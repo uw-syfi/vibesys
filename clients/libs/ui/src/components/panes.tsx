@@ -32,7 +32,7 @@ export function Pane(props: {
   const headingId = useId();
   const {enterKey, focusHeading = true} = props;
   // The section is keyed by `enterKey`, so its heading mounts once per opening; this callback
-  // changes only with the key (and `focusHeading`), so it runs once then and not on every render.
+  // changes only with the key (and `focusHeading`), so it fires once then and not on every render.
   const focusOnOpen = useCallback(
     (heading: HTMLHeadingElement | null) => {
       if (heading !== null && enterKey !== undefined && focusHeading) {

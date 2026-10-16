@@ -12,12 +12,17 @@ import {
   type GanttRow,
   LogPane,
   Meter,
+  Narrative,
   NewBelow,
   Pane,
   PickList,
   PickRow,
+  Said,
   Screen,
+  Thought,
   Thread,
+  ToolGroup,
+  type ToolLine,
 } from './index.js';
 
 const window = new Window();
@@ -349,15 +354,18 @@ describe('Gantt', () => {
       row('a', {
         press: () => opened.push('row'),
         segments: [
-          {id: 's1', start: 0, end: 4, kind: 'agent', label: 'one', press: () => opened.push('s1')},
-          {id: 's2', start: 4, end: 10, kind: 'gate', label: 'two'},
+          {id: 's1', start: 0, end: 4, kind: 'solid', label: 'one', press: () => opened.push('s1')},
+          {id: 's2', start: 4, end: 10, kind: 'hatched', label: 'two'},
         ],
       }),
     ];
     const {container} = await mount(<Gantt label="Over time" from={0} to={10} rows={rows} />);
     const segments = all(container, '.vs-gantt-seg');
     expect(segments.map(segment => segment.getAttribute('title'))).toEqual(['one', 'two']);
-    expect(segments.map(segment => segment.getAttribute('data-kind'))).toEqual(['agent', 'gate']);
+    expect(segments.map(segment => segment.getAttribute('data-kind'))).toEqual([
+      'solid',
+      'hatched',
+    ]);
     await click(segments[0] as HTMLElement);
     await click(segments[1] as HTMLElement);
     expect(opened).toEqual(['s1', 'row']);
@@ -375,7 +383,7 @@ describe('Gantt', () => {
       row(`r${index}`, {
         start,
         end,
-        segments: [{id: 's', start: start - 1, end: end + 1, kind: 'agent', label: 's'}],
+        segments: [{id: 's', start: start - 1, end: end + 1, kind: 'solid', label: 's'}],
       }),
     );
     const {container} = await mount(<Gantt label="Over time" from={0} to={10} rows={rows} />);
@@ -523,5 +531,96 @@ describe('PickRow state', () => {
     expect(one(container, '.vs-pickrow-dot').getAttribute('data-tip')).toBe('off');
     await click(one(container, '[role="option"]'));
     expect(one(container, '.vs-pickrow-dot').getAttribute('data-tip')).toBe('on');
+  });
+});
+
+function tools(): ToolLine[] {
+  return [
+    {id: 'a', name: 'read', line: 'one.rs', state: 'ok', press: noop},
+    {
+      id: 'b',
+      name: 'execute',
+      line: 'cargo test',
+      outcome: 'exit 101',
+      state: 'failed',
+      press: noop,
+    },
+  ];
+}
+
+function Group(props: {readonly pressed: string[]; readonly start: boolean}) {
+  const [open, setOpen] = useState(props.start);
+  const lines = tools().map(tool => ({...tool, press: () => props.pressed.push(tool.id)}));
+  return <ToolGroup tools={lines} open={open} toggle={setOpen} />;
+}
+
+describe('Narrative', () => {
+  test('keeps thinking, text and tool lines in the order given', async () => {
+    const {container} = await mount(
+      <Narrative label="Turn">
+        <Thought text="first" />
+        <Said text="second" />
+        <ToolGroup tools={tools()} open={false} toggle={noop} />
+      </Narrative>,
+    );
+    expect(one(container, 'section').getAttribute('aria-label')).toBe('Turn');
+    expect(container.textContent?.startsWith('firstsecond2 tools')).toBe(true);
+  });
+
+  test('a closed group is one line that still shows a failed call, and opens to every call', async () => {
+    const pressed: string[] = [];
+    const {container} = await mount(<Group pressed={pressed} start={false} />);
+    const head = one(container, '.vs-toolgroup-head');
+    expect(head.getAttribute('aria-expanded')).toBe('false');
+    expect(head.textContent).toContain('2 tools');
+    expect(all(container, '.vs-toolgroup-row').map(r => r.getAttribute('data-state'))).toEqual([
+      'failed',
+    ]);
+    await click(head);
+    expect(head.getAttribute('aria-expanded')).toBe('true');
+    expect(all(container, '.vs-toolgroup-row')).toHaveLength(2);
+    await click(all(container, '.vs-toolgroup-row')[0] as HTMLElement);
+    expect(pressed).toEqual(['a']);
+  });
+
+  test('says "1 tool" for one and marks the selected call', async () => {
+    const [first] = tools() as [ToolLine];
+    const {container} = await mount(
+      <ToolGroup tools={[{...first, selected: true}]} open toggle={noop} />,
+    );
+    expect(one(container, '.vs-toolgroup-count').textContent).toBe('1 tool');
+    expect(one(container, '.vs-toolgroup-row').getAttribute('aria-current')).toBe('true');
+  });
+});
+
+describe('PickRow extras', () => {
+  test('shows the column it came from and an accent stripe when on the chain', async () => {
+    const {container} = await mount(
+      <PickList label="Ideas" selected="a">
+        <PickRow id="a" title="a" from="input" stripe select={noop} />
+        <PickRow id="b" title="b" select={noop} />
+      </PickList>,
+    );
+    const [a, b] = all(container, '[role="option"]') as [HTMLElement, HTMLElement];
+    expect(one(a, '.vs-pickrow-from').textContent).toBe('input');
+    expect(a.hasAttribute('data-stripe')).toBe(true);
+    expect(b.hasAttribute('data-stripe')).toBe(false);
+    expect(b.querySelector('.vs-pickrow-from')).toBeNull();
+  });
+});
+
+describe('Breadcrumb figure', () => {
+  test('names a chain with its result after the last level', async () => {
+    const {container} = await mount(
+      <Breadcrumb
+        label="Best path"
+        items={[
+          {id: 'input', label: 'input', press: noop},
+          {id: 'a', label: 'a'},
+        ]}
+        figure="5.72x"
+      />,
+    );
+    expect(one(container, '.vs-crumb-figure').textContent).toBe('5.72x');
   });
 });

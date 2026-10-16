@@ -53,6 +53,13 @@ export {
   type ToolState,
 } from './components/message.js';
 export {Meter} from './components/meter.js';
+export {
+  Narrative,
+  Said,
+  Thought,
+  ToolGroup,
+  type ToolLine,
+} from './components/narrative.js';
 export {NewBelow} from './components/new-below.js';
 export {Pane, Panes, type PaneWidth} from './components/panes.js';
 export {type Completion, PathInput} from './components/path-input.js';

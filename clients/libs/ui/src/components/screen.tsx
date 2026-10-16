@@ -31,11 +31,14 @@ export interface Crumb {
 
 /**
  * Where the reader is: every zoom level from the top, each but the last a link back to it. The
- * last names what the panes show now.
+ * last names what the panes show now. A `figure` after the last level (a result, such as a gain)
+ * reads in the ok color, so the same line can also name a chain, such as the path to the best
+ * result.
  */
 export function Breadcrumb(props: {
   readonly label: string;
   readonly items: readonly Crumb[];
+  readonly figure?: string;
 }): JSX.Element {
   return (
     <nav className="vs-crumbs" aria-label={props.label}>
@@ -59,6 +62,7 @@ export function Breadcrumb(props: {
           </li>
         ))}
       </ol>
+      {props.figure === undefined ? null : <span className="vs-crumb-figure">{props.figure}</span>}
     </nav>
   );
 }

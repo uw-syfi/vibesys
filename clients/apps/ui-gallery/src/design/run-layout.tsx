@@ -23,6 +23,7 @@ import {
   KeyValue,
   LogPane,
   Menu,
+  Narrative,
   NewBelow,
   Pane,
   Panes,
@@ -30,6 +31,7 @@ import {
   PickRow,
   Row,
   type RowBar,
+  Said,
   Screen,
   Scrubber,
   SegmentedControl,
@@ -37,7 +39,10 @@ import {
   SidebarSection,
   Stack,
   Text,
+  Thought,
   ToolCall,
+  ToolGroup,
+  type ToolLine,
 } from '@vibesys/ui';
 import {type JSX, useEffect, useState} from 'react';
 import {
@@ -49,6 +54,7 @@ import {
   gateLog,
   INPUT,
   NARRATION,
+  NARRATIVE,
   OUTCOME_DOT,
   POINTS,
   REPLY_FACTS,
@@ -71,6 +77,8 @@ export interface DesignFlags {
   readonly ended: boolean;
   readonly narrow: boolean;
   readonly hover: string | null;
+  /** A tool group opened in place (`open=g2`), for the expanded-turn screenshot. */
+  readonly open: string | null;
 }
 
 /** `c` (candidate), `step`, `item`, `mode=logs`; `ended` and `narrow` are flags. */
@@ -88,7 +96,12 @@ export function zoomFromQuery(search: string): {zoom: Zoom; flags: DesignFlags} 
             ? 'timeline'
             : 'main',
     },
-    flags: {ended: query.has('ended'), narrow: query.has('narrow'), hover: query.get('hover')},
+    flags: {
+      ended: query.has('ended'),
+      narrow: query.has('narrow'),
+      hover: query.get('hover'),
+      open: query.get('open'),
+    },
   };
 }
 
@@ -188,8 +201,8 @@ function axisTicks(flags: DesignFlags): {at: number; label: string}[] {
 }
 
 function stepKind(step: Step): GanttSegment['kind'] {
-  if (step.kind === 'gate') return 'gate';
-  return step.role === 'judge' ? 'judge' : 'agent';
+  if (step.kind === 'gate') return 'hatched';
+  return step.role === 'judge' ? 'grey' : 'solid';
 }
 
 /** A candidate's bar: its lifetime on the run's clock, split by its steps in proportion to their durations. */
@@ -576,7 +589,6 @@ function StepList(props: {
           id={step.id}
           lead={step.role}
           title={step.headline}
-          {...(step.tools === undefined ? {} : {summary: `${step.tools} tools`})}
           figure={step.took}
           figureTone="muted"
           state={{tone: step.tone, label: step.state}}
@@ -669,39 +681,63 @@ function CandidateDetail(props: {
   );
 }
 
-function EntryList(props: {
+function entryById(id: string): Entry {
+  const found = TURN_ENTRIES.find(e => e.id === id);
+  if (found === undefined) throw new Error(`no turn entry ${id}`);
+  return found;
+}
+
+/** The group holding a tool call, so opening that call at level 3 shows it in place. */
+function groupOf(id: string | null): string | null {
+  const beat = NARRATIVE.find(b => b.kind === 'tools' && b.tools.includes(id ?? ''));
+  return beat === undefined ? null : beat.id;
+}
+
+/**
+ * The turn as the agent told it: thinking and text in time order, tool calls folded into one line
+ * between paragraphs that opens in place. Pressing a tool row opens that call (level 3).
+ */
+function TurnNarrative(props: {
   readonly selected: string | null;
+  readonly initiallyOpen: string | null;
   readonly open: (id: string) => void;
 }): JSX.Element {
+  const [opened, setOpened] = useState<ReadonlySet<string>>(
+    () =>
+      new Set(
+        [props.initiallyOpen, groupOf(props.selected)].filter((g): g is string => g !== null),
+      ),
+  );
+  const toggle = (group: string, on: boolean): void => {
+    const next = new Set(opened);
+    if (on) next.add(group);
+    else next.delete(group);
+    setOpened(next);
+  };
   return (
-    <PickList
-      label="Turn transcript"
-      {...(props.selected === null ? {} : {selected: props.selected})}
-    >
-      {TURN_ENTRIES.map(entry => (
-        <PickRow
-          key={entry.id}
-          id={entry.id}
-          lead={entry.name}
-          title={entry.line}
-          {...(entry.meta === undefined
-            ? {}
-            : {
-                figure: entry.meta,
-                figureTone: entry.state === 'failed' ? ('err' as const) : ('muted' as const),
-              })}
-          state={
-            entry.state === 'failed'
-              ? {tone: 'err', label: 'Failed'}
-              : entry.kind === 'reply'
-                ? {tone: 'live', label: 'Reply'}
-                : {tone: 'ok', label: 'Done'}
-          }
-          mono={entry.kind !== 'message'}
-          select={() => props.open(entry.id)}
-        />
-      ))}
-    </PickList>
+    <Narrative label="Turn transcript">
+      {NARRATIVE.map(beat => {
+        if (beat.kind === 'thinking') return <Thought key={beat.id} text={beat.text} />;
+        if (beat.kind === 'text') return <Said key={beat.id} text={beat.text} />;
+        const tools: ToolLine[] = beat.tools.map(entryById).map(e => ({
+          id: e.id,
+          name: e.name,
+          line: e.line,
+          ...(e.meta === undefined ? {} : {outcome: e.meta}),
+          state: e.state,
+          selected: props.selected === e.id,
+          press: () => props.open(e.id),
+        }));
+        return (
+          <ToolGroup
+            key={beat.id}
+            tools={tools}
+            open={opened.has(beat.id)}
+            toggle={on => toggle(beat.id, on)}
+          />
+        );
+      })}
+    </Narrative>
   );
 }
 
@@ -711,6 +747,7 @@ function TurnDetail(props: {
   readonly mode: Mode;
   readonly setMode: (mode: Mode) => void;
   readonly openEntry: (id: string) => void;
+  readonly flags: DesignFlags;
 }): JSX.Element {
   const running = props.step.tone === 'live';
   return (
@@ -734,7 +771,7 @@ function TurnDetail(props: {
       ) : (
         <>
           <KeyValue items={REPLY_FACTS} />
-          <EntryList selected={null} open={props.openEntry} />
+          <TurnNarrative selected={null} initiallyOpen={props.flags.open} open={props.openEntry} />
           {running ? <NewBelow text="3 new" press={noop} /> : null}
         </>
       )}
@@ -829,8 +866,13 @@ function ItemLevel(props: LevelProps & {readonly step: Step; readonly entry: Ent
   return (
     <Panes>
       {flags.narrow ? null : (
-        <Pane kicker={`agent turn · ${step.role}`} title={`${TURN_ENTRIES.length}`} width="list">
-          <EntryList selected={entry.id} open={id => go({...zoom, item: id})} />
+        <Pane kicker={`agent turn · ${step.role}`} title={step.headline} width="list">
+          <TurnNarrative
+            key={entry.id}
+            selected={entry.id}
+            initiallyOpen={null}
+            open={id => go({...zoom, item: id})}
+          />
         </Pane>
       )}
       <EntryInspector entry={entry} />
@@ -856,6 +898,7 @@ function StepLevel(props: LevelProps & {readonly c: Candidate; readonly step: St
           mode={zoom.mode}
           setMode={mode => go({...zoom, mode})}
           openEntry={id => go({...zoom, item: id})}
+          flags={flags}
         />
       )}
     </Panes>

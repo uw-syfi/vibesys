@@ -80,6 +80,34 @@ export interface RowBar {
   readonly label: string;
 }
 
+/** What follows a row's text: its badges, its `from` column, its bar and its figure. */
+function Trail(props: {
+  readonly badges?: readonly {readonly label: string; readonly tone: StatusTone}[];
+  readonly from?: string;
+  readonly bar?: RowBar;
+  readonly figure?: string;
+  readonly figureTone?: 'default' | 'ok' | 'err' | 'muted';
+}): JSX.Element {
+  return (
+    <>
+      {(props.badges ?? []).map(badge => (
+        <Chip key={badge.label} label={badge.label} tone={badge.tone} />
+      ))}
+      {props.from === undefined ? null : <span className="vs-pickrow-from">{props.from}</span>}
+      {props.bar === undefined ? null : (
+        <span className="vs-pickrow-bar">
+          <Meter label={props.bar.label} value={props.bar.value} tone={props.bar.tone} />
+        </span>
+      )}
+      {props.figure === undefined ? null : (
+        <span className="vs-pickrow-figure" data-tone={props.figureTone ?? 'default'}>
+          {props.figure}
+        </span>
+      )}
+    </>
+  );
+}
+
 /**
  * One row of a `PickList`, one line (28 px in a compact screen): what it is (`title`), its most
  * important line (`summary`, which gives way first when the row is narrow), `badges`, a `bar`, a
@@ -104,6 +132,10 @@ export function PickRow(props: {
   /** Called when the pointer or the focus enters (true) or leaves (false) the row. */
   readonly hover?: (on: boolean) => void;
   readonly bar?: RowBar;
+  /** A muted column naming what this row came from (its parent), before the bar. */
+  readonly from?: string;
+  /** An accent stripe down the row's edge: it is on the chain the reader is led along (a winning path). */
+  readonly stripe?: boolean;
   readonly badges?: readonly {readonly label: string; readonly tone: StatusTone}[];
   readonly select: () => void;
 }): JSX.Element {
@@ -117,6 +149,7 @@ export function PickRow(props: {
       aria-selected={selected}
       data-fresh={props.fresh === true || undefined}
       data-path={props.path === true || undefined}
+      data-stripe={props.stripe === true || undefined}
       onClick={props.select}
       onMouseEnter={hover === undefined ? undefined : () => hover(true)}
       onMouseLeave={hover === undefined ? undefined : () => hover(false)}
@@ -147,19 +180,7 @@ export function PickRow(props: {
           </Text>
         )}
       </span>
-      {(props.badges ?? []).map(badge => (
-        <Chip key={badge.label} label={badge.label} tone={badge.tone} />
-      ))}
-      {props.bar === undefined ? null : (
-        <span className="vs-pickrow-bar">
-          <Meter label={props.bar.label} value={props.bar.value} tone={props.bar.tone} />
-        </span>
-      )}
-      {props.figure === undefined ? null : (
-        <span className="vs-pickrow-figure" data-tone={props.figureTone ?? 'default'}>
-          {props.figure}
-        </span>
-      )}
+      <Trail {...props} />
     </div>
   );
 }

@@ -407,3 +407,47 @@ export const NARRATION: readonly LogLine[] = [
   {text: '21:28:31  mpmc-ring-padding kept: 13,318,503 ops/s (5.72×)'},
   {text: '21:28:58  planned: spin-backoff, slot-arena'},
 ];
+
+/** One block of a turn read as narrative: thinking, what the agent said, or the tools it ran between. */
+export type Beat =
+  | {readonly kind: 'thinking'; readonly id: string; readonly text: string}
+  | {readonly kind: 'text'; readonly id: string; readonly text: string}
+  | {readonly kind: 'tools'; readonly id: string; readonly tools: readonly string[]};
+
+/** mpmc-ring-padding's implementer turn 1, in time order; `tools` name entries of `TURN_ENTRIES`. */
+export const NARRATIVE: readonly Beat[] = [
+  {
+    kind: 'thinking',
+    id: 'k1',
+    text: 'Throughput flattens past four producers. The ring itself is fine; suspect false sharing on head and tail.',
+  },
+  {kind: 'tools', id: 'g1', tools: ['t1', 't2']},
+  {
+    kind: 'text',
+    id: 's1',
+    text: 'Head and tail are adjacent AtomicUsize fields, so they share a cache line. Padding each to 128 bytes should stop the false sharing.',
+  },
+  {
+    kind: 'thinking',
+    id: 'k2',
+    text: 'CachePadded is 128 bytes on x86_64 because of adjacent-line prefetch. Wrap both counters and leave the C ABI alone.',
+  },
+  {kind: 'tools', id: 'g2', tools: ['t3', 't4']},
+  {
+    kind: 'text',
+    id: 's2',
+    text: 'Tests pass. Building the shared object and running the MPMC check before asking for a measurement.',
+  },
+  {kind: 'tools', id: 'g3', tools: ['t5', 't6', 't7']},
+  {
+    kind: 'thinking',
+    id: 'k3',
+    text: "The benchmark wants the evaluator's harness flags; measuring is not my call. Ask for the official run instead.",
+  },
+  {kind: 'tools', id: 'g4', tools: ['t8']},
+  {
+    kind: 'text',
+    id: 's3',
+    text: 'Padded head and tail to separate cache lines. cargo test and all 100 MPMC trials pass; asked for the official benchmark.',
+  },
+];

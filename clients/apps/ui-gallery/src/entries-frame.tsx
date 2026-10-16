@@ -8,15 +8,20 @@ import {
   type Guide,
   LogPane,
   Meter,
+  Narrative,
   NewBelow,
   Pane,
   Panes,
   PickList,
   PickRow,
   Row,
+  Said,
   Screen,
   Stack,
   Text,
+  Thought,
+  ToolGroup,
+  type ToolLine,
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import type {ComponentName, GalleryEntry} from './gallery-entry.js';
@@ -136,7 +141,14 @@ const ROWS: readonly GanttRow[] = [
     press: noop,
     figure: '1.00×',
     segments: [
-      {id: 'gate', start: 0, end: 1, kind: 'gate', label: 'gate · 2.33M ops/s · 41s', press: noop},
+      {
+        id: 'gate',
+        start: 0,
+        end: 1,
+        kind: 'hatched',
+        label: 'gate · 2.33M ops/s · 41s',
+        press: noop,
+      },
     ],
   },
   {
@@ -154,7 +166,7 @@ const ROWS: readonly GanttRow[] = [
         id: 'plan',
         start: 1,
         end: 2,
-        kind: 'judge',
+        kind: 'grey',
         label: 'judge · picked the idea · 1m',
         press: noop,
       },
@@ -162,11 +174,18 @@ const ROWS: readonly GanttRow[] = [
         id: 'impl',
         start: 2,
         end: 5,
-        kind: 'agent',
+        kind: 'solid',
         label: 'implementer · wrote the ring · 3m',
         press: noop,
       },
-      {id: 'gate', start: 5, end: 7, kind: 'gate', label: 'gate · 9.53M ops/s · 2m', press: noop},
+      {
+        id: 'gate',
+        start: 5,
+        end: 7,
+        kind: 'hatched',
+        label: 'gate · 9.53M ops/s · 2m',
+        press: noop,
+      },
     ],
   },
   {
@@ -183,7 +202,7 @@ const ROWS: readonly GanttRow[] = [
         id: 'impl',
         start: 7,
         end: 9,
-        kind: 'agent',
+        kind: 'solid',
         label: 'implementer · batched dequeues · 2m',
         press: noop,
       },
@@ -191,7 +210,7 @@ const ROWS: readonly GanttRow[] = [
         id: 'gate',
         start: 9,
         end: 11,
-        kind: 'gate',
+        kind: 'hatched',
         label: 'gate · slower than parent · 2m',
         press: noop,
       },
@@ -210,7 +229,7 @@ const ROWS: readonly GanttRow[] = [
         id: 'impl',
         start: 8,
         end: 14,
-        kind: 'agent',
+        kind: 'solid',
         label: 'implementer · editing · 6m',
         press: noop,
       },
@@ -307,6 +326,40 @@ function ScreenDemo(): JSX.Element {
   );
 }
 
+const TOOLS: readonly ToolLine[] = [
+  {id: 't1', name: 'read', line: 'src/lib.rs', outcome: '212 lines', state: 'ok', press: noop},
+  {
+    id: 't2',
+    name: 'execute',
+    line: 'cargo test --locked',
+    outcome: 'exit 101',
+    state: 'failed',
+    press: noop,
+  },
+  {
+    id: 't3',
+    name: 'edit',
+    line: 'src/lib.rs',
+    outcome: '+38 -12',
+    state: 'ok',
+    selected: true,
+    press: noop,
+  },
+];
+
+function NarrativeDemo(): JSX.Element {
+  const [opened, setOpened] = useState(true);
+  return (
+    <Narrative label="Turn">
+      <Thought text="Throughput flattens past four producers; suspect false sharing on the counters." />
+      <ToolGroup tools={TOOLS.slice(0, 1)} open={false} toggle={noop} />
+      <Said text="Head and tail share a cache line. Padding each to 128 bytes should stop it." />
+      <ToolGroup tools={TOOLS} open={opened} toggle={setOpened} />
+      <ToolGroup tools={TOOLS.slice(1, 2)} open={false} toggle={noop} />
+    </Narrative>
+  );
+}
+
 /** The frame: a screen that never scrolls as a whole, its panes and lists, and a time axis. */
 export const FRAME_ENTRIES = {
   Screen: {render: () => <ScreenDemo />},
@@ -359,6 +412,25 @@ export const FRAME_ENTRIES = {
   },
   NewBelow: {render: () => <NewBelow text="3 new" press={noop} />},
   Gantt: {render: () => <GanttDemo />},
+  Narrative: {render: () => <NarrativeDemo />},
+  Thought: {
+    render: () => (
+      <Text tone="muted">The muted, italic paragraphs of the Narrative above: the thinking.</Text>
+    ),
+  },
+  Said: {
+    render: () => (
+      <Text tone="muted">The body paragraphs of the Narrative above: what was said.</Text>
+    ),
+  },
+  ToolGroup: {
+    render: () => (
+      <Text tone="muted">
+        The dim lines of the Narrative above: tool calls folded into one line that opens in place; a
+        failed call stays visible when closed, and the selected call is marked.
+      </Text>
+    ),
+  },
   DotLegend: {
     render: () => (
       <DotLegend

@@ -34,6 +34,17 @@
   gap: var(--space-4);
 }
 
+.vs-crumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.vs-crumb-figure {
+  color: var(--ok);
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  line-height: var(--text-code-line);
+}
 .vs-crumbs ol {
   display: flex;
   flex-wrap: wrap;
@@ -273,6 +284,20 @@ button.vs-crumb:focus-visible {
 .vs-pickrow-lead {
   flex: none;
   min-width: calc(var(--space-8) + var(--space-5));
+}
+.vs-pickrow-from {
+  flex: none;
+  width: var(--column-swatch);
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-pickrow[data-stripe] {
+  border-left-color: var(--accent);
 }
 .vs-pickrow-figure {
   flex: none;
@@ -515,17 +540,17 @@ button.vs-crumb:focus-visible {
   border-right: var(--hairline) solid var(--panel);
   cursor: pointer;
 }
-.vs-gantt-seg[data-kind="agent"] {
+.vs-gantt-seg[data-kind="solid"] {
   background: var(--accent);
 }
-.vs-gantt-seg[data-kind="gate"] {
+.vs-gantt-seg[data-kind="hatched"] {
   background: repeating-linear-gradient(
     135deg,
     var(--accent) 0 var(--space-1),
     var(--chip-accent-bg) var(--space-1) var(--space-3)
   );
 }
-.vs-gantt-seg[data-kind="judge"] {
+.vs-gantt-seg[data-kind="grey"] {
   background: var(--muted);
 }
 .vs-gantt-seg:hover {
@@ -648,4 +673,96 @@ button.vs-crumb:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+/* --- narrative: a turn as thinking, text and folded tool lines ----------------------------------- */
+
+.vs-narrative {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: var(--column-main);
+  min-height: 0;
+}
+.vs-thought,
+.vs-said {
+  margin: 0;
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+}
+.vs-thought {
+  padding-left: var(--space-3);
+  border-left: var(--hairline) solid var(--line);
+  color: var(--muted);
+  font-style: italic;
+}
+.vs-said {
+  color: var(--text);
+}
+.vs-toolgroup {
+  display: flex;
+  flex-direction: column;
+}
+.vs-toolgroup[data-open] {
+  padding-bottom: var(--space-1);
+  border-left: var(--hairline) solid var(--line);
+}
+.vs-toolgroup-head,
+.vs-toolgroup-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: var(--control-sm);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted);
+  font-family: var(--text-code-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.vs-toolgroup-head:hover,
+.vs-toolgroup-row:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.vs-toolgroup-head:focus-visible,
+.vs-toolgroup-row:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: calc(-1 * var(--focus-ring));
+}
+.vs-toolgroup-count {
+  flex: none;
+}
+.vs-toolgroup-line {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vs-toolgroup-row {
+  padding-left: calc(var(--space-2) + var(--space-5));
+}
+.vs-toolgroup-name {
+  flex: none;
+  min-width: var(--space-8);
+  color: var(--text);
+}
+.vs-toolgroup-outcome {
+  flex: none;
+}
+.vs-toolgroup-row[data-state="failed"],
+.vs-toolgroup-row[data-state="failed"] .vs-toolgroup-name {
+  color: var(--err);
+}
+.vs-toolgroup-row[aria-current="true"] {
+  background: var(--selection);
+  box-shadow: inset var(--focus-ring) 0 0 var(--accent);
+  color: var(--text);
 }

@@ -4,15 +4,15 @@ import {type Guide, Guides} from './guides.js';
 import {optionKeys} from './listbox.js';
 import {Text} from './text.js';
 
-/** One step inside a Gantt bar: its span on the axis and its kind, drawn by shade, not by words. */
+/** One piece of a Gantt bar: its span on the axis and its `kind`, a shade (solid accent, hatched, or grey), not words. */
 export interface GanttSegment {
   readonly id: string;
   readonly start: number;
   readonly end: number;
-  readonly kind: 'agent' | 'gate' | 'judge';
+  readonly kind: 'solid' | 'hatched' | 'grey';
   /** The one-line tooltip. */
   readonly label: string;
-  /** Opens this step. Pointer only: the row's own key opens the row, whose steps are a list. */
+  /** Opens this piece. Pointer only: the row's own key opens the row, whose steps are a list. */
   readonly press?: () => void;
 }
 
@@ -72,7 +72,7 @@ function GanttBar(props: {
         };
         const press = segment.press;
         return (
-          // biome-ignore lint/a11y/useKeyWithClickEvents: the row is the keyboard target; a segment is a pointer shortcut to a step that the candidate's step list also reaches by keyboard.
+          // biome-ignore lint/a11y/useKeyWithClickEvents: the row is the keyboard target; a segment is a pointer shortcut to a piece that a list of the row's pieces also reaches by keyboard.
           // biome-ignore lint/a11y/noStaticElementInteractions: see above; the segment carries its meaning in `title` and the row's accessible name.
           <span
             key={segment.id}
