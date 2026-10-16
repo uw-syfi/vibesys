@@ -108,6 +108,9 @@ def test_a_round_that_adopts_a_candidate_is_an_accepted_workstream_with_its_turn
         "hypothesis_id": "h1",
         "parent_revision": FACTS.baseline.revision_id.root,
         "round": 1,
+        "idea": "title h1",
+        "revision": "c1",
+        "probe": False,
     }
     expected_roles = [PLANNER, IMPLEMENTER] if search == "single" else [PLANNER, IMPLEMENTER, JUDGE]
     assert roles_under(host, workstream) == expected_roles
@@ -119,6 +122,7 @@ def test_a_round_that_adopts_a_candidate_is_an_accepted_workstream_with_its_turn
         "stage": "accuracy,benchmark",
         "metric_value": CANDIDATE_THROUGHPUT,
         "vs_baseline": CANDIDATE_THROUGHPUT / INPUT_THROUGHPUT,
+        "failed": None,
     }
 
 
@@ -166,9 +170,16 @@ def _check(host: SerialHost) -> None:
             assert chosen, f"{span.id} was accepted without a hypothesis"
         if not chosen and span.ended_at is not None and span.label.verdict is not None:
             assert span.label.reason == "no_design"
+        # an accepted round names the revision it kept: what the next round builds on
+        kept = found.get("revision")
+        assert (kept is not None) == (span.label.verdict == "accepted"), f"{span.id} kept {kept}"
+        assert found.get("probe") is False
         links = [link.to for link in span.label.links]
         assert len(links) <= 1
         assert set(links) <= set(workstreams), f"{span.id} builds on a later span: {links}"
+        for link in links:
+            # one path: a round links to the round that kept the revision it builds on
+            assert attrs(by_id[link])["revision"] == found["parent_revision"], span.id
         workstreams.append(span.id)
     turns = [s for s in trace.spans if s.invocation is not None]
     assert all(s.label is not None and s.label.kind == "agent_turn" for s in turns)

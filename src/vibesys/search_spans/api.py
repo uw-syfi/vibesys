@@ -5,17 +5,29 @@ call, a workstream (which hypothesis, built on which revision, accepted or rejec
 workstream it builds on), an agent turn (which role and model) and a gate (a trusted measurement:
 its stages, the candidate's value and how it compares with the input, and whether it passed) and
 the adoption (the candidate the run adopts, what it measured and its ratio to the input's).
-Clients read these kinds (``@vibesys/run-state/overview``) and word them; a search declares
+Clients read these kinds (``@vibesys/run-state/overview`` and ``/candidates``) and word them.
+
+The candidates of a run are read from its workstreams, the same way for every search: a
+workstream is one attempt at a candidate, attempts at one idea share its ``hypothesis_id``, the
+``builds_on`` link names the workstream (so the candidate) an attempt built on (none: the input),
+the verdict says whether the attempt's code was kept, ``revision`` names the code it kept (which
+the adoption names when it adopts it), ``idea`` is what the candidate tries in an agent's words,
+and the gates under it are what it measured. A workstream that only looks (``probe``) is not a
+candidate. A search that plays one path (a chain of rounds) links each round to the round that
+kept what it builds on, so its tree is a chain with rejected leaves. A search declares
 ``SPANS`` at ``@search(spans=...)`` and labels through ``ctx.label`` or ``label=``. How a search
 maps its own steps onto these kinds is its own (the dynamic search's ``_spans``, the serial
 searches' ``serial_search``).
 """
 
+from collections.abc import Sequence
 from typing import Literal, Self
 
+from vibesys.metrics import EvidenceReading, reading_of
 from vs_core.api.search import (
     ADOPTED,
     NOT_ADOPTED,
+    EvidenceKind,
     Input,
     Kept,
     Label,
@@ -32,16 +44,58 @@ class PlanningAttrs(Value):
 
 
 class WorkstreamAttrs(Value):
-    """A workstream: the hypothesis it works on, the revision it builds on, and its round.
+    """A workstream: one attempt at a candidate, what it builds on, and what it kept.
 
-    ``round`` is the round that runs it, for a search that plays rounds (the serial searches);
-    None for one that plans calls instead. A round labels its workstream as it begins, before
-    it has chosen its hypothesis: until then ``hypothesis_id`` and ``parent_revision`` are None.
+    ``hypothesis_id`` is the candidate's identity: every attempt at one idea carries the same
+    one. ``round`` is the round that runs it, for a search that plays rounds (the serial
+    searches); None for one that plans calls instead. A round labels its workstream as it
+    begins, before it has chosen its hypothesis: until then ``hypothesis_id``,
+    ``parent_revision`` and ``idea`` are None.
+
+    ``idea`` is what the candidate tries, in the words of the agent that chose it (a planner's
+    or designer's title, a mutator's summary, an issue's title); None until an agent said it.
+    ``revision`` is the revision the attempt kept, set with its ``accepted`` verdict; None while
+    it works and when it kept nothing. A ``probe`` only looks (a profile, a performance
+    evaluation): it writes no candidate and reaches no verdict, so it is not a candidate.
     """
 
     hypothesis_id: str | None = None
     parent_revision: str | None = None
     round: int | None = None
+    idea: str | None = None
+    revision: str | None = None
+    probe: bool = False
+
+
+class FailedCheck(Value):
+    """The trusted check that rejected a candidate, and how far it came when it reported that.
+
+    ``completed`` of ``required`` ``unit`` (``93`` of ``100`` ``trials``) is what the check's
+    evaluator reported it got through; each is None when it reported no progress.
+    """
+
+    check: EvidenceKind
+    completed: int | None = None
+    required: int | None = None
+    unit: str | None = None
+
+    @classmethod
+    def of(cls, readings: Sequence[EvidenceReading]) -> Self | None:
+        """The first trusted check (accuracy, then benchmark) that rejected, or None."""
+        for kind in (EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK):
+            reading = reading_of(tuple(readings), kind)
+            if reading is None or reading.passed:
+                continue
+            partial = reading.partial
+            if partial is None:
+                return cls(check=kind)
+            return cls(
+                check=kind,
+                completed=partial.completed,
+                required=partial.required,
+                unit=partial.progress_unit,
+            )
+        return None
 
 
 class AgentTurnAttrs(Value):
@@ -55,18 +109,34 @@ class AgentTurnAttrs(Value):
 
 
 class GateAttrs(Value):
-    """A trusted measurement of a candidate: its stages, its value, and the ratio to the input's."""
+    """A trusted measurement of a candidate: its stages, its value, and the ratio to the input's.
+
+    ``failed`` is the first trusted check that rejected the candidate, once its readings are
+    read; None when every check it read passed. The verdict (``failed_check`` for a check, or a
+    rejection for another reason) is the search's own.
+    """
 
     stage: str
     metric_value: float | None = None
     vs_baseline: float | None = None
     """The candidate's headline value divided by the input's; None while either is unknown."""
+    failed: FailedCheck | None = None
 
     @classmethod
-    def measured(cls, stage: str, value: float | None, input_value: float | None) -> Self:
-        """The gate of ``stage`` that read ``value``, against the input's ``input_value``."""
+    def read(
+        cls, stage: str, readings: Sequence[EvidenceReading], input_value: float | None
+    ) -> Self:
+        """The gate of ``stage`` that read ``readings``, against the input's ``input_value``.
+
+        Its value is the benchmark's headline; ``failed`` the first check that rejected.
+        """
+        benchmark = reading_of(tuple(readings), EvidenceKind.BENCHMARK)
+        headline = None if benchmark is None else benchmark.headline()
+        value = None if headline is None else headline.value
         ratio = None if value is None or not input_value else value / input_value
-        return cls(stage=stage, metric_value=value, vs_baseline=ratio)
+        return cls(
+            stage=stage, metric_value=value, vs_baseline=ratio, failed=FailedCheck.of(readings)
+        )
 
 
 class AdoptionAttrs(Value):
@@ -140,6 +210,7 @@ __all__ = [
     "WORKSTREAM",
     "AdoptionAttrs",
     "AgentTurnAttrs",
+    "FailedCheck",
     "GateAttrs",
     "PlanningAttrs",
     "WorkstreamAttrs",

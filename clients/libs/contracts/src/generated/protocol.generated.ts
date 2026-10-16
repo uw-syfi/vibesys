@@ -891,10 +891,20 @@ export type Model8 = string | null;
 export type Stage3 = string;
 export type MetricValue1 = number | null;
 export type VsBaseline1 = number | null;
+/**
+ * Closed measurement kinds used for eligibility requirements.
+ */
+export type EvidenceKind = "correctness" | "benchmark" | "profiling" | "local-validation";
+export type Completed = number | null;
+export type Required = number | null;
+export type Unit4 = string | null;
 export type Call = number;
 export type HypothesisId1 = string | null;
 export type ParentRevision = string | null;
 export type Round3 = number | null;
+export type Idea = string | null;
+export type Revision4 = string | null;
+export type Probe = boolean;
 
 export interface ProtocolDocument {
   request: Request;
@@ -2393,11 +2403,28 @@ export interface AgentTurnAttrs {
 }
 /**
  * A trusted measurement of a candidate: its stages, its value, and the ratio to the input's.
+ *
+ * ``failed`` is the first trusted check that rejected the candidate, once its readings are
+ * read; None when every check it read passed. The verdict (``failed_check`` for a check, or a
+ * rejection for another reason) is the search's own.
  */
 export interface GateAttrs {
   stage: Stage3;
   metric_value?: MetricValue1;
   vs_baseline?: VsBaseline1;
+  failed?: FailedCheck | null;
+}
+/**
+ * The trusted check that rejected a candidate, and how far it came when it reported that.
+ *
+ * ``completed`` of ``required`` ``unit`` (``93`` of ``100`` ``trials``) is what the check's
+ * evaluator reported it got through; each is None when it reported no progress.
+ */
+export interface FailedCheck {
+  check: EvidenceKind;
+  completed?: Completed;
+  required?: Required;
+  unit?: Unit4;
 }
 /**
  * A planning call: which call of the run it is.
@@ -2406,16 +2433,27 @@ export interface PlanningAttrs {
   call: Call;
 }
 /**
- * A workstream: the hypothesis it works on, the revision it builds on, and its round.
+ * A workstream: one attempt at a candidate, what it builds on, and what it kept.
  *
- * ``round`` is the round that runs it, for a search that plays rounds (the serial searches);
- * None for one that plans calls instead. A round labels its workstream as it begins, before
- * it has chosen its hypothesis: until then ``hypothesis_id`` and ``parent_revision`` are None.
+ * ``hypothesis_id`` is the candidate's identity: every attempt at one idea carries the same
+ * one. ``round`` is the round that runs it, for a search that plays rounds (the serial
+ * searches); None for one that plans calls instead. A round labels its workstream as it
+ * begins, before it has chosen its hypothesis: until then ``hypothesis_id``,
+ * ``parent_revision`` and ``idea`` are None.
+ *
+ * ``idea`` is what the candidate tries, in the words of the agent that chose it (a planner's
+ * or designer's title, a mutator's summary, an issue's title); None until an agent said it.
+ * ``revision`` is the revision the attempt kept, set with its ``accepted`` verdict; None while
+ * it works and when it kept nothing. A ``probe`` only looks (a profile, a performance
+ * evaluation): it writes no candidate and reaches no verdict, so it is not a candidate.
  */
 export interface WorkstreamAttrs {
   hypothesis_id?: HypothesisId1;
   parent_revision?: ParentRevision;
   round?: Round3;
+  idea?: Idea;
+  revision?: Revision4;
+  probe?: Probe;
 }
 export interface EvolveSpanAttributes {
   adoption?: AdoptionAttrs | null;

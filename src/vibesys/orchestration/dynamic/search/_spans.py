@@ -11,7 +11,6 @@ from vibesys.orchestration.dynamic.search._outcomes import (
     WorkstreamDone,
     WorkstreamStart,
     beats_input,
-    headline,
     input_headline,
 )
 from vibesys.orchestration.dynamic.search._values import WorkKind
@@ -36,12 +35,24 @@ def workstream_title(w: WorkstreamStart) -> str:
 
 
 def workstream_attrs(w: WorkstreamStart) -> WorkstreamAttrs:
-    """The hypothesis a workstream works on and the revision it builds on."""
-    return WorkstreamAttrs(hypothesis_id=w.plan.work_id, parent_revision=w.parent.revision_id.root)
+    """The hypothesis a workstream works on, the planner's idea and the revision it builds on.
+
+    A profile only looks, so it is a probe, not a candidate.
+    """
+    return WorkstreamAttrs(
+        hypothesis_id=w.plan.work_id,
+        parent_revision=w.parent.revision_id.root,
+        idea=w.plan.title or w.plan.hypothesis or None,
+        probe=w.plan.kind is WorkKind.PROFILE,
+    )
 
 
 class BuildsOn:
-    """The root's links from each workstream to the latest one of the hypothesis it builds on."""
+    """The root's links from each workstream to the latest one of the hypothesis it descends from.
+
+    The hypothesis is the one the workstream's parent revision was resolved from at scheduling
+    (``WorkstreamStart.parent_hypothesis_id``); a workstream built on the run's main has none.
+    """
 
     def __init__(self) -> None:
         """Start with no workstream started."""
@@ -52,7 +63,7 @@ class BuildsOn:
         span = task.span
         if span is None:
             return
-        parent = self._latest.get(w.plan.parent_hypothesis_id or "")
+        parent = self._latest.get(w.parent_hypothesis_id or "")
         if parent is not None:
             ctx.label(WORKSTREAM, span=span, links=(SpanLink(rel=BUILDS_ON, to=parent),))
         self._latest[w.plan.work_id] = span
@@ -72,14 +83,15 @@ def label_outcome(
     if not profile:
         kept = settled.retention != "discard"
         reason = None if closing.cause is None else closing.cause.kind.value
-        ctx.label(WORKSTREAM, verdict=ACCEPTED if kept else REJECTED, reason=reason)
+        found = closing.candidate if kept else None
+        revision = None if found is None else found.revision_id.root
+        ours = workstream_attrs(w).model_copy(update={"revision": revision})
+        ctx.label(WORKSTREAM, attrs=ours, verdict=ACCEPTED if kept else REJECTED, reason=reason)
     if work.gate is None:
         return
     span, stage = work.gate
-    value, base = headline(closing), input_headline(work.baseline)
-    attrs = GateAttrs.measured(
-        stage, None if value is None else value.value, None if base is None else base.value
-    )
+    base = input_headline(work.baseline)
+    attrs = GateAttrs.read(stage, closing.readings, None if base is None else base.value)
     if profile:
         ctx.label(GATE, span=span, attrs=attrs)
         return

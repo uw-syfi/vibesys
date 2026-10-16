@@ -67,7 +67,7 @@ async def issue_job(ctx: Flow, job: IssueJob) -> JobDone:
             issue_not_opened(ctx, Closing(failure=failure))
             return JobDone(issue_id=job.issue.id, closing=Closing(failure=failure), refunded=True)
         closing = await work_issue(ctx, job, opened)
-        issue_settled(ctx, closing, retained=retained(closing))
+        issue_settled(ctx, job, closing, retained=retained(closing))
         revision = closing.candidate if retained(closing) else None
         ctx.workspaces.keep(opened, revision, assessment_of(closing))
     return JobDone(

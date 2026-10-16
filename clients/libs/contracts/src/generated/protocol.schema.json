@@ -1955,6 +1955,17 @@
       "title": "EventsQuery",
       "type": "object"
     },
+    "EvidenceKind": {
+      "description": "Closed measurement kinds used for eligibility requirements.",
+      "enum": [
+        "correctness",
+        "benchmark",
+        "profiling",
+        "local-validation"
+      ],
+      "title": "EvidenceKind",
+      "type": "string"
+    },
     "EvolveSpanAttributes": {
       "additionalProperties": false,
       "properties": {
@@ -2183,6 +2194,56 @@
       "title": "ExperimentsChangedData",
       "type": "object"
     },
+    "FailedCheck": {
+      "additionalProperties": false,
+      "description": "The trusted check that rejected a candidate, and how far it came when it reported that.\n\n``completed`` of ``required`` ``unit`` (``93`` of ``100`` ``trials``) is what the check's\nevaluator reported it got through; each is None when it reported no progress.",
+      "properties": {
+        "check": {
+          "$ref": "#/$defs/EvidenceKind"
+        },
+        "completed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completed"
+        },
+        "required": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Required"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        }
+      },
+      "required": [
+        "check"
+      ],
+      "title": "FailedCheck",
+      "type": "object"
+    },
     "FailureKind": {
       "description": "flows.md's failure kinds a span can end with. Closed.\n\nA defect crashes the step that raised it, which is never persisted, so no trace holds one.",
       "enum": [
@@ -2257,7 +2318,7 @@
     },
     "GateAttrs": {
       "additionalProperties": false,
-      "description": "A trusted measurement of a candidate: its stages, its value, and the ratio to the input's.",
+      "description": "A trusted measurement of a candidate: its stages, its value, and the ratio to the input's.\n\n``failed`` is the first trusted check that rejected the candidate, once its readings are\nread; None when every check it read passed. The verdict (``failed_check`` for a check, or a\nrejection for another reason) is the search's own.",
       "properties": {
         "stage": {
           "title": "Stage",
@@ -2286,6 +2347,17 @@
           ],
           "default": null,
           "title": "Vs Baseline"
+        },
+        "failed": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FailedCheck"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -7392,7 +7464,7 @@
     },
     "WorkstreamAttrs": {
       "additionalProperties": false,
-      "description": "A workstream: the hypothesis it works on, the revision it builds on, and its round.\n\n``round`` is the round that runs it, for a search that plays rounds (the serial searches);\nNone for one that plans calls instead. A round labels its workstream as it begins, before\nit has chosen its hypothesis: until then ``hypothesis_id`` and ``parent_revision`` are None.",
+      "description": "A workstream: one attempt at a candidate, what it builds on, and what it kept.\n\n``hypothesis_id`` is the candidate's identity: every attempt at one idea carries the same\none. ``round`` is the round that runs it, for a search that plays rounds (the serial\nsearches); None for one that plans calls instead. A round labels its workstream as it\nbegins, before it has chosen its hypothesis: until then ``hypothesis_id``,\n``parent_revision`` and ``idea`` are None.\n\n``idea`` is what the candidate tries, in the words of the agent that chose it (a planner's\nor designer's title, a mutator's summary, an issue's title); None until an agent said it.\n``revision`` is the revision the attempt kept, set with its ``accepted`` verdict; None while\nit works and when it kept nothing. A ``probe`` only looks (a profile, a performance\nevaluation): it writes no candidate and reaches no verdict, so it is not a candidate.",
       "properties": {
         "hypothesis_id": {
           "anyOf": [
@@ -7429,6 +7501,35 @@
           ],
           "default": null,
           "title": "Round"
+        },
+        "idea": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Idea"
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Revision"
+        },
+        "probe": {
+          "default": false,
+          "title": "Probe",
+          "type": "boolean"
         }
       },
       "title": "WorkstreamAttrs",

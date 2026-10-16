@@ -10,6 +10,7 @@ from vibesys.orchestration.evolve.models import JudgeResponse, MutatorResponse
 from vibesys.orchestration.evolve.search._measure import gate
 from vibesys.orchestration.evolve.search._prompts import JudgePrompt, ObjectiveAxis, ProfilerPrompt
 from vibesys.orchestration.evolve.search._roles import JUDGE, MUTATOR, PROFILER
+from vibesys.orchestration.evolve.search._spans import mutated
 from vibesys.orchestration.evolve.search._values import (
     ChildStart,
     Closing,
@@ -35,6 +36,7 @@ from vs_core.api.search import (
 async def work(ctx: Flow, start: ChildStart, ws: Workspace) -> Closing:
     """Let the agents and the gates decide what the child is: a failed or a passing individual."""
     closing = await mutate(ctx, start, ws)
+    mutated(ctx, start, closing)
     if closing.cause is not None:
         return closing
     closing = await review(ctx, ws, closing)

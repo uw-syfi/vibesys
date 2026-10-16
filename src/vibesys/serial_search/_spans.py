@@ -45,26 +45,41 @@ def hypothesis_chosen(
     ctx.label(
         WORKSTREAM,
         title=plan.title or plan.hypothesis_id,
-        attrs=WorkstreamAttrs(
-            hypothesis_id=plan.hypothesis_id,
-            parent_revision=base.revision_id.root,
-            round=start.number,
-        ),
+        attrs=_chosen(start, plan, base),
         links=() if built is None else (SpanLink(rel=BUILDS_ON, to=built),),
     )
 
 
-def round_settled(ctx: Flow, settlement: Settlement | None) -> None:
+def round_settled(
+    ctx: Flow,
+    start: RoundStart,
+    plan: OrchestratorPlan,
+    base: RevisionRef,
+    settlement: Settlement | None,
+) -> None:
     """Accept the round's workstream when its workspace kept what it made, else reject it.
 
-    A workspace keeps a candidate or work in progress later rounds build on; one that discards,
-    or never opened, rejects the workstream.
+    A workspace keeps a candidate or work in progress later rounds build on (the revision the
+    workstream names as kept); one that discards, or never opened, rejects the workstream.
     """
     if settlement is None:
         ctx.label(WORKSTREAM, verdict=REJECTED, reason=NOT_OPENED)
         return
     kept = settlement.retention != "discard"
-    ctx.label(WORKSTREAM, verdict=ACCEPTED if kept else REJECTED)
+    found = settlement.candidate if kept else None
+    revision = None if found is None else found.revision_id.root
+    attrs = _chosen(start, plan, base).model_copy(update={"revision": revision})
+    ctx.label(WORKSTREAM, attrs=attrs, verdict=ACCEPTED if kept else REJECTED)
+
+
+def _chosen(start: RoundStart, plan: OrchestratorPlan, base: RevisionRef) -> WorkstreamAttrs:
+    """A round's workstream once it chose its hypothesis: the designer's idea, built on ``base``."""
+    return WorkstreamAttrs(
+        hypothesis_id=plan.hypothesis_id,
+        parent_revision=base.revision_id.root,
+        round=start.number,
+        idea=plan.title or None,
+    )
 
 
 def not_designed(ctx: Flow) -> None:

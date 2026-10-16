@@ -55,7 +55,14 @@ def test_each_job_is_a_workstream_and_the_issue_that_builds_on_the_tip_links_to_
     base = FACTS.baseline.revision_id.root
     assert first.label is not None
     assert first.label.verdict == "accepted"
-    assert attrs(first) == {"hypothesis_id": "issue-1", "parent_revision": base, "round": 1}
+    assert attrs(first) == {
+        "hypothesis_id": "issue-1",
+        "parent_revision": base,
+        "round": 1,
+        "idea": "two opaque items",
+        "revision": "c1",
+        "probe": False,
+    }
     assert first.label.links == ()
     assert roles_under(host, first) == [IMPLEMENTER, JUDGE]
 
@@ -63,12 +70,15 @@ def test_each_job_is_a_workstream_and_the_issue_that_builds_on_the_tip_links_to_
     assert evaluation.label.title == "performance evaluation 1"
     assert evaluation.label.verdict is None
     assert attrs(evaluation)["hypothesis_id"] == "evaluation-1"
+    assert attrs(evaluation)["probe"] is True, "an evaluation only looks: it is no candidate"
     assert roles_under(host, evaluation) == [PERF]
 
     assert second.label is not None
     assert (second.label.title, second.label.verdict) == ("#2 faster", "accepted")
     assert attrs(second)["round"] == 2
-    assert attrs(second)["parent_revision"] != base, "it builds on the first issue's candidate"
+    assert attrs(second)["parent_revision"] == attrs(first)["revision"], (
+        "it builds on the revision the first issue's job kept"
+    )
     assert [(link.rel, link.to) for link in second.label.links] == [("builds_on", first.id)]
     assert last.label is not None
     assert attrs(last)["hypothesis_id"] == "evaluation-2"
@@ -82,7 +92,12 @@ def test_the_accuracy_proof_is_a_gate_and_the_adopted_tip_is_the_adoption(
     host.drain()
 
     (gate,) = labelled(host, "gate")
-    assert attrs(gate) == {"stage": "accuracy", "metric_value": None, "vs_baseline": None}
+    assert attrs(gate) == {
+        "stage": "accuracy",
+        "metric_value": None,
+        "vs_baseline": None,
+        "failed": None,
+    }
     (adoption,) = labelled(host, "adoption")
     assert adoption.label is not None
     assert adoption.label.verdict == "adopted"

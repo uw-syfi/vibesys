@@ -72,7 +72,7 @@ async def verify_parent(ctx: Flow, start: ChildStart) -> Failure | None:
 def keep(ctx: Flow, start: ChildStart, ws: Workspace, closing: Closing) -> None:
     """Assert what the child established for the workspace to settle with."""
     proposed = assertion(start, closing, ctx.task.terms)
-    child_settled(ctx, closing, retained=proposed.retention != "discard")
+    child_settled(ctx, start, closing, retained=proposed.retention != "discard")
     kept = Assessment(
         outcome=proposed.outcome,
         assessments=proposed.assessments,

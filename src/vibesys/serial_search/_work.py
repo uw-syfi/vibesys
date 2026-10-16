@@ -79,7 +79,7 @@ async def work(
     """
     hypothesis_chosen(ctx, start, attempt.plan, attempt.base)
     settlement = await _work(ctx, attempt, room=room, turn=turn)
-    round_settled(ctx, settlement)
+    round_settled(ctx, start, attempt.plan, attempt.base, settlement)
     return settlement
 
 

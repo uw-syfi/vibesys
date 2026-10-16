@@ -1433,7 +1433,7 @@ expose = ["api", "api\\..*"]
 # workstreams, agent turns, gates), so clients read one set of kinds whatever the search.
 path = "vibesys.search_spans"
 layer = "roles_search"
-depends_on = ["vs_core"]
+depends_on = ["vs_core", "vibesys.metrics"]
 
 [[interfaces]]
 from = ["vibesys.search_spans"]

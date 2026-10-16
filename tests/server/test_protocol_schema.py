@@ -111,8 +111,17 @@ def test_the_protocol_exports_the_span_kinds_attribute_schema_of_every_built_in_
         listed = defs["SpanAttributes"]["properties"][search]
         assert listed["anyOf"][0]["$ref"].startswith("#/$defs/"), search
     workstream = defs["WorkstreamAttrs"]["properties"]
-    assert set(workstream) == {"hypothesis_id", "parent_revision", "round"}
-    assert set(defs["GateAttrs"]["properties"]) == {"stage", "metric_value", "vs_baseline"}
+    assert set(workstream) == {
+        "hypothesis_id",
+        "parent_revision",
+        "round",
+        "idea",
+        "revision",
+        "probe",
+    }
+    gate = set(defs["GateAttrs"]["properties"])
+    assert gate == {"stage", "metric_value", "vs_baseline", "failed"}
+    assert set(defs["FailedCheck"]["properties"]) == {"check", "completed", "required", "unit"}
     assert set(defs["AdoptionAttrs"]["properties"]) == {"candidate", "metric_value", "vs_baseline"}
 
 

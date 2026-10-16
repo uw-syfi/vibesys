@@ -2,8 +2,9 @@
 
 The run is played from generated schedules, as `test_root_properties.py` plays it. After every
 step and at the end: every workstream span says what it works on (its kind, title, hypothesis
-and parent revision), a workstream links to the latest workstream of the hypothesis its plan
-builds on, every agent turn names its role, a gate that reached a verdict carries the value it
+and parent revision), an accepted one names the revision it kept, a profile is a probe that
+reaches no verdict, a workstream links to the latest workstream of the hypothesis it descends
+from, every agent turn names its role, a gate that reached a verdict carries the value it
 measured (and the ratio to the input's, when the input was measured), and a gate that passed
 belongs to an accepted workstream. Live and with a restart after every step, the labels agree.
 """
@@ -43,6 +44,8 @@ def _parents_by_hypothesis(host: Host) -> dict[str, set[str | None]]:
     plans = [f.plan for f in record.finished] + [r.plan for r in record.running]
     for plan in plans:
         found.setdefault(plan.work_id, set()).add(plan.parent_hypothesis_id)
+    for finished in record.finished:  # the hypothesis its parent revision was resolved from
+        found.setdefault(finished.plan.work_id, set()).add(finished.parent_hypothesis_id)
     return found
 
 
@@ -57,6 +60,10 @@ def _check_workstreams(host: Host) -> None:
         attrs = _attrs(span)
         hypothesis = str(attrs["hypothesis_id"])
         assert attrs["parent_revision"]
+        if attrs["probe"]:
+            assert span.label.verdict is None, f"{span.id} only looks, yet reached a verdict"
+        kept = attrs["revision"]
+        assert (kept is not None) == (span.label.verdict == "accepted"), f"{span.id} kept {kept}"
         links = [link.to for link in span.label.links if link.rel == "builds_on"]
         allowed = {latest[p] for p in parents.get(hypothesis, set()) if p in latest}
         assert set(links) <= allowed, f"{span.id} builds on {links}, not one of {allowed}"

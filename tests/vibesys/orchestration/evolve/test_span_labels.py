@@ -48,10 +48,20 @@ def test_a_cold_start_and_the_child_built_on_it_are_workstreams_with_turns_gates
         "hypothesis_id": "bootstrap.1",
         "parent_revision": FACTS.baseline.revision_id.root,
         "round": 1,
+        "idea": "change c1",
+        "revision": "c1",
+        "probe": False,
     }
     assert second.label is not None
     assert (second.label.title, second.label.verdict) == ("generation 1 · child 1", "accepted")
-    assert attrs(second) == {"hypothesis_id": "g1.c1", "parent_revision": "c1", "round": 2}
+    assert attrs(second) == {
+        "hypothesis_id": "g1.c1",
+        "parent_revision": "c1",
+        "round": 2,
+        "idea": "change c2",
+        "revision": "c2",
+        "probe": False,
+    }
     assert [(link.rel, link.to) for link in second.label.links] == [("builds_on", first.id)]
     assert first.label.links == ()
     assert roles_under(host, first) == roles_under(host, second) == ["mutator", "judge"]
@@ -59,7 +69,7 @@ def test_a_cold_start_and_the_child_built_on_it_are_workstreams_with_turns_gates
     gates = labelled(host, "gate")
     assert [g.parent for g in gates] == [first.id, second.id]
     assert [attrs(g) for g in gates] == [
-        {"stage": "accuracy,benchmark", "metric_value": value, "vs_baseline": None}
+        {"stage": "accuracy,benchmark", "metric_value": value, "vs_baseline": None, "failed": None}
         for value in (100.0, 150.0)
     ]
     assert [g.label.verdict for g in gates if g.label is not None] == ["passed", "passed"]
@@ -90,6 +100,8 @@ def test_a_child_the_judge_rejects_is_a_rejected_workstream_and_adoption_keeps_t
     assert cold.label.verdict == "accepted"
     assert child.label is not None
     assert (child.label.verdict, child.label.reason) == ("rejected", "not_passed")
+    assert attrs(child)["revision"] is None, "a rejected child kept nothing"
+    assert attrs(child)["idea"], "the mutator said what it tried"
     assert [g.parent for g in labelled(host, "gate")] == [cold.id]
     (adoption,) = labelled(host, "adoption")
     assert attrs(adoption)["candidate"] == "c1"
