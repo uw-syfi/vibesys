@@ -22,21 +22,24 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given, note, settings
+from hypothesis import event, given, note, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic._host import (
     FACTS,
     INPUT_PATH,
     PLANNER_LABEL,
     Host,
+    begin,
     config,
 )
+from tests.vibesys.orchestration.dynamic._main_watch import MainWatch
 from tests.vibesys.vibesys_flows import start_flow
 
 from vibesys.orchestration.dynamic.search.api import (
     DynamicConfig,
     FinishedWork,
     InterpretEvidence,
+    MergeOutcome,
     dynamic,
 )
 from vs_core.api import (
@@ -76,6 +79,8 @@ class Seen:
     """Every finished workstream the run ever published, by its sequence."""
     rounds: dict[str, int] = field(default_factory=dict)
     """The most rounds the run ever published for each hypothesis."""
+    main: MainWatch | None = None
+    """What a run that merges published of main, checked after every answer."""
 
 
 def _answer(host: Host, asked: Asked, seen: Seen) -> None:
@@ -87,6 +92,8 @@ def _answer(host: Host, asked: Asked, seen: Seen) -> None:
         for hypothesis in record.hypotheses:
             known = seen.rounds.get(hypothesis.hypothesis_id, 0)
             seen.rounds[hypothesis.hypothesis_id] = max(known, len(hypothesis.rounds))
+    if seen.main is not None:
+        seen.main.check(record)
 
 
 def _play(
@@ -314,5 +321,44 @@ def test_code_changes_at_any_steps_keep_the_runs_work(
     try:
         _play(host, seen, picks)
         _check_kept_work(host, seen)
+    finally:
+        note(host.run.timeline())
+
+
+@settings(max_examples=examples(pr=15, nightly=100), deadline=None, derandomize=True, database=None)
+@given(
+    changes=st.sets(st.integers(0, 90), min_size=1, max_size=3),
+    picks=st.lists(st.integers(0, 7), min_size=1, max_size=12),
+    throughputs=st.dictionaries(
+        st.sampled_from([f"c{n}" for n in range(1, 12)]), st.floats(10, 200), max_size=11
+    ),
+)
+def test_code_changes_during_merges_keep_main_and_each_merged_commit(
+    changes: set[int], picks: list[int], throughputs: dict[str, float]
+) -> None:
+    """A run that merges, changed at generated steps, keeps main, its merges and their commits.
+
+    Main resumes where it was and moves only to the commit of a merge that merged; a merger's
+    commit is measured at most once, and is measured or its code kept, like a candidate.
+    """
+    cfg = config(max_rounds=3, max_in_flight=2, judge_every=1)
+    policy = RestartPolicy(steps=frozenset(changes), changes=(CHANGED, dynamic))
+    host = begin(cfg, restarting=policy, merging=True, throughputs=throughputs)
+    seen = Seen(main=MainWatch(throughputs=dict(throughputs)))
+    try:
+        _play(host, seen, picks)
+        _check_kept_work(host, seen)
+        record = host.record
+        assert record is not None
+        commits = [item.revision for item in record.merges if item.revision is not None]
+        measured = Counter(
+            item.plan.candidate
+            for item in _decisions(host, Measure)
+            if item.plan.purpose != "baseline"
+        )
+        assert all(measured[commit] <= 1 for commit in commits), measured
+        moved = [item for item in record.merges if item.outcome is MergeOutcome.MERGED]
+        assert all(item.revision and measured[item.revision] == 1 for item in moved), record.merges
+        event(f"merges: {len(record.merges)}, merged: {len(moved)}")
     finally:
         note(host.run.timeline())
