@@ -66,6 +66,28 @@ export type StopFlow =
       readonly forced: boolean;
     };
 
+/** Which spans the Map shows, by state; `finished` is done or stopped. */
+export type MapFilter = 'all' | 'running' | 'waiting' | 'failed' | 'finished';
+export const MAP_FILTERS: readonly MapFilter[] = [
+  'all',
+  'running',
+  'waiting',
+  'failed',
+  'finished',
+];
+
+/** The Map's own state: its filter, the groups the user opened, and the selected span. */
+export interface MapState {
+  readonly filter: MapFilter;
+  /** Ids of the groups shown open (a planning call's finished workstreams, by its span id). */
+  readonly open: ReadonlySet<string>;
+  /** The selected span's id; null, or a span not in the trace at the view, selects the root. */
+  readonly selected: string | null;
+}
+
+/** Where the scrubber stands: following the newest event, or at one event's sequence. */
+export type RunView = {readonly at: 'live'} | {readonly at: number};
+
 export type RunLogs =
   | {readonly kind: 'idle'}
   | {
@@ -100,9 +122,10 @@ export interface RunPageState {
   /** The run fold and trace so far. */
   readonly run: RunFold;
   /** The sequence the tabs show: the live end, or a past one the scrubber chose. */
-  readonly view: {readonly at: 'live'} | {readonly at: number};
+  readonly view: RunView;
   /** Why the last command the run refused failed, until the next one. */
   readonly notice: string | null;
+  readonly map: MapState;
   readonly next: number;
 }
 
@@ -112,6 +135,9 @@ export type RunPageAction =
   | {readonly type: 'select-stream'; readonly streamId: string}
   | {readonly type: 'work-query'; readonly query: string}
   | {readonly type: 'work-outcome'; readonly outcome: WorkOutcome}
+  | {readonly type: 'map-filter'; readonly filter: MapFilter}
+  | {readonly type: 'map-toggle'; readonly id: string; readonly open: boolean}
+  | {readonly type: 'map-select'; readonly id: string}
   | {readonly type: 'view-logs'}
   | {readonly type: 'ask-stop'}
   | {readonly type: 'cancel-stop'}
@@ -132,7 +158,7 @@ export type RunPageAction =
   | {readonly type: 'run-core'; readonly core: CoreState}
   | {readonly type: 'run-data'; readonly data: RunData}
   | {readonly type: 'command-refused'; readonly message: string}
-  | {readonly type: 'view'; readonly view: RunPageState['view']};
+  | {readonly type: 'view'; readonly view: RunView};
 
 export type RunPageRequest =
   | {readonly kind: 'stop'; readonly force: boolean}
@@ -176,6 +202,7 @@ export function runPageInitial(seed: RunPageSeed): RunPageState {
     run: EMPTY_RUN_FOLD,
     view: {at: 'live'},
     notice: null,
+    map: {filter: 'all', open: new Set(), selected: null},
     next: 1,
   };
 }
@@ -438,6 +465,17 @@ function narration(state: RunPageState): string | null {
   return found?.id ?? null;
 }
 
+function toggled(
+  open: ReadonlySet<string>,
+  action: {readonly id: string; readonly open: boolean},
+): ReadonlySet<string> {
+  if (open.has(action.id) === action.open) return open;
+  const next = new Set(open);
+  if (action.open) next.add(action.id);
+  else next.delete(action.id);
+  return next;
+}
+
 export function runPageStep(state: RunPageState, action: RunPageAction): RunPageStep {
   const stop = confirmStep(state, action) ?? stoppingStep(state, action);
   if (stop !== null) return stop;
@@ -465,6 +503,15 @@ export function runPageStep(state: RunPageState, action: RunPageAction): RunPage
       return {state: {...state, work: {...state.work, outcome: action.outcome}}, requests: []};
     case 'view-logs':
       return {state: {...state, tab: 'logs', selected: narration(state)}, requests: []};
+    case 'map-filter':
+      return {state: {...state, map: {...state.map, filter: action.filter}}, requests: []};
+    case 'map-toggle':
+      return {
+        state: {...state, map: {...state.map, open: toggled(state.map.open, action)}},
+        requests: [],
+      };
+    case 'map-select':
+      return {state: {...state, map: {...state.map, selected: action.id}}, requests: []};
     default:
       return {state, requests: []};
   }

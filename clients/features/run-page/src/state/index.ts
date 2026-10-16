@@ -31,6 +31,9 @@ export {NOTHING_FOLDED, type RunAtView} from './run-at-view.js';
 export {
   commandable,
   FORCE_STOP_BOUND_MS,
+  MAP_FILTERS,
+  type MapFilter,
+  type MapState,
   RUN_TABS,
   type RunCapability,
   type RunLogs,
@@ -42,6 +45,7 @@ export {
   type RunPhase,
   type RunRecord,
   type RunTab,
+  type RunView,
   runPageInitial,
   runPageInvariants,
   runPageStep,

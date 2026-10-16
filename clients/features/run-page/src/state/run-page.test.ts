@@ -10,6 +10,7 @@ import {
   followedStreams,
   headerView,
   logGroups,
+  MAP_FILTERS,
   RUN_TABS,
   type RunPageAction,
   type RunPageRequest,
@@ -163,7 +164,7 @@ function liveAction(random: Seeded, issued: readonly number[]): RunPageAction {
 }
 
 function randomAction(random: Seeded, issued: readonly number[]): RunPageAction {
-  switch (random.int(8)) {
+  switch (random.int(9)) {
     case 6:
     case 7:
       return liveAction(random, issued);
@@ -181,6 +182,13 @@ function randomAction(random: Seeded, issued: readonly number[]): RunPageAction 
       };
     case 3:
       return {type: 'tab', tab: random.pick(RUN_TABS)};
+    case 4:
+      return random.pick<RunPageAction>([
+        {type: 'map-filter', filter: random.pick(MAP_FILTERS)},
+        {type: 'map-toggle', id: random.pick(['p1', 'p2']), open: random.bool()},
+        {type: 'map-select', id: random.pick(['root', 'w1'])},
+        {type: 'view', view: random.bool() ? {at: 'live'} : {at: random.int(40)}},
+      ]);
     default:
       return random.pick(USER_ACTIONS);
   }
@@ -283,6 +291,21 @@ describe('the run page store', () => {
       {type: 'bound-elapsed', token: arm.token},
     ]);
     expect(ended.state.stop).toEqual({kind: 'idle'});
+  });
+
+  test('the Map and the scrubber are page state that asks for no I/O', () => {
+    const {state, requests} = fold(initial(), [
+      {type: 'map-filter', filter: 'failed'},
+      {type: 'map-toggle', id: 'p1', open: true},
+      {type: 'map-toggle', id: 'p2', open: true},
+      {type: 'map-toggle', id: 'p1', open: false},
+      {type: 'map-select', id: 'w1'},
+      {type: 'view', view: {at: 12}},
+    ]);
+    expect(requests).toEqual([]);
+    expect(state.map).toEqual({filter: 'failed', open: new Set(['p2']), selected: 'w1'});
+    expect(state.view).toEqual({at: 12});
+    expect(fold(state, [{type: 'view', view: {at: 'live'}}]).state.view).toEqual({at: 'live'});
   });
 
   test('a stop seen in the record (from anywhere) arms the same bound', () => {
