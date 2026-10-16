@@ -116,6 +116,7 @@ const USER_ACTIONS: readonly RunPageAction[] = [
   {type: 'resume'},
   {type: 'wait-for-quota'},
   {type: 'stop-waiting'},
+  {type: 'wait-refused', message: "unknown field 'when'"},
   {type: 'resume-ended'},
   {type: 'open-window'},
   {type: 'archive'},

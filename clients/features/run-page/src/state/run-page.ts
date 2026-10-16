@@ -14,7 +14,8 @@
  * and Resume are protocol commands, so they are offered only while the session can deliver one.
  * A run paused by a usage limit also offers to wait: Resume with `when: capacity_returns`, which the
  * run acknowledges with `quota_waiting` (folded into the pause by `@vibesys/run-state`), and "Stop
- * waiting" (Pause) once it waits.
+ * waiting" (Pause) once it waits. A server that refuses the wait (an older one rejects `when`) no
+ * longer offers it for this run instance (`waitRefused`).
  */
 
 import type {RunEvent} from '@vibesys/contracts';
@@ -166,6 +167,8 @@ export interface RunPageState {
   readonly map: MapState;
   /** An ended run's recorded events, read into `run`. */
   readonly history: RunHistory;
+  /** Why the attached run refused to wait for its quota; the wait is not offered again for it. */
+  readonly waitRefused: string | null;
   readonly next: number;
 }
 
@@ -202,6 +205,8 @@ export type RunPageAction =
   | {readonly type: 'run-core'; readonly core: CoreState}
   | {readonly type: 'run-data'; readonly data: RunData}
   | {readonly type: 'command-refused'; readonly message: string}
+  /** The run refused a Resume when capacity returns (an older server rejects `when`). */
+  | {readonly type: 'wait-refused'; readonly message: string}
   | {readonly type: 'view'; readonly view: RunView}
   | {readonly type: 'history'; readonly token: number; readonly reply: HistoryReply};
 
@@ -256,6 +261,7 @@ export function runPageInitial(seed: RunPageSeed): RunPageState {
     notice: null,
     map: {filter: 'all', open: new Set(), selected: null},
     history: {kind: 'idle'},
+    waitRefused: null,
     next: 1,
   };
 }
@@ -349,6 +355,7 @@ function linked(state: RunPageState): RunPageStep {
       link: {kind: 'attaching', token, instance: wanted},
       session: null,
       run: EMPTY_RUN_FOLD,
+      waitRefused: null,
     },
     requests: [...release, {kind: 'attach', token, instance: wanted}],
   };
@@ -567,10 +574,13 @@ function commandStep(state: RunPageState, action: RunPageAction): RunPageStep | 
         when: 'now',
       });
     case 'wait-for-quota':
-      return offered(commandable(state) && byQuota && !waitingForQuota(state), {
-        kind: 'resume',
-        when: 'capacity_returns',
-      });
+      return offered(
+        commandable(state) && byQuota && !waitingForQuota(state) && state.waitRefused === null,
+        {
+          kind: 'resume',
+          when: 'capacity_returns',
+        },
+      );
     case 'stop-waiting':
       return offered(commandable(state) && waitingForQuota(state), {kind: 'pause'});
     case 'resume-ended': {
@@ -683,6 +693,15 @@ function liveStep(state: RunPageState, action: RunPageAction): RunPageStep | nul
       };
     case 'command-refused':
       return {state: {...state, notice: action.message}, requests: []};
+    case 'wait-refused':
+      return {
+        state: {
+          ...state,
+          notice: `The run cannot wait for its quota: ${action.message}`,
+          waitRefused: action.message,
+        },
+        requests: [],
+      };
     case 'view':
       return {state: {...state, view: action.view}, requests: []};
     case 'history':

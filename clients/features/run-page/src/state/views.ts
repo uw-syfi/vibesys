@@ -146,7 +146,7 @@ export function quotaBannerView(
   const waiting = pause?.waiting ?? null;
   const offers = {
     resumeNow: offer(true, reason),
-    wait: offer(waiting === null, reason),
+    wait: offer(waiting === null && state.waitRefused === null, reason),
     stopWaiting: offer(waiting !== null, reason),
   };
   if (pause === null) {

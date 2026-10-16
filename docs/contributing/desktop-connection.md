@@ -626,7 +626,8 @@ offered only while its controls are up. A run paused by a usage limit shows the 
 instead of the header's Resume: the provider and its reset time, "Resume now" (`command.resume`
 with `when: now`), "Wait and resume when quota is back" (`when: capacity_returns`), and, once the
 run reports `quota_waiting` (folded into the run fold's quota pause, with its `resumes_at`), the
-expected time and "Stop waiting" (`command.pause`) until `quota_wait_cancelled`. Times are words
+expected time and "Stop waiting" (`command.pause`) until `quota_wait_cancelled`. A server that
+refuses the wait (an older one rejects `when`) no longer offers it for that run instance. Times are words
 for the events' epoch seconds in the user's time zone; no clock is read. Leaving the run releases it (`releaseRun`), and a new
 shell document detaches the run the old one held. An ended run opens from its recorded history
 instead: the store reads `runs.read_events` (feature `run_history`, through the welcome bridge's
