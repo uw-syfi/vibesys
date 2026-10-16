@@ -61,6 +61,7 @@ export type {
   Request as HelperRequest,
   RunConnectReply,
   RunList,
+  RunOption,
   RunPhase,
   RunRole,
   RunStartCompensationFailure,

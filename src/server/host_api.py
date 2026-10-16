@@ -776,6 +776,9 @@ class HelperFeature(StrEnum):
     RUN_BACKEND = "run_backend"
     """``run.preflight``'s ``with_backend``: the compute backend the run resolved to (the task's),
     and each failing check's typed ``cause``."""
+    RUN_CAUSES = "run_causes"
+    """``run.preflight``'s ``with_causes``: the typed ``cause`` of a failed ``settings_valid``
+    check beyond an unrunnable backend (the task, configuration, agent and argument failures)."""
 
 
 CLI_PROVIDER_FLAG: Final = "--cli-provider"
@@ -958,6 +961,9 @@ class RunPreflightRequest(_HelperRequest):
     with_backend: bool | None = None
     """Ask for ``backend`` in the reply and a ``cause`` on the checks that have one. Sent only
     after ``hello`` returned ``run_backend``."""
+    with_causes: bool | None = None
+    """Ask for the typed ``cause`` of every other way ``settings_valid`` can fail, and a ``detail``
+    that names no flag. Sent only after ``hello`` returned ``run_causes``."""
 
 
 class RunStopRequest(_HelperRequest):
@@ -1183,6 +1189,7 @@ HELPER_FIELD_FEATURES: Final[Mapping[type[_HelperRequest], Mapping[str, HelperFe
         "options": HelperFeature.RUN_OPTIONS,
         "with_roles": HelperFeature.RUN_ROLES,
         "with_backend": HelperFeature.RUN_BACKEND,
+        "with_causes": HelperFeature.RUN_CAUSES,
         "with_project_clean": HelperFeature.PROJECT_CLEAN,
     },
     LogsListRequest: {"span_id": HelperFeature.LOGS_BY_SPAN},

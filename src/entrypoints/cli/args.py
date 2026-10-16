@@ -619,7 +619,7 @@ def _run_id(value: str) -> str:
         raise argparse.ArgumentTypeError(str(exc)) from None
 
 
-def _make_parser(prog: str, description: str) -> argparse.ArgumentParser:
+def _make_parser(prog: str, description: str) -> _RunArgumentParser:
     parser = _RunArgumentParser(prog=prog, description=description)
     _apply_common_args(parser)
     return parser
@@ -646,7 +646,7 @@ def _build_validate_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _build_agent_parser() -> argparse.ArgumentParser:
+def _build_agent_parser() -> _RunArgumentParser:
     parser = _make_parser(
         prog="vibesys --outer-loop agent",
         description="Run the autonomous orchestrator-driven build loop.",
@@ -851,7 +851,7 @@ def _parse_cli_objective(spec: str) -> Objective:
     return Objective(name=name, direction=direction)
 
 
-def _build_evolve_parser() -> argparse.ArgumentParser:
+def _build_evolve_parser() -> _RunArgumentParser:
     parser = _make_parser(
         prog="vibesys --outer-loop evolve",
         description="Run the evolutionary-search build loop.",
@@ -945,7 +945,7 @@ def _build_evolve_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _build_plain_parser() -> argparse.ArgumentParser:
+def _build_plain_parser() -> _RunArgumentParser:
     parser = _make_parser(
         prog="vibesys --outer-loop plain",
         description=(

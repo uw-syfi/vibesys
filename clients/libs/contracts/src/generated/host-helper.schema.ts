@@ -13,6 +13,57 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "Accelerator",
       "type": "string"
     },
+    "ArgumentsRejected": {
+      "additionalProperties": false,
+      "description": "The run's argument parser refused the extra arguments; ``problem`` is its message (raw).",
+      "properties": {
+        "kind": {
+          "const": "arguments_rejected",
+          "default": "arguments_rejected",
+          "title": "Kind",
+          "type": "string"
+        },
+        "problem": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Problem",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "problem"
+      ],
+      "title": "ArgumentsRejected",
+      "type": "object"
+    },
+    "ArgumentsUnrecognized": {
+      "additionalProperties": false,
+      "description": "Extra arguments the run's search does not take, in the order given (raw).",
+      "properties": {
+        "kind": {
+          "const": "arguments_unrecognized",
+          "default": "arguments_unrecognized",
+          "title": "Kind",
+          "type": "string"
+        },
+        "arguments": {
+          "items": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Arguments",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "arguments"
+      ],
+      "title": "ArgumentsUnrecognized",
+      "type": "object"
+    },
     "AvailableLogTail": {
       "additionalProperties": false,
       "description": "A bounded suffix of one instance's regular ``server.log`` file.",
@@ -190,8 +241,20 @@ const hostHelperSchema: Record<string, unknown> = {
             {
               "discriminator": {
                 "mapping": {
+                  "arguments_rejected": "#/$defs/ArgumentsRejected",
+                  "arguments_unrecognized": "#/$defs/ArgumentsUnrecognized",
                   "backend_unavailable": "#/$defs/BackendUnavailable",
-                  "project_dirty": "#/$defs/ProjectDirty"
+                  "config_invalid": "#/$defs/ConfigInvalid",
+                  "github_unavailable": "#/$defs/GitHubUnavailable",
+                  "model_not_vetted": "#/$defs/ModelNotVetted",
+                  "option_not_accepted": "#/$defs/OptionNotAccepted",
+                  "project_dirty": "#/$defs/ProjectDirty",
+                  "roles_not_declared": "#/$defs/RolesNotDeclared",
+                  "sysbox_missing": "#/$defs/SysboxMissing",
+                  "task_image_unsupported": "#/$defs/TaskImageUnsupported",
+                  "task_needs_provisioning": "#/$defs/TaskNeedsProvisioning",
+                  "task_not_found": "#/$defs/TaskNotFound",
+                  "task_unusable": "#/$defs/TaskUnusable"
                 },
                 "propertyName": "kind"
               },
@@ -201,6 +264,42 @@ const hostHelperSchema: Record<string, unknown> = {
                 },
                 {
                   "$ref": "#/$defs/ProjectDirty"
+                },
+                {
+                  "$ref": "#/$defs/TaskNotFound"
+                },
+                {
+                  "$ref": "#/$defs/TaskUnusable"
+                },
+                {
+                  "$ref": "#/$defs/TaskNeedsProvisioning"
+                },
+                {
+                  "$ref": "#/$defs/TaskImageUnsupported"
+                },
+                {
+                  "$ref": "#/$defs/SysboxMissing"
+                },
+                {
+                  "$ref": "#/$defs/ConfigInvalid"
+                },
+                {
+                  "$ref": "#/$defs/RolesNotDeclared"
+                },
+                {
+                  "$ref": "#/$defs/ModelNotVetted"
+                },
+                {
+                  "$ref": "#/$defs/ArgumentsRejected"
+                },
+                {
+                  "$ref": "#/$defs/ArgumentsUnrecognized"
+                },
+                {
+                  "$ref": "#/$defs/OptionNotAccepted"
+                },
+                {
+                  "$ref": "#/$defs/GitHubUnavailable"
                 }
               ]
             },
@@ -484,6 +583,30 @@ const hostHelperSchema: Record<string, unknown> = {
       "required": [
         "kind"
       ]
+    },
+    "ConfigInvalid": {
+      "additionalProperties": false,
+      "description": "The run's configuration (``agent.toml`` and what overrides it) is not valid.",
+      "properties": {
+        "kind": {
+          "const": "config_invalid",
+          "default": "config_invalid",
+          "title": "Kind",
+          "type": "string"
+        },
+        "problem": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Problem",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "problem"
+      ],
+      "title": "ConfigInvalid",
+      "type": "object"
     },
     "CopyOut": {
       "additionalProperties": false,
@@ -874,6 +997,30 @@ const hostHelperSchema: Record<string, unknown> = {
         "message"
       ],
       "title": "FailureReason",
+      "type": "object"
+    },
+    "GitHubUnavailable": {
+      "additionalProperties": false,
+      "description": "The run publishes to GitHub, and this machine has no signed-in account; ``problem`` is raw.",
+      "properties": {
+        "kind": {
+          "const": "github_unavailable",
+          "default": "github_unavailable",
+          "title": "Kind",
+          "type": "string"
+        },
+        "problem": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Problem",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "problem"
+      ],
+      "title": "GitHubUnavailable",
       "type": "object"
     },
     "Gpu": {
@@ -1289,7 +1436,8 @@ const hostHelperSchema: Record<string, unknown> = {
         "examples",
         "run_roles",
         "project_clean",
-        "run_backend"
+        "run_backend",
+        "run_causes"
       ],
       "title": "HelperFeature",
       "type": "string"
@@ -2609,6 +2757,94 @@ const hostHelperSchema: Record<string, unknown> = {
         "state"
       ]
     },
+    "ModelNotVetted": {
+      "additionalProperties": false,
+      "description": "A model, or none, outside the vetted models of its provider.",
+      "properties": {
+        "kind": {
+          "const": "model_not_vetted",
+          "default": "model_not_vetted",
+          "title": "Kind",
+          "type": "string"
+        },
+        "provider": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Model"
+        },
+        "vetted": {
+          "items": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Vetted",
+          "type": "array"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Role"
+        },
+        "fallback": {
+          "title": "Fallback",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "provider",
+        "model",
+        "vetted",
+        "role",
+        "fallback"
+      ],
+      "title": "ModelNotVetted",
+      "type": "object"
+    },
+    "OptionNotAccepted": {
+      "additionalProperties": false,
+      "description": "The run's search does not take a typed option the screen set (for instance rounds).",
+      "properties": {
+        "kind": {
+          "const": "option_not_accepted",
+          "default": "option_not_accepted",
+          "title": "Kind",
+          "type": "string"
+        },
+        "option": {
+          "$ref": "#/$defs/RunOption"
+        }
+      },
+      "required": [
+        "kind",
+        "option"
+      ],
+      "title": "OptionNotAccepted",
+      "type": "object"
+    },
     "PathEntry": {
       "additionalProperties": false,
       "description": "One directory that completes the typed path, with what it looks like.",
@@ -3045,6 +3281,33 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "RoleOption",
       "type": "object"
     },
+    "RolesNotDeclared": {
+      "additionalProperties": false,
+      "description": "The configuration names agent roles the run's orchestration does not declare.",
+      "properties": {
+        "kind": {
+          "const": "roles_not_declared",
+          "default": "roles_not_declared",
+          "title": "Kind",
+          "type": "string"
+        },
+        "roles": {
+          "items": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Roles",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "roles"
+      ],
+      "title": "RolesNotDeclared",
+      "type": "object"
+    },
     "RunConnectReply": {
       "additionalProperties": false,
       "description": "The channel is now a byte relay carrying the run protocol to this run.",
@@ -3182,6 +3445,18 @@ const hostHelperSchema: Record<string, unknown> = {
       ],
       "title": "RunList",
       "type": "object"
+    },
+    "RunOption": {
+      "description": "A typed New run option (``RunOptions``); closed.",
+      "enum": [
+        "rounds",
+        "time_limit",
+        "results",
+        "role_model",
+        "role_reasoning_effort"
+      ],
+      "title": "RunOption",
+      "type": "string"
     },
     "RunOptions": {
       "additionalProperties": false,
@@ -3446,6 +3721,18 @@ const hostHelperSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "With Backend"
+        },
+        "with_causes": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "With Causes"
         }
       },
       "required": [
@@ -4120,6 +4407,75 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "StopUnconfirmedCompensationFailure",
       "type": "object"
     },
+    "SysboxMissing": {
+      "additionalProperties": false,
+      "description": "The task runs Docker inside its sandbox, which needs a runtime this machine's Docker lacks.",
+      "properties": {
+        "kind": {
+          "const": "sysbox_missing",
+          "default": "sysbox_missing",
+          "title": "Kind",
+          "type": "string"
+        },
+        "task": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Task",
+          "type": "string"
+        },
+        "problem": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Problem",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "task",
+        "problem"
+      ],
+      "title": "SysboxMissing",
+      "type": "object"
+    },
+    "TaskImageUnsupported": {
+      "additionalProperties": false,
+      "description": "The task's Dockerfile cannot be used the way this run would run; ``problem`` is raw text.",
+      "properties": {
+        "kind": {
+          "const": "task_image_unsupported",
+          "default": "task_image_unsupported",
+          "title": "Kind",
+          "type": "string"
+        },
+        "task": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Task"
+        },
+        "problem": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Problem",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "task",
+        "problem"
+      ],
+      "title": "TaskImageUnsupported",
+      "type": "object"
+    },
     "TaskList": {
       "additionalProperties": false,
       "description": "``vibesys tasks --json``: the tasks of one project.",
@@ -4149,6 +4505,64 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "TaskList",
       "type": "object"
     },
+    "TaskNeedsProvisioning": {
+      "additionalProperties": false,
+      "description": "The task needs inputs copied into a project of its own, which this run does not do.",
+      "properties": {
+        "kind": {
+          "const": "task_needs_provisioning",
+          "default": "task_needs_provisioning",
+          "title": "Kind",
+          "type": "string"
+        },
+        "task": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Task",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "task"
+      ],
+      "title": "TaskNeedsProvisioning",
+      "type": "object"
+    },
+    "TaskNotFound": {
+      "additionalProperties": false,
+      "description": "The project has no task of that name.",
+      "properties": {
+        "kind": {
+          "const": "task_not_found",
+          "default": "task_not_found",
+          "title": "Kind",
+          "type": "string"
+        },
+        "task": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Task",
+          "type": "string"
+        },
+        "available": {
+          "items": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Available",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "task",
+        "available"
+      ],
+      "title": "TaskNotFound",
+      "type": "object"
+    },
     "TaskSummary": {
       "additionalProperties": false,
       "description": "One task of a project.",
@@ -4162,6 +4576,44 @@ const hostHelperSchema: Record<string, unknown> = {
         "name"
       ],
       "title": "TaskSummary",
+      "type": "object"
+    },
+    "TaskUnusable": {
+      "additionalProperties": false,
+      "description": "The task's files cannot be loaded; ``problem`` is the loader's own account (raw text).",
+      "properties": {
+        "kind": {
+          "const": "task_unusable",
+          "default": "task_unusable",
+          "title": "Kind",
+          "type": "string"
+        },
+        "task": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Task"
+        },
+        "problem": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Problem",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "task",
+        "problem"
+      ],
+      "title": "TaskUnusable",
       "type": "object"
     },
     "TasksListReply": {
@@ -4605,6 +5057,7 @@ const hostHelperSchema: Record<string, unknown> = {
       "options": "run_options",
       "with_roles": "run_roles",
       "with_backend": "run_backend",
+      "with_causes": "run_causes",
       "with_project_clean": "project_clean"
     },
     "logs.list": {

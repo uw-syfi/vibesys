@@ -7,8 +7,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from entrypoints.cli.constants import _IGNORED_CONFIG_SECTIONS
-from entrypoints.cli.errors import _configuration_error, _project_resume_mismatch
-from vibesys.api import ComputeBackend, Config, DomainName, load_config
+from entrypoints.cli.errors import _cause_error, _configuration_error, _project_resume_mismatch
+from vibesys.api import (
+    ComputeBackend,
+    Config,
+    ConfigInvalid,
+    DomainName,
+    GitHubUnavailable,
+    load_config,
+)
 from vibesys.api.request import (
     REPOSITORY_SLUG,
     default_skill_roots,
@@ -210,7 +217,7 @@ def _load_effective_config(args: argparse.Namespace) -> Config:
     try:
         config = _load_config_or_default(args.config)
     except (ValueError, FileNotFoundError) as e:
-        _configuration_error(str(e), code="config_load_failed", stage="config_loading")
+        _cause_error(ConfigInvalid(problem=str(e)))
 
     model = getattr(args, "model", None)
     if model is not None:
@@ -244,21 +251,20 @@ def _with_run_overrides(config: Config, args: argparse.Namespace) -> Config:
     try:
         return Config.model_validate(document)
     except ValueError as exc:
-        _configuration_error(str(exc), code="config_load_failed", stage="config_loading")
+        _cause_error(ConfigInvalid(problem=str(exc)))
 
 
-def _resolve_repository_owner(config: Config) -> str:
-    """Resolve the configured repository owner or the authenticated ``gh`` user."""
+def _resolve_repository_owner(config: Config, github: GitHubCLI | None = None) -> str:
+    """Resolve the configured repository owner or the authenticated ``gh`` user.
+
+    ``github`` asks ``gh`` (the real one by default), only when no owner is configured.
+    """
     if config.repository.owner is not None:
         return config.repository.owner
     try:
-        return GitHubCLI(OsProcesses()).current_user()
+        return (github or GitHubCLI(OsProcesses())).current_user()
     except GitHubCLIError as exc:
-        _configuration_error(
-            str(exc),
-            code="repository_setup_failed",
-            stage="repository_setup",
-        )
+        _cause_error(GitHubUnavailable(problem=str(exc)))
 
 
 def _load_config_or_default(config_path: Path | None) -> Config:
@@ -269,6 +275,29 @@ def _load_config_or_default(config_path: Path | None) -> Config:
     if selected_path.is_file():
         return load_config(selected_path, ignored_sections=_IGNORED_CONFIG_SECTIONS)
     return Config()
+
+
+def _publishes_to_a_remote(args: argparse.Namespace) -> bool:
+    """Whether the run creates or pushes to a GitHub repository (``--repo``, ``--publish``)."""
+    if args.resume is not None:
+        return False
+    if args.runs_dir is None and args.repo is None and not args.publish:
+        return False
+    return not args.local
+
+
+def require_repository_owner(
+    args: argparse.Namespace, config: Config, github: GitHubCLI | None = None
+) -> None:
+    """Raise ``ConfigurationError`` (``GitHubUnavailable``) when the run needs a GitHub account it lacks.
+
+    It asks what ``_prepare_experiment_repository`` asks, ahead of the run: a repository named
+    without an owner, or a new one to create, needs the configured owner or the signed-in
+    ``gh`` account. ``github`` is the client to ask (the real one by default).
+    """
+    named_without_owner = args.repo is not None and "/" not in args.repo
+    if named_without_owner or (_publishes_to_a_remote(args) and args.repo is None):
+        _resolve_repository_owner(config, github)
 
 
 def _prepare_experiment_repository(args: argparse.Namespace, config: Config) -> None:

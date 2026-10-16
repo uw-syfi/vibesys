@@ -18,6 +18,7 @@ import {
   offers,
   projectPath,
 } from '../../state/index.js';
+import {backendLabel, type FailureWords, failureWords} from './cause-words.js';
 
 export interface MachineOption {
   readonly value: HostKey;
@@ -80,18 +81,7 @@ export function rolesView(context: NewRunContext): RolesView {
     : {kind: 'pending'};
 }
 
-const BACKEND_LABELS: Readonly<Record<Backend, string>> = {
-  cpu: 'CPU',
-  cuda: 'NVIDIA GPU (CUDA)',
-  rocm: 'AMD GPU (ROCm)',
-  metal: 'Apple GPU (Metal)',
-  trainium: 'AWS Trainium',
-};
-
-/** A compute backend as a person reads it. */
-export function backendLabel(backend: Backend): string {
-  return BACKEND_LABELS[backend];
-}
+export {backendLabel};
 
 /**
  * The compute backend the run will use, read-only: it is the task's, so it is shown, never chosen.
@@ -100,32 +90,6 @@ export function backendLabel(backend: Backend): string {
 export function backendOf(context: NewRunContext): Backend | null {
   const key = inputsKey(context.form);
   return key !== null && context.checks?.for === key ? context.checks.backend : null;
-}
-
-/**
- * A failed check in words for this screen, from its typed cause when it has one: the app names
- * what to change here (the task or the machine), never a command-line flag.
- */
-/** How many changed paths a failure names before saying how many more there are. */
-const SHOWN_PATHS = 5;
-
-function causeDetail(check: Check, machine: HostKey): string | null {
-  const cause = check.cause ?? null;
-  if (cause === null) return null;
-  if (cause.kind === 'project_dirty') {
-    const shown = cause.paths.slice(0, SHOWN_PATHS).join(', ');
-    const more = cause.paths.length - SHOWN_PATHS;
-    return (
-      `${lastSegment(cause.project)} has uncommitted changes (${shown}` +
-      `${more > 0 ? `, and ${more} more` : ''}). Commit or discard them in the project, then check again.`
-    );
-  }
-  const on = machineLabel(machine);
-  const wants =
-    cause.declared.length > 1
-      ? `one of ${cause.declared.map(backendLabel).join(', ')}`
-      : backendLabel(cause.backend);
-  return `The task "${cause.task}" runs on ${wants}, which ${on} does not have. Choose another task or another machine.`;
 }
 
 const CHECK_LABELS: Readonly<Record<Check['id'], string>> = {
@@ -144,6 +108,8 @@ export interface Readiness {
   readonly state: CheckState;
   readonly label: string;
   readonly detail?: string;
+  /** What the run printed about a failure, for a collapsible detail, never the headline. */
+  readonly raw?: string;
   readonly fix?: ReadinessFix;
 }
 
@@ -153,9 +119,14 @@ export type ReadinessFix =
   | {readonly kind: 'choose_checkout'}
   | {readonly kind: 'recheck'};
 
-function checkFix(check: Check, project: string | null): ReadinessFix | undefined {
-  // Changes in the project are committed or discarded outside this screen, then checked again.
-  if (check.cause?.kind === 'project_dirty') return {kind: 'recheck'};
+function checkFix(
+  check: Check,
+  project: string | null,
+  words: FailureWords | null,
+): ReadinessFix | undefined {
+  // What a cause asks is done outside this screen (the project, the machine); then the inputs
+  // are checked again.
+  if (words?.recheck === true) return {kind: 'recheck'};
   const fix = check.fix ?? null;
   if (fix === null) return undefined;
   if (fix.kind === 'copy_out') {
@@ -170,13 +141,15 @@ function checkFix(check: Check, project: string | null): ReadinessFix | undefine
 }
 
 function checkItem(check: Check, project: string | null, machine: HostKey): Readiness {
-  const fix = check.state === 'ok' ? undefined : checkFix(check, project);
+  const words = check.state === 'fail' ? failureWords(check, machineLabel(machine)) : null;
+  const fix = check.state === 'ok' ? undefined : checkFix(check, project, words);
   const copyTo = fix?.kind === 'copy_out' ? ` Its copy goes to ${fix.destination}.` : '';
   return {
     id: check.id,
     state: check.state,
     label: CHECK_LABELS[check.id],
-    detail: `${causeDetail(check, machine) ?? check.detail}${copyTo}`,
+    detail: `${words?.headline ?? check.detail}${copyTo}`,
+    ...(words?.raw == null ? {} : {raw: words.raw}),
     ...(fix === undefined ? {} : {fix}),
   };
 }

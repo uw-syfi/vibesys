@@ -6,19 +6,22 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pydantic import ValidationError
+
 from entrypoints.cli.config import _prepare_experiment_repository, load_config_and_skills
 from entrypoints.cli.environment import (
     TaskImageBuild,
     _validate_run_environment_profiler,
     run_environment_spec_from_args,
 )
-from entrypoints.cli.errors import _configuration_error
+from entrypoints.cli.errors import _cause_error, _configuration_error
 from entrypoints.cli.inputs import _standalone_input_dests_set, _validate_target_inputs
 from entrypoints.cli.remote import _clone_project, _is_remote_project
 from entrypoints.production import production_runs
 from entrypoints.run import run_headless
 from launch import validate_descriptor, validate_run_request
 from vibesys.api import (
+    ArgumentsRejected,
     DomainName,
     OrchestrationDescriptor,
     ResumeRef,
@@ -349,6 +352,18 @@ def _build_run_request(args: argparse.Namespace) -> RunRequest:
         )
 
 
+def _validate_options(descriptor: OrchestrationDescriptor) -> None:
+    """Refuse options the selected orchestration's own validation rejects, as arguments."""
+    try:
+        validate_descriptor(descriptor)
+    except ValidationError as error:
+        problems = "; ".join(
+            f"{'.'.join(str(part) for part in each['loc'])}: {each['msg']}"
+            for each in error.errors()
+        )
+        _cause_error(ArgumentsRejected(f"{descriptor.id} options are invalid: {problems}"))
+
+
 def validated_run_request(
     args: argparse.Namespace, probe: CommandProbe | None = None
 ) -> tuple[RunRequest, Config]:
@@ -371,7 +386,7 @@ def validated_run_request(
         else:
             descriptor = _evolve_policy_descriptor(args, bundle)
             objective = bundle.objective
-        validate_descriptor(descriptor)
+        _validate_options(descriptor)
         request = RunRequest(
             project_root=bundle.root,
             orchestration=descriptor,

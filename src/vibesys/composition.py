@@ -11,7 +11,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from vibesys.constants import DomainName
-from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
+from vibesys.errors import ModelNotVetted, RolesNotDeclared, configuration_error
 from vs_agent.api import (
     DEFAULT_CLI_PROVIDER,
     AgentBackend,
@@ -152,17 +152,8 @@ def resolve_agent_specs(
     declared = {role.id for role in roles}
     unknown = sorted(config.agent.roles.keys() - declared)
     if unknown:
-        raise ConfigurationError(
-            ConfigurationDiagnostic(
-                code="agent_role_configuration_invalid",
-                stage="agent_configuration_validation",
-                message=(
-                    "agent configuration names roles not declared by the selected "
-                    f"orchestration: {', '.join(f'agent.roles.{role_id}' for role_id in unknown)}"
-                ),
-            )
-        )
-    with _unvetted_harness_named("model.name (or --model)"):
+        raise configuration_error(RolesNotDeclared(tuple(unknown)))
+    with _unvetted_harness_named(role=None):
         default_spec = agent_spec_from_config(
             config,
             backend=backend,
@@ -175,12 +166,12 @@ def resolve_agent_specs(
         and fallback.fallback_model is not None
         and not allow_unvetted_model
     ):
-        with _unvetted_harness_named("agent.quota.fallback_model"):
+        with _unvetted_harness_named(role=None, fallback=True):
             check_harness(fallback.fallback_provider, fallback.fallback_model)
     resolved: dict[str, AgentSpec] = {}
     for role in roles:
         override = config.agent.roles.get(role.id)
-        with _unvetted_harness_named(f"agent.roles.{role.id}.model"):
+        with _unvetted_harness_named(role=role.id):
             resolved[role.id] = replace(
                 default_spec,
                 model=(
@@ -198,18 +189,17 @@ def resolve_agent_specs(
 
 
 @contextmanager
-def _unvetted_harness_named(key: str) -> Iterator[None]:
-    """Report an unvetted harness as a configuration error naming ``key``."""
+def _unvetted_harness_named(*, role: str | None, fallback: bool = False) -> Iterator[None]:
+    """Report an unvetted harness as a configuration error naming whose model it is."""
     try:
         yield
     except UnvettedHarnessError as error:
-        raise ConfigurationError(
-            ConfigurationDiagnostic(
-                code="agent_harness_unvetted",
-                stage="agent_configuration_validation",
-                message=(
-                    f"{key}: {error}. Choose a vetted model, or pass "
-                    "--allow-unvetted-model at the terminal to run it anyway"
-                ),
+        raise configuration_error(
+            ModelNotVetted(
+                provider=error.provider,
+                model=error.model,
+                vetted=error.allowed,
+                role=role,
+                fallback=fallback,
             )
         ) from error

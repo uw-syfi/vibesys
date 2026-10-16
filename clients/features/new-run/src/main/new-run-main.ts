@@ -141,7 +141,8 @@ export class NewRunMain {
 
   /**
    * The checks for `inputs`, with the run's roles when the helper agreed to `run_roles`, and its
-   * backend (and each failure's typed cause) when it agreed to `run_backend`.
+   * backend (and each failure's typed cause) when it agreed to `run_backend`, and the typed cause
+   * of every other failed setting when it agreed to `run_causes`.
    */
   async #preflight(host: HostId, inputs: RunInputs): Promise<Offered<PreflightResult>> {
     try {
@@ -150,12 +151,14 @@ export class NewRunMain {
       const rolesToo = lease.connection.features?.includes('run_roles') === true;
       const backendToo = lease.connection.features?.includes('run_backend') === true;
       const cleanToo = lease.connection.features?.includes('project_clean') === true;
+      const causesToo = lease.connection.features?.includes('run_causes') === true;
       const reply = (await lease.connection.request({
         type: 'run.preflight',
         ...runFields(inputs),
         ...(rolesToo ? {with_roles: true} : {}),
         ...(backendToo ? {with_backend: true} : {}),
         ...(cleanToo ? {with_project_clean: true} : {}),
+        ...(causesToo ? {with_causes: true} : {}),
       })) as {checks: Check[]; roles?: string[] | null; backend?: Backend | null};
       return {
         kind: 'offered',

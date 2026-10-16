@@ -836,7 +836,9 @@ def _preflight(request: RunPreflightRequest, host: HelperHost) -> RunPreflightRe
     report = host.preflight.report(root, run_arguments(request))
     checks = tuple(
         check
-        for check in preflight_checks(facts, report)
+        for check in preflight_checks(
+            facts, report, options=request.options, with_causes=bool(request.with_causes)
+        )
         if request.with_project_clean or check.id is not CheckId.PROJECT_CLEAN
     )
     return RunPreflightReply(

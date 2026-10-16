@@ -74,6 +74,10 @@ class BackendUnavailable(BaseModel):
     declared: tuple[Backend, ...]
     """The backends the task's manifest declares; empty for a task that declares none."""
 
+    def plain(self) -> str:
+        """The fact as one plain line."""
+        return backend_unavailable_text(self)
+
 
 class ProjectDirty(BaseModel):
     """The project's repository has changes a run cannot start beside.
@@ -89,9 +93,243 @@ class ProjectDirty(BaseModel):
     paths: tuple[Annotated[str, StringConstraints(min_length=1, max_length=4096)], ...]
     """Every changed path (tracked or untracked), without those the run's own state accounts for."""
 
+    def plain(self) -> str:
+        """The fact as one plain line."""
+        return f"{len(self.paths)} uncommitted path(s) in the project"
 
-Cause = Annotated[BackendUnavailable | ProjectDirty, Field(discriminator="kind")]
-"""Why a check failed, as data; ``kind`` discriminates."""
+
+TEXT_MAX_CHARACTERS = 4096
+"""The longest name or message a cause carries."""
+
+_Text = Annotated[str, StringConstraints(min_length=1, max_length=TEXT_MAX_CHARACTERS)]
+"""A name or a message a cause carries, as the run printed it."""
+
+
+def clip(text: str) -> str:
+    """``text`` cut to ``TEXT_MAX_CHARACTERS``, and ``"(no message)"`` for a blank one."""
+    if not text.strip():
+        return "(no message)"
+    if len(text) <= TEXT_MAX_CHARACTERS:
+        return text
+    return text[: TEXT_MAX_CHARACTERS - 1] + "…"
+
+
+class TaskNotFound(BaseModel):
+    """The project has no task of that name."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["task_not_found"] = "task_not_found"
+    task: _Text
+    available: tuple[_Text, ...]
+
+    def plain(self) -> str:
+        """The fact as one plain line."""
+        return f"task {self.task!r} was not found in the project"
+
+
+class TaskUnusable(BaseModel):
+    """The task's files cannot be loaded; ``problem`` is the loader's own account (raw text)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["task_unusable"] = "task_unusable"
+    task: _Text | None
+    problem: _Text
+
+    def plain(self) -> str:
+        """The fact as one plain line."""
+        if self.task is None:
+            return "the project's task cannot be loaded"
+        return f"task {self.task!r} cannot be loaded"
+
+
+class TaskNeedsProvisioning(BaseModel):
+    """The task needs inputs copied into a project of its own, which this run does not do."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["task_needs_provisioning"] = "task_needs_provisioning"
+    task: _Text
+
+    def plain(self) -> str:
+        """The fact as one plain line."""
+        return f"task {self.task!r} needs its sources copied into a project of its own"
+
+
+class TaskImageUnsupported(BaseModel):
+    """The task's Dockerfile cannot be used the way this run would run; ``problem`` is raw text."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["task_image_unsupported"] = "task_image_unsupported"
+    task: _Text | None
+    problem: _Text
+
+    def plain(self) -> str:
+        """The fact as one plain line."""
+        if self.task is None:
+            return "the project's task ships a Dockerfile this run cannot use here"
+        return f"task {self.task!r} ships a Dockerfile this run cannot use here"
+
+
+class SysboxMissing(BaseModel):
+    """The task runs Docker inside its sandbox, which needs a runtime this machine's Docker lacks."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["sysbox_missing"] = "sysbox_missing"
+    task: _Text
+    problem: _Text
+    """Why the runtime is missing, as the run's own check says it (raw text)."""
+
+    def plain(self) -> str:
+        """The fact as one plain line."""
+        return f"task {self.task!r} needs Docker with the Sysbox runtime, which this machine lacks"
+
+
+class ConfigInvalid(BaseModel):
+    """The run's configuration (``agent.toml`` and what overrides it) is not valid."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["config_invalid"] = "config_invalid"
+    problem: _Text
+    """The validation's own account (raw text)."""
+
+    def plain(self) -> str:
+        """The fact as one plain line."""
+        return "the run's configuration is not valid"
+
+
+class RolesNotDeclared(BaseModel):
+    """The configuration names agent roles the run's orchestration does not declare."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["roles_not_declared"] = "roles_not_declared"
+    roles: tuple[_Text, ...]
+
+    def plain(self) -> str:
+        """The fact as one plain line."""
+        return f"the run has no agent role named {', '.join(self.roles)}"
+
+
+class ModelNotVetted(BaseModel):
+    """A model, or none, outside the vetted models of its provider."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["model_not_vetted"] = "model_not_vetted"
+    provider: _Text
+    model: _Text | None
+    vetted: tuple[_Text, ...]
+    role: _Text | None
+    """The role whose model it is; ``None`` for the run's own model."""
+    fallback: bool
+    """Whether it is the quota fallback's model rather than the run's or a role's."""
+
+    def plain(self) -> str:
+        """The fact as one plain line."""
+        chosen = (
+            "no model is named" if self.model is None else f"model {self.model!r} is not vetted"
+        )
+        return f"{chosen} for provider {self.provider!r}"
+
+
+class ArgumentsRejected(BaseModel):
+    """The run's argument parser refused the extra arguments; ``problem`` is its message (raw)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["arguments_rejected"] = "arguments_rejected"
+    problem: _Text
+
+    def plain(self) -> str:
+        """The fact as one plain line."""
+        return "the extra arguments were not accepted"
+
+
+class ArgumentsUnrecognized(BaseModel):
+    """Extra arguments the run's search does not take, in the order given (raw)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["arguments_unrecognized"] = "arguments_unrecognized"
+    arguments: tuple[_Text, ...]
+
+    def plain(self) -> str:
+        """The fact as one plain line."""
+        return "the extra arguments include some this search does not take"
+
+
+class RunOption(StrEnum):
+    """A typed New run option (``RunOptions``); closed."""
+
+    ROUNDS = "rounds"
+    TIME_LIMIT = "time_limit"
+    RESULTS = "results"
+    ROLE_MODEL = "role_model"
+    ROLE_REASONING_EFFORT = "role_reasoning_effort"
+
+
+class OptionNotAccepted(BaseModel):
+    """The run's search does not take a typed option the screen set (for instance rounds)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["option_not_accepted"] = "option_not_accepted"
+    option: RunOption
+
+    def plain(self) -> str:
+        """The fact as one plain line."""
+        return f"this search does not take the {_OPTION_WORDS[self.option]} setting"
+
+
+class GitHubUnavailable(BaseModel):
+    """The run publishes to GitHub, and this machine has no signed-in account; ``problem`` is raw."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["github_unavailable"] = "github_unavailable"
+    problem: _Text
+
+    def plain(self) -> str:
+        """The fact as one plain line."""
+        return "publishing to GitHub needs a signed-in GitHub account, which this machine lacks"
+
+
+Cause = Annotated[
+    BackendUnavailable
+    | ProjectDirty
+    | TaskNotFound
+    | TaskUnusable
+    | TaskNeedsProvisioning
+    | TaskImageUnsupported
+    | SysboxMissing
+    | ConfigInvalid
+    | RolesNotDeclared
+    | ModelNotVetted
+    | ArgumentsRejected
+    | ArgumentsUnrecognized
+    | OptionNotAccepted
+    | GitHubUnavailable,
+    Field(discriminator="kind"),
+]
+"""Why a check failed, as data; ``kind`` discriminates.
+
+Each is a fact the app words for its own controls. A check's ``detail`` says the same in one plain
+line that names no flag and carries none of a cause's raw ``problem`` text; the raw text is for a
+collapsible detail, never a headline.
+"""
+
+_OPTION_WORDS = {
+    RunOption.ROUNDS: "rounds",
+    RunOption.TIME_LIMIT: "time limit",
+    RunOption.RESULTS: "results",
+    RunOption.ROLE_MODEL: "role model",
+    RunOption.ROLE_REASONING_EFFORT: "role reasoning effort",
+}
 
 
 def backend_unavailable_text(cause: BackendUnavailable) -> str:
@@ -100,6 +338,11 @@ def backend_unavailable_text(cause: BackendUnavailable) -> str:
         f"task {cause.task!r} targets the {cause.backend.value!r} backend, "
         "which this machine cannot run"
     )
+
+
+def cause_text(cause: Cause) -> str:
+    """``cause`` as one plain line that names no flag, setting or raw error text."""
+    return cause.plain()
 
 
 class CheckState(StrEnum):
@@ -240,7 +483,7 @@ class SettingsInvalid(BaseModel):
     code: str
     stage: str
     message: str
-    cause: BackendUnavailable | None = None
+    cause: Cause | None = None
     """The failure as data when it has a typed cause; ``message`` is the CLI's wording of it."""
 
 
@@ -270,6 +513,9 @@ class PreflightReport(BaseModel):
 
 __all__ = [
     "DETAIL_MAX_CHARACTERS",
+    "TEXT_MAX_CHARACTERS",
+    "ArgumentsRejected",
+    "ArgumentsUnrecognized",
     "Backend",
     "BackendUnavailable",
     "Cause",
@@ -277,20 +523,33 @@ __all__ = [
     "CheckId",
     "CheckState",
     "ChooseCheckout",
+    "ConfigInvalid",
     "CopyOut",
     "DeclareBuild",
     "EditSetting",
     "Fix",
+    "GitHubUnavailable",
+    "ModelNotVetted",
+    "OptionNotAccepted",
     "PreflightReport",
     "ProjectDirty",
     "ReasoningEffort",
     "RoleName",
     "RoleOption",
+    "RolesNotDeclared",
+    "RunOption",
     "RunOptions",
     "RunResults",
     "SettingsInvalid",
     "SettingsValid",
     "StartDocker",
+    "SysboxMissing",
+    "TaskImageUnsupported",
+    "TaskNeedsProvisioning",
+    "TaskNotFound",
+    "TaskUnusable",
     "backend_unavailable_text",
+    "cause_text",
+    "clip",
     "one_line",
 ]

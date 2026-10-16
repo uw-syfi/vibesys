@@ -64,7 +64,7 @@ path = "examples/microservices/hotel-correctness"
 path = "examples/microservices/repositories/deathstarbench"
 external_repo = true
 known_failing = [
-  { check = "backend", reason = "its tasks live in vibesys-playground/DeathStarBench, which declares no backends yet", tracking = "https://github.com/uw-syfi/vibesys/pull/2980" },
+  { check = "backend", reason = "its tasks live in vibesys-playground/DeathStarBench, which declares no backends yet", tracking = "https://github.com/uw-syfi/vibesys/issues/2987" },
 ]
 skips = [{ check = "path-refs", reason = "external repo checkout has no candidate source for ${PROJECT_ROOT} paths to point at" }]
 
@@ -72,21 +72,21 @@ skips = [{ check = "path-refs", reason = "external repo checkout has no candidat
 path = "examples/microservices/repositories/masa"
 external_repo = true
 known_failing = [
-  { check = "backend", reason = "its tasks live in vibesys-playground/masa, which declares no backends yet", tracking = "https://github.com/uw-syfi/vibesys/pull/2980" },
+  { check = "backend", reason = "its tasks live in vibesys-playground/masa, which declares no backends yet", tracking = "https://github.com/uw-syfi/vibesys/issues/2987" },
 ]
 
 [[example]]
 path = "examples/microservices/repositories/rpcstack"
 external_repo = true
 known_failing = [
-  { check = "backend", reason = "its tasks live in vibesys-playground/rpcstack, which declares no backends yet", tracking = "https://github.com/uw-syfi/vibesys/pull/2980" },
+  { check = "backend", reason = "its tasks live in vibesys-playground/rpcstack, which declares no backends yet", tracking = "https://github.com/uw-syfi/vibesys/issues/2987" },
 ]
 
 [[example]]
 path = "examples/microservices/repositories/train-ticket"
 external_repo = true
 known_failing = [
-  { check = "backend", reason = "its tasks live in vibesys-playground/train-ticket, which declares no backends yet", tracking = "https://github.com/uw-syfi/vibesys/pull/2980" },
+  { check = "backend", reason = "its tasks live in vibesys-playground/train-ticket, which declares no backends yet", tracking = "https://github.com/uw-syfi/vibesys/issues/2987" },
 ]
 
 [[example]]
@@ -138,21 +138,21 @@ path = "examples/model-serving/qwen3.6-35b-a3b-2xh100"
 path = "examples/model-serving/repositories/sglang"
 external_repo = true
 known_failing = [
-  { check = "backend", reason = "its tasks live in vibesys-playground/sglang, which declares no backends yet", tracking = "https://github.com/uw-syfi/vibesys/pull/2980" },
+  { check = "backend", reason = "its tasks live in vibesys-playground/sglang, which declares no backends yet", tracking = "https://github.com/uw-syfi/vibesys/issues/2987" },
 ]
 
 [[example]]
 path = "examples/model-serving/repositories/vllm"
 external_repo = true
 known_failing = [
-  { check = "backend", reason = "its tasks live in vibesys-playground/vllm, which declares no backends yet", tracking = "https://github.com/uw-syfi/vibesys/pull/2980" },
+  { check = "backend", reason = "its tasks live in vibesys-playground/vllm, which declares no backends yet", tracking = "https://github.com/uw-syfi/vibesys/issues/2987" },
 ]
 
 [[example]]
 path = "examples/model-serving/repositories/vllm-omni"
 external_repo = true
 known_failing = [
-  { check = "backend", reason = "its tasks live in vibesys-playground/vllm-omni, which declares no backends yet", tracking = "https://github.com/uw-syfi/vibesys/pull/2980" },
+  { check = "backend", reason = "its tasks live in vibesys-playground/vllm-omni, which declares no backends yet", tracking = "https://github.com/uw-syfi/vibesys/issues/2987" },
 ]
 
 [[example]]

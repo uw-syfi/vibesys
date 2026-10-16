@@ -99,6 +99,33 @@ describe('NewRunMain', () => {
     expect(await ids()).not.toContain('project_clean');
   });
 
+  test('asks for the typed causes of failed settings only from a helper that has run_causes', async () => {
+    const {link, main} = subject();
+    link.helper.host.projects.set('/p', ['mpmc']);
+    link.helper.host.preflight = link.helper.host.preflight.map(check =>
+      check.id === 'settings_valid'
+        ? {
+            ...check,
+            state: 'fail' as const,
+            detail: 'the extra arguments include some this search does not take',
+            cause: {kind: 'option_not_accepted' as const, option: 'rounds' as const},
+          }
+        : check,
+    );
+    const inputs: RunInputs = {project: '/p', task: 'mpmc', harness: null, options: {}, args: []};
+    const settings = async () =>
+      (
+        (await main.answer({kind: 'preflight', host: LOCAL, inputs})) as {
+          value: {checks: {id: string; cause?: {kind: string}}[]};
+        }
+      ).value.checks.find(check => check.id === 'settings_valid');
+    expect((await settings())?.cause?.kind).toBe('option_not_accepted');
+    link.helper.features.delete('run_causes');
+    expect((await settings())?.cause).toBeUndefined();
+    const asked = link.helper.requests.filter(request => request.type === 'run.preflight');
+    expect(asked.map(request => 'with_causes' in request)).toEqual([true, false]);
+  });
+
   test('starts a run with typed options and records it in Recent', async () => {
     const {link, main, remembered} = subject();
     link.helper.host.projects.set('/p', ['mpmc']);

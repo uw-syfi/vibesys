@@ -8,19 +8,19 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.task_project import write_task
+from tests.support.fake_github import signed_in_github
+from tests.support.task_project import task_path, write_task
 
 from entrypoints import cli
 from entrypoints.cli.config import load_config_and_skills
 from entrypoints.cli.preflight import (
     ACCELERATOR_UNAVAILABLE,
     AGENT_IMAGES_COMMAND,
-    TASK_IMAGE_UNSUPPORTED,
     agent_image_check,
     evaluator_check,
-    preflight_report,
     valid_report,
 )
+from entrypoints.cli.preflight import preflight_report as _preflight_report
 from launch import built_in_orchestrations
 from server.host_api import MAX_RUN_SECONDS_FLAG, ROLE_MODEL_FLAG, ROLE_REASONING_EFFORT_FLAG
 from server.host_preflight import (
@@ -32,9 +32,11 @@ from server.host_preflight import (
     PreflightReport,
     SettingsInvalid,
     SettingsValid,
+    SysboxMissing,
+    TaskImageUnsupported,
 )
 from vibesys.api import ComputeBackend, DomainName
-from vibesys.api.request import TaskImageError, run_environment_uses_docker
+from vibesys.api.request import run_environment_uses_docker
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.inputs import InputBundle, load_task
 from vs_project.api.testing import FakeGitRepositories
@@ -47,6 +49,16 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_project.api import GitRepository
+
+
+def preflight_report(
+    argv: list[str],
+    parse: Callable[[list[str]], Namespace],
+    probe: ScriptedProbe,
+    repository: Callable[[Path], GitRepository] | None = None,
+) -> PreflightReport:
+    """The report for a host whose GitHub CLI is signed in, so no test starts a real ``gh``."""
+    return _preflight_report(argv, parse, probe, repository, github=signed_in_github().cli)
 
 
 def _argv(tmp_path: Path, *extra: str) -> list[str]:
@@ -285,19 +297,21 @@ def test_a_pinned_cuda_device_is_trusted_as_the_run_trusts_it(
     assert report.settings.valid is True
 
 
-def test_a_task_image_the_run_refuses_is_reported_as_invalid_settings() -> None:
+def test_a_task_image_the_run_refuses_is_reported_as_invalid_settings(tmp_path: Path) -> None:
     """Regression: a refused task Dockerfile (a ValueError) crashed ``vibesys preflight``."""
-    refusal = TaskImageError.operator_image(Path("/task/Dockerfile"), "custom:1")
-
-    def parse(_argv: list[str]) -> Namespace:
-        raise refusal
-
+    project = _project_declaring(tmp_path, '"cpu"')
+    (task_path(project, "default") / "Dockerfile").write_text("FROM scratch\n")
     probe = ScriptedProbe(lambda _argv: None)
-    report = preflight_report(["--docker-image", "custom:1"], parse, probe)
 
-    assert report.settings == SettingsInvalid(
-        code=TASK_IMAGE_UNSUPPORTED, stage="run_environment", message=str(refusal)
+    report = _preflight_of(tmp_path, project, probe, "--docker-image", "custom:1")
+
+    assert isinstance(report.settings, SettingsInvalid)
+    assert (report.settings.code, report.settings.stage) == (
+        "task_image_unsupported",
+        "run_environment",
     )
+    assert report.settings.cause == TaskImageUnsupported(task=None, problem=report.settings.message)
+    assert "--docker-image" in report.settings.message
     assert probe.calls == []
 
 
@@ -355,6 +369,8 @@ def test_a_docker_in_docker_run_on_a_host_without_sysbox_fails_preflight(
     assert isinstance(report.settings, SettingsInvalid)
     assert report.settings.code == ACCELERATOR_UNAVAILABLE
     assert "sysbox-runc" in report.settings.message
+    assert isinstance(report.settings.cause, SysboxMissing)
+    assert "sysbox-runc" in report.settings.cause.problem
     assert "\n" not in report.settings.message
 
 

@@ -9,7 +9,8 @@ repository, Docker) and the ``PreflightReport`` the run's own code printed. Ligh
 rest of the helper.
 
 Public surface: ``option_arguments``, ``option_flags``, ``repeated_option``,
-``unvetted_role``, ``preflight_checks``, ``PreflightFacts``, ``preflight_unavailable``.
+``unvetted_role``, ``preflight_checks``, ``typed_arguments``, ``refined_cause``,
+``PreflightFacts``, ``preflight_unavailable``.
 """
 
 from __future__ import annotations
@@ -32,18 +33,23 @@ from server.host_api import (
     MachineCheckout,
 )
 from server.host_preflight import (
+    ArgumentsUnrecognized,
+    BackendUnavailable,
+    Cause,
     Check,
     CheckId,
     CheckState,
     CopyOut,
+    OptionNotAccepted,
     PreflightReport,
     ProjectDirty,
     ReasoningEffort,
+    RunOption,
     RunOptions,
     RunResults,
     SettingsInvalid,
     StartDocker,
-    backend_unavailable_text,
+    cause_text,
     one_line,
 )
 
@@ -53,23 +59,52 @@ if TYPE_CHECKING:
 _RESULTS_FLAGS = {RunResults.KEEP: LOCAL_FLAG, RunResults.PUBLISH_GITHUB: PUBLISH_FLAG}
 
 
-def option_arguments(options: RunOptions | None) -> tuple[str, ...]:
-    """The run flags that carry ``options``; none for an option left unset."""
+def typed_arguments(options: RunOptions | None) -> tuple[tuple[RunOption, tuple[str, ...]], ...]:
+    """Each typed option set in ``options`` with the run arguments that carry it, in order.
+
+    The one place an option becomes flags: ``option_arguments`` flattens it, and a failure the
+    run reports about an argument is traced back to the option that produced it.
+    """
     if options is None:
         return ()
-    arguments: list[str] = []
+    pairs: list[tuple[RunOption, tuple[str, ...]]] = []
     if options.rounds is not None:
-        arguments += [MAX_ROUNDS_FLAG, str(options.rounds)]
+        pairs.append((RunOption.ROUNDS, (MAX_ROUNDS_FLAG, str(options.rounds))))
     if options.time_limit_s is not None:
-        arguments += [MAX_RUN_SECONDS_FLAG, str(options.time_limit_s)]
+        pairs.append((RunOption.TIME_LIMIT, (MAX_RUN_SECONDS_FLAG, str(options.time_limit_s))))
     if options.results is not None:
-        arguments.append(_RESULTS_FLAGS[options.results])
+        pairs.append((RunOption.RESULTS, (_RESULTS_FLAGS[options.results],)))
     for role in options.roles:
         if role.model is not None:
-            arguments += [ROLE_MODEL_FLAG, f"{role.role}={role.model}"]
+            pairs.append((RunOption.ROLE_MODEL, (ROLE_MODEL_FLAG, f"{role.role}={role.model}")))
         if role.reasoning_effort is not ReasoningEffort.DEFAULT:
-            arguments += [ROLE_REASONING_EFFORT_FLAG, f"{role.role}={role.reasoning_effort}"]
-    return tuple(arguments)
+            pairs.append(
+                (
+                    RunOption.ROLE_REASONING_EFFORT,
+                    (ROLE_REASONING_EFFORT_FLAG, f"{role.role}={role.reasoning_effort}"),
+                )
+            )
+    return tuple(pairs)
+
+
+def option_arguments(options: RunOptions | None) -> tuple[str, ...]:
+    """The run flags that carry ``options``; none for an option left unset."""
+    return tuple(
+        argument for _option, arguments in typed_arguments(options) for argument in arguments
+    )
+
+
+def refined_cause(cause: Cause, options: RunOptions | None) -> Cause:
+    """``cause``, naming the typed option when the run rejected the arguments that carry it.
+
+    The run reports arguments its search does not take; only the helper knows which of them it
+    wrote for a typed option, so the screen can point at that control instead of Extra arguments.
+    """
+    if isinstance(cause, ArgumentsUnrecognized):
+        for option, arguments in typed_arguments(options):
+            if arguments[0] in cause.arguments:
+                return OptionNotAccepted(option=option)
+    return cause
 
 
 def option_flags(options: RunOptions | None) -> tuple[str, ...]:
@@ -141,13 +176,24 @@ class PreflightFacts:
     docker: DockerReachable | DockerUnreachable
 
 
-def preflight_checks(facts: PreflightFacts, report: PreflightReport) -> tuple[Check, ...]:
-    """Every check, in ``CheckId`` order."""
+def preflight_checks(
+    facts: PreflightFacts,
+    report: PreflightReport,
+    *,
+    options: RunOptions | None = None,
+    with_causes: bool = False,
+) -> tuple[Check, ...]:
+    """Every check, in ``CheckId`` order.
+
+    ``options`` are the typed options the run was asked with, and ``with_causes`` says the client
+    reads the typed cause of a failed ``settings_valid`` (feature ``run_causes``), else that
+    check keeps the run's own message and no cause.
+    """
     return (
         _checkout_check(facts),
         _repository_check(facts),
         _clean_check(facts, report),
-        _settings_check(report),
+        _settings_check(report, options, with_causes=with_causes),
         _docker_check(facts.docker) if report.uses_docker is not False else _NO_DOCKER,
         report.agent_image,
         report.evaluator,
@@ -226,24 +272,31 @@ def _clean_check(facts: PreflightFacts, report: PreflightReport) -> Check:
     )
 
 
-def _settings_check(report: PreflightReport) -> Check:
+def _settings_check(
+    report: PreflightReport, options: RunOptions | None, *, with_causes: bool
+) -> Check:
     settings = report.settings
-    if isinstance(settings, SettingsInvalid):
+    if not isinstance(settings, SettingsInvalid):
+        return Check(
+            id=CheckId.SETTINGS_VALID,
+            state=CheckState.OK,
+            detail="the run's configuration is valid",
+        )
+    cause = settings.cause
+    if isinstance(cause, BackendUnavailable) or (cause is not None and with_causes):
         # A typed cause is worded here without flags (the CLI's message names them); the app
         # words the cause itself for its own controls.
-        message = (
-            settings.message if settings.cause is None else backend_unavailable_text(settings.cause)
-        )
+        cause = refined_cause(cause, options)
         return Check(
             id=CheckId.SETTINGS_VALID,
             state=CheckState.FAIL,
-            detail=one_line(message, settings.code),
-            cause=settings.cause,
+            detail=one_line(cause_text(cause), settings.code),
+            cause=cause,
         )
     return Check(
         id=CheckId.SETTINGS_VALID,
-        state=CheckState.OK,
-        detail="the run's configuration is valid",
+        state=CheckState.FAIL,
+        detail=one_line(settings.message, settings.code),
     )
 
 

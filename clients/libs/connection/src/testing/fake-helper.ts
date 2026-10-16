@@ -127,6 +127,16 @@ export interface FakeHost {
   examples: ExampleList | null;
 }
 
+/** `check` as a helper answers a client that sets (or not) `with_backend` and `with_causes`. */
+function answeredTo(check: Check, request: Extract<HelperRequest, {type: 'run.preflight'}>): Check {
+  const {cause} = check;
+  if (cause === undefined || cause === null || cause.kind === 'project_dirty') return check;
+  const asked = cause.kind === 'backend_unavailable' ? request.with_backend : request.with_causes;
+  if (asked === true) return check;
+  const {cause: _withheld, ...plain} = check;
+  return plain;
+}
+
 /** The roles a new `FakeHelper` reports: those the multi orchestration declares. */
 const FAKE_ROLES: readonly string[] = [
   'multi-orchestrator',
@@ -265,6 +275,7 @@ export class FakeHelper {
     'examples',
     'run_roles',
     'run_backend',
+    'run_causes',
     'project_clean',
   ]);
   /** The run log streams `logs.list` and `logs.read` serve; replace it to seed a store. */
@@ -831,10 +842,11 @@ class HelperSession {
     this.#send({
       type: 'run.preflight',
       request_id: id,
-      // A helper answers the project_clean check only to a client that asked for it.
-      checks: host.preflight.filter(
-        check => request.with_project_clean === true || check.id !== 'project_clean',
-      ),
+      // A helper answers the project_clean check only to a client that asked for it, and a typed
+      // cause only to one that asked for its kind (the backend's, or any other failed setting's).
+      checks: host.preflight
+        .filter(check => request.with_project_clean === true || check.id !== 'project_clean')
+        .map(check => answeredTo(check, request)),
       ...(request.with_roles === true ? {roles: [...host.roles]} : {}),
       ...(request.with_backend === true && host.backend !== null ? {backend: host.backend} : {}),
     });

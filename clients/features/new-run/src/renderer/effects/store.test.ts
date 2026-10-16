@@ -1,5 +1,5 @@
 import {expect, test} from 'bun:test';
-import type {HelperFeature} from '@vibesys/contracts/host-helper';
+import type {Check, HelperFeature} from '@vibesys/contracts/host-helper';
 import type {RecentRun, RunRef} from '@vibesys/runs';
 import {backendOf, readiness, rolesView, startBlocked, summary} from '../ui/view.js';
 import {createNewRunStore, type NewRunBridge} from './store.js';
@@ -411,4 +411,88 @@ test('a long list of dirty paths is cut with a count of the rest', async () => {
   const item = readiness(state).find(each => each.id === 'project_clean');
 
   expect(item?.detail).toContain('(a, b, c, d, e, and 2 more)');
+});
+
+/** A bridge whose preflight fails the run's settings for `cause` (or none), as a helper reports it. */
+function settingsBridge(
+  cause: NonNullable<Check['cause']> | null,
+  detail = 'the extra arguments were not accepted',
+): NewRunBridge {
+  return {
+    ...fakeBridge(),
+    preflight: () =>
+      ok({
+        kind: 'offered' as const,
+        value: {
+          checks: [
+            {
+              id: 'settings_valid' as const,
+              state: 'fail' as const,
+              detail,
+              ...(cause === null ? {} : {cause}),
+            },
+          ],
+          roles: null,
+          backend: null,
+        },
+      }),
+  };
+}
+
+test('a search without rounds fails the settings in words that name the Rounds control, never the flag', async () => {
+  const state = await checked(
+    settingsBridge(
+      {kind: 'option_not_accepted', option: 'rounds'},
+      'this search does not take the rounds setting',
+    ),
+  );
+
+  const item = readiness(state).find(each => each.id === 'settings_valid');
+
+  expect(item).toEqual({
+    id: 'settings_valid',
+    state: 'fail',
+    label: 'Run settings',
+    detail:
+      'This search does not take a number of rounds. Clear Rounds, or change the search in Extra arguments, then check again.',
+  });
+  expect(startBlocked(state)).toBe('Fix the items marked above to start.');
+});
+
+test('rejected extra arguments are worded for Extra arguments, with the parser’s message as a detail', async () => {
+  const state = await checked(
+    settingsBridge({kind: 'arguments_rejected', problem: 'argument --max-rounds: invalid int'}),
+  );
+
+  const item = readiness(state).find(each => each.id === 'settings_valid');
+
+  expect(item?.detail).toBe(
+    'The Extra arguments were not accepted. Edit or clear them in Budget and results, then check again.',
+  );
+  expect(item?.raw).toBe('argument --max-rounds: invalid int');
+});
+
+test('a settings failure with no typed cause is generic, and the run’s message is only the detail', async () => {
+  const state = await checked(
+    settingsBridge(null, '--outer-loop evolve cannot take --max-rounds (see --help)'),
+  );
+
+  const item = readiness(state).find(each => each.id === 'settings_valid');
+
+  expect(item?.detail).toBe(
+    "These settings can't be used to start a run. Check the project, task, agent and Extra arguments, then check again.",
+  );
+  expect(item?.raw).toBe('--outer-loop evolve cannot take --max-rounds (see --help)');
+  expect(item?.fix).toEqual({kind: 'recheck'});
+});
+
+test('a GitHub account the machine lacks is worded by the Results control, and offers Check again', async () => {
+  const state = await checked(
+    settingsBridge({kind: 'github_unavailable', problem: 'GitHub CLI is not authenticated'}),
+  );
+
+  const item = readiness(state).find(each => each.id === 'settings_valid');
+
+  expect(item?.detail).toContain('set Results to keep them there');
+  expect(item?.fix).toEqual({kind: 'recheck'});
 });

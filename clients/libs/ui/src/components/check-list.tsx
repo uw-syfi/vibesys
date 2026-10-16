@@ -11,6 +11,8 @@ export interface CheckItem {
   readonly state: CheckState;
   readonly label: string;
   readonly detail?: string;
+  /** Technical text behind the detail, kept closed until the reader opens it. */
+  readonly raw?: string;
   readonly fix?: {readonly text: string; readonly press: () => void};
 }
 
@@ -37,6 +39,12 @@ export function CheckList(props: {readonly items: readonly CheckItem[]}): JSX.El
               <Text variant="small" tone="muted">
                 {item.detail}
               </Text>
+            )}
+            {item.raw === undefined ? null : (
+              <details className="vs-check-raw">
+                <summary>Details</summary>
+                <pre>{item.raw}</pre>
+              </details>
             )}
             {item.fix === undefined ? null : (
               <span className="vs-check-fix">

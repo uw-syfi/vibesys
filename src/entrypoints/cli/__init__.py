@@ -133,7 +133,7 @@ class CliInvocation:
 class _LoopCommand:
     """Parser and validation for one CLI outer-loop selection."""
 
-    build_parser: Callable[[], argparse.ArgumentParser]
+    build_parser: Callable[[], _RunArgumentParser]
     validate: Callable[[argparse.Namespace], None]
 
 
@@ -178,7 +178,7 @@ def parse_cli_invocation(argv: list[str]) -> CliInvocation:
     command = _LOOP_COMMANDS[loop_kind]
     parser = command.build_parser()
     parser.prog = f"vibesys --outer-loop {loop_kind}"
-    args = parser.parse_args(remaining)
+    args = parser.parse_run_arguments(remaining)
     args.outer_loop = loop_kind
     args.explicit_cli_dests = _explicit_cli_dests(parser, remaining)
     _normalize_runs_dir(args)

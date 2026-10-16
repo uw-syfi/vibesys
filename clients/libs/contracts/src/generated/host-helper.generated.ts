@@ -146,6 +146,7 @@ export type Args1 = string[];
 export type WithRoles = boolean | null;
 export type WithProjectClean = boolean | null;
 export type WithBackend = boolean | null;
+export type WithCauses = boolean | null;
 export type RequestId20 = string;
 export type DeadlineMs20 = number;
 export type Type20 = "examples.list";
@@ -210,7 +211,8 @@ export type HelperFeature =
   | "examples"
   | "run_roles"
   | "project_clean"
-  | "run_backend";
+  | "run_backend"
+  | "run_causes";
 export type Features1 = HelperFeature[];
 export type VibesysVersion = string;
 export type Root = string;
@@ -484,7 +486,24 @@ export type Kind3 = "start_docker";
 export type Kind4 = "declare_build";
 export type Manifest = string;
 export type Outputs = string[];
-export type Cause = (BackendUnavailable | ProjectDirty) | null;
+export type Cause =
+  | (
+      | BackendUnavailable
+      | ProjectDirty
+      | TaskNotFound
+      | TaskUnusable
+      | TaskNeedsProvisioning
+      | TaskImageUnsupported
+      | SysboxMissing
+      | ConfigInvalid
+      | RolesNotDeclared
+      | ModelNotVetted
+      | ArgumentsRejected
+      | ArgumentsUnrecognized
+      | OptionNotAccepted
+      | GitHubUnavailable
+    )
+  | null;
 export type Kind5 = "backend_unavailable";
 export type Task4 = string;
 /**
@@ -495,8 +514,43 @@ export type Declared = Backend[];
 export type Kind6 = "project_dirty";
 export type Project5 = string;
 export type Paths = string[];
+export type Kind7 = "task_not_found";
+export type Task5 = string;
+export type Available = string[];
+export type Kind8 = "task_unusable";
+export type Task6 = string | null;
+export type Problem = string;
+export type Kind9 = "task_needs_provisioning";
+export type Task7 = string;
+export type Kind10 = "task_image_unsupported";
+export type Task8 = string | null;
+export type Problem1 = string;
+export type Kind11 = "sysbox_missing";
+export type Task9 = string;
+export type Problem2 = string;
+export type Kind12 = "config_invalid";
+export type Problem3 = string;
+export type Kind13 = "roles_not_declared";
+export type Roles1 = string[];
+export type Kind14 = "model_not_vetted";
+export type Provider2 = string;
+export type Model4 = string | null;
+export type Vetted = string[];
+export type Role1 = string | null;
+export type Fallback = boolean;
+export type Kind15 = "arguments_rejected";
+export type Problem4 = string;
+export type Kind16 = "arguments_unrecognized";
+export type Arguments = string[];
+export type Kind17 = "option_not_accepted";
+/**
+ * A typed New run option (``RunOptions``); closed.
+ */
+export type RunOption = "rounds" | "time_limit" | "results" | "role_model" | "role_reasoning_effort";
+export type Kind18 = "github_unavailable";
+export type Problem5 = string;
 export type Checks = Check[];
-export type Roles1 = string[] | null;
+export type Roles2 = string[] | null;
 export type RequestId43 = string;
 export type Type43 = "examples.list";
 export type Version12 = 1;
@@ -586,19 +640,19 @@ export type Type48 = "run.start_compensation_failed";
 export type ExitStatus1 = 12;
 export type RequestId47 = string;
 export type Detail2 = string;
-export type Kind7 = "worker_start_refused";
+export type Kind19 = "worker_start_refused";
 export type InstanceId6 = string;
 export type Type49 = "run.start_compensation_failed";
 export type ExitStatus2 = 12;
 export type RequestId48 = string;
 export type Detail3 = string;
-export type Kind8 = "stop_failed";
+export type Kind20 = "stop_failed";
 export type InstanceId7 = string;
 export type Type50 = "run.start_compensation_failed";
 export type ExitStatus3 = 12;
 export type RequestId49 = string;
 export type Detail4 = string;
-export type Kind9 = "stop_unconfirmed";
+export type Kind21 = "stop_unconfirmed";
 export type Version13 = 1;
 export type Id6 = string;
 export type Outcome1 = "stopping" | "still_running" | "unsupported";
@@ -880,6 +934,7 @@ export interface RunPreflightRequest {
   with_roles?: WithRoles;
   with_project_clean?: WithProjectClean;
   with_backend?: WithBackend;
+  with_causes?: WithCauses;
 }
 /**
  * The examples of the checkout this helper runs from, with their tasks.
@@ -1418,7 +1473,7 @@ export interface RunPreflightReply {
   request_id: RequestId42;
   type: Type42;
   checks: Checks;
-  roles?: Roles1;
+  roles?: Roles2;
   backend?: Backend | null;
 }
 /**
@@ -1485,6 +1540,98 @@ export interface ProjectDirty {
   kind: Kind6;
   project: Project5;
   paths: Paths;
+}
+/**
+ * The project has no task of that name.
+ */
+export interface TaskNotFound {
+  kind: Kind7;
+  task: Task5;
+  available: Available;
+}
+/**
+ * The task's files cannot be loaded; ``problem`` is the loader's own account (raw text).
+ */
+export interface TaskUnusable {
+  kind: Kind8;
+  task: Task6;
+  problem: Problem;
+}
+/**
+ * The task needs inputs copied into a project of its own, which this run does not do.
+ */
+export interface TaskNeedsProvisioning {
+  kind: Kind9;
+  task: Task7;
+}
+/**
+ * The task's Dockerfile cannot be used the way this run would run; ``problem`` is raw text.
+ */
+export interface TaskImageUnsupported {
+  kind: Kind10;
+  task: Task8;
+  problem: Problem1;
+}
+/**
+ * The task runs Docker inside its sandbox, which needs a runtime this machine's Docker lacks.
+ */
+export interface SysboxMissing {
+  kind: Kind11;
+  task: Task9;
+  problem: Problem2;
+}
+/**
+ * The run's configuration (``agent.toml`` and what overrides it) is not valid.
+ */
+export interface ConfigInvalid {
+  kind: Kind12;
+  problem: Problem3;
+}
+/**
+ * The configuration names agent roles the run's orchestration does not declare.
+ */
+export interface RolesNotDeclared {
+  kind: Kind13;
+  roles: Roles1;
+}
+/**
+ * A model, or none, outside the vetted models of its provider.
+ */
+export interface ModelNotVetted {
+  kind: Kind14;
+  provider: Provider2;
+  model: Model4;
+  vetted: Vetted;
+  role: Role1;
+  fallback: Fallback;
+}
+/**
+ * The run's argument parser refused the extra arguments; ``problem`` is its message (raw).
+ */
+export interface ArgumentsRejected {
+  kind: Kind15;
+  problem: Problem4;
+}
+/**
+ * Extra arguments the run's search does not take, in the order given (raw).
+ */
+export interface ArgumentsUnrecognized {
+  kind: Kind16;
+  arguments: Arguments;
+}
+/**
+ * The run's search does not take a typed option the screen set (for instance rounds).
+ */
+export interface OptionNotAccepted {
+  kind: Kind17;
+  option: RunOption;
+}
+/**
+ * The run publishes to GitHub, and this machine has no signed-in account; ``problem`` is raw.
+ */
+export interface GitHubUnavailable {
+  kind: Kind18;
+  problem: Problem5;
 }
 /**
  * The checkout's example catalog.
@@ -1570,7 +1717,7 @@ export interface WorkerStartRefusedCompensationFailure {
   exit_status: ExitStatus1;
   request_id: RequestId47;
   detail: Detail2;
-  kind: Kind7;
+  kind: Kind19;
   instance_id: InstanceId6;
 }
 /**
@@ -1581,7 +1728,7 @@ export interface StopFailedCompensationFailure {
   exit_status: ExitStatus2;
   request_id: RequestId48;
   detail: Detail3;
-  kind: Kind8;
+  kind: Kind20;
   instance_id: InstanceId7;
 }
 /**
@@ -1595,7 +1742,7 @@ export interface StopUnconfirmedCompensationFailure {
   exit_status: ExitStatus3;
   request_id: RequestId49;
   detail: Detail4;
-  kind: Kind9;
+  kind: Kind21;
   stop_result: UnconfirmedInstanceStopResult;
 }
 /**

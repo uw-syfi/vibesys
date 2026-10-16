@@ -999,6 +999,22 @@ body > div:first-child {
 .vs-check-fix {
   padding-top: var(--space-2);
 }
+.vs-check-raw {
+  color: var(--muted);
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+}
+.vs-check-raw summary {
+  cursor: pointer;
+}
+.vs-check-raw pre {
+  margin: var(--space-1) 0 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--text-code-family);
+}
 
 /* --- timeline ---------------------------------------------------------------------------------- */
 

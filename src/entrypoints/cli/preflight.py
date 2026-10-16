@@ -14,7 +14,9 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING
 
+from entrypoints.cli.config import require_repository_owner
 from entrypoints.cli.loops import validated_run_request
+from entrypoints.cli.preflight_cause import settings_cause, wire_cause
 from launch import orchestration_roles
 from server.host_preflight import (
     Backend,
@@ -26,10 +28,12 @@ from server.host_preflight import (
     PreflightReport,
     SettingsInvalid,
     SettingsValid,
+    SysboxMissing,
     backend_unavailable_text,
+    clip,
     one_line,
 )
-from vibesys.api import ConfigurationError
+from vibesys.api import ConfigurationError, TaskImageUnsupported, cli_wording
 from vibesys.api.request import (
     TaskImageError,
     run_environment_uses_docker,
@@ -52,6 +56,7 @@ if TYPE_CHECKING:
 
     from vibesys.api import RunRequest
     from vibesys.api.request import HostShortfall, InputBundle
+    from vs_github.api import GitHubCLI
     from vs_project.api import GitRepository
     from vs_sim.api import CommandProbe
 
@@ -63,8 +68,6 @@ ACCELERATOR_UNAVAILABLE = "accelerator_unavailable"
 
 That is the compute backend's accelerator, or the Sysbox runtime a docker-in-docker task needs.
 """
-TASK_IMAGE_UNSUPPORTED = "task_image_unsupported"
-"""The settings code when the run cannot honor the task's Dockerfile as asked."""
 
 
 def run_preflight(argv: list[str], parse: Callable[[list[str]], Namespace]) -> None:
@@ -78,34 +81,62 @@ def preflight_report(
     parse: Callable[[list[str]], Namespace],
     probe: CommandProbe,
     repository: Callable[[Path], GitRepository] | None = None,
+    github: GitHubCLI | None = None,
 ) -> PreflightReport:
     """Validate ``argv`` as a run would, then check the agent image and the evaluator.
 
     ``repository`` opens the project's repository (real Git by default) for the check that a
-    new run's baseline is clean.
+    new run's baseline is clean, and ``github`` is the client (real ``gh`` by default) that
+    says whether a run that publishes has a GitHub account to publish from.
     """
     try:
         args = parse(argv)
-        request, _config = validated_run_request(args, probe)
+        request, config = validated_run_request(args, probe)
+        require_repository_owner(args, config, github)
         roles = orchestration_roles(request.orchestration)
-        shortfall = run_host_shortfall(request, probe)
+    except TaskImageError as error:
+        # Refused while the arguments were parsed, before any task is known to the caller.
+        return _task_image_refusal(error, _task_named_in(argv))
     except ConfigurationError as error:
         diagnostic = error.diagnostic
         return _invalid_settings(
             SettingsInvalid(
-                code=diagnostic.code, stage=diagnostic.stage, message=diagnostic.message
+                code=diagnostic.code,
+                stage=diagnostic.stage,
+                message=diagnostic.message,
+                cause=settings_cause(diagnostic),
             )
         )
+    try:
+        shortfall = run_host_shortfall(request, probe)
     except TaskImageError as error:
-        # The run refuses this before it builds anything; report it as settings.
-        return _invalid_settings(
-            SettingsInvalid(
-                code=TASK_IMAGE_UNSUPPORTED, stage="run_environment", message=str(error)
-            )
-        )
+        return _task_image_refusal(error, args.input_bundle.task_name)
     changes = () if args.resume is not None else project_changes(request.project_root, repository)
     report = _resolved_report(args, request, shortfall, probe, roles)
     return report.model_copy(update={"project_changes": changes})
+
+
+def _task_named_in(argv: list[str]) -> str | None:
+    """The task ``--task`` names in ``argv``, if it names one."""
+    for index, word in enumerate(argv):
+        if word == "--task" and index + 1 < len(argv):
+            return argv[index + 1]
+        if word.startswith("--task="):
+            return word.removeprefix("--task=")
+    return None
+
+
+def _task_image_refusal(error: TaskImageError, task: str | None) -> PreflightReport:
+    """The run refuses the task's Dockerfile before it builds anything; report it as settings."""
+    refusal = TaskImageUnsupported(task=task, problem=str(error))
+    return _invalid_settings(
+        SettingsInvalid(
+            code=refusal.code,
+            stage=refusal.stage,
+            message=cli_wording(refusal),
+            cause=wire_cause(refusal),
+        )
+    )
 
 
 PREFLIGHT_RUN_ID = "preflight"
@@ -171,7 +202,10 @@ def _shortfall_settings(
     """The settings failure for what the host lacks: typed when it is the task's backend."""
     if shortfall.backend is None:
         return SettingsInvalid(
-            code=ACCELERATOR_UNAVAILABLE, stage="compute_backend", message=shortfall.reason
+            code=ACCELERATOR_UNAVAILABLE,
+            stage="compute_backend",
+            message=shortfall.reason,
+            cause=SysboxMissing(task=clip(task), problem=clip(shortfall.reason)),
         )
     cause = BackendUnavailable(
         task=task,
