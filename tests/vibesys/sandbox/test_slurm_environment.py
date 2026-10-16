@@ -30,8 +30,10 @@ from vs_runtime.api.infrastructure import (
     RunEnvironment,
     RunEnvironmentRequest,
     RunEnvironmentSessionRole,
+    RunEnvironmentSpec,
     SlurmEnvironment,
     TrustedEvaluatorRequirements,
+    build_run_environment,
     evaluator_go_module_ready_path,
     run_environment_deprecation,
 )
@@ -823,3 +825,31 @@ def test_closing_the_session_removes_every_host_socket(tmp_path: Path, name: str
     session.close()
 
     assert not any(socket.exists() for socket in sockets)
+
+
+def test_the_slurm_agent_container_is_built_from_the_task_image(tmp_path: Path) -> None:
+    """Regression: the Slurm editor built its agent container on the backend's default image.
+
+    The run selection's ``image`` (the task image, when the task has a
+    Dockerfile) reaches the backend the run opens with, and the agent layer
+    is built ``FROM`` it.
+    """
+    task_image = "vibesys-task-build:0123456789abcdef-" + "0" * 32
+    config = tmp_path / "slurm-local.toml"
+    config.write_text(_SLURM_LOCAL_CONFIG, encoding="utf-8")
+    runner = FakeDockerBuildRunner()
+    environment = build_run_environment(
+        RunEnvironmentSpec(
+            name="slurm",
+            options={"config_path": str(config), "image": task_image, "build_runner": runner},
+        )
+    )
+    # As the run's resources do: the backend opens on the environment's backend image.
+    backend = FakeComputeBackend(threads=SimThreads(), image=environment.backend_image)
+    request = replace(_request(tmp_path, backend), system=idle_environment_system())
+
+    session = open_run_environment(environment, request)
+    session.close()
+
+    (agent_build,) = [argv for argv, _, _ in runner.calls if argv[1] == "build"]
+    assert f"BASE_IMAGE={task_image}" in agent_build
