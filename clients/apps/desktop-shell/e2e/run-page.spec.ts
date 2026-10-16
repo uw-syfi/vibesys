@@ -195,6 +195,39 @@ test('a run starts, writes its logs, stops with Force stop after the bound, and 
     .toEqual(['resume', 'ssh:chelan4', PROJECT, RUN_ID]);
 });
 
+test('the Overview and Work tabs read the folded run, and the Work filter is kept', async ({
+  page,
+}) => {
+  await open(page, {...SEED, listings: [listed([server('running')], [])]});
+
+  // Overview: with nothing folded yet, each section says what will appear, not a guess.
+  const objective = page.getByRole('region', {name: 'Objective'});
+  await expect(objective.getByText('has not declared its objective yet')).toBeVisible();
+  for (const label of ['Best vs baseline', 'Round', 'Workstreams', 'Elapsed']) {
+    await expect(page.getByText(label, {exact: true})).toBeVisible();
+  }
+  await expect(page.getByRole('region', {name: 'Performance'})).toContainText(
+    'Nothing measured yet',
+  );
+  await expect(page.getByRole('region', {name: 'Current work'})).toContainText(
+    'Nothing is running',
+  );
+  expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
+  await shot(page, 'ink-overview-empty');
+
+  // Work: the search and the outcome filter live in the page state, so a tab switch keeps them.
+  await page.getByRole('tab', {name: 'Work'}).click();
+  await expect(page.getByText('No work yet')).toBeVisible();
+  await page.getByLabel('Search work').fill('ring');
+  await page.getByRole('radiogroup', {name: 'Show outcomes'}).getByText('Rejected').click();
+  await page.getByRole('tab', {name: 'Overview'}).click();
+  await page.getByRole('tab', {name: 'Work'}).click();
+  await expect(page.getByLabel('Search work')).toHaveValue('ring');
+  await expect(page.getByRole('radio', {name: 'Rejected'})).toBeChecked();
+  expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
+  await shot(page, 'ink-work-empty');
+});
+
 test('a cleanly stopped run offers no Resume', async ({page}) => {
   const stopped = server('stopped', {
     outcome: 'stopped',

@@ -698,6 +698,9 @@ importers:
       '@vibesys/machine':
         specifier: workspace:*
         version: link:../../libs/machine
+      '@vibesys/run-state':
+        specifier: workspace:*
+        version: link:../../libs/run-state
       '@vibesys/runs':
         specifier: workspace:*
         version: link:../../libs/runs

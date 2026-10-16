@@ -23,8 +23,10 @@ import {
   headerView,
   logGroups,
   logsNotice,
+  NOTHING_FOLDED,
   type Offer,
   RUN_TABS,
+  type RunAtView,
   type RunPageAction,
   type RunPageState,
   type RunTab,
@@ -34,6 +36,8 @@ import {
   streamLines,
   timelineView,
 } from '../../state/index.js';
+import {OverviewTab} from './overview-tab.js';
+import {WorkTab} from './work-tab.js';
 
 type Dispatch = (action: RunPageAction) => void;
 
@@ -44,18 +48,10 @@ const TAB_LABELS: Readonly<Record<RunTab, string>> = {
   logs: 'Logs',
 };
 
-const COMING: Readonly<Record<Exclude<RunTab, 'logs'>, {title: string; body: string}>> = {
-  overview: {
-    title: 'The overview is on its way',
-    body: 'The objective, key numbers, the performance chart and current work arrive here next.',
-  },
+const COMING: Readonly<Record<'map', {title: string; body: string}>> = {
   map: {
     title: 'The map is on its way',
     body: 'Every planning call, workstream, agent turn and gate, as a tree, arrives here next.',
-  },
-  work: {
-    title: 'The work list is on its way',
-    body: 'Every hypothesis the run tried, with its outcome against the baseline, arrives here next.',
   },
 };
 
@@ -281,9 +277,15 @@ function LogsTab(props: {readonly state: RunPageState; readonly dispatch: Dispat
   );
 }
 
-function Panel(props: {readonly state: RunPageState; readonly dispatch: Dispatch}): JSX.Element {
-  const {state, dispatch} = props;
+function Panel(props: {
+  readonly state: RunPageState;
+  readonly run: RunAtView;
+  readonly dispatch: Dispatch;
+}): JSX.Element {
+  const {state, run, dispatch} = props;
   if (state.tab === 'logs') return <LogsTab state={state} dispatch={dispatch} />;
+  if (state.tab === 'overview') return <OverviewTab run={run} state={state} />;
+  if (state.tab === 'work') return <WorkTab run={run} work={state.work} dispatch={dispatch} />;
   const {title, body} = COMING[state.tab];
   return (
     <Card>
@@ -294,13 +296,16 @@ function Panel(props: {readonly state: RunPageState; readonly dispatch: Dispatch
 
 /**
  * The Run screen: the header with its actions, the stop and ended banners, the startup timeline
- * while the run starts, and the tabs. Everything shown is a selector over `state`.
+ * while the run starts, and the tabs. Everything shown is a selector over `state` and `run`, the
+ * folded run at the view (nothing folded until the live connection provides it).
  */
 export function RunScreen(props: {
   readonly state: RunPageState;
+  readonly run?: RunAtView;
   readonly dispatch: Dispatch;
 }): JSX.Element {
   const {state, dispatch} = props;
+  const run = props.run ?? NOTHING_FOLDED;
   return (
     <Page width="wide">
       <Stack gap="space-5">
@@ -314,7 +319,7 @@ export function RunScreen(props: {
           value={state.tab}
           change={tab => dispatch({type: 'tab', tab})}
         >
-          <Panel state={state} dispatch={dispatch} />
+          <Panel state={state} run={run} dispatch={dispatch} />
         </Tabs>
       </Stack>
     </Page>

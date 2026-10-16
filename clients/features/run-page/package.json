@@ -38,6 +38,7 @@
     "@vibesys/ipc": "workspace:*",
     "@vibesys/logs": "workspace:*",
     "@vibesys/machine": "workspace:*",
+    "@vibesys/run-state": "workspace:*",
     "@vibesys/runs": "workspace:*",
     "@vibesys/store": "workspace:*",
     "@vibesys/transport": "workspace:*",

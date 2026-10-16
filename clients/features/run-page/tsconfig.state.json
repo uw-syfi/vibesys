@@ -29,6 +29,15 @@
     },
     {
       "path": "../../libs/runs/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/contracts/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/run-state/tsconfig.overview.json"
+    },
+    {
+      "path": "../../libs/run-state/tsconfig.trace.json"
     }
   ]
 }
