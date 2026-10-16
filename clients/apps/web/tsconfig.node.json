@@ -12,7 +12,7 @@
     "build-inputs.ts",
     "campaign-stream.ts",
     "build-manifest.ts",
-    "playwright.config.ts",
+    "playwright.config.ts", "../../tools/e2e/free-port.mts",
     "vite.config.ts",
     "vite.browser.config.ts",
     "vite.desktop.config.ts"

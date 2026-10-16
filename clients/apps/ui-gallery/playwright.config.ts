@@ -1,4 +1,5 @@
 import {defineConfig} from '@playwright/test';
+import {E2E_HOST, runPort} from '../../tools/e2e/free-port.mjs';
 
 /**
  * The gallery's visual and accessibility suite (rules S11 and S12 of #2827).
@@ -9,6 +10,7 @@ import {defineConfig} from '@playwright/test';
  * bundled fonts, under reduced motion, at a fixed viewport and scale, with nothing from a clock.
  */
 const inCI = !!process.env['CI'];
+const port = await runPort('VIBESYS_E2E_UI_GALLERY_PORT');
 
 export default defineConfig({
   testDir: './e2e',
@@ -21,12 +23,12 @@ export default defineConfig({
   snapshotPathTemplate: '{testDir}/__screenshots__/{arg}{ext}',
   expect: {toHaveScreenshot: {animations: 'disabled', caret: 'hide', scale: 'css'}},
   webServer: {
-    command: 'node e2e/serve-dist.mjs 5186',
-    port: 5186,
-    reuseExistingServer: !inCI,
+    command: `node e2e/serve-dist.mjs ${port}`,
+    port,
+    reuseExistingServer: false,
   },
   use: {
-    baseURL: 'http://127.0.0.1:5186',
+    baseURL: `http://${E2E_HOST}:${port}`,
     browserName: 'chromium',
     viewport: {width: 1280, height: 900},
     deviceScaleFactor: 1,

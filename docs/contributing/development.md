@@ -330,9 +330,8 @@ This does not run every CI check. Browser end-to-end tests (`tui_e2e`) are
 CI-only by default: Playwright needs Chromium and its system libraries as well
 as the client and Python environments, so making the normal local command
 acquire or require them would make it unexpectedly heavyweight. Run that group
-explicitly when browser coverage is needed. Local port 5173 must be free or
-already serve this checkout's web app: Playwright reuses a local listener, so
-an unrelated listener would run the wrong app.
+explicitly when browser coverage is needed. Each Playwright run asks the OS for
+a free port for its own server, so parallel runs on one machine do not collide.
 
 ```bash
 uv sync --dev

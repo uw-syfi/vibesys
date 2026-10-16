@@ -36,7 +36,7 @@ import weakref
 from collections import deque
 from typing import TYPE_CHECKING, Self, cast
 
-from vs_sim.concurrency import OsThreadLocal
+from vs_sim.concurrency import OsThreadLocal, WorkerReservationStateError
 from vs_sim.randomness import SeededRandom
 from vs_sim.virtual import (
     SIM_MONOTONIC_ORIGIN,
@@ -50,7 +50,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
     from types import TracebackType
 
-    from vs_sim.concurrency import Lock, ThreadLocal
+    from vs_sim.concurrency import Lock, ThreadLocal, WorkerReservation
     from vs_sim.trace import EventTrace
 
 
@@ -158,6 +158,47 @@ class SimWorker:
         if self._thread.done:
             return
         sim.block(me, f"join of {self._thread.name}", self._thread.joiners, timeout)
+
+
+class _SimWorkerReservation:
+    """A simulated worker retained before the scheduler may run its target."""
+
+    def __init__(
+        self,
+        threads: SimThreads,
+        target: Callable[[], object],
+        *,
+        name: str,
+        daemon: bool,
+    ) -> None:
+        self._threads = threads
+        self._target = target
+        self._name = name
+        self._daemon = daemon
+        self._worker: SimWorker | None = None
+        self._attempted = False
+        self._settled = False
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def start(self) -> None:
+        if self._attempted or self._settled:
+            raise WorkerReservationStateError(self.name)
+        self._attempted = True
+        self._worker = self._threads.spawn(
+            self._target,
+            name=self._name,
+            daemon=self._daemon,
+        )
+
+    def settle(self) -> None:
+        if self._settled:
+            return
+        if self._worker is not None:
+            self._worker.join()
+        self._settled = True
 
 
 class SimLock:
@@ -393,6 +434,12 @@ class SimThreads:
         thread = self._spawn(target, name, daemon=daemon)
         self.switch_point(me)
         return SimWorker(self, thread)
+
+    def reserve(
+        self, target: Callable[[], object], *, name: str, daemon: bool = True
+    ) -> WorkerReservation:
+        """Retain a simulated worker before its target can enter the schedule."""
+        return _SimWorkerReservation(self, target, name=name, daemon=daemon)
 
     def _spawn(self, target: Callable[[], object], name: str, *, daemon: bool) -> _SimThread:
         thread = _SimThread(name, target, daemon=daemon)

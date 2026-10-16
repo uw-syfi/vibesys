@@ -38,9 +38,10 @@ reasoning_effort = "xhigh"
 ```
 
 Every model must be a vetted model of the CLI provider: VibeSys runs only the
-provider and model pairs in `vs_agent.provider_policy.HARNESSES`. Without
-`[model].name` or `--model`, a run uses its provider's default model (the
-provider's first vetted model). An unvetted model in `[model].name`, `--model`,
+provider and model pairs `vs_agent.provider_policy.harnesses()` returns: the
+models agentshim lists for each shipped provider (`ProviderProfile.models`).
+Without `[model].name` or `--model`, a run uses its provider's default model
+(the first one agentshim lists). An unvetted model in `[model].name`, `--model`,
 a role entry, or `[agent.quota].fallback_model` is rejected before the run
 builds anything, with the key and the vetted models. At a terminal,
 `--allow-unvetted-model` runs it anyway; runs started from the desktop app
@@ -49,6 +50,38 @@ cannot opt out. A resume keeps the pair its run was started with.
 Unknown role IDs are rejected against the selected orchestration before run
 resources open. The run manifest records the total resolved role map. Resume
 restores that map and rejects a plugin generation whose role IDs differ.
+
+### Rounds, workstreams, and attempts
+
+A **workstream** is one independently scheduled unit of dynamic agent work. It
+may implement or continue a hypothesis, profile a revision, or merge candidate
+revisions. `--max-in-flight M` limits how many workstreams hold agent slots at
+once. `--max-rounds N` supplies `N` admissions per slot, so the dynamic search
+may admit at most `N * M` workstreams whose workspaces open. A workstream that
+fails parent verification or workspace admission is refunded and does not
+consume that budget; an operator stop before the workspace opens is not
+refunded.
+
+A dynamic **round** is the durable result of an implementation workstream
+recorded under a hypothesis. Profile and merge workstreams still appear in the
+iteration tree and consume an admission when their workspace opens, but they do
+not produce round records. An implementation workstream that never reaches a
+round record likewise produces no round event.
+
+An **attempt** is the core-owned admission identity beneath a workstream and
+owns its workspace when one opens; it is not an implementer retry. Dynamic
+implementer retries are agent turns, bounded by `--max-unmeasured-turns`;
+`--max-retries-per-round` applies only to the serial agent policies. The
+strategy-neutral `round_finished.data.attempts` field currently reports `1`
+for a projected dynamic round and must not be read as its implementer-turn
+count.
+
+Each recorded dynamic round produces one `round_finished` and one
+`workstream_finished` event. Both carry the same non-null envelope
+`round_label` (`round-N`), so consumers correlate the pair by `(run_id,
+round_label)`. The count of either event is bounded by the `N * M` admission
+budget, not by `--max-rounds` alone; profile, merge, and pre-open workstreams
+are not included in that count.
 
 ### Evaluation suspension bounds
 
@@ -312,7 +345,7 @@ worktree must be clean before VibeSys switches to the saved
 
 | Flag | Default | Behavior |
 | --- | ---: | --- |
-| `--judge-every N` | `3` | Run an independent judge every Nth round. A candidate explicitly nominated by the implementer and the final round are always reviewed immediately. Canonical accuracy and benchmark commands run only after a judge PASS. The `dynamic` orchestration counts each workstream as a round: it always reviews a nominated or supported candidate, and reviews another terminal outcome on every Nth workstream. Its budget is `--max-rounds` times its `max_in_flight` workstreams, and a continued hypothesis counts as one more workstream. |
+| `--judge-every N` | `3` | Run an independent judge every Nth round. A candidate explicitly nominated by the implementer and the final round are always reviewed immediately. Canonical accuracy and benchmark commands run only after a judge PASS. The `dynamic` orchestration uses an implementation workstream's global schedule sequence for this cadence: it always reviews a nominated or supported candidate, and reviews another terminal outcome when that sequence is every Nth workstream. Its admission budget is `--max-rounds` times `--max-in-flight`, and a continued hypothesis uses another admission. |
 | `--official-eval-every N` | `3` | Run configured framework-owned accuracy and benchmark gates every N accepted candidate checkpoints. Intermediate checkpoints remain provisional; orchestrator requests and the final round force immediate official evaluation. Retries, continuing hypotheses, and profiler-only rounds do not advance this cadence. Modal gates reuse one healthy deployment for the exact candidate commit, explicitly stop it after the final gate, and rely on zero minimum-warm replicas plus a short finite scaledown window as the crash backstop. Unchanged retries reuse a prior accuracy PASS when only a later gate failed. The `dynamic` orchestration ignores this cadence: its workstreams are parallel branches, so it evaluates every review-passed candidate. |
 | `--memory-layout` | `files` | `files` keeps `roadmap.md` and `progress.md`. `directories` uses `roadmap/index.md` and one `progress/round-NNNN.md` audit file per round; fresh orchestrators receive a bounded recent window and can inspect older files on demand. Existing runs retain their current layout when resumed. |
 | `--constraint TEXT` | none | Add an operator-supplied workload invariant to every agent's objective without changing the input bundle. The framework commits the effective objective under the run's portable `.vibesys/state/` and mounts it read-only in isolated environments, so candidate edits cannot erase it. Repeat for multiple constraints and repeat the same flags when resuming. |
@@ -595,12 +628,25 @@ Each component has `name`, nonnegative `cost`, `share` between zero and one, and
 an optional `evidence` string list. This configuration is task capability, not
 a modality. Other loops ignore it.
 
-The command runs in the run's own command environment: under `--run-environment
-slurm` that is the editor container, not a Slurm job, so a Python environment that
-exists only on the host (or is exposed to GPU jobs through `read_only_paths`) is not
-there. Make the command self-contained in the workspace. When it fails, the run stops
-at the first capture and the error names the command, where it ran, and the output tail
-(exit code 127 means a program it calls was not found).
+The command runs in the candidate workspace through the run's capture-command
+environment. Under `--run-environment slurm` with local transport and
+`[vibesys.agent_gpu]`, that means a confined Slurm GPU job with the same partition,
+job-name prefix, concurrency cap, `read_only_paths`, host environment policy, and
+run-scoped launcher as `vibesys-gpu`. Its seconds timeout is rounded up for Slurm's
+minute allocation while VibeSys still cancels at the exact requested second. Without
+`[vibesys.agent_gpu]`, and in every other run environment, capture keeps using the
+editor command runner. Local validation commands always use the editor runner; enabling
+agent GPU jobs does not move validation to Slurm.
+
+Make the command and its dependencies visible in the environment selected above. When
+it fails, the run stops at the first capture and the error names the command, where it
+ran, and the bounded diagnostic tail (exit code 127 means a program it calls was not
+found). Before submission, VibeSys durably records the capture's stable Slurm job
+name. Cancellation drains the capture before its temporary output and candidate are
+removed. If Slurm cannot confirm the named job is gone, VibeSys reports an unresolved
+stop and retains those resources rather than deleting files a live job may still use.
+A resumed host cancels and queries the recorded name; it removes the candidate only
+after the scheduler confirms that job is absent.
 
 `[agent].domain` in `vibesys.input.toml` supplies cross-cutting problem-space
 context for the agent and evolve loops. Registered domains include:

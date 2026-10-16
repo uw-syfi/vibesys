@@ -65,6 +65,31 @@ _LOOP_RUN_TARGETS = {
 }
 
 
+def test_help_explains_dynamic_workstream_budget(capsys: pytest.CaptureFixture[str]) -> None:
+    """The public CLI distinguishes serial rounds from dynamic admissions and turns."""
+    with pytest.raises(SystemExit, match="0"):
+        main(["--help"])
+
+    help_text = " ".join(capsys.readouterr().out.split()).replace("- ", "-")
+    assert "Serial agent loops: N rounds" in help_text
+    assert "N times --max-in-flight admitted workstreams" in help_text
+    assert "failed workspace admissions are refunded" in help_text
+    assert "together with --max-rounds this sets the admission budget" in help_text
+
+    retries_help = help_text.rsplit("--max-retries-per-round N", maxsplit=1)[1].split(
+        "--max-in-flight N", maxsplit=1
+    )[0]
+    assert "maximum paid implementer turns inside each round (default: 3)" in retries_help
+    assert "The dynamic loop ignores this flag and uses --max-unmeasured-turns" in retries_help
+    assert "default: 2" not in retries_help
+
+    unmeasured_help = help_text.rsplit("--max-unmeasured-turns N", maxsplit=1)[1].split(
+        "--evaluation-slots N", maxsplit=1
+    )[0]
+    assert "before it settles as failed (default: 2)" in unmeasured_help
+    assert "default: 3" not in unmeasured_help
+
+
 def agent_descriptor(
     options: AgentOrchestrationOptions, *, orchestration_id: str
 ) -> OrchestrationDescriptor:

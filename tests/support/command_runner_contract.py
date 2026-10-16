@@ -42,7 +42,7 @@ from typing import TYPE_CHECKING, Protocol
 
 import pytest
 
-from vs_sandbox.api import CommandResult, CommandRunner
+from vs_sandbox.api import CaptureCommandRunner, CommandResult, CommandRunner
 from vs_sim.api import Capture
 from vs_sim.api.testing import HANG_GUARD_S
 
@@ -153,6 +153,22 @@ def _assert_streams_compose_output(result: CommandResult) -> None:
 def _everything() -> Capture:
     """A sink that keeps every byte the contract's commands write."""
     return Capture(1 << 20)
+
+
+def assert_preset_cancellation_contract(
+    runner: CaptureCommandRunner,
+    threads: Threads,
+    command: str,
+) -> CommandResult:
+    """Prove the cancellation semantic shared by ordinary and capture runners."""
+    cancel = threads.event()
+    cancel.set()
+
+    result = runner.execute(command, timeout=3600, cancel=cancel, output=DISCARD)
+
+    assert result.cancelled
+    assert result.output == result.stdout + result.stderr
+    return result
 
 
 class CommandRunnerContract:
@@ -282,15 +298,12 @@ class CommandRunnerContract:
         assert harness.processes_gone()
 
     def test_a_cancel_set_before_the_call_cancels_it(self, harness: Harness) -> None:
-        cancel = harness.threads.event()
-        cancel.set()
-
-        result = harness.sandbox.execute(
-            harness.hang(announce=False), timeout=3600, cancel=cancel, output=DISCARD
+        assert_preset_cancellation_contract(
+            harness.sandbox,
+            harness.threads,
+            harness.hang(announce=False),
         )
 
-        assert result.cancelled
-        _assert_streams_compose_output(result)
         assert harness.processes_gone()
 
     def test_every_byte_written_reaches_the_output_sink_and_the_result_is_unchanged(

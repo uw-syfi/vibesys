@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+from typing import Literal, cast
 
 import pytest
 from hypothesis import given, settings
@@ -15,14 +17,23 @@ from vibesys.serial_search.api import (
     AttributionConfig,
     accept_plan,
     bottlenecks_of,
+    capture_failure,
     focus_of,
     focus_policy,
     plan_evidence,
     record_round,
 )
+from vs_core.api import CaptureCommandBase, RevisionId, RevisionRef
+from vs_runtime.api import CommandResult
+from vs_runtime.api.core import CaptureCommandOwner
+from vs_runtime.api.testing import FakeCommands, FakeWorkspace, FakeWorkspaces
 from vs_sim.api.testing import examples
 
 _CONFIG = HypothesisConfig(max_rounds=4)
+
+
+class _Capture(CaptureCommandBase):
+    kind: Literal["test.capture_attribution"] = "test.capture_attribution"
 
 
 def _reply(identifier: str, **extra: object) -> OrchestratorPlan:
@@ -83,6 +94,51 @@ def test_attribution_output_past_the_size_cap_is_refused_before_it_is_parsed() -
     framed = f'__VIBESYS_ATTRIBUTION_BEGIN__{{"version": 1,{padding}"components": []}}__VIBESYS_ATTRIBUTION_END__'
     with pytest.raises(ProfileAttributionError, match="larger than"):
         parse_attribution(framed)
+
+
+async def test_failed_capture_attribution_never_displays_raw_secret_fragments() -> None:
+    """The public operation passes only its complete-stream diagnostic to attribution."""
+    revision = RevisionRef(revision_id=RevisionId(root="r1"), digest="git-commit:r1")
+    workspaces = FakeWorkspaces(
+        FakeWorkspace(path=Path("/workspace"), known_revisions={"r1"}),
+        supports_parallel_candidates=True,
+    )
+    commands = FakeCommands()
+    secret = "s" * 240
+    commands.script(
+        CommandResult(
+            output=f"prefix API_TOKEN={secret[:20]}...[truncated]...{secret[-20:]} tail",
+            exit_code=7,
+            truncated=True,
+            diagnostic_output="prefix API_TOKEN=[REDACTED] tail",
+        )
+    )
+    owner = CaptureCommandOwner(
+        workspaces,
+        commands,
+        workspaces,
+        lambda ref: ref.revision_id.root if ref == revision else None,
+    )
+
+    capture = await owner.capture(
+        _Capture(
+            revision=revision,
+            argv=("bash", "attribute.sh"),
+            output_argument="--out",
+            timeout_seconds=30,
+        ),
+        "operation-id",
+    )
+    detail = capture_failure(
+        ("bash", "attribute.sh"),
+        exit_code=cast("int", capture["exit_code"]),
+        detail="",
+        output=cast("str", capture["output"]),
+    )
+
+    assert "API_TOKEN=[REDACTED]" in detail
+    assert secret[:20] not in detail
+    assert secret[-20:] not in detail
 
 
 def test_a_plain_run_has_no_focus_policy_and_records_nothing() -> None:

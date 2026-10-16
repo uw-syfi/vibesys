@@ -169,6 +169,23 @@ remote ROCprof capture over the SSH transport. With the local transport and no
 agent GPU commands there is no transport for the capture, so the run offers no
 profiler (`--profiler none` is the only choice).
 
+The `profile-guided` loop's framework-owned `[profile_guided].command` uses the
+same attribution route. With local transport and `[vibesys.agent_gpu]`, it runs
+as a confined one-GPU Slurm job in the isolated candidate workspace, through
+the same run-scoped launcher, partition policy, job-name prefix, concurrency
+cap, host environment filter, and `read_only_paths` as `vibesys-gpu`. The
+configured seconds timeout remains exact: the scheduler allocation is rounded
+up to minutes, and VibeSys cancels it at the requested second. Without the
+capability, attribution falls back to the editor command runner. Local
+validation remains in the editor in both cases.
+
+Before submission, VibeSys durably records the capture's stable Slurm job name.
+Cancellation waits for the job to settle before removing the runtime-owned output
+file or discarding the candidate. If the launcher cannot prove the named job left
+the queue, the capture fails as unresolved and those resources remain retained
+across host cleanup and restart. A resumed host cancels and queries the recorded
+name, and sweeps the candidate only after the scheduler confirms the job is absent.
+
 ## Launch
 
 ```bash

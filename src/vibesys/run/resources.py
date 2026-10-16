@@ -418,6 +418,8 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 orchestration_resume,
             )
 
+        capture_recovery = environment.capture_recovery(run_id, system=integration.system)
+
         def recover_existing_run() -> None:
             """Recover external resources while the project-run owner holds its host lock."""
             with boot_trace.span("reap_orphans"):
@@ -466,6 +468,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                     git_repository=integration.git_repository,
                     state_stores=integration.state_stores,
                     resume_recovery=recover_existing_run if existing else None,
+                    capture_recovery=capture_recovery,
                 ),
                 buffered_logs=buffered_logs,
                 resolve_resume=resolve_recorded_run,

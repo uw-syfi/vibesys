@@ -50,7 +50,15 @@ if TYPE_CHECKING:
         observe_removal,
         released,
     )
-    from vs_sandbox.execution import CommandResult, CommandRunner, CommandStopUnconfirmedError
+    from vs_sandbox.execution import (
+        CaptureCommandRunner,
+        CaptureExecutionIdentity,
+        CaptureExecutionKind,
+        CommandExecutionSettledError,
+        CommandResult,
+        CommandRunner,
+        CommandStopUnconfirmedError,
+    )
     from vs_sandbox.feature_dockerfile import (
         BuildPlan,
         FeatureInstall,
@@ -153,6 +161,10 @@ __all__ = [
     "AcceleratorInventory",
     "BeforeReadyContext",
     "BuildPlan",
+    "CaptureCommandRunner",
+    "CaptureExecutionIdentity",
+    "CaptureExecutionKind",
+    "CommandExecutionSettledError",
     "CommandOutcome",
     "CommandResult",
     "CommandRunner",
@@ -318,6 +330,10 @@ _LAZY_EXPORTS = {
     "observe_removal": ("docker_states", "observe_removal"),
     "released": ("docker_states", "released"),
     "CommandRunner": ("execution", "CommandRunner"),
+    "CaptureCommandRunner": ("execution", "CaptureCommandRunner"),
+    "CaptureExecutionIdentity": ("execution", "CaptureExecutionIdentity"),
+    "CaptureExecutionKind": ("execution", "CaptureExecutionKind"),
+    "CommandExecutionSettledError": ("execution", "CommandExecutionSettledError"),
     "CommandResult": ("execution", "CommandResult"),
     "CommandStopUnconfirmedError": ("execution", "CommandStopUnconfirmedError"),
     "EnvironmentBindMount": ("host_resources", "EnvironmentBindMount"),

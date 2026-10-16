@@ -4,6 +4,7 @@ import {
   type RunSnapshot,
   type RunStatus,
   ServerError,
+  type Span,
 } from '@vibesys/contracts';
 import {event, eventBatch, snapshotResponse} from '@vibesys/contracts/testing';
 import {initialIterationNavigation} from '@vibesys/run-state';
@@ -12,6 +13,7 @@ import type {BatchReconciliation, StreamMessageContext} from '@vibesys/transport
 import {FakeClock} from '@vibesys/transport/testing';
 import {connectRun} from './connect.js';
 import type {RunCommandOutcome, RunConnection, RunStreamHandlers} from './ports.js';
+import type {RunTracePublication} from './run.js';
 import {
   deferred,
   disconnect,
@@ -25,6 +27,17 @@ import {
   waitForSession,
 } from './testing/index.js';
 import {WebSession} from './web-session.js';
+
+function traceSpan(id: string): Span {
+  return {id, parent: null, type: 'flow', name: id, status: 'done', started_at: 1};
+}
+
+function spanStarted(sequence: number, id: string) {
+  return event(sequence, 'span_started', {
+    run_id: 'run-1',
+    data: {kind: 'span_started', span: traceSpan(id)},
+  });
+}
 
 /** A connection whose replacement batch arrives before its subscription handle is adopted. */
 class PendingHandleConnection implements RunConnection {
@@ -2465,8 +2478,8 @@ async function settle(): Promise<void> {
   for (let turn = 0; turn < 50; turn += 1) await Promise.resolve();
 }
 
-describe('run actions', () => {
-  test('a page hears every action the session folds, in order, after the fold', async () => {
+describe('trace publications', () => {
+  test('a page hears accepted trace data in order after the authoritative fold', async () => {
     const heard: Array<{type: string; status: string}> = [];
     const session: WebSession = new WebSession({
       lifecycle: new FakeLifecycle(),
@@ -2478,12 +2491,225 @@ describe('run actions', () => {
         },
         {reconnectDelaysMs: [0]},
       ),
-      onRunAction: action =>
-        heard.push({type: action.type, status: session.store.getState().status}),
+      onTracePublication: publication =>
+        heard.push({type: publication.kind, status: session.store.getState().status}),
     });
     await session.start();
     await settle();
     expect(heard).toContainEqual({type: 'snapshot', status: 'running'});
+    await session.close();
+  });
+
+  test('publishes a delayed historical snapshot even after the event cursor raced ahead', async () => {
+    const loaded = deferred<ProtocolResponse>();
+    const publications: RunTracePublication[] = [];
+    const built: FakeTransport[] = [];
+    const session = new WebSession({
+      lifecycle: new FakeLifecycle(),
+      connect: connectRun(
+        hooks => {
+          const transport = new FakeTransport(hooks);
+          transport.snapshots.push(loaded.promise);
+          built.push(transport);
+          return transport;
+        },
+        {reconnectDelaysMs: [0]},
+      ),
+      onTracePublication: publication => publications.push(publication),
+    });
+    const transport = built[0];
+    if (transport === undefined) throw new Error('session did not build its transport');
+
+    const next = transport.nextSubscription();
+    const started = session.start();
+    const subscription = await next;
+    subscription.onMessage(
+      eventBatch([spanStarted(2, 'newer-span')], {
+        store_id: 'store-1',
+        through_sequence: 2,
+        history_after_sequence: 0,
+      }),
+    );
+    loaded.resolve(snapshotResponse({sequence: 1, spans: [traceSpan('stale-snapshot-only')]}));
+    await started;
+    await settle();
+
+    expect(session.store.getState().sequence).toBe(2);
+    expect(publications.filter(publication => publication.kind === 'snapshot')).toEqual([
+      {
+        kind: 'snapshot',
+        snapshot: expect.objectContaining({
+          sequence: 1,
+          spans: [expect.objectContaining({id: 'stale-snapshot-only'})],
+        }),
+      },
+    ]);
+    expect(
+      publications.some(
+        publication =>
+          publication.kind === 'events' && publication.events.some(item => item.sequence === 2),
+      ),
+    ).toBe(true);
+    await session.close();
+  });
+
+  test('publishes the accepted subset of a mixed-run batch and reports its rejection', async () => {
+    const publications: RunTracePublication[] = [];
+    const built: FakeTransport[] = [];
+    const session = new WebSession({
+      lifecycle: new FakeLifecycle(),
+      connect: connectRun(
+        hooks => {
+          const transport = new FakeTransport(hooks);
+          transport.snapshots.push(snapshotResponse({run_id: 'run-a', sequence: 1}));
+          built.push(transport);
+          return transport;
+        },
+        {reconnectDelaysMs: [0]},
+      ),
+      onTracePublication: publication => publications.push(publication),
+    });
+    const transport = built[0];
+    if (transport === undefined) throw new Error('session did not build its transport');
+    await session.start();
+
+    transport.subscriptions[0]?.onMessage(
+      eventBatch(
+        [
+          event(2, 'span_started', {
+            run_id: 'run-a',
+            data: {kind: 'span_started', span: traceSpan('accepted-run-a')},
+          }),
+          event(3, 'span_started', {
+            run_id: 'run-b',
+            data: {kind: 'span_started', span: traceSpan('rejected-run-b')},
+          }),
+        ],
+        {store_id: 'store-1', through_sequence: 3, history_after_sequence: 0},
+      ),
+    );
+    await settle();
+
+    expect(session.store.getState()).toMatchObject({runId: 'run-a', sequence: 2});
+    expect(
+      publications
+        .filter(publication => publication.kind === 'events')
+        .flatMap(publication => publication.events)
+        .filter(item => (item.sequence ?? 0) >= 2)
+        .map(item => ({runId: item.run_id, sequence: item.sequence})),
+    ).toEqual([{runId: 'run-a', sequence: 2}]);
+    expect(session.getState().error?.message).toContain('run-b');
+    await session.close();
+  });
+
+  test('publishes whether a rebootstrap keeps or replaces the established stream store', async () => {
+    const publications: RunTracePublication[] = [];
+    const built: FakeTransport[] = [];
+    const session = new WebSession({
+      lifecycle: new FakeLifecycle(),
+      connect: connectRun(
+        hooks => {
+          const transport = new FakeTransport(hooks);
+          transport.snapshots.push(snapshotResponse({sequence: 1}));
+          built.push(transport);
+          return transport;
+        },
+        {reconnectDelaysMs: [0]},
+      ),
+      onTracePublication: publication => publications.push(publication),
+    });
+    const transport = built[0];
+    if (transport === undefined) throw new Error('session did not build its transport');
+    await session.start();
+    const subscription = transport.subscriptions[0];
+    if (subscription === undefined) throw new Error('initial subscription did not open');
+
+    subscription.onMessage(
+      eventBatch([spanStarted(2, 'same-store')], {
+        store_id: 'store-1',
+        through_sequence: 2,
+        history_after_sequence: 0,
+        rebootstrap: true,
+      }),
+    );
+    transport.snapshots.push(snapshotResponse({sequence: 1}));
+    subscription.onMessage(
+      eventBatch([spanStarted(1, 'replacement-store')], {
+        store_id: 'store-2',
+        through_sequence: 1,
+        history_after_sequence: 0,
+        rebootstrap: true,
+      }),
+    );
+    await settle();
+
+    expect(
+      publications
+        .filter(publication => publication.kind === 'rebootstrap')
+        .map(publication => publication.base),
+    ).toEqual(['preserve', 'reset']);
+    await session.close();
+  });
+
+  test('loads a fenced snapshot after a same-store rebootstrap cannot prove run identity', async () => {
+    const publications: RunTracePublication[] = [];
+    const built: FakeTransport[] = [];
+    const session = new WebSession({
+      lifecycle: new FakeLifecycle(),
+      connect: connectRun(
+        hooks => {
+          const transport = new FakeTransport(hooks);
+          transport.snapshots.push(
+            snapshotResponse({sequence: 1, spans: [traceSpan('old-snapshot-span')]}),
+          );
+          built.push(transport);
+          return transport;
+        },
+        {reconnectDelaysMs: [0]},
+      ),
+      onTracePublication: publication => publications.push(publication),
+    });
+    const transport = built[0];
+    if (transport === undefined) throw new Error('session did not build its transport');
+    await session.start();
+    transport.snapshots.push(
+      snapshotResponse({
+        sequence: 2,
+        spans: [traceSpan('old-snapshot-span'), traceSpan('identity-unknown')],
+      }),
+    );
+
+    transport.subscriptions[0]?.onMessage(
+      eventBatch(
+        [
+          event(2, 'span_started', {
+            data: {kind: 'span_started', span: traceSpan('identity-unknown')},
+          }),
+        ],
+        {
+          store_id: 'store-1',
+          through_sequence: 2,
+          history_after_sequence: 0,
+          rebootstrap: true,
+        },
+      ),
+    );
+    await settle();
+
+    expect(
+      transport.requests.filter(
+        request => request.type === 'query.snapshot' && request.expected_store_id === 'store-1',
+      ),
+    ).toHaveLength(2);
+    expect(publications.slice(-2)).toMatchObject([
+      {kind: 'rebootstrap', base: 'reset', events: [{sequence: 2}]},
+      {
+        kind: 'snapshot',
+        snapshot: {sequence: 2, spans: [{id: 'old-snapshot-span'}, {id: 'identity-unknown'}]},
+      },
+    ]);
+    expect(session.store.getState().runId).toBe('run-1');
+    expect(session.getState().error).toBeNull();
     await session.close();
   });
 });

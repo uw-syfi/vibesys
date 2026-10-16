@@ -63,6 +63,7 @@ from vs_core._search_run import (
     advance,
     begin,
     check_decisions,
+    deferred,
 )
 from vs_core._session_scope import write_turn_authority
 from vs_core._step import (
@@ -1324,6 +1325,7 @@ __all__ = [
     "check_envelope_version",
     "component",
     "decision_of_operation",
+    "deferred",
     "downtime",
     "encode_json",
     "evidence_view",

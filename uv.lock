@@ -40,11 +40,11 @@ members = [
 
 [[package]]
 name = "agentshim"
-version = "0.15.7"
+version = "0.18.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/d6/c7/bc40e328588d088a78e1c54f4726d963315541ab7f99a280e70c2476875c/agentshim-0.15.7.tar.gz", hash = "sha256:9c25c8c01180115622d7f9de25dbe2884c15bd201365172b496bc1d6fa42d64b", size = 251468, upload-time = "2026-10-09T19:46:17.007Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a6/ca/fb2f1a2e0bb55c300070cd281a893caca510baf88aa9b6fe4afbbb559da7/agentshim-0.18.1.tar.gz", hash = "sha256:3b1dda47da07654b3e0b9d27f40a507f9f7f61e387193ea95818be507bec951d", size = 263687, upload-time = "2026-10-16T06:04:00.079Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f2/2c/5b6dbe42cb81896ea2ac3b970024dcb5afdb5853f2e728769f17b36f36b4/agentshim-0.15.7-py3-none-any.whl", hash = "sha256:6c02a1145296d34c2fe895bd7de422da16aeab769b03e91f5b1382f9f136360a", size = 294243, upload-time = "2026-10-09T19:46:15.227Z" },
+    { url = "https://files.pythonhosted.org/packages/16/d4/6ee7a1b32500ac6f3cfaf266f2267dc969638d8c2135f608526a8dc48361/agentshim-0.18.1-py3-none-any.whl", hash = "sha256:ca3421ddf3c96428b909e5028a6fa2795bdddd93b4e4d24d4047b7a5bbef1501", size = 307229, upload-time = "2026-10-16T06:03:58.685Z" },
 ]
 
 [[package]]
@@ -2572,8 +2572,8 @@ name = "secretstorage"
 version = "3.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cryptography" },
-    { name = "jeepney" },
+    { name = "cryptography", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "jeepney", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/1c/03/e834bcd866f2f8a49a85eaff47340affa3bfa391ee9912a952a1faa68c7b/secretstorage-3.5.0.tar.gz", hash = "sha256:f04b8e4689cbce351744d5537bf6b1329c6fc68f91fa666f60a380edddcd11be", size = 19884, upload-time = "2025-11-23T19:02:53.191Z" }
 wheels = [
@@ -2884,8 +2884,8 @@ name = "uvicorn"
 version = "0.44.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "click" },
-    { name = "h11" },
+    { name = "click", marker = "sys_platform != 'emscripten'" },
+    { name = "h11", marker = "sys_platform != 'emscripten'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/5e/da/6eee1ff8b6cbeed47eeb5229749168e81eb4b7b999a1a15a7176e51410c9/uvicorn-0.44.0.tar.gz", hash = "sha256:6c942071b68f07e178264b9152f1f16dfac5da85880c4ce06366a96d70d4f31e", size = 86947, upload-time = "2026-04-06T09:23:22.826Z" }
 wheels = [
@@ -2941,7 +2941,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", specifier = ">=0.15.7,<0.16" },
+    { name = "agentshim", specifier = ">=0.18.1,<0.19" },
     { name = "cbor2", specifier = "<6" },
     { name = "cryptography", specifier = "<50" },
     { name = "huggingface-hub" },
@@ -3001,7 +3001,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", specifier = ">=0.15.7,<0.16" },
+    { name = "agentshim", specifier = ">=0.18.1,<0.19" },
     { name = "pydantic", specifier = ">=2" },
     { name = "vs-decode", editable = "libs/vs-decode" },
     { name = "vs-faults", editable = "libs/vs-faults" },

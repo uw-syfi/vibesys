@@ -18,12 +18,20 @@ export {
 } from './iteration-navigation.js';
 export {
   type ActiveExecutionCheckpointFold,
+  type EventFold,
+  foldEventBatch,
+  foldEventRebootstrap,
+  foldResponseEvents,
+  foldSnapshot,
+  type RunIdentityRejection,
   reduceEvent,
   reduceEventBatch,
   reduceEventPrefix,
   reduceEventRebootstrap,
   reduceResponseEvents,
   reduceSnapshot,
+  type SnapshotFold,
+  type SnapshotFoldDisposition,
 } from './reduce.js';
 export {
   type ActiveAgentExecution,

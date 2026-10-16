@@ -227,7 +227,7 @@ either the method's result, whose `type` is the request's, or `HelperError` (`ty
 | `runs.read_events` | `project`, `run_id`, `from_sequence` (from 1), `max` (1 to 500) | `events: [RunEvent as JSON]`, `next_sequence`, `complete` | A run's recorded events, live or ended, read from its journal (`run-events.jsonl` in the run's log directory) so an ended run opens with its map, overview and scrubber; the live path keeps `run.connect`. Oldest first, at most `max` events and 512 KiB of journal per page (an event longer than that alone comes alone, so every read progresses); `complete` says the page reached the end of what is recorded now, and `next_sequence` is the next page's `from_sequence`. A line that does not decode (a live writer's unfinished tail) ends the journal there. The client narrows each event with the run protocol's generated `RunEvent`. `unknown_run` names a run the project does not have; `project_missing` as for `runs.list`; a run that journaled nothing has no events. Gated by feature `run_history`. The reader decodes each line with `vs_decode` on the helper's light import path, so `hello` stays light; a line longer than a helper line (1 MiB) ends the readable journal. |
 | `run.start` | `project`, `task`, `args: [str]`, `resume: {run_id} \| {latest: true} \| null`, `harness: {provider, model} \| null`, `options: {rounds, time_limit_s, results: keep \| publish_github, roles: [{role, model \| null, reasoning_effort: default \| low \| medium \| high}]} \| null` | `{instance_id, run_id, socket_path, phase}` or `DetachedLaunchFailure` | Allocates or resolves `run_id` before detaching (see [Run identity](#run-identity)); returns once the record is published, not when the run is ready. `args` holding `--allow-unvetted-model`, or any abbreviation argparse accepts, is `invalid_request`: a run started here never opts out of the vetted harnesses. `harness` (gated by feature `harnesses`; absent or null keeps the project's configuration) must be a pair `harnesses.list` offers, else `unvetted_harness` naming the provider's vetted models; it becomes `--cli-provider` and `--model`, so `args` may then hold neither. `options` (gated by feature `run_options`; every field optional, unset keeps the configuration) become the run's own flags: `rounds` is `--max-rounds`, `time_limit_s` is `--max-run-seconds` (overriding `[run].max_run_seconds`), `results` is `--local` (keep) or `--publish` (publish under the generated repository name), and each role is `--role-model ROLE=MODEL` and `--role-reasoning-effort ROLE=EFFORT` (overriding `agent.roles.ROLE`). `args` holding a flag of an option that is set, or an abbreviation of one, is `invalid_request` naming it (`--repo` counts as a results flag). With `harness`, a role's model must be one of its vetted models, else `unvetted_harness`; without one, the run's own validation names `agent.roles.ROLE.model`. |
 | `run.preflight` | `project`, `task`, `args`, `harness`, `options` (as `run.start`) | `checks: [{id, state: ok \| warn \| fail, detail, fix: Fix \| null}]`, one per `id` in order: `checkout_found`, `project_own_repository`, `settings_valid`, `docker_reachable`, `agent_image`, `evaluator_available`; `Fix` is `{kind: choose_checkout} \| {kind: copy_out, suggested_path} \| {kind: edit_setting, key} \| {kind: start_docker}` | Start is enabled exactly when no check is `fail`. The arguments are refused as `run.start` refuses them. `settings_valid`, `agent_image` and `evaluator_available` come from `vibesys preflight ARGS`, run in the project with exactly the arguments `run.start` would launch (same interpreter, same directory): it runs the run's own `validated_run_request` (the configuration, the task, the orchestration's options and roles), so a run that passes does not fail its configuration at launch, and a failure's detail is the diagnostic's first line, naming the key. `settings_valid` also fails (code `accelerator_unavailable`) when the run's environment hands its agent the compute backend's accelerator on this machine and the machine cannot provide it, the check the run makes before its image build (`vibesys.api.request.run_accelerator_unavailable`); the detail names the `--backend` choices. `agent_image` is `ok` when an agent image was built on the machine before (a build reuses its layers) and `warn` that one will be built otherwise. `project_own_repository` fails, with `copy_out` beside the containing repository, when the project sits inside another Git repository. `docker_reachable` fails with `start_docker`. Both `docker_reachable` and `agent_image` apply only when the run's resolved run environment starts local Docker containers (`RunEnvironment.uses_docker`, which `vibesys preflight` reports): for one that does not (the host environment), each is `ok` with a `not needed` detail, so every check id is always present and an unreachable Docker never blocks such a run. When the settings resolve no environment, Docker is checked. Gated by feature `preflight`. |
-| `harnesses.list` | none | `harnesses: [{provider, model, default}]`, each provider's default first | The vetted provider and model pairs (`vs_agent`'s `HARNESSES`), for the start sheet's model picker. Gated by feature `harnesses`. The helper loads the agent library only when this or a `run.start` with `harness` arrives, so `hello` stays light. |
+| `harnesses.list` | none | `harnesses: [{provider, model, default}]`, each provider's default first | The vetted provider and model pairs (`vs_agent`'s `harnesses()`), for the start sheet's model picker. Gated by feature `harnesses`. The helper loads the agent library only when this or a `run.start` with `harness` arrives, so `hello` stays light. |
 | `machine.describe` | none | `machine: {checkout: {root, version, commit, dirty} \| null, hardware: {cpu_cores, gpus: [{vendor, model}], accelerator: cpu \| cuda \| rocm \| metal}, docker: {reachable: true, version} \| {reachable: false, reason}, harness_clis: [provider], runs: {live, ended_today}}` | For the Machines and New run screens. `checkout` is the helper's own (what starts runs here), `null` from an installed distribution. GPUs come from the first vendor tool that lists any (`nvidia-smi`, `rocm-smi`, Apple Silicon's CPU brand), which names `accelerator`; `cpu` exactly when none is listed. `docker` asks the daemon for its server version, so `reachable` proves the daemon answers; `reason` is one line. `harness_clis` are the vetted providers whose CLI program is on the helper's search path, in offer order. `ended_today` counts tombstones since the host's local midnight. Each fact's command has 5 s; one that cannot run counts as absent. Gated by feature `machine_describe`; the agent library loads only when it is asked, so `hello` stays light. |
 | `checkout.inspect` | `path` | `inspection: {state: found, root, version, commit, dirty, compatible} \| {state: not_found} \| {state: too_old, version, min}` | Whether a path (`~` and a relative path as for `paths.complete`) holds a VibeSys checkout: its `pyproject.toml` names `vibesys`. `too_old` when its version's release segment is below `MIN_CHECKOUT_VERSION` (or it declares none, `version` empty); `compatible` says it ships the host helper the app starts from a checkout. Path completion stays `paths.complete`. Gated by feature `checkout_inspect`. |
 | `examples.list` | none | `listing: {version, checkout, examples: [{name, category, tasks, external_repo}]}` | The catalog (`examples/registry.toml`) of the checkout this helper runs from, the same document `vibesys example list --json` prints. `examples_unavailable` from an installed distribution or an invalid catalog. Gated by feature `examples`. |
@@ -438,7 +438,10 @@ Facts enter once:
   until its session reports it ready (`RunTrigger.READY`); attaching the journal is not readiness.
   A pause or stop requested while starting is held (`RunState.requested`), not entered: the run
   keeps reporting `starting` with its stage and progress, a resume drops the held request, and
-  `READY` lands the run in `pausing` or `stopping` if one is still held. Core may land a held stop
+  `READY` lands the run in `pausing` or `stopping` if one is still held. A pause lands (`paused`)
+  once core holds the run paused and nothing of it is running: at the end of the agent turn in
+  flight, or at once when only a measurement job is (the job finishes, and what the search then
+  decides waits for the resume). Core may land a held stop
   before `READY`, abandoning the startup; the run then goes from `starting` straight to `stopped`. A failure while starting past `resolving` names the startup stage it failed in.
 - **Starting label**: the run view's status chip shows the stage, its progress, how long the
   stage has run, and, once nothing has been heard for 60 s, `quiet for <duration>`, so a slow
@@ -620,25 +623,28 @@ cross the context bridge; the page speaks the relay's credit protocol over it
 (`@vibesys/ipc`'s `openPortSocket`) and the app shapes it as the session's transport. While the
 run is attached, the store keeps its `WebSession` open (bootstrap, stream, recovery stay in
 `@vibesys/run-session`'s machine) and folds what it reports: the session's state, the run fold, and
-the trace's span events in sequence order (the session's `onRunAction`), so the tabs fold the trace
-at the sequence they show (`viewedRun`). Pause and Resume are protocol commands on that session,
-offered only while its controls are up. A run paused by a usage limit shows the quota banner
+the trace's accepted span events in sequence order (the session's `onTracePublication`), so the
+tabs fold the trace at the sequence they show (`viewedRun`). Pause and Resume are protocol commands
+on that session, offered only while its controls are up. When a rebootstrap cannot prove that the
+current trace base still belongs to the run, its reset initiates a snapshot request fenced to the
+established store, including when that store is unchanged. A run paused by a usage limit shows the quota banner
 instead of the header's Resume: the provider and its reset time, "Resume now" (`command.resume`
 with `when: now`), "Wait and resume when quota is back" (`when: capacity_returns`), and, once the
 run reports `quota_waiting` (folded into the run fold's quota pause, with its `resumes_at`), the
 expected time and "Stop waiting" (`command.pause`) until `quota_wait_cancelled`. A server that
-refuses the wait (an older one rejects `when`) no longer offers it for that run instance. Times are words
-for the events' epoch seconds in the user's time zone; no clock is read. Leaving the run releases it (`releaseRun`), and a new
-shell document detaches the run the old one held. An ended run opens from its recorded history
-instead: the store reads `runs.read_events` (feature `run_history`, through the welcome bridge's
-`readEvents`) page by page under a token, validates each event, and folds the pages into the same
-`run` slice, so the tabs have one source; an older host answers `unsupported`. Its invariants (force offered only while stopping
-and only after its bound, no stop flow outliving the live run, the link holding exactly the live
-server, no session report without an attached run, trace events in increasing sequence, commands
-sent only when offered) are checked over seeded action sequences with stale replies. The theme
-is in the first paint: the welcome preload asks the main process synchronously for the stored
-theme and the window controls' inset (`FIRST_PAINT_CHANNEL`, one fact from `window-chrome.ts`) and
-sets them on the root element before the page's scripts run.
+refuses the wait (an older one rejects `when`) no longer offers it for that run instance. Times are
+words for the events' epoch seconds in the user's time zone; no clock is read. Leaving the run
+releases it (`releaseRun`), and a new shell document detaches the run the old one held. An ended run
+opens from its recorded history instead: the store reads `runs.read_events` (feature `run_history`,
+through the welcome bridge's `readEvents`) page by page under a token, validates each event, and
+folds the pages into the same `run` slice, so the tabs have one source; an older host answers
+`unsupported`. Its invariants (force offered only while stopping and only after its bound, no stop
+flow outliving the live run, the link holding exactly the live server, no session report without an
+attached run, trace events in increasing sequence, commands sent only when offered) are checked over
+seeded action sequences with stale replies. The theme is in the first paint: the welcome preload asks
+the main process synchronously for the stored theme and the window controls' inset
+(`FIRST_PAINT_CHANNEL`, one fact from `window-chrome.ts`) and sets them on the root element before
+the page's scripts run.
 
 ## Windows and notifications
 

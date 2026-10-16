@@ -52,6 +52,7 @@ from vs_agent.api import (
 from vs_project.api import RunResourceRequest  # noqa: TC001
 from vs_runtime import _boot_trace as boot_trace
 from vs_runtime._cli_container_env import cli_container_env, cli_provider_env_and_auth_files
+from vs_runtime._command_environment_session import command_environment_session
 from vs_runtime._container_runtime_policy import (
     DOCKER_IN_DOCKER_NOTICE,
     attaches_accelerator,
@@ -71,6 +72,7 @@ from vs_runtime._environment_startup import (
 from vs_runtime._image_features import image_features
 from vs_runtime._model_artifacts import read_model_metadata
 from vs_runtime._objective_document import materialize_objective_document
+from vs_runtime._project_run import CaptureRecoverySource, NoCaptureRecovery
 from vs_runtime._run_environment_facts import (
     ClusterEvaluationFacts,
     DockerEnvironmentFacts,
@@ -163,6 +165,7 @@ if TYPE_CHECKING:
     from vs_project.api import StateNamespace
     from vs_runtime._environment_system import EnvironmentSystem
     from vs_sandbox.api import (
+        CaptureCommandRunner,
         CommandRunner,
         ComputeBackendImpl,
         DockerCli,
@@ -377,6 +380,11 @@ class RunEnvironmentSession(Protocol):
     sandbox: CommandRunner
     view: RunEnvironmentView
 
+    @property
+    def capture_commands(self) -> CaptureCommandRunner:
+        """Runner for profile-attribution capture; usually the editor runner."""
+        ...
+
     def __enter__(self) -> RunEnvironmentSession:
         """Enter the session and return its context-managed handle."""
         ...
@@ -500,7 +508,7 @@ class _PreparedRunEnvironment:
         return self._open(presentation)
 
 
-class RunEnvironment(Protocol):
+class RunEnvironment(CaptureRecoverySource, Protocol):
     """Environment policy for run execution and candidate evaluation."""
 
     # Read-only members: an environment may fix them or derive them from its
@@ -581,7 +589,7 @@ class RunEnvironment(Protocol):
         ...
 
 
-class _NoopWorkspaceRecovery:
+class _NoopWorkspaceRecovery(NoCaptureRecovery):
     def reap_orphans(
         self, run_id: str, *, system: EnvironmentSystem, log: Callable[[str], None]
     ) -> None:
@@ -670,20 +678,22 @@ class HostEnvironment(_NoopWorkspaceRecovery):
         objective_document = _materialize_effective_objective(request)
         sandbox = _make_host_sandbox(request)
         evaluation = _host_evaluation_plan(request)
-        return SandboxSession.borrowed(
-            sandbox=sandbox,
-            view=RunEnvironmentView(
-                paths=AgentPaths(
-                    objective=(
-                        str(objective_document)
-                        if objective_document is not None
-                        else "OBJECTIVE.md"
+        return command_environment_session(
+            SandboxSession.borrowed(
+                sandbox=sandbox,
+                view=RunEnvironmentView(
+                    paths=AgentPaths(
+                        objective=(
+                            str(objective_document)
+                            if objective_document is not None
+                            else "OBJECTIVE.md"
+                        ),
+                        accuracy_command=evaluation.accuracy_command,
+                        benchmark_command=evaluation.benchmark_command,
+                        profiler_support=request.profiler_support_path,
                     ),
-                    accuracy_command=evaluation.accuracy_command,
-                    benchmark_command=evaluation.benchmark_command,
-                    profiler_support=request.profiler_support_path,
                 ),
-            ),
+            )
         )
 
 
@@ -840,7 +850,7 @@ class EditorExtras:
     attach_accelerator: bool = True
 
 
-class DockerEnvironment:
+class DockerEnvironment(NoCaptureRecovery):
     """Run agents and evaluator commands in a Docker sandbox."""
 
     isolated = True
@@ -900,7 +910,9 @@ class DockerEnvironment:
             env_kind="docker",
         )
         with _starting_container(request) as output:
-            return SandboxSession.start(sandbox=sandbox, view=view, output=output)
+            return command_environment_session(
+                SandboxSession.start(sandbox=sandbox, view=view, output=output)
+            )
 
     def attaches_backend_accelerator(self, *, docker_in_docker: bool) -> bool:
         """The editor container gets the accelerator, unless Docker-in-Docker forbids it."""
@@ -1089,6 +1101,11 @@ class _SkyPilotRunEnvironmentSession:
     def __post_init__(self) -> None:
         self._steps.callback(self.bridge.close)
         self._steps.callback(stop_sandbox, self.sandbox)
+
+    @property
+    def capture_commands(self) -> CaptureCommandRunner:
+        """Run capture in the editor for environments without a separate role."""
+        return self.sandbox
 
     def __enter__(self) -> _SkyPilotRunEnvironmentSession:
         return self
@@ -1515,37 +1532,41 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
             ),
         )
         with _starting_container(request) as output:
-            return SandboxSession.start(
-                sandbox=sandbox,
-                output=output,
-                view=RunEnvironmentView(
-                    paths=AgentPaths(
-                        objective=(
-                            agent_path_sandbox.agent_path(objective_document)
-                            if objective_document is not None
-                            else "OBJECTIVE.md"
+            return command_environment_session(
+                SandboxSession.start(
+                    sandbox=sandbox,
+                    output=output,
+                    view=RunEnvironmentView(
+                        paths=AgentPaths(
+                            objective=(
+                                agent_path_sandbox.agent_path(objective_document)
+                                if objective_document is not None
+                                else "OBJECTIVE.md"
+                            ),
+                            accuracy_command=_prefix_command(
+                                evaluator_prefix,
+                                evaluation.accuracy_command,
+                            ),
+                            benchmark_command=_prefix_command(
+                                evaluator_prefix,
+                                evaluation.benchmark_command,
+                            ),
+                            profiler_support=(
+                                request.profiler_support_name
+                                if request.profiler_support_path
+                                else None
+                            ),
                         ),
-                        accuracy_command=_prefix_command(
-                            evaluator_prefix,
-                            evaluation.accuracy_command,
-                        ),
-                        benchmark_command=_prefix_command(
-                            evaluator_prefix,
-                            evaluation.benchmark_command,
-                        ),
-                        profiler_support=(
-                            request.profiler_support_name if request.profiler_support_path else None
-                        ),
+                        prompt_notes=presentation.prompt_notes,
+                        isolated=True,
+                        cli_sandboxed=True,
+                        host_device_reselect=False,
+                        env_kind="modal",
+                        profile_execution="remote",
+                        deployment_release_env_var="VIBESYS_RELEASE_MODAL_DEPLOYMENT",
+                        framework_setup_timeout_seconds=setup_timeout_seconds,
                     ),
-                    prompt_notes=presentation.prompt_notes,
-                    isolated=True,
-                    cli_sandboxed=True,
-                    host_device_reselect=False,
-                    env_kind="modal",
-                    profile_execution="remote",
-                    deployment_release_env_var="VIBESYS_RELEASE_MODAL_DEPLOYMENT",
-                    framework_setup_timeout_seconds=setup_timeout_seconds,
-                ),
+                )
             )
 
     def _ensure_model_volume(self, request: RunEnvironmentRequest) -> None:

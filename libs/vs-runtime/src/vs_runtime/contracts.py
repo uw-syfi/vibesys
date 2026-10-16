@@ -62,6 +62,21 @@ class RuntimeContractError(RuntimeError):
     """Base class for typed runtime operation failures."""
 
 
+class CaptureStopUnconfirmedError(RuntimeContractError):
+    """A capture lifecycle cannot be proved safe for candidate cleanup.
+
+    The command may still be running, or persistence of its durable intent or
+    settlement may have failed. The runtime retains both the candidate and its
+    temporary output when this is raised rather than guessing that cleanup is safe.
+    """
+
+    def __init__(self) -> None:
+        """Describe the unresolved stop without backend-specific text."""
+        super().__init__(
+            "captured command settlement could not be confirmed; its candidate and output remain retained"
+        )
+
+
 class SessionTransportUnavailableError(RuntimeContractError):
     """Durable session operations require an explicitly bound agent interface."""
 
@@ -380,18 +395,8 @@ class CommandResult(BaseModel):
         return {**value, "diagnostic_output": redact_diagnostic_text(output)}
 
 
-class Commands(Protocol):
-    """Sandboxed process execution scoped to a live run workspace."""
-
-    async def run(
-        self,
-        argv: tuple[str, ...],
-        *,
-        workspace: Workspace,
-        timeout_seconds: int | None = None,
-    ) -> CommandResult:
-        """Run one argv without policy-authored shell composition."""
-        ...
+class CaptureCommands(Protocol):
+    """Runtime-owned output capture scoped to a live run workspace."""
 
     async def capture_output(
         self,
@@ -404,12 +409,29 @@ class Commands(Protocol):
         """Run argv with a runtime-owned output file and return its bounded contents.
 
         The runtime appends ``output_argument`` and the temporary path, reads
-        the file after a successful command, and attempts to remove it on every
+        the file after a successful command, and removes it after every settled
         path. A failed command returns its ordinary diagnostic output and exit
-        status. Failure to remove the artifact raises ``RuntimeContractError``
+        status. An unconfirmed remote stop raises
+        :class:`CaptureStopUnconfirmedError` and retains the candidate and
+        artifact across host cleanup and restart. Failure to remove the artifact raises
+        ``RuntimeContractError``
         unless another exception is already propagating, in which case the
         cleanup failure is attached as an exception note.
         """
+        ...
+
+
+class Commands(Protocol):
+    """Ordinary sandboxed process execution scoped to a live run workspace."""
+
+    async def run(
+        self,
+        argv: tuple[str, ...],
+        *,
+        workspace: Workspace,
+        timeout_seconds: int | None = None,
+    ) -> CommandResult:
+        """Run one argv without policy-authored shell composition."""
         ...
 
     async def run_trusted_shell(

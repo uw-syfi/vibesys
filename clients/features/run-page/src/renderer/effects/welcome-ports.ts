@@ -16,10 +16,10 @@ import {
   type WelcomeResult,
 } from '@vibesys/ipc';
 import type {LogListOutcome, LogReadInput, LogReadOutcome, LogTransport} from '@vibesys/logs';
-import {type RunAction, WebSession, type WebSessionOptions} from '@vibesys/run-session';
+import {WebSession, type WebSessionOptions} from '@vibesys/run-session';
 import {exactResumeRunId, type RunRef} from '@vibesys/runs';
 import type {AbortSignalLike} from '@vibesys/transport';
-import type {HistoryReply, RunData} from '../../state/index.js';
+import type {HistoryReply} from '../../state/index.js';
 import type {LiveSession, SessionObserver} from './live-session.js';
 import {type PortMessages, welcomeRunBridge} from './run-connection.js';
 import type {RunPagePorts} from './store.js';
@@ -43,7 +43,7 @@ export type RunPageBridge = Pick<
 export interface RunPagePage {
   readonly messages: PortMessages;
   /** The session's transport and lifecycle over the run's bridge (the app builds transports). */
-  session(bridge: DesktopBridge): Omit<WebSessionOptions, 'onRunAction'>;
+  session(bridge: DesktopBridge): Omit<WebSessionOptions, 'onTracePublication'>;
 }
 
 /** What the screen's run is, beyond its identity, at the moment a command is sent. */
@@ -73,21 +73,6 @@ function historyReply(page: RunHistoryPage): HistoryReply {
   }
 }
 
-/** What one fold action of the session adds to the screen's trace slice. */
-function runData(action: RunAction): RunData {
-  switch (action.type) {
-    case 'snapshot':
-      return {kind: 'snapshot', snapshot: action.snapshot};
-    case 'events':
-    case 'response-events':
-      return {kind: 'events', events: action.events};
-    case 'batch':
-      return action.reconciliation.kind === 'rebootstrap'
-        ? {kind: 'rebootstrap', events: action.message.events}
-        : {kind: 'events', events: action.message.events};
-  }
-}
-
 /** A `WebSession` over the window's relay, reporting to `observer`. */
 function openWebSession(
   bridge: RunPageBridge,
@@ -96,7 +81,7 @@ function openWebSession(
 ): LiveSession {
   const session = new WebSession({
     ...page.session(welcomeRunBridge(bridge, page.messages)),
-    onRunAction: action => observer.data(runData(action)),
+    onTracePublication: publication => observer.data(publication),
   });
   const reportSession = (): void => {
     const view = session.getState();

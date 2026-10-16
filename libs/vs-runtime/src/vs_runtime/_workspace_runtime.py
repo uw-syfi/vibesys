@@ -16,6 +16,7 @@ from vs_runtime._local_validation import (
 from vs_runtime._workspaces import RuntimeWorkspace, RuntimeWorkspaces, WorkspaceResource, run_sync
 from vs_runtime.contracts import (
     AccuracyReceipt,
+    CaptureStopUnconfirmedError,
     CommandResult,
     RuntimeContractError,
     Workspace,
@@ -84,6 +85,7 @@ class WorkspaceRuntime:
 
     workspaces: RuntimeWorkspaces
     commands: RuntimeCommands
+    capture_commands: RuntimeCaptureCommands
     evaluation: RuntimeWorkspaceEvaluation
 
 
@@ -103,49 +105,6 @@ class RuntimeCommands:
     ) -> CommandResult:
         validate_command(argv, timeout_seconds)
         return await self._execute(workspace, shlex.join(argv), timeout_seconds)
-
-    async def capture_output(
-        self,
-        argv: tuple[str, ...],
-        *,
-        workspace: Workspace,
-        output_argument: str,
-        timeout_seconds: int | None = None,
-    ) -> CommandResult:
-        validate_command(argv, timeout_seconds)
-        validate_command((output_argument,), None)
-        managed = self._workspaces.workspace_for(workspace)
-        async with self._workspaces._mutation(managed):  # noqa: SLF001  # lint-waiver: LW-228423 [SLF001]; the sibling runtime capability serializes effects through the workspace owner.
-            resource = self._workspaces.resource_for(managed)
-            temporary = await self._blocking.run(resource.execute, "mktemp", None)
-            if temporary.exit_code != 0 or not temporary.stdout.strip():
-                message = "runtime could not allocate a captured command output file"
-                raise RuntimeContractError(message)
-            output_path = temporary.stdout.strip()
-            primary_error: BaseException | None = None
-            try:
-                result = await self._blocking.run(
-                    resource.execute,
-                    shlex.join((*argv, output_argument, output_path)),
-                    timeout_seconds,
-                )
-                if result.exit_code != 0:
-                    return _command_result(result)
-                captured = await self._blocking.run(
-                    resource.execute,
-                    shlex.join(("cat", output_path)),
-                    None,
-                )
-                return _captured_result(result, captured)
-            except BaseException as error:
-                primary_error = error
-                raise
-            finally:
-                cleanup_error = await self._remove_captured_output(resource, output_path)
-                if cleanup_error is not None:
-                    if primary_error is None:
-                        raise cleanup_error
-                    primary_error.add_note(str(cleanup_error))
 
     async def run_trusted_shell(
         self,
@@ -168,6 +127,74 @@ class RuntimeCommands:
             resource = self._workspaces.resource_for(managed)
             result = await self._blocking.run(resource.execute, command, timeout_seconds)
         return _command_result(result)
+
+
+class RuntimeCaptureCommands:
+    """Capture output through each environment's explicit capture-command runner."""
+
+    def __init__(self, workspaces: RuntimeWorkspaces, blocking: BlockingOperations) -> None:
+        self._workspaces = workspaces
+        self._blocking = blocking
+
+    async def capture_output(
+        self,
+        argv: tuple[str, ...],
+        *,
+        workspace: Workspace,
+        output_argument: str,
+        timeout_seconds: int | None = None,
+    ) -> CommandResult:
+        """Run argv with a shared-workspace temporary artifact owned by this runtime."""
+        validate_command(argv, timeout_seconds)
+        validate_command((output_argument,), None)
+        managed = self._workspaces.workspace_for(workspace)
+        async with self._workspaces._mutation(managed):  # noqa: SLF001  # lint-waiver: LW-228423 [SLF001]; the sibling runtime capability serializes capture and cleanup through the workspace owner.
+            resource = self._workspaces.resource_for(managed)
+            # A relative path is visible at the same workspace root in an editor
+            # container and in a Slurm job. mktemp creates it mode 0600 before
+            # the command starts, so the command never chooses the artifact.
+            temporary = await self._blocking.run(
+                resource.execute, "mktemp .vibesys-capture.XXXXXXXXXX", None
+            )
+            if temporary.exit_code != 0 or not temporary.stdout.strip():
+                message = "runtime could not allocate a captured command output file"
+                raise RuntimeContractError(message)
+            output_path = temporary.stdout.strip()
+            await self._workspaces.begin_capture(managed, resource.capture_execution)
+            primary_error: BaseException | None = None
+            stop_unconfirmed = False
+            try:
+                command = shlex.join((*argv, output_argument, output_path))
+                result = await self._blocking.run_cancellable(
+                    lambda cancel: resource.execute_capture(command, timeout_seconds, cancel)
+                )
+                if result.exit_code != 0:
+                    return _command_result(result)
+                captured = await self._blocking.run(
+                    resource.execute,
+                    shlex.join(("cat", output_path)),
+                    None,
+                )
+                return _captured_result(result, captured)
+            except CaptureStopUnconfirmedError as error:
+                primary_error = error
+                stop_unconfirmed = True
+                raise
+            except BaseException as error:
+                primary_error = error
+                raise
+            finally:
+                if not stop_unconfirmed:
+                    try:
+                        await self._workspaces.finish_capture(managed)
+                    except CaptureStopUnconfirmedError:
+                        stop_unconfirmed = True
+                        raise
+                    cleanup_error = await self._remove_captured_output(resource, output_path)
+                    if cleanup_error is not None:
+                        if primary_error is None:
+                            raise cleanup_error
+                        primary_error.add_note(str(cleanup_error))
 
     async def _remove_captured_output(
         self,

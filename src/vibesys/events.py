@@ -595,7 +595,14 @@ class BenchmarkResultData(EventPayload):
 
 
 class RoundFinishedData(EventPayload):
-    """Summary of attempt, judge, and performance outcomes for a round."""
+    """Summary of judge and performance outcomes for one recorded round.
+
+    A projected dynamic implementation round emits this alongside
+    ``workstream_finished`` with the same non-null envelope ``round_label``.
+    ``attempts`` is strategy-neutral; dynamic currently reports one and does
+    not use it as an implementer-turn count. The CLI glossary owns the public
+    round, workstream, and attempt definitions.
+    """
 
     kind: Literal["round_finished"] = "round_finished"
     attempts: int
@@ -775,18 +782,19 @@ class WorkstreamFailureData(BaseModel):
 
 
 class WorkstreamFinishedData(EventPayload):
-    """One workstream (one dynamic-run round) ended; its typed failure, if any.
+    """One projected, recorded policy round ended; its typed failure, if any.
 
-    ``setup_failure`` and ``refunded`` are both always ``False`` from this
-    event's only current producer: a workstream whose workspace never opened
-    (``WorkstreamDone.not_opened``, refunded to the planner) never produces
-    the ``RoundRecord`` this event reads from
-    (``RunRecord.finished``/``_hypotheses.with_round`` only keep a round once
-    its workspace has a settlement, which ``not_opened`` never has), so the
-    only workstreams this event is ever emitted for already cleared setup.
-    Both fields are declared for a future producer that also covers setup
-    failures (none exists yet, since a refunded workstream's slot is tallied
-    only as an aggregate run-level count today, not a per-attempt fact).
+    The strategy-neutral commit producer emits this alongside
+    ``round_finished`` for each newly projected ``RoundSummary``, including
+    serial policy rounds. It currently sets ``setup_failure`` and ``refunded``
+    to ``False`` because its input is already a recorded round and contains no
+    per-attempt setup-failure projection. The fields remain declared for a
+    future producer that can publish such evidence.
+
+    In the dynamic policy specifically, a workstream whose workspace never
+    opened produces no recorded round, while profile and merge workstreams are
+    projected only as iterations. Those dynamic workstreams therefore do not
+    produce this event today.
     """
 
     kind: Literal["workstream_finished"] = "workstream_finished"

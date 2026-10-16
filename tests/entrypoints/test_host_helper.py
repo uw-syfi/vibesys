@@ -30,7 +30,7 @@ from server.host_api import (
 )
 from server.host_helper_requests import answer
 from server.registry import FileInstanceStore, instance_root
-from vibesys.api import HARNESSES
+from vibesys.api import harnesses
 from vs_sim.api.testing import SimThreads
 
 if TYPE_CHECKING:
@@ -72,7 +72,7 @@ def test_the_real_host_offers_the_vetted_harnesses_with_one_default_per_provider
 
     assert isinstance(reply, HarnessesListReply)
     offered = reply.harnesses
-    assert [(o.provider, o.model) for o in offered] == [(h.provider, h.model) for h in HARNESSES]
+    assert [(o.provider, o.model) for o in offered] == [(h.provider, h.model) for h in harnesses()]
     for provider in {option.provider for option in offered}:
         models = [option for option in offered if option.provider == provider]
         assert [option.default for option in models] == [True] + [False] * (len(models) - 1)

@@ -27,9 +27,9 @@ declare global {
 
 const BRIDGE_FIXTURE = fileURLToPath(new URL('./fake-welcome-bridge.js', import.meta.url));
 
-test.beforeEach(async ({context, page}) => {
+test.beforeEach(async ({baseURL, context, page}) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], {
-    origin: 'http://127.0.0.1:5184',
+    origin: new URL(baseURL ?? '').origin,
   });
   await page.addInitScript({path: BRIDGE_FIXTURE});
   await page.goto('/welcome.html');

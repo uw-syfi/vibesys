@@ -136,6 +136,10 @@ class _Session:
         )
     )
 
+    @property
+    def capture_commands(self) -> CommandRunner:
+        return self.sandbox
+
     def __enter__(self) -> _Session:
         return self
 
@@ -295,7 +299,7 @@ def _measure_with_lost_command(
             )
             runtime = create_workspace_runtime(
                 workspace_resources=factory,
-                blocking=BlockingOperations(runner=InlineBlockingRunner()),
+                blocking=BlockingOperations(runner=InlineBlockingRunner(), threads=SimThreads()),
                 validation_passes=MemoryValidationPasses(),
             )
             evaluation = create_evaluation(

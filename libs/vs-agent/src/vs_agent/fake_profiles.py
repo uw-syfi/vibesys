@@ -44,6 +44,7 @@ class _ProfileOptions(TypedDict, total=False):
     credential_files: tuple[str, ...]
     resume_state_paths: tuple[str, ...]
     mcp_config_file: str | None
+    models: tuple[str, ...]
 
 
 def profile(name: str, **options: Unpack[_ProfileOptions]) -> ProviderProfile:
@@ -74,6 +75,7 @@ def profile(name: str, **options: Unpack[_ProfileOptions]) -> ProviderProfile:
         credential_files=options.get("credential_files", ()),
         resume_state_paths=options.get("resume_state_paths", ()),
         mcp_config_file=options.get("mcp_config_file"),
+        models=options.get("models", ()),
     )
 
 

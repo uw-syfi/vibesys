@@ -64,7 +64,7 @@ if TYPE_CHECKING:
         WorkspaceResourceProvider,
     )
     from vs_sandbox.api import CommandRunner, ComputeBackendImpl
-    from vs_sim.api import BlockingRunner
+    from vs_sim.api import BlockingRunner, Threads
 
 RUN_ID = "workspace-requests"
 
@@ -75,6 +75,10 @@ class _Session:
     view: RunEnvironmentView = field(
         default_factory=lambda: RunEnvironmentView(paths=AgentPaths(), cli_sandboxed=True)
     )
+
+    @property
+    def capture_commands(self) -> CommandRunner:
+        return self.sandbox
 
     def __enter__(self) -> _Session:
         return self
@@ -107,6 +111,7 @@ class WorkspaceEnv:
 
     project: Project
     factory: WorkspaceResourceProvider
+    threads: Threads
     hosts: list[RuntimeWorkspaces] = field(default_factory=list)
     git_disk: FakeGitRepositories | Git = REAL_GIT
     """The in-memory repositories of a world on ``GitKind.FAKE``; ``REAL_GIT`` on real Git."""
@@ -118,7 +123,7 @@ class WorkspaceEnv:
         """
         runtime = create_workspace_runtime(
             workspace_resources=self.factory,
-            blocking=BlockingOperations(runner or ThreadBlockingRunner()),
+            blocking=BlockingOperations(runner or ThreadBlockingRunner(), self.threads),
             validation_passes=MemoryValidationPasses(),
         )
         self.hosts.append(runtime.workspaces)
@@ -221,6 +226,7 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
             clock=ManualClock(),
         )
         with closing(environment):
+            threads = OsThreads()
             factory = WorkspaceResourceFactory(
                 project,
                 environment,
@@ -230,9 +236,9 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
                 skill_selection=NULL_SKILL_SELECTION,
                 host_resources=(),
                 events=events or (lambda _event: None),
-                threads=OsThreads(),
+                threads=threads,
                 blocking=ThreadBlockingRunner(),
             )
-            env = WorkspaceEnv(project.project, factory, git_disk=disk)
+            env = WorkspaceEnv(project.project, factory, threads, git_disk=disk)
             env.start_host()
             yield env

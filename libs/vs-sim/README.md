@@ -6,13 +6,17 @@ timing: the clock, sleeping, seeds, signals, child processes and blocking calls.
 - `vs_sim.api` holds the role-named interfaces product code takes
   (`Clock`, `Sleeper`, `SleepingClock`, `BlockingRunner`, `SignalSource`,
   `ProcessLauncher`, `Processes`, `StreamingCommand`, `OutputSink`, `ByteSource`,
-  `RandomSource`, `Threads`, `Network`)
+  `RandomSource`, `Threads`, `ReservableThreads`, `Network`)
   and their real implementations (`SystemClock`, `MonotonicClock`, `ThreadBlockingRunner`,
   `LoopSignalSource`, `SubprocessLauncher`, `OsProcesses`, `SubprocessStreamingCommand`,
   `LocalFileSource`, `SeededRandom`, `SystemRandomSource`, `OsThreads`, `UnixNetwork`).
   `Threads` is the one interface for everything that blocks an operating-system thread:
   `spawn`, locks, reentrant locks, conditions, events, thread-local values, synchronous
-  `sleep` and a monotonic `now`. `Processes` runs a command to completion in a process group
+  `sleep` and a monotonic `now`. `ReservableThreads` is the narrower extension for a
+  transaction that must own a `WorkerReservation` before an interruption-prone start;
+  aborting code settles that reservation before releasing its other resources. Settlement
+  is idempotent and terminal even when start was never attempted. `Processes`
+  runs a command to completion in a process group
   of its own; its result says whether the command exited, timed out and was cleaned up, or
   timed out and left something running. `Platform` bundles them for the few components that
   use more than three; `Platform.real()` is built at an entrypoint and `Sim.platform` in a

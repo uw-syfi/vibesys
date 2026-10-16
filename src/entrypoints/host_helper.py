@@ -81,7 +81,7 @@ def vetted_harnesses() -> tuple[HarnessOption, ...]:
     # > level every channel would pay for it before `hello` (the light-entrypoint guards forbid
     # > it). A copy of the list in a light module would be a second source of truth, and a
     # > generated copy would need a drift check for what one deferred import already gives.
-    from vs_agent.api import HARNESSES, default_model  # noqa: PLC0415
+    from vs_agent.api import default_model, harnesses  # noqa: PLC0415
 
     return tuple(
         HarnessOption(
@@ -89,7 +89,7 @@ def vetted_harnesses() -> tuple[HarnessOption, ...]:
             model=harness.model,
             default=default_model(harness.provider) == harness.model,
         )
-        for harness in HARNESSES
+        for harness in harnesses()
     )
 
 
@@ -100,9 +100,9 @@ def harness_binaries() -> tuple[tuple[str, str], ...]:
     # > The same deferral as `vetted_harnesses`: `vs_agent.api` owns the vetted list and the
     # > provider profiles that name each CLI, and importing it at module level would make every
     # > channel pay half a second before `hello`; a copied list would be a second source of truth.
-    from vs_agent.api import HARNESSES, provider_binary  # noqa: PLC0415
+    from vs_agent.api import harnesses, provider_binary  # noqa: PLC0415
 
-    providers = dict.fromkeys(harness.provider for harness in HARNESSES)
+    providers = dict.fromkeys(harness.provider for harness in harnesses())
     return tuple((provider, provider_binary(provider)) for provider in providers)
 
 

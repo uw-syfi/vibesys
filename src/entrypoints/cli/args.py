@@ -47,6 +47,8 @@ _REMOVED_DOCKER_FLAG_MESSAGE = (
     "Drop the flag; use --modal, --skypilot, or --slurm-config to choose where "
     "evaluation runs."
 )
+_MAX_RETRIES_PER_ROUND_DEFAULT = 3
+_MAX_UNMEASURED_TURNS_DEFAULT = 2
 
 
 class _RemovedDockerFlag(argparse.Action):
@@ -647,23 +649,48 @@ def _build_agent_parser() -> argparse.ArgumentParser:
         prog="vibesys --outer-loop agent",
         description="Run the autonomous orchestrator-driven build loop.",
     )
-    parser.add_argument("--max-rounds", type=int, default=24)
-    parser.add_argument("--max-retries-per-round", type=int, default=3)
+    parser.add_argument(
+        "--max-rounds",
+        type=int,
+        default=24,
+        metavar="N",
+        help=(
+            "Serial agent loops: N rounds. Dynamic loop: N times --max-in-flight "
+            "admitted workstreams; failed workspace admissions are refunded "
+            "(default: 24)."
+        ),
+    )
+    parser.add_argument(
+        "--max-retries-per-round",
+        type=int,
+        default=_MAX_RETRIES_PER_ROUND_DEFAULT,
+        metavar="N",
+        help=(
+            "Serial agent loops only: maximum paid implementer turns inside each round "
+            f"(default: {_MAX_RETRIES_PER_ROUND_DEFAULT}). The dynamic loop ignores this flag "
+            "and uses "
+            "--max-unmeasured-turns."
+        ),
+    )
     parser.add_argument(
         "--max-in-flight",
         type=int,
         default=2,
         metavar="N",
-        help="Maximum independent dynamic workstreams dispatched concurrently (default: 2).",
+        help=(
+            "Maximum dynamic workstreams whose agents work concurrently; together with "
+            "--max-rounds this sets the admission budget (default: 2)."
+        ),
     )
     parser.add_argument(
         "--max-unmeasured-turns",
         type=int,
-        default=2,
+        default=_MAX_UNMEASURED_TURNS_DEFAULT,
         metavar="N",
         help=(
             "Dynamic loop: turns of one workstream that may end without a candidate "
-            "reaching measurement before it settles as failed (default: 2)."
+            "reaching measurement before it settles as failed "
+            f"(default: {_MAX_UNMEASURED_TURNS_DEFAULT})."
         ),
     )
     parser.add_argument(

@@ -300,6 +300,7 @@ class TestAuthEnvVars:
         assert cli_docker.auth_env_vars("claude") == (
             "ANTHROPIC_AUTH_TOKEN",
             "ANTHROPIC_API_KEY",
+            "CLAUDE_CODE_OAUTH_TOKEN",
             "ANTHROPIC_BASE_URL",
             "ANTHROPIC_CUSTOM_HEADERS",
         )

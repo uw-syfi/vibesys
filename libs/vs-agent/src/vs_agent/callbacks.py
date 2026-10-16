@@ -3,7 +3,6 @@
 import json
 import uuid
 from collections import defaultdict, deque
-from collections.abc import Callable
 from contextlib import suppress
 from typing import Any, TextIO
 
@@ -14,52 +13,6 @@ from vs_agent.progress import AgentProgress
 from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
 from vs_agent.todos import todos_from_tool_call
 from vs_sim.api import Clock
-
-ContextWindowLookup = Callable[[str | None], int | None]
-"""Resolves a model name to its context window size in tokens.
-
-Injected into ``AgentLogger`` so the static prefix table can be stubbed in
-tests today and replaced in the future (e.g. live ``client.models.list()``
-queries against the OpenAI/Anthropic models API, or values loaded from
-``agent.toml``).
-"""
-
-
-# Ordered most-specific first: linear scan returns the first prefix match,
-# so longer prefixes must come before their shorter parents (e.g. ``gpt-5.4``
-# before ``gpt-5``, ``claude-sonnet-4-6`` before ``claude-``).
-#
-# Values verified against vendor docs as of 2026-04-08.
-_MODEL_CONTEXT_WINDOWS: tuple[tuple[str, int], ...] = (
-    # OpenAI — https://developers.openai.com/api/docs/models/
-    ("gpt-5.4", 1_050_000),  # gpt-5.4, gpt-5.4-pro
-    ("gpt-5", 400_000),  # gpt-5, gpt-5-mini, gpt-5-nano, gpt-5.2
-    ("gpt-4o", 128_000),
-    ("gpt-4-turbo", 128_000),
-    ("o1", 200_000),
-    ("o3", 200_000),
-    ("o4", 200_000),
-    # Anthropic — https://platform.claude.com/docs/en/docs/about-claude/models/overview
-    # Opus 4.6 and Sonnet 4.6 default to 1M; older 4.x and Haiku 4.5 are 200k.
-    # (Pre-4.6 models had a context-1m-2025-08-07 beta header that swapped them
-    # to 1M per request, but that's enabled at request time, not by model ID.)
-    ("claude-opus-4-6", 1_000_000),
-    ("claude-sonnet-4-6", 1_000_000),
-    ("claude-", 200_000),
-    # Google
-    ("gemini-", 1_048_576),  # Gemini 2.5 / 3.x families default to 1M
-    ("gemma-", 8_192),
-)
-
-
-def _default_context_window_lookup(model_name: str | None) -> int | None:
-    """Default ``ContextWindowLookup`` — prefix match against the static table."""
-    if not model_name:
-        return None
-    for prefix, ctx in _MODEL_CONTEXT_WINDOWS:
-        if model_name.startswith(prefix):
-            return ctx
-    return None
 
 
 class AgentLogger:
@@ -79,7 +32,7 @@ class AgentLogger:
         model_name: str | None = None,
         agent_label: str | None = None,
         progress: AgentProgress | None = None,
-        context_window_lookup: ContextWindowLookup | None = None,
+        context_window: int | None = None,
         agent_kind: str | None = None,
         round_label: str | None = None,
         invocation_id: str | None = None,
@@ -100,8 +53,9 @@ class AgentLogger:
         self._clock = clock
         self._start_time = self._clock.now()
         self._input_tokens = 0
-        self._context_window_lookup = context_window_lookup or _default_context_window_lookup
-        self._context_window = self._context_window_lookup(model_name)
+        # The model's context window in tokens, or None when unknown: the
+        # status then shows tokens used without a limit.
+        self._context_window = context_window
         self._pending_tool_calls: dict[str, deque[str]] = defaultdict(deque)
         self._agent_kind = agent_kind
         self._round_label = round_label

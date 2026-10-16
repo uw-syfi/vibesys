@@ -102,6 +102,7 @@ test('uses the direct gateway cookie when session storage is denied', async ({pa
 });
 
 test('keeps a manually exchanged session when storage is denied across loopback sites', async ({
+  baseURL,
   page,
 }) => {
   await page.addInitScript(() => {
@@ -148,7 +149,7 @@ test('keeps a manually exchanged session when storage is denied across loopback 
         }),
       ).toBe(true);
     },
-    ['http://127.0.0.1:5173'],
+    [new URL(baseURL ?? '').origin],
   );
 });
 
