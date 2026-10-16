@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import type {RunEvent, RunSnapshot, Span} from '@vibesys/contracts';
-import type {LogStream} from '@vibesys/contracts/host-helper';
+import {type LogStream, parseHelperRequest} from '@vibesys/contracts/host-helper';
 import type {HostRun} from '@vibesys/hosts';
 import {emptyLogView, foldChunk} from '@vibesys/logs';
 import type {RunTracePublication} from '@vibesys/run-session';
@@ -8,6 +8,7 @@ import {type CoreState, initialCoreState, reduceEvent} from '@vibesys/run-state'
 import {checkModel, type Seeded} from '@vibesys/store/testing';
 import {
   endedView,
+  FIRST_HISTORY_SEQUENCE,
   FORCE_STOP_BOUND_MS,
   followedStreams,
   HISTORY_PAGE_EVENTS,
@@ -733,8 +734,11 @@ describe('the run page store', () => {
       }) as unknown as RunEvent;
     const ended = fold(initial(), [{type: 'record', record: RECORDS[8] as RunRecord}]);
     const first = ended.requests.find(request => request.kind === 'read-history');
-    expect(first).toMatchObject({from: 0, max: HISTORY_PAGE_EVENTS});
+    expect(first).toMatchObject({from: FIRST_HISTORY_SEQUENCE, max: HISTORY_PAGE_EVENTS});
     if (first?.kind !== 'read-history') throw new Error('no history asked');
+    // Regression: the first read asked from 0, which the helper refuses (`from_sequence` is
+    // positive), so every run opened ended showed nothing.
+    expect(() => parseHelperRequest(readEventsLine(first.from, first.max))).not.toThrow();
     const paged = fold(ended.state, [
       {
         type: 'history',
@@ -758,6 +762,19 @@ describe('the run page store', () => {
     expect(read.run.core).not.toBeNull();
   });
 });
+
+/** The `runs.read_events` line a history read of `from` and `max` sends to the host's helper. */
+function readEventsLine(from: number, max: number): string {
+  return JSON.stringify({
+    type: 'runs.read_events',
+    request_id: 'history-1',
+    deadline_ms: 30_000,
+    project: '/projects/queue',
+    run_id: 'run-1',
+    from_sequence: from,
+    max,
+  });
+}
 
 describe('the Work tab filter', () => {
   test('changes only the work filter and asks for nothing', () => {

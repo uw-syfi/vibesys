@@ -45,6 +45,7 @@ export {runRecord, sameRecord} from './record.js';
 export {NOTHING_FOLDED, type RunAtView} from './run-at-view.js';
 export {
   commandable,
+  FIRST_HISTORY_SEQUENCE,
   FORCE_STOP_BOUND_MS,
   HISTORY_PAGE_EVENTS,
   type HistoryReply,

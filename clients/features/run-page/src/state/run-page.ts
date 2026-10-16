@@ -71,6 +71,9 @@ export type RunPhase =
 /** The most events one history page asks for. */
 export const HISTORY_PAGE_EVENTS = 500;
 
+/** The sequence a run's journal starts at, where a history read starts (`runs.read_events`). */
+export const FIRST_HISTORY_SEQUENCE = 1;
+
 /**
  * An ended run's recorded events, read page by page (`runs.read_events`) into the run fold: not
  * asked yet, a page awaited under a token, all read, not served by this host, or failed.
@@ -390,7 +393,7 @@ function historyFor(state: RunPageState): RunPageStep {
     // (nothing folded yet) reads its recorded history.
     const folded = state.run.core !== null || state.run.trace !== EMPTY_RUN_FOLD.trace;
     if (folded) return {state: {...state, history: {kind: 'read'}}, requests: []};
-    return readingFrom(state, 0);
+    return readingFrom(state, FIRST_HISTORY_SEQUENCE);
   }
   return {state, requests: []};
 }
