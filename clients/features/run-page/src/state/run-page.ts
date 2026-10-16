@@ -13,6 +13,7 @@ import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun, RunEnd} from '@vibesys/hosts';
 import type {LogListOutcome, LogView} from '@vibesys/logs';
 import type {RunRef} from '@vibesys/runs';
+import {WORK_FILTER_ALL, type WorkFilter, type WorkOutcome} from './work-filter.js';
 
 /** How long a Stop may take before "Force stop" is offered. */
 export const FORCE_STOP_BOUND_MS = 2 * 60 * 1000;
@@ -76,6 +77,8 @@ export interface RunPageState {
   readonly views: Readonly<Record<string, LogView>>;
   /** The stream the Logs tab shows; null shows the first one. */
   readonly selected: string | null;
+  /** The Work tab's search query and outcome filter. */
+  readonly work: WorkFilter;
   readonly next: number;
 }
 
@@ -83,6 +86,8 @@ export type RunPageAction =
   | {readonly type: 'record'; readonly record: RunRecord}
   | {readonly type: 'tab'; readonly tab: RunTab}
   | {readonly type: 'select-stream'; readonly streamId: string}
+  | {readonly type: 'work-query'; readonly query: string}
+  | {readonly type: 'work-outcome'; readonly outcome: WorkOutcome}
   | {readonly type: 'view-logs'}
   | {readonly type: 'ask-stop'}
   | {readonly type: 'cancel-stop'}
@@ -131,6 +136,7 @@ export function runPageInitial(seed: RunPageSeed): RunPageState {
     logs: {kind: 'idle'},
     views: {},
     selected: null,
+    work: WORK_FILTER_ALL,
     next: 1,
   };
 }
@@ -376,6 +382,10 @@ export function runPageStep(state: RunPageState, action: RunPageAction): RunPage
       return {state: {...state, tab: action.tab}, requests: []};
     case 'select-stream':
       return {state: {...state, tab: 'logs', selected: action.streamId}, requests: []};
+    case 'work-query':
+      return {state: {...state, work: {...state.work, query: action.query}}, requests: []};
+    case 'work-outcome':
+      return {state: {...state, work: {...state.work, outcome: action.outcome}}, requests: []};
     case 'view-logs':
       return {state: {...state, tab: 'logs', selected: narration(state)}, requests: []};
     default:

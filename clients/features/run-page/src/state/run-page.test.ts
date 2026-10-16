@@ -114,6 +114,8 @@ const USER_ACTIONS: readonly RunPageAction[] = [
   {type: 'run-again'},
   {type: 'view-logs'},
   {type: 'select-stream', streamId: 's3'},
+  {type: 'work-query', query: 'ring'},
+  {type: 'work-outcome', outcome: 'accepted'},
 ];
 
 function randomAction(random: Seeded, issued: readonly number[]): RunPageAction {
@@ -361,5 +363,24 @@ describe('the run page store', () => {
       unsupported: false,
     });
     expect(mismatched.state.views).toEqual({});
+  });
+});
+
+describe('the Work tab filter', () => {
+  test('changes only the work filter and asks for nothing', () => {
+    const state = initial();
+    for (const action of [
+      {type: 'work-query', query: 'ring'},
+      {type: 'work-outcome', outcome: 'rejected'},
+    ] as const) {
+      const step = runPageStep(state, action);
+      expect(step.requests).toEqual([]);
+      expect({...step.state, work: state.work}).toEqual(state);
+    }
+    const both = fold(state, [
+      {type: 'work-query', query: 'ring'},
+      {type: 'work-outcome', outcome: 'rejected'},
+    ]);
+    expect(both.state.work).toEqual({query: 'ring', outcome: 'rejected'});
   });
 });
