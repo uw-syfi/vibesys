@@ -10,7 +10,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any, Protocol
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AgentExecutionStatus(StrEnum):
@@ -36,8 +36,27 @@ class AgentExecutionStarted(BaseModel):
     model: str | None = None
 
 
+class AgentReply(BaseModel):
+    """The typed reply a structured turn ended with, read through the role's own reply model.
+
+    ``kind`` is that model's name and ``json_schema`` its JSON Schema, so a reader learns which
+    fields are text, choices or lists from the model and keeps no list of its own. ``value`` is
+    the validated reply as JSON.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: str = Field(min_length=1)
+    json_schema: dict[str, Any]
+    value: dict[str, Any]
+
+
 class AgentExecutionFinished(BaseModel):
-    """Semantic terminal observation for one provider invocation."""
+    """Semantic terminal observation for one provider invocation.
+
+    ``reply`` is set when the turn was structured and its text is a valid reply of the turn's
+    model; ``result`` stays the raw text.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -47,6 +66,7 @@ class AgentExecutionFinished(BaseModel):
     status: AgentExecutionStatus
     result: Any = None
     error: str | None = None
+    reply: AgentReply | None = None
 
 
 type AgentExecutionLifecycleEvent = AgentExecutionStarted | AgentExecutionFinished
@@ -64,4 +84,5 @@ __all__ = [
     "AgentExecutionLifecycleSink",
     "AgentExecutionStarted",
     "AgentExecutionStatus",
+    "AgentReply",
 ]

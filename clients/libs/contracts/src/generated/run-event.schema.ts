@@ -72,6 +72,17 @@ const runEventSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "Error"
+        },
+        "reply": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentReply"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "title": "AgentExecutionFinishedData",
@@ -195,6 +206,34 @@ const runEventSchema: Record<string, unknown> = {
         "content"
       ],
       "title": "AgentOutputChunkData",
+      "type": "object"
+    },
+    "AgentReply": {
+      "additionalProperties": false,
+      "description": "The typed reply a structured turn ended with, read through the role's own reply model.\n\n``kind`` is that model's name and ``json_schema`` its JSON Schema, so a reader learns which\nfields are text, choices or lists from the model and keeps no list of its own. ``value`` is\nthe validated reply as JSON.",
+      "properties": {
+        "kind": {
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "json_schema": {
+          "additionalProperties": true,
+          "title": "Json Schema",
+          "type": "object"
+        },
+        "value": {
+          "additionalProperties": true,
+          "title": "Value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind",
+        "json_schema",
+        "value"
+      ],
+      "title": "AgentReply",
       "type": "object"
     },
     "AgentStatusData": {

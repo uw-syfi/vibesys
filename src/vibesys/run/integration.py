@@ -581,7 +581,7 @@ class LocalRunIntegration:
         self.events.emit(
             CoreEventType.AGENT_EXECUTION_FINISHED,
             status=status,
-            data=AgentExecutionFinishedData(result=result, error=event.error),
+            data=AgentExecutionFinishedData(result=result, error=event.error, reply=event.reply),
             **fields,
         )
         self.events.emit(

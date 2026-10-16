@@ -26,6 +26,7 @@ from vs_runtime._agent_lifecycle import (
     AgentExecutionLifecycleSink,
     AgentExecutionStarted,
     AgentExecutionStatus,
+    AgentReply,
 )
 from vs_runtime._bounded_stop import (
     StopGraceError,
@@ -488,6 +489,7 @@ __all__ = [
     "AgentExecutionStarted",
     "AgentExecutionStatus",
     "AgentPaths",
+    "AgentReply",
     "BlockingOperations",
     "BuildStore",
     "BundledResources",

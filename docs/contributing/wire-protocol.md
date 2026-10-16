@@ -98,6 +98,13 @@ trace's order. A span that starts and ends within one commit gets a `span_starte
   before the field existed carry none. Clients never join the two, so a transcript reaches a span
   by `span_id` and never by invocation, name or time. A log stream's owner names its span in `span_id` when the writer
   knows it, and `logs.list` filters by it (see [desktop-connection.md](desktop-connection.md)).
+- **Typed replies.** A structured turn ends with the agent's raw JSON text, which stays in
+  `agent_execution_finished.data.result`. When that text is a valid reply of the turn's role
+  model, `data.reply` carries it as data: `kind` (the reply model's name; a role that may wait
+  reports the result or the wait the envelope holds), `json_schema` (that model's JSON Schema) and
+  `value` (the validated reply as JSON). A client learns which fields are text, choices or lists
+  from `json_schema` and keeps no field list of its own; a reply that fails validation has no
+  `reply`. `reply` is optional and additive within `PROTOCOL_VERSION` 1.
 - **Evolution.** The three events, `RunSnapshot.spans`, `RunEvent.span_id`, `TurnUsageData.span_id` and
   `LogOwner.span_id` are additive within `PROTOCOL_VERSION` 1. A client that predates them counts
   the events as unknown kinds and ignores the new optional fields.

@@ -56,6 +56,7 @@ from vibesys.events import (
 from vibesys.events import RunStartedData as CoreRunStartedData
 from vs_project.api import Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
+from vs_runtime.api.infrastructure import AgentReply
 from vs_sim.api.testing import SimThreads
 
 if TYPE_CHECKING:
@@ -954,3 +955,31 @@ def test_a_run_is_starting_until_its_session_reports_it_ready(tmp_path: Path) ->
     ]
     assert statuses == [(RunStatus.STARTING, RunStatus.RUNNING)]
     parts.integration.close()
+
+
+def test_a_turns_typed_reply_is_data_on_the_executions_finish_event(tmp_path: Path) -> None:
+    parts = build_server_parts(tmp_path)
+    execution_id = _emit_execution_started(
+        parts, "round-1", _execution_started_data("judge", "review")
+    )
+    reply = AgentReply(
+        kind="JudgeResponse",
+        json_schema={"type": "object", "properties": {"verdict": {"enum": ["pass", "fail"]}}},
+        value={"analysis": "checked", "feedback": "", "verdict": "pass", "skills_used": []},
+    )
+
+    parts.core_events.emit(
+        CoreEventType.AGENT_EXECUTION_FINISHED,
+        status=CoreEventStatus.COMPLETED,
+        agent_kind="judge",
+        round_label="round-1",
+        execution_id=execution_id,
+        data=AgentExecutionFinishedData(result="{}", reply=reply),
+    )
+
+    finished = [
+        event.data
+        for event in parts.journal.read()
+        if event.type is EventType.AGENT_EXECUTION_FINISHED
+    ]
+    assert [getattr(data, "reply", None) for data in finished] == [reply]

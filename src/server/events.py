@@ -43,6 +43,7 @@ from server.host_api import StartupProgress, StartupStage
 from server.run_lifecycle import RunStatus
 from vibesys.api import (
     AgentOutputChannel,
+    AgentReply,
     AgentStatusData,
     GateKind,
     QuotaWaitCancelledData,
@@ -325,6 +326,8 @@ class AgentExecutionFinishedData(EventPayload):
     kind: Literal["agent_execution_finished"] = "agent_execution_finished"
     result: Any = None
     error: str | None = None
+    reply: AgentReply | None = None
+    """The typed reply of a structured turn. See ``vibesys.events.AgentExecutionFinishedData``."""
 
 
 class OutputData(EventPayload):

@@ -31,7 +31,7 @@ from vs_agent.api import (
 )
 from vs_core.api import EndReason, SpanId, WireSpan
 from vs_redaction.api import redact_diagnostic_text
-from vs_runtime.api.infrastructure import EnvironmentStartupStage
+from vs_runtime.api.infrastructure import AgentReply, EnvironmentStartupStage
 
 CommandResultPayload = _agent_api.CommandResultPayload
 JsonResultPayload = _agent_api.JsonResultPayload
@@ -211,6 +211,10 @@ class AgentExecutionFinishedData(EventPayload):
     kind: Literal["agent_execution_finished"] = "agent_execution_finished"
     result: Any = None
     error: str | None = None
+    reply: AgentReply | None = None
+    """The typed reply of a structured turn, read through its role's reply model; ``result`` is
+    the raw text it came from. Absent for an unstructured turn or one whose text was no valid
+    reply."""
 
 
 class EvaluatorIdentity(BaseModel):
