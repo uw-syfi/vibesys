@@ -18,7 +18,6 @@ import type {HostRun, RunEnd} from '@vibesys/hosts';
 import type {LogListOutcome, LogView} from '@vibesys/logs';
 import type {CoreState} from '@vibesys/run-state';
 import type {RunRef} from '@vibesys/runs';
-import {WORK_FILTER_ALL, type WorkFilter, type WorkOutcome} from './work-filter.js';
 import {
   EMPTY_RUN_FOLD,
   type RunData,
@@ -28,6 +27,7 @@ import {
   traceProblems,
   traceStep,
 } from './live.js';
+import {WORK_FILTER_ALL, type WorkFilter, type WorkOutcome} from './work-filter.js';
 
 /** How long a Stop may take before "Force stop" is offered. */
 export const FORCE_STOP_BOUND_MS = 2 * 60 * 1000;
