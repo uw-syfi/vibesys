@@ -15,6 +15,9 @@ from vs_agent.api.images import (
     DockerCommandResult,
     TaskImageBuildError,
     build_task_image,
+    is_task_image_reference,
+    local_image_exists,
+    task_image_reference,
 )
 from vs_agent.api.testing import (
     DockerBuildResult,
@@ -450,3 +453,44 @@ def test_build_rejects_dockerfile_symlink_without_widening_context(tmp_path: Pat
         build_task_image(dockerfile, command_runner=runner, clock=ManualClock(), output=DISCARD)
 
     assert runner.calls == []
+
+
+def test_a_build_never_prunes_another_tasks_tag(tmp_path: Path) -> None:
+    """Regression: a build pruned every task's tag on the daemon, so concurrent runs
+    (other tasks, other checkouts, other users of a shared host) lost their images."""
+    store = _FakeDockerImageStore()
+    first = tmp_path / "one" / "Dockerfile"
+    second = tmp_path / "two" / "Dockerfile"
+    for dockerfile in (first, second):
+        dockerfile.parent.mkdir()
+        dockerfile.write_text("FROM scratch\n", encoding="utf-8")
+
+    build_task_image(first, command_runner=store, clock=ManualClock(), output=DISCARD)
+    build_task_image(second, command_runner=store, clock=ManualClock(), output=DISCARD)
+    second.write_text("FROM scratch\nRUN echo changed\n", encoding="utf-8")
+    build_task_image(second, command_runner=store, clock=ManualClock(), output=DISCARD)
+
+    assert store.builds[0] in store.tags
+    assert store.removed == [store.builds[1]]
+
+
+@given(base=st.one_of(st.none(), st.text(min_size=1, max_size=30)))
+def test_the_reference_is_the_tag_the_build_produces(base: str | None) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        dockerfile = Path(directory) / "Dockerfile"
+        dockerfile.write_text("FROM scratch\n", encoding="utf-8")
+        store = _FakeDockerImageStore()
+        reference = task_image_reference(dockerfile, base_image=base)
+
+        assert not local_image_exists(
+            reference, command_runner=store, output=DISCARD, clock=ManualClock()
+        )
+        build_task_image(
+            dockerfile, base_image=base, command_runner=store, clock=ManualClock(), output=DISCARD
+        )
+
+        assert store.builds == [reference]
+        assert is_task_image_reference(reference)
+        assert local_image_exists(
+            reference, command_runner=store, output=DISCARD, clock=ManualClock()
+        )

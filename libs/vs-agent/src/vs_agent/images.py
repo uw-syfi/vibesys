@@ -71,11 +71,16 @@ _PROCESS_SETTLE_TIMEOUT_SECONDS = 5.0
 # After a normally exited leader, leave half of the one final cleanup budget
 # for killing inherited writers and settling the readers they kept open.
 _DRAIN_GRACE_FRACTION = 0.5
-#: Repository of the local tag keyed by a digest of the task's build context,
-#: Dockerfile, and base image argument, so an unchanged task retags the same
-#: image and a changed one gets a new tag. Every build prunes the
-#: repository's other tags, so at most one survives past one launch.
-_TASK_IMAGE_REPOSITORY = "vibesys-task-build"
+TASK_IMAGE_REPOSITORY = "vibesys-task-build"
+"""Repository of the task image's local tag, ``<owner>-<inputs>``.
+
+``<owner>`` is keyed to the task directory's absolute path, so two tasks (or
+two checkouts, or two users of one daemon) never share a tag prefix.
+``<inputs>`` is a digest of the build context, the Dockerfile, and the base
+image argument, so an unchanged task retags the same image and a changed one
+gets a new tag. A build prunes only its own owner's other tags.
+"""
+_TASK_IMAGE_REPOSITORY = TASK_IMAGE_REPOSITORY
 #: Repository of the local tag that names a bare image ID so BuildKit can
 #: resolve it in a ``FROM`` line. Keyed by the full ID, so re-tagging is a
 #: no-op and the agent layer's cache key stays stable.
@@ -840,6 +845,62 @@ def _validated_task_dockerfile(dockerfile_path: Path, timeout: float) -> Path:
     return dockerfile
 
 
+def task_image_reference(dockerfile_path: Path, *, base_image: str | None) -> str:
+    """Return the local tag :func:`build_task_image` builds *dockerfile_path* to.
+
+    The tag is a function of the task directory's location and of every build
+    input (the context, the Dockerfile, ``base_image``), read now, without
+    Docker. A run records it so a resume can tell unchanged inputs (rebuild
+    the same tag when the image is gone) from changed ones.
+    """
+    dockerfile = _validated_task_dockerfile(dockerfile_path, _DEFAULT_BUILD_TIMEOUT_SECONDS)
+    return _task_image_tag(dockerfile.parent, base_image)
+
+
+def is_task_image_reference(image: str) -> bool:
+    """Return whether *image* is a tag :func:`task_image_reference` produces."""
+    return image.startswith(f"{TASK_IMAGE_REPOSITORY}:")
+
+
+def local_image_exists(
+    image: str,
+    *,
+    command_runner: DockerBuildRunner | None = None,
+    output: OutputSink,
+    clock: Clock,
+) -> bool:
+    """Return whether the local Docker daemon has *image* (a tag or an ID).
+
+    A failed ``docker image inspect`` means absent. Docker missing, or the
+    inspection outliving its bound, raises :class:`TaskImageBuildError`.
+    """
+    build = _BuildRun(
+        runner=command_runner or SubprocessDockerBuildRunner(),
+        timeout=_DEFAULT_VERIFY_TIMEOUT_SECONDS,
+        output=output,
+        clock=clock,
+    )
+    target = _BuildTarget(
+        source=image,
+        context=Path.cwd(),
+        image_repository=TASK_IMAGE_REPOSITORY,
+        image_label="task image",
+    )
+    argv = ("docker", "image", "inspect", "--format", "{{.Id}}", image)
+    result = _run_docker(build, argv, action="inspecting", target=target)
+    return result.returncode == 0
+
+
+def _task_image_tag(context: Path, base_image: str | None) -> str:
+    """The task image's local tag: its owner, then its build inputs."""
+    return f"{TASK_IMAGE_REPOSITORY}:{_task_image_owner(context)}-{_task_image_digest(context, base_image)}"
+
+
+def _task_image_owner(context: Path) -> str:
+    """A 16-character key of the task directory's absolute location."""
+    return hashlib.sha256(str(context).encode()).hexdigest()[:16]
+
+
 def _build_task_image(dockerfile: Path, *, base_image: str | None, build: _BuildRun) -> _BuiltImage:
     """Build a validated task Dockerfile to a content-addressed tag and return it with its ID."""
     context = dockerfile.parent
@@ -850,7 +911,7 @@ def _build_task_image(dockerfile: Path, *, base_image: str | None, build: _Build
         image_repository=_TASK_IMAGE_REPOSITORY,
         image_label="task image",
     )
-    image_tag = f"{_TASK_IMAGE_REPOSITORY}:{_task_image_digest(context, base_image)}"
+    image_tag = _task_image_tag(context, base_image)
     built = _build_and_inspect(target, extra_build_args, build, image_tag=image_tag)
     _prune_superseded_task_tags(build, context, keep_tag=image_tag)
     return built
@@ -880,12 +941,14 @@ def _task_image_digest(context: Path, base_image: str | None) -> str:
 
 
 def _prune_superseded_task_tags(build: _BuildRun, context: Path, *, keep_tag: str) -> None:
-    """Best-effort: remove every other local tag under :data:`_TASK_IMAGE_REPOSITORY`.
+    """Best-effort: remove this task's other local tags under :data:`TASK_IMAGE_REPOSITORY`.
 
     One launch resolves exactly one task image tag (*keep_tag*, keyed to this
-    task's content); any other tag in the repository is left over from a
-    since-changed task or an earlier VibeSys version and would otherwise
-    accumulate forever, which is the bug this guards against. Removing a tag
+    task's content); any other tag with the same owner prefix is left over
+    from a since-changed version of this task and would otherwise accumulate
+    forever, which is the bug this guards against. Tags of other tasks, other
+    checkouts, other users of the daemon, and earlier VibeSys versions are
+    never touched: a concurrent run may be using them. Removing a tag
     drops a name, not Docker's own layer cache, so a future build of a
     since-pruned task still reuses whatever layers it shares with others.
     Failing to list or remove a tag does not fail the build: the image this
@@ -908,8 +971,9 @@ def _prune_superseded_task_tags(build: _BuildRun, context: Path, *, keep_tag: st
     if listed.returncode != 0:
         return
     keep_suffix = keep_tag.removeprefix(f"{_TASK_IMAGE_REPOSITORY}:")
+    owner = f"{_task_image_owner(context)}-"
     for tag in listed.stdout.split():
-        if tag == keep_suffix:
+        if tag == keep_suffix or not tag.startswith(owner):
             continue
         timeout = min(_DEFAULT_VERIFY_TIMEOUT_SECONDS, build.remaining())
         if timeout <= 0:
