@@ -213,6 +213,7 @@ function secondCall(): readonly Step[] {
   };
   const w5Turn = turn('op:w5-turn', w5.id, 'implementer', 1240);
   const w6Turn = turn('op:w6-turn', w6.id, 'implementer', 1241);
+  const w5Judge = turn('op:w5-judge', w5.id, 'judge', 1640);
   const probe: FakeSpan = {
     id: 'op:cache-warmup',
     parent: ROOT,
@@ -240,6 +241,8 @@ function secondCall(): readonly Step[] {
     ['span_started', probe],
     ['span_ended', ended(w5Turn, 1630, 'done')],
     ['span_started', gate(W5_GATE, w5.id, 1631)],
+    ['span_started', w5Judge],
+    ['span_ended', ended(w5Judge, 1700, 'done')],
     [
       'span_updated',
       {...w6Turn, attempts: retried(1241, 1500, 'build failed: missing Send bound')},
@@ -332,4 +335,60 @@ export function turnEvents(after: number): readonly Record<string, unknown>[] {
     span_id: 'op:w5-turn',
     data,
   }));
+}
+
+const JUDGE_REPLY = {
+  analysis:
+    'The current src/lib.rs matches the declared outcome: the counters sit on separate cache lines and the correctness gate passed.',
+  feedback: '',
+  verdict: 'pass',
+  skills_used: [],
+};
+
+const JUDGE_SCHEMA = {
+  $defs: {Verdict: {enum: ['pass', 'fail'], type: 'string'}},
+  properties: {
+    analysis: {type: 'string'},
+    feedback: {type: 'string'},
+    verdict: {$ref: '#/$defs/Verdict'},
+    skills_used: {type: 'array', items: {type: 'object'}},
+  },
+  required: ['analysis', 'feedback', 'verdict'],
+  type: 'object',
+};
+
+/**
+ * The judge's turn under W5: the raw JSON it streamed, then the finish event that carries the
+ * same reply as typed data, as the server sends them. `after` is the last event's sequence.
+ */
+export function judgeEvents(after: number): readonly Record<string, unknown>[] {
+  const stamp = new Date(START + 1750 * 1000).toISOString().slice(0, 19);
+  const raw = JSON.stringify({reply: JUDGE_REPLY});
+  const common = {
+    protocol_version: 1,
+    run_id: RUN_ID,
+    timestamp: `${stamp}+00:00`,
+    invocation_id: 'inv-w5-judge',
+    agent_kind: 'judge',
+    span_id: 'op:w5-judge',
+  };
+  return [
+    {
+      ...common,
+      sequence: after + 1,
+      type: 'agent_output_chunk',
+      data: {kind: 'agent_output_chunk', channel: 'assistant', content: raw},
+    },
+    {
+      ...common,
+      sequence: after + 2,
+      type: 'agent_execution_finished',
+      status: 'completed',
+      data: {
+        kind: 'agent_execution_finished',
+        result: raw,
+        reply: {kind: 'JudgeResponse', json_schema: JUDGE_SCHEMA, value: JUDGE_REPLY},
+      },
+    },
+  ];
 }

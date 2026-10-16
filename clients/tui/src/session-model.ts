@@ -378,7 +378,8 @@ export interface ConversationEntry {
     | 'diagnostic'
     | 'subprocess'
     | 'status'
-    | 'result';
+    | 'result'
+    | 'reply';
   content: string;
   /** TUI-owned label semantics for entries created locally by the controller. */
   labelKind?: 'chat_commands' | 'user' | 'user_queued' | 'answer' | 'chat_failed';

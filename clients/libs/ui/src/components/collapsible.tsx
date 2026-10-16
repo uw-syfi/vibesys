@@ -9,6 +9,8 @@ import {Icon} from './icon.js';
 export function Collapsible(props: {
   readonly label: string;
   readonly summary?: string;
+  /** Muted text at the end of the title line, such as a size or a count. */
+  readonly meta?: string;
   /** Something before the title that says what the block is: a status dot or a chip. */
   readonly leading?: ReactNode;
   /** Set the title in the mono face, for a name that is code. */
@@ -36,6 +38,9 @@ export function Collapsible(props: {
         </span>
         {props.summary === undefined ? null : (
           <span className="vs-collapsible-summary">{props.summary}</span>
+        )}
+        {props.meta === undefined ? null : (
+          <span className="vs-collapsible-meta">{props.meta}</span>
         )}
       </button>
       {props.open ? (

@@ -146,6 +146,7 @@ describe('the turns under the selected Map step', () => {
         name: 'Bash',
         state: 'ok',
         summary: 'cargo bench',
+        meta: '13 chars',
         input: '{\n  "command": "cargo bench"\n}',
         output: 'ok 14 benches',
       },
@@ -250,5 +251,144 @@ describe('the turns under the selected Map step', () => {
       expect(words.filter(word => word !== '').length, `seed ${seed}`).toBe(sent);
       expect(calls, `seed ${seed}`).toBe(events.length - sent);
     }
+  });
+});
+
+/** What the server sends for a judge's turn: the reply model's schema and the validated reply. */
+const JUDGE_SCHEMA = {
+  $defs: {Verdict: {enum: ['pass', 'fail'], type: 'string'}},
+  properties: {
+    analysis: {type: 'string'},
+    feedback: {type: 'string'},
+    verdict: {$ref: '#/$defs/Verdict'},
+    skills_used: {type: 'array', items: {type: 'object'}},
+  },
+  required: ['analysis', 'feedback', 'verdict'],
+  type: 'object',
+};
+
+function replied(
+  sequence: number,
+  spanId: string,
+  kind: string,
+  schema: Record<string, unknown>,
+  value: Record<string, unknown>,
+): RunEvent {
+  return event(sequence, 'agent_execution_finished', {
+    invocation_id: `inv-${spanId}`,
+    agent_kind: 'judge',
+    span_id: spanId,
+    status: 'completed',
+    data: {
+      kind: 'agent_execution_finished',
+      result: JSON.stringify({reply: value}) as unknown as Record<string, unknown>,
+      reply: {kind, json_schema: schema, value},
+    },
+  });
+}
+
+function rowsOf(events: readonly RunEvent[], selected: string): readonly TurnRow[] {
+  return turns(page(events, selected))?.rows ?? [];
+}
+
+describe('a structured reply under the selected Map step', () => {
+  const JUDGE = {
+    analysis: 'The current src/lib.rs matches.',
+    feedback: '',
+    verdict: 'pass',
+    skills_used: [],
+  };
+
+  test('a judge reply shows its analysis as text and its verdict as a badge, with no braces', () => {
+    const raw = JSON.stringify({reply: JUDGE});
+    const rows = rowsOf(
+      [say(10, 'op:1', raw), replied(11, 'op:1', 'JudgeResponse', JUDGE_SCHEMA, JUDGE)],
+      'op:1',
+    );
+    expect(rows.map(row => row.kind)).toEqual(['heading', 'reply']);
+    const reply = rows[1];
+    if (reply?.kind !== 'reply') throw new Error('no reply row');
+    expect(reply.title).toBe('Judge response');
+    expect(reply.fields).toEqual([
+      {kind: 'prose', key: 'analysis', label: 'Analysis', text: 'The current src/lib.rs matches.'},
+      {kind: 'badge', key: 'verdict', label: 'Verdict', value: 'pass', tone: 'ok'},
+    ]);
+    const shown = JSON.stringify(
+      reply.fields.map(field => [field.label, 'text' in field ? field.text : '']),
+    );
+    expect(shown).not.toContain('{');
+    expect(reply.raw).toContain('"verdict": "pass"');
+  });
+
+  test('a failing verdict reads as an error badge, and empty fields are not shown', () => {
+    const rows = rowsOf(
+      [
+        replied(10, 'op:1', 'JudgeResponse', JUDGE_SCHEMA, {
+          ...JUDGE,
+          feedback: '',
+          verdict: 'fail',
+        }),
+      ],
+      'op:1',
+    );
+    const reply = rows.find(row => row.kind === 'reply');
+    expect(reply?.kind === 'reply' && reply.fields.map(field => field.key)).toEqual([
+      'analysis',
+      'verdict',
+    ]);
+    expect(reply?.kind === 'reply' && reply.fields[1]).toMatchObject({tone: 'err'});
+  });
+
+  test('a reply of a kind nothing knows reads generically: text, lists, nested records', () => {
+    const value = {
+      summary: 'Padded the counters.',
+      files_touched: ['src/queue.rs', 'src/lib.rs'],
+      metrics: {ops: 41.2, noisy: false},
+      notes: [
+        {title: 'a', detail: 'first'},
+        {title: 'b', detail: ''},
+      ],
+      empty: [],
+      nothing: null,
+    };
+    const rows = rowsOf([replied(10, 'op:1', 'BrandNewReply', {}, value)], 'op:1');
+    const reply = rows.find(row => row.kind === 'reply');
+    if (reply?.kind !== 'reply') throw new Error('no reply row');
+    expect(reply.title).toBe('Brand new reply');
+    expect(reply.fields.map(field => [field.kind, field.key])).toEqual([
+      ['prose', 'summary'],
+      ['list', 'files_touched'],
+      ['group', 'metrics'],
+      ['group', 'notes'],
+    ]);
+  });
+});
+
+describe('a tool call in the turn view', () => {
+  test('is one line of name, main argument and result size, with the full text behind it', () => {
+    const output = 'a\nb\nc';
+    const rows = rowsOf(
+      [call(10, 'op:1', 'c1', 'cargo bench --bench queue'), result(11, 'op:1', 'c1', output)],
+      'op:1',
+    );
+    expect(rows[1]).toMatchObject({
+      kind: 'tool',
+      name: 'Bash',
+      summary: 'cargo bench --bench queue',
+      meta: '3 lines',
+      output,
+      state: 'ok',
+    });
+  });
+
+  test('says why a failed or empty result has no size', () => {
+    const failed = rowsOf(
+      [call(10, 'op:1', 'c1', 'x'), result(11, 'op:1', 'c1', 'boom', true)],
+      'op:1',
+    );
+    expect(failed[1]).toMatchObject({state: 'failed', meta: 'failed · 4 chars'});
+    const empty = rowsOf([call(10, 'op:1', 'c1', 'x'), result(11, 'op:1', 'c1', '')], 'op:1');
+    expect(empty[1]).toMatchObject({meta: 'no output'});
+    expect(rowsOf([call(10, 'op:1', 'c1', 'x')], 'op:1')[1]).not.toHaveProperty('meta');
   });
 });

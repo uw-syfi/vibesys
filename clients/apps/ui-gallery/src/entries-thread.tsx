@@ -3,7 +3,9 @@ import {
   Collapsible,
   Message,
   type MessageVariant,
+  type ReplyField,
   Stack,
+  StructuredReply,
   Text,
   Thread,
   type ThreadItem,
@@ -95,6 +97,8 @@ function ToolCallDemo(): JSX.Element {
         ...base,
         name: 'Read',
         state: 'ok',
+        summary: 'src/queue.rs',
+        meta: '4 lines',
         input: '{\n  "file_path": "src/queue.rs"\n}',
         output: 'pub struct Queue {\n    head: AtomicUsize,\n    tail: AtomicUsize,\n}',
       })}
@@ -102,12 +106,31 @@ function ToolCallDemo(): JSX.Element {
         ...base,
         name: 'Edit',
         state: 'failed',
+        summary: 'src/queue.rs',
+        meta: 'failed · 38 chars',
         input: '{\n  "file_path": "src/queue.rs",\n  "old_string": "head"\n}',
         output: 'The string to replace was not found.',
       })}
     </Stack>
   );
 }
+
+const REPLY_FIELDS: readonly ReplyField[] = [
+  {kind: 'badge', key: 'verdict', label: 'Verdict', value: 'pass', tone: 'ok'},
+  {
+    kind: 'prose',
+    key: 'analysis',
+    label: 'Analysis',
+    text: 'The current src/lib.rs matches the declared outcome.\nThe benchmark gate passed and no check regressed.',
+  },
+  {kind: 'list', key: 'checks', label: 'Checks', items: ['build', 'accuracy', 'benchmark']},
+  {
+    kind: 'group',
+    key: 'skills_used',
+    label: 'Skills used',
+    fields: [{kind: 'fact', key: 'skill', label: 'Skill', value: 'rocprof'}],
+  },
+];
 
 const THREAD: readonly ThreadItem[] = [
   {kind: 'heading', id: 'h1', title: 'Pad the head and tail counters', detail: 'Worker'},
@@ -132,6 +155,7 @@ const THREAD: readonly ThreadItem[] = [
     name: 'Read',
     state: 'ok',
     summary: 'src/queue.rs',
+    meta: '4 lines',
     input: '{\n  "file_path": "src/queue.rs"\n}',
     output: 'pub struct Queue {\n    head: AtomicUsize,\n    tail: AtomicUsize,\n}',
   },
@@ -141,6 +165,7 @@ const THREAD: readonly ThreadItem[] = [
     name: 'Edit',
     state: 'failed',
     summary: 'src/queue.rs',
+    meta: 'failed · 38 chars',
     input: '{\n  "file_path": "src/queue.rs"\n}',
     output: 'The string to replace was not found.',
   },
@@ -159,6 +184,14 @@ const THREAD: readonly ThreadItem[] = [
     summary: 'cargo bench --bench queue',
     input: '{\n  "command": "cargo bench --bench queue"\n}',
     output: null,
+  },
+  {
+    kind: 'reply',
+    id: 'r1',
+    author: 'Judge',
+    title: 'Judge response',
+    fields: REPLY_FIELDS,
+    raw: '{}',
   },
   {kind: 'heading', id: 'h2', title: 'Batch the producer handoff', detail: 'Worker'},
   {
@@ -179,12 +212,30 @@ const THREAD: readonly ThreadItem[] = [
   },
 ];
 
+function StructuredReplyDemo(): JSX.Element {
+  const [open, setOpen] = useState(true);
+  return (
+    <StructuredReply
+      author="Judge"
+      title="Judge response"
+      fields={REPLY_FIELDS}
+      raw={'{\n  "verdict": "pass"\n}'}
+      open={open}
+      toggle={setOpen}
+    />
+  );
+}
+
 export const THREAD_ENTRIES: Readonly<
-  Record<Extract<ComponentName, 'Collapsible' | 'Message' | 'ToolCall' | 'Thread'>, GalleryEntry>
+  Record<
+    Extract<ComponentName, 'Collapsible' | 'Message' | 'ToolCall' | 'StructuredReply' | 'Thread'>,
+    GalleryEntry
+  >
 > = {
   Collapsible: {render: () => <CollapsibleDemo />},
   Message: {render: () => <MessageDemo />},
   ToolCall: {render: () => <ToolCallDemo />},
+  StructuredReply: {render: () => <StructuredReplyDemo />},
   Thread: {
     render: () => (
       <Card>

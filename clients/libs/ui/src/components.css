@@ -1155,6 +1155,16 @@ button.vs-stage-head {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.vs-collapsible-meta {
+  flex: none;
+  margin-left: auto;
+  color: var(--muted);
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  line-height: var(--text-code-line);
+  font-weight: var(--text-code-weight);
+  white-space: nowrap;
+}
 .vs-collapsible-body {
   display: flex;
   flex-direction: column;
@@ -1183,6 +1193,24 @@ button.vs-stage-head {
 }
 .vs-message[data-tone="err"] .vs-message-text {
   color: var(--err);
+}
+
+.vs-reply-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.vs-reply-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.vs-reply-field[data-inline] {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-3);
 }
 
 .vs-code-block {

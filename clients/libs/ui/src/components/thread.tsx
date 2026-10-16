@@ -8,6 +8,7 @@ import {
   ToolCall,
   type ToolState,
 } from './message.js';
+import {type ReplyField, StructuredReply} from './structured-reply.js';
 import {Text} from './text.js';
 
 /** One entry of a thread: a heading that starts a section, a message, or a tool call. */
@@ -30,11 +31,22 @@ export type ThreadItem =
       readonly startOpen?: boolean;
     }
   | {
+      readonly kind: 'reply';
+      readonly id: string;
+      readonly author: string;
+      readonly title: string;
+      readonly fields: readonly ReplyField[];
+      readonly raw: string;
+      /** Open until the reader decides; a structured reply starts open. */
+      readonly startOpen?: boolean;
+    }
+  | {
       readonly kind: 'tool';
       readonly id: string;
       readonly name: string;
       readonly state: ToolState;
       readonly summary?: string;
+      readonly meta?: string;
       readonly input: string | null;
       readonly output: string | null;
       readonly startOpen?: boolean;
@@ -48,6 +60,7 @@ const OVERSCAN = 6;
 function startsOpen(item: ThreadItem): boolean {
   if (item.kind === 'heading') return true;
   if (item.startOpen !== undefined) return item.startOpen;
+  if (item.kind === 'reply') return true;
   return item.kind === 'message' && (item.variant === 'reply' || item.variant === 'note');
 }
 
@@ -111,11 +124,24 @@ function Row(props: {
       />
     );
   }
+  if (item.kind === 'reply') {
+    return (
+      <StructuredReply
+        author={item.author}
+        title={item.title}
+        fields={item.fields}
+        raw={item.raw}
+        open={open}
+        toggle={toggle}
+      />
+    );
+  }
   return (
     <ToolCall
       name={item.name}
       state={item.state}
       {...(item.summary === undefined ? {} : {summary: item.summary})}
+      {...(item.meta === undefined ? {} : {meta: item.meta})}
       input={item.input}
       output={item.output}
       open={open}

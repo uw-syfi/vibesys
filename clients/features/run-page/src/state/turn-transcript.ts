@@ -10,6 +10,7 @@ import type {CoreState} from '@vibesys/run-state';
 import {type RunTrace, traceSpans} from '@vibesys/run-state/trace';
 import {type TranscriptEntry, transcriptBySpan} from '@vibesys/run-state/transcript';
 import {selectedSpan} from './map-view.js';
+import {type ReplyFieldView, replyFields, replyTitle} from './reply-fields.js';
 import type {MapState} from './run-page.js';
 import {ended, plain, statusWords, titleOf} from './span-words.js';
 
@@ -34,11 +35,20 @@ export type TurnRow =
       readonly notice?: string;
     }
   | {
+      readonly kind: 'reply';
+      readonly id: string;
+      readonly author: string;
+      readonly title: string;
+      readonly fields: readonly ReplyFieldView[];
+      readonly raw: string;
+    }
+  | {
       readonly kind: 'tool';
       readonly id: string;
       readonly name: string;
       readonly state: 'pending' | 'ok' | 'failed';
       readonly summary?: string;
+      readonly meta?: string;
       readonly input: string | null;
       readonly output: string | null;
     };
@@ -74,6 +84,19 @@ function summaryOf(args: Readonly<Record<string, unknown>> | undefined): string 
   return line.length > SUMMARY_LIMIT ? `${line.slice(0, SUMMARY_LIMIT - 1)}…` : line;
 }
 
+/** The size of a tool's result in a word or two, or why it has none. */
+function metaOf(state: 'pending' | 'ok' | 'failed', output: string | null): string | undefined {
+  if (state === 'pending') return undefined;
+  if (output === null) return 'no result';
+  if (output === '') return 'no output';
+  const lines = output.split('\n').length;
+  const prefix = state === 'failed' ? 'failed · ' : '';
+  if (lines > 1) return `${prefix}${lines} lines`;
+  const size =
+    output.length < 1000 ? `${output.length} chars` : `${(output.length / 1000).toFixed(1)} KB`;
+  return `${prefix}${size}`;
+}
+
 function toolRow(entry: TranscriptEntry, turnEnded: boolean): TurnRow {
   const args = entry.toolArguments;
   const settled = entry.toolResult !== undefined;
@@ -84,12 +107,15 @@ function toolRow(entry: TranscriptEntry, turnEnded: boolean): TurnRow {
     : (entry.toolCall ?? '').replace(/^\s*→\s*/, '').split('\n', 1)[0] || 'Tool';
   const output = typed ? (settled ? (entry.toolResult?.content ?? '') : null) : entry.content;
   const summary = summaryOf(args);
+  const state = failed ? 'failed' : settled || turnEnded || !typed ? 'ok' : 'pending';
+  const meta = metaOf(state, output);
   return {
     kind: 'tool',
     id: entry.id,
     name,
-    state: failed ? 'failed' : settled || turnEnded || !typed ? 'ok' : 'pending',
+    state,
     ...(summary === undefined ? {} : {summary}),
+    ...(meta === undefined ? {} : {meta}),
     input: args === undefined ? null : JSON.stringify(args, null, 2),
     output,
   };
@@ -108,6 +134,20 @@ function messageRow(entry: TranscriptEntry, variant: TurnVoice, author: string):
   };
 }
 
+function replyRow(entry: TranscriptEntry, author: string): TurnRow {
+  const reply = entry.reply;
+  if (reply === undefined) return messageRow(entry, 'note', author);
+  const value = reply.value as Readonly<Record<string, unknown>>;
+  return {
+    kind: 'reply',
+    id: entry.id,
+    author,
+    title: replyTitle(reply.kind),
+    fields: replyFields(reply.json_schema as Readonly<Record<string, unknown>>, value),
+    raw: JSON.stringify(value, null, 2),
+  };
+}
+
 function rowOf(entry: TranscriptEntry, turnEnded: boolean): TurnRow {
   const agent = entry.agentKind === undefined ? 'Agent' : plain(entry.agentKind);
   switch (entry.kind) {
@@ -117,6 +157,8 @@ function rowOf(entry: TranscriptEntry, turnEnded: boolean): TurnRow {
       return messageRow(entry, 'reasoning', agent);
     case 'prompt':
       return messageRow(entry, 'prompt', agent);
+    case 'reply':
+      return replyRow(entry, agent);
     case 'tool':
       return toolRow(entry, turnEnded);
     case 'diagnostic':
