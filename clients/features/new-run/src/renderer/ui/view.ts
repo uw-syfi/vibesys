@@ -7,6 +7,7 @@ import type {RecentRun} from '@vibesys/runs';
 import type {CheckState, KeyValueItem} from '@vibesys/ui';
 import {
   advancedProblem,
+  type Backend,
   type Check,
   checksPass,
   inputsKey,
@@ -79,6 +80,43 @@ export function rolesView(context: NewRunContext): RolesView {
     : {kind: 'pending'};
 }
 
+const BACKEND_LABELS: Readonly<Record<Backend, string>> = {
+  cpu: 'CPU',
+  cuda: 'NVIDIA GPU (CUDA)',
+  rocm: 'AMD GPU (ROCm)',
+  metal: 'Apple GPU (Metal)',
+  trainium: 'AWS Trainium',
+};
+
+/** A compute backend as a person reads it. */
+export function backendLabel(backend: Backend): string {
+  return BACKEND_LABELS[backend];
+}
+
+/**
+ * The compute backend the run will use, read-only: it is the task's, so it is shown, never chosen.
+ * Null until the checks for the inputs now have reported it (or from a helper that does not).
+ */
+export function backendOf(context: NewRunContext): Backend | null {
+  const key = inputsKey(context.form);
+  return key !== null && context.checks?.for === key ? context.checks.backend : null;
+}
+
+/**
+ * A failed check in words for this screen, from its typed cause when it has one: the app names
+ * what to change here (the task or the machine), never a command-line flag.
+ */
+function causeDetail(check: Check, machine: HostKey): string | null {
+  const cause = check.cause ?? null;
+  if (cause === null) return null;
+  const on = machineLabel(machine);
+  const wants =
+    cause.declared.length > 1
+      ? `one of ${cause.declared.map(backendLabel).join(', ')}`
+      : backendLabel(cause.backend);
+  return `The task "${cause.task}" runs on ${wants}, which ${on} does not have. Choose another task or another machine.`;
+}
+
 const CHECK_LABELS: Readonly<Record<Check['id'], string>> = {
   checkout_found: 'VibeSys checkout',
   project_own_repository: 'Project in its own repository',
@@ -117,14 +155,14 @@ function checkFix(check: Check, project: string | null): ReadinessFix | undefine
   return {kind: 'recheck'};
 }
 
-function checkItem(check: Check, project: string | null): Readiness {
+function checkItem(check: Check, project: string | null, machine: HostKey): Readiness {
   const fix = check.state === 'ok' ? undefined : checkFix(check, project);
   const copyTo = fix?.kind === 'copy_out' ? ` Its copy goes to ${fix.destination}.` : '';
   return {
     id: check.id,
     state: check.state,
     label: CHECK_LABELS[check.id],
-    detail: `${check.detail}${copyTo}`,
+    detail: `${causeDetail(check, machine) ?? check.detail}${copyTo}`,
     ...(fix === undefined ? {} : {fix}),
   };
 }
@@ -188,7 +226,7 @@ function inputReadiness(snapshot: NewRunSnapshot): Readiness[] {
   if (key === null) return missing(context);
   if (context.checks !== null && context.checks.for === key) {
     const project = projectPath(context.form);
-    return context.checks.list.map(check => checkItem(check, project));
+    return context.checks.list.map(check => checkItem(check, project, context.form.machine));
   }
   return [{id: 'checking', state: 'pending', label: 'Checking these inputs on the machine'}];
 }
@@ -216,5 +254,13 @@ export function summary(context: NewRunContext): string | null {
   const {task, agent, budget, machine} = context.form;
   if (project === null || task === null || agent === null) return null;
   const rounds = budget.rounds === null ? 'rounds as configured' : `${budget.rounds} rounds`;
-  return [lastSegment(project), task, machineLabel(machine), agent.model, rounds].join(' · ');
+  const backend = backendOf(context);
+  return [
+    lastSegment(project),
+    task,
+    machineLabel(machine),
+    ...(backend === null ? [] : [backendLabel(backend)]),
+    agent.model,
+    rounds,
+  ].join(' · ');
 }

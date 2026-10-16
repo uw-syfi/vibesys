@@ -42,6 +42,7 @@ from server.host_preflight import (
     RunResults,
     SettingsInvalid,
     StartDocker,
+    backend_unavailable_text,
     one_line,
 )
 
@@ -206,10 +207,16 @@ def _repository_check(facts: PreflightFacts) -> Check:
 def _settings_check(report: PreflightReport) -> Check:
     settings = report.settings
     if isinstance(settings, SettingsInvalid):
+        # A typed cause is worded here without flags (the CLI's message names them); the app
+        # words the cause itself for its own controls.
+        message = (
+            settings.message if settings.cause is None else backend_unavailable_text(settings.cause)
+        )
         return Check(
             id=CheckId.SETTINGS_VALID,
             state=CheckState.FAIL,
-            detail=one_line(settings.message, settings.code),
+            detail=one_line(message, settings.code),
+            cause=settings.cause,
         )
     return Check(
         id=CheckId.SETTINGS_VALID,

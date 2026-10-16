@@ -4,6 +4,7 @@
  */
 import {type ConnectionLease, HelperRequestError} from '@vibesys/connection';
 import type {
+  Backend,
   Check,
   CreatedProject,
   DetachedLaunchFailure,
@@ -138,20 +139,29 @@ export class NewRunMain {
     );
   }
 
-  /** The checks for `inputs`, with the run's roles when the helper agreed to `run_roles`. */
+  /**
+   * The checks for `inputs`, with the run's roles when the helper agreed to `run_roles`, and its
+   * backend (and each failure's typed cause) when it agreed to `run_backend`.
+   */
   async #preflight(host: HostId, inputs: RunInputs): Promise<Offered<PreflightResult>> {
     try {
       await using lease = await this.#deps.connect(host);
       await lease.connection.ready();
       const rolesToo = lease.connection.features?.includes('run_roles') === true;
+      const backendToo = lease.connection.features?.includes('run_backend') === true;
       const reply = (await lease.connection.request({
         type: 'run.preflight',
         ...runFields(inputs),
         ...(rolesToo ? {with_roles: true} : {}),
-      })) as {checks: Check[]; roles?: string[] | null};
+        ...(backendToo ? {with_backend: true} : {}),
+      })) as {checks: Check[]; roles?: string[] | null; backend?: Backend | null};
       return {
         kind: 'offered',
-        value: {checks: reply.checks, roles: rolesToo ? (reply.roles ?? []) : null},
+        value: {
+          checks: reply.checks,
+          roles: rolesToo ? (reply.roles ?? []) : null,
+          backend: backendToo ? (reply.backend ?? null) : null,
+        },
       };
     } catch (error) {
       if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {

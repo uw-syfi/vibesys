@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     import argparse
 
     from vibesys.api import Config
+    from vs_sim.api import CommandProbe
 
 
 def _normalize_runs_dir(args: argparse.Namespace) -> None:
@@ -348,16 +349,19 @@ def _build_run_request(args: argparse.Namespace) -> RunRequest:
         )
 
 
-def validated_run_request(args: argparse.Namespace) -> tuple[RunRequest, Config]:
+def validated_run_request(
+    args: argparse.Namespace, probe: CommandProbe | None = None
+) -> tuple[RunRequest, Config]:
     """The run's request and configuration, validated as a run validates them, with no effect.
 
     Raises ``ConfigurationError`` naming what is wrong. Both a run and ``vibesys preflight``
     call it, so a configuration preflight accepts is one the run accepts; neither discovers
-    a GitHub account nor builds an image before it returns.
+    a GitHub account nor builds an image before it returns. ``probe`` asks the host which of a
+    task's several backends it provides (a real one by default).
     """
     with boot_trace.span("validate_run_request"):
         bundle: InputBundle = args.input_bundle
-        config, skills, backend = load_config_and_skills(args, domain=bundle.domain)
+        config, skills, backend = load_config_and_skills(args, domain=bundle.domain, probe=probe)
         if args.outer_loop in {"agent", "profile-guided", "dynamic"}:
             descriptor = _agent_policy_descriptor(args, bundle)
             objective = with_operator_constraints(bundle.objective, args.constraint)

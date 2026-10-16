@@ -189,7 +189,7 @@ Several flags look independent, but they combine into one execution contract:
 | --- | --- | --- |
 | Search loop | `--outer-loop` | Which outer-loop policy runs: `agent`, `profile-guided`, `plain`, or `evolve`. |
 | Evaluation interface | `--interface` | Agent loop only. Whether evaluator-owned code invokes the candidate directly or communicates with a service. |
-| Compute backend | `--backend` | Hardware/runtime target: `cuda`, `metal`, `trainium`, `rocm`, or `cpu`. |
+| Compute backend | `backends` in `vibesys.input.toml` | Hardware/runtime target the task declares: `cuda`, `metal`, `trainium`, `rocm`, or `cpu`. The task decides; `--backend` only overrides it with another backend the task declares (see [Compute backend](running-vibesys.md#compute-backend)). |
 | Agent environment | none (always Docker) | Where the agent runs: a local Docker container, for every run. `--docker` was removed and is rejected. |
 | Evaluation environment | `--run-environment`, `--modal`, `--skypilot`, `--slurm-config` | Where evaluation runs: the local container (default), Modal, SkyPilot, or Slurm. These never move the agent out of its local container. |
 | Profiler | `--profiler` | Bottleneck evidence source: `nsys`, `rocprof`, `torch`, `neuron`, `otel`, `macos_cpu`, `linux_cpu`, or `auto`. |

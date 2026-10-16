@@ -60,6 +60,30 @@ describe('NewRunMain', () => {
     expect(asked.map(request => 'with_roles' in request)).toEqual([false]);
   });
 
+  test("reports the run's backend, and the checks' typed causes, from a helper that has run_backend", async () => {
+    const {link, main} = subject();
+    link.helper.host.projects.set('/p', ['mpmc']);
+    link.helper.host.backend = 'cpu';
+    const inputs: RunInputs = {project: '/p', task: 'mpmc', harness: null, options: {}, args: []};
+    const answer = (await main.answer({kind: 'preflight', host: LOCAL, inputs})) as {
+      value: {backend: string | null};
+    };
+    expect(answer.value.backend).toBe('cpu');
+  });
+
+  test('a helper without run_backend is not asked for the backend, and none is reported', async () => {
+    const {link, main} = subject();
+    link.helper.host.projects.set('/p', ['mpmc']);
+    link.helper.features.delete('run_backend');
+    const inputs: RunInputs = {project: '/p', task: 'mpmc', harness: null, options: {}, args: []};
+    const answer = (await main.answer({kind: 'preflight', host: LOCAL, inputs})) as {
+      value: {backend: string | null};
+    };
+    expect(answer.value.backend).toBeNull();
+    const asked = link.helper.requests.filter(request => request.type === 'run.preflight');
+    expect(asked.map(request => 'with_backend' in request)).toEqual([false]);
+  });
+
   test('starts a run with typed options and records it in Recent', async () => {
     const {link, main, remembered} = subject();
     link.helper.host.projects.set('/p', ['mpmc']);

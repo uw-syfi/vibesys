@@ -183,6 +183,19 @@ def test_tasks_build_what_their_evaluator_requires(entry: ExampleEntry) -> None:
     assert not failures, "\n".join(failures)
 
 
+@pytest.mark.parametrize("entry", [_param(e, Check.BACKEND) for e in ENTRIES])
+def test_every_task_declares_the_backends_it_targets(entry: ExampleEntry) -> None:
+    """A run takes its backend from its task; an example that declares none would fall back to
+    the CLI's default (``cuda``), which fails a CPU task on a CPU-only host."""
+    _require_present(entry)
+    undeclared = [
+        f"{entry.path} task={task}: declare `backends = [...]` in its vibesys.input.toml"
+        for task in _tasks(entry)
+        if not load_task(example_root(entry), task).declared_backends
+    ]
+    assert not undeclared, "\n".join(undeclared)
+
+
 @pytest.mark.parametrize("entry", [_param(e, Check.PATH_REFS) for e in ENTRIES])
 def test_command_path_references_exist(entry: ExampleEntry) -> None:
     _require_present(entry)

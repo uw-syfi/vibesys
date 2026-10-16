@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.support.task_project import write_task
 
 from entrypoints import cli
 from entrypoints.cli.config import load_config_and_skills
@@ -23,13 +24,16 @@ from entrypoints.cli.preflight import (
 from launch import built_in_orchestrations
 from server.host_api import MAX_RUN_SECONDS_FLAG, ROLE_MODEL_FLAG, ROLE_REASONING_EFFORT_FLAG
 from server.host_preflight import (
+    Backend,
+    BackendUnavailable,
     CheckId,
     CheckState,
     DeclareBuild,
+    PreflightReport,
     SettingsInvalid,
     SettingsValid,
 )
-from vibesys.api import DomainName
+from vibesys.api import ComputeBackend, DomainName
 from vibesys.api.request import TaskImageError, run_environment_uses_docker
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.inputs import InputBundle, load_task
@@ -178,7 +182,9 @@ def test_a_run_that_needs_no_docker_needs_no_agent_image(tmp_path: Path) -> None
     args = cli.parse_cli_invocation(_argv(tmp_path)).args
     probe = ScriptedProbe(lambda _argv: None)
 
-    report = valid_report(uses_docker=False, bundle=args.input_bundle, probe=probe, roles=())
+    report = valid_report(
+        uses_docker=False, bundle=args.input_bundle, probe=probe, roles=(), backend=Backend.CPU
+    )
 
     assert (report.uses_docker, report.agent_image.state) == (False, CheckState.OK)
     assert report.agent_image.detail.startswith("not needed")
@@ -241,7 +247,9 @@ def test_a_cuda_run_on_a_host_without_a_gpu_fails_preflight_naming_the_backend(
 
     assert isinstance(report.settings, SettingsInvalid)
     assert report.settings.code == ACCELERATOR_UNAVAILABLE
-    assert "--backend cpu" in report.settings.message
+    assert report.settings.cause == BackendUnavailable(
+        task="default", backend=Backend.CUDA, declared=()
+    )
     assert "\n" not in report.settings.message
 
 
@@ -393,3 +401,122 @@ def test_a_task_that_declares_the_build_its_evaluator_requires_passes_preflight(
     check = evaluator_check(_queue_task(tmp_path, build=True))
 
     assert (check.state, check.fix) == (CheckState.OK, None)
+
+
+def _project_declaring(tmp_path: Path, backends: str) -> Path:
+    """A project whose one task declares ``backends`` (a TOML array body) and nothing else."""
+    project = tmp_path / "project"
+    (project / "src").mkdir(parents=True)
+    write_task(
+        project,
+        f"""\
+version = 1
+backends = [{backends}]
+
+[agent]
+domain = "generic"
+
+[accuracy]
+command = ["python", "-c", "print('ok')"]
+
+[benchmark]
+command = ["python", "-c", "print('1')"]
+""",
+    )
+    return project
+
+
+def _preflight_of(
+    tmp_path: Path, project: Path, probe: ScriptedProbe, *flags: str
+) -> PreflightReport:
+    argv = [
+        "--outer-loop",
+        "agent",
+        "--runs-dir",
+        str(tmp_path / "runs"),
+        "--input",
+        str(project),
+        "--no-skills",
+        "--profiler",
+        "none",
+        *flags,
+    ]
+    return preflight_report(argv, _parse, probe)
+
+
+def test_a_cpu_task_on_a_host_without_a_gpu_passes_preflight_with_no_user_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: the CLI's cuda default failed a CPU task on a CPU-only host."""
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+
+    report = _preflight_of(tmp_path, _project_declaring(tmp_path, '"cpu"'), _nvidia_smi(None))
+
+    assert isinstance(report.settings, SettingsValid)
+    assert report.backend is Backend.CPU
+
+
+def test_a_task_whose_backend_the_host_cannot_run_fails_preflight_with_a_typed_fact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+
+    report = _preflight_of(tmp_path, _project_declaring(tmp_path, '"cuda"'), _nvidia_smi(None))
+
+    assert isinstance(report.settings, SettingsInvalid)
+    assert report.settings.cause == BackendUnavailable(
+        task="default", backend=Backend.CUDA, declared=(Backend.CUDA,)
+    )
+    assert report.backend is Backend.CUDA
+
+
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    [(None, Backend.CPU), (ProbeResult(0, _GPU_ROW), Backend.CUDA)],
+    ids=["no-gpu", "gpu"],
+)
+def test_among_several_declared_backends_the_run_takes_the_first_the_host_provides(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    answer: ProbeResult | None,
+    expected: Backend,
+) -> None:
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+
+    report = _preflight_of(
+        tmp_path, _project_declaring(tmp_path, '"cuda", "cpu"'), _nvidia_smi(answer)
+    )
+
+    assert isinstance(report.settings, SettingsValid)
+    assert report.backend is expected
+
+
+def test_a_backend_flag_the_task_does_not_declare_is_refused_early(tmp_path: Path) -> None:
+    report = _preflight_of(
+        tmp_path,
+        _project_declaring(tmp_path, '"cpu"'),
+        ScriptedProbe(lambda _argv: None),
+        "--backend",
+        "cuda",
+    )
+
+    assert isinstance(report.settings, SettingsInvalid)
+    assert report.settings.code == "backend_not_declared"
+    assert "cpu" in report.settings.message
+    assert report.backend is None
+
+
+def test_a_backend_flag_the_task_declares_overrides_its_preference(tmp_path: Path) -> None:
+    report = _preflight_of(
+        tmp_path,
+        _project_declaring(tmp_path, '"cuda", "cpu"'),
+        ScriptedProbe(lambda _argv: None),
+        "--backend",
+        "cpu",
+    )
+
+    assert report.backend is Backend.CPU
+
+
+def test_the_backend_enum_names_exactly_the_compute_backends() -> None:
+    assert {b.value for b in Backend} == {b.value for b in ComputeBackend}

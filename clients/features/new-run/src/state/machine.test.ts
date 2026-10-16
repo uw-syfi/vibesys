@@ -118,6 +118,7 @@ function output(operation: string, random: Seeded): unknown {
           checks: checks(random),
           // From a helper without `run_roles`, from settings that resolved none, or the run's own.
           roles: random.pick([null, [], ROLE_IDS, ROLE_IDS.slice(1), ['plain-judge']]),
+          backend: random.pick([null, 'cpu', 'cuda']),
         },
       };
     case 'fix':
@@ -393,7 +394,7 @@ describe('the run reports its roles', () => {
             {readonly host: HostKey; readonly inputs: RunInputs}
           >(async ({input}) => {
             asked.push(input.inputs);
-            return {kind: 'offered', value: {checks: [], roles}};
+            return {kind: 'offered', value: {checks: [], roles, backend: null}};
           }),
         },
       }),

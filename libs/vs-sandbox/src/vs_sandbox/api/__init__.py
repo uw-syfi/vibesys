@@ -27,6 +27,7 @@ if TYPE_CHECKING:
         accelerator_unavailable,
         backend_default_image,
         backend_is_host_only,
+        backend_provided,
         create_compute_backend,
         register_compute_backend,
     )
@@ -228,6 +229,7 @@ __all__ = [
     "accelerator_unavailable",
     "backend_default_image",
     "backend_is_host_only",
+    "backend_provided",
     "build_feature_image",
     "build_host_sandbox",
     "create_compute_backend",
@@ -298,6 +300,7 @@ _LAZY_EXPORTS = {
     "accelerator_unavailable": ("compute_backends", "accelerator_unavailable"),
     "backend_default_image": ("compute_backends", "backend_default_image"),
     "backend_is_host_only": ("compute_backends", "backend_is_host_only"),
+    "backend_provided": ("compute_backends", "backend_provided"),
     "create_compute_backend": ("compute_backends", "create_compute_backend"),
     "register_compute_backend": ("compute_backends", "register_compute_backend"),
     "ContainerRuntimeUnavailableError": (

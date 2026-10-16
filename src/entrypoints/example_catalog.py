@@ -36,6 +36,7 @@ class Check(StrEnum):
     PATH_REFS = "path-refs"  # `${PROJECT_ROOT}/...` paths in task commands exist
     TRUST_POLICY = "trust-policy"  # files the commands read are read-only for the agent
     CANDIDATE_BUILD = "candidate-build"  # a task whose evaluator requires outputs declares a build
+    BACKEND = "backend"  # every task declares the compute backends it targets
 
 
 class KnownFailing(BaseModel):

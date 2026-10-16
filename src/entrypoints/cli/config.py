@@ -16,11 +16,15 @@ from vibesys.api.request import (
     resolve_skill_source_dirs,
 )
 from vs_github.api import GitHubCLI, GitHubCLIError
-from vs_sim.api import OsProcesses
+from vs_sandbox.api import backend_provided
+from vs_sim.api import OsProcesses, SubprocessProbe
 
 if TYPE_CHECKING:
     import argparse
     from types import SimpleNamespace
+
+    from vibesys.api.request import InputBundle
+    from vs_sim.api import CommandProbe
 
 
 def _explicit_config_value(raw: object, path: tuple[str, ...]) -> tuple[bool, object]:
@@ -123,6 +127,7 @@ def load_config_and_skills(
     args: argparse.Namespace,
     *,
     domain: DomainName,
+    probe: CommandProbe | None = None,
 ) -> tuple[Config, list[str] | None, ComputeBackend]:
     """Load config, resolve the backend, and select compatible skills."""
     config = _load_effective_config(args)
@@ -152,7 +157,7 @@ def load_config_and_skills(
     if getattr(args, "repo_visibility", None) is None:
         args.repo_visibility = config.repository.visibility
 
-    backend: ComputeBackend = args.backend or config.backend.name
+    backend = resolve_backend(args, config, probe)
 
     if getattr(args, "no_skills", False):
         skills = None
@@ -163,6 +168,41 @@ def load_config_and_skills(
         extra = getattr(args, "extra_skills", None) or []
         skills = resolve_skill_source_dirs([*base, *extra], backend=backend, domain=domain)
     return config, skills, backend
+
+
+def resolve_backend(
+    args: argparse.Namespace, config: Config, probe: CommandProbe | None = None
+) -> ComputeBackend:
+    """The compute backend a run targets: the task's, not the user's.
+
+    A resumed run keeps the backend it recorded. Otherwise a task that declares backends
+    (``backends`` in its manifest) decides: its one backend, or the first it declares that
+    this host provides (``probe``, a real one by default, is asked only when several are
+    declared; none provided keeps the first, which preflight reports). ``--backend`` is an
+    explicit override and must be one the task declares, else ``ConfigurationError``. A task
+    that declares none (one written before backends were declared) falls back, explicitly, to
+    ``--backend``, else ``[backend].name`` in ``agent.toml``, whose default is ``cuda``.
+    """
+    if getattr(args, "project_run_configuration", None) is not None:
+        return config.backend.name
+    bundle: InputBundle | None = getattr(args, "input_bundle", None)
+    declared = () if bundle is None else bundle.declared_backends
+    if args.backend is not None:
+        if bundle is not None and declared and args.backend not in declared:
+            _configuration_error(
+                f"--backend {args.backend} is not a backend task {bundle.task_name!r} declares "
+                f"({', '.join(declared)}); drop --backend, or declare it in the task's "
+                "vibesys.input.toml",
+                code="backend_not_declared",
+                stage="compute_backend",
+            )
+        return args.backend
+    if not declared:
+        return config.backend.name
+    if len(declared) == 1:
+        return declared[0]
+    probe = probe or SubprocessProbe()
+    return next((each for each in declared if backend_provided(each, probe)), declared[0])
 
 
 def _load_effective_config(args: argparse.Namespace) -> Config:

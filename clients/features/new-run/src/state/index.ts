@@ -1,6 +1,6 @@
 /** The New run feature's pure state: the form and its rules, and the screen's machine. */
 
-export type {Check, MachineDescription} from '@vibesys/contracts/host-helper';
+export type {Backend, Check, MachineDescription} from '@vibesys/contracts/host-helper';
 export {
   type AgentChoice,
   advancedProblem,

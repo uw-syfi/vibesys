@@ -136,12 +136,16 @@ function afterPreflight(context: NewRunContext, answer: Offered<PreflightResult>
   const asked = inputsKey(context.form) ?? '';
   if (answer.kind !== 'offered') {
     // Only a helper that agreed to `preflight` is asked; none checks nothing.
-    return {checks: {for: asked, list: []}, roles: context.roles, form: context.form};
+    return {
+      checks: {for: asked, list: [], backend: null},
+      roles: context.roles,
+      form: context.form,
+    };
   }
   const roles =
     answer.value.roles === null ? context.roles : rolesAfter(context.roles, answer.value.roles);
   return {
-    checks: {for: asked, list: answer.value.checks},
+    checks: {for: asked, list: answer.value.checks, backend: answer.value.backend},
     roles,
     // The form follows the run's roles: a setting for a role it does not have would fail the run.
     form: formWithRoles(context.form, roles),

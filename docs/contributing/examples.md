@@ -42,6 +42,7 @@ check consumes it.
 | `path-refs` | `${PROJECT_ROOT}/...` in check/measure (accuracy/benchmark) commands pointing at nothing | Example, task, path |
 | `trust-policy` | Files those commands read that the agent could edit, using `build_project_path_policy` on a scratch copy | Lists the writable files and the read-only set |
 | `candidate-build` | A task whose evaluator package requires candidate outputs (`candidate_outputs`) but declares no `[build]`, so every measurement fails its check (`InputBundle.missing_build`, the rule New run preflight applies too) | Example, task, the missing outputs |
+| `backend` | A task that declares no `backends`, so a run would fall back to the CLI's `cuda` default and fail a CPU task on a CPU-only host | Example, task |
 | Stale references (repo-wide) | `examples/...` literals in workflows, scripts, docs, and READMEs whose target is gone | File and literal; exclusions live in the test with a comment |
 
 `known_failing` is a strict xfail: when the check starts passing the test fails

@@ -1,7 +1,7 @@
 import {expect, test} from 'bun:test';
 import type {HelperFeature} from '@vibesys/contracts/host-helper';
 import type {RecentRun, RunRef} from '@vibesys/runs';
-import {readiness, rolesView, startBlocked} from '../ui/view.js';
+import {backendOf, readiness, rolesView, startBlocked, summary} from '../ui/view.js';
 import {createNewRunStore, type NewRunBridge} from './store.js';
 
 const ok = <T>(value: T) => Promise.resolve({ok: true as const, value});
@@ -22,7 +22,8 @@ function fakeBridge(
       ok({kind: 'listed' as const, harnesses: [{provider: 'claude', model: 'm', default: true}]}),
     examples: () => record('examples', {kind: 'unsupported' as const}),
     tasks: () => ok(['mpmc']),
-    preflight: () => record('preflight', {kind: 'offered' as const, value: {checks: [], roles}}),
+    preflight: () =>
+      record('preflight', {kind: 'offered' as const, value: {checks: [], roles, backend: null}}),
     createFromExample: (_host, _example, destination) => ok({project: destination, tasks: ['a']}),
     copyOut: (_host, _source, destination) => ok({project: destination, tasks: ['a']}),
     startRun: () => record('startRun', {runId: 'run-2', instanceId: '00000000000c'}),
@@ -152,6 +153,7 @@ test('a task missing the build its evaluator requires fails Evaluator, fixed by 
             },
           ],
           roles: null,
+          backend: null,
         },
       }),
   };
@@ -231,4 +233,77 @@ test('a helper that does not report roles gets an empty state, not the roles of 
   await settle();
   expect(rolesView(store.getState().context)).toEqual({kind: 'unsupported'});
   expect(store.getState().context.form.agent?.roles).toEqual([]);
+});
+
+/** A bridge whose preflight reports the backend, failing Run settings with the typed fact. */
+function backendBridge(
+  backend: 'cpu' | 'cuda',
+  failing: boolean,
+  features: readonly string[] = ['run_options', 'preflight', 'examples', 'run_backend'],
+): NewRunBridge {
+  return {
+    ...fakeBridge(features),
+    preflight: () =>
+      ok({
+        kind: 'offered' as const,
+        value: {
+          checks: [
+            failing
+              ? {
+                  id: 'settings_valid' as const,
+                  state: 'fail' as const,
+                  detail: "task 'mpmc' targets the 'cuda' backend, which this machine cannot run",
+                  cause: {
+                    kind: 'backend_unavailable' as const,
+                    task: 'mpmc',
+                    backend,
+                    declared: [backend],
+                  },
+                }
+              : {id: 'settings_valid' as const, state: 'ok' as const, detail: 'valid'},
+          ],
+          roles: null,
+          backend,
+        },
+      }),
+  };
+}
+
+async function checked(bridge: NewRunBridge) {
+  const clock = manualSchedule();
+  const {store} = createNewRunStore(bridge, {
+    recent: [recentRun('ssh:chelan4', '/p', 2)],
+    schedule: clock.schedule,
+    started: () => undefined,
+  });
+  await settle();
+  clock.runDue();
+  await settle();
+  return store.getState();
+}
+
+test('a task for a backend the machine lacks is worded for this screen, naming the task and the machine, never a flag or a setting', async () => {
+  const state = await checked(backendBridge('cuda', true));
+
+  const settings = readiness(state).find(item => item.id === 'settings_valid');
+
+  expect(settings?.state).toBe('fail');
+  expect(settings?.detail).toBe(
+    'The task "mpmc" runs on NVIDIA GPU (CUDA), which chelan4 does not have. Choose another task or another machine.',
+  );
+  expect(settings?.detail).not.toMatch(/--|backend:|setting/i);
+});
+
+test("the task's backend is shown read-only once the checks report it, and is never a form input", async () => {
+  const state = await checked(backendBridge('cpu', false));
+
+  expect(backendOf(state.context)).toBe('cpu');
+  expect(summary(state.context)).toContain('CPU');
+  expect(Object.keys(state.context.form)).not.toContain('backend');
+});
+
+test('a helper without run_backend reports no backend, and the screen shows none', async () => {
+  const state = await checked(fakeBridge());
+
+  expect(backendOf(state.context)).toBeNull();
 });

@@ -1,7 +1,7 @@
 """Light contracts for starting a run from the desktop app: typed options and preflight checks.
 
 ``RunOptions`` is what the New run screen sets on ``run.start`` (feature ``run_options``);
-``Check`` and ``Fix`` are what ``run.preflight`` (feature ``preflight``) answers, closed sets
+``Check`` (with an optional typed ``Cause``) and ``Fix`` are what ``run.preflight`` (feature ``preflight``) answers, closed sets
 so every failure the app shows carries an action it knows how to perform. ``PreflightReport``
 is what ``vibesys preflight`` prints: the checks only the run's own code can make, from the
 same arguments ``run.start`` would launch with. Pydantic and the standard library only, like
@@ -46,6 +46,44 @@ class CheckId(StrEnum):
     DOCKER_REACHABLE = "docker_reachable"
     AGENT_IMAGE = "agent_image"
     EVALUATOR_AVAILABLE = "evaluator_available"
+
+
+class Backend(StrEnum):
+    """A compute backend a task targets (``vs_sandbox.ComputeBackend``'s values); closed."""
+
+    CPU = "cpu"
+    CUDA = "cuda"
+    ROCM = "rocm"
+    METAL = "metal"
+    TRAINIUM = "trainium"
+
+
+class BackendUnavailable(BaseModel):
+    """The machine cannot run the compute backend the task targets.
+
+    A fact, not a sentence: the client words it for its own controls, the CLI for its flags.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["backend_unavailable"] = "backend_unavailable"
+    task: Annotated[str, StringConstraints(min_length=1, max_length=256)]
+    backend: Backend
+    """The backend the run resolved to."""
+    declared: tuple[Backend, ...]
+    """The backends the task's manifest declares; empty for a task that declares none."""
+
+
+Cause = BackendUnavailable
+"""Why a check failed, as data (a union as causes are added; ``kind`` discriminates)."""
+
+
+def backend_unavailable_text(cause: BackendUnavailable) -> str:
+    """The fact as one plain line, naming no flag or setting."""
+    return (
+        f"task {cause.task!r} targets the {cause.backend.value!r} backend, "
+        "which this machine cannot run"
+    )
 
 
 class CheckState(StrEnum):
@@ -115,6 +153,8 @@ class Check(BaseModel):
     state: CheckState
     detail: Detail
     fix: Fix | None = None
+    cause: Annotated[Cause | None, Field(exclude_if=lambda cause: cause is None)] = None
+    """The failure as data, when it has a typed cause; ``detail`` says it in one line."""
 
 
 class ReasoningEffort(StrEnum):
@@ -184,6 +224,8 @@ class SettingsInvalid(BaseModel):
     code: str
     stage: str
     message: str
+    cause: Cause | None = None
+    """The failure as data when it has a typed cause; ``message`` is the CLI's wording of it."""
 
 
 class PreflightReport(BaseModel):
@@ -198,6 +240,9 @@ class PreflightReport(BaseModel):
     settings did not resolve one. Docker is not checked for a run that needs none."""
     agent_image: Check
     evaluator: Check
+    backend: Backend | None = None
+    """The compute backend the run resolved to (the task's), ``None`` when the settings did
+    not resolve one."""
     roles: tuple[RoleName, ...] = ()
     """The role ids the run's orchestration plugin declares, in declaration order: what
     ``RoleOption.role`` may name. Empty when the settings did not resolve an orchestration."""
@@ -205,6 +250,9 @@ class PreflightReport(BaseModel):
 
 __all__ = [
     "DETAIL_MAX_CHARACTERS",
+    "Backend",
+    "BackendUnavailable",
+    "Cause",
     "Check",
     "CheckId",
     "CheckState",
@@ -222,5 +270,6 @@ __all__ = [
     "SettingsInvalid",
     "SettingsValid",
     "StartDocker",
+    "backend_unavailable_text",
     "one_line",
 ]

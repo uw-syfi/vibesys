@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING
 from entrypoints.cli.loops import validated_run_request
 from launch import orchestration_roles
 from server.host_preflight import (
+    Backend,
+    BackendUnavailable,
     Check,
     CheckId,
     CheckState,
@@ -24,13 +26,14 @@ from server.host_preflight import (
     PreflightReport,
     SettingsInvalid,
     SettingsValid,
+    backend_unavailable_text,
     one_line,
 )
 from vibesys.api import ConfigurationError
 from vibesys.api.request import (
     TaskImageError,
-    run_accelerator_unavailable,
     run_environment_uses_docker,
+    run_host_shortfall,
 )
 from vs_agent.api.images import AGENT_IMAGE_REPOSITORY
 from vs_sim.api import SubprocessProbe
@@ -39,7 +42,8 @@ if TYPE_CHECKING:
     from argparse import Namespace
     from collections.abc import Callable
 
-    from vibesys.api.request import InputBundle
+    from vibesys.api import RunRequest
+    from vibesys.api.request import HostShortfall, InputBundle
     from vs_sim.api import CommandProbe
 
 DOCKER_TIMEOUT_SECONDS = 5.0
@@ -66,9 +70,9 @@ def preflight_report(
     """Validate ``argv`` as a run would, then check the agent image and the evaluator."""
     try:
         args = parse(argv)
-        request, _config = validated_run_request(args)
+        request, _config = validated_run_request(args, probe)
         roles = orchestration_roles(request.orchestration)
-        accelerator = run_accelerator_unavailable(request, probe)
+        shortfall = run_host_shortfall(request, probe)
     except ConfigurationError as error:
         diagnostic = error.diagnostic
         return _invalid_settings(
@@ -83,15 +87,15 @@ def preflight_report(
                 code=TASK_IMAGE_UNSUPPORTED, stage="run_environment", message=str(error)
             )
         )
-    if accelerator is not None:
+    backend = Backend(request.backend.value)
+    if shortfall is not None:
         # The run stops on this before its image build, seconds after it starts.
         return PreflightReport(
-            settings=SettingsInvalid(
-                code=ACCELERATOR_UNAVAILABLE, stage="compute_backend", message=accelerator
-            ),
+            settings=_shortfall_settings(shortfall, args.input_bundle.task_name, request),
             uses_docker=run_environment_uses_docker(request.run_environment),
             agent_image=_not_checked(CheckId.AGENT_IMAGE),
             evaluator=_not_checked(CheckId.EVALUATOR_AVAILABLE),
+            backend=backend,
             roles=roles,
         )
     return valid_report(
@@ -99,7 +103,36 @@ def preflight_report(
         bundle=args.input_bundle,
         probe=probe,
         roles=roles,
+        backend=backend,
     )
+
+
+def _shortfall_settings(
+    shortfall: HostShortfall, task: str, request: RunRequest
+) -> SettingsInvalid:
+    """The settings failure for what the host lacks: typed when it is the task's backend."""
+    if shortfall.backend is None:
+        return SettingsInvalid(
+            code=ACCELERATOR_UNAVAILABLE, stage="compute_backend", message=shortfall.reason
+        )
+    cause = BackendUnavailable(
+        task=task,
+        backend=Backend(shortfall.backend.value),
+        declared=tuple(Backend(each.value) for each in request.input_bundle.declared_backends),
+    )
+    return SettingsInvalid(
+        code=ACCELERATOR_UNAVAILABLE,
+        stage="compute_backend",
+        message=cli_backend_wording(cause, shortfall.reason),
+        cause=cause,
+    )
+
+
+def cli_backend_wording(cause: BackendUnavailable, reason: str) -> str:
+    """The CLI's one line for ``cause``: what is missing, and what ``--backend`` may name."""
+    fact = backend_unavailable_text(cause)
+    allowed = ", ".join(cause.declared) or "any backend"
+    return f"{fact}: {reason}. --backend may only name a backend the task declares ({allowed})."
 
 
 def _invalid_settings(settings: SettingsInvalid) -> PreflightReport:
@@ -112,7 +145,12 @@ def _invalid_settings(settings: SettingsInvalid) -> PreflightReport:
 
 
 def valid_report(
-    *, uses_docker: bool, bundle: InputBundle, probe: CommandProbe, roles: tuple[str, ...]
+    *,
+    uses_docker: bool,
+    bundle: InputBundle,
+    probe: CommandProbe,
+    roles: tuple[str, ...],
+    backend: Backend,
 ) -> PreflightReport:
     """The report for valid settings; the agent image is checked only where Docker runs."""
     return PreflightReport(
@@ -120,6 +158,7 @@ def valid_report(
         uses_docker=uses_docker,
         agent_image=agent_image_check(probe) if uses_docker else NO_AGENT_IMAGE,
         evaluator=evaluator_check(bundle),
+        backend=backend,
         roles=roles,
     )
 

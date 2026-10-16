@@ -745,6 +745,18 @@ def _machine_reply(
             return CheckoutInspectReply(request_id=request_id, inspection=inspection)
 
 
+def installed_first(
+    harnesses: tuple[HarnessOption, ...], installed: tuple[str, ...]
+) -> tuple[HarnessOption, ...]:
+    """``harnesses`` with the providers whose CLI is installed on this machine first.
+
+    A client starts a run on the first provider listed, so a machine without the first
+    provider's CLI would otherwise default to a run that cannot start its agent. Order is
+    otherwise kept: each provider's options stay together, its default first.
+    """
+    return tuple(sorted(harnesses, key=lambda option: option.provider not in installed))
+
+
 def describe_machine(host: HelperHost) -> MachineDescription:
     """What this machine offers runs: its checkout, hardware, Docker, harness CLIs and runs."""
     return MachineDescription(
@@ -821,10 +833,14 @@ def _preflight(request: RunPreflightRequest, host: HelperHost) -> RunPreflightRe
         docker=host.machine.docker(),
     )
     report = host.preflight.report(root, run_arguments(request))
+    checks = preflight_checks(facts, report)
     return RunPreflightReply(
         request_id=request.request_id,
-        checks=preflight_checks(facts, report),
+        checks=checks
+        if request.with_backend
+        else tuple(check.model_copy(update={"cause": None}) for check in checks),
         roles=report.roles if request.with_roles else None,
+        backend=report.backend if request.with_backend else None,
     )
 
 
@@ -874,7 +890,10 @@ def _host_read_reply(
         case PathsCompleteRequest():
             return complete_path(request, host.directories)
         case HarnessesListRequest(request_id=request_id):
-            return HarnessesListReply(request_id=request_id, harnesses=host.harnesses())
+            return HarnessesListReply(
+                request_id=request_id,
+                harnesses=installed_first(host.harnesses(), host.machine.harness_clis()),
+            )
         case LogsListRequest() | LogsReadRequest() if host.logs is None:
             message = f"{request.type} needs a log store, which this host does not have"
             return _error(request.request_id, HelperErrorCode.INTERNAL, message)

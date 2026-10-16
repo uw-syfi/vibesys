@@ -13,6 +13,7 @@
  * channel at once (`drop`, a broken link).
  */
 import {
+  type Backend,
   type ChannelEndOutcome,
   type Check,
   type CheckoutInspectReply,
@@ -116,6 +117,8 @@ export interface FakeHost {
   preflight: Check[];
   /** The role ids `run.preflight` reports the run's orchestration declares (`with_roles`). */
   roles: string[];
+  /** The compute backend `run.preflight` reports the run resolved to (`with_backend`). */
+  backend: Backend | null;
   /**
    * What `examples.list` answers, or `null` for a helper with no catalog (`examples_unavailable`,
    * as from an installed distribution). `project.create_from_example` and `project.copy_out` add
@@ -218,6 +221,7 @@ export class FakeHelper {
     checkouts: new Map(),
     preflight: [...PASSING_CHECKS],
     roles: [...FAKE_ROLES],
+    backend: 'cpu',
     examples: null,
   };
   /** Exit every new channel at once with this status and stdout, as a failing bootstrap does. */
@@ -259,6 +263,7 @@ export class FakeHelper {
     'run_options',
     'examples',
     'run_roles',
+    'run_backend',
   ]);
   /** The run log streams `logs.list` and `logs.read` serve; replace it to seed a store. */
   logStore = new FakeLogStore();
@@ -826,6 +831,7 @@ class HelperSession {
       request_id: id,
       checks: [...host.preflight],
       ...(request.with_roles === true ? {roles: [...host.roles]} : {}),
+      ...(request.with_backend === true && host.backend !== null ? {backend: host.backend} : {}),
     });
   }
 

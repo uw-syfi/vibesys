@@ -3,7 +3,12 @@
  * (the checks are for exactly one key), what Advanced may not repeat, and the prefill from the last
  * run on a machine.
  */
-import type {Check, HelperFeature, MachineDescription} from '@vibesys/contracts/host-helper';
+import type {
+  Backend,
+  Check,
+  HelperFeature,
+  MachineDescription,
+} from '@vibesys/contracts/host-helper';
 import type {HostKey} from '@vibesys/hosts';
 import type {HarnessOffer, Offered, RoleOption, RunInputs} from '@vibesys/ipc';
 import type {RecentRun, RunStart} from '@vibesys/runs';
@@ -275,6 +280,8 @@ export function offers(
 export interface ChecksFor {
   readonly for: string;
   readonly list: readonly Check[];
+  /** The compute backend the run resolved to (its task's), when the helper reported it. */
+  readonly backend: Backend | null;
 }
 
 /** What a machine offers, for one machine. */

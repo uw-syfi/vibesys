@@ -5,6 +5,7 @@
  * them over the host's connection.
  */
 import type {
+  Backend,
   Check,
   CreatedProject,
   ExampleList,
@@ -53,6 +54,11 @@ export interface PreflightResult {
    * does not take `run_roles`. Empty when the settings did not resolve an orchestration.
    */
   readonly roles: readonly string[] | null;
+  /**
+   * The compute backend the run resolved to, which its task declares; null from a helper that does
+   * not take `run_backend`, or when the settings resolved none.
+   */
+  readonly backend: Backend | null;
 }
 
 /** A run that started: its id and the server that drives it. */

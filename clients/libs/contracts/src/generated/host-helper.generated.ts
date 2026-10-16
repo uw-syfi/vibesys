@@ -144,6 +144,7 @@ export type Project4 = string;
 export type Task1 = string | null;
 export type Args1 = string[];
 export type WithRoles = boolean | null;
+export type WithBackend = boolean | null;
 export type RequestId20 = string;
 export type DeadlineMs20 = number;
 export type Type20 = "examples.list";
@@ -206,7 +207,8 @@ export type HelperFeature =
   | "preflight"
   | "run_options"
   | "examples"
-  | "run_roles";
+  | "run_roles"
+  | "run_backend";
 export type Features1 = HelperFeature[];
 export type VibesysVersion = string;
 export type Root = string;
@@ -479,6 +481,13 @@ export type Kind3 = "start_docker";
 export type Kind4 = "declare_build";
 export type Manifest = string;
 export type Outputs = string[];
+export type Kind5 = "backend_unavailable";
+export type Task4 = string;
+/**
+ * A compute backend a task targets (``vs_sandbox.ComputeBackend``'s values); closed.
+ */
+export type Backend = "cpu" | "cuda" | "rocm" | "metal" | "trainium";
+export type Declared = Backend[];
 export type Checks = Check[];
 export type Roles1 = string[] | null;
 export type RequestId43 = string;
@@ -570,19 +579,19 @@ export type Type48 = "run.start_compensation_failed";
 export type ExitStatus1 = 12;
 export type RequestId47 = string;
 export type Detail2 = string;
-export type Kind5 = "worker_start_refused";
+export type Kind6 = "worker_start_refused";
 export type InstanceId6 = string;
 export type Type49 = "run.start_compensation_failed";
 export type ExitStatus2 = 12;
 export type RequestId48 = string;
 export type Detail3 = string;
-export type Kind6 = "stop_failed";
+export type Kind7 = "stop_failed";
 export type InstanceId7 = string;
 export type Type50 = "run.start_compensation_failed";
 export type ExitStatus3 = 12;
 export type RequestId49 = string;
 export type Detail4 = string;
-export type Kind7 = "stop_unconfirmed";
+export type Kind8 = "stop_unconfirmed";
 export type Version13 = 1;
 export type Id6 = string;
 export type Outcome1 = "stopping" | "still_running" | "unsupported";
@@ -862,6 +871,7 @@ export interface RunPreflightRequest {
   harness?: HarnessChoice | null;
   options?: RunOptions | null;
   with_roles?: WithRoles;
+  with_backend?: WithBackend;
 }
 /**
  * The examples of the checkout this helper runs from, with their tasks.
@@ -1401,6 +1411,7 @@ export interface RunPreflightReply {
   type: Type42;
   checks: Checks;
   roles?: Roles1;
+  backend?: Backend | null;
 }
 /**
  * One preflight check: its state, one line of detail, and the action that fixes it.
@@ -1410,6 +1421,7 @@ export interface Check {
   state: CheckState;
   detail: Detail;
   fix?: Fix;
+  cause?: BackendUnavailable | null;
 }
 /**
  * Pick another VibeSys checkout for this machine.
@@ -1444,6 +1456,17 @@ export interface DeclareBuild {
   kind: Kind4;
   manifest: Manifest;
   outputs: Outputs;
+}
+/**
+ * The machine cannot run the compute backend the task targets.
+ *
+ * A fact, not a sentence: the client words it for its own controls, the CLI for its flags.
+ */
+export interface BackendUnavailable {
+  kind?: Kind5;
+  task: Task4;
+  backend: Backend;
+  declared: Declared;
 }
 /**
  * The checkout's example catalog.
@@ -1529,7 +1552,7 @@ export interface WorkerStartRefusedCompensationFailure {
   exit_status: ExitStatus1;
   request_id: RequestId47;
   detail: Detail2;
-  kind: Kind5;
+  kind: Kind6;
   instance_id: InstanceId6;
 }
 /**
@@ -1540,7 +1563,7 @@ export interface StopFailedCompensationFailure {
   exit_status: ExitStatus2;
   request_id: RequestId48;
   detail: Detail3;
-  kind: Kind6;
+  kind: Kind7;
   instance_id: InstanceId7;
 }
 /**
@@ -1554,7 +1577,7 @@ export interface StopUnconfirmedCompensationFailure {
   exit_status: ExitStatus3;
   request_id: RequestId49;
   detail: Detail4;
-  kind: Kind7;
+  kind: Kind8;
   stop_result: UnconfirmedInstanceStopResult;
 }
 /**

@@ -41,6 +41,53 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "AvailableLogTail",
       "type": "object"
     },
+    "Backend": {
+      "description": "A compute backend a task targets (``vs_sandbox.ComputeBackend``'s values); closed.",
+      "enum": [
+        "cpu",
+        "cuda",
+        "rocm",
+        "metal",
+        "trainium"
+      ],
+      "title": "Backend",
+      "type": "string"
+    },
+    "BackendUnavailable": {
+      "additionalProperties": false,
+      "description": "The machine cannot run the compute backend the task targets.\n\nA fact, not a sentence: the client words it for its own controls, the CLI for its flags.",
+      "properties": {
+        "kind": {
+          "const": "backend_unavailable",
+          "default": "backend_unavailable",
+          "title": "Kind",
+          "type": "string"
+        },
+        "task": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Task",
+          "type": "string"
+        },
+        "backend": {
+          "$ref": "#/$defs/Backend"
+        },
+        "declared": {
+          "items": {
+            "$ref": "#/$defs/Backend"
+          },
+          "title": "Declared",
+          "type": "array"
+        }
+      },
+      "required": [
+        "task",
+        "backend",
+        "declared"
+      ],
+      "title": "BackendUnavailable",
+      "type": "object"
+    },
     "ChannelEnd": {
       "additionalProperties": false,
       "description": "The one stderr line a relayed run channel writes when it ends with a nonzero status.",
@@ -136,6 +183,17 @@ const hostHelperSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "Fix"
+        },
+        "cause": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BackendUnavailable"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -1212,7 +1270,8 @@ const hostHelperSchema: Record<string, unknown> = {
         "preflight",
         "run_options",
         "examples",
-        "run_roles"
+        "run_roles",
+        "run_backend"
       ],
       "title": "HelperFeature",
       "type": "string"
@@ -3211,6 +3270,17 @@ const hostHelperSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "Roles"
+        },
+        "backend": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Backend"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -3300,6 +3370,18 @@ const hostHelperSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "With Roles"
+        },
+        "with_backend": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "With Backend"
         }
       },
       "required": [
@@ -4457,7 +4539,8 @@ const hostHelperSchema: Record<string, unknown> = {
     "run.preflight": {
       "harness": "harnesses",
       "options": "run_options",
-      "with_roles": "run_roles"
+      "with_roles": "run_roles",
+      "with_backend": "run_backend"
     },
     "logs.list": {
       "span_id": "logs_by_span"

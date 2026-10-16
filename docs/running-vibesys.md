@@ -266,6 +266,38 @@ which gives the loop service, span, datastore, critical-path, and trace
 breakdown evidence. Tasks without those flags stay on `none`, since OTel
 profiling has nothing to read.
 
+## Compute Backend
+
+A task declares the compute backends it targets, as a top-level key of its
+`vibesys.input.toml`:
+
+```toml
+version = 1
+backends = ["cpu"]            # or ["cuda"], ["rocm"], ["trainium"], ["metal"]
+```
+
+A run takes its backend from the task, never from the CLI's default:
+
+- One backend declared: the run uses it.
+- Several declared, in preference order: the run uses the first this host
+  provides (`cuda` needs an NVIDIA GPU, `rocm` a `/dev/kfd`, `trainium` Neuron
+  devices, `metal` macOS; `cpu` always). When the host provides none, the first
+  is kept and `vibesys preflight` fails naming the task and that backend.
+- `--backend NAME` overrides the choice and must be one the task declares, else
+  the run is refused before it starts.
+- A task that declares none (written before backends were declared) falls back,
+  explicitly, to `--backend`, then `[backend].name` in `agent.toml`, whose default
+  is `cuda`. That default fails a CPU task on a CPU-only host, so declare
+  `backends`. `[resources].accelerator_backend`, when a task declares resources
+  for a cluster, counts as its declaration and must be one of `backends` if both
+  are given. Every bundled example declares its backends
+  (`tests/examples/test_example_registry.py`).
+
+`vibesys preflight` (and the desktop app's Ready to start checks) fail when the
+host cannot provide the backend the run resolved to, reporting a typed fact (the
+task, the backend and the declared set) that the CLI words with `--backend` and
+the app words for its own controls.
+
 ## Task Layout Only
 
 Task inputs live only in `.vibesys/tasks/<task>/`. A project with a root

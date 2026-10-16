@@ -50,10 +50,8 @@ class CudaAcceleratorUnavailableError(RuntimeError):
     def no_gpu_detected(cls) -> CudaAcceleratorUnavailableError:
         """Describe a host where ``nvidia-smi`` reports no GPU, or is not installed."""
         return cls(
-            "The 'cuda' backend (the CLI default) needs an NVIDIA GPU and the NVIDIA "
-            "Container Toolkit's Docker runtime, but `nvidia-smi` reports no GPU on this "
-            "host. Select a backend this host can run: --backend cpu, --backend metal, "
-            "--backend rocm, or --backend trainium."
+            "The 'cuda' backend needs an NVIDIA GPU and the NVIDIA Container Toolkit's "
+            "Docker runtime, but `nvidia-smi` reports no GPU on this host."
         )
 
 

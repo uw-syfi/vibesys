@@ -558,8 +558,10 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         choices=list(ComputeBackend),
         default=None,
         help=(
-            "Compute backend to target. Overrides [backend].name in "
-            f"agent.toml. Defaults to 'cuda'. Supported: {', '.join(KNOWN_COMPUTE_BACKENDS)}."
+            "Override the compute backend the task declares (`backends` in its "
+            "vibesys.input.toml); it must be one the task declares. For a task that "
+            "declares none, falls back to [backend].name in agent.toml (default 'cuda'). "
+            f"Supported: {', '.join(KNOWN_COMPUTE_BACKENDS)}."
         ),
     )
 

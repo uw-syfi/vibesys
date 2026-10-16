@@ -22,7 +22,7 @@ from pydantic import (
 )
 
 from vibesys.config import BUNDLED_RESOURCES
-from vibesys.constants import DomainName
+from vibesys.constants import ComputeBackend, DomainName
 from vibesys.inputs._plan import TaskPlan, check_plan_documents, plan_toml_lines
 from vs_project.api import Project, RunResourceRequest
 from vs_runtime.api.infrastructure import (
@@ -416,6 +416,11 @@ class InputManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     version: Literal[1]
+    backends: tuple[ComputeBackend, ...] = ()
+    """The compute backends the task targets, in preference order; the run takes its backend from
+    them (one it can run on the host, when several). Empty means undeclared: the run falls back
+    to ``[backend].name`` in ``agent.toml`` (default ``cuda``), or to ``[resources]``'s
+    ``accelerator_backend`` when the task declares those resources."""
     agent: AgentInput
     profile_guided: ProfileGuidedInput | None = None
     build: BuildCommand | None = None
@@ -454,6 +459,35 @@ class InputManifest(BaseModel):
         if isinstance(measure, dict) and "result" not in measure:
             return {**data, "measure": {"result_protocol": 2, **measure}}
         return data
+
+    @model_validator(mode="after")
+    def _backends_agree(self) -> InputManifest:
+        """``backends`` names each backend once and contains ``[resources]``'s backend."""
+        repeated = sorted({b for b in self.backends if self.backends.count(b) > 1})
+        if repeated:
+            message = f"backends names each backend once; repeated: {', '.join(repeated)}"
+            raise ValueError(message)
+        resources = self.resources
+        if (
+            self.backends
+            and resources is not None
+            and ComputeBackend(resources.accelerator_backend) not in self.backends
+        ):
+            message = (
+                f"resources.accelerator_backend {resources.accelerator_backend!r} is not one of "
+                f"backends ({', '.join(self.backends)}); declare it there or change the resources"
+            )
+            raise ValueError(message)
+        return self
+
+    @property
+    def declared_backends(self) -> tuple[ComputeBackend, ...]:
+        """The backends the task targets: ``backends``, else its ``[resources]``' one, else none."""
+        if self.backends:
+            return self.backends
+        if self.resources is not None:
+            return (ComputeBackend(self.resources.accelerator_backend),)
+        return ()
 
     @property
     def stages(self) -> tuple[StageDeclaration, ...]:
@@ -522,6 +556,8 @@ def render_input_manifest(manifest: InputManifest) -> str:
     lines = [f"version = {manifest.version}"]
     if manifest.metric is not None:
         lines.append(f"metric = {_toml_string(manifest.metric)}")
+    if manifest.backends:
+        lines.append(f"backends = {_toml_array(tuple(str(b) for b in manifest.backends))}")
     lines += [
         "",
         "[agent]",
@@ -771,6 +807,11 @@ class InputBundle(BaseModel):
     def profile_command(self) -> tuple[str, ...] | None:
         """Return the trusted diagnostic workload, independent of benchmark gates."""
         return self.resolved_profile_command
+
+    @property
+    def declared_backends(self) -> tuple[ComputeBackend, ...]:
+        """The compute backends the task targets (see ``InputManifest.declared_backends``)."""
+        return self.manifest.declared_backends
 
     @property
     def domain(self) -> DomainName:

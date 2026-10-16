@@ -31,6 +31,8 @@ import {
   vettedModels,
 } from '../../state/index.js';
 import {
+  backendLabel,
+  backendOf,
   type MachineOption,
   machineFacts,
   machineLabel,
@@ -215,20 +217,29 @@ function TaskField(props: CardProps): JSX.Element | null {
   if (tasks.length === 0) {
     return <Text tone="warn">This project defines no tasks.</Text>;
   }
+  const backend = backendOf(context);
   return (
-    <Field label="Task">
-      <Select
-        mono
-        value={task ?? NONE}
-        options={[
-          ...(task === null ? [{value: NONE, label: 'Choose a task'}] : []),
-          ...tasks.map(name => ({value: name, label: name})),
-        ]}
-        change={name => {
-          if (name !== NONE) dispatch({type: 'task', task: name});
-        }}
-      />
-    </Field>
+    <Stack gap="space-2">
+      <Field label="Task">
+        <Select
+          mono
+          value={task ?? NONE}
+          options={[
+            ...(task === null ? [{value: NONE, label: 'Choose a task'}] : []),
+            ...tasks.map(name => ({value: name, label: name})),
+          ]}
+          change={name => {
+            if (name !== NONE) dispatch({type: 'task', task: name});
+          }}
+        />
+      </Field>
+      {/* The task decides its backend: shown here, never a choice. */}
+      {backend === null ? null : (
+        <Text variant="small" tone="muted">
+          Runs on {backendLabel(backend)}, as the task declares.
+        </Text>
+      )}
+    </Stack>
   );
 }
 

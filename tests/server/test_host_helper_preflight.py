@@ -46,6 +46,8 @@ from server.host_helper_preflight import (
 )
 from server.host_helper_requests import answer, launch_arguments
 from server.host_preflight import (
+    Backend,
+    BackendUnavailable,
     Check,
     CheckId,
     CheckState,
@@ -387,3 +389,59 @@ def test_docker_fails_exactly_when_the_run_may_need_it_and_it_is_unreachable(
     unreachable = isinstance(docker, DockerUnreachable)
     assert (check.state is CheckState.FAIL) == (uses_docker is not False and unreachable)
     assert [each.id for each in checks] == list(CheckId)
+
+
+_UNAVAILABLE = BackendUnavailable(task="mpmc", backend=Backend.CUDA, declared=(Backend.CUDA,))
+
+
+def _failing_backend_report() -> PreflightReport:
+    return PreflightReport(
+        settings=SettingsInvalid(
+            code="accelerator_unavailable",
+            stage="compute_backend",
+            message="CLI wording: --backend may only name a backend the task declares",
+            cause=_UNAVAILABLE,
+        ),
+        uses_docker=True,
+        agent_image=Check(id=CheckId.AGENT_IMAGE, state=CheckState.WARN, detail="not checked"),
+        evaluator=Check(
+            id=CheckId.EVALUATOR_AVAILABLE, state=CheckState.WARN, detail="not checked"
+        ),
+        backend=Backend.CUDA,
+    )
+
+
+@pytest.mark.parametrize("asked", [None, True])
+def test_a_backend_failure_carries_its_typed_cause_and_the_backend_only_when_asked_for(
+    tmp_path: Path, *, asked: bool | None
+) -> None:
+    reply, _ = _preflight(
+        _project(tmp_path / "proj"), report=_failing_backend_report(), with_backend=asked
+    )
+
+    assert isinstance(reply, RunPreflightReply)
+    settings = next(check for check in reply.checks if check.id is CheckId.SETTINGS_VALID)
+    assert settings.state is CheckState.FAIL
+    assert settings.cause == (_UNAVAILABLE if asked else None)
+    assert reply.backend == (Backend.CUDA if asked else None)
+    assert ('"cause"' in reply.model_dump_json()) is bool(asked)
+    assert ('"backend"' in reply.model_dump_json()) is bool(asked)
+
+
+def test_a_backend_failures_detail_names_the_task_and_never_a_flag_or_setting(
+    tmp_path: Path,
+) -> None:
+    reply, _ = _preflight(_project(tmp_path / "proj"), report=_failing_backend_report())
+
+    assert isinstance(reply, RunPreflightReply)
+    settings = next(check for check in reply.checks if check.id is CheckId.SETTINGS_VALID)
+    assert "mpmc" in settings.detail
+    assert "--" not in settings.detail
+
+
+def test_asking_for_the_backend_needs_the_run_backend_feature() -> None:
+    request = RunPreflightRequest.model_validate(
+        {"request_id": "p", "deadline_ms": 5000, "project": "/p", "with_backend": True}
+    )
+
+    assert request_features(request) == (HelperFeature.PREFLIGHT, HelperFeature.RUN_BACKEND)

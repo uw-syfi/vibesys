@@ -72,7 +72,7 @@ from pydantic import (
 )
 
 from server.host_examples import CreatedProject, ExampleList
-from server.host_preflight import Check, RoleName, RunOptions
+from server.host_preflight import Backend, Check, RoleName, RunOptions
 from vs_decode.api import Unreadable, decode_json
 
 PROTOCOL_VERSION = 1
@@ -770,6 +770,9 @@ class HelperFeature(StrEnum):
     """``examples.list``, ``project.create_from_example`` and ``project.copy_out``."""
     RUN_ROLES = "run_roles"
     """``run.preflight``'s ``with_roles``: the role ids the run's orchestration declares."""
+    RUN_BACKEND = "run_backend"
+    """``run.preflight``'s ``with_backend``: the compute backend the run resolved to (the task's),
+    and each failing check's typed ``cause``."""
 
 
 CLI_PROVIDER_FLAG: Final = "--cli-provider"
@@ -947,6 +950,9 @@ class RunPreflightRequest(_HelperRequest):
     options: RunOptions | None = None
     with_roles: bool | None = None
     """Ask for ``roles`` in the reply. Sent only after ``hello`` returned ``run_roles``."""
+    with_backend: bool | None = None
+    """Ask for ``backend`` in the reply and a ``cause`` on the checks that have one. Sent only
+    after ``hello`` returned ``run_backend``."""
 
 
 class RunStopRequest(_HelperRequest):
@@ -1171,6 +1177,7 @@ HELPER_FIELD_FEATURES: Final[Mapping[type[_HelperRequest], Mapping[str, HelperFe
         "harness": HelperFeature.HARNESSES,
         "options": HelperFeature.RUN_OPTIONS,
         "with_roles": HelperFeature.RUN_ROLES,
+        "with_backend": HelperFeature.RUN_BACKEND,
     },
     LogsListRequest: {"span_id": HelperFeature.LOGS_BY_SPAN},
 }
@@ -1685,6 +1692,10 @@ class RunPreflightReply(_HelperReply):
     """The role ids the run's orchestration declares, in declaration order: what a
     ``RoleOption.role`` may name. Present only when the request set ``with_roles`` (feature
     ``run_roles``), so a strict client that did not ask never sees the field."""
+    backend: Annotated[Backend | None, Field(exclude_if=lambda backend: backend is None)] = None
+    """The compute backend the run resolved to, which its task declares; ``None`` when the
+    settings resolved none. Present only when the request set ``with_backend`` (feature
+    ``run_backend``), as are the checks' ``cause`` fields."""
 
 
 class CheckoutInspectReply(_HelperReply):

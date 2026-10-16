@@ -20,6 +20,7 @@ import hostHelperSchema from './generated/host-helper.schema.js';
 import {type Schema, type SchemaWalk, validateSchema} from './schema-walker.js';
 
 export type {
+  Backend,
   ChannelEnd,
   ChannelEndOutcome,
   Check,
