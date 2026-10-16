@@ -438,7 +438,10 @@ Facts enter once:
   until its session reports it ready (`RunTrigger.READY`); attaching the journal is not readiness.
   A pause or stop requested while starting is held (`RunState.requested`), not entered: the run
   keeps reporting `starting` with its stage and progress, a resume drops the held request, and
-  `READY` lands the run in `pausing` or `stopping` if one is still held. Core may land a held stop
+  `READY` lands the run in `pausing` or `stopping` if one is still held. A pause lands (`paused`)
+  once core holds the run paused and nothing of it is running: at the end of the agent turn in
+  flight, or at once when only a measurement job is (the job finishes, and what the search then
+  decides waits for the resume). Core may land a held stop
   before `READY`, abandoning the startup; the run then goes from `starting` straight to `stopped`. A failure while starting past `resolving` names the startup stage it failed in.
 - **Starting label**: the run view's status chip shows the stage, its progress, how long the
   stage has run, and, once nothing has been heard for 60 s, `quiet for <duration>`, so a slow
