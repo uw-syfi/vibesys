@@ -1,14 +1,18 @@
 import {describe, expect, test} from 'bun:test';
 import type {HostKey, HostListing, HostRun} from '@vibesys/hosts';
 import type {RecentRun, RunRef} from '@vibesys/runs';
+import {checkModel, type Seeded} from '@vibesys/store/testing';
 import {
+  initialSidebar,
   liveRows,
+  machineCounts,
   RECENT_ROWS,
   type RunRowStatus,
   recentRows,
   runNotices,
   SIDEBAR_EMPTY,
   type SidebarAction,
+  type SidebarRequest,
   type SidebarState,
   sidebarInvariants,
   sidebarStep,
@@ -85,6 +89,28 @@ function randomRun(random: () => number): RunRef {
   return {host: pick(random, HOSTS), runId: pick(random, RUN_IDS)};
 }
 
+/** A model action: a push, a selection, or a machines reply with any token issued so far. */
+function modelAction(random: Seeded, tokens: readonly number[]): SidebarAction {
+  const roll = random.next();
+  if (roll < 0.15) {
+    const hosts = HOSTS.filter(() => random.bool());
+    return {
+      type: 'machines-listed',
+      token: random.pick(tokens),
+      hosts: random.bool() ? hosts : null,
+    };
+  }
+  if (roll < 0.35) {
+    return {
+      type: 'machine-checked',
+      token: random.pick(tokens),
+      host: random.pick(HOSTS),
+      ready: random.bool(),
+    };
+  }
+  return randomAction(() => random.next());
+}
+
 function randomAction(random: () => number): SidebarAction {
   const roll = random();
   if (roll < 0.35) return {type: 'listing', listing: randomListing(random)};
@@ -107,16 +133,58 @@ function randomAction(random: () => number): SidebarAction {
 }
 
 describe('sidebarStep', () => {
-  test('holds its invariants over seeded sequences of pushes and selections', () => {
-    for (let seed = 1; seed <= 300; seed++) {
-      const random = seeded(seed);
-      let state: SidebarState = SIDEBAR_EMPTY;
-      for (let step = 0; step < 40; step++) {
-        const action = randomAction(random);
-        state = sidebarStep(state, action);
-        expect(sidebarInvariants(state), `seed ${seed}, step ${step}`).toEqual([]);
-      }
+  test('model: holds its invariants and drops stale machine replies over seeded sequences', () => {
+    checkModel<SidebarState, SidebarAction, SidebarRequest>({
+      initial: initialSidebar().state,
+      step: sidebarStep,
+      action: (random, tokens) => modelAction(random, tokens),
+      issues: request => request.token,
+      awaited: state => ({
+        listing: state.machines.listing,
+        ...Object.fromEntries(
+          state.machines.saved.map(machine => [`check:${machine.host}`, machine.checking]),
+        ),
+      }),
+      reply: action =>
+        action.type === 'machines-listed'
+          ? {slot: 'listing', token: action.token}
+          : action.type === 'machine-checked'
+            ? {slot: `check:${action.host}`, token: action.token}
+            : null,
+      invariants: sidebarInvariants,
+      also: (before, action, after, requests) => {
+        // Leaving the Machines screen lists the saved machines again.
+        const left =
+          action.type === 'select' &&
+          before.selection.kind === 'machines' &&
+          action.screen.kind !== 'machines';
+        expect(requests.some(request => request.kind === 'list-machines')).toBe(left);
+        expect(machineCounts(after).count).toBe(after.machines.saved.length);
+      },
+    });
+  });
+
+  test('regression: the Machines count is the saved machines, with no host watched', () => {
+    let step = initialSidebar();
+    const listing = step.requests.find(request => request.kind === 'list-machines');
+    step = sidebarStep(step.state, {
+      type: 'machines-listed',
+      token: listing?.token ?? 0,
+      hosts: ['local', 'ssh:chelan3', 'ssh:chelan4'],
+    });
+    expect(step.state.listings).toEqual([]);
+    expect(machineCounts(step.state)).toEqual({count: 3, attention: 0});
+    let state = step.state;
+    for (const request of step.requests) {
+      if (request.kind !== 'check-machine') continue;
+      state = sidebarStep(state, {
+        type: 'machine-checked',
+        token: request.token,
+        host: request.host,
+        ready: request.host === 'local',
+      }).state;
     }
+    expect(machineCounts(state)).toEqual({count: 3, attention: 2});
   });
 
   test('Recent keeps the newest runs up to its limit, without archived or live ones', () => {
@@ -129,11 +197,11 @@ describe('sidebarStep', () => {
       instanceId: null,
       attachedAt: index,
     }));
-    let state = sidebarStep(SIDEBAR_EMPTY, {type: 'recent', recent});
+    let state = sidebarStep(SIDEBAR_EMPTY, {type: 'recent', recent}).state;
     state = sidebarStep(state, {
       type: 'archived',
       archived: [{host: 'local', runId: RUN_IDS[29] as string}],
-    });
+    }).state;
     state = sidebarStep(state, {
       type: 'listing',
       listing: {
@@ -144,7 +212,7 @@ describe('sidebarStep', () => {
         unreadable: [],
         unverified: [],
       },
-    });
+    }).state;
     const {rows, more} = recentRows(state);
     expect(rows).toHaveLength(RECENT_ROWS);
     expect(more).toBe(RUN_IDS.length - 2 - RECENT_ROWS);
@@ -191,7 +259,7 @@ describe('row statuses', () => {
               attachedAt: 1,
             },
           ],
-        }),
+        }).state,
         {
           type: 'listing',
           listing: {
@@ -203,7 +271,7 @@ describe('row statuses', () => {
             unverified: [],
           },
         },
-      );
+      ).state;
       expect(recentRows(state).rows[0]?.status, `${outcome} ${phase}`).toBe(status);
     }
   });
@@ -219,7 +287,7 @@ describe('row statuses', () => {
         unreadable: [],
         unverified: [],
       },
-    });
+    }).state;
     expect(liveRows(state)[0]).toMatchObject({
       status: 'paused',
       detail: 'This Mac · paused: usage limit',
