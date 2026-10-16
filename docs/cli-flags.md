@@ -517,11 +517,12 @@ A repository-native task may provide
 local container (Docker, and the agent container of `--modal`, `--skypilot`
 and `--run-environment slurm`) builds it with the task directory as its
 complete context and the backend's default image as `BASE_IMAGE`, and runs the
-agent in the resulting immutable image ID, which the run records. No manifest
-field or pre-build step is required. `--docker-image` conflicts with this
-convention, and the `host` environment refuses it. Resume rebuilds the task
-image and refuses a different image ID, or a Dockerfile the record has no
-image for. `docker_in_docker = true` (below) still selects Docker only. A root
+agent in the resulting image, recorded as a tag keyed to the task directory and
+a digest of every build input. No manifest field or pre-build step is required.
+`--docker-image` conflicts with this convention, and the `host` environment
+refuses it. Resume reuses the recorded image while it is in the local daemon,
+rebuilds it when it is gone and the inputs are unchanged, and refuses changed
+inputs or a Dockerfile the record has no image for. `docker_in_docker = true` (below) still selects Docker only. A root
 Dockerfile is a candidate file and is not auto-detected. See
 [Running VibeSys](running-vibesys.md) for why a task image's `ENV` leaks into
 Slurm GPU jobs.

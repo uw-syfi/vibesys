@@ -67,11 +67,26 @@ as the complete build context, on top of the backend's default image (passed
 as the build argument `BASE_IMAGE`, so the Dockerfile may start with
 `ARG BASE_IMAGE` and `FROM ${BASE_IMAGE}`), and layers the agent on top. Every
 run environment whose agent runs in a local container does this the same way:
-Docker (the default), and the agent container of Modal, SkyPilot and Slurm. The
-resolved immutable image ID is recorded with the run, and resume rebuilds the
-task image and refuses to continue if it no longer matches the record, or if
-the run was recorded without a task image the task now declares. Docker's
-native layer cache makes later launches incremental. The candidate repository
+Docker (the default), and the agent container of Modal, SkyPilot and Slurm.
+
+The run records the task image as a local tag, `vibesys-task-build:<owner>-<digest>`,
+where `<owner>` identifies the task directory and `<digest>` covers the
+Dockerfile, every file in its build context, and the base image. On resume:
+
+- if the recorded image is still in the local Docker daemon, it is reused and
+  nothing is built;
+- otherwise, if the inputs are unchanged, VibeSys rebuilds the same tag and
+  continues, with a notice (the image ID may differ when Docker's build cache
+  has been pruned);
+- if the inputs changed, or the run was recorded without a task image the task
+  now declares, resume refuses. A run recorded with the removed `local`
+  environment and continued in Docker falls in the second case.
+
+Runs recorded before tags held a bare image ID: they are reused while that ID
+is local, and otherwise rebuilt as they were then (without `BASE_IMAGE`) and
+refused unless the rebuild reproduces the recorded ID. A build removes only the
+same task directory's older tags, never another task's. Docker's native layer
+cache makes later launches incremental. The candidate repository
 is mounted at runtime and is never part of the image build context.
 
 Task Dockerfiles are intentionally convention-based: they require no manifest
