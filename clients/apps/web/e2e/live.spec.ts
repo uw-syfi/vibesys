@@ -303,6 +303,9 @@ short`;
     await expect(page.locator('.transcript-content').filter({hasText: 'short'})).toHaveText(
       baselineContent,
     );
+    // The transcript can show while the header still reads "Connecting to the server", which
+    // is wider at this viewport, so each width is read only once the run's final status shows.
+    await expect(page.locator('.status')).toHaveText('completed');
     const baselineDocumentWidth = await page.evaluate(() => document.documentElement.scrollWidth);
 
     content = formattedContent;
@@ -310,6 +313,7 @@ short`;
 
     const transcript = page.locator('.transcript-content').filter({hasText: 'A'.repeat(128)});
     await expect(transcript).toHaveText(formattedContent);
+    await expect(page.locator('.status')).toHaveText('completed');
     const layout = await transcript.evaluate((element, payload) => {
       const text = element.querySelector('pre')?.firstChild;
       const entry = element.parentElement;
