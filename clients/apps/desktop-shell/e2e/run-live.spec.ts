@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
-import {type FakeBridgeSeed, installFakeBridge} from './fake-bridge.js';
+import {type FakeBridgeSeed, installFakeBridge, installFakeMachines} from './fake-bridge.js';
 import {installFakeRun} from './fake-run.js';
 import {type FakeServerSeed, installFakeServer} from './fake-server.js';
 
@@ -86,6 +86,7 @@ test('a live run pauses and resumes from the header over its session, and is let
   page,
 }) => {
   await page.addInitScript(installFakeBridge, SEED);
+  await page.addInitScript(installFakeMachines, SEED);
   await page.addInitScript(installFakeRun, {streams: [], text: {}});
   await page.addInitScript(installFakeServer, SERVER);
   await page.goto('./shell.html');
