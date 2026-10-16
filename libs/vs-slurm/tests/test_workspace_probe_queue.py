@@ -334,7 +334,7 @@ def test_an_sbatch_refusal_is_reported_in_sbatchs_own_words(tmp_path: Path) -> N
 
     with pytest.raises(
         SlurmWorkspaceRootProbeError,
-        match=r"sbatch exited with code 1: sbatch: error: invalid partition specified: nope",
+        match=(r"exit code 1 running sbatch: sbatch: error: invalid partition specified: nope"),
     ):
         _probe(_config(remote), connector, tmp_path)
 

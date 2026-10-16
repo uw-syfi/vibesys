@@ -192,11 +192,13 @@ class SlurmTransportFailedError(SlurmError):
 
 # The longest part of sbatch's own diagnostics an error message carries.
 _SBATCH_DIAGNOSTIC_MAX_CHARS = 500
-_SBATCH_DIAGNOSTIC_LINES = 3
+# sbatch prefixes every line it prints itself; transport output (ssh, a connector,
+# a login banner) lacks it and stays private.
+_SBATCH_LINE_PREFIX = "sbatch: "
 
 
 class SlurmSbatchFailedError(SlurmError):
-    """``sbatch`` exited nonzero; the message carries the end of its own diagnostics.
+    """``sbatch`` exited nonzero; the message carries the lines sbatch itself printed.
 
     Acceptance is still unknown: an ``sbatch`` whose reply timed out may have
     submitted the job, so callers reconcile by name as for any other failure.
@@ -204,10 +206,14 @@ class SlurmSbatchFailedError(SlurmError):
 
     @classmethod
     def from_transport(cls, error: SlurmTransportFailedError) -> SlurmSbatchFailedError:
-        """Describe a failed ``sbatch`` by its exit code and last diagnostic lines."""
-        lines = [line.strip() for line in error.stderr.splitlines() if line.strip()]
-        detail = " ".join(lines[-_SBATCH_DIAGNOSTIC_LINES:])[:_SBATCH_DIAGNOSTIC_MAX_CHARS]
-        return cls(f"sbatch exited with code {error.returncode}: {detail or 'no diagnostics'}")
+        """Describe a failed ``sbatch`` by its exit code and its own diagnostic lines."""
+        lines = [
+            line.strip()
+            for line in error.stderr.splitlines()
+            if line.startswith(_SBATCH_LINE_PREFIX)
+        ]
+        detail = " ".join(lines)[:_SBATCH_DIAGNOSTIC_MAX_CHARS] or "sbatch printed no diagnostic"
+        return cls(f"{error} running sbatch: {detail}")
 
 
 class SlurmSubmissionRejectedError(SlurmError):
@@ -251,9 +257,7 @@ class SlurmWorkspaceRootProbeError(SlurmError):
         return cls("Slurm `remote_workspace_root` startup probe failed: infrastructure error")
 
     @classmethod
-    def never_scheduled(  # LW-209116; each argument is one fact the operator needs to act on.
-        # > A record type would duplicate the probe's durable state for one message;
-        # > passing the state couples the error to the probe's private model.
+    def never_scheduled(
         cls,
         job_id: str,
         *,
