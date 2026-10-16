@@ -553,8 +553,6 @@ def test_a_projection_that_fails_validation_is_a_view_that_says_so(tmp_path: Pat
         assert view.projection is None
         assert view.experiment_revision == record.envelope.revision
     assert stored.status is RunStatus.FAILED
-    assert (
-        not dynamic_projector()
-        .project_committed("dynamic", record, run_id=run_id)
-        .projection_failed
-    )
+    sound = dynamic_projector().project_committed("dynamic", record, run_id=run_id)
+    assert sound is not None
+    assert not sound.projection_failed
