@@ -14,12 +14,14 @@
  */
 import {
   type ChannelEndOutcome,
+  type CheckoutInspectReply,
   type HarnessOption,
   type HelperFeature,
   type HelperRequest,
   helperFeaturesForRequest,
   type InstanceList,
   type LiveInstanceRecord,
+  type MachineDescription,
   type PathEntry,
   parseHelperRequest,
   type UnreadableRecord,
@@ -104,7 +106,20 @@ export interface FakeHost {
   readonly logs: Map<string, {readonly text: string; readonly truncated: boolean}>;
   /** The vetted provider and model pairs (`harnesses.list`), each provider's default first. */
   readonly harnesses: HarnessOption[];
+  /** What `machine.describe` answers; replace it to describe another machine. */
+  machine: MachineDescription;
+  /** What `checkout.inspect` answers per path; any other path holds no checkout. */
+  readonly checkouts: Map<string, CheckoutInspectReply['inspection']>;
 }
+
+/** The machine a new `FakeHelper` describes: a CPU-only host with Docker and one harness CLI. */
+const FAKE_MACHINE: MachineDescription = {
+  checkout: {root: '/src/vibesys', version: '0.1.1', commit: 'abc123', dirty: false},
+  hardware: {cpu_cores: 8, gpus: [], accelerator: 'cpu'},
+  docker: {reachable: true, version: '27.3.1'},
+  harness_clis: ['codex'],
+  runs: {live: 0, ended_today: 0},
+};
 
 /** The pairs a new `FakeHelper` offers: two providers, each default first. */
 export const FAKE_HARNESSES: readonly HarnessOption[] = [
@@ -169,6 +184,8 @@ export class FakeHelper {
     denied: new Set(),
     logs: new Map(),
     harnesses: [...FAKE_HARNESSES],
+    machine: FAKE_MACHINE,
+    checkouts: new Map(),
   };
   /** Exit every new channel at once with this status and stdout, as a failing bootstrap does. */
   bootstrapExit: {readonly code: number; readonly stdout: string} | null = null;
@@ -203,6 +220,8 @@ export class FakeHelper {
     'logs',
     'logs_cancel',
     'run_history',
+    'machine_describe',
+    'checkout_inspect',
   ]);
   /** The run log streams `logs.list` and `logs.read` serve; replace it to seed a store. */
   logStore = new FakeLogStore();
@@ -507,6 +526,16 @@ class HelperSession {
         return;
       case 'runs.read_events':
         this.#readEvents(request);
+        return;
+      case 'machine.describe':
+        this.#send({type: 'machine.describe', request_id: id, machine: this.#helper.host.machine});
+        return;
+      case 'checkout.inspect':
+        this.#send({
+          type: 'checkout.inspect',
+          request_id: id,
+          inspection: this.#helper.host.checkouts.get(request.path) ?? {state: 'not_found'},
+        });
         return;
       case 'harnesses.list':
         this.#send({

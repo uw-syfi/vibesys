@@ -1,5 +1,16 @@
 {
   "$defs": {
+    "Accelerator": {
+      "description": "How a machine's GPUs run work; a closed set, ``cpu`` when it has none.",
+      "enum": [
+        "cpu",
+        "cuda",
+        "rocm",
+        "metal"
+      ],
+      "title": "Accelerator",
+      "type": "string"
+    },
     "AvailableLogTail": {
       "additionalProperties": false,
       "description": "A bounded suffix of one instance's regular ``server.log`` file.",
@@ -108,6 +119,191 @@
       "title": "Checkout",
       "type": "object"
     },
+    "CheckoutFound": {
+      "additionalProperties": false,
+      "description": "A VibeSys checkout at least ``MIN_CHECKOUT_VERSION``.\n\n``compatible`` says whether it ships the host helper this app starts from a checkout.",
+      "properties": {
+        "state": {
+          "const": "found",
+          "default": "found",
+          "title": "State",
+          "type": "string"
+        },
+        "root": {
+          "title": "Root",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        },
+        "commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Commit"
+        },
+        "dirty": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Dirty"
+        },
+        "compatible": {
+          "title": "Compatible",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "state",
+        "root",
+        "version",
+        "commit",
+        "dirty",
+        "compatible"
+      ],
+      "title": "CheckoutFound",
+      "type": "object"
+    },
+    "CheckoutInspectReply": {
+      "additionalProperties": false,
+      "description": "What the path holds.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "checkout.inspect",
+          "default": "checkout.inspect",
+          "title": "Type",
+          "type": "string"
+        },
+        "inspection": {
+          "discriminator": {
+            "mapping": {
+              "found": "#/$defs/CheckoutFound",
+              "not_found": "#/$defs/CheckoutNotFound",
+              "too_old": "#/$defs/CheckoutTooOld"
+            },
+            "propertyName": "state"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/CheckoutFound"
+            },
+            {
+              "$ref": "#/$defs/CheckoutNotFound"
+            },
+            {
+              "$ref": "#/$defs/CheckoutTooOld"
+            }
+          ],
+          "title": "Inspection"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "inspection"
+      ],
+      "title": "CheckoutInspectReply",
+      "type": "object"
+    },
+    "CheckoutInspectRequest": {
+      "additionalProperties": false,
+      "description": "Whether ``path`` holds a VibeSys checkout, and whether this app can use it.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "checkout.inspect",
+          "default": "checkout.inspect",
+          "title": "Type",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "path"
+      ],
+      "title": "CheckoutInspectRequest",
+      "type": "object"
+    },
+    "CheckoutNotFound": {
+      "additionalProperties": false,
+      "description": "The path holds no VibeSys checkout (or does not exist).",
+      "properties": {
+        "state": {
+          "const": "not_found",
+          "default": "not_found",
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "title": "CheckoutNotFound",
+      "type": "object",
+      "required": [
+        "state"
+      ]
+    },
+    "CheckoutTooOld": {
+      "additionalProperties": false,
+      "description": "A VibeSys checkout older than this app supports: ``version`` is below ``min``.",
+      "properties": {
+        "state": {
+          "const": "too_old",
+          "default": "too_old",
+          "title": "State",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        },
+        "min": {
+          "title": "Min",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "version",
+        "min"
+      ],
+      "title": "CheckoutTooOld",
+      "type": "object"
+    },
     "DetachedLaunchFailure": {
       "additionalProperties": false,
       "description": "What ``vibesys --detach`` prints on stdout, as one line, when it starts nothing.\n\nOn success the line is a ``LiveInstanceRecord`` instead; a reader tells them\napart by ``outcome``, which a record never has. ``code`` is a\n``DetachedLaunchErrorCode`` or the code of the run's configuration\ndiagnostic (``invalid_arguments``, ``resume_not_found``, ...), and\n``exit_code`` is the process's exit status.",
@@ -174,6 +370,48 @@
       "title": "DetachedLaunchFailure",
       "type": "object"
     },
+    "DockerReachable": {
+      "additionalProperties": false,
+      "description": "Docker's daemon answered, with its server version.",
+      "properties": {
+        "reachable": {
+          "const": true,
+          "default": true,
+          "title": "Reachable",
+          "type": "boolean"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version"
+      ],
+      "title": "DockerReachable",
+      "type": "object"
+    },
+    "DockerUnreachable": {
+      "additionalProperties": false,
+      "description": "Docker could not be reached, and why, in one line.",
+      "properties": {
+        "reachable": {
+          "const": false,
+          "default": false,
+          "title": "Reachable",
+          "type": "boolean"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "title": "DockerUnreachable",
+      "type": "object"
+    },
     "EndRecord": {
       "additionalProperties": false,
       "description": "How a run ended, as its tombstone reports it: the sidebar's Recent row and the ended banner.\n\n``resumable`` says whether a resume continues the run: its durable record exists and\nis not terminal. ``resume_from_round`` is the round that resume starts at, when the\nserver knew it (a crashed server did not say).",
@@ -237,6 +475,54 @@
         "message"
       ],
       "title": "FailureReason",
+      "type": "object"
+    },
+    "Gpu": {
+      "additionalProperties": false,
+      "description": "One GPU as its vendor's tool names it.",
+      "properties": {
+        "vendor": {
+          "title": "Vendor",
+          "type": "string"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        }
+      },
+      "required": [
+        "vendor",
+        "model"
+      ],
+      "title": "Gpu",
+      "type": "object"
+    },
+    "Hardware": {
+      "additionalProperties": false,
+      "description": "The machine's processors.",
+      "properties": {
+        "cpu_cores": {
+          "exclusiveMinimum": 0,
+          "title": "Cpu Cores",
+          "type": "integer"
+        },
+        "gpus": {
+          "items": {
+            "$ref": "#/$defs/Gpu"
+          },
+          "title": "Gpus",
+          "type": "array"
+        },
+        "accelerator": {
+          "$ref": "#/$defs/Accelerator"
+        }
+      },
+      "required": [
+        "cpu_cores",
+        "gpus",
+        "accelerator"
+      ],
+      "title": "Hardware",
       "type": "object"
     },
     "HarnessChoice": {
@@ -590,7 +876,9 @@
         "logs_cancel",
         "harnesses",
         "logs_by_span",
-        "run_history"
+        "run_history",
+        "machine_describe",
+        "checkout_inspect"
       ],
       "title": "HelperFeature",
       "type": "string"
@@ -1741,6 +2029,158 @@
       "title": "LogsReadRequest",
       "type": "object"
     },
+    "MachineCheckout": {
+      "additionalProperties": false,
+      "description": "The VibeSys checkout this helper runs from, which starts runs on this machine.",
+      "properties": {
+        "root": {
+          "title": "Root",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        },
+        "commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Commit"
+        },
+        "dirty": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Dirty"
+        }
+      },
+      "required": [
+        "root",
+        "version",
+        "commit",
+        "dirty"
+      ],
+      "title": "MachineCheckout",
+      "type": "object"
+    },
+    "MachineDescribeReply": {
+      "additionalProperties": false,
+      "description": "The machine's description.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "machine.describe",
+          "default": "machine.describe",
+          "title": "Type",
+          "type": "string"
+        },
+        "machine": {
+          "$ref": "#/$defs/MachineDescription"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "machine"
+      ],
+      "title": "MachineDescribeReply",
+      "type": "object"
+    },
+    "MachineDescribeRequest": {
+      "additionalProperties": false,
+      "description": "What this host offers runs: its checkout, hardware, Docker, harness CLIs and runs.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "machine.describe",
+          "default": "machine.describe",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type"
+      ],
+      "title": "MachineDescribeRequest",
+      "type": "object"
+    },
+    "MachineDescription": {
+      "additionalProperties": false,
+      "description": "What one machine offers runs.",
+      "properties": {
+        "checkout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MachineCheckout"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hardware": {
+          "$ref": "#/$defs/Hardware"
+        },
+        "docker": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DockerReachable"
+            },
+            {
+              "$ref": "#/$defs/DockerUnreachable"
+            }
+          ],
+          "title": "Docker"
+        },
+        "harness_clis": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Harness Clis",
+          "type": "array"
+        },
+        "runs": {
+          "$ref": "#/$defs/RunCounts"
+        }
+      },
+      "required": [
+        "checkout",
+        "hardware",
+        "docker",
+        "harness_clis",
+        "runs"
+      ],
+      "title": "MachineDescription",
+      "type": "object"
+    },
     "MissingLogTail": {
       "additionalProperties": false,
       "description": "The instance has no retained ``server.log`` file.",
@@ -2043,6 +2483,28 @@
         "role"
       ],
       "title": "RunConnectRequest",
+      "type": "object"
+    },
+    "RunCounts": {
+      "additionalProperties": false,
+      "description": "Runs on this machine: live now, and ended since the host's local midnight.",
+      "properties": {
+        "live": {
+          "minimum": 0,
+          "title": "Live",
+          "type": "integer"
+        },
+        "ended_today": {
+          "minimum": 0,
+          "title": "Ended Today",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "live",
+        "ended_today"
+      ],
+      "title": "RunCounts",
       "type": "object"
     },
     "RunEndOutcome": {
@@ -2991,6 +3453,7 @@
     "request": {
       "discriminator": {
         "mapping": {
+          "checkout.inspect": "#/$defs/CheckoutInspectRequest",
           "harnesses.list": "#/$defs/HarnessesListRequest",
           "hello": "#/$defs/HelloRequest",
           "instances.inspect": "#/$defs/InstancesInspectRequest",
@@ -3000,6 +3463,7 @@
           "logs.cancel": "#/$defs/LogsCancelRequest",
           "logs.list": "#/$defs/LogsListRequest",
           "logs.read": "#/$defs/LogsReadRequest",
+          "machine.describe": "#/$defs/MachineDescribeRequest",
           "paths.complete": "#/$defs/PathsCompleteRequest",
           "ping": "#/$defs/PingRequest",
           "run.connect": "#/$defs/RunConnectRequest",
@@ -3062,6 +3526,12 @@
         },
         {
           "$ref": "#/$defs/RunsReadEventsRequest"
+        },
+        {
+          "$ref": "#/$defs/MachineDescribeRequest"
+        },
+        {
+          "$ref": "#/$defs/CheckoutInspectRequest"
         }
       ],
       "title": "Request"
@@ -3069,6 +3539,7 @@
     "message": {
       "discriminator": {
         "mapping": {
+          "checkout.inspect": "#/$defs/CheckoutInspectReply",
           "error": "#/$defs/HelperError",
           "harnesses.list": "#/$defs/HarnessesListReply",
           "hello": "#/$defs/HelloReply",
@@ -3080,6 +3551,7 @@
           "logs.cancel": "#/$defs/LogsCancelReply",
           "logs.list": "#/$defs/LogsListReply",
           "logs.read": "#/$defs/LogsReadReply",
+          "machine.describe": "#/$defs/MachineDescribeReply",
           "paths.complete": "#/$defs/PathsCompleteReply",
           "ping": "#/$defs/PingReply",
           "run.connect": "#/$defs/RunConnectReply",
@@ -3144,6 +3616,12 @@
           "$ref": "#/$defs/RunsReadEventsReply"
         },
         {
+          "$ref": "#/$defs/MachineDescribeReply"
+        },
+        {
+          "$ref": "#/$defs/CheckoutInspectReply"
+        },
+        {
           "$ref": "#/$defs/InstancesChanged"
         },
         {
@@ -3176,7 +3654,9 @@
     "logs.read": "logs",
     "logs.cancel": "logs_cancel",
     "harnesses.list": "harnesses",
-    "runs.read_events": "run_history"
+    "runs.read_events": "run_history",
+    "machine.describe": "machine_describe",
+    "checkout.inspect": "checkout_inspect"
   },
   "x-vibesys-feature-by-field": {
     "run.start": {

@@ -30,7 +30,10 @@ the log streams' ``LogStream``, ``LogStreamOutcome``, ``LogChunk``, ``LogPipeSpa
 ``HELPER_FIELD_FEATURES``, ``request_features``, ``HelperFeature``,
 ``HelperRequest`` (``parse_helper_request``) and its members, the run history
 read's limits (``RUN_EVENTS_READ_MAX``, ``RUN_EVENTS_READ_MAX_BYTES``), ``RUN_EVENTS_FILE`` and
-``RunEventDocument``, ``HelperMessage``
+``RunEventDocument``, the machine facts (``Accelerator``, ``Gpu``, ``Hardware``,
+``DockerReachable``, ``DockerUnreachable``, ``MachineCheckout``, ``RunCounts``,
+``MachineDescription``) and checkout inspection (``MIN_CHECKOUT_VERSION``,
+``CheckoutFound``, ``CheckoutNotFound``, ``CheckoutTooOld``, ``CheckoutInspection``), ``HelperMessage``
 and its members, ``HelperErrorCode``, the harness choice (``HarnessOption``,
 ``HarnessChoice``, and the run flags ``CLI_PROVIDER_FLAG``, ``MODEL_FLAG``,
 ``UNVETTED_MODEL_FLAG``), and a relayed channel's end: ``ChannelEndOutcome``,

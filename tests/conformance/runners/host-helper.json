@@ -19,7 +19,8 @@
     ],
     "host-paths": [
       "helper-project-missing",
-      "helper-paths-missing"
+      "helper-paths-missing",
+      "helper-machine"
     ],
     "logs": [
       "helper-logs-list",
