@@ -71,9 +71,6 @@ type MultiRunLaunch = MultiLaunch | ProfileGuidedMultiLaunch
 
 # The label of the snapshot that retains a verified revision.
 RETENTION_LABEL = "verified"
-# The directories the run-scoped turns may write: the profiler's evidence. The designer's
-# roadmap is VibeSys-owned run state, reached through the roadmap operations.
-ARTIFACT_DIRECTORIES = ("profile",)
 
 
 def _registry() -> OperationRegistry:
@@ -212,7 +209,6 @@ def multi_core_policy(launch_type: type[MultiRunLaunch]) -> CorePolicy:
         retention_label=RETENTION_LABEL,
         prompt_templates=Path(prompts.__file__).parent,
         prompt_fallback_roots=(SERIAL_SEARCH_PROMPTS, CORE_PROTOCOL_DIR, PROMPTS_DIR / "shared"),
-        artifact_directories=ARTIFACT_DIRECTORIES,
         owned_operations=roadmap_entries,
     )
 

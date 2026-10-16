@@ -1002,7 +1002,7 @@ mapping above, each deliberate:
 - Prompts are domain-agnostic as `single`'s are: the evidence the loop kept in progress files (history,
   frontier, notices, the implementer's claims for the judge, the profile) is rendered from typed
   rows, the validation recipe contract is rendered from its schema, and the profiler prompt is the
-  per-kind shared template plus where to write its bounded evidence (`profile/round-NNNN/`). The
+  per-kind shared template, and the profiler writes nothing in the project (its reply is the evidence). The
   run's domain pack is rendered once by the plan (`domain_sections`) into one slot of each role's
   prompt, and skill-recommendation resolution is not rendered; the modality and interface texts
   are.

@@ -47,14 +47,13 @@ class PreRoundPrompt(RolePromptContext):
 
 
 class ProfilerPrompt(RolePromptContext):
-    """One advisory profiling turn: where to look and where to write bounded evidence."""
+    """One advisory profiling turn: where to look."""
 
     reply_schema: ClassVar[SchemaRef | None] = PROFILER.reply_schema
 
     template: Literal[PromptTemplate.PROFILER] = PromptTemplate.PROFILER
     round_number: int = Field(gt=0)
     profile_focus: str
-    evidence_directory: str
 
 
 class Claim(Value):

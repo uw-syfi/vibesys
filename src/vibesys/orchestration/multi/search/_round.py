@@ -43,9 +43,6 @@ from vs_core.api.search import (
 DEFAULT_PROFILE_FOCUS = "general steady-state benchmark hotspots"
 """What the profiler looks at when the router wants a profile and names no focus."""
 
-PROFILE_DIRECTORY = "profile"
-"""Where the profiler writes its bounded evidence, below the run's root."""
-
 
 class MultiRound(RoundStart):
     """A round told where the search stands, with the config the search runs under."""
@@ -155,7 +152,6 @@ def _advice(ctx: Flow, config: MultiConfig, start: MultiRound) -> serial.Advise:
             ProfilerPrompt(
                 round_number=start.number,
                 profile_focus=routed.profile_focus or DEFAULT_PROFILE_FOCUS,
-                evidence_directory=f"{PROFILE_DIRECTORY}/round-{start.number:04d}/",
             ),
         )
 
@@ -185,7 +181,6 @@ async def profile(profiler: Session, prompt: ProfilerPrompt) -> LastProfile | No
                 suggestions=findings.suggestions,
                 perf_metric=findings.perf_metric,
                 perf_unit=findings.perf_unit,
-                evidence_directory=prompt.evidence_directory,
             )
         case Failed():
             return None

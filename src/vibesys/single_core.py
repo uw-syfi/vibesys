@@ -64,9 +64,6 @@ type SingleRunLaunch = SingleLaunch | ProfileGuidedSingleLaunch
 
 # The label of the snapshot that retains a verified revision.
 RETENTION_LABEL = "verified"
-# The directories a run-scoped turn may write in the run's workspace: none. The designer's
-# roadmap is VibeSys-owned run state, reached through the roadmap operations.
-ARTIFACT_DIRECTORIES: tuple[str, ...] = ()
 
 
 def _registry() -> OperationRegistry:
@@ -193,7 +190,6 @@ def single_core_policy(launch_type: type[SingleRunLaunch]) -> CorePolicy:
         retention_label=RETENTION_LABEL,
         prompt_templates=Path(prompts.__file__).parent,
         prompt_fallback_roots=(SERIAL_SEARCH_PROMPTS, CORE_PROTOCOL_DIR),
-        artifact_directories=ARTIFACT_DIRECTORIES,
         owned_operations=roadmap_entries,
     )
 

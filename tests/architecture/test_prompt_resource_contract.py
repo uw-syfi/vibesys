@@ -656,7 +656,6 @@ def core_policy_context() -> dict[str, object]:
         ),
         "validation_failure": ValidationFailure(recipe="unit", error="boom", output="tail"),
         "validation_recipe_schema": '{"version": 1}',
-        "evidence_directory": "profile/round-0001/",
         "profiler_kind": "linux_cpu",
         # The single strategy's plan prompt (`PlanPrompt`) fields.
         "benchmark_enabled": True,

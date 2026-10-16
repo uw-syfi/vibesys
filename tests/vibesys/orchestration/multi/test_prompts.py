@@ -151,7 +151,6 @@ _PROFILER = st.builds(
     ProfilerPrompt,
     round_number=st.integers(1, 5),
     profile_focus=_TEXT,
-    evidence_directory=st.just("profile/round-0001/"),
 )
 _PLANNING = st.builds(
     PlanPrompt,
@@ -164,7 +163,6 @@ _PLANNING = st.builds(
         source=st.just("profiler"),
         analysis=_TEXT,
         bottlenecks=_TEXT,
-        evidence_directory=st.none() | st.just("profile/round-0001/"),
     ),
 )
 
@@ -217,12 +215,12 @@ def test_the_profiler_prompt_renders_for_every_runnable_profiler(
     context: ProfilerPrompt, kind: str
 ) -> None:
     text = _render(PromptTemplate.PROFILER, context, profiler_kind=kind)
-    assert context.evidence_directory in text
+    assert "Write nothing in the workspace" in text
 
 
 @settings(max_examples=examples(pr=8, nightly=100))
 @given(context=_PLANNING)
-def test_the_planning_prompt_shows_a_fresh_profile_with_its_evidence_directory(
+def test_the_planning_prompt_shows_a_fresh_profile(
     context: PlanPrompt,
 ) -> None:
     text = _render(PlanTemplate.PLAN, context)

@@ -184,7 +184,6 @@ _STRATEGIES = (
                 multi_api.ProfilerPrompt(
                     round_number=1,
                     profile_focus="hot path",
-                    evidence_directory="profile",
                 ),
             ),
         ),

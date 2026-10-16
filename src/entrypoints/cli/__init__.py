@@ -8,7 +8,7 @@ this package is the shared surface between them.
 The loop is picked by ``--outer-loop {agent, profile-guided, plain, evolve}``:
 
   "agent" / "profile-guided": orchestrated hypothesis loops. The designer's
-             roadmap is kept in the run's state; profiler evidence below ``profile/``.
+             roadmap is kept in the run's state; the profiler's findings travel in its reply.
   "plain": issue-driven outer loop on the core lifecycle. Its issue board (a local
              issues.json, or GitHub issues) is filled by the performance evaluator
              and the judge, and the implementer works one issue at a time.

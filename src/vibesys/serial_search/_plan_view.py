@@ -80,8 +80,6 @@ class LastProfile(Value):
     suggestions: str = ""
     perf_metric: float | None = None
     perf_unit: str | None = None
-    # Where the profiler wrote its bounded evidence files, when it did.
-    evidence_directory: str | None = None
 
 
 class PlanEvidence(Value):

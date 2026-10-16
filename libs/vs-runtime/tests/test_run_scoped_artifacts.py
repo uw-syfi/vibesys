@@ -1,10 +1,10 @@
 """A run-scoped turn's artifact directory lives in the run root and outlives restores.
 
-A run-scoped `WRITE_ARTIFACTS` turn (the `multi` profiler, which writes its evidence below
-`profile/`) writes in the run root and a later turn reads what it wrote. That needs (1) the
-turn's writes under the configured artifact directory to be kept and anything else reverted,
-and (2) the file to be there when the next turn starts, whatever workspace work happened between
-the two turns.
+A run-scoped `WRITE_ARTIFACTS` turn (a role that a plugin lets write below a configured
+directory, `profile/` here) writes in the run root and a later turn reads what it wrote. That
+needs (1) the turn's writes under the configured artifact directory to be kept and anything else
+reverted, and (2) the file to be there when the next turn starts, whatever workspace work
+happened between the two turns.
 """
 
 from __future__ import annotations

@@ -1,12 +1,13 @@
-"""A serial run's designer leaves the project a clean baseline for the next run (#2957).
+"""A serial run's agents leave the project a clean baseline for the next run (#2957, #2963).
 
-The single and multi designers kept their roadmap as files in the project root, which the run
-never committed, so the next run refused to start on a dirty project. Their planning state is
-now VibeSys-owned run state behind the roadmap operations (`test_roadmap_owner` shows it kept
-across runs). This test plays what a designer does to the project in an earlier run, as the
-product declares it: it writes into every directory its turn may write. The next run then starts
-in a copy of the project (a new process, which knows nothing of what the earlier one wrote) and
-must find a clean baseline.
+The single and multi designers kept their roadmap as files in the project root, and the multi
+profiler its evidence below `profile/`. The run never committed them, so the next run refused to
+start on a dirty project. The roadmap is now VibeSys-owned run state behind the roadmap
+operations (`test_roadmap_owner` shows it kept across runs), and the profiler's findings travel
+in its reply. This test plays what the run-scoped agents do to the project in an earlier run, as
+the product declares it: it writes into every directory a turn that may write in the project is
+granted. The next run then starts in a copy of the project (a new process, which knows nothing
+of what the earlier one wrote) and must find a clean baseline.
 """
 
 from __future__ import annotations
@@ -21,8 +22,6 @@ from tests.support import run_test_command
 from tests.support.real_git import real_git_tracker
 
 from launch import built_in_orchestrations
-from vibesys.serial_search.api import ORCHESTRATOR
-from vs_core.api import Access
 from vs_project.api import (
     NullGitTrackerEvents,
     OrchestrationDescriptor,
@@ -30,6 +29,7 @@ from vs_project.api import (
     RunEnvironmentRecord,
 )
 from vs_project.api.testing import run_execution_record
+from vs_runtime.api import WorkspaceAccess
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -103,15 +103,20 @@ def _start_run(root: Path, descriptor: OrchestrationDescriptor) -> Project:
     return project
 
 
-def _designer_writes(registration: OrchestrationRegistration) -> tuple[str, ...]:
-    """The directories a designer turn may write in the project, as the policy declares them."""
-    if ORCHESTRATOR.access is not Access.WRITE_ARTIFACTS:
-        return ()
-    return registration.plugin.core.artifact_directories
+def _project_writes(registration: OrchestrationRegistration) -> tuple[str, ...]:
+    """The directories the run's agents may write in the project, as the plugin declares them.
+
+    A role that is not limited to artifacts writes nowhere in the project (it reads, or works in
+    its own candidate workspace), so the policy's directories are open only when one is.
+    """
+    plugin = registration.plugin
+    if any(agent.workspace_access is WorkspaceAccess.LIMITED for agent in plugin.agents):
+        return plugin.core.artifact_directories
+    return ()
 
 
 @pytest.mark.parametrize("plugin_id", ["single-agent", "multi-agent"])
-def test_a_serial_designer_leaves_the_project_clean_for_the_next_run(
+def test_a_serial_run_leaves_the_project_clean_for_the_next_run(
     tmp_path: Path, plugin_id: str
 ) -> None:
     registration = built_in_orchestrations().resolve(plugin_id)
@@ -122,7 +127,7 @@ def test_a_serial_designer_leaves_the_project_clean_for_the_next_run(
     _user_repository(earlier)
     _start_run(earlier, descriptor)
 
-    for directory in _designer_writes(registration):
+    for directory in _project_writes(registration):
         written = earlier / directory / "index.md"
         written.parent.mkdir(parents=True, exist_ok=True)
         written.write_text("- major-1: todo\n", encoding="utf-8")

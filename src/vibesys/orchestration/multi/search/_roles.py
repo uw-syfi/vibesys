@@ -55,7 +55,7 @@ PROFILER = Role(
     prompt="profiler.j2",
     reply=ProfilerSummary,
     workspace=None,
-    access=Access.WRITE_ARTIFACTS,
+    access=Access.READ_ONLY,
     turn_time=hours(1),
     corrections=1,
     lost_turns=2,
@@ -63,7 +63,7 @@ PROFILER = Role(
     charge=Charge.TURN,
     exchanges=Exchanges(correction="reply_correction.j2"),
 )
-"""Collects and analyses a profile, writing bounded evidence below `profile/`."""
+"""Collects and analyses a profile, writing nothing in the project: its reply is the evidence."""
 
 IMPLEMENTER = Role(
     name="implementer",
