@@ -17,7 +17,7 @@ from server.control_envelope import (
     StopCommand,
 )
 from server.diagnostics import Diagnostic, DiagnosticScope, exception_to_diagnostic
-from server.events import ChatThreadId, RunEvent
+from server.events import ChatThreadId, RunEvent, WireSpan
 from server.execution import ActiveAgentExecution
 from server.host_api import PROTOCOL_VERSION
 from server.run_lifecycle import RunStatus
@@ -341,6 +341,9 @@ class RunSnapshot(ProtocolModel):
     # CHAT event, so a client that folds only a tail cannot rebuild the
     # registry from the events it holds.
     chat_threads: list[ChatThreadInfo] = Field(default_factory=list)
+    # The run trace: every span of the run as its latest span event left it, each after its
+    # parent. Folding the run's span events by span id gives the same list.
+    spans: list[WireSpan] = Field(default_factory=list)
 
 
 class ChatResult(ProtocolModel):

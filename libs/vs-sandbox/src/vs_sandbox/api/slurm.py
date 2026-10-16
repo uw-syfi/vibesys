@@ -27,6 +27,7 @@ from vs_sandbox.host_command_broker import (
 )
 from vs_sandbox.host_command_client import SOCKET_ENV as COMMAND_BROKER_SOCKET_ENV
 from vs_sandbox.host_command_client import TOKEN_ENV as COMMAND_BROKER_TOKEN_ENV
+from vs_sandbox.host_sandbox import remote_job_prefix
 from vs_sandbox.job_confinement import HostJobConfinement, JobConfinement
 from vs_sandbox.read_only_links import ReadOnlyPathLinkError, check_read_only_links
 from vs_sandbox.slurm_broker import SlurmProcessBroker, SlurmProcessBrokerError
@@ -160,6 +161,7 @@ __all__ = [
     "profile_capture_descriptor",
     "queue_status_from_snapshot",
     "read_slurm_capture_plan",
+    "remote_job_prefix",
     "render_slurm_operator_toml",
     "require_profile_fields",
     "slurm_queue_status_reader",

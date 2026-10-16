@@ -59,6 +59,7 @@ from server.host_api import (
     INSTANCE_ID_PATTERN,
     RECORD_VERSION,
     AvailableLogTail,
+    EndRecord,
     FailureReason,
     InspectionState,
     InstanceInspection,
@@ -68,6 +69,7 @@ from server.host_api import (
     InstanceStopResult,
     LiveInstanceRecord,
     MissingLogTail,
+    RunEndOutcome,
     RunPhase,
     RunStatus,
     StopOutcome,
@@ -112,6 +114,9 @@ CRASHED = FailureReason(
     message="The server exited without recording how its run ended; see its log.",
 )
 """The reason a listing records for a server that died without a tombstone."""
+CRASHED_END = EndRecord(outcome=RunEndOutcome.FAILED, reason=CRASHED.message, resumable=True)
+"""A crashed server's ``end``: its durable run state is where the server left it, so a
+resume is offered; the round it continues from is unknown, since the server said nothing."""
 _INSPECTION_METADATA_BYTES = 32 * 1024
 _INSPECTION_METADATA_NAME = "inspection.json"
 
@@ -374,6 +379,8 @@ def crashed(record: LiveInstanceRecord, ended_at: float | None = None) -> LiveIn
             **record.model_dump(),
             "phase": RunPhase(status=RunStatus.FAILED, reason=CRASHED),
             "ended_at": ended_at,
+            "paused": None,
+            "end": CRASHED_END,
         }
     )
 

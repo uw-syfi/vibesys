@@ -52,6 +52,45 @@ or interpret iteration kinds. Older servers reject the request under the same
 strict request parsing, and clients retain event-derived round navigation as the
 compatibility path.
 
+## Run trace events
+
+This is payload level, recorded here because every client folds it the same way. The run trace
+(see "The run trace" in [flows.md](flows.md)) reaches clients as three generic run events,
+`span_started`, `span_updated` and `span_ended`. Each event carries the **whole span** in
+`data.span`, plus the event's own `sequence` and `timestamp`, never a field delta. The runtime
+records the spans. After each durable core commit, the run's commit observer
+(`vibesys.run.integration`) diffs the committed trace against the one before
+(`vs_core.span_changes`) and emits one event per span that started, changed or ended, in the
+trace's order. A span that starts and ends within one commit gets a `span_started` and then a
+`span_ended`. No search code is involved.
+
+- **Folding.** Replace by `span.id`, in `sequence` order. A span keeps the position it first
+  started at, so each span comes after its parent. `RunSnapshot.spans` is that fold at the
+  snapshot's `sequence`. The server folds the same events as a journal listener
+  (`src/server/trace.py`), live and on replay. A client starts from the snapshot and folds the events
+  after it (`@vibesys/run-state/trace`: `traceFromSnapshot`, `foldTrace`). Folding every span event
+  gives the snapshot's spans; folding a prefix gives the trace at that prefix's last sequence.
+- **Generic.** A span's `label.kind` names a kind its search declared at `@search`. A client
+  that does not know the kind renders it from `name`, `label.title`, `status`, `label.attrs_json`
+  and `label.links`, so a new kind needs no protocol change.
+- **Ids.** `flow:<path>#<n>` for a flow task, `op:<decision id>` for an operation, both plain
+  strings. A span id is stable across replay and restart.
+- **Contract choices.** `waiting_on[].kind` is `operation`, `slot`, `time` or `stop`. There is no
+  `first`: a flow waiting on `ctx.first(a, b)` has one entry per source. `failure.kind` is
+  `outcome` (for a `failed` span) or `interruption` (for a `stopped` span). There is no `defect`:
+  a defect crashes the step that raised it, and that step is never committed, so no span event
+  reports it. The run's failure event carries it instead. The run's `Finish` has no span:
+  issuing it ends every open span, and the root span ends `done`, `failed` or `stopped` by the
+  proposed result.
+- **Agent turns.** An agent-turn span carries `invocation`, the invocation id the turn ran as.
+  The runtime owns the mapping from that id to the span: the server stamps
+  `turn_usage_recorded.data.span_id` with the agent-turn span of the record's `execution_id`.
+  Clients never join the two. A log stream's owner names its span in `span_id` when the writer
+  knows it, and `logs.list` filters by it (see [desktop-connection.md](desktop-connection.md)).
+- **Evolution.** The three events, `RunSnapshot.spans`, `TurnUsageData.span_id` and
+  `LogOwner.span_id` are additive within `PROTOCOL_VERSION` 1. A client that predates them counts
+  the events as unknown kinds and ignores the new optional fields.
+
 ## Framing and connection decisions
 
 Each decision below carries a stable token. The conformance corpus (`tests/conformance/`, see

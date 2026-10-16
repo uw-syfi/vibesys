@@ -94,6 +94,9 @@
   --dot: 8px;
   --dot-ring: 3px;
   --check: 18px;
+  --menu: 220px;
+  --log: 320px;
+  --log-sm: 160px;
   --radius-sm: 4px;
   --radius: 6px;
   --radius-lg: 8px;
@@ -107,6 +110,7 @@
   --duration-base: 200ms;
   --easing: cubic-bezier(0.2, 0, 0, 1);
   --selection: color-mix(in srgb, var(--accent) 14%, var(--bg));
+  --log-err: color-mix(in srgb, var(--err) 60%, var(--log-text));
   --chip-accent-bg: color-mix(in srgb, var(--accent) 12%, var(--panel));
   --chip-accent-border: color-mix(in srgb, var(--accent) 35%, var(--panel));
   --banner-accent-bg: color-mix(in srgb, var(--accent) 8%, var(--bg));

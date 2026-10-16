@@ -72,7 +72,7 @@ def test_instances_list_loads_no_engine(
     stdout = _run_light(["instances", "list", "--json"], env, record_property)
 
     assert json.loads(stdout) == {
-        "version": 4,
+        "version": 5,
         "instances": [],
         "ended": [],
         "unreadable": [],

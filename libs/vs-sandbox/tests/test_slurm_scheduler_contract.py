@@ -608,14 +608,16 @@ async def _poll_with_dropped_command(spec: _WorldSpec, delay_s: float, position:
             world.clock.advance(delay_s)
             world.faults.drop_command(position)
             polled = await reader.poll(handle.id)
+            # Every fault is one transient transport error and the job is known: the
+            # other source (queue or accounting) answers. An ended job's poll also
+            # downloads its results; one cut short reads nothing, so that poll is
+            # unknown and the next one, with no fault, collects the job whole.
+            again = await reader.poll(handle.id) if polled.phase is PollPhase.UNKNOWN else None
         finally:
             release.set()
             await submitter.close()
-        # Every fault is one transient transport error and the job is known: the
-        # other source (queue or accounting) answers. Ended jobs also collect files,
-        # which is a different boundary.
-        if polled.phase is not PollPhase.ENDED:
-            assert polled.phase is not PollPhase.UNKNOWN, polled.detail
+        if again is not None:
+            assert again.phase is PollPhase.ENDED, polled.detail
 
 
 @pytest.mark.parametrize("spec", _FAULT_WORLDS, ids=lambda spec: spec.label)

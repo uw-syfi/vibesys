@@ -15,7 +15,9 @@ export default defineConfig({
   retries: 0,
   forbidOnly: inCI,
   workers: 1,
-  timeout: 120_000,
+  // A hang guard only: the six themes take about a minute natively, three times that under the
+  // x86-64 emulation that writes the baselines on an Arm Mac.
+  timeout: 360_000,
   snapshotPathTemplate: '{testDir}/__screenshots__/{arg}{ext}',
   expect: {toHaveScreenshot: {animations: 'disabled', caret: 'hide', scale: 'css'}},
   webServer: {

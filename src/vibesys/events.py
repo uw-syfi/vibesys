@@ -21,6 +21,7 @@ from vs_agent.api import (
     TodoItemData,
     ToolResultPayload,
 )
+from vs_core.api import EndReason, SpanId, WireSpan
 from vs_runtime.api.infrastructure import EnvironmentStartupStage
 
 CommandResultPayload = _agent_api.CommandResultPayload
@@ -36,6 +37,7 @@ class CoreEventType(StrEnum):
     ITERATIONS_CHANGED = "iterations_changed"
     RUN_FINISHED = "run_finished"
     RUN_FAILED = "run_failed"
+    RUN_ENDING = "run_ending"
     INVOCATION_STARTED = "invocation_started"
     INVOCATION_FINISHED = "invocation_finished"
     AGENT_EXECUTION_STARTED = "agent_execution_started"
@@ -65,6 +67,9 @@ class CoreEventType(StrEnum):
     WINNER_SELECTED = "winner_selected"
     WORKSTREAM_FINISHED = "workstream_finished"
     TURN_USAGE_RECORDED = "turn_usage_recorded"
+    SPAN_STARTED = "span_started"
+    SPAN_UPDATED = "span_updated"
+    SPAN_ENDED = "span_ended"
 
     # No TURN_RETRY_WAITING member: a retry wait has no correlating identity to
     # carry yet. `_Ask._lost` (`vs_core.flows._agents`) appends a bare
@@ -279,6 +284,22 @@ class RunFailedData(EventPayload):
 
     kind: Literal["run_failed"] = "run_failed"
     failure: RunFailure
+
+
+class RunEndingData(EventPayload):
+    """How a core run's durable record stands as the run ends, emitted once just before its end.
+
+    ``reason`` is core's ``EndReason`` when the run recorded a result, ``None`` when it ended
+    without one (an error, or a stop that left work unsettled). ``resumable`` is whether a
+    resume continues it: its record is not terminal. ``rounds_finished`` counts its
+    workstreams (rounds) that reached their end. ``summary`` is core's account of the result.
+    """
+
+    kind: Literal["run_ending"] = "run_ending"
+    reason: EndReason | None
+    summary: str = ""
+    resumable: bool
+    rounds_finished: NonNegativeInt
 
 
 ExperimentsChangeReason = Literal[
@@ -689,6 +710,37 @@ class TurnUsageData(EventPayload):
     output_tokens: int | None = None
     total_cost_usd: float | None = None
     duration_ms: int | None = None
+    span_id: SpanId | None = None
+    """The agent-turn span of the run trace this turn ran as; the server names it."""
+
+
+class _SpanData(EventPayload):
+    """A span of the run trace, whole, as it is after the change the event reports.
+
+    Spans come from the runtime (``vs_core`` records them where it journals each transition);
+    a search's labels ride in ``span.label``. Folding the span events of a run by ``span.id``,
+    in sequence order, gives the run's spans.
+    """
+
+    span: WireSpan
+
+
+class SpanStartedData(_SpanData):
+    """A span started (a flow task began, or a flow issued an operation)."""
+
+    kind: Literal["span_started"] = "span_started"
+
+
+class SpanUpdatedData(_SpanData):
+    """A span changed: what it waits on, its attempts, its stop or its label."""
+
+    kind: Literal["span_updated"] = "span_updated"
+
+
+class SpanEndedData(_SpanData):
+    """A span ended: ``span.status`` and ``span.failure`` say how."""
+
+    kind: Literal["span_ended"] = "span_ended"
 
 
 CoreEventData = Annotated[
@@ -700,6 +752,7 @@ CoreEventData = Annotated[
     | RunStartedData
     | RunStartupProgressData
     | RunFailedData
+    | RunEndingData
     | ExperimentsChangedData
     | IterationsChangedData
     | PhaseData
@@ -724,7 +777,10 @@ CoreEventData = Annotated[
     | FrameworkWarningData
     | WinnerSelectedData
     | WorkstreamFinishedData
-    | TurnUsageData,
+    | TurnUsageData
+    | SpanStartedData
+    | SpanUpdatedData
+    | SpanEndedData,
     Field(discriminator="kind"),
 ]
 

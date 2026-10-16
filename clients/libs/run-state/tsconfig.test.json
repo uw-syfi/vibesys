@@ -24,6 +24,9 @@
       "path": "./tsconfig.transcript.json"
     },
     {
+      "path": "./tsconfig.trace.json"
+    },
+    {
       "path": "../contracts/tsconfig.lib.json"
     },
     {

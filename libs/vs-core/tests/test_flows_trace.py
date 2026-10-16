@@ -48,8 +48,8 @@ def spans_of(run: FlowRun[Config], kind: core.SpanType) -> list[core.Span]:
 
 def span_of(run: FlowRun[Config], root: str) -> core.Span:
     """The span ``root``; it must exist."""
-    found = run.trace().span(core.SpanId(root=root))
-    assert found is not None, f"no span {root}: {[s.id.root for s in run.trace().spans]}"
+    found = run.trace().span(root)
+    assert found is not None, f"no span {root}: {[s.id for s in run.trace().spans]}"
     return found
 
 
@@ -81,6 +81,7 @@ def test_spans_are_timed_by_the_run_clock_of_the_step_that_recorded_them(
     assert [s.started_at for s in turns] == issued[: len(gaps)]
     assert [s.ended_at for s in turns] == answered
     assert all(s.status is core.SpanStatus.DONE for s in turns)
+    assert len({s.invocation for s in turns if s.invocation}) == len(turns)  # each its own
     assert run.finished is not None
     assert_trace_ended(run.trace())
     assert span_of(run, "flow:#1").ended_at == answered[-1]

@@ -28,7 +28,8 @@ export const SPACE: Readonly<Record<SpaceToken, number>> = {
 /**
  * Control and row heights (`control-sm`, `control`, `row`), the sidebar, page content widths, the
  * columns `Grid` and `Split` wrap at, and the small fixed sizes of the components: the hairline, the
- * focus ring and its offset, icons, status dots and the ring of a live one, and check boxes.
+ * focus ring and its offset, icons, status dots and the ring of a live one, check boxes, a menu's
+ * least width, and the heights of a log pane.
  */
 export type SizeToken =
   | 'control-sm'
@@ -49,7 +50,10 @@ export type SizeToken =
   | 'icon'
   | 'dot'
   | 'dot-ring'
-  | 'check';
+  | 'check'
+  | 'menu'
+  | 'log'
+  | 'log-sm';
 export const SIZE: Readonly<Record<SizeToken, number>> = {
   'control-sm': 32,
   control: 40,
@@ -70,6 +74,9 @@ export const SIZE: Readonly<Record<SizeToken, number>> = {
   dot: 8,
   'dot-ring': 3,
   check: 18,
+  menu: 220,
+  log: 320,
+  'log-sm': 160,
 };
 
 export type RadiusToken = 'radius-sm' | 'radius' | 'radius-lg' | 'radius-full';

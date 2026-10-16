@@ -53,11 +53,12 @@ from .connector_protocol import (
     SlurmConnectorResponse,
     SlurmConnectorSyncToRequest,
 )
-from .errors import SlurmError, SlurmSubmissionRejectedError
+from .errors import SlurmError, SlurmSubmissionRejectedError, SlurmTransferInterruptedError
 from .fake_cluster import FakeCluster, SecondsRange, SlurmTimingProfile
 from .fake_connector import REQUESTS_FILE, FakeConnector
 from .fake_ledger import FakeEvaluationLedger
 from .identity import runtime_content_identity
+from .job_teardown import PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE
 from .ledger import (
     BATCH_RESULT_LAYOUT,
     LEDGER_FORMAT_VERSION,
@@ -214,6 +215,7 @@ __all__ = [
     "MAX_REMOTE_READ_BYTES",
     "MAX_TRANSPORT_STREAM_BYTES",
     "PORT_PLACEHOLDER",
+    "PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE",
     "REQUESTS_FILE",
     "SCHEDULER_READ_END",
     "SERVICE_NOT_READY_EXIT_CODE",
@@ -318,6 +320,7 @@ __all__ = [
     "SlurmStatus",
     "SlurmSubmissionRejectedError",
     "SlurmTimingProfile",
+    "SlurmTransferInterruptedError",
     "SlurmTransport",
     "SlurmTransportBrokerPolicy",
     "SlurmTransportRequestError",

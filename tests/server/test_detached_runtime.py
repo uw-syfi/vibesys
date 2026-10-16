@@ -11,7 +11,12 @@ import threading
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.server.support import DEADLOCK_GUARD_S, REQUEST_TIME, build_server_parts
+from tests.server.support import (
+    DEADLOCK_GUARD_S,
+    REQUEST_TIME,
+    RecordingObserver,
+    build_server_parts,
+)
 
 from entrypoints.production import production_runs
 from server.api.protocol import SnapshotQuery, StopCommand, SubscribeRequest
@@ -31,8 +36,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from server.host_api import FailureReason, RunStatus, StartupFact
-
 
 def test_detached_runtime_runs_without_a_subscriber_and_exits_when_the_run_ends(
     tmp_path: Path,
@@ -44,30 +47,14 @@ def test_detached_runtime_runs_without_a_subscriber_and_exits_when_the_run_ends(
     reopened read-only from stored state instead.
     """
     socket_path = tmp_path / "control.sock"
-    milestones: list[str] = []
-
-    class Observer:
-        def resolved(self, *, project_root: Path, task: str) -> None:
-            del project_root, task
-
-        def listening(self) -> None:
-            milestones.append("listening")
-
-        def observe(
-            self,
-            *,
-            status: RunStatus | None = None,
-            failure: FailureReason | None = None,
-            startup: StartupFact | None = None,
-        ) -> None:
-            milestones.append(str(status or failure or startup))
+    observer = RecordingObserver()
 
     runtime = ServerRuntime(
         run_id="run-1",
         runs=production_runs(),
         socket_path=socket_path,
         detach=True,
-        observer=Observer(),
+        observer=observer,
         platform=Platform.real(),
     )
     started = threading.Event()
@@ -86,7 +73,7 @@ def test_detached_runtime_runs_without_a_subscriber_and_exits_when_the_run_ends(
     assert runtime.transport_listening.is_set()
     # Attaching the journal is not readiness: no session reported the run
     # ready, so it is still starting when it serves.
-    assert milestones == ["listening"]
+    assert observer.facts == ["listening"]
 
     # A client that attaches mid-run is served through the reconnect bootstrap.
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:

@@ -34,7 +34,7 @@ LINES = ("a", "b", "c")
 
 
 @dataclass(frozen=True)
-class Submit:
+class SubmitCandidate:
     """A workstream of ``line`` submits a candidate built on an earlier one (or on the input)."""
 
     line: str
@@ -59,11 +59,11 @@ class Rank:
     order: tuple[str, ...]
 
 
-type Event = Submit | End | Rank
+type Event = SubmitCandidate | End | Rank
 
 EVENTS = st.one_of(
     st.builds(
-        Submit,
+        SubmitCandidate,
         st.sampled_from(LINES),
         st.sampled_from([WorkKind.IMPLEMENT, WorkKind.IMPLEMENT, WorkKind.PROFILE]),
         st.none() | st.integers(0, 20),
@@ -101,7 +101,7 @@ def _ancestors(played: Played, revision: RevisionRef) -> set[RevisionRef]:
     return found
 
 
-def _submission(played: Played, event: Submit, at: int) -> Submission:
+def _submission(played: Played, event: SubmitCandidate, at: int) -> Submission:
     earlier = list(played.submitted.values())
     parent = BASE
     if event.parent is not None and earlier:
@@ -139,7 +139,7 @@ def _bind_checked(played: Played) -> None:
         played.verdicts.setdefault(key, []).append(verdict)
 
 
-def _submit_checked(played: Played, event: Submit, at: int) -> None:
+def _submit_checked(played: Played, event: SubmitCandidate, at: int) -> None:
     queue = played.queue
     submission = _submission(played, event, at)
     waiting = {item.submission.key: item.submission for item in queue.pending}
@@ -166,7 +166,7 @@ def play(events: list[Event], *, slots: int, ranked: bool) -> Played:
     played = Played(EvaluationQueue(slots=slots, policy="ranked" if ranked else "newest"))
     for at, event in enumerate(events, 1):
         match event:
-            case Submit():
+            case SubmitCandidate():
                 _submit_checked(played, event, at)
             case End(which=which) if played.queue.holding:
                 key = played.queue.holding[which % len(played.queue.holding)]
@@ -184,9 +184,11 @@ def play(events: list[Event], *, slots: int, ranked: bool) -> Played:
 @given(events=st.lists(EVENTS, max_size=40), slots=st.integers(1, 3), ranked=st.booleans())
 @example(
     events=[
-        Submit("a", WorkKind.IMPLEMENT, None),
-        Submit("b", WorkKind.IMPLEMENT, None),
-        Submit("c", WorkKind.IMPLEMENT, 1, at_parent=True),  # measured at b's waiting candidate
+        SubmitCandidate("a", WorkKind.IMPLEMENT, None),
+        SubmitCandidate("b", WorkKind.IMPLEMENT, None),
+        SubmitCandidate(
+            "c", WorkKind.IMPLEMENT, 1, at_parent=True
+        ),  # measured at b's waiting candidate
     ],
     slots=1,
     ranked=False,
@@ -264,7 +266,7 @@ def test_a_free_slot_measures_the_newest_or_the_first_ranked_candidate(
 
 
 ARRIVALS = st.one_of(
-    st.builds(Submit, st.sampled_from(LINES), st.just(WorkKind.PROFILE), st.none()),
+    st.builds(SubmitCandidate, st.sampled_from(LINES), st.just(WorkKind.PROFILE), st.none()),
     st.builds(End, st.integers(0, 10)),
 )
 """Submissions that are never superseded, and measurements that end: a run that keeps submitting."""
@@ -277,9 +279,9 @@ ARRIVALS = st.one_of(
     ranked=st.booleans(),
 )
 @example(
-    events=[Submit("a", WorkKind.PROFILE, None)]
-    + [Submit("b", WorkKind.PROFILE, None)] * 2
-    + [End(0), Submit("c", WorkKind.PROFILE, None)] * 3,
+    events=[SubmitCandidate("a", WorkKind.PROFILE, None)]
+    + [SubmitCandidate("b", WorkKind.PROFILE, None)] * 2
+    + [End(0), SubmitCandidate("c", WorkKind.PROFILE, None)] * 3,
     slots=1,
     ranked=False,
 )

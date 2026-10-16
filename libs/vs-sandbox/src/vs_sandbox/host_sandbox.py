@@ -63,8 +63,8 @@ import posixpath
 import shutil
 import sys
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass, field, replace
+from pathlib import Path, PurePath
 from typing import TYPE_CHECKING
 
 from vs_sandbox import landlock
@@ -735,6 +735,80 @@ def build(  # noqa: PLR0913  # lint-waiver: LW-010194 [PLR0913]; Preserve build'
         "runs unconfined. Use the default Docker run environment for an externally sandboxed run."
     )
     return _unavailable(message, require_enforcement=require_enforcement, log=_log)
+
+
+def build_remote_job_prefix(
+    workspace: Path | str,
+    *,
+    env: dict[str, str],
+    resources: Iterable[HostResource] = (),
+    project_path_policy: ProjectPathPolicy | None = None,
+) -> list[str]:
+    """Build the host-confinement prefix for a job launched on another machine.
+
+    Backend selection, enforcement, and remote compatibility stay together here:
+    callers cannot accidentally build a local-only backend and serialize its
+    submit-host executable path into a remote job.  Off switches retain
+    :func:`build`'s fail-closed diagnostic.  Linux backend parsing therefore runs
+    only after those switches have been consumed.
+    """
+    if (
+        sys.platform.startswith("linux")
+        and not _is_disabled(env)
+        and _requested_linux_backend(env) is LinuxBackend.LANDLOCK
+    ):
+        _refuse_remote_landlock()
+
+    sandbox = build(
+        workspace,
+        env=env,
+        resources=resources,
+        project_path_policy=project_path_policy,
+        require_enforcement=True,
+    )
+    if sandbox is None:  # require_enforcement raises instead
+        message = "brokered jobs require host confinement"
+        raise RuntimeError(message)
+    return remote_job_prefix(sandbox)
+
+
+def remote_job_prefix(sandbox: WorkspaceSandbox) -> list[str]:
+    """Return *sandbox*'s confinement prefix with node-resolved executables.
+
+    Bubblewrap and Seatbelt carry all policy data inline in their argv.  Naming
+    their launcher by basename is therefore sufficient for the compute node to
+    resolve its own installed copy through ``PATH``.  Landlock instead re-execs
+    this installation's Python module, so its submit-host entry point is not a
+    portable remote contract and is refused.  Unknown implementations fail
+    closed until they declare an explicit remote-job contract here.
+    """
+    if isinstance(sandbox, HostSandbox):
+        sandbox = replace(sandbox, bwrap_path=PurePath(sandbox.bwrap_path).name)
+    elif isinstance(sandbox, SeatbeltSandbox):
+        sandbox = replace(
+            sandbox,
+            sandbox_exec_path=PurePath(sandbox.sandbox_exec_path).name,
+        )
+    elif isinstance(sandbox, LandlockSandbox):
+        _refuse_remote_landlock()
+    else:
+        message = (
+            f"host confinement backend {type(sandbox).__name__} has no remote-job "
+            "compatibility contract; refusing brokered job"
+        )
+        raise SandboxUnavailableError(message)
+
+    # Everything before the placeholder argv is the confinement prefix.
+    return sandbox.wrap([])
+
+
+def _refuse_remote_landlock() -> None:
+    message = (
+        f"{DISABLE_ENV}={LinuxBackend.LANDLOCK} cannot confine a brokered job on a "
+        "compute node: its Python entry point is resolved on the submit host and may "
+        "not exist on the node; use bubblewrap confinement for remote jobs"
+    )
+    raise SandboxUnavailableError(message)
 
 
 def _unavailable(

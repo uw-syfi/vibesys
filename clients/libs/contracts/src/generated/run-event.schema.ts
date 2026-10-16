@@ -251,6 +251,16 @@ const runEventSchema: Record<string, unknown> = {
       "title": "AgentStatusData",
       "type": "object"
     },
+    "AttemptOutcome": {
+      "description": "How one try of ``ctx.retry`` ended. Closed.",
+      "enum": [
+        "done",
+        "again",
+        "gave_up"
+      ],
+      "title": "AttemptOutcome",
+      "type": "string"
+    },
     "BenchmarkResultData": {
       "additionalProperties": false,
       "description": "Metric result emitted by a benchmark stage.",
@@ -633,6 +643,20 @@ const runEventSchema: Record<string, unknown> = {
       "title": "DiagnosticSeverity",
       "type": "string"
     },
+    "EndReason": {
+      "description": "Why the framework ended the run as it did. Closed: the result's reason starts with it.",
+      "enum": [
+        "adopted",
+        "kept-input",
+        "no-winner",
+        "adoption-failed",
+        "stopped",
+        "deadline",
+        "finish-refused"
+      ],
+      "title": "EndReason",
+      "type": "string"
+    },
     "EventStatus": {
       "description": "Lifecycle and command states reported in events.",
       "enum": [
@@ -679,6 +703,7 @@ const runEventSchema: Record<string, unknown> = {
         "round_finished",
         "run_finished",
         "run_failed",
+        "run_ending",
         "output",
         "tool_call",
         "tool_result",
@@ -696,7 +721,10 @@ const runEventSchema: Record<string, unknown> = {
         "framework_warning",
         "winner_selected",
         "workstream_finished",
-        "turn_usage_recorded"
+        "turn_usage_recorded",
+        "span_started",
+        "span_updated",
+        "span_ended"
       ],
       "title": "EventType",
       "type": "string"
@@ -740,6 +768,15 @@ const runEventSchema: Record<string, unknown> = {
       ],
       "title": "ExperimentsChangedData",
       "type": "object"
+    },
+    "FailureKind": {
+      "description": "flows.md's failure kinds a span can end with. Closed.\n\nA defect crashes the step that raised it, which is never persisted, so no trace holds one.",
+      "enum": [
+        "outcome",
+        "interruption"
+      ],
+      "title": "FailureKind",
+      "type": "string"
     },
     "FrameworkSource": {
       "description": "Closed set of framework subsystems that emit framework events.",
@@ -1727,6 +1764,50 @@ const runEventSchema: Record<string, unknown> = {
       "title": "RunConfiguredData",
       "type": "object"
     },
+    "RunEndingData": {
+      "additionalProperties": false,
+      "description": "How a core run's durable record stands as the run ends, emitted once just before its end.\n\n``reason`` is core's ``EndReason`` when the run recorded a result, ``None`` when it ended\nwithout one (an error, or a stop that left work unsettled). ``resumable`` is whether a\nresume continues it: its record is not terminal. ``rounds_finished`` counts its\nworkstreams (rounds) that reached their end. ``summary`` is core's account of the result.",
+      "properties": {
+        "kind": {
+          "const": "run_ending",
+          "default": "run_ending",
+          "title": "Kind",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EndReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "summary": {
+          "default": "",
+          "title": "Summary",
+          "type": "string"
+        },
+        "resumable": {
+          "title": "Resumable",
+          "type": "boolean"
+        },
+        "rounds_finished": {
+          "minimum": 0,
+          "title": "Rounds Finished",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "reason",
+        "resumable",
+        "rounds_finished"
+      ],
+      "title": "RunEndingData",
+      "type": "object"
+    },
     "RunFailedData": {
       "additionalProperties": false,
       "description": "Why a run failed, what partial result it preserved, and the counts behind it.",
@@ -1962,6 +2043,10 @@ const runEventSchema: Record<string, unknown> = {
       "title": "RunStatusChangedData",
       "type": "object"
     },
+    "Seconds": {
+      "minimum": 0,
+      "type": "number"
+    },
     "ServerReadyData": {
       "additionalProperties": false,
       "description": "Transport details emitted once the server is ready.",
@@ -1984,6 +2069,406 @@ const runEventSchema: Record<string, unknown> = {
       "required": [
         "kind"
       ]
+    },
+    "Span": {
+      "additionalProperties": false,
+      "description": "One flow task or awaited operation of the run, on the run clock.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/SpanId"
+        },
+        "parent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SpanId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "$ref": "#/$defs/SpanType"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/SpanStatus"
+        },
+        "waiting_on": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/WaitingOn"
+          },
+          "title": "Waiting On",
+          "type": "array"
+        },
+        "attempts": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SpanAttempt"
+          },
+          "title": "Attempts",
+          "type": "array"
+        },
+        "started_at": {
+          "$ref": "#/$defs/Seconds"
+        },
+        "ended_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Seconds"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SpanFailure"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "stop": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SpanStop"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "invocation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Invocation"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SpanLabel"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "parent",
+        "type",
+        "name",
+        "status",
+        "started_at"
+      ],
+      "title": "Span",
+      "type": "object"
+    },
+    "SpanAttempt": {
+      "additionalProperties": false,
+      "description": "One try of ``ctx.retry`` in the flow: try ``n`` of ``of``.\n\n``outcome`` is None while the try runs, and stays None when the flow ended inside it.",
+      "properties": {
+        "n": {
+          "title": "N",
+          "type": "integer"
+        },
+        "of": {
+          "title": "Of",
+          "type": "integer"
+        },
+        "started_at": {
+          "$ref": "#/$defs/Seconds"
+        },
+        "ended_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Seconds"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttemptOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "n",
+        "of",
+        "started_at"
+      ],
+      "title": "SpanAttempt",
+      "type": "object"
+    },
+    "SpanEndedData": {
+      "additionalProperties": false,
+      "description": "A span ended.",
+      "properties": {
+        "span": {
+          "$ref": "#/$defs/WireSpan"
+        },
+        "kind": {
+          "const": "span_ended",
+          "default": "span_ended",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "span",
+        "kind"
+      ],
+      "title": "SpanEndedData",
+      "type": "object"
+    },
+    "SpanFailure": {
+      "additionalProperties": false,
+      "description": "Why a span ended failed or stopped.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/FailureKind"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "title": "SpanFailure",
+      "type": "object"
+    },
+    "SpanId": {
+      "pattern": "^(flow|op):\\S*$",
+      "type": "string"
+    },
+    "SpanLabel": {
+      "additionalProperties": false,
+      "description": "What the search says a span is: one of its declared kinds, with that kind's fields.\n\n``attrs_json`` holds the kind's attribute model as JSON (the search's own model, which a\nstate schema cannot name); ``verdict`` is one of the kind's verdicts, apart from ``status``.",
+      "properties": {
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "links": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SpanLink"
+          },
+          "title": "Links",
+          "type": "array"
+        },
+        "attrs_json": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attrs Json"
+        },
+        "verdict": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verdict"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "SpanLabel",
+      "type": "object"
+    },
+    "SpanLink": {
+      "additionalProperties": false,
+      "description": "A labelled span's relation ``rel`` (one its kind declares) to the span ``to``.",
+      "properties": {
+        "rel": {
+          "title": "Rel",
+          "type": "string"
+        },
+        "to": {
+          "$ref": "#/$defs/SpanId"
+        }
+      },
+      "required": [
+        "rel",
+        "to"
+      ],
+      "title": "SpanLink",
+      "type": "object"
+    },
+    "SpanStartedData": {
+      "additionalProperties": false,
+      "description": "A span started.",
+      "properties": {
+        "span": {
+          "$ref": "#/$defs/WireSpan"
+        },
+        "kind": {
+          "const": "span_started",
+          "default": "span_started",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "span",
+        "kind"
+      ],
+      "title": "SpanStartedData",
+      "type": "object"
+    },
+    "SpanStatus": {
+      "description": "Where a span is in its lifecycle. Closed.",
+      "enum": [
+        "pending",
+        "running",
+        "waiting",
+        "done",
+        "failed",
+        "stopped"
+      ],
+      "title": "SpanStatus",
+      "type": "string"
+    },
+    "SpanStop": {
+      "additionalProperties": false,
+      "description": "The operator's stop as this flow saw it: when it arrived, and whether it interrupted it.",
+      "properties": {
+        "requested_at": {
+          "$ref": "#/$defs/Seconds"
+        },
+        "landed": {
+          "default": false,
+          "title": "Landed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "requested_at"
+      ],
+      "title": "SpanStop",
+      "type": "object"
+    },
+    "SpanType": {
+      "description": "What a span stands for. Closed.",
+      "enum": [
+        "flow",
+        "operation"
+      ],
+      "title": "SpanType",
+      "type": "string"
+    },
+    "SpanUpdatedData": {
+      "additionalProperties": false,
+      "description": "A span changed.",
+      "properties": {
+        "span": {
+          "$ref": "#/$defs/WireSpan"
+        },
+        "kind": {
+          "const": "span_updated",
+          "default": "span_updated",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "span",
+        "kind"
+      ],
+      "title": "SpanUpdatedData",
+      "type": "object"
+    },
+    "SpanWaitKind": {
+      "description": "What a flow waits on. Closed.",
+      "enum": [
+        "operation",
+        "slot",
+        "time",
+        "stop"
+      ],
+      "title": "SpanWaitKind",
+      "type": "string"
     },
     "StartupProgress": {
       "additionalProperties": false,
@@ -2315,6 +2800,17 @@ const runEventSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "Duration Ms"
+        },
+        "span_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SpanId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "title": "TurnUsageData",
@@ -2369,6 +2865,29 @@ const runEventSchema: Record<string, unknown> = {
       "title": "UsageUpdateData",
       "type": "object"
     },
+    "WaitingOn": {
+      "additionalProperties": false,
+      "description": "One source a suspended flow waits on, since the run-clock time it began waiting on it.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/SpanWaitKind"
+        },
+        "ref": {
+          "title": "Ref",
+          "type": "string"
+        },
+        "since": {
+          "$ref": "#/$defs/Seconds"
+        }
+      },
+      "required": [
+        "kind",
+        "ref",
+        "since"
+      ],
+      "title": "WaitingOn",
+      "type": "object"
+    },
     "WinnerSelectedData": {
       "additionalProperties": false,
       "description": "The run's result was chosen: a retained candidate, or the unchanged trusted input.",
@@ -2411,6 +2930,9 @@ const runEventSchema: Record<string, unknown> = {
       ],
       "title": "WinnerSelectedData",
       "type": "object"
+    },
+    "WireSpan": {
+      "$ref": "#/$defs/Span"
     },
     "WorkspaceSnapshotData": {
       "additionalProperties": false,
@@ -2739,12 +3261,16 @@ const runEventSchema: Record<string, unknown> = {
               "rate_limit_update": "#/$defs/RateLimitUpdateData",
               "round_finished": "#/$defs/RoundFinishedData",
               "run_configured": "#/$defs/RunConfiguredData",
+              "run_ending": "#/$defs/RunEndingData",
               "run_failed": "#/$defs/RunFailedData",
               "run_interrupted": "#/$defs/RunInterruptedData",
               "run_started": "#/$defs/RunStartedData",
               "run_startup_progress": "#/$defs/RunStartupProgressData",
               "run_status_changed": "#/$defs/RunStatusChangedData",
               "server_ready": "#/$defs/ServerReadyData",
+              "span_ended": "#/$defs/SpanEndedData",
+              "span_started": "#/$defs/SpanStartedData",
+              "span_updated": "#/$defs/SpanUpdatedData",
               "subprocess_output": "#/$defs/SubprocessOutputData",
               "todo_update": "#/$defs/TodoUpdateData",
               "tool_call": "#/$defs/ToolCallData",
@@ -2793,6 +3319,9 @@ const runEventSchema: Record<string, unknown> = {
             },
             {
               "$ref": "#/$defs/RunFailedData"
+            },
+            {
+              "$ref": "#/$defs/RunEndingData"
             },
             {
               "$ref": "#/$defs/RunInterruptedData"
@@ -2877,6 +3406,15 @@ const runEventSchema: Record<string, unknown> = {
             },
             {
               "$ref": "#/$defs/TurnUsageData"
+            },
+            {
+              "$ref": "#/$defs/SpanStartedData"
+            },
+            {
+              "$ref": "#/$defs/SpanUpdatedData"
+            },
+            {
+              "$ref": "#/$defs/SpanEndedData"
             }
           ]
         },

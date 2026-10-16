@@ -5,8 +5,8 @@ which calls :func:`answer`, or :func:`connect` for ``run.connect``. Each request
 reads the registry, the project, or the filesystem afresh through
 :class:`HelperHost`, so answering keeps no state between requests. The pure
 decisions it needs (:func:`negotiate`, :func:`select_completions`,
-:func:`run_summaries`, :func:`launch_arguments`, :func:`refused_argument`,
-:func:`unvetted_harness`) are public so they can be tested on their own.
+:func:`run_summaries`, :func:`event_page`, :func:`launch_arguments`,
+:func:`refused_argument`, :func:`unvetted_harness`) are public so they can be tested on their own.
 
 Light like the channel: the standard library, Pydantic, ``vs_sim.api`` and light
 ``server`` modules only.
@@ -16,6 +16,7 @@ Public surface: ``answer``, ``connect``, ``negotiate``, ``Negotiated``,
 ``CheckoutProbe`` with the values they exchange (``ProjectRun``,
 ``ProjectLookupError``, ``ScannedEntry``, ``Scan``, ``PathHints``);
 ``complete_path``, ``select_completions``, ``split_prefix``, ``run_summaries``,
+``event_page``, ``EventPage``,
 ``launch_arguments``, ``refused_argument``, ``unvetted_harness``; and the limit
 ``SCAN_LIMIT``.
 """
@@ -23,12 +24,16 @@ Public surface: ``answer``, ``connect``, ``negotiate``, ``Negotiated``,
 from __future__ import annotations
 
 import posixpath
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Protocol, assert_never
 
+from pydantic import TypeAdapter
+
 from server.host_api import (
     CLI_PROVIDER_FLAG,
+    HELPER_LINE_MAX_BYTES,
     HELPER_PROTOCOL_VERSIONS,
     MODEL_FLAG,
     PATHS_COMPLETE_CAP,
@@ -65,9 +70,12 @@ from server.host_api import (
     ResumeRun,
     RunConnectReply,
     RunConnectRequest,
+    RunEventDocument,
     RunList,
     RunsListReply,
     RunsListRequest,
+    RunsReadEventsReply,
+    RunsReadEventsRequest,
     RunStartReply,
     RunStartRequest,
     RunStopReply,
@@ -83,6 +91,7 @@ from server.relay import (
     ChannelEndOutcome,
     dial,
 )
+from vs_decode.api import Unreadable, decode_json
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
@@ -171,6 +180,14 @@ class Projects(Protocol):
 
     def require_initialized(self, project: Path) -> Path:
         """The project's resolved root, once it is known to define tasks."""
+        ...
+
+    def run_events(self, project: Path, run_id: str, from_sequence: int, limit: int) -> EventPage:
+        """A page of run ``run_id``'s journal (``event_page`` under ``RUN_EVENTS_READ_MAX_BYTES``).
+
+        A run that journaled nothing has an empty, complete page. Raises
+        ``ProjectLookupError`` with ``unknown_run`` when the project has no such run.
+        """
         ...
 
 
@@ -368,6 +385,64 @@ def run_summaries(root: Path, runs: Iterable[ProjectRun], listing: InstanceList)
     return RunList(project_root=project_root, runs=tuple(summaries))
 
 
+@dataclass(frozen=True)
+class EventPage:
+    """One page of recorded events and where the next page starts."""
+
+    events: tuple[RunEventDocument, ...]
+    next_sequence: int
+    complete: bool
+
+
+_EVENT_DOCUMENT: TypeAdapter[RunEventDocument] = TypeAdapter(RunEventDocument)
+_SEQUENCE_PREFIX = re.compile(rb'"sequence":(\d+)[,}]')
+_SEQUENCE_PREFIX_BYTES = 96
+
+
+def event_page(lines: Iterable[bytes], from_sequence: int, limit: int, max_bytes: int) -> EventPage:
+    """The journal events in ``lines`` from ``from_sequence`` on: at most ``limit`` and ``max_bytes``.
+
+    A line before ``from_sequence`` is skipped by the sequence near its start, without
+    decoding the rest. A line that is not a JSON object with an integer ``sequence``
+    ends the journal there: it is the tail a live writer has not finished, or damage no
+    later read gets past. An event longer than ``max_bytes`` is still returned when it
+    is the page's first, so every read makes progress.
+    """
+    events: list[RunEventDocument] = []
+    size = 0
+    next_sequence = from_sequence
+    for line in lines:
+        if not line.strip():
+            continue
+        skipped = _sequence_prefix(line)
+        if skipped is not None and skipped < from_sequence:
+            continue
+        event = _journal_event(line)
+        if event is None:
+            break
+        sequence = event["sequence"]
+        if not isinstance(sequence, int) or sequence < from_sequence:
+            continue
+        if len(events) == limit or (events and size + len(line) > max_bytes):
+            return EventPage(tuple(events), next_sequence, complete=False)
+        events.append(event)
+        size += len(line)
+        next_sequence = sequence + 1
+    return EventPage(tuple(events), next_sequence, complete=True)
+
+
+def _sequence_prefix(line: bytes) -> int | None:
+    match = _SEQUENCE_PREFIX.search(line, 0, _SEQUENCE_PREFIX_BYTES)
+    return None if match is None else int(match.group(1))
+
+
+def _journal_event(line: bytes) -> RunEventDocument | None:
+    event = decode_json(line, _EVENT_DOCUMENT, source="run event", max_bytes=HELPER_LINE_MAX_BYTES)
+    if isinstance(event, Unreadable) or type(event.get("sequence")) is not int:
+        return None
+    return event
+
+
 def _abbreviates(token: str, flag: str) -> bool:
     """Whether argparse reads ``token`` (``--name`` or ``--name=value``) as ``flag``.
 
@@ -477,6 +552,8 @@ def _answer(
             reply = _instances_reply(request, host)
         case TasksListRequest() | RunsListRequest():
             reply = _project_reply(request, host)
+        case RunsReadEventsRequest():
+            reply = _run_events_reply(request, host)
         case RunStartRequest():
             reply = _start(request, host)
         case RunStopRequest(instance_id=instance_id, force=force):
@@ -515,6 +592,18 @@ def _project_reply(
             root, runs = host.projects.runs(project)
             summaries = run_summaries(root, runs, host.registry.list())
             return RunsListReply(request_id=request_id, runs=summaries)
+
+
+def _run_events_reply(request: RunsReadEventsRequest, host: HelperHost) -> RunsReadEventsReply:
+    """Answer one page of a run's recorded events."""
+    project = Path(_host_path(request.project, host.directories))
+    page = host.projects.run_events(project, request.run_id, request.from_sequence, request.max)
+    return RunsReadEventsReply(
+        request_id=request.request_id,
+        events=page.events,
+        next_sequence=page.next_sequence,
+        complete=page.complete,
+    )
 
 
 def _start(request: RunStartRequest, host: HelperHost) -> RunStartReply | HelperError:

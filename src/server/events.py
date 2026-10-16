@@ -44,9 +44,12 @@ from vibesys.api import (
     AgentOutputChannel,
     AgentStatusData,
     GateKind,
+    RunEndingData,
     RunFailedData,
+    SpanId,
     TodoItemData,
     ToolResultPayload,
+    WireSpan,
 )
 from vibesys.api import (
     CommandResultPayload as _CommandResultPayload,
@@ -108,6 +111,7 @@ class EventType(StrEnum):
     ROUND_FINISHED = "round_finished"
     RUN_FINISHED = "run_finished"
     RUN_FAILED = "run_failed"
+    RUN_ENDING = "run_ending"
     OUTPUT = "output"
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
@@ -126,6 +130,9 @@ class EventType(StrEnum):
     WINNER_SELECTED = "winner_selected"
     WORKSTREAM_FINISHED = "workstream_finished"
     TURN_USAGE_RECORDED = "turn_usage_recorded"
+    SPAN_STARTED = "span_started"
+    SPAN_UPDATED = "span_updated"
+    SPAN_ENDED = "span_ended"
 
 
 class EventStatus(StrEnum):
@@ -752,6 +759,32 @@ class TurnUsageData(EventPayload):
     output_tokens: int | None = None
     total_cost_usd: float | None = None
     duration_ms: int | None = None
+    span_id: SpanId | None = None
+    """The agent-turn span of the run trace this turn ran as."""
+
+
+class _SpanData(EventPayload):
+    """A span of the run trace, whole. See ``vibesys.events.SpanStartedData``."""
+
+    span: WireSpan
+
+
+class SpanStartedData(_SpanData):
+    """A span started."""
+
+    kind: Literal["span_started"] = "span_started"
+
+
+class SpanUpdatedData(_SpanData):
+    """A span changed."""
+
+    kind: Literal["span_updated"] = "span_updated"
+
+
+class SpanEndedData(_SpanData):
+    """A span ended."""
+
+    kind: Literal["span_ended"] = "span_ended"
 
 
 EventData = Annotated[
@@ -767,6 +800,7 @@ EventData = Annotated[
     | RunStartedData
     | RunStartupProgressData
     | RunFailedData
+    | RunEndingData
     | RunInterruptedData
     | RunStatusChangedData
     | ExperimentsChangedData
@@ -794,7 +828,10 @@ EventData = Annotated[
     | FrameworkWarningData
     | WinnerSelectedData
     | WorkstreamFinishedData
-    | TurnUsageData,
+    | TurnUsageData
+    | SpanStartedData
+    | SpanUpdatedData
+    | SpanEndedData,
     Field(discriminator="kind"),
 ]
 

@@ -22,10 +22,12 @@ from server.events import (
     InvocationFinishedData,
     PhaseData,
     RunEvent,
+    TurnUsageData,
 )
 from server.read_model import RunInspector
 from server.run_attachment import AgentSelection, RunAttachment
 from server.run_lifecycle import RunTrigger
+from server.trace import TraceProjection
 from vibesys.api import CoreEventType
 from vs_sim.api import CloseOnce, ReleaseStack
 
@@ -220,6 +222,9 @@ class RunIntegrationAdapter:
         self._detach_run: Callable[[], None] | None = None
         self._close = CloseOnce()
         self._failure_diagnostics: dict[str, Diagnostic] = {}
+        self.trace = TraceProjection()
+        """The run's spans, folded from its span events (live and replayed)."""
+        journal.add_listener(self.trace.observe, replay_filter=TraceProjection.replay_filter)
 
     @property
     def attached_run(self) -> RunRecord | None:
@@ -380,6 +385,8 @@ class RunIntegrationAdapter:
             if event.data is None
             else _EVENT_DATA_ADAPTER.validate_python(event.data.model_dump(mode="python"))
         )
+        if isinstance(data, TurnUsageData) and data.span_id is None:
+            data = data.model_copy(update={"span_id": self.trace.turn_span(event.execution_id)})
         if event_type is EventType.AGENT_EXECUTION_STARTED:
             self.executions.track_started(event)
         elif event_type is EventType.AGENT_EXECUTION_FINISHED:

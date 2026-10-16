@@ -8,20 +8,38 @@ import tomllib
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
 PORT_PLACEHOLDER = "VIBESYS_DYNAMIC_PORT"
-# After the service's process group gets SIGKILL, the longest the job script waits for
-# the group to go before it exits anyway (a process stuck in the kernel ignores SIGKILL).
-SERVICE_KILL_REAP_SECONDS = 5
 # Slurm's default KillWait, the time between the SIGTERM and the SIGKILL Slurm sends a job
-# it ends. The service's whole teardown (grace, then the reap above) stays 5 s under it, so
-# the job script, not Slurm, always ends the service; a step Slurm cannot kill drains the node.
+# it ends. On that SIGTERM the job script's teardown sends SIGTERM to the processes it
+# started and SIGKILL the stop grace later; the grace stays 10 s under KillWait, so the
+# script's SIGKILL, not Slurm's, ends them and the script still sees them go.
 _SLURM_DEFAULT_KILL_WAIT_SECONDS = 30
-_SERVICE_STOP_GRACE_MAX_SECONDS = _SLURM_DEFAULT_KILL_WAIT_SECONDS - SERVICE_KILL_REAP_SECONDS - 5
+_SERVICE_STOP_GRACE_MAX_SECONDS = _SLURM_DEFAULT_KILL_WAIT_SECONDS - 10
+# After SIGKILL, how long the job script waits for the processes it started to exit. A CUDA
+# process with a large GPU allocation can take tens of seconds; past Slurm's default
+# UnkillableStepTimeout (60 s) a process Slurm finds left in the step drains the node.
+_PROCESS_EXIT_WAIT_DEFAULT_SECONDS = 120
+_PROCESS_EXIT_WAIT_MAX_SECONDS = 1800
+# ``sbatch`` time limit spellings: minutes, minutes:seconds, hours:minutes:seconds,
+# days-hours, days-hours:minutes, days-hours:minutes:seconds.
+_TIME_LIMIT = re.compile(
+    r"(?:(?P<days>\d+)-(?P<dh>\d+)(?::(?P<dm>\d+)(?::(?P<ds>\d+))?)?)"
+    r"|(?:(?P<a>\d+)(?::(?P<b>\d+)(?::(?P<c>\d+))?)?)"
+)
+_NO_TIME_LIMIT = frozenset({"INFINITE", "UNLIMITED"})
 _PORT_EXPANSION = '"${PORT}"'
 
 
@@ -215,10 +233,42 @@ class SlurmConfig(BaseModel):
     queue_timeout_seconds: Annotated[int, Field(gt=0)] | None = None
     transport_timeout_seconds: Annotated[int, Field(gt=0)] = 110
     evaluation_capacity: Annotated[int, Field(gt=0)] = 1
-    # When a job ends, its service's process group gets SIGTERM, then SIGKILL this long later.
+    # When a job ends, the processes it started (its service's and its command's sessions)
+    # get SIGTERM, then SIGKILL this long later.
     service_stop_grace_seconds: Annotated[int, Field(gt=0, le=_SERVICE_STOP_GRACE_MAX_SECONDS)] = (
         _SERVICE_STOP_GRACE_MAX_SECONDS
     )
+    # After that SIGKILL, the longest the job script waits for those processes to exit. One
+    # still alive then is named on the job's stderr and fails the job (exit code 71). The
+    # stop grace plus this wait must be shorter than an ``sbatch`` time limit (checked
+    # below), and the default shrinks to fit one; the run deadline ``job_timeout_seconds``
+    # should leave the same room after the command.
+    process_exit_wait_seconds: Annotated[
+        int, Field(gt=0, le=_PROCESS_EXIT_WAIT_MAX_SECONDS, validate_default=True)
+    ] = _PROCESS_EXIT_WAIT_DEFAULT_SECONDS
+
+    @model_validator(mode="before")
+    @classmethod
+    def _default_exit_wait_fits_the_time_limit(cls, data: object) -> object:
+        """Default the exit wait to 120 s, or to what an sbatch time limit leaves of it."""
+        if not isinstance(data, dict) or "process_exit_wait_seconds" in data:
+            return data
+        arguments = data.get("sbatch_arguments", ())
+        grace = data.get("service_stop_grace_seconds", _SERVICE_STOP_GRACE_MAX_SECONDS)
+        if (
+            not isinstance(arguments, list | tuple)
+            or not all(isinstance(argument, str) for argument in arguments)
+            or type(grace) is not int
+        ):
+            return data  # the fields' own validation reports these
+        try:
+            limit = _sbatch_time_limit_seconds(arguments)
+        except ValueError:
+            return data  # reported by sbatch_arguments' validation
+        if limit is None:
+            return data
+        wait = max(1, min(_PROCESS_EXIT_WAIT_DEFAULT_SECONDS, limit - grace - 1))
+        return {**data, "process_exit_wait_seconds": wait}
 
     @field_validator("name")
     @classmethod
@@ -255,6 +305,29 @@ class SlurmConfig(BaseModel):
             raise ValueError(message)
         return value
 
+    @field_validator("sbatch_arguments")
+    @classmethod
+    def _readable_time_limit(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        _sbatch_time_limit_seconds(value)  # raises on a time limit sbatch would not read
+        return value
+
+    @field_validator("process_exit_wait_seconds")
+    @classmethod
+    def _teardown_fits_the_time_limit(cls, value: int, info: ValidationInfo) -> int:
+        arguments = info.data.get("sbatch_arguments")
+        grace = info.data.get("service_stop_grace_seconds")
+        if not isinstance(arguments, tuple) or not isinstance(grace, int):
+            return value  # those fields failed their own validation and are reported there
+        limit = _sbatch_time_limit_seconds(arguments)
+        if limit is not None and grace + value >= limit:
+            message = (
+                f"service_stop_grace_seconds + process_exit_wait_seconds ({grace + value} s) "
+                f"must be shorter than the sbatch_arguments time limit ({limit} s): the job "
+                "script waits that long for the processes it started to exit"
+            )
+            raise ValueError(message)
+        return value
+
     @field_validator("remote_workspace_root")
     @classmethod
     def _normalized_remote_root(cls, value: str) -> str:
@@ -267,6 +340,37 @@ class SlurmConfig(BaseModel):
             message = "remote_workspace_root must be an absolute normalized POSIX path"
             raise ValueError(message)
         return path.as_posix()
+
+
+def _sbatch_time_limit_seconds(arguments: Sequence[str]) -> int | None:
+    """The time limit ``--time``/``-t`` in ``arguments`` sets, in seconds; None for no limit.
+
+    The last occurrence wins, as in ``sbatch``. A value ``sbatch`` would not read raises
+    ``ValueError``.
+    """
+    value: str | None = None
+    for index, argument in enumerate(arguments):
+        if argument in {"--time", "-t"}:
+            value = arguments[index + 1] if index + 1 < len(arguments) else ""
+        elif argument.startswith("--time="):
+            value = argument.removeprefix("--time=")
+        elif argument.startswith("-t") and not argument.startswith("--"):
+            value = argument.removeprefix("-t")
+    if value is None or value.upper() in _NO_TIME_LIMIT:
+        return None
+    match = _TIME_LIMIT.fullmatch(value)
+    if match is None:
+        message = f"{value!r} is not an sbatch time limit"
+        raise ValueError(message)
+    if match["days"] is not None:
+        days, hours = int(match["days"]), int(match["dh"])
+        minutes, seconds = int(match["dm"] or 0), int(match["ds"] or 0)
+        limit = ((days * 24 + hours) * 60 + minutes) * 60 + seconds
+    elif match["c"] is not None:
+        limit = (int(match["a"]) * 60 + int(match["b"])) * 60 + int(match["c"])
+    else:
+        limit = int(match["a"]) * 60 + int(match["b"] or 0)
+    return limit or None  # a zero time limit is no limit
 
 
 def load_slurm_config(path: Path) -> SlurmConfig:
