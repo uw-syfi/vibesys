@@ -279,7 +279,7 @@ function problemOf(error: unknown): string {
 
 function submit(state: MachinesState, form: FormName): MachinesStep {
   const current = form === 'add' ? state.adding : state.fixing;
-  if (current === null || current.saving !== null) return same(state);
+  if (current === null || current.saving !== null || state.pending !== null) return same(state);
   let host: HostKey;
   let checkout: string;
   try {
@@ -361,6 +361,8 @@ function startPending(
   if (state.pending !== null || !state.machines.some(machine => machine.host === host))
     return same(state);
   if (kind === 'remove' && host === hostKey({kind: 'local'})) return same(state);
+  if (kind === 'remove' && state.fixing?.host === host && state.fixing.saving !== null)
+    return same(state);
   const token = state.lastToken + 1;
   return {
     state: {...state, pending: {kind, host, token}, actionProblem: null, lastToken: token},

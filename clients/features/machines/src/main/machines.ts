@@ -9,11 +9,13 @@
 import {ConnectionError, type ConnectionLease, HelperRequestError} from '@vibesys/connection';
 import {type HostId, hostFromKey, hostKey, hostLabel} from '@vibesys/hosts';
 import type {CheckoutInspection, MachineEntry, MachineReport} from '@vibesys/ipc';
-import {type SettingsStore, withoutHost} from '@vibesys/settings';
+import type {SettingsStore} from '@vibesys/settings';
 
 export interface MachinesMainDeps {
-  /** The settings files' one writer. */
-  readonly settings: Pick<SettingsStore, 'hosts' | 'updateHosts'>;
+  /** Read the saved hosts; their owner performs all mutations. */
+  readonly settings: Pick<SettingsStore, 'hosts'>;
+  /** The hosts owner removes one host after fencing its checkout mutations. */
+  readonly removeHost: (id: HostId) => Promise<void>;
   /** The checkout `id` runs VibeSys from (This Mac: the app's own unless one is saved). */
   readonly checkout: (id: HostId) => Promise<string | null>;
   /** Lease `id`'s one connection, from its saved checkout. */
@@ -100,7 +102,7 @@ export class MachinesMain {
 
   /** Forget `id`; This Mac stays, back on the app's own checkout. Answers the machines left. */
   async remove(id: HostId): Promise<MachineEntry[]> {
-    await this.#deps.settings.updateHosts(current => withoutHost(current, id));
+    await this.#deps.removeHost(id);
     return this.machines();
   }
 }

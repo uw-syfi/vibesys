@@ -182,6 +182,14 @@ function Detail(props: {
   }
   const status = machineStatus(machine);
   const removing = state.pending?.kind === 'remove' && state.pending.host === machine.host;
+  const savingHere = state.fixing?.host === machine.host && state.fixing.saving !== null;
+  const changeDisabled =
+    state.pending === null ? null : 'Wait for the current machine action to finish.';
+  const removeDisabled = removing
+    ? 'Removing this machine.'
+    : savingHere
+      ? 'Wait for the checkout check to finish.'
+      : changeDisabled;
   return (
     <Card>
       <Stack>
@@ -208,13 +216,14 @@ function Detail(props: {
           <Button
             variant="quiet"
             text="Change checkout"
+            {...(changeDisabled === null ? {} : {disabledReason: changeDisabled})}
             press={() => dispatch({type: 'open-fix', host: machine.host})}
           />
           {machine.host === LOCAL ? null : (
             <Button
               variant="quiet"
               text={removing ? 'Removing…' : 'Remove'}
-              {...(removing ? {disabledReason: 'Removing this machine.'} : {})}
+              {...(removeDisabled === null ? {} : {disabledReason: removeDisabled})}
               press={() => dispatch({type: 'remove', host: machine.host})}
             />
           )}

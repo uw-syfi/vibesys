@@ -2,7 +2,7 @@ import {describe, expect, test} from 'bun:test';
 import {ConnectionManager} from '@vibesys/connection';
 import {FakeLink} from '@vibesys/connection/testing';
 import {type HostId, hostKey} from '@vibesys/hosts';
-import {SettingsStore, withHostSettings} from '@vibesys/settings';
+import {SettingsStore, withHostSettings, withoutHost} from '@vibesys/settings';
 import {FakeSettingsFilesystem} from '@vibesys/settings/testing';
 import {FakeClock} from '@vibesys/transport/testing';
 import {MachinesMain} from './index.js';
@@ -47,6 +47,7 @@ async function subject(links: ReadonlyMap<string, FakeLink>): Promise<{
   };
   const machines = new MachinesMain({
     settings,
+    removeHost: id => settings.updateHosts(current => withoutHost(current, id)).then(() => {}),
     checkout,
     connection: async id => {
       const path = await checkout(id);

@@ -196,6 +196,7 @@ async function openWindow(
 function machinesOver(settings: SettingsStore, hosts: Hosts): MachinesMain {
   return new MachinesMain({
     settings,
+    removeHost: id => hosts.remove(id),
     checkout: id => hosts.checkout(id),
     connection: id => hosts.connection(id),
   });

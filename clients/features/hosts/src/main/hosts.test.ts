@@ -371,6 +371,89 @@ describe('Hosts.harnesses', () => {
 });
 
 describe('Hosts checkout changes', () => {
+  test('removing a host fences an older checkout validation before acknowledging removal', async () => {
+    const settings = new SettingsStore({
+      settingsPath: '/settings/hosts.json',
+      recentPath: '/settings/recent.json',
+      preferencesPath: '/settings/preferences.json',
+      filesystem: new FakeSettingsFilesystem(),
+      log: () => {},
+    });
+    await settings.updateHosts(current => withHostSettings(current, ALPHA, {checkout: '/old'}));
+    const link = new FakeLink();
+    const held = link.deferEstablish();
+    await using manager = new ConnectionManager({
+      linkFor: () => link,
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: CONFIG,
+      log: () => {},
+    });
+    const hosts = new Hosts({
+      manager,
+      settings,
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      log: () => {},
+      push: () => {},
+      retire: () => {},
+    });
+    const change = {owner: '10:100', sequence: 1};
+    const changing = hosts.setCheckout(ALPHA, '/new', change);
+    await held.received;
+
+    const removing = hosts.remove(ALPHA);
+    await expect(
+      hosts.setCheckout(ALPHA, '/newer', {owner: '10:100', sequence: 2}),
+    ).rejects.toThrow('alpha is being removed');
+    held.release();
+
+    await expect(changing).rejects.toThrow('checkout change was cancelled');
+    await removing;
+    await hosts.cancelCheckout(change);
+    expect(settingsFor((await settings.hosts()).settings, ALPHA)).toBeNull();
+  });
+
+  test('removing a host wins after an older checkout has crossed its commit boundary', async () => {
+    const filesystem = new FakeSettingsFilesystem();
+    const settings = new SettingsStore({
+      settingsPath: '/settings/hosts.json',
+      recentPath: '/settings/recent.json',
+      preferencesPath: '/settings/preferences.json',
+      filesystem,
+      log: () => {},
+    });
+    await settings.updateHosts(current => withHostSettings(current, ALPHA, {checkout: '/old'}));
+    const link = new FakeLink();
+    await using manager = new ConnectionManager({
+      linkFor: () => link,
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: CONFIG,
+      log: () => {},
+    });
+    const hosts = new Hosts({
+      manager,
+      settings,
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      log: () => {},
+      push: () => {},
+      retire: () => {},
+    });
+    const held = filesystem.deferNextReplaceAfterCommit();
+    const changing = hosts.setCheckout(ALPHA, '/new', {owner: '10:100', sequence: 1});
+    await held.committed;
+
+    const removing = hosts.remove(ALPHA);
+    held.release();
+
+    await expect(changing).resolves.toBe('/src/vibesys');
+    await removing;
+    expect(settingsFor((await settings.hosts()).settings, ALPHA)).toBeNull();
+    expect(manager.existing('ssh:alpha')).toBeNull();
+  });
+
   test('cancelling checkout validation cannot persist or replace a newer operation', async () => {
     const directory = '/settings';
     const filesystem = new FakeSettingsFilesystem();

@@ -243,6 +243,34 @@ describe('machinesStep', () => {
     expect(state.listing?.select).toBe('ssh:chelan4');
   });
 
+  test('checkout save and removal for one machine are mutually exclusive', () => {
+    const listed = machinesStep(initialMachines().state, {
+      type: 'listed',
+      token: 1,
+      result: {ok: true, value: [ENTRIES[2] as MachineEntry]},
+    }).state;
+    const fixing = machinesStep(listed, {type: 'open-fix', host: 'ssh:chelan4'}).state;
+
+    const saving = machinesStep(fixing, {type: 'submit', form: 'fix'});
+    expect(saving.requests).toContainEqual(
+      expect.objectContaining({kind: 'save', host: 'ssh:chelan4'}),
+    );
+    const removeDuringSave = machinesStep(saving.state, {
+      type: 'remove',
+      host: 'ssh:chelan4',
+    });
+    expect(removeDuringSave.state).toBe(saving.state);
+    expect(removeDuringSave.requests).toEqual([]);
+
+    const removing = machinesStep(fixing, {type: 'remove', host: 'ssh:chelan4'});
+    expect(removing.requests).toContainEqual(
+      expect.objectContaining({kind: 'remove', host: 'ssh:chelan4'}),
+    );
+    const saveDuringRemove = machinesStep(removing.state, {type: 'submit', form: 'fix'});
+    expect(saveDuringRemove.state).toBe(removing.state);
+    expect(saveDuringRemove.requests).toEqual([]);
+  });
+
   test('Add refuses a host or path it cannot use, naming the problem, and asks nothing', () => {
     const listed = machinesStep(initialMachines().state, {
       type: 'listed',

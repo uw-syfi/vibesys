@@ -32,6 +32,7 @@ import {
   type SettingsStore,
   settingsFor,
   withHostSettings,
+  withoutHost,
 } from '@vibesys/settings';
 import {discoverSshConfigAliases, type SshConfigFilesystem} from './ssh-config.js';
 
@@ -75,6 +76,8 @@ export class Hosts {
   readonly #watched = new Map<HostKey, WatchedHost>();
   /** Checkout validations that still own permission to persist, by renderer-document operation. */
   readonly #checkoutChanges = new Map<string, CheckoutChange>();
+  /** Hosts whose removal owns the mutation boundary; no new checkout save may enter. */
+  readonly #removing = new Set<HostKey>();
   /** The latest committed checkout identity for each host, fencing checkout-derived leases. */
   readonly #checkoutRevisions = new Map<HostKey, CheckoutRevision>();
   /** The logs channel each renderer document's inspector holds, on one host at a time. */
@@ -174,9 +177,11 @@ export class Hosts {
    */
   async setCheckout(id: HostId, path: unknown, change: CheckoutChangeId): Promise<string> {
     const checkout = validHostPath(path, `the VibeSys checkout on ${hostLabel(id)}`);
+    const host = hostKey(id);
+    if (this.#removing.has(host)) throw new Error(`${hostLabel(id)} is being removed`);
     const key = checkoutChangeKey(change);
     if (this.#checkoutChanges.has(key)) throw new Error('the checkout change is already active');
-    const operation = new CheckoutChange(this.#deps.manager.candidate(id, checkout));
+    const operation = new CheckoutChange(host, this.#deps.manager.candidate(id, checkout));
     this.#checkoutChanges.set(key, operation);
     try {
       const candidate = await operation.ready();
@@ -229,6 +234,36 @@ export class Hosts {
     );
     if (failures.length > 0)
       throw new AggregateError(failures, 'could not cancel checkout changes');
+  }
+
+  /** Remove `id` after revoking every older checkout save that could recreate it. */
+  async remove(id: HostId): Promise<void> {
+    const key = hostKey(id);
+    if (this.#removing.has(key)) throw new Error(`${hostLabel(id)} is already being removed`);
+    this.#removing.add(key);
+    try {
+      const operations = [...this.#checkoutChanges.values()].filter(
+        operation => operation.host === key && operation.cancel(),
+      );
+      const cleanup = await Promise.allSettled(
+        operations.map(operation => operation.closeCandidate()),
+      );
+      await Promise.all(operations.map(operation => operation.settled));
+      for (const failure of cleanup) {
+        if (failure.status === 'rejected')
+          this.#deps.log(
+            `could not close ${hostLabel(id)} checkout validation: ${
+              failure.reason instanceof Error ? failure.reason.message : String(failure.reason)
+            }`,
+          );
+      }
+      await this.#deps.settings.updateHosts(current => withoutHost(current, id));
+      this.#checkoutRevisions.set(key, {removed: true});
+      this.#watchIntents.delete(key);
+      await this.#repairDesired(key);
+    } finally {
+      this.#removing.delete(key);
+    }
   }
 
   /** Sign in to `id` now, prompting when the host asks (the user's own action). */
@@ -594,13 +629,13 @@ export class Hosts {
     return generation === this.#generation && this.#desired().has(key);
   }
 
-  #commitCheckout(key: HostKey, checkout: string): CheckoutRevision {
+  #commitCheckout(key: HostKey, checkout: string): WatchIntent {
     const revision = {checkout};
     this.#checkoutRevisions.set(key, revision);
     return revision;
   }
 
-  async #refresh(id: HostId, revision: CheckoutRevision): Promise<void> {
+  async #refresh(id: HostId, revision: WatchIntent): Promise<void> {
     const key = hostKey(id);
     this.#watchIntents.set(key, revision);
     await this.#replaceWatched(id, revision.checkout, revision);
@@ -731,18 +766,20 @@ interface WatchIntent {
   readonly checkout: string;
 }
 
-/** One checkout after its settings commit; object identity is its acquisition revision. */
-type CheckoutRevision = WatchIntent;
+/** One checkout mutation after its settings commit; object identity fences older acquisitions. */
+type CheckoutRevision = WatchIntent | {readonly removed: true};
 
 /** One checkout validation and the permission it must still own at the settings commit boundary. */
 class CheckoutChange {
+  readonly host: HostKey;
   readonly settled: Promise<void>;
   readonly #candidate: Promise<HostConnection>;
   #resolveSettled: () => void = () => undefined;
   #state: 'current' | 'cancelled' | 'committed' = 'current';
   #closing: Promise<void> | null = null;
 
-  constructor(candidate: Promise<HostConnection>) {
+  constructor(host: HostKey, candidate: Promise<HostConnection>) {
+    this.host = host;
     this.#candidate = candidate;
     this.settled = new Promise(resolve => {
       this.#resolveSettled = resolve;
@@ -751,8 +788,10 @@ class CheckoutChange {
 
   readonly isCurrent = (): boolean => this.#state === 'current';
 
-  cancel(): void {
-    if (this.#state === 'current') this.#state = 'cancelled';
+  cancel(): boolean {
+    if (this.#state !== 'current') return false;
+    this.#state = 'cancelled';
+    return true;
   }
 
   assertCurrent(): void {
