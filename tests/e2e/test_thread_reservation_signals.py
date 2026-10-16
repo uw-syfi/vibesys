@@ -31,6 +31,12 @@ if TYPE_CHECKING:
     from vs_sim.api import Event, Worker, WorkerReservation
 
 
+# How long the settlement signaler waits for an acknowledgement before it re-sends.
+# Only the number of sends depends on it, never the outcome: see
+# ``_interrupt_settlement_once``.
+_RESIGNAL_S = 0.01
+
+
 class _SettlementInterrupted(BaseException):
     """A real signal interrupted the main thread while it settled a worker."""
 
@@ -159,15 +165,40 @@ def _is_owner_wait(frame: FrameType | None, method: str) -> bool:
     )
 
 
+def _is_owner_block(frame: FrameType | None, method: str) -> bool:
+    """Whether ``frame`` is the blocking ``Condition.wait`` under the owner's ``method``."""
+    return (
+        frame is not None
+        and frame.f_code is threading.Condition.wait.__code__
+        and _has_concurrency_frame(frame, method)
+    )
+
+
+def _inside_owner_wait(frame: FrameType | None, method: str) -> bool:
+    """Whether ``frame`` or one of its callers is a threading wait under ``method``.
+
+    A Python signal handler runs at the owner's next evaluation check, which may be in
+    a callee of the wait (a ``Condition`` helper, or this file's trace hook) rather than
+    in the ``wait`` frame itself.
+    """
+    while frame is not None:
+        if _is_owner_wait(frame, method):
+            return True
+        frame = frame.f_back
+    return False
+
+
 def _publish_owner_wait(
     owner_id: int,
     method: str,
     reached: threading.Event,
+    *,
+    boundary: Callable[[FrameType | None, str], bool] = _is_owner_wait,
 ) -> Callable[[FrameType, str, object], object]:
     """Return a trace hook that publishes the exact owner-wait boundary once."""
 
     def publish(frame: FrameType, _event: str, _argument: object) -> object:
-        if threading.get_ident() == owner_id and _is_owner_wait(frame, method):
+        if threading.get_ident() == owner_id and boundary(frame, method):
             reached.set()
         return publish
 
@@ -236,13 +267,28 @@ def _interrupt_settlement_once(
     reservation: WorkerReservation,
     main_thread_id: int,
 ) -> tuple[bool, bool]:
-    """Deliver SIGALRM only while the owner is in the target-completion wait."""
+    """Interrupt the owner exactly once while it blocks in the target-completion wait.
+
+    One signal cannot be aimed at a blocked thread: the owner publishes its wait before
+    it parks, and a signal that arrives in between runs only the C-level handler, after
+    which the owner sleeps through it without ``EINTR``. Only the target's end would
+    then wake it, so the interruption would be lost. The signaler therefore re-sends to
+    the owner thread until the handler acknowledges; every send lands inside the
+    blocking wait, and the handler acts on the first one only.
+    """
     boundary_observed = False
+    handled = False
+    acknowledged = threading.Event()
     wait_reached = threading.Event()
 
     def interrupt_settlement(_number: int, frame: FrameType | None) -> None:
-        nonlocal boundary_observed
-        boundary_observed = _is_owner_wait(frame, "settle")
+        nonlocal boundary_observed, handled
+        if handled:
+            # A re-send that crossed the acknowledgement; the owner already unwound.
+            return
+        handled = True
+        acknowledged.set()
+        boundary_observed = _inside_owner_wait(frame, "settle")
         if not boundary_observed:
             message = "SIGALRM landed outside reservation settlement"
             raise AssertionError(message)
@@ -250,12 +296,19 @@ def _interrupt_settlement_once(
 
     def signal_during_settlement() -> None:
         assert wait_reached.wait(HANG_GUARD_S)
-        os.kill(os.getpid(), signal.SIGALRM)
+        for _ in range(int(HANG_GUARD_S / _RESIGNAL_S)):
+            signal.pthread_kill(main_thread_id, signal.SIGALRM)
+            if acknowledged.wait(_RESIGNAL_S):
+                return
+        message = "the owner never handled SIGALRM"
+        raise AssertionError(message)
 
     previous_handler = signal.getsignal(signal.SIGALRM)
     previous_trace = threading.gettrace()
     signal.signal(signal.SIGALRM, interrupt_settlement)
-    threading.settrace_all_threads(_publish_owner_wait(main_thread_id, "settle", wait_reached))
+    threading.settrace_all_threads(
+        _publish_owner_wait(main_thread_id, "settle", wait_reached, boundary=_is_owner_block)
+    )
     signaler = threads.spawn(signal_during_settlement, name="signal-during-settlement")
     interrupted = False
     try:
@@ -369,7 +422,7 @@ def _exercise_interrupted_start() -> tuple[bool, bool, bool, bool]:
 
     def interrupt_start(_number: int, frame: FrameType | None) -> None:
         nonlocal boundary_observed
-        boundary_observed = _is_owner_wait(frame, "start")
+        boundary_observed = _inside_owner_wait(frame, "start")
         if not boundary_observed:
             message = "target SIGALRM landed outside the reservation start outcome wait"
             raise AssertionError(message)
