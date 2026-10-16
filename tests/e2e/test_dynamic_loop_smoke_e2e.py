@@ -686,6 +686,14 @@ def _assert_headless_stream(
 
     jobs = {event.execution_id for event in events if event.type is CoreEventType.GATE_STARTED}
     assert len(jobs) == 3, jobs  # the baseline, the implementer's own and the candidate's
+    # The candidate's official measurement reused the implementer's own run of the same input
+    # (#2949): its gates say so, and no other job's do.
+    reused = {
+        e.execution_id
+        for e in events
+        if e.type is CoreEventType.GATE_FINISHED and getattr(e.data, "reused", False)
+    }
+    assert len(reused) == 1, reused
     for job in jobs:
         # A job runs the gates its kind needs: a validation run has fewer than a trusted one.
         gates = {
@@ -853,9 +861,10 @@ def test_core_path_runs_the_fake_slurm_search(
     selection = envelope["core"]["run"]["result"]["selection"]
     assert selection["kind"] == "retained_candidate"
     assert selection["revision"] != envelope["core"]["run"]["facts"]["baseline"]
-    # The baseline, the implementer's own in-turn measurement through the tool, and the
-    # trusted measurement of the one candidate were each submitted exactly once.
-    assert sum("sbatch " in command for command in recorded_commands(loop_input.cluster)) == 3
+    # The baseline and the implementer's own in-turn measurement through the tool were each
+    # submitted exactly once; the trusted measurement of the one candidate reused the
+    # implementer's run of the same input instead of submitting a third job (#2949).
+    assert sum("sbatch " in command for command in recorded_commands(loop_input.cluster)) == 2
     evaluation = envelope["core"]["evaluation"]
     assert [call["rejection"] for call in evaluation["agent_calls"]] == [None]
     # The agent's own evaluations and the official one both sit in the ledger for the winner,

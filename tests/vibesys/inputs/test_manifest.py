@@ -253,8 +253,7 @@ _PLAIN_PATH = st.lists(
     sources=st.booleans(),
 )
 def test_unread_workspace_paths_round_trip_through_manifest_toml(
-    unread: list[str],
-    sources: bool,  # noqa: FBT001
+    *, unread: list[str], sources: bool
 ) -> None:
     workspace = {"unread": unread, "sources": [_source()] if sources else []}
     manifest = InputManifest.model_validate(_manifest({"workspace": workspace}))
