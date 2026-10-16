@@ -110,6 +110,8 @@ class _SlurmProbe:
     def run(self, argv: Sequence[str], *, timeout_seconds: float) -> ProbeResult | None:
         assert timeout_seconds > 0
         program = argv[-1].split()[0]
+        if program == "sinfo":  # the partition-limit query before submission
+            return ProbeResult(0, "gpu* 2:00:00\n")
         self._trace.append(program)
         if program == "scancel" and self._on_scancel is not None:
             self._on_scancel()
