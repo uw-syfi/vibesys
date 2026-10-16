@@ -19,6 +19,7 @@ import {
   advancedProblem,
   type Budget,
   type Effort,
+  missingFeatures,
   type NewRunContext,
   type NewRunEvent,
   type ProjectChoice,
@@ -206,11 +207,16 @@ function TaskField(props: CardProps): JSX.Element | null {
 /** 02: the project (a recent one, a folder, or an example) and its task. */
 export function ProjectCard(props: CardProps): JSX.Element {
   const [source, setSource] = useState<Source>(props.context.form.project?.source ?? 'recent');
+  const {helper, form} = props.context;
+  // A helper without `examples` cannot make one: the choice is not offered.
+  const sources = missingFeatures(helper, form.machine).includes('examples')
+    ? SOURCES.filter(option => option.value !== 'example')
+    : SOURCES;
   return (
     <Card section="02 · Project and task">
       <SegmentedControl
         label="Project source"
-        options={SOURCES}
+        options={sources}
         value={source}
         change={setSource}
       />

@@ -3,7 +3,7 @@
  * (the checks are for exactly one key), what Advanced may not repeat, and the prefill from the last
  * run on a machine.
  */
-import type {Check, MachineDescription} from '@vibesys/contracts/host-helper';
+import type {Check, HelperFeature, MachineDescription} from '@vibesys/contracts/host-helper';
 import type {HostKey} from '@vibesys/hosts';
 import type {HarnessOffer, Offered, RoleOption, RunInputs} from '@vibesys/ipc';
 import type {RecentRun} from '@vibesys/runs';
@@ -190,6 +190,33 @@ export function runInputs(form: Form): RunInputs | null {
 export function inputsKey(form: Form): string | null {
   const inputs = runInputs(form);
   return inputs === null ? null : JSON.stringify([form.machine, inputs]);
+}
+
+/** What one machine's helper agreed to in `hello`. */
+export interface HelperFor {
+  readonly for: HostKey;
+  readonly features: readonly HelperFeature[];
+}
+
+/**
+ * The helper features New run needs: typed run options (`run.start` refuses them otherwise), the
+ * Ready to start checks, and the examples. A helper without one predates this app's New run.
+ */
+export const NEW_RUN_FEATURES: readonly HelperFeature[] = ['run_options', 'preflight', 'examples'];
+
+/** The features New run needs that `machine`'s helper lacks; none while they are not known yet. */
+export function missingFeatures(helper: HelperFor | null, machine: HostKey): HelperFeature[] {
+  if (helper === null || helper.for !== machine) return [];
+  return NEW_RUN_FEATURES.filter(feature => !helper.features.includes(feature));
+}
+
+/** Whether `machine`'s helper is known to take `feature`. */
+export function offers(
+  helper: HelperFor | null,
+  machine: HostKey,
+  feature: HelperFeature,
+): boolean {
+  return helper !== null && helper.for === machine && helper.features.includes(feature);
 }
 
 /** The checks a run is held to, for one key. */

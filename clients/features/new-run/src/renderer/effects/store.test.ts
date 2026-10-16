@@ -1,22 +1,31 @@
 import {expect, test} from 'bun:test';
+import type {HelperFeature} from '@vibesys/contracts/host-helper';
 import type {RecentRun, RunRef} from '@vibesys/runs';
 import {readiness, startBlocked} from '../ui/view.js';
 import {createNewRunStore, type NewRunBridge} from './store.js';
 
 const ok = <T>(value: T) => Promise.resolve({ok: true as const, value});
 
-/** The bridge calls New run makes, answering at once from memory. */
-function fakeBridge(): NewRunBridge {
+/** The bridge calls New run makes, answering at once from memory, from a helper with `features`. */
+function fakeBridge(
+  features: readonly string[] = ['run_options', 'preflight', 'examples'],
+  asked: string[] = [],
+): NewRunBridge {
+  const record = <T>(name: string, value: T) => {
+    asked.push(name);
+    return ok(value);
+  };
   return {
     describeMachine: () => ok({kind: 'unsupported' as const}),
     harnesses: () =>
       ok({kind: 'listed' as const, harnesses: [{provider: 'claude', model: 'm', default: true}]}),
-    examples: () => ok({kind: 'unsupported' as const}),
+    examples: () => record('examples', {kind: 'unsupported' as const}),
     tasks: () => ok(['mpmc']),
-    preflight: () => ok({kind: 'offered' as const, value: []}),
+    preflight: () => record('preflight', {kind: 'offered' as const, value: []}),
     createFromExample: (_host, _example, destination) => ok({project: destination, tasks: ['a']}),
     copyOut: (_host, _source, destination) => ok({project: destination, tasks: ['a']}),
-    startRun: () => ok({runId: 'run-2', instanceId: '00000000000c'}),
+    startRun: () => record('startRun', {runId: 'run-2', instanceId: '00000000000c'}),
+    helperFeatures: () => ok(features as readonly HelperFeature[]),
   };
 }
 
@@ -116,4 +125,28 @@ test('Start says why it waits: inputs missing, being checked, or an item to fix'
     'fail',
   ]);
   expect(startBlocked(store.getState())).toBe('Fix the items marked above to start.');
+});
+
+test('a helper older than New run is never asked to check or start, and Start says why', async () => {
+  const clock = manualSchedule();
+  const asked: string[] = [];
+  const {store} = createNewRunStore(fakeBridge(['preflight', 'harnesses'], asked), {
+    recent: [recentRun('ssh:chelan4', '/p', 2)],
+    schedule: clock.schedule,
+    started: () => undefined,
+  });
+  await settle();
+  clock.runDue();
+  await settle();
+  const [first] = readiness(store.getState());
+  expect(first).toMatchObject({id: 'helper', state: 'fail', label: 'VibeSys on chelan4'});
+  expect(first?.detail).toBe(
+    'VibeSys on chelan4 is older than this app: update its checkout to start runs from here ' +
+      '(it lacks run_options, examples).',
+  );
+  expect(startBlocked(store.getState())).toBe('Fix the items marked above to start.');
+  store.dispatch({type: 'start'});
+  await settle();
+  expect(asked).toEqual([]);
+  expect(store.getState().context.examples?.value).toEqual({kind: 'unsupported'});
 });

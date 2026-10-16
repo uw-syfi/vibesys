@@ -22,7 +22,7 @@
  * signal and the connection's lifetime jointly own any run channel that dial opened.
  */
 
-import type {InstanceList} from '@vibesys/contracts/host-helper';
+import type {HelperFeature, InstanceList} from '@vibesys/contracts/host-helper';
 import type {LogListOutcome, LogReadFailure, LogReadInput, LogReadOutcome} from '@vibesys/logs';
 import {clockFrom} from '@vibesys/machine';
 import {
@@ -280,6 +280,11 @@ export class HostConnection implements AsyncDisposable {
   /** The checkout the control channel's helper runs from, once it answered `hello`. */
   get checkoutRoot(): string | null {
     return this.#control?.hello?.checkout?.root ?? null;
+  }
+
+  /** The features the control channel's helper agreed to in `hello`, once it answered. */
+  get features(): readonly HelperFeature[] | null {
+    return this.#control?.hello?.features ?? null;
   }
 
   /** True while something holds the connection open (`hold`). */

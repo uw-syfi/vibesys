@@ -166,6 +166,7 @@ function cases(random: Seeded): Case[] {
       {kind: 'copy-out', host, source: path, destination: `${directory}copy`},
     ],
     [bridge => bridge.startRun(key, inputs), {kind: 'start-run', host, inputs}],
+    [bridge => bridge.helperFeatures(key), {kind: 'helper-features', host}],
   ];
 }
 

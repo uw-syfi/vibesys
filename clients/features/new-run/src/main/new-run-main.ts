@@ -8,6 +8,7 @@ import type {
   CreatedProject,
   DetachedLaunchFailure,
   ExampleList,
+  HelperFeature,
   HelperRequest,
   LiveInstanceRecord,
   MachineDescription,
@@ -26,7 +27,8 @@ export type NewRunMainRequest = Extract<
       | 'examples'
       | 'create-from-example'
       | 'copy-out'
-      | 'start-run';
+      | 'start-run'
+      | 'helper-features';
   }
 >;
 
@@ -117,6 +119,19 @@ export class NewRunMain {
         );
       case 'start-run':
         return this.#start(request.host, request.inputs);
+      case 'helper-features':
+        return this.#features(request.host);
+    }
+  }
+
+  /** What `host`'s helper agreed to in `hello`, once the host is ready. */
+  async #features(host: HostId): Promise<readonly HelperFeature[]> {
+    try {
+      await using lease = await this.#deps.connect(host);
+      await lease.connection.ready();
+      return [...(lease.connection.features ?? [])];
+    } catch (error) {
+      throw plain(error, `Could not reach ${hostLabel(host)}`);
     }
   }
 

@@ -104,6 +104,7 @@ const WELCOME_ARGUMENT_COUNTS = {
   [WELCOME_CHANNELS.createFromExample]: 3,
   [WELCOME_CHANNELS.copyOut]: 3,
   [WELCOME_CHANNELS.startRun]: 2,
+  [WELCOME_CHANNELS.helperFeatures]: 1,
 } as const satisfies Readonly<Record<WelcomeChannel, number>>;
 
 /**

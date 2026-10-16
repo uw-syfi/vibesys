@@ -11,6 +11,7 @@ import {
   checksPass,
   inputsKey,
   type MachineDescription,
+  missingFeatures,
   type NewRunContext,
   type NewRunSnapshot,
   projectPath,
@@ -137,8 +138,32 @@ function missing(context: NewRunContext): Readiness[] {
   return items;
 }
 
+/** The failed item for a helper older than New run, naming what it lacks; null when it is not. */
+function helperItem(context: NewRunContext): Readiness | null {
+  const {machine} = context.form;
+  const missing = missingFeatures(context.helper, machine);
+  if (missing.length === 0) return null;
+  const label = machineLabel(machine);
+  return {
+    id: 'helper',
+    state: 'fail',
+    label: `VibeSys on ${label}`,
+    detail:
+      `VibeSys on ${label} is older than this app: update its checkout to start runs from here ` +
+      `(it lacks ${missing.join(', ')}).`,
+  };
+}
+
 /** The "Ready to start" items for the inputs now. */
 export function readiness(snapshot: NewRunSnapshot): Readiness[] {
+  const helper = helperItem(snapshot.context);
+  const items = inputReadiness(snapshot);
+  if (helper === null) return items;
+  // Nothing is checked on such a helper; what the inputs still lack is listed after it.
+  return [helper, ...items.filter(item => item.id !== 'checking')];
+}
+
+function inputReadiness(snapshot: NewRunSnapshot): Readiness[] {
   const {context} = snapshot;
   const key = inputsKey(context.form);
   if (key === null) return missing(context);

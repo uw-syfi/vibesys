@@ -175,6 +175,7 @@ class FakeWelcomeBridge implements WelcomeBridge {
   createFromExample = async () => this.#refused();
   copyOut = async () => this.#refused();
   startRun = async () => this.#refused();
+  helperFeatures = async () => ({ok: true as const, value: []});
   #refused = () => ({ok: false as const, error: 'not in this window', authNeeded: false});
 
   listenerCounts(): number[] {

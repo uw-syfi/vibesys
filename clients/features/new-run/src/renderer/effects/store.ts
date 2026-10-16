@@ -22,6 +22,7 @@ export type NewRunBridge = Pick<
   | 'createFromExample'
   | 'copyOut'
   | 'startRun'
+  | 'helperFeatures'
 >;
 
 /** What `call` answered, or a rejection with its error (a call that throws rejects too). */
@@ -36,6 +37,7 @@ export function newRunLogic(bridge: NewRunBridge) {
   return newRunMachine.provide({
     actors: {
       describe: fromPromise(({input}) => value(() => bridge.describeMachine(input.host))),
+      features: fromPromise(({input}) => value(() => bridge.helperFeatures(input.host))),
       harnesses: fromPromise(async ({input}) => {
         const listing = await value(() => bridge.harnesses(input.host));
         return listing.kind === 'listed' ? listing.harnesses : [];

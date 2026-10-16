@@ -42,6 +42,8 @@ export interface FakeBridgeSeed {
     };
     /** The tasks of each project the machine has. */
     readonly projects: Readonly<Record<string, readonly string[]>>;
+    /** What the helper agreed to in `hello`; every feature New run uses when not given. */
+    readonly features?: readonly string[];
   };
 }
 
@@ -233,6 +235,10 @@ export function installFakeNewRun(seed: FakeBridgeSeed): void {
   const page = window as unknown as {vibesysWelcome: object; fakeHost: object};
   Object.assign(page.vibesysWelcome, {
     describeMachine: () => offered(catalog?.machine),
+    helperFeatures: () =>
+      ok(
+        catalog === undefined ? [] : (catalog.features ?? ['run_options', 'preflight', 'examples']),
+      ),
     harnesses: () => ok({kind: 'listed', harnesses: catalog?.harnesses ?? []}),
     examples: () => offered(catalog?.examples),
     tasks: (_host: string, project: string) => {

@@ -74,6 +74,7 @@ const VALID_ARGUMENTS: Readonly<
     {project: '/p', task: 'mpmc', harness: null, options: {rounds: 2}, args: []},
   ],
   [WELCOME_CHANNELS.examples]: ['local'],
+  [WELCOME_CHANNELS.helperFeatures]: ['ssh:chelan4'],
   [WELCOME_CHANNELS.createFromExample]: ['local', 'queue-rs', '~/projects/queue-rs'],
   [WELCOME_CHANNELS.copyOut]: ['local', '/p/inner', '/p-own'],
   [WELCOME_CHANNELS.startRun]: [

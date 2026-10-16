@@ -1,5 +1,10 @@
 import {describe, expect, test} from 'bun:test';
-import type {Check, ExampleList, MachineDescription} from '@vibesys/contracts/host-helper';
+import type {
+  Check,
+  ExampleList,
+  HelperFeature,
+  MachineDescription,
+} from '@vibesys/contracts/host-helper';
 import type {HostKey} from '@vibesys/hosts';
 import type {HarnessOffer, Offered} from '@vibesys/ipc';
 import {checkMachine} from '@vibesys/machine/testing';
@@ -9,8 +14,10 @@ import {createActor, fromPromise, type SnapshotFrom} from 'xstate';
 import {
   checksPass,
   inputsKey,
+  missingFeatures,
   type NewRunEvent,
   newRunMachine,
+  offers,
   ROLES,
   runInputs,
   vettedModels,
@@ -75,6 +82,14 @@ function output(operation: string, random: Seeded): unknown {
       return random.pick([{kind: 'unsupported'}, {kind: 'offered', value: {}}]);
     case 'harnesses':
       return OFFERS;
+    case 'features':
+      // A current helper, one before examples, one before typed options, one before both.
+      return random.pick([
+        ['run_options', 'preflight', 'examples', 'harnesses'],
+        ['run_options', 'preflight', 'harnesses'],
+        ['preflight', 'examples', 'harnesses'],
+        ['harnesses'],
+      ]);
     case 'tasks':
       return random.pick([['mpmc', 'spsc'], ['spsc'], []]);
     case 'preflight':
@@ -126,6 +141,27 @@ function expectInputKeepsFacts(before: Snapshot, event: NewRunEvent, after: Snap
   }
 }
 
+/**
+ * The helper is asked only what it agreed to: the checks need `preflight` and `run_options`, the
+ * examples need `examples`, and Start needs every feature New run uses.
+ */
+function expectAsksOnlyWhatHelperTakes(before: Snapshot, after: Snapshot): void {
+  const {helper, form} = after.context;
+  const entered = (state: Parameters<Snapshot['matches']>[0]) =>
+    !before.matches(state) && after.matches(state);
+  if (entered({editing: {checks: 'checking'}})) {
+    expect(offers(helper, form.machine, 'preflight')).toBe(true);
+    expect(offers(helper, form.machine, 'run_options')).toBe(true);
+  }
+  if (entered({editing: {examples: 'loading'}})) {
+    expect(offers(helper, form.machine, 'examples')).toBe(true);
+  }
+  if (entered({editing: {action: 'starting'}})) {
+    expect(offers(helper, form.machine, 'run_options')).toBe(true);
+    expect(missingFeatures(helper, form.machine)).toEqual([]);
+  }
+}
+
 /** An input the user changes while editing is the form's from then on. */
 function expectInputApplied(before: Snapshot, event: NewRunEvent, after: Snapshot): void {
   if (!before.matches('editing') || !after.matches('editing')) return;
@@ -167,6 +203,7 @@ describe('newRunMachine', () => {
           expectStartOnlyWhenChecksPass(before, after);
           expectInputKeepsFacts(before, event as NewRunEvent, after);
           expectInputApplied(before, event as NewRunEvent, after);
+          expectAsksOnlyWhatHelperTakes(before, after);
           if (event.type === 'xstate.done.actor.preflight') {
             expect(after.context.checks?.for).toBe(inputsKey(after.context.form) ?? undefined);
           }
@@ -191,6 +228,11 @@ describe('newRunMachine', () => {
           harnesses: fromPromise<readonly HarnessOffer[], {readonly host: HostKey}>(
             async () => OFFERS,
           ),
+          features: fromPromise<readonly HelperFeature[], {readonly host: HostKey}>(async () => [
+            'run_options',
+            'preflight',
+            'examples',
+          ]),
           tasks: fromPromise<readonly string[], {readonly host: HostKey; readonly project: string}>(
             async () => ['spsc', 'mpmc'],
           ),

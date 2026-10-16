@@ -56,6 +56,7 @@ const CHANNELS: Channels = {
   createFromExample: 'vibesys:welcome:create-from-example',
   copyOut: 'vibesys:welcome:copy-out',
   startRun: 'vibesys:welcome:start-run',
+  helperFeatures: 'vibesys:welcome:helper-features',
 };
 const EVENTS: Events = {
   chrome: 'vibesys:welcome:chrome',
@@ -135,6 +136,7 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
       call(CHANNELS.createFromExample, host, example, destination),
     copyOut: (host, source, destination) => call(CHANNELS.copyOut, host, source, destination),
     startRun: (host, inputs) => call(CHANNELS.startRun, host, inputs),
+    helperFeatures: host => call(CHANNELS.helperFeatures, host),
     onChrome: on(EVENTS.chrome),
     onRecent: on(EVENTS.recent),
     onShowHost: on(EVENTS.showHost),

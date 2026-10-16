@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
-import {type FakeHostWindow, open, PROJECT} from './world.js';
+import {type FakeHostWindow, open, PROJECT, SEED} from './world.js';
 
 const ready = (page: Page) => page.getByRole('region', {name: 'Ready to start'});
 const start = (page: Page) => ready(page).getByRole('button', {name: 'Start run'});
@@ -100,4 +100,22 @@ test('extra arguments may not repeat an option set above, and roles change the r
       args: ['--max-in-flight', '3'],
     },
   ]);
+});
+
+test('a machine whose VibeSys predates New run says so and is never asked to start', async ({
+  page,
+}) => {
+  const newRun = SEED.newRun;
+  if (newRun === undefined) throw new Error('the seed has no New run helper');
+  await open(page, {...SEED, newRun: {...newRun, features: ['harnesses']}});
+  await expect(ready(page)).toContainText(
+    'VibeSys on chelan4 is older than this app: update its checkout to start runs from here ' +
+      '(it lacks run_options, preflight, examples).',
+  );
+  await expect(start(page)).toHaveAttribute('aria-disabled', 'true');
+  await expect(page.getByRole('radio', {name: 'From an example'})).toHaveCount(0);
+  await start(page).click({force: true});
+  const {started, preflights} = await fakeNewRun(page);
+  expect(started).toEqual([]);
+  expect(preflights).toEqual([]);
 });

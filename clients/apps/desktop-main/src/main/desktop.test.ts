@@ -221,6 +221,7 @@ describe('Desktop New run routing', () => {
       [WELCOME_CHANNELS.createFromExample, 'local', 'queue-rs', '/projects/queue-rs'],
       [WELCOME_CHANNELS.copyOut, 'local', '/repo/project', '/projects/project'],
       [WELCOME_CHANNELS.startRun, 'local', inputs],
+      [WELCOME_CHANNELS.helperFeatures, 'local'],
     ];
     for (const [channel, ...args] of calls) {
       await expect(w.ipc.invoke('10:100', channel, ...args)).resolves.toEqual({
@@ -235,6 +236,7 @@ describe('Desktop New run routing', () => {
       'new-run:create-from-example',
       'new-run:copy-out',
       'new-run:start-run',
+      'new-run:helper-features',
     ]);
   });
 });

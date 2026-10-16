@@ -87,7 +87,8 @@ type ScreenRequest = Extract<
       | 'examples'
       | 'create-from-example'
       | 'copy-out'
-      | 'start-run';
+      | 'start-run'
+      | 'helper-features';
   }
 >;
 
@@ -319,16 +320,8 @@ export class Desktop {
       case 'set-notifications':
       case 'archive':
         return this.#deps.preferences.answer(request);
-      case 'machines':
-      case 'machine':
-      case 'inspect-checkout':
-      case 'remove-machine':
-      case 'describe-machine':
-      case 'preflight':
-      case 'examples':
-      case 'create-from-example':
-      case 'copy-out':
-      case 'start-run':
+      default:
+        // Every other request is a redesigned screen's (`ScreenRequest`), which the type checks.
         return this.#screen(request);
     }
   }

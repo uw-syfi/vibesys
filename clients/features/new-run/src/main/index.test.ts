@@ -63,6 +63,16 @@ describe('NewRunMain', () => {
     ]);
   });
 
+  test("answers the features the machine's helper agreed to in hello", async () => {
+    const {link, main} = subject();
+    link.helper.features.delete('run_options');
+    link.helper.features.delete('examples');
+    const features = (await main.answer({kind: 'helper-features', host: LOCAL})) as string[];
+    expect(features).toContain('preflight');
+    expect(features).not.toContain('run_options');
+    expect(features).not.toContain('examples');
+  });
+
   test('a failed request says what it was doing', async () => {
     const {main} = subject();
     await expect(

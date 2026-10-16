@@ -11,13 +11,14 @@ import type {
   Check,
   CreatedProject,
   ExampleList,
+  HelperFeature,
   MachineDescription,
 } from '@vibesys/contracts/host-helper';
 import type {HostKey} from '@vibesys/hosts';
 import type {HarnessOffer, Offered, RunInputs, StartedRun} from '@vibesys/ipc';
 import {unprovided} from '@vibesys/machine';
 import type {RecentRun} from '@vibesys/runs';
-import {assign, raise, type SnapshotFrom, setup} from 'xstate';
+import {and, assign, raise, type SnapshotFrom, setup} from 'xstate';
 import {
   type AgentChoice,
   type Budget,
@@ -26,7 +27,10 @@ import {
   defaultAgent,
   type FactsFor,
   type Form,
+  type HelperFor,
   inputsKey,
+  missingFeatures,
+  offers,
   type ProjectChoice,
   prefill,
   projectPath,
@@ -43,6 +47,8 @@ export interface NewRunContext {
   readonly form: Form;
   readonly recent: readonly RecentRun[];
   readonly facts: FactsFor | null;
+  /** What the machine's helper agreed to: New run asks only what it takes. */
+  readonly helper: HelperFor | null;
   readonly harnesses: {readonly for: HostKey; readonly list: readonly HarnessOffer[]} | null;
   readonly examples: {readonly for: HostKey; readonly value: Offered<ExampleList>} | null;
   readonly tasks: {readonly for: string; readonly list: readonly string[]} | null;
@@ -125,6 +131,7 @@ export const newRunMachine = setup({
   },
   actors: {
     describe: unprovided<Offered<MachineDescription>, {readonly host: HostKey}>('describe'),
+    features: unprovided<readonly HelperFeature[], {readonly host: HostKey}>('features'),
     harnesses: unprovided<readonly HarnessOffer[], {readonly host: HostKey}>('harnesses'),
     examples: unprovided<Offered<ExampleList>, {readonly host: HostKey}>('examples'),
     tasks: unprovided<readonly string[], {readonly host: HostKey; readonly project: string}>(
@@ -140,7 +147,14 @@ export const newRunMachine = setup({
   guards: {
     hasProject: ({context}) => projectPath(context.form) !== null,
     hasInputs: ({context}) => inputsKey(context.form) !== null,
-    mayStart: ({context}) => checksPass(context.form, context.checks),
+    mayStart: ({context}) =>
+      checksPass(context.form, context.checks) &&
+      missingFeatures(context.helper, context.form.machine).length === 0,
+    helperKnown: ({context}) => context.helper?.for === context.form.machine,
+    offersChecks: ({context}) =>
+      offers(context.helper, context.form.machine, 'preflight') &&
+      offers(context.helper, context.form.machine, 'run_options'),
+    offersExamples: ({context}) => offers(context.helper, context.form.machine, 'examples'),
   },
   delays: {debounce: CHECK_DEBOUNCE_MS},
   actions: {
@@ -160,6 +174,7 @@ export const newRunMachine = setup({
     form: prefill(input.machine, input.recent),
     recent: input.recent,
     facts: null,
+    helper: null,
     harnesses: null,
     examples: null,
     tasks: null,
@@ -178,6 +193,7 @@ export const newRunMachine = setup({
           actions: assign(({context, event}) => ({
             form: prefill(event.machine, context.recent),
             facts: null,
+            helper: null,
             harnesses: null,
             examples: null,
             tasks: null,
@@ -188,6 +204,33 @@ export const newRunMachine = setup({
         recent: {actions: assign(({event}) => ({recent: event.recent}))},
       },
       states: {
+        helper: {
+          initial: 'loading',
+          states: {
+            loading: {
+              invoke: {
+                id: 'features',
+                src: 'features',
+                input: ({context}) => ({host: context.form.machine}),
+                onDone: {
+                  // What may be asked changed: check the inputs again.
+                  target: 'ready',
+                  actions: [
+                    assign(({context, event}) => ({
+                      helper: {for: context.form.machine, features: event.output},
+                    })),
+                    raise({type: 'recheck'}),
+                  ],
+                },
+                onError: {
+                  target: 'ready',
+                  actions: {type: 'fail', params: ({event}) => ({error: event.error})},
+                },
+              },
+            },
+            ready: {},
+          },
+        },
         facts: {
           initial: 'loading',
           states: {
@@ -243,8 +286,21 @@ export const newRunMachine = setup({
           },
         },
         examples: {
-          initial: 'loading',
+          initial: 'pending',
           states: {
+            // A helper without `examples` is never asked: it offers none.
+            pending: {
+              always: [
+                {guard: 'offersExamples', target: 'loading'},
+                {
+                  guard: 'helperKnown',
+                  target: 'ready',
+                  actions: assign(({context}) => ({
+                    examples: {for: context.form.machine, value: {kind: 'unsupported'}},
+                  })),
+                },
+              ],
+            },
             loading: {
               invoke: {
                 id: 'examples',
@@ -317,7 +373,13 @@ export const newRunMachine = setup({
           },
           states: {
             waiting: {
-              after: {debounce: [{guard: 'hasInputs', target: 'checking'}, {target: 'incomplete'}]},
+              // Checked only on a helper that takes the checks and typed options.
+              after: {
+                debounce: [
+                  {guard: and(['hasInputs', 'offersChecks']), target: 'checking'},
+                  {target: 'incomplete'},
+                ],
+              },
             },
             incomplete: {},
             checking: {
@@ -334,7 +396,7 @@ export const newRunMachine = setup({
                     checks:
                       event.output.kind === 'offered'
                         ? {for: inputsKey(context.form) ?? '', list: event.output.value}
-                        : // A helper with no preflight checks nothing; Start proceeds as before.
+                        : // Only a helper that agreed to `preflight` is asked; none checks nothing.
                           {for: inputsKey(context.form) ?? '', list: []},
                   })),
                 },

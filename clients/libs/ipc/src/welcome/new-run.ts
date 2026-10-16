@@ -8,6 +8,7 @@ import type {
   Check,
   CreatedProject,
   ExampleList,
+  HelperFeature,
   HelperRequest,
   MachineDescription,
 } from '@vibesys/contracts/host-helper';
@@ -22,6 +23,7 @@ export const NEW_RUN_CHANNELS = {
   createFromExample: 'vibesys:welcome:create-from-example',
   copyOut: 'vibesys:welcome:copy-out',
   startRun: 'vibesys:welcome:start-run',
+  helperFeatures: 'vibesys:welcome:helper-features',
 } as const;
 
 /** The typed options a run starts with (`run.start`'s `options`). */
@@ -68,6 +70,8 @@ export interface NewRunWelcomeBridge {
     destination: string,
   ): Promise<WelcomeResult<CreatedProject>>;
   startRun(host: HostKey, inputs: RunInputs): Promise<WelcomeResult<StartedRun>>;
+  /** The features `host`'s helper agreed to: what New run may ask of it. */
+  helperFeatures(host: HostKey): Promise<WelcomeResult<readonly HelperFeature[]>>;
 }
 
 export type NewRunRequest =
@@ -86,7 +90,8 @@ export type NewRunRequest =
       readonly source: string;
       readonly destination: string;
     }
-  | {readonly kind: 'start-run'; readonly host: HostId; readonly inputs: RunInputs};
+  | {readonly kind: 'start-run'; readonly host: HostId; readonly inputs: RunInputs}
+  | {readonly kind: 'helper-features'; readonly host: HostId};
 
 const EFFORTS = ['default', 'low', 'medium', 'high'] as const;
 const RESULTS = ['keep', 'publish_github'] as const;
@@ -207,5 +212,7 @@ export function parseNewRunRequest(
       return {kind: 'copy-out', host, source: project(second), destination: project(third)};
     case NEW_RUN_CHANNELS.startRun:
       return {kind: 'start-run', host, inputs: parseRunInputs(second)};
+    case NEW_RUN_CHANNELS.helperFeatures:
+      return {kind: 'helper-features', host};
   }
 }
