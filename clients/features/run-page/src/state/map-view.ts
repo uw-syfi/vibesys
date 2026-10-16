@@ -12,11 +12,10 @@
 import type {Span} from '@vibesys/contracts';
 import {type RunTrace, traceSpans} from '@vibesys/run-state/trace';
 import type {MapFilter, MapState, RunPageState} from './run-page.js';
+import {attrsOf, duration} from './span-reading.js';
 import {
   attemptWords,
-  attrsOf,
   bucket,
-  duration,
   ended,
   kindWords,
   plain,

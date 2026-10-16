@@ -6,37 +6,11 @@
  */
 import type {Span} from '@vibesys/contracts';
 import type {MapFilter} from './run-page.js';
+import {duration, numberAttr, ratio, stringAttr, words} from './span-reading.js';
 import type {Tone} from './views.js';
 
 type Status = Span['status'];
 type Waiting = NonNullable<Span['waiting_on']>[number];
-
-/** A span's attributes as its label carries them: decoded JSON values, or none. */
-export type Attrs = Readonly<Record<string, unknown>>;
-
-/** The label's `attrs_json` as an object; text that is not a JSON object reads as no attributes. */
-export function attrsOf(span: Span): Attrs {
-  const text = span.label?.attrs_json;
-  if (text === null || text === undefined) return {};
-  try {
-    const value: unknown = JSON.parse(text);
-    return typeof value === 'object' && value !== null && !Array.isArray(value)
-      ? Object.fromEntries(Object.entries(value))
-      : {};
-  } catch {
-    return {};
-  }
-}
-
-function text(attrs: Attrs, key: string): string | null {
-  const value = attrs[key];
-  return typeof value === 'string' && value !== '' ? value : null;
-}
-
-function number(attrs: Attrs, key: string): number | null {
-  const value = attrs[key];
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
 
 const STATUS: Readonly<Record<Status, {readonly label: string; readonly tone: Tone}>> = {
   pending: {label: 'Not started', tone: 'neutral'},
@@ -61,7 +35,7 @@ const VERDICTS: Readonly<Record<string, {readonly label: string; readonly tone: 
 
 /** A word from the wire (`failed_check`) as text (`Failed check`). */
 export function plain(word: string): string {
-  const spaced = word.replaceAll('_', ' ');
+  const spaced = words(word);
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
@@ -111,7 +85,7 @@ export function kindWords(span: Span): string {
 /** The span's short name, as a link to it reads: a workstream's hypothesis, else its title. */
 export function shortName(span: Span): string {
   if (span.label?.kind === 'workstream') {
-    const hypothesis = text(attrsOf(span), 'hypothesis_id');
+    const hypothesis = stringAttr(span, 'hypothesis_id');
     if (hypothesis !== null) return hypothesis;
   }
   return span.label?.title ?? span.name;
@@ -122,16 +96,15 @@ export function titleOf(span: Span): string {
   const label = span.label;
   const title = label?.title ?? span.name;
   if (span.parent === null) return `Run · ${title}`;
-  const attrs = attrsOf(span);
   switch (label?.kind) {
     case 'planning_call':
       return plain(title);
     case 'workstream': {
-      const hypothesis = text(attrs, 'hypothesis_id');
+      const hypothesis = stringAttr(span, 'hypothesis_id');
       return hypothesis === null || hypothesis === title ? title : `${hypothesis} · ${title}`;
     }
     case 'agent_turn': {
-      const model = text(attrs, 'model');
+      const model = stringAttr(span, 'model');
       return model === null ? title : `${title} · ${model}`;
     }
     case 'gate':
@@ -139,15 +112,6 @@ export function titleOf(span: Span): string {
     default:
       return title;
   }
-}
-
-/** Seconds as a short duration: `12s`, `4m 10s`, `1h 02m`. */
-export function duration(seconds: number): string {
-  const whole = Math.max(0, Math.round(seconds));
-  if (whole < 60) return `${whole}s`;
-  if (whole < 3600) return `${Math.floor(whole / 60)}m ${String(whole % 60).padStart(2, '0')}s`;
-  const minutes = Math.floor(whole / 60);
-  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
 }
 
 /** One source the span waits on, in words; an operation reads as its span's title when known. */
@@ -178,21 +142,20 @@ export function attemptWords(attempt: NonNullable<Span['attempts']>[number]): st
 }
 
 /** A gate's measurement, in words: `41.2 · 1.18× the input`. */
-function measured(attrs: Attrs): string | null {
-  const value = number(attrs, 'metric_value');
+function measured(span: Span): string | null {
+  const value = numberAttr(span, 'metric_value');
   if (value === null) return null;
-  const ratio = number(attrs, 'vs_baseline');
-  return ratio === null ? `${value}` : `${value} · ${ratio.toFixed(2)}× the input`;
+  const vs = numberAttr(span, 'vs_baseline');
+  return vs === null ? `${value}` : `${value} · ${ratio(vs)} the input`;
 }
 
 /** The subtitle a labelled kind gives itself, or null to use the generic one. */
 function kindSubtitle(span: Span, children: number): string | null {
-  const attrs = attrsOf(span);
   switch (span.label?.kind) {
     case 'planning_call':
       return `${children} workstream${children === 1 ? '' : 's'} planned`;
     case 'gate':
-      return measured(attrs);
+      return measured(span);
     case 'workstream':
       return span.label?.reason == null ? null : plain(span.label.reason);
     default:

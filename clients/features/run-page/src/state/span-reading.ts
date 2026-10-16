@@ -38,7 +38,7 @@ export function titleOf(span: Span): string {
 }
 
 /** The label's attributes as a record; empty when it has none or they do not parse to one. */
-function attrsOf(span: Span): Readonly<Record<string, unknown>> {
+export function attrsOf(span: Span): Readonly<Record<string, unknown>> {
   const text = span.label?.attrs_json;
   if (text === undefined || text === null || text === '') return {};
   try {
