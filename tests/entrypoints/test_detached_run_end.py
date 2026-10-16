@@ -200,7 +200,8 @@ def _expected_end(
         outcome = RunEndOutcome.FAILED
     else:
         return None
-    resumable = ending is not None and ending.resumable
+    stopped = outcome in {RunEndOutcome.STOPPED, RunEndOutcome.FORCE_STOPPED}
+    resumable = ending is not None and ending.resumable and not stopped
     rounds = None if ending is None or not resumable else ending.rounds_finished + 1
     return outcome, resumable, rounds
 
@@ -243,14 +244,15 @@ def test_a_failed_run_ends_failed_with_the_first_line_of_its_failure() -> None:
     )
 
 
-def test_a_terminated_server_ends_force_stopped() -> None:
+def test_a_terminated_server_ends_force_stopped_for_good() -> None:
+    """Regression: a force-stopped run was offered a resume, while a cleanly stopped one was not."""
     ending = RunEndingFact(outcome=None, resumable=True, rounds_finished=0)
 
     _, tombstone = _serve([_Terminated(), _Ending(ending), _Failed()])
 
     assert tombstone.end is not None
     assert tombstone.end.outcome is RunEndOutcome.FORCE_STOPPED
-    assert tombstone.end.resume_from_round == 1
+    assert (tombstone.end.resumable, tombstone.end.resume_from_round) == (False, None)
 
 
 def test_a_server_that_exits_before_its_run_ends_leaves_a_failed_end_that_cannot_resume() -> None:
@@ -261,7 +263,8 @@ def test_a_server_that_exits_before_its_run_ends_leaves_a_failed_end_that_cannot
     )
 
 
-def test_a_stop_that_left_work_unsettled_ends_stopped_and_resumable() -> None:
+def test_a_stop_that_outlived_its_grace_bound_ends_for_good() -> None:
+    """Regression: a stop whose drain outlived its grace bound left the run resumable."""
     ending = RunEndingFact(outcome=None, resumable=True, rounds_finished=2)
 
     _, tombstone = _serve(
@@ -269,10 +272,7 @@ def test_a_stop_that_left_work_unsettled_ends_stopped_and_resumable() -> None:
     )
 
     assert tombstone.end == EndRecord(
-        outcome=RunEndOutcome.STOPPED,
-        reason="Stopped by request.",
-        resumable=True,
-        resume_from_round=3,
+        outcome=RunEndOutcome.STOPPED, reason="Stopped by request.", resumable=False
     )
 
 
@@ -296,3 +296,44 @@ def test_a_quota_pause_is_reported_until_the_run_resumes() -> None:
         None,
         PauseCause.USER,
     ]
+
+
+@settings(max_examples=examples(pr=40, nightly=400), deadline=None)
+@given(facts=st.lists(_FACTS, max_size=12), crashes=st.booleans())
+def test_only_a_crash_or_an_open_failure_leaves_a_run_resumable(
+    facts: list[_Fact], *, crashes: bool
+) -> None:
+    """Over any stop, force stop and crash ordering: a stop ends the run; a crash keeps it."""
+    threads = SimThreads()
+    store = FakeInstanceStore()
+    registry = LiveRegistry(store, ManualClock(100.0))
+
+    def scenario() -> None:
+        hold = store.hold(INSTANCE)
+        publisher = RecordPublisher(
+            hold,
+            _running_record(),
+            ManualClock(100.0),
+            metadata=FakeInstanceMetadataStore(),
+            threads=threads,
+        )
+        for fact in facts:
+            _tell(publisher, fact)
+        if crashes:
+            hold.crash()
+        else:
+            publisher.end()
+            hold.release()
+
+    threads.run(scenario)
+    (tombstone,) = registry.list().ended
+    end = tombstone.end
+    if crashes:
+        assert end is not None
+        assert end.resumable
+        return
+    stopped = any(isinstance(fact, _Terminated) for fact in facts) or tombstone.phase.status is (
+        RunStatus.STOPPED
+    )
+    if end is not None and stopped:
+        assert not end.resumable

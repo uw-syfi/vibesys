@@ -8,11 +8,26 @@
  * token comes back while the run is still stopping is "Force stop" offered, and a reply for an
  * earlier stop is dropped. Commands are requests the shell performs through the existing
  * run-control paths; the reducer does no I/O and reads no clock.
+ *
+ * A live run is attached under a token (`link`); once attached, the shell runs the run's session
+ * (`@vibesys/run-session`) and reports what it says (`session`) and what it folded (`run`). Pause
+ * and Resume are protocol commands, so they are offered only while the session can deliver one.
  */
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun, RunEnd} from '@vibesys/hosts';
 import type {LogListOutcome, LogView} from '@vibesys/logs';
+import type {CoreState} from '@vibesys/run-state';
 import type {RunRef} from '@vibesys/runs';
+import {
+  EMPTY_RUN_FOLD,
+  type RunData,
+  type RunFold,
+  type RunLink,
+  type SessionView,
+  traceProblems,
+  traceStep,
+} from './live.js';
+import {WORK_FILTER_ALL, type WorkFilter, type WorkOutcome} from './work-filter.js';
 
 /** How long a Stop may take before "Force stop" is offered. */
 export const FORCE_STOP_BOUND_MS = 2 * 60 * 1000;
@@ -21,7 +36,7 @@ export type RunTab = 'overview' | 'map' | 'work' | 'logs';
 export const RUN_TABS: readonly RunTab[] = ['overview', 'map', 'work', 'logs'];
 
 /** What the app could not do for this run, with why; an action named here is shown disabled. */
-export type RunCapability = 'pause' | 'open-window' | 'logs';
+export type RunCapability = 'open-window' | 'logs';
 export type Unavailable = Readonly<Partial<Record<RunCapability, string>>>;
 
 /** The run as the host's registry lists it: live, ended, or not (yet) listed. */
@@ -51,10 +66,37 @@ export type StopFlow =
       readonly forced: boolean;
     };
 
+/** Which spans the Map shows, by state; `finished` is done or stopped. */
+export type MapFilter = 'all' | 'running' | 'waiting' | 'failed' | 'finished';
+export const MAP_FILTERS: readonly MapFilter[] = [
+  'all',
+  'running',
+  'waiting',
+  'failed',
+  'finished',
+];
+
+/** The Map's own state: its filter, the groups the user opened, and the selected span. */
+export interface MapState {
+  readonly filter: MapFilter;
+  /** Ids of the groups shown open (a planning call's finished workstreams, by its span id). */
+  readonly open: ReadonlySet<string>;
+  /** The selected span's id; null, or a span not in the trace at the view, selects the root. */
+  readonly selected: string | null;
+}
+
+/** Where the scrubber stands: following the newest event, or at one event's sequence. */
+export type RunView = {readonly at: 'live'} | {readonly at: number};
+
 export type RunLogs =
   | {readonly kind: 'idle'}
-  | {readonly kind: 'listing'; readonly token: number; readonly streams: readonly LogStream[]}
-  | {readonly kind: 'listed'; readonly streams: readonly LogStream[]}
+  | {
+      readonly kind: 'listing';
+      readonly token: number;
+      readonly instanceId: string;
+      readonly streams: readonly LogStream[];
+    }
+  | {readonly kind: 'listed'; readonly instanceId: string; readonly streams: readonly LogStream[]}
   | {readonly kind: 'failed'; readonly message: string; readonly unsupported: boolean};
 
 export interface RunPageState {
@@ -71,6 +113,19 @@ export interface RunPageState {
   readonly views: Readonly<Record<string, LogView>>;
   /** The stream the Logs tab shows; null shows the first one. */
   readonly selected: string | null;
+  /** The Work tab's search query and outcome filter. */
+  readonly work: WorkFilter;
+  /** The window's hold on the live run. */
+  readonly link: RunLink;
+  /** What the attached run's session reports; null while none runs. */
+  readonly session: SessionView | null;
+  /** The run fold and trace so far. */
+  readonly run: RunFold;
+  /** The sequence the tabs show: the live end, or a past one the scrubber chose. */
+  readonly view: RunView;
+  /** Why the last command the run refused failed, until the next one. */
+  readonly notice: string | null;
+  readonly map: MapState;
   readonly next: number;
 }
 
@@ -78,6 +133,11 @@ export type RunPageAction =
   | {readonly type: 'record'; readonly record: RunRecord}
   | {readonly type: 'tab'; readonly tab: RunTab}
   | {readonly type: 'select-stream'; readonly streamId: string}
+  | {readonly type: 'work-query'; readonly query: string}
+  | {readonly type: 'work-outcome'; readonly outcome: WorkOutcome}
+  | {readonly type: 'map-filter'; readonly filter: MapFilter}
+  | {readonly type: 'map-toggle'; readonly id: string; readonly open: boolean}
+  | {readonly type: 'map-select'; readonly id: string}
   | {readonly type: 'view-logs'}
   | {readonly type: 'ask-stop'}
   | {readonly type: 'cancel-stop'}
@@ -92,18 +152,28 @@ export type RunPageAction =
   | {readonly type: 'resume-ended'}
   | {readonly type: 'open-window'}
   | {readonly type: 'archive'}
-  | {readonly type: 'run-again'};
+  | {readonly type: 'run-again'}
+  | {readonly type: 'attached'; readonly token: number; readonly error: string | null}
+  | {readonly type: 'session'; readonly session: SessionView | null}
+  | {readonly type: 'run-core'; readonly core: CoreState}
+  | {readonly type: 'run-data'; readonly data: RunData}
+  | {readonly type: 'command-refused'; readonly message: string}
+  | {readonly type: 'view'; readonly view: RunView};
 
 export type RunPageRequest =
   | {readonly kind: 'stop'; readonly force: boolean}
   | {readonly kind: 'arm-bound'; readonly token: number; readonly ms: number}
-  | {readonly kind: 'list-logs'; readonly token: number}
+  | {readonly kind: 'list-logs'; readonly token: number; readonly instanceId: string}
   | {readonly kind: 'pause'}
   | {readonly kind: 'resume'}
   | {readonly kind: 'resume-ended'; readonly fromRound: number | null}
   | {readonly kind: 'open-window'}
   | {readonly kind: 'archive'}
-  | {readonly kind: 'run-again'};
+  | {readonly kind: 'run-again'}
+  /** Attach the live run's server `instance` to this window, answering `attached` with `token`. */
+  | {readonly kind: 'attach'; readonly token: number; readonly instance: string}
+  /** Let the attached run go (its session closes with it). */
+  | {readonly kind: 'release'};
 
 export interface RunPageStep {
   readonly state: RunPageState;
@@ -126,6 +196,13 @@ export function runPageInitial(seed: RunPageSeed): RunPageState {
     logs: {kind: 'idle'},
     views: {},
     selected: null,
+    work: WORK_FILTER_ALL,
+    link: {kind: 'none'},
+    session: null,
+    run: EMPTY_RUN_FOLD,
+    view: {at: 'live'},
+    notice: null,
+    map: {filter: 'all', open: new Set(), selected: null},
     next: 1,
   };
 }
@@ -177,19 +254,64 @@ function armed(state: RunPageState, forced: boolean): RunPageStep {
 
 /** Ask for the stream listing again, unless the app cannot read logs or one is in flight. */
 function relisted(state: RunPageState): RunPageStep {
-  if (state.unavailable.logs !== undefined || state.logs.kind === 'listing') {
+  const instanceId = recordInstance(state.record);
+  if (
+    state.unavailable.logs !== undefined ||
+    instanceId === null ||
+    (state.logs.kind === 'listing' && state.logs.instanceId === instanceId)
+  ) {
     return {state, requests: []};
   }
   const token = state.next;
-  const streams = state.logs.kind === 'listed' ? state.logs.streams : [];
+  const streams =
+    state.logs.kind === 'listed' && state.logs.instanceId === instanceId ? state.logs.streams : [];
   return {
-    state: {...state, next: token + 1, logs: {kind: 'listing', token, streams}},
-    requests: [{kind: 'list-logs', token}],
+    state: {...state, next: token + 1, logs: {kind: 'listing', token, instanceId, streams}},
+    requests: [{kind: 'list-logs', token, instanceId}],
+  };
+}
+
+function recordInstance(record: RunRecord): string | null {
+  return record.kind === 'unlisted' ? null : record.run.id;
+}
+
+/**
+ * The link the record calls for: a live run's server attached to this window, nothing otherwise.
+ * A new server (a resume, a restart) is attached afresh; leaving a live run releases it.
+ */
+function linked(state: RunPageState): RunPageStep {
+  const {record, link} = state;
+  const wanted = record.kind === 'live' ? record.run.id : null;
+  const held = link.kind === 'none' ? null : link.instance;
+  if (wanted === held) return {state, requests: []};
+  const release: RunPageRequest[] = link.kind === 'none' ? [] : [{kind: 'release'}];
+  if (wanted === null) {
+    return {state: {...state, link: {kind: 'none'}, session: null}, requests: release};
+  }
+  const token = state.next;
+  return {
+    state: {
+      ...state,
+      next: token + 1,
+      link: {kind: 'attaching', token, instance: wanted},
+      session: null,
+      run: EMPTY_RUN_FOLD,
+    },
+    requests: [...release, {kind: 'attach', token, instance: wanted}],
   };
 }
 
 function withRecord(state: RunPageState, record: RunRecord): RunPageStep {
-  const next: RunPageState = {...state, record};
+  const instanceChanged = recordInstance(state.record) !== recordInstance(record);
+  const fenced: RunPageState = instanceChanged
+    ? {...state, record, logs: {kind: 'idle'}, views: {}, selected: null}
+    : {...state, record};
+  const link = linked(fenced);
+  const step = recordStep(link.state, record);
+  return {state: step.state, requests: [...link.requests, ...step.requests]};
+}
+
+function recordStep(next: RunPageState, record: RunRecord): RunPageStep {
   if (record.kind !== 'live') {
     // The run ended (or left the listing): no stop is pending and no force is offered.
     const settled = {...next, stop: STOP_IDLE};
@@ -220,7 +342,26 @@ function withStreams(state: RunPageState, token: number, outcome: LogListOutcome
       requests: [],
     };
   }
-  return {state: {...state, logs: {kind: 'listed', streams: outcome.streams}}, requests: []};
+  if (outcome.instanceId !== state.logs.instanceId) {
+    return {
+      state: {
+        ...state,
+        logs: {
+          kind: 'failed',
+          message: `the app listed logs for ${outcome.instanceId}, not ${state.logs.instanceId}`,
+          unsupported: false,
+        },
+      },
+      requests: [],
+    };
+  }
+  return {
+    state: {
+      ...state,
+      logs: {kind: 'listed', instanceId: outcome.instanceId, streams: outcome.streams},
+    },
+    requests: [],
+  };
 }
 
 function unchanged(state: RunPageState): RunPageStep {
@@ -277,6 +418,11 @@ function stoppingStep(state: RunPageState, action: RunPageAction): RunPageStep |
   }
 }
 
+/** Whether a protocol command (Pause, Resume) can reach the run now: its session's controls are up. */
+export function commandable(state: RunPageState): boolean {
+  return state.link.kind === 'attached' && state.session?.controls === true;
+}
+
 /** A command the screen offers, sent only when the current state offers it. */
 function commandStep(state: RunPageState, action: RunPageAction): RunPageStep | null {
   const phase = runPhase(state);
@@ -286,12 +432,11 @@ function commandStep(state: RunPageState, action: RunPageAction): RunPageStep | 
   });
   switch (action.type) {
     case 'pause':
-      return offered(
-        state.unavailable.pause === undefined && phase.kind === 'running' && !phase.pausing,
-        {kind: 'pause'},
-      );
+      return offered(commandable(state) && phase.kind === 'running' && !phase.pausing, {
+        kind: 'pause',
+      });
     case 'resume':
-      return offered(state.unavailable.pause === undefined && phase.kind === 'paused', {
+      return offered(commandable(state) && phase.kind === 'paused', {
         kind: 'resume',
       });
     case 'resume-ended': {
@@ -320,11 +465,24 @@ function narration(state: RunPageState): string | null {
   return found?.id ?? null;
 }
 
+function toggled(
+  open: ReadonlySet<string>,
+  action: {readonly id: string; readonly open: boolean},
+): ReadonlySet<string> {
+  if (open.has(action.id) === action.open) return open;
+  const next = new Set(open);
+  if (action.open) next.add(action.id);
+  else next.delete(action.id);
+  return next;
+}
+
 export function runPageStep(state: RunPageState, action: RunPageAction): RunPageStep {
   const stop = confirmStep(state, action) ?? stoppingStep(state, action);
   if (stop !== null) return stop;
   const command = commandStep(state, action);
   if (command !== null) return command;
+  const live = liveStep(state, action);
+  if (live !== null) return live;
   switch (action.type) {
     case 'record':
       return withRecord(state, action.record);
@@ -339,16 +497,80 @@ export function runPageStep(state: RunPageState, action: RunPageAction): RunPage
       return {state: {...state, tab: action.tab}, requests: []};
     case 'select-stream':
       return {state: {...state, tab: 'logs', selected: action.streamId}, requests: []};
+    case 'work-query':
+      return {state: {...state, work: {...state.work, query: action.query}}, requests: []};
+    case 'work-outcome':
+      return {state: {...state, work: {...state.work, outcome: action.outcome}}, requests: []};
     case 'view-logs':
       return {state: {...state, tab: 'logs', selected: narration(state)}, requests: []};
+    case 'map-filter':
+      return {state: {...state, map: {...state.map, filter: action.filter}}, requests: []};
+    case 'map-toggle':
+      return {
+        state: {...state, map: {...state.map, open: toggled(state.map.open, action)}},
+        requests: [],
+      };
+    case 'map-select':
+      return {state: {...state, map: {...state.map, selected: action.id}}, requests: []};
     default:
       return {state, requests: []};
   }
 }
 
+function withAttached(state: RunPageState, token: number, error: string | null): RunPageStep {
+  const {link} = state;
+  if (link.kind !== 'attaching' || link.token !== token) return {state, requests: []};
+  const next: RunLink =
+    error === null
+      ? {kind: 'attached', instance: link.instance}
+      : {kind: 'failed', instance: link.instance, message: error};
+  return {state: {...state, link: next}, requests: []};
+}
+
+/** What the attached run's session reports and folds; nothing once the link is gone. */
+function liveStep(state: RunPageState, action: RunPageAction): RunPageStep | null {
+  const attached = state.link.kind === 'attached';
+  switch (action.type) {
+    case 'attached':
+      return withAttached(state, action.token, action.error);
+    case 'session':
+      return {state: attached ? {...state, session: action.session} : state, requests: []};
+    case 'run-core':
+      return {
+        state: attached ? {...state, run: {...state.run, core: action.core}} : state,
+        requests: [],
+      };
+    case 'run-data':
+      return {
+        state: attached
+          ? {...state, run: {...state.run, trace: traceStep(state.run.trace, action.data)}}
+          : state,
+        requests: [],
+      };
+    case 'command-refused':
+      return {state: {...state, notice: action.message}, requests: []};
+    case 'view':
+      return {state: {...state, view: action.view}, requests: []};
+    default:
+      return null;
+  }
+}
+
+/** What must hold of the live link and the run data it brings. */
+function liveProblems(state: RunPageState): string[] {
+  const problems: string[] = [...traceProblems(state.run.trace)];
+  const live = state.record.kind === 'live' ? state.record.run.id : null;
+  const held = state.link.kind === 'none' ? null : state.link.instance;
+  if (held !== live) problems.push(`the link holds ${held} while the live server is ${live}`);
+  if (state.session !== null && state.link.kind !== 'attached') {
+    problems.push('a session reports without an attached run');
+  }
+  return problems;
+}
+
 /** What must hold in every state; empty when all do. */
 export function runPageInvariants(state: RunPageState): string[] {
-  const problems: string[] = [];
+  const problems: string[] = liveProblems(state);
   const phase = runPhase(state);
   if (state.stop.kind === 'stopping' && state.stop.forceOffered && phase.kind !== 'stopping') {
     problems.push('force stop is offered outside stopping');
@@ -358,6 +580,12 @@ export function runPageInvariants(state: RunPageState): string[] {
   }
   if (state.stop.kind !== 'idle' && state.record.kind !== 'live') {
     problems.push(`a ${state.stop.kind} stop outlives the live run`);
+  }
+  if (
+    (state.logs.kind === 'listing' || state.logs.kind === 'listed') &&
+    state.logs.instanceId !== recordInstance(state.record)
+  ) {
+    problems.push('log state belongs to a different run instance');
   }
   if (state.unavailable.logs !== undefined && state.logs.kind !== 'idle') {
     problems.push('logs are read although the app cannot read them');

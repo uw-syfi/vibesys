@@ -18,8 +18,8 @@ class SlurmError(RuntimeError):
 
     @classmethod
     def invalid_job_id(cls) -> SlurmError:
-        """Describe a nonnumeric scheduler identifier."""
-        return cls("job_id must be numeric")
+        """Describe a scheduler identifier outside the bounded decimal contract."""
+        return cls("job_id must contain 1 to 32 decimal digits")
 
     @classmethod
     def operation_identity_ambiguous(cls) -> SlurmError:
@@ -151,6 +151,11 @@ class SlurmError(RuntimeError):
         """Describe a handle whose remote paths do not match its identity."""
         return cls("Slurm job handle contains paths outside its operation workspace")
 
+    @classmethod
+    def operation_cleanup_unconfirmed(cls) -> SlurmError:
+        """Describe operation-owned remote paths that remain after cleanup."""
+        return cls("Slurm operation cleanup could not be confirmed")
+
 
 class SlurmTransferInterruptedError(SlurmError):
     """A download from the cluster failed, and the cluster did not prove its source absent.
@@ -173,3 +178,67 @@ class SlurmSubmissionRejectedError(SlurmError):
     The original SlurmError diagnostic is preserved. Once the sbatch call
     begins, transport loss has unknown acceptance and never uses this type.
     """
+
+
+class SlurmWorkspaceRootProbeError(SlurmError):
+    """The startup probe could not prove the configured workspace root shared."""
+
+    @classmethod
+    def job_failed(cls, job_id: str, exit_code: int | None) -> SlurmWorkspaceRootProbeError:
+        """Describe a probe job that reached a nonzero or missing exit status."""
+        return cls(
+            "Slurm `remote_workspace_root` startup probe failed: "
+            f"probe job {job_id} exited with code {exit_code}"
+        )
+
+    @classmethod
+    def node_token_missing(cls, job_id: str) -> SlurmWorkspaceRootProbeError:
+        """Describe a node token the submit side could not read or collect."""
+        return cls(
+            "Slurm `remote_workspace_root` startup probe failed: "
+            f"probe job {job_id} returned no collectable node token"
+        )
+
+    @classmethod
+    def node_token_wrong(cls, job_id: str) -> SlurmWorkspaceRootProbeError:
+        """Describe a node token that did not belong to this probe."""
+        return cls(
+            "Slurm `remote_workspace_root` startup probe failed: "
+            f"probe job {job_id} returned the wrong node token"
+        )
+
+    @classmethod
+    def infrastructure(cls) -> SlurmWorkspaceRootProbeError:
+        """Describe an infrastructure failure without exposing boundary diagnostics."""
+        return cls("Slurm `remote_workspace_root` startup probe failed: infrastructure error")
+
+    @classmethod
+    def submission_unresolved(cls) -> SlurmWorkspaceRootProbeError:
+        """Describe scheduler acceptance that could not be reconciled yet."""
+        return cls(
+            "Slurm `remote_workspace_root` startup probe failed: "
+            "probe submission could not be reconciled"
+        )
+
+    @classmethod
+    def settlement_unconfirmed(cls) -> SlurmWorkspaceRootProbeError:
+        """Describe a probe job whose terminal state could not be confirmed."""
+        return cls(
+            "Slurm `remote_workspace_root` startup probe failed: "
+            "probe job settlement could not be confirmed"
+        )
+
+    @classmethod
+    def cleanup_unconfirmed(cls) -> SlurmWorkspaceRootProbeError:
+        """Describe probe-owned remote material that could not be confirmed absent."""
+        return cls(
+            "Slurm `remote_workspace_root` startup probe failed: "
+            "probe cleanup could not be confirmed"
+        )
+
+    @classmethod
+    def state_invalid(cls) -> SlurmWorkspaceRootProbeError:
+        """Describe unreadable durable probe completion evidence."""
+        return cls(
+            "Slurm `remote_workspace_root` startup probe failed: probe recovery state is invalid"
+        )

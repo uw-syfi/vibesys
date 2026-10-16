@@ -1299,6 +1299,7 @@ def _job_observed(
                     status=observation.status,
                     failure=failure,
                     diagnostic=observation.diagnostic[-MEASUREMENT_DIAGNOSTIC_LIMIT:],
+                    operator_diagnostic=event.operator_diagnostic[-MEASUREMENT_DIAGNOSTIC_LIMIT:],
                 ),
             )
         elif reported and (newly or refused):
@@ -1312,6 +1313,7 @@ def _job_observed(
                     status=observation.status,
                     failure=failure,
                     diagnostic=observation.diagnostic[-MEASUREMENT_DIAGNOSTIC_LIMIT:],
+                    operator_diagnostic=event.operator_diagnostic[-MEASUREMENT_DIAGNOSTIC_LIMIT:],
                 ),
             )
         # A cancel stop discards its run's jobs, so it collects nothing from them: a job the

@@ -63,16 +63,23 @@ export function Row(props: FlexProps): JSX.Element {
   return <Flex {...props} direction="row" align={props.align ?? 'center'} />;
 }
 
-/** A main column and an aside beside it; the aside moves under the main column when narrow. */
+/**
+ * A main column and an aside beside it; the aside moves under the main column when narrow.
+ * `asideFirst` puts the aside before the main column, in reading order and on screen (a list
+ * beside the detail of its selected row); when narrow it then sits above it.
+ */
 export function Split(props: {
   readonly main: ReactNode;
   readonly aside: ReactNode;
   readonly gap?: SpaceToken;
+  readonly asideFirst?: boolean;
 }): JSX.Element {
+  const main = <div className="vs-split-main">{props.main}</div>;
+  const aside = <div className="vs-split-aside">{props.aside}</div>;
   return (
     <div className="vs-split" style={gapStyle(props.gap ?? 'space-5')}>
-      <div className="vs-split-main">{props.main}</div>
-      <div className="vs-split-aside">{props.aside}</div>
+      {props.asideFirst === true ? aside : main}
+      {props.asideFirst === true ? main : aside}
     </div>
   );
 }

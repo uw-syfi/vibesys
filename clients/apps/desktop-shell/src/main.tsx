@@ -10,6 +10,7 @@ import type {WelcomeBridge} from '@vibesys/ipc';
 import {Card, EmptyState, Page} from '@vibesys/ui';
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
+import {shellSessionOptions} from './run-session.js';
 import {createShellStores, Shell} from './shell.js';
 
 declare global {
@@ -42,6 +43,10 @@ if (bridge === undefined) {
     pageAppearance(window),
     document.documentElement,
     schedule,
+    {
+      messages: window,
+      session: run => shellSessionOptions(run, {document, window, navigator}),
+    },
   );
   createRoot(root).render(
     <StrictMode>

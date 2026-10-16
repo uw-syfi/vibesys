@@ -19,7 +19,7 @@ import {
   type WelcomeEvent,
 } from '@vibesys/ipc';
 import {BaseWindow, dialog, ipcMain, type MessagePortMain, type WebContentsView} from 'electron';
-import {APP_ENTRY_URL} from './app-assets.js';
+import {APP_ENTRY_URL, SHELL_URL} from './app-assets.js';
 import {sandboxedView} from './app-security.js';
 import {type PendingRunPort, RunIpcRegistry} from './run-ipc.js';
 import {observeRunPage, RunPageLifecycle} from './run-page-lifecycle.js';
@@ -61,7 +61,7 @@ function runIpcRegistry(log: (message: string) => void): RunIpcRegistry {
         );
       },
     },
-    APP_ENTRY_URL,
+    [APP_ENTRY_URL, SHELL_URL],
     log,
   );
   return sharedRunIpc;
@@ -101,6 +101,11 @@ export class AppWindow {
   /** Stable welcome-document authority across the one allowed WebContentsView recreation. */
   readonly welcome: WelcomeDocument;
   #mode: ChromeState['mode'] = 'welcome';
+  /**
+   * Whether the trusted surface shows runs itself (the app shell, `SHELL_URL`): then a bound run
+   * gets no run page; its connections come from the surface's own document.
+   */
+  readonly #runsInSurface: boolean;
   /** The run bound to the current run page, if any; null before one ever opened. */
   #currentRunId: string | null = null;
   /** Withdraws this window's admission claim from the shared run-connect registry. */
@@ -108,6 +113,7 @@ export class AppWindow {
 
   constructor(deps: AppWindowDeps) {
     this.#deps = deps;
+    this.#runsInSurface = deps.surfaceUrl === SHELL_URL;
     this.#window = new BaseWindow({
       width: 1440,
       height: 900,
@@ -144,9 +150,11 @@ export class AppWindow {
       this.#detachCurrentRun();
       this.#unregisterRunIpc();
     });
+    // A new surface document has not attached the run the old one showed: let that run go.
+    if (this.#runsInSurface) this.#welcomeNewDocuments.add(() => this.#detachCurrentRun());
     this.#welcomePages.start(sandboxedView('welcome.cjs'));
     this.#unregisterRunIpc = runIpcRegistry(deps.log).register({
-      currentSenderId: () => this.#runPages.current?.webContents.id ?? null,
+      currentSenderId: () => this.#runSenderId(),
       // The registry only admits a port whose sender is this window's current run page, so
       // `#currentRunId` names the same run this port's connection is for.
       connect: port => {
@@ -190,6 +198,7 @@ export class AppWindow {
     wake(): void;
     close(): void;
   } {
+    if (this.#runsInSurface) return this.#bindSurfaceRun(runId);
     const view = sandboxedView('run.cjs');
     this.#runPages.replace(view);
     this.#currentRunId = runId;
@@ -211,6 +220,43 @@ export class AppWindow {
         this.#runPages.close(view);
       },
     };
+  }
+
+  /**
+   * The app shell asked to let its run go (it shows another screen): detach the run bound to the
+   * surface. Does nothing when the surface binds no run, or when runs have their own page.
+   */
+  releaseSurfaceRun(): void {
+    if (this.#runsInSurface) this.#detachCurrentRun();
+  }
+
+  /**
+   * Bind `runId` to the surface itself: the app shell shows the run in its own document, so no run
+   * page opens and the layout stays. A different run bound before is detached first, as replacing a
+   * run page detaches its run.
+   */
+  #bindSurfaceRun(runId: string): {wake(): void; close(): void} {
+    if (this.#currentRunId !== runId) this.#detachCurrentRun();
+    this.#currentRunId = runId;
+    return {
+      wake: () => {
+        const surface = this.#welcomePages.current;
+        if (surface !== null && !surface.webContents.isDestroyed()) {
+          surface.webContents.send(WAKE_CHANNEL);
+        }
+      },
+      close: () => {
+        if (this.#currentRunId === runId) this.#currentRunId = null;
+      },
+    };
+  }
+
+  /** The web contents whose run connections this window admits: its run page, or the surface. */
+  #runSenderId(): number | null {
+    if (!this.#runsInSurface) return this.#runPages.current?.webContents.id ?? null;
+    return this.#currentRunId === null
+      ? null
+      : (this.#welcomePages.current?.webContents.id ?? null);
   }
 
   /** Send one ordered `event` to the welcome view on `channel`. */

@@ -16,6 +16,8 @@ import {
 } from '@vibesys/connection';
 import {RunNotifier} from '@vibesys/feature-app-shell/main';
 import {Hosts} from '@vibesys/feature-hosts/main';
+import {MachinesMain} from '@vibesys/feature-machines/main';
+import {NewRunMain} from '@vibesys/feature-new-run/main';
 import {RunControl} from '@vibesys/feature-run-control/main';
 import {PreferencesMain} from '@vibesys/feature-settings/main';
 import type {HostId} from '@vibesys/hosts';
@@ -75,6 +77,15 @@ function watchNetwork(manager: ConnectionManager): void {
     realTimers(poll, NETWORK_POLL_MS);
   };
   realTimers(poll, NETWORK_POLL_MS);
+}
+
+/** New run's requests, answered over the hosts' connections, recording each start in Recent. */
+function newRunMain(hosts: Hosts, settings: SettingsStore): NewRunMain {
+  return new NewRunMain({
+    connect: id => hosts.connection(id),
+    remember: run => settings.updateRecent(recent => remember(recent, run)),
+    now: () => Date.now(),
+  });
 }
 
 async function openWindow(
@@ -154,9 +165,11 @@ async function openWindow(
     window,
     welcome,
     hosts,
+    machines: machinesOver(settings, hosts),
     runs,
     settings,
     preferences,
+    newRun: newRunMain(hosts, settings),
     surfaceUrl: surface,
     welcomeIpc: {
       handle: (channel, listener) =>
@@ -177,6 +190,16 @@ async function openWindow(
   powerMonitor.on('resume', () => manager.wake());
   watchNetwork(manager);
   return desktop;
+}
+
+/** The machines, over the settings store and the hosts' checkouts and connections. */
+function machinesOver(settings: SettingsStore, hosts: Hosts): MachinesMain {
+  return new MachinesMain({
+    settings,
+    removeHost: id => hosts.remove(id),
+    checkout: id => hosts.checkout(id),
+    connection: id => hosts.connection(id),
+  });
 }
 
 async function connectionManager(): Promise<ConnectionManager> {

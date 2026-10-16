@@ -3,18 +3,25 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, cast
+
+from vs_redaction.api import redact_diagnostic_text
 
 if TYPE_CHECKING:
     from vs_sim.api import Event, OutputSink
 
 _TRUNCATION_MARKER = "\n...[truncated]...\n"
+_MISSING_DIAGNOSTIC = cast("str", object())
 
 
 @dataclass
 class CommandResult:
     """A command's combined output, exit code, and each process stream.
 
+    ``output``/``stdout``/``stderr`` preserve command bytes for protocols and
+    evidence. Their ``diagnostic_*`` counterparts redact recognized credentials
+    from the complete streams before applying the same runner output cap, so
+    operator-facing consumers never need to sanitize an already-truncated key.
     ``cancelled`` is true when the caller's cancel event stopped the command.
     """
 
@@ -24,6 +31,37 @@ class CommandResult:
     stdout: str = ""
     stderr: str = ""
     cancelled: bool = False
+    diagnostic_output: str = _MISSING_DIAGNOSTIC
+    diagnostic_stdout: str = _MISSING_DIAGNOSTIC
+    diagnostic_stderr: str = _MISSING_DIAGNOSTIC
+
+    def __post_init__(self) -> None:
+        """Supply a safe diagnostic view for manually constructed results.
+
+        Production runners provide this view from complete process streams before
+        bounding them. Directly constructed results, used by adapters and Fakes,
+        have no earlier stream available, so their retained text is redacted here.
+        """
+        self.diagnostic_output = self._safe_view(
+            "diagnostic_output", self.output, self.diagnostic_output
+        )
+        self.diagnostic_stdout = self._safe_view(
+            "diagnostic_stdout", self.stdout, self.diagnostic_stdout
+        )
+        self.diagnostic_stderr = self._safe_view(
+            "diagnostic_stderr", self.stderr, self.diagnostic_stderr
+        )
+
+    def _safe_view(self, name: str, raw: str, safe: str) -> str:
+        """Derive only from a complete stream; require callers to preserve earlier context."""
+        if safe is not _MISSING_DIAGNOSTIC:
+            return safe
+        if not raw:
+            return ""
+        if self.truncated:
+            message = f"a truncated command result requires {name} from before truncation"
+            raise ValueError(message)
+        return redact_diagnostic_text(raw)
 
 
 class CommandStopUnconfirmedError(RuntimeError):
@@ -80,7 +118,9 @@ class CommandRunner(Protocol):
         sandbox's cap; a signalled command reports ``128 + N``; an empty
         command returns exit code 1 without running; a non-positive *timeout*
         raises ``ValueError``. A sandbox that cannot stop its commands must
-        raise rather than ignore *cancel*. The full contract is in
+        raise rather than ignore *cancel*. Raw result streams remain suitable
+        for machine protocols; ``diagnostic_*`` streams are their bounded,
+        credential-redacted operator-facing view. The full contract is in
         :mod:`vs_sandbox.command_execution` and ``tests/test_sandbox_contract.py``.
         """
         ...
@@ -103,15 +143,41 @@ def bounded_execution_result(
     stream events never label retained process output as the wrong stream.
     """
     limit = max(0, max_output_chars)
+    bounded_stdout, bounded_stderr, truncated = _bounded_streams(
+        stdout=stdout,
+        stderr=stderr,
+        exit_code=exit_code,
+        limit=limit,
+    )
+    diagnostic_stdout, diagnostic_stderr, _ = _bounded_streams(
+        stdout=redact_diagnostic_text(stdout),
+        stderr=redact_diagnostic_text(stderr),
+        exit_code=exit_code,
+        limit=limit,
+    )
+    return CommandResult(
+        output=bounded_stdout + bounded_stderr,
+        exit_code=exit_code,
+        truncated=truncated,
+        stdout=bounded_stdout,
+        stderr=bounded_stderr,
+        diagnostic_output=diagnostic_stdout + diagnostic_stderr,
+        diagnostic_stdout=diagnostic_stdout,
+        diagnostic_stderr=diagnostic_stderr,
+    )
+
+
+def _bounded_streams(
+    *,
+    stdout: str,
+    stderr: str,
+    exit_code: int | None,
+    limit: int,
+) -> tuple[str, str, bool]:
+    """Bound one pair of streams without changing their contents first."""
     combined = stdout + stderr
     if len(combined) <= limit:
-        return CommandResult(
-            output=combined,
-            exit_code=exit_code,
-            truncated=False,
-            stdout=stdout,
-            stderr=stderr,
-        )
+        return stdout, stderr, False
 
     marker = _TRUNCATION_MARKER[:limit]
     payload_budget = limit - len(marker)
@@ -136,10 +202,4 @@ def bounded_execution_result(
         else:
             bounded_stdout += marker
 
-    return CommandResult(
-        output=bounded_stdout + bounded_stderr,
-        exit_code=exit_code,
-        truncated=True,
-        stdout=bounded_stdout,
-        stderr=bounded_stderr,
-    )
+    return bounded_stdout, bounded_stderr, True

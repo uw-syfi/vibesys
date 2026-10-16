@@ -3,10 +3,20 @@
  * startup timeline, the log streams grouped by owner, and the stop and ended banners. The renderer
  * maps these onto `@vibesys/ui` components and decides nothing itself.
  */
+import type {RunEvent, Span} from '@vibesys/contracts';
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {RunEnd} from '@vibesys/hosts';
 import {decodeNarrationLine, type LogView, logViewRecords} from '@vibesys/logs';
-import {type RunPageState, runPhase, type StopFlow, type Unavailable} from './run-page.js';
+import type {CoreState} from '@vibesys/run-state';
+import {type RunTrace, traceSpans} from '@vibesys/run-state/trace';
+import {traceAt} from './live.js';
+import {
+  commandable,
+  type RunPageState,
+  runPhase,
+  type StopFlow,
+  type Unavailable,
+} from './run-page.js';
 
 export type Tone = 'neutral' | 'live' | 'ok' | 'warn' | 'err';
 
@@ -73,6 +83,13 @@ function status(state: RunPageState): {label: string; tone: Tone} {
   }
 }
 
+/** Why Pause and Resume cannot be sent now, or undefined when they can. */
+function commandReason(state: RunPageState): string | undefined {
+  if (commandable(state)) return undefined;
+  if (state.link.kind === 'failed') return `Could not connect to the run: ${state.link.message}`;
+  return 'Connecting to the run…';
+}
+
 function offer(shown: boolean, unavailable?: string): Offer {
   return {shown, disabledReason: unavailable ?? null};
 }
@@ -86,8 +103,8 @@ export function headerView(state: RunPageState): HeaderView {
     title: task === null ? name : `${name} · ${task}`,
     subtitle: `${state.hostLabel} · ${state.identity.runId}`,
     status: status(state),
-    pause: offer(phase.kind === 'running' && !phase.pausing, unavailable.pause),
-    resume: offer(phase.kind === 'paused', unavailable.pause),
+    pause: offer(phase.kind === 'running' && !phase.pausing, commandReason(state)),
+    resume: offer(phase.kind === 'paused', commandReason(state)),
     stop: offer(
       (phase.kind === 'starting' || phase.kind === 'running' || phase.kind === 'paused') &&
         state.stop.kind === 'idle',
@@ -349,4 +366,30 @@ export function endedView(state: RunPageState): EndedView | null {
   const resume =
     end?.resumable === true ? (round === null ? 'Resume' : `Resume from round ${round}`) : null;
   return {title: label, tone: tone === 'live' ? 'neutral' : tone, reason, resume};
+}
+
+/**
+ * The run as the tabs show it, at the view's sequence: the run fold (`CoreState`, the live end;
+ * null before a snapshot), the trace folded at the view's sequence, its spans in start order, and
+ * the span events in sequence order (for a tab that folds or scrubs them itself).
+ */
+export interface ViewedRun {
+  readonly core: CoreState | null;
+  readonly trace: RunTrace;
+  readonly spans: readonly Span[];
+  readonly spanEvents: readonly RunEvent[];
+  /** The sequence shown: null at the live end. */
+  readonly at: number | null;
+}
+
+export function viewedRun(state: RunPageState): ViewedRun {
+  const at = state.view.at === 'live' ? null : state.view.at;
+  const trace = traceAt(state.run.trace, at);
+  return {
+    core: state.run.core,
+    trace,
+    spans: traceSpans(trace),
+    spanEvents: state.run.trace.events,
+    at,
+  };
 }

@@ -1,13 +1,15 @@
 /**
- * The sidebar's shell: its store, fed by the welcome bridge's overview and pushes. Every change is
- * a push the main process sends (a host's listing, Recent, the preferences), so there is no refresh.
+ * The sidebar's shell: its store, fed by the welcome bridge's overview and pushes (a host's
+ * listing, Recent, the preferences), and by the saved machines and their checks, which the store
+ * asks for itself (`SidebarRequest`).
  */
 import {settled, type WelcomeBridge} from '@vibesys/ipc';
-import {createStore, only, type Store} from '@vibesys/store';
+import {createStore, type Store} from '@vibesys/store';
 import {
+  initialSidebar,
   type ShellActions,
-  SIDEBAR_EMPTY,
   type SidebarAction,
+  type SidebarRequest,
   type SidebarState,
   sidebarStep,
 } from '../../state/index.js';
@@ -15,8 +17,43 @@ import {
 /** The bridge calls and pushes the sidebar uses. */
 export type ShellBridge = Pick<
   WelcomeBridge,
-  'overview' | 'preferences' | 'archive' | 'onListing' | 'onRecent' | 'onPreferences'
+  | 'overview'
+  | 'preferences'
+  | 'archive'
+  | 'machines'
+  | 'machine'
+  | 'onListing'
+  | 'onRecent'
+  | 'onPreferences'
 >;
+
+/** Ask what `request` names; its reply is dispatched as the action that carries its token. */
+function perform(
+  bridge: ShellBridge,
+  request: SidebarRequest,
+  dispatch: (action: SidebarAction) => void,
+): void {
+  const {token} = request;
+  if (request.kind === 'list-machines') {
+    void settled(bridge.machines()).then(result =>
+      dispatch({
+        type: 'machines-listed',
+        token,
+        hosts: result.ok ? result.value.map(machine => machine.host) : null,
+      }),
+    );
+    return;
+  }
+  const {host} = request;
+  void settled(bridge.machine(host)).then(result =>
+    dispatch({
+      type: 'machine-checked',
+      token,
+      host,
+      ready: result.ok && result.value.kind === 'ready',
+    }),
+  );
+}
 
 /**
  * The sidebar store over `bridge`. Pushes that arrive before the overview are ordered by their
@@ -26,11 +63,13 @@ export function createSidebarStore(bridge: ShellBridge): {
   readonly store: Store<SidebarState, SidebarAction>;
   readonly actions: ShellActions;
 } {
-  const store = createStore<SidebarState, SidebarAction, never>(
-    (state, action) => only(sidebarStep(state, action)),
-    SIDEBAR_EMPTY,
-    () => {},
+  const initial = initialSidebar();
+  const store = createStore<SidebarState, SidebarAction, SidebarRequest>(
+    sidebarStep,
+    initial.state,
+    (request, dispatch) => perform(bridge, request, dispatch),
   );
+  for (const request of initial.requests) perform(bridge, request, store.dispatch);
   let cursor: number | null = null;
   const early: {sequence: number; action: SidebarAction}[] = [];
   const pushed = (sequence: number, action: SidebarAction): void => {

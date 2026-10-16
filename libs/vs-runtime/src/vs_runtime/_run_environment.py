@@ -71,6 +71,14 @@ from vs_runtime._environment_startup import (
 from vs_runtime._image_features import image_features
 from vs_runtime._model_artifacts import read_model_metadata
 from vs_runtime._objective_document import materialize_objective_document
+from vs_runtime._run_environment_facts import (
+    ClusterEvaluationFacts,
+    DockerEnvironmentFacts,
+    HostEnvironmentFacts,
+    ModalEnvironmentFacts,
+    RunEnvironmentPresentationFacts,
+    SkyPilotEnvironmentFacts,
+)
 from vs_runtime._tool_location import ToolLocation, ToolSite, assumed_tool
 from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
 from vs_runtime._trusted_evaluation_preparation import (
@@ -128,7 +136,6 @@ from vs_sandbox.api.skypilot import (
     resolve_profile,
     stable_cluster_name,
 )
-from vs_sandbox.api.slurm import profile_capture_descriptor
 from vs_sandbox.api.symlink_mounts import (
     SymlinkMountScope,
     collect_symlink_mounts,
@@ -162,7 +169,6 @@ if TYPE_CHECKING:
         FeatureRef,
         WorkspaceSandbox,
     )
-    from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmOperatorSettings
     from vs_sim.api import Clock, OutputSink
 
 
@@ -194,6 +200,17 @@ class ParallelCandidateObstacle(StrEnum):
 
     NO_OWN_CONTAINER = "no_own_container"
     BORROWED_SESSION = "borrowed_session"
+
+
+class RunEnvironmentSessionRole(StrEnum):
+    """The lifecycle role of one environment session within a run.
+
+    A run opens exactly one root session. Candidate and auxiliary workspaces
+    are children: they reuse run-scoped preparation and must not repeat it.
+    """
+
+    ROOT = "root"
+    CHILD = "child"
 
 
 @dataclass(frozen=True)
@@ -272,105 +289,6 @@ class RunEnvironmentPresentation:
 
 
 @dataclass(frozen=True)
-class HostEnvironmentFacts:
-    """Presentation facts for an agent confined on the host."""
-
-
-@dataclass(frozen=True)
-class DockerEnvironmentFacts:
-    """Presentation facts for Docker execution."""
-
-
-@dataclass(frozen=True)
-class ClusterEvaluationFacts:
-    """What an environment whose trusted evaluation runs on a Slurm cluster reports.
-
-    ``settings`` is the operator file as the run parsed it once, and ``plan`` the
-    evaluation plan the run wrote. Consumers read the cluster's capacity and the
-    executor's inputs here instead of re-reading either file.
-    """
-
-    settings: SlurmOperatorSettings
-    plan: SlurmEvaluationPlan
-
-    @property
-    def evaluation_capacity(self) -> int:
-        """How many evaluations the cluster runs at once."""
-        return self.settings.config.evaluation_capacity
-
-    @property
-    def captures_profile(self) -> bool:
-        """Whether the cluster runs a profile capture for this run."""
-        return self.plan.profile_command is not None
-
-    @property
-    def supported_profile_fields(self) -> tuple[ProfileField, ...]:
-        """The measurement fields the configured capture can supply, none without a capture.
-
-        The single source for what a run offers to its agents and accepts from them: the
-        executor checks a request against this same descriptor.
-        """
-        return profile_capture_descriptor(self.plan.profile_command).supported_fields
-
-
-@dataclass(frozen=True)
-class AgentGpuFacts:
-    """The limits of the agent's own GPU jobs, as the agent is told them."""
-
-    max_gpus: int
-    max_time_minutes: int
-    #: Host paths the jobs may read besides the workspace and system directories.
-    read_only_paths: tuple[str, ...] = ()
-    #: ``(name, absolute path)`` of each profiler (``ncu``, ``nsys``) that exists on the host but
-    #: not on a job's ``PATH``: a bare ``ncu`` exits 127 in a job, so the agent names the path.
-    tool_paths: tuple[tuple[str, str], ...] = ()
-
-
-@dataclass(frozen=True)
-class SlurmEnvironmentFacts:
-    """Presentation facts for a local editor with remote trusted execution.
-
-    ``service_command`` is the operator-configured argv (remote interpreter
-    already substituted) that trusted jobs use to start the candidate service
-    from the candidate root, or empty when the operator configured none.
-    ``gpu_client`` is the name the agent runs, on its ``PATH``, to start its own GPU
-    commands as Slurm jobs; it is set when ``agent_gpu`` is. Agents request trusted
-    evaluation only through the evaluation tool, so no gate client exists.
-    """
-
-    service_command: tuple[str, ...] = ()
-    gpu_client: str = ""
-    agent_gpu: AgentGpuFacts | None = None
-
-
-@dataclass(frozen=True)
-class SkyPilotEnvironmentFacts:
-    """Resolved SkyPilot facts needed by product presentation and opening."""
-
-    resources: ResolvedSkyPilotResources
-    runtime_container_path: str = "/opt/vibesys-runtime/environment.md"
-
-
-@dataclass(frozen=True)
-class ModalEnvironmentFacts:
-    """Resolved Modal facts needed by product presentation and opening."""
-
-    gpu: str
-    app_name: str
-    reference_path: str
-    runtime_container_path: str = "/opt/vibesys-runtime/environment.md"
-
-
-RunEnvironmentPresentationFacts = (
-    HostEnvironmentFacts
-    | DockerEnvironmentFacts
-    | SlurmEnvironmentFacts
-    | SkyPilotEnvironmentFacts
-    | ModalEnvironmentFacts
-)
-
-
-@dataclass(frozen=True)
 class RunEnvironmentRequest:
     """Resolved inputs required to open a run environment."""
 
@@ -409,14 +327,17 @@ class RunEnvironmentRequest:
     # Host directories the run owns besides ``workspace``, such as the
     # directory holding its candidate worktrees. Agent tools bound once per
     # run (the profiler) may stage any of them to a remote executor. Only the
-    # root session has any: a candidate session's request clears them, so its
-    # brokers never reach a sibling candidate.
+    # candidate session's request clears them, so its brokers never reach a
+    # sibling candidate. A root may legitimately own none; ``session_role`` is
+    # the lifecycle discriminator.
     run_owned_roots: tuple[Path, ...] = ()
     environment_bind_mounts: tuple[EnvironmentBindMount, ...] = ()
     seeded_workspace_paths: tuple[str, ...] = ()
     log: Callable[[str], None] | None = None
     project_path_policy: ProjectPathPolicy = field(default_factory=ProjectPathPolicy)
     state_namespace: StateNamespace | None = None
+    session_role: RunEnvironmentSessionRole = RunEnvironmentSessionRole.ROOT
+    """Whether this request opens the run's one root session or a child workspace."""
     #: Root of the run's dedicated agent CLI homes; ``None`` when the run has
     #: no machine-local state (agents then keep the provider's default home).
     agent_homes_dir: Path | None = None
@@ -591,6 +512,11 @@ class RunEnvironment(Protocol):
         ...
 
     @property
+    def uses_docker(self) -> bool:
+        """Whether a run here starts local Docker containers (the agent's, or an editor's)."""
+        ...
+
+    @property
     def materialize_local_model_weights(self) -> bool:
         """Whether external model-weight symlinks are copied into the workspace."""
         ...
@@ -684,6 +610,7 @@ class HostEnvironment(_NoopWorkspaceRecovery):
     """
 
     isolated: bool = False
+    uses_docker: bool = False
     materialize_local_model_weights: bool = True
     default_profiler_id = "nsys"
     supported_profiler_ids: frozenset[str] | None = None
@@ -904,6 +831,7 @@ class DockerEnvironment:
     """Run agents and evaluator commands in a Docker sandbox."""
 
     isolated = True
+    uses_docker = True
     requires_local_profiler_preflight = True
     materialize_local_model_weights = True
     default_profiler_id = "nsys"
@@ -1368,6 +1296,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
     """Run candidate evaluations as Modal deployments."""
 
     isolated = True
+    uses_docker = True
     requires_local_profiler_preflight = True
     materialize_local_model_weights = False
     default_profiler_id = "torch"

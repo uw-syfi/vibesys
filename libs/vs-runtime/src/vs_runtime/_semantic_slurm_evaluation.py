@@ -41,6 +41,7 @@ from vs_evaluation.api import (
     is_finished,
     same_work,
 )
+from vs_redaction.api import redact_diagnostic_tail
 from vs_runtime._failure_classification import RecordState, classify, is_unsettled, signal_of
 from vs_runtime._measurement_progress import StageRun
 from vs_runtime._trusted_evaluation import (
@@ -101,6 +102,11 @@ def _stage_failure_kind(evidence: TrustedEvidence) -> StageFailureKind:
     if evidence.failure_kind is BenchmarkFailureKind.AMBIGUOUS:
         return StageFailureKind.EXECUTION
     return StageFailureKind.COLLECTION
+
+
+def _first_defined(*values: str | None) -> str | None:
+    """Return the first supplied projection, preserving an explicitly empty safe value."""
+    return next((value for value in values if value is not None), None)
 
 
 class _DurableSemanticSubmission(BaseModel):
@@ -452,6 +458,14 @@ class SemanticSlurmEvaluationExecutor:
     ) -> ExecutorObservation:
         results: list[EvaluationStepResult] = []
         failed_checks: list[tuple[str | None, EvidenceKind]] = []
+        operator_failed_checks: list[tuple[str | None, EvidenceKind]] = []
+        operator_observed_failure = (
+            None
+            if observed.failure is None
+            else observed.operator_failure
+            if observed.operator_failure is not None
+            else redact_diagnostic_tail(observed.failure, max_chars=MAX_EVIDENCE_SUMMARY_CHARS)
+        )
         metadata = (
             SlurmCommandResult.model_validate(observed.stage_results[0].result).execution_metadata
             if observed.stage_results and observed.stage_results[0].result is not None
@@ -460,13 +474,30 @@ class SemanticSlurmEvaluationExecutor:
         infrastructure_failure = metadata is None or metadata.aggregate_unknown is not None
         for step, raw_step in zip(request.stages, observed.stage_results, strict=False):
             if raw_step.result is None:
-                results.append(raw_step.model_copy(update={"name": step.name}))
+                operator_step_failure = (
+                    None
+                    if raw_step.failure is None
+                    else raw_step.operator_failure
+                    if raw_step.operator_failure is not None
+                    else redact_diagnostic_tail(
+                        raw_step.failure, max_chars=MAX_EVIDENCE_SUMMARY_CHARS
+                    )
+                )
+                results.append(
+                    raw_step.model_copy(
+                        update={"name": step.name, "operator_failure": operator_step_failure}
+                    )
+                )
                 continue
             stage = SemanticEvaluationStage.model_validate(step.payload)
             raw = SlurmCommandResult.model_validate(raw_step.result)
             completed = _completed(raw, metadata)
-            evidence = self._evidence(
-                stage, raw, raw_step.failure, handle_id=handle_id, metadata=metadata
+            evidence, operator_evidence_summary = self._evidence(
+                stage,
+                raw,
+                raw_step.failure,
+                handle_id=handle_id,
+                metadata=metadata,
             )
             # A job that exited cleanly can still hold a benchmark whose evaluator died
             # before writing its result, so the evidence's own kind counts too. An
@@ -474,33 +505,68 @@ class SemanticSlurmEvaluationExecutor:
             # once more, but its evidence stays: it is the last tail if it happens again.
             completed &= not is_unsettled(evidence.failure_kind)
             infrastructure_failure |= not completed
+            operator_step_failure = (
+                None
+                if raw_step.failure is None
+                else raw_step.operator_failure
+                if raw_step.operator_failure is not None
+                else redact_diagnostic_tail(raw_step.failure, max_chars=MAX_EVIDENCE_SUMMARY_CHARS)
+            )
             if evidence.outcome is EvidenceOutcome.FAILED:
                 failed_checks.append((evidence.semantic_summary, stage.kind))
+                operator_failed_checks.append(
+                    (
+                        operator_evidence_summary,
+                        stage.kind,
+                    )
+                )
             results.append(
                 EvaluationStepResult(
                     name=step.name,
                     state=StageState.SUCCEEDED if completed else StageState.FAILED,
                     result=evidence.model_dump(mode="json"),
+                    operator_summary=operator_evidence_summary,
                     duration_s=raw_step.duration_s,
-                    stdout_tail=raw.stdout[-STAGE_OUTPUT_TAIL_CHARS:] or None,
-                    stderr_tail=raw.stderr[-STAGE_OUTPUT_TAIL_CHARS:] or None,
+                    stdout_tail=(
+                        redact_diagnostic_tail(raw.stdout, max_chars=STAGE_OUTPUT_TAIL_CHARS)
+                        or None
+                    ),
+                    stderr_tail=(
+                        redact_diagnostic_tail(raw.stderr, max_chars=STAGE_OUTPUT_TAIL_CHARS)
+                        or None
+                    ),
                     failure_kind=None if completed else _stage_failure_kind(evidence),
                     failure=(
                         None
                         if completed
                         else raw_step.failure or observed.failure or evidence.semantic_summary
                     ),
+                    operator_failure=(
+                        None
+                        if completed
+                        else _first_defined(
+                            operator_step_failure,
+                            operator_observed_failure,
+                            operator_evidence_summary,
+                            f"{stage.kind.value} command failed",
+                        )
+                    ),
                 )
             )
         has_semantic_result = any(item.result is not None for item in results)
         skipped = any(item.state is StageState.SKIPPED for item in results)
         failure = observed.failure
+        operator_failure = operator_observed_failure
         if infrastructure_failure and observed.state in {
             EvaluationState.SUCCEEDED,
             EvaluationState.FAILED,
         }:
             state = EvaluationState.FAILED
             failure = self._stage_failure_text(failed_checks, observed.failure)
+            operator_failure = redact_diagnostic_tail(
+                self._stage_failure_text(operator_failed_checks, operator_observed_failure),
+                max_chars=MAX_EVIDENCE_SUMMARY_CHARS,
+            )
         elif observed.state is EvaluationState.FAILED and has_semantic_result and not skipped:
             state = EvaluationState.SUCCEEDED
         elif skipped and has_semantic_result:
@@ -509,6 +575,10 @@ class SemanticSlurmEvaluationExecutor:
             # diagnostics are the failure the submitting agent reads.
             state = EvaluationState.FAILED
             failure = self._stage_failure_text(failed_checks, observed.failure)
+            operator_failure = redact_diagnostic_tail(
+                self._stage_failure_text(operator_failed_checks, operator_observed_failure),
+                max_chars=MAX_EVIDENCE_SUMMARY_CHARS,
+            )
         else:
             state = observed.state
         return ExecutorObservation(
@@ -516,6 +586,7 @@ class SemanticSlurmEvaluationExecutor:
             current_stage=None if is_finished(state) else observed.current_stage,
             stage_results=tuple(results),
             failure=None if state is EvaluationState.SUCCEEDED else failure,
+            operator_failure=None if state is EvaluationState.SUCCEEDED else operator_failure,
         )
 
     def _evidence(
@@ -526,11 +597,12 @@ class SemanticSlurmEvaluationExecutor:
         *,
         handle_id: str,
         metadata: SlurmExecutionMetadata | None,
-    ) -> TrustedEvidence:
+    ) -> tuple[TrustedEvidence, str | None]:
         passed = _completed(raw, metadata) and raw.exit_code == 0
         service_not_ready = metadata is not None and metadata.service_not_ready
         metrics: tuple[EvidenceMetric, ...] = ()
         summary: str | None = None
+        operator_summary: str | None = None
         partial: PartialMeasurement | None = None
         # Whose fault a failure is follows from how the stage ended and what its evaluator
         # wrote (`classify`). Only a benchmark has a result record to read; every other
@@ -552,12 +624,20 @@ class SemanticSlurmEvaluationExecutor:
             # The evaluator's own stop reason leads, as on the local executor;
             # the raw output tail would end with its command line instead.
             summary = decoded.reason
+            operator_summary = (
+                None
+                if decoded.reason is None
+                else redact_diagnostic_tail(decoded.reason, max_chars=MAX_EVIDENCE_SUMMARY_CHARS)
+            )
             if decoded.violation is not None:
                 # A clean exit with no valid record still leaves the output the evaluator
                 # printed before it stopped, which is all that says what happened.
                 failure = f"{failure or raw.output}\n{decoded.violation}"
                 if passed:
                     summary = failure
+                    operator_summary = redact_diagnostic_tail(
+                        failure, max_chars=MAX_EVIDENCE_SUMMARY_CHARS
+                    )
             passed = decoded.passed
             record = decoded.record
             metrics = tuple(
@@ -582,15 +662,24 @@ class SemanticSlurmEvaluationExecutor:
                 failure = str(exc)
             else:
                 summary = text[-MAX_EVIDENCE_SUMMARY_CHARS:] or None
+                operator_summary = (
+                    redact_diagnostic_tail(text, max_chars=MAX_EVIDENCE_SUMMARY_CHARS) or None
+                )
                 metrics = () if stats is None else stats.metrics()
         if not passed and summary is None:
             # The provider's stage failure already holds the stage output plus the
             # server log tail; keep its end, where the cause usually is.
             detail = failure or raw.output
             summary = detail[-MAX_EVIDENCE_SUMMARY_CHARS:] or f"{stage.kind.value} command failed"
+            operator_summary = (
+                redact_diagnostic_tail(detail, max_chars=MAX_EVIDENCE_SUMMARY_CHARS)
+                or f"{stage.kind.value} command failed"
+            )
         outcome = EvidenceOutcome.PASSED if passed else EvidenceOutcome.FAILED
         if summary is not None:
             summary = summary[-MAX_EVIDENCE_SUMMARY_CHARS:]
+        if operator_summary is not None:
+            operator_summary = operator_summary[-MAX_EVIDENCE_SUMMARY_CHARS:]
         evidence_id = evidence_identity(
             stage,
             EvidenceResultIdentity(
@@ -614,7 +703,7 @@ class SemanticSlurmEvaluationExecutor:
             partial_measurement=partial,
             failure_kind=None if passed else classify(signal, record),
             accepted_round=0,
-        )
+        ), operator_summary
 
     def _load(self, handle_id: str) -> _DurableSemanticSubmission | None:
         return self._namespace.load_optional(self._path(handle_id), _DurableSemanticSubmission)

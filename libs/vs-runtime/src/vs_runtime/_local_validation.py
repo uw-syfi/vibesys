@@ -24,6 +24,7 @@ from pydantic import (
 )
 
 from vs_project.api.workspace_tree import WorkspacePathError, relative_parts
+from vs_redaction.api import redact_diagnostic_tail
 from vs_runtime._workspace_files import (
     WorkspaceFileProblem,
     WorkspaceFileProblemKind,
@@ -171,7 +172,9 @@ class FrameworkValidationResult(BaseModel):
     reused: bool = False
     exit_code: int | None = None
     output: str = ""
+    operator_output: str | None = Field(default=None, exclude=True)
     error: str | None = None
+    operator_error: str | None = Field(default=None, exclude=True)
 
 
 class LocalValidationRecipeErrorKind(StrEnum):
@@ -302,29 +305,36 @@ async def _execute_recipe(
             timeout_seconds=recipe.timeout_seconds,
         )
         output = execution.output.strip()
+        operator_output = execution.diagnostic_output.strip()
         result = FrameworkValidationResult(
             recipe=recipe,
             input_digest=input_digest,
             passed=execution.exit_code == 0,
             exit_code=execution.exit_code,
             output=output[-_OUTPUT_TAIL_CHARS:],
+            operator_output=operator_output[-_OUTPUT_TAIL_CHARS:],
             error=None if execution.exit_code == 0 else "command exited nonzero",
+            operator_error=None if execution.exit_code == 0 else "command exited nonzero",
         )
     except Exception as error:  # noqa: BLE001  # lint-waiver: LW-732841 [BLE001]; trusted command failures are validation results, while cancellation remains a BaseException.
+        error_text = f"command could not be executed: {error}"
         result = FrameworkValidationResult(
             recipe=recipe,
             input_digest=input_digest,
             passed=False,
-            error=f"command could not be executed: {error}",
+            error=error_text,
+            operator_error=redact_diagnostic_tail(error_text, max_chars=_OUTPUT_TAIL_CHARS),
         )
     changes = await workspace.pending_changes()
     if not changes:
         return result, False
+    mutation = f"validation command mutated the workspace: {', '.join(changes[:8])}"
     return (
         result.model_copy(
             update={
                 "passed": False,
-                "error": f"validation command mutated the workspace: {', '.join(changes[:8])}",
+                "error": mutation,
+                "operator_error": redact_diagnostic_tail(mutation, max_chars=_OUTPUT_TAIL_CHARS),
             }
         ),
         True,

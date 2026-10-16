@@ -18,6 +18,9 @@
   "references": [
     {
       "path": "../contracts/tsconfig.host-helper.json"
+    },
+    {
+      "path": "../store/tsconfig.lib.json"
     }
   ]
 }

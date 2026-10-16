@@ -5,6 +5,7 @@
  * requests, grouped by the feature that makes them, and the main process's pushes. No Electron
  * import: the preloads and the main process each bind these to Electron themselves.
  */
+
 export {
   BRIDGE_CREDIT_WINDOW_BYTES,
   CONNECT_CHANNEL,
@@ -20,6 +21,7 @@ export {
   parsePageMessage,
   WAKE_CHANNEL,
 } from './bridge.js';
+export {openPortSocket, type PagePort} from './port-socket.js';
 export {
   LOGS_CHANNEL,
   parseRunLogsRequest,
@@ -27,18 +29,30 @@ export {
   type RunLogsRequest,
 } from './run-logs.js';
 export {
+  type CheckoutInspection,
   type ChromeState,
   FIRST_PAINT_CHANNEL,
   type FirstPaint,
   type HarnessChoice,
   type HarnessListing,
   type HarnessOffer,
+  type HarnessPick,
   type HostsWelcomeBridge,
+  type MachineEntry,
+  type MachineReport,
+  type MachinesWelcomeBridge,
+  type NewRunWelcomeBridge,
+  type Offered,
   type PathCompletion,
   type PreferencesView,
   parseWelcomeRequest,
+  type RoleOption,
+  RUN_PORT_MESSAGE,
   type RunControlWelcomeBridge,
+  type RunInputs,
+  type RunOptions,
   type SettingsWelcomeBridge,
+  type StartedRun,
   type StartOutcome,
   type StartRunWelcomeBridge,
   settled,

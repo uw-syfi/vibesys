@@ -49,7 +49,7 @@ from server.api.protocol import (
 )
 from server.chat.options import ChatOptions, build_chat_options
 from server.control_envelope import CommandAck
-from server.events import EventType, RunEvent
+from server.events import EventType, RunEvent, RunOverview, RunStartedData
 from vibesys.api import IterationUnavailable, RunRecordReadError
 from vibesys.api.hypothesis import agent_projection
 from vs_sim.api import utc_datetime
@@ -143,6 +143,16 @@ class RunControlUnavailableError(RuntimeError):
         super().__init__(f"Run control is unavailable {timing}")
 
 
+class CapacityWaitUnavailableError(RuntimeError):
+    """``command.resume {when: capacity_returns}`` for a run not paused on a capacity limit."""
+
+    diagnostic_code = "capacity_wait_unavailable"
+
+    def __init__(self) -> None:
+        """Say why the run cannot wait for capacity."""
+        super().__init__("The run is not paused on a provider capacity limit")
+
+
 class RunControlSlot:
     """Synchronize command admission with installation of one run session.
 
@@ -209,6 +219,10 @@ class RunControlSlot:
             control.pause()
             return CommandAck(action="pause", status="pending")
         if isinstance(request, ResumeCommand):
+            if request.when == "capacity_returns":
+                if not control.resume_when_capacity_returns():
+                    raise CapacityWaitUnavailableError
+                return CommandAck(action="resume", status="pending")
             if request.fallback:
                 control.resume_with_fallback()
             else:
@@ -294,6 +308,12 @@ class RunApi:
         self._journal.add_listener(
             self._observe_experiment_change,
             replay_filter=lambda _header: False,
+        )
+        self._overview: RunOverview | None = None
+        self._measured: PerformanceContext | None = None
+        self._journal.add_listener(
+            self._observe_run_started,
+            replay_filter=lambda header: header.type is EventType.RUN_STARTED,
         )
 
     def _now(self) -> datetime:
@@ -496,6 +516,7 @@ class RunApi:
                     for spec in self._chat.threads_locked()
                 ],
                 spans=self._integration.trace.spans(),
+                overview=self._current_overview(),
             )
 
     def iterations(
@@ -855,13 +876,39 @@ class RunApi:
         do here.
         """
         record = self._controller.attached_run
-        if record is None or agent_projection(view) is None:
+        projection = agent_projection(view)
+        if record is None or projection is None:
             return
+        self._measured = build_performance_context(view, objectives=projection.objectives)
         self._experiment_projection.update(
             record.run_id,
             record.identity,
             view,
             changed_keys=changed_keys,
+        )
+
+    def _observe_run_started(self, event: RunEvent) -> None:
+        """Keep the overview the run's ``run_started`` event declared (live and on replay)."""
+        data = event.data
+        if isinstance(data, RunStartedData) and data.overview is not None:
+            self._overview = data.overview
+
+    def _current_overview(self) -> RunOverview | None:
+        """The declared overview, with the unit and direction the run's measurements add."""
+        overview, measured = self._overview, self._measured
+        if overview is None or measured is None:
+            return overview
+        objective = overview.objective
+        return overview.model_copy(
+            update={
+                "objective": objective.model_copy(
+                    update={
+                        "metric": objective.metric or measured.objective_metric,
+                        "unit": measured.objective_unit or objective.unit,
+                        "direction": measured.objective_direction or objective.direction,
+                    }
+                )
+            }
         )
 
     # Keep the previous internal spelling for existing server-side observers.

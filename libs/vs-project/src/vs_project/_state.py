@@ -108,6 +108,11 @@ def is_project_state_path(relative_path: Path | str) -> bool:
     )
 
 
+_CONTROL_NAMESPACE = "control"
+"""Run state the operator writes from outside the run's server, such as a force stop."""
+_STOP_REQUEST_FILE = "stop-request"
+
+
 @dataclass(frozen=True)
 class ProjectSandboxPaths:
     """Project-relative framework paths for a sandbox policy.
@@ -1247,6 +1252,22 @@ class ProjectState:
             root=self._portable_state_dir(run_id, namespace),
             portable=True,
         )
+
+    def record_stop_request(self, run_id: str) -> None:
+        """Durably note that the operator stopped ``run_id``, before its server is killed.
+
+        A force stop ends the server without the run committing its stop, so the request
+        is kept here; a later resume of the run reads it (``stop_requested``) and only
+        finishes the drain and ends the run, starting no new work.
+        """
+        self.portable_namespace(run_id, _CONTROL_NAMESPACE).write_bytes(
+            _STOP_REQUEST_FILE, b"stop\n"
+        )
+
+    def stop_requested(self, run_id: str) -> bool:
+        """Whether the operator's stop of ``run_id`` was recorded (``record_stop_request``)."""
+        namespace = self.portable_namespace(run_id, _CONTROL_NAMESPACE)
+        return namespace.read_bytes(_STOP_REQUEST_FILE) is not None
 
     def state_store_namespace(self, run_id: str) -> StateNamespace:
         """Open shared opaque kernel storage, including before manifest creation.

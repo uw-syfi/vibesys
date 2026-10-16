@@ -2464,3 +2464,26 @@ function nextSessionChange(session: WebSession): Promise<void> {
 async function settle(): Promise<void> {
   for (let turn = 0; turn < 50; turn += 1) await Promise.resolve();
 }
+
+describe('run actions', () => {
+  test('a page hears every action the session folds, in order, after the fold', async () => {
+    const heard: Array<{type: string; status: string}> = [];
+    const session: WebSession = new WebSession({
+      lifecycle: new FakeLifecycle(),
+      connect: connectRun(
+        hooks => {
+          const transport = new FakeTransport(hooks);
+          transport.snapshots.push(snapshotResponse({sequence: 1, status: 'running'}));
+          return transport;
+        },
+        {reconnectDelaysMs: [0]},
+      ),
+      onRunAction: action =>
+        heard.push({type: action.type, status: session.store.getState().status}),
+    });
+    await session.start();
+    await settle();
+    expect(heard).toContainEqual({type: 'snapshot', status: 'running'});
+    await session.close();
+  });
+});

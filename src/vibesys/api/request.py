@@ -82,6 +82,7 @@ __all__ = [
     "resolve_run_environment_spec",
     "resolve_skill_source_dirs",
     "run_environment_record",
+    "run_environment_uses_docker",
     "supported_profilers",
     "synthesize_input_bundle",
     "validate_descriptor",
@@ -114,6 +115,16 @@ def validate_run_request(request: RunRequest, *, registry: OrchestrationRegistry
     )
     if request.resume is not None and registration.plugin.core is not None:
         ensure_not_legacy_resume(request.project_root, request.resume.run_id)
+
+
+def run_environment_uses_docker(spec: RunEnvironmentSpec | None) -> bool:
+    """Whether a run in `spec`'s run environment starts local Docker containers.
+
+    Read from the environment `spec` selects (the default one for `None`, as a run resolves
+    it), as `supported_profilers` reads its profilers, so a caller never names a concrete
+    environment.
+    """
+    return build_run_environment(spec or make_run_environment_spec()).uses_docker
 
 
 def supported_profilers(spec: RunEnvironmentSpec) -> frozenset[ProfilerKind] | None:

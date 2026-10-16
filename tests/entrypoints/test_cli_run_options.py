@@ -10,11 +10,18 @@ from hypothesis import strategies as st
 
 from entrypoints import cli
 from entrypoints.cli.config import load_config_and_skills
-from entrypoints.cli.preflight import AGENT_IMAGES_COMMAND, agent_image_check, preflight_report
+from entrypoints.cli.preflight import (
+    AGENT_IMAGES_COMMAND,
+    agent_image_check,
+    preflight_report,
+    valid_report,
+)
 from server.host_api import MAX_RUN_SECONDS_FLAG, ROLE_MODEL_FLAG, ROLE_REASONING_EFFORT_FLAG
 from server.host_preflight import CheckId, CheckState, SettingsInvalid
 from vibesys.api import DomainName
+from vibesys.api.request import run_environment_uses_docker
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
+from vs_runtime.api.infrastructure import RunEnvironmentSpec
 from vs_sim.api import ProbeResult
 from vs_sim.api.testing import ScriptedProbe
 
@@ -138,3 +145,30 @@ def test_the_agent_image_is_ok_once_built_here_and_a_warning_before(
 
     assert check.id is CheckId.AGENT_IMAGE
     assert check.state is state
+
+
+@pytest.mark.parametrize(
+    ("spec", "expected"),
+    [
+        (RunEnvironmentSpec("docker"), True),
+        (RunEnvironmentSpec("modal", {"gpu": "A10G"}), True),
+        (RunEnvironmentSpec("host"), False),
+    ],
+    ids=["docker", "modal", "host"],
+)
+def test_whether_a_run_needs_docker_comes_from_its_environment(
+    *, spec: RunEnvironmentSpec, expected: bool
+) -> None:
+    assert run_environment_uses_docker(spec) is expected
+
+
+def test_a_run_that_needs_no_docker_needs_no_agent_image(tmp_path: Path) -> None:
+    """Regression: the agent image was checked, through Docker, for a run that starts no container."""
+    args = cli.parse_cli_invocation(_argv(tmp_path)).args
+    probe = ScriptedProbe(lambda _argv: None)
+
+    report = valid_report(uses_docker=False, bundle=args.input_bundle, probe=probe)
+
+    assert (report.uses_docker, report.agent_image.state) == (False, CheckState.OK)
+    assert report.agent_image.detail.startswith("not needed")
+    assert probe.calls == []

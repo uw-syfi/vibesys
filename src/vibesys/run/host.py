@@ -29,6 +29,7 @@ from vibesys.run.resources import open_run_resources
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vs_agent.api import AgentSessionKey, AgentSessionState, DurableSessionStore
 from vs_runtime.api import PollingEvaluationExecutor, RetryingEvaluationExecutor, TryHandles
+from vs_runtime.api.core import MeasurementDecisions
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     BlockingOperations,
@@ -400,7 +401,8 @@ class _ProductHostFactory:
         # measurement's handle and try, as its gate events name it: an in-process stage's as
         # its command prints it, a Slurm stage's as each scheduler poll reads it.
         tries = TryHandles()
-        stage_output = tries.stage_output(resources.stage_output)
+        decisions = MeasurementDecisions()
+        stage_output = tries.stage_output(decisions.stage_output(resources.stage_output))
         executor = self._semantic_executor(
             resources,
             workspaces,
@@ -463,6 +465,7 @@ class _ProductHostFactory:
                 # per-attempt identity to pass through here.
                 local_validation_events=CoreLocalValidationEvents(self.integration.events),
                 measurement_observer=CoreMeasurementEvents(self.integration.events),
+                measurement_decisions=decisions,
                 commit_observer=self.integration.core_commit_observer(
                     project.state.run_id, self.projector, self.plugin.id
                 ),

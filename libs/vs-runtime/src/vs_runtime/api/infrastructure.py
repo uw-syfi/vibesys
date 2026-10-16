@@ -162,6 +162,8 @@ from vs_runtime._quota_policy import (
 from vs_runtime._recorded_environment import migrate_recorded_run_environment
 from vs_runtime._release import release_all
 from vs_runtime._run_control import (
+    CapacityWaitEnd,
+    CapacityWake,
     RunControlChannel,
     RunControlEventSink,
     RunControlTransition,
@@ -171,25 +173,28 @@ from vs_runtime._run_control import (
 )
 from vs_runtime._run_environment import (
     AgentPaths,
-    ClusterEvaluationFacts,
     DockerEnvironment,
     DockerEnvironmentConfig,
-    DockerEnvironmentFacts,
-    HostEnvironmentFacts,
-    ModalEnvironmentFacts,
     ParallelCandidateObstacle,
     RunEnvironment,
     RunEnvironmentPresentation,
     RunEnvironmentRequest,
     RunEnvironmentResources,
     RunEnvironmentSession,
+    RunEnvironmentSessionRole,
     RunEnvironmentSpec,
     RunEnvironmentView,
     SkyPilotEnvironment,
-    SkyPilotEnvironmentFacts,
-    SlurmEnvironmentFacts,
     open_run_environment_resources,
     open_workspace_environment_resources,
+)
+from vs_runtime._run_environment_facts import (
+    ClusterEvaluationFacts,
+    DockerEnvironmentFacts,
+    HostEnvironmentFacts,
+    ModalEnvironmentFacts,
+    SkyPilotEnvironmentFacts,
+    SlurmEnvironmentFacts,
 )
 from vs_runtime._run_environment_selection import (
     HostEnvironment,
@@ -462,6 +467,8 @@ __all__ = [
     "BundledResources",
     "CapacityHandling",
     "CapacityTimer",
+    "CapacityWaitEnd",
+    "CapacityWake",
     "ClusterEvaluationFacts",
     "CommandExecutionResult",
     "DockerEnvironment",
@@ -551,6 +558,7 @@ __all__ = [
     "RunEnvironmentRequest",
     "RunEnvironmentResources",
     "RunEnvironmentSession",
+    "RunEnvironmentSessionRole",
     "RunEnvironmentSpec",
     "RunEnvironmentView",
     "RunHostComponents",

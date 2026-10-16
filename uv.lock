@@ -31,6 +31,7 @@ members = [
     "vs-mcp",
     "vs-project",
     "vs-prompts",
+    "vs-redaction",
     "vs-runtime",
     "vs-sandbox",
     "vs-sim",
@@ -2571,8 +2572,8 @@ name = "secretstorage"
 version = "3.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cryptography", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
-    { name = "jeepney", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "cryptography" },
+    { name = "jeepney" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/1c/03/e834bcd866f2f8a49a85eaff47340affa3bfa391ee9912a952a1faa68c7b/secretstorage-3.5.0.tar.gz", hash = "sha256:f04b8e4689cbce351744d5537bf6b1329c6fc68f91fa666f60a380edddcd11be", size = 19884, upload-time = "2025-11-23T19:02:53.191Z" }
 wheels = [
@@ -2883,8 +2884,8 @@ name = "uvicorn"
 version = "0.44.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "click", marker = "sys_platform != 'emscripten'" },
-    { name = "h11", marker = "sys_platform != 'emscripten'" },
+    { name = "click" },
+    { name = "h11" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/5e/da/6eee1ff8b6cbeed47eeb5229749168e81eb4b7b999a1a15a7176e51410c9/uvicorn-0.44.0.tar.gz", hash = "sha256:6c942071b68f07e178264b9152f1f16dfac5da85880c4ce06366a96d70d4f31e", size = 86947, upload-time = "2026-04-06T09:23:22.826Z" }
 wheels = [
@@ -3249,6 +3250,11 @@ dependencies = [
 requires-dist = [{ name = "jinja2", specifier = ">=3.1" }]
 
 [[package]]
+name = "vs-redaction"
+version = "0.1.0"
+source = { editable = "libs/vs-redaction" }
+
+[[package]]
 name = "vs-runtime"
 version = "0.1.0"
 source = { editable = "libs/vs-runtime" }
@@ -3267,6 +3273,7 @@ dependencies = [
     { name = "vs-mcp" },
     { name = "vs-project" },
     { name = "vs-prompts" },
+    { name = "vs-redaction" },
     { name = "vs-sandbox" },
     { name = "vs-sim" },
     { name = "vs-slurm" },
@@ -3288,6 +3295,7 @@ requires-dist = [
     { name = "vs-mcp", editable = "libs/vs-mcp" },
     { name = "vs-project", editable = "libs/vs-project" },
     { name = "vs-prompts", editable = "libs/vs-prompts" },
+    { name = "vs-redaction", editable = "libs/vs-redaction" },
     { name = "vs-sandbox", editable = "libs/vs-sandbox" },
     { name = "vs-sim", editable = "libs/vs-sim" },
     { name = "vs-slurm", editable = "libs/vs-slurm" },
@@ -3305,6 +3313,7 @@ dependencies = [
     { name = "vs-decode" },
     { name = "vs-evaluation" },
     { name = "vs-project" },
+    { name = "vs-redaction" },
     { name = "vs-sim" },
     { name = "vs-slurm" },
 ]
@@ -3318,6 +3327,7 @@ requires-dist = [
     { name = "vs-decode", editable = "libs/vs-decode" },
     { name = "vs-evaluation", editable = "libs/vs-evaluation" },
     { name = "vs-project", editable = "libs/vs-project" },
+    { name = "vs-redaction", editable = "libs/vs-redaction" },
     { name = "vs-sim", editable = "libs/vs-sim" },
     { name = "vs-slurm", editable = "libs/vs-slurm" },
 ]

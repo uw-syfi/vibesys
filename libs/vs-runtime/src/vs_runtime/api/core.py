@@ -135,6 +135,7 @@ from vs_runtime._export_patch_operation import ExportPatchOwner
 from vs_runtime._issue_board_operations import BoardTexts, IssueBoardOwner
 from vs_runtime._measurement_progress import (
     IgnoreMeasurement,
+    MeasurementDecisions,
     MeasurementObserver,
     StageMetric,
     StageOutputOpener,
@@ -326,6 +327,7 @@ __all__ = [
     "LeaseUnavailableError",
     "LifecycleReportingExecutor",
     "MayHold",
+    "MeasurementDecisions",
     "MeasurementObserver",
     "MeasurementRequests",
     "MeasurementServices",

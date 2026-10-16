@@ -531,6 +531,23 @@ class GitTracker:
             path for path in changed if not FRAMEWORK_WRITES.is_framework_state(self.root / path)
         ]
 
+    def baseline_changes(self) -> list[str]:
+        """Return the changes that keep the project from being a clean run baseline.
+
+        These are the candidate paths changed since ``HEAD`` (tracked or untracked) and
+        the committed VibeSys metadata changed since ``HEAD``. Untracked paths below the
+        framework metadata directory are not counted: they are VibeSys's own run state
+        (a run's store, artifacts and publications are written there and never
+        committed), every run that ends, fails or is killed leaves them behind, and no
+        candidate can contain them because candidate staging excludes that directory.
+        Unlike ``pending_changes`` this does not depend on what this process wrote, so a
+        new run or a resume in a new process sees the same answer as the run that wrote
+        the state.
+        """
+        metadata = self._state_integration.metadata_pathspec
+        candidate = self._git.uncommitted_paths([".", f":(exclude){metadata}"])
+        return sorted({*candidate, *self._pending_committed_framework_metadata()})
+
     def checkout_tree(
         self,
         sha: str,
@@ -863,7 +880,7 @@ class GitTracker:
         return path in {".env", "agent.toml"} or path.startswith(".env.")
 
     def _require_clean_project(self, message: str) -> None:
-        changes = self.pending_changes()
+        changes = self.baseline_changes()
         if changes:
             message = f"{message}: {', '.join(changes)}"
             raise ValueError(message)

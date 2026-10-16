@@ -4,7 +4,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import type {ChannelEndOutcome} from '@vibesys/contracts/host-helper';
 import {FakeClock} from '@vibesys/transport/testing';
-import type {Cause, ConnectionConfig} from '../state/host-connection.js';
+import type {Cause, CheckoutProblem, ConnectionConfig} from '../state/host-connection.js';
 import {ECHO_SERVER, FakeHelper, FakeLink, record} from '../testing/fake-helper.js';
 import {FakeLogStore, type LogStoreFixture} from '../testing/fake-log-store.js';
 import {deferredKillProcess, fakeProcess} from '../testing/fake-process.js';
@@ -829,18 +829,43 @@ describe('HostConnection over the FakeHelper', () => {
     await phaseReached(connection, 'incompatible');
   });
 
-  const bootstraps: readonly {code: number; stdout: string; says: string}[] = [
-    {code: 64, stdout: 'predates 0.0.9', says: 'predates the desktop helper (version 0.0.9)'},
-    {code: 65, stdout: 'nodir', says: '/src/vibesys on fake is not a directory.'},
-    {code: 65, stdout: 'nopyproject', says: 'has no pyproject.toml'},
-    {code: 65, stdout: 'notvibesys', says: 'does not declare the vibesys project'},
-    {code: 66, stdout: 'missing', says: 'uv was not found on fake'},
+  const bootstraps: readonly {
+    code: number;
+    stdout: string;
+    says: string;
+    checkout: CheckoutProblem | null;
+  }[] = [
+    {
+      code: 64,
+      stdout: 'predates 0.0.9',
+      says: 'predates the desktop helper (version 0.0.9)',
+      checkout: 'too-old',
+    },
+    {
+      code: 65,
+      stdout: 'nodir',
+      says: '/src/vibesys on fake is not a directory.',
+      checkout: 'missing',
+    },
+    {code: 65, stdout: 'nopyproject', says: 'has no pyproject.toml', checkout: 'missing'},
+    {
+      code: 65,
+      stdout: 'notvibesys',
+      says: 'does not declare the vibesys project',
+      checkout: 'missing',
+    },
+    {code: 66, stdout: 'missing', says: 'uv was not found on fake', checkout: null},
     // A reserved status without its own line is not the bootstrap's report.
-    {code: 64, stdout: 'Welcome to the cluster', says: 'exited with 64'},
-    {code: 65, stdout: 'Traceback (most recent call last):', says: 'exited with 65'},
-    {code: 66, stdout: '', says: 'exited with 66'},
+    {code: 64, stdout: 'Welcome to the cluster', says: 'exited with 64', checkout: null},
+    {
+      code: 65,
+      stdout: 'Traceback (most recent call last):',
+      says: 'exited with 65',
+      checkout: null,
+    },
+    {code: 66, stdout: '', says: 'exited with 66', checkout: null},
   ];
-  for (const {code, stdout, says} of bootstraps) {
+  for (const {code, stdout, says, checkout} of bootstraps) {
     test(`a bootstrap that exits ${code} saying ${JSON.stringify(stdout)} stops as incompatible`, async () => {
       const link = new FakeLink();
       link.helper.bootstrapExit = {code, stdout};
@@ -848,6 +873,9 @@ describe('HostConnection over the FakeHelper', () => {
       const error = await rejection(connection.ready());
       expect((error as ConnectionError).reason).toBe('incompatible');
       expect(error.message).toContain(says);
+      expect((error as ConnectionError).checkout).toBe(checkout);
+      const phase = connection.phase;
+      expect(phase.kind === 'incompatible' ? phase.checkout : 'not incompatible').toBe(checkout);
     });
   }
 

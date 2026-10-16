@@ -13,9 +13,9 @@ from server.diagnostics import (
     DiagnosticSeverity,
     exception_detail,
     exception_to_diagnostic,
-    redact_diagnostic_text,
 )
 from server.events import EventType, RunEvent, make_event
+from vs_redaction.api import redact_diagnostic_text
 
 
 class _NestedValidationInput(BaseModel):
@@ -143,6 +143,22 @@ def test_diagnostic_redacts_explicit_text_on_construction_and_round_trip() -> No
 
     restored = Diagnostic.model_validate_json(diagnostic.model_dump_json())
     assert restored == diagnostic
+
+
+def test_diagnostic_coerces_bytes_before_redacting_every_text_field() -> None:
+    diagnostic = Diagnostic.model_validate(
+        {
+            "code": "request_failed",
+            "summary": b"TOKEN=summary-bytes-secret",
+            "detail": b"password: detail-bytes-secret",
+            "hint": b"Bearer hint-bytes-secret",
+            "scope": DiagnosticScope.RUN,
+        }
+    )
+
+    assert diagnostic.summary == "TOKEN=[REDACTED]"
+    assert diagnostic.detail == "password: [REDACTED]"
+    assert diagnostic.hint == "Bearer [REDACTED]"
 
 
 def test_failure_factories_keep_legacy_fields_consistent_and_sanitized() -> None:

@@ -1,7 +1,13 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
-import {type FakeBridgeSeed, installFakeBridge} from './fake-bridge.js';
+import {
+  type FakeBridgeSeed,
+  installFakeBridge,
+  installFakeMachines,
+  installFakeNewRun,
+} from './fake-bridge.js';
 import {type FakeRunSeed, installFakeRun} from './fake-run.js';
+import {type FakeServerSeed, installFakeServer} from './fake-server.js';
 
 /**
  * The Run screen's journey against the Fake bridge and a fake run that reports its startup steps
@@ -67,6 +73,19 @@ const SEED: FakeBridgeSeed = {
   ],
 };
 
+/** The live run's server: a session that opens and answers, with no events to show yet. */
+const SERVER: FakeServerSeed = {
+  runId: RUN_ID,
+  batch: {
+    type: 'event_batch',
+    events: [{timestamp: '2026-10-15T16:30:51Z', type: 'server_ready', sequence: 1}],
+    through_sequence: 1,
+    store_id: 'store-1',
+    history_after_sequence: 0,
+  },
+  snapshot: {run_id: RUN_ID, sequence: 1, status: 'starting'},
+};
+
 const RUN: FakeRunSeed = {
   streams: [
     stream('s1', {kind: 'startup_step', stage: 'building_image'}, 'ended'),
@@ -86,7 +105,10 @@ const RUN: FakeRunSeed = {
 
 async function open(page: Page, seed: FakeBridgeSeed): Promise<void> {
   await page.addInitScript(installFakeBridge, seed);
+  await page.addInitScript(installFakeMachines, seed);
+  await page.addInitScript(installFakeNewRun, seed);
   await page.addInitScript(installFakeRun, RUN);
+  await page.addInitScript(installFakeServer, SERVER);
   await page.goto('./shell.html');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'ink');
   await page
@@ -133,7 +155,7 @@ test('a run starts, writes its logs, stops with Force stop after the bound, and 
   // Running: the timeline goes; the Logs tab groups the streams by owner and follows one.
   await push(page, listed([server('running')], []));
   await expect(startup).toHaveCount(0);
-  await expect(page.getByRole('button', {name: 'Pause'})).toBeDisabled();
+  await expect(page.getByRole('button', {name: 'Pause'})).toBeEnabled();
   await page.getByRole('tab', {name: 'Logs'}).click();
   const streams = page.getByRole('tree', {name: 'Log streams'});
   for (const group of ['Startup', 'Gates', 'Tool builds', 'Run narration']) {
@@ -192,6 +214,39 @@ test('a run starts, writes its logs, stops with Force stop after the bound, and 
   await expect
     .poll(async () => (await calls(page)).at(-1))
     .toEqual(['resume', 'ssh:chelan4', PROJECT, RUN_ID]);
+});
+
+test('the Overview and Work tabs read the folded run, and the Work filter is kept', async ({
+  page,
+}) => {
+  await open(page, {...SEED, listings: [listed([server('running')], [])]});
+
+  // Overview: with nothing folded yet, each section says what will appear, not a guess.
+  const objective = page.getByRole('region', {name: 'Objective'});
+  await expect(objective.getByText('has not declared its objective yet')).toBeVisible();
+  for (const label of ['Best vs baseline', 'Round', 'Workstreams', 'Elapsed']) {
+    await expect(page.getByText(label, {exact: true})).toBeVisible();
+  }
+  await expect(page.getByRole('region', {name: 'Performance'})).toContainText(
+    'Nothing measured yet',
+  );
+  await expect(page.getByRole('region', {name: 'Current work'})).toContainText(
+    'Nothing is running',
+  );
+  expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
+  await shot(page, 'ink-overview-empty');
+
+  // Work: the search and the outcome filter live in the page state, so a tab switch keeps them.
+  await page.getByRole('tab', {name: 'Work'}).click();
+  await expect(page.getByText('No work yet')).toBeVisible();
+  await page.getByLabel('Search work').fill('ring');
+  await page.getByRole('radiogroup', {name: 'Show outcomes'}).getByText('Rejected').click();
+  await page.getByRole('tab', {name: 'Overview'}).click();
+  await page.getByRole('tab', {name: 'Work'}).click();
+  await expect(page.getByLabel('Search work')).toHaveValue('ring');
+  await expect(page.getByRole('radio', {name: 'Rejected'})).toBeChecked();
+  expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
+  await shot(page, 'ink-work-empty');
 });
 
 test('a cleanly stopped run offers no Resume', async ({page}) => {

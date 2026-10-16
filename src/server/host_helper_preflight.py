@@ -145,7 +145,7 @@ def preflight_checks(facts: PreflightFacts, report: PreflightReport) -> tuple[Ch
         _checkout_check(facts),
         _repository_check(facts),
         _settings_check(report),
-        _docker_check(facts.docker),
+        _docker_check(facts.docker) if report.uses_docker is not False else _NO_DOCKER,
         report.agent_image,
         report.evaluator,
     )
@@ -155,6 +155,7 @@ def preflight_unavailable(detail: str) -> PreflightReport:
     """The report when ``vibesys preflight`` printed none: settings fail with ``detail``."""
     return PreflightReport(
         settings=SettingsInvalid(code="preflight_failed", stage="preflight", message=detail),
+        uses_docker=None,
         agent_image=Check(
             id=CheckId.AGENT_IMAGE, state=CheckState.WARN, detail="not checked: preflight failed"
         ),
@@ -164,6 +165,13 @@ def preflight_unavailable(detail: str) -> PreflightReport:
             detail="not checked: preflight failed",
         ),
     )
+
+
+_NO_DOCKER = Check(
+    id=CheckId.DOCKER_REACHABLE,
+    state=CheckState.OK,
+    detail="not needed: this run's environment starts no Docker container",
+)
 
 
 def _checkout_check(facts: PreflightFacts) -> Check:

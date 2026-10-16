@@ -127,6 +127,11 @@ export function AppShell(props: {
             label="Machines"
             icon="monitor"
             count={machines.count}
+            {...(machines.attention === 0
+              ? {}
+              : {
+                  detail: `${machines.attention} need${machines.attention === 1 ? 's' : ''} attention`,
+                })}
             active={state.selection.kind === 'machines'}
             press={select({kind: 'machines'})}
           />

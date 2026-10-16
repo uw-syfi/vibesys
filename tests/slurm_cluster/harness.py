@@ -35,6 +35,7 @@ from vs_runtime.api.infrastructure import (
     RunEnvironment,
     RunEnvironmentRequest,
     RunEnvironmentSession,
+    RunEnvironmentSessionRole,
     SlurmEnvironment,
     TrustedEvaluatorRequirements,
 )
@@ -345,7 +346,12 @@ def make_candidate_request(
     base = make_request(cluster, directory, run_id)
     workspace = worktrees / f"candidate-{run_id}" / "workspace"
     workspace.mkdir(parents=True)
-    return replace(base, workspace=workspace, run_owned_roots=(worktrees,))
+    return replace(
+        base,
+        workspace=workspace,
+        run_owned_roots=(),
+        session_role=RunEnvironmentSessionRole.CHILD,
+    )
 
 
 @contextmanager

@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.events import CoreEventType, RunEndingData, RunFailure, RunFailureKind
-from vs_core.api import AttemptPhase, EndReason, RetainedCandidate, RunResultProposal
+from vs_core.api import AttemptPhase, EndReason, RetainedCandidate, RunResultProposal, StopMode
 from vs_core.api import RunStatus as CoreRunStatus
 from vs_project.api import Project
 from vs_runtime.api import RunStatus
@@ -140,6 +140,10 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
     loop = CoreRunHost(shell, delivery, services.clock, controls, workspaces=host.workspaces)
     config = _loop_config(services.run_id, host.timing.lease_seconds)
     await start_core_awaiting_lease(loop, config)
+    if services.stop_requested:
+        # A force stop killed the server before the run committed its stop; the run
+        # commits it now, before asking its search for anything, and only drains.
+        integration.control.request_stop(StopMode.DRAIN)
     bridge = services.agent_evaluation
     run_error: BaseException | None = None
     try:

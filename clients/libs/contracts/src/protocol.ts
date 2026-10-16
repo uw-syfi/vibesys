@@ -14,6 +14,8 @@ export type AgentStatusData = NonNullable<
   Extract<NonNullable<RunEvent['data']>, {channel: unknown}>['status']
 >;
 export type RunSnapshot = ProtocolDocument['snapshot'];
+/** The run's objective and what measures it. Source: `RunOverview` in `vibesys.events`. */
+export type RunOverview = NonNullable<RunSnapshot['overview']>;
 /** One span of the run trace: a flow task or an awaited operation. Source: `Span` in `vs_core.flows`. */
 export type Span = NonNullable<RunSnapshot['spans']>[number];
 /** Run lifecycle statuses the backend reports. Source: `RunStatus` in `src/server/run_lifecycle.py`. */

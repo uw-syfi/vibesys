@@ -13,6 +13,7 @@ import {
   LogPane,
   Menu,
   type MenuItem,
+  Prose,
   Row,
   Scrubber,
   SidebarItem,
@@ -307,6 +308,18 @@ function ScrubberDemo(): JSX.Element {
         change={noop}
         backToLive={noop}
       />
+      <Scrubber
+        label="Position, ended"
+        value={30}
+        last={40}
+        live={false}
+        pastLabel="Replay"
+        latestLabel="End"
+        backLabel="Jump to end"
+        position="Step 30 of 40"
+        change={noop}
+        backToLive={noop}
+      />
     </Stack>
   );
 }
@@ -371,6 +384,23 @@ export const RICH_ENTRIES = {
           {key: 'Builds on', value: 'Pad the counters'},
         ]}
       />
+    ),
+  },
+  Prose: {
+    render: () => (
+      <Card section="Objective">
+        <Prose
+          blocks={[
+            {kind: 'heading', text: 'Make the queue faster'},
+            {
+              kind: 'paragraph',
+              text: 'Maximize trusted end-to-end throughput of the MPMC queue without breaking it.',
+            },
+            {kind: 'list', ordered: false, items: ['Pass the correctness check', 'Stay lock-free']},
+            {kind: 'list', ordered: true, items: ['Measure the baseline', 'Beat it']},
+          ]}
+        />
+      </Card>
     ),
   },
   CheckList: {render: () => <CheckList items={CHECKS} />},

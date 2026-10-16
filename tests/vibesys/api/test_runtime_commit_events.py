@@ -25,8 +25,11 @@ from vibesys.events import (
 )
 from vibesys.run.contracts import RoundFailureSummary, RoundSummary, RunStatus, RunView
 from vibesys.run.integration import LocalRunIntegration
+from vs_redaction.api import redact_diagnostic_tail
 from vs_runtime.api.testing import idle_environment_system
 from vs_sim.api.testing import ManualClock, SimThreads, examples
+
+_FAILURE_TEXT_LIMIT = 4000
 
 
 class _FakeAgentState(BaseModel):
@@ -141,8 +144,8 @@ def test_commit_projection_preserves_semantics_and_publication_order() -> None:
     ]
 
 
-def test_workstream_finished_carries_the_round_s_typed_failure() -> None:
-    """A round's typed failure survives onto `WORKSTREAM_FINISHED`, unresolved by `ROUND_FINISHED`."""
+def test_workstream_finished_carries_a_typed_bounded_redacted_failure() -> None:
+    """The commit producer preserves typed failures and sanitizes their bounded text."""
     integration = LocalRunIntegration(
         clock=ManualClock(),
         git=REAL_GIT,
@@ -184,6 +187,35 @@ def test_workstream_finished_carries_the_round_s_typed_failure() -> None:
     assert workstream_finished.data.last_error.turns == 3
     assert workstream_finished.data.last_error.limit == 3
     assert workstream_finished.data.last_error.text == "the implementer repeated an earlier turn"
+
+    credential = "API_TOKEN=workstream-secret"
+    for round_number, split_at in enumerate(range(1, len("API_TOKEN")), start=2):
+        suffix = "z" * (_FAILURE_TEXT_LIMIT + split_at - len(credential) - 1)
+        observer.committed(
+            None,
+            _FakeAgentState(
+                round_numbers=tuple(range(1, round_number + 1)),
+                revision=round_number,
+                round_status="failed",
+                last_error=RoundFailureSummary(
+                    kind=WorkstreamFailureKind.NO_TRUSTED_EVIDENCE.value,
+                    text="prefix:" + credential + " " + suffix,
+                    operator_text=redact_diagnostic_tail(
+                        "prefix:" + credential + " " + suffix,
+                        max_chars=_FAILURE_TEXT_LIMIT,
+                    ),
+                ),
+            ),
+        )
+
+        finished = next(
+            event for event in reversed(captured) if event.type is CoreEventType.WORKSTREAM_FINISHED
+        )
+        assert finished.data is not None
+        assert finished.data.kind == "workstream_finished"
+        assert finished.data.last_error is not None
+        assert len(finished.data.last_error.text) <= _FAILURE_TEXT_LIMIT
+        assert "workstream-secret" not in finished.data.last_error.text
 
 
 @given(

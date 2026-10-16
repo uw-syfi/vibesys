@@ -1,4 +1,5 @@
 import {describe, expect, test} from 'bun:test';
+import type {RunEvent} from '@vibesys/contracts';
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun} from '@vibesys/hosts';
 import {emptyLogView, foldChunk} from '@vibesys/logs';
@@ -9,6 +10,7 @@ import {
   followedStreams,
   headerView,
   logGroups,
+  MAP_FILTERS,
   RUN_TABS,
   type RunPageAction,
   type RunPageRequest,
@@ -114,10 +116,58 @@ const USER_ACTIONS: readonly RunPageAction[] = [
   {type: 'run-again'},
   {type: 'view-logs'},
   {type: 'select-stream', streamId: 's3'},
+  {type: 'work-query', query: 'ring'},
+  {type: 'work-outcome', outcome: 'accepted'},
 ];
 
+/** A span event at `sequence`, or another event the trace must skip. */
+function runEvent(random: Seeded, sequence: number): RunEvent {
+  const type = random.pick(['span_started', 'span_ended', 'agent_output_chunk'] as const);
+  const span = {id: `s${random.int(4)}`, name: 'turn', status: 'running'};
+  return {
+    sequence,
+    type,
+    data: type === 'agent_output_chunk' ? null : {span},
+  } as unknown as RunEvent;
+}
+
+/** What the attached run's session might report, current or late. */
+function liveAction(random: Seeded, issued: readonly number[]): RunPageAction {
+  switch (random.int(4)) {
+    case 0:
+      return {
+        type: 'attached',
+        token: random.pick(issued),
+        error: random.bool() ? null : 'refused',
+      };
+    case 1:
+      return {
+        type: 'session',
+        session: {
+          hasSnapshot: random.bool(),
+          streaming: true,
+          controls: random.bool(),
+          error: null,
+        },
+      };
+    case 2:
+      return {
+        type: 'run-data',
+        data: {
+          kind: random.pick(['events', 'rebootstrap'] as const),
+          events: Array.from({length: random.int(4)}, () => runEvent(random, random.int(30))),
+        },
+      };
+    default:
+      return {type: 'view', view: random.bool() ? {at: 'live'} : {at: random.int(30)}};
+  }
+}
+
 function randomAction(random: Seeded, issued: readonly number[]): RunPageAction {
-  switch (random.int(6)) {
+  switch (random.int(9)) {
+    case 6:
+    case 7:
+      return liveAction(random, issued);
     case 0:
       return {type: 'record', record: random.pick(RECORDS)};
     case 1:
@@ -132,25 +182,36 @@ function randomAction(random: Seeded, issued: readonly number[]): RunPageAction 
       };
     case 3:
       return {type: 'tab', tab: random.pick(RUN_TABS)};
+    case 4:
+      return random.pick<RunPageAction>([
+        {type: 'map-filter', filter: random.pick(MAP_FILTERS)},
+        {type: 'map-toggle', id: random.pick(['p1', 'p2']), open: random.bool()},
+        {type: 'map-select', id: random.pick(['root', 'w1'])},
+        {type: 'view', view: random.bool() ? {at: 'live'} : {at: random.int(40)}},
+      ]);
     default:
       return random.pick(USER_ACTIONS);
   }
 }
 
 function issues(request: RunPageRequest): number | null {
-  return request.kind === 'arm-bound' || request.kind === 'list-logs' ? request.token : null;
+  return request.kind === 'arm-bound' || request.kind === 'list-logs' || request.kind === 'attach'
+    ? request.token
+    : null;
 }
 
 function awaited(state: RunPageState) {
   return {
     bound: state.stop.kind === 'stopping' ? state.stop.bound : null,
     logs: state.logs.kind === 'listing' ? state.logs.token : null,
+    attach: state.link.kind === 'attaching' ? state.link.token : null,
   };
 }
 
 function reply(action: RunPageAction) {
   if (action.type === 'bound-elapsed') return {slot: 'bound', token: action.token};
   if (action.type === 'streams') return {slot: 'logs', token: action.token};
+  if (action.type === 'attached') return {slot: 'attach', token: action.token};
   return null;
 }
 
@@ -232,6 +293,21 @@ describe('the run page store', () => {
     expect(ended.state.stop).toEqual({kind: 'idle'});
   });
 
+  test('the Map and the scrubber are page state that asks for no I/O', () => {
+    const {state, requests} = fold(initial(), [
+      {type: 'map-filter', filter: 'failed'},
+      {type: 'map-toggle', id: 'p1', open: true},
+      {type: 'map-toggle', id: 'p2', open: true},
+      {type: 'map-toggle', id: 'p1', open: false},
+      {type: 'map-select', id: 'w1'},
+      {type: 'view', view: {at: 12}},
+    ]);
+    expect(requests).toEqual([]);
+    expect(state.map).toEqual({filter: 'failed', open: new Set(['p2']), selected: 'w1'});
+    expect(state.view).toEqual({at: 12});
+    expect(fold(state, [{type: 'view', view: {at: 'live'}}]).state.view).toEqual({at: 'live'});
+  });
+
   test('a stop seen in the record (from anywhere) arms the same bound', () => {
     const {state, requests} = fold(initial(), [{type: 'record', record: RECORDS[6] as RunRecord}]);
     expect(runPhase(state).kind).toBe('stopping');
@@ -306,5 +382,79 @@ describe('the run page store', () => {
     ]).state;
     expect(shown.tab).toBe('logs');
     expect(streamLines(shown, 's5')).toEqual([{text: '16:30:51 INFO run started', stream: 'out'}]);
+  });
+
+  test('an instance replacement fences its old log listing and projected bytes', () => {
+    const first = fold(initial(), [{type: 'record', record: RECORDS[1] as RunRecord}]);
+    const firstList = first.requests.find(request => request.kind === 'list-logs');
+    if (firstList?.kind !== 'list-logs') throw new Error('no first listing asked');
+    expect(firstList.instanceId).toBe('a1b2c3d4e5f6');
+
+    const oldView = foldChunk(emptyLogView(), {
+      offset: 0,
+      data: 'bytes from the replaced instance\n',
+      next_offset: 33,
+      eof: false,
+      closed: false,
+      truncated_before: false,
+      pipes: [],
+    });
+    const withOldBytes = fold(first.state, [
+      {type: 'log-view', streamId: 's1', view: oldView},
+    ]).state;
+    const replacement = {
+      kind: 'live',
+      run: server('starting', {id: 'fedcba654321'}),
+    } as const;
+    const replaced = fold(withOldBytes, [{type: 'record', record: replacement}]);
+    const secondList = replaced.requests.find(request => request.kind === 'list-logs');
+    if (secondList?.kind !== 'list-logs') throw new Error('no replacement listing asked');
+
+    expect(secondList.instanceId).toBe('fedcba654321');
+    expect(secondList.token).not.toBe(firstList.token);
+    expect(replaced.state.views).toEqual({});
+    expect(replaced.state.logs).toMatchObject({
+      kind: 'listing',
+      token: secondList.token,
+      instanceId: 'fedcba654321',
+    });
+
+    const stale = runPageStep(replaced.state, {
+      type: 'streams',
+      token: firstList.token,
+      outcome: {ok: true, instanceId: 'a1b2c3d4e5f6', streams: STREAMS},
+    });
+    expect(stale.state).toBe(replaced.state);
+
+    const mismatched = runPageStep(replaced.state, {
+      type: 'streams',
+      token: secondList.token,
+      outcome: {ok: true, instanceId: 'a1b2c3d4e5f6', streams: STREAMS},
+    });
+    expect(mismatched.state.logs).toEqual({
+      kind: 'failed',
+      message: 'the app listed logs for a1b2c3d4e5f6, not fedcba654321',
+      unsupported: false,
+    });
+    expect(mismatched.state.views).toEqual({});
+  });
+});
+
+describe('the Work tab filter', () => {
+  test('changes only the work filter and asks for nothing', () => {
+    const state = initial();
+    for (const action of [
+      {type: 'work-query', query: 'ring'},
+      {type: 'work-outcome', outcome: 'rejected'},
+    ] as const) {
+      const step = runPageStep(state, action);
+      expect(step.requests).toEqual([]);
+      expect({...step.state, work: state.work}).toEqual(state);
+    }
+    const both = fold(state, [
+      {type: 'work-query', query: 'ring'},
+      {type: 'work-outcome', outcome: 'rejected'},
+    ]);
+    expect(both.state.work).toEqual({query: 'ring', outcome: 'rejected'});
   });
 });

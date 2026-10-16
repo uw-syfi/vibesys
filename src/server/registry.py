@@ -47,7 +47,7 @@ import platform
 import re
 import stat
 from contextlib import contextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as distribution_version
@@ -525,6 +525,29 @@ class InstanceMetadataStore(Protocol):
     def publish(self, metadata: InstanceInspectionMetadata) -> None:
         """Publish one snapshot atomically; an unlike existing value is a conflict."""
         ...
+
+
+class StopIntents(Protocol):
+    """Durably records the operator's stop of a run, before its server is signalled.
+
+    Contract: never raises. A server is signalled whether or not the record could be
+    written; a run whose project could not take it resumes as after a crash.
+    """
+
+    def record(self, record: LiveInstanceRecord) -> None:
+        """Note that ``record``'s run was stopped by the operator."""
+        ...
+
+
+@dataclass
+class FakeStopIntents:
+    """A ``StopIntents`` that keeps the run ids it was told, in order."""
+
+    recorded: list[str] = field(default_factory=list)
+
+    def record(self, record: LiveInstanceRecord) -> None:
+        """Keep ``record``'s run id."""
+        self.recorded.append(record.run_id)
 
 
 class StopRequester(Protocol):
@@ -1166,12 +1189,13 @@ def _inspection_state(observation: InstanceObservation, now: float) -> Inspectio
 
 @dataclass(frozen=True)
 class StopEffects:
-    """The I/O one ``LiveRegistry.stop`` uses: ask, signal, and wait."""
+    """The I/O one ``LiveRegistry.stop`` uses: ask, record the stop, signal, and wait."""
 
     requester: StopRequester
     signaller: ProcessSignaller
     clock: Clock
     pause: Callable[[float], None]
+    intents: StopIntents
 
 
 class LiveRegistry:
@@ -1277,6 +1301,9 @@ class LiveRegistry:
                 outcome=StopOutcome.STOPPED if released else StopOutcome.STOPPING,
                 route=StopRoute.CONTROL_SOCKET,
             )
+        # A signalled server cannot commit its run's stop, so the request is kept durably
+        # first: a resume then only finishes the drain and ends the run.
+        effects.intents.record(record)
         try:
             sent = effects.signaller.terminate_if_current(
                 record.pid, lambda: self._held(instance_id)

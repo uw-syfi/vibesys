@@ -92,6 +92,15 @@ export function withHostSettings(
   };
 }
 
+/** `file` without `id`'s settings: the app no longer runs VibeSys there. */
+export function withoutHost(file: SettingsFile, id: HostId): SettingsFile {
+  const key = hostKey(id);
+  return {
+    version: 2,
+    hosts: Object.fromEntries(Object.entries(file.hosts).filter(([each]) => each !== key)),
+  };
+}
+
 /** One discovery-relevant directive in an OpenSSH client configuration, in source order. */
 export type SshConfigDirective =
   | {

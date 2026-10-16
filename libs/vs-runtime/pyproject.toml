@@ -22,6 +22,7 @@ dependencies = [
     "vs-mcp",
     "vs-project",
     "vs-prompts",
+    "vs-redaction",
     "vs-sandbox",
     "vs-sim",
     "vs-slurm",
@@ -45,6 +46,7 @@ vs-issue-tracker = { workspace = true }
 vs-mcp = { workspace = true }
 vs-project = { workspace = true }
 vs-prompts = { workspace = true }
+vs-redaction = { workspace = true }
 vs-sandbox = { workspace = true }
 vs-sim = { workspace = true }
 vs-slurm = { workspace = true }

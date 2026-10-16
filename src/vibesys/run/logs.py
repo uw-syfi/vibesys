@@ -19,6 +19,7 @@ from vibesys.log_owners import (
     ToolBuild,
 )
 from vibesys.run.measurement_events import gate_of
+from vs_core.api import DecisionId, operation_span
 from vs_logs.api import (
     CorruptLogError,
     FileLogStore,
@@ -82,7 +83,8 @@ def stage_output_opener(scope: LogScope[LogOwner]) -> StageOutputOpener:
     """The opener that records each gate stage's output as a stream under its gate.
 
     A stage is named the way its gate events name it: the job's handle is the
-    execution, and the purpose and stage id give the gate. A stage that is no gate
+    execution, and the purpose and stage id give the gate; the stream's owner names the
+    gate's run-trace span when the measurement's decision is known. A stage that is no gate
     (profiling) has no owner yet, so its output is discarded. The stream's command is
     the stage id, a label only.
     """
@@ -91,7 +93,8 @@ def stage_output_opener(scope: LogScope[LogOwner]) -> StageOutputOpener:
         gate = gate_of(run.purpose, run.stage_id)
         if gate is None:
             return nullcontext(DISCARD)
-        owner = GateStage(execution_id=run.handle_id, gate=gate, attempt=run.attempt)
+        span = None if run.decision_id is None else operation_span(DecisionId(root=run.decision_id))
+        owner = GateStage(execution_id=run.handle_id, gate=gate, attempt=run.attempt, span_id=span)
         return scope.open(owner, run.stage_id)
 
     return open_stage_output

@@ -50,6 +50,7 @@ from server.registry import (
     FakeInstanceLogs,
     FakeInstanceMetadataStore,
     FakeInstanceStore,
+    FakeStopIntents,
     InstanceInspector,
     LiveRegistry,
     StopEffects,
@@ -138,6 +139,7 @@ class FakeRunPreflight:
     report_: PreflightReport = field(
         default_factory=lambda: PreflightReport(
             settings=SettingsValid(),
+            uses_docker=True,
             agent_image=Check(id=CheckId.AGENT_IMAGE, state=CheckState.OK, detail="cached"),
             evaluator=Check(
                 id=CheckId.EVALUATOR_AVAILABLE, state=CheckState.OK, detail="benchmark command"
@@ -349,6 +351,7 @@ def fake_host(
             signaller=FakeProcessSignaller(set()),
             clock=threads,
             pause=threads.sleep,
+            intents=FakeStopIntents(),
         ),
         projects=FileProjects(),
         directories=directories or FakeDirectories(tree={HOME: {}}),

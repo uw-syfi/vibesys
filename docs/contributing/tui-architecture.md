@@ -242,7 +242,7 @@ and then the connection closes; no `run_finished`, `run_failed`, or `run_interru
 server that ends with its run waits, bounded, until every open stream has written the latest
 event before it closes its transport, so the terminal status arrives before the close.
 
-`vibesys --detach --resume [RUN]` resumes a stopped or crashed run as a new detached server,
+`vibesys --detach --resume [RUN]` resumes a crashed or failed run as a new detached server,
 through the same resume resolution as `vibesys --resume`. The child runs under the interpreter of
 the `vibesys` command that was invoked, so the run continues on that command's code (a desktop
 client chooses the checkout or install per host). On success stdout is the new server's

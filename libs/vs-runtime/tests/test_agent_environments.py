@@ -12,6 +12,7 @@ from vs_agent.api import NULL_SKILL_SELECTION
 from vs_runtime.api.infrastructure import (
     AgentPaths,
     RunEnvironmentRequest,
+    RunEnvironmentSessionRole,
     RunEnvironmentView,
     SharedAgentEnvironmentConflictError,
     open_agent_execution_environment,
@@ -181,6 +182,7 @@ def test_owned_environment_translates_mounts_and_closes_once(tmp_path: Path) -> 
     candidate = observed[0]
     assert candidate.agent_backend == "cli"
     assert candidate.cli_provider == "codex"
+    assert candidate.session_role is RunEnvironmentSessionRole.CHILD
     assert candidate.environment_bind_mounts == (
         *request.environment_bind_mounts,
         EnvironmentBindMount(readonly.path, "/mnt/read", read_only=True),

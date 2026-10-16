@@ -20,6 +20,7 @@ from vibesys.events import (
     GateStartedData,
     SubprocessOutputData,
 )
+from vs_redaction.api import redact_diagnostic_tail
 
 if TYPE_CHECKING:
     from vs_runtime.api.core import StageSettled, StageStarted
@@ -79,7 +80,11 @@ class CoreMeasurementEvents:
                 unit=None
                 if metric is None or gate is not GateKind.BENCHMARK
                 else (metric.unit or metric.name),
-                output_tail=None if passed or reason is None else reason[-GATE_TAIL_CHARS:],
+                output_tail=(
+                    None
+                    if passed or reason is None
+                    else redact_diagnostic_tail(reason, max_chars=GATE_TAIL_CHARS)
+                ),
             ),
             status=EventStatus.COMPLETED if passed else EventStatus.FAILED,
             execution_id=event.handle_id,

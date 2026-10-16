@@ -505,7 +505,7 @@ def _apply_resume_decision(
     if decision.descriptor is None:
         return
     if decision.requires_clean_workspace:
-        pending = git.pending_changes()
+        pending = git.baseline_changes()
         if pending:
             raise ProjectRunDirtyResumeError(pending)
     project.state.update_run_orchestration(run_id, decision.descriptor)

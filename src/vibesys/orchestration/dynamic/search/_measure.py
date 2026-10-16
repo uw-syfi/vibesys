@@ -225,7 +225,10 @@ async def evidence_of(
     keys = trusted_keys(found, scope=found.scope, candidate=revision, purpose=purpose)
     if not keys:
         none = Failure(
-            kind=FailureKind.NO_TRUSTED_EVIDENCE, status=found.status, output=found.diagnostic
+            kind=FailureKind.NO_TRUSTED_EVIDENCE,
+            status=found.status,
+            output=found.diagnostic,
+            operator_output=found.operator_diagnostic,
         )
         raise WorkEndedError(none)
     proof = Proof(refs=tuple(item for item in found.evidence if item.key in keys))

@@ -17,6 +17,7 @@ from vibesys.events import (
     SubprocessOutputData,
 )
 from vs_core.api import EvidenceKind
+from vs_redaction.api import redact_diagnostic_tail
 from vs_runtime.api import (
     AccuracyEvaluation,
     AccuracyReceipt,
@@ -162,14 +163,26 @@ class CoreLocalValidationEvents:
 
     def finished(self, result: FrameworkValidationResult) -> None:
         """Publish one ``GATE_FINISHED`` for a validation recipe's settled result."""
-        failure = None if result.passed else (result.error or result.output or "unknown failure")
+        failure = (
+            None
+            if result.passed
+            else result.operator_error
+            if result.operator_error is not None
+            else result.operator_output
+            if result.operator_output is not None
+            else result.error or result.output or "unknown failure"
+        )
         emit_gate_finished(
             self._events,
             GateFinishedData(
                 gate=GateKind.VALIDATION,
                 recipe=result.recipe.name,
                 reused=result.reused,
-                output_tail=None if failure is None else failure[-GATE_LOG_TAIL_CHARS:],
+                output_tail=(
+                    None
+                    if failure is None
+                    else redact_diagnostic_tail(failure, max_chars=GATE_LOG_TAIL_CHARS)
+                ),
                 round_label=self._round_label,
             ),
             passed=result.passed,
@@ -294,16 +307,17 @@ class _EvaluationAdapter:
                 output=output,
             )
             result = self._require_accuracy_result(run.result)
-            self._log_provisioning(result.provisioned_volumes, result.failure)
+            self._log_provisioning(result.provisioned_volumes, result.operator_failure)
             self._publish_streams(
-                result.stdout,
-                result.stderr,
+                result.operator_stdout,
+                result.operator_stderr,
                 f"evaluation-accuracy-{next(self._identifiers)}",
                 "accuracy_checker",
             )
             evaluation = AccuracyEvaluation(
                 executed=result.executed,
                 feedback=self._accuracy_feedback(result),
+                operator_feedback=self._operator_accuracy_feedback(result),
                 failure_kind=result.failure_kind,
                 receipt=run.receipt if result.passed else None,
             )
@@ -337,15 +351,15 @@ class _EvaluationAdapter:
                 output=output,
             )
             result = run.result
-            self._log_provisioning(result.provisioned_volumes, result.failure)
+            self._log_provisioning(result.provisioned_volumes, result.operator_failure)
             evaluation = self._interpret_benchmark(
                 result,
                 objectives,
                 run.contract,
             )
             self._publish_streams(
-                result.stdout,
-                result.stderr,
+                result.operator_stdout,
+                result.operator_stderr,
                 f"evaluation-benchmark-{next(self._identifiers)}",
                 "benchmark",
             )
@@ -382,7 +396,9 @@ class _EvaluationAdapter:
             self._events,
             GateFinishedData(
                 gate=GateKind.ACCURACY,
-                output_tail=(result.output[-GATE_LOG_TAIL_CHARS:] if not result.passed else None),
+                output_tail=(
+                    result.operator_output[-GATE_LOG_TAIL_CHARS:] if not result.passed else None
+                ),
             ),
             passed=result.passed,
         )
@@ -410,7 +426,9 @@ class _EvaluationAdapter:
                 unit=(evaluation.metric_unit or evaluation.metric_name)
                 if result.passed and evaluation.metric_name is not None
                 else None,
-                output_tail=(result.output[-GATE_LOG_TAIL_CHARS:] if not result.passed else None),
+                output_tail=(
+                    result.operator_output[-GATE_LOG_TAIL_CHARS:] if not result.passed else None
+                ),
             ),
             passed=result.passed,
         )
@@ -418,7 +436,10 @@ class _EvaluationAdapter:
     def _finish_gate_error(self, gate: GateKind, output: str) -> None:
         emit_gate_finished(
             self._events,
-            GateFinishedData(gate=gate, output_tail=output[-GATE_LOG_TAIL_CHARS:]),
+            GateFinishedData(
+                gate=gate,
+                output_tail=redact_diagnostic_tail(output, max_chars=GATE_LOG_TAIL_CHARS),
+            ),
             passed=False,
         )
 
@@ -455,6 +476,19 @@ class _EvaluationAdapter:
         return f"Framework accuracy gate failed.\n{result.output[-GATE_FEEDBACK_TAIL_CHARS:]}"
 
     @staticmethod
+    def _operator_accuracy_feedback(result: TrustedAccuracyResult) -> str | None:
+        """Return the independently safe operator projection of accuracy feedback."""
+        if result.passed:
+            return None
+        if result.operator_failure is not None and result.operator_failure.startswith(
+            "Model-weight request"
+        ):
+            return result.operator_failure[-GATE_FEEDBACK_TAIL_CHARS:]
+        return (
+            f"Framework accuracy gate failed.\n{result.operator_output[-GATE_FEEDBACK_TAIL_CHARS:]}"
+        )
+
+    @staticmethod
     def _interpret_benchmark(
         result: TrustedBenchmarkResult,
         objectives: tuple[BenchmarkObjective, ...],
@@ -470,9 +504,25 @@ class _EvaluationAdapter:
                 else result.failure_reason
                 or (f"Framework benchmark failed.\n{result.output[-GATE_FEEDBACK_TAIL_CHARS:]}")
             )
+            if not result.executed or provisioning_failure:
+                operator_feedback = (
+                    result.operator_failure_reason
+                    if result.operator_failure_reason is not None
+                    else result.operator_failure
+                )
+            else:
+                operator_feedback = (
+                    result.operator_failure_reason
+                    if result.operator_failure_reason is not None
+                    else (
+                        "Framework benchmark failed.\n"
+                        f"{result.operator_output[-GATE_FEEDBACK_TAIL_CHARS:]}"
+                    )
+                )
             return BenchmarkEvaluation(
                 executed=result.executed,
                 feedback=feedback,
+                operator_feedback=operator_feedback,
                 failure_kind=result.failure_kind,
                 partial_measurement=result.partial_measurement,
             )
@@ -492,6 +542,10 @@ class _EvaluationAdapter:
             return BenchmarkEvaluation(
                 executed=result.executed,
                 feedback=feedback,
+                operator_feedback=redact_diagnostic_tail(
+                    feedback,
+                    max_chars=GATE_FEEDBACK_TAIL_CHARS,
+                ),
                 failure_kind=BenchmarkFailureKind.WORKLOAD,
                 row=result.row,
             )
@@ -533,7 +587,11 @@ class _EvaluationAdapter:
     ) -> None:
         prefix = "Model-weight request could not be satisfied: "
         if failure is not None and failure.startswith(prefix):
-            self._log(f"[model-request] rejected: {failure.removeprefix(prefix)}")
+            detail = redact_diagnostic_tail(
+                failure.removeprefix(prefix),
+                max_chars=GATE_FEEDBACK_TAIL_CHARS,
+            )
+            self._log(f"[model-request] rejected: {detail}")
         if volumes:
             self._log(
                 f"[model-request] staged {len(volumes)} model volume(s): " + ", ".join(volumes)

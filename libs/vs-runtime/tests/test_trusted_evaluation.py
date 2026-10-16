@@ -59,6 +59,29 @@ class _Git:
         return self._changes[0]
 
 
+class _FailedProcessRunner:
+    """Run every command through the production-shaped Fake process-result boundary."""
+
+    def __init__(self, stderr: str, *, limit: int) -> None:
+        self._stderr = stderr
+        self._runner = FakeCommandRunner(max_output_chars=limit)
+
+    @property
+    def id(self) -> str:
+        return self._runner.id
+
+    def execute(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+        cancel: Event | None = None,
+        output: OutputSink,
+    ) -> CommandResult:
+        self._runner.script_process(command, stderr=self._stderr, returncode=1)
+        return self._runner.execute(command, timeout=timeout, cancel=cancel, output=output)
+
+
 def _executor(
     tmp_path: Path,
     plan: TrustedEvaluationPlan,
@@ -105,6 +128,38 @@ def test_accuracy_applies_setup_timeout_and_preserves_streams(tmp_path: Path) ->
     assert result.stderr == "warning\n"
     assert sandbox.calls[0].command == "check"
     assert sandbox.calls[0].timeout == 10
+
+
+@pytest.mark.parametrize("stage", ["accuracy", "benchmark"])
+@pytest.mark.parametrize("split_at", range(1, len("API_TOKEN")))
+def test_failed_local_evaluation_streams_use_the_pre_redacted_bounded_view(
+    tmp_path: Path,
+    stage: str,
+    split_at: int,
+) -> None:
+    limit = 100
+    credential = "API_TOKEN=stream-secret"
+    suffix = "z" * (81 + split_at - len(credential) - 1)
+    runner = _FailedProcessRunner("p" * 32 + credential + " " + suffix, limit=limit)
+    plan = TrustedEvaluationPlan(
+        accuracy_command="check",
+        benchmark_command="bench",
+        benchmark_contract=ScalarBenchmarkContract(output_argument="--output", metric="score"),
+    )
+    executor = _executor(tmp_path, plan, runner)
+
+    if stage == "accuracy":
+        result = asyncio.run(executor.accuracy(output=DISCARD))
+    else:
+        result = asyncio.run(executor.benchmark(output=DISCARD))
+
+    assert not result.passed
+    assert "stream-secret" in result.output
+    assert "stream-secret" in result.stderr
+    assert "stream-secret" not in result.operator_output
+    assert "stream-secret" not in result.operator_stderr
+    assert len(result.stderr) <= limit
+    assert len(result.operator_stderr) <= limit
 
 
 def test_only_the_stage_command_writes_to_the_stage_output(tmp_path: Path) -> None:
@@ -163,14 +218,40 @@ def test_accuracy_rejects_mutation_during_execution(tmp_path: Path) -> None:
         tmp_path,
         TrustedEvaluationPlan(accuracy_command="check"),
         sandbox,
-        git=_Git([], ["OBJECTIVE.md"]),
+        git=_Git([], ["API_TOKEN=mutation-secret"]),
     )
 
     result = asyncio.run(executor.accuracy(output=DISCARD))
 
     assert not result.passed
     assert result.executed
-    assert "changed during accuracy execution: OBJECTIVE.md" in result.output
+    assert "API_TOKEN=mutation-secret" in result.output
+    assert "mutation-secret" not in result.operator_output
+
+
+def test_benchmark_keeps_raw_mutation_evidence_and_safe_operator_output(tmp_path: Path) -> None:
+    output = f'{_MARKER}\n{{"score": 4.5}}\n{_END_MARKER}\n'
+    sandbox = FakeCommandRunner(
+        default_result=CommandResult(output=output, exit_code=0, stdout=output)
+    )
+    executor = _executor(
+        tmp_path,
+        TrustedEvaluationPlan(
+            benchmark_command="bench",
+            benchmark_contract=ScalarBenchmarkContract(
+                output_argument="--output-json",
+                metric="score",
+            ),
+        ),
+        sandbox,
+        git=_Git([], ["API_TOKEN=mutation-secret"]),
+    )
+
+    result = asyncio.run(executor.benchmark(output=DISCARD))
+
+    assert not result.passed
+    assert "API_TOKEN=mutation-secret" in result.output
+    assert "mutation-secret" not in result.operator_output
 
 
 def test_scalar_benchmark_decodes_finite_result_and_always_cleans(tmp_path: Path) -> None:
@@ -218,6 +299,8 @@ class _TruncatingRunner(FakeCommandRunner):
                 exit_code=0,
                 truncated=True,
                 stdout=head,
+                diagnostic_output=head + "\n\n... Output truncated at 100000 characters.",
+                diagnostic_stdout=head,
             )
         if command.startswith("printf "):
             return CommandResult(
@@ -643,7 +726,12 @@ def test_a_trusted_result_names_whose_fault_a_failure_is_exactly_when_it_failed(
     model: type[TrustedAccuracyResult] | type[TrustedBenchmarkResult],
 ) -> None:
     model(executed=True, passed=True)
-    model(executed=True, passed=False, failure_kind=BenchmarkFailureKind.WORKLOAD)
+    model(
+        executed=True,
+        passed=False,
+        failure_kind=BenchmarkFailureKind.WORKLOAD,
+        operator_failure="failed",
+    )
     with pytest.raises(ValidationError, match="failure kind"):
         model(executed=True, passed=False)
     with pytest.raises(ValidationError, match="failure kind"):

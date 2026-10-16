@@ -42,7 +42,10 @@ thread exits, so such a zombie (``nlwp`` above 1) is alive.
 
 Not found: a descendant that leaves the job's sessions and also clears its environment
 (``env -i setsid ...``), and a descendant that leaves them and is already exiting when the
-teardown's first scan runs. Slurm still kills such a process when the script exits (with
+teardown's first scan runs. A scan lists /proc when it starts, so the job counts as gone
+only after two scans in a row find nothing: the second lists any process forked during the
+first by one that exited before the first read it. A chain that forks and exits again
+within each of two consecutive scans can still be missed. Slurm still kills such a process when the script exits (with
 ``proctrack/cgroup`` it finds it by the job's cgroup), but the script does not wait for it.
 
 Slurm's own SIGTERM (a cancel or the time limit) runs the same teardown; Slurm sends SIGKILL
@@ -134,7 +137,7 @@ def teardown_shell(
         # is in it only for a moment, between its fork and its setsid. Fields after the
         # command name in /proc/<pid>/stat: $1 state, $4 session, $18 threads, $20 start
         # time. Reading stat takes no lock of the process's, so it never blocks.
-        "vs_scan() {",
+        "vs_scan_once() {",
         "  local file pid line own",
         "  read -r line < /proc/$$/stat",
         "  set -- ${line##*) }",
@@ -154,6 +157,15 @@ def teardown_shell(
         '    case " $vs_groups " in *" ${4:-0} "*) vs_alive="$vs_alive $pid" ;; esac',
         "  done",
         '  [ -n "$vs_alive$vs_unknown" ]',
+        "}",
+        # The /proc listing is taken when a scan starts, so it misses a process forked
+        # during the scan by one that then exited before the scan read it (a SIGTERM
+        # handler that forks a setsid child and exits does exactly this). That process
+        # was forked before the scan ended, so a second scan, listed after the first
+        # ended, sees it: the job counts as gone only when two scans in a row find
+        # nothing.
+        "vs_scan() {",
+        "  vs_scan_once || vs_scan_once",
         "}",
         "vs_signal() {",
         "  local id",

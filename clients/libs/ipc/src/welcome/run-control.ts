@@ -16,7 +16,15 @@ export const RUN_CONTROL_CHANNELS = {
   retry: 'vibesys:welcome:retry',
   stop: 'vibesys:welcome:stop',
   stopConfirmed: 'vibesys:welcome:stop-confirmed',
+  releaseRun: 'vibesys:welcome:release-run',
 } as const;
+
+/**
+ * The window message type that hands the shell page one run connection's port: `connectRun(id)`
+ * makes the preload post `{type: RUN_PORT_MESSAGE, id}` to the page with the port as its transfer,
+ * because a `MessagePort` cannot cross the context bridge as a value.
+ */
+export const RUN_PORT_MESSAGE = 'vibesys:run-port';
 
 /** The welcome bridge's requests the run-control feature makes. */
 export interface RunControlWelcomeBridge {
@@ -28,6 +36,16 @@ export interface RunControlWelcomeBridge {
   stop(host: HostKey, instance: string, force: boolean): Promise<WelcomeResult<null>>;
   /** Stop without the app's own question: the view already asked the user, who said yes. */
   stopConfirmed(host: HostKey, instance: string, force: boolean): Promise<WelcomeResult<null>>;
+  /**
+   * Open one connection to the run the window attached for this view (`attach` binds it), over
+   * the same relay a run page uses; the port arrives as a `RUN_PORT_MESSAGE` window message named
+   * `id`. A view with no attached run gets a port the main process closes at once.
+   */
+  connectRun(id: string): void;
+  /** The machine woke and the attached run's host is reachable again: redial now. */
+  onWake(listener: () => void): void;
+  /** Let the attached run go: the view shows no live run now. Safe when none is attached. */
+  releaseRun(): Promise<WelcomeResult<null>>;
 }
 
 export type RunControlRequest =
@@ -49,7 +67,8 @@ export type RunControlRequest =
     }
   | {readonly kind: 'show-run'}
   | {readonly kind: 'show-welcome'}
-  | {readonly kind: 'retry'};
+  | {readonly kind: 'retry'}
+  | {readonly kind: 'release-run'};
 
 function forceStop(value: unknown): boolean {
   if (typeof value !== 'boolean') throw new Error('force stop must be a boolean');
@@ -87,5 +106,7 @@ export function parseRunControlRequest(
       return {kind: 'show-welcome'};
     case RUN_CONTROL_CHANNELS.retry:
       return {kind: 'retry'};
+    case RUN_CONTROL_CHANNELS.releaseRun:
+      return {kind: 'release-run'};
   }
 }

@@ -216,6 +216,7 @@ class JobView:
     evidence: tuple[EvidenceRef, ...]
     facts: EvaluationTerminalFacts | None
     failure: MeasurementFailure | None
+    operator_diagnostic: str = ""
 
 
 def job_view(  # noqa: PLR0913  # lint-waiver: LW-940004 [PLR0913]; the plan, identity, job and observer are independent facts of one view.
@@ -308,6 +309,12 @@ def _terminal_view(
     diagnostic = next(
         (s.failure for s in terminal.stage_results if s.failure), terminal.failure or ""
     )
+    operator_diagnostic = next(
+        (s.operator_failure for s in terminal.stage_results if s.operator_failure is not None),
+        terminal.operator_failure
+        if terminal.operator_failure is not None
+        else ("evaluation failed" if diagnostic else ""),
+    )
     observation = make(status, accepted=True, terminal=True, diagnostic=diagnostic)
     evidence, outcomes = _evidence(terminal, plan, subject, observation.sequence)
     failure = (
@@ -324,8 +331,22 @@ def _terminal_view(
         # candidate yet, so no scientific facts reach the core and it may retry. Its
         # evidence still does: the failure text is all an agent learns if the last try
         # fails too.
-        return JobView(observation, None, evidence, None, failure)
-    return JobView(observation, None, evidence, _facts(terminal, plan, outcomes), failure)
+        return JobView(
+            observation,
+            None,
+            evidence,
+            None,
+            failure,
+            operator_diagnostic=operator_diagnostic,
+        )
+    return JobView(
+        observation,
+        None,
+        evidence,
+        _facts(terminal, plan, outcomes),
+        failure,
+        operator_diagnostic=operator_diagnostic,
+    )
 
 
 def _core_kind(kind: StageKind, purpose: str) -> EvidenceKind:

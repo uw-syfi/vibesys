@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Protocol
 import pytest
 
 from vs_evaluation.api import (
+    MAX_EVIDENCE_SUMMARY_CHARS,
     ContentDigest,
     EvaluationRequest,
     EvaluationState,
@@ -95,6 +96,7 @@ async def _local(root: Path, script: _Script, stage_output: StageOutputOpener | 
             AccuracyEvaluation(
                 executed=True,
                 feedback="accuracy mismatch",
+                operator_feedback="accuracy mismatch",
                 failure_kind=BenchmarkFailureKind.WORKLOAD,
             )
         )
@@ -228,6 +230,27 @@ async def test_a_failed_accuracy_stage_fails_the_evaluation_with_its_rendered_te
         ((evidence.semantic_summary, EvidenceKind.ACCURACY),), None
     )
     await world.executor.close()
+
+
+async def test_semantic_slurm_failure_keeps_raw_evidence_and_safe_operator_summary(
+    tmp_path: Path,
+) -> None:
+    cluster = ScenarioCluster()
+    cluster.benchmark_exit = 1
+    cluster.benchmark_output = "API_TOKEN=" + "slurm-secret-" * 2_000
+    stack = await build_stack(tmp_path, cluster)
+
+    await stack.executor.submit(_request(stack.snapshot), handle_id=_HANDLE)
+    observed = await _terminal(stack.executor)
+    benchmark = observed.stage_results[1]
+    evidence = TrustedEvidence.model_validate(benchmark.result)
+
+    assert evidence.semantic_summary is not None
+    assert "slurm-secret" in evidence.semantic_summary
+    assert len(evidence.semantic_summary) <= MAX_EVIDENCE_SUMMARY_CHARS
+    assert benchmark.operator_summary is not None
+    assert "slurm-secret" not in benchmark.operator_summary
+    await stack.executor.close()
 
 
 @pytest.mark.parametrize("build", BUILDERS)

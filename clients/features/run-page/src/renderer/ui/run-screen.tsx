@@ -23,17 +23,25 @@ import {
   headerView,
   logGroups,
   logsNotice,
+  NOTHING_FOLDED,
   type Offer,
   RUN_TABS,
+  type RunAtView,
   type RunPageAction,
   type RunPageState,
   type RunTab,
   runPhase,
   shownStream,
+  spanLogs,
   stopBannerView,
   streamLines,
   timelineView,
+  viewedRun,
 } from '../../state/index.js';
+import {MapTab} from './map-tab.js';
+import {OverviewTab} from './overview-tab.js';
+import {RunScrubber} from './run-scrubber.js';
+import {WorkTab} from './work-tab.js';
 
 type Dispatch = (action: RunPageAction) => void;
 
@@ -42,21 +50,6 @@ const TAB_LABELS: Readonly<Record<RunTab, string>> = {
   map: 'Map',
   work: 'Work',
   logs: 'Logs',
-};
-
-const COMING: Readonly<Record<Exclude<RunTab, 'logs'>, {title: string; body: string}>> = {
-  overview: {
-    title: 'The overview is on its way',
-    body: 'The objective, key numbers, the performance chart and current work arrive here next.',
-  },
-  map: {
-    title: 'The map is on its way',
-    body: 'Every planning call, workstream, agent turn and gate, as a tree, arrives here next.',
-  },
-  work: {
-    title: 'The work list is on its way',
-    body: 'Every hypothesis the run tried, with its outcome against the baseline, arrives here next.',
-  },
 };
 
 function reason(offer: Offer): {disabledReason?: string} {
@@ -281,40 +274,81 @@ function LogsTab(props: {readonly state: RunPageState; readonly dispatch: Dispat
   );
 }
 
-function Panel(props: {readonly state: RunPageState; readonly dispatch: Dispatch}): JSX.Element {
-  const {state, dispatch} = props;
-  if (state.tab === 'logs') return <LogsTab state={state} dispatch={dispatch} />;
-  const {title, body} = COMING[state.tab];
-  return (
-    <Card>
-      <EmptyState title={title} body={body} />
-    </Card>
-  );
+/** Whether the run's trace has reached the window: a snapshot, or a span event, folded. */
+function traceReached(state: RunPageState): boolean {
+  const {trace} = state.run;
+  return state.session?.hasSnapshot === true || trace.base.sequence > 0 || trace.events.length > 0;
+}
+
+function Panel(props: {
+  readonly state: RunPageState;
+  readonly run: RunAtView;
+  readonly dispatch: Dispatch;
+}): JSX.Element {
+  const {state, run, dispatch} = props;
+  switch (state.tab) {
+    case 'logs':
+      return <LogsTab state={state} dispatch={dispatch} />;
+    case 'overview':
+      return <OverviewTab run={run} state={state} />;
+    case 'work':
+      return <WorkTab run={run} work={state.work} dispatch={dispatch} />;
+    case 'map':
+      return (
+        <MapTab
+          trace={traceReached(state) ? viewedRun(state).trace : null}
+          map={state.map}
+          logsOf={spanId => spanLogs(state, spanId)}
+          actions={{
+            filter: filter => dispatch({type: 'map-filter', filter}),
+            toggle: (id, open) => dispatch({type: 'map-toggle', id, open}),
+            select: id => dispatch({type: 'map-select', id}),
+            openLog: streamId => dispatch({type: 'select-stream', streamId}),
+          }}
+        />
+      );
+  }
 }
 
 /**
  * The Run screen: the header with its actions, the stop and ended banners, the startup timeline
- * while the run starts, and the tabs. Everything shown is a selector over `state`.
+ * while the run starts, the time scrubber once the run's trace has reached the window, and the
+ * tabs. Everything shown is a selector over `state` and `run`, the folded run at the view (nothing
+ * folded until the live connection provides it); the Map and the scrubber read the trace log the
+ * state holds.
  */
 export function RunScreen(props: {
   readonly state: RunPageState;
+  readonly run?: RunAtView;
   readonly dispatch: Dispatch;
 }): JSX.Element {
   const {state, dispatch} = props;
+  const run = props.run ?? NOTHING_FOLDED;
   return (
     <Page width="wide">
       <Stack gap="space-5">
         <Header state={state} dispatch={dispatch} />
         <StopBanner state={state} dispatch={dispatch} />
+        {state.notice === null ? null : (
+          <Banner tone="err" title="The run did not take the command" body={state.notice} />
+        )}
         <EndedBanner state={state} dispatch={dispatch} />
         <Startup state={state} />
+        {traceReached(state) ? (
+          <RunScrubber
+            log={state.run.trace}
+            view={state.view}
+            ended={runPhase(state).kind === 'ended'}
+            change={view => dispatch({type: 'view', view})}
+          />
+        ) : null}
         <Tabs
           label="Run views"
           tabs={RUN_TABS.map(tab => ({value: tab, label: TAB_LABELS[tab]}))}
           value={state.tab}
           change={tab => dispatch({type: 'tab', tab})}
         >
-          <Panel state={state} dispatch={dispatch} />
+          <Panel state={state} run={run} dispatch={dispatch} />
         </Tabs>
       </Stack>
     </Page>

@@ -17,6 +17,9 @@
       "path": "./tsconfig.trace.json"
     },
     {
+      "path": "./tsconfig.overview.json"
+    },
+    {
       "path": "./tsconfig.test.json"
     }
   ]

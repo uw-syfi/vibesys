@@ -1,7 +1,10 @@
 import {expect, test} from 'bun:test';
+import type {Screen} from '@vibesys/feature-app-shell/state';
 import type {PreferencesView, WelcomeBridge, WelcomeEvent} from '@vibesys/ipc';
 import type {ThemeMode, ThemeName} from '@vibesys/ui/tokens';
 import {createShellStores} from './shell.js';
+
+const ignore = (): void => undefined;
 
 const STORED: PreferencesView = {
   appearance: {mode: 'system', light: 'mist', dark: 'midnight'},
@@ -27,9 +30,13 @@ function fakeBridge(): WelcomeBridge {
     setAppearance: appearance => ok({...STORED, appearance}),
     setNotifications: enabled => ok({...STORED, notifications: {enabled}}),
     archive: () => ok(STORED),
+    machines: () => ok([]),
     onListing: ignore,
     onRecent: ignore,
     onPreferences: ignore,
+    describeMachine: () => ok({kind: 'unsupported' as const}),
+    harnesses: () => ok({kind: 'unsupported' as const}),
+    examples: () => ok({kind: 'unsupported' as const}),
   };
   return bridge as WelcomeBridge;
 }
@@ -42,6 +49,12 @@ test('the page follows the stored theme for the system mode, and each change of 
     {mode: 'dark', onChange: listener => (systemListener = listener)},
     {setAttribute: (_name, value) => painted.push(value)},
     () => () => undefined,
+    {
+      messages: {addEventListener: ignore, removeEventListener: ignore},
+      session: () => {
+        throw new Error('this test opens no run');
+      },
+    },
   );
   await Promise.resolve();
   await Promise.resolve();
@@ -53,4 +66,28 @@ test('the page follows the stored theme for the system mode, and each change of 
     change: {kind: 'appearance', appearance: {mode: 'dark', light: 'mist', dark: 'terminal'}},
   });
   expect(painted.at(-1)).toBe('terminal');
+});
+
+test('New run opened for a machine starts on it; opened plainly, it keeps its machine', () => {
+  const stores = createShellStores(
+    fakeBridge(),
+    {mode: 'light', onChange: () => undefined},
+    {setAttribute: () => undefined},
+    () => () => undefined,
+    {
+      messages: {addEventListener: ignore, removeEventListener: ignore},
+      session: () => {
+        throw new Error('this test opens no run');
+      },
+    },
+  );
+  const select = (screen: Screen): void => stores.sidebar.store.dispatch({type: 'select', screen});
+  const machine = () => stores.newRun.getState().context.form.machine;
+  expect(machine()).toBe('local');
+  select({kind: 'machines'});
+  select({kind: 'new-run', machine: 'ssh:gpu-box'});
+  expect(machine()).toBe('ssh:gpu-box');
+  select({kind: 'settings'});
+  select({kind: 'new-run'});
+  expect(machine()).toBe('ssh:gpu-box');
 });

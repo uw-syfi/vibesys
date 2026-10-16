@@ -15,8 +15,13 @@
  * takes the pipe of the span holding its first byte and covers its UTF-8 length. A U+FFFD that
  * replaced bytes that were not UTF-8 counts as 3 bytes, so after such bytes the runs are only as
  * exact as the decoded text allows.
+ *
+ * Terminal escape sequences (colors, cursor moves, titles) are dropped as the text is folded
+ * (`escapes.ts`), so the lines are text only. A sequence a chunk cut is finished by the next chunk:
+ * the view carries the scanner's state (`escape`), and a gap resets it with the line it ends.
  */
 import type {LogChunk, LogPipe} from '@vibesys/contracts/host-helper';
+import {type EscapeState, escapeStep} from './escapes.js';
 
 export interface LogViewBounds {
   /** The most complete lines the view keeps. */
@@ -62,6 +67,8 @@ export interface LogView {
   readonly eof: boolean;
   /** The stream is closed: once `eof`, the view is complete. */
   readonly closed: boolean;
+  /** Where the escape scanner stopped: `text`, or inside a sequence the next chunk finishes. */
+  readonly escape: EscapeState;
 }
 
 export function emptyLogView(bounds: LogViewBounds = DEFAULT_LOG_VIEW_BOUNDS): LogView {
@@ -76,6 +83,7 @@ export function emptyLogView(bounds: LogViewBounds = DEFAULT_LOG_VIEW_BOUNDS): L
     truncatedBefore: false,
     eof: false,
     closed: false,
+    escape: 'text',
   };
 }
 
@@ -153,14 +161,21 @@ function utf8Length(codePoint: number): number {
   return codePoint < 0x10000 ? 3 : 4;
 }
 
-/** The chunk's text as lines: those a line end finished, then what follows the last line end. */
-function chunkLines(chunk: LogChunk): {readonly ended: LogLine[]; readonly rest: LogLine} {
+/**
+ * The chunk's text as lines, without escape sequences: those a line end finished, then what
+ * follows the last line end, and where the escape scanner stopped (starting from `from`).
+ */
+function chunkLines(
+  chunk: LogChunk,
+  from: EscapeState,
+): {readonly ended: LogLine[]; readonly rest: LogLine; readonly escape: EscapeState} {
   const spans = chunk.pipes;
   const ended: LogLine[] = [];
   let span = 0;
   let byte = chunk.offset;
   let text = '';
   let runs: PipeRun[] = [];
+  let state = from;
   for (const character of chunk.data) {
     while (span < spans.length - 1) {
       const current = spans[span];
@@ -169,6 +184,9 @@ function chunkLines(chunk: LogChunk): {readonly ended: LogLine[]; readonly rest:
     }
     const pipe = spans[span]?.pipe ?? 'stdout';
     byte += utf8Length(character.codePointAt(0) ?? 0);
+    const step = escapeStep(state, character);
+    state = step.next;
+    if (!step.keep) continue;
     if (character === '\n') {
       ended.push({text, runs});
       text = '';
@@ -178,7 +196,7 @@ function chunkLines(chunk: LogChunk): {readonly ended: LogLine[]; readonly rest:
     text += character;
     pushRun(runs, character.length, pipe);
   }
-  return {ended, rest: {text, runs}};
+  return {ended, rest: {text, runs}, escape: state};
 }
 
 /** Fold one chunk into the view. A stale chunk (it starts before `nextOffset`) leaves it unchanged. */
@@ -187,7 +205,9 @@ export function foldChunk(view: LogView, chunk: LogChunk): LogView {
   if (expected !== null && chunk.offset < expected) return view;
   const gap = expected === null ? 0 : chunk.offset - expected;
   const {maxLines, maxLineChars} = view.bounds;
-  const {ended, rest} = chunkLines(chunk);
+  // A gap ends the unfinished line, and with it any sequence the scanner was inside.
+  const lines = chunkLines(chunk, gap > 0 ? 'text' : view.escape);
+  const {ended, rest} = lines;
   // After a gap the unfinished line ends where the view ended; otherwise the chunk continues it.
   const carried = gap > 0 && view.partial.text !== '' ? [view.partial] : [];
   const continued = carried.length > 0 ? EMPTY_LINE : view.partial;
@@ -213,5 +233,6 @@ export function foldChunk(view: LogView, chunk: LogChunk): LogView {
     truncatedBefore: view.truncatedBefore || (expected === null && chunk.truncated_before),
     eof: chunk.eof,
     closed: chunk.closed,
+    escape: lines.escape,
   };
 }

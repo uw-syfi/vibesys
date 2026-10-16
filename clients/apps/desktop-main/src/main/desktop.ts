@@ -1,10 +1,12 @@
 /**
  * The desktop's composition of its features over the one window: it routes each validated welcome
- * request to the feature that owns it (`hosts`, `run-control`), keeps the window's state
+ * request to the feature that owns it (`hosts`, `machines`, `new-run`, `run-control`, `settings`), keeps the window's state
  * (`ChromeState`) in step, and opens what a launch asked for.
  */
 
 import type {Hosts} from '@vibesys/feature-hosts/main';
+import type {MachinesMain} from '@vibesys/feature-machines/main';
+import type {NewRunMain} from '@vibesys/feature-new-run/main';
 import type {RunControl} from '@vibesys/feature-run-control/main';
 import type {PreferencesMain} from '@vibesys/feature-settings/main';
 import {shellWords} from '@vibesys/feature-start-run/state';
@@ -23,7 +25,10 @@ import {bindWelcomeIpc, type WelcomeIpc} from './welcome-ipc.js';
 import type {AppWindow} from './window.js';
 
 export interface DesktopDeps {
-  readonly window: Pick<AppWindow, 'focus' | 'mode' | 'sendWelcome' | 'setMode' | 'welcome'>;
+  readonly window: Pick<
+    AppWindow,
+    'focus' | 'mode' | 'releaseSurfaceRun' | 'sendWelcome' | 'setMode' | 'welcome'
+  >;
   readonly welcome: Pick<WelcomeFeed, 'chrome' | 'recent' | 'showHost' | 'snapshot'>;
   readonly hosts: Pick<
     Hosts,
@@ -46,6 +51,7 @@ export interface DesktopDeps {
     | 'signIn'
     | 'tasks'
   >;
+  readonly machines: Pick<MachinesMain, 'machines' | 'report' | 'inspect' | 'remove'>;
   readonly runs: Pick<
     RunControl,
     | 'attach'
@@ -60,11 +66,31 @@ export interface DesktopDeps {
   >;
   readonly settings: Pick<SettingsStore, 'onRecentChanged' | 'recent'>;
   readonly preferences: Pick<PreferencesMain, 'answer'>;
+  readonly newRun: Pick<NewRunMain, 'answer'>;
   /** The page the window's trusted surface loads, the only one admitted to its requests. */
   readonly surfaceUrl: string;
   readonly welcomeIpc: WelcomeIpc;
   readonly log: (message: string) => void;
 }
+
+/** The requests of the redesigned window's Machines and New run screens. */
+type ScreenRequest = Extract<
+  WelcomeRequest,
+  {
+    readonly kind:
+      | 'machines'
+      | 'machine'
+      | 'inspect-checkout'
+      | 'remove-machine'
+      | 'describe-machine'
+      | 'preflight'
+      | 'examples'
+      | 'create-from-example'
+      | 'copy-out'
+      | 'start-run'
+      | 'helper-features';
+  }
+>;
 
 /** The recent runs as the welcome view lists them. */
 function welcomeRecent(recent: RecentFile): RecentRun[] {
@@ -199,6 +225,27 @@ export class Desktop {
     });
   }
 
+  /** The requests about the run the window shows: which view, letting it go, retry. */
+  #answerShownRun(
+    request: Extract<
+      WelcomeRequest,
+      {readonly kind: 'show-run' | 'show-welcome' | 'release-run' | 'retry'}
+    >,
+  ): null {
+    switch (request.kind) {
+      case 'show-run':
+      case 'show-welcome':
+        this.#mode(request.kind === 'show-run' ? 'run' : 'welcome');
+        return null;
+      case 'release-run':
+        this.#deps.window.releaseSurfaceRun();
+        return null;
+      case 'retry':
+        this.#deps.runs.retry();
+        return null;
+    }
+  }
+
   /** Answer one validated welcome request. */
   async #answer(request: WelcomeRequest, rendererGeneration: string): Promise<unknown> {
     const {hosts, runs} = this.#deps;
@@ -265,16 +312,34 @@ export class Desktop {
         return null;
       case 'show-run':
       case 'show-welcome':
-        this.#mode(request.kind === 'show-run' ? 'run' : 'welcome');
-        return null;
+      case 'release-run':
       case 'retry':
-        runs.retry();
-        return null;
+        return this.#answerShownRun(request);
       case 'preferences':
       case 'set-appearance':
       case 'set-notifications':
       case 'archive':
         return this.#deps.preferences.answer(request);
+      default:
+        // Every other request is a redesigned screen's (`ScreenRequest`), which the type checks.
+        return this.#screen(request);
+    }
+  }
+
+  /** Answer one request of the redesigned window's Machines or New run screen. */
+  #screen(request: ScreenRequest): Promise<unknown> {
+    const {machines} = this.#deps;
+    switch (request.kind) {
+      case 'machines':
+        return machines.machines();
+      case 'machine':
+        return machines.report(request.host);
+      case 'inspect-checkout':
+        return machines.inspect(request.host, request.path);
+      case 'remove-machine':
+        return machines.remove(request.host);
+      default:
+        return this.#deps.newRun.answer(request);
     }
   }
 }
