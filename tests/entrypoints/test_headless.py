@@ -659,6 +659,23 @@ def test_fresh_task_dockerfile_rejects_an_explicit_docker_image(
         parse_cli_invocation(["--project", str(project), "--task", "latency", *flags])
 
 
+def test_a_host_derived_environment_refuses_the_task_image_before_building(
+    tmp_path: Path,
+) -> None:
+    """Regression: Metal on macOS built the task image, then derived ``host`` and refused it."""
+    project = tmp_path / "repository"
+    project.mkdir()
+    task = _write_repository_task(project, "latency")
+    (task / "Dockerfile").write_text("FROM python:3.12-bookworm\n")
+    invocation = parse_cli_invocation(["--project", str(project), "--task", "latency"])
+    runner = FakeDockerBuildRunner()
+    build = TaskImageBuild(backend=ComputeBackend.METAL, runner=runner, platform="darwin")
+
+    with pytest.raises(TaskImageError, match="runs the agent on the host"):
+        run_environment_spec_from_args(invocation.args, task_image=build)
+    assert runner.calls == []
+
+
 def _declare_docker_in_docker(task: Path) -> None:
     manifest = task / "vibesys.input.toml"
     manifest.write_text(

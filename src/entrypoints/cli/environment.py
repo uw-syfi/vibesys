@@ -77,11 +77,13 @@ class TaskImageBuild:
 
     The Dockerfile is built on *backend*'s default image, passed as
     ``BASE_IMAGE``. *runner* runs the Docker commands; ``None`` runs the real
-    Docker CLI.
+    Docker CLI. *platform* is the host platform the run opens on, which decides
+    whether a host-only backend derives the host environment.
     """
 
     backend: ComputeBackend
     runner: DockerBuildRunner | None = None
+    platform: str = sys.platform
 
 
 def _task_image_facts(
@@ -197,7 +199,7 @@ def run_environment_spec_from_args(
     plan = _editor_image(
         (
             derived_environment_name(
-                requested_environment, task_image.backend, platform=sys.platform
+                requested_environment, task_image.backend, platform=task_image.platform
             )
             if task_image is not None
             else requested_environment
