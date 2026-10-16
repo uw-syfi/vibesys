@@ -100,9 +100,9 @@ def record(
     stage: str,
     status: core.ObservationStatus,
     *,
-    evidence_id: str | None = None,
+    reused: core.RequestId | None = None,
 ) -> core.EvidenceRef:
-    """One stage's record as the runtime reports it for ``request``."""
+    """One stage's record as the runtime reports it for ``request``, reusing run ``reused``."""
     assert isinstance(request.plan.candidate, core.RevisionRef)
     if request.plan.purpose == "local-validation":
         kind = core.EvidenceKind.LOCAL_VALIDATION
@@ -110,11 +110,10 @@ def record(
         kind = core.EvidenceKind.CORRECTNESS
     else:
         kind = core.EvidenceKind.BENCHMARK
-    reused = request.reuses
     source = request.request_id if reused is None else reused
     assert source is not None
     return core.EvidenceRef(
-        evidence_id=core.EvidenceId(root=evidence_id or f"{source.root}-{stage}"),
+        evidence_id=core.EvidenceId(root=f"{source.root}-{stage}"),
         kind=kind,
         purpose=request.plan.purpose,
         scope=request.scope,
@@ -132,12 +131,17 @@ def record(
                 digest="sha256:result",
             ),
         ),
-        reused_from=reused,
+        # Named only on a reuse, so this helper also builds records on code without reuse.
+        **({} if reused is None else {"reused_from": reused}),
     )
 
 
 def ended(
-    state: core.CoreState, request: core.SubmitMeasurement, outcome: Outcome
+    state: core.CoreState,
+    request: core.SubmitMeasurement,
+    outcome: Outcome,
+    *,
+    reused: core.RequestId | None = None,
 ) -> core.Transition:
     """Accept ``request``'s job and end it as the runtime reports ``outcome``."""
     started = seen(request, 1)
@@ -151,7 +155,8 @@ def ended(
     finished = seen(request, 2, status=status, terminal=True, released=True)
     facts = _PASSED if passed else _FAILED
     evidence = tuple(
-        record(request, finished, stage, status) for stage in ("accuracy", "benchmark")
+        record(request, finished, stage, status, reused=reused)
+        for stage in ("accuracy", "benchmark")
     )
     state = committed(state, finished, facts)
     failure = {
@@ -203,6 +208,25 @@ def results(change: core.Transition) -> list[core.MeasurementResult]:
     return [event for event in change.events if isinstance(event, core.MeasurementResult)]
 
 
+def test_an_official_measurement_of_the_agents_evaluated_commit_submits_no_second_job() -> None:
+    """The agent measured the very commit the strategy then measures officially.
+
+    Written against the API that predates reuse, so it fails on the merge base by
+    observing the second, fresh submission rather than by a missing field.
+    """
+    state, agent = agent_run(
+        core.initial_state(),
+        "c1",
+        plan(purpose="local-validation", candidate=revision("0027142")),
+        "passed",
+    )
+    assert agent is not None
+    asked = official(state, plan(purpose="official", candidate=revision("0027142")))
+    (submission,) = [r for r in asked.requests if isinstance(r, core.SubmitMeasurement)]
+    reused = submission.model_dump(mode="json").get("reuses")
+    assert reused == agent.request_id.model_dump(mode="json"), "a second measurement ran"
+
+
 def test_an_official_measurement_of_the_agents_evaluated_input_runs_no_second_job() -> None:
     """The reported case: a notes-only commit after the agent's evaluation (0027142 -> 509dd57).
 
@@ -219,7 +243,7 @@ def test_an_official_measurement_of_the_agents_evaluated_input_runs_no_second_jo
     asked = official(state, measured("official", "509dd57", "sha256:input"))
     (submission,) = [r for r in asked.requests if isinstance(r, core.SubmitMeasurement)]
     assert submission.reuses == agent.request_id
-    done = ended(asked.state, submission, "passed")
+    done = ended(asked.state, submission, "passed", reused=submission.reuses)
     (result,) = results(done)
     assert result.status is core.ObservationStatus.SUCCEEDED
     assert [item.reused_from for item in result.evidence] == [agent.request_id] * 2
@@ -252,13 +276,17 @@ def test_a_reusing_submission_takes_only_its_runs_own_records() -> None:
             finished,
             "benchmark",
             core.ObservationStatus.SUCCEEDED,
-            evidence_id="never-measured",
-        ),
-        record(submission, finished, "accuracy", core.ObservationStatus.SUCCEEDED).model_copy(
-            update={"reused_from": None}
-        ),
+            reused=submission.reuses,
+        ).model_copy(update={"evidence_id": core.EvidenceId(root="never-measured")}),
+        record(submission, finished, "accuracy", core.ObservationStatus.SUCCEEDED),
     )
-    genuine = record(submission, finished, "benchmark", core.ObservationStatus.SUCCEEDED)
+    genuine = record(
+        submission,
+        finished,
+        "benchmark",
+        core.ObservationStatus.SUCCEEDED,
+        reused=submission.reuses,
+    )
     assert started.resource_id is not None
     done = transition(
         committed(after, finished, _PASSED),
@@ -342,3 +370,70 @@ def test_an_official_measurement_reuses_exactly_the_scopes_one_latest_conclusive
     )
     assert submissions(again.state) == submissions(asked.state), "a replay allocates nothing"
     assert reloaded(asked.state) == asked.state
+
+
+def attempt_with_checkpoints(inputs: dict[str, str]) -> tuple[core.CoreState, core.Scope]:
+    """A run whose one attempt retained a checkpoint of each revision, with its measured input."""
+    state = core.initial_state()
+    owner = core.AttemptView(
+        attempt_id=core.AttemptId(root="attempt"),
+        item_id=core.ItemId(root="item"),
+        generation=0,
+        phase=core.AttemptPhase.ACTIVE,
+        workspace=core.WorkspacePlan(
+            mode=core.WorkspaceMode.EXCLUSIVE_ROOT, base=state.run.facts.baseline
+        ),
+        budget=core.AttemptBudget(),
+        admission_id=core.DecisionId(root="admission"),
+        checkpoints=tuple(
+            core.AttemptCheckpoint(
+                invocation=None,
+                request_id=core.RequestId(root=f"snapshot-{name}"),
+                revision=revision(name),
+                retention="wip",
+                measured_input=digest,
+            )
+            for name, digest in inputs.items()
+        ),
+    )
+    attempts = core.AttemptsState(attempts=(owner,))
+    return state.model_copy(update={"attempts": attempts}), core.Scope(
+        owner=owner.attempt_id, generation=0
+    )
+
+
+def measure_in(
+    state: core.CoreState, scope: core.Scope, name: str, candidate: str
+) -> tuple[core.CoreState, core.SubmitMeasurement]:
+    """A strategy's official measurement of ``candidate``, its input unnamed, and its submission."""
+    decision = core.Measure(
+        decision_id=core.DecisionId(root=name),
+        scope=scope,
+        plan=plan(purpose="official", candidate=revision(candidate)),
+    )
+    asked = transition(
+        state,
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=state.revision,
+        ),
+    )
+    (submission,) = [r for r in asked.requests if isinstance(r, core.SubmitMeasurement)]
+    return asked.state, submission
+
+
+def test_a_measurement_takes_its_input_from_the_attempts_checkpoint_of_the_revision() -> None:
+    """The strategy names a revision only; the snapshot that retained it named its input."""
+    state, scope = attempt_with_checkpoints(
+        {"0027142": "sha256:input", "509dd57": "sha256:input", "a1b2c3d": "sha256:other"}
+    )
+    asked, first = measure_in(state, scope, "first", "0027142")
+    assert first.plan.measured_input == "sha256:input"
+    assert first.reuses is None
+    after = ended(asked, first, "passed").state
+    _, same = measure_in(after, scope, "second", "509dd57")
+    assert same.plan.measured_input == "sha256:input"
+    assert same.reuses == first.request_id
+    _, other = measure_in(after, scope, "third", "a1b2c3d")
+    assert other.plan.measured_input == "sha256:other"
+    assert other.reuses is None
