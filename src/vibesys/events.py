@@ -650,8 +650,8 @@ class GateFinishedData(EventPayload):
     kind: Literal["gate_finished"] = "gate_finished"
     gate: GateKind
     recipe: str | None = None
-    # True when a prior PASS for the exact same input was reused instead of
-    # re-running the command.
+    # True when a prior result for the same input was reused instead of
+    # re-running the command (a prior pass, or an earlier run's pass or failure).
     reused: bool = False
     metric: str | None = None
     value: FiniteFloat | None = None

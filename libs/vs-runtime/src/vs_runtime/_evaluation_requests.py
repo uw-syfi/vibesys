@@ -371,7 +371,9 @@ class MeasurementRequests:
                 terminal=ExecutorObservation(state=EvaluationState.CANCELED),
             )
         polled = self._with_ledgered_evidence(polled, record, subject)
-        self._progress.report(record.handle_id, record.plan.purpose, polled)
+        self._progress.report(
+            record.handle_id, record.plan.purpose, polled, reused=record.reuses is not None
+        )
         # The job's observations carry the submission's request id, so they share one
         # sequence with the submission's own (possibly Unknown) observations.
         view = job_view(

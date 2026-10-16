@@ -21,10 +21,12 @@ from vs_core.api import (
     RequestId,
     SubmitMeasurement,
 )
+from vs_runtime.api.core import StageSettled
 from vs_runtime.api.slurm_evaluation_stack import ADMISSION, SCOPE, plan
 from vs_slurm.api import SlurmJobStatus
 
 from .test_evaluation_requests import (
+    Recorder,
     World,
     close_request,
     query,
@@ -95,6 +97,8 @@ async def test_a_reusing_submission_answers_with_the_earlier_runs_records_and_la
     """The reported case: on main the official measurement launched a second Slurm job."""
     async with world() as w:
         source, earlier = await ended(w, agent_run(w))
+        heard = Recorder()
+        w.observer = heard
         got = await run(w, reusing(w, "agent"))
         resource = resource_of(got)
         assert resource != source
@@ -109,6 +113,10 @@ async def test_a_reusing_submission_answers_with_the_earlier_runs_records_and_la
             EvidenceKind.CORRECTNESS,
             EvidenceKind.BENCHMARK,
         }
+        settled_stages = [e for e in heard.heard if isinstance(e, StageSettled)]
+        assert {(e.handle_id, e.purpose, e.reused) for e in settled_stages} == {
+            (resource.root, "official", True)
+        }, "the gates report the reuse"
         again = await run(w, query(InspectOwnedJob, "inspect-again", resource))
         assert again.observation.target is not None
         assert [facts(item) for item in again.observation.target.evidence] == [

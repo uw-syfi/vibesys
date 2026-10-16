@@ -83,6 +83,7 @@ class CoreMeasurementEvents:
             CoreEventType.GATE_FINISHED,
             data=GateFinishedData(
                 gate=gate,
+                reused=event.reused,
                 metric=None if metric is None or gate is not GateKind.BENCHMARK else metric.name,
                 value=None if metric is None or gate is not GateKind.BENCHMARK else metric.value,
                 unit=None
