@@ -608,8 +608,8 @@ graceful stop. The ended banner reads the end record and offers Resume, naming
 `resume_from_round`, only when it says `resumable`. Logs are grouped by their owner (startup
 steps, gate stages, tool builds, narration) and read over the welcome bridge's `logs`, which the
 main process serves from the host's logs channel until the screen lets it go; the startup
-timeline is built from the startup steps' streams. "Open in new window" stays out of the "⋯"
-menu until the app opens more than one window (#2615).
+timeline is built from the startup steps' streams. "Open in new window" opens the run in a
+window of its own (see "Windows and notifications").
 
 A live run is attached to the window under a token (the store's `link`), through the same
 `RunControl.attach` a run page uses. Under the app shell the window binds that run to the surface
@@ -631,25 +631,36 @@ is in the first paint: the welcome preload asks the main process synchronously f
 theme and the window controls' inset (`FIRST_PAINT_CHANNEL`, one fact from `window-chrome.ts`) and
 sets them on the root element before the page's scripts run.
 
-## Multiple run windows
+## Windows and notifications
 
-Each `AppWindow` holds one `#run` view and binds to at most one run at a time (`openRunPage`
-always replaces whatever the window showed before). `RunControl` and `RunIpcRegistry` key every
-binding, navigation claim, and IPC admission by `run_id` rather than by one shared slot
-(`clients/features/run-control/src/main/run-control.ts`, `clients/apps/desktop-main/src/main/
-run-ipc.ts`), so two independent `AppWindow`s attached to two different runs cannot cross-detach or
-cross-admit each other's connection: a window's close detaches only the binding for the run it
-showed, and a window's IPC connect is admitted only for the run its own current page named. A
-Playwright spec (`clients/apps/desktop-main/e2e/two-windows.spec.ts`) constructs two `AppWindow`s
-directly against a fixture host connection and asserts no cross-run bleed on attach, content, or
-close.
+The app has one main window and, for each run the user opens with "Open in new window" (the Run
+screen's "⋯" menu and the sidebar row menu), one run window that shows the Run screen for that
+run alone, with no sidebar (`RunWindow` in `apps/desktop-shell`, chosen by the run in the page's
+query). Opening a run that already has a window focuses it. `RunWindows` (`run-windows.ts`) is the
+registry, keyed by run, and `openRunWindow` on the welcome bridge is its request.
 
-This keying is the safety prerequisite for concurrent windows, not the feature itself: the app does
-not yet construct more than one `AppWindow`. `index.ts`'s `openWindow()` creates exactly one at
-startup, and every run attach, start, or resume targets that same window, replacing its current run
-page. Wiring an actual multi-window user path needs a UX decision first (whether attaching always
-opens a fresh window, or only when the current one already shows a different run, and how the
-welcome view's window relates to run windows) and is tracked by #2615.
+Each `AppWindow` holds one `#run` view and binds to at most one run at a time. `RunControl` and
+`RunIpcRegistry` key every binding, navigation claim, and IPC admission by `run_id` rather than by
+one shared slot (`clients/features/run-control/src/main/run-control.ts`,
+`clients/apps/desktop-main/src/main/run-ipc.ts`), so windows attached to different runs cannot
+cross-detach or cross-admit each other's connection. `RunControl`'s `openPage` binds a run to the
+window showing it (`RunWindows.showing`) and any other run to the main window, so a run with a
+window of its own is live there. Closing a run window forgets it and detaches only that run's live
+connection; the run itself goes on. A Playwright spec
+(`clients/apps/desktop-main/e2e/two-windows.spec.ts`) constructs two `AppWindow`s against a
+fixture host connection and asserts no cross-run bleed on attach, content, or close.
+
+The welcome IPC has one handler per channel, because Electron allows one. `WelcomeRouter`
+registers each channel once and routes every request to the window whose current welcome document
+sent it, on that window's page; a sender that is no window's current document is refused. Each
+window has its own admission (document generations, replacement barrier, retirement), which ends
+when its native window closes. Requests that change the main window's own view (`show-run`,
+`show-welcome`) are refused from a run window. Pushed events (listings, preferences, the chrome)
+go to every window's surface.
+
+Known gaps: in a run window "Run again" only focuses the main window (`show-main-window`) instead
+of opening New run with the run's inputs there, and a notification click focuses the main window
+rather than the window of the run it names.
 
 The campaign workspace UI these run pages can render, and the live telemetry stream it folds, are
 designed in [campaign-workspace-ui.md](../design/campaign-workspace-ui.md) and
