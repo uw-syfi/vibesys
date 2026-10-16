@@ -106,6 +106,19 @@ class Switch:
 type QuotaDecision = Hold | WaitFor | GiveUp | Switch
 
 
+def capacity_returns_at(*, resets_at: float | None, now: float) -> float | None:
+    """When capacity should be back: the provider's reset time plus the margin, if still ahead."""
+    if resets_at is not None and resets_at + RESET_MARGIN_SECONDS > now:
+        return resets_at + RESET_MARGIN_SECONDS
+    return None
+
+
+def capacity_wait(policy: QuotaPolicy, *, resets_at: float | None, now: float) -> float:
+    """How long to wait before sending the turn again: until capacity returns, else one retry."""
+    back = capacity_returns_at(resets_at=resets_at, now=now)
+    return policy.retry_seconds if back is None else back - now
+
+
 def decide_quota(
     policy: QuotaPolicy, *, resets_at: float | None, now: float, waited: float
 ) -> QuotaDecision:
@@ -127,10 +140,9 @@ def decide_quota(
     end = Switch if policy.action is QuotaAction.FALLBACK else GiveUp
     if remaining is not None and remaining <= 0:
         return end(f"waited {waited:g}s for capacity, the whole budget")
-    if resets_at is not None and resets_at + RESET_MARGIN_SECONDS > now:
-        wanted = resets_at + RESET_MARGIN_SECONDS - now
+    wanted = capacity_wait(policy, resets_at=resets_at, now=now)
+    if capacity_returns_at(resets_at=resets_at, now=now) is not None:
         if remaining is not None and wanted > remaining:
             return end(f"capacity returns in {wanted:g}s, past the {remaining:g}s still allowed")
         return WaitFor(wanted)
-    wanted = policy.retry_seconds
     return WaitFor(wanted if remaining is None else min(wanted, remaining))

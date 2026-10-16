@@ -88,6 +88,9 @@ class _SessionControlStub:
     def resume_with_fallback(self) -> None:
         self._control.resume_with_fallback()
 
+    def resume_when_capacity_returns(self) -> bool:
+        return self._control.resume_when_capacity_returns()
+
     def stop(self) -> None:
         self.stop_calls += 1
         self._control.request_stop(StopMode.DRAIN)

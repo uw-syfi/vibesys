@@ -19,6 +19,7 @@ if TYPE_CHECKING:
         ProviderSwitch,
         QuotaPlan,
         QuotaResumeReason,
+        QuotaWaitCancelReason,
     )
     from vs_agent.events import (
         AgentOutputChannel,
@@ -130,6 +131,20 @@ class AgentEventSink(Protocol):
 
     def quota_abandoned(self, error: AgentQuotaError, reason: str, where: Attribution) -> None:
         """Publish that the turn ended with the quota error instead of waiting or resuming."""
+        ...
+
+    def quota_waiting(self, provider: str, resumes_at: float | None, where: Attribution) -> None:
+        """Publish that, at the operator's request, the paused run resumes when capacity returns.
+
+        ``resumes_at`` is the epoch second it resumes, ``None`` when the provider gave no reset
+        time and the run tries again after the policy's retry interval.
+        """
+        ...
+
+    def quota_wait_cancelled(
+        self, provider: str, reason: QuotaWaitCancelReason, where: Attribution
+    ) -> None:
+        """Publish that the operator ended a wait for capacity before it elapsed."""
         ...
 
     def provider_switched(self, switch: ProviderSwitch, where: Attribution) -> None:
@@ -245,6 +260,16 @@ class NullAgentEventSink:
     def quota_abandoned(self, error: AgentQuotaError, reason: str, where: Attribution) -> None:
         """Ignore quota abandonment when no event sink was injected."""
         del error, reason, where
+
+    def quota_waiting(self, provider: str, resumes_at: float | None, where: Attribution) -> None:
+        """Ignore capacity waits when no event sink was injected."""
+        del provider, resumes_at, where
+
+    def quota_wait_cancelled(
+        self, provider: str, reason: QuotaWaitCancelReason, where: Attribution
+    ) -> None:
+        """Ignore cancelled capacity waits when no event sink was injected."""
+        del provider, reason, where
 
     def provider_switched(self, switch: ProviderSwitch, where: Attribution) -> None:
         """Ignore provider switches when no event sink was injected."""

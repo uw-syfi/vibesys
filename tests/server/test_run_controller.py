@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 from tests.server.support import (
     DEADLOCK_GUARD_S,
     REQUEST_TIME,
@@ -12,6 +13,7 @@ from tests.server.support import (
 )
 
 from server.api.protocol import PauseCommand, ResumeCommand, SteerCommand, StopCommand
+from server.api.service import CapacityWaitUnavailableError
 from server.events import (
     EventStatus,
     EventType,
@@ -125,6 +127,24 @@ def test_a_resume_command_can_ask_for_the_fallback_and_a_plain_one_cannot(tmp_pa
     assert (ack.action, ack.status) == ("resume", "consumed")
     assert parts.control.consume_fallback_request() is True
     assert parts.control.consume_fallback_request() is False  # taken once
+
+
+def test_waiting_for_capacity_is_refused_for_a_run_not_paused_on_a_capacity_limit(
+    tmp_path: Path,
+) -> None:
+    parts = build_server_parts(tmp_path)
+    parts.api.execute(PauseCommand(timestamp=REQUEST_TIME))
+
+    with pytest.raises(CapacityWaitUnavailableError) as refused:
+        parts.api.execute(ResumeCommand(timestamp=REQUEST_TIME, when="capacity_returns"))
+
+    assert refused.value.diagnostic_code == "capacity_wait_unavailable"
+    assert parts.control.pause_requested()
+
+
+def test_a_resume_cannot_both_switch_to_the_fallback_and_wait_for_capacity() -> None:
+    with pytest.raises(ValidationError, match="fallback"):
+        ResumeCommand(timestamp=REQUEST_TIME, fallback=True, when="capacity_returns")
 
 
 def test_finish_is_idempotent_and_interrupts_controlled_executions(tmp_path: Path) -> None:

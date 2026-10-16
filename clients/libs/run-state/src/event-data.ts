@@ -129,6 +129,9 @@ const EVENT_DATA_HANDLERS = {
   quota_paused: runEventData(applyQuotaData),
   quota_resumed: runEventData(applyQuotaData),
   quota_abandoned: runEventData(applyQuotaData),
+  // The quota banner (a later client change) folds the operator's wait for capacity.
+  quota_waiting: ignoredEventData,
+  quota_wait_cancelled: ignoredEventData,
   provider_switched: runEventData(applyQuotaData),
   gate_started: ignoredEventData,
   gate_finished: runEventData(applyBenchmarkData),

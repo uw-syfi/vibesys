@@ -120,6 +120,31 @@ beside `overviewFromSnapshot` and `foldOverview`. `query.performance` and `Perfo
 stay unchanged for the frozen web run page. Gate tools' own versions are not measured today, so
 the overview does not carry them.
 
+## Waiting for capacity to return
+
+A run paused on a provider capacity limit (`quota_paused`) resumes when the operator sends
+`command.resume`. The request's `when` (`now`, the default, or `capacity_returns`) says how:
+
+- `now` resumes at once. A wait for capacity in progress ends with
+  `quota_wait_cancelled {provider, reason: resumed}`, then `quota_resumed {reason: operator}`.
+- `capacity_returns` keeps the run paused until capacity should be back, then resumes it by itself
+  with `quota_resumed {reason: wait_elapsed}`. The run server arms the same wait the `wait` policy
+  uses (`vs_runtime`'s `capacity_wait`): the provider's reset time plus a five-second margin, or,
+  when the provider gave none, the quota policy's `retry_seconds`; a turn that stops on the limit
+  again after such a wait waits again by itself, so the run polls until the turn goes through.
+  Each wait it arms emits `quota_waiting {provider, resumes_at}`, where `resumes_at` is the epoch
+  second it resumes, `null` when it is polling without a reset time. The command acks
+  `{action: resume, status: pending}`; a run not paused on a capacity limit answers the protocol
+  error `capacity_wait_unavailable` and nothing changes. `fallback: true` cannot be combined with
+  it (`invalid_request`).
+- `command.pause` during the wait cancels it (`quota_wait_cancelled {reason: paused}`): the run
+  stays paused for the operator. A second `capacity_returns` replaces the first, emitting a new
+  `quota_waiting`.
+
+The wait is held by the live run server: if the server ends, the run ends like any other. `when`
+is a new request field, so a client discovers support for it by `WP-CAPABILITY-PROBE`: an older
+server rejects it as an unknown field.
+
 ## Framing and connection decisions
 
 Each decision below carries a stable token. The conformance corpus (`tests/conformance/`, see
@@ -324,10 +349,11 @@ working, not a gap. It records rather than pins, because no runner executes it y
 ### WP-CAPABILITY-PROBE: capabilities are probed by rejection, not advertised
 
 There is no capability advertisement. A client discovers whether the server supports an optional
-subscribe field by sending it and reading the result: acceptance means the field works, a
-`extra="forbid"` rejection means the server predates it. `tail` and `store_id` are the two fields
-this already governs (`SubscribeRequest` in `protocol.py`; the client's probe-and-fallback in
-`clients/libs/transport/src/persistent-event-stream.ts`).
+request field by sending it and reading the result: acceptance means the field works, a
+`extra="forbid"` rejection means the server predates it. The subscribe fields `tail` and
+`store_id` are governed this way (`SubscribeRequest` in `protocol.py`; the client's
+probe-and-fallback in `clients/libs/transport/src/persistent-event-stream.ts`), and so is
+`command.resume`'s `when` (see [Waiting for capacity to return](#waiting-for-capacity-to-return)).
 
 The recorded consequence, accepted deliberately: a browser resume that carries `store_id` against a
 server that lacks it costs one extra speculative dial (the rejected probe, then the cursor-only

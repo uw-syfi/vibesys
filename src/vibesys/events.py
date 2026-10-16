@@ -67,6 +67,8 @@ class CoreEventType(StrEnum):
     QUOTA_PAUSED = "quota_paused"
     QUOTA_RESUMED = "quota_resumed"
     QUOTA_ABANDONED = "quota_abandoned"
+    QUOTA_WAITING = "quota_waiting"
+    QUOTA_WAIT_CANCELLED = "quota_wait_cancelled"
     PROVIDER_SWITCHED = "provider_switched"
     GATE_STARTED = "gate_started"
     GATE_FINISHED = "gate_finished"
@@ -491,6 +493,27 @@ class QuotaResumedData(EventPayload):
     reason: Literal["operator", "wait_elapsed"] = "operator"
 
 
+class QuotaWaitingData(EventPayload):
+    """At the operator's request, the run paused on a capacity limit resumes when capacity returns.
+
+    ``resumes_at`` is the epoch second it resumes (the provider's reset time plus a margin),
+    ``None`` when the provider gave no reset time and the run tries again after the quota
+    policy's retry interval. A later request replaces this one.
+    """
+
+    kind: Literal["quota_waiting"] = "quota_waiting"
+    provider: str
+    resumes_at: float | None = None
+
+
+class QuotaWaitCancelledData(EventPayload):
+    """The operator ended a wait for capacity: ``resumed`` the run now, or ``paused`` it again."""
+
+    kind: Literal["quota_wait_cancelled"] = "quota_wait_cancelled"
+    provider: str
+    reason: Literal["resumed", "paused"]
+
+
 class ProviderSwitchedData(EventPayload):
     """The run replaced a provider by its fallback.
 
@@ -848,6 +871,8 @@ CoreEventData = Annotated[
     | QuotaPausedData
     | QuotaResumedData
     | QuotaAbandonedData
+    | QuotaWaitingData
+    | QuotaWaitCancelledData
     | ProviderSwitchedData
     | GateStartedData
     | GateFinishedData

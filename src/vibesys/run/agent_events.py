@@ -19,6 +19,8 @@ from vibesys.events import (
     QuotaAbandonedData,
     QuotaPausedData,
     QuotaResumedData,
+    QuotaWaitCancelledData,
+    QuotaWaitingData,
     RateLimitUpdateData,
     TodoItemData,
     TodoUpdateData,
@@ -41,6 +43,7 @@ if TYPE_CHECKING:
         ProviderSwitch,
         QuotaPlan,
         QuotaResumeReason,
+        QuotaWaitCancelReason,
     )
 
 EventSink = Callable[[CoreEvent], object]
@@ -97,6 +100,8 @@ class CoreAgentEventSink:
         | QuotaPausedData
         | QuotaResumedData
         | QuotaAbandonedData
+        | QuotaWaitingData
+        | QuotaWaitCancelledData
         | ProviderSwitchedData,
         *,
         agent_kind: str | None,
@@ -312,6 +317,24 @@ class CoreAgentEventSink:
             where,
         )
 
+    def quota_waiting(self, provider: str, resumes_at: float | None, where: Attribution) -> None:
+        """Emit that the paused run resumes when capacity returns, at the operator's request."""
+        self._attributed(
+            CoreEventType.QUOTA_WAITING,
+            QuotaWaitingData(provider=provider, resumes_at=resumes_at),
+            where,
+        )
+
+    def quota_wait_cancelled(
+        self, provider: str, reason: QuotaWaitCancelReason, where: Attribution
+    ) -> None:
+        """Emit that the operator ended a wait for capacity."""
+        self._attributed(
+            CoreEventType.QUOTA_WAIT_CANCELLED,
+            QuotaWaitCancelledData(provider=provider, reason=reason),
+            where,
+        )
+
     def provider_switched(self, switch: ProviderSwitch, where: Attribution) -> None:
         """Emit that sessions opened from now on run on the fallback provider."""
         self._attributed(
@@ -329,7 +352,12 @@ class CoreAgentEventSink:
     def _attributed(
         self,
         event_type: CoreEventType,
-        data: QuotaPausedData | QuotaResumedData | QuotaAbandonedData | ProviderSwitchedData,
+        data: QuotaPausedData
+        | QuotaResumedData
+        | QuotaAbandonedData
+        | QuotaWaitingData
+        | QuotaWaitCancelledData
+        | ProviderSwitchedData,
         where: Attribution,
     ) -> None:
         self._emit(

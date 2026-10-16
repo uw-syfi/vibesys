@@ -754,6 +754,8 @@ const runEventSchema: Record<string, unknown> = {
         "quota_paused",
         "quota_resumed",
         "quota_abandoned",
+        "quota_waiting",
+        "quota_wait_cancelled",
         "provider_switched",
         "gate_started",
         "gate_finished",
@@ -1603,6 +1605,71 @@ const runEventSchema: Record<string, unknown> = {
         "provider"
       ],
       "title": "QuotaResumedData",
+      "type": "object"
+    },
+    "QuotaWaitCancelledData": {
+      "additionalProperties": false,
+      "description": "The operator ended a wait for capacity: ``resumed`` the run now, or ``paused`` it again.",
+      "properties": {
+        "kind": {
+          "const": "quota_wait_cancelled",
+          "default": "quota_wait_cancelled",
+          "title": "Kind",
+          "type": "string"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "resumed",
+            "paused"
+          ],
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "provider",
+        "reason"
+      ],
+      "title": "QuotaWaitCancelledData",
+      "type": "object"
+    },
+    "QuotaWaitingData": {
+      "additionalProperties": false,
+      "description": "At the operator's request, the run paused on a capacity limit resumes when capacity returns.\n\n``resumes_at`` is the epoch second it resumes (the provider's reset time plus a margin),\n``None`` when the provider gave no reset time and the run tries again after the quota\npolicy's retry interval. A later request replaces this one.",
+      "properties": {
+        "kind": {
+          "const": "quota_waiting",
+          "default": "quota_waiting",
+          "title": "Kind",
+          "type": "string"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "resumes_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resumes At"
+        }
+      },
+      "required": [
+        "kind",
+        "provider"
+      ],
+      "title": "QuotaWaitingData",
       "type": "object"
     },
     "RateLimitUpdateData": {
@@ -3399,6 +3466,8 @@ const runEventSchema: Record<string, unknown> = {
               "quota_abandoned": "#/$defs/QuotaAbandonedData",
               "quota_paused": "#/$defs/QuotaPausedData",
               "quota_resumed": "#/$defs/QuotaResumedData",
+              "quota_wait_cancelled": "#/$defs/QuotaWaitCancelledData",
+              "quota_waiting": "#/$defs/QuotaWaitingData",
               "rate_limit_update": "#/$defs/RateLimitUpdateData",
               "round_finished": "#/$defs/RoundFinishedData",
               "run_configured": "#/$defs/RunConfiguredData",
@@ -3520,6 +3589,12 @@ const runEventSchema: Record<string, unknown> = {
             },
             {
               "$ref": "#/$defs/QuotaAbandonedData"
+            },
+            {
+              "$ref": "#/$defs/QuotaWaitingData"
+            },
+            {
+              "$ref": "#/$defs/QuotaWaitCancelledData"
             },
             {
               "$ref": "#/$defs/ProviderSwitchedData"

@@ -52,6 +52,14 @@ class RunControl(Protocol):
         """
         ...
 
+    def resume_when_capacity_returns(self) -> bool:
+        """Keep a run paused on a provider capacity limit paused until capacity returns.
+
+        False, changing nothing, when the run is not paused on a capacity limit. `resume`
+        ends the wait at once and `pause` cancels it.
+        """
+        ...
+
     def stop(self) -> None:
         """Request the run terminate."""
         ...

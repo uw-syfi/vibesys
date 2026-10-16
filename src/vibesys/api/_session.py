@@ -398,6 +398,10 @@ class _LocalRunSession:
         """Resume the run and switch a quota-paused run to its configured fallback."""
         self._integration.control.resume_with_fallback()
 
+    def resume_when_capacity_returns(self) -> bool:
+        """Resume a quota-paused run once capacity returns; False when it is not quota-paused."""
+        return self._integration.control.resume_when_capacity_returns()
+
     def stop(self, mode: StopMode = StopMode.DRAIN) -> None:
         """Request the run terminate; the operator chooses to drain or cancel work in flight.
 

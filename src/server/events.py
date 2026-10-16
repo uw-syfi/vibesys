@@ -45,6 +45,8 @@ from vibesys.api import (
     AgentOutputChannel,
     AgentStatusData,
     GateKind,
+    QuotaWaitCancelledData,
+    QuotaWaitingData,
     RunEndingData,
     RunFailedData,
     RunOverview,
@@ -124,6 +126,8 @@ class EventType(StrEnum):
     QUOTA_PAUSED = "quota_paused"
     QUOTA_RESUMED = "quota_resumed"
     QUOTA_ABANDONED = "quota_abandoned"
+    QUOTA_WAITING = "quota_waiting"
+    QUOTA_WAIT_CANCELLED = "quota_wait_cancelled"
     PROVIDER_SWITCHED = "provider_switched"
     GATE_STARTED = "gate_started"
     GATE_FINISHED = "gate_finished"
@@ -840,6 +844,8 @@ EventData = Annotated[
     | QuotaPausedData
     | QuotaResumedData
     | QuotaAbandonedData
+    | QuotaWaitingData
+    | QuotaWaitCancelledData
     | ProviderSwitchedData
     | GateStartedData
     | GateFinishedData

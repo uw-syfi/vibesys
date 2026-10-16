@@ -121,6 +121,17 @@ class ResumeCommand(Request):
     # A run paused on a provider capacity limit may switch to its configured
     # fallback provider as it resumes. Ignored when the run has no fallback.
     fallback: bool = False
+    # ``capacity_returns`` keeps a run paused on a provider capacity limit paused until
+    # capacity should be back (``quota_waiting``), then resumes it; ``now`` resumes at once
+    # and ends such a wait. A server without the field rejects it (``WP-CAPABILITY-PROBE``).
+    when: Literal["now", "capacity_returns"] = "now"
+
+    @model_validator(mode="after")
+    def _one_way_to_resume(self) -> ResumeCommand:
+        if self.fallback and self.when == "capacity_returns":
+            message = "fallback resumes now; it cannot wait for capacity to return"
+            raise ValueError(message)
+        return self
 
 
 class SteerCommand(Request):

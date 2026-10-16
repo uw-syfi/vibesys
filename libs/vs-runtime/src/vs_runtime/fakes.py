@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_runtime._agent_lifecycle import AgentExecutionLifecycleEvent
-    from vs_runtime._run_control import RunControlChannel, RunControlTransition
+    from vs_runtime._run_control import CapacityWaitEnd, RunControlChannel, RunControlTransition
     from vs_runtime._workspace_holds import WorkspaceHolds
     from vs_sandbox.api import CommandRunner, HostResource, ProjectPathPolicy
     from vs_sim.api import OutputSink, ProcessSpec, Threads
@@ -192,16 +192,35 @@ class FakeCapacityTimer:
         *,
         start: float = 1_000_000.0,
         operator_resumes_after: float | None = None,
+        during_capacity_wait: Callable[[float], bool] | None = None,
     ) -> None:
-        """Start the virtual clock at ``start`` epoch seconds."""
+        """Start the virtual clock at ``start`` epoch seconds.
+
+        ``during_capacity_wait`` is the operator during a wait for capacity: called with the
+        wait's length, it returns True when it acted (resumed, paused or asked again).
+        """
         self._control = control
         self._now = start
         self._operator_after = operator_resumes_after
+        self._during_capacity_wait = during_capacity_wait
         self.waits: list[float] = []
+        self.capacity_waits: list[float] = []
 
     def now(self) -> float:
         """Return the virtual epoch second."""
         return self._now
+
+    def wait_for_capacity(self, seconds: float, request: int) -> CapacityWaitEnd:
+        """Let ``during_capacity_wait`` act as the operator, else spend ``seconds`` of virtual time.
+
+        The real channel then settles the wait with a zero timeout, so its outcome and its
+        transitions are the production ones.
+        """
+        self.capacity_waits.append(seconds)
+        acted = self._during_capacity_wait is not None and self._during_capacity_wait(seconds)
+        if not acted:
+            self._now += seconds
+        return self._control.wait_for_capacity(0.0, request)
 
     def wait_resumed(self, seconds: float) -> bool:
         """Spend ``seconds`` of virtual time, or fewer when the operator resumes first."""

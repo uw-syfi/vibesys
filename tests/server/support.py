@@ -125,6 +125,9 @@ class _ControlBridge:
     def resume_with_fallback(self) -> None:
         self._channel.resume_with_fallback()
 
+    def resume_when_capacity_returns(self) -> bool:
+        return self._channel.resume_when_capacity_returns()
+
     def stop(self) -> None:
         self._channel.request_stop(StopMode.DRAIN)
 

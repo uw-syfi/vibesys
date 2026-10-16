@@ -143,6 +143,16 @@ class RunControlUnavailableError(RuntimeError):
         super().__init__(f"Run control is unavailable {timing}")
 
 
+class CapacityWaitUnavailableError(RuntimeError):
+    """``command.resume {when: capacity_returns}`` for a run not paused on a capacity limit."""
+
+    diagnostic_code = "capacity_wait_unavailable"
+
+    def __init__(self) -> None:
+        """Say why the run cannot wait for capacity."""
+        super().__init__("The run is not paused on a provider capacity limit")
+
+
 class RunControlSlot:
     """Synchronize command admission with installation of one run session.
 
@@ -209,6 +219,10 @@ class RunControlSlot:
             control.pause()
             return CommandAck(action="pause", status="pending")
         if isinstance(request, ResumeCommand):
+            if request.when == "capacity_returns":
+                if not control.resume_when_capacity_returns():
+                    raise CapacityWaitUnavailableError
+                return CommandAck(action="resume", status="pending")
             if request.fallback:
                 control.resume_with_fallback()
             else:
