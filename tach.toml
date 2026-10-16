@@ -1339,7 +1339,7 @@ depends_on = ["vs_core._values"]
 
 [[interfaces]]
 from = ["vs_core.types.common"]
-expose = ["[A-Z].*", "validate_setup_failure"]
+expose = ["[A-Z].*", "unset", "validate_setup_failure"]
 
 [[modules]]
 path = "vs_core._values"
