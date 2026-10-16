@@ -197,6 +197,7 @@ body > div:first-child {
   font-weight: var(--text-display-weight);
   font-size: min(var(--text-display-size), calc(100cqi / var(--wordmark-columns)));
   line-height: calc(var(--text-display-line) / var(--text-display-size));
+  letter-spacing: var(--text-display-tracking);
   white-space: pre;
   overflow: hidden;
   color: var(--accent);

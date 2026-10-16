@@ -70,6 +70,7 @@ clients/
                                                         window (`shell.html`)
   apps/ui-gallery        @vibesys/app-ui-gallery        development only, never shipped: every
                                                         component in every theme, screenshot-tested
+                                                        in Ink
   tui/              @vibesys/tui              deprecated terminal UI; stays at the root until it is deleted
   tools/            scripts/ (checkers, scaffold), lint-rules/ (Biome plugins), and the shared
                     tsconfig.base.json, tsconfig.architecture.json, knip.config.ts
@@ -265,7 +266,7 @@ truth for each fact; everything else is derived from it.
 | `./tokens` | `neutral` | `THEMES`, `DEFAULT_THEMES`, `SPACE`, `TYPE`, `SIZE`, `RADIUS`, `ELEVATION`, `MOTION`, `CONTRAST_PAIRS`, `contrastRatio`, and `renderTokensCss`. No DOM, so tests and tools import it. |
 | `./tokens.css` | `dom` asset | Generated from `./tokens`; never edited by hand. |
 | `./components.css` | `dom` asset | The components' styles, hand-written from token variables only. |
-| `./fonts.css` | `dom` asset | `@font-face` for Schibsted Grotesk and JetBrains Mono (weights 400, 500, 600) from the woff2 files in `src/fonts/`, with their SIL OFL texts. Nothing is fetched at runtime. |
+| `./fonts.css` | `dom` asset | `@font-face` for Schibsted Grotesk and JetBrains Mono (weights 400, 500, 600, and JetBrains Mono 700 for the wordmark) from the woff2 files in `src/fonts/`, with their SIL OFL texts. Nothing is fetched at runtime. |
 
 A theme is `{mode, colors}` where `colors` is a `Record<ColorRole, Hex>`, so a missing role is a
 compile error. The six themes are `paper`, `mist`, `sand` (light) and `ink`, `midnight`,
@@ -411,9 +412,10 @@ component with no gallery entry. Run it with `pnpm --filter @vibesys/app-ui-gall
 The gallery is a strict package (`"design": "strict"`), so it also shows that a page built
 only from `@vibesys/ui` passes the strict rules.
 
-Its Playwright suite (in the `tui_e2e` group) loads each theme once, fails on any axe violation,
-and compares each component's screenshot against `e2e/__screenshots__/<theme>-<Component>.png`
-under reduced motion at a fixed 1280 by 900 viewport. The baselines are Chromium on Linux, the
+Its Playwright suite (in the `tui_e2e` group) runs in one theme, Ink: it fails on any axe
+violation and compares each component's screenshot against `e2e/__screenshots__/ink-<Component>.png`
+under reduced motion at a fixed 1280 by 900 viewport. The other themes are not screenshot-tested;
+the token test still holds every theme to the contrast floors. The baselines are Chromium on Linux, the
 `tui_e2e` job's browser and OS, so they are written in Playwright's Linux image, never on macOS:
 
 ```bash

@@ -15,7 +15,7 @@ export default defineConfig({
   retries: 0,
   forbidOnly: inCI,
   workers: 1,
-  // A hang guard only: the six themes take about a minute natively, three times that under the
+  // A hang guard only: the suite takes well under a minute natively, three times that under the
   // x86-64 emulation that writes the baselines on an Arm Mac.
   timeout: 360_000,
   snapshotPathTemplate: '{testDir}/__screenshots__/{arg}{ext}',

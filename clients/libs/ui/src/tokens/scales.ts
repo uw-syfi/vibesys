@@ -94,7 +94,7 @@ export const FONT_STACKS: Readonly<Record<FontFamily, string>> = {
 };
 
 /** The weights `fonts.css` ships. */
-export type FontWeight = 400 | 500 | 600;
+export type FontWeight = 400 | 500 | 600 | 700;
 
 export type TextStyle =
   | 'display'
@@ -131,9 +131,10 @@ function text(
 }
 
 export const TYPE: Readonly<Record<TextStyle, TextSpec>> = {
-  // The ASCII wordmark only, bold on a line of its own size, so its block and box-drawing glyphs
-  // join into solid letters; at most 30 px, sized to its container's width.
-  display: text('mono', 30, 30, 600),
+  // The ASCII wordmark only, bold, its rows and columns drawn a hair into each other (a line just
+  // under its size, slightly tight tracking) so the block glyphs join into solid letters instead of
+  // showing antialiased seams; at most 30 px, sized to its container's width.
+  display: text('mono', 30, 29, 700, {tracking: -0.03}),
   title: text('sans', 24, 30, 600, {tracking: -0.01}),
   heading: text('sans', 18, 24, 600),
   body: text('sans', 14, 20, 400),

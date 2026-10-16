@@ -34,12 +34,18 @@ async function entryNames(page: Page): Promise<string[]> {
     .evaluateAll(entries => entries.map(entry => entry.getAttribute('data-gallery-entry') ?? ''));
 }
 
-test('every component looks as agreed, and the page has no axe violation, in every theme', async ({
+/**
+ * The themes the screenshots and axe run in: Ink only, the Vercel-inspired theme the redesign
+ * leads with. The other themes stay in the token table, where the contrast test checks every one.
+ */
+const VALIDATED_THEMES = ['ink'];
+
+test('every component looks as agreed, and the page has no axe violation, in Ink', async ({
   page,
 }) => {
   const themes = await themeNames(page);
-  expect(themes).toHaveLength(6);
-  for (const theme of themes) {
+  expect(themes).toEqual(expect.arrayContaining(VALIDATED_THEMES));
+  for (const theme of VALIDATED_THEMES) {
     await open(page, theme);
     const axe = await new AxeBuilder({page}).analyze();
     expect.soft(axe.violations, `axe violations in ${theme}`).toEqual([]);

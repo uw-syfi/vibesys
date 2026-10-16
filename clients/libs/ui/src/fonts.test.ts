@@ -7,7 +7,7 @@ const urls = [...css.matchAll(/url\("([^"]+)"\)/g)].map(match => match[1] ?? '')
 
 describe('fonts.css', () => {
   test('bundles both families at the weights the type scale uses, as woff2 files that exist', () => {
-    expect(urls).toHaveLength(6);
+    expect(urls).toHaveLength(7);
     for (const url of urls) {
       const bytes = readFileSync(new URL(url, import.meta.url));
       expect(bytes.subarray(0, 4).toString('latin1')).toBe('wOF2');

@@ -7,9 +7,9 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --text-display-family: var(--font-mono);
   --text-display-size: 30px;
-  --text-display-line: 30px;
-  --text-display-weight: 600;
-  --text-display-tracking: 0em;
+  --text-display-line: 29px;
+  --text-display-weight: 700;
+  --text-display-tracking: -0.03em;
   --text-display-transform: none;
   --text-title-family: var(--font-sans);
   --text-title-size: 24px;
