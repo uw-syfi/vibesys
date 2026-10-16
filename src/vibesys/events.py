@@ -211,7 +211,7 @@ class AgentExecutionFinishedData(EventPayload):
     kind: Literal["agent_execution_finished"] = "agent_execution_finished"
     result: Any = None
     error: str | None = None
-    reply: AgentReply | None = None
+    reply: AgentReply | None = Field(default=None, exclude_if=lambda value: value is None)
     """The typed reply of a structured turn, read through its role's reply model; ``result`` is
     the raw text it came from. Absent for an unstructured turn or one whose text was no valid
     reply."""
