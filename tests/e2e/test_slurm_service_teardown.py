@@ -243,25 +243,20 @@ _LATE_ESCAPEE = textwrap.dedent(
 
     root = pathlib.Path(sys.argv[1])
 
-    def leave(*_):
+    # SIGTERM stays blocked and is taken with sigwait: a handler followed by
+    # signal.pause() loses a signal that lands after the handler check and before
+    # pause() blocks.
+    if os.fork() == 0:
         signal.pthread_sigmask(signal.SIG_BLOCK, [signal.SIGTERM])
+        (root / "leaver.pid").write_text(str(os.getpid()))
+        signal.sigwait([signal.SIGTERM])
         if os.fork() == 0:
             os.setsid()
-            def noted(*_):
-                (root / "late-termed").write_text("yes")
-                os._exit(0)
-            signal.signal(signal.SIGTERM, noted)
             (root / "late.pid").write_text(str(os.getpid()))
-            signal.pthread_sigmask(signal.SIG_UNBLOCK, [signal.SIGTERM])
-            while True:
-                signal.pause()
+            signal.sigwait([signal.SIGTERM])
+            (root / "late-termed").write_text("yes")
+            os._exit(0)
         os._exit(0)
-
-    if os.fork() == 0:
-        signal.signal(signal.SIGTERM, leave)
-        (root / "leaver.pid").write_text(str(os.getpid()))
-        while True:
-            signal.pause()
     while not (root / "leaver.pid").is_file():
         signal.sigtimedwait([], 0.05)
     """
