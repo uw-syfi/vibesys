@@ -9,7 +9,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from tests.support.fake_github import signed_in_github
-from tests.support.task_project import task_path, write_task
+from tests.support.task_project import DEFAULT_TASK, task_path, write_task
 
 from entrypoints import cli
 from entrypoints.cli.config import load_config_and_skills
@@ -421,6 +421,36 @@ def test_a_task_that_declares_the_build_its_evaluator_requires_passes_preflight(
     check = evaluator_check(_queue_task(tmp_path, build=True))
 
     assert (check.state, check.fix) == (CheckState.OK, None)
+
+
+def test_the_evaluator_check_names_the_project_the_benchmark_command_runs_on(
+    tmp_path: Path,
+) -> None:
+    """Regression: the check showed the run's unexpanded ``${PROJECT_ROOT}`` placeholder."""
+    project = tmp_path / "project"
+    (project / "src").mkdir(parents=True)
+    write_task(
+        project,
+        """\
+version = 1
+backends = ["cpu"]
+
+[agent]
+domain = "generic"
+
+[accuracy]
+command = ["python", "-c", "print('ok')"]
+
+[benchmark]
+command = ["python", "-c", "print('1')", "--workspace", "${PROJECT_ROOT}"]
+""",
+    )
+
+    check = evaluator_check(load_task(project, DEFAULT_TASK))
+
+    assert check.state is CheckState.OK
+    assert f"--workspace '{project.resolve()}'" in check.detail
+    assert "${" not in check.detail
 
 
 def _project_declaring(tmp_path: Path, backends: str) -> Path:

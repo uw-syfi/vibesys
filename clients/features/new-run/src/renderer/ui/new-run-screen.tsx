@@ -41,7 +41,7 @@ function fixPress(fix: ReadinessFix, dispatch: Dispatch, chooseCheckout: () => v
     case 'choose_checkout':
       return chooseCheckout;
     case 'recheck':
-      return () => dispatch({type: 'recheck'});
+      return () => dispatch({type: 'refresh'});
   }
 }
 

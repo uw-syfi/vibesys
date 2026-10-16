@@ -80,6 +80,8 @@ export type NewRunEvent =
   | {readonly type: 'advanced'; readonly advanced: string}
   | {readonly type: 'recent'; readonly recent: readonly RecentRun[]}
   | {readonly type: 'recheck'}
+  /** Check again: read the project's tasks and check the inputs once more. */
+  | {readonly type: 'refresh'}
   | {readonly type: 'fix'; readonly fix: ProjectFix}
   | {readonly type: 'start'};
 
@@ -384,7 +386,7 @@ export const newRunMachine = setup({
           initial: 'choosing',
           // Each region restarts on what it depends on: a transition from the parallel state itself
           // would leave and re-enter every region, stopping all their work.
-          on: {project: '.choosing'},
+          on: {project: '.choosing', refresh: '.choosing'},
           states: {
             choosing: {
               always: [{guard: 'hasProject', target: 'loading'}, {target: 'none'}],
@@ -429,6 +431,7 @@ export const newRunMachine = setup({
             budget: {target: '.waiting', actions: 'input'},
             advanced: {target: '.waiting', actions: 'input'},
             recheck: '.waiting',
+            refresh: '.waiting',
           },
           states: {
             waiting: {

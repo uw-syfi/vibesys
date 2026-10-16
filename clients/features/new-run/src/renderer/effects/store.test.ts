@@ -404,6 +404,63 @@ test('a dirty project is worded for this screen from the typed fact, naming the 
   expect(startBlocked(state)).toBe('Fix the items marked above to start.');
 });
 
+/** A New run whose project changes under it: `change` edits what the project declares. */
+async function changing() {
+  const clock = manualSchedule();
+  const project = {tasks: ['mpmc'], backend: 'cuda' as 'cuda' | 'cpu'};
+  const bridge: NewRunBridge = {
+    ...fakeBridge(),
+    tasks: () => ok([...project.tasks]),
+    preflight: () =>
+      ok({kind: 'offered' as const, value: {checks: [], roles: null, backend: project.backend}}),
+  };
+  const {store} = createNewRunStore(bridge, {
+    recent: [recentRun('local', '/p', 2)],
+    schedule: clock.schedule,
+    started: () => undefined,
+  });
+  const checked = async () => {
+    await settle();
+    clock.runDue();
+    await settle();
+    return store.getState().context;
+  };
+  return {project, store, checked};
+}
+
+test("Check again reads the task's declared backend again, without reselecting the task", async () => {
+  const {project, store, checked} = await changing();
+  expect(backendOf(await checked())).toBe('cuda');
+
+  project.backend = 'cpu';
+  store.dispatch({type: 'refresh'});
+
+  expect(backendOf(await checked())).toBe('cpu');
+});
+
+test("Check again reads the project's tasks again, keeping the task still offered", async () => {
+  const {project, store, checked} = await changing();
+  expect((await checked()).tasks?.list).toEqual(['mpmc']);
+
+  project.tasks = ['mpmc', 'mpmc-cpu'];
+  store.dispatch({type: 'refresh'});
+  const context = await checked();
+
+  expect(context.tasks?.list).toEqual(['mpmc', 'mpmc-cpu']);
+  expect(context.form.task).toBe('mpmc');
+});
+
+test('Check again moves a task the project no longer has to the first it offers', async () => {
+  const {project, store, checked} = await changing();
+  await checked();
+
+  project.tasks = ['mpmc-cpu'];
+  store.dispatch({type: 'refresh'});
+  const context = await checked();
+
+  expect(context.form.task).toBe('mpmc-cpu');
+});
+
 test('a long list of dirty paths is cut with a count of the rest', async () => {
   const paths = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
   const state = await checked(dirtyBridge(paths));

@@ -47,6 +47,7 @@ from vs_project.api import (
     NullGitTrackerEvents,
     open_git_repository,
 )
+from vs_sandbox.api.command_translation import PROJECT_ROOT_TOKEN
 from vs_sim.api import OsProcesses, SubprocessProbe
 
 if TYPE_CHECKING:
@@ -300,11 +301,10 @@ def evaluator_check(bundle: InputBundle) -> Check:
             fix=DeclareBuild(manifest=str(bundle.manifest_path), outputs=bundle.candidate_outputs),
         )
     source = bundle.evaluator_path
-    detail = (
-        f"evaluator source {source}"
-        if source is not None
-        else f"benchmark command {bundle.benchmark_command_display}"
-    )
+    # The run writes the project's path into the command for each candidate; the check is of
+    # this project, so it names that path, not the unexpanded placeholder.
+    command = bundle.benchmark_command_display.replace(PROJECT_ROOT_TOKEN, str(bundle.root))
+    detail = f"evaluator source {source}" if source is not None else f"benchmark command {command}"
     return Check(
         id=CheckId.EVALUATOR_AVAILABLE, state=CheckState.OK, detail=one_line(detail, "available")
     )
