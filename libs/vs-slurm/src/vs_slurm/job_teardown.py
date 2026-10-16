@@ -20,7 +20,19 @@ that left them (``setsid``, as Ray and daemons do) is found by the marker in its
 environment, and its new session joins the job's, so its descendants are found too, and it
 is still found after it starts exiting (when its environment is no longer readable). The
 marker is set only on the commands the script starts, so the script itself and the helpers
-it runs during teardown are never members.
+it runs during teardown are never members. Under Slurm a marked process must also carry this
+job's ``SLURM_JOB_ID``: a nested job submitted by a marked command inherits the marker, since
+``sbatch`` exports the caller's environment, but is another job. A session found after the
+first scan, while the stop grace lasts, gets its SIGTERM then.
+
+Teardown must never hang, since a script that outlives its time limit is what drains the
+node. Reading a process's environment (or, for ``ps``, its command line) takes that
+process's mmap_lock, which an exiting or driver-stuck process can hold indefinitely, so
+every such read runs under ``timeout -s KILL``. A process whose read was cut off is
+unknown: it is read again at the next scan, it keeps teardown waiting, and if it is still
+unknown at the end of the exit wait it is named and the job fails as if it outlived the
+wait. Only processes of the script's user outside the job's known sessions are read, and
+each only once. Reading ``/proc/<pid>/stat`` takes no such lock.
 
 A process counts as alive while it exists and is not a zombie whose last thread exited. A
 zombie has released its memory and devices, and only its parent can reap it, which may be a
@@ -53,8 +65,14 @@ PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE = 71
 # The environment variable that marks the processes the job script starts. Its value is
 # unique to one run of the script, so another job's processes never match.
 JOB_PROCESS_MARKER = "VS_SLURM_JOB_PROCESS"
-_TERM_POLL_SECONDS = "0.2"
-_KILL_POLL_SECONDS = "0.5"
+# How often teardown scans /proc while it waits. A scan reads every process's stat (about
+# 1,400 on a GPU node), so it is not cheap; half a second keeps it a small share of a core.
+_POLL_SECONDS = "0.5"
+# Bounds on each read that takes another process's mmap_lock: its environment during a
+# scan, and the command lines in the final report. The scan's own bound is this times the
+# number of the user's processes outside the job whose environment it has not yet read.
+_READ_BOUND_SECONDS = 1
+_REPORT_BOUND_SECONDS = 5
 
 
 def teardown_shell(
@@ -75,26 +93,55 @@ def teardown_shell(
     return [
         'vs_groups=""',
         'vs_alive=""',
+        'vs_unknown=""',
+        'vs_fresh=""',
+        'vs_plain=""',
         'vs_token="${SLURM_JOB_ID:-}.$$.$RANDOM$RANDOM"',
-        # Adds the session of every marked process to vs_groups, then sets vs_alive to the
-        # live processes of those sessions. Runs in the script's own shell, so the
-        # sessions it learns persist; its own helpers (grep) run in the script's session,
-        # which is never the job's. Fields after the command name in /proc/<pid>/stat:
-        # $1 state, $4 session, $18 threads.
+        # A process is the job's when its environment holds the marker and, under Slurm,
+        # this job's id: a nested job submitted by a marked command inherits the marker
+        # (sbatch exports the caller's environment) but gets its own SLURM_JOB_ID.
+        f'vs_match="-e {JOB_PROCESS_MARKER}=$vs_token"',
+        "vs_want=1",
+        'if [ -n "${SLURM_JOB_ID:-}" ]; then',
+        '  vs_match="$vs_match -e SLURM_JOB_ID=$SLURM_JOB_ID"',
+        "  vs_want=2",
+        "fi",
+        # Reads the environment of process $1 (start time $2, session $3), which is not in
+        # a known session, and adds its session to vs_groups when it is the job's. Reading
+        # another process's environment takes that process's mmap_lock, which an exiting
+        # or driver-stuck process can hold indefinitely, so the read is bounded, and a read
+        # that did not finish leaves the process in vs_unknown, to be read again. A process
+        # read once and not the job's is remembered by pid and start time in vs_plain.
+        # Another user's environment is unreadable, so only the script's user's are read.
+        "vs_check() {",
+        "  local count",
+        '  [ -O "/proc/$1" ] || return 0',
+        '  case " $vs_plain " in *" $1.$2 "*) return 0 ;; esac',
+        f"  count=$(timeout -s KILL {_READ_BOUND_SECONDS} grep -czxF $vs_match"
+        ' "/proc/$1/environ" 2>/dev/null)',
+        "  case $? in",
+        '    124 | 137) vs_unknown="$vs_unknown $1" ;;',
+        '    *) if [ "$count" = "$vs_want" ]; then',
+        '         vs_groups="$vs_groups $3"',
+        '         vs_fresh="$vs_fresh -$3 $1"',
+        '       else vs_plain="$vs_plain $1.$2"; fi ;;',
+        "  esac",
+        "}",
+        # Sets vs_alive to the live processes of the job's sessions, first adding the
+        # session of every marked process outside them (vs_fresh lists those found by this
+        # call). Runs in the script's own shell, so the sessions it learns persist; its own
+        # helpers run in the script's session, which is never the job's: a marked command
+        # is in it only for a moment, between its fork and its setsid. Fields after the
+        # command name in /proc/<pid>/stat: $1 state, $4 session, $18 threads, $20 start
+        # time. Reading stat takes no lock of the process's, so it never blocks.
         "vs_scan() {",
         "  local file pid line own",
-        # A marked command is in the script's own session for a moment, between its fork
-        # and its setsid; that session (the script's process group too) is never the job's.
         "  read -r line < /proc/$$/stat",
         "  set -- ${line##*) }",
         "  own=$4",
-        f'  for file in $(grep -lzxF -e "{JOB_PROCESS_MARKER}=$vs_token"'
-        " /proc/[0-9]*/environ 2>/dev/null); do",
-        '    read -r line 2>/dev/null < "${file%/environ}/stat" || continue',
-        "    set -- ${line##*) }",
-        '    case " $own 0 $vs_groups " in *" ${4:-0} "*) ;; *) vs_groups="$vs_groups $4" ;; esac',
-        "  done",
         '  vs_alive=""',
+        '  vs_unknown=""',
+        '  vs_fresh=""',
         "  for file in /proc/[0-9]*/stat; do",
         "    pid=${file#/proc/}",
         "    pid=${pid%/stat}",
@@ -103,9 +150,10 @@ def teardown_shell(
         "    set -- ${line##*) }",
         # A zombie is gone only once its last thread is.
         '    [ "${1:-Z}" != Z ] || [ "${18:-1}" -gt 1 ] || continue',
+        '    case " $own 0 $vs_groups " in *" ${4:-0} "*) ;; *) vs_check "$pid" "$20" "$4" ;; esac',
         '    case " $vs_groups " in *" ${4:-0} "*) vs_alive="$vs_alive $pid" ;; esac',
         "  done",
-        '  [ -n "$vs_alive" ]',
+        '  [ -n "$vs_alive$vs_unknown" ]',
         "}",
         "vs_signal() {",
         "  local id",
@@ -113,23 +161,33 @@ def teardown_shell(
         '  for id in $vs_alive; do kill -"$1" "$id" 2>/dev/null; done',
         "}",
         "vs_stop_groups() {",
-        "  local status=$? deadline",
+        "  local status=$? deadline id",
         '  [ -n "$vs_groups" ] || return 0',
         "  trap '' TERM",
         "  vs_scan",
         "  vs_signal TERM",
         f"  deadline=$((SECONDS + {stop_grace_seconds}))",
-        f'  while vs_scan && [ "$SECONDS" -lt "$deadline" ]; do sleep {_TERM_POLL_SECONDS}; done',
+        '  while vs_scan && [ "$SECONDS" -lt "$deadline" ]; do',
+        # A session found after the first scan gets its SIGTERM too, once.
+        '    for id in $vs_fresh; do kill -TERM -- "$id" 2>/dev/null; done',
+        f"    sleep {_POLL_SECONDS}",
+        "  done",
         "  vs_signal KILL",
         f"  deadline=$((SECONDS + {exit_wait_seconds}))",
         '  while vs_scan && [ "$SECONDS" -lt "$deadline" ]; do',
         "    vs_signal KILL",
-        f"    sleep {_KILL_POLL_SECONDS}",
+        f"    sleep {_POLL_SECONDS}",
         "  done",
-        '  [ -n "$vs_alive" ] || return 0',
-        f'  echo "vs-slurm: these processes of the job were still alive {exit_wait_seconds} s'
-        ' after SIGKILL; Slurm may fail to end them and drain the node:" >&2',
-        "  ps -o pid,ppid,pgid,sid,nlwp,stat,etime,args -p \"$(echo $vs_alive | tr ' ' ',')\" >&2",
+        '  [ -n "$vs_alive$vs_unknown" ] || return 0',
+        f'  [ -z "$vs_alive" ] || echo "vs-slurm: these processes of the job were still alive'
+        f" {exit_wait_seconds} s after SIGKILL; Slurm may fail to end them and drain the"
+        ' node:$vs_alive" >&2',
+        '  [ -z "$vs_unknown" ] || echo "vs-slurm: reading the environment of these processes'
+        f" did not finish within {_READ_BOUND_SECONDS} s for {exit_wait_seconds} s after"
+        " SIGKILL, so whether they are the job's is unknown:$vs_unknown\" >&2",
+        # ps reads each process's command line, which takes its mmap_lock too.
+        f"  timeout -s KILL {_REPORT_BOUND_SECONDS} ps -o pid,ppid,pgid,sid,nlwp,stat,etime,args"
+        " -p \"$(echo $vs_alive $vs_unknown | tr ' ' ',')\" >&2",
         f'  [ "$status" -ne {kept_exit_code} ] || return 0',
         f"  printf '%s\\n' {outlived} > {status}",
         f"  exit {outlived}",

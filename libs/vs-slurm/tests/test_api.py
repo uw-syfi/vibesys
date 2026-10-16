@@ -918,12 +918,54 @@ def test_teardown_ends_every_session_the_job_started_and_outlives_them_within_a_
     assert f"deadline=$((SECONDS + {grace}))" in teardown[term:kill]
     assert f"deadline=$((SECONDS + {exit_wait}))" in teardown[kill:]
     assert teardown.count('while vs_scan && [ "$SECONDS" -lt "$deadline" ]') == 2
-    failure = teardown[teardown.index('[ -n "$vs_alive" ] || return 0') :]
+    failure = teardown[teardown.index('[ -n "$vs_alive$vs_unknown" ] || return 0') :]
     assert f"still alive {exit_wait} s after SIGKILL" in failure
     # A service that never became ready keeps its status; any other job fails with 71.
     kept = failure.index(f'[ "$status" -ne {SERVICE_NOT_READY_EXIT_CODE} ] || return 0')
     assert kept < failure.index(f"exit {PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE}")
     assert f"printf '%s\\n' {PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE} > " in failure[kept:]
+
+
+@given(grace=st.integers(min_value=1, max_value=20), exit_wait=st.integers(1, 1800))
+@settings(max_examples=examples(pr=5, nightly=20), deadline=None)
+def test_teardown_bounds_every_read_that_can_block_on_another_process(
+    grace: int, exit_wait: int
+) -> None:
+    """Review (2026-10-16): one unbounded read of /proc/*/environ could hang the teardown.
+
+    Reading another process's environment or command line takes that process's mmap_lock,
+    which an exiting or driver-stuck process (the case teardown exists for) can hold
+    indefinitely; the script then never reached its deadline, never exited 71, and the job
+    outlived its time limit. Every such read now runs under ``timeout -s KILL``, and a read
+    that did not finish keeps the teardown waiting (the process is unknown) instead of
+    ending the scan. A real-tier test cannot hold another process's mmap_lock from user
+    space without privileges, so the script's shape is pinned here.
+    """
+    with tempfile.TemporaryDirectory() as temporary:
+        script, _submission = _submitted_service_job(
+            Path(temporary),
+            _config(
+                service_stop_grace_seconds=grace,
+                process_exit_wait_seconds=exit_wait,
+                sbatch_arguments=(),
+            ),
+        )
+
+    readers = [
+        line
+        for line in script.splitlines()
+        if re.search(r"/environ|/cmdline|\bps\b|\bpgrep\b|\bpkill\b", line)
+    ]
+    assert len(readers) == 2, readers
+    assert all(re.search(r"\btimeout -s KILL \d+ (grep|ps) ", line) for line in readers), readers
+    scan = script[script.index("vs_scan() {") : script.index("vs_signal() {")]
+    check = script[script.index("vs_check() {") : script.index("vs_scan() {")]
+    # A read cut short (124, or 137 when timeout kills itself too) leaves the process
+    # unknown, and an unknown process keeps the scan reporting the job as not yet gone.
+    assert '124 | 137) vs_unknown="$vs_unknown $1" ;;' in check
+    assert scan.rstrip().endswith('[ -n "$vs_alive$vs_unknown" ]\n}')
+    teardown = script[script.index("vs_stop_groups() {") :]
+    assert '[ -n "$vs_alive$vs_unknown" ] || return 0' in teardown
 
 
 def test_jobs_are_submitted_without_scheduler_requeue(tmp_path: Path) -> None:

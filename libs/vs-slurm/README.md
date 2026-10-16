@@ -92,9 +92,16 @@ evaluation is not reused; a service that never became ready keeps its code 70.
 Both commands start with the environment variable `VS_SLURM_JOB_PROCESS` set to
 a token unique to the job script, so a descendant that left their sessions with
 `setsid` (Ray and daemons do) is found by that marker, and its own session joins
-the job's. Not found: a descendant that leaves the sessions and also clears its
-environment (`env -i setsid ...`), or that is already exiting when teardown
-starts; Slurm's own step kill still ends it, but the script does not wait for it.
+the job's; a process found that way gets SIGTERM too while the grace lasts. A
+process also needs the job's own `SLURM_JOB_ID` to match, so a nested job that a
+command submitted, which inherits the marker, is left alone. Not found: a
+descendant that leaves the sessions and also clears its environment
+(`env -i setsid ...`), or that is already exiting when teardown starts; Slurm's
+own step kill still ends it, but the script does not wait for it.
+Reading another process's environment can block while that process is stuck in
+the kernel, so each read, and the `ps` report, is cut off after a few seconds.
+A process of the job's user whose environment read was cut off for the whole
+wait counts as possibly the job's: the script names it and exits with code 71.
 
 The grace plus the wait must be shorter than a `--time`/`-t` limit in
 `sbatch_arguments`: an explicit wait that does not fit is rejected, and the

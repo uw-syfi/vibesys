@@ -24,6 +24,13 @@ processes by the sessions it started. Here a tracer holds a worker's sibling thr
 exit after the main thread exited, and a command leaves behind a process in a session of
 its own, with a child whose environment is empty.
 
+Second review (2026-10-16): a nested job submitted by the command inherited the marker and
+was killed, and a session found after the first scan got only SIGKILL. A third finding, an
+environment read that blocks on a stuck process's mmap_lock, has no real-tier test: holding
+another process's mmap_lock, or making a read of its environment block, needs privileges
+(``userfaultfd`` for kernel faults, FUSE, or a stuck driver) that a test host does not
+reliably grant, so ``libs/vs-slurm/tests/test_api.py`` pins that every such read is bounded.
+
 Each job runs on the executing Fake Slurm cluster, which runs the exact production-generated
 job script under ``/bin/bash`` inside ``sbatch``. The transport timeout is the hang guard.
 The script's shape and the configuration's bounds are pinned in the deterministic tier by
@@ -205,6 +212,61 @@ _ESCAPEE = textwrap.dedent(
     """
 )
 
+# A command that submits a nested job: the nested job's process inherits the command's
+# environment, the job's marker included (sbatch exports it), but runs under a job id of its
+# own, in a session of its own. It ignores SIGTERM, so only teardown's SIGKILL would end it.
+_NESTED = textwrap.dedent(
+    """
+    import os, pathlib, signal, subprocess, sys
+
+    root = pathlib.Path(sys.argv[1])
+    holder = (
+        "import os, pathlib, signal, sys; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); signal.pause()"
+    )
+    env = {**os.environ, "SLURM_JOB_ID": "nested-" + os.environ["SLURM_JOB_ID"]}
+    subprocess.Popen(
+        [sys.executable, "-c", holder, str(root / "nested.pid")], env=env, start_new_session=True
+    )
+    while not (root / "nested.pid").is_file():
+        signal.sigtimedwait([], 0.05)
+    """
+)
+
+# A command whose child leaves the job's sessions only when teardown's SIGTERM arrives, so
+# teardown finds the new session after its first scan: on SIGTERM the child forks a process
+# that calls setsid and then exits on its own SIGTERM, noting that it got one. SIGTERM stays
+# blocked in that process until its handler is in place.
+_LATE_ESCAPEE = textwrap.dedent(
+    """
+    import os, pathlib, signal, sys
+
+    root = pathlib.Path(sys.argv[1])
+
+    def leave(*_):
+        signal.pthread_sigmask(signal.SIG_BLOCK, [signal.SIGTERM])
+        if os.fork() == 0:
+            os.setsid()
+            def noted(*_):
+                (root / "late-termed").write_text("yes")
+                os._exit(0)
+            signal.signal(signal.SIGTERM, noted)
+            (root / "late.pid").write_text(str(os.getpid()))
+            signal.pthread_sigmask(signal.SIG_UNBLOCK, [signal.SIGTERM])
+            while True:
+                signal.pause()
+        os._exit(0)
+
+    if os.fork() == 0:
+        signal.signal(signal.SIGTERM, leave)
+        (root / "leaver.pid").write_text(str(os.getpid()))
+        while True:
+            signal.pause()
+    while not (root / "leaver.pid").is_file():
+        signal.sigtimedwait([], 0.05)
+    """
+)
+
 pytestmark = pytest.mark.skipif(
     not sys.platform.startswith("linux")
     or shutil.which("setsid") is None
@@ -245,6 +307,7 @@ def _run_job(
     command: tuple[str, ...] = ("true",),
     service: bool = True,
     exit_wait_seconds: int = int(HANG_GUARD_S),
+    grace_seconds: int = _GRACE_SECONDS,
 ) -> SlurmJobResult:
     service_root = tmp_path / "service"
     service_program = tmp_path / "service.py"
@@ -261,7 +324,7 @@ def _run_job(
             kind="connector",
             command=(sys.executable, "-m", "vs_slurm.fake_connector", str(cluster)),
         ),
-        service_stop_grace_seconds=_GRACE_SECONDS,
+        service_stop_grace_seconds=grace_seconds,
         process_exit_wait_seconds=exit_wait_seconds,
         transport_timeout_seconds=int(HANG_GUARD_S) * 2,
     )
@@ -468,3 +531,54 @@ def test_job_script_ends_a_process_that_left_the_job_session_and_its_children(
             if pid_file.is_file():
                 with suppress(ProcessLookupError):
                     os.kill(int(pid_file.read_text(encoding="utf-8")), signal.SIGKILL)
+
+
+def test_job_script_leaves_a_nested_job_that_inherited_its_marker_alone(tmp_path: Path) -> None:
+    """Review (2026-10-16): a nested sbatch job inherits the marker; it is not this job's."""
+    root = tmp_path / "service"
+    root.mkdir()
+    program = tmp_path / "nested.py"
+    program.write_text(_NESTED, encoding="utf-8")
+    pid_file = root / "nested.pid"
+    try:
+        result = _run_job(
+            tmp_path, command=(sys.executable, str(program), str(root)), service=False
+        )
+
+        assert result.exit_code == 0, result.output
+        # At the merge base teardown matched the marker alone and killed the nested job.
+        assert _alive(int(pid_file.read_text(encoding="utf-8")))
+    finally:
+        if pid_file.is_file():
+            with suppress(ProcessLookupError):
+                os.kill(int(pid_file.read_text(encoding="utf-8")), signal.SIGKILL)
+
+
+def test_job_script_sends_sigterm_to_a_session_it_finds_after_its_first_scan(
+    tmp_path: Path,
+) -> None:
+    """Review (2026-10-16): a session found after the first scan got only SIGKILL."""
+    root = tmp_path / "service"
+    root.mkdir()
+    program = tmp_path / "late.py"
+    program.write_text(_LATE_ESCAPEE, encoding="utf-8")
+    pid_file = root / "late.pid"
+    try:
+        # The grace is as long as the configuration allows, and the late process exits
+        # on SIGTERM, so a passing run ends well before it.
+        result = _run_job(
+            tmp_path,
+            command=(sys.executable, str(program), str(root)),
+            service=False,
+            grace_seconds=20,
+        )
+
+        assert result.exit_code == 0, result.output
+        # At the merge base it got only SIGKILL, at the end of the grace.
+        assert (root / "late-termed").is_file(), result.output
+        assert not _alive(int(pid_file.read_text(encoding="utf-8")))
+    finally:
+        for name in ("late.pid", "leaver.pid"):
+            if (root / name).is_file():
+                with suppress(ProcessLookupError):
+                    os.kill(int((root / name).read_text(encoding="utf-8")), signal.SIGKILL)
