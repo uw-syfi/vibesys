@@ -27,6 +27,7 @@ function fakeBridge(): WelcomeBridge {
     setAppearance: appearance => ok({...STORED, appearance}),
     setNotifications: enabled => ok({...STORED, notifications: {enabled}}),
     archive: () => ok(STORED),
+    machines: () => ok([]),
     onListing: ignore,
     onRecent: ignore,
     onPreferences: ignore,

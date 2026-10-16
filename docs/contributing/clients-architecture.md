@@ -60,7 +60,7 @@ clients/
   libs/settings/    @vibesys/settings         settings store, atomic files       -> hosts, runs
   features/<x>/     @vibesys/feature-<x>      run-view, gateway-connect, replay, hosts,
                                               start-run, run-control, recent-runs; strict:
-                                              app-shell, settings
+                                              app-shell, settings, machines
   apps/desktop-main      @vibesys/app-desktop-main      composition only (Electron main), and the
                                                         sandboxed preloads
   apps/desktop-renderer  @vibesys/app-desktop-renderer  composition only (Electron renderer)
@@ -616,7 +616,7 @@ names a missing or extra one.
 | `@vibesys/core-state` | core | deleted: split into `store` and `run-state` | domain split (#1949) |
 | `@vibesys/transport` | core | exists: `.` and `./testing` (the shared `FakeClock`) are `neutral`, `./websocket` is `dom` | backend-client split (#1910) |
 | `@vibesys/transport-node` | domain | exists: the Unix-socket `ServerClient`; desktop's ssh and local-host links join it with the connection manager | backend-client split (#1910) |
-| `@vibesys/hosts` | core | exists: host identity and keys, labels, the checkout and project path rules (`HostValidationError`), a host's listed runs with their phase text (`instancePhaseText`), and what the window shows about a connection; depends on `contracts` | domain split (#1949) |
+| `@vibesys/hosts` | core | exists: host identity and keys, labels, the checkout and project path rules (`HostValidationError`), a host's listed runs with their phase text (`instancePhaseText`), path completion for host path fields (`completionStep`, moved down from `feature-hosts`), and what the window shows about a connection; depends on `contracts`, `store` | domain split (#1949) |
 | `@vibesys/runs` | domain | exists: run, task, and instance ids, a recent run's status from its host's listing, the exact-resume policy, the stop flow; depends on `contracts`, `hosts` | domain split (#1949) |
 | `@vibesys/machine` | core | exists: `actorStore`, `clockFrom`, `unprovided` (`.`) and `checkMachine` (`./testing`); domain-free | state architecture (#1950) |
 | `@vibesys/run-session` | domain | exists: the run fold's wiring (`runStep`), the session lifecycle (`sessionMachine`, three parallel regions: start-up, recovery, and the fenced replacement snapshot), its ports, the run connection over a control transport (`connectRun`), and `WebSession`, with `./testing` (an in-memory control transport and page lifecycle, and `sessionWith`) | domain split (#1949) |
@@ -631,6 +631,7 @@ names a missing or extra one.
 | `apps/desktop-renderer` | app | exists: composition only (one `dom` entry, no exports): the welcome view's entry, its stores wired to the welcome preload's bridge, and the view composed from the desktop features | desktop renderer (phase 7 of #1878) |
 | `@vibesys/feature-app-shell` | feature (strict) | exists: the sidebar store (Live, Recent with the last 20 and Show all, Machines, the selected screen) over the hosts' listings, Recent and archived runs, with seeded-sequence invariant tests; the shell layout and placeholder screens (`./renderer`); the run notices a listing calls for, raised by `./main` when Settings enables them | redesign (#2842) |
 | `@vibesys/feature-settings` | feature (strict) | exists: the Settings store (appearance and notifications, saved under tokens) and screen; `./main` answers the preference requests and keeps Electron's `nativeTheme` on the appearance's mode | redesign (#2842) |
+| `@vibesys/feature-machines` | feature (strict) | exists: the Machines store (the saved machines, each one's status a selector over its last report: Ready, Checkout not found, Sign in, or Can't connect; the Add form and the checkout form, whose path suggestions carry each checkout's version), with seeded-sequence invariant tests, and the screen (`./renderer`); `./main` lists the machines from `hosts.json`, reports a machine's facts from its connection's state and `machine.describe`, inspects paths (`checkout.inspect`) and removes a machine. Adding a machine or changing its checkout is `feature-hosts`' checked `setCheckout` | redesign (#2843) |
 | `apps/desktop-shell` | app (strict) | exists: the redesigned window's composition (`shell.html`), loaded in the welcome view's place when `VIBESYS_DESKTOP_SHELL=next`; its Playwright journey runs against a Fake of the welcome bridge | redesign (#2842) |
 | `apps/ui-gallery` | app | exists: development only, never shipped (one `dom` entry, no exports): the component gallery and its screenshot and axe suite (see [The gallery and its screenshots](#the-gallery-and-its-screenshots)) | none |
 | `apps/desktop-main` | app | exists: composition only (Electron main, `.`, `node`): the lifecycle, page confinement, the window, launch arguments, and the welcome requests routed to the features' `./main` controllers; and the two sandboxed preloads (`./preload-run`, `./preload-welcome`, `preload`). Its build copies the two page bundles into `dist/ui` | desktop main process (phase 8 of #1878) |

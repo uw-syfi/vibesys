@@ -128,6 +128,10 @@ function cases(random: Seeded): Case[] {
       bridge => bridge.archive({host: key, runId: name}, force),
       {kind: 'archive', run: {host: key, runId: name}, archived: force},
     ],
+    [bridge => bridge.machines(), {kind: 'machines'}],
+    [bridge => bridge.machine(key), {kind: 'machine', host}],
+    [bridge => bridge.inspectCheckout(key, path), {kind: 'inspect-checkout', host, path}],
+    [bridge => bridge.removeMachine(key), {kind: 'remove-machine', host}],
   ];
 }
 

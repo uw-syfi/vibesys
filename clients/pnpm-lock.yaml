@@ -39,6 +39,9 @@ importers:
       '@vibesys/feature-hosts':
         specifier: workspace:*
         version: link:../../features/hosts
+      '@vibesys/feature-machines':
+        specifier: workspace:*
+        version: link:../../features/machines
       '@vibesys/feature-run-control':
         specifier: workspace:*
         version: link:../../features/run-control
@@ -149,6 +152,9 @@ importers:
       '@vibesys/feature-app-shell':
         specifier: workspace:*
         version: link:../../features/app-shell
+      '@vibesys/feature-machines':
+        specifier: workspace:*
+        version: link:../../features/machines
       '@vibesys/feature-run-page':
         specifier: workspace:*
         version: link:../../features/run-page
@@ -539,6 +545,46 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  features/machines:
+    dependencies:
+      '@vibesys/connection':
+        specifier: workspace:*
+        version: link:../../libs/connection
+      '@vibesys/hosts':
+        specifier: workspace:*
+        version: link:../../libs/hosts
+      '@vibesys/ipc':
+        specifier: workspace:*
+        version: link:../../libs/ipc
+      '@vibesys/settings':
+        specifier: workspace:*
+        version: link:../../libs/settings
+      '@vibesys/store':
+        specifier: workspace:*
+        version: link:../../libs/store
+      '@vibesys/ui':
+        specifier: workspace:*
+        version: link:../../libs/ui
+      react:
+        specifier: 19.1.1
+        version: 19.1.1
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      '@types/react':
+        specifier: 19.1.13
+        version: 19.1.13
+      '@vibesys/transport':
+        specifier: workspace:*
+        version: link:../../libs/transport
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
   features/recent-runs:
     dependencies:
       '@vibesys/hosts':
@@ -880,6 +926,9 @@ importers:
       '@vibesys/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@vibesys/store':
+        specifier: workspace:*
+        version: link:../store
     devDependencies:
       '@types/bun':
         specifier: 1.4.2

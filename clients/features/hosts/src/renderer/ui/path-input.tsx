@@ -12,7 +12,7 @@ import {
   type CompletionField,
   type CompletionState,
   suggestions,
-} from '../../state/completion.js';
+} from '../../state/index.js';
 
 export type PathInputProps = {
   readonly field: CompletionField;

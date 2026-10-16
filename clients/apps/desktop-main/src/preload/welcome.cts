@@ -45,6 +45,10 @@ const CHANNELS: Channels = {
   setAppearance: 'vibesys:welcome:set-appearance',
   setNotifications: 'vibesys:welcome:set-notifications',
   archive: 'vibesys:welcome:archive',
+  machines: 'vibesys:welcome:machines',
+  machine: 'vibesys:welcome:machine',
+  inspectCheckout: 'vibesys:welcome:inspect-checkout',
+  removeMachine: 'vibesys:welcome:remove-machine',
 };
 const EVENTS: Events = {
   chrome: 'vibesys:welcome:chrome',
@@ -102,6 +106,10 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
     setAppearance: appearance => call(CHANNELS.setAppearance, appearance),
     setNotifications: enabled => call(CHANNELS.setNotifications, enabled),
     archive: (run, archived) => call(CHANNELS.archive, run, archived),
+    machines: () => call(CHANNELS.machines),
+    machine: host => call(CHANNELS.machine, host),
+    inspectCheckout: (host, path) => call(CHANNELS.inspectCheckout, host, path),
+    removeMachine: host => call(CHANNELS.removeMachine, host),
     onChrome: on(EVENTS.chrome),
     onRecent: on(EVENTS.recent),
     onShowHost: on(EVENTS.showHost),

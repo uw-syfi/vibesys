@@ -1,10 +1,11 @@
 /**
- * The app shell's composition: the sidebar store and the Settings store over the welcome bridge,
+ * The app shell's composition: the sidebar, Settings and Machines stores over the welcome bridge,
  * the theme following the Settings store, and the shell rendering the selected screen: Settings,
- * the Run screen for a selected run, or a placeholder for a screen not built yet.
+ * Machines, the Run screen for a selected run, or a placeholder for a screen not built yet.
  */
 import {AppShell, createSidebarStore, PlaceholderScreen} from '@vibesys/feature-app-shell/renderer';
 import type {Screen, SidebarState} from '@vibesys/feature-app-shell/state';
+import {createMachinesStore, MachinesScreen} from '@vibesys/feature-machines/renderer';
 import {type RunPageNavigation, RunScreen, useRunPage} from '@vibesys/feature-run-page/renderer';
 import {runRecord} from '@vibesys/feature-run-page/state';
 import {
@@ -30,6 +31,7 @@ export interface ShellStores {
   readonly settings: ReturnType<typeof createSettingsStore>;
   readonly bridge: WelcomeBridge;
   readonly schedule: Schedule;
+  readonly machines: ReturnType<typeof createMachinesStore>;
 }
 
 const DEFAULT_APPEARANCE = {mode: 'system', light: 'paper', dark: 'ink'} as const;
@@ -56,7 +58,13 @@ export function createShellStores(
     if (state.kind === 'ready') applyTheme(shownTheme(state, DEFAULT_APPEARANCE), document);
   };
   settings.subscribe(follow);
-  return {sidebar: createSidebarStore(bridge), settings, bridge, schedule};
+  return {
+    sidebar: createSidebarStore(bridge),
+    settings,
+    machines: createMachinesStore(bridge),
+    bridge,
+    schedule,
+  };
 }
 
 function useStore<S, A>(store: Store<S, A>): S {
@@ -110,13 +118,23 @@ export function Shell(props: {
   readonly stores: ShellStores;
   readonly version: string;
 }): JSX.Element {
-  const {sidebar, settings} = props.stores;
+  const {sidebar, settings, machines} = props.stores;
   const sidebarState = useStore(sidebar.store);
   const settingsState = useStore(settings);
+  const machinesState = useStore(machines);
   const screen = (selected: Screen): JSX.Element => {
     switch (selected.kind) {
       case 'settings':
         return <SettingsScreen state={settingsState} dispatch={settings.dispatch} />;
+      case 'machines':
+        return (
+          <MachinesScreen
+            state={machinesState}
+            dispatch={machines.dispatch}
+            // New run does not take a machine yet; it opens on its own until it lands.
+            newRun={() => sidebar.store.dispatch({type: 'select', screen: {kind: 'new-run'}})}
+          />
+        );
       case 'run':
         return (
           <RunRoute

@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@vibesys/feature-app-shell": "workspace:*",
+    "@vibesys/feature-machines": "workspace:*",
     "@vibesys/feature-run-page": "workspace:*",
     "@vibesys/feature-settings": "workspace:*",
     "@vibesys/hosts": "workspace:*",

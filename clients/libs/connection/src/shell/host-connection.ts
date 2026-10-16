@@ -125,7 +125,7 @@ function terminalError(phase: Phase): ConnectionError | null {
     case 'auth-needed':
       return new ConnectionError('auth', phase.detail);
     case 'incompatible':
-      return new ConnectionError('incompatible', phase.detail);
+      return new ConnectionError('incompatible', phase.detail, {checkout: phase.checkout});
     case 'closed':
       return new ConnectionError('link', 'the connection was closed');
     default:

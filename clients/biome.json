@@ -71,6 +71,8 @@
         "apps/desktop-shell/src/**/*.tsx",
         "features/app-shell/src/**/*.ts",
         "features/app-shell/src/**/*.tsx",
+        "features/machines/src/**/*.ts",
+        "features/machines/src/**/*.tsx",
         "features/settings/src/**/*.ts",
         "features/settings/src/**/*.tsx",
         "features/run-page/src/**/*.ts",

@@ -573,6 +573,17 @@ store (`@vibesys/feature-app-shell`) folds the listings, Recent and the archived
 Settings store (`@vibesys/feature-settings`) saves each change under a token, so a slow save
 cannot undo a newer choice. Both have invariants checked over seeded action sequences.
 
+The Machines store (`@vibesys/feature-machines`) keeps the saved machines and derives each one's
+status from its last report rather than storing one: `Sign in` when the connection waits for
+credentials, `Checkout not found` when the bootstrap reports no
+VibeSys checkout at the saved path (the connection manager's `incompatible` phase carries that as
+a typed `checkout` problem, `missing` or `too-old`), `Can't connect` for any other failure, and
+otherwise `Ready` with what `machine.describe` says. Adding a machine or changing its checkout is
+the hosts feature's `setCheckout`, which starts the helper from the path before it saves it; path
+suggestions are `paths.complete`, each listed checkout labelled with its version by
+`checkout.inspect`, so they need a helper already running on that host (This Mac, or a machine
+whose checkout works). Its invariants are checked over seeded action sequences.
+
 The Run screen (`@vibesys/feature-run-page`) has one store per shown run, a reducer over the run's
 registry record (from the host's watch, through the sidebar's listings) and its log streams. The
 phase is the record's: the screen never shows a phase the host did not report, except that a Stop

@@ -1,16 +1,17 @@
 import {describe, expect, test} from 'bun:test';
-import type {PathCompletion, WelcomeResult} from '@vibesys/ipc';
 import {checkModel, type Seeded} from '@vibesys/store/testing';
 import {
   COMPLETION_EMPTY,
   type CompletionAction,
+  type CompletionResult,
   completionStep,
+  type PathCompletion,
   splitPath,
   suggestions,
-} from './completion.js';
+} from './index.js';
 
-function failed<T>(error: string): WelcomeResult<T> {
-  return {ok: false, error, authNeeded: false};
+function failed(error: string): CompletionResult {
+  return {ok: false, error};
 }
 
 const COMPLETION: PathCompletion = {

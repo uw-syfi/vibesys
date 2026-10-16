@@ -16,6 +16,7 @@ import {
 } from '@vibesys/connection';
 import {RunNotifier} from '@vibesys/feature-app-shell/main';
 import {Hosts} from '@vibesys/feature-hosts/main';
+import {MachinesMain} from '@vibesys/feature-machines/main';
 import {RunControl} from '@vibesys/feature-run-control/main';
 import {PreferencesMain} from '@vibesys/feature-settings/main';
 import type {HostId} from '@vibesys/hosts';
@@ -154,6 +155,7 @@ async function openWindow(
     window,
     welcome,
     hosts,
+    machines: machinesOver(settings, hosts),
     runs,
     settings,
     preferences,
@@ -177,6 +179,15 @@ async function openWindow(
   powerMonitor.on('resume', () => manager.wake());
   watchNetwork(manager);
   return desktop;
+}
+
+/** The machines, over the settings store and the hosts' checkouts and connections. */
+function machinesOver(settings: SettingsStore, hosts: Hosts): MachinesMain {
+  return new MachinesMain({
+    settings,
+    checkout: id => hosts.checkout(id),
+    connection: id => hosts.connection(id),
+  });
 }
 
 async function connectionManager(): Promise<ConnectionManager> {

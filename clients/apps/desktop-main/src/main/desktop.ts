@@ -1,10 +1,11 @@
 /**
  * The desktop's composition of its features over the one window: it routes each validated welcome
- * request to the feature that owns it (`hosts`, `run-control`), keeps the window's state
+ * request to the feature that owns it (`hosts`, `machines`, `run-control`, `settings`), keeps the window's state
  * (`ChromeState`) in step, and opens what a launch asked for.
  */
 
 import type {Hosts} from '@vibesys/feature-hosts/main';
+import type {MachinesMain} from '@vibesys/feature-machines/main';
 import type {RunControl} from '@vibesys/feature-run-control/main';
 import type {PreferencesMain} from '@vibesys/feature-settings/main';
 import {shellWords} from '@vibesys/feature-start-run/state';
@@ -46,6 +47,7 @@ export interface DesktopDeps {
     | 'signIn'
     | 'tasks'
   >;
+  readonly machines: Pick<MachinesMain, 'machines' | 'report' | 'inspect' | 'remove'>;
   readonly runs: Pick<
     RunControl,
     | 'attach'
@@ -275,6 +277,14 @@ export class Desktop {
       case 'set-notifications':
       case 'archive':
         return this.#deps.preferences.answer(request);
+      case 'machines':
+        return this.#deps.machines.machines();
+      case 'machine':
+        return this.#deps.machines.report(request.host);
+      case 'inspect-checkout':
+        return this.#deps.machines.inspect(request.host, request.path);
+      case 'remove-machine':
+        return this.#deps.machines.remove(request.host);
     }
   }
 }

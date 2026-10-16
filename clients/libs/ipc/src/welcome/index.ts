@@ -3,7 +3,7 @@
  * request, and the events the main process sends.
  *
  * The requests are grouped by the feature that makes them (`hosts.ts`, `start-run.ts`,
- * `run-control.ts`, `settings.ts`; the overview is the app's own), each group owning its channel names, the
+ * `run-control.ts`, `settings.ts`, `machines.ts`; the overview is the app's own), each group owning its channel names, the
  * bridge methods its view calls, and the parser the main process runs on what arrives. This module
  * composes them: `WELCOME_CHANNELS` and `WelcomeBridge` are the union of the groups, and
  * `parseWelcomeRequest` sends a channel to its group's parser.
@@ -16,6 +16,12 @@ import {
   type HostsWelcomeBridge,
   parseHostsRequest,
 } from './hosts.js';
+import {
+  MACHINES_CHANNELS,
+  type MachinesRequest,
+  type MachinesWelcomeBridge,
+  parseMachinesRequest,
+} from './machines.js';
 import {
   parseRunControlRequest,
   RUN_CONTROL_CHANNELS,
@@ -47,6 +53,7 @@ export const WELCOME_CHANNELS = {
   ...START_RUN_CHANNELS,
   ...RUN_CONTROL_CHANNELS,
   ...SETTINGS_CHANNELS,
+  ...MACHINES_CHANNELS,
 } as const;
 
 type WelcomeChannel = (typeof WELCOME_CHANNELS)[keyof typeof WELCOME_CHANNELS];
@@ -79,6 +86,10 @@ const WELCOME_ARGUMENT_COUNTS = {
   [WELCOME_CHANNELS.setAppearance]: 1,
   [WELCOME_CHANNELS.setNotifications]: 1,
   [WELCOME_CHANNELS.archive]: 2,
+  [WELCOME_CHANNELS.machines]: 0,
+  [WELCOME_CHANNELS.machine]: 1,
+  [WELCOME_CHANNELS.inspectCheckout]: 2,
+  [WELCOME_CHANNELS.removeMachine]: 1,
 } as const satisfies Readonly<Record<WelcomeChannel, number>>;
 
 /**
@@ -89,7 +100,8 @@ export interface WelcomeBridge
   extends HostsWelcomeBridge,
     StartRunWelcomeBridge,
     RunControlWelcomeBridge,
-    SettingsWelcomeBridge {
+    SettingsWelcomeBridge,
+    MachinesWelcomeBridge {
   readonly platform: string;
   overview(): Promise<WelcomeResult<WelcomeOverview>>;
   onChrome(listener: (event: WelcomeEvent<ChromeState>) => void): void;
@@ -105,7 +117,8 @@ export type WelcomeRequest =
   | HostsRequest
   | StartRunRequest
   | RunControlRequest
-  | SettingsRequest;
+  | SettingsRequest
+  | MachinesRequest;
 
 /**
  * The typed request on `channel` with `args` (as the welcome view's bridge sent them); throws an
@@ -125,11 +138,18 @@ export function parseWelcomeRequest(channel: string, args: readonly unknown[]): 
   if (isChannelOf(START_RUN_CHANNELS, channel)) return parseStartRunRequest(channel, args);
   if (isChannelOf(RUN_CONTROL_CHANNELS, channel)) return parseRunControlRequest(channel, args);
   if (isChannelOf(SETTINGS_CHANNELS, channel)) return parseSettingsRequest(channel, args);
+  if (isChannelOf(MACHINES_CHANNELS, channel)) return parseMachinesRequest(channel, args);
   // `WELCOME_ARGUMENT_COUNTS` is exhaustive over the same composed channel object.
   throw new Error(`${JSON.stringify(channel)} is not a welcome request`);
 }
 
 export type {HostsWelcomeBridge, WelcomeInspection} from './hosts.js';
+export type {
+  CheckoutInspection,
+  MachineEntry,
+  MachineReport,
+  MachinesWelcomeBridge,
+} from './machines.js';
 export type {RunControlWelcomeBridge} from './run-control.js';
 export {
   FIRST_PAINT_CHANNEL,

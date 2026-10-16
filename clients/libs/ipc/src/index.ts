@@ -27,6 +27,7 @@ export {
   type RunLogsRequest,
 } from './run-logs.js';
 export {
+  type CheckoutInspection,
   type ChromeState,
   FIRST_PAINT_CHANNEL,
   type FirstPaint,
@@ -34,6 +35,9 @@ export {
   type HarnessListing,
   type HarnessOffer,
   type HostsWelcomeBridge,
+  type MachineEntry,
+  type MachineReport,
+  type MachinesWelcomeBridge,
   type PathCompletion,
   type PreferencesView,
   parseWelcomeRequest,

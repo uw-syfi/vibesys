@@ -38,18 +38,25 @@ import {
   registerAbort,
   type ScheduleTimeout,
 } from '@vibesys/transport';
-import type {Cause} from '../state/host-connection.js';
+import type {Cause, CheckoutProblem} from '../state/host-connection.js';
 import {bootstrapProblem} from './bootstrap.js';
 import {type ProcessRetirement, retireProcess, type SpawnedProcess} from './process.js';
 
 /** A failure of a channel or of an operation on one, with the cause the machine decides on. */
 export class ConnectionError extends Error {
   readonly reason: Cause;
+  /** For an `incompatible` bootstrap report: which checkout problem it is, or null. */
+  readonly checkout: CheckoutProblem | null;
 
-  constructor(reason: Cause, message: string, options?: ErrorOptions) {
+  constructor(
+    reason: Cause,
+    message: string,
+    options?: ErrorOptions & {readonly checkout?: CheckoutProblem | null},
+  ) {
     super(message, options);
     this.name = 'ConnectionError';
     this.reason = reason;
+    this.checkout = options?.checkout ?? null;
   }
 }
 
@@ -565,7 +572,9 @@ export class HelperChannel implements AsyncDisposable {
     if (code === 0 && this.#relay === null) return null;
     const problem =
       this.hello === null ? bootstrapProblem(code, this.#bootstrap, this.#options.where) : null;
-    if (problem !== null) return new ConnectionError('incompatible', problem);
+    if (problem !== null) {
+      return new ConnectionError('incompatible', problem.message, {checkout: problem.checkout});
+    }
     return this.#options.explain(code, this.#stderr);
   }
 

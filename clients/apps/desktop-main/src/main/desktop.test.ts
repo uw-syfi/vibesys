@@ -175,6 +175,12 @@ function desktopWorld(cleanups: RetirementCleanups = {}) {
     window,
     welcome: new WelcomeFeed(),
     hosts,
+    machines: {
+      machines: async () => [],
+      report: async () => ({kind: 'ready', facts: null}),
+      inspect: async () => ({state: 'not_found'}),
+      remove: async () => [],
+    },
     runs,
     settings,
     preferences: {

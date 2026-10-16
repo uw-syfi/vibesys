@@ -19,7 +19,7 @@ export {
   completionStep,
   splitPath,
   suggestions,
-} from './completion.js';
+} from '@vibesys/hosts';
 export {
   type CheckoutForm,
   type HostAction,
