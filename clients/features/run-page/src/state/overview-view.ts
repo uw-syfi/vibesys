@@ -163,7 +163,7 @@ function bestNumber(run: RunAtView, spans: readonly Span[], ended: boolean): Key
  * workstream with a `round` attribute), its latest round. A round still choosing its hypothesis
  * (no `hypothesis_id` yet) is planning.
  */
-function roundNumber(index: SpanIndex): KeyNumber {
+function roundNumber(index: SpanIndex, ended: boolean): KeyNumber {
   const calls = index.spans.filter(span => kindOf(span) === 'planning_call');
   const rounds = index.spans.filter(
     span => kindOf(span) === 'workstream' && numberAttr(span, 'round') !== null,
@@ -179,7 +179,7 @@ function roundNumber(index: SpanIndex): KeyNumber {
     calls.some(isOpen) ||
     rounds.some(span => isOpen(span) && stringAttr(span, 'hypothesis_id') === null);
   const measuring = index.spans.some(span => kindOf(span) === 'gate' && isOpen(span));
-  const sub = planning ? 'planning' : measuring ? 'measuring' : 'working';
+  const sub = ended ? 'finished' : planning ? 'planning' : measuring ? 'measuring' : 'working';
   return {label: 'Round', value: String(latest), sub};
 }
 
@@ -401,7 +401,7 @@ export function overviewView(run: RunAtView, state: RunPageState): OverviewView 
     objective: objectiveView(run),
     numbers: [
       bestNumber(run, spans, ended),
-      roundNumber(index),
+      roundNumber(index, ended),
       workstreamsNumber(spans),
       elapsedNumber(spans, ended),
     ],

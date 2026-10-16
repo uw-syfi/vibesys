@@ -301,3 +301,66 @@ describe('the best candidate of a run that adopts', () => {
     });
   });
 });
+
+/**
+ * The order a live multi run emits its spans (`tests/vibesys/serial_search/test_span_labels.py`
+ * plays it): the round's gate is labelled as the measurement is issued, the measurement ends, and
+ * only once its evidence is read does the gate's label gain the value, the ratio and the verdict
+ * (a `span_updated` of a span that already ended); then the round settles accepted and the next
+ * round begins designing.
+ */
+function liveRoundOne(run: Recording): void {
+  run.start('flow:#1', null, 'root');
+  run.start('op:measure.1', 'flow:#1', 'measure');
+  run.end('op:measure.1');
+  const id = 'flow:000001/#1';
+  run.start(id, 'flow:#1', 'play_round', {
+    kind: 'workstream',
+    title: 'round 1',
+    attrs_json: JSON.stringify({hypothesis_id: null, parent_revision: null, round: 1}),
+  });
+  run.relabel(id, {
+    title: 'title h1',
+    attrs_json: JSON.stringify({hypothesis_id: 'h1', parent_revision: 'base', round: 1}),
+  });
+  run.start('op:000001/measure.1', id, 'measure', gate());
+  run.end('op:000001/measure.1');
+  run.relabel('op:000001/measure.1', {
+    verdict: 'passed',
+    attrs_json: JSON.stringify({stage: 'accuracy,benchmark', metric_value: 100, vs_baseline: 2}),
+  });
+  run.end(id, {verdict: 'accepted'});
+}
+
+describe('a live multi run with an accepted round 1', () => {
+  test('mid-run the Overview shows the best candidate and a chart point, and Work its gate', () => {
+    const run = new Recording();
+    liveRoundOne(run);
+    run.start('flow:000002/#1', 'flow:#1', 'play_round', {
+      kind: 'workstream',
+      title: 'round 2',
+      attrs_json: JSON.stringify({hypothesis_id: null, parent_revision: null, round: 2}),
+    });
+    const view = overviewView(at(run.events), LIVE);
+    expect(view.numbers[0]).toEqual({
+      label: 'Best vs baseline',
+      value: '2.00×',
+      sub: '100 ops/s · so far',
+    });
+    expect(view.numbers[1]).toEqual({label: 'Round', value: '2', sub: 'planning'});
+    expect(view.chart?.points.map(point => [point.y, point.filled])).toEqual([[100, true]]);
+    const [first] = workView(at(run.events), ALL).rows;
+    expect(first?.gate).toBe('passed · 2.00×');
+  });
+
+  test('once the run finished the Overview says its last round finished, not working', () => {
+    const run = new Recording();
+    liveRoundOne(run);
+    adopting(run, {candidate: 'c1', value: 100, vs: 2, verdict: 'adopted'});
+    run.end('flow:#1');
+    const view = overviewView(at(run.events), ENDED);
+    expect(view.numbers[1]).toEqual({label: 'Round', value: '1', sub: 'finished'});
+    expect(view.numbers[0]?.value).toBe('2.00×');
+    expect(view.current).toEqual([]);
+  });
+});
