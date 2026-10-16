@@ -2333,6 +2333,10 @@ export interface NarrationLine {
 }
 export interface SpanAttributes {
   dynamic?: DynamicSpanAttributes | null;
+  "multi-agent"?: MultiAgentSpanAttributes | null;
+  "profile-guided-multi-agent"?: ProfileGuidedMultiAgentSpanAttributes | null;
+  "profile-guided-single-agent"?: ProfileGuidedSingleAgentSpanAttributes | null;
+  "single-agent"?: SingleAgentSpanAttributes | null;
 }
 export interface DynamicSpanAttributes {
   agent_turn?: AgentTurnAttrs | null;
@@ -2374,4 +2378,28 @@ export interface WorkstreamAttrs {
   hypothesis_id?: HypothesisId1;
   parent_revision?: ParentRevision;
   round?: Round3;
+}
+export interface MultiAgentSpanAttributes {
+  agent_turn?: AgentTurnAttrs | null;
+  gate?: GateAttrs | null;
+  planning_call?: PlanningAttrs | null;
+  workstream?: WorkstreamAttrs | null;
+}
+export interface ProfileGuidedMultiAgentSpanAttributes {
+  agent_turn?: AgentTurnAttrs | null;
+  gate?: GateAttrs | null;
+  planning_call?: PlanningAttrs | null;
+  workstream?: WorkstreamAttrs | null;
+}
+export interface ProfileGuidedSingleAgentSpanAttributes {
+  agent_turn?: AgentTurnAttrs | null;
+  gate?: GateAttrs | null;
+  planning_call?: PlanningAttrs | null;
+  workstream?: WorkstreamAttrs | null;
+}
+export interface SingleAgentSpanAttributes {
+  agent_turn?: AgentTurnAttrs | null;
+  gate?: GateAttrs | null;
+  planning_call?: PlanningAttrs | null;
+  workstream?: WorkstreamAttrs | null;
 }

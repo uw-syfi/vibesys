@@ -92,9 +92,17 @@ def test_committed_protocol_schema_matches_python_contract() -> None:
 
 def test_the_protocol_exports_each_declared_span_kinds_attribute_schema() -> None:
     defs = protocol_json_schema(built_in_span_attributes())["$defs"]
-    dynamic = defs["DynamicSpanAttributes"]["properties"]
-    assert set(dynamic) == {"planning_call", "workstream", "agent_turn", "gate"}
-    assert set(defs["WorkstreamAttrs"]["properties"]) == {"hypothesis_id", "parent_revision"}
+    for search in (
+        "Dynamic",
+        "SingleAgent",
+        "ProfileGuidedSingleAgent",
+        "MultiAgent",
+        "ProfileGuidedMultiAgent",
+    ):
+        kinds = defs[f"{search}SpanAttributes"]["properties"]
+        assert set(kinds) == {"planning_call", "workstream", "agent_turn", "gate"}, search
+    workstream = defs["WorkstreamAttrs"]["properties"]
+    assert set(workstream) == {"hypothesis_id", "parent_revision", "round"}
     assert set(defs["GateAttrs"]["properties"]) == {"stage", "metric_value", "vs_baseline"}
 
 

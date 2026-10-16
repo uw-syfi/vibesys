@@ -193,6 +193,7 @@ def single_core_policy(launch_type: type[SingleRunLaunch]) -> CorePolicy:
         prompt_templates=Path(prompts.__file__).parent,
         prompt_fallback_roots=(SERIAL_SEARCH_PROMPTS, CORE_PROTOCOL_DIR),
         owned_operations=roadmap_entries,
+        span_kinds=single.spans,
     )
 
 

@@ -3427,6 +3427,57 @@
         }
       ]
     },
+    "MultiAgentSpanAttributes": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_turn": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentTurnAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "gate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GateAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "planning_call": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlanningAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "workstream": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkstreamAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "MultiAgentSpanAttributes",
+      "type": "object"
+    },
     "NarrationLevel": {
       "description": "A line's severity: the standard ``logging`` level at or below the record's.",
       "enum": [
@@ -3855,6 +3906,108 @@
         "call"
       ],
       "title": "PlanningAttrs",
+      "type": "object"
+    },
+    "ProfileGuidedMultiAgentSpanAttributes": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_turn": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentTurnAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "gate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GateAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "planning_call": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlanningAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "workstream": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkstreamAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "ProfileGuidedMultiAgentSpanAttributes",
+      "type": "object"
+    },
+    "ProfileGuidedSingleAgentSpanAttributes": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_turn": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentTurnAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "gate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GateAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "planning_call": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlanningAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "workstream": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkstreamAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "ProfileGuidedSingleAgentSpanAttributes",
       "type": "object"
     },
     "ProtocolErrorMessage": {
@@ -5562,6 +5715,57 @@
         "kind"
       ]
     },
+    "SingleAgentSpanAttributes": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_turn": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentTurnAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "gate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GateAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "planning_call": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlanningAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "workstream": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkstreamAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "SingleAgentSpanAttributes",
+      "type": "object"
+    },
     "SnapshotQuery": {
       "additionalProperties": false,
       "description": "Request the current run snapshot.\n\n``expected_store_id`` fences the read to the event store whose batch established a\nclient's sequence space. None preserves the unfenced request used by\nclients that do not combine a snapshot with a live subscription. An empty\nstring is a real fence for the pre-attachment store, not an alias for None.",
@@ -5791,6 +5995,50 @@
           "anyOf": [
             {
               "$ref": "#/$defs/DynamicSpanAttributes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "multi-agent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MultiAgentSpanAttributes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "profile-guided-multi-agent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProfileGuidedMultiAgentSpanAttributes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "profile-guided-single-agent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProfileGuidedSingleAgentSpanAttributes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "single-agent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SingleAgentSpanAttributes"
             },
             {
               "type": "null"

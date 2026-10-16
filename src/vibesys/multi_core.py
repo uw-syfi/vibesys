@@ -212,6 +212,7 @@ def multi_core_policy(launch_type: type[MultiRunLaunch]) -> CorePolicy:
         prompt_templates=Path(prompts.__file__).parent,
         prompt_fallback_roots=(SERIAL_SEARCH_PROMPTS, CORE_PROTOCOL_DIR, PROMPTS_DIR / "shared"),
         owned_operations=roadmap_entries,
+        span_kinds=multi.spans,
     )
 
 
