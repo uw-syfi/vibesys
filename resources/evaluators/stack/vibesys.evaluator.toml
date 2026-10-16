@@ -4,6 +4,8 @@ version = "0.1.0"
 protocol_version = 1
 toolchains = ["go", "rust"]
 go_module = "."
+# The file a candidate's [build] must produce; the framework verifies it and passes it on.
+candidate_outputs = ["stack-candidate.so"]
 
 [entrypoints]
 vibesys-stack = ["go", "-C", "${PACKAGE_ROOT}", "run", "."]

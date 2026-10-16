@@ -39,8 +39,9 @@ check consumes it.
 | --- | --- | --- |
 | Registry completeness | New example directory, missing path, root `vibesys.input.toml`, task list out of date | Names the file and the entry to add |
 | `validate` | Everything `vibesys validate` rejects, per task | Example path plus task |
-| `path-refs` | `${PROJECT_ROOT}/...` in accuracy/benchmark commands pointing at nothing | Example, task, path |
+| `path-refs` | `${PROJECT_ROOT}/...` in check/measure (accuracy/benchmark) commands pointing at nothing | Example, task, path |
 | `trust-policy` | Files those commands read that the agent could edit, using `build_project_path_policy` on a scratch copy | Lists the writable files and the read-only set |
+| `candidate-build` | A task whose evaluator package requires candidate outputs (`candidate_outputs`) but declares no `[build]`, so every measurement fails its check (`InputBundle.missing_build`, the rule New run preflight applies too) | Example, task, the missing outputs |
 | Stale references (repo-wide) | `examples/...` literals in workflows, scripts, docs, and READMEs whose target is gone | File and literal; exclusions live in the test with a comment |
 
 `known_failing` is a strict xfail: when the check starts passing the test fails

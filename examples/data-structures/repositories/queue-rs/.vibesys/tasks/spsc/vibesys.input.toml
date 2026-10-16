@@ -1,4 +1,5 @@
 version = 1
+metric = "total_ops_per_sec"
 
 [agent]
 domain = "generic"
@@ -7,7 +8,13 @@ domain = "generic"
 name = "vibesys-evaluator-queue"
 version = "0.1.0"
 
-[accuracy]
+# Candidate code: runs confined in a fresh checkout of the measured commit and
+# must produce queue-candidate.so, which the evaluator requires.
+[build]
+command = ["make", "queue-candidate.so"]
+timeout_seconds = 600
+
+[check]
 entrypoint = "vibesys-queue"
 args = [
   "check", "--workspace", "${PROJECT_ROOT}",
@@ -15,11 +22,10 @@ args = [
 ]
 timeout_seconds = 120
 
-[benchmark]
+[measure]
 entrypoint = "vibesys-queue"
 args = [
   "benchmark", "--workspace", "${PROJECT_ROOT}",
   "--scenario", "spsc", "--repetitions", "3",
 ]
 timeout_seconds = 300
-result_protocol = 2

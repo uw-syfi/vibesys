@@ -20,6 +20,7 @@ from server.host_preflight import (
     Check,
     CheckId,
     CheckState,
+    DeclareBuild,
     PreflightReport,
     SettingsInvalid,
     SettingsValid,
@@ -154,7 +155,19 @@ def agent_image_check(probe: CommandProbe) -> Check:
 
 
 def evaluator_check(bundle: InputBundle) -> Check:
-    """``ok`` naming the task's evaluator: its source, else its benchmark command."""
+    """``ok`` naming the task's evaluator: its source, else its benchmark command.
+
+    It fails, with a ``declare_build`` fix, when the evaluator requires candidate build
+    outputs the task declares no build for: every measurement would fail its check.
+    """
+    missing = bundle.missing_build
+    if missing is not None:
+        return Check(
+            id=CheckId.EVALUATOR_AVAILABLE,
+            state=CheckState.FAIL,
+            detail=one_line(missing, "the task declares no build"),
+            fix=DeclareBuild(manifest=str(bundle.manifest_path), outputs=bundle.candidate_outputs),
+        )
     source = bundle.evaluator_path
     detail = (
         f"evaluator source {source}"

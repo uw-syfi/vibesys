@@ -106,11 +106,13 @@ def _task_terms(
         launch.metric_space,
         Measuring(
             stage_seconds={
+                "build": evaluation.build_seconds,
                 "accuracy": evaluation.accuracy_seconds,
                 "benchmark": evaluation.benchmark_seconds,
             },
             queue_allowance=float(context.queue_allowance_seconds),
             benchmark_needs_accuracy=evaluation.benchmark_needs_accuracy,
+            builds=evaluation.builds,
         ),
     )
 

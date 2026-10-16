@@ -14,6 +14,7 @@ whichever is wrong in the same PR.
 | agent confinement | Restricting the agent CLI process: which paths it can read and write, and which it cannot see. "Sandbox" is reserved for this. | `WorkspaceSandbox` and `HostSandbox`, `LandlockSandbox`, `SeatbeltSandbox`, `DockerSandbox.wrap` |
 | candidate isolation | Per-workstream evaluation isolation: each candidate is evaluated in its own worktree or workspace so candidates cannot affect each other's results. | `_project_run.py`, `_trusted_evaluation.py` in `vs_runtime` |
 | trust boundary | The protections that keep the evaluator and its inputs out of the candidate's reach: read-only and hidden project paths, plus the accuracy gate that diffs protected paths against a trusted baseline. | `ProjectPathPolicy` |
+| candidate build | A task's `[build]`: candidate code the framework runs before the trusted check and measure, confined like the agent, in a fresh checkout of the measured commit. Its declared outputs are verified and recorded outside every workspace. | `TrustedBuild`, `RuntimeWorkspaceEvaluation.build`, `_build_outputs.py` in `vs_runtime` |
 
 A class name containing "Sandbox" must be a confinement type;
 `tests/architecture/test_sandbox_naming.py` enforces it.
@@ -139,4 +140,17 @@ macOS when full read confinement matters.
   implementation kept project-level hidden paths and lowers them to mask mounts
   in containers, as described above. This page and
   [CLI flags](../cli-flags.md#runtime-environment) describe the implementation.
+- **Candidate builds run under agent confinement, not as trusted commands.**
+  The build stage executes the task's `[build]` argv through the candidate
+  checkout's agent confinement (`WorkspaceResource.agent_sandbox()`; the
+  candidate's `DockerSandbox` in the Docker run environment), never through the
+  trusted command runner, so it gets the read-only and hidden project paths and
+  none of the trusted evaluator environment (the prepared Go module cache and
+  its offline policy). It fails closed where the run environment has no such
+  confinement (the host environment) and does not run on the Slurm executor yet
+  (#2968). Evaluator-owned files are checked before and after the build, as for
+  the check. The outputs it produces are candidate bytes: the runtime only
+  guarantees that check and measure load exactly what the measured commit's
+  build produced (verified by path, regular-file type and digest), which the
+  candidate controls anyway, since the evaluator loads candidate code.
 - **Network** is open in every mode so the agent can reach its model provider.

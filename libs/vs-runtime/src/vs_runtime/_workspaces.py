@@ -26,7 +26,11 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_runtime._agent_execution import AgentExecutionScope
-    from vs_runtime._trusted_evaluation import TrustedAccuracyResult, TrustedBenchmarkResult
+    from vs_runtime._trusted_evaluation import (
+        TrustedAccuracyResult,
+        TrustedBenchmarkResult,
+        TrustedBuildResult,
+    )
     from vs_runtime._workspace_holds import WorkspaceHolds
     from vs_runtime._workspace_receipts import BaselineEntry, RootBaselineDrift
     from vs_runtime._workspace_runtime import CommandExecutionResult, WorkspaceEvaluationSpec
@@ -107,6 +111,10 @@ class WorkspaceResource(Protocol):
 
     @property
     def evaluation_spec(self) -> WorkspaceEvaluationSpec: ...
+
+    async def candidate_build(self, output: OutputSink) -> TrustedBuildResult:
+        """Run the candidate's build here under agent confinement, writing to *output*."""
+        ...
 
     async def trusted_accuracy(
         self, command_override: str | None, output: OutputSink

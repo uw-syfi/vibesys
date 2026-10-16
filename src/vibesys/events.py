@@ -125,6 +125,7 @@ class GateKind(StrEnum):
     """Closed set of framework-owned gates a candidate passes through."""
 
     VALIDATION = "validation"
+    BUILD = "build"
     ACCURACY = "accuracy"
     BENCHMARK = "benchmark"
 
@@ -623,7 +624,7 @@ class GateStartedData(EventPayload):
 
     kind: Literal["gate_started"] = "gate_started"
     gate: GateKind
-    # The validation recipe being executed; None for accuracy and benchmark.
+    # The validation recipe being executed; None for build, accuracy and benchmark.
     recipe: str | None = None
     # The trusted command the gate runs, when one is configured.
     command: str | None = None

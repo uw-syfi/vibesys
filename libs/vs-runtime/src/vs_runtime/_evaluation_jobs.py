@@ -59,6 +59,7 @@ from vs_runtime._failure_classification import job_failure
 from vs_runtime._observation_factory import ObservationFacts, ObservationSubject
 
 STAGE_KINDS: dict[str, StageKind] = {
+    "build": StageKind.BUILD,
     "accuracy": StageKind.ACCURACY,
     "benchmark": StageKind.BENCHMARK,
     "profile": StageKind.PROFILE,
@@ -373,6 +374,10 @@ def _evidence(
             continue
         item = TrustedEvidence.model_validate(step.result)
         by_stage[step.name] = item
+        if item.kind is StageKind.BUILD:
+            # A build proves nothing about the candidate's behaviour: it decides only whether
+            # the later stages ran, and its failure text is the job's diagnostic.
+            continue
         refs.append(
             EvidenceRef(
                 evidence_id=EvidenceId(root=item.evidence_id),

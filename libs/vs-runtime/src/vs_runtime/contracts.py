@@ -578,6 +578,36 @@ class AccuracyReceipt(BaseModel):
 BenchmarkFailureKind = EvidenceFailureKind
 
 
+class BuildEvaluation(BaseModel):
+    """Semantic outcome of the candidate's confined build and the check of its outputs."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    executed: bool
+    reused: bool = False
+    """The commit's earlier verified build was reused instead of building again."""
+    feedback: str | None = None
+    operator_feedback: str | None = None
+    """Credential-safe feedback for operator-facing projections, never agent evidence."""
+    # Whose fault the failure is: present exactly when the build failed, with no default.
+    failure_kind: BenchmarkFailureKind | None = None
+
+    @model_validator(mode="after")
+    def _failure_kind_exactly_when_failed(self) -> BuildEvaluation:
+        if (self.feedback is None) != (self.failure_kind is None):
+            message = "a build outcome carries a failure kind exactly when it failed"
+            raise ValueError(message)
+        if (self.feedback is None) != (self.operator_feedback is None):
+            message = "a build failure requires a separate operator-safe feedback"
+            raise ValueError(message)
+        return self
+
+    @property
+    def passed(self) -> bool:
+        """Return whether the build produced every required output."""
+        return self.feedback is None
+
+
 class AccuracyEvaluation(BaseModel):
     """Semantic outcome of the trusted accuracy evaluation."""
 
@@ -676,6 +706,14 @@ class LocalValidationEvaluation(BaseModel):
 
 class Evaluation(Protocol):
     """Trusted candidate evaluation effects a local run measures through."""
+
+    async def build(self, workspace: Workspace, *, output: OutputSink) -> BuildEvaluation:
+        """Build the workspace's commit confined, once, and verify its required outputs.
+
+        A commit already built and verified reuses that build. The build command's raw output
+        is written to *output* while it runs.
+        """
+        ...
 
     async def accuracy(
         self,

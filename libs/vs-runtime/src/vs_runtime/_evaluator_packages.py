@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Literal, NoReturn
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from vs_runtime._build_outputs import check_candidate_output_path
 from vs_sandbox.api.command_translation import PROJECT_ROOT_TOKEN, PYTHON_TOKEN
 from vs_sandbox.api.evaluator_tools import CargoGitToolSpec
 
@@ -136,6 +137,23 @@ class EvaluatorPackageMetadata(EvaluatorPackageRequirement):
     go_module: str | None = None
     tools: dict[str, CargoGitToolSpec] = Field(default_factory=dict)
     entrypoints: dict[str, tuple[str, ...]]
+    candidate_outputs: tuple[str, ...] = ()
+    """Files a candidate's build must produce, as workspace-relative POSIX paths.
+
+    The evaluator loads them from the checkout it runs in. A task whose evaluator requires
+    outputs declares a ``[build]`` that produces them; the framework verifies each one after
+    the build and fails the build stage naming the first missing one.
+    """
+
+    @field_validator("candidate_outputs")
+    @classmethod
+    def _valid_candidate_outputs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        for output in value:
+            check_candidate_output_path(output)
+        if len(value) != len(set(value)):
+            message = "candidate_outputs must not contain duplicates"
+            raise ValueError(message)
+        return value
 
     @field_validator("toolchains")
     @classmethod

@@ -28,6 +28,22 @@ The selected run environment expands it to the candidate repository root before
 running the resolved command. This is necessary for tools such as `go -C`,
 which change cwd.
 
+## Candidate outputs
+
+A package whose evaluator loads a file the candidate builds names it:
+
+```toml
+candidate_outputs = ["queue-candidate.so"]
+```
+
+Each entry is a normalized workspace-relative file path outside `.git/` and
+`.vibesys/`. A task using the package must declare a `[build]` that produces
+every entry; `vibesys preflight` and the example registry's `candidate-build`
+check refuse one that does not. After the confined build, VibeSys verifies each
+output (a regular file, not a symlink), records it outside the workspace, places
+it at its path in the checkout where each trusted command runs, and passes the
+paths, `:`-joined, in `VIBESYS_CANDIDATE_OUTPUTS`.
+
 The local collection is the initial package source. Published packages can
 later provide the same metadata and entry-point names through a registry-backed
 resolver. Repository-specific checks and workloads belong with their task, not

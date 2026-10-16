@@ -19,6 +19,7 @@ if TYPE_CHECKING:
         AccuracyReceipt,
         BenchmarkEvaluation,
         BenchmarkObjective,
+        BuildEvaluation,
         Evaluation,
         LocalValidationEvaluation,
         Workspace,
@@ -166,6 +167,9 @@ class _StopGatedEvaluation:
     def __init__(self, inner: Evaluation, channel: RunControlChannel) -> None:
         self._inner = inner
         self._channel = channel
+
+    async def build(self, workspace: Workspace, *, output: OutputSink) -> BuildEvaluation:
+        return await self.until_stop(self._inner.build(workspace, output=output))
 
     async def accuracy(
         self,

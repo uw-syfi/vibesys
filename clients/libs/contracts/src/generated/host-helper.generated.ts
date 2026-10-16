@@ -469,13 +469,16 @@ export type CheckId =
  */
 export type CheckState = "ok" | "warn" | "fail";
 export type Detail = string;
-export type Fix = (ChooseCheckout | CopyOut | EditSetting | StartDocker) | null;
+export type Fix = (ChooseCheckout | CopyOut | EditSetting | StartDocker | DeclareBuild) | null;
 export type Kind = "choose_checkout";
 export type Kind1 = "copy_out";
 export type SuggestedPath = string;
 export type Kind2 = "edit_setting";
 export type Key = string;
 export type Kind3 = "start_docker";
+export type Kind4 = "declare_build";
+export type Manifest = string;
+export type Outputs = string[];
 export type Checks = Check[];
 export type Roles1 = string[] | null;
 export type RequestId43 = string;
@@ -567,19 +570,19 @@ export type Type48 = "run.start_compensation_failed";
 export type ExitStatus1 = 12;
 export type RequestId47 = string;
 export type Detail2 = string;
-export type Kind4 = "worker_start_refused";
+export type Kind5 = "worker_start_refused";
 export type InstanceId6 = string;
 export type Type49 = "run.start_compensation_failed";
 export type ExitStatus2 = 12;
 export type RequestId48 = string;
 export type Detail3 = string;
-export type Kind5 = "stop_failed";
+export type Kind6 = "stop_failed";
 export type InstanceId7 = string;
 export type Type50 = "run.start_compensation_failed";
 export type ExitStatus3 = 12;
 export type RequestId49 = string;
 export type Detail4 = string;
-export type Kind6 = "stop_unconfirmed";
+export type Kind7 = "stop_unconfirmed";
 export type Version13 = 1;
 export type Id6 = string;
 export type Outcome1 = "stopping" | "still_running" | "unsupported";
@@ -1435,6 +1438,14 @@ export interface StartDocker {
   kind: Kind3;
 }
 /**
+ * Declare a ``[build]`` producing ``outputs`` in the task manifest at ``manifest``.
+ */
+export interface DeclareBuild {
+  kind: Kind4;
+  manifest: Manifest;
+  outputs: Outputs;
+}
+/**
  * The checkout's example catalog.
  */
 export interface ExamplesListReply {
@@ -1518,7 +1529,7 @@ export interface WorkerStartRefusedCompensationFailure {
   exit_status: ExitStatus1;
   request_id: RequestId47;
   detail: Detail2;
-  kind: Kind4;
+  kind: Kind5;
   instance_id: InstanceId6;
 }
 /**
@@ -1529,7 +1540,7 @@ export interface StopFailedCompensationFailure {
   exit_status: ExitStatus2;
   request_id: RequestId48;
   detail: Detail3;
-  kind: Kind5;
+  kind: Kind6;
   instance_id: InstanceId7;
 }
 /**
@@ -1543,7 +1554,7 @@ export interface StopUnconfirmedCompensationFailure {
   exit_status: ExitStatus3;
   request_id: RequestId49;
   detail: Detail4;
-  kind: Kind6;
+  kind: Kind7;
   stop_result: UnconfirmedInstanceStopResult;
 }
 /**

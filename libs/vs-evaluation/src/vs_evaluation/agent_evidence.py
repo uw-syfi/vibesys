@@ -21,6 +21,7 @@ MAX_EVIDENCE_SUMMARY_CHARS = 16_384
 class EvidenceKind(StrEnum):
     """Semantic facts available through the evaluation agent service."""
 
+    BUILD = "build"
     ACCURACY = "accuracy"
     BENCHMARK = "benchmark"
     PROFILE = "profile"

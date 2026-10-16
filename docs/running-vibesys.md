@@ -127,11 +127,13 @@ the legacy `main.py` default:
 entrypoint = "examples/deployment/service.py"
 ```
 
-Accuracy, benchmark and diagnostic profile commands may be task-owned argv
-arrays, or stable entry points supplied by an exact evaluator package:
+A task declares how a candidate is measured in one of two forms. The short
+form names the stages `build` (optional), `check` and `measure`, and the
+headline `metric`:
 
 ```toml
 version = 1
+metric = "total_ops_per_sec"
 
 [agent]
 domain = "generic"
@@ -140,14 +142,39 @@ domain = "generic"
 name = "vibesys-evaluator-queue"
 version = "0.1.0"
 
-[accuracy]
+[build]
+command = ["make", "queue-candidate.so"]
+timeout_seconds = 600
+
+[check]
 entrypoint = "vibesys-queue"
 args = ["check", "--workspace", "${PROJECT_ROOT}", "--scenario", "spsc"]
 
-[benchmark]
+[measure]
 entrypoint = "vibesys-queue"
 args = ["benchmark", "--workspace", "${PROJECT_ROOT}", "--scenario", "spsc"]
 ```
+
+The existing form names the same check and measure stages `[accuracy]` and
+`[benchmark]`, and may declare `[build]` too. Both forms compile to the same
+stages; declaring one stage in both forms is refused. A short-form `measure`
+speaks evaluator result protocol 2 unless it declares a `result` table.
+
+Check, measure and diagnostic profile commands may be task-owned argv arrays,
+or stable entry points supplied by an exact evaluator package; they are trusted
+evaluator code. The build is candidate code: an argv run from the root of a
+fresh checkout of the measured commit, confined like the agent (in the Docker
+run environment, the candidate's container). After it passes, VibeSys verifies
+every file the evaluator package requires (`candidate_outputs` in its
+`vibesys.evaluator.toml`, for example `queue-candidate.so`); a missing one
+fails the build stage naming it. The verified files are kept outside every
+workspace and placed at their declared paths in the checkouts where the check
+and the measure run, which receive their workspace-relative paths, `:`-joined,
+in `VIBESYS_CANDIDATE_OUTPUTS`. A commit is built once: a later stage or
+measurement of the same commit reuses its build. A task whose evaluator requires
+outputs but declares no build fails `vibesys preflight` and the desktop app's
+New run check. The build needs agent confinement, so the host run environment
+refuses it, and the Slurm evaluation executor does not run build stages yet (#2968).
 
 For trusted serving captures, also declare a bundle-owned diagnostic workload:
 

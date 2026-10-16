@@ -21,7 +21,8 @@ def overview_of(bundle: InputBundle) -> RunOverview:
     return RunOverview(
         objective=ObjectiveOverview(
             text=bundle.objective,
-            metric=manifest.benchmark.result.metric if manifest.benchmark.result else None,
+            metric=manifest.metric
+            or (manifest.benchmark.result.metric if manifest.benchmark.result else None),
             correctness_check=bundle.accuracy_command,
         ),
         benchmarks=BenchmarkVersions(

@@ -7,8 +7,9 @@ is what ``vibesys preflight`` prints: the checks only the run's own code can mak
 same arguments ``run.start`` would launch with. Pydantic and the standard library only, like
 ``server.host_api``, which embeds these in the helper's messages.
 
-Public surface: ``CheckId``, ``CheckState``, ``ChooseCheckout``, ``CopyOut``, ``EditSetting``,
-``StartDocker``, ``Fix``, ``Check``, ``ReasoningEffort``, ``RoleName``, ``RoleOption``, ``RunResults``,
+Public surface: ``CheckId``, ``CheckState``, ``ChooseCheckout``, ``CopyOut``, ``DeclareBuild``,
+``EditSetting``, ``StartDocker``, ``Fix``, ``Check``, ``ReasoningEffort``, ``RoleName``,
+``RoleOption``, ``RunResults``,
 ``RunOptions``, ``SettingsValid``, ``SettingsInvalid``, ``PreflightReport``, ``one_line``.
 """
 
@@ -89,7 +90,20 @@ class StartDocker(BaseModel):
     kind: Literal["start_docker"] = "start_docker"
 
 
-Fix = Annotated[ChooseCheckout | CopyOut | EditSetting | StartDocker, Field(discriminator="kind")]
+class DeclareBuild(BaseModel):
+    """Declare a ``[build]`` producing ``outputs`` in the task manifest at ``manifest``."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["declare_build"] = "declare_build"
+    manifest: str
+    outputs: tuple[str, ...]
+
+
+Fix = Annotated[
+    ChooseCheckout | CopyOut | EditSetting | StartDocker | DeclareBuild,
+    Field(discriminator="kind"),
+]
 
 
 class Check(BaseModel):
@@ -196,6 +210,7 @@ __all__ = [
     "CheckState",
     "ChooseCheckout",
     "CopyOut",
+    "DeclareBuild",
     "EditSetting",
     "Fix",
     "PreflightReport",

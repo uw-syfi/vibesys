@@ -79,7 +79,7 @@ trace's order. A span that starts and ends within one commit gets a `span_starte
   `python -m entrypoints.protocol_schema` exports the built-in ones
   (`tests/server/test_protocol_schema.py` holds the committed schema to it). Today only the
   dynamic search labels spans: `planning_call`, `workstream` (verdicts `accepted`, `rejected`;
-  link `builds_on`), `agent_turn` and `gate` (verdicts `passed`, `failed_check`, `slower`). The
+  link `builds_on`), `agent_turn` and `gate` (verdicts `passed`, `failed_check`, `slower`). A gate span covers one measurement; each of its stages (`build`, `accuracy`, `benchmark`) has its own `gate_started`/`gate_finished` events (`GateKind`) and its own log stream, whose `GateStage` owner names the span. The
   other searches' spans carry no label and render plainly.
 - **Ids.** `flow:<path>#<n>` for a flow task, `op:<decision id>` for an operation, both plain
   strings. A span id is stable across replay and restart.
@@ -106,7 +106,7 @@ The run's header facts are one contract, `RunOverview` (`overview_version: 1`, d
 carries it, built from the task's input bundle (`vibesys.run.overview`):
 
 - `objective.text` is the task's `OBJECTIVE.md` (Markdown) and `objective.metric` the
-  benchmark's result metric.
+  task's headline metric (its `metric`, else the scalar benchmark result's metric).
 - `objective.correctness_check` is the argv of the accuracy check a candidate must pass.
 - `benchmarks.evaluator` is the evaluator package the manifest pins (`name`, `version`). It is
   null for a source-tree evaluator, which has no version.

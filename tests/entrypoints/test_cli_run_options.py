@@ -16,15 +16,23 @@ from entrypoints.cli.preflight import (
     AGENT_IMAGES_COMMAND,
     TASK_IMAGE_UNSUPPORTED,
     agent_image_check,
+    evaluator_check,
     preflight_report,
     valid_report,
 )
 from launch import built_in_orchestrations
 from server.host_api import MAX_RUN_SECONDS_FLAG, ROLE_MODEL_FLAG, ROLE_REASONING_EFFORT_FLAG
-from server.host_preflight import CheckId, CheckState, SettingsInvalid, SettingsValid
+from server.host_preflight import (
+    CheckId,
+    CheckState,
+    DeclareBuild,
+    SettingsInvalid,
+    SettingsValid,
+)
 from vibesys.api import DomainName
 from vibesys.api.request import TaskImageError, run_environment_uses_docker
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
+from vibesys.inputs import InputBundle, load_task
 from vs_runtime.api.infrastructure import RunEnvironmentSpec
 from vs_sim.api import ProbeResult
 from vs_sim.api.testing import ScriptedProbe
@@ -346,3 +354,42 @@ def test_a_docker_in_docker_run_on_a_host_with_sysbox_passes_preflight(tmp_path:
     )
 
     assert report.settings.valid is True
+
+
+_QUEUE_RS = Path(__file__).parents[2] / "examples/data-structures/repositories/queue-rs"
+
+
+def _queue_task(tmp_path: Path, *, build: bool) -> InputBundle:
+    """queue-rs's mpmc task in a project of its own, with or without its declared build."""
+    task = tmp_path / ".vibesys" / "tasks" / "mpmc"
+    task.mkdir(parents=True)
+    source = _QUEUE_RS / ".vibesys" / "tasks" / "mpmc"
+    (task / "OBJECTIVE.md").write_text((source / "OBJECTIVE.md").read_text())
+    manifest = (source / "vibesys.input.toml").read_text()
+    if not build:
+        start = manifest.index("[build]")
+        manifest = manifest[:start] + manifest[manifest.index("[check]") :]
+    (task / "vibesys.input.toml").write_text(manifest)
+    return load_task(tmp_path, "mpmc")
+
+
+def test_a_task_whose_evaluator_requires_a_build_it_does_not_declare_fails_preflight(
+    tmp_path: Path,
+) -> None:
+    """Regression: such a task started, and every measurement, the baseline's too, failed."""
+    check = evaluator_check(_queue_task(tmp_path, build=False))
+
+    assert check.state is CheckState.FAIL
+    assert "queue-candidate.so" in check.detail
+    assert "[build]" in check.detail
+    assert isinstance(check.fix, DeclareBuild)
+    assert check.fix.outputs == ("queue-candidate.so",)
+    assert check.fix.manifest.endswith("vibesys.input.toml")
+
+
+def test_a_task_that_declares_the_build_its_evaluator_requires_passes_preflight(
+    tmp_path: Path,
+) -> None:
+    check = evaluator_check(_queue_task(tmp_path, build=True))
+
+    assert (check.state, check.fix) == (CheckState.OK, None)

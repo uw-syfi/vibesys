@@ -52,6 +52,10 @@ if TYPE_CHECKING:
     from vs_sim.api import Clock, OutputSink
 
 
+_GATING_KINDS = frozenset({EvidenceKind.BUILD, EvidenceKind.ACCURACY})
+"""Stages whose failed outcome skips the stages after them: nothing later can count."""
+
+
 @dataclass(frozen=True, slots=True)
 class _SemanticStageObservation:
     evidence: TrustedEvidence
@@ -99,7 +103,11 @@ class PollingEvaluationExecutor:
             cost_class=CostClass.UNKNOWN,
             observed_at=self._clock.now(),
             fresh_for_s=1.0,
-            supported_evidence_kinds=(EvidenceKind.ACCURACY.value, EvidenceKind.BENCHMARK.value),
+            supported_evidence_kinds=(
+                EvidenceKind.BUILD.value,
+                EvidenceKind.ACCURACY.value,
+                EvidenceKind.BENCHMARK.value,
+            ),
         )
 
     async def submit(self, request: EvaluationRequest, *, handle_id: str) -> None:
@@ -193,8 +201,7 @@ class PollingEvaluationExecutor:
                     )
                 )
                 if not observed.completed or (
-                    evidence.kind is EvidenceKind.ACCURACY
-                    and evidence.outcome is EvidenceOutcome.FAILED
+                    evidence.kind in _GATING_KINDS and evidence.outcome is EvidenceOutcome.FAILED
                 ):
                     skipped = request.stages[len(results) :]
                     results.extend(
@@ -272,7 +279,18 @@ class PollingEvaluationExecutor:
         handle_id: str,
         output: OutputSink,
     ) -> _SemanticStageObservation:
-        if stage.kind is EvidenceKind.ACCURACY:
+        if stage.kind is EvidenceKind.BUILD:
+            built = await self._evaluation.build(workspace, output=output)
+            completed = not is_unsettled(built.failure_kind)
+            outcome = (
+                EvidenceOutcome.PASSED if completed and built.passed else EvidenceOutcome.FAILED
+            )
+            summary = built.feedback or ("reused this commit's build" if built.reused else None)
+            operator_summary = built.operator_feedback or summary
+            metrics: tuple[EvidenceMetric, ...] = ()
+            partial = None
+            kind = built.failure_kind
+        elif stage.kind is EvidenceKind.ACCURACY:
             result = await self._evaluation.accuracy(workspace, output=output)
             completed = not is_unsettled(result.failure_kind)
             outcome = (
@@ -280,7 +298,7 @@ class PollingEvaluationExecutor:
             )
             summary = result.feedback
             operator_summary = result.operator_feedback
-            metrics: tuple[EvidenceMetric, ...] = ()
+            metrics = ()
             partial = None
             kind = result.failure_kind
         elif stage.kind is EvidenceKind.BENCHMARK:

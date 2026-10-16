@@ -36,6 +36,7 @@ from vs_runtime.api.infrastructure import (
     CapacityHandling,
     QuotaPolicy,
     RunHostComponents,
+    StateBuildStore,
     StateValidationPasses,
     WorkspaceResourceFactory,
     bounded_stop,
@@ -220,6 +221,9 @@ class _ProductHostFactory:
             blocking=blocking,
             validation_passes=StateValidationPasses(
                 project.project.state.local_namespace(project.state.run_id, "validation")
+            ),
+            builds=StateBuildStore(
+                project.project.state.local_namespace(project.state.run_id, "builds")
             ),
         )
         workspaces = agent_runtime.workspaces

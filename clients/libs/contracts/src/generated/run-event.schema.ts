@@ -1002,6 +1002,7 @@ const runEventSchema: Record<string, unknown> = {
       "description": "Closed set of framework-owned gates a candidate passes through.",
       "enum": [
         "validation",
+        "build",
         "accuracy",
         "benchmark"
       ],

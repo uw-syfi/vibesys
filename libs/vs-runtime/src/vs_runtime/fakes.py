@@ -14,13 +14,18 @@ from vs_agent.api import (
 )
 from vs_project.api import Git
 from vs_runtime._local_validation import LocalValidationRecipeError, check_recipe_artifact_path
-from vs_runtime._trusted_evaluation import TrustedAccuracyResult, TrustedBenchmarkResult
+from vs_runtime._trusted_evaluation import (
+    TrustedAccuracyResult,
+    TrustedBenchmarkResult,
+    TrustedBuildResult,
+)
 from vs_runtime._workspace_access import WorkspaceAccessRecovery
 from vs_runtime.contracts import (
     AccuracyEvaluation,
     AccuracyReceipt,
     BenchmarkEvaluation,
     BenchmarkObjective,
+    BuildEvaluation,
     CandidateWorkspace,
     CommandResult,
     LocalValidationEvaluation,
@@ -116,6 +121,7 @@ class FakeTrustedEvaluationExecutor:
 
     def __init__(self) -> None:
         """Create an executor with passing, unexecuted defaults."""
+        self.build_confinements: list[CommandRunner | None] = []
         self.accuracy_calls: list[FakeTrustedAccuracyCall] = []
         self.benchmark_calls: list[FakeTrustedBenchmarkCall] = []
         self._accuracy_results: list[TrustedAccuracyResult] = []
@@ -128,6 +134,14 @@ class FakeTrustedEvaluationExecutor:
     def script_benchmark(self, *results: TrustedBenchmarkResult) -> None:
         """Replace queued benchmark outcomes."""
         self._benchmark_results = list(results)
+
+    async def build(
+        self, *, confinement: CommandRunner | None, output: OutputSink
+    ) -> TrustedBuildResult:
+        """Record one call and pass without running anything; it prints nothing."""
+        del output
+        self.build_confinements.append(confinement)
+        return TrustedBuildResult(executed=False, passed=True)
 
     async def accuracy(
         self, *, command_override: str | None = None, output: OutputSink
@@ -909,7 +923,7 @@ class FakeLocalValidationCall:
     report_location: str
 
 
-FakeEvaluationKind: TypeAlias = Literal["accuracy", "benchmark"]
+FakeEvaluationKind: TypeAlias = Literal["build", "accuracy", "benchmark"]
 
 
 class FakeEvaluationGate:
@@ -963,6 +977,7 @@ class FakeEvaluation:
     before its gate holds it, as a running command prints before it ends.
     """
 
+    default_build: BuildEvaluation = field(default_factory=lambda: BuildEvaluation(executed=False))
     default_accuracy: AccuracyEvaluation = field(
         default_factory=lambda: AccuracyEvaluation(executed=False)
     )
@@ -972,6 +987,8 @@ class FakeEvaluation:
     default_local_validation: LocalValidationEvaluation = field(
         default_factory=lambda: LocalValidationEvaluation(passed=True)
     )
+    build_results: list[BuildEvaluation | BaseException] = field(default_factory=list)
+    build_calls: list[Workspace] = field(default_factory=list)
     accuracy_results: list[AccuracyEvaluation | BaseException] = field(default_factory=list)
     benchmark_results: list[BenchmarkEvaluation | BaseException] = field(default_factory=list)
     root_benchmark_results: list[BenchmarkEvaluation | BaseException] = field(default_factory=list)
@@ -983,6 +1000,10 @@ class FakeEvaluation:
     printed: dict[FakeEvaluationKind, tuple[bytes, bytes]] = field(default_factory=dict)
     """The (stdout, stderr) each accuracy or benchmark call of a kind prints."""
     _gates: dict[tuple[FakeEvaluationKind, int], FakeEvaluationGate] = field(default_factory=dict)
+
+    def script_build(self, *results: BuildEvaluation | BaseException) -> None:
+        """Queue build results or failures in call order."""
+        self.build_results.extend(results)
 
     def script_accuracy(self, *results: AccuracyEvaluation | BaseException) -> None:
         """Queue accuracy results or failures in call order."""
@@ -1023,6 +1044,15 @@ class FakeEvaluation:
         gate = self._gates.get((kind, call))
         if gate is not None:
             await gate.hold(workspace)
+
+    async def build(self, workspace: Workspace, *, output: OutputSink) -> BuildEvaluation:
+        """Record the request, print the scripted output, and return the next scripted result."""
+        self.build_calls.append(workspace)
+        await self._pass_gate("build", len(self.build_calls) - 1, workspace, output)
+        result = self.build_results.pop(0) if self.build_results else self.default_build
+        if isinstance(result, BaseException):
+            raise result
+        return result
 
     async def accuracy(
         self,

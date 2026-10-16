@@ -106,6 +106,7 @@ const hostHelperSchema: Record<string, unknown> = {
                 "mapping": {
                   "choose_checkout": "#/$defs/ChooseCheckout",
                   "copy_out": "#/$defs/CopyOut",
+                  "declare_build": "#/$defs/DeclareBuild",
                   "edit_setting": "#/$defs/EditSetting",
                   "start_docker": "#/$defs/StartDocker"
                 },
@@ -123,6 +124,9 @@ const hostHelperSchema: Record<string, unknown> = {
                 },
                 {
                   "$ref": "#/$defs/StartDocker"
+                },
+                {
+                  "$ref": "#/$defs/DeclareBuild"
                 }
               ]
             },
@@ -449,6 +453,36 @@ const hostHelperSchema: Record<string, unknown> = {
         "tasks"
       ],
       "title": "CreatedProject",
+      "type": "object"
+    },
+    "DeclareBuild": {
+      "additionalProperties": false,
+      "description": "Declare a ``[build]`` producing ``outputs`` in the task manifest at ``manifest``.",
+      "properties": {
+        "kind": {
+          "const": "declare_build",
+          "default": "declare_build",
+          "title": "Kind",
+          "type": "string"
+        },
+        "manifest": {
+          "title": "Manifest",
+          "type": "string"
+        },
+        "outputs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Outputs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "manifest",
+        "outputs"
+      ],
+      "title": "DeclareBuild",
       "type": "object"
     },
     "DetachedLaunchFailure": {

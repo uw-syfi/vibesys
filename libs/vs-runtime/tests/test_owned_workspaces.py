@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
 import pytest
@@ -27,6 +28,8 @@ from vs_runtime.api.infrastructure import (
     LocalValidationRecipeErrorKind,
     TrustedAccuracyResult,
     TrustedBenchmarkResult,
+    TrustedBuild,
+    TrustedBuildResult,
     WorkspaceEvaluationSpec,
     WorkspaceHolds,
     WorkspaceRuntime,
@@ -48,7 +51,6 @@ from vs_sim.api.testing import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     from vs_agent.api import AgentClientProtocol
     from vs_runtime.api import AgentRole
@@ -162,11 +164,16 @@ class _Resource:
     @property
     def evaluation_spec(self) -> WorkspaceEvaluationSpec:
         return WorkspaceEvaluationSpec(
+            build=None,
             accuracy_command="python accuracy.py",
             benchmark_command="python benchmark.py",
             benchmark_contract=None,
             deployment_release_env_var=None,
         )
+
+    async def candidate_build(self, output: OutputSink) -> TrustedBuildResult:
+        del output
+        return TrustedBuildResult(executed=False, passed=True)
 
     async def trusted_accuracy(
         self, command_override: str | None, output: OutputSink
@@ -466,6 +473,10 @@ class _ContentResource(_Resource):
         self.revision = f"{len(self.history):040x}"
         self.history[self.revision] = dict(self.files)
         return self.revision
+
+    async def candidate_build(self, output: OutputSink) -> TrustedBuildResult:
+        del output
+        return TrustedBuildResult(executed=False, passed=True)
 
     async def trusted_accuracy(
         self, command_override: str | None, output: OutputSink
@@ -1157,3 +1168,112 @@ async def test_cancelled_close_keeps_owned_root_cleanup_alive(tmp_path: Path) ->
     runner.release()
     await workspaces.close()
     assert root.closed
+
+
+_BUILD = TrustedBuild(command="make lib.so", outputs=("out/lib.so",))
+
+type _Produced = bytes | Path
+"""What a fake build leaves at a path: file contents, or a symlink to the given path."""
+
+
+class _BuildingResource(_Resource):
+    """A workspace whose confined build leaves ``produces`` in its checkout."""
+
+    def __init__(
+        self, identifier: str | None, path: Path, revision: str, produces: dict[str, _Produced]
+    ) -> None:
+        super().__init__(identifier, path, revision)
+        path.mkdir(parents=True, exist_ok=True)
+        self.produces = produces
+        self.builds = 0
+
+    def snapshot(self, label: str) -> str:
+        del label
+        return self.revision or "a" * 40
+
+    @property
+    def evaluation_spec(self) -> WorkspaceEvaluationSpec:
+        return WorkspaceEvaluationSpec(
+            build=_BUILD,
+            accuracy_command="python accuracy.py",
+            benchmark_command="python benchmark.py",
+            benchmark_contract=None,
+            deployment_release_env_var=None,
+        )
+
+    async def candidate_build(self, output: OutputSink) -> TrustedBuildResult:
+        del output
+        self.builds += 1
+        for relative, produced in self.produces.items():
+            target = self.path / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if isinstance(produced, Path):
+                target.symlink_to(produced)
+            else:
+                target.write_bytes(produced)
+        return TrustedBuildResult(command=_BUILD.command, executed=True, passed=True)
+
+
+class _BuildingProvider(_Provider):
+    def __init__(self, path: Path, produces: dict[str, _Produced]) -> None:
+        super().__init__(path)
+        self.produces = produces
+        self.live = _BuildingResource(None, path / "root", "a" * 40, produces)
+        self.root = self.live
+        self.building: list[_BuildingResource] = []
+
+    def create_candidate(self, workspace_id: str, revision: str) -> _BuildingResource:
+        resource = _BuildingResource(
+            workspace_id, self.root.path / workspace_id, revision, self.produces
+        )
+        self.created.append(resource)
+        self.building.append(resource)
+        return resource
+
+
+async def test_a_commit_builds_once_and_its_checks_load_what_that_build_produced(
+    tmp_path: Path,
+) -> None:
+    provider = _BuildingProvider(tmp_path, {"out/lib.so": b"\x7fELF candidate"})
+    runtime = _runtime(provider)
+    workspace = runtime.workspaces.root
+
+    first = await runtime.evaluation.build(workspace, output=DISCARD)
+    again = await runtime.evaluation.build(workspace, output=DISCARD)
+    await runtime.evaluation.accuracy("run-a", workspace, output=DISCARD)
+    await runtime.evaluation.benchmark(workspace, required_metrics=frozenset(), output=DISCARD)
+
+    assert (first.passed, first.reused) == (True, False)
+    assert (again.passed, again.reused) == (True, True)
+    # The build ran once, in a fresh checkout of the commit, never in the live workspace.
+    assert provider.live.builds == 0
+    builder, checker, measurer = provider.building
+    assert (builder.builds, checker.builds, measurer.builds) == (1, 0, 0)
+    for gate in (checker, measurer):
+        assert (gate.path / "out/lib.so").read_bytes() == b"\x7fELF candidate"
+    commands = (checker.accuracy_calls[0], measurer.benchmark_calls[0][0])
+    for command in commands:
+        assert command is not None
+        assert "VIBESYS_CANDIDATE_OUTPUTS=out/lib.so" in command
+
+
+@pytest.mark.parametrize(
+    "produces",
+    [{}, {"out/other.so": b"x"}, {"out/lib.so/inner": b"x"}, {"out/lib.so": Path("/etc/hosts")}],
+    ids=["nothing", "another-file", "a-directory", "a-symlink"],
+)
+async def test_a_build_that_misses_a_required_output_fails_naming_it(
+    tmp_path: Path, produces: dict[str, _Produced]
+) -> None:
+    provider = _BuildingProvider(tmp_path, produces)
+    runtime = _runtime(provider)
+    workspace = runtime.workspaces.root
+
+    built = await runtime.evaluation.build(workspace, output=DISCARD)
+
+    assert not built.passed
+    assert built.missing_output is not None
+    assert "out/lib.so" in built.missing_output
+    # Nothing was recorded, so a check of the commit refuses to run without its build.
+    with pytest.raises(RuntimeContractError, match="no verified build"):
+        await runtime.evaluation.accuracy("run-a", workspace, output=DISCARD)

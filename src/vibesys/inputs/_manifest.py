@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 import shlex
 import tomllib
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 from urllib.parse import urlparse
 
 from pydantic import (
+    AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
@@ -277,6 +279,35 @@ class BenchmarkCommand(InputCommand):
         return self
 
 
+class BuildCommand(BaseModel):
+    """The candidate's own build step: argv run from the root of the measured checkout.
+
+    The build is candidate code. The framework runs it confined, in a fresh checkout of the
+    measured commit, before the trusted check and measure stages, and then verifies the
+    outputs the evaluator package requires (``candidate_outputs``). It is never an evaluator
+    entrypoint: an entrypoint is trusted evaluator code, a build is not.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    command: tuple[str, ...]
+    timeout_seconds: int | None = Field(default=None, gt=0)
+
+    @field_validator("command")
+    @classmethod
+    def _non_empty_command(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if not value:
+            message = "command must contain at least one argv element"
+            raise ValueError(message)
+        if any(not part for part in value):
+            message = "command elements must be non-empty strings"
+            raise ValueError(message)
+        if Path(value[0]).is_absolute():
+            message = "command executable must be a program name or a project-relative path"
+            raise ValueError(message)
+        return value
+
+
 class AgentInput(BaseModel):
     """Agent-loop metadata declared by an input bundle."""
 
@@ -344,16 +375,55 @@ class EnvironmentInput(BaseModel):
     docker_in_docker: StrictBool = False
 
 
+class StageKind(StrEnum):
+    """A kind of stage a task's measurement can run.
+
+    The registry of executable kinds. A stage is an ordered, recorded operation named by its
+    kind and labelled for people; a new kind (an evaluation SDK's, say) is a new member here
+    and an executor that runs it, not a new fixed slot in the task model.
+    """
+
+    BUILD = "build"
+    CHECK = "check"
+    MEASURE = "measure"
+
+
+class StageDeclaration(BaseModel):
+    """One stage of a task's measurement as the task declares it."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: StageKind
+    label: str = Field(min_length=1)
+    timeout_seconds: int | None = Field(default=None, gt=0)
+
+
+_SHORT_FORM = {"check": "accuracy", "measure": "benchmark"}
+"""Each short-form stage key and the existing-form key it compiles to."""
+
+
 class InputManifest(BaseModel):
-    """Versioned evaluator-command manifest for an input bundle."""
+    """Versioned evaluator-command manifest for an input bundle.
+
+    A task declares its evaluation in one of two forms that compile to the same model: the
+    short form (``build``, ``check``, ``measure``, ``metric``) or the existing form
+    (``[accuracy]``, ``[benchmark]``, optionally ``[build]``). ``check`` is the accuracy
+    stage and ``measure`` the benchmark stage; a short-form ``measure`` speaks evaluator
+    result protocol 2 unless it declares a ``result`` contract. ``stages`` is the compiled,
+    ordered list of what one measurement runs.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     version: Literal[1]
     agent: AgentInput
     profile_guided: ProfileGuidedInput | None = None
-    accuracy: InputCommand
-    benchmark: BenchmarkCommand
+    build: BuildCommand | None = None
+    """The candidate's confined build, run once per measured commit before check and measure."""
+    accuracy: InputCommand = Field(validation_alias=AliasChoices("accuracy", "check"))
+    benchmark: BenchmarkCommand = Field(validation_alias=AliasChoices("benchmark", "measure"))
+    metric: str | None = Field(default=None, min_length=1)
+    """The headline metric the measure stage reports."""
     profile: InputCommand | None = None
     resources: RunResourceRequest | None = None
     environment: EnvironmentInput | None = None
@@ -362,8 +432,55 @@ class InputManifest(BaseModel):
     plan: TaskPlan | None = None
     """The design a plan-mode run follows; inert otherwise."""
 
+    @model_validator(mode="before")
+    @classmethod
+    def _compile_short_form(cls, data: object) -> object:
+        """Refuse a stage declared in both forms; a short-form measure defaults to protocol 2."""
+        if not isinstance(data, dict):
+            return data
+        mixed = [
+            f"{short} and {existing}"
+            for short, existing in _SHORT_FORM.items()
+            if short in data and existing in data
+        ]
+        if mixed:
+            message = (
+                f"declare each stage once: {', '.join(mixed)} name the same stage; use the "
+                "short form (build, check, measure, metric) or the existing form "
+                "([accuracy], [benchmark]), not both"
+            )
+            raise ValueError(message)
+        measure = data.get("measure")
+        if isinstance(measure, dict) and "result" not in measure:
+            return {**data, "measure": {"result_protocol": 2, **measure}}
+        return data
+
+    @property
+    def stages(self) -> tuple[StageDeclaration, ...]:
+        """What one measurement of a candidate runs, in order, whichever form declared it."""
+        declared: tuple[tuple[StageKind, BuildCommand | InputCommand | None], ...] = (
+            (StageKind.BUILD, self.build),
+            (StageKind.CHECK, self.accuracy),
+            (StageKind.MEASURE, self.benchmark),
+        )
+        return tuple(
+            StageDeclaration(kind=kind, label=kind.value, timeout_seconds=command.timeout_seconds)
+            for kind, command in declared
+            if command is not None
+        )
+
     @model_validator(mode="after")
     def _validate_cross_references(self) -> InputManifest:
+        if (
+            self.metric is not None
+            and self.benchmark.result is not None
+            and self.benchmark.result.metric != self.metric
+        ):
+            message = (
+                f"metric {self.metric!r} disagrees with benchmark.result.metric "
+                f"{self.benchmark.result.metric!r}; declare the headline metric once"
+            )
+            raise ValueError(message)
         uses_entrypoint = any(
             command.entrypoint is not None
             for command in (self.accuracy, self.benchmark, self.profile)
@@ -402,13 +519,16 @@ def _toml_array(values: tuple[str, ...]) -> str:
 
 def render_input_manifest(manifest: InputManifest) -> str:
     """Serialize a validated input manifest as deterministic TOML."""
-    lines = [
-        f"version = {manifest.version}",
+    lines = [f"version = {manifest.version}"]
+    if manifest.metric is not None:
+        lines.append(f"metric = {_toml_string(manifest.metric)}")
+    lines += [
         "",
         "[agent]",
         f"domain = {_toml_string(manifest.agent.domain.value)}",
     ]
     _append_profile_guided(lines, manifest)
+    _append_build(lines, manifest)
     _append_accuracy(lines, manifest)
     _append_environment_and_resources(lines, manifest)
     _append_benchmark(lines, manifest)
@@ -449,6 +569,14 @@ def _append_profile_guided(lines: list[str], manifest: InputManifest) -> None:
                 (f"min_relative_improvement = {manifest.profile_guided.min_relative_improvement}"),
             ]
         )
+
+
+def _append_build(lines: list[str], manifest: InputManifest) -> None:
+    if manifest.build is None:
+        return
+    lines.extend(["", "[build]", f"command = {_toml_array(manifest.build.command)}"])
+    if manifest.build.timeout_seconds is not None:
+        lines.append(f"timeout_seconds = {manifest.build.timeout_seconds}")
 
 
 def _append_accuracy(lines: list[str], manifest: InputManifest) -> None:
@@ -597,6 +725,8 @@ class InputBundle(BaseModel):
     evaluator_path: Path | None
     evaluator_package_digest: str | None = None
     evaluator_package_root: Path | None = None
+    candidate_outputs: tuple[str, ...] = ()
+    """The files the evaluator package requires a candidate's build to produce."""
     resolved_accuracy_command: tuple[str, ...]
     resolved_benchmark_command: tuple[str, ...]
     resolved_profile_command: tuple[str, ...] | None = None
@@ -606,6 +736,26 @@ class InputBundle(BaseModel):
     def objective(self) -> str:
         """Read the objective text from its declared file."""
         return self.objective_path.read_text()
+
+    @property
+    def missing_build(self) -> str | None:
+        """Why the task cannot be measured for want of a build, or None.
+
+        A task whose evaluator requires candidate outputs must declare the ``[build]`` that
+        produces them; without one every measurement, the baseline's included, fails.
+        """
+        if not self.candidate_outputs or self.manifest.build is not None:
+            return None
+        outputs = ", ".join(self.candidate_outputs)
+        manifest = (
+            self.manifest_path.relative_to(self.root)
+            if self.manifest_path.is_relative_to(self.root)
+            else self.manifest_path
+        )
+        return (
+            f"the evaluator requires the candidate build output {outputs}, but the task "
+            f"declares no build: add a [build] whose command produces it to {manifest}"
+        )
 
     @property
     def accuracy_command(self) -> tuple[str, ...]:
@@ -754,6 +904,9 @@ def load_project_task(project: Project, task: TaskDirectory) -> InputBundle:
             evaluator_package.digest if evaluator_package is not None else None
         ),
         evaluator_package_root=(evaluator_package.root if evaluator_package is not None else None),
+        candidate_outputs=(
+            evaluator_package.metadata.candidate_outputs if evaluator_package is not None else ()
+        ),
         resolved_accuracy_command=resolved_commands[0],
         resolved_benchmark_command=resolved_commands[1],
         resolved_profile_command=(resolved_commands[2] if manifest.profile is not None else None),

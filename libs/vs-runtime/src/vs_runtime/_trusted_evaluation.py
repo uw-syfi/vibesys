@@ -185,10 +185,29 @@ class ProtocolBenchmarkContract(BaseModel):
 type TrustedBenchmarkContract = ScalarBenchmarkContract | ProtocolBenchmarkContract
 
 
+class TrustedBuild(BaseModel):
+    """The candidate's build: confined candidate code, then the outputs it must produce.
+
+    ``command`` runs from the root of a fresh checkout of the measured commit under the run
+    environment's agent confinement, never as a trusted command. ``outputs`` are the
+    evaluator package's ``candidate_outputs``, verified after the command and passed to the
+    trusted check and measure stages.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    command: str = Field(min_length=1)
+    timeout_seconds: int | None = Field(default=None, gt=0)
+    outputs: tuple[str, ...] = ()
+
+
 class TrustedEvaluationPlan(BaseModel):
     """Resolved commands and transport contract for one workspace."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+    build: TrustedBuild | None = None
+    """The candidate's confined build, when the task declares one."""
 
     accuracy_command: str | None = Field(default=None, min_length=1)
     accuracy_timeout_seconds: int | None = Field(default=None, gt=0)
@@ -219,7 +238,8 @@ class TrustedEvaluationPlan(BaseModel):
     """
 
     def execution_budget_seconds(
-        self, stages: tuple[Literal["accuracy", "benchmark", "profile", "framework_setup"], ...]
+        self,
+        stages: tuple[Literal["build", "accuracy", "benchmark", "profile", "framework_setup"], ...],
     ) -> int:
         """Sum declared timeouts for exactly the stages the evaluation will run.
 
@@ -230,6 +250,7 @@ class TrustedEvaluationPlan(BaseModel):
             message = "stages must be nonempty and unique"
             raise ValueError(message)
         timeouts = {
+            "build": None if self.build is None else self.build.timeout_seconds,
             "accuracy": self.accuracy_timeout_seconds,
             "benchmark": self.benchmark_timeout_seconds,
             "profile": self.profile_timeout_seconds,
@@ -247,7 +268,7 @@ class TrustedEvaluationPlan(BaseModel):
     def suspension_deadline_s(
         self,
         submitted_at_s: float,
-        stages: tuple[Literal["accuracy", "benchmark", "profile", "framework_setup"], ...],
+        stages: tuple[Literal["build", "accuracy", "benchmark", "profile", "framework_setup"], ...],
         queue_allowance_seconds: int,
     ) -> float:
         """Derive an absolute deadline from supplied time and declared bounds."""
@@ -310,6 +331,58 @@ class TrustedAccuracyResult(BaseModel):
         return self
 
 
+class TrustedBuildResult(BaseModel):
+    """Policy-neutral result of one confined candidate build command."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    command: str | None = None
+    executed: bool
+    passed: bool
+    output: str = ""
+    failure: str | None = None
+    operator_output: str = ""
+    operator_failure: str | None = None
+    # Whose fault a failed build is: present exactly when it failed, with no default.
+    failure_kind: BenchmarkFailureKind | None = None
+
+    @model_validator(mode="after")
+    def _failure_kind_exactly_when_failed(self) -> TrustedBuildResult:
+        if self.passed != (self.failure_kind is None):
+            message = "a build result carries a failure kind exactly when it failed"
+            raise ValueError(message)
+        if self.passed != (self.operator_failure is None):
+            message = "a failed build result requires a separate operator-safe failure"
+            raise ValueError(message)
+        return self
+
+    @classmethod
+    def failed(
+        cls, failure: str, kind: BenchmarkFailureKind, *, command: str | None, executed: bool
+    ) -> TrustedBuildResult:
+        """A failed build whose failure text is all its output."""
+        operator_failure = redact_diagnostic_text(failure)
+        return cls(
+            command=command,
+            executed=executed,
+            passed=False,
+            output=failure,
+            failure=failure,
+            operator_output=operator_failure,
+            operator_failure=operator_failure,
+            failure_kind=kind,
+        )
+
+
+_TIMEOUT_EXIT = 124
+"""The exit status a ``CommandRunner`` reports for a command it stopped at its timeout."""
+
+NO_BUILD_CONFINEMENT = (
+    "this run environment has no agent confinement for the candidate's build, so the build "
+    "does not run; use a run environment that runs the agent in a container (docker)"
+)
+
+
 class TrustedBenchmarkResult(BaseModel):
     """Policy-neutral result of one trusted benchmark command."""
 
@@ -353,6 +426,15 @@ class TrustedBenchmarkResult(BaseModel):
 
 class TrustedEvaluationExecutor(Protocol):
     """Serialize trusted evaluation effects for one workspace."""
+
+    async def build(
+        self, *, confinement: CommandRunner | None, output: OutputSink
+    ) -> TrustedBuildResult:
+        """Run the candidate's build confined; with no confinement it fails closed.
+
+        The command's stdout and stderr are written to *output* as it runs.
+        """
+        ...
 
     async def accuracy(
         self, *, command_override: str | None = None, output: OutputSink
@@ -420,6 +502,18 @@ class RuntimeTrustedEvaluation:
         async with self._lock:
             return await self._run_sync(partial(self._accuracy, command_override, output))
 
+    async def build(
+        self, *, confinement: CommandRunner | None, output: OutputSink
+    ) -> TrustedBuildResult:
+        """Run the candidate's build under ``confinement`` without overlapping workspace mutation.
+
+        ``confinement`` is the run environment's agent confinement for this workspace; with
+        none the build fails closed and runs nothing. The command's output is written to
+        *output* as it runs.
+        """
+        async with self._lock:
+            return await self._run_sync(partial(self._build, confinement, output))
+
     async def benchmark(
         self,
         *,
@@ -462,6 +556,76 @@ class RuntimeTrustedEvaluation:
         except ModelRequestError as error:
             return (), f"Model-weight request could not be satisfied: {error}"
         return volumes, None
+
+    def _build(
+        self, confinement: CommandRunner | None, sink: OutputSink, cancel: Event
+    ) -> TrustedBuildResult:
+        build = self._plan.build
+        if build is None:
+            return TrustedBuildResult(executed=False, passed=True)
+        refusal = self._build_refusal(build, confinement)
+        if refusal is not None or confinement is None:
+            return refusal or TrustedBuildResult.failed(
+                NO_BUILD_CONFINEMENT,
+                BenchmarkFailureKind.WORKLOAD,
+                command=build.command,
+                executed=False,
+            )
+        # A runner that cannot start the command raises; the executor records that as the
+        # evaluation's failure, as it does for any stage that raises.
+        result = confinement.execute(
+            build.command, timeout=self._timeout(build.timeout_seconds), cancel=cancel, output=sink
+        )
+        if changed := self._git.trusted_input_changes():
+            return TrustedBuildResult.failed(
+                "Evaluator-owned files changed during the build: " + ", ".join(changed),
+                BenchmarkFailureKind.WORKLOAD,
+                command=build.command,
+                executed=True,
+            )
+        if result.exit_code == 0 and not result.cancelled:
+            return TrustedBuildResult(
+                command=build.command,
+                executed=True,
+                passed=True,
+                output=result.output.strip(),
+                operator_output=result.diagnostic_output.strip(),
+            )
+        status = (
+            "timed out" if result.exit_code == _TIMEOUT_EXIT else f"exited with {result.exit_code}"
+        )
+        failure = f"Candidate build {status}.\n{result.output.strip()}".strip()
+        operator_failure = f"Candidate build {status}.\n{result.diagnostic_output.strip()}".strip()
+        return TrustedBuildResult(
+            command=build.command,
+            executed=True,
+            passed=False,
+            output=failure,
+            failure=failure,
+            operator_output=operator_failure,
+            operator_failure=operator_failure,
+            failure_kind=_command_failure_kind(RecordState.OUTCOME, result, None),
+        )
+
+    def _build_refusal(
+        self, build: TrustedBuild, confinement: CommandRunner | None
+    ) -> TrustedBuildResult | None:
+        """Why the build must not run at all, or None: no confinement, or tampered inputs."""
+        if confinement is None:
+            return TrustedBuildResult.failed(
+                NO_BUILD_CONFINEMENT,
+                BenchmarkFailureKind.WORKLOAD,
+                command=build.command,
+                executed=False,
+            )
+        if changed := self._git.trusted_input_changes():
+            return TrustedBuildResult.failed(
+                "Evaluator-owned files were modified: " + ", ".join(changed),
+                BenchmarkFailureKind.WORKLOAD,
+                command=build.command,
+                executed=False,
+            )
+        return None
 
     def _accuracy(
         self, command_override: str | None, sink: OutputSink, cancel: Event

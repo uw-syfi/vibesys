@@ -37,6 +37,7 @@ from tests.support.example_registry import (
 from entrypoints.cli import _run_validate
 from entrypoints.example_catalog import REGISTRY_RELATIVE, Check, ExampleEntry
 from vibesys.errors import ConfigurationError
+from vibesys.inputs import load_input_manifest, load_task
 from vibesys.run.project_policy import build_project_path_policy, trusted_project_input_paths
 from vs_project.api import Project
 
@@ -166,6 +167,22 @@ def test_example_validates(entry: ExampleEntry, capsys: pytest.CaptureFixture[st
     assert not failures, "\n".join(failures)
 
 
+@pytest.mark.parametrize("entry", [_param(e, Check.CANDIDATE_BUILD) for e in ENTRIES])
+def test_tasks_build_what_their_evaluator_requires(entry: ExampleEntry) -> None:
+    """A task whose evaluator requires candidate outputs declares the build that makes them.
+
+    Without one, every measurement, the baseline's included, fails its check; New run
+    preflight refuses such a task by the same rule (``InputBundle.missing_build``).
+    """
+    _require_present(entry)
+    failures = [
+        f"{entry.path} task={task}: {missing}"
+        for task in _tasks(entry)
+        if (missing := load_task(example_root(entry), task).missing_build) is not None
+    ]
+    assert not failures, "\n".join(failures)
+
+
 @pytest.mark.parametrize("entry", [_param(e, Check.PATH_REFS) for e in ENTRIES])
 def test_command_path_references_exist(entry: ExampleEntry) -> None:
     _require_present(entry)
@@ -185,12 +202,13 @@ _RUNTIME_DIRS = (".vibesys/state", "_input_libs")
 
 
 def _command_strings(manifest: Path) -> list[str]:
-    document = tomllib.loads(manifest.read_text())
-    strings: list[str] = []
-    for section in ("accuracy", "benchmark"):
-        table = document.get(section, {})
-        strings += [str(item) for key in ("command", "args") for item in table.get(key, [])]
-    return strings
+    """Every argv element of the trusted check and measure commands, whichever form declares them."""
+    parsed = load_input_manifest(manifest)
+    return [
+        item
+        for command in (parsed.accuracy, parsed.benchmark)
+        for item in (*(command.command or ()), *command.args)
+    ]
 
 
 def _manifest(entry: ExampleEntry, task: str) -> Path:

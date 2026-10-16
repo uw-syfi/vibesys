@@ -33,6 +33,13 @@ from vs_runtime._bounded_stop import (
     bounded_stop,
     stop_gated_evaluation,
 )
+from vs_runtime._build_outputs import (
+    BuildStore,
+    MissingOutputError,
+    StateBuildStore,
+    VerifiedOutput,
+    verify_outputs,
+)
 from vs_runtime._bundled_paths import (
     BundledResources,
     resolve_bundled_tree,
@@ -249,6 +256,8 @@ from vs_runtime._trusted_evaluation import (
     TrustedBenchmarkContract,
     TrustedBenchmarkDecoding,
     TrustedBenchmarkResult,
+    TrustedBuild,
+    TrustedBuildResult,
     TrustedEvaluationExecutor,
     TrustedEvaluationPlan,
     TrustedMetricDeclaration,
@@ -292,6 +301,7 @@ from vs_runtime._workspace_runtime import (
     CommandExecutionResult,
     RuntimeAccuracyRun,
     RuntimeBenchmarkRun,
+    RuntimeBuildRun,
     RuntimeCaptureCommands,
     RuntimeCommands,
     RuntimeWorkspaceEvaluation,
@@ -327,11 +337,13 @@ def create_workspace_runtime(
     workspace_resources: WorkspaceResourceProvider,
     blocking: BlockingOperations,
     validation_passes: ValidationPasses,
+    builds: BuildStore | None = None,
 ) -> WorkspaceRuntime:
     """Create one owner for workspace handles and the commands and evaluation over them.
 
-    ``validation_passes`` is the runtime-owned record of trusted local-validation passes;
-    it must live outside every workspace.
+    ``validation_passes`` is the runtime-owned record of trusted local-validation passes and
+    ``builds`` the record of verified candidate builds (default: in memory); both must live
+    outside every workspace.
     """
     workspaces = RuntimeWorkspaces(workspace_resources, runner=blocking.runner)
     commands = RuntimeCommands(workspaces, blocking)
@@ -340,7 +352,7 @@ def create_workspace_runtime(
         workspaces=workspaces,
         commands=commands,
         capture_commands=capture_commands,
-        evaluation=RuntimeWorkspaceEvaluation(workspaces, commands, validation_passes),
+        evaluation=RuntimeWorkspaceEvaluation(workspaces, commands, validation_passes, builds),
     )
 
 
@@ -477,6 +489,7 @@ __all__ = [
     "AgentExecutionStatus",
     "AgentPaths",
     "BlockingOperations",
+    "BuildStore",
     "BundledResources",
     "CapacityHandling",
     "CapacityTimer",
@@ -531,6 +544,7 @@ __all__ = [
     "MacOSProfilerTool",
     "ManagedConversation",
     "ManagedConversationSpec",
+    "MissingOutputError",
     "ModalEnvironmentFacts",
     "ModelArtifactDownloader",
     "ModelArtifactRequest",
@@ -580,6 +594,7 @@ __all__ = [
     "RunStopped",
     "RuntimeAccuracyRun",
     "RuntimeBenchmarkRun",
+    "RuntimeBuildRun",
     "RuntimeRunHost",
     "RuntimeWorkspace",
     "RuntimeWorkspaceEvaluation",
@@ -596,6 +611,7 @@ __all__ = [
     "SlurmEnvironmentFacts",
     "StageFailureText",
     "StartupOutputOpener",
+    "StateBuildStore",
     "StateValidationPasses",
     "StopGraceError",
     "StopTimer",
@@ -611,6 +627,8 @@ __all__ = [
     "TrustedBenchmarkContract",
     "TrustedBenchmarkDecoding",
     "TrustedBenchmarkResult",
+    "TrustedBuild",
+    "TrustedBuildResult",
     "TrustedEvaluationCommandPaths",
     "TrustedEvaluationExecutor",
     "TrustedEvaluationPlan",
@@ -618,6 +636,7 @@ __all__ = [
     "TrustedMetricDeclaration",
     "ValidationPasses",
     "ValidationRecipe",
+    "VerifiedOutput",
     "WaitFor",
     "WorkspaceEvaluationSpec",
     "WorkspaceHolds",
@@ -698,4 +717,5 @@ __all__ = [
     "stop_gated_evaluation",
     "summarize_linux_profile",
     "validate_run_environment_profile",
+    "verify_outputs",
 ]

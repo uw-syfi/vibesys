@@ -41,6 +41,8 @@ from vs_logs.api.testing import MemoryVolume, no_warning
 from vs_logs.read import Tail, reader_of
 from vs_runtime.api import (
     AccuracyEvaluation,
+    BenchmarkFailureKind,
+    BuildEvaluation,
     EvaluationRetries,
     PollingEvaluationExecutor,
     RetryingEvaluationExecutor,
@@ -66,7 +68,7 @@ if TYPE_CHECKING:
     from vs_runtime.api.core import StageOutputOpener
 
 _HANDLE = "vs-measurement"
-_PRINTED: dict[Literal["accuracy", "benchmark"], tuple[bytes, bytes]] = {
+_PRINTED: dict[Literal["build", "accuracy", "benchmark"], tuple[bytes, bytes]] = {
     "accuracy": (b"checking 1/3\nchecking 2/3\n", b"warning: slow\n"),
     "benchmark": (b"warmup\nrps=41\n", b""),
 }
@@ -333,6 +335,64 @@ async def test_a_local_validation_accuracy_stage_is_the_validation_gate() -> Non
 
     validation = GateStage(execution_id=_HANDLE, gate=GateKind.VALIDATION, attempt=1)
     assert _owners(store) == [(validation, StreamOutcome.ENDED)]
+
+
+_BUILD_STAGES = (EvidenceKind.BUILD, EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK)
+
+
+@pytest.mark.asyncio
+async def test_a_build_stage_writes_its_output_to_the_build_gate_stream_first() -> None:
+    store = _store()
+    evaluation = FakeEvaluation(
+        default_build=BuildEvaluation(executed=True),
+        default_accuracy=AccuracyEvaluation(executed=True),
+    )
+    evaluation.printed["build"] = (b"cargo build --release\n", b"")
+
+    await _measure(
+        evaluation,
+        purpose="official",
+        stage_output=lambda tries: tries.stage_output(stage_output_opener(store)),
+        stages=_BUILD_STAGES,
+    )
+
+    build = GateStage(execution_id=_HANDLE, gate=GateKind.BUILD, attempt=1)
+    reader = reader_of(store, LOG_OWNER)
+    streams = reader.list_streams()
+    assert [info.owner.gate for info in streams if isinstance(info.owner, GateStage)] == [
+        GateKind.BUILD,
+        GateKind.ACCURACY,
+        GateKind.BENCHMARK,
+    ]
+    assert (streams[0].owner, streams[0].command) == (build, "build")
+    assert _read(reader, streams[0]) == b"cargo build --release\n"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_build_skips_the_check_and_the_measure() -> None:
+    """Nothing after a failed build can count, so neither the check nor the measure runs."""
+    store = _store()
+    missing = "the build did not produce required output 'queue-candidate.so'"
+    evaluation = FakeEvaluation(
+        default_build=BuildEvaluation(
+            executed=True,
+            feedback=missing,
+            operator_feedback=missing,
+            failure_kind=BenchmarkFailureKind.WORKLOAD,
+        )
+    )
+
+    await _measure(
+        evaluation,
+        purpose="official",
+        stage_output=lambda tries: tries.stage_output(stage_output_opener(store)),
+        stages=_BUILD_STAGES,
+    )
+
+    assert (len(evaluation.build_calls), evaluation.accuracy_calls) == (1, [])
+    assert evaluation.benchmark_calls == []
+    build = GateStage(execution_id=_HANDLE, gate=GateKind.BUILD, attempt=1)
+    assert [owner for owner, _ in _owners(store)] == [build]
 
 
 @pytest.mark.asyncio

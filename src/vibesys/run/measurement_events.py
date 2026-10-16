@@ -27,8 +27,16 @@ if TYPE_CHECKING:
 
 GATE_TAIL_CHARS = 1000
 _LOCAL_VALIDATION = "local-validation"
-_GATES = {"accuracy": GateKind.ACCURACY, "benchmark": GateKind.BENCHMARK}
-_PROCESS_KINDS = {GateKind.ACCURACY: "accuracy_checker", GateKind.BENCHMARK: "benchmark"}
+_GATES = {
+    "build": GateKind.BUILD,
+    "accuracy": GateKind.ACCURACY,
+    "benchmark": GateKind.BENCHMARK,
+}
+_PROCESS_KINDS = {
+    GateKind.BUILD: "candidate_build",
+    GateKind.ACCURACY: "accuracy_checker",
+    GateKind.BENCHMARK: "benchmark",
+}
 
 
 def gate_of(purpose: str | None, stage_id: str) -> GateKind | None:

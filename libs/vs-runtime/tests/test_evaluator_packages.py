@@ -657,3 +657,24 @@ def test_metadata_rejects_invalid_entrypoints(tmp_path: Path, entrypoints: str, 
 
     with pytest.raises(EvaluatorPackageError, match=error):
         load_evaluator_package(root)
+
+
+def test_a_package_declares_the_outputs_a_candidate_build_must_produce(tmp_path: Path) -> None:
+    root = _write_package(
+        tmp_path / "package", extra_metadata='candidate_outputs = ["lib/queue.so", "q.so"]'
+    )
+
+    assert load_evaluator_package(root).metadata.candidate_outputs == ("lib/queue.so", "q.so")
+
+
+@pytest.mark.parametrize(
+    "output",
+    ["", "/abs/q.so", "../q.so", "lib/../q.so", "lib//q.so", "./q.so", "lib/", ".git/q.so", "a:b"],
+)
+def test_a_candidate_output_must_be_a_normalized_workspace_file(
+    tmp_path: Path, output: str
+) -> None:
+    root = _write_package(tmp_path / "package", extra_metadata=f'candidate_outputs = ["{output}"]')
+
+    with pytest.raises(EvaluatorPackageError, match="candidate"):
+        load_evaluator_package(root)

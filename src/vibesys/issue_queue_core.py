@@ -165,12 +165,14 @@ def _task_terms(evaluation: EvaluationInputs, context: CoreRunContext) -> TaskTe
         MetricSpace(),
         Measuring(
             stage_seconds={
+                "build": evaluation.build_seconds,
                 "accuracy": evaluation.accuracy_seconds,
                 "benchmark": evaluation.benchmark_seconds,
                 "profile": evaluation.profile_seconds,
             },
             queue_allowance=float(context.queue_allowance_seconds),
             benchmark_needs_accuracy=evaluation.benchmark_needs_accuracy,
+            builds=evaluation.builds,
         ),
     )
 

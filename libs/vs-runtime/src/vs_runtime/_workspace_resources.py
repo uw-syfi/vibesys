@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from vs_runtime._trusted_evaluation import (
         TrustedAccuracyResult,
         TrustedBenchmarkResult,
+        TrustedBuildResult,
         TrustedEvaluationExecutor,
     )
     from vs_sandbox.api import CommandRunner
@@ -529,11 +530,15 @@ class RuntimeWorkspaceResource:
     def evaluation_spec(self) -> WorkspaceEvaluationSpec:
         view = self._environment.view
         return WorkspaceEvaluationSpec(
+            build=self._evaluation_plan.build,
             accuracy_command=self._evaluation_plan.accuracy_command,
             benchmark_command=self._evaluation_plan.benchmark_command,
             benchmark_contract=self._evaluation_plan.benchmark_contract,
             deployment_release_env_var=view.deployment_release_env_var,
         )
+
+    async def candidate_build(self, output: OutputSink) -> TrustedBuildResult:
+        return await self._evaluation.build(confinement=self.agent_sandbox(), output=output)
 
     async def trusted_accuracy(
         self, command_override: str | None, output: OutputSink

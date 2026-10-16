@@ -578,7 +578,7 @@ export type Kind38 = "gate_started";
 /**
  * Closed set of framework-owned gates a candidate passes through.
  */
-export type GateKind = "validation" | "accuracy" | "benchmark";
+export type GateKind = "validation" | "build" | "accuracy" | "benchmark";
 export type Recipe = string | null;
 export type Command = string | null;
 /**
