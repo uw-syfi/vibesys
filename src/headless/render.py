@@ -15,8 +15,10 @@ from typing import TextIO
 from headless.format import format_status_prefix
 from headless.framework_events import (
     format_framework_event,
+    format_outage_summary,
     format_quota_event,
     format_rate_limit_event,
+    outage_wait_seconds,
 )
 from vibesys.api import (
     AgentOutputChunkData,
@@ -134,6 +136,7 @@ class HeadlessRenderer:
         self.max_text_len = max_text_len
         self._at_line_start = True
         self._todo_display = TodoDisplay(file=out, color=color)
+        self._outage_wait_seconds = 0.0
 
     @property
     def _out(self) -> TextIO:
@@ -142,6 +145,7 @@ class HeadlessRenderer:
     def handle(self, event: CoreEvent) -> None:
         """Render one core event to the configured terminal stream."""
         data = event.data
+        self._outage_wait_seconds += outage_wait_seconds(event)
         if isinstance(data, AgentOutputChunkData):
             self._render_chunk(data)
         elif isinstance(data, ToolCallData):
@@ -159,6 +163,12 @@ class HeadlessRenderer:
             self._render_line(framework_line)
         # Other event types (usage updates, lifecycle) carry no direct
         # terminal output; status readings surface through chunk prefixes.
+
+    def finish(self) -> None:
+        """Render the run-end summary: the time turns spent waiting out provider outages."""
+        line = format_outage_summary(self._outage_wait_seconds)
+        if line is not None:
+            self._render_line(line)
 
     # -- channel rendering ---------------------------------------------------
 

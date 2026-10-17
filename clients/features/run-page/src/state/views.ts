@@ -158,14 +158,6 @@ export function quotaBannerView(
           : `The run resumes by itself at about ${time(waiting.resumesAt)}.`,
     };
   }
-  if (pause.condition === 'unavailable') {
-    const retry = pause.resumesAt === null ? '' : ` at about ${time(pause.resumesAt)}`;
-    return {
-      ...offers,
-      title: `Paused: ${provider} is unavailable`,
-      body: `${pause.detail}. The run tries again by itself${retry}.`,
-    };
-  }
   const limit = pause.condition === 'rate_limited' ? 'rate limit' : 'usage limit';
   const reset =
     pause.resetsAt === null

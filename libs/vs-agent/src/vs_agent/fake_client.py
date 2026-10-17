@@ -258,6 +258,8 @@ class FakeAgentClient:
         self.cancelled_sessions: list[AgentSessionKey] = []
         self.released_sessions: list[AgentSessionKey] = []
         self._cancelled = threads.event()
+        self._turns: list[tuple[AgentSessionKey | None, CapacityStops]] = []
+        self._turns_lock = threads.lock()
 
     # -- AgentClientProtocol: attribution ---------------------------------
 
@@ -303,6 +305,7 @@ class FakeAgentClient:
     def cancel(self) -> None:
         """Record a cancellation request and release turns waiting for one."""
         self.cancel_count += 1
+        self._cancel_turns(None)
         self._cancelled.set()
 
     # -- optional capability: steering a running turn ---------------------------
@@ -344,6 +347,7 @@ class FakeAgentClient:
     def cancel_session(self, key: AgentSessionKey) -> None:
         """Record a cancellation of one key and release turns waiting for a cancellation."""
         self.cancelled_sessions.append(key)
+        self._cancel_turns(key)
         self._cancelled.set()
 
     def release_session(self, key: AgentSessionKey) -> None:
@@ -524,7 +528,9 @@ class FakeAgentClient:
         self._write_usage(
             session_spec.role, turn.label, session_spec.model, session_spec.reasoning_effort
         )
-        self._maybe_raise(session_spec.role, turn.message, turn.label, turn.invocation_id)
+        self._maybe_raise(
+            session_spec.role, turn.message, turn.label, turn.invocation_id, session_key
+        )
         self._update_session(reuse_session=True, session_key=session_key)
         if session_key is not None:
             self._raw_fingerprints[session_key] = fingerprint
@@ -651,7 +657,7 @@ class FakeAgentClient:
             session_key=session_key,
         )
         self._write_usage(kind, round_label, self.model_for_kind(kind), None)
-        self._maybe_raise(kind, user_prompt, round_label, invocation_id)
+        self._maybe_raise(kind, user_prompt, round_label, invocation_id, session_key)
         self._update_session(reuse_session=reuse_session, session_key=session_key)
         self._emit_stream(kind, invocation)
         return self._resolve_response(kind, invocation, response_cls)
@@ -689,7 +695,7 @@ class FakeAgentClient:
             session_key=session_key,
         )
         self._write_usage(kind, round_label, self.model_for_kind(kind), None)
-        self._maybe_raise(kind, user_prompt, round_label, invocation_id)
+        self._maybe_raise(kind, user_prompt, round_label, invocation_id, session_key)
         self._update_session(reuse_session=reuse_session, session_key=session_key)
         self._emit_stream(kind, invocation)
         text = self._resolve_text(kind, invocation)
@@ -758,24 +764,53 @@ class FakeAgentClient:
         self._capacity_gate = gate
 
     def _maybe_raise(
-        self, kind: str, message: str, label: str | None, invocation_id: str | None
+        self,
+        kind: str,
+        message: str,
+        label: str | None,
+        invocation_id: str | None,
+        session_key: AgentSessionKey | None,
     ) -> None:
-        """Raise the scripted failure; a quota limit waits at the gate and sends the turn again."""
-        stops = CapacityStops()
-        while True:
-            try:
-                self._raise_scripted(kind)
-            except AgentQuotaError as error:
-                gate = self._capacity_gate
-                if gate is None:
-                    raise
-                stops.count += 1
-                request = AgentTurnRequest(
-                    message=message, label=label, invocation_id=invocation_id
-                )
-                gate.wait_for_capacity(error, request, role=kind, stops=stops)
-            else:
-                return
+        """Raise the scripted failure; a quota limit waits at the gate and sends the turn again.
+
+        As in the real client, the turn's record outlives each resend: a cancellation of
+        the turn (or of its key) ends the gate's wait, and a cancelled turn is not sent
+        again. A turn that gets through is reported to the gate as served.
+        """
+        stops = CapacityStops(self.threads)
+        entry = (session_key, stops)
+        with self._turns_lock:
+            self._turns.append(entry)
+        try:
+            while True:
+                try:
+                    self._raise_scripted(kind)
+                except AgentQuotaError as error:
+                    gate = self._capacity_gate
+                    if gate is None:
+                        raise
+                    stops.count += 1
+                    request = AgentTurnRequest(
+                        message=message, label=label, invocation_id=invocation_id
+                    )
+                    gate.wait_for_capacity(error, request, role=kind, stops=stops)
+                    if stops.cancelled:
+                        raise error from None
+                else:
+                    gate = self._capacity_gate
+                    if gate is not None and self._provider is not None:
+                        gate.turn_served(self._provider)
+                    return
+        finally:
+            with self._turns_lock:
+                self._turns.remove(entry)
+
+    def _cancel_turns(self, key: AgentSessionKey | None) -> None:
+        """Cancel the turns in flight on ``key``, or every one when ``key`` is None."""
+        with self._turns_lock:
+            turns = [stops for turn_key, stops in self._turns if key is None or turn_key == key]
+        for stops in turns:
+            stops.cancel()
 
     def _raise_scripted(self, kind: str) -> None:
         state = self._failures.get(kind)

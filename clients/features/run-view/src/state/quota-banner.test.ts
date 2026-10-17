@@ -124,6 +124,24 @@ describe('quotaBanner', () => {
     expect(run.quota.lastSwitch).not.toBeNull();
   });
 
+  test('an outage on another turn neither replaces nor settles the pause', () => {
+    const outage = {provider: 'mock', condition: 'unavailable', detail: '503'} as const;
+    const events: RunEvent[] = [
+      PAUSED,
+      fixtureEvent(2, 'quota_paused', {data: {kind: 'quota_paused', ...outage, policy: 'wait'}}),
+      fixtureEvent(3, 'quota_resumed', {
+        data: {kind: 'quota_resumed', provider: 'mock', condition: 'unavailable', waited_seconds: 60},
+      }),
+      fixtureEvent(4, 'quota_abandoned', {
+        data: {kind: 'quota_abandoned', ...outage, reason: 'the outage budget is spent'},
+      }),
+    ];
+    expect(quotaBanner(runWith('paused', events))).toMatchObject({
+      kind: 'pause',
+      message: 'claude is rate limited. The run is paused until it resumes.',
+    });
+  });
+
   test('shows nothing once a plain resume settles the pause', () => {
     const resumed: RunEvent = fixtureEvent(2, 'quota_resumed', {
       data: {kind: 'quota_resumed', provider: 'claude'},

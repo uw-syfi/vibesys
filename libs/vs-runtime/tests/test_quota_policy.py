@@ -9,6 +9,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vs_runtime.api.infrastructure import (
+    PROVIDER_OUTAGE,
     RESET_MARGIN_SECONDS,
     FallbackTarget,
     GiveUp,
@@ -158,7 +159,7 @@ outage_policies = st.builds(
 def test_an_outage_waits_within_the_cap_and_the_budget_or_gives_up_once_it_is_spent(
     policy: OutagePolicy, stop: int, elapsed: float
 ) -> None:
-    decision = decide_outage(policy, stop=stop, elapsed=elapsed)
+    decision = decide_outage(policy, stop=stop, elapsed=elapsed, run_left=None)
 
     if elapsed >= policy.budget_seconds:
         assert isinstance(decision, GiveUp)
@@ -172,13 +173,13 @@ def test_an_outage_waits_within_the_cap_and_the_budget_or_gives_up_once_it_is_sp
 def test_outage_waits_never_shrink_from_one_stop_to_the_next_while_budget_remains(
     policy: OutagePolicy, stop: int
 ) -> None:
-    now = decide_outage(policy, stop=stop, elapsed=0.0)
-    later = decide_outage(policy, stop=stop + 1, elapsed=0.0)
+    now = decide_outage(policy, stop=stop, elapsed=0.0, run_left=None)
+    later = decide_outage(policy, stop=stop + 1, elapsed=0.0, run_left=None)
 
     assert isinstance(now, WaitFor)
     assert isinstance(later, WaitFor)
     assert now.seconds <= later.seconds
-    assert decide_outage(policy, stop=1, elapsed=0.0) == WaitFor(
+    assert decide_outage(policy, stop=1, elapsed=0.0, run_left=None) == WaitFor(
         min(policy.first_wait_seconds, policy.budget_seconds)
     )
 
@@ -192,3 +193,33 @@ def test_an_outage_policy_rejects_values_no_decision_can_use(
 ) -> None:
     with pytest.raises(ValueError, match=r"outage policy|first_wait_seconds"):
         OutagePolicy(budget, first, cap)
+
+
+@given(
+    policy=outage_policies,
+    stop=st.integers(min_value=1, max_value=200),
+    elapsed=seconds,
+    run_left=st.floats(min_value=-1e6, max_value=1e6, allow_nan=False),
+)
+def test_an_outage_wait_never_runs_past_the_run_deadline(
+    policy: OutagePolicy, stop: int, elapsed: float, run_left: float
+) -> None:
+    """The run's deadline bounds every wait, and a run out of time does not wait at all."""
+    decision = decide_outage(policy, stop=stop, elapsed=elapsed, run_left=run_left)
+
+    if run_left <= 0:
+        assert isinstance(decision, GiveUp)
+        assert "deadline" in decision.reason
+        return
+    if isinstance(decision, WaitFor):
+        assert 0 < decision.seconds <= run_left
+    else:
+        assert elapsed >= policy.budget_seconds
+
+
+def test_an_outage_that_spent_its_budget_says_so_in_hours_and_minutes() -> None:
+    decision = decide_outage(PROVIDER_OUTAGE, stop=40, elapsed=6 * 3600 + 125.0, run_left=None)
+
+    assert decision == GiveUp(
+        "the provider stayed unavailable for 6 h 2 min 5 s, the whole 6 h outage budget"
+    )

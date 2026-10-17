@@ -124,8 +124,12 @@ class OutagePolicy:
     does. It covers the gateway outages seen on live runs (503 "No available accounts"
     for hours on 2026-10-16) and an incident at a provider, which is usually resolved
     within hours. An outage longer than that is more likely a revoked account or a
-    removed model, which waiting cannot fix, and the run should end and say so. A stop
-    or the run's deadline ends the wait sooner."""
+    removed model, which waiting cannot fix, and the run should end and say so.
+
+    The budget is per turn and bounds only the waiting. Sooner ends come from outside
+    the policy: a stop request or a cancellation of the turn ends a wait at once, and
+    no wait runs past the run's deadline (``decide_outage`` takes the time the run has
+    left), so an outage never holds a run beyond its deadline."""
     first_wait_seconds: float = 60.0
     max_wait_seconds: float = 600.0
     """Ten minutes. Each attempt also spends agentshim's own retries (about fifteen
@@ -146,21 +150,39 @@ class OutagePolicy:
 PROVIDER_OUTAGE = OutagePolicy()
 
 
-def decide_outage(policy: OutagePolicy, *, stop: int, elapsed: float) -> WaitFor | GiveUp:
+def decide_outage(
+    policy: OutagePolicy, *, stop: int, elapsed: float, run_left: float | None
+) -> WaitFor | GiveUp:
     """Decide what to do about the ``stop``-th outage stop of one turn (the first is 1).
 
-    ``elapsed`` is the time since the turn's first stop. A wait never runs past the
-    budget, so the time from the first stop to the last attempt is at most the budget.
+    ``elapsed`` is the time since the turn's first stop and ``run_left`` the time to the
+    run's deadline (``None`` for a run without one). A wait never runs past the budget
+    nor past the deadline, so the time from the first stop to the last attempt is at
+    most the budget, and a turn never waits once the run is out of time.
     """
+    if run_left is not None and run_left <= 0:
+        return GiveUp("the run reached its deadline while the provider was unavailable")
     remaining = policy.budget_seconds - elapsed
     if remaining <= 0:
         return GiveUp(
-            f"the provider stayed unavailable for {elapsed:g}s, "
-            f"the whole {policy.budget_seconds:g}s outage budget"
+            f"the provider stayed unavailable for {describe_seconds(elapsed)}, "
+            f"the whole {describe_seconds(policy.budget_seconds)} outage budget"
         )
     doublings = min(max(stop - 1, 0), 32)  # 2**32 minutes is past any cap
     wanted = min(policy.first_wait_seconds * 2.0**doublings, policy.max_wait_seconds)
-    return WaitFor(min(wanted, remaining))
+    bound = remaining if run_left is None else min(remaining, run_left)
+    return WaitFor(min(wanted, bound))
+
+
+def describe_seconds(seconds: float) -> str:
+    """A duration in the largest units that keep it exact to the second: ``2 h 5 min``."""
+    whole = max(round(seconds), 0)
+    hours, rest = divmod(whole, 3600)
+    minutes, secs = divmod(rest, 60)
+    parts = [
+        f"{value} {unit}" for value, unit in ((hours, "h"), (minutes, "min"), (secs, "s")) if value
+    ]
+    return " ".join(parts) or "0 s"
 
 
 def capacity_returns_at(*, resets_at: float | None, now: float) -> float | None:

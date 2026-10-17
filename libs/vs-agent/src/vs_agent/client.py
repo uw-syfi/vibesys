@@ -938,27 +938,40 @@ class AgentClient:
 
         A turn that stops on a provider capacity limit goes to the capacity
         gate, when one is installed, and is sent again on the same live
-        session once the gate returns; the gate raises to end the turn.
+        session once the gate returns; the gate raises to end the turn. The
+        turn's :class:`CapacityStops` record outlives each send, so a
+        cancellation that lands while the gate waits ends the wait, and one
+        that lands after it keeps the turn from being sent again.
         """
+        stops = CapacityStops(self._threads)
         with self._active_lock:
             if self._cancelled:
                 msg = "agent client is cancelled"
                 raise RuntimeError(msg)
             self._active_sessions.append(session)
+            session.track(stops)
         try:
-            stops = CapacityStops()
             while True:
                 try:
-                    return session.run_turn(turn, observer)
+                    result = session.run_turn(turn, observer)
                 except AgentQuotaError as error:
                     gate = self._capacity_gate
                     if gate is None:
                         raise
                     stops.count += 1
                     gate.wait_for_capacity(error, turn, role=role, stops=stops)
+                    if stops.cancelled:
+                        # Cancelled after the gate let the turn go: it is not sent again.
+                        raise error from None
+                else:
+                    gate = self._capacity_gate
+                    if gate is not None:
+                        gate.turn_served(session.profile.name)
+                    return result
         finally:
             with self._active_lock:
                 self._active_sessions.remove(session)
+                session.track(None)
 
     def _evict(self, key: AgentSessionKey) -> None:
         cached = self._sessions.pop(key, None)

@@ -125,8 +125,17 @@ class AgentEventSink(Protocol):
         """Publish that a turn stopped on a provider capacity limit and the run paused."""
         ...
 
-    def quota_resumed(self, provider: str, reason: QuotaResumeReason, where: Attribution) -> None:
-        """Publish that the paused turn is being sent again on the same provider."""
+    def quota_resumed(
+        self,
+        error: AgentQuotaError,
+        reason: QuotaResumeReason,
+        waited_seconds: float,
+        where: Attribution,
+    ) -> None:
+        """Publish that the turn stopped by ``error`` is being sent again on the same provider.
+
+        ``waited_seconds`` is how long this stop held the turn.
+        """
         ...
 
     def quota_abandoned(self, error: AgentQuotaError, reason: str, where: Attribution) -> None:
@@ -253,9 +262,15 @@ class NullAgentEventSink:
         """Ignore quota pauses when no event sink was injected."""
         del error, plan, where
 
-    def quota_resumed(self, provider: str, reason: QuotaResumeReason, where: Attribution) -> None:
+    def quota_resumed(
+        self,
+        error: AgentQuotaError,
+        reason: QuotaResumeReason,
+        waited_seconds: float,
+        where: Attribution,
+    ) -> None:
         """Ignore quota resumes when no event sink was injected."""
-        del provider, reason, where
+        del error, reason, waited_seconds, where
 
     def quota_abandoned(self, error: AgentQuotaError, reason: str, where: Attribution) -> None:
         """Ignore quota abandonment when no event sink was injected."""

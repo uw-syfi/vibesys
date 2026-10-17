@@ -260,11 +260,15 @@ function applyRunStatusData(state: CoreState, event: RunEvent): CoreState {
  * The quota state after `event`: a pause sets it, any event that settles the stop clears it.
  * `provider_switched` additionally records what it switched, in `lastSwitch`: that fact is
  * sticky, so every branch carries the previous one forward rather than dropping it.
+ *
+ * An outage (`unavailable`) never pauses the run: only the stopped turn waits, while other
+ * turns go on and may hold a real pause. So its events neither set nor settle the pause.
  */
 function quotaFromEvent(quota: QuotaState, event: RunEvent, sequence: number): QuotaState {
   const data = event.data;
   switch (data?.kind) {
     case 'quota_paused':
+      if (data.condition === 'unavailable') return quota;
       return {
         ...quota,
         sequence,
@@ -297,6 +301,7 @@ function quotaFromEvent(quota: QuotaState, event: RunEvent, sequence: number): Q
         : {...quota, sequence, pause: {...quota.pause, waiting: null}};
     case 'quota_resumed':
     case 'quota_abandoned':
+      if (data.condition === 'unavailable') return quota;
       return {...quota, sequence, pause: null};
     case 'provider_switched':
       return {

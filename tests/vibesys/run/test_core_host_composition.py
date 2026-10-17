@@ -303,6 +303,12 @@ def test_every_client_the_core_path_builds_gets_the_runs_quota_gate(tmp_path: Pa
     assert all(len(client.gates) == 1 for client in clients)
 
 
+def _one_stop() -> CapacityStops:
+    stops = CapacityStops(SimThreads())
+    stops.count = 1
+    return stops
+
+
 def test_the_quota_policy_of_the_config_reaches_the_gate(tmp_path: Path) -> None:
     """Under ``fail`` a quota stop ends the turn at once, where ``pause`` would hold it."""
     config = Config.model_validate(
@@ -317,7 +323,7 @@ def test_the_quota_policy_of_the_config_reaches_the_gate(tmp_path: Path) -> None
             error,
             AgentTurnRequest(message="m", label=None, invocation_id=None),
             role="r",
-            stops=CapacityStops(count=1),
+            stops=_one_stop(),
         )
 
 

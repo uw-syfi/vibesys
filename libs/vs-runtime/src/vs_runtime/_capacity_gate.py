@@ -12,7 +12,6 @@ from vs_runtime._quota_policy import (
     GiveUp,
     OutagePolicy,
     QuotaAction,
-    QuotaDecision,
     QuotaPolicy,
     Switch,
     WaitFor,
@@ -20,6 +19,7 @@ from vs_runtime._quota_policy import (
     capacity_wait,
     decide_outage,
     decide_quota,
+    describe_seconds,
 )
 from vs_runtime._run_control import CapacityWake
 
@@ -61,6 +61,14 @@ class CapacityTimer(Protocol):
         """
         ...
 
+    def wait_out(self, turn: CapacityStops, seconds: float) -> None:
+        """Hold one turn for at most ``seconds``, on this turn's thread only.
+
+        A cancellation or an interruption of ``turn`` ends the wait sooner. The run's pause
+        state is not touched: the rest of the run goes on.
+        """
+        ...
+
 
 class ControlCapacityTimer:
     """Production timer: the wall clock, and the run control channel's own bounded park."""
@@ -82,6 +90,35 @@ class ControlCapacityTimer:
         """Wait on the control channel for at most ``seconds``."""
         return self._control.wait_for_capacity(seconds, request)
 
+    def wait_out(self, turn: CapacityStops, seconds: float) -> None:
+        """Park on the turn's own event for at most ``seconds``."""
+        turn.park(seconds)
+
+
+class ProviderHealth:
+    """How many turns each provider has served this run, so an outage can be told apart.
+
+    A provider that is down serves no turn; one that serves other turns while this one
+    keeps failing is not down, and that turn's failure (any server error is transient to
+    agentshim) is the turn's own. The count only grows, so a gate compares the count at a
+    turn's first stop with the count now. Thread-safe; ``threads`` makes its lock.
+    """
+
+    def __init__(self, threads: Threads) -> None:
+        """Start with no turn served on any provider."""
+        self._lock = threads.lock()
+        self._served: dict[str, int] = {}
+
+    def record_served(self, provider: str) -> None:
+        """Count one turn ``provider`` served."""
+        with self._lock:
+            self._served[provider] = self._served.get(provider, 0) + 1
+
+    def served(self, provider: str) -> int:
+        """The turns ``provider`` has served so far."""
+        with self._lock:
+            return self._served.get(provider, 0)
+
 
 @dataclass(frozen=True, slots=True)
 class CapacityHandling:
@@ -90,12 +127,13 @@ class CapacityHandling:
     ``policy`` governs the limits a provider names (a quota, a rate limit); ``outage``
     governs a provider that keeps failing without naming one. ``fallback`` records
     which providers the run has replaced and is the one place sessions consult when
-    they open. A ``None`` timer is the production one, built from the run's control
-    channel.
+    they open; ``health`` counts the turns each provider served, across every client.
+    A ``None`` timer is the production one, built from the run's control channel.
     """
 
     policy: QuotaPolicy
     fallback: ProviderFallback
+    health: ProviderHealth
     timer: CapacityTimer | None = None
     outage: OutagePolicy = PROVIDER_OUTAGE
 
@@ -105,9 +143,11 @@ class CapacityHandling:
     ) -> CapacityHandling:
         """Handling for ``policy``, with a fallback state holding its target.
 
-        ``threads`` makes the fallback state's lock.
+        ``threads`` makes the locks of the fallback state and the provider health.
         """
-        return cls(policy, ProviderFallback(policy.fallback, threads), timer)
+        return cls(
+            policy, ProviderFallback(policy.fallback, threads), ProviderHealth(threads), timer
+        )
 
 
 class PolicyCapacityGate:
@@ -123,10 +163,15 @@ class PolicyCapacityGate:
     stop request ends the wait by raising ``RunStopped``.
 
     A provider outage (``QuotaCondition.UNAVAILABLE``) is waited out under the
-    outage policy instead, whatever the quota policy says: the run pauses and
-    resumes itself with backoff until the outage budget is spent, then the turn
-    fails. An outage names no limit an operator could decide about, and a run left
-    unattended overnight must not end on one, nor stay paused for the operator.
+    outage policy instead, whatever the quota policy says, and without pausing the
+    run: only the stopped turn waits, on its own thread, while the run goes on
+    dispatching measurements and other turns. The turn is sent again with backoff
+    until the outage budget is spent or the run's deadline comes, then it fails; a
+    stop request or a cancellation of the turn ends the wait at once. An outage
+    names no limit an operator could decide about, and a run left unattended
+    overnight must not end on one. A stop counts as an outage only while the
+    provider has served no other turn since this turn first stopped; otherwise the
+    provider is up and the failure is the turn's own, so the turn fails at once.
 
     A switch to the fallback provider (by the policy once its wait is spent, or at
     the operator's request) is recorded in the run's ``ProviderFallback`` and ends
@@ -149,25 +194,37 @@ class PolicyCapacityGate:
         self._policy = handling.policy
         self._outage = handling.outage
         self._fallback = handling.fallback
+        self._health = handling.health
         self._timer = timer
-        self._capacity_requested = False
+
+    def turn_served(self, provider: str) -> None:
+        """Count a turn ``provider`` served, which shows the provider is up."""
+        self._health.record_served(provider)
 
     def wait_for_capacity(
         self, error: AgentQuotaError, turn: AgentTurnRequest, *, role: str, stops: CapacityStops
     ) -> None:
-        """Pause the run, publish why, and return once the turn may be sent again."""
+        """Return once the turn may be sent again; raise to end it.
+
+        An outage holds only this turn; any other capacity limit pauses the run.
+        """
         context = Attribution(role, turn.label, turn.invocation_id)
         now = self._timer.now()
         if stops.first_at is None:
             stops.first_at = now
-            self._capacity_requested = False
+            stops.served_at_first = self._health.served(error.provider)
         if self._fallback.replaced(error.provider):
             self._abandon(
                 error,
                 f"the run switched away from {error.provider}; this session cannot continue on it",
                 context,
             )
-        decision = self._decide(error, stops, now)
+        if error.condition is QuotaCondition.UNAVAILABLE:
+            self._wait_out_outage(error, stops, now, context)
+            return
+        decision = decide_quota(
+            self._policy, resets_at=error.resets_at, now=now, waited=stops.waited
+        )
         if isinstance(decision, GiveUp):
             self._abandon(error, decision.reason, context)
         if isinstance(decision, Switch):
@@ -175,7 +232,7 @@ class PolicyCapacityGate:
         resumes_at = now + decision.seconds if isinstance(decision, WaitFor) else None
         target = self._fallback.target
         plan = QuotaPlan(
-            self._plan_action(error).value,
+            self._policy.action.value,
             resumes_at,
             None if target is None else target.provider,
             None if target is None else target.model,
@@ -186,29 +243,63 @@ class PolicyCapacityGate:
             by_operator = self._timer.wait_resumed(decision.seconds)
             stops.waited += self._timer.now() - now
         else:
-            by_operator = self._hold(error, context)
+            by_operator = self._hold(error, stops, context)
         if self._control.consume_fallback_request() and self._fallback.target is not None:
             self._switch_or_abandon(
                 error, "operator", "the operator resumed with the fallback", context
             )
         self._events.quota_resumed(
-            error.provider, "operator" if by_operator else "wait_elapsed", context
+            error, "operator" if by_operator else "wait_elapsed", self._timer.now() - now, context
         )
 
-    def _decide(self, error: AgentQuotaError, stops: CapacityStops, now: float) -> QuotaDecision:
-        """The outage policy for an outage, else the quota policy, for this turn's stop."""
-        if error.condition is QuotaCondition.UNAVAILABLE:
-            first = now if stops.first_at is None else stops.first_at
-            return decide_outage(self._outage, stop=stops.count, elapsed=now - first)
-        return decide_quota(self._policy, resets_at=error.resets_at, now=now, waited=stops.waited)
+    def _wait_out_outage(
+        self, error: AgentQuotaError, stops: CapacityStops, now: float, context: Attribution
+    ) -> None:
+        """Hold this turn through one outage backoff, without touching the run's pause.
 
-    def _plan_action(self, error: AgentQuotaError) -> QuotaAction:
-        """The policy the pause reports: an outage is always waited out by itself."""
-        if error.condition is QuotaCondition.UNAVAILABLE:
-            return QuotaAction.WAIT
-        return self._policy.action
+        Returns when the turn should be sent again. Raises ``RunStopped`` on a stop
+        request, and the quota error when the turn was cancelled, the run reached its
+        deadline, the budget is spent, or the provider served another turn meanwhile.
+        """
+        if self._health.served(error.provider) != stops.served_at_first:
+            self._abandon(
+                error,
+                f"{error.provider} served other turns since this one first stopped, "
+                "so it is up and this failure is the turn's own",
+                context,
+            )
+        first = now if stops.first_at is None else stops.first_at
+        deadline = self._control.run_deadline()
+        decision = decide_outage(
+            self._outage,
+            stop=stops.count,
+            elapsed=now - first,
+            run_left=None if deadline is None else deadline - now,
+        )
+        if isinstance(decision, GiveUp):
+            self._abandon(error, decision.reason, context)
+        plan = QuotaPlan(QuotaAction.WAIT.value, now + decision.seconds, None, None)
+        self._events.quota_paused(error, plan, context)
+        unsubscribe = self._control.on_stop_requested(stops.interrupt)
+        try:
+            if not self._control.stop_requested() and not stops.cancelled:
+                self._timer.wait_out(stops, decision.seconds)
+        finally:
+            unsubscribe()
+        waited = self._timer.now() - now
+        stops.waited += waited
+        self._control.raise_if_stopped()
+        if stops.cancelled:
+            self._abandon(
+                error, f"the turn was cancelled after {describe_seconds(waited)}", context
+            )
+        if deadline is not None and self._timer.now() >= deadline:
+            self._abandon(
+                error, "the run reached its deadline while the provider was unavailable", context
+            )
+        self._events.quota_resumed(error, "wait_elapsed", waited, context)
 
-    def _hold(self, error: AgentQuotaError, context: Attribution) -> bool:
+    def _hold(self, error: AgentQuotaError, stops: CapacityStops, context: Attribution) -> bool:
         """Park for the operator, or until capacity returns when the operator asked to wait.
 
         True when the operator ended the pause, False when capacity should be back. A turn
@@ -216,9 +307,9 @@ class PolicyCapacityGate:
         polling at the policy's retry interval when the provider gives no reset time.
         """
         try:
-            request = self._control.park_for_capacity(waiting=self._capacity_requested)
+            request = self._control.park_for_capacity(waiting=stops.capacity_requested)
             while request is not None:
-                self._capacity_requested = True
+                stops.capacity_requested = True
                 now = self._timer.now()
                 back = capacity_returns_at(resets_at=error.resets_at, now=now)
                 self._events.quota_waiting(error.provider, back, context)
@@ -232,7 +323,7 @@ class PolicyCapacityGate:
                         return True
                     case CapacityWake.CANCELLED:
                         self._events.quota_wait_cancelled(error.provider, "paused", context)
-                        self._capacity_requested = False
+                        stops.capacity_requested = False
                         request = self._control.park_for_capacity()
                     case CapacityWake.REARMED:
                         request = end.request

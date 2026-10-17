@@ -31,6 +31,7 @@ class _Gate:
 
     refusal: Exception | None = None
     calls: list[tuple[AgentQuotaError, str, str | None, int]] = field(default_factory=list)
+    served: list[str] = field(default_factory=list)
 
     def wait_for_capacity(
         self, error: AgentQuotaError, turn: AgentTurnRequest, *, role: str, stops: CapacityStops
@@ -38,6 +39,9 @@ class _Gate:
         self.calls.append((error, role, turn.invocation_id, stops.count))
         if self.refusal is not None:
             raise self.refusal
+
+    def turn_served(self, provider: str) -> None:
+        self.served.append(provider)
 
 
 def _invoke(client: AgentClient, workspace: Path) -> str:

@@ -213,6 +213,18 @@ class RunControlChannel(Protocol):
         """
         ...
 
+    def set_run_deadline(self, at: float) -> None:
+        """Record when the run must end, in epoch seconds on the run clock's timeline.
+
+        The run loop records it as it starts, so work the run does on other threads (a
+        turn waiting out a provider outage) can bound its own waits by it.
+        """
+        ...
+
+    def run_deadline(self) -> float | None:
+        """When the run must end, or ``None`` before the run loop recorded it."""
+        ...
+
 
 class RunStopped(BaseException):
     """A requested stop landed at a cooperative run boundary."""
@@ -235,6 +247,7 @@ class RuntimeRunControlChannel:
         self._capacity_listening = False
         self._capacity_request: int | None = None
         self._capacity_requests = 0
+        self._run_deadline: float | None = None
 
     def queue_steer(self, text: str, control_id: str | None = None) -> None:
         """Queue free-text steering for the run loop to take at its next control poll."""
@@ -336,6 +349,16 @@ class RuntimeRunControlChannel:
                     self._stop_listeners.remove(listener)
 
         return unsubscribe
+
+    def set_run_deadline(self, at: float) -> None:
+        """Record when the run must end."""
+        with self._lock:
+            self._run_deadline = at
+
+    def run_deadline(self) -> float | None:
+        """When the run must end, or ``None`` before it was recorded."""
+        with self._lock:
+            return self._run_deadline
 
     def take_pending_steer(self) -> list[QueuedSteer]:
         """Drain steering queued since the previous invocation boundary."""

@@ -317,6 +317,61 @@ class TestQuotaEvents:
         )
         assert out == "[quota] the wait elapsed; sending the paused claude turn again\n"
 
+    def test_an_outage_says_only_the_turn_waits(self) -> None:
+        out = _render_event(
+            CoreEventType.QUOTA_PAUSED,
+            QuotaPausedData(
+                provider="claude",
+                condition="unavailable",
+                detail="503",
+                resumes_at=1_791_954_019,
+                policy="wait",
+            ),
+        )
+        assert out == (
+            "[quota] claude unavailable: 503; this turn waits, the run goes on; "
+            "trying again at 2026-10-14 05:00 UTC\n"
+        )
+
+    def test_an_outage_resume_shows_how_long_the_turn_waited(self) -> None:
+        out = _render_event(
+            CoreEventType.QUOTA_RESUMED,
+            QuotaResumedData(
+                provider="claude",
+                condition="unavailable",
+                reason="wait_elapsed",
+                waited_seconds=600.0,
+            ),
+        )
+        assert out == "[quota] claude turn waited 10 min out of an outage; sending it again\n"
+
+    def test_the_run_end_reports_the_total_outage_wait(self) -> None:
+        out = StringIO()
+        renderer = HeadlessRenderer(out=out)
+        for waited, condition in ((3600.0, "unavailable"), (125.0, "unavailable"), (900.0, None)):
+            renderer.handle(
+                make_core_event(
+                    CoreEventType.QUOTA_RESUMED,
+                    data=QuotaResumedData(
+                        provider="claude",
+                        condition=condition,
+                        reason="wait_elapsed",
+                        waited_seconds=waited,
+                    ),
+                    timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+                )
+            )
+        renderer.finish()
+
+        assert out.getvalue().splitlines()[-1] == (
+            "[quota] turns waited out provider outages for 1 h 2 min 5 s in total"
+        )
+
+    def test_a_run_without_an_outage_reports_none(self) -> None:
+        out = StringIO()
+        HeadlessRenderer(out=out).finish()
+        assert out.getvalue() == ""
+
     def test_an_abandoned_turn_names_the_policys_reason(self) -> None:
         out = _render_event(
             CoreEventType.QUOTA_ABANDONED,

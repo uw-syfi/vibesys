@@ -570,7 +570,8 @@ def _report_phase_facts(observer: ServerLifecycleObserver, event: RunEvent) -> N
         observer.observe(status=data.status)
     elif isinstance(data, RunStartupProgressData):
         observer.observe(startup=StartupFact(stage=data.stage, progress=data.progress))
-    elif isinstance(data, QuotaPausedData):
+    elif isinstance(data, QuotaPausedData) and data.condition != "unavailable":
+        # An outage holds only its own turn; the run is not pausing for it.
         observer.pausing_for(PauseCause.QUOTA)
     elif isinstance(data, RunEndingData):
         observer.ending(_ending_fact(data))

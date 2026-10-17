@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from vs_agent.session_key import AgentSessionKey
     from vs_mcp.api import ToolServerDescriptor
     from vs_sandbox.api import HostResource, ProjectPathPolicy
+    from vs_sim.api import Threads
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -174,20 +175,56 @@ class ProviderSwitch:
     detail: str
 
 
-@dataclass(slots=True)
 class CapacityStops:
-    """One turn's capacity stops so far, so a gate can budget that turn's waiting.
+    """One turn's capacity stops so far, and whether its caller cancelled it.
 
-    The client makes one record per turn, counts each stop in ``count`` (the first
-    stop is 1) and hands the same record to every gate call of that turn. The gate
-    keeps the rest on its own clock: ``first_at`` is when the first stop reached it
-    and ``waited`` the seconds it has spent waiting since. One record per turn keeps
-    the budgets of turns that stop at the same time apart.
+    The client makes one record per turn, before its first send, and hands the same
+    record to every gate call of that turn, so the record outlives each resend. It
+    counts each stop in ``count`` (the first stop is 1) and calls :meth:`cancel` when
+    the caller cancels the turn; it never sends a cancelled turn again.
+
+    The gate keeps its own memory of the turn here, on its own clock: ``first_at`` is
+    when the first stop reached it, ``waited`` the seconds it has spent waiting since,
+    ``served_at_first`` its count of turns the provider had served at the first stop,
+    and ``capacity_requested`` whether the operator asked this turn to wait for
+    capacity. One record per turn keeps the budgets of turns that stop at the same
+    time apart. A gate waits with :meth:`park`, which :meth:`cancel` and
+    :meth:`interrupt` end early.
     """
 
-    count: int = 0
-    first_at: float | None = None
-    waited: float = 0.0
+    def __init__(self, threads: Threads) -> None:
+        """Start a turn with no stops; ``threads`` makes the event a wait parks on."""
+        self.count = 0
+        self.first_at: float | None = None
+        self.waited = 0.0
+        self.served_at_first = 0
+        self.capacity_requested = False
+        self._cancelled = False
+        self._wake = threads.event()
+
+    @property
+    def cancelled(self) -> bool:
+        """Whether the caller cancelled this turn."""
+        return self._cancelled
+
+    def cancel(self) -> None:
+        """Mark the turn cancelled and end a wait in progress."""
+        self._cancelled = True
+        self._wake.set()
+
+    def interrupt(self) -> None:
+        """End a wait in progress without cancelling the turn (a stop request, say)."""
+        self._wake.set()
+
+    def park(self, seconds: float) -> bool:
+        """Wait at most ``seconds``, on the threads' clock; True when woken sooner.
+
+        The wake is consumed, so the next wait starts clear; its causes (the
+        cancellation, a run's stop request) stay readable where they are recorded.
+        """
+        woke = self._wake.wait(seconds)
+        self._wake.clear()
+        return woke
 
 
 class CapacityGate(Protocol):
@@ -197,7 +234,8 @@ class CapacityGate(Protocol):
     only when the same turn should be sent again on the same conversation. It
     raises to end the turn instead, and the raised error replaces the quota
     error. The call may block for hours, so a gate owns its own cancellation:
-    a stop request must end the wait by raising.
+    a stop request, and a cancellation of the turn (:meth:`CapacityStops.cancel`),
+    must end the wait by raising.
     """
 
     def wait_for_capacity(
@@ -207,6 +245,14 @@ class CapacityGate(Protocol):
 
         ``stops`` is this turn's record, already counting this stop (see
         :class:`CapacityStops`).
+        """
+        ...
+
+    def turn_served(self, provider: str) -> None:
+        """Note that a turn on ``provider`` just succeeded.
+
+        The client calls it after every successful turn, so the gate can tell a
+        provider that is down from one that fails only this turn.
         """
         ...
 

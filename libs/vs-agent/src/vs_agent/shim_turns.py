@@ -38,6 +38,7 @@ if TYPE_CHECKING:
         AgentObserver,
         AgentSessionSpec,
         AgentTurnRequest,
+        CapacityStops,
     )
     from vs_sim.api import Threads
 
@@ -200,6 +201,11 @@ class LaunchedSession:
         self.timeout = timeout
         self.log = log
         self.closed = False
+        self._turn: CapacityStops | None = None
+
+    def track(self, turn: CapacityStops | None) -> None:
+        """Make :meth:`cancel` reach ``turn``, the caller's record of the turn in flight."""
+        self._turn = turn
 
     def close(self) -> None:
         """Release this logical session, stopping any turn it still owns."""
@@ -212,8 +218,13 @@ class LaunchedSession:
 
         A turn waiting out a transient provider error stops waiting and raises
         that error instead of retrying, as a plain failure: a cancelled turn is
-        never a capacity stop for the caller to wait out.
+        never a capacity stop for the caller to wait out. A turn the caller's
+        capacity gate is waiting on is cancelled through its tracked record,
+        which ends that wait and keeps the turn from being sent again.
         """
+        turn = self._turn
+        if turn is not None:
+            turn.cancel()
         self.events.cancelled = True
         self.session.interrupt()
 

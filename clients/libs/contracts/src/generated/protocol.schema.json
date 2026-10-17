@@ -4585,7 +4585,7 @@
     },
     "QuotaPausedData": {
       "additionalProperties": false,
-      "description": "A turn stopped on a provider capacity limit and the run paused for it.\n\n``condition`` is ``quota_exhausted`` (a usage, spend or billing limit),\n``rate_limited`` (sustained rate limiting) or ``unavailable`` (a provider outage,\nwhich the run waits out by itself under its outage budget); ``detail`` is the provider's\ndiagnostic and ``resets_at`` the epoch second the provider said capacity\nreturns, when it said. The run stays paused until it resumes; ``resumes_at`` is the\nepoch second the run's quota policy resumes it by itself, ``None`` when only the\noperator can. ``policy`` is the unattended quota policy; the fallback fields name the\nprovider and model an operator may resume with, ``None`` when none is configured.",
+      "description": "A turn stopped on a provider capacity limit and the run paused for it.\n\n``condition`` is ``quota_exhausted`` (a usage, spend or billing limit),\n``rate_limited`` (sustained rate limiting) or ``unavailable`` (a provider outage:\nonly the stopped turn waits, under its outage budget, and the run is not paused);\n``detail`` is the provider's\ndiagnostic and ``resets_at`` the epoch second the provider said capacity\nreturns, when it said. The run stays paused until it resumes; ``resumes_at`` is the\nepoch second the run's quota policy resumes it by itself, ``None`` when only the\noperator can. ``policy`` is the unattended quota policy; the fallback fields name the\nprovider and model an operator may resume with, ``None`` when none is configured.",
       "properties": {
         "kind": {
           "const": "quota_paused",
@@ -4681,7 +4681,7 @@
     },
     "QuotaResumedData": {
       "additionalProperties": false,
-      "description": "A run paused on a capacity limit resumed on the same provider and sent the turn again.",
+      "description": "A turn stopped on a capacity limit is sent again on the same provider.\n\n``condition`` is the limit it stopped on, as in ``quota_paused`` (``None`` in events\nrecorded before the field existed). ``waited_seconds`` is how long that stop held the\nturn: for ``unavailable`` the turn's own backoff, during which the rest of the run went\non; otherwise the run's pause.",
       "properties": {
         "kind": {
           "const": "quota_resumed",
@@ -4693,6 +4693,23 @@
           "title": "Provider",
           "type": "string"
         },
+        "condition": {
+          "anyOf": [
+            {
+              "enum": [
+                "quota_exhausted",
+                "rate_limited",
+                "unavailable"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Condition"
+        },
         "reason": {
           "default": "operator",
           "enum": [
@@ -4701,6 +4718,11 @@
           ],
           "title": "Reason",
           "type": "string"
+        },
+        "waited_seconds": {
+          "default": 0.0,
+          "title": "Waited Seconds",
+          "type": "number"
         }
       },
       "required": [

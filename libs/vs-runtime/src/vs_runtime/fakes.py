@@ -46,6 +46,7 @@ from vs_sim.api.testing import FakeProcesses, ProcessScript
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from vs_agent.api import CapacityStops
     from vs_runtime._agent_lifecycle import AgentExecutionLifecycleEvent
     from vs_runtime._run_control import CapacityWaitEnd, RunControlChannel, RunControlTransition
     from vs_runtime._workspace_holds import WorkspaceHolds
@@ -245,6 +246,16 @@ class FakeCapacityTimer:
         else:
             self._now += seconds
         return self._control.wait_resumed(0.0)
+
+    def wait_out(self, turn: CapacityStops, seconds: float) -> None:
+        """Spend ``seconds`` of virtual time holding one turn; ``waits`` records it.
+
+        Nothing ends the wait sooner: a test that cancels or stops a turn mid-wait runs the
+        production timer on the simulated threads instead.
+        """
+        del turn
+        self.waits.append(seconds)
+        self._now += seconds
 
 
 class FakeProjectMaterializationEffects:

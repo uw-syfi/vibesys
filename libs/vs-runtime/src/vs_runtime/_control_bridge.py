@@ -130,6 +130,7 @@ class RunControlBridge:
         self._consumption.newly_delivered(core, self._report_consumed)
         if not self._started:
             self._started = True
+            self._channel.set_run_deadline(core.run.deadline_at)
             self._count = len(core.run.controls)
             self._paused = core.run.status == RunStatus.PAUSED
             self._stopped = any(c.action == "stop" for c in core.run.controls)
