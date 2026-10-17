@@ -97,6 +97,7 @@ from .types.sessions import (
     InputOfferedMidTurn,
     InputReservationReleased,
     InputReservationRequested,
+    InputTakenMidTurn,
     InputWithdrawRequested,
     InterruptRequested,
     InvocationCancellationRequested,
@@ -200,6 +201,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | SessionInputReceived()
             | InputWithdrawRequested()
             | InputOfferedMidTurn()
+            | InputTakenMidTurn()
             | InputMidTurnReleased()
             | InputReservationRequested()
             | InputAcceptanceObserved()

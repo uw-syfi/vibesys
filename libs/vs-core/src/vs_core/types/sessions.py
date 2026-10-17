@@ -779,20 +779,38 @@ class InputOfferedMidTurn(Value):
     now_at: Seconds
 
 
-class InputMidTurnReleased(Value):
-    """An offered input did not reach the running turn, or the turn refused it later.
+class InputTakenMidTurn(Value):
+    """The provider took an offered input into its running turn (it answered ``DELIVERED``).
 
-    The shell raises it when the provider takes no mid-turn input, has no turn running,
-    refuses the message at turn end, or when it finds an offer an earlier host made and
-    cannot prove reached the turn. A pending offer returns to pending; an offer already
-    delivered gets a next-turn redelivery, so the message is never lost (and may arrive
-    twice).
+    Committed after the provider's answer. Only a taken offer joins the turn when the turn's
+    acceptance commits; an offer the turn ends without having taken waits for the next turn.
+    A crash between the answer and this commit leaves the offer untaken, so the input reaches
+    a turn again: delivery is at least once. A take for an offer core no longer holds for that
+    turn changes nothing.
+    """
+
+    kind: Literal["input_taken_mid_turn"] = "input_taken_mid_turn"
+    input_id: InputId
+    invocation: InvocationRef
+    now_at: Seconds
+
+
+class InputMidTurnReleased(Value):
+    """An offered input did not stay in the running turn: it waits for the next turn instead.
+
+    The shell raises it when the provider takes no mid-turn input or has no turn running, or
+    when it finds an offer an earlier host made. The turn's own result raises it, before the
+    turn's acceptance, for a message the provider took and then refused (``refused``): the
+    agent never read that one. An offer that already settled, or that core holds for another
+    turn, changes nothing.
     """
 
     kind: Literal["input_mid_turn_released"] = "input_mid_turn_released"
     input_id: InputId
     invocation: InvocationRef
     now_at: Seconds
+    refused: bool = False
+    """The provider took the message and then refused it, so the agent did not read it."""
 
 
 class InputReservationRequested(Value):
@@ -989,6 +1007,7 @@ type SessionsEvent = Annotated[
     | SessionInputReceived
     | InputWithdrawRequested
     | InputOfferedMidTurn
+    | InputTakenMidTurn
     | InputMidTurnReleased
     | InputReservationRequested
     | TurnInputsReserved

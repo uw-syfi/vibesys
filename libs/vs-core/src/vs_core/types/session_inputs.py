@@ -63,6 +63,9 @@ class InputDropReason(StrEnum):
     INVOCATION_TERMINAL = "invocation-terminal"
     WITHDRAWN = "withdrawn"
     """An operator withdrew standing guidance."""
+    DELIVERY_UNKNOWN = "delivery-unknown"
+    """No later turn can take the input, but a running turn's provider took it mid-turn and no
+    turn end confirmed or refused it (its host died): the agent may have read it."""
 
 
 class InputDelivered(Value):
@@ -129,8 +132,13 @@ class InputRecord(Value):
     Never set together with ``reserved_to``: an offered input waits for that turn's end
     (delivered with it, or returned to pending) and no next turn reserves it meanwhile.
     """
-    redelivers: InputId | None = None
-    """The input whose mid-turn delivery the provider took back: this is its next-turn copy."""
+    taken: bool = False
+    """A running turn's provider took the input mid-turn, and no turn end has refused it since.
+
+    The input joins that turn only if the turn ends accepted while it is still offered there.
+    Otherwise it waits for the next turn, and stays marked: the agent may have read it, so a
+    drop records ``DELIVERY_UNKNOWN`` instead of saying it reached no turn.
+    """
     receipt: InputReceipt | None = None
 
     @model_validator(mode="after")
@@ -149,6 +157,8 @@ class InputRecord(Value):
                 raise ContractValidationError(
                     "offered_to", "only an interrupt-mode input is offered"
                 )
+        if self.taken and self.input.mode is not InputMode.INTERRUPT:
+            raise ContractValidationError("taken", "only an interrupt-mode input is taken mid-turn")
         if isinstance(self.receipt, InputDelivered):
             holder = self.offered_to if self.receipt.mid_turn else self.reserved_to
             if self.receipt.invocation != holder:
