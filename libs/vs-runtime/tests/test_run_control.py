@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Literal
+
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from vs_core.api import (
@@ -18,6 +23,7 @@ from vs_core.api import (
 )
 from vs_runtime.api.core import RunControlBridge
 from vs_runtime.api.infrastructure import (
+    CapacityWake,
     PauseWake,
     RunControlTransition,
     RunControlTransitionKind,
@@ -320,3 +326,165 @@ def test_the_bridge_publishes_the_run_deadline_on_its_first_poll() -> None:
     bridge.poll(core, core.run.now_at)
 
     assert channel.run_deadline() == core.run.deadline_at
+
+
+@pytest.mark.parametrize("source", ["timed", "capacity"])
+@given(seconds=st.floats(min_value=0.5, max_value=5_000.0), seed=st.integers(0, 2**16))
+def test_a_self_resume_releases_every_parked_waiter(
+    source: Literal["timed", "capacity"], seconds: float, seed: int
+) -> None:
+    """When the channel resumes the run itself, every parked waiter wakes, not only its own.
+
+    Before, the timed resume of a quota wait and the elapsed wait for capacity cleared the
+    pause without a notify, so a boundary parked in ``wait_while_paused`` stayed parked.
+    """
+    threads = SimThreads(schedule_seed=seed)
+    events = FakeRunControlEventSink()
+    control = create_run_control_channel(events, threads=threads)
+    control.request_pause()
+    released: list[float] = []
+
+    def boundary() -> None:
+        control.wait_while_paused()
+        released.append(threads.now())
+
+    def turn() -> None:
+        if source == "timed":
+            assert control.wait_resumed(seconds) is PauseWake.ELAPSED
+            return
+        control.enter_capacity()
+        try:
+            request = control.park_for_capacity(waiting=True)
+            assert request is not None
+            assert control.wait_for_capacity(seconds, request).wake is CapacityWake.ELAPSED
+        finally:
+            control.leave_capacity()
+
+    def main() -> float:
+        start = threads.now()
+        waiter = threads.spawn(boundary, name="boundary", daemon=False)
+        worker = threads.spawn(turn, name="turn", daemon=False)
+        worker.join(seconds + HANG_GUARD_S)
+        waiter.join(HANG_GUARD_S)
+        assert not waiter.is_alive(), "the parked boundary was never woken"
+        return start
+
+    start = threads.run(main)
+
+    assert released == [pytest.approx(start + seconds)]
+    assert not control.pause_requested()
+    assert [t.kind for t in events.transitions].count(RunControlTransitionKind.RESUMED) == 1
+
+
+@dataclass(frozen=True)
+class _Waiter:
+    """One turn parked on the paused run: a timed quota wait, or a wait for capacity."""
+
+    kind: Literal["timed", "capacity"]
+    seconds: float
+    cancelled: bool
+
+
+_WAITERS = st.lists(
+    st.builds(
+        _Waiter,
+        kind=st.sampled_from(["timed", "capacity"]),
+        seconds=st.floats(min_value=100.0, max_value=1_000.0),
+        cancelled=st.booleans(),
+    ),
+    min_size=1,
+    max_size=4,
+)
+
+
+@given(
+    waiters=_WAITERS,
+    cancel_at=st.floats(min_value=2.0, max_value=99.0),
+    seed=st.integers(0, 2**16),
+)
+def test_a_turns_cancel_ends_only_its_own_wait(
+    waiters: list[_Waiter], cancel_at: float, seed: int
+) -> None:
+    """Cancelling any subset of the parked turns leaves the run, and every other turn, as it was.
+
+    Timed turns arm the run's timed resume at 0 s; capacity turns wait under the operator's
+    request from 1 s. Cancelled turns end at once and change nothing: the run stays paused,
+    the others stay parked under the same request, and the run resumes itself, once, at the
+    earliest deadline still in force (every timed one, and each surviving capacity wait). The
+    timed resume belongs to the channel, so it fires even when every turn that armed it left.
+    Before, a cancelled wait counted as elapsed and resumed the run, and the first capacity
+    turn to leave dropped the operator's request for all of them.
+    """
+    threads = SimThreads(schedule_seed=seed)
+    events = FakeRunControlEventSink()
+    control = create_run_control_channel(events, threads=threads)
+    control.request_pause()
+    ended = [False] * len(waiters)
+    outcomes: dict[int, tuple[object, float]] = {}
+    requests: dict[int, int] = {}
+
+    def turn(index: int, waiter: _Waiter) -> None:
+        def gone() -> bool:
+            return ended[index]
+
+        if waiter.kind == "timed":
+            outcomes[index] = (control.wait_resumed(waiter.seconds, ended=gone), threads.now())
+            return
+        control.enter_capacity()
+        try:
+            request = control.park_for_capacity(ended=gone)
+            assert request is not None
+            requests[index] = request
+            end = control.wait_for_capacity(waiter.seconds, request, ended=gone)
+            outcomes[index] = (end.wake, threads.now())
+            assert end.request == request
+        finally:
+            control.leave_capacity()
+
+    deadlines = [w.seconds for w in waiters if w.kind == "timed"]
+    deadlines += [1.0 + w.seconds for w in waiters if w.kind == "capacity" and not w.cancelled]
+    resume_at = min(deadlines, default=None)
+
+    base = threads.now()
+
+    def main() -> tuple[bool, bool, bool]:
+        workers = [
+            threads.spawn(lambda i=i, w=w: turn(i, w), name=f"turn-{i}", daemon=False)
+            for i, w in enumerate(waiters)
+        ]
+        threads.sleep(1.0)
+        if any(w.kind == "capacity" for w in waiters):
+            assert control.resume_when_capacity_returns()
+        threads.sleep(cancel_at - 1.0)
+        for index, waiter in enumerate(waiters):
+            if waiter.cancelled:
+                ended[index] = True
+        control.interrupt_waits()
+        threads.sleep(1.0)
+        paused_after_cancel = control.pause_requested()
+        survivors_parked = all(
+            index not in outcomes for index, w in enumerate(waiters) if not w.cancelled
+        )
+        # The run loop's control poll, after the earliest deadline still in force.
+        threads.sleep(max(base + (resume_at or 0.0) + 1.0 - threads.now(), 0.0))
+        paused_at_end = control.pause_requested()
+        for worker in workers:
+            worker.join(HANG_GUARD_S)
+        return paused_after_cancel, survivors_parked, paused_at_end
+
+    paused_after_cancel, survivors_parked, paused_at_end = threads.run(main)
+
+    assert paused_after_cancel
+    assert survivors_parked
+    assert len(set(requests.values())) <= 1
+    resumed = [t.kind for t in events.transitions].count(RunControlTransitionKind.RESUMED)
+    assert paused_at_end is (resume_at is None)
+    assert resumed == (0 if resume_at is None else 1)
+    for index, waiter in enumerate(waiters):
+        wake, at = outcomes[index] if index in outcomes else (None, None)
+        if waiter.cancelled:
+            assert wake in {PauseWake.DETACHED, CapacityWake.DETACHED}
+            assert at == pytest.approx(base + cancel_at)
+        elif resume_at is not None:
+            assert wake in {PauseWake.ELAPSED, CapacityWake.ELAPSED}
+            assert at == pytest.approx(base + resume_at)
