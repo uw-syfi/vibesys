@@ -38,7 +38,11 @@ class RunControl(Protocol):
     """
 
     def submit(self, request: ControlRequest) -> ControlAck:
-        """Apply one operator control request and say what became of it."""
+        """Apply one operator control request and say what became of it.
+
+        Once per ``control_id``: the same request again returns the first answer and changes
+        nothing; a different request under the same id answers ``ControlStatus.CONFLICT``.
+        """
         ...
 
     def steer(self, text: str) -> None:

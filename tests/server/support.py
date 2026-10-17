@@ -266,7 +266,7 @@ def build_server_parts(
     control = create_run_control_channel(
         lambda transition: _record_control_transition(core_events, transition), threads=OsThreads()
     )
-    control_bridge = ChannelRunControl(control)
+    control_bridge = ChannelRunControl(control, OsThreads())
     controls = RunControlSlot(condition)
     controls.install(control_bridge)
     api = RunApi(

@@ -71,7 +71,7 @@ class _SessionControlStub(ChannelRunControl):
     """
 
     def __init__(self, control: RunControlChannel) -> None:
-        super().__init__(control)
+        super().__init__(control, OsThreads())
         self.stop_calls = 0
 
     def stop(self, mode: StopMode = StopMode.DRAIN) -> None:

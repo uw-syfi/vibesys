@@ -10,9 +10,10 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 from tests.server.support import REQUEST_TIME
 
-from server.api.protocol import Response
+from server.api.protocol import CommandAck, Response
 from server.api.schema import fully_populated_response
-from server.control_envelope import CommandAck, ResponseEnvelope, ResponseEnvelopeReader
+from server.control_envelope import ResponseEnvelope, ResponseEnvelopeReader
+from vibesys.api import ControlAction
 
 _ENVELOPE_FIELDS = list(ResponseEnvelope.model_fields)
 
@@ -27,7 +28,7 @@ def test_the_full_response_extends_the_envelope_fields_in_order() -> None:
     ack=st.none()
     | st.builds(
         CommandAck,
-        action=st.sampled_from(["pause", "resume", "steer", "stop"]),
+        action=st.sampled_from(ControlAction),
         status=st.sampled_from(["pending", "consumed"]),
     ),
 )

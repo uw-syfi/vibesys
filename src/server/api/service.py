@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -23,6 +24,7 @@ from server.api.protocol import (
     ChatResult,
     ChatThreadCreateQuery,
     ChatThreadInfo,
+    CommandAck,
     ControlCommand,
     DesignPatch,
     DesignPatchQuery,
@@ -49,12 +51,12 @@ from server.api.protocol import (
     failure_response,
 )
 from server.chat.options import ChatOptions, build_chat_options
-from server.control_envelope import CommandAck
 from server.events import EventType, RunEvent, RunOverview, RunStartedData
 from vibesys.api import (
     ControlStatus,
     IterationUnavailable,
     PauseRequest,
+    RefusalReason,
     ResumeRequest,
     RunRecordReadError,
     SteerRequest,
@@ -162,6 +164,22 @@ class CapacityWaitUnavailableError(RuntimeError):
         super().__init__("The run is not paused on a provider capacity limit")
 
 
+class ControlIdConflictError(RuntimeError):
+    """A control whose ``control_id`` already named a different control."""
+
+    diagnostic_code = "control_id_conflict"
+
+    def __init__(self, control_id: str) -> None:
+        """Name the reused id."""
+        super().__init__(f"Control id {control_id!r} already named a different control")
+
+
+_REFUSALS: dict[RefusalReason, type[Exception]] = {
+    RefusalReason.NOT_PAUSED_ON_CAPACITY: CapacityWaitUnavailableError,
+}
+"""The protocol error each refusal answers with."""
+
+
 type ControlProtocolCommand = (
     PauseCommand | ResumeCommand | SteerCommand | StopCommand | ControlCommand
 )
@@ -169,16 +187,21 @@ type ControlProtocolCommand = (
 
 
 def control_request(command: ControlProtocolCommand) -> ControlRequest:
-    """The operator control a protocol command carries, in the schema every ingress shares."""
+    """The operator control a protocol command carries, in the schema every ingress shares.
+
+    A single-action command has no control id of its own; its envelope's ``request_id``
+    names it, so resending the same request is one control.
+    """
     if isinstance(command, ControlCommand):
         return command.control
+    control_id = f"wire-{hashlib.sha256(command.request_id.encode()).hexdigest()[:32]}"
     if isinstance(command, PauseCommand):
-        return PauseRequest()
+        return PauseRequest(control_id=control_id)
     if isinstance(command, ResumeCommand):
-        return ResumeRequest(fallback=command.fallback, when=command.when)
+        return ResumeRequest(control_id=control_id, fallback=command.fallback, when=command.when)
     if isinstance(command, SteerCommand):
-        return SteerRequest(text=command.text)
-    return StopRequest()
+        return SteerRequest(control_id=control_id, text=command.text)
+    return StopRequest(control_id=control_id)
 
 
 class RunControlSlot:
@@ -232,14 +255,19 @@ class RunControlSlot:
                     request, StopRequest
                 ):
                     self._stop_pending = request
-                    return CommandAck(action="stop", status="pending")
+                    return CommandAck(action=request.action, status="pending")
                 raise RunControlUnavailableError(self._state)
             # Delivered while the slot prevents session release.
             ack = control.submit(request)
-        if ack.status is ControlStatus.REFUSED:
-            # Only a wait for capacity on a run not paused on a capacity limit is refused.
-            raise CapacityWaitUnavailableError
-        return CommandAck(action=ack.action, status=ack.status.value)
+        match ack.status, ack.reason:
+            case ControlStatus.REFUSED, RefusalReason() as reason:
+                raise _REFUSALS[reason]
+            case ControlStatus.CONFLICT, _:
+                raise ControlIdConflictError(request.control_id)
+            case ControlStatus.PENDING, _:
+                return CommandAck(action=ack.action, status="pending")
+            case _:
+                return CommandAck(action=ack.action, status="consumed")
 
 
 @dataclass(frozen=True)

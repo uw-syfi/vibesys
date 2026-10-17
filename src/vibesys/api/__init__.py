@@ -125,18 +125,24 @@ from vibesys.run import CoreAgentEventSink
 from vs_agent.api import AgentBackend, AgentSpec, Harness, check_harness, harnesses, vetted_models
 from vs_runtime.api import boot_trace
 from vs_runtime.api.infrastructure import (
+    CONTROL_ID_PATTERN,
     CONTROL_REQUEST,
     ControlAck,
+    ControlAction,
     ControlRequest,
     ControlStatus,
     PauseRequest,
+    RefusalReason,
     ResumeRequest,
+    ResumeWhen,
     RunStopped,
     SteerRequest,
     StopRequest,
+    check_one_way_to_resume,
 )
 
 __all__ = [
+    "CONTROL_ID_PATTERN",
     "CONTROL_REQUEST",
     "KNOWN_COMPUTE_BACKENDS",
     "AgentBackend",
@@ -159,6 +165,7 @@ __all__ = [
     "ConfigurationDiagnostic",
     "ConfigurationError",
     "ControlAck",
+    "ControlAction",
     "ControlRequest",
     "ControlStatus",
     "CoreAgentEventSink",
@@ -198,9 +205,11 @@ __all__ = [
     "QuotaWaitCancelledData",
     "QuotaWaitingData",
     "RateLimitUpdateData",
+    "RefusalReason",
     "RepositoryVisibility",
     "ResumeRef",
     "ResumeRequest",
+    "ResumeWhen",
     "RolesNotDeclared",
     "RunConfiguredData",
     "RunControl",
@@ -249,6 +258,7 @@ __all__ = [
     "agent_spec_from_config",
     "boot_trace",
     "check_harness",
+    "check_one_way_to_resume",
     "cli_wording",
     "configuration_error",
     "create_session",

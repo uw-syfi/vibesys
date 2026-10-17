@@ -7,9 +7,14 @@ same requests and applies them the same way. The schema forbids unknown keys, so
 that names an option this run does not offer is refused where it is parsed, with the key
 named.
 
+Every request carries a ``control_id`` its sender chooses. Submitting the same id again with
+the same request returns the first answer and changes nothing, so a sender that is unsure a
+request arrived may send it again; the same id with a different request is a conflict.
+
 The schema has no field that reaches measurement or acceptance: no evaluation command, checker,
 trust rule or resource partition. Steering changes what agents are told and what work runs, never
-how a candidate is judged; ``tests/test_operator_control.py`` holds every field to that.
+how a candidate is judged; ``tests/test_operator_control.py`` holds every field to an allow-list
+with ``control_schema_fields`` (``_control_schema.py``).
 """
 
 from __future__ import annotations
@@ -23,23 +28,53 @@ from vs_core.api import StopMode
 
 if TYPE_CHECKING:
     from vs_runtime._run_control import RunControlChannel
+    from vs_sim.api import Threads
+
+CONTROL_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+"""One to 128 letters, digits, ``.``, ``_`` and ``-``, starting with a letter or digit."""
+
+
+class ControlAction(StrEnum):
+    """What a control request asks for; the tag of the ``ControlRequest`` union."""
+
+    STEER = "steer"
+    PAUSE = "pause"
+    RESUME = "resume"
+    STOP = "stop"
 
 
 class _Request(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    control_id: str = Field(pattern=CONTROL_ID_PATTERN)
+    """The sender's id for this request; resending it is safe."""
+
 
 class SteerRequest(_Request):
     """Free-text guidance for the run's next agent turn."""
 
-    action: Literal["steer"] = "steer"
+    action: Literal[ControlAction.STEER] = ControlAction.STEER
     text: str = Field(min_length=1)
 
 
 class PauseRequest(_Request):
     """Reach the next safe boundary and hold the run there."""
 
-    action: Literal["pause"] = "pause"
+    action: Literal[ControlAction.PAUSE] = ControlAction.PAUSE
+
+
+ResumeWhen = Literal["now", "capacity_returns"]
+"""Resume at once, or once provider capacity should be back."""
+
+
+def check_one_way_to_resume(*, fallback: bool, when: ResumeWhen) -> None:
+    """Raise ``ValueError`` if a resume both switches to the fallback and waits for capacity.
+
+    The one definition of the rule; every model with these two fields validates with it.
+    """
+    if fallback and when == "capacity_returns":
+        message = "fallback resumes now; it cannot wait for capacity to return"
+        raise ValueError(message)
 
 
 class ResumeRequest(_Request):
@@ -51,22 +86,20 @@ class ResumeRequest(_Request):
     limit, and cannot be combined with ``fallback``, which resumes now.
     """
 
-    action: Literal["resume"] = "resume"
+    action: Literal[ControlAction.RESUME] = ControlAction.RESUME
     fallback: bool = False
-    when: Literal["now", "capacity_returns"] = "now"
+    when: ResumeWhen = "now"
 
     @model_validator(mode="after")
     def _one_way_to_resume(self) -> ResumeRequest:
-        if self.fallback and self.when == "capacity_returns":
-            message = "fallback resumes now; it cannot wait for capacity to return"
-            raise ValueError(message)
+        check_one_way_to_resume(fallback=self.fallback, when=self.when)
         return self
 
 
 class StopRequest(_Request):
     """End the run, draining or cancelling the work in flight."""
 
-    action: Literal["stop"] = "stop"
+    action: Literal[ControlAction.STOP] = ControlAction.STOP
     mode: StopMode = StopMode.DRAIN
 
 
@@ -87,14 +120,31 @@ class ControlStatus(StrEnum):
     CONSUMED = "consumed"
     """Already applied."""
     REFUSED = "refused"
-    """Not applicable to the run as it stands; nothing changed."""
+    """Not applicable to the run as it stands (``ControlAck.reason`` says why); nothing changed."""
+    CONFLICT = "conflict"
+    """Its ``control_id`` already named a different request; nothing changed."""
+
+
+class RefusalReason(StrEnum):
+    """Why a control was refused."""
+
+    NOT_PAUSED_ON_CAPACITY = "not_paused_on_capacity"
+    """A wait for capacity, for a run not paused on a provider capacity limit."""
 
 
 class ControlAck(_Request):
-    """The answer to one submitted control."""
+    """The answer to one submitted control: ``reason`` is set exactly when it was refused."""
 
-    action: Literal["steer", "pause", "resume", "stop"]
+    action: ControlAction
     status: ControlStatus
+    reason: RefusalReason | None = None
+
+    @model_validator(mode="after")
+    def _reason_iff_refused(self) -> ControlAck:
+        if (self.reason is None) == (self.status is ControlStatus.REFUSED):
+            message = "a refused control says why, and only a refused one"
+            raise ValueError(message)
+        return self
 
 
 class ChannelRunControl:
@@ -104,32 +154,56 @@ class ChannelRunControl:
     applies, kept for callers that hold a single action.
     """
 
-    def __init__(self, channel: RunControlChannel) -> None:
+    def __init__(self, channel: RunControlChannel, threads: Threads) -> None:
         """Write every control to ``channel``, the mailbox the run loop reads."""
         self._channel = channel
+        self._lock = threads.lock()
+        self._answered: dict[str, tuple[ControlRequest, ControlAck]] = {}
 
     def submit(self, request: ControlRequest) -> ControlAck:
-        """Apply one control request and say what became of it."""
+        """Apply one control request once per ``control_id`` and say what became of it."""
+        with self._lock:
+            answered = self._answered.get(request.control_id)
+            if answered is not None:
+                first, ack = answered
+                if first == request:
+                    return ack
+                return self._ack(request, ControlStatus.CONFLICT)
+            ack = self._apply(request)
+            self._answered[request.control_id] = (request, ack)
+            return ack
+
+    def _apply(self, request: ControlRequest) -> ControlAck:
+        reason = None
         match request:
             case SteerRequest(text=text):
                 self.steer(text)
-                return ControlAck(action="steer", status=ControlStatus.PENDING)
+                status = ControlStatus.PENDING
             case PauseRequest():
                 self.pause()
-                return ControlAck(action="pause", status=ControlStatus.PENDING)
+                status = ControlStatus.PENDING
             case ResumeRequest(when="capacity_returns"):
-                armed = self.resume_when_capacity_returns()
-                status = ControlStatus.PENDING if armed else ControlStatus.REFUSED
-                return ControlAck(action="resume", status=status)
+                status = ControlStatus.PENDING
+                if not self.resume_when_capacity_returns():
+                    status, reason = ControlStatus.REFUSED, RefusalReason.NOT_PAUSED_ON_CAPACITY
             case ResumeRequest(fallback=True):
                 self.resume_with_fallback()
-                return ControlAck(action="resume", status=ControlStatus.CONSUMED)
+                status = ControlStatus.CONSUMED
             case ResumeRequest():
                 self.resume()
-                return ControlAck(action="resume", status=ControlStatus.CONSUMED)
+                status = ControlStatus.CONSUMED
             case StopRequest(mode=mode):
                 self.stop(mode)
-                return ControlAck(action="stop", status=ControlStatus.PENDING)
+                status = ControlStatus.PENDING
+        return self._ack(request, status, reason)
+
+    @staticmethod
+    def _ack(
+        request: ControlRequest, status: ControlStatus, reason: RefusalReason | None = None
+    ) -> ControlAck:
+        return ControlAck(
+            control_id=request.control_id, action=request.action, status=status, reason=reason
+        )
 
     def steer(self, text: str) -> None:
         """Queue free-text steering for the next turn."""
@@ -157,13 +231,19 @@ class ChannelRunControl:
 
 
 __all__ = [
+    "CONTROL_ID_PATTERN",
     "CONTROL_REQUEST",
     "ChannelRunControl",
     "ControlAck",
+    "ControlAction",
     "ControlRequest",
     "ControlStatus",
     "PauseRequest",
+    "RefusalReason",
     "ResumeRequest",
+    "ResumeWhen",
     "SteerRequest",
+    "StopMode",
     "StopRequest",
+    "check_one_way_to_resume",
 ]

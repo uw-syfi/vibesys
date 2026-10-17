@@ -358,7 +358,7 @@ def test_runtime_returns_cleanly_after_an_operator_stop(
         integration.events.subscribe(runtime.integration.project_event)
 
         def run() -> str:
-            control = ChannelRunControl(integration.control)
+            control = ChannelRunControl(integration.control, threads)
             runtime.controls.install(control)
             try:
                 runtime.api.execute(StopCommand(timestamp=REQUEST_TIME))

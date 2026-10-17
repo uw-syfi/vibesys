@@ -169,7 +169,7 @@ class _LocalRunSession:
             threads=implementations.timing.threads,
             system=implementations.system,
         )
-        self._control = ChannelRunControl(self._integration.control)
+        self._control = ChannelRunControl(self._integration.control, implementations.timing.threads)
         self._integration.add_committed_state_listener(self._handle_committed_state)
         self._integration.add_resource_listener(self._handle_resources)
         self._committed_view_listener: Callable[[RunView, tuple[str, ...] | None], None] | None = (

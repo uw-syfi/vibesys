@@ -25,6 +25,7 @@ from server.api.protocol import (
 )
 from server.api.service import (
     CapacityWaitUnavailableError,
+    ControlIdConflictError,
     ControlProtocolCommand,
     control_request,
 )
@@ -35,7 +36,7 @@ from server.events import (
     RunStatusChangedData,
 )
 from server.run_lifecycle import RunStatus
-from vibesys.api import RunStopped
+from vibesys.api import PauseRequest, RunStopped, SteerRequest
 from vibesys.events import CoreEventType
 from vibesys.events import EventStatus as CoreEventStatus
 from vs_core.api import StopMode
@@ -476,7 +477,8 @@ def test_a_control_command_does_what_the_single_action_command_it_carries_does(
 def test_a_control_command_with_a_key_its_action_does_not_declare_is_refused_naming_it() -> None:
     frame = (
         '{"type": "command.control", "timestamp": "2026-01-01T00:00:00Z",'
-        ' "control": {"action": "steer", "text": "go", "checker": "always-pass"}}'
+        ' "control": {"control_id": "c1", "action": "steer", "text": "go",'
+        ' "checker": "always-pass"}}'
     )
 
     response = decode_request(frame, clock=ManualClock())
@@ -486,3 +488,22 @@ def test_a_control_command_with_a_key_its_action_does_not_declare_is_refused_nam
     assert response.diagnostic is not None
     assert response.diagnostic.validation_paths is not None
     assert any("checker" in path for path in response.diagnostic.validation_paths)
+
+
+def test_a_resent_control_is_one_control_and_a_reused_id_is_a_conflict(tmp_path: Path) -> None:
+    parts = build_server_parts(tmp_path)
+    steer = ControlCommand(
+        timestamp=REQUEST_TIME, control=SteerRequest(control_id="c1", text="prefer latency")
+    )
+
+    first = parts.api.execute(steer).ack
+    again = parts.api.execute(steer).ack
+    with pytest.raises(ControlIdConflictError) as conflict:
+        parts.api.execute(
+            ControlCommand(timestamp=REQUEST_TIME, control=PauseRequest(control_id="c1"))
+        )
+
+    assert first == again
+    assert conflict.value.diagnostic_code == "control_id_conflict"
+    assert parts.control.take_pending_steer() == ["prefer latency"]
+    assert not parts.control.pause_requested()
