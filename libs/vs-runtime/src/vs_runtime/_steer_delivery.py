@@ -176,7 +176,13 @@ def request_refusal(core: CoreState, request: ControlRequest) -> RefusalReason |
 
 def input_mode(mode: SteerMode) -> InputMode | None:
     """The input mode core records for a steer sent in ``mode``; None is the next turn."""
-    return InputMode.STANDING if mode is SteerMode.STANDING else None
+    match mode:
+        case SteerMode.NEXT_TURN:
+            return None
+        case SteerMode.STANDING:
+            return InputMode.STANDING
+        case SteerMode.INTERRUPT:
+            return InputMode.INTERRUPT
 
 
 def names_target(target: SteerTarget, held: InputTarget | None) -> bool:
