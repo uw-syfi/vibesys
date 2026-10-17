@@ -184,6 +184,25 @@ describe('the run reader', () => {
   });
 });
 
+describe('fresh ideas', () => {
+  test('are the ideas the events just read changed or brought, never the history', () => {
+    const all = run();
+    const reader = createRunReader();
+    // The page's first read is its history: nothing flashes.
+    const first = logOf(all.slice(0, 7));
+    expect(reader.read(first, null).changed.size).toBe(0);
+    // ring-pad finishes and spin starts: both flash, ring does not.
+    const grown = traceStep(first, {kind: 'events', events: all.slice(7, 12)});
+    const model = reader.read(grown, null);
+    expect([...model.changed].sort()).toEqual(['flow:w2/#1', 'flow:w3/#1']);
+    expect(
+      ideasView(model, IDEAS_FILTER_DEFAULT).rows.find(row => row.title === 'ring')?.fresh,
+    ).toBe(false);
+    // A past sequence shows no news.
+    expect(reader.read(grown, 3).changed.size).toBe(0);
+  });
+});
+
 describe('the run level', () => {
   const model = createRunReader().read(logOf(run()), null);
 

@@ -50,6 +50,8 @@ export interface IdeaRow {
   readonly trail: {readonly label: string; readonly parent: string | null};
   /** On the winning path. */
   readonly stripe: boolean;
+  /** Changed or arrived in the events just read (the row flashes once). */
+  readonly fresh: boolean;
 }
 
 export interface IdeasView {
@@ -108,6 +110,7 @@ interface RowContext {
   readonly best: number | null;
   readonly direction: Direction;
   readonly unit: string;
+  readonly changed: ReadonlySet<string>;
 }
 
 function rowOf(item: Candidate, context: RowContext): IdeaRow {
@@ -141,6 +144,7 @@ function rowOf(item: Candidate, context: RowContext): IdeaRow {
         ? {label: 'from input', parent: null}
         : {label: `from ${parent.title}`, parent: parent.id},
     stripe: context.path.has(item.id),
+    fresh: context.changed.has(item.id),
   };
 }
 
@@ -174,6 +178,7 @@ function buildIdeas(model: RunModel, filter: IdeasFilter): IdeasView {
     best: bestValue(tree),
     direction: model.direction,
     unit: unitOf(model),
+    changed: model.changed,
   };
   const query = filter.query.trim();
   const rows: IdeaRow[] = [];

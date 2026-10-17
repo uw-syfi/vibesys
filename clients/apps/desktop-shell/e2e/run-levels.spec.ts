@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import {expect, type Page, test} from '@playwright/test';
+import {expect, type Locator, type Page, test} from '@playwright/test';
 import {type FakeBridgeSeed, installFakeBridge, installFakeMachines} from './fake-bridge.js';
 import {installFakeRun} from './fake-run.js';
 import {type FakeServerSeed, installFakeServer} from './fake-server.js';
@@ -119,7 +119,54 @@ async function openRun(page: Page): Promise<void> {
     .click();
 }
 
+/** Presses Tab until the focus is inside `target`; at most `limit` presses (guards a hang). */
+async function tabInto(page: Page, target: Locator, limit = 60): Promise<void> {
+  for (let press = 0; press < limit; press += 1) {
+    if (await target.evaluate(element => element.contains(document.activeElement))) return;
+    await page.keyboard.press('Tab');
+  }
+  throw new Error(`Tab never reached ${String(target)}`);
+}
+
 test.use({colorScheme: 'dark', viewport: {width: 1440, height: 900}});
+
+test('every level opens from the keyboard alone, and Escape walks back', async ({page}) => {
+  await openRun(page);
+  const ideas = page.getByRole('listbox', {name: 'Ideas'});
+  await expect(ideas.getByRole('option').first()).toBeVisible();
+  await tabInto(page, ideas);
+  // Down to the third row, then Enter opens it.
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading', {name: 'Combine W1 ring with W2 padding'})).toBeVisible();
+
+  const steps = page.getByRole('listbox', {name: /steps$/});
+  await tabInto(page, steps);
+  await page.keyboard.press('Home');
+  const implementer = steps.getByRole('option', {name: /implementer/}).first();
+  for (let press = 0; press < 20; press += 1) {
+    if (await implementer.evaluate(element => element === document.activeElement)) break;
+    await page.keyboard.press('ArrowDown');
+  }
+  await page.keyboard.press('Enter');
+  const tools = page.getByRole('listbox', {name: 'Tool calls'});
+  await expect(tools).toBeVisible();
+
+  await tabInto(page, tools);
+  const bench = tools.getByRole('option', {name: /cargo bench --bench queue/});
+  await page.keyboard.press('Home');
+  for (let press = 0; press < 40; press += 1) {
+    if (await bench.evaluate(element => element === document.activeElement)) break;
+    await page.keyboard.press('ArrowDown');
+  }
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('queue/mpmc time: 41.2 ms')).toBeVisible();
+
+  for (const _level of ['step', 'idea', 'run']) await page.keyboard.press('Escape');
+  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'Combine W1 ring with W2 padding'})).toHaveCount(0);
+});
 
 test('the run level shows the best ratio, the ideas running first, and what runs now', async ({
   page,

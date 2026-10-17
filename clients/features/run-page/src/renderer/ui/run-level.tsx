@@ -162,6 +162,7 @@ function IdeaPickRow(props: {
       figureTone={row.figureTone}
       {...(compact ? {} : {trail: {label: row.trail.label}})}
       stripe={row.stripe}
+      fresh={row.fresh}
       select={() => zoom({type: 'open-idea', idea: row.id})}
     />
   );
