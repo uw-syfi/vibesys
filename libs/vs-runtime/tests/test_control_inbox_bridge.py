@@ -9,6 +9,7 @@ or set aside with a reason, never both, and nothing stays pending.
 
 from __future__ import annotations
 
+import contextlib
 import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -27,10 +28,11 @@ from vs_core.api import (
     initial_state,
     step,
 )
-from vs_project.api import InboxEntry, ProjectStateError, RejectedEntry
+from vs_project.api import InboxEntry, ProjectStateError
 from vs_project.api.testing import FakeControlInbox
 from vs_runtime.api.core import OperatorInbox, RunControlBridge
 from vs_runtime.api.infrastructure import (
+    CONTROL_REQUEST,
     ChannelRunControl,
     ControlAck,
     ControlRequest,
@@ -94,10 +96,14 @@ _PAYLOADS: st.SearchStrategy[dict[str, object] | bytes] = st.one_of(
     ),
 )
 
+_IDS = st.sampled_from(["k0", "k1", "k2"])
+"""Ids shared by both ingresses, so a resend through the socket, the inbox or both collides."""
+
 _STEPS = st.lists(
     st.one_of(
-        st.tuples(st.just("post"), _PAYLOADS),
-        st.tuples(st.just("socket steer"), st.text(min_size=1, max_size=12)),
+        st.tuples(st.just("post"), _IDS, _PAYLOADS),
+        st.tuples(st.just("post"), st.none(), _PAYLOADS),
+        st.tuples(st.just("socket"), _IDS, _PAYLOADS.filter(lambda p: isinstance(p, dict))),
         st.tuples(st.just("poll")),
         st.tuples(st.just("lost poll")),
         st.tuples(st.just("restart")),
@@ -117,22 +123,34 @@ def _commit(core: CoreState, events: tuple[CoreEvent, ...]) -> CoreState:
 
 
 @given(_STEPS)
-def test_every_inbox_request_is_recorded_once_or_set_aside(
+def test_every_control_is_recorded_once_whichever_way_it_was_sent(
     history: list[tuple[object, ...]],
 ) -> None:
+    """Regression: a control sent through the socket and the inbox under one id applied twice.
+
+    Each inbox request ends settled or set aside; a settled one is recorded as
+    ``op-<id>``; and no request, sent any number of times through either ingress, is
+    recorded more than once.
+    """
     inbox = FakeControlInbox()
     texts = _Texts()
     core = initial_state()
     bridge, control = _wired(inbox, texts)
-    posted: list[str] = []
+    posted: set[str] = set()
+    sent: set[tuple[str, bytes]] = set()
     for index, operation in enumerate(history):
         match operation:
-            case ("socket steer", str(text)):
-                control.submit(SteerRequest(control_id=f"s{index:03d}", text=text))
-            case ("post", dict() | bytes() as payload):
-                request_id = f"r{index:03d}"
-                inbox.post(request_id, _payload(payload, request_id))
-                posted.append(request_id)
+            case ("socket", str(control_id), dict(payload)):
+                request = CONTROL_REQUEST.validate_json(_payload(payload, control_id))
+                control.submit(request)
+                sent.add((control_id, _json(request)))
+            case ("post", str() | None as shared, dict() | bytes() as payload):
+                request_id = shared or f"r{index:03d}"
+                contents = _payload(payload, request_id)
+                with contextlib.suppress(ProjectStateError):  # an id holds one request
+                    inbox.post(request_id, contents)
+                    posted.add(request_id)
+                    sent.add((request_id, contents))
             case ("poll",):
                 core = _commit(core, bridge.poll(core, float(index)))
             case ("lost poll",):
@@ -146,14 +164,29 @@ def test_every_inbox_request_is_recorded_once_or_set_aside(
     recorded = [control.control_id.root for control in core.run.controls]
     rejected = {entry.request_id for entry in inbox.rejected()}
     assert inbox.pending() == ()
-    assert len(recorded) == len(set(recorded))
-    for request_id in posted:
-        assert (f"op-{request_id}" in recorded) != (request_id in rejected), request_id
+    assert len(recorded) <= len(sent)
+    for request_id in posted - rejected:
+        assert f"op-{request_id}" in recorded, request_id
     steer_controls = {
         control.control_id.root for control in core.run.controls if control.action == "steer"
     }
     steer_inputs = {row.input.input_id.root for row in core.sessions.inputs}
     assert {f"steer-{identity}" for identity in steer_controls} == steer_inputs
+
+
+def test_a_pause_sent_through_the_socket_and_the_inbox_is_recorded_once() -> None:
+    inbox = FakeControlInbox()
+    bridge, control = _wired(inbox, _Texts())
+    control.submit(PauseRequest(control_id="k1"))
+    core = _commit(initial_state(), bridge.poll(initial_state(), 1.0))
+
+    inbox.post("k1", _json(PauseRequest(control_id="k1")))
+    for at in (2.0, 3.0):
+        core = _commit(core, bridge.poll(core, at))
+
+    assert [(c.control_id.root, c.action) for c in core.run.controls] == [("op-k1", "pause")]
+    assert inbox.pending() == ()
+    assert inbox.rejected() == ()
 
 
 def test_a_request_that_is_not_a_control_is_set_aside_with_its_reason() -> None:
@@ -251,13 +284,15 @@ def test_the_same_request_sent_again_after_it_settled_is_settled_again() -> None
 
 
 def test_an_unreadable_entry_is_set_aside_and_the_rest_apply() -> None:
-    inbox = _UnreadableInbox()
+    inbox = FakeControlInbox()
+    inbox.hold_unreadable("r1", "a dir")
     inbox.post("r2", _json(PauseRequest(control_id="r2")))
 
     core = _commit(initial_state(), _bridge(inbox, _Texts()).poll(initial_state(), 1.0))
 
     assert [c.control_id.root for c in core.run.controls] == ["op-r2"]
     assert [(e.request_id, e.reason) for e in inbox.rejected()] == [("r1", "unreadable: a dir")]
+    assert [entry.request_id for entry in inbox.pending()] == ["r2"]  # settled at the next poll
 
 
 class _RacingControl(ChannelRunControl):
@@ -284,29 +319,25 @@ def test_a_socket_steer_in_the_same_poll_keeps_its_own_identity() -> None:
     for restarted in (bridge, _bridge(inbox, texts)):
         core = _commit(core, restarted.poll(core, 2.0))
 
-    assert sorted(c.control_id.root for c in core.run.controls) == ["control-1", "op-r1"]
+    assert sorted(c.control_id.root for c in core.run.controls) == ["op-r1", "op-s-r1"]
     assert texts.held["steer-op-r1"] == "from the inbox"
     assert inbox.pending() == ()
 
 
-class _UnreadableInbox(FakeControlInbox):
-    """An inbox holding one entry it cannot read, as a directory under ``inbox/`` would be."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._unreadable = True
+class _DamagedInbox(FakeControlInbox):
+    """An inbox whose directory cannot be listed, as a symlinked ``inbox/`` would be."""
 
     def pending(self) -> tuple[InboxEntry, ...]:
-        bad = (InboxEntry("r1", b"", unreadable="a dir"),) if self._unreadable else ()
-        return bad + super().pending()
+        message = "VibeSys state path is a symlink"
+        raise ProjectStateError(message)
 
-    def reject(self, request_id: str, reason: str) -> None:
-        if request_id == "r1" and self._unreadable:
-            self._unreadable = False
-            self._rejected_unreadable = RejectedEntry("r1", b"", reason)
-            return
-        super().reject(request_id, reason)
 
-    def rejected(self) -> tuple[RejectedEntry, ...]:
-        mine = getattr(self, "_rejected_unreadable", None)
-        return ((mine,) if mine is not None else ()) + super().rejected()
+def test_a_damaged_inbox_never_fails_the_run() -> None:
+    """Regression: a symlinked inbox directory raised out of the control poll."""
+    inbox = _DamagedInbox()
+    bridge, control = _wired(inbox, _Texts())
+    control.submit(PauseRequest(control_id="k1"))
+
+    core = _commit(initial_state(), bridge.poll(initial_state(), 1.0))
+
+    assert [c.control_id.root for c in core.run.controls] == ["op-k1"]

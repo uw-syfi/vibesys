@@ -179,21 +179,21 @@ class ChannelRunControl:
             case SteerRequest(text=text, control_id=control_id):
                 self._channel.queue_steer(text, control_id)
                 status = ControlStatus.PENDING
-            case PauseRequest():
-                self.pause()
+            case PauseRequest(control_id=control_id):
+                self._channel.request_pause(control_id)
                 status = ControlStatus.PENDING
             case ResumeRequest(when="capacity_returns"):
                 status = ControlStatus.PENDING
                 if not self.resume_when_capacity_returns():
                     status, reason = ControlStatus.REFUSED, RefusalReason.NOT_PAUSED_ON_CAPACITY
-            case ResumeRequest(fallback=True):
-                self.resume_with_fallback()
+            case ResumeRequest(fallback=True, control_id=control_id):
+                self._channel.resume_with_fallback(control_id)
                 status = ControlStatus.CONSUMED
-            case ResumeRequest():
-                self.resume()
+            case ResumeRequest(control_id=control_id):
+                self._channel.resume(control_id)
                 status = ControlStatus.CONSUMED
-            case StopRequest(mode=mode):
-                self.stop(mode)
+            case StopRequest(mode=mode, control_id=control_id):
+                self._channel.request_stop(mode, control_id)
                 status = ControlStatus.PENDING
         return self._ack(request, status, reason)
 

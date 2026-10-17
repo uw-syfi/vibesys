@@ -197,7 +197,9 @@ Every control carries a `control_id` the client chooses (1 to 128 letters, digit
 `-`). The same control sent again under its id returns the first ack and changes nothing; a
 different control under a used id answers the protocol error `control_id_conflict`. The server
 keeps answered ids for the life of the run session only, so the TypeScript transport does not
-resend `command.control` after a dropped connection. The server turns `command.pause`,
+resend `command.control` after a dropped connection. The run records each control under its
+id, so one sent both here and through a headless run's inbox under the same id is applied once.
+The server turns `command.pause`,
 `command.resume`, `command.steer` and `command.stop` into the same request, named by their
 envelope's `request_id`, and applies all five through one `RunControl.submit`, so they ack
 alike. A single-action command that reuses a `request_id` with a different command is therefore

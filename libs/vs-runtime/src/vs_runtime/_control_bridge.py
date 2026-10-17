@@ -6,14 +6,17 @@ writes there), and turns what changed since the last poll into ``RunControlEvent
 identities, followed, for a steer, by the session input that delivers it (``_steer_delivery``).
 
 An inbox request is applied through the same ``ChannelRunControl.submit`` as a socket request,
-and core records it under the identity ``op-<control id>`` (the request's ``control_id``,
-which is also its name in the inbox). The bridge removes the request from
-the inbox only once core holds that identity, so a request is applied exactly once across a
-crash or a resume: a request core already holds is settled, one it does not is applied again.
+and core records every control that has a ``control_id``, from either, under the identity
+``op-<control id>`` (for an inbox request, also its name in the inbox). The bridge settles an
+inbox request only once core holds that identity, so a request is applied exactly once across
+a crash, a resume, or a resend through the other ingress: a request core already holds is
+settled, one it does not is applied again. A control without an id (a session's
+``RunControl`` call) is recorded as ``control-<n>``.
 """
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Protocol
@@ -30,6 +33,7 @@ from vs_core.api import (
     RunStatus,
     StopMode,
 )
+from vs_project.api import ProjectStateError
 from vs_runtime._operator_control import (
     CONTROL_REQUEST,
     ChannelRunControl,
@@ -65,9 +69,10 @@ class RunControlBridge:
     """Turns the cooperative ``RunControlChannel`` mailbox into core control events.
 
     The channel is level-triggered (a pause flag, a stop flag, a queue of steer texts).
-    Each ``poll`` emits one event per change since the last poll, with stable
-    identities ``control-<n>`` that continue the count of controls core already holds,
-    so a resumed run never reuses an identity. A stop carries no result: the search
+    Each ``poll`` emits one event per change since the last poll. A change whose control
+    had an id is recorded as ``op-<id>``, and one core already holds is not emitted again;
+    any other has the identity ``control-<n>``, continuing the count of controls core
+    already holds, so a resumed run never reuses an identity. A stop carries no result: the search
     adopts its last choice and ends the run itself.
 
     With an ``inbox``, each poll also applies the inbox's requests, in id order, each as one
@@ -118,36 +123,43 @@ class RunControlBridge:
         events: list[CoreEvent] = list(unrecorded_steers(core, now_at))
         self._take_steers(core, now_at, events)
         if self._inbox is not None:
-            self._read_inbox(self._inbox, core, now_at, events)
+            # A damaged inbox (a symlinked or misplaced directory) leaves its requests waiting
+            # and the run going on; reporting it to the operator is tracked in #3061.
+            with contextlib.suppress(ProjectStateError):
+                self._read_inbox(self._inbox, core, now_at, events)
         if self._stopped:
             return tuple(events)
         if self._channel.stop_requested():
             self._stopped = True
-            events.append(self._event("stop", now_at, mode=self._channel.stop_mode()))
+            by = self._channel.requested_by("stop")
+            stop = self._event(
+                core, now_at, _Change("stop", mode=self._channel.stop_mode(), control_id=by)
+            )
+            events += () if stop is None else (stop,)
         elif self._channel.pause_requested() != self._paused:
             self._paused = not self._paused
-            events.append(self._event("pause" if self._paused else "resume", now_at))
+            action = "pause" if self._paused else "resume"
+            by = self._channel.requested_by("pause")
+            change = self._event(core, now_at, _Change(action, control_id=by))
+            events += () if change is None else (change,)
         return tuple(events)
 
-    def _take_steers(
-        self, core: CoreState, now_at: float, events: list[CoreEvent], inbox_id: str | None = None
-    ) -> None:
-        """Emit the queued steers; the one ``inbox_id`` sent, if any, under that id.
-
-        The inbox's steer is recognised by its control id, so a socket steer queued in the
-        same poll keeps its own identity.
-        """
+    def _take_steers(self, core: CoreState, now_at: float, events: list[CoreEvent]) -> None:
+        """Emit the queued steers, each under its control's id if it had one."""
         for steer in self._channel.take_pending_steer():
-            from_inbox = inbox_id is not None and steer.control_id == inbox_id
             control = self._event(
-                "steer", now_at, text=steer.text, inbox_id=inbox_id if from_inbox else None
+                core, now_at, _Change("steer", text=steer.text, control_id=steer.control_id)
             )
-            events += (control, steer_input(core, control.control, now_at, self._position))
+            if control is not None:
+                events += (control, steer_input(core, control.control, now_at, self._position))
 
     def _read_inbox(
         self, inbox: OperatorInbox, core: CoreState, now_at: float, events: list[CoreEvent]
     ) -> None:
-        """Settle the requests core holds and apply, once per process, the ones it does not."""
+        """Settle the requests core holds and apply, once per process, the ones it does not.
+
+        Raises ``ProjectStateError`` when the inbox itself cannot be read or marked.
+        """
         held = {control.control_id.root: control for control in core.run.controls}
         for entry in inbox.requests.pending():
             if entry.unreadable is not None:
@@ -186,15 +198,19 @@ class RunControlBridge:
                 inbox.requests.settle(identity)
             case PauseRequest():
                 self._paused = True
-                events.append(self._event("pause", now_at, inbox_id=identity))
+                change = self._event(core, now_at, _Change("pause", control_id=identity))
+                events += () if change is None else (change,)
             case ResumeRequest():
                 self._paused = False
-                events.append(self._event("resume", now_at, inbox_id=identity))
+                change = self._event(core, now_at, _Change("resume", control_id=identity))
+                events += () if change is None else (change,)
             case StopRequest(mode=mode):
                 self._stopped = True
-                events.append(self._event("stop", now_at, mode=mode, inbox_id=identity))
+                stop = self._event(core, now_at, _Change("stop", mode=mode, control_id=identity))
+                events += () if stop is None else (stop,)
             case SteerRequest():
-                self._take_steers(core, now_at, events, inbox_id=identity)
+                # Applied now, or queued earlier through the socket under the same id.
+                self._take_steers(core, now_at, events)
         return None
 
     def _submitted_request(
@@ -236,29 +252,28 @@ class RunControlBridge:
             agent_kind=role, round_label=round_label, execution_id=execution_id
         )
 
-    def _event(
-        self,
-        action: ControlAction,
-        now_at: float,
-        *,
-        text: str | None = None,
-        mode: StopMode | None = None,
-        inbox_id: str | None = None,
-    ) -> RunControlEvent:
+    def _event(self, core: CoreState, now_at: float, change: _Change) -> RunControlEvent | None:
+        """The event recording one control, or None when core already holds that control.
+
+        A control with an id is recorded as ``op-<id>``; if core holds a different control
+        under it (a socket request reusing an id after a restart), it is recorded as
+        ``control-<n>`` instead, so it is applied and never conflicts with the record.
+        """
+        if change.control_id is not None:
+            control = change.control(_identity(change.control_id))
+            held = next((c for c in core.run.controls if c.control_id == control.control_id), None)
+            if held == control:
+                return None
+            if held is None:
+                return self._recorded(control, change.text, now_at)
+        self._count += 1
+        control = change.control(ControlId(root=f"control-{self._count}"))
+        return self._recorded(control, change.text, now_at)
+
+    def _recorded(self, control: ControlInput, text: str | None, now_at: float) -> RunControlEvent:
         self._position += 1
-        if inbox_id is None:
-            self._count += 1
-            identity = ControlId(root=f"control-{self._count}")
-        else:
-            identity = _identity(inbox_id)
-        artifact = None
-        if text is not None:
-            artifact = ArtifactRef(
-                artifact_id=ArtifactId(root=f"steer-{identity.root}"),
-                digest=hashlib.sha256(text.encode()).hexdigest(),
-            )
-            self._steer.put(artifact, text)
-        control = ControlInput(control_id=identity, action=action, mode=mode, artifact=artifact)
+        if text is not None and control.artifact is not None:
+            self._steer.put(control.artifact, text)
         return RunControlEvent(control=control, now_at=now_at)
 
 
@@ -271,8 +286,30 @@ class OperatorInbox:
 
 
 def _identity(control_id: str) -> ControlId:
-    """The identity core records an inbox request's control under."""
+    """The identity core records a control with an id under."""
     return ControlId(root=f"op-{control_id}")
+
+
+@dataclass(frozen=True)
+class _Change:
+    """One control to record: its action, a steer's text, a stop's mode, the sender's id."""
+
+    action: ControlAction
+    text: str | None = None
+    mode: StopMode | None = None
+    control_id: str | None = None
+
+    def control(self, identity: ControlId) -> ControlInput:
+        """The control core records; a steer carries its text's digest, not the text."""
+        artifact = None
+        if self.text is not None:
+            artifact = ArtifactRef(
+                artifact_id=ArtifactId(root=f"steer-{identity.root}"),
+                digest=hashlib.sha256(self.text.encode()).hexdigest(),
+            )
+        return ControlInput(
+            control_id=identity, action=self.action, mode=self.mode, artifact=artifact
+        )
 
 
 def _is_held(entry: InboxEntry, control: ControlInput) -> bool:
