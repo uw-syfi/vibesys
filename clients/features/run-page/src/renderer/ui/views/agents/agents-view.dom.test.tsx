@@ -6,6 +6,7 @@
 
 import {afterAll, beforeAll, describe, expect, test} from 'bun:test';
 import type {RunEvent, Span} from '@vibesys/contracts';
+import {initialCoreState} from '@vibesys/run-state';
 import {EMPTY_TRACE} from '@vibesys/run-state/trace';
 import {Window} from 'happy-dom';
 import {act} from 'react';
@@ -198,6 +199,22 @@ describe('AgentsView', () => {
     expect(view.textContent).not.toContain('finished');
   });
 
+  test('the opened agent stays in the compact list when its group was folded', async () => {
+    const finished: TurnOf[] = Array.from({length: FOLD_FROM + 1}, (_, n) => ({
+      agent: `old-${n}`,
+      at: 2 + n,
+      role: `old${n}`,
+      startedBy: ['boss'],
+    }));
+    const model = modelOf([
+      {agent: 'boss', at: 1, role: 'orchestrator', status: 'running'},
+      ...finished,
+    ]);
+    const view = await mount(<AgentsView {...base(model, [])} selected="old-2" compact />);
+    expect(option(view, 'old2').getAttribute('aria-selected')).toBe('true');
+    expect(view.textContent).not.toContain('finished');
+  });
+
   test('a large run draws only the rows near the visible part', async () => {
     const model = modelOf([
       {agent: 'boss', at: 1, role: 'orchestrator', status: 'running'},
@@ -242,6 +259,34 @@ describe('AgentPane', () => {
       expect.stringMatching(/1.*Pad the ring.*1m/),
       expect.stringMatching(/2.*Measure it.*1m/),
     ]);
+  });
+
+  test('names the resolved model of a running execution when the turn names none', async () => {
+    const agent = MODEL.agents.agents.find(each => each.id === 'impl');
+    if (agent === undefined) throw new Error('no agent');
+    const unnamed = {...agent, model: null};
+    const core = {
+      ...initialCoreState(),
+      activeExecutions: {
+        x: {
+          executionId: 'x',
+          agentKind: 'implementer',
+          roundLabel: null,
+          roundNumber: null,
+          roundKey: null,
+          stage: 's',
+          attempt: null,
+          assignment: '',
+          startedAt: '',
+          activity: {mode: 'thinking' as const, summary: ''},
+          model: 'gpt-6-luna',
+        },
+      },
+    };
+    const named = await mount(<AgentPane {...base(MODEL, [])} core={core} agent={unnamed} />);
+    expect(named.textContent).toContain('gpt-6-luna');
+    const none = await mount(<AgentPane {...base(MODEL, [])} core={null} agent={unnamed} />);
+    expect(none.textContent).toContain('the run’s default');
   });
 
   test('the starter is a button that opens that agent, and a turn opens its step', async () => {

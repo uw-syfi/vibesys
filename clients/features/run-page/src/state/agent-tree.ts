@@ -4,7 +4,8 @@
  * `alsoUnder` for fan-in; agents nobody known started are roots. Children follow in the order
  * they started. Subtrees whose agents are all done fold into one `+ N finished` row once a parent
  * has `FOLD_FROM` of them (a few finished siblings read better in place); a subtree with any agent
- * not done stays open, and a fold in `expanded` (by its parent's key) shows its subtrees.
+ * not done stays open, and a fold in `expanded` (by its parent's key) shows its subtrees. The
+ * `selected` agent and its ancestors are never folded: the group that holds them stays shown.
  *
  * Rows are a function of the graph, the spans (for each agent's latest headline) and `expanded`,
  * built in one pass over the agents; the list's windowing keeps a large run cheap to draw.
@@ -48,6 +49,8 @@ interface Placed {
   /** Agents in the subtree, itself included. */
   size: number;
   finished: boolean;
+  /** Whether the selected agent is this one or below it. */
+  holdsSelected: boolean;
 }
 
 /** Where each agent sits: under its first known parent; a ring of agents opens at its first. */
@@ -56,7 +59,8 @@ function place(agents: readonly AgentNode[]): {
   readonly parentOf: (agent: AgentNode) => string | null;
 } {
   const nodes = new Map<string, Placed>();
-  for (const agent of agents) nodes.set(agent.id, {agent, children: [], size: 1, finished: false});
+  for (const agent of agents)
+    nodes.set(agent.id, {agent, children: [], size: 1, finished: false, holdsSelected: false});
   const parentOf = (agent: AgentNode): string | null =>
     agent.startedBy.find(id => id !== agent.id && nodes.has(id)) ?? null;
   const above = (node: Placed): Placed | undefined => {
@@ -87,13 +91,15 @@ function place(agents: readonly AgentNode[]): {
 }
 
 /** Sets `size` and `finished` of each subtree, children first. */
-function measure(node: Placed): void {
+function measure(node: Placed, selected: string | null): void {
   node.size = 1;
   node.finished = node.agent.status === 'done';
+  node.holdsSelected = node.agent.id === selected;
   for (const child of node.children) {
-    measure(child);
+    measure(child, selected);
     node.size += child.size;
     node.finished &&= child.finished;
+    node.holdsSelected ||= child.holdsSelected;
   }
 }
 
@@ -101,10 +107,11 @@ export function agentTree(
   graph: AgentGraph,
   spans: ReadonlyMap<string, Span>,
   expanded: ReadonlySet<string>,
+  selected: string | null = null,
 ): readonly TreeRow[] {
   const {roots, parentOf} = place(graph.agents);
   const roles = new Map(graph.agents.map(agent => [agent.id, agent.role]));
-  for (const root of roots) measure(root);
+  for (const root of roots) measure(root, selected);
   const rows: TreeRow[] = [];
 
   const headlineOf = (agent: AgentNode): string | null => {
@@ -124,7 +131,8 @@ export function agentTree(
   /** `below[i]`: whether the branch at level i above this one continues under this level's rows. */
   const level = (siblings: readonly Placed[], parent: string, below: readonly boolean[]): void => {
     const done = siblings.filter(node => node.finished);
-    const folded = done.length >= FOLD_FROM && !expanded.has(parent);
+    const kept = expanded.has(parent) || siblings.some(node => node.holdsSelected);
+    const folded = done.length >= FOLD_FROM && !kept;
     const shown = folded ? siblings.filter(node => !node.finished) : siblings;
     const lines = shown.length + (folded ? 1 : 0);
     const guides = (index: number): TreeGuide[] => [

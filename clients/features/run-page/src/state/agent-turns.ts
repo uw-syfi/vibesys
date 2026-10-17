@@ -5,6 +5,8 @@
  * turn reads the trace here, once per agent opened.
  */
 import type {Span} from '@vibesys/contracts';
+import type {CoreState} from '@vibesys/run-state';
+import type {AgentNode} from '@vibesys/run-state/agents';
 import {stringAttr} from './span-reading.js';
 
 /** One turn of an agent. */
@@ -36,4 +38,19 @@ export function agentTurns(spans: ReadonlyMap<string, Span>, agent: string): rea
     });
   }
   return turns;
+}
+
+/**
+ * The model an agent runs on. A turn names its model only when its role sets one, so an agent on
+ * the run's default has none in the trace; the executions the run is running carry the resolved
+ * model by role, so a role that runs now gives its agents' model. Null when neither names it.
+ */
+export function agentModel(agent: AgentNode, core: CoreState | null): string | null {
+  if (agent.model !== null) return agent.model;
+  const models = new Set<string>();
+  for (const execution of Object.values(core?.activeExecutions ?? {})) {
+    if (execution.agentKind === agent.role && execution.model) models.add(execution.model);
+  }
+  const [only, ...rest] = models;
+  return only !== undefined && rest.length === 0 ? only : null;
 }

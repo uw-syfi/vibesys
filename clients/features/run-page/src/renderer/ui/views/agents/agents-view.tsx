@@ -7,7 +7,7 @@ import type {AgentNode} from '@vibesys/run-state/agents';
 import {Button, EmptyState, KeyValue, PickList, PickRow, Stack, Text} from '@vibesys/ui';
 import {type JSX, useMemo, useState} from 'react';
 import {type AgentRow, agentTree, type FoldRow} from '../../../../state/agent-tree.js';
-import {type AgentTurn, agentTurns} from '../../../../state/agent-turns.js';
+import {type AgentTurn, agentModel, agentTurns} from '../../../../state/agent-turns.js';
 import {duration} from '../../../../state/span-reading.js';
 import type {ViewBase, WithCore} from '../props.js';
 
@@ -93,7 +93,10 @@ export function AgentsView(props: AgentsViewProps): JSX.Element {
   const {agents} = props.model;
   const spans = props.model.trace.spans;
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
-  const rows = useMemo(() => agentTree(agents, spans, expanded), [agents, spans, expanded]);
+  const rows = useMemo(
+    () => agentTree(agents, spans, expanded, props.selected),
+    [agents, spans, expanded, props.selected],
+  );
   if (agents.agents.length === 0) return <EmptyState title="No agents yet" />;
   return (
     <PickList
@@ -136,6 +139,7 @@ export function AgentPane(props: AgentPaneProps): JSX.Element {
   const {agent, model, zoom} = props;
   const spans = model.trace.spans;
   const turns = useMemo(() => agentTurns(spans, agent.id), [spans, agent.id]);
+  const modelName = agentModel(agent, props.core);
   const parents = agent.startedBy
     .map(id => model.agents.agents.find(item => item.id === id))
     .filter((item): item is AgentNode => item !== undefined);
@@ -144,7 +148,7 @@ export function AgentPane(props: AgentPaneProps): JSX.Element {
       <KeyValue
         items={[
           {key: 'role', value: agent.role},
-          {key: 'model', value: agent.model ?? 'the run’s default', mono: agent.model !== null},
+          {key: 'model', value: modelName ?? 'the run’s default', mono: modelName !== null},
           {
             key: 'started by',
             value:

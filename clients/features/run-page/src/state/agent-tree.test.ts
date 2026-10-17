@@ -1,8 +1,9 @@
 import {describe, expect, test} from 'bun:test';
 import type {Span} from '@vibesys/contracts';
+import {initialCoreState} from '@vibesys/run-state';
 import {agentGraph} from '@vibesys/run-state/agents';
 import {agentTree, FOLD_FROM, ROOT_FOLD, type TreeRow} from './agent-tree.js';
-import {agentTurns} from './agent-turns.js';
+import {agentModel, agentTurns} from './agent-turns.js';
 
 /** One agent's turn span, as the search labels it. */
 function turn(
@@ -30,9 +31,13 @@ function turn(
   };
 }
 
-function rowsOf(spans: readonly Span[], expanded: string[] = []): readonly TreeRow[] {
+function rowsOf(
+  spans: readonly Span[],
+  expanded: string[] = [],
+  selected: string | null = null,
+): readonly TreeRow[] {
   const byId = new Map(spans.map(span => [span.id, span]));
-  return agentTree(agentGraph(spans), byId, new Set(expanded));
+  return agentTree(agentGraph(spans), byId, new Set(expanded), selected);
 }
 
 const names = (rows: readonly TreeRow[]): string[] =>
@@ -143,6 +148,81 @@ describe('agentTree', () => {
       null,
       'Padded the ring',
     ]);
+  });
+});
+
+describe('the selected agent', () => {
+  const finished = (parent: string, prefix: string): Span[] =>
+    Array.from({length: FOLD_FROM}, (_, n) => turn(`${prefix}${n}`, 10 + n, {startedBy: [parent]}));
+
+  test('is never folded away, nor are its ancestors, so its group stays shown', () => {
+    const spans = [
+      turn('boss', 1, {status: 'running'}),
+      ...finished('boss', 'old'),
+      turn('mid', 20, {startedBy: ['boss']}),
+      ...finished('mid', 'kid'),
+    ];
+    // Unselected, the finished children fold under boss.
+    expect(names(rowsOf(spans))).toContain(`+${FOLD_FROM + FOLD_FROM + 1}`);
+    const rows = names(rowsOf(spans, [], 'kid2'));
+    expect(rows).toContain('kid2');
+    expect(rows).toContain('mid');
+    expect(rows).toContain('boss');
+  });
+
+  test('is drawn whatever the run looks like, as every agent is selectable', () => {
+    let seed = 11;
+    const next = (bound: number): number => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed % bound;
+    };
+    for (let run = 0; run < 50; run++) {
+      const size = 1 + next(30);
+      const spans = Array.from({length: size}, (_, n) =>
+        turn(`a${n}`, n, {
+          status: next(4) === 0 ? 'running' : 'done',
+          startedBy: n === 0 ? [] : [`a${next(n)}`],
+        }),
+      );
+      for (let pick = 0; pick < size; pick++) {
+        expect(names(rowsOf(spans, [], `a${pick}`))).toContain(`a${pick}`);
+      }
+    }
+  });
+});
+
+describe('agentModel', () => {
+  const agentOf = (model: string | null) =>
+    agentGraph([turn('a', 1, {role: 'implementer'})]).agents.map(agent => ({...agent, model}))[0];
+  const running = (agentKind: string, model: string | null) => ({
+    ...initialCoreState(),
+    activeExecutions: {
+      x: {
+        executionId: 'x',
+        agentKind,
+        roundLabel: null,
+        roundNumber: null,
+        roundKey: null,
+        stage: 's',
+        attempt: null,
+        assignment: '',
+        startedAt: '',
+        activity: {mode: 'thinking' as const, summary: ''},
+        model,
+      },
+    },
+  });
+
+  test('is the model the turn names', () => {
+    const agent = agentOf('turn-model');
+    expect(agent && agentModel(agent, running('implementer', 'other'))).toBe('turn-model');
+  });
+
+  test('is the resolved model of a running execution of its role when the turn names none', () => {
+    const agent = agentOf(null);
+    expect(agent && agentModel(agent, running('implementer', 'gpt-6-luna'))).toBe('gpt-6-luna');
+    expect(agent && agentModel(agent, running('judge', 'gpt-6-luna'))).toBeNull();
+    expect(agent && agentModel(agent, null)).toBeNull();
   });
 });
 
