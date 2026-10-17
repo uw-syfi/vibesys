@@ -31,6 +31,7 @@ import {
   Timeline,
   Tree,
   TreeRow,
+  WindowFrame,
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import type {ComponentName, GalleryEntry} from './gallery-entry.js';
@@ -414,6 +415,15 @@ export const RICH_ENTRIES = {
           <Text>The main area holds a Page.</Text>
         </Card>
       </AppFrame>
+    ),
+  },
+  WindowFrame: {
+    render: () => (
+      <WindowFrame>
+        <Card>
+          <Text>A window that is only a page sits below the title-bar row.</Text>
+        </Card>
+      </WindowFrame>
     ),
   },
   ThemeSwatch: {render: () => <SwatchDemo />},

@@ -53,7 +53,7 @@ export function AppFrame(props: {
 }
 
 /**
- * A window that is only a page (a run in a window of its own): the same title-bar row as
+ * A window that is only a page (no navigation column): the same title-bar row as
  * `AppFrame`, empty and draggable, clear of the window's own controls, with `children` below it
  * filling the window.
  */
