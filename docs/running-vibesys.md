@@ -457,6 +457,16 @@ new generation, which the message does not reach). For example:
 vibesys control <run-id> steer "re-plan around the new profile" --role dynamic-planner
 ```
 
+`--interrupt` offers the message to a turn of the target that is running now, on a provider
+that takes messages mid-turn. With no such turn running, a provider that cannot take it, or a
+turn that refuses it, the next turn of the target gets it instead. The run's events say which
+happened. Delivery is at least once: after a restart, or when a turn takes the message back at
+its end, the next turn may get it again.
+
+```bash
+vibesys control <run-id> steer "stop tuning the tile size; profile the copy first" --interrupt
+```
+
 A steer reaches one turn. `--standing` makes it standing guidance instead: every turn of its
 target dispatched from then on receives it, in a section of its own, until you withdraw it by
 the id `vibesys control` printed:
