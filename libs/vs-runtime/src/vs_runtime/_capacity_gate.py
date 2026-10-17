@@ -344,11 +344,17 @@ class PolicyCapacityGate:
             None if target is None else target.model,
         )
         self._events.quota_paused(error, plan, context)
-        if isinstance(decision, WaitFor):
-            wake = self._timer.pause_for_quota(decision.seconds, stops)
-        else:
-            self._control.pause_for_quota()
-            wake = self._hold(error, stops, memory, context)
+        timed = isinstance(decision, WaitFor)
+        # The turn owns the pause from before it exists until it stops waiting on it.
+        self._control.enter_capacity(timed=timed)
+        try:
+            if isinstance(decision, WaitFor):
+                wake = self._timer.pause_for_quota(decision.seconds, stops)
+            else:
+                self._control.pause_for_quota()
+                wake = self._hold(error, stops, memory, context)
+        finally:
+            self._control.leave_capacity(timed=timed)
         waited = self._timer.now() - now
         memory.quota_waited += waited
         if wake is PauseWake.DETACHED or stops.cancelled:
@@ -443,33 +449,29 @@ class PolicyCapacityGate:
         time. A cancellation of the turn ends only its own park (``DETACHED``): the operator's
         request stays in force for the other turns parked on a capacity limit.
         """
-        self._control.enter_capacity()
-        try:
-            request = self._timer.park_for_capacity(stops, waiting=memory.capacity_requested)
-            while isinstance(request, int) and not stops.cancelled:
-                memory.capacity_requested = True
-                now = self._timer.now()
-                back = capacity_returns_at(resets_at=error.resets_at, now=now)
-                self._events.quota_waiting(error.provider, back, context)
-                wait = capacity_wait(self._policy, resets_at=error.resets_at, now=now)
-                end = self._timer.wait_for_capacity(wait, request, stops)
-                match end.wake:
-                    case CapacityWake.ELAPSED:
-                        return PauseWake.ELAPSED
-                    case CapacityWake.RESUMED:
-                        self._events.quota_wait_cancelled(error.provider, "resumed", context)
-                        return PauseWake.RESUMED
-                    case CapacityWake.DETACHED:
-                        return PauseWake.DETACHED
-                    case CapacityWake.CANCELLED:
-                        self._events.quota_wait_cancelled(error.provider, "paused", context)
-                        memory.capacity_requested = False
-                        request = self._timer.park_for_capacity(stops, waiting=False)
-                    case CapacityWake.REARMED:
-                        request = end.request
-            return PauseWake.DETACHED if stops.cancelled or isinstance(request, int) else request
-        finally:
-            self._control.leave_capacity()
+        request = self._timer.park_for_capacity(stops, waiting=memory.capacity_requested)
+        while isinstance(request, int) and not stops.cancelled:
+            memory.capacity_requested = True
+            now = self._timer.now()
+            back = capacity_returns_at(resets_at=error.resets_at, now=now)
+            self._events.quota_waiting(error.provider, back, context)
+            wait = capacity_wait(self._policy, resets_at=error.resets_at, now=now)
+            end = self._timer.wait_for_capacity(wait, request, stops)
+            match end.wake:
+                case CapacityWake.ELAPSED:
+                    return PauseWake.ELAPSED
+                case CapacityWake.RESUMED:
+                    self._events.quota_wait_cancelled(error.provider, "resumed", context)
+                    return PauseWake.RESUMED
+                case CapacityWake.DETACHED:
+                    return PauseWake.DETACHED
+                case CapacityWake.CANCELLED:
+                    self._events.quota_wait_cancelled(error.provider, "paused", context)
+                    memory.capacity_requested = False
+                    request = self._timer.park_for_capacity(stops, waiting=False)
+                case CapacityWake.REARMED:
+                    request = end.request
+        return PauseWake.DETACHED if stops.cancelled or isinstance(request, int) else request
 
     def _switch_or_abandon(
         self,

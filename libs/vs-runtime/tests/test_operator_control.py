@@ -286,8 +286,11 @@ def test_submit_applies_each_control_id_once_as_its_action_says(
     control = ChannelRunControl(channel, SimThreads())
     expected = _Expected(paused=quota_paused, quota_paused=quota_paused)
     if quota_paused:
+        # A turn waits on the pause's timed resume, never leaving: it would take a fallback.
+        channel.enter_capacity(timed=True)
         channel.pause_for_quota()
     for request in sequence:
+        stopping = expected.stop is not None
         ack = control.submit(request)
         assert (ack.control_id, ack.action) == (request.control_id, request.action)
         answered = expected.answered.get(request.control_id)
@@ -298,9 +301,10 @@ def test_submit_applies_each_control_id_once_as_its_action_says(
             assert ack == answered[1]
         else:
             assert ack.status is ControlStatus.CONFLICT
-        assert (ack.reason is RefusalReason.NOT_PAUSED_ON_CAPACITY) == (
-            ack.status is ControlStatus.REFUSED
-        )
+        if ack.status is ControlStatus.REFUSED and answered is None:
+            assert ack.reason is (
+                RefusalReason.STOPPING if stopping else RefusalReason.NOT_PAUSED_ON_CAPACITY
+            )
     assert [steer.text for steer in channel.take_pending_steer()] == expected.steers
     assert [w.withdraws for w in channel.take_pending_withdrawals()] == expected.withdrawals
     assert channel.pause_requested() == expected.paused

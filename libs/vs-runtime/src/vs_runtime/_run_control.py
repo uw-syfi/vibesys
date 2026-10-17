@@ -54,7 +54,8 @@ class PauseWake(StrEnum):
     RESUMED = "resumed"
     """The operator resumed the run (directly, or by an operator request to wait for capacity)."""
     ELAPSED = "elapsed"
-    """The run's timed resume came due: the channel resumed the run itself."""
+    """The channel resumed the run itself: its timed resume came due, or the last turn that
+    stopped on the quota left a quota pause nothing else would end."""
     DETACHED = "detached"
     """The waiting turn left (it was cancelled); the run's pause state is unchanged."""
 
@@ -194,7 +195,8 @@ class RunControlChannel(Protocol):
     def resume_with_fallback(self, control_id: str | None = None) -> bool:
         """Resume like :meth:`resume`, asking a run paused on a provider capacity limit to switch.
 
-        False, and nothing changes, unless a quota stop paused the run (:meth:`pause_for_quota`)
+        False, and nothing changes, unless a quota stop paused the run (:meth:`pause_for_quota`),
+        a turn stopped on the quota still waits to take the request (:meth:`enter_capacity`),
         and no stop is pending. The request stays pending until a resumed turn takes it with
         :meth:`consume_fallback_request`; the run's next resume drops a request no turn took.
         A run with no fallback configured ignores it.
@@ -309,18 +311,26 @@ class RunControlChannel(Protocol):
         """
         ...
 
-    def enter_capacity(self) -> None:
-        """A turn stopped on a capacity limit: the operator may ask the run to wait for capacity.
+    def enter_capacity(self, *, timed: bool = False) -> None:
+        """A turn stopped on a quota limit waits on the run's quota pause; it owns the pause.
 
-        Pairs with one :meth:`leave_capacity`; several turns may be in at once.
+        Call it before the turn pauses the run (:meth:`pause_for_quota`), so the pause never
+        exists without a turn that owns it. A turn that parks for the operator
+        (:meth:`park_for_capacity`) lets the operator ask the run to wait for capacity; a
+        ``timed`` one waits on the run's timed resume instead. Either kind takes a fallback
+        request when the run resumes. Pairs with one :meth:`leave_capacity` of the same kind;
+        several turns may be in at once.
         """
         ...
 
-    def leave_capacity(self) -> None:
-        """One turn stopped waiting on its capacity limit.
+    def leave_capacity(self, *, timed: bool = False) -> None:
+        """One turn of that kind stopped waiting on its quota limit.
 
-        When it was the last such turn, further requests are refused and the pending one
-        is dropped; while others remain, both stay as they are. Leaving without a matching
+        When the last turn that parks for the operator leaves, further capacity requests are
+        refused and the pending one is dropped. When no turn of either kind is left, a quota
+        pause that nothing else ends (no operator hold, no timed resume, no pending stop)
+        ends: the run resumes itself (``ELAPSED``), as a restart would resume it, so the run
+        never stays paused with no turn, no timer and no request. Leaving without a matching
         :meth:`enter_capacity` raises ``RuntimeError``.
         """
         ...
@@ -392,6 +402,7 @@ class RuntimeRunControlChannel:
         self._stop_listeners: list[Callable[[], object]] = []
         self._now = threads.now
         self._capacity_turns = 0
+        self._timed_turns = 0
         self._capacity_request: int | None = None
         self._capacity_requests = 0
         self._run_deadline: float | None = None
@@ -514,9 +525,10 @@ class RuntimeRunControlChannel:
         self._lock.wait(max(min(deadlines) - self._now(), 0.0))
 
     def resume_with_fallback(self, control_id: str | None = None) -> bool:
-        """Resume a quota-paused run, leaving a fallback request; False if not quota-paused."""
+        """Resume a quota-paused run, leaving a fallback request for a waiting turn to take."""
         with self._lock:
-            if not self._quota_paused or self._stop_requested:
+            waiting = self._capacity_turns + self._timed_turns
+            if not (self._quota_paused and waiting) or self._stop_requested:
                 return False
             self._release(fallback=True, control_id=control_id)
         return True
@@ -722,20 +734,35 @@ class RuntimeRunControlChannel:
         with self._lock:
             self._lock.notify_all()
 
-    def enter_capacity(self) -> None:
-        """Count one more turn stopped on a capacity limit."""
+    def enter_capacity(self, *, timed: bool = False) -> None:
+        """Count one more turn waiting on a quota stop, of the kind ``timed`` says."""
         with self._lock:
-            self._capacity_turns += 1
+            if timed:
+                self._timed_turns += 1
+            else:
+                self._capacity_turns += 1
 
-    def leave_capacity(self) -> None:
-        """Count one turn out; the last one out refuses further requests and drops the pending one."""
+    def leave_capacity(self, *, timed: bool = False) -> None:
+        """Count one turn out; see the protocol for what the last one out ends."""
         with self._lock:
-            if not self._capacity_turns:
+            if not (self._timed_turns if timed else self._capacity_turns):
                 message = "leave_capacity without a matching enter_capacity"
                 raise RuntimeError(message)
-            self._capacity_turns -= 1
+            if timed:
+                self._timed_turns -= 1
+            else:
+                self._capacity_turns -= 1
             if not self._capacity_turns:
                 self._capacity_request = None
+            orphaned = (
+                self._quota_paused
+                and not (self._held or self._stop_requested)
+                and self._resume_at is None
+                and not (self._capacity_turns or self._timed_turns)
+            )
+            if orphaned:
+                # The turns that stopped owned the pause and none is left.
+                self._unpause(PauseWake.ELAPSED)
 
     def _capacity_end(self, request: int) -> CapacityWaitEnd:
         """How the wait for ``request`` stands; the caller holds the lock."""

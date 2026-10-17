@@ -276,6 +276,57 @@ def test_an_operator_capacity_request_survives_other_turns_quota_stops(
     assert resumed == 1
 
 
+@given(
+    stops_at=st.lists(st.integers(0, 60).map(float), min_size=1, max_size=4),
+    cancels_after=st.lists(st.integers(1, 120).map(float), min_size=4, max_size=4),
+    ask_at=st.none() | st.integers(0, 90).map(float),
+    seed=st.integers(0, 2**16),
+)
+def test_a_quota_pause_ends_with_the_last_turn_that_waited_on_it(
+    stops_at: list[float], cancels_after: list[float], ask_at: float | None, seed: int
+) -> None:
+    """Under ``pause``, turns stop on a quota and are all cancelled while they wait.
+
+    The operator may ask the run to resume when capacity returns (a wait far longer than
+    the test) before or after some turns stop. Once the last waiting turn is cancelled, no
+    turn owns the quota pause, and the run resumes itself, as a restart would resume it.
+    Before, the run stayed paused with no turn, no timer and no request to end the pause.
+    """
+    run = _Run(QuotaPolicy(QuotaAction.PAUSE, retry_seconds=10_000.0), seed)
+    threads, control = run.threads, run.control
+
+    def turn(index: int, at: float) -> None:
+        stops = CapacityStops(threads)
+        threads.sleep(at)
+        threads.spawn(lambda: _cancel_later(cancels_after[index], stops), name=f"cancel-{index}")
+        run.stop(f"turn-{index}", stops, None)
+
+    def _cancel_later(after: float, stops: CapacityStops) -> None:
+        threads.sleep(after)
+        stops.cancel()
+
+    def operator() -> None:
+        if ask_at is not None:
+            threads.sleep(ask_at)
+            control.resume_when_capacity_returns()
+
+    def main() -> bool:
+        workers = [
+            threads.spawn(lambda i=i, at=at: turn(i, at), name=f"turn-{i}", daemon=False)
+            for i, at in enumerate(stops_at)
+        ]
+        workers.append(threads.spawn(operator, name="operator", daemon=False))
+        for worker in workers:
+            worker.join(END)
+        assert not any(worker.is_alive() for worker in workers), "a cancelled turn stayed parked"
+        return control.pause_requested()
+
+    paused = threads.run(main)
+
+    assert not paused
+    assert run.transitions[-1].kind is RunControlTransitionKind.RESUMED
+
+
 _OPERATOR_ACTIONS = st.lists(st.sampled_from(["pause", "resume"]), min_size=2, max_size=6)
 
 

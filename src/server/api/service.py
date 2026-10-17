@@ -164,6 +164,16 @@ class CapacityWaitUnavailableError(RuntimeError):
         super().__init__("The run is not paused on a provider capacity limit")
 
 
+class RunStoppingError(RuntimeError):
+    """``command.resume`` waiting for capacity or with ``fallback``, for a run that is stopping."""
+
+    diagnostic_code = "run_stopping"
+
+    def __init__(self) -> None:
+        """Say why the run cannot wait for capacity or switch to its fallback."""
+        super().__init__("The run is stopping")
+
+
 class SteerTargetUnknownError(RuntimeError):
     """A steer to a role the search does not declare."""
 
@@ -206,6 +216,7 @@ class ControlIdConflictError(RuntimeError):
 
 _REFUSALS: dict[RefusalReason, type[Exception]] = {
     RefusalReason.NOT_PAUSED_ON_CAPACITY: CapacityWaitUnavailableError,
+    RefusalReason.STOPPING: RunStoppingError,
     RefusalReason.UNKNOWN_TARGET: SteerTargetUnknownError,
     RefusalReason.ENDED_TARGET: SteerTargetEndedError,
     RefusalReason.NOT_STANDING: WithdrawNotStandingError,

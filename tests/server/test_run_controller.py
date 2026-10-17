@@ -1,6 +1,7 @@
 """Pause, stop, steering, and terminal-state tests for the run controller."""
 
 from pathlib import Path
+from typing import Literal
 
 import pytest
 from hypothesis import HealthCheck, given, settings
@@ -28,6 +29,7 @@ from server.api.service import (
     ControlIdConflictError,
     ControlProtocolCommand,
     RunControlSlot,
+    RunStoppingError,
     control_request,
 )
 from server.events import (
@@ -158,6 +160,7 @@ def test_a_resume_command_can_ask_for_the_fallback_and_a_plain_one_cannot(tmp_pa
     parts.api.execute(ResumeCommand(timestamp=REQUEST_TIME))
     assert parts.control.consume_fallback_request() is False
 
+    parts.control.enter_capacity(timed=True)  # a stopped turn waits to take the switch
     parts.control.pause_for_quota()
     ack = parts.api.execute(ResumeCommand(timestamp=REQUEST_TIME, fallback=True)).ack
 
@@ -190,6 +193,23 @@ def test_the_fallback_is_refused_for_a_run_not_paused_on_a_capacity_limit(
         parts.api.execute(ResumeCommand(timestamp=REQUEST_TIME, fallback=True))
 
     assert parts.control.pause_requested()
+    assert parts.control.consume_fallback_request() is False
+
+
+@pytest.mark.parametrize("when", ["now", "capacity_returns"])
+def test_a_capacity_resume_for_a_stopping_run_answers_that_it_is_stopping(
+    tmp_path: Path, when: Literal["now", "capacity_returns"]
+) -> None:
+    parts = build_server_parts(tmp_path)
+    parts.control.enter_capacity()
+    parts.control.pause_for_quota()
+    parts.api.execute(StopCommand(timestamp=REQUEST_TIME))
+
+    with pytest.raises(RunStoppingError) as refused:
+        parts.api.execute(ResumeCommand(timestamp=REQUEST_TIME, fallback=when == "now", when=when))
+
+    assert refused.value.diagnostic_code == "run_stopping"
+    assert parts.control.stop_requested()
     assert parts.control.consume_fallback_request() is False
 
 

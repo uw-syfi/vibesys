@@ -725,8 +725,10 @@ def test_a_success_while_only_this_turn_fails_ends_it_as_its_own_failure() -> No
 @given(cancel_after=st.floats(min_value=1.0, max_value=290.0, allow_nan=False))
 def test_a_cancel_ends_a_quota_wait_at_once(action: QuotaAction, cancel_after: float) -> None:
     """The gate's contract: a cancellation of the turn ends its wait, for a quota as for an
-    outage. Under ``pause`` the run stays paused for the operator; under ``wait`` the run
-    resumes, as the wait's own end would have resumed it (here a 300 s retry)."""
+    outage. Under ``pause`` the cancelled turn was the only owner of the quota pause, so the
+    run resumes itself at once, as a restart would resume it; before, it stayed paused with
+    no turn, no timer and no request to end the pause. Under ``wait`` the run stays paused
+    until its timed resume (here a 300 s retry), as the wait's own end would have resumed it."""
     run = _Run(policy=QuotaPolicy(action))
     client = run.client(OTHER, _quota(), "later")
     ended: list[float] = []
@@ -748,7 +750,7 @@ def test_a_cancel_ends_a_quota_wait_at_once(action: QuotaAction, cancel_after: f
     [(_, reason, _)] = run.sink.abandoned
     assert "cancelled" in reason
     assert run.sink.abandoned_waits == [pytest.approx(cancel_after)]
-    assert run.control.pause_requested()
+    assert run.control.pause_requested() is (action is QuotaAction.WAIT)
 
 
 @given(

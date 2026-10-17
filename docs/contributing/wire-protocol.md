@@ -176,8 +176,14 @@ A run paused on a provider capacity limit (`quota_paused`) resumes when the oper
   error `capacity_wait_unavailable` and nothing changes. `fallback: true` cannot be combined with
   it (`invalid_request`).
 - `fallback: true` resumes at once and switches the stopped turn to the quota fallback. It too
-  needs a run paused on a capacity limit: otherwise it answers `capacity_wait_unavailable` and
-  nothing changes. A fallback request that no turn took is dropped at the run's next resume.
+  needs a run paused on a capacity limit with a stopped turn still waiting to take it: otherwise
+  it answers `capacity_wait_unavailable` and nothing changes. A fallback request that no turn
+  took is dropped at the run's next resume.
+- While a stop is pending, `capacity_returns` and `fallback: true` answer `run_stopping` instead,
+  and nothing changes.
+- When the last turn waiting on a quota stop is cancelled, a quota pause that nothing else ends
+  (no `command.pause`, no timed resume) ends too: the run resumes itself, as it would after a
+  restart, and a pending `capacity_returns` is dropped with it.
 - `command.pause` during the wait cancels it (`quota_wait_cancelled {reason: paused}`): the run
   stays paused for the operator. A second `capacity_returns` replaces the first, emitting a new
   `quota_waiting`.
