@@ -31,6 +31,8 @@ from vs_core.api import (
     ControlId,
     ControlInput,
     InputDelivered,
+    InputDropped,
+    InputMode,
     InputRecord,
     RunStatus,
     SessionInputReceived,
@@ -46,7 +48,7 @@ from vs_runtime.api.core import (
     drive_core,
     start_core,
 )
-from vs_runtime.api.infrastructure import RuntimeRunControlChannel
+from vs_runtime.api.infrastructure import RuntimeRunControlChannel, SteerMode
 from vs_runtime.api.testing import FakeRunControlEventSink
 from vs_sim.api.testing import ManualClock, SimThreads, clock_from, loop_threads
 
@@ -162,6 +164,27 @@ async def test_a_steer_queued_before_the_turn_reaches_it_once_and_is_recorded(
     assert [(t.agent_kind, t.execution_id) for t in reported] == [
         ("skeleton-implementer", record.receipt.invocation.invocation_id.root)
     ]
+
+
+async def test_standing_guidance_is_in_the_turn_message_until_the_run_ends(
+    tmp_path: Path,
+) -> None:
+    sent = Sent()
+    channel = RuntimeRunControlChannel(FakeRunControlEventSink(), threads=SimThreads())
+    channel.queue_steer("keep the weights in bf16", "keep", None, SteerMode.STANDING)
+    with open_skeleton_world(tmp_path, agents=_agents(sent)) as world:
+        core = await _run(world, channel)
+
+    assert len(sent.messages) == 1
+    assert "Standing guidance from the operator" in sent.messages[0]
+    assert "New steering from the operator" not in sent.messages[0]
+    assert sent.messages[0].count("keep the weights in bf16") == 1
+    [record] = core.sessions.inputs
+    assert record.input.mode is InputMode.STANDING
+    assert record.reserved_to is None  # never reserved: every matching turn is given it
+    assert [row.guidance_ids for row in core.sessions.invocations] == [(record.input.input_id,)]
+    # The run's end, not the turn, ends it.
+    assert isinstance(record.receipt, InputDropped)
 
 
 async def test_a_run_with_no_steer_sends_the_turn_no_operator_input(tmp_path: Path) -> None:
