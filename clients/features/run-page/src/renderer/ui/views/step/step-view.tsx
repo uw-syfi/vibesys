@@ -83,6 +83,7 @@ function BlockView(args: {
           title={block.reply.title}
           fields={block.reply.fields}
           raw={block.reply.raw}
+          overview={block.overview}
           open={args.replyOpen}
           toggle={args.setReplyOpen}
         />
@@ -119,21 +120,19 @@ function TurnBody(props: StepViewProps): JSX.Element {
   const live = LIVE.has(step.status);
   const holding = item === null ? null : toolOf(narrative, item)?.block;
   return (
-    <>
-      <Narrative key={step.span} label="Agent turn" size="fill" start={live ? 'end' : 'top'}>
-        {narrative.blocks.map(block => (
-          <BlockView
-            key={block.id}
-            block={block}
-            props={props}
-            replyOpen={replyOpen}
-            setReplyOpen={setReplyOpen}
-            open={flipped.get(block.id) ?? block.id === holding}
-            toggle={open => setFlipped(new Map(flipped).set(block.id, open))}
-          />
-        ))}
-      </Narrative>
-    </>
+    <Narrative key={step.span} label="Agent turn" size="fill" start={live ? 'end' : 'top'}>
+      {narrative.blocks.map(block => (
+        <BlockView
+          key={block.id}
+          block={block}
+          props={props}
+          replyOpen={replyOpen}
+          setReplyOpen={setReplyOpen}
+          open={flipped.get(block.id) ?? block.id === holding}
+          toggle={open => setFlipped(new Map(flipped).set(block.id, open))}
+        />
+      ))}
+    </Narrative>
   );
 }
 

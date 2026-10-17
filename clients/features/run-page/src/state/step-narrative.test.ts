@@ -7,6 +7,8 @@ import {
   gateView,
   itemLines,
   narrativeOf,
+  reasoningItems,
+  replyOverview,
   type TurnNarrative,
   toolOf,
   turnMeta,
@@ -113,6 +115,63 @@ describe('an agent turn as narrative', () => {
     const narrative = narrativeOf([tool('a'), tool('b', 'failed')]);
     expect(turnMeta(100, narrative)).toBe('1m · 2 tools · 1 failed');
     expect(turnMeta(null, narrativeOf([tool('a')]))).toBe('1 tool');
+  });
+});
+
+describe('reasoning items', () => {
+  const TITLE_A = '**Inspecting repository history**';
+  const TITLE_B = '**Scoping the change**';
+
+  test('items glued into one entry are split at their bold titles', () => {
+    expect(
+      reasoningItems(`${TITLE_A}\n\nLooking at git log.${TITLE_B}\n\nNarrow it down.`),
+    ).toEqual([`${TITLE_A}\n\nLooking at git log.`, `${TITLE_B}\n\nNarrow it down.`]);
+    expect(reasoningItems(`${TITLE_A} ${TITLE_B}`)).toEqual([TITLE_A, TITLE_B]);
+    expect(reasoningItems(`${TITLE_A}\n\none\n\n${TITLE_B}\n\ntwo`)).toHaveLength(2);
+  });
+
+  test('a bold phrase inside a sentence, or text with no title, is one item', () => {
+    expect(reasoningItems('Use the **ring** buffer here.')).toEqual([
+      'Use the **ring** buffer here.',
+    ]);
+    expect(reasoningItems('plain thinking')).toEqual(['plain thinking']);
+    expect(reasoningItems(`${TITLE_A}\n\nsee **this**`)).toHaveLength(1);
+  });
+
+  test('no text is lost or reordered whatever the items', () => {
+    const squash = (text: string): string => text.replace(/\s+/g, '');
+    for (const count of [1, 2, 5, 9]) {
+      const text = Array.from({length: count}, (_, n) => `**Title ${n}**\n\nBody ${n}.`).join('');
+      const items = reasoningItems(text);
+      expect(items).toHaveLength(count);
+      expect(squash(items.join(''))).toBe(squash(text));
+    }
+  });
+
+  test('the narrative has one thought per item, ids stable as the entry grows', () => {
+    const first = say('r', 'reasoning', `${TITLE_A}\n\nOne.`);
+    const grown = say('r', 'reasoning', `${TITLE_A}\n\nOne.${TITLE_B}\n\nTwo.`);
+    expect(shape(narrativeOf([first]))).toEqual(['thought:r']);
+    expect(shape(narrativeOf([grown]))).toEqual(['thought:r', 'thought:r#1']);
+  });
+});
+
+describe('a structured reply at first', () => {
+  const field = (kind: 'prose' | 'fact', key: string): never =>
+    ({kind, key, label: key, text: 'x', value: 'x'}) as never;
+
+  test('shows its summary, else its first prose field, and nothing else', () => {
+    expect(
+      replyOverview([
+        field('fact', 'handle'),
+        field('prose', 'details'),
+        field('prose', 'summary'),
+      ]),
+    ).toEqual(['summary']);
+    expect(replyOverview([field('fact', 'handle'), field('prose', 'analysis')])).toEqual([
+      'analysis',
+    ]);
+    expect(replyOverview([field('fact', 'handle')])).toEqual([]);
   });
 });
 

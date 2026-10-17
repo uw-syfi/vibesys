@@ -4,6 +4,7 @@ import {Collapsible} from './collapsible.js';
 import {Code} from './message.js';
 import {Chip, type StatusTone} from './status.js';
 import {Text} from './text.js';
+import {useSlot} from './windowing.js';
 
 /**
  * One field of a structured reply, already read from the reply's own schema: `prose` is text to
@@ -126,18 +127,29 @@ export function StructuredReply(props: {
   readonly raw: string;
   readonly open: boolean;
   readonly toggle: (open: boolean) => void;
+  /**
+   * The `key`s of the fields to show at first (besides the choices on the title line), with the
+   * rest behind "Show all fields"; absent, every field shows.
+   */
+  readonly overview?: readonly string[];
 }): JSX.Element {
   const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
   const [raw, setRaw] = useState(false);
+  const [all, setAll] = useState(false);
   const flip = (path: string): void => {
     const next = new Set(opened);
     if (!next.delete(path)) next.add(path);
     setOpened(next);
   };
+  // In a windowed `Narrative` the reply reports its height, so a tall reply is not taken for a line.
+  const slot = useSlot();
   const badges = props.fields.flatMap(field => (field.kind === 'badge' ? [field] : []));
-  const body = props.fields.filter(field => field.kind !== 'badge');
+  const fields = props.fields.filter(field => field.kind !== 'badge');
+  const full = props.overview === undefined || all;
+  const body = full ? fields : fields.filter(field => props.overview?.includes(field.key));
+  const hidden = fields.length - body.length;
   return (
-    <div className="vs-structured-reply">
+    <div ref={slot?.measure} className="vs-structured-reply">
       <Collapsible
         label={props.author}
         leading={
@@ -160,10 +172,29 @@ export function StructuredReply(props: {
         ) : (
           <Fields fields={body} path="" reading={{opened, flip}} />
         )}
-        <span>
-          <Button size="sm" variant="quiet" text="Raw" expanded={raw} press={() => setRaw(!raw)} />
-        </span>
-        {raw ? <Code label="Raw" text={props.raw} /> : null}
+        {props.overview === undefined || (hidden === 0 && !all) ? null : (
+          <span>
+            <Button
+              size="sm"
+              variant="quiet"
+              text={all ? 'Show fewer fields' : `Show all fields (${hidden} more)`}
+              expanded={all}
+              press={() => setAll(!all)}
+            />
+          </span>
+        )}
+        {full ? (
+          <span>
+            <Button
+              size="sm"
+              variant="quiet"
+              text="Raw"
+              expanded={raw}
+              press={() => setRaw(!raw)}
+            />
+          </span>
+        ) : null}
+        {raw && full ? <Code label="Raw" text={props.raw} /> : null}
       </Collapsible>
     </div>
   );

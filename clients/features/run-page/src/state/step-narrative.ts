@@ -9,6 +9,7 @@ import type {Span} from '@vibesys/contracts';
 import type {CoreState} from '@vibesys/run-state';
 import {type RunTrace, traceSpans} from '@vibesys/run-state/trace';
 import {transcriptBySpan} from '@vibesys/run-state/transcript';
+import type {ReplyFieldView} from './reply-fields.js';
 import {attrsOf, duration, formatValue, ratio} from './span-reading.js';
 import {plain, statusWords, verdictWords} from './span-words.js';
 import {type TurnRow, turnTranscript} from './turn-transcript.js';
@@ -19,7 +20,13 @@ type ReplyRow = Extract<TurnRow, {kind: 'reply'}>;
 
 /** One block of an agent turn's narrative. */
 export type NarrativeBlock =
-  | {readonly kind: 'reply'; readonly id: string; readonly reply: ReplyRow}
+  | {
+      readonly kind: 'reply';
+      readonly id: string;
+      readonly reply: ReplyRow;
+      /** The reply's fields shown at first (`replyOverview`); the rest are one press away. */
+      readonly overview: readonly string[];
+    }
   | {readonly kind: 'thought'; readonly id: string; readonly text: string}
   | {readonly kind: 'said'; readonly id: string; readonly text: string}
   /** Consecutive tool calls; its id is the first call's. */
@@ -34,16 +41,40 @@ export interface TurnNarrative {
 
 type MessageRow = Extract<TurnRow, {kind: 'message'}>;
 
-/** What the agent thought or said in a message; null for a prompt, an ordinary note or no text. */
-function heardBlock(row: MessageRow): NarrativeBlock | null {
+/**
+ * Where a reasoning item starts. Reasoning arrives as items that each open with a bold title (a
+ * paragraph of its own, or the item's only text), and the transcript glues them into one entry,
+ * so an item starts at a bold title that is the entry's start, follows a blank line or the end of
+ * a sentence, and is followed by a blank line or the end of the text.
+ */
+const ITEM_TITLE = /(?<=^|\n\n|[.!?)]\s*|\*\*\s+)\*\*[^*\n]+\*\*(?=\n\n|\s*$)/g;
+
+/** The reasoning items in `text`, in order; text with no title is one item. */
+export function reasoningItems(text: string): string[] {
+  const starts = [...text.matchAll(ITEM_TITLE)].map(found => found.index);
+  const edges = [0, ...starts.filter(at => at > 0), text.length];
+  return edges
+    .slice(0, -1)
+    .map((from, index) => text.slice(from, edges[index + 1]).trim())
+    .filter(item => item !== '');
+}
+
+/** What the agent thought or said in a message: blocks, none for a prompt or an ordinary note. */
+function heardBlocks(row: MessageRow): NarrativeBlock[] {
   const text = row.text.trim();
-  if (text === '') return null;
-  if (row.variant === 'reasoning') return {kind: 'thought', id: row.id, text};
-  if (row.variant === 'reply') return {kind: 'said', id: row.id, text};
-  if (row.variant === 'note' && row.tone === 'err') {
-    return {kind: 'said', id: row.id, text: `${row.author}: ${text}`};
+  if (text === '') return [];
+  if (row.variant === 'reasoning') {
+    return reasoningItems(text).map((item, index) => ({
+      kind: 'thought' as const,
+      id: index === 0 ? row.id : `${row.id}#${index}`,
+      text: item,
+    }));
   }
-  return null;
+  if (row.variant === 'reply') return [{kind: 'said', id: row.id, text}];
+  if (row.variant === 'note' && row.tone === 'err') {
+    return [{kind: 'said', id: row.id, text: `${row.author}: ${text}`}];
+  }
+  return [];
 }
 
 /**
@@ -64,12 +95,12 @@ export function narrativeOf(rows: readonly TurnRow[]): TurnNarrative {
     if (row.kind === 'tool') {
       run.push(row);
     } else if (row.kind === 'reply') {
-      replies.push({kind: 'reply', id: row.id, reply: row});
+      replies.push({kind: 'reply', id: row.id, reply: row, overview: replyOverview(row.fields)});
     } else if (row.kind === 'message') {
-      const heard = heardBlock(row);
-      if (heard === null) continue;
+      const heard = heardBlocks(row);
+      if (heard.length === 0) continue;
       flush();
-      blocks.push(heard);
+      blocks.push(...heard);
     }
   }
   flush();
@@ -214,4 +245,15 @@ export function itemLines(tool: ToolRow): GateLine[] {
       tool.state === 'failed' ? 'err' : 'out',
     ),
   ];
+}
+
+/**
+ * The keys of the reply fields to show at first: its summary (the first prose field whose key says
+ * "summary", else the first prose field); the choices ride the title line. Every other field is
+ * behind "Show all fields".
+ */
+export function replyOverview(fields: readonly ReplyFieldView[]): string[] {
+  const prose = fields.filter(field => field.kind === 'prose');
+  const summary = prose.find(field => /summary/i.test(field.key)) ?? prose[0];
+  return summary === undefined ? [] : [summary.key];
 }

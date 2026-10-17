@@ -116,7 +116,7 @@ interface Fixture {
 }
 
 /** The run after `transcript`, as a view receives it. */
-function fixture(transcript: readonly RunEvent[]): Fixture {
+function fixture(transcript: readonly RunEvent[], turnStatus: Span['status'] = 'done'): Fixture {
   let state = runPageInitial({
     identity: {host: 'ssh:chelan4', runId: '20261015-163047'},
     title: {project: '~/p', task: 'mpmc'},
@@ -129,10 +129,12 @@ function fixture(transcript: readonly RunEvent[]): Fixture {
     wallMs: 0,
     data: {
       kind: 'events',
-      events: SPANS.map((each, index) => ({
-        ...event(index + 1, 'span_started'),
-        data: {kind: 'span_started', span: each},
-      })) as RunEvent[],
+      events: SPANS.map(each => (each.id === 'turn' ? {...each, status: turnStatus} : each)).map(
+        (each, index) => ({
+          ...event(index + 1, 'span_started'),
+          data: {kind: 'span_started', span: each},
+        }),
+      ) as RunEvent[],
     },
   }).state;
   const core = reduceEventBatch(initialCoreState(), transcript);
@@ -350,5 +352,98 @@ describe('an item', () => {
       <ItemView {...fx.base} core={fx.core} step={fx.turn} item="nope" />,
     );
     expect(container.textContent).toContain('This item is not in the step');
+  });
+});
+
+function reply(sequence: number): RunEvent {
+  return event(sequence, 'agent_execution_finished', {
+    invocation_id: 'inv',
+    agent_kind: 'implementer',
+    span_id: 'turn',
+    data: {
+      kind: 'agent_execution_finished',
+      result: '{}',
+      reply: {
+        kind: 'ImplementerReply',
+        json_schema: {
+          properties: {
+            summary: {type: 'string'},
+            changed: {type: 'array', items: {type: 'string'}},
+            outcome: {enum: ['done', 'blocked'], type: 'string'},
+          },
+          required: ['summary'],
+          type: 'object',
+        },
+        value: {summary: 'Padded the counters.', changed: ['src/lib.rs'], outcome: 'done'},
+      },
+    },
+  } as never);
+}
+
+describe('a turn that is live', () => {
+  async function mountAt(node: ReactNode): Promise<{
+    readonly container: HTMLElement;
+    readonly render: (next: ReactNode) => Promise<void>;
+  }> {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(node));
+    return {container, render: next => act(async () => root.render(next))};
+  }
+
+  test('keeps the same narrative element when events are appended', async () => {
+    for (const status of ['running', 'done'] as const) {
+      const before = fixture([...TURN, reply(18)], status);
+      const after = fixture(
+        [
+          ...TURN,
+          reply(18),
+          chunk(19, 'analysis', '**Next**\n\nMore.'),
+          chunk(20, 'assistant', 'Hi.'),
+        ],
+        status,
+      );
+      const {container, render} = await mountAt(
+        <StepView {...viewProps(before, before.turn, null)} />,
+      );
+      const narrative = one(container, '.vs-narrative');
+      const wrap = one(container, '.vs-narrative-wrap');
+      await render(<StepView {...viewProps(after, after.turn, null)} />);
+      expect(one(container, '.vs-narrative')).toBe(narrative);
+      expect(one(container, '.vs-narrative-wrap')).toBe(wrap);
+      expect(narrative.textContent).toContain('More.');
+    }
+  });
+});
+
+describe('the turn’s layout', () => {
+  test('shows the reply compactly with its summary, then the narrative below it', async () => {
+    const fx = fixture([...TURN, reply(18)]);
+    const container = await mount(<StepView {...viewProps(fx, fx.turn, null)} />);
+    const text = one(container, '.vs-narrative').textContent ?? '';
+    expect(text).toContain('Padded the counters.');
+    expect(text).not.toContain('Changed');
+    expect(text).toContain('Counters share a cache line.');
+    expect(text.indexOf('Padded the counters.')).toBeLessThan(text.indexOf('Counters share'));
+    expect(container.textContent).toContain('Show all fields (1 more)');
+    expect(container.textContent).not.toContain('Raw');
+  });
+
+  test('draws reasoning titles in bold, one row per reasoning item', async () => {
+    const fx = fixture([
+      chunk(
+        10,
+        'analysis',
+        '**Inspecting history**\n\nRead the log.**Scoping the change**\n\nNarrow it.',
+      ),
+    ]);
+    const container = await mount(<StepView {...viewProps(fx, fx.turn, null)} />);
+    expect(all(container, '.vs-thought')).toHaveLength(2);
+    expect(all(container, '.vs-thought strong').map(each => each.textContent)).toEqual([
+      'Inspecting history',
+      'Scoping the change',
+    ]);
+    expect(container.textContent).not.toContain('**');
   });
 });

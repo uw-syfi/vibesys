@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Locator, type Page, test} from '@playwright/test';
 import {type FakeBridgeSeed, installFakeBridge, installFakeMachines} from './fake-bridge.js';
+import {installFakeLive, moreTurnEvents, turnReplyEvent} from './fake-live.js';
 import {installFakeRun} from './fake-run.js';
 import {type FakeServerSeed, installFakeServer} from './fake-server.js';
 import {judgeEvents, RUN_ID, traceEvents, turnEvents, W5_GATE} from './fake-trace.js';
@@ -14,7 +15,7 @@ import {judgeEvents, RUN_ID, traceEvents, turnEvents, W5_GATE} from './fake-trac
  */
 
 interface FakeHostWindow extends Window {
-  fakeHost: {listing(listing: unknown): void};
+  fakeHost: {listing(listing: unknown): void; emit(events: readonly unknown[]): void};
 }
 
 const PROJECT = '/home/me/vibesys-projects/queue-rs';
@@ -118,11 +119,12 @@ async function check(page: Page, name: string): Promise<void> {
   if (shots !== undefined) await page.getByRole('main').screenshot({path: `${shots}/${name}.png`});
 }
 
-async function openRun(page: Page): Promise<void> {
+async function openRun(page: Page, live = false): Promise<void> {
   await page.addInitScript(installFakeBridge, SEED);
   await page.addInitScript(installFakeMachines, SEED);
   await page.addInitScript(installFakeRun, LOGS);
   await page.addInitScript(installFakeServer, SERVER);
+  if (live) await page.addInitScript(installFakeLive);
   await page.goto('./shell.html');
   await page
     .getByRole('navigation', {name: 'VibeSys'})
@@ -419,4 +421,63 @@ test('every face of the run level keeps the time bar and the hero in view', asyn
     await expect(doing).toHaveText(/\S/);
     expect(await doing.evaluate(each => each.scrollWidth <= each.clientWidth)).toBe(true);
   }
+});
+
+test('a live turn keeps its scroll position and its element as events arrive', async ({page}) => {
+  await openRun(page, true);
+  await page
+    .getByRole('listbox', {name: 'Ideas'})
+    .getByRole('option', {name: /Wait-free consumer path/})
+    .click();
+  await page
+    .getByRole('listbox', {name: /steps$/})
+    .getByRole('option', {name: /implementer/})
+    .first()
+    .click();
+  const emit = (events: readonly unknown[]) =>
+    page.evaluate(events => (window as unknown as FakeHostWindow).fakeHost.emit(events), events);
+  let sequence = EVENTS.length;
+  const more = (from: number, count: number) => {
+    const events = moreTurnEvents('op:w6-turn', sequence, from, count);
+    sequence += count;
+    return emit(events);
+  };
+  await more(0, 12);
+  sequence += 1;
+  await emit([turnReplyEvent('op:w6-turn', sequence)]);
+  const turn = page.getByRole('region', {name: 'Agent turn'});
+
+  // Thinking and text come first and the reply is compact; no Raw toggle stands in the way.
+  await expect(turn).toContainText('Said number 11');
+  await expect(turn.getByRole('button', {name: /Show all fields/})).toBeVisible();
+  await expect(turn.getByRole('button', {name: 'Raw'})).toHaveCount(0);
+  await expect(turn.locator('.vs-thought strong').first()).toBeVisible();
+  expect(await turn.evaluate(element => element.textContent?.includes('**'))).toBe(false);
+
+  // A live turn the reader has not scrolled away from stays at its end.
+  const gap = () =>
+    turn.evaluate(element => element.scrollHeight - element.scrollTop - element.clientHeight);
+  await expect.poll(gap).toBeLessThan(2);
+  await more(12, 1);
+  await expect.poll(gap).toBeLessThan(2);
+
+  // Scrolled away, it stays where it is: the same element, and no scroll event moved it.
+  await turn.evaluate(element => {
+    const seen: number[] = [];
+    Object.assign(window, {scrolls: seen});
+    element.setAttribute('data-probe', '1');
+    element.addEventListener('scroll', () => seen.push(element.scrollTop));
+    element.scrollTop = 400;
+  });
+  const scrolls = () => page.evaluate(() => (window as unknown as {scrolls: number[]}).scrolls);
+  // The page has taken the reader's scroll before the run updates.
+  await expect.poll(async () => (await scrolls()).length).toBeGreaterThan(0);
+  const height = () => turn.evaluate(element => element.scrollHeight);
+  const before = await height();
+  await more(13, 4);
+  await expect.poll(height).toBeGreaterThan(before);
+  await more(17, 1);
+  await expect(turn.locator('xpath=self::*[@data-probe]')).toHaveCount(1);
+  expect((await scrolls()).filter(top => top !== 400)).toEqual([]);
+  expect(await turn.evaluate(element => element.scrollTop)).toBe(400);
 });

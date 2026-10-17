@@ -7,7 +7,8 @@
  * acknowledgement. With `quota`, the run is paused on a usage limit, as the run server does it: a
  * Resume when capacity returns is followed by `quota_waiting`, and a Pause or a Resume now while it
  * waits by `quota_wait_cancelled`. What the page asked is recorded in order on
- * `window.fakeHost.commands` (a Resume names a `when` other than `now`).
+ * `window.fakeHost.commands` (a Resume names a `when` other than `now`); `window.fakeHost.send`
+ * posts a message to the subscribed stream (see `installFakeLive`).
  * `installFakeServer` runs in the page after `installFakeBridge`, so it is self-contained.
  */
 
@@ -119,5 +120,5 @@ export function installFakeServer(seed: FakeServerSeed): void {
     // This fake records no history: an ended run reads that its host does not serve one.
     readEvents: () => ok({kind: 'unsupported'}),
   });
-  Object.assign(target.fakeHost, {commands});
+  Object.assign(target.fakeHost, {commands, send: (message: unknown) => stream?.(message)});
 }

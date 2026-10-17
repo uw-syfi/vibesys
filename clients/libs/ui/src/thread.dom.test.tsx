@@ -297,6 +297,38 @@ describe('StructuredReply', () => {
   });
 });
 
+describe('StructuredReply with an overview', () => {
+  function Brief() {
+    const [open, setOpen] = useState(true);
+    return (
+      <StructuredReply
+        author="Judge"
+        title="Judge response"
+        fields={FIELDS}
+        raw="{}"
+        open={open}
+        toggle={setOpen}
+        overview={['analysis']}
+      />
+    );
+  }
+
+  test('shows its choices and the overview fields, and the rest on "Show all fields"', async () => {
+    const {container} = await mount(<Brief />);
+    expect(text(container)).toContain('pass');
+    expect(text(container)).toContain('The edit is sound.');
+    expect(container.querySelectorAll('li')).toHaveLength(0);
+    expect(container.textContent).not.toContain('Raw');
+    const more = button(container, 'Show all fields (2 more)');
+    expect(more.getAttribute('aria-expanded')).toBe('false');
+    await click(more);
+    expect([...container.querySelectorAll('li')]).toHaveLength(2);
+    expect(text(container)).toContain('Raw');
+    await click(button(container, 'Show fewer fields'));
+    expect(container.querySelectorAll('li')).toHaveLength(0);
+  });
+});
+
 describe('a tool call, closed and open', () => {
   const long = Array.from({length: 60}, (_, index) => `line ${index}`).join('\n');
 

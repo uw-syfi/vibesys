@@ -630,6 +630,22 @@ describe('Narrative', () => {
     expect(container.querySelector('.vs-new-below')).toBeNull();
   });
 
+  test('draws a title in bold and keeps paragraphs and code marks, never as markup', async () => {
+    const {container} = await mount(
+      <Narrative label="Turn">
+        <Thought text={'**Inspecting history**\n\nRead `git log` first.'} />
+        <Said text="Use *both* <b>counters</b>." />
+      </Narrative>,
+    );
+    expect(one(container, '.vs-thought strong').textContent).toBe('Inspecting history');
+    expect(all(container, '.vs-thought p')).toHaveLength(2);
+    expect(one(container, '.vs-thought code').textContent).toBe('git log');
+    expect(container.textContent).not.toContain('**');
+    expect(one(container, '.vs-said em').textContent).toBe('both');
+    expect(container.querySelector('.vs-said b')).toBeNull();
+    expect(one(container, '.vs-said').textContent).toContain('<b>counters</b>');
+  });
+
   test('says "1 tool" for one and marks the selected call', async () => {
     const [first] = tools() as [ToolLine];
     const {container} = await mount(
