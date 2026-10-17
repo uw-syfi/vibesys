@@ -76,6 +76,9 @@ def test_the_real_host_offers_the_vetted_harnesses_with_one_default_per_provider
     for provider in {option.provider for option in offered}:
         models = [option for option in offered if option.provider == provider]
         assert [option.default for option in models] == [True] + [False] * (len(models) - 1)
+    # Every offered pair says how it reads, and the wire form round-trips with it.
+    assert all(option.display is not None for option in offered)
+    assert HarnessesListReply.model_validate_json(reply.model_dump_json()) == reply
 
 
 def test_an_unsafe_registry_root_is_refused(tmp_path: Path) -> None:

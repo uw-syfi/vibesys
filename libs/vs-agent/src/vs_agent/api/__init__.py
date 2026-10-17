@@ -79,6 +79,7 @@ from vs_agent.host_resource_declarations import (
     declare_provider_state_resources,
     task_agent_host_resources,
 )
+from vs_agent.model_catalog import ModelDisplay, model_display
 from vs_agent.progress import AgentProgress, CandidateProgress, RoundProgress
 from vs_agent.provider_policy import (
     CLI_VERSIONS,
@@ -229,6 +230,7 @@ __all__ = [
     "InvocationOutcome",
     "JsonResultPayload",
     "MCPServerSpec",
+    "ModelDisplay",
     "NullAgentEventSink",
     "NullSessionStore",
     "OrphanReapError",
@@ -283,6 +285,7 @@ __all__ = [
     "inspect_invocation_journal",
     "launch_shell_environment",
     "materialize_skills",
+    "model_display",
     "native_schema",
     "native_schema_problems",
     "parse_typed_response",

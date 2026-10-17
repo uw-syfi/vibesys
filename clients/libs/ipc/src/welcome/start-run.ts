@@ -17,9 +17,29 @@ export interface HarnessChoice {
   readonly model: string;
 }
 
-/** A vetted pair; `default` marks the model a run on `provider` uses when nothing names one. */
+/** How a vetted pair reads: its family, its tier within the family, and readable names. */
+interface HarnessDisplay {
+  /** The provider's CLI as people call it ("Claude Code"). */
+  readonly providerName: string;
+  /** The model alone ("Claude Opus 5.5"). */
+  readonly modelName: string;
+  /** The family's stable key; models sharing it are tiers of one generation. */
+  readonly family: string;
+  /** The family as people call it ("Claude 5.5"). */
+  readonly familyName: string;
+  /** Zero for the family's fastest and cheapest model, rising to its strongest. */
+  readonly tier: number;
+  /** The tier as people call it ("Opus"). */
+  readonly tierName: string;
+}
+
+/**
+ * A vetted pair; `default` marks the model a run on `provider` uses when nothing names one.
+ * `display` is absent when the host's helper predates it: the pair is then listed flat.
+ */
 export interface HarnessOffer extends HarnessChoice {
   readonly default: boolean;
+  readonly display?: HarnessDisplay;
 }
 
 /** The host's vetted harnesses, or `unsupported` when its helper predates the choice. */

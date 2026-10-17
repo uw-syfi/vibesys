@@ -365,7 +365,57 @@ describe('Hosts.harnesses', () => {
 
     await expect(subject.hosts.harnesses(LOCAL)).resolves.toEqual({
       kind: 'listed',
-      harnesses: [...link.helper.host.harnesses],
+      harnesses: link.helper.host.harnesses.map(({provider, model, default: isDefault}) => ({
+        provider,
+        model,
+        default: isDefault,
+      })),
+    });
+  });
+});
+
+describe('Hosts.harnesses display', () => {
+  test('carries how each pair reads, and none for a pair without it', async () => {
+    const link = new FakeLink();
+    link.helper.host.harnesses.splice(
+      0,
+      link.helper.host.harnesses.length,
+      {
+        provider: 'claude',
+        model: 'claude-opus-5-5',
+        default: true,
+        display: {
+          provider_name: 'Claude Code',
+          model_name: 'Claude Opus 5.5',
+          family: 'claude-5.5',
+          family_name: 'Claude 5.5',
+          tier: 2,
+          tier_name: 'Opus',
+        },
+      },
+      {provider: 'codex', model: 'gpt-a', default: true},
+    );
+    const subject = completionSubject(link);
+    await using _manager = subject.manager;
+
+    await expect(subject.hosts.harnesses(LOCAL)).resolves.toEqual({
+      kind: 'listed',
+      harnesses: [
+        {
+          provider: 'claude',
+          model: 'claude-opus-5-5',
+          default: true,
+          display: {
+            providerName: 'Claude Code',
+            modelName: 'Claude Opus 5.5',
+            family: 'claude-5.5',
+            familyName: 'Claude 5.5',
+            tier: 2,
+            tierName: 'Opus',
+          },
+        },
+        {provider: 'codex', model: 'gpt-a', default: true},
+      ],
     });
   });
 });

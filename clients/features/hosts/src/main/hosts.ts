@@ -334,10 +334,22 @@ export class Hosts {
       const reply = await lease.connection.request({type: 'harnesses.list'});
       return {
         kind: 'listed',
-        harnesses: reply.harnesses.map(({provider, model, default: isDefault}) => ({
+        harnesses: reply.harnesses.map(({provider, model, default: isDefault, display}) => ({
           provider,
           model,
           default: isDefault,
+          ...(display == null
+            ? {}
+            : {
+                display: {
+                  providerName: display.provider_name,
+                  modelName: display.model_name,
+                  family: display.family,
+                  familyName: display.family_name,
+                  tier: display.tier,
+                  tierName: display.tier_name,
+                },
+              }),
         })),
       };
     } catch (error) {

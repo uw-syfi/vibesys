@@ -1091,6 +1091,47 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "HarnessChoice",
       "type": "object"
     },
+    "HarnessDisplay": {
+      "additionalProperties": false,
+      "description": "How a vetted provider and model pair reads: its family, tier and readable names.",
+      "properties": {
+        "provider_name": {
+          "title": "Provider Name",
+          "type": "string"
+        },
+        "model_name": {
+          "title": "Model Name",
+          "type": "string"
+        },
+        "family": {
+          "title": "Family",
+          "type": "string"
+        },
+        "family_name": {
+          "title": "Family Name",
+          "type": "string"
+        },
+        "tier": {
+          "minimum": 0,
+          "title": "Tier",
+          "type": "integer"
+        },
+        "tier_name": {
+          "title": "Tier Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider_name",
+        "model_name",
+        "family",
+        "family_name",
+        "tier",
+        "tier_name"
+      ],
+      "title": "HarnessDisplay",
+      "type": "object"
+    },
     "HarnessOption": {
       "additionalProperties": false,
       "description": "A vetted provider and model pair a run may start with.",
@@ -1106,6 +1147,17 @@ const hostHelperSchema: Record<string, unknown> = {
         "default": {
           "type": "boolean",
           "title": "Default"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HarnessDisplay"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [

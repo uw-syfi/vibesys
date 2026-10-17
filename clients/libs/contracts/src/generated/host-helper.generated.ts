@@ -424,6 +424,12 @@ export type Type39 = "harnesses.list";
 export type Provider1 = string;
 export type Model2 = string;
 export type Default = boolean;
+export type ProviderName = string;
+export type ModelName = string;
+export type Family = string;
+export type FamilyName = string;
+export type Tier = number;
+export type TierName = string;
 export type Harnesses = HarnessOption[];
 export type RequestId40 = string;
 export type Type40 = "runs.read_events";
@@ -1400,6 +1406,18 @@ export interface HarnessOption {
   provider: Provider1;
   model: Model2;
   default: Default;
+  display?: HarnessDisplay | null;
+}
+/**
+ * How a vetted provider and model pair reads: its family, tier and readable names.
+ */
+export interface HarnessDisplay {
+  provider_name: ProviderName;
+  model_name: ModelName;
+  family: Family;
+  family_name: FamilyName;
+  tier: Tier;
+  tier_name: TierName;
 }
 /**
  * One page of a run's recorded events, oldest first.

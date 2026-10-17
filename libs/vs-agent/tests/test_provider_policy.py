@@ -38,6 +38,8 @@ _ALLOWED_LITERALS_BY_PATH: dict[str, frozenset[str] | None] = {
     # test is guarding, both are expected to name providers directly.
     "libs/vs-agent/src/vs_agent/provider_policy.py": None,
     "libs/vs-agent/src/vs_agent/provider_profiles.py": None,
+    # The catalog names each provider's families, so it states providers directly.
+    "libs/vs-agent/src/vs_agent/model_catalog.py": None,
     # The chat model picker's suggestion catalog is keyed by shipped provider.
     # It is a list of model names to offer, not a behavior branch.
     "src/server/chat/options.py": None,

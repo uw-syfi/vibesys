@@ -17,12 +17,13 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+from dataclasses import asdict
 from datetime import UTC, datetime, tzinfo
 from functools import cache
 from typing import TYPE_CHECKING
 
 from entrypoints.launcher import headless_command, source_checkout_root
-from server.host_api import HarnessOption
+from server.host_api import HarnessDisplay, HarnessOption
 from server.host_helper import serve_channel
 from server.host_helper_logs import HelperLogs, run_location
 from server.host_helper_machine import HostMachineProbe
@@ -81,16 +82,20 @@ def vetted_harnesses() -> tuple[HarnessOption, ...]:
     # > level every channel would pay for it before `hello` (the light-entrypoint guards forbid
     # > it). A copy of the list in a light module would be a second source of truth, and a
     # > generated copy would need a drift check for what one deferred import already gives.
-    from vs_agent.api import default_model, harnesses  # noqa: PLC0415
+    from vs_agent.api import default_model, harnesses, model_display  # noqa: PLC0415
 
-    return tuple(
-        HarnessOption(
-            provider=harness.provider,
-            model=harness.model,
-            default=default_model(harness.provider) == harness.model,
+    options: list[HarnessOption] = []
+    for harness in harnesses():
+        shown = model_display(harness.provider, harness.model)
+        options.append(
+            HarnessOption(
+                provider=harness.provider,
+                model=harness.model,
+                default=default_model(harness.provider) == harness.model,
+                display=None if shown is None else HarnessDisplay(**asdict(shown)),
+            )
         )
-        for harness in harnesses()
-    )
+    return tuple(options)
 
 
 @cache
