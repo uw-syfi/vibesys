@@ -25,6 +25,7 @@ from vibesys.api.request import (
     resolve_skill_source_dirs,
     supported_profilers,
     validate_experiment_name,
+    with_operator_constraints,
 )
 from vs_runtime.api.infrastructure import build_run_environment
 
@@ -36,6 +37,7 @@ _NAMES = [
     "load_task",
     "load_project_task",
     "load_objective",
+    "with_operator_constraints",
     "RunEnvironmentSpec",
     "make_run_environment_spec",
     "build_task_image",
@@ -66,6 +68,7 @@ def test_request_names_are_exported_and_importable() -> None:
     assert load_task is not None
     assert load_project_task is not None
     assert load_objective is not None
+    assert with_operator_constraints is not None
     assert RunEnvironmentSpec is not None
     assert make_run_environment_spec is not None
     assert build_task_image is not None

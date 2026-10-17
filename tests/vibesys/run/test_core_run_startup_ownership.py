@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
@@ -14,11 +13,11 @@ from vibesys.run.core_run import CoreRunRefusedError, drive_core_run
 from vibesys.run.core_services import ClosableEvaluation, CoreServices
 from vibesys.run.host import CoreHost
 from vs_core.api import initial_state
-from vs_project.api import FakeStateStore, Project, StoredEnvelope
+from vs_project.api import FakeStateStore, Project
 from vs_runtime.api import ArtifactStore
 from vs_runtime.api.core import CoreRuntimeBindings, RunTiming
 from vs_runtime.api.core_shell_fixtures import CounterConfig, ShellTraceTransitions, counter
-from vs_runtime.api.infrastructure import ChannelRunControl, create_run_control_channel
+from vs_runtime.api.infrastructure import create_run_control_channel
 from vs_runtime.api.testing import FakeRunControlEventSink
 from vs_sim.api.testing import SimThreads, VirtualClock, run_virtual
 
@@ -163,9 +162,9 @@ def _startup_host(
         services,
         RunTiming(clock, 60.0, threads),
     )
-    channel = create_run_control_channel(FakeRunControlEventSink(), threads=threads)
     integration = cast(
-        "LocalRunIntegration", _Integration(channel, ChannelRunControl(channel, threads))
+        "LocalRunIntegration",
+        _Integration(create_run_control_channel(FakeRunControlEventSink(), threads=threads)),
     )
     return host, integration, clock
 
@@ -244,34 +243,3 @@ def test_a_run_force_stopped_before_starts_no_new_work_and_goes_straight_to_its_
     ((_type, ending),) = events.emitted
     assert isinstance(ending, RunEndingData)
     assert ending.rounds_finished == 0
-
-
-def test_launch_constraints_are_standing_guidance_the_run_holds_before_its_first_request(
-    tmp_path: Path,
-) -> None:
-    """A ``--constraint`` is recorded as a standing steer at the run's first control poll.
-
-    The run here asks for one request only (the adoption a stop makes, refused), so a
-    constraint core holds at the end was received before the run asked for anything.
-    """
-    host, integration, clock = _startup_host(tmp_path, None, stop_requested=True)
-
-    async def exercise() -> None:
-        with pytest.raises(CoreRunRefusedError):
-            await drive_core_run(host, integration, standing_guidance=("keep bf16", "one GPU only"))
-
-    run_virtual(clock, exercise())
-
-    stored = host.services.store.load()
-    assert isinstance(stored, StoredEnvelope)
-    core = json.loads(stored.payload)["envelope"]["core"]
-    controls = [(c["control_id"]["root"], c["action"]) for c in core["run"]["controls"]]
-    assert controls[:2] == [("op-constraint-1", "steer"), ("op-constraint-2", "steer")]
-    inputs = {
-        _root(row["input"]["input_id"]): row["input"]["mode"] for row in core["sessions"]["inputs"]
-    }
-    assert inputs == {"steer-op-constraint-1": "standing", "steer-op-constraint-2": "standing"}
-
-
-def _root(identity: object) -> object:
-    return identity["root"] if isinstance(identity, dict) else identity

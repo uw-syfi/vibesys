@@ -37,6 +37,7 @@ from vibesys.api.metrics import MetricSpace, Objective
 from vibesys.api.request import (
     InputBundle,
     load_objectives,
+    with_operator_constraints,
 )
 from vs_issue_tracker.api import IssueTrackerConfig
 from vs_project.api import Git, Project, ProjectLayoutError
@@ -375,21 +376,22 @@ def validated_run_request(
     with boot_trace.span("validate_run_request"):
         bundle: InputBundle = args.input_bundle
         config, skills, backend = load_config_and_skills(args, domain=bundle.domain, probe=probe)
-        # A launch constraint is not objective text: the agent options carry it, and the run
-        # gives it to every turn as standing guidance.
         if args.outer_loop in {"agent", "profile-guided", "dynamic"}:
             descriptor = _agent_policy_descriptor(args, bundle)
+            objective = with_operator_constraints(bundle.objective, args.constraint)
         elif args.outer_loop == "plain":
             descriptor = _plain_policy_descriptor(args)
+            objective = bundle.objective
         else:
             descriptor = _evolve_policy_descriptor(args, bundle)
+            objective = bundle.objective
         _validate_options(descriptor)
         request = RunRequest(
             project_root=bundle.root,
             orchestration=descriptor,
             config=config,
             input_bundle=bundle,
-            objective=bundle.objective,
+            objective=objective,
             resume=ResumeRef(run_id=args.resume) if args.resume is not None else None,
             exp_name=args.exp_name,
             run_id=args.run_id,

@@ -39,13 +39,6 @@ class AgentOrchestrationOptions(TaskInputs):
     turn_drop_backoff_seconds: Annotated[float, Field(gt=0, le=600)] = 5.0
 
 
-def standing_guidance_of(options: BaseModel) -> tuple[str, ...]:
-    """The operator's launch constraints a policy's options carry, each standing guidance."""
-    if isinstance(options, TaskInputs):
-        return tuple(item for item in options.operator_constraints if item.strip())
-    return ()
-
-
 def attribution_command_of(options: BaseModel) -> tuple[str, ...] | None:
     """The profile-guided attribution command a policy's options select, or ``None``."""
     if isinstance(options, TaskInputs) and options.profile_guided is not None:

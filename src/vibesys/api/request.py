@@ -21,6 +21,7 @@ from vibesys.inputs import (
     load_project_task,
     load_task,
     synthesize_input_bundle,
+    with_operator_constraints,
 )
 from vibesys.orchestration.agent_options import attribution_command_of
 from vibesys.repository import (
@@ -123,6 +124,7 @@ __all__ = [
     "validate_descriptor",
     "validate_experiment_name",
     "validate_run_request",
+    "with_operator_constraints",
 ]
 
 

@@ -69,6 +69,7 @@ from vibesys.api import ConfigurationError, RunRequest, boot_trace
 from vibesys.api.request import (
     generate_experiment_name,
     load_objective,
+    with_operator_constraints,
 )
 from vs_project.api import generate_run_id
 from vs_sim.api import MonotonicClock, SystemClock, utc_datetime
@@ -81,6 +82,7 @@ if TYPE_CHECKING:
 
 # Aliases the tests reach for by name; the submodules use the imported names.
 _load_objective = load_objective
+_with_operator_constraints = with_operator_constraints
 
 __all__ = [
     "_OUTER_LOOPS",
@@ -107,6 +109,7 @@ __all__ = [
     "_run_validate",
     "_validate_agent",
     "_validate_target_inputs",
+    "_with_operator_constraints",
     "build_run_request",
     "configuration_error",
     "dispatch",
