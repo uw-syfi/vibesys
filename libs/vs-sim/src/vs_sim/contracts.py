@@ -878,7 +878,11 @@ class PipedUnderTest:
     blocks_until_signalled: Callable[[], PipedProcess]
     """A group that writes nothing and never ends by itself."""
     descendant_holds_output: Callable[[], PipedProcess]
-    """A leader that exits 0 at once while a descendant that wrote ``ready`` keeps the pipes."""
+    """A leader that exits 0 at once while a descendant keeps the pipes.
+
+    The descendant writes ``ready`` only after the leader has exited, so a case that
+    reads it knows the leader's status is already fixed.
+    """
     drive: Callable[[Callable[[], object]], object]
 
 
