@@ -329,10 +329,16 @@ class SerialHost:
                 return LocalValidationReport(status="failed", detail="the runner broke")
 
     def _reading_of(self, ref: EvidenceRef) -> EvidenceReading:
-        """What the evidence owner decodes of a record: the host's idea of how it measured."""
+        """What the evidence owner decodes of a record: the host's idea of how it measured.
+
+        An agent's own evaluation is one ``local-validation`` record per stage, and its evidence
+        ID starts with the stage's name (``benchmark:...``).
+        """
         metrics = ()
         passed = ref.status is ObservationStatus.SUCCEEDED
-        if ref.kind is EvidenceKind.BENCHMARK and passed:
+        own = ref.kind is EvidenceKind.LOCAL_VALIDATION
+        stage = ref.evidence_id.root.split(":")[0] if own else ref.kind.value
+        if passed and (ref.kind is EvidenceKind.BENCHMARK or (own and stage == "benchmark")):
             value = (
                 INPUT_THROUGHPUT
                 if ref.purpose == "baseline"
@@ -343,7 +349,7 @@ class SerialHost:
             evidence_id=ref.evidence_id,
             kind=ref.kind,
             passed=passed,
-            stage=ref.kind.value,
+            stage=stage,
             metrics=metrics,
         )
 

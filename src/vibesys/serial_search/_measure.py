@@ -2,15 +2,22 @@
 
 The measurement's span is the round's gate: it is labelled with the stages it ran and, once the
 evidence is read, with the candidate's headline value, its ratio to the input's and the verdict.
+
+The search runs its gates on a cadence, so a round may keep a candidate they never measured. Its
+agents may have measured it themselves through the evaluation tool, which core holds as trusted
+evidence of the attempt (``label_taken``): the round's gate is then the reading of the latest of
+those that ran the benchmark, labelled the same way, so every measured round says what its
+candidate measured.
 """
 
 from __future__ import annotations
 
-from vibesys.candidates.api import Baseline, Measured
-from vibesys.metrics import AcceptedReading, accept_readings
+from vibesys.candidates.api import Baseline, input_value
+from vibesys.metrics import AcceptedReading, accept_readings, reading_of
 from vibesys.search_spans.api import FAILED_CHECK, GATE, PASSED, SLOWER, GateAttrs
 from vibesys.serial_search._closing import beats_input, failed_gate
 from vs_core.api.search import (
+    EvidenceKind,
     EvidenceRef,
     Failed,
     Flow,
@@ -19,6 +26,7 @@ from vs_core.api.search import (
     MeasurementResult,
     RevisionRef,
     SpanId,
+    TaskTerms,
     Value,
     Workspace,
     trusted_keys,
@@ -78,21 +86,86 @@ def _label_reading(
     readings: tuple[AcceptedReading, ...],
     baseline: Baseline,
 ) -> None:
-    """Label the gate with what its readings say: the value, the ratio to the input's, the verdict.
+    """Label the gate with what its readings say: the value, the ratio to the input's, the verdict."""
+    attrs = GateAttrs.read(stage, readings, input_value(baseline))
+    ctx.label(GATE, span=gate, attrs=attrs, verdict=_verdict(ctx, readings, baseline))
+
+
+def _verdict(ctx: Flow, readings: tuple[AcceptedReading, ...], baseline: Baseline) -> str | None:
+    """What the readings say of the candidate, or None when they lack the check it is gated on.
 
     It passed when every trusted gate passed and the candidate beats the input; it is slower when
-    it does not beat the input, and failed a check when a gate rejected it.
+    it does not beat the input, and failed a check when a gate rejected it. Readings without the
+    accuracy check a task requires cannot pass it (an agent may have measured only the benchmark).
     """
     terms = ctx.task.terms
-    seen = baseline.reading if isinstance(baseline, Measured) else None
-    base = seen.metrics[0].value if seen is not None and seen.metrics else None
     if failed_gate(readings) is not None:
-        verdict = FAILED_CHECK
-    elif not beats_input(baseline, readings, terms):
-        verdict = SLOWER
-    else:
-        verdict = PASSED
-    ctx.label(GATE, span=gate, attrs=GateAttrs.read(stage, readings, base), verdict=verdict)
+        return FAILED_CHECK
+    if terms.requires_accuracy_proof and reading_of(readings, EvidenceKind.CORRECTNESS) is None:
+        return None
+    if not beats_input(baseline, readings, terms):
+        return SLOWER
+    return PASSED
+
+
+async def label_taken(ctx: Flow, ws: Workspace, revision: RevisionRef, baseline: Baseline) -> None:
+    """Label the reading of the agents' latest benchmark of ``revision`` as its gate.
+
+    For a round whose trusted gates did not measure the candidate it keeps: its agents' own
+    trusted evaluations of that exact revision (``ctx.evaluation.taken``) are what is known of
+    it. They are read in one operation, whose span is labelled a gate with what the latest
+    evaluation that ran the benchmark read: its stages, the value, the ratio to the input's and
+    the verdict, as the trusted gates' own are. Nothing is labelled when no evaluation ran the
+    benchmark or the evidence cannot be read: the round's outcome does not depend on it.
+    """
+    refs = ctx.evaluation.taken(ws, revision)
+    if not refs:
+        return
+    read = await _read(ctx, ws, refs)
+    gate = ctx.operation_span
+    if gate is None or not isinstance(read, Gated):
+        return
+    readings = _latest_benchmark(_as_gates(read.readings, ctx.task.terms), refs)
+    if not readings:
+        return
+    names = tuple(dict.fromkeys(item.stage for item in readings))
+    attrs = GateAttrs.read(",".join(names), readings, input_value(baseline))
+    verdict = _verdict(ctx, readings, baseline)
+    ctx.label(GATE, span=gate, title=" + ".join(names), attrs=attrs, verdict=verdict)
+
+
+def _as_gates(
+    readings: tuple[AcceptedReading, ...], terms: TaskTerms
+) -> tuple[AcceptedReading, ...]:
+    """An agent's evaluation read as the gates its stages are.
+
+    Core records each stage an agent evaluated as one ``local-validation`` record, never as
+    proof; the task's terms say which of the stages it measures is the accuracy check, and the
+    others are its benchmark. Stages the task does not measure are no gate.
+    """
+    return tuple(
+        item.model_copy(
+            update={
+                "kind": EvidenceKind.CORRECTNESS
+                if item.stage == terms.accuracy_stage
+                else EvidenceKind.BENCHMARK
+            }
+        )
+        for item in readings
+        if item.kind is EvidenceKind.LOCAL_VALIDATION and item.stage in terms.measured
+    )
+
+
+def _latest_benchmark(
+    readings: tuple[AcceptedReading, ...], refs: tuple[EvidenceRef, ...]
+) -> tuple[AcceptedReading, ...]:
+    """The readings of the latest evaluation (``refs`` are oldest first) with a benchmark value."""
+    for request in reversed(tuple(dict.fromkeys(item.source_request for item in refs))):
+        taken = tuple(item for item in readings if item.source_request == request)
+        benchmark = reading_of(taken, EvidenceKind.BENCHMARK)
+        if benchmark is not None and benchmark.headline() is not None:
+            return taken
+    return ()
 
 
 async def _gated(

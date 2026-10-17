@@ -5,7 +5,8 @@ one paid turn at a time, until the attempt is over or its paid turns are spent. 
 does with the reply (a self-review, a judge, the trusted gates) is the search's; this is what
 they share. The workspace is a resource, so it always settles: with the assertion the attempt
 made, with a failure, or as cancelled when the operator stops the run. The round's workstream is
-named for the hypothesis as the work begins and gets its verdict from the settlement.
+named for the hypothesis as the work begins and gets its verdict from the settlement. A candidate
+the trusted gates did not measure gets as its gate what its agents measured of it (`label_taken`).
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from vibesys.serial_search._measure import label_taken
 from vibesys.serial_search._spans import hypothesis_chosen, round_settled
 from vs_core.api.search import (
     Again,
@@ -33,7 +35,9 @@ from vs_core.api.search import (
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
+    from vibesys.candidates.api import Baseline
     from vibesys.hypothesis import OrchestratorPlan
+    from vibesys.metrics import AcceptedReading
     from vibesys.serial_search._run import RoundStart
     from vs_core.api.search import Assessment, RevisionRef, Session
 
@@ -44,6 +48,10 @@ class Attempting(Protocol):
     number: int
     plan: OrchestratorPlan
     base: RevisionRef
+    baseline: Baseline
+    """The input's measurement, which a candidate's gate compares it with."""
+    readings: tuple[AcceptedReading, ...]
+    """The trusted gates' readings of the candidate it keeps; empty when they did not measure it."""
 
     def failed(self, reason: str) -> object:
         """Record that the attempt cannot go on."""
@@ -107,5 +115,9 @@ async def _work(ctx: Flow, attempt: Attempting, *, room: Room, turn: Turn) -> Se
             return True if again is None else Again(reason=again)
 
         await ctx.retry(ask, RetryPolicy(max_tries=room.paid_turns))
-        ctx.workspaces.keep(opened, *attempt.asserted())
+        revision, assessment = attempt.asserted()
+        ctx.workspaces.keep(opened, revision, assessment)
+        if revision is not None and not attempt.readings:
+            # after the keep, so a stop while the evidence is read still settles what it keeps
+            await label_taken(ctx, opened, revision, attempt.baseline)
     return opened.settlement if isinstance(opened, Workspace) else None
