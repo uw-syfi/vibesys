@@ -20,8 +20,13 @@ Use the cheapest tier that can show the defect, and stop there.
 1. **Fixtures** (seconds): recorded and synthetic runs replayed into the built
    app. Every UI change starts and usually ends here.
 2. **Agent-less runs** (minutes): the real backend with scripted agents and no
-   model calls, on a small CPU workload. Use them for what a fixture cannot
-   show: startup, pause and resume, an ended run read from its history.
+   model calls, on the CPU queue example. From a project copied out of the
+   `queue-rs` example, run `vibesys --task mpmc --outer-loop dynamic
+   --agent-backend scripted --max-rounds 5 --max-in-flight 2`; in the desktop
+   New run form, put the same flags in Advanced. The scripted agents' seed is the
+   `scripted_seed` setting of the agent configuration, so a run repeats. Use them
+   for what a fixture cannot show: startup, pause and resume, an ended run read
+   from its history.
 3. **Real runs with live agents**: only at the end of a batch of UI changes, or
    when the user explicitly grants one. Use Codex with `gpt-6.1-luna`, the
    cheapest model, on the CPU queue example with the `mpmc` task, one or two
