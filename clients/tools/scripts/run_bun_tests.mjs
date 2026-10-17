@@ -25,13 +25,23 @@
  * the rest of the suite as missing, so ad-hoc runs call `bun test` directly.
  */
 
-import {spawn} from 'node:child_process';
+import {execFileSync, spawn} from 'node:child_process';
 import {mkdtempSync, readdirSync, readFileSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
-import {join, resolve} from 'node:path';
+import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const RUNNER = 'bun';
+/**
+ * The one place the Bun version is pinned: CI installs it from here (`packaging/fetch_bun.py`) and
+ * the TUI ships it. A Bun older than the pin resolves imports differently (1.3.9 does not map
+ * `./welcome.cjs` to its `welcome.cts` source), so a test run on it fails on a module it cannot
+ * find, which reads as a missing build and not as the wrong runtime.
+ */
+const BUN_PIN_FILE = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  '../../../packaging/tui_packaging.py',
+);
 /**
  * The per-test bound, in milliseconds. It only guards against a hang: no test waits on time (they
  * run on fakes and virtual clocks), so a test that reaches it is stuck, not slow. Bun's 5 s default
@@ -133,6 +143,45 @@ export function collectionErrors(expected, collected) {
   return errors;
 }
 
+/**
+ * The Bun version `packaging/tui_packaging.py` pins, read from its `BUN_VERSION = "x.y.z"` line.
+ *
+ * @param {string} source the text of that file
+ * @returns {string}
+ */
+export function pinnedBunVersion(source) {
+  const match = source.match(/^BUN_VERSION = "(\d+\.\d+\.\d+)"$/m);
+  if (match === null) throw new Error(`${BUN_PIN_FILE}: no BUN_VERSION = "x.y.z" line`);
+  return match[1];
+}
+
+/**
+ * The rejection for a Bun other than the pinned one, or `undefined` when they agree.
+ *
+ * @param {string} actual the version `bun --version` printed
+ * @param {string} pinned the version `pinnedBunVersion` read
+ * @returns {string | undefined}
+ */
+export function bunVersionError(actual, pinned) {
+  if (actual === pinned) return undefined;
+  return (
+    `bun ${actual} is on PATH but the clients tests need bun ${pinned} (the pin in ` +
+    'packaging/tui_packaging.py, the version CI installs). Another version resolves imports ' +
+    'differently, so a test can fail on a module it cannot find. Install the pinned version, ' +
+    'for example `python3 packaging/fetch_bun.py --target <linux-x86_64|linux-aarch64|macos-arm64> ' +
+    '--output <dir>/bin/bun`, and put that directory first on PATH.'
+  );
+}
+
+/** The version of the Bun on PATH, or a rejection saying there is none. */
+function installedBunVersion() {
+  try {
+    return execFileSync(RUNNER, ['--version'], {encoding: 'utf8'}).trim();
+  } catch (error) {
+    throw new Error(`cannot run \`${RUNNER} --version\`: ${error.message}`);
+  }
+}
+
 /** The test roots relative to the package, or a rejection naming why an argument is not one. */
 function parseRoots(argv) {
   if (argv.length === 0) {
@@ -206,6 +255,14 @@ function runSuite(roots, reportFile) {
 
 async function main(argv) {
   const roots = parseRoots(argv);
+  const versionError = bunVersionError(
+    installedBunVersion(),
+    pinnedBunVersion(readFileSync(BUN_PIN_FILE, 'utf8')),
+  );
+  if (versionError !== undefined) {
+    console.error(versionError);
+    return 1;
+  }
   const expected = testFileNames(process.cwd(), roots);
   // The report is this process's to create and to remove, on every path, and a per-run directory
   // keeps two packages' suites from naming the same file under `pnpm -r`.
