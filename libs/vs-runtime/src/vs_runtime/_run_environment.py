@@ -884,8 +884,8 @@ class EditorExtras:
 
 
 @dataclass(frozen=True)
-class EditorSandbox:
-    """A built, unstarted editor sandbox and the Git fact its mount plan implies."""
+class BuiltEditor:
+    """The built, unstarted editor command runner and the Git fact its mount plan implies."""
 
     runner: CommandRunner
     #: From the same plan that mounted the workspace's Git metadata.
@@ -970,7 +970,7 @@ class DockerEnvironment(NoCaptureRecovery):
         self,
         request: RunEnvironmentRequest,
         extras: EditorExtras | None = None,
-    ) -> EditorSandbox:
+    ) -> BuiltEditor:
         """Build, without starting, the Docker sandbox the agent edits in.
 
         Every environment whose agent runs in Docker opens its editor here, so
@@ -1071,7 +1071,7 @@ class DockerEnvironment(NoCaptureRecovery):
             run_id=request.run_id,
         )
         log(f"[docker] starting container with image {container_image}")
-        return EditorSandbox(sandbox, agent_git_writable=plan.agent_git_writable)
+        return BuiltEditor(sandbox, agent_git_writable=plan.agent_git_writable)
 
     def reap_orphans(
         self, run_id: str, *, system: EnvironmentSystem, log: Callable[[str], None]
