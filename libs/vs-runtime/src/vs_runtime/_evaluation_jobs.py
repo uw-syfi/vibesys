@@ -364,6 +364,13 @@ def _core_kind(kind: StageKind, purpose: str) -> EvidenceKind:
     return EvidenceKind.CORRECTNESS if kind is StageKind.ACCURACY else EvidenceKind.BENCHMARK
 
 
+def _proof_kind(kind: StageKind, purpose: str) -> EvidenceKind | None:
+    """The kind an official run would give this stage's record, named on an agent's record."""
+    if purpose != "local-validation" or kind is StageKind.PROFILE:
+        return None
+    return EvidenceKind.CORRECTNESS if kind is StageKind.ACCURACY else EvidenceKind.BENCHMARK
+
+
 def _evidence(
     terminal: ExecutorObservation,
     plan: MeasurementPlan,
@@ -388,6 +395,7 @@ def _evidence(
             EvidenceRef(
                 evidence_id=EvidenceId(root=item.evidence_id),
                 kind=_core_kind(item.kind, plan.purpose),
+                proof_kind=_proof_kind(item.kind, plan.purpose),
                 purpose=plan.purpose,
                 scope=subject.scope,
                 source_request=subject.request_id,

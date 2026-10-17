@@ -163,6 +163,13 @@ def record(
         environment_digest=request.plan.environment_digest,
         provenance="trusted",
         status=status,
+        proof_kind=(
+            None
+            if request.plan.purpose != "local-validation"
+            else core.EvidenceKind.CORRECTNESS
+            if stage == "accuracy"
+            else core.EvidenceKind.BENCHMARK
+        ),
         artifacts=(
             core.ArtifactRef(
                 artifact_id=core.ArtifactId(root=f"{source.root}-{stage}.json"),
@@ -542,7 +549,12 @@ def _reusing_job(
     after = committed(asked.state, started)
     after = transition(after, core.MeasurementSubmissionObserved(observation=started)).state
     finished = seen(
-        submission, 2, status=core.ObservationStatus.SUCCEEDED, terminal=True, released=True
+        submission,
+        2,
+        status=core.ObservationStatus.SUCCEEDED,
+        terminal=True,
+        released=True,
+        children_complete=True,
     )
     return after, submission, started, finished
 
@@ -569,22 +581,17 @@ _STAGES = ("accuracy", "benchmark")
 _KINDS = tuple(core.EvidenceKind)
 
 
+_HONEST = {"accuracy": core.EvidenceKind.CORRECTNESS, "benchmark": core.EvidenceKind.BENCHMARK}
+
+
 @pytest.mark.parametrize("source_purpose", ["local-validation", "official"])
-@given(
-    kinds=st.tuples(st.sampled_from(_KINDS), st.sampled_from(_KINDS)),
-)
-def test_a_reused_record_takes_only_the_kind_its_source_record_maps_to(
+@given(kinds=st.tuples(st.sampled_from(_KINDS), st.sampled_from(_KINDS)))
+def test_a_reused_record_takes_exactly_the_kind_its_source_record_maps_to(
     source_purpose: Literal["local-validation", "official"],
     kinds: tuple[core.EvidenceKind, core.EvidenceKind],
 ) -> None:
-    """An agent record stands for a correctness or benchmark record; an official one keeps its kind."""
+    """Each reused record keeps its own stage's kind: no kind is invented, none is swapped."""
     state, submission, started, finished = _reusing_job(source_purpose)
-    honest = {"accuracy": core.EvidenceKind.CORRECTNESS, "benchmark": core.EvidenceKind.BENCHMARK}
-    allowed = (
-        {core.EvidenceKind.CORRECTNESS, core.EvidenceKind.BENCHMARK}
-        if source_purpose == "local-validation"
-        else None
-    )
     evidence = tuple(
         record(
             submission, finished, stage, core.ObservationStatus.SUCCEEDED, reused=submission.reuses
@@ -594,8 +601,7 @@ def test_a_reused_record_takes_only_the_kind_its_source_record_maps_to(
     done = _report(state, started, finished, evidence)
     kept = {item.key for item in core.project(done.state).measurements}
     for stage, item in zip(_STAGES, evidence, strict=True):
-        ok = item.kind in allowed if allowed is not None else item.kind is honest[stage]
-        assert (item.key in kept) is ok, (stage, item.kind)
+        assert (item.key in kept) is (item.kind is _HONEST[stage]), (stage, item.kind)
 
 
 def test_a_reusing_job_that_ends_without_all_its_sources_records_is_refused() -> None:
@@ -609,10 +615,30 @@ def test_a_reusing_job_that_ends_without_all_its_sources_records_is_refused() ->
     )
     short = _report(state, started, finished, both[1:])
     (result,) = results(short)
-    assert result.failure is core.MeasurementFailure.UNKNOWN
+    assert result.failure is core.MeasurementFailure.INFRASTRUCTURE
     full = _report(state, started, finished, both)
     (result,) = results(full)
     assert result.failure is None
+
+
+def test_a_short_reused_result_is_retried_with_a_fresh_measurement() -> None:
+    """An incomplete reused result is the machinery's, so the candidate gets one fresh run."""
+    state, submission, started, finished = _reusing_job("local-validation")
+    both = tuple(
+        record(
+            submission, finished, stage, core.ObservationStatus.SUCCEEDED, reused=submission.reuses
+        )
+        for stage in _STAGES
+    )
+    short = _report(state, started, finished, both[1:])
+    retried = requested(
+        short.state,
+        identity="third",
+        measurement=measured("official", "b", "sha256:a"),
+    )
+    (fresh,) = [r for r in retried.requests if isinstance(r, core.SubmitMeasurement)]
+    assert fresh.reuses is None
+    assert fresh.request_id != submission.request_id
 
 
 def test_a_run_on_a_host_the_executor_does_not_hold_alone_is_never_reused() -> None:
