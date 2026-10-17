@@ -65,7 +65,7 @@ if TYPE_CHECKING:
     from vs_core.api import CoreEvent, InputId, InputTarget
     from vs_project.api import ControlInbox, InboxEntry
     from vs_runtime._operator_control import ControlRequest
-    from vs_runtime._run_control import RunControlChannel
+    from vs_runtime._run_control import QueuedWithdraw, RunControlChannel
 
 
 type ControlAction = Literal["pause", "resume", "stop", "steer", "withdraw"]
@@ -119,6 +119,8 @@ class RunControlBridge:
         self._inbox = inbox
         self._control = control if control is not None or inbox is None else inbox.control
         self._submitted: set[str] = set()
+        # Inbox withdrawals submitted in this poll: one that ends nothing is set aside.
+        self._inbox_withdrawals: set[str] = set()
         self._warned_damaged = False
         self._count = 0
         self._position = 0
@@ -180,8 +182,7 @@ class RunControlBridge:
         # that sorts before its own steer in the inbox still finds it in this poll's events.
         withdrawals += self._channel.take_pending_withdrawals()
         self._take_steers(core, now_at, events)
-        for withdrawal in withdrawals:
-            self._withdraw(core, now_at, withdrawal.withdraws, withdrawal.control_id, events)
+        self._apply_withdrawals(core, now_at, withdrawals, events)
         if self._stopped:
             return tuple(events)
         if self._channel.stop_requested():
@@ -225,6 +226,22 @@ class RunControlBridge:
             if control is not None:
                 events += (control, steer_input(core, control.control, now_at, self._position))
 
+    def _apply_withdrawals(
+        self,
+        core: CoreState,
+        now_at: float,
+        withdrawals: list[QueuedWithdraw],
+        events: list[CoreEvent],
+    ) -> None:
+        """Emit this poll's withdrawals; set aside each inbox one that ends nothing."""
+        for withdrawal in withdrawals:
+            dropped = self._withdraw(
+                core, now_at, withdrawal.withdraws, withdrawal.control_id, events
+            )
+            if dropped is not None and withdrawal.control_id in self._inbox_withdrawals:
+                self._reject_withdrawal(withdrawal.control_id, dropped)
+        self._inbox_withdrawals.clear()
+
     def _withdraw(
         self,
         core: CoreState,
@@ -232,24 +249,39 @@ class RunControlBridge:
         withdraws: str,
         control_id: str,
         events: list[CoreEvent],
-    ) -> None:
+    ) -> str | None:
         """Emit the withdrawal of the standing steer sent under ``withdraws``.
 
         Its guidance must be in force in ``core`` or received in this poll; a withdrawal of
         anything else becomes no control, and the channel hears why. A withdrawal of a steer
-        the run has not taken by this poll (one sent later) is dropped the same way.
+        the run has not taken by this poll (one sent later) is dropped the same way. Returns
+        why it was dropped, or None when it was emitted.
         """
         input_id = standing_input_id(withdraws)
         if not _standing_now(core, events, withdraws):
-            self._channel.notify_steer_dropped(
-                f"withdraw {control_id} ended nothing: steer {withdraws} is not standing guidance"
-                " in force"
-            )
-            return
+            reason = f"steer {withdraws} is not standing guidance in force"
+            self._channel.notify_steer_dropped(f"withdraw {control_id} ended nothing: {reason}")
+            return reason
         control = self._event(
             core, now_at, _Change("withdraw", control_id=control_id, withdraws=input_id)
         )
         events += () if control is None else (control,)
+        return None
+
+    def _reject_withdrawal(self, control_id: str, reason: str) -> None:
+        """Set aside an inbox withdrawal that ended nothing: it must not apply after a restart.
+
+        Ending nothing is final for its id, as the socket's one answer is: left pending, a new
+        process would read it again and end guidance the operator sent after it.
+        """
+        if self._inbox is None:
+            return
+        try:
+            self._inbox.requests.reject(control_id, f"it ended nothing: {reason}")
+        except ProjectStateError as error:
+            _LOG.warning(
+                "the run's control inbox cannot be marked; %s waits: %s", control_id, error
+            )
 
     def _read_inbox(
         self, inbox: OperatorInbox, core: CoreState, now_at: float, events: list[CoreEvent]
@@ -310,8 +342,9 @@ class RunControlBridge:
                 # Applied now, or queued earlier through the socket under the same id.
                 self._take_steers(core, now_at, events)
             case WithdrawRequest():
-                # Queued on the channel; ``poll`` takes it after every steer of this poll.
-                pass
+                # Queued on the channel; ``poll`` takes it after every steer of this poll, and
+                # sets the entry aside if it then ends nothing.
+                self._inbox_withdrawals.add(identity)
         return None
 
     def _submitted_request(

@@ -466,7 +466,10 @@ vibesys control <run-id> --control-id keep-bf16 steer "keep the weights in bf16"
 vibesys control <run-id> withdraw keep-bf16
 ```
 
-A withdrawal of a steer that is not standing guidance, or that has already ended, is rejected.
+A withdrawal is rejected when the run already holds the steer it names and that steer is not
+standing guidance, or its guidance has already ended. A withdrawal sent before the run has taken
+its steer ends nothing: the run reports that and sets the withdrawal aside, so send it again once
+the guidance is in force.
 The run's events report once when standing guidance stops reaching turns, with the reason: it
 was withdrawn, its target or the run ended, or the attempt it names was reopened (a reopened
 attempt is a new generation, which the guidance does not reach). A launch `--constraint` is

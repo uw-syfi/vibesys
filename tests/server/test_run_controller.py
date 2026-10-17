@@ -613,7 +613,10 @@ def test_a_withdrawal_of_no_standing_guidance_answers_its_protocol_error(tmp_pat
 
 
 def test_standing_guidance_is_journaled_in_force_then_ended(tmp_path: Path) -> None:
-    """Guidance is journaled active, not waiting for a turn; its withdrawal settles with its end."""
+    """Guidance is journaled active, not waiting for a turn; its withdrawal pending, its end done.
+
+    The withdrawal's entry stays pending: the end of the guidance is journaled as its own entry.
+    """
     parts = build_server_parts(tmp_path)
     steer = SteerRequest(control_id="keep", text="keep bf16", mode=SteerMode.STANDING)
     parts.api.execute(ControlCommand(timestamp=REQUEST_TIME, control=steer))

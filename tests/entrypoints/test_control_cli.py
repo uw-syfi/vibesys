@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_core.api import ArtifactRef
+    from vs_project.api import ControlInbox
 
 
 def _project_with_run(root: Path) -> str:
@@ -181,6 +182,53 @@ def test_a_withdrawal_posted_with_its_steer_ends_it_in_the_same_poll(
     assert withdrawn.receipt.reason is InputDropReason.WITHDRAWN
     ended = [t.text for t in sink.transitions if t.kind is RunControlTransitionKind.GUIDANCE_ENDED]
     assert ended == [f"standing guidance {steer_id} ended: withdrawn"]
+
+
+def _production_bridge(
+    tmp_path: Path, run_id: str
+) -> tuple[RunControlBridge, ControlInbox, FakeRunControlEventSink]:
+    """The bridge a run wires: its inbox and its socket share one ``ChannelRunControl``."""
+    sink = FakeRunControlEventSink()
+    channel = create_run_control_channel(sink, threads=SimThreads())
+    control = ChannelRunControl(channel, SimThreads())
+    requests = Project.open(tmp_path).state.control_inbox(run_id)
+    bridge = RunControlBridge(
+        channel, _Texts(), inbox=OperatorInbox(requests, control), control=control
+    )
+    return bridge, requests, sink
+
+
+def test_a_withdrawal_that_ended_nothing_never_ends_guidance_sent_after_it(
+    tmp_path: Path,
+) -> None:
+    """Regression: a withdrawal posted before its steer stayed pending in the inbox, so a
+    restarted run read it again and ended the guidance the operator sent after it."""
+    run_id = _project_with_run(tmp_path)
+    bridge, requests, _sink = _production_bridge(tmp_path, run_id)
+    core = _declaring(("dynamic-planner",))
+    for event in bridge.poll(core, 0.5):
+        core = step(core, event).state
+
+    assert _control(tmp_path, [run_id, "withdraw", "keep"], "w-1")[0] == 0
+    for event in bridge.poll(core, 1.0):
+        core = step(core, event).state
+    assert requests.pending() == ()
+    ((rejected, reason),) = [(entry.request_id, entry.reason) for entry in requests.rejected()]
+    assert rejected == "w-1"
+    assert "ended nothing" in reason
+
+    steer = [run_id, "--control-id", "keep", "steer", "keep bf16", "--standing"]
+    assert _control(tmp_path, steer)[0] == 0
+    for event in bridge.poll(core, 2.0):
+        core = step(core, event).state
+    restarted, _, _ = _production_bridge(tmp_path, run_id)
+    for now in (3.0, 4.0):
+        for event in restarted.poll(core, now):
+            core = step(core, event).state
+
+    (guidance,) = core.sessions.inputs
+    assert (guidance.input.mode, guidance.receipt) == (InputMode.STANDING, None)
+    assert all(control.action != "withdraw" for control in core.run.controls)
 
 
 def _declaring(roles: tuple[str, ...]) -> CoreState:

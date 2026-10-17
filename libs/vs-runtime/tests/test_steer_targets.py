@@ -390,3 +390,42 @@ def test_the_end_of_standing_guidance_is_reported_once_as_an_end_not_a_drop(
 
     assert _guidance_ends(run) == [f"standing guidance keep ended: {reason}"]
     assert _drops(run) == []
+
+
+def _guided(run: _Run) -> CoreState:
+    """A run holding standing guidance for the attempt ``live``, as its bridge recorded it."""
+    core = _core()
+    run.bridge.poll(core, 1.0)
+    target = SteerTarget(kind=SteerTargetKind.ATTEMPT, id="live")
+    run.control.submit(
+        SteerRequest(control_id="keep", text="keep bf16", target=target, mode=SteerMode.STANDING)
+    )
+    for event in run.bridge.poll(core, 2.0):
+        core = step(core, event).state
+    return core
+
+
+@pytest.mark.parametrize(
+    "end",
+    [_dropped_as(InputDropReason.WITHDRAWN), _dropped_as(InputDropReason.RUN_TERMINAL), _reopened],
+)
+def test_a_restarted_bridge_does_not_report_an_end_the_run_already_holds(
+    end: Callable[[CoreState], CoreState],
+) -> None:
+    ended = end(_guided(_run()))
+
+    restarted = _run()
+    restarted.bridge.poll(ended, 3.0)
+    restarted.bridge.poll(ended, 4.0)
+
+    assert _guidance_ends(restarted) == []
+
+
+def test_guidance_whose_attempt_reopened_and_then_the_run_ended_is_reported_once() -> None:
+    run = _run()
+    core = _reopened(_guided(run))
+    run.bridge.poll(core, 3.0)
+    core = _dropped_as(InputDropReason.RUN_TERMINAL)(core)
+    run.bridge.poll(core, 4.0)
+
+    assert _guidance_ends(run) == ["standing guidance keep ended: its attempt was reopened"]
