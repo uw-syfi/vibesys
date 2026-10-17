@@ -103,7 +103,7 @@ repository's contracts, architecture, tests, and affected callers.
      head), write a throwaway test or script from the issue's steps, or for
      TUI rendering fixes render the affected view at a fixed width with the
      terminal UI client's test harness. Drive the live TUI through the
-     `hunt-client-bugs` harness only when no cheaper reproduction exists and the
+     `verify-desktop-ui` harness only when no cheaper reproduction exists and the
      cost is justified.
    - Report the reproduction as evidence: the command, the observed failure
      at the base, and the observed result at the head. If a reproduction was
