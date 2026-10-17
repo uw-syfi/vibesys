@@ -20,6 +20,7 @@ from ._dispatch_episode import (
 )
 from ._host_epochs import downtime
 from ._inspection import validate_inspection_target, validate_registered_owner
+from ._operator_actions import action_refusal, cancellations, notice
 from ._ownership import cleanup_pending
 from ._proofs import (
     Proven,
@@ -55,6 +56,7 @@ from .types.attempts import (
     ScopeReopenAdmitted,
 )
 from .types.common import (
+    OPERATOR_ACTIONS,
     Area,
     AttemptId,
     AttemptRef,
@@ -135,6 +137,7 @@ from .types.scheduling import (
     AttemptRequested,
     ClockAdvanced,
     CloseAdmission,
+    ParallelLimitChanged,
     RegisterAttempt,
     RunDrained,
     SchedulingEvent,
@@ -1282,7 +1285,7 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
         return Transition(state=state)
     if event.control.action == "stop":
         return _stop_control(state, event, dispatch)
-    refusal = control_refusal(state.run, event.control)
+    refusal = control_refusal(state.run, event.control) or action_refusal(state, event.control)
     if refusal is not None:
         raise refusal
     check_declared_target(event.control.target, state.run.declaration)
@@ -1294,6 +1297,9 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
         "stop": RunStatus.CLOSING,
         "steer": state.run.status,
         "withdraw": state.run.status,
+        "cancel_attempt": state.run.status,
+        "cancel_item": state.run.status,
+        "set_max_parallel": state.run.status,
     }
     run = state.run.model_copy(
         update={
@@ -1305,6 +1311,8 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
     updated = state.model_copy(update={"run": run})
     if event.control.action == "steer" or waits:
         result = Transition(state=updated)
+    elif event.control.action in OPERATOR_ACTIONS:
+        result = _operator_action(updated, event, dispatch)
     elif event.control.withdraws is not None:
         result = propagate(
             updated, (InputWithdrawRequested(input_id=event.control.withdraws),), dispatch
@@ -1316,6 +1324,36 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
     return result.model_copy(
         update={"events": (*result.events, ControlChanged(control=event.control))}
     )
+
+
+def _operator_action(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Transition:
+    """Apply an operator action core has recorded: its notice, then what it changes.
+
+    A cancel withdraws each attempt it names as a search's own ``Withdraw`` would, with a
+    ``Cancel`` disposition and the cleanup bound as its limit; a new parallel limit retries
+    admission. ``_operator_actions`` says what each action changes.
+    """
+    control = event.control
+    signals: tuple[Signal, ...] = (notice(state, control, event.now_at),)
+    if control.action == "set_max_parallel":
+        signals += (ParallelLimitChanged(),)
+    result = propagate(state, signals, dispatch)
+    within = Within(limit=state.run.limits.cleanup_bound)
+    for withdraw in cancellations(state, control):
+        current = result.state
+        submitted = _submitted(
+            current,
+            DecisionSubmitted(
+                decision=Wait(request=withdraw, until=within), expected_revision=current.revision
+            ),
+            dispatch,
+        )
+        result = Transition(
+            state=submitted.state,
+            requests=(*result.requests, *submitted.requests),
+            events=(*result.events, *submitted.events),
+        )
+    return result
 
 
 def _validate_observation_ingress(state: CoreState, event: CoreEvent) -> None:

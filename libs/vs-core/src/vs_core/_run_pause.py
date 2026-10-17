@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ._registry import ContractError
-from .types.common import PauseOwner, RunPause, RunStatus
+from .types.common import OPERATOR_ACTIONS, PauseOwner, RunPause, RunStatus
 
 if TYPE_CHECKING:
     from .types.common import ControlInput
@@ -82,7 +82,8 @@ def control_refusal(run: RunState, control: ControlInput) -> ContractError | Non
         return None
     if run.status == RunStatus.TERMINAL:
         return ContractError(("run", "status"), "terminal run rejects controls")
-    if control.action in ("steer", "withdraw"):
+    if control.action in ("steer", "withdraw") or control.action in OPERATOR_ACTIONS:
+        # Each holds until the run ends; ``action_refusal`` judges an action's subject.
         return None
     if run.status in (RunStatus.CLOSING, RunStatus.BLOCKED) or run.result is not None:
         return ContractError(("run", "cleanup"), "cleanup must finish before pause or resume")
