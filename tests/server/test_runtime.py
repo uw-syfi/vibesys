@@ -41,7 +41,7 @@ from vibesys.run.integration import LocalRunIntegration
 from vs_core.api import StopMode
 from vs_runtime.api.infrastructure import ChannelRunControl, RunControlChannel
 from vs_runtime.api.testing import idle_environment_system
-from vs_sim.api import OsThreads, Platform
+from vs_sim.api import OsThreads, Platform, Threads
 from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
@@ -70,8 +70,8 @@ class _SessionControlStub(ChannelRunControl):
     test installs the control role a live session provides.
     """
 
-    def __init__(self, control: RunControlChannel) -> None:
-        super().__init__(control, OsThreads())
+    def __init__(self, control: RunControlChannel, threads: Threads) -> None:
+        super().__init__(control, threads)
         self.stop_calls = 0
 
     def stop(self, mode: StopMode = StopMode.DRAIN) -> None:
@@ -257,7 +257,7 @@ def test_stop_acknowledged_while_transport_starts_reaches_the_session(tmp_path: 
         threads=OsThreads(),
         system=idle_environment_system(),
     )
-    control = _SessionControlStub(integration.control)
+    control = _SessionControlStub(integration.control, integration.threads)
 
     class Observer(RecordingObserver):
         def listening(self) -> None:

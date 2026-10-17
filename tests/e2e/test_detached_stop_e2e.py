@@ -15,7 +15,7 @@ import shutil
 import tempfile
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import pytest
 from tests.server.support import REQUEST_TIME
@@ -45,7 +45,7 @@ from server.registry import (
 from server.runtime import ServerRuntime
 from vibesys.run.integration import LocalRunIntegration
 from vs_core.api import StopMode
-from vs_runtime.api.infrastructure import EnvironmentSystem
+from vs_runtime.api.infrastructure import ChannelRunControl, EnvironmentSystem
 from vs_sim.api import (
     OsProcesses,
     OsThreads,
@@ -60,7 +60,6 @@ from vs_sim.api.testing import HANG_GUARD_S, NO_PROCESSES
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
-    from vibesys.api import RunControl
     from vs_runtime.api.infrastructure import RunControlChannel
 
 
@@ -73,16 +72,6 @@ class _NoSignal:
     def terminate_if_current(self, pid: int, current: Callable[[], bool]) -> bool:
         del pid, current
         raise NotImplementedError
-
-
-class _Session:
-    """The ``RunControl`` slice of a session, over the run's control channel."""
-
-    def __init__(self, control: RunControlChannel) -> None:
-        self._control = control
-
-    def stop(self) -> None:
-        self._control.request_stop(StopMode.DRAIN)
 
 
 def _wait_for_stop(control: RunControlChannel, threads: OsThreads) -> None:
@@ -182,12 +171,12 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
     outcome: list[object] = []
 
     def run() -> None:
-        control = _Session(integration.control)
-        runtime.controls.install(cast("RunControl", control))
+        control = ChannelRunControl(integration.control, threads)
+        runtime.controls.install(control)
         try:
             _wait_for_stop(integration.control, threads)
         finally:
-            runtime.controls.release(cast("RunControl", control))
+            runtime.controls.release(control)
 
     def serve() -> None:
         hostname, version = host_facts()
