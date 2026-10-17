@@ -1046,8 +1046,8 @@ describe('series colors', () => {
       false,
       true,
     ]);
-    expect(one(items[0] as HTMLElement, '.vs-series-swatch').style.getPropertyValue('--seg-color')).toBe(
-      'var(--series-3)',
-    );
+    expect(
+      one(items[0] as HTMLElement, '.vs-series-swatch').style.getPropertyValue('--seg-color'),
+    ).toBe('var(--series-3)');
   });
 });
