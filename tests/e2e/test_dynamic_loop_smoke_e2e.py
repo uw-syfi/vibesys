@@ -208,6 +208,8 @@ class SmokeRun:
             'name = "fake"\n'
             f'remote_workspace_root = "{remote}"\n'
             "poll_interval_seconds = 1.0\n"
+            # Exclusive nodes: the candidate's official run may reuse the agent's (#2949).
+            'sbatch_arguments = ["--exclusive"]\n'
             f'transport = {{ kind = "connector", command = {connector} }}\n'
             "[vibesys]\n"
             f'remote_python = "{remote_python}"\n'

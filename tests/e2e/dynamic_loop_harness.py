@@ -506,6 +506,9 @@ class LoopInput:
             'name = "fake"\n'
             f'remote_workspace_root = "{remote}"\n'
             f"poll_interval_seconds = {poll_interval_s}\n"
+            # Each evaluation holds its node alone, so an agent's run may stand for the
+            # official one (``SlurmConfig.exclusive_hosts``).
+            'sbatch_arguments = ["--exclusive"]\n'
             f'transport = {{ kind = "connector", command = {command} }}\n',
             encoding="utf-8",
         )

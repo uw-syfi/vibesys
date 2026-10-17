@@ -253,6 +253,21 @@ class SlurmConfig(BaseModel):
         int, Field(gt=0, le=_PROCESS_EXIT_WAIT_MAX_SECONDS, validate_default=True)
     ] = _PROCESS_EXIT_WAIT_DEFAULT_SECONDS
 
+    @property
+    def exclusive_hosts(self) -> bool:
+        """Whether each job holds its nodes alone: the last sharing option is a bare ``--exclusive``.
+
+        ``--exclusive=user``, ``=mcs`` or ``=topo`` share nodes with other jobs (the agent's
+        own GPU jobs run as the same user), and ``--oversubscribe`` (``-s``) shares them too;
+        sbatch takes the last of these options it reads.
+        """
+        sharing = [
+            argument
+            for argument in self.sbatch_arguments
+            if argument in {"--oversubscribe", "-s"} or argument.startswith("--exclusive")
+        ]
+        return bool(sharing) and sharing[-1] == "--exclusive"
+
     @model_validator(mode="before")
     @classmethod
     def _default_exit_wait_fits_the_time_limit(cls, data: object) -> object:

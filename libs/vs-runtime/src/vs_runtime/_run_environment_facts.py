@@ -46,6 +46,11 @@ class ClusterEvaluationFacts:
         return self.settings.config.evaluation_capacity
 
     @property
+    def exclusive_hosts(self) -> bool:
+        """Whether each trusted evaluation job holds its nodes alone (``SlurmConfig``)."""
+        return self.settings.config.exclusive_hosts
+
+    @property
     def captures_profile(self) -> bool:
         """Whether the cluster runs a profile capture for this run."""
         return self.plan.profile_command is not None

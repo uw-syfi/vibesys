@@ -201,6 +201,7 @@ def _core_plan(context: CoreRunContext) -> CorePlan:
         evaluator_digest=evaluation.evaluator_digest,
         workload_digest=evaluation.workload_digest,
         environment_digest=evaluation.environment_digest,
+        exclusive_measurement_hosts=evaluation.exclusive_hosts,
         task=terms,
     )
     config = launch.search_config()
