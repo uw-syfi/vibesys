@@ -674,6 +674,7 @@ export type InputTokens2 = number | null;
 export type CacheCreationInputTokens = number | null;
 export type CacheReadInputTokens = number | null;
 export type OutputTokens = number | null;
+export type ReasoningOutputTokens = number | null;
 export type TotalCostUsd = number | null;
 export type DurationMs = number | null;
 export type Kind47 = "span_started";
@@ -2035,6 +2036,7 @@ export interface TurnUsageData {
   cache_creation_input_tokens?: CacheCreationInputTokens;
   cache_read_input_tokens?: CacheReadInputTokens;
   output_tokens?: OutputTokens;
+  reasoning_output_tokens?: ReasoningOutputTokens;
   total_cost_usd?: TotalCostUsd;
   duration_ms?: DurationMs;
   span_id?: SpanId | null;

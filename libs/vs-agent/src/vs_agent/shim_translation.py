@@ -114,6 +114,7 @@ def usage_from(
         cache_creation_input_tokens=tokens.cache_write_input_tokens,
         cache_read_input_tokens=tokens.cache_read_input_tokens,
         output_tokens=tokens.output_tokens,
+        reasoning_output_tokens=tokens.reasoning_output_tokens,
         total_cost_usd=cost_usd if cost_usd is not None else usage.total_cost_usd,
         duration_ms=duration_ms,
     )

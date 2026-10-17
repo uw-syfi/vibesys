@@ -397,6 +397,8 @@ class AgentUsage:
     output_tokens: int | None = None
     total_cost_usd: float | None = None
     duration_ms: int | None = None
+    reasoning_output_tokens: int | None = None
+    """The part of ``output_tokens`` the provider reports as reasoning (never in addition to it)."""
 
 
 @dataclass(frozen=True, slots=True)

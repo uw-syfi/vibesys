@@ -125,6 +125,44 @@ def test_the_snapshot_holds_the_spans_the_runtime_holds_and_usage_names_its_turn
     assert usage == [TurnUsageData(input_tokens=3, span_id=turn.id)]
 
 
+@settings(max_examples=examples(pr=4, nightly=30), deadline=None)
+@given(
+    turns=st.integers(1, 3),
+    order=st.randoms(use_true_random=False),
+    spend=st.lists(st.integers(0, 10**6), min_size=3, max_size=3),
+)
+def test_each_turns_usage_is_attributed_to_its_own_span_and_the_spans_sum_to_the_run_total(
+    tmp_path_factory: pytest.TempPathFactory, turns: int, order: Random, spend: list[int]
+) -> None:
+    parts = build_server_parts()
+    run = run_to_end(parts, tmp_path_factory.mktemp("run"), turns, order)
+    turn_spans = [span for span in run.trace().spans if span.invocation is not None]
+    assert len(turn_spans) == turns
+    for span, tokens in zip(turn_spans, spend, strict=False):
+        parts.core_events.emit(
+            CoreEventType.TURN_USAGE_RECORDED,
+            execution_id=span.invocation,
+            data=CoreTurnUsageData(
+                input_tokens=tokens, output_tokens=tokens // 2, reasoning_output_tokens=tokens // 4
+            ),
+        )
+    usage = [
+        e.data
+        for e in parts.journal.read()
+        if e.type is EventType.TURN_USAGE_RECORDED and isinstance(e.data, TurnUsageData)
+    ]
+    by_span = {data.span_id: data for data in usage}
+    assert set(by_span) == {span.id for span in turn_spans}
+    for span, tokens in zip(turn_spans, spend, strict=False):
+        data = by_span[span.id]
+        assert (data.input_tokens, data.output_tokens, data.reasoning_output_tokens) == (
+            tokens,
+            tokens // 2,
+            tokens // 4,
+        )
+    assert sum(data.input_tokens or 0 for data in usage) == sum(spend[:turns])
+
+
 def _transcript_data(
     kind: int, number: int
 ) -> AgentOutputChunkData | ToolCallData | ToolResultData:
