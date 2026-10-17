@@ -1,16 +1,16 @@
 """An interrupt-mode input joins a running turn when the provider takes it, else the next turn.
 
-The shell offers a pending interrupt-mode input to a running session turn in two steps: it
-commits ``InputOfferedMidTurn`` first and only then asks the provider, so a crash between
-the two cannot lose the fact that the provider may have been asked. Whatever the provider
-answers, and whenever the host crashes, the input reaches a turn at least once and no input
-occurrence ever gets two receipts:
+The shell offers a pending interrupt-mode input to a running session turn in steps it commits
+one by one: ``InputOfferedMidTurn`` before it asks the provider, then ``InputTakenMidTurn``
+once the provider answers that it took the message. A crash between any two of them cannot
+lose the input. Whatever the provider answers, whenever the host crashes, and in whichever
+order a restarted host reports the offer and the turn's end, the input reaches a turn at least
+once and no input occurrence ever gets two receipts:
 
-- the turn's acceptance delivers an offer the provider kept (``InputDelivered.mid_turn``);
-- ``InputMidTurnReleased`` returns an offer that did not reach the turn to pending, so the
-  next matching turn reserves it;
-- a release after the turn already delivered it (the provider handed the message back at turn
-  end) adds a next-turn copy, ``<id>.redelivery``, instead of losing the message.
+- the turn's acceptance delivers an offer the provider took (``InputDelivered.mid_turn``);
+- an offer the turn ends without having taken waits for the next turn, as does one the
+  turn's result refused (``InputMidTurnReleased.refused``, committed before the acceptance);
+- ``InputMidTurnReleased`` returns any other offer that did not reach the turn to pending.
 """
 
 from __future__ import annotations
@@ -25,12 +25,18 @@ import vs_core.api as core
 from .test_role_input_target import _role_turn
 from .test_run_scoped_input_delivery import _fate_event, _with_inputs
 from .test_session_inputs import occurrence
-from .test_session_turns import invocation, reload_step, waiting_turn_state
+from .test_session_turns import (
+    invocation,
+    reload_step,
+    waiting_for_reservation,
+    waiting_turn_state,
+)
+from .test_terminal_inputs import closing_state, drain
 
 _Fate = Literal["deliver", "rejected", "failed", "cancelled", "crash"]
 _Answer = Literal["delivered", "unsupported", "no-running-turn"]
-_Crash = Literal["none", "after-offer", "after-call"]
-_Reject = Literal["never", "before-turn-end", "after-turn-end"]
+_Crash = Literal["none", "after-offer", "after-call", "after-taken"]
+_Order = Literal["release-first", "turn-end-first"]
 _FATES: tuple[_Fate, ...] = ("deliver", "rejected", "failed", "cancelled", "crash")
 
 
@@ -42,26 +48,39 @@ def _interrupt(
 
 @dataclass(frozen=True)
 class _Offer:
-    """What happens to one offer: the provider's answer, a late refusal and a host crash."""
+    """What happens to one offer: the provider's answer, a refusal, a crash, and replay order.
+
+    ``refused`` is a refusal the turn's result carries. ``crash`` stops the host after a step
+    of the offer; the restarted host releases the offer it finds, before or after it reports
+    the turn's end (``order``), and the turn's own result is all that survives of the call.
+    """
 
     answer: _Answer
-    reject: _Reject
+    refused: bool
     crash: _Crash
+    order: _Order
 
     @property
-    def kept(self) -> bool:
-        """Whether the shell saw the provider keep the message to the end of the turn."""
-        return (
-            self.crash == "none" and self.answer == "delivered" and self.reject != "before-turn-end"
-        )
+    def taken(self) -> bool:
+        """Whether core committed that the provider took the message."""
+        return self.answer == "delivered" and self.crash in ("none", "after-taken")
+
+    def joins(self, fate: _Fate) -> bool:
+        """Whether the input joins the running turn instead of reaching the next one."""
+        if fate != "deliver" or not self.taken or self.refused:
+            return False
+        return self.crash == "none" or self.order == "turn-end-first"
 
 
 _OFFERS = tuple(
-    _Offer(answer, reject, crash)
+    _Offer(answer, refused, crash, order)
     for answer in ("delivered", "unsupported", "no-running-turn")
-    for reject in ("never", "before-turn-end", "after-turn-end")
-    for crash in ("none", "after-offer", "after-call")
-    if answer == "delivered" or reject == "never"
+    for refused in (False, True)
+    for crash in ("none", "after-offer", "after-call", "after-taken")
+    for order in ("release-first", "turn-end-first")
+    if (answer == "delivered" or (not refused and crash in ("none", "after-offer")))
+    and (crash != "none" or order == "release-first")
+    and (not refused or crash == "none")
 )
 
 
@@ -81,15 +100,16 @@ class _Run:
         return result.state
 
 
-def _released(ref: core.InvocationRef, input_id: core.InputId) -> core.InputMidTurnReleased:
-    return core.InputMidTurnReleased(input_id=input_id, invocation=ref, now_at=0.0)
+def _released(
+    ref: core.InvocationRef, input_id: core.InputId, *, refused: bool = False
+) -> core.InputMidTurnReleased:
+    return core.InputMidTurnReleased(input_id=input_id, invocation=ref, now_at=0.0, refused=refused)
 
 
 def _offer_to(
     run: _Run, state: core.CoreState, ref: core.InvocationRef, offer: _Offer
-) -> tuple[core.CoreState, list[core.InputMidTurnReleased]]:
-    """The shell's offer: commit, then (unless the host crashed) ask; release what missed."""
-    late: list[core.InputMidTurnReleased] = []
+) -> core.CoreState:
+    """The shell's offer: commit it, ask (unless the host died first), commit the answer."""
     for candidate in core.mid_turn_offers(state):
         assert candidate.invocation == ref
         identity = candidate.input.input_id
@@ -97,13 +117,22 @@ def _offer_to(
         state = run.record(reload_step(state, offered))
         (row,) = [r for r in state.sessions.inputs if r.input.input_id == identity]
         assert row.offered_to == ref
-        release = _released(ref, identity)
-        if offer.kept and offer.reject == "after-turn-end":
-            late.append(release)
-        elif not offer.kept:
-            # Not taken, taken back, or a restarted host that cannot prove it was asked.
-            state = run.record(reload_step(state, release))
-    return state, late
+        if offer.crash == "after-offer":
+            continue
+        if offer.answer != "delivered":
+            state = run.record(reload_step(state, _released(ref, identity)))
+        elif offer.taken:
+            taken = core.InputTakenMidTurn(input_id=identity, invocation=ref, now_at=0.0)
+            state = run.record(reload_step(state, taken))
+    return state
+
+
+def _restart_releases(run: _Run, state: core.CoreState, ref: core.InvocationRef) -> core.CoreState:
+    """A restarted host cannot reach the turn an earlier host offered to: it releases each."""
+    for row in state.sessions.inputs:
+        if row.offered_to == ref and row.receipt is None:
+            state = run.record(reload_step(state, _released(ref, row.input.input_id)))
+    return state
 
 
 def _turn(
@@ -115,20 +144,21 @@ def _turn(
     (request,) = reserved.requests
     assert isinstance(request, core.DispatchTurn)
     state = run.record(reserved)
-    late: list[core.InputMidTurnReleased] = []
     if offer is not None:
         state = run.record(reload_step(state, core.SessionInputReceived(input=_interrupt())))
-        state, late = _offer_to(run, state, ref, offer)
+        state = _offer_to(run, state, ref, offer)
+    crashed = offer is not None and offer.crash != "none"
+    if crashed and offer is not None and offer.order == "release-first":
+        state = _restart_releases(run, state, ref)
     event = _fate_event(fate, ref, request)
     if event is not None:
+        if offer is not None and offer.refused:
+            # The turn's result carries the refusal, committed before its acceptance.
+            identity = _interrupt().input_id
+            state = run.record(reload_step(state, _released(ref, identity, refused=True)))
         state = run.record(reload_step(state, event))
-    for release in late:
-        state = run.record(reload_step(state, release))
-    if event is None:
-        # The host crashed with the turn: a restarted host releases every offer it finds.
-        for row in state.sessions.inputs:
-            if row.offered_to == ref and row.receipt is None:
-                state = run.record(reload_step(state, _released(ref, row.input.input_id)))
+    if crashed or event is None:
+        state = _restart_releases(run, state, ref)
     return state
 
 
@@ -137,7 +167,7 @@ def _turn(
 def test_an_interrupt_input_reaches_a_turn_at_least_once_with_one_receipt_per_occurrence(
     offer: _Offer, fate: _Fate
 ) -> None:
-    """Every provider answer, late refusal, crash point and turn outcome, then one more turn."""
+    """Every provider answer, refusal, crash point, replay order and turn outcome, then a turn."""
     run = _Run()
     first = _role_turn("turn-0", "planner")
     state = _turn(run, waiting_turn_state(first), first, fate, offer)
@@ -146,27 +176,128 @@ def test_an_interrupt_input_reaches_a_turn_at_least_once_with_one_receipt_per_oc
     state = _turn(run, state, second, "deliver", None)
     records = state.sessions.inputs
     assert all(len(receipts) == 1 for receipts in run.receipts.values())
-    delivered = {
-        row.input.input_id.root: row.receipt
-        for row in records
-        if isinstance(row.receipt, core.InputDelivered)
-    }
     assert [row for row in records if row.receipt is None] == []
-    mid_turn = offer.kept and fate == "deliver"
-    if mid_turn and offer.reject == "after-turn-end":
-        # Taken into the turn, then handed back at its end: the next turn gets a copy.
-        assert set(delivered) == {"input-0", "input-0.redelivery"}
-        assert delivered["input-0"].mid_turn
-        assert delivered["input-0.redelivery"].invocation == invocation(second)
-    elif mid_turn:
-        assert set(delivered) == {"input-0"}
-        assert delivered["input-0"].mid_turn
-        assert delivered["input-0"].invocation == invocation(first)
+    (row,) = records
+    assert isinstance(row.receipt, core.InputDelivered)
+    if offer.joins(fate):
+        assert row.receipt.mid_turn
+        assert row.receipt.invocation == invocation(first)
     else:
-        # The offer missed (or a crash hid whether it landed): the next turn reserves it.
-        assert set(delivered) == {"input-0"}
-        assert not delivered["input-0"].mid_turn
-        assert delivered["input-0"].invocation == invocation(second)
+        # The offer missed, was refused, or a crash hid whether it landed: the next turn takes it.
+        assert not row.receipt.mid_turn
+        assert row.receipt.invocation == invocation(second)
+
+
+def test_a_turn_that_ends_before_the_provider_takes_its_offer_leaves_it_for_the_next() -> None:
+    """The turn's acceptance commits right after the offer, before the shell asked anyone."""
+    run = _Run()
+    first = _role_turn("turn-0", "planner")
+    ref = invocation(first)
+    state = reload_step(waiting_turn_state(first), core.InputReservationRequested(invocation=ref))
+    (request,) = state.requests
+    state = run.record(state)
+    state = run.record(reload_step(state, core.SessionInputReceived(input=_interrupt())))
+    item = _interrupt()
+    offer = core.InputOfferedMidTurn(input_id=item.input_id, invocation=ref, now_at=0.0)
+    state = run.record(reload_step(state, offer))
+    ended = _fate_event("deliver", ref, request)
+    assert ended is not None
+    state = run.record(reload_step(state, ended))
+    (row,) = state.sessions.inputs
+    assert (row.offered_to, row.reserved_to, row.receipt) == (None, None, None)
+    # A take the shell commits after the turn ended changes nothing.
+    late = core.InputTakenMidTurn(input_id=item.input_id, invocation=ref, now_at=0.0)
+    assert reload_step(state, late).state.sessions == state.sessions
+    second = _role_turn("turn-1", "planner")
+    state = _turn(
+        run,
+        _with_inputs(waiting_turn_state(second), state.sessions.inputs),
+        second,
+        "deliver",
+        None,
+    )
+    (row,) = state.sessions.inputs
+    assert isinstance(row.receipt, core.InputDelivered)
+    assert row.receipt.invocation == invocation(second)
+    assert not row.receipt.mid_turn
+
+
+def _running_with_offer(*, taken: bool, refused: bool = False) -> core.CoreState:
+    """A run whose one running turn holds an interrupt input's offer, as the shell left it."""
+    spec = _role_turn("turn-0", "planner")
+    ref = invocation(spec)
+    item = _interrupt()
+    state = reload_step(waiting_turn_state(spec), core.InputReservationRequested(invocation=ref))
+    state = reload_step(state.state, core.SessionInputReceived(input=item))
+    offer = core.InputOfferedMidTurn(input_id=item.input_id, invocation=ref, now_at=0.0)
+    state = reload_step(state.state, offer)
+    if taken:
+        take = core.InputTakenMidTurn(input_id=item.input_id, invocation=ref, now_at=0.0)
+        state = reload_step(state.state, take)
+    return reload_step(state.state, _released(ref, item.input_id, refused=refused)).state
+
+
+_TAKEN_CASES = {
+    "never-taken": (False, False, core.InputDropReason.RUN_TERMINAL),
+    "taken": (True, False, core.InputDropReason.DELIVERY_UNKNOWN),
+    "taken-then-refused": (True, True, core.InputDropReason.RUN_TERMINAL),
+}
+
+
+@pytest.mark.parametrize("case", sorted(_TAKEN_CASES))
+def test_an_input_a_provider_took_that_no_turn_confirms_is_dropped_as_unknown(case: str) -> None:
+    """A host died after the provider took the message, and no later turn can confirm it.
+
+    The drop says the agent may have read it, unless the turn refused it.
+    """
+    taken, refused, expected = _TAKEN_CASES[case]
+    state = _running_with_offer(taken=taken, refused=refused)
+    (row,) = state.sessions.inputs
+    assert row.taken is (taken and not refused)
+    assert (row.offered_to, row.receipt) == (None, None)
+    closing = closing_state()
+    closing = closing.model_copy(
+        update={"sessions": core.SessionsState(inputs=state.sessions.inputs)}
+    )
+    (row,) = drain(closing).state.sessions.inputs
+    assert isinstance(row.receipt, core.InputDropped)
+    assert row.receipt.reason is expected
+
+
+def test_a_parallel_turn_never_reserves_an_input_offered_to_another() -> None:
+    """Two turns of one role run at once; an input offered to the first is not the second's."""
+    first, other = _role_turn("turn-0", "planner"), _role_turn("turn-1", "planner")
+    session = other.session.model_copy(update={"session_id": core.SessionId(root="session-1")})
+    second = other.model_copy(update={"session": session})
+    # The second turn waits on a live request, so core does not end it as stalled meanwhile.
+    a, b = waiting_turn_state(first), waiting_for_reservation(second)
+    state = a.model_copy(
+        update={
+            "records": b.records,
+            "sessions": a.sessions.model_copy(
+                update={
+                    "sessions": (*a.sessions.sessions, *b.sessions.sessions),
+                    "invocations": (*a.sessions.invocations, *b.sessions.invocations),
+                    "run_charges": (*a.sessions.run_charges, *b.sessions.run_charges),
+                }
+            ),
+        }
+    )
+    state = reload_step(state, core.InputReservationRequested(invocation=invocation(first))).state
+    item = _interrupt()
+    state = reload_step(state, core.SessionInputReceived(input=item)).state
+    (offer,) = core.mid_turn_offers(state)
+    assert offer.invocation == invocation(first)
+    state = reload_step(
+        state,
+        core.InputOfferedMidTurn(input_id=item.input_id, invocation=offer.invocation, now_at=0.0),
+    ).state
+    reserved = reload_step(state, core.InputReservationRequested(invocation=invocation(second)))
+    (request,) = reserved.requests
+    assert isinstance(request, core.DispatchTurn)
+    assert item not in request.inputs
+    (row,) = reserved.state.sessions.inputs
+    assert (row.offered_to, row.reserved_to) == (invocation(first), None)
 
 
 def test_an_offer_core_cannot_record_changes_nothing() -> None:

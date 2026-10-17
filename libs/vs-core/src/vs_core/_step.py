@@ -558,8 +558,8 @@ def validate_terminal_inputs(
     """Validate the pure input-finalization output before terminal publication.
 
     Preserve every occurrence, payload, sibling field and existing receipt.
-    Each pending occurrence gains one RUN_TERMINAL drop at now_at and exactly
-    one matching event. Finalization emits no requests or signals. Raises
+    Each pending occurrence gains one RUN_TERMINAL drop (DELIVERY_UNKNOWN for one a provider
+    took mid-turn) at now_at and exactly one matching event. Finalization emits no requests or signals. Raises
     ContractError naming the offending output field without changing state.
     """
     if change.requests or change.signals:
@@ -578,7 +578,8 @@ def validate_terminal_inputs(
             )
         if old.receipt is None and (
             not isinstance(new.receipt, InputDropped)
-            or new.receipt.reason != InputDropReason.RUN_TERMINAL
+            or new.receipt.reason
+            != (InputDropReason.DELIVERY_UNKNOWN if old.taken else InputDropReason.RUN_TERMINAL)
             or new.receipt.at != now_at
             or new.receipt.target != old.input.target
             or new.receipt.input_id != old.input.input_id
