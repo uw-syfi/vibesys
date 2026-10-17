@@ -188,7 +188,10 @@ A run paused on a provider capacity limit (`quota_paused`) resumes when the oper
   stays paused for the operator. A second `capacity_returns` replaces the first, emitting a new
   `quota_waiting`.
 
-The wait is held by the live run server: if the server ends, the run ends like any other. `when`
+The run's state records the wait. A run resumed after its server ended does not stay paused on
+a capacity limit, because the turns that stopped did not survive. It resumes, and the next turn
+that stops on the limit waits for capacity without asking again. A run the operator paused stays
+paused across a restart until the operator resumes it. `when`
 is a new request field, so a client discovers support for it by `WP-CAPABILITY-PROBE`: an older
 server rejects it as an unknown field.
 
