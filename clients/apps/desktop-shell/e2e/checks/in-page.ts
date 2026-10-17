@@ -480,6 +480,13 @@ export function chartSizeCheck(): Violation[] {
   return found;
 }
 
+/** The child of `body` that holds `element`; null when `element` is not inside `body`. */
+function columnOf(body: Element, element: Element): Element | null {
+  let column: Element | null = element;
+  while (column !== null && column.parentElement !== body) column = column.parentElement;
+  return column;
+}
+
 /**
  * A pane (`.vs-pane-body`) whose content column is narrower than the pane while its text wraps:
  * the user sees a block of text with dead space beside it. The column is the body's own child
@@ -490,26 +497,22 @@ export function chartSizeCheck(): Violation[] {
 export function paneFillCheck(): Violation[] {
   const found: Violation[] = [];
   const share = 0.85;
-  const boxes = textBoxes();
+  const wrapped = textBoxes().filter(box => !inCode(box.element) && lineCount(box.node) > 1);
   for (const body of document.querySelectorAll('.vs-pane-body')) {
-    if (!isShown(body)) continue;
     const style = getComputedStyle(body);
     const inner = body.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
     const reported = new Set<Element>();
-    for (const box of boxes) {
-      if (!body.contains(box.element) || inCode(box.element) || lineCount(box.node) < 2) continue;
-      let column: Element | null = box.element;
-      while (column !== null && column.parentElement !== body) column = column.parentElement;
+    for (const box of wrapped) {
+      const column = columnOf(body, box.element);
       if (column === null || reported.has(column)) continue;
       const used = column.getBoundingClientRect().width;
-      if (inner > 0 && used < inner * share) {
-        reported.add(column);
-        found.push({
-          check: 'pane-fill',
-          message: `a pane's content uses ${Math.round(used)} px of its ${Math.round(inner)} px (${Math.round((100 * used) / inner)}%) while text wraps: "${box.text.slice(0, 40)}"`,
-          where: describe(column),
-        });
-      }
+      if (inner <= 0 || used >= inner * share) continue;
+      reported.add(column);
+      found.push({
+        check: 'pane-fill',
+        message: `a pane's content uses ${Math.round(used)} px of its ${Math.round(inner)} px (${Math.round((100 * used) / inner)}%) while text wraps: "${box.text.slice(0, 40)}"`,
+        where: describe(column),
+      });
     }
   }
   return found;
@@ -536,4 +539,5 @@ export const HELPERS: readonly ((...args: never[]) => unknown)[] = [
   stripMarks,
   markColors,
   legendColors,
+  columnOf,
 ];

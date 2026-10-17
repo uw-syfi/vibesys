@@ -100,7 +100,7 @@ export const SIZE: Readonly<Record<SizeToken, number>> = {
 };
 
 /**
- * The longest line of running prose, in characters: a paragraph is capped here and wraps, while
+ * The longest line of a paragraph, in characters: a paragraph is capped here and wraps, while
  * the column that holds it fills its pane (a cap on a column is dead space beside it).
  */
 export const PROSE_MEASURE_CH = 105;
