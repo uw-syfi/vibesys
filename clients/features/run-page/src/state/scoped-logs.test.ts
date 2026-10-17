@@ -1,9 +1,10 @@
 import {expect, test} from 'bun:test';
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun} from '@vibesys/hosts';
+import {emptyLogView, type LogView} from '@vibesys/logs';
 import {Seeded} from '@vibesys/store/testing';
 import {type RunPageState, runPageInitial} from './index.js';
-import {scopedLogs} from './scoped-logs.js';
+import {paneLines, scopedLogs} from './scoped-logs.js';
 
 type Owner = LogStream['owner'];
 
@@ -20,7 +21,11 @@ function stream(id: string, owner: Owner, live: boolean): LogStream {
   };
 }
 
-function pageState(streams: readonly LogStream[], selected: string | null = null): RunPageState {
+function pageState(
+  streams: readonly LogStream[],
+  selected: string | null = null,
+  views: Readonly<Record<string, LogView>> = {},
+): RunPageState {
   const run: HostRun = {
     id: 'a1b2c3d4e5f6',
     projectRoot: '~/queue-rs',
@@ -42,6 +47,7 @@ function pageState(streams: readonly LogStream[], selected: string | null = null
     record: {kind: 'live', run},
     logs: {kind: 'listed', instanceId: run.id, streams},
     selected,
+    views,
   };
 }
 
@@ -117,4 +123,46 @@ test('startup is last, and the groups that write or wrote last come first, for a
     const writing = names.map(name => owner(name).some(item => item.live));
     expect(writing).toEqual([...writing].sort((a, b) => Number(b) - Number(a)));
   }
+});
+
+function viewOf(lines: readonly string[]): LogView {
+  return {
+    ...emptyLogView(),
+    lines: lines.map(text => ({text, runs: [{length: text.length, pipe: 'stdout'}]})),
+  };
+}
+
+function narration(message: string): string {
+  const at = '2026-10-15T16:36:20+00:00';
+  return JSON.stringify({at, level: 'INFO', logger: 'run', thread: 'main', message});
+}
+
+test('the narration is listed once: its label already says what the owner would', () => {
+  const logs = scopedLogs(pageState(restarted(1)), {kind: 'run'});
+  const leads = Object.fromEntries(logs.streams.map(item => [item.id, item.lead]));
+  expect(leads['narration']).toBeNull();
+  expect(leads['gate']).toBe('Gates');
+});
+
+test('developer boot timing stays out of the narration unless diagnostics are asked for', () => {
+  const lines = [
+    narration('boot span run_preamble: 100ms'),
+    narration('started on chelan4'),
+    'boot span context: 431ms',
+    narration('boot span context.project_open: 12ms (raised ValueError)'),
+    'round 2 started',
+  ];
+  const state = pageState(restarted(1), null, {
+    narration: viewOf(lines),
+    gate: viewOf(['boot span build: 5ms']),
+  });
+  expect(paneLines(state, 'narration').map(line => line.text)).toEqual([
+    '16:36:20 INFO started on chelan4',
+    'round 2 started',
+  ]);
+  expect(paneLines(state, 'narration', true)).toHaveLength(5);
+  // Only the narration is the runtime's own voice: a gate's output is shown as written.
+  expect(paneLines(state, 'gate').map(line => line.text)).toEqual(['boot span build: 5ms']);
+  const last = scopedLogs(state, {kind: 'run'}).streams.find(item => item.id === 'narration');
+  expect(last?.lastLine).toBe('round 2 started');
 });

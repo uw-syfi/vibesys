@@ -44,6 +44,8 @@ function scopeSpans(scope: LogScope): ReadonlySet<string> | null {
 /** One stream of a scope, as a row: its owner, whether it is still written, and its last line. */
 interface ScopedStream {
   readonly id: string;
+  /** The owner to show beside the label, null when the label already says it (the narration). */
+  readonly lead: LogGroupName | null;
   /** What repeats: the startup step a stream ran (a restart or a resume runs it again), else null. */
   readonly repeats: string | null;
   readonly owner: LogGroupName;
@@ -87,17 +89,38 @@ export interface ScopedLogs {
 
 const lineCache = new WeakMap<LogView, readonly LogLineView[]>();
 
+/** The runtime's boot-stage timing, as the narration shows it (`boot span <name>: <n>ms`). */
+const BOOT_TIMING = /^(?:\d\d:\d\d:\d\d \w+ )?boot span \S+: \d+ms/;
+
+/** Whether a line is developer boot timing rather than something the run says to its user. */
+function isBootTiming(text: string): boolean {
+  return BOOT_TIMING.test(text);
+}
+
+function isNarration(state: RunPageState, streamId: string): boolean {
+  return listedStreams(state).some(
+    stream => stream.id === streamId && stream.owner['kind'] === 'run_narration',
+  );
+}
+
 /**
  * A stream's lines for `LogPane`, computed once per view: a live log of tens of thousands of lines
- * is re-read on every render of the screen, but only changes when its view does.
+ * is re-read on every render of the screen, but only changes when its view does. The run
+ * narration leaves out the runtime's boot timing, which is for developers, unless `diagnostics`.
  */
-export function paneLines(state: RunPageState, streamId: string | null): readonly LogLineView[] {
+export function paneLines(
+  state: RunPageState,
+  streamId: string | null,
+  diagnostics = false,
+): readonly LogLineView[] {
   if (streamId === null) return [];
   const view = state.views[streamId];
   if (view === undefined) return [];
+  if (diagnostics) return streamLines(state, streamId);
   const cached = lineCache.get(view);
   if (cached !== undefined) return cached;
-  const lines = streamLines(state, streamId);
+  const all = streamLines(state, streamId);
+  const lines = isNarration(state, streamId) ? all.filter(line => !isBootTiming(line.text)) : all;
   lineCache.set(view, lines);
   return lines;
 }
@@ -182,6 +205,7 @@ export function scopedLogs(state: RunPageState, scope: LogScope): ScopedLogs {
       .map(stream => ({
         id: stream.id,
         repeats: stage.get(stream.id) ?? null,
+        lead: stream.label.replace(/ · \d+$/, '') === group.name ? null : group.name,
         owner: group.name,
         label: stream.label,
         live: stream.live,

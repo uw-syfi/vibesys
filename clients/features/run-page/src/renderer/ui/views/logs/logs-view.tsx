@@ -65,7 +65,7 @@ function StreamRow(props: {
       id={stream.id}
       title={stream.label}
       {...(stream.lastLine === null ? {} : {summary: stream.lastLine})}
-      {...(props.byOwner && !row.nested ? {lead: stream.owner} : {})}
+      {...(props.byOwner && !row.nested && stream.lead !== null ? {lead: stream.lead} : {})}
       {...(row.nested ? {guides: ['tee']} : {})}
       state={liveState(stream.live)}
       select={() => dispatch({type: 'select-stream', streamId: stream.id})}
