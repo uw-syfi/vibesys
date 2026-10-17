@@ -36,6 +36,7 @@ from vs_agent.api import (
     SessionPersistenceError,
     SessionResumeError,
     SessionScope,
+    SteerOutcome,
     Unknown,
 )
 from vs_agent.api.testing import (
@@ -869,11 +870,25 @@ def test_release_refuses_while_an_invocation_is_active_and_cancel_ignores_idle_t
     assert "active invocation" in seen[0]
 
 
-@pytest.mark.parametrize("method", ["cancel", "release"])
+def test_a_steer_reaches_no_turn_but_the_running_invocation(harness: _Harness) -> None:
+    seen: list[SteerOutcome] = []
+
+    def during_turn() -> None:
+        seen.append(harness.sessions.steer(KEY, "idle", "text", on_rejected=lambda: None))
+
+    harness.boundary.effect = during_turn
+    assert isinstance(harness.sessions.resume(KEY, harness.message, "busy"), Completed)
+    after = harness.sessions.steer(KEY, "busy", "text", on_rejected=lambda: None)
+    assert seen == [SteerOutcome.NO_RUNNING_TURN]
+    assert after is SteerOutcome.NO_RUNNING_TURN
+
+
+@pytest.mark.parametrize("method", ["cancel", "steer", "release"])
 def test_cancel_and_release_reject_a_nondurable_key(harness: _Harness, method: str) -> None:
     key = AgentSessionKey(SessionScope.ROLE, "worker")
     call = {
         "cancel": lambda: harness.sessions.cancel(key, "inv"),
+        "steer": lambda: harness.sessions.steer(key, "inv", "text", on_rejected=lambda: None),
         "release": lambda: harness.sessions.release(key),
     }[method]
     with pytest.raises(SessionConfigurationError, match="not durable"):

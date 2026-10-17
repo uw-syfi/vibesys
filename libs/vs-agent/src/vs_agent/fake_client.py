@@ -344,6 +344,13 @@ class FakeAgentClient:
         for refusal in refusals:
             refusal()
 
+    def steer_session(
+        self, key: AgentSessionKey, text: str, *, on_rejected: Callable[[], None]
+    ) -> SteerOutcome:
+        """Offer *text* to the turn in flight, answering as scripted; the fake runs one key."""
+        del key
+        return self.steer(text, on_rejected=on_rejected)
+
     def cancel_session(self, key: AgentSessionKey) -> None:
         """Record a cancellation of one key and release turns waiting for a cancellation."""
         self.cancelled_sessions.append(key)
