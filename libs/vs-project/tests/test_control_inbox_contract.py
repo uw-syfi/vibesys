@@ -39,6 +39,7 @@ _PAYLOADS = st.binary(max_size=40)
 _OPERATIONS = st.lists(
     st.one_of(
         st.tuples(st.just("post"), _IDS, _PAYLOADS),
+        st.tuples(st.just("post"), st.just("same"), st.sampled_from([b"one", b"two"])),
         st.tuples(st.just("settle"), _IDS),
         st.tuples(st.just("reject"), _IDS, st.text(max_size=20)),
         st.tuples(st.just("reopen")),
@@ -70,14 +71,18 @@ class _Model:
     rejected: dict[str, tuple[bytes, str]] = field(default_factory=dict)
 
 
-def _apply(model: _Model, operation: tuple[object, ...]) -> None:
+def _apply(model: _Model, operation: tuple[object, ...]) -> bool:
+    """Apply ``operation`` to the model; False when the inbox must refuse it."""
     match operation:
         case ("post", str(request_id), bytes(payload)):
+            if model.pending.get(request_id, payload) != payload:
+                return False
             model.pending[request_id] = payload
         case ("settle", str(request_id)):
             model.pending.pop(request_id, None)
         case ("reject", str(request_id), str(reason)) if request_id in model.pending:
             model.rejected[request_id] = (model.pending.pop(request_id), reason)
+    return True
 
 
 def _file_inbox(tmp_path: Path) -> Callable[[], ControlInbox]:
@@ -105,7 +110,13 @@ def test_an_inbox_lists_what_was_posted_and_neither_settled_nor_rejected(
         if operation == ("reopen",):
             inbox = reopen()
             continue
-        _apply(model, operation)
+        if not _apply(model, operation):
+            _, request_id, payload = operation
+            assert isinstance(request_id, str)
+            assert isinstance(payload, bytes)
+            with pytest.raises(ProjectStateError, match="pending with a different request"):
+                inbox.post(request_id, payload)
+            continue
         match operation:
             case ("post", str(request_id), bytes(payload)):
                 inbox.post(request_id, payload)
@@ -140,3 +151,26 @@ def test_a_file_inbox_ignores_files_that_are_not_requests(tmp_path: Path) -> Non
 
     assert inbox.pending() == (InboxEntry("r1", b"{}"),)
     assert isinstance(inbox, FileControlInbox)
+
+
+@pytest.mark.parametrize("bad", ["symlink", "directory"])
+def test_a_file_inbox_lists_an_unreadable_entry_with_its_reason(tmp_path: Path, bad: str) -> None:
+    """One bad entry never hides the others or fails the run; rejecting it records why."""
+    project, run_id = _project_with_run(tmp_path)
+    inbox = project.state.control_inbox(run_id)
+    inbox.post("good", b"{}")
+    inbox.post("target", b"{}")
+    pending = next(tmp_path.rglob("good.json")).parent
+    if bad == "symlink":
+        (pending / "bad.json").symlink_to(pending / "target.json")
+    else:
+        (pending / "bad.json").mkdir()
+
+    listed = {entry.request_id: entry for entry in inbox.pending()}
+    assert listed["good"] == InboxEntry("good", b"{}")
+    assert listed["bad"].payload == b""
+    assert listed["bad"].unreadable
+
+    inbox.reject("bad", "unreadable")
+    assert inbox.rejected() == (RejectedEntry("bad", b"", "unreadable"),)
+    assert {entry.request_id for entry in inbox.pending()} >= {"good", "target"}

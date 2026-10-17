@@ -48,10 +48,16 @@ def validate_request_id(request_id: str) -> str:
 
 @dataclass(frozen=True)
 class InboxEntry:
-    """One pending request: its id and the bytes the operator wrote."""
+    """One pending request: its id and the bytes the operator wrote.
+
+    ``unreadable`` says why the entry could not be read (a directory, a symlink, a file the
+    run may not read), and ``payload`` is then empty. The run rejects such an entry with
+    that reason instead of failing.
+    """
 
     request_id: str
     payload: bytes
+    unreadable: str | None = None
 
 
 @dataclass(frozen=True)
@@ -66,14 +72,18 @@ class RejectedEntry:
 class ControlInbox(Protocol):
     """Durable requests for one run, in the order of their ids.
 
-    ``post`` is idempotent per id. ``pending`` lists what has not been settled or rejected,
-    ordered by id. ``settle`` removes a request the run applied; ``reject`` moves one it
-    could not apply aside, with the reason. Both are idempotent, and neither touches another
-    request.
+    ``post`` is idempotent per id, and refuses a different payload under a pending id.
+    ``pending`` lists what has not been settled or rejected, ordered by id; it never fails on
+    one bad entry. ``settle`` removes a request the run applied; ``reject`` moves one it could
+    not apply aside, with the reason. Both are idempotent, and neither touches another request.
     """
 
     def post(self, request_id: str, payload: bytes) -> None:
-        """Hold ``payload`` as the request ``request_id``, replacing an identical post."""
+        """Hold ``payload`` as the request ``request_id``.
+
+        Posting the same payload again is one request; a different payload under an id that
+        is still pending raises ``ProjectStateError``.
+        """
         ...
 
     def pending(self) -> tuple[InboxEntry, ...]:
@@ -105,19 +115,30 @@ class FileControlInbox:
         self._namespace = namespace
 
     def post(self, request_id: str, payload: bytes) -> None:
-        """Write the request's file atomically."""
-        self._namespace.write_bytes(
-            _PENDING / f"{validate_request_id(request_id)}{_SUFFIX}", payload
-        )
+        """Write the request's file atomically, unless its id holds a different request."""
+        path = _PENDING / f"{validate_request_id(request_id)}{_SUFFIX}"
+        held = self._namespace.read_bytes(path)
+        if held is not None and held != payload:
+            message = f"control request {request_id!r} is pending with a different request"
+            raise ProjectStateError(message)
+        self._namespace.write_bytes(path, payload)
 
     def pending(self) -> tuple[InboxEntry, ...]:
-        """Read every request file, ordered by id; a file that vanished meanwhile is skipped."""
+        """Read every request file, ordered by id; a file that vanished meanwhile is skipped.
+
+        An entry that cannot be read is listed with the reason, so one bad entry never hides
+        the others or fails the run.
+        """
         entries = []
-        for name in self._namespace.entries(_PENDING):
+        for name in self._namespace.entries(_PENDING, list_symlinks=True):
             request_id = _request_id_of(name)
             if request_id is None:
                 continue
-            payload = self._namespace.read_bytes(_PENDING / name)
+            try:
+                payload = self._namespace.read_bytes(_PENDING / name)
+            except ProjectStateError as error:
+                entries.append(InboxEntry(request_id, b"", unreadable=str(error)))
+                continue
             if payload is not None:
                 entries.append(InboxEntry(request_id, payload))
         return tuple(sorted(entries, key=lambda entry: entry.request_id))
@@ -127,9 +148,17 @@ class FileControlInbox:
         self._namespace.delete(_PENDING / f"{validate_request_id(request_id)}{_SUFFIX}")
 
     def reject(self, request_id: str, reason: str) -> None:
-        """Write the request and its reason under ``rejected/``, then delete the pending file."""
+        """Write the request and its reason under ``rejected/``, then delete the pending file.
+
+        An entry the run cannot read or delete (a directory, a symlink) gets only its reason;
+        it stays where the operator put it, for the operator to remove.
+        """
         name = validate_request_id(request_id)
-        payload = self._namespace.read_bytes(_PENDING / f"{name}{_SUFFIX}")
+        try:
+            payload = self._namespace.read_bytes(_PENDING / f"{name}{_SUFFIX}")
+        except ProjectStateError:
+            self._namespace.write_bytes(_REJECTED / f"{name}{_REASON_SUFFIX}", reason.encode())
+            return
         if payload is None:
             return
         self._namespace.write_bytes(_REJECTED / f"{name}{_SUFFIX}", payload)
@@ -137,17 +166,22 @@ class FileControlInbox:
         self._namespace.delete(_PENDING / f"{name}{_SUFFIX}")
 
     def rejected(self) -> tuple[RejectedEntry, ...]:
-        """Read every rejected request and its reason, ordered by id."""
+        """Read every rejected request and its reason, ordered by id.
+
+        A request rejected because it could not be read has an empty payload.
+        """
         found = []
         for name in self._namespace.entries(_REJECTED):
-            request_id = _request_id_of(name)
-            if request_id is None:
+            if not name.endswith(_REASON_SUFFIX):
                 continue
-            payload = self._namespace.read_bytes(_REJECTED / name)
-            reason = self._namespace.read_bytes(_REJECTED / f"{request_id}{_REASON_SUFFIX}")
-            if payload is not None:
-                text = "" if reason is None else reason.decode(errors="replace")
-                found.append(RejectedEntry(request_id, payload, text))
+            request_id = name.removesuffix(_REASON_SUFFIX)
+            if not _REQUEST_ID.fullmatch(request_id):
+                continue
+            reason = self._namespace.read_bytes(_REJECTED / name)
+            payload = self._namespace.read_bytes(_REJECTED / f"{request_id}{_SUFFIX}")
+            if reason is not None:
+                text = reason.decode(errors="replace")
+                found.append(RejectedEntry(request_id, payload or b"", text))
         return tuple(sorted(found, key=lambda entry: entry.request_id))
 
 
@@ -160,8 +194,12 @@ class FakeControlInbox:
         self._rejected: dict[str, RejectedEntry] = {}
 
     def post(self, request_id: str, payload: bytes) -> None:
-        """Hold the request."""
-        self._pending[validate_request_id(request_id)] = payload
+        """Hold the request, unless its id holds a different one."""
+        held = self._pending.get(validate_request_id(request_id))
+        if held is not None and held != payload:
+            message = f"control request {request_id!r} is pending with a different request"
+            raise ProjectStateError(message)
+        self._pending[request_id] = payload
 
     def pending(self) -> tuple[InboxEntry, ...]:
         """The held requests, ordered by id."""

@@ -482,8 +482,14 @@ class StateNamespace:
         except OSError as exc:
             raise ProjectStateError.state_file_read_failed(path, exc) from exc
 
-    def entries(self, relative_directory: str | PurePosixPath) -> tuple[str, ...]:
-        """List direct state-directory entry names without following symlinks."""
+    def entries(
+        self, relative_directory: str | PurePosixPath, *, list_symlinks: bool = False
+    ) -> tuple[str, ...]:
+        """List direct state-directory entry names without following symlinks.
+
+        A symlink among them raises, unless ``list_symlinks``: then it is listed by name like
+        any entry, for a caller that reads each entry on its own and refuses the bad ones.
+        """
         directory = self._resolve_file(relative_directory)
         if not directory.exists():
             return ()
@@ -494,7 +500,7 @@ class StateNamespace:
         except OSError as exc:
             raise ProjectStateError.state_directory_list_failed(directory, exc) from exc
         for entry in entries:
-            if entry.is_symlink():
+            if entry.is_symlink() and not list_symlinks:
                 raise ProjectStateError.state_entry_symlink(entry)
         return tuple(entry.name for entry in entries)
 
