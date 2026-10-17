@@ -23,30 +23,80 @@ export interface LogsViewProps extends ViewBase {
   readonly dispatch: (action: RunPageAction) => void;
 }
 
+type Dispatch = (action: RunPageAction) => void;
+type Row = ScopedLogs['rows'][number];
+
+function liveState(live: boolean): {tone: 'live' | 'neutral'; label: string} {
+  return live ? {tone: 'live', label: 'Writing'} : {tone: 'neutral', label: 'Closed'};
+}
+
+/** The repeats of a startup step in one row: choosing it shows the newest, and opens it. */
+function FoldRow(props: {
+  readonly id: string;
+  readonly row: Extract<Row, {kind: 'fold'}>;
+  readonly byOwner: boolean;
+  readonly dispatch: Dispatch;
+}): JSX.Element {
+  const {row, dispatch} = props;
+  return (
+    <PickRow
+      id={row.id}
+      title={row.label}
+      figure={`${row.open ? '▾' : '▸'} ×${row.count}`}
+      figureTone="muted"
+      {...(row.lastLine === null ? {} : {summary: row.lastLine})}
+      {...(props.byOwner ? {lead: 'Startup'} : {})}
+      state={liveState(row.live)}
+      select={() => dispatch({type: 'select-stream', streamId: row.latest})}
+    />
+  );
+}
+
+function StreamRow(props: {
+  readonly id: string;
+  readonly row: Extract<Row, {kind: 'stream'}>;
+  readonly byOwner: boolean;
+  readonly dispatch: Dispatch;
+}): JSX.Element {
+  const {row, dispatch} = props;
+  const {stream} = row;
+  return (
+    <PickRow
+      id={stream.id}
+      title={stream.label}
+      {...(stream.lastLine === null ? {} : {summary: stream.lastLine})}
+      {...(props.byOwner && !row.nested ? {lead: stream.owner} : {})}
+      {...(row.nested ? {guides: ['tee']} : {})}
+      state={liveState(stream.live)}
+      select={() => dispatch({type: 'select-stream', streamId: stream.id})}
+    />
+  );
+}
+
 function StreamRows(props: {
   readonly logs: ScopedLogs;
   readonly byOwner: boolean;
-  readonly dispatch: (action: RunPageAction) => void;
+  readonly dispatch: Dispatch;
 }): JSX.Element {
-  const {dispatch} = props;
+  const {byOwner, dispatch} = props;
   return (
     <PickList
       label="Log streams"
       {...(props.logs.shown === null ? {} : {selected: props.logs.shown})}
     >
-      {props.logs.streams.map(stream => (
-        <PickRow
-          key={stream.id}
-          id={stream.id}
-          title={stream.label}
-          {...(stream.lastLine === null ? {} : {summary: stream.lastLine})}
-          {...(props.byOwner ? {lead: stream.owner} : {})}
-          state={
-            stream.live ? {tone: 'live', label: 'Writing'} : {tone: 'neutral', label: 'Closed'}
-          }
-          select={() => dispatch({type: 'select-stream', streamId: stream.id})}
-        />
-      ))}
+      {props.logs.rows.map(row =>
+        row.kind === 'fold' ? (
+          <FoldRow key={row.id} id={row.id} row={row} byOwner={byOwner} dispatch={dispatch} />
+        ) : (
+          <StreamRow
+            key={row.stream.id}
+            id={row.stream.id}
+            row={row}
+            byOwner={byOwner}
+            dispatch={dispatch}
+          />
+        ),
+      )}
     </PickList>
   );
 }

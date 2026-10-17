@@ -4,6 +4,7 @@
  * set it, so a step may have no stream, and the face says so rather than guess.
  */
 
+import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {LogView} from '@vibesys/logs';
 import type {Candidate, CandidateStep} from '@vibesys/run-state/candidates';
 import type {RunPageState} from './run-page.js';
@@ -43,6 +44,8 @@ function scopeSpans(scope: LogScope): ReadonlySet<string> | null {
 /** One stream of a scope, as a row: its owner, whether it is still written, and its last line. */
 interface ScopedStream {
   readonly id: string;
+  /** What repeats: the startup step a stream ran (a restart or a resume runs it again), else null. */
+  readonly repeats: string | null;
   readonly owner: LogGroupName;
   readonly label: string;
   readonly live: boolean;
@@ -50,9 +53,32 @@ interface ScopedStream {
   readonly lastLine: string | null;
 }
 
+/**
+ * A row of the stream list: one stream, or the repeats of one startup step folded into a row with
+ * a count. A fold is open while the shown stream is one of its streams, and then lists them.
+ */
+export type ScopedRow =
+  | {readonly kind: 'stream'; readonly stream: ScopedStream; readonly nested: boolean}
+  | {
+      readonly kind: 'fold';
+      readonly id: string;
+      readonly label: string;
+      readonly count: number;
+      readonly live: boolean;
+      readonly lastLine: string | null;
+      /** The newest of its streams: what choosing the fold shows. */
+      readonly latest: string;
+      readonly open: boolean;
+    };
+
 export interface ScopedLogs {
-  /** The scope's streams grouped by owner, oldest first within a group. */
+  /**
+   * The scope's streams grouped by owner, oldest first within a group. The groups with running or
+   * the newest work come first, and the startup steps, which the timeline shows, last.
+   */
   readonly streams: readonly ScopedStream[];
+  /** `streams` as the list shows them, repeated startup steps folded. */
+  readonly rows: readonly ScopedRow[];
   /** The stream the pane shows: the selected one if it is in scope, else a default. */
   readonly shown: string | null;
   /** What to say instead of lines, when the scope has no streams. */
@@ -84,27 +110,92 @@ function ownedStreams(state: RunPageState, spans: ReadonlySet<string> | null): S
   return new Set(streams.filter(stream => owner(stream.owner['span_id'])).map(stream => stream.id));
 }
 
+function listedStreams(state: RunPageState): readonly LogStream[] {
+  return state.logs.kind === 'listing' || state.logs.kind === 'listed' ? state.logs.streams : [];
+}
+
+/** Startup steps last; the others by whether one is still written, then by the newest stream. */
+function orderGroups(
+  streams: readonly ScopedStream[],
+  listed: readonly LogStream[],
+): ScopedStream[] {
+  const position = new Map(listed.map((stream, index) => [stream.id, index]));
+  const rank = (owner: LogGroupName): readonly [number, number] => {
+    const own = streams.filter(stream => stream.owner === owner);
+    const newest = Math.max(...own.map(stream => position.get(stream.id) ?? -1));
+    return [own.some(stream => stream.live) ? 0 : 1, -newest];
+  };
+  const owners = [...new Set(streams.map(stream => stream.owner))];
+  const ranked = owners
+    .filter(owner => owner !== 'Startup')
+    .map(owner => ({owner, key: rank(owner)}))
+    .sort((a, b) => a.key[0] - b.key[0] || a.key[1] - b.key[1])
+    .map(item => item.owner);
+  const order: readonly LogGroupName[] = owners.includes('Startup')
+    ? [...ranked, 'Startup']
+    : ranked;
+  return order.flatMap(owner => streams.filter(stream => stream.owner === owner));
+}
+
+function foldRows(streams: readonly ScopedStream[], shown: string | null): ScopedRow[] {
+  const rows: ScopedRow[] = [];
+  const done = new Set<string>();
+  for (const stream of streams) {
+    const repeats = stream.repeats;
+    const same = repeats === null ? [] : streams.filter(other => other.repeats === repeats);
+    if (repeats === null || same.length < 2) {
+      rows.push({kind: 'stream', stream, nested: false});
+      continue;
+    }
+    if (done.has(repeats)) continue;
+    done.add(repeats);
+    const latest = same.at(-1) ?? stream;
+    const open = same.some(other => other.id === shown);
+    rows.push({
+      kind: 'fold',
+      id: `fold ${repeats}`,
+      label: stream.label.replace(/ · \d+$/, ''),
+      count: same.length,
+      live: same.some(other => other.live),
+      lastLine: latest.lastLine,
+      latest: latest.id,
+      open,
+    });
+    if (open) for (const other of same) rows.push({kind: 'stream', stream: other, nested: true});
+  }
+  return rows;
+}
+
 /** The scope's streams, the one shown, and the notice for an empty scope. */
 export function scopedLogs(state: RunPageState, scope: LogScope): ScopedLogs {
   const owned = ownedStreams(state, scopeSpans(scope));
-  const streams: ScopedStream[] = logGroups(state).flatMap(group =>
+  const listed = listedStreams(state);
+  const stage = new Map(
+    listed.map(stream => [
+      stream.id,
+      stream.owner['kind'] === 'startup_step' ? String(stream.owner['stage']) : null,
+    ]),
+  );
+  const unordered: ScopedStream[] = logGroups(state).flatMap(group =>
     group.streams
       .filter(stream => owned === null || owned.has(stream.id))
       .map(stream => ({
         id: stream.id,
+        repeats: stage.get(stream.id) ?? null,
         owner: group.name,
         label: stream.label,
         live: stream.live,
         lastLine: paneLines(state, stream.id).at(-1)?.text ?? null,
       })),
   );
+  const streams = orderGroups(unordered, listed);
   const selected = state.selected;
   let shown: string | null = null;
   if (selected !== null && streams.some(stream => stream.id === selected)) shown = selected;
   else if (owned === null) shown = shownStream(state);
   else shown = (streams.find(stream => stream.live) ?? streams.at(-1))?.id ?? null;
   const notice = streams.length > 0 ? null : emptyNotice(state, scope);
-  return {streams, shown, notice};
+  return {streams, rows: foldRows(streams, shown), shown, notice};
 }
 
 function emptyNotice(state: RunPageState, scope: LogScope): string | null {
