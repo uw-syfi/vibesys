@@ -36,7 +36,15 @@ import {settled, type WelcomeBridge} from '@vibesys/ipc';
 import type {RecentRun, RunRef} from '@vibesys/runs';
 import {sameRun} from '@vibesys/runs';
 import type {Store} from '@vibesys/store';
-import {applyTheme, Card, EmptyState, Page, type ThemeTarget, Wordmark} from '@vibesys/ui';
+import {
+  applyTheme,
+  Card,
+  EmptyState,
+  Page,
+  type ThemeTarget,
+  WindowFrame,
+  Wordmark,
+} from '@vibesys/ui';
 import {type JSX, useMemo, useSyncExternalStore} from 'react';
 
 /** The clock the shell's screens time their bounds on: the window's own timers, in `main.tsx`. */
@@ -281,7 +289,8 @@ export function Shell(props: {
 }
 
 /**
- * A run window: the Run screen for `run` alone, with no sidebar. The sidebar's store still runs,
+ * A run window: the Run screen for `run` alone, with no sidebar, below the same title-bar row as
+ * the main window's. The sidebar's store still runs,
  * for the hosts' listings the run's record is read from.
  */
 export function RunWindow(props: {
@@ -290,11 +299,13 @@ export function RunWindow(props: {
 }): JSX.Element {
   const sidebarState = useStore(props.stores.sidebar.store);
   return (
-    <RunRoute
-      run={props.run}
-      sidebar={sidebarState}
-      stores={props.stores}
-      place={runWindowPlace(props.stores)}
-    />
+    <WindowFrame>
+      <RunRoute
+        run={props.run}
+        sidebar={sidebarState}
+        stores={props.stores}
+        place={runWindowPlace(props.stores)}
+      />
+    </WindowFrame>
   );
 }

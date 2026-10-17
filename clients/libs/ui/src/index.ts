@@ -5,7 +5,7 @@
  * `./components.css` once.
  */
 export {applyTheme, type ThemeTarget} from './apply-theme.js';
-export {AppFrame} from './components/app-frame.js';
+export {AppFrame, WindowFrame} from './components/app-frame.js';
 export {
   Button,
   type ButtonAction,

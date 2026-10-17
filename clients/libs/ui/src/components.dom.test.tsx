@@ -193,7 +193,7 @@ describe('AppFrame', () => {
       label="Side"
       nav={<Button text="New run" press={() => undefined} />}
       navHidden={hidden}
-      reveal={
+      control={
         <Button
           icon="sidebar"
           label="Show sidebar"
@@ -212,12 +212,16 @@ describe('AppFrame', () => {
     expect(nav.hasAttribute('inert')).toBe(false);
     expect(nav.hasAttribute('aria-hidden')).toBe(false);
     expect(container.querySelector('.vs-app-strip')).toBeNull();
+    expect(one(container, '.vs-app-titlebar-control button').getAttribute('aria-label')).toBe(
+      'Show sidebar',
+    );
 
     const hidden = await mount(frame(true));
     const hiddenNav = one(hidden, 'nav');
     expect(hiddenNav.hasAttribute('inert')).toBe(true);
     expect(hiddenNav.getAttribute('aria-hidden')).toBe('true');
-    const reveal = one(one(hidden, '.vs-app-main'), '.vs-app-strip button');
+    expect(one(hidden, '.vs-app-main .vs-app-strip').textContent).toBe('');
+    const reveal = one(hidden, '.vs-app-titlebar-control button');
     expect(reveal.getAttribute('aria-label')).toBe('Show sidebar');
     expect(reveal.textContent).toBe('');
     expect(one(hidden, 'main').textContent).toBe('Main');
