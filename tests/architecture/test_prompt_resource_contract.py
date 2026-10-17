@@ -436,6 +436,7 @@ def render_packaged_prompts(installed: Path) -> int:
     }
     context["prompts"] = ("Review the candidate.",)
     context["steers"] = ({"mode": "steer", "text": "Focus on the cache."},)
+    context["guidance"] = ("Keep the weights in bf16.",)
     hidden = (
         build_project_path_policy(workspace, evaluator_source=None).resolve(workspace).hidden_paths
     )
