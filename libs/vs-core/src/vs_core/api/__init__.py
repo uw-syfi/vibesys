@@ -85,6 +85,7 @@ from vs_core._search_run import (
 from vs_core._session_scope import write_turn_authority
 from vs_core._step import (
     CoreReducers,
+    mid_turn_offers,
     step,
     suspension_refusal,
     validate_terminal_inputs,
@@ -581,6 +582,7 @@ from vs_core.types.session_inputs import (
     InputMode,
     InputReceipt,
     InputRecord,
+    MidTurnOffer,
     SessionInput,
 )
 from vs_core.types.sessions import (
@@ -594,6 +596,8 @@ from vs_core.types.sessions import (
     DispatchTurn,
     EnsureSession,
     InputAcceptanceObserved,
+    InputMidTurnReleased,
+    InputOfferedMidTurn,
     InputReservationReleased,
     InputReservationRequested,
     InspectTurn,
@@ -1000,7 +1004,9 @@ __all__ = [
     "InputDropReason",
     "InputDropped",
     "InputId",
+    "InputMidTurnReleased",
     "InputMode",
+    "InputOfferedMidTurn",
     "InputReceipt",
     "InputRecord",
     "InputReservationReleased",
@@ -1065,6 +1071,7 @@ __all__ = [
     "MeasurementSubmissionObserved",
     "MessageDelivered",
     "MessageDropped",
+    "MidTurnOffer",
     "Moment",
     "NoWinner",
     "NotOpened",
@@ -1391,6 +1398,7 @@ __all__ = [
     "latest_comparisons",
     "ledger_refs",
     "markdown_prose",
+    "mid_turn_offers",
     "minutes",
     "moment_of",
     "operation_result",

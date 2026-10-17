@@ -83,6 +83,8 @@ EXPECTED_TARGET = {
                 "interrupt_requested",
                 "session_input_received",
                 "input_withdraw_requested",
+                "input_offered_mid_turn",
+                "input_mid_turn_released",
                 "input_reservation_requested",
                 "input_acceptance_observed",
                 "input_reservation_released",

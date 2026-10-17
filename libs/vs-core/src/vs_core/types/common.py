@@ -843,6 +843,10 @@ class InputMode(StrEnum):
     """How an input reaches the turns of its target; interrupt metadata grants no refund authority.
 
     ``NEXT_TURN`` is reserved by the first matching turn and delivered to it once.
+    ``INTERRUPT`` is first offered to a matching session turn that is running, and joins it
+    when the provider takes it; otherwise, or once the provider takes it back, the next
+    matching turn reserves it as a next-turn input. Delivery is at least once: an offer a
+    crash leaves unresolved is offered again, and may reach the turn twice.
     ``STANDING`` is never reserved: every matching session turn dispatched while it is in force
     receives it, until it is withdrawn or its target ends.
     """
@@ -876,9 +880,11 @@ class ControlInput(Value):
             raise ContractValidationError("target", "only a steer has a target")
         if self.input_mode is not None and self.action != "steer":
             raise ContractValidationError("input_mode", "only a steer has an input mode")
-        if self.input_mode is InputMode.STANDING and isinstance(self.target, InvocationInputTarget):
+        if self.input_mode in (InputMode.STANDING, InputMode.INTERRUPT) and isinstance(
+            self.target, InvocationInputTarget
+        ):
             raise ContractValidationError(
-                "input_mode", "standing guidance is for a run, role, attempt or item"
+                "input_mode", f"{self.input_mode.value} input is for a run, role, attempt or item"
             )
         if (self.action == "withdraw") != (self.withdraws is not None):
             raise ContractValidationError("withdraws", "required for withdraw and only for it")
