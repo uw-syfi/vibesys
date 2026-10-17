@@ -9,9 +9,10 @@ with the earlier run's result instead (`reused_run`) when all of these hold:
 - it measured the same input with the same evaluation: its identity equals the requested one
   except for the purpose (`MeasurementIdentity.measures_same_input`), and it ran the same
   stages with the same execution budgets, queue allowance and stage policy;
-- both it and the requested measurement run on hosts the executor holds alone for the job
-  (`MeasurementPlan.exclusive_hosts`, the executor's declared capability), so the earlier
-  run was timed as an official run is; a run on a host shared with agent work never counts;
+- both it and the requested measurement get their GPUs and CPU cores to themselves from the
+  executor (`MeasurementPlan.dedicated_measurement_resources`, the executor's declared
+  capability), so the earlier run was timed as an official run is; a run beside agent work
+  never counts;
 - it is the scope's only admitted measurement submission of any input, so the official
   score never selects among several runs (the luckiest one, or the one whose input the agent
   kept after measuring others);
@@ -129,7 +130,7 @@ def reused_run(
     """
     if (
         identity.purpose != "official"
-        or not plan.exclusive_hosts
+        or not plan.dedicated_measurement_resources
         or any(
             budget.scope == scope and budget.identity == identity
             for budget in state.submission_budgets
@@ -164,9 +165,9 @@ def reused_run(
 
 
 def _same_execution(source: MeasurementPlan, requested: MeasurementPlan) -> bool:
-    """Whether ``source`` ran as ``requested`` would: same stages, budgets, queue and hosts."""
+    """Whether ``source`` ran as ``requested`` would: same stages, budgets, queue and dedicated resources."""
     return (
-        source.exclusive_hosts
+        source.dedicated_measurement_resources
         and source.stages == requested.stages
         and source.queue_allowance == requested.queue_allowance
         and source.policy == requested.policy

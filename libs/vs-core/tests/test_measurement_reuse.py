@@ -63,7 +63,7 @@ _VARIANTS: dict[Variant, dict[str, object]] = {
     "stages": {"stages": (_ACCURACY,)},
     "budget": {"stages": (_ACCURACY, _BENCHMARK.model_copy(update={"execution_budget": 69.0}))},
     "queue": {"queue_allowance": 9.0},
-    "shared-host": {"exclusive_hosts": False},
+    "shared-host": {"dedicated_measurement_resources": False},
 }
 """How a run's plan may differ from the official one; only ``same`` may be reused."""
 
@@ -79,7 +79,7 @@ def measured(
         purpose=purpose,
         candidate=revision(candidate),
         measured_input=measured_input,
-        **({"exclusive_hosts": True} | _VARIANTS[variant]),
+        **({"dedicated_measurement_resources": True} | _VARIANTS[variant]),
     )
 
 
@@ -536,7 +536,9 @@ def measure_in(
     decision = core.Measure(
         decision_id=core.DecisionId(root=name),
         scope=scope,
-        plan=plan(purpose="official", candidate=revision(candidate), exclusive_hosts=True),
+        plan=plan(
+            purpose="official", candidate=revision(candidate), dedicated_measurement_resources=True
+        ),
     )
     asked = transition(
         state,

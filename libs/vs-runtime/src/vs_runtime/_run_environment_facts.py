@@ -46,9 +46,9 @@ class ClusterEvaluationFacts:
         return self.settings.config.evaluation_capacity
 
     @property
-    def exclusive_hosts(self) -> bool:
+    def dedicated_measurement_resources(self) -> bool:
         """Whether each trusted evaluation job holds its nodes alone (``SlurmConfig``)."""
-        return self.settings.config.exclusive_hosts
+        return self.settings.config.dedicates_measurement_resources
 
     @property
     def captures_profile(self) -> bool:

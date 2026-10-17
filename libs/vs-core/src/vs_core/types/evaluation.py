@@ -96,8 +96,8 @@ class MeasurementPlan(Value):
     submitted_at: Seconds
     queue_allowance: Seconds
     reusable_evidence: tuple[EvidenceId, ...] = ()
-    exclusive_hosts: bool = Field(default=False, exclude_if=unset)
-    """The executor runs this measurement on hosts it holds alone (``RunFacts``' capability).
+    dedicated_measurement_resources: bool = Field(default=False, exclude_if=unset)
+    """The executor gives this measurement its resources alone (``RunFacts``' capability).
 
     Only a run with it may answer another measurement: an agent's evaluation on a shared
     host is timed beside other work, so it can never stand for an official run.
