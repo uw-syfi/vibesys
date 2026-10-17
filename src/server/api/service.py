@@ -155,12 +155,12 @@ class RunControlUnavailableError(RuntimeError):
 
 
 class CapacityWaitUnavailableError(RuntimeError):
-    """``command.resume {when: capacity_returns}`` for a run not paused on a capacity limit."""
+    """``command.resume`` waiting for capacity or with ``fallback``, for a run not so paused."""
 
     diagnostic_code = "capacity_wait_unavailable"
 
     def __init__(self) -> None:
-        """Say why the run cannot wait for capacity."""
+        """Say why the run cannot wait for capacity or switch to its fallback."""
         super().__init__("The run is not paused on a provider capacity limit")
 
 

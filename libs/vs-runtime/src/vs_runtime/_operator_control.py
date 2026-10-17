@@ -193,7 +193,7 @@ class RefusalReason(StrEnum):
     """Why a control was refused."""
 
     NOT_PAUSED_ON_CAPACITY = "not_paused_on_capacity"
-    """A wait for capacity, for a run not paused on a provider capacity limit."""
+    """A wait for capacity or a switch to the fallback, for a run not paused on a capacity limit."""
     UNKNOWN_TARGET = "unknown_target"
     """A steer to a role the search does not declare: no later state of the run declares it.
 
@@ -307,8 +307,9 @@ class ChannelRunControl:
                 if not self.resume_when_capacity_returns():
                     status, reason = ControlStatus.REFUSED, RefusalReason.NOT_PAUSED_ON_CAPACITY
             case ResumeRequest(fallback=True, control_id=control_id):
-                self._channel.resume_with_fallback(control_id)
                 status = ControlStatus.CONSUMED
+                if not self._channel.resume_with_fallback(control_id):
+                    status, reason = ControlStatus.REFUSED, RefusalReason.NOT_PAUSED_ON_CAPACITY
             case ResumeRequest(control_id=control_id):
                 self._channel.resume(control_id)
                 status = ControlStatus.CONSUMED
@@ -340,9 +341,9 @@ class ChannelRunControl:
         """Release a paused run, cancelling a pending pause or stop."""
         self._channel.resume()
 
-    def resume_with_fallback(self) -> None:
-        """Resume, switching a run paused on a provider capacity limit to its fallback."""
-        self._channel.resume_with_fallback()
+    def resume_with_fallback(self) -> bool:
+        """Resume, switching a run paused on a capacity limit to its fallback; False if not so paused."""
+        return self._channel.resume_with_fallback()
 
     def resume_when_capacity_returns(self) -> bool:
         """Resume a run paused on a capacity limit once capacity returns; False if not so paused."""

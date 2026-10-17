@@ -214,19 +214,73 @@ def test_a_stop_ends_a_bounded_wait_and_is_never_cleared_by_its_timeout() -> Non
 def test_a_fallback_request_is_taken_once_and_a_plain_resume_clears_a_stale_one() -> None:
     control = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
 
-    control.resume_with_fallback()
+    control.pause_for_quota()
+    assert control.resume_with_fallback() is True
     assert control.consume_fallback_request() is True
     assert control.consume_fallback_request() is False
 
+    control.pause_for_quota()
     control.resume_with_fallback()
     control.resume()
     assert control.consume_fallback_request() is False
+
+
+_Unpause = Literal["resume", "elapsed", "fallback"]
+
+
+@given(st.lists(st.sampled_from(["resume", "elapsed", "fallback"]), min_size=1, max_size=6))
+def test_a_fallback_request_answers_only_the_quota_pause_it_ended(
+    unpauses: list[_Unpause],
+) -> None:
+    """Each quota pause ends one way; only a fallback resume leaves a request to take.
+
+    No turn takes the requests here, so a request that outlived its pause would be taken
+    by the turn a later pause resumes.
+    """
+    threads = SimThreads()
+    control = create_run_control_channel(FakeRunControlEventSink(), threads=threads)
+
+    for unpause in unpauses:
+        match unpause:
+            case "resume":
+                control.pause_for_quota()
+                control.resume()
+            case "elapsed":
+                control.pause_for_quota(0.0)
+                assert threads.run(control.wait_resumed) is PauseWake.ELAPSED
+            case "fallback":
+                control.pause_for_quota()
+                assert control.resume_with_fallback() is True
+
+    assert control.consume_fallback_request() is (unpauses[-1] == "fallback")
+
+
+@pytest.mark.parametrize("pause", ["none", "operator", "stopping"])
+def test_a_fallback_is_refused_and_changes_nothing_unless_a_quota_stop_paused_the_run(
+    pause: Literal["none", "operator", "stopping"],
+) -> None:
+    events = FakeRunControlEventSink()
+    control = create_run_control_channel(events, threads=SimThreads())
+    if pause == "operator":
+        control.request_pause()
+    if pause == "stopping":
+        control.pause_for_quota()
+        control.request_stop(StopMode.DRAIN)
+    before = list(events.transitions)
+
+    assert control.resume_with_fallback() is False
+
+    assert control.pause_requested() is (pause != "none")
+    assert control.stop_requested() is (pause == "stopping")
+    assert control.consume_fallback_request() is False
+    assert events.transitions == before
 
 
 def test_resuming_with_the_fallback_releases_a_parked_run_like_a_resume() -> None:
     events = FakeRunControlEventSink()
     control = create_run_control_channel(events, threads=SimThreads())
     control.request_pause()
+    control.pause_for_quota()
 
     control.resume_with_fallback()
 

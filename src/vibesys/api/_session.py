@@ -401,9 +401,9 @@ class _LocalRunSession:
         """Request the run acquire the write lease and continue from checkpoint."""
         self._control.resume()
 
-    def resume_with_fallback(self) -> None:
-        """Resume the run and switch a quota-paused run to its configured fallback."""
-        self._control.resume_with_fallback()
+    def resume_with_fallback(self) -> bool:
+        """Resume a quota-paused run on its configured fallback; False when it is not quota-paused."""
+        return self._control.resume_with_fallback()
 
     def resume_when_capacity_returns(self) -> bool:
         """Resume a quota-paused run once capacity returns; False when it is not quota-paused."""

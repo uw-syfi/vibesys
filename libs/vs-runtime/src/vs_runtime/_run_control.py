@@ -191,11 +191,13 @@ class RunControlChannel(Protocol):
         """
         ...
 
-    def resume_with_fallback(self, control_id: str | None = None) -> None:
-        """Resume like :meth:`resume`, asking a run parked on a provider capacity limit to switch.
+    def resume_with_fallback(self, control_id: str | None = None) -> bool:
+        """Resume like :meth:`resume`, asking a run paused on a provider capacity limit to switch.
 
-        The request stays pending until a parked turn takes it with
-        :meth:`consume_fallback_request`. A run with no fallback configured ignores it.
+        False, and nothing changes, unless a quota stop paused the run (:meth:`pause_for_quota`)
+        and no stop is pending. The request stays pending until a resumed turn takes it with
+        :meth:`consume_fallback_request`; the run's next resume drops a request no turn took.
+        A run with no fallback configured ignores it.
         """
         ...
 
@@ -473,8 +475,8 @@ class RuntimeRunControlChannel:
         with self._lock:
             self._stop_requested = False
             self._stop_mode = None
-            self._fallback_requested = fallback
             self._unpause(PauseWake.RESUMED)
+            self._fallback_requested = fallback
             self._requested_by = {"pause": control_id}
 
     def _unpause(self, cause: PauseWake) -> None:
@@ -484,6 +486,8 @@ class RuntimeRunControlChannel:
         self._resumed_by = cause
         self._resume_at = None
         self._capacity_request = None
+        # A fallback request answers the pause it ended; one no turn took is stale by now.
+        self._fallback_requested = False
         # The run resuming itself has no control id; an operator resume records its own after.
         self._requested_by["pause"] = None
         self._lock.notify_all()
@@ -509,9 +513,13 @@ class RuntimeRunControlChannel:
             return
         self._lock.wait(max(min(deadlines) - self._now(), 0.0))
 
-    def resume_with_fallback(self, control_id: str | None = None) -> None:
-        """Resume the run and leave a fallback request for the parked turn to take."""
-        self._release(fallback=True, control_id=control_id)
+    def resume_with_fallback(self, control_id: str | None = None) -> bool:
+        """Resume a quota-paused run, leaving a fallback request; False if not quota-paused."""
+        with self._lock:
+            if not self._quota_paused or self._stop_requested:
+                return False
+            self._release(fallback=True, control_id=control_id)
+        return True
 
     def consume_fallback_request(self) -> bool:
         """Take the pending fallback request: True once per request."""

@@ -244,7 +244,9 @@ class _Expected:
     steers: list[str] = field(default_factory=list)
     withdrawals: list[str] = field(default_factory=list)
     paused: bool = False
+    quota_paused: bool = False
     stop: StopMode | None = None
+    fallback: bool = False
     answered: dict[str, tuple[ControlRequest, ControlAck]] = field(default_factory=dict)
 
 
@@ -259,9 +261,13 @@ def _expected_status(request: ControlRequest, expected: _Expected) -> ControlSta
         case ResumeRequest(when="capacity_returns"):
             # No turn is parked on a capacity limit here, so the wait is refused.
             return ControlStatus.REFUSED
-        case ResumeRequest():
-            expected.paused = False
+        case ResumeRequest(fallback=True) if not expected.quota_paused or expected.stop:
+            # A switch to the fallback answers only a quota stop's pause.
+            return ControlStatus.REFUSED
+        case ResumeRequest(fallback=fallback):
+            expected.paused = expected.quota_paused = False
             expected.stop = None
+            expected.fallback = fallback
             return ControlStatus.CONSUMED
         case StopRequest(mode=mode):
             expected.stop = mode
@@ -272,13 +278,15 @@ def _expected_status(request: ControlRequest, expected: _Expected) -> ControlSta
             return ControlStatus.PENDING
 
 
-@given(st.lists(_requests(_IDS), max_size=16))
+@given(sequence=st.lists(_requests(_IDS), max_size=16), quota_paused=st.booleans())
 def test_submit_applies_each_control_id_once_as_its_action_says(
-    sequence: list[ControlRequest],
+    *, sequence: list[ControlRequest], quota_paused: bool
 ) -> None:
     channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
     control = ChannelRunControl(channel, SimThreads())
-    expected = _Expected()
+    expected = _Expected(paused=quota_paused, quota_paused=quota_paused)
+    if quota_paused:
+        channel.pause_for_quota()
     for request in sequence:
         ack = control.submit(request)
         assert (ack.control_id, ack.action) == (request.control_id, request.action)
@@ -297,3 +305,4 @@ def test_submit_applies_each_control_id_once_as_its_action_says(
     assert [w.withdraws for w in channel.take_pending_withdrawals()] == expected.withdrawals
     assert channel.pause_requested() == expected.paused
     assert channel.stop_mode() == expected.stop
+    assert channel.consume_fallback_request() == expected.fallback
