@@ -33,6 +33,8 @@ class RunControlTransitionKind(StrEnum):
     WITHDRAW_QUEUED = "withdraw_queued"
     GUIDANCE_ENDED = "guidance_ended"
     """Standing guidance reaches no turn any more: withdrawn, or its target or the run ended."""
+    CONTROL_REFUSED = "control_refused"
+    """The run refused an operator control it had acknowledged; ``text`` names it and why."""
     PAUSED = "paused"
     STOPPED = "stopped"
 
@@ -82,6 +84,11 @@ class CapacityWaitEnd:
 
     wake: CapacityWake
     request: int
+
+
+type RefusedPart = Literal["hold", "capacity", "fallback"]
+"""What a refused control asked of the channel: an operator hold, a wait for capacity, or a
+switch to the quota fallback."""
 
 
 def _never() -> bool:
@@ -276,6 +283,21 @@ class RunControlChannel(Protocol):
         """Record that standing guidance reaches no turn any more; ``reason`` names it and why.
 
         It was withdrawn, its target or the run ended, or its attempt was reopened.
+        """
+        ...
+
+    def notify_control_refused(self, reason: str) -> None:
+        """Record that the run refused an operator control; ``reason`` names it and core's reason."""
+        ...
+
+    def undo_refused(self, part: RefusedPart, control_id: str | None) -> None:
+        """Undo the ``part`` of the pause the control ``control_id`` asked for: the run refused it.
+
+        The channel then holds the pause core records: a refused hold is lifted (the run
+        resumes, unless a quota stop still pauses it), and a refused wait for capacity or
+        fallback request is dropped. Nothing changes when a later control has set that part
+        since (``control_id`` no longer names it). The quota pause and a pending stop are not
+        an operator's request and stay.
         """
         ...
 
@@ -711,6 +733,36 @@ class RuntimeRunControlChannel:
                 RunControlTransition(kind=RunControlTransitionKind.GUIDANCE_ENDED, text=reason)
             )
 
+    def notify_control_refused(self, reason: str) -> None:
+        """Record that the run refused an operator control, and why."""
+        with self._lock:
+            self._emit(RunControlTransitionKind.CONTROL_REFUSED, text=reason)
+
+    def undo_refused(self, part: RefusedPart, control_id: str | None) -> None:
+        """Undo what the refused control asked of the channel; see the protocol."""
+        with self._lock:
+            match part:
+                case "hold" if self._held and self._requested_by.get("pause") == control_id:
+                    self._held = False
+                    self._requested_by["pause"] = None
+                    if self._quota_paused:
+                        self._lock.notify_all()
+                    else:
+                        self._unpause(PauseWake.RESUMED)
+                case "capacity" if (
+                    self._capacity_request is not None
+                    and self._requested_by.get("capacity") == control_id
+                ):
+                    self._capacity_request = None
+                    self._requested_by.pop("capacity", None)
+                    self._lock.notify_all()
+                case "fallback" if (
+                    self._resumed_with_fallback and self._requested_by.get("pause") == control_id
+                ):
+                    self._fallback_requested = self._resumed_with_fallback = False
+                case _:
+                    pass
+
     def wait_while_paused(self) -> None:
         """Park while paused, then land any stop that released the wait."""
         with self._lock:
@@ -875,6 +927,7 @@ __all__ = [
     "PauseWake",
     "QueuedSteer",
     "QueuedWithdraw",
+    "RefusedPart",
     "RunControlChannel",
     "RunControlEventSink",
     "RunControlTransition",
