@@ -90,12 +90,19 @@ def control_refusal(run: RunState, control: ControlInput) -> ControlRefusedError
 
     The one statement of the rule: core raises the error when the control arrives, and a
     shell that must answer an operator before core commits asks the same question. A
-    terminal run refuses every control; any other run takes a stop.
+    terminal run refuses every control; any other run takes a stop, a steer and a
+    withdrawal, and a run that recorded a stop takes no pause or resume.
     """
     if run.status == RunStatus.TERMINAL:
         return ControlRefusedError(control, ("run", "status"), "terminal run rejects controls")
     if control.action in ("stop", "steer", "withdraw"):
         return None
+    if any(recorded.action == "stop" for recorded in run.controls):
+        # The stop is final: the search ends the run, and a pause or resume would change
+        # nothing an operator could see before it does.
+        return ControlRefusedError(
+            control, ("run", "controls"), "a stopped run takes no pause or resume"
+        )
     if run.status in (RunStatus.CLOSING, RunStatus.BLOCKED) or run.result is not None:
         return ControlRefusedError(
             control, ("run", "cleanup"), "cleanup must finish before pause or resume"

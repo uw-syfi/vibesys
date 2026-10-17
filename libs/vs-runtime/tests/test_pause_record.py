@@ -27,9 +27,9 @@ from vs_agent.api import (
 )
 from vs_agent.api.testing import FakeAgentClient
 from vs_core.api import (
-    ContractError,
     ControlId,
     ControlInput,
+    ControlRefusedError,
     CoreState,
     PauseOwner,
     RunControlEvent,
@@ -46,6 +46,7 @@ from vs_runtime.api.core import OperatorInbox, RunControlBridge
 from vs_runtime.api.infrastructure import (
     CapacityHandling,
     ChannelRunControl,
+    ControlAck,
     ControlRequest,
     PauseRequest,
     QuotaAction,
@@ -210,6 +211,8 @@ def _apply(run: _Run, op: _Op, control_id: str) -> _Run:
 @given(st.lists(st.sampled_from(_OPS), max_size=30))
 # The quota pause, and the inbox's capacity wait asked for under it, reach one poll: before,
 # the bridge emitted the wait first and core, still running, refused it, ending the run.
+# This only pins that core is never asked to refuse; that the wait is taken, not rejected,
+# is pinned by the two dedicated tests below.
 @example(["quota", "inbox-capacity", "poll"])
 # The only waiting turn is cancelled under a capacity wait: before, the channel stayed paused
 # with no turn and core kept a capacity wait nothing would end.
@@ -220,8 +223,6 @@ def _apply(run: _Run, op: _Op, control_id: str) -> _Run:
 # A restart under a quota pause with a capacity wait, then a second restart: before, the
 # first poll erased the wait from core, so the second restart lost it.
 @example(["quota", "capacity", "poll", "restart", "poll", "restart", "poll"])
-# A restart under an operator pause with a capacity wait: before, the run came back running.
-@example(["quota", "capacity", "operator", "poll", "restart", "poll"])
 def test_after_each_committed_poll_core_holds_the_channels_pause(ops: list[_Op]) -> None:
     """Socket and inbox controls, quota stops and cancelled turns in any order and any mix
     of committed and queued polls, with restarts. Core never refuses what the bridge emits,
@@ -315,6 +316,9 @@ def test_a_fallback_resume_reusing_a_plain_resumes_id_is_rejected_not_settled() 
 
 
 @given(ops=st.lists(st.sampled_from(_OPS), max_size=16))
+# An operator pause asked for under a quota pause with a capacity wait: before (finding 9 of
+# the #3091 review), the restart took the capacity wait first and the run came back running.
+@example(ops=["quota", "capacity", "operator", "poll"])
 def test_a_restart_keeps_an_operator_pause_and_resumes_only_a_quota_pause(
     *, ops: list[_Op]
 ) -> None:
@@ -353,11 +357,11 @@ def test_a_restart_keeps_an_operator_pause_and_resumes_only_a_quota_pause(
 def test_an_inbox_request_core_refuses_at_commit_is_answered_with_cores_reason() -> None:
     """The bridge judged an inbox pause against a running run, then the run ended first.
 
-    The run loop stops a run whose recovery is blocked with a result, after the bridge's
-    events of the same poll were judged. Core refuses the pause when it commits; the run
-    loop drops it and goes on. The next poll sees core does not hold it and rejects the
-    entry with core's reason. Before, the entry stayed marked as submitted for the rest of
-    the process: pending, never answered.
+    An input committed ahead of the pause (the run loop's stop of a run whose recovery is
+    blocked, with a result) ends the run, and core refuses the pause. The shell hands the
+    refusal to ``settled``, which rejects the entry with core's reason and lifts the hold
+    the request put on the channel, with no later poll: the run loop makes none after the
+    run ends. The run loop's own test is ``tests/system/run_loop/test_refused_controls.py``.
     """
     run = _run()
     run.poll()
@@ -371,14 +375,60 @@ def test_an_inbox_request_core_refuses_at_commit_is_answered_with_cores_reason()
         now_at=1.0,
     )
     run.core = step(run.core, blocked).state
-    with pytest.raises(ContractError):
-        step(run.core, pause)  # what the run loop drops
-    run.bridge.settled(run.core, running=False)
+    with pytest.raises(ControlRefusedError) as refused:
+        step(run.core, pause)  # what the run loop sets aside
+    run.bridge.settled(run.core, running=False, refused=(refused.value,))
 
-    assert run.poll() == ()
+    assert run.inbox.pending() == ()
     assert [(entry.request_id, entry.reason) for entry in run.inbox.rejected()] == [
         ("p1", "refused by the run: terminal run rejects controls")
     ]
+    assert run.channel.pause_state() is None
+
+
+class _QuotaWhileRead(ChannelRunControl):
+    """Run controls where a turn stops on a quota just after the first request is applied.
+
+    It stands for a turn's thread pausing the run while the bridge reads the inbox.
+    """
+
+    def __init__(self, channel: RunControlChannel, threads: SimThreads) -> None:
+        super().__init__(channel, threads)
+        self.channel = channel
+        self.stopped = False
+
+    def submit(self, request: ControlRequest) -> ControlAck:
+        ack = super().submit(request)
+        if not self.stopped:
+            self.stopped = True
+            self.channel.enter_capacity()
+            self.channel.pause_for_quota()
+        return ack
+
+
+def test_each_inbox_request_is_judged_against_the_pause_the_run_is_in_by_then() -> None:
+    """A quota stop between two inbox requests of one poll reaches core before the second.
+
+    The first is a resume of a running run, which changes nothing; the second asks to wait
+    for capacity, which the run takes only while paused on the quota. Before (the per-entry half of P1 of the #3091 review), it was judged against
+    the pause at the start of the poll, and rejected.
+    """
+    threads = SimThreads()
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=threads)
+    control = _QuotaWhileRead(channel, threads)
+    inbox = FakeControlInbox()
+    bridge = RunControlBridge(channel, _Texts(), inbox=OperatorInbox(inbox, control))
+    run = _Run(channel, control, bridge, inbox, initial_state())
+    run.inbox.post("a1", ResumeRequest(control_id="a1").model_dump_json().encode())
+    wait = ResumeRequest(control_id="a2", when="capacity_returns")
+    run.inbox.post("a2", wait.model_dump_json().encode())
+
+    run.poll()
+
+    assert run.inbox.rejected() == ()
+    assert run.inbox.pending() == ()
+    assert run_pause(run.core.run) == RunPause(owner=PauseOwner.QUOTA, capacity_wait=True)
+    assert run.agrees()
 
 
 class _GateClient(FakeAgentClient):

@@ -231,8 +231,13 @@ accepted and checked when the run takes it, and journaled as `/steer dropped: wi
 nothing: ...` if it then names no guidance in force; a `vibesys control` withdrawal that ends nothing is also set aside in the run's inbox with that reason, so it never applies later. A
 `vibesys control` pause, resume or steer is judged by the run's own rule (`vs_core`'s
 `control_refusal`) against the pause the run is in, including a quota pause the run has not
-committed yet; one the run still refuses when it commits (a decision closed the run first) is set
-aside in the inbox with the run's reason, and the run goes on. An accepted withdrawal is journaled as
+committed yet; one the run still refuses when it commits (an input committed first closed or ended
+the run) is set aside in the inbox with the run's reason as soon as that commit lands, and the run
+goes on. A run that recorded a stop takes no pause or resume. A pause or resume acknowledged here
+that the run then refuses, when it reads it or when it commits it, is journaled as a `CONTROL`
+event with status `failed` and the text `/control refused: <action> <id>: <reason>`, and what it
+did to the run's pause is undone: a refused pause is lifted, a refused `capacity_returns` or
+`fallback: true` is dropped. An accepted withdrawal is journaled as
 `/withdraw: <withdraws>` with status `pending`. Accepted standing guidance is journaled with
 status `active` as `/steer --standing: <text>`, and its end, once, with status `completed` as
 `/guidance ended: standing guidance <id> ended: <reason>`, where the reason is `withdrawn`,

@@ -330,16 +330,19 @@ class RunControlBridge:
     def _run_as_asked(self, core: CoreState) -> RunState:
         """The run as core will hold it once it records every control emitted so far.
 
-        Only the status differs from ``core``: a stop emitted closes the run, and the pause
-        controls emitted pause or resume it.
+        It differs from ``core`` in its status, which the pause controls emitted pause or
+        resume, and in a stop emitted, which it holds too.
         """
-        status = core.run.status
-        if status in (RunStatus.RUNNING, RunStatus.PAUSED):
-            if self._stopped:
-                status = RunStatus.CLOSING
-            else:
-                status = RunStatus.RUNNING if self._pause is None else RunStatus.PAUSED
-        return core.run.model_copy(update={"status": status})
+        run = core.run
+        if run.status in (RunStatus.RUNNING, RunStatus.PAUSED):
+            status = RunStatus.RUNNING if self._pause is None else RunStatus.PAUSED
+            run = run.model_copy(update={"status": status})
+        if self._stopped and not any(c.action == "stop" for c in run.controls):
+            stop = ControlInput(
+                control_id=ControlId(root="pending-stop"), action="stop", mode=StopMode.DRAIN
+            )
+            run = run.model_copy(update={"controls": (*run.controls, stop)})
+        return run
 
     def _take_steers(self, core: CoreState, now_at: float, events: list[CoreEvent]) -> None:
         """Emit the queued steers, each under its control's id if it had one.
