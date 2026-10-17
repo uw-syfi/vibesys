@@ -34,7 +34,7 @@ read's limits (``RUN_EVENTS_READ_MAX``, ``RUN_EVENTS_READ_MAX_BYTES``), ``RUN_EV
 ``DockerReachable``, ``DockerUnreachable``, ``MachineCheckout``, ``RunCounts``,
 ``MachineDescription``) and checkout inspection (``MIN_CHECKOUT_VERSION``,
 ``CheckoutFound``, ``CheckoutNotFound``, ``CheckoutTooOld``, ``CheckoutInspection``), ``HelperMessage``
-and its members, ``HelperErrorCode``, the harness choice (``HarnessDisplay``, ``HarnessOption``,
+and its members, ``HelperErrorCode``, the harness choice (``HarnessOption``,
 ``HarnessChoice``, and the run flags ``CLI_PROVIDER_FLAG``, ``MODEL_FLAG``,
 ``UNVETTED_MODEL_FLAG``), and a relayed channel's end: ``ChannelEndOutcome``,
 ``ChannelEnd``. An undeliverable successful start whose compensating stop cannot
@@ -78,6 +78,7 @@ from server.host_envelope import (
     RunId,
 )
 from server.host_examples import CreatedProject, ExampleList
+from server.host_harness import HarnessChoice, HarnessOption
 from server.host_preflight import Backend, Check, RoleName, RunOptions
 from server.host_run_summary import RunsSummaryReply, RunsSummaryRequest
 from vs_decode.api import Unreadable, decode_json
@@ -889,49 +890,6 @@ class ResumeLatest(BaseModel):
     latest: Literal[True]
 
 
-class HarnessChoice(BaseModel):
-    """One agent CLI provider and one model it runs."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    provider: str
-    model: str
-
-
-class HarnessDisplay(BaseModel):
-    """How a vetted provider and model pair reads: its family, tier and readable names."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    provider_name: str
-    """The provider's CLI as people call it ("Claude Code")."""
-    model_name: str
-    """The model alone ("Claude Opus 5.5")."""
-    family: str
-    """The family's stable key ("claude-5.5"); models sharing it are tiers of one generation."""
-    family_name: str
-    """The family as people call it ("Claude 5.5")."""
-    tier: int = Field(ge=0)
-    """Zero for the family's fastest and cheapest model, rising to its strongest."""
-    tier_name: str
-    """The tier as people call it ("Opus")."""
-
-
-class HarnessOption(BaseModel):
-    """A vetted provider and model pair a run may start with."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    provider: str
-    model: str
-    default: bool
-    """The model a run on ``provider`` uses when nothing names one."""
-    display: Annotated[HarnessDisplay | None, Field(exclude_if=lambda display: display is None)] = (
-        None
-    )
-    """How the pair reads; a helper that predates it sends none and a client lists the pair flat."""
-
-
 class HarnessesListRequest(HelperRequestBase):
     """The vetted provider and model pairs ``run.start``'s ``harness`` accepts."""
 
@@ -1630,6 +1588,9 @@ class MachineDescription(BaseModel):
     docker: DockerReachable | DockerUnreachable
     harness_clis: tuple[str, ...]
     """The vetted harness providers whose CLI is installed on this machine, in offer order."""
+    harness_cli_names: dict[str, str] = Field(default_factory=dict)
+    """Each of ``harness_clis`` as people call it ("Claude Code"), as agentshim names it; a
+    helper that predates it sends none and a client shows the provider id."""
     runs: RunCounts
 
 

@@ -34,6 +34,7 @@ from server.host_api import (
     RunStatus,
     parse_helper_message,
 )
+from server.host_harness import HarnessDisplay
 from server.host_helper import serve_channel
 from server.host_helper_logs import (
     HelperLogs,
@@ -77,7 +78,12 @@ VIBESYS_VERSION = "0+test"
 HARNESSES = (
     HarnessOption(provider="codex", model="gpt-a", default=True),
     HarnessOption(provider="codex", model="gpt-b", default=False),
-    HarnessOption(provider="claude", model="claude-a", default=True),
+    HarnessOption(
+        provider="claude",
+        model="claude-a",
+        default=True,
+        display=HarnessDisplay(provider_name="Claude Code"),
+    ),
 )
 """The vetted pairs a fake host offers: two providers, each default first."""
 

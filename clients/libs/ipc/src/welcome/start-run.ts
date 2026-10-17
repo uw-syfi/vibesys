@@ -17,20 +17,18 @@ export interface HarnessChoice {
   readonly model: string;
 }
 
-/** How a vetted pair reads: its family, its tier within the family, and readable names. */
+/** How a pair reads, as agentshim names it; a client renders these and never derives a name from an id. */
 interface HarnessDisplay {
   /** The provider's CLI as people call it ("Claude Code"). */
   readonly providerName: string;
-  /** The model alone ("Claude Opus 5.5"). */
-  readonly modelName: string;
-  /** The family's stable key; models sharing it are tiers of one generation. */
-  readonly family: string;
-  /** The family as people call it ("Claude 5.5"). */
-  readonly familyName: string;
-  /** Zero for the family's fastest and cheapest model, rising to its strongest. */
-  readonly tier: number;
-  /** The tier as people call it ("Opus"). */
-  readonly tierName: string;
+  /** The model alone ("Opus 5.5"); absent when agentshim does not name it: show the raw id. */
+  readonly modelName?: string;
+  /** The model line ("Claude", "GPT", "Gemini"); absent exactly when `modelName` is. */
+  readonly family?: string;
+  /** The model's rank in its family, 1 the smallest and cheapest; absent off the ladder. */
+  readonly tier?: number;
+  /** The tier as people call it ("Opus"); absent exactly when `tier` is. */
+  readonly tierName?: string;
 }
 
 /**

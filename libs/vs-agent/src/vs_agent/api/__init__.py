@@ -79,7 +79,6 @@ from vs_agent.host_resource_declarations import (
     declare_provider_state_resources,
     task_agent_host_resources,
 )
-from vs_agent.model_catalog import ModelDisplay, model_display
 from vs_agent.progress import AgentProgress, CandidateProgress, RoundProgress
 from vs_agent.provider_policy import (
     CLI_VERSIONS,
@@ -95,7 +94,13 @@ from vs_agent.provider_policy import (
     harnesses,
     vetted_models,
 )
-from vs_agent.provider_profiles import launch_shell_environment, provider_binary
+from vs_agent.provider_profiles import (
+    ModelDisplay,
+    launch_shell_environment,
+    model_display,
+    provider_binary,
+    provider_display_name,
+)
 from vs_agent.reply_limits import (
     MAX_REPLY_BYTES,
     MAX_WHITESPACE_RUN,
@@ -290,6 +295,7 @@ __all__ = [
     "native_schema_problems",
     "parse_typed_response",
     "provider_binary",
+    "provider_display_name",
     "reap_orphaned_agents",
     "reply_breach",
     "session_env_allowlist",

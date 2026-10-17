@@ -331,6 +331,7 @@ def test_machine_describe_reports_the_checkout_hardware_docker_clis_and_runs() -
     assert reply.machine.hardware == Hardware(cpu_cores=4, gpus=(), accelerator=Accelerator.CPU)
     assert reply.machine.docker == DockerReachable(version="27.3.1")
     assert reply.machine.harness_clis == ("claude",)
+    assert reply.machine.harness_cli_names == {"claude": "Claude Code"}
     assert reply.machine.runs == RunCounts(live=1, ended_today=0)
 
 

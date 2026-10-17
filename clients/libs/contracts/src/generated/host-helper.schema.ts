@@ -1093,41 +1093,64 @@ const hostHelperSchema: Record<string, unknown> = {
     },
     "HarnessDisplay": {
       "additionalProperties": false,
-      "description": "How a vetted provider and model pair reads: its family, tier and readable names.",
+      "description": "How a provider and model pair reads, as agentshim names it.",
       "properties": {
         "provider_name": {
           "title": "Provider Name",
           "type": "string"
         },
         "model_name": {
-          "title": "Model Name",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Name"
         },
         "family": {
-          "title": "Family",
-          "type": "string"
-        },
-        "family_name": {
-          "title": "Family Name",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Family"
         },
         "tier": {
-          "minimum": 0,
-          "title": "Tier",
-          "type": "integer"
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tier"
         },
         "tier_name": {
-          "title": "Tier Name",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tier Name"
         }
       },
       "required": [
-        "provider_name",
-        "model_name",
-        "family",
-        "family_name",
-        "tier",
-        "tier_name"
+        "provider_name"
       ],
       "title": "HarnessDisplay",
       "type": "object"
@@ -2778,6 +2801,13 @@ const hostHelperSchema: Record<string, unknown> = {
           },
           "title": "Harness Clis",
           "type": "array"
+        },
+        "harness_cli_names": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Harness Cli Names",
+          "type": "object"
         },
         "runs": {
           "$ref": "#/$defs/RunCounts"

@@ -11,6 +11,7 @@ substitute a profile.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -67,3 +68,39 @@ def model_context_window(provider: str, model: str | None) -> int | None:
     rather than a wrong one.
     """
     return _agentshim().context_window(provider, model)
+
+
+@dataclass(frozen=True, slots=True)
+class ModelDisplay:
+    """How one model reads, as agentshim names it (``agentshim.ModelSpec``)."""
+
+    model_name: str
+    """The model alone ("Opus 5.5")."""
+    family: str
+    """The model line ("Claude", "GPT", "Gemini")."""
+    tier: int | None
+    """The model's rank in its family, 1 the smallest and cheapest; ``None`` off the ladder."""
+    tier_name: str | None
+    """The tier as people call it ("Opus"); ``None`` exactly when ``tier`` is."""
+
+
+def provider_display_name(provider: str) -> str:
+    """*provider*'s CLI as people call it ("Claude Code"), from agentshim's profile."""
+    return provider_profile(provider).display_name
+
+
+def model_display(provider: str, model: str | None) -> ModelDisplay | None:
+    """How *model* run through *provider* reads, or ``None`` when agentshim does not name it.
+
+    agentshim owns the names (``agentshim.model_spec``). An unnamed model is ``None``,
+    never a prettified id: a caller shows the raw id.
+    """
+    spec = _agentshim().model_spec(provider, model)
+    if spec is None or spec.display_name is None or spec.family is None:
+        return None
+    return ModelDisplay(
+        model_name=spec.display_name,
+        family=spec.family,
+        tier=spec.tier,
+        tier_name=spec.tier_name,
+    )

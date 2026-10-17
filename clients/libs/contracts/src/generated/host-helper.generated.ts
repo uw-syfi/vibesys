@@ -425,11 +425,10 @@ export type Provider1 = string;
 export type Model2 = string;
 export type Default = boolean;
 export type ProviderName = string;
-export type ModelName = string;
-export type Family = string;
-export type FamilyName = string;
-export type Tier = number;
-export type TierName = string;
+export type ModelName = string | null;
+export type Family = string | null;
+export type Tier = number | null;
+export type TierName = string | null;
 export type Harnesses = HarnessOption[];
 export type RequestId40 = string;
 export type Type40 = "runs.read_events";
@@ -1409,15 +1408,14 @@ export interface HarnessOption {
   display?: HarnessDisplay | null;
 }
 /**
- * How a vetted provider and model pair reads: its family, tier and readable names.
+ * How a provider and model pair reads, as agentshim names it.
  */
 export interface HarnessDisplay {
   provider_name: ProviderName;
-  model_name: ModelName;
-  family: Family;
-  family_name: FamilyName;
-  tier: Tier;
-  tier_name: TierName;
+  model_name?: ModelName;
+  family?: Family;
+  tier?: Tier;
+  tier_name?: TierName;
 }
 /**
  * One page of a run's recorded events, oldest first.
@@ -1500,6 +1498,7 @@ export interface MachineDescription {
   hardware: Hardware;
   docker: Docker;
   harness_clis: HarnessClis;
+  harness_cli_names?: HarnessCliNames;
   runs: RunCounts;
 }
 /**
@@ -1539,6 +1538,9 @@ export interface DockerReachable {
 export interface DockerUnreachable {
   reachable?: Reachable1;
   reason: Reason1;
+}
+export interface HarnessCliNames {
+  [k: string]: string;
 }
 /**
  * Runs on this machine: live now, and ended since the host's local midnight.

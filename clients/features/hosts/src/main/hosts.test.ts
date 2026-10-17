@@ -375,7 +375,7 @@ describe('Hosts.harnesses', () => {
 });
 
 describe('Hosts.harnesses display', () => {
-  test('carries how each pair reads, and none for a pair without it', async () => {
+  test('carries how each pair reads, a pair the model is unnamed for with only the provider name, and none for a pair without it', async () => {
     const link = new FakeLink();
     link.helper.host.harnesses.splice(
       0,
@@ -386,14 +386,19 @@ describe('Hosts.harnesses display', () => {
         default: true,
         display: {
           provider_name: 'Claude Code',
-          model_name: 'Claude Opus 5.5',
-          family: 'claude-5.5',
-          family_name: 'Claude 5.5',
-          tier: 2,
+          model_name: 'Opus 5.5',
+          family: 'Claude',
+          tier: 3,
           tier_name: 'Opus',
         },
       },
       {provider: 'codex', model: 'gpt-a', default: true},
+      {
+        provider: 'codex',
+        model: 'gpt-x',
+        default: false,
+        display: {provider_name: 'Codex'},
+      },
     );
     const subject = completionSubject(link);
     await using _manager = subject.manager;
@@ -407,14 +412,14 @@ describe('Hosts.harnesses display', () => {
           default: true,
           display: {
             providerName: 'Claude Code',
-            modelName: 'Claude Opus 5.5',
-            family: 'claude-5.5',
-            familyName: 'Claude 5.5',
-            tier: 2,
+            modelName: 'Opus 5.5',
+            family: 'Claude',
+            tier: 3,
             tierName: 'Opus',
           },
         },
         {provider: 'codex', model: 'gpt-a', default: true},
+        {provider: 'codex', model: 'gpt-x', default: false, display: {providerName: 'Codex'}},
       ],
     });
   });

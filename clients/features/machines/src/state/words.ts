@@ -88,7 +88,9 @@ function dockerText(described: MachineDescription): string {
 }
 
 function harnessText(described: MachineDescription): string {
-  const names = described.harness_clis.map(name => name.charAt(0).toUpperCase() + name.slice(1));
+  const names = described.harness_clis.map(
+    provider => described.harness_cli_names?.[provider] ?? provider,
+  );
   return names.length === 0 ? 'none installed' : `${names.join(' · ')} installed`;
 }
 

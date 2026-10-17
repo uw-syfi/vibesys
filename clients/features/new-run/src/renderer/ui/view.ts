@@ -36,7 +36,7 @@ export function machineLabel(key: HostKey): string {
 
 /** The facts the Machine card lists. */
 export function machineFacts(machine: MachineDescription): KeyValueItem[] {
-  const {hardware, docker, harness_clis, runs, checkout} = machine;
+  const {hardware, docker, harness_clis, harness_cli_names, runs, checkout} = machine;
   const gpus = hardware.gpus.map(gpu => gpu.model).join(', ');
   return [
     ...(checkout === null
@@ -50,7 +50,13 @@ export function machineFacts(machine: MachineDescription): KeyValueItem[] {
       key: 'Docker',
       value: 'reason' in docker ? `not reachable: ${docker.reason}` : docker.version,
     },
-    {key: 'Agent CLIs', value: harness_clis.length === 0 ? 'none' : harness_clis.join(', ')},
+    {
+      key: 'Agent CLIs',
+      value:
+        harness_clis.length === 0
+          ? 'none'
+          : harness_clis.map(provider => harness_cli_names?.[provider] ?? provider).join(', '),
+    },
     {key: 'Runs', value: `${runs.live} live, ${runs.ended_today} ended today`},
   ];
 }

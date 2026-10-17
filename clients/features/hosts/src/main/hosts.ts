@@ -343,11 +343,10 @@ export class Hosts {
             : {
                 display: {
                   providerName: display.provider_name,
-                  modelName: display.model_name,
-                  family: display.family,
-                  familyName: display.family_name,
-                  tier: display.tier,
-                  tierName: display.tier_name,
+                  ...(display.model_name == null ? {} : {modelName: display.model_name}),
+                  ...(display.family == null ? {} : {family: display.family}),
+                  ...(display.tier == null ? {} : {tier: display.tier}),
+                  ...(display.tier_name == null ? {} : {tierName: display.tier_name}),
                 },
               }),
         })),

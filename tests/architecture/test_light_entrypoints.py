@@ -66,6 +66,7 @@ ALLOWED_FIRST_PARTY = (
     "server.host_helper_logs",
     "server.host_helper_machine",
     "server.host_examples",
+    "server.host_harness",
     "server.host_helper_preflight",
     "server.host_preflight",
     "server.host_helper_os",

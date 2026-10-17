@@ -771,11 +771,20 @@ def installed_first(
 
 def describe_machine(host: HelperHost) -> MachineDescription:
     """What this machine offers runs: its checkout, hardware, Docker, harness CLIs and runs."""
+    harness_clis = host.machine.harness_clis()
+    names = {
+        option.provider: option.display.provider_name
+        for option in host.harnesses()
+        if option.display is not None
+    }
     return MachineDescription(
         checkout=_machine_checkout(host),
         hardware=host.machine.hardware(),
         docker=host.machine.docker(),
-        harness_clis=host.machine.harness_clis(),
+        harness_clis=harness_clis,
+        harness_cli_names={
+            provider: names[provider] for provider in harness_clis if provider in names
+        },
         runs=run_counts(host.registry.read(), host.clock.now(), host.timezone),
     )
 

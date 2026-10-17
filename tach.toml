@@ -87,7 +87,7 @@ layers_explicit_depends_on = true
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.settings", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_preflight", "server.host_examples"]
+depends_on = ["server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.settings", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_preflight", "server.host_examples", "server.host_harness"]
 
 [[modules]]
 path = "headless"
@@ -138,7 +138,7 @@ depends_on = ["server", "server.trace", "server.execution", "server.chat", "serv
 # the standard library only; tests/architecture/test_light_entrypoints.py keeps
 # the light entrypoints' import closure free of the engine.
 path = "server.host_api"
-depends_on = ["vs_decode.api", "server.host_envelope", "server.host_examples", "server.host_preflight", "server.host_run_summary"]
+depends_on = ["vs_decode.api", "server.host_envelope", "server.host_examples", "server.host_harness", "server.host_preflight", "server.host_run_summary"]
 
 [[modules]]
 # The fields every helper request and reply carries. Pydantic only.
@@ -217,6 +217,11 @@ depends_on = ["server.host_api", "vs_sim.api"]
 [[modules]]
 # Light contracts for the example catalog and the projects made from it or copied out.
 path = "server.host_examples"
+depends_on = []
+
+[[modules]]
+# Light contracts for the harness a run starts with: the provider and model pair and how it reads.
+path = "server.host_harness"
 depends_on = []
 
 [[modules]]
