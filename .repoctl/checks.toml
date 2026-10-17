@@ -169,25 +169,13 @@ commands = [
 name = "examples_native_evaluator_tests"
 trigger_job = "examples"
 include_in_test = true
-# Locally this runs only when a change touches what it builds and runs: the examples, the
-# evaluator SDK and packages, and the code and tests listed under `native_evaluator_examples`
-# in components.toml. CI runs it whenever the `examples` job is selected.
-local_paths = [
-  "examples", "sdk/vs-evaluator", "resources/evaluators",
-  "libs/vs-runtime/src/vs_runtime/_docker_evaluator_tools.py",
-  "libs/vs-runtime/src/vs_runtime/_evaluator_packages.py",
-  "libs/vs-runtime/src/vs_runtime/_run_environment.py",
-  "libs/vs-runtime/src/vs_runtime/_slurm_environment.py",
-  "libs/vs-runtime/src/vs_runtime/_trusted_evaluation_preparation.py",
-  "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py",
-  "tests/architecture/test_stack_evaluator.py",
-  "tests/architecture/test_ordered_map_evaluator.py",
-  "tests/architecture/test_unordered_map_evaluator.py",
-  "tests/examples/test_prioqueue_evaluator.py",
-  "tests/examples/test_queue_evaluator.py",
-  "tests/e2e/test_bundled_go_evaluator_offline.py",
-  "tests/e2e/test_kvstore_default_gate_e2e.py",
-]
+# Locally this runs only when a change touches what it builds and runs: the examples, and the
+# roots and files of the `native_evaluator_examples` component in components.toml (the evaluator
+# SDK and packages, and the code and tests the examples import). That list is declared once, in
+# components.toml, where CI also selects on it; `local_components` reads it from there.
+# CI runs it whenever the `examples` job is selected.
+local_paths = ["examples"]
+local_components = ["native_evaluator_examples"]
 language = "python"
 directory = "."
 timeout_seconds = 1800

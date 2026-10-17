@@ -47,7 +47,7 @@ func selectedTestChecks(g graph, p plan) ([]execution.Check, []string, []string,
 		if !suite.IncludeInTest || !p.Jobs[suite.TriggerJob] {
 			continue
 		}
-		if len(suite.LocalPaths) > 0 && !anyUnder(p.ChangedPaths, suite.LocalPaths) {
+		if local := g.localSelectionPaths(suite); len(local) > 0 && !anyUnder(p.ChangedPaths, local) {
 			skippedGroups = append(skippedGroups, name)
 			coveredJobs[suite.TriggerJob] = true
 			continue

@@ -1,5 +1,7 @@
 package main
 
+import "repoctl/execution"
+
 // forLocalTest returns the graph `repoctl test` plans with. A component that
 // declares local_jobs stops selecting every job and collection and selects
 // only those jobs, so a change that CI must check everywhere (the repoctl
@@ -39,4 +41,17 @@ func anyUnder(paths, roots []string) bool {
 		}
 	}
 	return false
+}
+
+// localSelectionPaths returns the repository paths that narrow a check group in
+// `repoctl test`: its local_paths plus the roots and files of its
+// local_components. An empty result means the group is not narrowed.
+func (g graph) localSelectionPaths(suite execution.Suite) []string {
+	paths := append([]string(nil), suite.LocalPaths...)
+	for _, id := range suite.LocalComponents {
+		c := g.Components[id]
+		paths = appendUniquePaths(paths, c.Roots)
+		paths = appendUniquePaths(paths, c.Files)
+	}
+	return paths
 }

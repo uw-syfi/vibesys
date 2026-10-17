@@ -30,6 +30,11 @@ func (g *graph) validateCheckGroups(groups []execution.Suite) error {
 				return fmt.Errorf("check_groups.%s: unsafe local_paths entry %q", suite.Name, path)
 			}
 		}
+		for _, id := range suite.LocalComponents {
+			if _, ok := g.Components[id]; !ok {
+				return fmt.Errorf("check_groups.%s: unknown local_components entry %q", suite.Name, id)
+			}
+		}
 		if suite.Directory != "." && !validPath(suite.Directory) {
 			return fmt.Errorf("check_groups.%s: unsafe directory %q", suite.Name, suite.Directory)
 		}

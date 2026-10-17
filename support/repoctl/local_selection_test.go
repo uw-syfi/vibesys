@@ -1,9 +1,14 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
+
+	"repoctl/execution"
 )
 
 // localPlan returns the groups and native targets `repoctl test` would run for
@@ -132,5 +137,58 @@ func TestLocalJobsMustBeKnown(t *testing.T) {
 	err := g.add(component{ID: "x", Roots: []string{"x"}, LocalJobs: []string{"nope"}})
 	if err == nil {
 		t.Fatal("unknown local job accepted")
+	}
+}
+
+// The evaluator examples' file list lives in components.toml (CI selects on it) and the
+// local selection reads it from there. Touching any one of its files or roots must therefore
+// run the group locally, so the two cannot drift.
+func TestLocalSelectionOfEvaluatorExamplesFollowsItsComponent(t *testing.T) {
+	g, err := readPolicy("../..", ".repoctl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	component, ok := g.Components["native_evaluator_examples"]
+	if !ok {
+		t.Fatal("component native_evaluator_examples is missing")
+	}
+	paths := append(append([]string{}, component.Files...), component.Roots...)
+	if len(paths) == 0 {
+		t.Fatal("component native_evaluator_examples lists no paths")
+	}
+	for _, path := range paths {
+		groups, _, _ := localPlan(t, []string{path})
+		if !contains(groups, "examples_native_evaluator_tests") {
+			t.Errorf("a change to %s (listed by native_evaluator_examples) does not run examples_native_evaluator_tests locally; groups = %v", path, groups)
+		}
+	}
+}
+
+// Every path a group lists in local_paths must exist, so a rename cannot leave a
+// local selection that silently matches nothing.
+func TestLocalPathsExist(t *testing.T) {
+	g, err := readPolicy("../..", ".repoctl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, suite := range g.CheckGroups {
+		for _, path := range suite.LocalPaths {
+			if _, err := os.Stat(filepath.Join("../..", path)); err != nil {
+				t.Errorf("check_groups.%s: local_paths entry %q does not exist: %v", name, path, err)
+			}
+		}
+	}
+}
+
+func TestLocalComponentsMustBeKnown(t *testing.T) {
+	g, _ := testFixture()
+	g.CheckGroups = map[string]execution.Suite{}
+	suite := execution.Suite{
+		Name: "x", Language: "python", Directory: ".", TimeoutSeconds: 1,
+		Commands: [][]string{{"pytest"}}, LocalComponents: []string{"nope"},
+	}
+	err := g.validateCheckGroups([]execution.Suite{suite})
+	if err == nil || !strings.Contains(err.Error(), "local_components") {
+		t.Fatalf("validation error = %v, want a local_components rejection", err)
 	}
 }

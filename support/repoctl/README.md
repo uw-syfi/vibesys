@@ -39,8 +39,10 @@ targets from a plan. `test` runs groups marked
 local run stays short while CI keeps its full selection. A component with
 `local_jobs` selects only those jobs in `test` instead of all jobs and
 collections (the repoctl policy selects only `impact`). A check group with
-`local_paths` runs in `test` only when a changed path is under one of them;
-`test` prints each group it skips.
+`local_paths` or `local_components` runs in `test` only when a changed path is
+under one of the paths, or under a root or file of one of the named components
+(declare a list that CI also selects on once, in components.toml, and name its
+component); `test` prints each group it skips.
 Pass `--collection-json '["package-name"]'` to `run-checks` for a group with
 a configured collection; unknown or duplicate values fail before execution.
 In GitHub Actions, `plan --github-event` reads `GITHUB_EVENT_NAME` and

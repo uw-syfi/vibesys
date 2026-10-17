@@ -39,9 +39,13 @@ type Suite struct {
 	// LocalPaths narrows `repoctl test` only (never `run-checks`, which CI
 	// uses): when set, the group runs locally only if a changed path equals or
 	// is under one of these repository-relative paths.
-	LocalPaths     []string          `toml:"local_paths"`
-	Env            map[string]string `toml:"env"`
-	TimeoutSeconds int               `toml:"timeout_seconds"`
+	LocalPaths []string `toml:"local_paths"`
+	// LocalComponents extends LocalPaths with the roots and files of the named
+	// components, so a path list that CI also selects on is declared once, in
+	// components.toml, and cannot drift from this group's local selection.
+	LocalComponents []string          `toml:"local_components"`
+	Env             map[string]string `toml:"env"`
+	TimeoutSeconds  int               `toml:"timeout_seconds"`
 }
 
 // Planner validates and translates a configured suite and selected collection
