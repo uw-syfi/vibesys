@@ -521,7 +521,7 @@ def test_a_resent_control_is_one_control_and_a_reused_id_is_a_conflict(tmp_path:
 
     assert first == again
     assert conflict.value.diagnostic_code == "control_id_conflict"
-    assert parts.control.take_pending_steer() == ["prefer latency"]
+    assert [steer.text for steer in parts.control.take_pending_steer()] == ["prefer latency"]
     assert not parts.control.pause_requested()
 
 

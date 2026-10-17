@@ -221,7 +221,7 @@ def dispatch(argv: list[str], runs: Runs | None = None) -> None:
             control_main(
                 argv[1:],
                 cwd=Path.cwd(),
-                new_request_id=lambda: time_ordered_id(SystemClock().now(), secrets.token_hex(4)),
+                new_control_id=lambda: time_ordered_id(SystemClock().now(), secrets.token_hex(4)),
                 out=sys.stdout,
                 err=sys.stderr,
             )

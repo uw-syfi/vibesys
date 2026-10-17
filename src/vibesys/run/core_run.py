@@ -26,13 +26,14 @@ from vs_runtime.api.core import (
     CoreRunHost,
     CoreRuntime,
     JournalPublicationDelivery,
+    OperatorInbox,
     RunControlBridge,
     RunLoopConfig,
     drive_core,
     reject_legacy_resume,
     start_core_awaiting_lease,
 )
-from vs_runtime.api.infrastructure import RunStopped
+from vs_runtime.api.infrastructure import ChannelRunControl, RunStopped
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -116,13 +117,11 @@ def ensure_not_legacy_resume(project_root: Path, run_id: str) -> None:
         ) from error
 
 
-async def drive_core_run(
-    host: CoreHost, integration: LocalRunIntegration, project_root: Path
-) -> RunEnd:
+async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> RunEnd:
     """Run one core run to its terminal status over ``host.services``.
 
-    The loop reads operator controls from ``integration.control`` and from the run's
-    control inbox in the project at ``project_root``, where ``vibesys control`` writes.
+    The loop reads operator controls from ``integration.control`` and, when the services
+    carry one, from the run's control inbox, where ``vibesys control`` writes.
 
     Raises ``RunStopped`` when the operator's stop ended the run, so the session reports
     a stopped run, and ``CoreRunRefusedError`` when composition left an executor role
@@ -141,7 +140,12 @@ async def drive_core_run(
     controls = RunControlBridge(
         integration.control,
         _SteerTexts(services.artifacts),
-        inbox=Project.open(project_root).state.control_inbox(services.run_id),
+        inbox=None
+        if services.control_inbox is None
+        else OperatorInbox(
+            services.control_inbox,
+            ChannelRunControl(integration.control, host.timing.threads),
+        ),
     )
     loop = CoreRunHost(shell, delivery, services.clock, controls, workspaces=host.workspaces)
     config = _loop_config(services.run_id, host.timing.lease_seconds)

@@ -125,7 +125,7 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
         network=network,
         invocation_store_factory=invocation_store_factory,
     ) as core_host:
-        return await drive_core_run(core_host, integration, request.project_root)
+        return await drive_core_run(core_host, integration)
 
 
 class _LocalRunSession:

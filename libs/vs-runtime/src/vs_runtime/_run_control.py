@@ -70,17 +70,17 @@ class RunControlEventSink(Protocol):
 
 @dataclass(frozen=True)
 class QueuedSteer:
-    """One queued steer: its text and, for a request from the run's inbox, the request's id."""
+    """One queued steer: its text and the id of the control that sent it, if it had one."""
 
     text: str
-    request_id: str | None = None
+    control_id: str | None = None
 
 
 class RunControlChannel(Protocol):
     """Cooperative control mailbox shared by callers and the run thread."""
 
-    def queue_steer(self, text: str, request_id: str | None = None) -> None:
-        """Queue steering for the next turn; ``request_id`` names an inbox request.
+    def queue_steer(self, text: str, control_id: str | None = None) -> None:
+        """Queue steering for the next turn; ``control_id`` names the control that sent it.
 
         The queue is the single source of truth. The run loop drains it
         (:meth:`take_pending_steer`) and turns each message into a durable session input,
@@ -227,10 +227,10 @@ class RuntimeRunControlChannel:
         self._capacity_request: int | None = None
         self._capacity_requests = 0
 
-    def queue_steer(self, text: str, request_id: str | None = None) -> None:
+    def queue_steer(self, text: str, control_id: str | None = None) -> None:
         """Queue free-text steering for the run loop to take at its next control poll."""
         with self._lock:
-            self._pending_steer.append(QueuedSteer(text, request_id))
+            self._pending_steer.append(QueuedSteer(text, control_id))
         self._emit(RunControlTransitionKind.STEER_QUEUED, text=text)
 
     def request_pause(self) -> None:

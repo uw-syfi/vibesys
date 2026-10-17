@@ -64,7 +64,7 @@ if TYPE_CHECKING:
     from vs_core.api import CoreState, LifecycleCapability, RequestRetries, SearchDef
     from vs_github.api import GitHubClient
     from vs_mcp.api import ToolServerDescriptor
-    from vs_project.api import Project, StateNamespace, StateStore
+    from vs_project.api import ControlInbox, Project, StateNamespace, StateStore
     from vs_runtime.api import AgentRole, CaptureCommands, Commands, CorePolicy, RunFacts
     from vs_runtime.api.core import (
         CommitObserver,
@@ -212,6 +212,8 @@ class CoreServices:
     """The plan would offer profile work, but the run environment cannot capture a profile."""
     stop_requested: bool = False
     """The operator force-stopped this run before (``record_stop_request``): it only ends."""
+    control_inbox: ControlInbox | None = None
+    """The run's durable control inbox, where ``vibesys control`` writes; the loop reads it."""
 
     async def close(self) -> None:
         """Release the evaluation executor; workspaces and the client close with the host."""
@@ -280,6 +282,7 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         agent_evaluation=bridge,
         profile_capture_withheld=plan.profile_capture_withheld,
         stop_requested=resources.project.state.stop_requested(run_id),
+        control_inbox=resources.project.state.control_inbox(run_id),
     )
 
 

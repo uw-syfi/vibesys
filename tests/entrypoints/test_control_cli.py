@@ -20,8 +20,8 @@ from vibesys.api import CONTROL_REQUEST
 from vs_core.api import initial_state, step
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
-from vs_runtime.api.core import RunControlBridge
-from vs_runtime.api.infrastructure import create_run_control_channel
+from vs_runtime.api.core import OperatorInbox, RunControlBridge
+from vs_runtime.api.infrastructure import ChannelRunControl, create_run_control_channel
 from vs_runtime.api.testing import FakeRunControlEventSink
 from vs_sim.api.testing import SimThreads
 
@@ -48,9 +48,9 @@ def _project_with_run(root: Path) -> str:
     return manifest.run_id
 
 
-def _control(root: Path, argv: list[str], request_id: str = "r-1") -> tuple[int, str, str]:
+def _control(root: Path, argv: list[str], control_id: str = "r-1") -> tuple[int, str, str]:
     out, err = io.StringIO(), io.StringIO()
-    status = control_main(argv, cwd=root, new_request_id=lambda: request_id, out=out, err=err)
+    status = control_main(argv, cwd=root, new_control_id=lambda: control_id, out=out, err=err)
     return status, out.getvalue(), err.getvalue()
 
 
@@ -83,9 +83,10 @@ def test_a_posted_control_is_what_the_run_records(
     request = CONTROL_REQUEST.validate_json(entry.payload)
     assert request.action == command[0]
     channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
-    bridge = RunControlBridge(
-        channel, _Texts(), inbox=Project.open(root).state.control_inbox(run_id)
+    inbox = OperatorInbox(
+        Project.open(root).state.control_inbox(run_id), ChannelRunControl(channel, SimThreads())
     )
+    bridge = RunControlBridge(channel, _Texts(), inbox=inbox)
     core = initial_state()
     for event in bridge.poll(core, 1.0):
         core = step(core, event).state
@@ -97,7 +98,7 @@ def test_a_posted_control_is_what_the_run_records(
     [
         (["{run}", "steer", ""], "text"),
         (["no-such-run", "pause"], "no-such-run"),
-        (["{run}", "--request-id", "../x", "pause"], "control request id"),
+        (["{run}", "--control-id", "../x", "pause"], "control_id"),
     ],
 )
 def test_an_invalid_control_is_refused_and_nothing_is_written(
