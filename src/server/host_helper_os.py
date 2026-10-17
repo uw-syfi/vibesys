@@ -58,6 +58,7 @@ from server.host_helper_requests import (
     event_page,
 )
 from server.host_preflight import PreflightReport
+from server.run_summary_cache import summarize_journal
 from vs_decode.api import Unreadable, decode_json
 from vs_project.api import GitRunHistory, NullGitTrackerEvents, Project, ProjectError
 from vs_sim.api import ProcessSpec
@@ -65,6 +66,7 @@ from vs_sim.api import ProcessSpec
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from server.run_summary import Summarized
     from vs_logs.read import LogReader as StoreReader
     from vs_project.api import GitRepositoryFactory
     from vs_sim.api import CommandProbe, ProcessLauncher
@@ -126,16 +128,24 @@ class FileProjects:
 
     def run_events(self, project: Path, run_id: str, from_sequence: int, limit: int) -> EventPage:
         """A page of run ``run_id``'s journal, once the project is known to have the run."""
-        root, runs = self.runs(project)
-        if all(run.run_id != run_id for run in runs):
-            message = f"{root} has no run {run_id!r}"
-            raise ProjectLookupError(HelperErrorCode.UNKNOWN_RUN, str(root), message)
-        journal = Project.log_directory_for(root, run_id) / RUN_EVENTS_FILE
+        journal = self._journal(project, run_id)
         try:
             with journal.open("rb") as lines:
                 return event_page(lines, from_sequence, limit, RUN_EVENTS_READ_MAX_BYTES)
         except FileNotFoundError:
             return EventPage((), from_sequence, complete=True)
+
+    def run_summary(self, project: Path, run_id: str) -> Summarized:
+        """The fold of run ``run_id``'s journal, from the cache beside it and what it gained since."""
+        return summarize_journal(self._journal(project, run_id))
+
+    def _journal(self, project: Path, run_id: str) -> Path:
+        """Run ``run_id``'s journal file, once the project is known to have the run."""
+        root, runs = self.runs(project)
+        if all(run.run_id != run_id for run in runs):
+            message = f"{root} has no run {run_id!r}"
+            raise ProjectLookupError(HelperErrorCode.UNKNOWN_RUN, str(root), message)
+        return Project.log_directory_for(root, run_id) / RUN_EVENTS_FILE
 
     def _open(self, project: Path) -> Project:
         try:

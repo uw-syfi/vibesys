@@ -1429,6 +1429,7 @@ const hostHelperSchema: Record<string, unknown> = {
         "harnesses",
         "logs_by_span",
         "run_history",
+        "run_summary",
         "machine_describe",
         "checkout_inspect",
         "preflight",
@@ -4231,6 +4232,166 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "RunsReadEventsRequest",
       "type": "object"
     },
+    "RunsSummaryReply": {
+      "additionalProperties": false,
+      "description": "One page of a run's summary: the client's fold of its journal, to ``through_sequence``.\n\nEvery field equals what a client reading the whole journal up to ``through_sequence`` folds\nitself, which is the contract the helper's tests hold it to:\n\n- ``spans``: the run trace (``foldTrace``): each span as its latest span event left it, in\n  the order the spans started, so each comes after its parent;\n- ``overview``: the ``overview`` of the last ``run_started`` event that declares one\n  (``foldOverview``), with no unit or direction a live server adds from run state;\n- ``replies``: the last typed reply of each agent-turn span, by ``agent_execution_finished``\n  events with a ``span_id``, in the order the spans first replied (``implementerOutcomes``);\n- the idea rows, the measurement points and the chart are folds of ``spans`` and ``replies``\n  the client already owns (``CandidateFold``, ``performanceFold``); nothing duplicates them.\n\nAn event at or before the last folded sequence is skipped whole, as the client skips it. The\nrun level is final at ``through_sequence``. Events after it are the live tail: read them with\n``runs.read_events`` from ``through_sequence + 1``, or subscribe after ``through_sequence``. A\nrun still writing can move between the pages of one read: every page names its\n``through_sequence``, and a read whose pages disagree starts again.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "runs.summary",
+          "default": "runs.summary",
+          "title": "Type",
+          "type": "string"
+        },
+        "through_sequence": {
+          "minimum": 0,
+          "title": "Through Sequence",
+          "type": "integer"
+        },
+        "event_count": {
+          "minimum": 0,
+          "title": "Event Count",
+          "type": "integer"
+        },
+        "journal_bytes": {
+          "minimum": 0,
+          "title": "Journal Bytes",
+          "type": "integer"
+        },
+        "span_count": {
+          "minimum": 0,
+          "title": "Span Count",
+          "type": "integer"
+        },
+        "reply_count": {
+          "minimum": 0,
+          "title": "Reply Count",
+          "type": "integer"
+        },
+        "overview": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/JsonValue"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Overview"
+        },
+        "spans": {
+          "items": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          "title": "Spans",
+          "type": "array"
+        },
+        "replies": {
+          "items": {
+            "$ref": "#/$defs/TurnReply"
+          },
+          "title": "Replies",
+          "type": "array"
+        },
+        "schemas": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          "title": "Schemas",
+          "type": "object"
+        },
+        "next_offset": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Next Offset"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "through_sequence",
+        "event_count",
+        "journal_bytes",
+        "span_count",
+        "reply_count",
+        "overview",
+        "spans",
+        "replies",
+        "schemas",
+        "next_offset"
+      ],
+      "title": "RunsSummaryReply",
+      "type": "object"
+    },
+    "RunsSummaryRequest": {
+      "additionalProperties": false,
+      "description": "One page of a run's summary: what its run level shows, as of the journal's end now.\n\nThe summary is the journal's fold the client would compute itself (see\n``RunsSummaryReply``), kept beside the journal so a read costs what the summary holds, not\nwhat the journal does. Its items (every span, then every reply) are read in pages: start at\n``offset`` 0 and continue at each page's ``next_offset`` until it is ``None``.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "runs.summary",
+          "default": "runs.summary",
+          "title": "Type",
+          "type": "string"
+        },
+        "project": {
+          "title": "Project",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "offset": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "project",
+        "run_id"
+      ],
+      "title": "RunsSummaryRequest",
+      "type": "object"
+    },
     "StartDocker": {
       "additionalProperties": false,
       "description": "Start Docker on the machine.",
@@ -4680,6 +4841,40 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "TasksListRequest",
       "type": "object"
     },
+    "TurnReply": {
+      "additionalProperties": false,
+      "description": "The typed reply an agent turn ended with, its schema named by ``schema_id``.\n\n``kind``, the schema and ``value`` are the three fields of the run protocol's ``AgentReply``;\nthe schema is carried once per page in ``schemas`` because it is the repeated, large part.",
+      "properties": {
+        "span_id": {
+          "title": "Span Id",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "schema_id": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Schema Id",
+          "type": "string"
+        },
+        "value": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "span_id",
+        "kind",
+        "schema_id",
+        "value"
+      ],
+      "title": "TurnReply",
+      "type": "object"
+    },
     "UnconfirmedInstanceStopResult": {
       "additionalProperties": false,
       "description": "A complete stop result whose outcome does not prove terminal cleanup.",
@@ -4828,6 +5023,7 @@ const hostHelperSchema: Record<string, unknown> = {
           "run.stop": "#/$defs/RunStopRequest",
           "runs.list": "#/$defs/RunsListRequest",
           "runs.read_events": "#/$defs/RunsReadEventsRequest",
+          "runs.summary": "#/$defs/RunsSummaryRequest",
           "tasks.list": "#/$defs/TasksListRequest"
         },
         "propertyName": "type"
@@ -4885,6 +5081,9 @@ const hostHelperSchema: Record<string, unknown> = {
           "$ref": "#/$defs/RunsReadEventsRequest"
         },
         {
+          "$ref": "#/$defs/RunsSummaryRequest"
+        },
+        {
           "$ref": "#/$defs/MachineDescribeRequest"
         },
         {
@@ -4932,6 +5131,7 @@ const hostHelperSchema: Record<string, unknown> = {
           "run.stop": "#/$defs/RunStopReply",
           "runs.list": "#/$defs/RunsListReply",
           "runs.read_events": "#/$defs/RunsReadEventsReply",
+          "runs.summary": "#/$defs/RunsSummaryReply",
           "tasks.list": "#/$defs/TasksListReply"
         },
         "propertyName": "type"
@@ -4989,6 +5189,9 @@ const hostHelperSchema: Record<string, unknown> = {
           "$ref": "#/$defs/RunsReadEventsReply"
         },
         {
+          "$ref": "#/$defs/RunsSummaryReply"
+        },
+        {
           "$ref": "#/$defs/MachineDescribeReply"
         },
         {
@@ -5040,6 +5243,7 @@ const hostHelperSchema: Record<string, unknown> = {
     "logs.cancel": "logs_cancel",
     "harnesses.list": "harnesses",
     "runs.read_events": "run_history",
+    "runs.summary": "run_summary",
     "machine.describe": "machine_describe",
     "checkout.inspect": "checkout_inspect",
     "run.preflight": "preflight",

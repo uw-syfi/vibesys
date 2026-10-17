@@ -199,6 +199,7 @@ def test_host_helper_schema_exports_the_authoritative_request_feature_gates() ->
         "logs.cancel": "logs_cancel",
         "harnesses.list": "harnesses",
         "runs.read_events": "run_history",
+        "runs.summary": "run_summary",
         "machine.describe": "machine_describe",
         "checkout.inspect": "checkout_inspect",
         "run.preflight": "preflight",
