@@ -397,7 +397,7 @@ export function gateLog(candidate: Candidate): readonly LogLine[] {
 }
 
 export const NARRATION: readonly LogLine[] = [
-  {text: '21:17:36  started on chelan4 · codex gpt-6-luna · 1 h'},
+  {text: '21:17:36  started on chelan4 · codex model-a · 1 h'},
   {text: '21:17:41  input measured: 2,330,000 ops/s'},
   {text: '21:18:20  planned: mpmc-ring-v1, treiber-stack'},
   {text: '21:23:52  treiber-stack rejected: FIFO order broken in 7/100 trials'},

@@ -311,7 +311,7 @@ function Header(props: {readonly flags: DesignFlags; readonly compactHero: boole
           <Row gap="space-3" wrap>
             <Chip label={ended ? 'Finished' : 'Running'} tone={ended ? 'ok' : 'live'} dot />
             <Text variant="small" tone="muted">
-              chelan4 · gpt-6-luna · {ended ? '22m' : '14m / 1h'}
+              chelan4 · model-a · {ended ? '22m' : '14m / 1h'}
             </Text>
           </Row>
         </Row>
