@@ -4,7 +4,8 @@ A generated history interleaves posting requests, control polls whose events cor
 polls whose events are lost (the process died before core committed them), and restarts (a
 new bridge and channel over the same inbox and core state). Whatever the history, once the
 run settles every request is either recorded by core under ``op-<control id>`` exactly once
-or set aside with a reason, never both, and nothing stays pending.
+or set aside with a reason, never both, and nothing stays pending. Requests apply in the
+order they were posted, and the operator is told of each one set aside, once.
 """
 
 from __future__ import annotations
@@ -30,7 +31,13 @@ from vs_core.api import (
     initial_state,
     step,
 )
-from vs_project.api import InboxEntry, ProjectStateError
+from vs_project.api import (
+    InboxClosedError,
+    InboxEntry,
+    ProjectStateError,
+    RequestState,
+    RequestStatus,
+)
 from vs_project.api.testing import FakeControlInbox
 from vs_runtime.api.core import OperatorInbox, RunControlBridge
 from vs_runtime.api.infrastructure import (
@@ -41,6 +48,7 @@ from vs_runtime.api.infrastructure import (
     ControlStatus,
     PauseRequest,
     ResumeRequest,
+    RunControlTransitionKind,
     SteerRequest,
     StopRequest,
     create_run_control_channel,
@@ -62,10 +70,12 @@ class _Texts:
         self.held[ref.artifact_id.root] = text
 
 
-def _wired(inbox: FakeControlInbox, texts: _Texts) -> tuple[RunControlBridge, ChannelRunControl]:
+def _wired(
+    inbox: FakeControlInbox, texts: _Texts, sink: FakeRunControlEventSink | None = None
+) -> tuple[RunControlBridge, ChannelRunControl]:
     """A bridge over ``inbox`` and the run control a socket would submit to."""
     threads = SimThreads()
-    channel = create_run_control_channel(FakeRunControlEventSink(), threads=threads)
+    channel = create_run_control_channel(sink or FakeRunControlEventSink(), threads=threads)
     control = ChannelRunControl(channel, threads)
     return RunControlBridge(channel, texts, inbox=OperatorInbox(inbox, control)), control
 
@@ -167,9 +177,11 @@ def test_every_control_is_recorded_once_whichever_way_it_was_sent(
     """
     inbox = FakeControlInbox()
     texts = _Texts()
+    sink = FakeRunControlEventSink()
     core = initial_state()
-    bridge, control = _wired(inbox, texts)
+    bridge, control = _wired(inbox, texts, sink)
     posted: set[str] = set()
+    first_posts: list[str] = []
     sent: set[tuple[str, bytes]] = set()
     fresh = True
     unrecalled = 0
@@ -182,10 +194,13 @@ def test_every_control_is_recorded_once_whichever_way_it_was_sent(
                 sent.add((control_id, _json(request)))
                 unrecalled += fresh
             case ("post", str() | None as shared, dict() | bytes() as payload):
-                request_id = shared or f"r{index:03d}"
+                # Later posts get ids that sort first, so id order is never posting order.
+                request_id = shared or f"r{999 - index:03d}"
                 contents = _payload(payload, request_id)
                 with contextlib.suppress(ProjectStateError):  # an id holds one request
                     inbox.post(request_id, contents)
+                    if request_id not in posted:
+                        first_posts.append(request_id)
                     posted.add(request_id)
                     sent.add((request_id, contents))
             case ("poll",):
@@ -193,10 +208,10 @@ def test_every_control_is_recorded_once_whichever_way_it_was_sent(
                 fresh = False
             case ("lost poll",):
                 bridge.poll(core, float(index))
-                bridge, control = _wired(inbox, texts)
+                bridge, control = _wired(inbox, texts, sink)
                 fresh, restarts = True, restarts + 1
             case ("restart",):
-                bridge, control = _wired(inbox, texts)
+                bridge, control = _wired(inbox, texts, sink)
                 fresh, restarts = True, restarts + 1
     for settle in range(3):
         core = _commit(core, bridge.poll(core, 1000.0 + settle))
@@ -215,6 +230,24 @@ def test_every_control_is_recorded_once_whichever_way_it_was_sent(
     }
     steer_inputs = {row.input.input_id.root for row in core.sessions.inputs}
     assert {f"steer-{identity}" for identity in steer_controls} == steer_inputs
+    _check_posting_order_and_reports(core, inbox, sink, first_posts)
+
+
+def _check_posting_order_and_reports(
+    core: CoreState, inbox: FakeControlInbox, sink: FakeRunControlEventSink, posts: list[str]
+) -> None:
+    """Inbox-only requests are recorded in posting order; each set aside is reported once."""
+    recorded = [control.control_id.root for control in core.run.controls]
+    inbox_only = [f"op-{request_id}" for request_id in posts if request_id.startswith("r")]
+    assert [identity for identity in recorded if identity in inbox_only] == [
+        identity for identity in inbox_only if identity in recorded
+    ]
+    reported = Counter(
+        t.text for t in sink.transitions if t.kind is RunControlTransitionKind.REQUEST_REJECTED
+    )
+    assert reported == Counter(
+        f"control request {entry.request_id} rejected: {entry.reason}" for entry in inbox.rejected()
+    )
 
 
 def test_a_pause_sent_through_the_socket_and_the_inbox_is_recorded_once() -> None:
@@ -290,26 +323,27 @@ def test_a_capacity_wait_with_no_capacity_pause_is_set_aside() -> None:
     assert [entry.reason for entry in inbox.rejected()] == ["refused: not_paused_on_capacity"]
 
 
-def test_inbox_requests_apply_in_id_order_as_their_actions_say() -> None:
+def test_inbox_requests_apply_in_posting_order_as_their_actions_say() -> None:
+    """Regression: requests applied in id order, so a resume named "r1" ran before a pause."""
     inbox = FakeControlInbox()
     inbox.post("r2", _json(SteerRequest(control_id="r2", text="prefer latency")))
-    inbox.post("r1", _json(PauseRequest(control_id="r1")))
-    inbox.post("r3", _json(ResumeRequest(control_id="r3")))
+    inbox.post("r3", _json(PauseRequest(control_id="r3")))
+    inbox.post("r1", _json(ResumeRequest(control_id="r1")))
     texts = _Texts()
     bridge = _bridge(inbox, texts)
 
     core = _commit(initial_state(), bridge.poll(initial_state(), 1.0))
 
     assert [(c.control_id.root, c.action) for c in core.run.controls] == [
-        ("op-r1", "pause"),
         ("op-r2", "steer"),
-        ("op-r3", "resume"),
+        ("op-r3", "pause"),
+        ("op-r1", "resume"),
     ]
     assert core.run.status == RunStatus.RUNNING
     assert list(texts.held.values()) == ["prefer latency"]
     (steer,) = core.sessions.inputs
     assert steer.input.input_id.root == "steer-op-r2"
-    assert steer.input.sequence == 2
+    assert steer.input.sequence == 1
     # Core holds all three, so the next poll settles them and applies nothing again.
     assert bridge.poll(core, 2.0) == ()
     assert inbox.pending() == ()
@@ -430,3 +464,42 @@ def test_a_damaged_inbox_never_fails_the_run_and_is_reported_once(
     assert [r.getMessage() for r in caplog.records if "control inbox" in r.getMessage()] == [
         "the run's control inbox cannot be read; its requests wait: VibeSys state path is a symlink"
     ]
+
+
+def _ended(core: CoreState) -> CoreState:
+    return core.model_copy(
+        update={"run": core.run.model_copy(update={"status": RunStatus.TERMINAL})}
+    )
+
+
+def test_an_ended_run_settles_what_it_applied_and_rejects_the_rest_once() -> None:
+    inbox = FakeControlInbox()
+    sink = FakeRunControlEventSink()
+    bridge, _control = _wired(inbox, _Texts(), sink)
+    inbox.post("applied", _json(PauseRequest(control_id="applied")))
+    core = _commit(initial_state(), bridge.poll(initial_state(), 1.0))
+    inbox.post("late", _json(ResumeRequest(control_id="late")))
+
+    bridge.end(_ended(core))
+    bridge.end(_ended(core))
+
+    assert inbox.pending() == ()
+    assert inbox.status("applied") == RequestStatus(RequestState.APPLIED)
+    late = inbox.status("late")
+    assert late is not None
+    assert late.state is RequestState.REJECTED
+    assert [
+        t.text for t in sink.transitions if t.kind is RunControlTransitionKind.REQUEST_REJECTED
+    ] == [f"control request late rejected: {late.reason}"]
+    with pytest.raises(InboxClosedError):
+        inbox.post("after", _json(PauseRequest(control_id="after")))
+
+
+def test_a_run_that_may_resume_keeps_its_inbox_open() -> None:
+    inbox = FakeControlInbox()
+    inbox.post("r1", _json(PauseRequest(control_id="r1")))
+
+    _bridge(inbox, _Texts()).end(initial_state())
+
+    assert inbox.status("r1") == RequestStatus(RequestState.PENDING)
+    inbox.post("r2", _json(ResumeRequest(control_id="r2")))

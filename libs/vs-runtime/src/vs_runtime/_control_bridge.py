@@ -35,7 +35,7 @@ from vs_core.api import (
     StopMode,
 )
 from vs_decode.api import Unreadable, decode_json
-from vs_project.api import ProjectStateError
+from vs_project.api import ProjectStateError, ended_unapplied
 from vs_runtime._operator_control import (
     CONTROL_REQUEST,
     ChannelRunControl,
@@ -96,8 +96,10 @@ class RunControlBridge:
     adopts its last choice and ends the run itself. The first poll also records the run's
     deadline on the channel, for work on other threads that must not wait past it.
 
-    With an ``inbox``, each poll also applies the inbox's requests, in id order, each as one
-    control ``op-<control id>``; see the module docstring for how each applies once.
+    With an ``inbox``, each poll also applies the inbox's requests, in the order they were
+    posted, each as one control ``op-<control id>``; see the module docstring for how each
+    applies once. Each request the run sets aside is reported (``notify_request_rejected``),
+    and ``end`` closes the inbox once the run has ended.
 
     ``control`` (by default the inbox's) is where operators submit controls; each poll tells
     it which ids core already records, so a control resent after a restart replays its ack
@@ -169,7 +171,7 @@ class RunControlBridge:
         self._take_steers(core, now_at, events)
         if self._inbox is not None:
             # A damaged inbox (a symlinked or misplaced directory) leaves its requests waiting
-            # and the run going on; reporting it to the operator is tracked in #3061.
+            # and the run going on, with one warning in the run's log.
             try:
                 self._read_inbox(self._inbox, core, now_at, events)
             except ProjectStateError as error:
@@ -179,7 +181,7 @@ class RunControlBridge:
                         "the run's control inbox cannot be read; its requests wait: %s", error
                     )
         # The inbox's withdrawals are taken only now, after all of its steers, so a withdrawal
-        # that sorts before its own steer in the inbox still finds it in this poll's events.
+        # posted before its own steer still finds it in this poll's events.
         withdrawals += self._channel.take_pending_withdrawals()
         self._take_steers(core, now_at, events)
         self._apply_withdrawals(core, now_at, withdrawals, events)
@@ -277,7 +279,7 @@ class RunControlBridge:
         if self._inbox is None:
             return
         try:
-            self._inbox.requests.reject(control_id, f"it ended nothing: {reason}")
+            self._reject(self._inbox, control_id, f"it ended nothing: {reason}")
         except ProjectStateError as error:
             _LOG.warning(
                 "the run's control inbox cannot be marked; %s waits: %s", control_id, error
@@ -290,24 +292,66 @@ class RunControlBridge:
 
         Raises ``ProjectStateError`` when the inbox itself cannot be read or marked.
         """
-        held = {control.control_id.root: control for control in core.run.controls}
         for entry in inbox.requests.pending():
-            if entry.unreadable is not None:
-                inbox.requests.reject(entry.request_id, f"unreadable: {entry.unreadable}")
+            if self._settle_held(inbox, entry, core):
                 continue
-            control = held.get(_identity(entry.request_id).root)
-            if control is not None:
-                if _is_held(entry, control):
-                    inbox.requests.settle(entry.request_id)
-                else:
-                    reason = "its control_id already named a different control"
-                    inbox.requests.reject(entry.request_id, reason)
-            elif entry.request_id not in self._submitted:
+            if entry.request_id not in self._submitted:
                 reason = self._apply(inbox, entry, core, now_at, events)
                 if reason is None:
                     self._submitted.add(entry.request_id)
                 else:
-                    inbox.requests.reject(entry.request_id, reason)
+                    self._reject(inbox, entry.request_id, reason)
+
+    def end(self, core: CoreState) -> None:
+        """Close the inbox of a run that has ended; a run that may resume keeps it open.
+
+        Every request core holds is settled and every other one rejected with the run's end,
+        then the inbox is closed, then what was posted meanwhile is rejected too. A post
+        that finds the inbox closed is refused (``vs_project``'s ``ControlInbox.post``).
+        """
+        inbox = self._inbox
+        if inbox is None or core.run.status != RunStatus.TERMINAL:
+            return
+        result = core.run.result
+        ending = "the run ended" if result is None else f"the run ended: {result.reason}"
+        try:
+            self._sweep_ended(inbox, core, ending)
+            inbox.requests.close(ending)
+            self._sweep_ended(inbox, core, ending)
+        except ProjectStateError as error:
+            _LOG.warning("the run's control inbox cannot be closed: %s", error)
+
+    def _sweep_ended(self, inbox: OperatorInbox, core: CoreState, ending: str) -> None:
+        for entry in inbox.requests.pending():
+            if not self._settle_held(inbox, entry, core):
+                self._reject(inbox, entry.request_id, ended_unapplied(ending))
+
+    def _settle_held(self, inbox: OperatorInbox, entry: InboxEntry, core: CoreState) -> bool:
+        """Settle or set aside an entry core already decided; whether it was one.
+
+        An unreadable entry is set aside; one whose identity core holds is settled when it
+        is that control, and set aside when core holds a different control under its id.
+        """
+        if entry.unreadable is not None:
+            self._reject(inbox, entry.request_id, f"unreadable: {entry.unreadable}")
+            return True
+        control = next(
+            (c for c in core.run.controls if c.control_id == _identity(entry.request_id)), None
+        )
+        if control is None:
+            return False
+        if _is_held(entry, control):
+            inbox.requests.settle(entry.request_id)
+        else:
+            self._reject(
+                inbox, entry.request_id, "its control_id already named a different control"
+            )
+        return True
+
+    def _reject(self, inbox: OperatorInbox, request_id: str, reason: str) -> None:
+        """Set an inbox request aside with ``reason``, and tell the operator."""
+        inbox.requests.reject(request_id, reason)
+        self._channel.notify_request_rejected(request_id, reason)
 
     def _apply(
         self,

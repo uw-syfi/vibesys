@@ -24,6 +24,7 @@ from vs_core.api import (
     InputMode,
     RoleId,
     RoleInputTarget,
+    RunStatus,
     initial_state,
     step,
 )
@@ -302,3 +303,50 @@ def test_time_ordered_ids_sort_by_time(earlier: float, later: float) -> None:
     earlier, later = sorted((earlier, later))
     if round(later * 1000) > round(earlier * 1000):
         assert time_ordered_id(earlier, "ffff") < time_ordered_id(later, "0000")
+
+
+def test_status_says_what_became_of_each_request(tmp_path: Path) -> None:
+    """A request reads pending until the run applies it, or rejected with the run's reason."""
+    run_id = _project_with_run(tmp_path)
+    bridge, _requests, sink = _production_bridge(tmp_path, run_id)
+    assert _control(tmp_path, [run_id, "pause"], "p-1")[0] == 0
+    assert _control(tmp_path, [run_id, "withdraw", "nothing"], "w-1")[0] == 0
+
+    assert _control(tmp_path, [run_id, "status", "p-1"]) == (0, "pending\n", "")
+    core = _declaring(("dynamic-planner",))
+    for now in (1.0, 2.0):
+        for event in bridge.poll(core, now):
+            core = step(core, event).state
+
+    assert _control(tmp_path, [run_id, "status", "p-1"]) == (0, "applied\n", "")
+    status, out, err = _control(tmp_path, [run_id, "status", "w-1"])
+    assert (status, err) == (0, "")
+    assert out.startswith("rejected: it ended nothing")
+    rejected = [
+        t.text for t in sink.transitions if t.kind is RunControlTransitionKind.REQUEST_REJECTED
+    ]
+    assert rejected == [f"control request w-1 rejected: {out.removeprefix('rejected: ').strip()}"]
+    status, out, err = _control(tmp_path, [run_id, "status", "never-sent"])
+    assert (status, out) == (1, "")
+    assert "never-sent" in err
+
+
+def test_an_ended_run_refuses_a_control_before_writing_it(tmp_path: Path) -> None:
+    """Regression: posting to a run that had ended exited 0 and the request never applied."""
+    run_id = _project_with_run(tmp_path)
+    bridge, requests, _sink = _production_bridge(tmp_path, run_id)
+    assert _control(tmp_path, [run_id, "steer", "too late"], "s-1")[0] == 0
+    core = _declaring(("dynamic-planner",))
+    ended = core.model_copy(
+        update={"run": core.run.model_copy(update={"status": RunStatus.TERMINAL})}
+    )
+
+    bridge.end(ended)
+    status, out, err = _control(tmp_path, [run_id, "pause"], "p-1")
+
+    assert (status, out) == (2, "")
+    assert "has ended" in err
+    assert requests.status("p-1") is None
+    status, out, _ = _control(tmp_path, [run_id, "status", "s-1"])
+    assert status == 0
+    assert out.startswith("rejected: the run ended before applying it")

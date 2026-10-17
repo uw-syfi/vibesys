@@ -159,6 +159,8 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
             bridge.attach(shell, services.clock)
             await bridge.serve()
         outcome = await drive_core(loop, config, stall_notes=_unacknowledged_notes(bridge))
+        # An ended run takes no more requests: ``vibesys control`` is refused from now on.
+        controls.end(shell.record.envelope.core)
     except BaseException as error:
         run_error = error
         raise

@@ -32,6 +32,8 @@ class RunControlTransitionKind(StrEnum):
     WITHDRAW_QUEUED = "withdraw_queued"
     GUIDANCE_ENDED = "guidance_ended"
     """Standing guidance reaches no turn any more: withdrawn, or its target or the run ended."""
+    REQUEST_REJECTED = "request_rejected"
+    """The run set aside a request from its control inbox, with the reason."""
     PAUSED = "paused"
     STOPPED = "stopped"
 
@@ -215,6 +217,10 @@ class RunControlChannel(Protocol):
 
         It was withdrawn, its target or the run ended, or its attempt was reopened.
         """
+        ...
+
+    def notify_request_rejected(self, request_id: str, reason: str) -> None:
+        """Record that the run set aside the inbox request ``request_id``, and why."""
         ...
 
     def wait_while_paused(self) -> None:
@@ -562,6 +568,15 @@ class RuntimeRunControlChannel:
         """Record that standing guidance reaches no turn any more, and why."""
         self._events(
             RunControlTransition(kind=RunControlTransitionKind.GUIDANCE_ENDED, text=reason)
+        )
+
+    def notify_request_rejected(self, request_id: str, reason: str) -> None:
+        """Record that an inbox request was set aside, naming it and the reason."""
+        self._events(
+            RunControlTransition(
+                kind=RunControlTransitionKind.REQUEST_REJECTED,
+                text=f"control request {request_id} rejected: {reason}",
+            )
         )
 
     def wait_while_paused(self) -> None:
