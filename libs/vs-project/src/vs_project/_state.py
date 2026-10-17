@@ -56,6 +56,7 @@ from vs_project._state_io import (
     _read_json_object,
     _serialize_json_object,
     _serialize_state_model,
+    exclusive_write_bytes,
     sync_directory_chain,
 )
 from vs_project._state_io import (
@@ -522,6 +523,21 @@ class StateNamespace:
             )
         except OSError as exc:
             raise ProjectStateError.state_file_write_failed(path, exc) from exc
+
+    def create_bytes(self, relative_path: str | PurePosixPath, contents: bytes) -> bool:
+        """Durably create one safe state file, unless an entry already holds its name.
+
+        Returns whether this call created it. Of two callers racing for one name, in any
+        processes, exactly one creates it; a reader sees the complete bytes or no file.
+        """
+        path = self._resolve_file(relative_path)
+        try:
+            created = exclusive_write_bytes(path, contents)
+            if created:
+                sync_directory_chain(path.parent, self._containment_root)
+        except OSError as exc:
+            raise ProjectStateError.state_file_write_failed(path, exc) from exc
+        return created
 
     def snapshot_bytes(self, relative_path: str | PurePosixPath, contents: bytes) -> StateSnapshot:
         """Prepare an exact portable snapshot of one subsystem-owned file."""
@@ -1412,8 +1428,13 @@ class ProjectState:
         )
 
     def control_inbox(self, run_id: str) -> FileControlInbox:
-        """Open the run's inbox of operator control requests (``vibesys control``)."""
-        return FileControlInbox(self.portable_namespace(run_id, _CONTROL_NAMESPACE))
+        """Open the run's inbox of operator control requests (``vibesys control``).
+
+        The inbox is machine-local state, outside git: another process (the operator's
+        ``vibesys control``) writes it, so in the project's checkout it would read as a write
+        by the run's agents.
+        """
+        return FileControlInbox(self.local_namespace(run_id, _CONTROL_NAMESPACE))
 
     def stop_requested(self, run_id: str) -> bool:
         """Whether the operator's stop of ``run_id`` was recorded (``record_stop_request``)."""

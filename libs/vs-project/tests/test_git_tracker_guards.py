@@ -699,3 +699,21 @@ def test_replacing_framework_state_never_follows_a_link_planted_after_the_check(
         tracker.snapshot_framework_state("replace", snapshot)
 
     assert sorted(path.name for path in outside.iterdir()) == ["keep.txt"]
+
+
+def test_a_control_another_process_posts_is_not_the_agents_write(tmp_path: Path) -> None:
+    """Regression: an operator's ``vibesys control`` failed the next read-only turn.
+
+    The operator posts from another process, so the run never wrote the file itself; in the
+    project's checkout the isolation check would report it as the agent's write.
+    """
+    tracker = _initialized_tracker(tmp_path)
+    project = _project(tmp_path, tracker)
+    project.state.control_inbox(tracker.run_id).post("first", b"{}")
+    local = project.state.local_namespace(tracker.run_id, "control").external_directory()
+    inbox = next(path for root in (tmp_path, local) for path in root.rglob("first.json")).parent
+    assert tracker.pending_changes() == []
+
+    (inbox / "second.json").write_bytes(b"{}")  # as the operator's process writes it
+
+    assert tracker.pending_changes() == []

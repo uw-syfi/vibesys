@@ -2,13 +2,14 @@
 
 An operator (or an orchestrating agent, over ssh) controls a run that has no socket by
 writing one file per request into the run's state directory. The run reads the inbox at
-each control poll, applies each request once, and only then removes it, so a request
+each control poll, applies each request once, and only then marks it settled, so a request
 written while the run is down, or one the run read but had not yet committed when it
-crashed, is applied after the run resumes. The request's own id names its file: writing the
-same request twice is one request, and the run recognises one it already applied by that id.
+crashed, is applied after the run resumes. The request's own id names its file, and the file
+is never removed: posting the same request again is one request, and an id, once posted,
+never names another request.
 
 The inbox stores opaque bytes; what a request says is the run's business
-(``vs_runtime``'s ``ControlRequest``). A request the run cannot apply is moved aside with
+(``vs_runtime``'s ``ControlRequest``). A request the run cannot apply is marked rejected with
 the reason, never silently dropped.
 """
 
@@ -25,7 +26,8 @@ if TYPE_CHECKING:
     from vs_project._state import StateNamespace
 
 _REQUEST_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
-_PENDING = PurePosixPath("inbox")
+_POSTED = PurePosixPath("inbox")
+_SETTLED = PurePosixPath("settled")
 _REJECTED = PurePosixPath("rejected")
 _SUFFIX = ".json"
 _REASON_SUFFIX = ".reason"
@@ -52,7 +54,7 @@ class InboxEntry:
 
     ``unreadable`` says why the entry could not be read (a directory, a symlink, a file the
     run may not read), and ``payload`` is then empty. The run rejects such an entry with
-    that reason instead of failing.
+    that reason instead of failing; rejecting it never reads it.
     """
 
     request_id: str
@@ -72,17 +74,18 @@ class RejectedEntry:
 class ControlInbox(Protocol):
     """Durable requests for one run, in the order of their ids.
 
-    ``post`` is idempotent per id, and refuses a different payload under a pending id.
-    ``pending`` lists what has not been settled or rejected, ordered by id; it never fails on
-    one bad entry. ``settle`` removes a request the run applied; ``reject`` moves one it could
-    not apply aside, with the reason. Both are idempotent, and neither touches another request.
+    ``post`` is idempotent per id and refuses a different payload under an id ever posted,
+    pending or not. ``pending`` lists what has been neither settled nor rejected, ordered by
+    id; it never fails on one bad entry. ``settle`` marks a request the run applied;
+    ``reject`` marks one it could not apply, with the reason. Both are idempotent, neither
+    touches another request, and a settled or rejected request is never pending again.
     """
 
     def post(self, request_id: str, payload: bytes) -> None:
         """Hold ``payload`` as the request ``request_id``.
 
-        Posting the same payload again is one request; a different payload under an id that
-        is still pending raises ``ProjectStateError``.
+        Posting the same payload again is one request; a different payload under an id
+        already posted raises ``ProjectStateError``, also when two posts race.
         """
         ...
 
@@ -91,51 +94,65 @@ class ControlInbox(Protocol):
         ...
 
     def settle(self, request_id: str) -> None:
-        """Remove ``request_id``: the run applied it."""
+        """Mark ``request_id`` settled: the run applied it."""
         ...
 
     def reject(self, request_id: str, reason: str) -> None:
-        """Move ``request_id`` aside with ``reason``: the run could not apply it."""
+        """Mark ``request_id`` rejected with ``reason``: the run could not apply it."""
         ...
 
     def rejected(self) -> tuple[RejectedEntry, ...]:
-        """Every rejected request with its reason, ordered by id."""
+        """Every rejected request with its reason, ordered by id.
+
+        A request rejected because it could not be read has an empty payload.
+        """
         ...
 
 
 class FileControlInbox:
-    """The inbox as files in the run's control state: ``inbox/<id>.json``.
+    """The inbox as files in the run's control state.
 
-    Each write is atomic and durable (the namespace's write), so a reader never sees half
-    a request and a crash never loses one that ``post`` returned for.
+    ``inbox/<id>.json`` holds each posted request, created exclusively and never removed;
+    ``settled/<id>`` and ``rejected/<id>.reason`` mark what became of it. Each write is
+    durable, so a reader never sees half a request and a crash never loses one that
+    ``post`` returned for. Settling and rejecting write only markers, so an entry the run
+    cannot read (a directory, a symlink, a file it may not open) is still set aside.
     """
 
     def __init__(self, namespace: StateNamespace) -> None:
-        """Keep the requests in ``namespace``, the run's portable control state."""
+        """Keep the requests in ``namespace``, the run's control state."""
         self._namespace = namespace
 
     def post(self, request_id: str, payload: bytes) -> None:
-        """Write the request's file atomically, unless its id holds a different request."""
-        path = _PENDING / f"{validate_request_id(request_id)}{_SUFFIX}"
-        held = self._namespace.read_bytes(path)
-        if held is not None and held != payload:
-            message = f"control request {request_id!r} is pending with a different request"
+        """Create the request's file, unless its id already holds a different request."""
+        path = _POSTED / f"{validate_request_id(request_id)}{_SUFFIX}"
+        if self._namespace.create_bytes(path, payload):
+            return
+        if self._namespace.read_bytes(path) != payload:
+            message = f"control request {request_id!r} was already posted with a different request"
             raise ProjectStateError(message)
-        self._namespace.write_bytes(path, payload)
 
     def pending(self) -> tuple[InboxEntry, ...]:
-        """Read every request file, ordered by id; a file that vanished meanwhile is skipped.
+        """Read every unmarked request file, ordered by id.
 
         An entry that cannot be read is listed with the reason, so one bad entry never hides
         the others or fails the run.
         """
+        done = {
+            *self._namespace.entries(_SETTLED),
+            *(
+                name.removesuffix(_REASON_SUFFIX)
+                for name in self._namespace.entries(_REJECTED)
+                if name.endswith(_REASON_SUFFIX)
+            ),
+        }
         entries = []
-        for name in self._namespace.entries(_PENDING, list_symlinks=True):
+        for name in self._namespace.entries(_POSTED, list_symlinks=True):
             request_id = _request_id_of(name)
-            if request_id is None:
+            if request_id is None or request_id in done:
                 continue
             try:
-                payload = self._namespace.read_bytes(_PENDING / name)
+                payload = self._namespace.read_bytes(_POSTED / name)
             except ProjectStateError as error:
                 entries.append(InboxEntry(request_id, b"", unreadable=str(error)))
                 continue
@@ -144,32 +161,19 @@ class FileControlInbox:
         return tuple(sorted(entries, key=lambda entry: entry.request_id))
 
     def settle(self, request_id: str) -> None:
-        """Delete the request's file, if it is still there."""
-        self._namespace.delete(_PENDING / f"{validate_request_id(request_id)}{_SUFFIX}")
+        """Write the request's settled marker."""
+        self._namespace.create_bytes(_SETTLED / validate_request_id(request_id), b"")
 
     def reject(self, request_id: str, reason: str) -> None:
-        """Write the request and its reason under ``rejected/``, then delete the pending file.
+        """Write the request's reason under ``rejected/``; the first reason stays.
 
-        An entry the run cannot read or delete (a directory, a symlink) gets only its reason;
-        it stays where the operator put it, for the operator to remove.
+        The request itself is not read, so an entry the run cannot read is set aside too.
         """
         name = validate_request_id(request_id)
-        try:
-            payload = self._namespace.read_bytes(_PENDING / f"{name}{_SUFFIX}")
-        except ProjectStateError:
-            self._namespace.write_bytes(_REJECTED / f"{name}{_REASON_SUFFIX}", reason.encode())
-            return
-        if payload is None:
-            return
-        self._namespace.write_bytes(_REJECTED / f"{name}{_SUFFIX}", payload)
-        self._namespace.write_bytes(_REJECTED / f"{name}{_REASON_SUFFIX}", reason.encode())
-        self._namespace.delete(_PENDING / f"{name}{_SUFFIX}")
+        self._namespace.create_bytes(_REJECTED / f"{name}{_REASON_SUFFIX}", reason.encode())
 
     def rejected(self) -> tuple[RejectedEntry, ...]:
-        """Read every rejected request and its reason, ordered by id.
-
-        A request rejected because it could not be read has an empty payload.
-        """
+        """Read every rejected request and its reason, ordered by id."""
         found = []
         for name in self._namespace.entries(_REJECTED):
             if not name.endswith(_REASON_SUFFIX):
@@ -178,7 +182,10 @@ class FileControlInbox:
             if not _REQUEST_ID.fullmatch(request_id):
                 continue
             reason = self._namespace.read_bytes(_REJECTED / name)
-            payload = self._namespace.read_bytes(_REJECTED / f"{request_id}{_SUFFIX}")
+            try:
+                payload = self._namespace.read_bytes(_POSTED / f"{request_id}{_SUFFIX}")
+            except ProjectStateError:
+                payload = None
             if reason is not None:
                 text = reason.decode(errors="replace")
                 found.append(RejectedEntry(request_id, payload or b"", text))
@@ -190,34 +197,49 @@ class FakeControlInbox:
 
     def __init__(self) -> None:
         """Start empty."""
-        self._pending: dict[str, bytes] = {}
-        self._rejected: dict[str, RejectedEntry] = {}
+        self._posted: dict[str, bytes | InboxEntry] = {}
+        self._settled: set[str] = set()
+        self._rejected: dict[str, str] = {}
+
+    def hold_unreadable(self, request_id: str, reason: str) -> None:
+        """Hold an entry the run cannot read, as a directory in a file inbox would be."""
+        self._posted[validate_request_id(request_id)] = InboxEntry(
+            request_id, b"", unreadable=reason
+        )
 
     def post(self, request_id: str, payload: bytes) -> None:
-        """Hold the request, unless its id holds a different one."""
-        held = self._pending.get(validate_request_id(request_id))
-        if held is not None and held != payload:
-            message = f"control request {request_id!r} is pending with a different request"
+        """Hold the request, unless its id already holds a different one."""
+        held = self._posted.setdefault(validate_request_id(request_id), payload)
+        if isinstance(held, InboxEntry):
+            raise ProjectStateError(held.unreadable or "unreadable")
+        if held != payload:
+            message = f"control request {request_id!r} was already posted with a different request"
             raise ProjectStateError(message)
-        self._pending[request_id] = payload
 
     def pending(self) -> tuple[InboxEntry, ...]:
-        """The held requests, ordered by id."""
-        return tuple(InboxEntry(key, self._pending[key]) for key in sorted(self._pending))
+        """The unmarked requests, ordered by id."""
+        return tuple(
+            held if isinstance(held, InboxEntry) else InboxEntry(key, held)
+            for key, held in sorted(self._posted.items())
+            if key not in self._settled and key not in self._rejected
+        )
 
     def settle(self, request_id: str) -> None:
-        """Forget the request."""
-        self._pending.pop(validate_request_id(request_id), None)
+        """Mark the request settled."""
+        self._settled.add(validate_request_id(request_id))
 
     def reject(self, request_id: str, reason: str) -> None:
-        """Move the request aside with its reason."""
-        payload = self._pending.pop(validate_request_id(request_id), None)
-        if payload is not None:
-            self._rejected[request_id] = RejectedEntry(request_id, payload, reason)
+        """Mark the request rejected with its reason; the first reason stays."""
+        self._rejected.setdefault(validate_request_id(request_id), reason)
 
     def rejected(self) -> tuple[RejectedEntry, ...]:
         """The rejected requests, ordered by id."""
-        return tuple(self._rejected[key] for key in sorted(self._rejected))
+        found = []
+        for key in sorted(self._rejected):
+            held = self._posted.get(key, b"")
+            payload = b"" if isinstance(held, InboxEntry) else held
+            found.append(RejectedEntry(key, payload, self._rejected[key]))
+        return tuple(found)
 
 
 def _request_id_of(name: str) -> str | None:

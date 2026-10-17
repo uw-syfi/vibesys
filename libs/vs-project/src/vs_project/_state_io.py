@@ -202,6 +202,32 @@ def atomic_write_bytes(
             filesystem.remove_temporary(temporary_path)
 
 
+def exclusive_write_bytes(path: Path, contents: bytes) -> bool:
+    """Durably create ``path`` with ``contents``, unless something already exists there.
+
+    The bytes are written and synced under a private name, then linked into place: the
+    kernel's link refuses an existing name, so of two writers racing for one name exactly
+    one creates it, and a reader sees the complete bytes or no file. Returns whether this
+    call created the file; the caller syncs the directory chain it owns.
+    """
+    filesystem = LocalAtomicWriteEffects()
+    temporary_path: Path | None = None
+    try:
+        with filesystem.temporary(path) as (temporary_path, stream):
+            stream.write(contents)
+            stream.flush()
+            filesystem.sync_file(stream)
+        try:
+            with FRAMEWORK_WRITES.publishing(path, contents):
+                os.link(temporary_path, path, follow_symlinks=False)
+        except FileExistsError:
+            return False
+        return True
+    finally:
+        if temporary_path is not None:
+            filesystem.remove_temporary(temporary_path)
+
+
 def _atomic_write_bytes(path: Path, contents: bytes) -> None:
     """Replace owned state bytes through the shared durability mechanism."""
     atomic_write_bytes(path, contents)

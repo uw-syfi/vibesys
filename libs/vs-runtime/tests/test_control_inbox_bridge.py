@@ -13,6 +13,7 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -26,7 +27,7 @@ from vs_core.api import (
     initial_state,
     step,
 )
-from vs_project.api import InboxEntry, RejectedEntry
+from vs_project.api import InboxEntry, ProjectStateError, RejectedEntry
 from vs_project.api.testing import FakeControlInbox
 from vs_runtime.api.core import OperatorInbox, RunControlBridge
 from vs_runtime.api.infrastructure import (
@@ -221,22 +222,17 @@ def test_a_request_whose_control_id_is_not_its_name_is_set_aside() -> None:
     assert [entry.request_id for entry in inbox.rejected()] == ["r1"]
 
 
-def test_a_settled_id_sent_again_with_another_request_is_set_aside() -> None:
+def test_a_settled_id_cannot_be_posted_again_with_another_request() -> None:
+    """Regression: a re-post under a settled id was settled unread, so its options were lost."""
     inbox = FakeControlInbox()
-    inbox.post("r1", _json(SteerRequest(control_id="r1", text="prefer latency")))
+    inbox.post("r1", _json(ResumeRequest(control_id="r1")))
     bridge = _bridge(inbox, _Texts())
     core = _commit(initial_state(), bridge.poll(initial_state(), 1.0))
     assert bridge.poll(core, 2.0) == ()
     assert inbox.pending() == ()
 
-    inbox.post("r1", _json(SteerRequest(control_id="r1", text="prefer throughput")))
-    inbox.post("r2", _json(SteerRequest(control_id="r2", text="prefer memory")))
-    for restarted in (bridge, _bridge(inbox, _Texts())):
-        events = restarted.poll(core, 3.0)
-        core = _commit(core, events)
-
-    assert [entry.request_id for entry in inbox.rejected()] == ["r1"]
-    assert [c.control_id.root for c in core.run.controls] == ["op-r1", "op-r2"]
+    with pytest.raises(ProjectStateError, match="different request"):
+        inbox.post("r1", _json(ResumeRequest(control_id="r1", fallback=True)))
 
 
 def test_the_same_request_sent_again_after_it_settled_is_settled_again() -> None:
