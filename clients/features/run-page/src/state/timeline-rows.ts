@@ -12,6 +12,7 @@ import type {
   CandidateOutcome,
   CandidateStep,
 } from '@vibesys/run-state/candidates';
+import {figureOf} from './ideas-view.js';
 import type {Direction, RunModel} from './run-model.js';
 import {duration, formatValue, ratio, words} from './span-reading.js';
 
@@ -116,19 +117,6 @@ export function stepSegments(
   });
 }
 
-function figureOf(item: Candidate): string {
-  if (item.outcome === 'running') return '';
-  const failed = item.measurement?.failed ?? null;
-  if (failed !== null) {
-    return failed.completed !== null && failed.required !== null
-      ? `${failed.completed}/${failed.required}${failed.unit === null ? '' : ` ${failed.unit}`}`
-      : words(failed.check);
-  }
-  const vs = item.measurement?.vsBaseline ?? null;
-  if (vs !== null) return ratio(vs);
-  return item.reason === null ? '–' : words(item.reason);
-}
-
 function rowOf(item: Candidate, now: number | null): TimelineRow {
   const steps = item.attempts.flatMap(attempt => attempt.steps);
   return {
@@ -137,7 +125,7 @@ function rowOf(item: Candidate, now: number | null): TimelineRow {
     start: item.startedAt,
     end: endOf(item.startedAt, item.endedAt, now),
     outcome: OUTCOME[item.outcome],
-    figure: figureOf(item),
+    figure: figureOf(item).figure,
     segments: stepSegments(steps, now),
     lane: false,
   };

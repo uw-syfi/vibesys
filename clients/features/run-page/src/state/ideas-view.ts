@@ -86,7 +86,8 @@ function stateOf(item: Candidate): IdeaRow['state'] {
   return {tone: 'err', label: why === null ? 'rejected' : `rejected · ${words(why)}`};
 }
 
-function figureOf(item: Candidate): {figure: string; tone: IdeaTone} {
+/** The figure at the right of an idea's row: its ratio, its failed check's progress, or why not. */
+export function figureOf(item: Candidate): {figure: string; tone: IdeaTone} {
   if (item.outcome === 'running') return {figure: '', tone: 'muted'};
   const measured = item.measurement;
   const failed = measured?.failed ?? null;
