@@ -52,7 +52,7 @@ from vs_sim.api.testing import (
 )
 
 if TYPE_CHECKING:
-    from vs_sim.api import Event
+    from vs_sim.api import Event, Threads
 
 
 class _Response(BaseModel):
@@ -74,9 +74,11 @@ class _FakeSession(HandSession):
     cancel_error: BaseException | None = None
     started: Event | None = None
     release: Event | None = None
+    threads: Threads = field(default_factory=SimThreads)
+    """The threads the client runs on: the session's locks are taken on its turn thread."""
 
     def __post_init__(self) -> None:
-        HandSession.__init__(self, threads=SimThreads())
+        HandSession.__init__(self, threads=self.threads)
 
     def run_turn(
         self,
@@ -758,7 +760,9 @@ def test_cancel_stops_an_active_session_without_closing_it() -> None:
     threads = SimThreads()
     started = threads.event()
     release = threads.event()
-    session = _FakeSession(results=[AgentTurnResult("ok")], started=started, release=release)
+    session = _FakeSession(
+        results=[AgentTurnResult("ok")], started=started, release=release, threads=threads
+    )
     client = AgentClient(
         _FakeLauncher([session]),
         event_sink=NULL_AGENT_EVENT_SINK,

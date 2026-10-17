@@ -357,7 +357,7 @@ def test_nondurable_key_is_configuration_error(harness: _Harness) -> None:
 
 def test_malformed_ledger_fails_typed_before_dispatch(harness: _Harness) -> None:
     slot = harness.namespace.slot("malformed.json", AgentInvocationState)
-    harness.namespace.write_bytes("malformed.json", b'{"schema_version":2}')
+    harness.namespace.write_bytes("malformed.json", b'{"schema_version":3}')
     sessions = ClientAgentSessions(harness.client, slot, threads=SimThreads())
     sessions.bind(KEY, harness.spec, harness.turn)
     with pytest.raises(SessionPersistenceError, match="read invocation ledger"):
@@ -659,12 +659,12 @@ class _SchemaFailureStore(FakeAgentInvocationStore):
 
     def load_optional(self) -> AgentInvocationState | None:
         if self.operation == "load":
-            return AgentInvocationState.model_validate({"schema_version": 2})
+            return AgentInvocationState.model_validate({"schema_version": 3})
         return super().load_optional()
 
     def save(self, model: AgentInvocationState) -> None:
         if self.operation == "save":
-            AgentInvocationState.model_validate({"schema_version": 2})
+            AgentInvocationState.model_validate({"schema_version": 3})
         super().save(model)
 
 
