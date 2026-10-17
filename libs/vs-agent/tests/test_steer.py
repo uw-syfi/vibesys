@@ -39,9 +39,9 @@ from vs_agent.api import (
     SessionScope,
     SteerOutcome,
 )
+from vs_agent.api.testing import FakeAgentClient
 
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
-from vs_agent.api.testing import FakeAgentClient
 from vs_agent.client import AgentDiagnosticLog
 
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
