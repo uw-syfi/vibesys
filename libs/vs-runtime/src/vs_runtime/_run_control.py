@@ -201,8 +201,12 @@ class RunControlChannel(Protocol):
         agent_kind: str,
         round_label: str,
         execution_id: str | None,
+        note: str = "",
     ) -> None:
-        """Record which invocation consumed queued steering."""
+        """Record which invocation consumed queued steering.
+
+        ``note`` says why an interrupt-mode steer reached this next turn, not a running one.
+        """
         ...
 
     def notify_steer_delivered_mid_turn(
@@ -551,11 +555,13 @@ class RuntimeRunControlChannel:
         agent_kind: str,
         round_label: str,
         execution_id: str | None,
+        note: str = "",
     ) -> None:
-        """Record the invocation identity that consumed queued steering."""
+        """Record the invocation identity that consumed queued steering, and any note."""
         self._events(
             RunControlTransition(
                 kind=RunControlTransitionKind.STEER_CONSUMED,
+                text=note,
                 agent_kind=agent_kind,
                 round_label=round_label,
                 execution_id=execution_id,

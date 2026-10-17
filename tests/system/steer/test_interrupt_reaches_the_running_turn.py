@@ -5,13 +5,21 @@ Fake provider: a provider profile that takes messages mid-turn (``FakeSteering``
 passes the same session contract suite as the production sessions. The operator sends the
 steer while the implementer's first turn runs; the attempt asks a second turn after it.
 
-Core records the offer (``InputOfferedMidTurn``) before the provider is asked. A refusal
-hands it back (``InputMidTurnReleased``): before the turn took it, the steer waits for the
-next turn; after, core appends a redelivery for the next turn. The host dies and restarts
-at each boundary of that exchange: after the offer is recorded, after the provider took the
-message, and after a release is recorded. Wherever it dies, the provider is asked only for
-offers core has recorded, and the steer reaches the agent (delivery is at least once) with
-one receipt for each input core holds.
+Core records the offer (``InputOfferedMidTurn``) before the provider is asked, and that the
+provider took it (``InputTakenMidTurn``) after. Only a taken offer joins the turn; a refusal
+rides in the turn's own result and sends the steer to the next turn. The host dies and
+restarts at each boundary of that exchange: after the offer is recorded, after the provider
+took the message, and after core recorded that it did. A host that dies after the offer leaves a
+turn that ends before anyone asks the provider: the next host's ask finds no running turn,
+and the steer goes to the next turn. Wherever it dies, the provider is asked only for offers
+core has recorded, and the steer reaches the agent (delivery is at least once) with one
+receipt, and with a report that says whether the running turn took it.
+
+One order this harness cannot produce: the turn's acceptance committing between the offer
+and the ask within one host. The run loop does not yield between the two, and a simulated
+turn only ends while the loop waits. The core suite pins that order
+(``test_a_turn_that_ends_before_the_provider_takes_its_offer_leaves_it_for_the_next`` in
+``libs/vs-core/tests/test_mid_turn_inputs.py``).
 """
 
 from __future__ import annotations
@@ -90,8 +98,8 @@ class Boundary(StrEnum):
     """Core has recorded the offer; the provider has not been asked."""
     AFTER_CALL = "after-call"
     """The provider took the message into the running turn; core has not heard back."""
-    AFTER_RELEASE = "after-release"
-    """Core has recorded that the offer came back."""
+    AFTER_TAKEN = "after-taken"
+    """Core has recorded that the provider took the message."""
 
 
 class HostDiedError(RuntimeError):
@@ -104,8 +112,8 @@ def _sessions(envelope: StoredEnvelope) -> SessionsState:
     return SessionsState.model_validate_json(json.dumps(payload["envelope"]["core"]["sessions"]))
 
 
-def _original(sessions: SessionsState) -> InputRecord | None:
-    return next((row for row in sessions.inputs if row.redelivers is None), None)
+def _steer(sessions: SessionsState) -> InputRecord | None:
+    return next(iter(sessions.inputs), None)
 
 
 @dataclass
@@ -119,7 +127,6 @@ class Scenario:
     """Every offer a provider was asked: which host asked, and the answer."""
     hosts: int = 0
     died: bool = False
-    offered: bool = False
     process: Process | None = None
     release: Event | None = None
 
@@ -143,17 +150,11 @@ class Scenario:
         """Whether this durable write is the one the host dies right after."""
         if self.died:
             return False
-        original = _original(_sessions(envelope))
-        if original is None:
+        steer = _steer(_sessions(envelope))
+        if steer is None or steer.offered_to is None or steer.receipt is not None:
             return False
-        offered = original.offered_to is not None and original.receipt is None
-        released = self.offered and (
-            (original.offered_to is None and original.receipt is None)
-            or any(row.redelivers is not None for row in _sessions(envelope).inputs)
-        )
-        self.offered = self.offered or offered
-        return (self.boundary is Boundary.AFTER_OFFER and offered) or (
-            self.boundary is Boundary.AFTER_RELEASE and released
+        return (self.boundary is Boundary.AFTER_OFFER and not steer.taken) or (
+            self.boundary is Boundary.AFTER_TAKEN and steer.taken
         )
 
     def die(self) -> HostDiedError:
@@ -171,12 +172,12 @@ class ObservedSteering:
     inner: TurnSteering
     scenario: Scenario
 
-    def offer_mid_turn(self, offer: MidTurnOffer, on_rejected: Callable[[], None]) -> SteerOutcome:
+    def offer_mid_turn(self, offer: MidTurnOffer) -> SteerOutcome:
         """Ask the provider, only for an offer core has recorded and settled nothing for."""
         [record] = [row for row in self.scenario.core().sessions.inputs if row.input == offer.input]
         assert record.offered_to == offer.invocation
         assert record.receipt is None
-        outcome = self.inner.offer_mid_turn(offer, on_rejected)
+        outcome = self.inner.offer_mid_turn(offer)
         self.scenario.asked.append((self.scenario.hosts, outcome))
         if self.scenario.boundary is Boundary.AFTER_CALL and not self.scenario.died:
             raise self.scenario.die()
@@ -300,13 +301,9 @@ async def _run(world: World, scenario: Scenario) -> CoreState:
 
 
 _SCENARIOS = [
-    (Boundary.NONE, FakeSteering.CONSUMED),
-    (Boundary.NONE, FakeSteering.REJECTED),
-    (Boundary.AFTER_OFFER, FakeSteering.CONSUMED),
-    (Boundary.AFTER_OFFER, FakeSteering.REJECTED),
-    (Boundary.AFTER_CALL, FakeSteering.CONSUMED),
-    (Boundary.AFTER_CALL, FakeSteering.REJECTED),
-    (Boundary.AFTER_RELEASE, FakeSteering.REJECTED),
+    (boundary, steering)
+    for boundary in Boundary
+    for steering in (FakeSteering.CONSUMED, FakeSteering.REJECTED)
 ]
 
 
@@ -329,33 +326,39 @@ async def test_an_interrupt_steer_reaches_the_agent_wherever_the_host_dies(
     assert core.run.result is not None
     assert core.run.result.outcome == "success"
     assert scenario.died is (boundary is not Boundary.NONE)
-    # The host that died after the offer had not asked the provider; the one after the call had.
+    # The host that died after the offer had not asked the provider; the others had, and the
+    # provider took the message into the running turn.
     first_host = [outcome for host, outcome in scenario.asked if host == 1]
-    expected_first = {
-        Boundary.NONE: [SteerOutcome.DELIVERED],
-        Boundary.AFTER_OFFER: [],
-        Boundary.AFTER_CALL: [SteerOutcome.DELIVERED],
-        Boundary.AFTER_RELEASE: [SteerOutcome.DELIVERED],
-    }
-    assert first_host == expected_first[boundary]
+    if boundary is Boundary.AFTER_OFFER:
+        assert first_host == []
+    else:
+        assert first_host == [SteerOutcome.DELIVERED]
     # One input, settled once: delivered to a turn, never dropped, never left waiting.
     [record] = core.sessions.inputs
     assert isinstance(record.receipt, InputDelivered)
     in_messages = sum(message.count(STEER) for message in scenario.sent.messages)
     reports = [
-        (t.kind.value, t.execution_id)
+        (t.kind.value, t.execution_id, t.text)
         for t in sink.transitions
         if t.kind.value in {"steer_consumed", "steer_delivered_mid_turn"}
     ]
     invocation = record.receipt.invocation.invocation_id.root
     if boundary is Boundary.NONE and steering is FakeSteering.CONSUMED:
-        # The running turn took it: no turn message carries it, and the operator hears so.
         assert record.receipt.mid_turn
-        assert in_messages == 0
-        assert reports == [("steer_delivered_mid_turn", invocation)]
-    else:
-        # Refused, or its fate died with the host: it goes again, in the next turn's message.
+    if boundary is Boundary.AFTER_OFFER or steering is FakeSteering.REJECTED:
+        # The turn never kept it: it ended before anyone asked, or refused it in its result.
         assert not record.receipt.mid_turn
+    if record.receipt.mid_turn:
+        # The running turn took it: no turn message carries it, and the operator hears so.
+        # A host that died after core recorded the take may report it so too (at least once).
+        assert boundary in (Boundary.NONE, Boundary.AFTER_TAKEN)
+        assert in_messages == 0
+        assert reports == [("steer_delivered_mid_turn", invocation, "")]
+    else:
+        # Refused, never asked, or its fate died with the host: the next turn's message
+        # carries it, and the operator hears that the running turn did not keep it.
         assert in_messages == 1
         assert STEER in scenario.sent.messages[-1]
-        assert reports == [("steer_consumed", invocation)]
+        [(kind, execution, note)] = reports
+        assert (kind, execution) == ("steer_consumed", invocation)
+        assert "reached the next turn" in note

@@ -25,8 +25,6 @@ from vs_runtime._agent_lifecycle import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from vs_agent.api import (
         AgentCapabilities,
         AgentObserver,
@@ -98,11 +96,9 @@ class LifecycleReportingExecutor:
         """Ask the keyed conversation's in-flight turn to stop."""
         self._client.cancel_session(key)
 
-    def steer_session(
-        self, key: AgentSessionKey, text: str, *, on_rejected: Callable[[], None]
-    ) -> SteerOutcome:
+    def steer_session(self, key: AgentSessionKey, text: str, *, steer_id: str) -> SteerOutcome:
         """Offer a message to the keyed conversation's in-flight turn."""
-        return self._client.steer_session(key, text, on_rejected=on_rejected)
+        return self._client.steer_session(key, text, steer_id=steer_id)
 
     def release_session(self, key: AgentSessionKey) -> None:
         """Release the keyed conversation's live resources."""

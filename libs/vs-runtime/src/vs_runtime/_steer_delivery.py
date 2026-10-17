@@ -24,6 +24,7 @@ from vs_core.api import (
     AttemptPhase,
     CoreState,
     InputDropped,
+    InputDropReason,
     InputId,
     InputMode,
     InvocationInputTarget,
@@ -277,15 +278,17 @@ class SteerConsumption:
     def newly_settled(
         self,
         core: CoreState,
-        delivered: Callable[[str, str, str], None],
+        delivered: Callable[[str, str, str, str], None],
         delivered_mid_turn: Callable[[str, str, str], None],
         dropped: Callable[[str], None],
         ended: Callable[[str], None],
     ) -> None:
         """Report each steer settled since last time.
 
-        ``delivered(role, scope owner, invocation)`` for one a turn received in its prompt,
-        ``delivered_mid_turn`` alike for one a turn accepted while it ran,
+        ``delivered(role, scope owner, invocation, note)`` for one a turn received in its
+        prompt, where ``note`` says why an interrupt-mode steer reached the next turn instead
+        of a running one (empty for any other steer),
+        ``delivered_mid_turn(role, scope owner, invocation)`` for one a turn took while it ran,
         ``dropped(reason)`` for one core dropped because its target can no longer take input,
         and ``ended(reason)`` for standing guidance that no longer reaches any turn.
         Receipts recorded before the first call are not reported: a resumed run must not
@@ -313,18 +316,36 @@ class SteerConsumption:
                 )
                 ended(f"standing guidance {_sent_as(input_id)} ended: {why}")
             elif isinstance(receipt, InputDropped):
-                name = _sent_as(row.redelivers or input_id)
-                dropped(f"steer {name} reached no turn: {receipt.reason.value}")
+                dropped(_drop_report(_sent_as(input_id), receipt))
             elif receipt is not None:
                 invocation = next(
                     row for row in core.sessions.invocations if row.invocation == receipt.invocation
                 )
-                report = delivered_mid_turn if receipt.mid_turn else delivered
-                report(
+                where = (
                     invocation.turn.session.role_id.root,
                     invocation.scope.owner.root,
                     receipt.invocation.invocation_id.root,
                 )
+                if receipt.mid_turn:
+                    delivered_mid_turn(*where)
+                elif row.input.mode is InputMode.INTERRUPT:
+                    delivered(
+                        *where,
+                        f"interrupt steer {_sent_as(input_id)} reached the next turn: "
+                        "no running turn kept it",
+                    )
+                else:
+                    delivered(*where, "")
+
+
+def _drop_report(name: str, receipt: InputDropped) -> str:
+    """What the operator reads about a steer core dropped, and why."""
+    if receipt.reason is InputDropReason.DELIVERY_UNKNOWN:
+        return (
+            f"steer {name} may have reached the agent mid-turn: its turn's provider took it, "
+            "and no later turn can confirm it"
+        )
+    return f"steer {name} reached no turn: {receipt.reason.value}"
 
 
 def _superseded(core: CoreState, item: SessionInput) -> bool:
