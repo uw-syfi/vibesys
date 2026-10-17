@@ -82,6 +82,8 @@ def test_the_turn_is_sent_again_after_each_gate_return(stops: int) -> None:
     assert [(error.detail, role, inv, attempt) for error, role, inv, attempt in gate.calls] == [
         (f"stop {n}", "implementer", "inv-1", n + 1) for n in range(stops)
     ]
+    # Only the send that got through counts as a turn the provider served.
+    assert gate.served == ["mock"]
 
 
 def test_a_gate_that_raises_ends_the_turn_with_its_error(tmp_path: Path) -> None:
@@ -120,3 +122,26 @@ def test_each_capacity_stop_reaches_the_gate_as_the_condition_the_provider_repor
     assert [(error.condition, count) for error, _, _, count in gate.calls] == [
         (condition, n + 1) for n, condition in enumerate(conditions)
     ]
+
+
+@dataclass
+class _CancellingGate(_Gate):
+    """A gate whose wait the caller cancels: it returns, but the turn must not be sent again."""
+
+    def wait_for_capacity(
+        self, error: AgentQuotaError, turn: AgentTurnRequest, *, role: str, stops: CapacityStops
+    ) -> None:
+        super().wait_for_capacity(error, turn, role=role, stops=stops)
+        stops.cancel()
+
+
+def test_a_turn_cancelled_while_the_gate_held_it_is_not_sent_again(tmp_path: Path) -> None:
+    gate = _CancellingGate()
+    client = _client((_quota("first"), "ok"))
+    client.set_capacity_gate(gate)
+
+    with pytest.raises(AgentQuotaError, match="first"):
+        _invoke(client, tmp_path)
+
+    assert len(gate.calls) == 1
+    assert gate.served == []

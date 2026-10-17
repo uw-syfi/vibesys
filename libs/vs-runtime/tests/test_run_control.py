@@ -307,3 +307,15 @@ def test_a_steer_control_without_its_input_gets_the_input_on_the_next_poll() -> 
     ] == ["steer-control-0"]
     recorded = step(held, repaired[0]).state
     assert bridge.poll(recorded, 3.0) == ()
+
+
+def test_the_bridge_publishes_the_run_deadline_on_its_first_poll() -> None:
+    """Work on other threads (a turn waiting out an outage) bounds its waits by this deadline."""
+    core = initial_state()
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
+    bridge = RunControlBridge(channel, _DiscardingSteerArtifacts())
+    assert channel.run_deadline() is None
+
+    bridge.poll(core, core.run.now_at)
+
+    assert channel.run_deadline() == core.run.deadline_at

@@ -151,9 +151,12 @@ class CapacityHandling:
 
 
 class PolicyCapacityGate:
-    """Turn a provider capacity limit into a run pause that the policy or the operator ends.
+    """Hold a turn stopped on a provider capacity limit until it may be sent again.
 
-    The run's existing cooperative pause carries the state: the turn that hit
+    A limit the provider names (a quota, a rate limit) pauses the run, which the policy
+    or the operator ends; an outage holds only the turn (see below).
+
+    For a named limit the run's existing cooperative pause carries the state: the turn that hit
     the limit stays in flight on its worker thread, the run reports PAUSING and
     then PAUSED, and the typed ``quota_paused`` event says why. Depending on the
     policy the run waits for the operator, resumes itself when capacity should

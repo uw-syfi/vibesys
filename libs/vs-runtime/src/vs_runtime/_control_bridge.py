@@ -79,7 +79,8 @@ class RunControlBridge:
     had an id is recorded as ``op-<id>``, and one core already holds is not emitted again;
     any other has the identity ``control-<n>``, continuing the count of controls core
     already holds, so a resumed run never reuses an identity. A stop carries no result: the search
-    adopts its last choice and ends the run itself.
+    adopts its last choice and ends the run itself. The first poll also records the run's
+    deadline on the channel, for work on other threads that must not wait past it.
 
     With an ``inbox``, each poll also applies the inbox's requests, in id order, each as one
     control ``op-<control id>``; see the module docstring for how each applies once.
