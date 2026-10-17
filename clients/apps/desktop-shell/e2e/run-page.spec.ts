@@ -159,18 +159,18 @@ test('a run starts, writes its logs, stops with Force stop after the bound, and 
   await expect(startup).toHaveCount(0);
   await expect(page.getByRole('button', {name: 'Pause'})).toBeEnabled();
   await page.getByRole('radiogroup', {name: 'Show'}).getByText('Logs').click();
-  const streams = page.getByRole('tree', {name: 'Log streams'});
+  const streams = page.getByRole('listbox', {name: 'Log streams'});
   for (const group of ['Startup', 'Gates', 'Tool builds', 'Run narration']) {
-    await expect(streams.getByRole('treeitem', {name: group, exact: true})).toBeVisible();
+    await expect(streams.getByRole('option', {name: group}).first()).toBeVisible();
   }
   // A measurement's candidate build is its own gate stream, before the gates after it.
-  await streams.getByRole('treeitem', {name: /candidate build · w5 · attempt 1/}).click();
-  await expect(page.getByText('Finished release profile')).toBeVisible();
+  await streams.getByRole('option', {name: /candidate build · w5 · attempt 1/}).click();
+  await expect(page.getByRole('log').getByText('Finished release profile')).toBeVisible();
   await streams
-    .getByRole('treeitem', {name: /Run narration/})
+    .getByRole('option', {name: /Run narration/})
     .last()
     .click();
-  await expect(page.getByText('16:36:20 INFO container ready')).toBeVisible();
+  await expect(page.getByRole('log').getByText('16:36:20 INFO container ready')).toBeVisible();
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
   await shot(page, 'ink-logs');
 
