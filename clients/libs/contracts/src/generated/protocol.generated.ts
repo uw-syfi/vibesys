@@ -138,12 +138,16 @@ export type ClientId17 = string;
 export type Timestamp17 = string;
 export type Type17 = "command.control";
 export type ControlRequest = SteerRequest | PauseRequest | ResumeRequest | StopRequest;
+export type ControlId = string;
 export type Action = "steer";
 export type Text2 = string;
+export type ControlId1 = string;
 export type Action1 = "pause";
+export type ControlId2 = string;
 export type Action2 = "resume";
 export type Fallback1 = boolean;
 export type When1 = "now" | "capacity_returns";
+export type ControlId3 = string;
 export type Action3 = "stop";
 /**
  * How a stop treats work in flight: let it finish, or cancel it.
@@ -176,7 +180,10 @@ export type CauseId = string | null;
 export type DebugRef = string | null;
 export type Source = string | null;
 export type ValidationPaths = (string | number)[][] | null;
-export type Action4 = "pause" | "resume" | "steer" | "stop";
+/**
+ * What a control request asks for; the tag of the ``ControlRequest`` union.
+ */
+export type ControlAction = "steer" | "pause" | "resume" | "stop";
 export type Status = "pending" | "consumed";
 export type Question = string;
 export type Answer = string;
@@ -719,7 +726,7 @@ export type HypothesisId = string;
 export type Identified = boolean;
 export type Title4 = string | null;
 export type Claim = string | null;
-export type Action5 = string | null;
+export type Action4 = string | null;
 export type FirstRound = number;
 export type LastRound = number;
 export type Round1 = number;
@@ -1195,6 +1202,7 @@ export interface ControlCommand {
  * Free-text guidance for the run's next agent turn.
  */
 export interface SteerRequest {
+  control_id: ControlId;
   action: Action;
   text: Text2;
 }
@@ -1202,6 +1210,7 @@ export interface SteerRequest {
  * Reach the next safe boundary and hold the run there.
  */
 export interface PauseRequest {
+  control_id: ControlId1;
   action: Action1;
 }
 /**
@@ -1213,6 +1222,7 @@ export interface PauseRequest {
  * limit, and cannot be combined with ``fallback``, which resumes now.
  */
 export interface ResumeRequest {
+  control_id: ControlId2;
   action: Action2;
   fallback?: Fallback1;
   when?: When1;
@@ -1221,6 +1231,7 @@ export interface ResumeRequest {
  * End the run, draining or cancelling the work in flight.
  */
 export interface StopRequest {
+  control_id: ControlId3;
   action: Action3;
   mode?: StopMode;
 }
@@ -1274,10 +1285,10 @@ export interface Diagnostic {
   validation_paths?: ValidationPaths;
 }
 /**
- * Acknowledgment of a requested run command.
+ * Acknowledgment of a requested run command; ``action`` is the control's tag.
  */
 export interface CommandAck {
-  action: Action4;
+  action: ControlAction;
   status: Status;
 }
 /**
@@ -2165,7 +2176,7 @@ export interface HypothesisEntry {
   identified?: Identified;
   title?: Title4;
   claim?: Claim;
-  action?: Action5;
+  action?: Action4;
   first_round: FirstRound;
   last_round: LastRound;
   rounds?: Rounds;

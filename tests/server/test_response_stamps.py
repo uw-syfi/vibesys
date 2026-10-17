@@ -6,9 +6,9 @@ from hypothesis import given
 from hypothesis import strategies as st
 from tests.server.support import REQUEST_TIME, build_server_parts
 
-from server.api.protocol import Response, SnapshotQuery, StopCommand
-from server.control_envelope import CommandAck
+from server.api.protocol import CommandAck, Response, SnapshotQuery, StopCommand
 from server.instances import ControlSocketStopRequester
+from vibesys.api import ControlAction
 from vs_sim.api import utc_datetime
 from vs_sim.api.testing import HANG_GUARD_S, ManualClock, SimNetwork, SimThreads
 
@@ -70,7 +70,7 @@ def test_the_stop_request_carries_the_time_its_clock_reads(start: float) -> None
         reply = Response(
             timestamp=utc_datetime(clock),
             request_id=request.request_id,
-            ack=CommandAck(action="stop", status="pending"),
+            ack=CommandAck(action=ControlAction.STOP, status="pending"),
         )
         connection.send(reply.model_dump_json().encode() + b"\n")
         connection.close()

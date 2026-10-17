@@ -315,17 +315,10 @@ const responsePayloadSchema: Record<string, unknown> = {
     },
     "CommandAck": {
       "additionalProperties": false,
-      "description": "Acknowledgment of a requested run command.",
+      "description": "Acknowledgment of a requested run command; ``action`` is the control's tag.",
       "properties": {
         "action": {
-          "enum": [
-            "pause",
-            "resume",
-            "steer",
-            "stop"
-          ],
-          "title": "Action",
-          "type": "string"
+          "$ref": "#/$defs/ControlAction"
         },
         "status": {
           "enum": [
@@ -342,6 +335,17 @@ const responsePayloadSchema: Record<string, unknown> = {
       ],
       "title": "CommandAck",
       "type": "object"
+    },
+    "ControlAction": {
+      "description": "What a control request asks for; the tag of the ``ControlRequest`` union.",
+      "enum": [
+        "steer",
+        "pause",
+        "resume",
+        "stop"
+      ],
+      "title": "ControlAction",
+      "type": "string"
     },
     "DesignFileChange": {
       "additionalProperties": false,

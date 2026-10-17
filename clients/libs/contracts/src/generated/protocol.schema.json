@@ -986,17 +986,10 @@
     },
     "CommandAck": {
       "additionalProperties": false,
-      "description": "Acknowledgment of a requested run command.",
+      "description": "Acknowledgment of a requested run command; ``action`` is the control's tag.",
       "properties": {
         "action": {
-          "enum": [
-            "pause",
-            "resume",
-            "steer",
-            "stop"
-          ],
-          "title": "Action",
-          "type": "string"
+          "$ref": "#/$defs/ControlAction"
         },
         "status": {
           "enum": [
@@ -1113,6 +1106,17 @@
       ],
       "title": "ConfigurationFailedData",
       "type": "object"
+    },
+    "ControlAction": {
+      "description": "What a control request asks for; the tag of the ``ControlRequest`` union.",
+      "enum": [
+        "steer",
+        "pause",
+        "resume",
+        "stop"
+      ],
+      "title": "ControlAction",
+      "type": "string"
     },
     "ControlCommand": {
       "additionalProperties": false,
@@ -4003,6 +4007,11 @@
       "additionalProperties": false,
       "description": "Reach the next safe boundary and hold the run there.",
       "properties": {
+        "control_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Control Id",
+          "type": "string"
+        },
         "action": {
           "const": "pause",
           "default": "pause",
@@ -4010,11 +4019,12 @@
           "type": "string"
         }
       },
-      "title": "PauseRequest",
-      "type": "object",
       "required": [
+        "control_id",
         "action"
-      ]
+      ],
+      "title": "PauseRequest",
+      "type": "object"
     },
     "PerfDeltaReason": {
       "description": "Why a headline measurement carries no causal delta.\n\nAlways re-derived from round evidence (``perf_provenance`` and the\nbaseline fields), never stored on the round record, so it cannot drift\nfrom them. Absent entirely for records that predate provenance tracking:\na legacy absolute number keeps reading as a deliberate absolute rather\nthan being relabelled as unresolved.",
@@ -5161,6 +5171,11 @@
       "additionalProperties": false,
       "description": "Continue a paused run.\n\n``fallback`` switches a run paused on a provider capacity limit to its configured fallback\nprovider as it resumes. ``when=\"capacity_returns\"`` keeps such a run paused until capacity\nshould be back, then resumes it; it is refused when the run is not paused on a capacity\nlimit, and cannot be combined with ``fallback``, which resumes now.",
       "properties": {
+        "control_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Control Id",
+          "type": "string"
+        },
         "action": {
           "const": "resume",
           "default": "resume",
@@ -5182,11 +5197,12 @@
           "type": "string"
         }
       },
-      "title": "ResumeRequest",
-      "type": "object",
       "required": [
+        "control_id",
         "action"
-      ]
+      ],
+      "title": "ResumeRequest",
+      "type": "object"
     },
     "RoundFinishedData": {
       "additionalProperties": false,
@@ -6886,6 +6902,11 @@
       "additionalProperties": false,
       "description": "Free-text guidance for the run's next agent turn.",
       "properties": {
+        "control_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Control Id",
+          "type": "string"
+        },
         "action": {
           "const": "steer",
           "default": "steer",
@@ -6899,6 +6920,7 @@
         }
       },
       "required": [
+        "control_id",
         "action",
         "text"
       ],
@@ -6962,6 +6984,11 @@
       "additionalProperties": false,
       "description": "End the run, draining or cancelling the work in flight.",
       "properties": {
+        "control_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Control Id",
+          "type": "string"
+        },
         "action": {
           "const": "stop",
           "default": "stop",
@@ -6973,11 +7000,12 @@
           "default": "drain"
         }
       },
-      "title": "StopRequest",
-      "type": "object",
       "required": [
+        "control_id",
         "action"
-      ]
+      ],
+      "title": "StopRequest",
+      "type": "object"
     },
     "SubprocessOutputData": {
       "additionalProperties": false,

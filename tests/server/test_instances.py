@@ -18,8 +18,8 @@ from pydantic import ValidationError
 from tests.server.support import REQUEST_TIME
 
 import server.registry as instance_module
-from server.api.protocol import Response
-from server.control_envelope import CommandAck, StopCommand
+from server.api.protocol import CommandAck, Response
+from server.control_envelope import StopCommand
 from server.host_api import (
     ECMASCRIPT_DATE_MAX_SECONDS,
     INSPECTION_LOG_TAIL_BYTES,
@@ -73,6 +73,7 @@ from server.registry import (
     parse_instance_id,
 )
 from server.transport.unix_jsonl import MAX_SOCKET_PATH_BYTES
+from vibesys.api import ControlAction
 from vs_sim.api.testing import HANG_GUARD_S, ManualClock, SimNetwork, SimThreads
 
 if TYPE_CHECKING:
@@ -1181,7 +1182,7 @@ def _reply_bytes(reply: _Reply, request_id: str) -> bytes:
             response = Response(
                 timestamp=REQUEST_TIME,
                 request_id=request_id,
-                ack=CommandAck(action="stop", status="pending"),
+                ack=CommandAck(action=ControlAction.STOP, status="pending"),
             )
         case _Reply.ERROR:
             response = Response(
