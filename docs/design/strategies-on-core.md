@@ -891,7 +891,7 @@ and before dispatch, and after dispatch and before the observation is committed.
 
 ### 9.3 Phase 3: single
 
-- **Added properties.** S1: a round the evaluation budget left unmeasured is never a winner or
+- **Added properties.** S1: a round no gate measured is never a winner or
   a base. S2: differential test against the golden transcripts of the legacy
   loop: for generated per-round outcomes, round records, endings and the final record equal the
   transcript. S3: the attempt base is the best, a passed idea the plan names with

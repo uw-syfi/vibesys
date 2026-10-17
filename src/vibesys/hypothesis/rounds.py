@@ -7,7 +7,7 @@ transition and return the encoded result. Every function is a pure function of i
 so a replay after a crash repeats it.
 
 What it owns: choosing the next round (finished, continue, new hypothesis), starting a
-hypothesis on its base, the evaluation budget of the trusted gates, the Pareto
+hypothesis on its base, when the trusted gates measure, the Pareto
 guard on a verdict, noting a failed attempt on the active hypothesis, and closing a round into a
 `RoundRecord`. What it does not own: turns, measurements or any workspace operation; the caller
 supplies plain facts (`ClosingFacts`).
