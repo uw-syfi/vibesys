@@ -1,6 +1,7 @@
 /**
  * New run: the machine, project and task, agent, and budget on the left; on the right, whether the
- * run is ready to start on that machine, each failed check with its fix, and Start.
+ * run is ready to start on that machine, each failed check with its fix, and Start. The wordmark
+ * and title stay in view and the form scrolls under them; the start panel stays beside it.
  */
 import {
   Banner,
@@ -93,21 +94,26 @@ export function NewRunScreen(props: {
   const {context} = snapshot;
   const cardProps = {context, dispatch};
   return (
-    <Page width="wide">
-      <Stack gap="space-4">
-        {/* The wordmark sizes to its container's width, so it is not in the centered stack. */}
-        {props.hero}
-        <Stack gap="space-1" align="center">
-          <Text as="h1" variant="title">
-            New run
-          </Text>
-          <Text tone="muted">Prefilled from your last run on this machine.</Text>
-        </Stack>
-      </Stack>
-      {context.problem === null ? null : (
-        <Banner tone="err" title="Something went wrong." body={context.problem} />
-      )}
+    <Page
+      width="wide"
+      header={
+        <>
+          {/* The wordmark sizes to its container's width, so it is not in the centered stack. */}
+          {props.hero}
+          <Stack gap="space-1" align="center">
+            <Text as="h1" variant="title">
+              New run
+            </Text>
+            <Text tone="muted">Prefilled from your last run on this machine.</Text>
+          </Stack>
+          {context.problem === null ? null : (
+            <Banner tone="err" title="Something went wrong." body={context.problem} />
+          )}
+        </>
+      }
+    >
       <Split
+        stickyAside
         main={
           <Stack gap="space-4">
             <MachineCard {...cardProps} machines={props.machines} chooseCheckout={chooseCheckout} />

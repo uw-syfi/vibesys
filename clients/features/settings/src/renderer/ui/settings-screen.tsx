@@ -68,13 +68,17 @@ export function SettingsScreen(props: {
   const choose = (next: Appearance): void =>
     dispatch({type: 'change', change: {kind: 'appearance', appearance: next}});
   return (
-    <Page width="narrow">
-      <Stack gap="space-1">
-        <Text variant="section">Settings</Text>
-        <Text as="h1" variant="title">
-          Appearance
-        </Text>
-      </Stack>
+    <Page
+      width="narrow"
+      header={
+        <Stack gap="space-1">
+          <Text variant="section">Settings</Text>
+          <Text as="h1" variant="title">
+            Appearance
+          </Text>
+        </Stack>
+      }
+    >
       {state.problem === null ? null : (
         <Banner tone="err" title="Could not save the change." body={state.problem} />
       )}

@@ -270,8 +270,8 @@ export function MachinesScreen(props: {
 }): JSX.Element {
   const {state, dispatch, newRun} = props;
   return (
-    <Page>
-      <Stack>
+    <Page
+      header={
         <Row gap="space-3" align="end" wrap>
           <Stack gap="space-1" grow>
             <Text variant="section">Machines</Text>
@@ -288,6 +288,9 @@ export function MachinesScreen(props: {
             press={() => dispatch({type: 'open-add'})}
           />
         </Row>
+      }
+    >
+      <Stack>
         <AddMachine state={state} dispatch={dispatch} />
         {state.listProblem === null ? null : (
           <Banner tone="err" title="The machines could not be read" body={state.listProblem} />
