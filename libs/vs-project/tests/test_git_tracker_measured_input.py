@@ -194,3 +194,28 @@ def test_commits_with_one_measured_input_are_evaluated_on_byte_identical_trees(
         for other_digest, other_tree in seen:
             if digest == other_digest:
                 assert tree == other_tree
+
+
+@pytest.mark.parametrize(
+    "declared",
+    [(), ("NOTES.md",), ("notes/",), ("NOTES.md", "notes/", "other.md")],
+)
+def test_another_unread_declaration_is_another_measured_input(
+    tmp_path: Path, declared: tuple[str, ...]
+) -> None:
+    """Even where it withholds nothing more, a changed declaration moves the digest.
+
+    The same commit read under two declarations is evaluated on two trees whenever the
+    declarations withhold different paths, so the declaration is part of the input; its
+    order and a directory's trailing slash are not.
+    """
+    (tmp_path / "main.py").write_text("VALUE = 0\n", encoding="utf-8")
+    tracker = real_git_tracker(tmp_path, run_id="input-run", events=NullGitTrackerEvents())
+    tracker.init(existing=False)
+    tracker.snapshot("step")
+    commit = tracker.current_sha()
+    assert commit is not None
+    assert tracker.measured_input(commit, declared) != tracker.measured_input(commit, _DECLARED)
+    assert tracker.measured_input(commit, ("notes", "NOTES.md")) == tracker.measured_input(
+        commit, _DECLARED
+    )

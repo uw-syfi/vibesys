@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -294,7 +295,8 @@ class GitTracker:
 
         *unread* names workspace paths (files or directories) the task's evaluation never
         reads, such as an agent's notes. Two commits that differ only there have the same
-        digest, so they are one measured input. The digest covers every other tracked path,
+        digest, so they are one measured input. The digest covers the sorted *unread* list
+        and every other tracked path,
         VibeSys's own files included, as the patch from the baseline commit, which is part of
         the digest too, so commits of different workspaces never share one.
 
@@ -305,11 +307,13 @@ class GitTracker:
         if root is None:
             message = f"cannot resolve workspace baseline for commit {commit}"
             raise ValueError(message)
-        skipped = [
-            f":(exclude){_wildcard_safe(Path(path).as_posix().rstrip('/'))}" for path in unread
-        ]
+        withheld = sorted({Path(path).as_posix().rstrip("/") for path in unread})
+        skipped = [f":(exclude){_wildcard_safe(path)}" for path in withheld]
         patch = self._git.diff_patch(root, commit, [".", *skipped], style=PatchStyle.EXACT)
         digest = hashlib.sha256(f"{root}\n".encode())
+        # The declaration is part of the input: one tree read under another declaration is
+        # another evaluated tree, since a different set of paths is withheld from it.
+        digest.update(f"{json.dumps(withheld)}\n".encode())
         digest.update(patch.encode())
         return f"sha256:{digest.hexdigest()}"
 
