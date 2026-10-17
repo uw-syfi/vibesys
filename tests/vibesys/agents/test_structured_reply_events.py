@@ -17,6 +17,7 @@ from pydantic import BaseModel, ValidationError
 
 from vibesys.orchestration.dynamic.search.api import dynamic
 from vibesys.orchestration.evolve.search.api import evolve
+from vibesys.orchestration.issue_queue.models import IssuePerfEvalResult, PerfMetrics
 from vibesys.orchestration.issue_queue.search.api import issue_queue
 from vibesys.orchestration.multi.search.api import multi
 from vibesys.orchestration.single.search.api import single
@@ -45,6 +46,12 @@ _ROLES: tuple[Role, ...] = tuple(
 
 _Schema = dict[str, Any]
 _DEPTH = 4
+_TREND_FIELDS = (
+    "throughput_trend",
+    "latency_trend",
+    "primary_metric_trend",
+    "secondary_metric_trend",
+)
 
 
 def _resolve(schema: _Schema, defs: _Schema) -> _Schema:
@@ -124,22 +131,44 @@ def _objects(schema: _Schema, defs: _Schema, depth: int) -> st.SearchStrategy[An
     )
 
 
+def _accepts(model: type[BaseModel], value: object) -> bool:
+    try:
+        model.model_validate_json(json.dumps(value))
+    except ValidationError:
+        return False
+    return True
+
+
+@st.composite
+def _perf_evaluations(draw: st.DrawFn, schema: _Schema, defs: _Schema) -> _Schema:
+    """A performance evaluation whose trend fields are the ones its metrics call for.
+
+    The reply model accepts a value only when the trend fields match the metrics' vocabulary,
+    which independent optional fields hit about 1% of the time. The trend fields are chosen from
+    the metrics instead of filtered for, so nearly every draw is valid.
+    """
+    value: _Schema = dict(draw(_instances(schema, defs)))
+    serving = _accepts(PerfMetrics, value.get("metrics"))
+    trends = ("improved", "regressed", "mixed")
+    keys = ("throughput_trend", "latency_trend") if serving else ("primary_metric_trend",)
+    for name in _TREND_FIELDS:
+        value.pop(name, None)
+    for name in keys:
+        value[name] = draw(st.sampled_from(trends))
+    return value
+
+
 def _replies(model: type[BaseModel]) -> st.SearchStrategy[BaseModel]:
     """Valid replies of ``model``: schema-shaped JSON the model's own validators then accept."""
     schema = model.model_json_schema()
     defs = schema.get("$defs", {})
-
-    def accepted(value: object) -> bool:
-        try:
-            model.model_validate_json(json.dumps(value))
-        except ValidationError:
-            return False
-        return True
-
-    return (
-        _instances(schema, defs)
-        .filter(accepted)
-        .map(lambda value: model.model_validate_json(json.dumps(value)))
+    shaped = (
+        _perf_evaluations(schema, defs)
+        if model is IssuePerfEvalResult
+        else _instances(schema, defs)
+    )
+    return shaped.filter(lambda value: _accepts(model, value)).map(
+        lambda value: model.model_validate_json(json.dumps(value))
     )
 
 
@@ -176,10 +205,7 @@ def _run(
 @settings(
     max_examples=8,
     deadline=None,
-    # A reply model with a cross-field validator (the performance evaluator's metrics must match
-    # its trend fields) accepts about 1% of schema-shaped values by design, so `_replies` filters
-    # heavily; whether Hypothesis's filter health check fired was a matter of the seed.
-    suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.filter_too_much],
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 @given(data=st.data())
 def test_every_role_reply_is_reported_as_its_typed_reply(
