@@ -199,9 +199,9 @@ class FakeRunControlEventSink:
 class FakeCapacityTimer:
     """A virtual clock for the capacity gate: waits cost no real time.
 
-    ``wait_resumed`` advances the clock by the requested seconds and lets the real
-    control channel settle the wait with a zero timeout, so the channel's PAUSED and
-    RESUMED transitions are the production ones. With ``operator_resumes_after`` set,
+    ``pause_for_quota`` advances the clock by the requested seconds and lets the real
+    control channel settle the wait with a timed resume due at once, so the channel's
+    PAUSED and RESUMED transitions are the production ones. With ``operator_resumes_after`` set,
     the operator resumes the run that many virtual seconds into any wait that lasts
     longer.
     """
@@ -244,22 +244,26 @@ class FakeCapacityTimer:
             self._now += seconds
         return self._control.wait_for_capacity(0.0, request, ended=lambda: turn.cancelled)
 
-    def wait_resumed(self, seconds: float, turn: CapacityStops) -> PauseWake:
-        """Spend ``seconds`` of virtual time, or fewer when the operator resumes first.
+    def pause_for_quota(self, seconds: float, turn: CapacityStops) -> PauseWake:
+        """Pause the run and spend ``seconds`` of virtual time, or fewer when the operator resumes first.
 
-        A cancelled ``turn`` spends no time.
+        A cancelled ``turn`` spends no time and leaves the timed resume armed ``seconds``
+        ahead on the channel's own clock, as production does.
         """
         self.waits.append(seconds)
         operator_first = self._operator_after is not None and self._operator_after < seconds
         if turn.cancelled:
-            seconds = 0.0
+            self._control.pause_for_quota(seconds)
         elif operator_first and self._operator_after is not None:
-            seconds = self._operator_after
+            self._control.pause_for_quota(seconds)
+            self._now += self._operator_after
             self._control.resume()
-        self._now += seconds
-        return self._control.wait_resumed(0.0, ended=lambda: turn.cancelled)
+        else:
+            self._control.pause_for_quota(0.0)
+            self._now += seconds
+        return self._control.wait_resumed(ended=lambda: turn.cancelled)
 
-    def park_for_capacity(self, turn: CapacityStops, *, waiting: bool) -> int | None:
+    def park_for_capacity(self, turn: CapacityStops, *, waiting: bool) -> int | PauseWake:
         """Park on the real channel, as production does; a cancelled ``turn`` ends the park."""
         return self._control.park_for_capacity(waiting=waiting, ended=lambda: turn.cancelled)
 

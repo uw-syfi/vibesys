@@ -177,9 +177,9 @@ def test_a_bounded_wait_that_times_out_resumes_the_run_itself() -> None:
     events = FakeRunControlEventSink()
     threads = SimThreads()
     control = create_run_control_channel(events, threads=threads)
-    control.request_pause()
+    control.pause_for_quota(0.0)
 
-    resumed = threads.run(lambda: control.wait_resumed(0.0))
+    resumed = threads.run(control.wait_resumed)
 
     assert resumed is PauseWake.ELAPSED
     assert not control.pause_requested()
@@ -193,20 +193,20 @@ def test_a_bounded_wait_that_times_out_resumes_the_run_itself() -> None:
 def test_a_bounded_wait_that_something_resumed_reports_it() -> None:
     threads = SimThreads()
     control = create_run_control_channel(FakeRunControlEventSink(), threads=threads)
-    control.request_pause()
+    control.pause_for_quota(0.0)
     control.resume()
 
-    assert threads.run(lambda: control.wait_resumed(0.0)) is PauseWake.RESUMED
+    assert threads.run(control.wait_resumed) is PauseWake.RESUMED
 
 
 def test_a_stop_ends_a_bounded_wait_and_is_never_cleared_by_its_timeout() -> None:
     threads = SimThreads()
     control = create_run_control_channel(FakeRunControlEventSink(), threads=threads)
-    control.request_pause()
+    control.pause_for_quota(0.0)
     control.request_stop(StopMode.DRAIN)
 
     with pytest.raises(RunStopped):
-        threads.run(lambda: control.wait_resumed(0.0))
+        threads.run(control.wait_resumed)
 
     assert control.stop_requested()
 
@@ -341,7 +341,7 @@ def test_a_self_resume_releases_every_parked_waiter(
     threads = SimThreads(schedule_seed=seed)
     events = FakeRunControlEventSink()
     control = create_run_control_channel(events, threads=threads)
-    control.request_pause()
+    control.pause_for_quota()
     released: list[float] = []
 
     def boundary() -> None:
@@ -350,12 +350,13 @@ def test_a_self_resume_releases_every_parked_waiter(
 
     def turn() -> None:
         if source == "timed":
-            assert control.wait_resumed(seconds) is PauseWake.ELAPSED
+            control.pause_for_quota(seconds)
+            assert control.wait_resumed() is PauseWake.ELAPSED
             return
         control.enter_capacity()
         try:
             request = control.park_for_capacity(waiting=True)
-            assert request is not None
+            assert isinstance(request, int)
             assert control.wait_for_capacity(seconds, request).wake is CapacityWake.ELAPSED
         finally:
             control.leave_capacity()
@@ -411,7 +412,7 @@ class _ParkedTurns:
         self.threads = SimThreads(schedule_seed=seed)
         self.events = FakeRunControlEventSink()
         self.control = create_run_control_channel(self.events, threads=self.threads)
-        self.control.request_pause()
+        self.control.pause_for_quota()
         self.base = self.threads.now()
         self.ended = [False] * len(waiters)
         self.outcomes: dict[int, tuple[object, float]] = {}
@@ -424,13 +425,14 @@ class _ParkedTurns:
             return self.ended[index]
 
         if waiter.kind == "timed":
-            wake = control.wait_resumed(waiter.seconds, ended=gone)
+            control.pause_for_quota(waiter.seconds)
+            wake = control.wait_resumed(ended=gone)
             self.outcomes[index] = (wake, self.threads.now())
             return
         control.enter_capacity()
         try:
             request = control.park_for_capacity(ended=gone)
-            assert request is not None
+            assert isinstance(request, int)
             self.requests[index] = request
             end = control.wait_for_capacity(waiter.seconds, request, ended=gone)
             self.outcomes[index] = (end.wake, self.threads.now())

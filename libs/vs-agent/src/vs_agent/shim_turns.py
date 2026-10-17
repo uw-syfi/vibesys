@@ -118,6 +118,13 @@ class TurnEvents:
 
     One instance is registered with the ``Agent`` that makes the session, and
     the turn in flight points it at its observer.
+
+    The library calls :meth:`on_event` on its own thread while a caller may :meth:`cancel`
+    from another (a real thread, even under simulated threads, because the library's
+    interrupt blocks), so the two must agree which of them stops a running turn. Each turn
+    has one delivery token; stopping the running turn takes it, and only the side that took
+    it stops the turn. Taking it is one ``list.pop``, atomic on its own, so no lock is shared
+    with the caller's thread.
     """
 
     def __init__(self, steers: SteerLedger) -> None:
@@ -134,7 +141,7 @@ class TurnEvents:
         self._guard = ReplyGuard()
         self._stop: Callable[[], None] | None = None
         self._turn: CapacityStops | None = None
-        self._cancel_delivered = False
+        self._delivery: list[None] = []
         self._running = False
         self._steers = steers
 
@@ -154,25 +161,32 @@ class TurnEvents:
         self._guard = ReplyGuard()
         self._stop = stop
         self._turn = turn
-        self._cancel_delivered = False
+        self._delivery = [None]
         self._running = False
 
-    def cancel(self, interrupt: Callable[[], None]) -> None:
-        """Stop the turn in flight now with *interrupt*, and record that it was stopped.
+    def cancel(self, interrupt: Callable[[], None], turn: CapacityStops | None = None) -> None:
+        """Cancel ``turn`` (the caller's record, when it keeps one) and stop it with *interrupt*.
 
         Once the library has run the turn (it emitted an event), *interrupt* reaches it, so
         the turn's next event does not stop it again. Before that, an interrupt has nothing
-        to stop, and the turn's first event delivers the cancellation instead.
+        to stop, and the turn's first event delivers the cancellation instead. When an
+        event racing this cancel already stopped the running turn, the cancel does not stop
+        it again.
         """
+        if turn is not None:
+            turn.cancel()
         self.cancelled = True
-        if self._running:
-            self._cancel_delivered = True
+        # ``_running`` is read after ``turn`` is marked, and set before an event reads the
+        # mark, so a running turn that missed the mark is stopped here, and one that saw
+        # it raced this cancel for the token.
+        if self._running and not self._take_delivery():
+            return
         interrupt()
 
     def on_event(self, event: agentshim.AgentEvent) -> None:
         """Translate and forward one library event, if anyone is listening."""
-        self._stop_if_cancelled()
         self._running = True
+        self._stop_if_cancelled()
         if isinstance(event, agentshim.SteerConsumed):
             self._steers.consumed(event.text)
         elif isinstance(event, agentshim.SteerRejected):
@@ -190,14 +204,21 @@ class TurnEvents:
             observer.on_event(translated)
 
     def _stop_if_cancelled(self) -> None:
-        """Stop the turn once if its caller cancelled it, even before the library ran it."""
+        """Stop the turn once if its caller cancelled it and no interrupt reached it yet."""
         turn = self._turn
-        if turn is None or self._cancel_delivered or not turn.cancelled:
+        if turn is None or not turn.cancelled or not self._take_delivery():
             return
-        self._cancel_delivered = True
         self.cancelled = True
         if self._stop is not None:
             self._stop()
+
+    def _take_delivery(self) -> bool:
+        """Take this turn's one delivery token; False when the other side already took it."""
+        try:
+            self._delivery.pop()
+        except IndexError:
+            return False
+        return True
 
     def _refuse_reply(self, text: str) -> bool:
         """Stop the turn the first time its reply crosses a limit; whether *text* is refused."""
@@ -264,10 +285,7 @@ class LaunchedSession:
         capacity gate is waiting on is cancelled through its tracked record,
         which ends that wait and keeps the turn from being sent again.
         """
-        turn = self._turn
-        if turn is not None:
-            turn.cancel()
-        self.events.cancel(self.session.interrupt)
+        self.events.cancel(self.session.interrupt, self._turn)
 
     def adopt(self, session_id: str) -> bool:
         """Continue ``session_id`` on the next turn, if the session accepts it.
