@@ -38,8 +38,13 @@ from server.journal import WireJournal
 from server.runtime import ServerRuntime
 from server.transport.discovery import WebInstanceClaim, WebInstanceRecord
 from vibesys.run.integration import LocalRunIntegration
-from vs_core.api import StopMode
-from vs_runtime.api.infrastructure import ChannelRunControl, RunControlChannel
+from vs_runtime.api.infrastructure import (
+    ChannelRunControl,
+    ControlAck,
+    ControlRequest,
+    RunControlChannel,
+    StopRequest,
+)
 from vs_runtime.api.testing import idle_environment_system
 from vs_sim.api import OsThreads, Platform, Threads
 from vs_sim.api.testing import ManualClock, SimThreads
@@ -74,9 +79,10 @@ class _SessionControlStub(ChannelRunControl):
         super().__init__(control, threads)
         self.stop_calls = 0
 
-    def stop(self, mode: StopMode = StopMode.DRAIN) -> None:
-        self.stop_calls += 1
-        super().stop(mode)
+    def submit(self, request: ControlRequest) -> ControlAck:
+        if isinstance(request, StopRequest):
+            self.stop_calls += 1
+        return super().submit(request)
 
 
 def _await_socket(runtime: ServerRuntime) -> None:
