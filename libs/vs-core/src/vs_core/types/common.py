@@ -57,15 +57,15 @@ class TurnFailureKind(StrEnum):
 
 
 def unset(value: object) -> bool:
-    """Whether an optional field is unset, so a value's serialized form leaves it out.
+    """Whether an optional field is unset (None) or a flag is off, so serialization leaves it out.
 
-    For ``Field(exclude_if=unset)`` on optional fields: left out when unset, a value that sets
+    For ``Field(exclude_if=unset)`` on optional fields and flags: left out when unset, a value that sets
     none of them serializes, and so digests, budget keys and request ids, exactly as before the
     field existed. That keeps identities stable; it does not make an older run resumable. Any
     new field changes the envelope's shape and version, and core refuses an envelope of
     another version (there is no migration).
     """
-    return value is None
+    return value is None or value is False
 
 
 class Value(BaseModel):
@@ -770,6 +770,13 @@ class RunFacts(Value):
     evaluator_digest: str
     workload_digest: str
     environment_digest: str
+    exclusive_measurement_hosts: bool = Field(default=False, exclude_if=unset)
+    """Each measurement job runs on hosts it holds alone, as the run's executor declares.
+
+    The executor's capability, derived from how it submits jobs (a Slurm job with a bare
+    ``--exclusive``), never from a backend's name. A run timed so is timed as an official
+    measurement is, so only such a run may answer one (``vs_core._measurement_reuse``).
+    """
     artifacts: tuple[ArtifactRef, ...] = ()
     task: TaskTerms | None = None
     """What the task fixes; a search that measures candidates reads it with ``ctx.task``."""

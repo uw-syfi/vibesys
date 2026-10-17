@@ -293,6 +293,8 @@ class AgentEvaluationPolicy:
     accuracy_stage: str | None
     accuracy_gated: tuple[EvidenceKind, ...]
     """Evidence kinds that count only if the accuracy stage passed: the task's trust rule."""
+    exclusive_hosts: bool = False
+    """The run's executor runs each job on hosts it holds alone (``MeasurementRecipe``)."""
     purpose: Literal["baseline", "local-validation", "official", "profile"] = "local-validation"
 
     @classmethod
@@ -314,6 +316,7 @@ class AgentEvaluationPolicy:
             queue_allowance=recipe.queue_allowance,
             accuracy_stage=recipe.accuracy_stage,
             accuracy_gated=recipe.accuracy_gated,
+            exclusive_hosts=recipe.exclusive_hosts,
             purpose=purpose,
         )
 
@@ -331,6 +334,7 @@ class AgentEvaluationPolicy:
             queue_allowance=self.queue_allowance,
             accuracy_stage=self.accuracy_stage,
             accuracy_gated=self.accuracy_gated,
+            exclusive_hosts=self.exclusive_hosts,
         )
 
     def plan(

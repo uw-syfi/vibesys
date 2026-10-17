@@ -7,12 +7,20 @@ with the earlier run's result instead (`reused_run`) when all of these hold:
 
 - the run belongs to the same scope (owner and generation), so budgets stay per attempt;
 - it measured the same input with the same evaluation: its identity equals the requested one
-  except for the purpose (`MeasurementIdentity.measures_same_input`);
-- it is the only run of that input in the scope, and the scope's latest run, so an agent
-  cannot keep the luckiest of several runs of one input, nor return to an older input after
-  measuring another;
+  except for the purpose (`MeasurementIdentity.measures_same_input`), and it ran the same
+  stages with the same execution budgets, queue allowance and stage policy;
+- both it and the requested measurement run on hosts the executor holds alone for the job
+  (`MeasurementPlan.exclusive_hosts`, the executor's declared capability), so the earlier
+  run was timed as an official run is; a run on a host shared with agent work never counts;
+- it is the scope's only admitted measurement submission of any input, so the official
+  score never selects among several runs (the luckiest one, or the one whose input the agent
+  kept after measuring others);
 - it ended conclusively: terminal, released, accepted, every record trusted and accepted by
   core, and any failure the candidate's own (a workload failure), never the machinery's.
+
+The reused run is a framework-owned trusted job: core admitted it (`SubmitMeasurement`) and
+the trusted executor ran it outside agent confinement. Only the agent asked for it. Its own
+records stay advice (``local-validation``); the official records are new rows naming it.
 
 A failed run is reused as well as a passed one: reusing only passes would hand a flaky
 candidate a second chance that a fresh official run does not get.
@@ -112,29 +120,57 @@ def _conclusive(state: EvaluationState, job: OwnedJob) -> bool:
 
 
 def reused_run(
-    state: EvaluationState, scope: Scope, identity: MeasurementIdentity
+    state: EvaluationState, scope: Scope, plan: MeasurementPlan, identity: MeasurementIdentity
 ) -> OwnedJob | None:
-    """The scope's run that answers an official measurement of ``identity``, or None.
+    """The scope's run that answers the official measurement ``plan`` (of ``identity``), or None.
 
-    None for any other purpose, and once the identity has a submission of its own.
+    None for any other purpose, once the identity has a submission of its own, and whenever
+    the scope admitted any other measurement submission, of this input or another.
     """
-    if identity.purpose != "official" or any(
-        budget.scope == scope and budget.identity == identity for budget in state.submission_budgets
+    if (
+        identity.purpose != "official"
+        or not plan.exclusive_hosts
+        or any(
+            budget.scope == scope and budget.identity == identity
+            for budget in state.submission_budgets
+        )
     ):
         return None
-    runs = tuple(
-        job
-        for job in state.jobs
-        if job.scope == scope and job.reuses is None and job.plan.purpose in _RUN_PURPOSES
+    # Admitted submissions, not accepted jobs: one admitted but not yet accepted is a run too.
+    admitted = tuple(
+        receipt
+        for budget in state.submission_budgets
+        if budget.scope == scope and budget.identity.purpose in _RUN_PURPOSES
+        for receipt in budget.receipts
     )
-    same = tuple(
-        job
-        for job in runs
-        if (measured := _identity(job)) is not None and measured.measures_same_input(identity)
-    )
-    if len(same) != 1 or same[0] != runs[-1]:
+    if len(admitted) != 1 or not isinstance(admitted[0], PreparedSubmissionReceipt):
         return None
-    return same[0] if _conclusive(state, same[0]) else None
+    source = next(
+        (
+            job
+            for job in state.jobs
+            if job.scope == scope and job.submission_id == admitted[0].request_id
+        ),
+        None,
+    )
+    if (
+        source is None
+        or (measured := _identity(source)) is None
+        or not measured.measures_same_input(identity)
+        or not _same_execution(source.plan, plan)
+    ):
+        return None
+    return source if _conclusive(state, source) else None
+
+
+def _same_execution(source: MeasurementPlan, requested: MeasurementPlan) -> bool:
+    """Whether ``source`` ran as ``requested`` would: same stages, budgets, queue and hosts."""
+    return (
+        source.exclusive_hosts
+        and source.stages == requested.stages
+        and source.queue_allowance == requested.queue_allowance
+        and source.policy == requested.policy
+    )
 
 
 def reused_record(

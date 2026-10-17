@@ -383,7 +383,7 @@ def _requested(
         for row in context.records.records
     ):
         return AreaChange(state=state)
-    run = reused_run(state, event.scope, identity.value)
+    run = reused_run(state, event.scope, plan, identity.value)
     reuses = None if run is None else run.submission_id
     origin_of = _Origin(event.scope, origin.value.decision_id, reuses=reuses)
     return _admit(state, context, origin_of, plan, identity.value)
