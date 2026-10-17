@@ -101,6 +101,8 @@ class EvaluationInputs:
     """The task requires a benchmark to pass the accuracy gate (``requires_accuracy``)."""
     builds: bool = False
     """The task declares a candidate build, measured before its other gates."""
+    exclusive_hosts: bool = False
+    """The trusted executor runs each measurement on hosts it holds alone."""
 
 
 def evaluation_inputs(run: ResolvedRun) -> EvaluationInputs:
@@ -129,6 +131,7 @@ def evaluation_inputs(run: ResolvedRun) -> EvaluationInputs:
         profile_seconds=plan.profile_timeout_seconds,
         benchmark_needs_accuracy=EvidenceKind.BENCHMARK in plan.accuracy_gated,
         builds=plan.build is not None,
+        exclusive_hosts=run.environment.exclusive_measurement_hosts,
     )
 
 
