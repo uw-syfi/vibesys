@@ -221,6 +221,18 @@ class RunControlChannel(Protocol):
         """Whether the run's latest resume asked for the fallback, taken or not."""
         ...
 
+    def seed(self, pause: RunPause | None) -> None:
+        """Start from the pause core recorded before a restart (``vs_core.run_pause``).
+
+        The operator's hold stays: the run stays paused until the operator resumes it. A
+        quota pause belonged to turns that did not survive the restart, so the run resumes
+        and a turn that stops on the limit again pauses it again with fresh facts. A capacity
+        wait the operator asked for resumes the run too, and the next turn stopped on a
+        capacity limit waits for capacity without asking the operator again. Call it once,
+        before any control.
+        """
+        ...
+
     def request_stop(self, mode: StopMode, control_id: str | None = None) -> None:
         """Request an unwind at the next cooperative boundary, draining or cancelling work."""
         ...
@@ -414,6 +426,8 @@ class RuntimeRunControlChannel:
         self._requested_by: dict[Literal["pause", "stop", "capacity"], str | None] = {}
         self._fallback_requested = False
         self._resumed_with_fallback = False
+        # A capacity wait core recorded before a restart: the next capacity stop takes it.
+        self._capacity_standing = False
         self._stop_listeners: list[Callable[[], object]] = []
         self._now = threads.now
         self._capacity_turns = 0
@@ -466,6 +480,7 @@ class RuntimeRunControlChannel:
             self._resume_at = None
             self._requested_by["pause"] = control_id
             self._capacity_request = None
+            self._capacity_standing = False
             self._lock.notify_all()
 
     def pause_for_quota(self, resume_in: float | None = None) -> None:
@@ -514,6 +529,7 @@ class RuntimeRunControlChannel:
         self._capacity_request = None
         # A fallback request answers the pause it ended; one no turn took is stale by now.
         self._fallback_requested = self._resumed_with_fallback = False
+        self._capacity_standing = False
         # The run resuming itself has no control id; an operator resume records its own after.
         self._requested_by["pause"] = None
         self._lock.notify_all()
@@ -566,6 +582,16 @@ class RuntimeRunControlChannel:
         """Whether the latest resume asked for the fallback."""
         with self._lock:
             return self._resumed_with_fallback
+
+    def seed(self, pause: RunPause | None) -> None:
+        """Take the pause core recorded before this process started; see the protocol."""
+        with self._lock:
+            if pause is None:
+                return
+            if pause.capacity_wait:
+                self._capacity_standing = True
+            elif pause.owner is PauseOwner.OPERATOR:
+                self._held = True
 
     def request_stop(self, mode: StopMode, control_id: str | None = None) -> None:
         """Request that the run unwind at its next cooperative boundary, as ``mode`` says.
@@ -717,6 +743,7 @@ class RuntimeRunControlChannel:
         """Park until asked to wait for capacity (the request), resumed, or *ended*."""
         with self._lock:
             self._land_pause()
+            waiting, self._capacity_standing = waiting or self._capacity_standing, False
             if waiting and self._paused and not self._stop_requested:
                 self._capacity_request = self._next_capacity_request()
             while (

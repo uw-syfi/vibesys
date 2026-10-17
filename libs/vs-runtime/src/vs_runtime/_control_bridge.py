@@ -98,7 +98,9 @@ class RunControlBridge:
     any other has the identity ``control-<n>``, continuing the count of controls core
     already holds, so a resumed run never reuses an identity. A stop carries no result: the search
     adopts its last choice and ends the run itself. The first poll also records the run's
-    deadline on the channel, for work on other threads that must not wait past it.
+    deadline on the channel, for work on other threads that must not wait past it, and seeds
+    the channel with the pause core recorded (``RunControlChannel.seed``), so a run the
+    operator paused stays paused across a restart.
 
     With an ``inbox``, each poll also applies the inbox's requests, in id order, each as one
     control ``op-<control id>``; see the module docstring for how each applies once.
@@ -159,6 +161,7 @@ class RunControlBridge:
         if not self._started:
             self._started = True
             self._channel.set_run_deadline(core.run.deadline_at)
+            self._channel.seed(run_pause(core.run))
             self._count = len(core.run.controls)
             self._stopped = any(c.action == "stop" for c in core.run.controls)
         self._position = len(core.run.controls)

@@ -66,27 +66,31 @@ type _Op = Literal["quota", "operator", "resume", "fallback", "capacity", "poll"
 _OPS: tuple[_Op, ...] = ("quota", "operator", "resume", "fallback", "capacity", "poll")
 
 
+def _apply(run: _Run, op: _Op, control_id: str) -> None:
+    match op:
+        case "quota":
+            run.channel.pause_for_quota()
+        case "operator":
+            run.channel.request_pause(control_id)
+        case "resume":
+            run.channel.resume(control_id)
+        case "fallback":
+            run.channel.resume_with_fallback(control_id)
+        case "capacity":
+            run.channel.resume_when_capacity_returns(control_id)
+        case "poll":
+            run.poll()
+
+
 @given(st.lists(st.sampled_from(_OPS), max_size=24))
 def test_after_each_committed_poll_core_holds_the_channels_pause(ops: list[_Op]) -> None:
     run = _run()
     # One turn waits on a capacity limit throughout, so a capacity wait can be asked for.
     run.channel.enter_capacity()
     for index, op in enumerate(ops):
-        control_id = f"c{index}"
-        match op:
-            case "quota":
-                run.channel.pause_for_quota()
-            case "operator":
-                run.channel.request_pause(control_id)
-            case "resume":
-                run.channel.resume(control_id)
-            case "fallback":
-                run.channel.resume_with_fallback(control_id)
-            case "capacity":
-                run.channel.resume_when_capacity_returns(control_id)
-            case "poll":
-                run.poll()
-                assert run_pause(run.core.run) == run.channel.pause_state()
+        _apply(run, op, f"c{index}")
+        if op == "poll":
+            assert run_pause(run.core.run) == run.channel.pause_state()
     run.poll()
     assert run_pause(run.core.run) == run.channel.pause_state()
 
@@ -125,3 +129,41 @@ def test_a_fallback_resume_reusing_a_plain_resumes_id_is_rejected_not_settled() 
 
     assert [entry.request_id for entry in run.inbox.rejected()] == ["x"]
     assert run.channel.consume_fallback_request() is False
+
+
+def _restarted(run: _Run) -> _Run:
+    """A new process over the same inbox and committed core state."""
+    fresh = _run()
+    return _Run(fresh.channel, fresh.control, _bridge_over(fresh, run.inbox), run.inbox, run.core)
+
+
+def _bridge_over(fresh: _Run, inbox: FakeControlInbox) -> RunControlBridge:
+    return RunControlBridge(fresh.channel, _Texts(), inbox=OperatorInbox(inbox, fresh.control))
+
+
+@given(ops=st.lists(st.sampled_from(_OPS), max_size=16), capacity_turn=st.booleans())
+def test_a_restart_keeps_an_operator_pause_and_resumes_only_a_quota_pause(
+    *, ops: list[_Op], capacity_turn: bool
+) -> None:
+    """Regression (#3080): a run the operator paused came back running after a restart."""
+    run = _run()
+    if capacity_turn:
+        run.channel.enter_capacity()
+    for index, op in enumerate(ops):
+        _apply(run, op, f"c{index}")
+    run.poll()
+    before = run_pause(run.core.run)
+
+    restarted = _restarted(run)
+    restarted.poll()
+    restarted.poll()
+
+    held = before is not None and before.owner is PauseOwner.OPERATOR and not before.capacity_wait
+    expected = RunPause(owner=PauseOwner.OPERATOR) if held else None
+    assert restarted.channel.pause_state() == expected
+    assert run_pause(restarted.core.run) == expected
+    if before is not None and before.capacity_wait:
+        # The operator asked to wait for capacity: the next capacity stop waits, unasked.
+        restarted.channel.enter_capacity()
+        restarted.channel.pause_for_quota()
+        assert isinstance(restarted.channel.park_for_capacity(), int)

@@ -162,8 +162,8 @@ def test_every_control_is_recorded_once_whichever_way_it_was_sent(
     Each inbox request ends settled or set aside; a settled one is recorded as
     ``op-<id>``; each ``op-<id>`` is recorded at most once; and a control is recorded under
     a fresh ``control-<n>`` only if the socket sent it after a restart, before the restarted
-    run's first poll told it which ids the run records, or if it is the resume a restart
-    records for a paused run (its new channel holds no pause).
+    run's first poll told it which ids the run records. A restart records nothing by itself:
+    the new channel starts from the pause core recorded.
     """
     inbox = FakeControlInbox()
     texts = _Texts()
@@ -207,7 +207,7 @@ def test_every_control_is_recorded_once_whichever_way_it_was_sent(
     assert len(recorded) <= len(sent) + restarts
     operator_ids = [identity for identity in recorded if identity.startswith("op-")]
     assert [i for i, n in Counter(operator_ids).items() if n > 1] == []
-    assert len(recorded) - len(operator_ids) <= unrecalled + restarts
+    assert len(recorded) - len(operator_ids) <= unrecalled
     for request_id in posted - rejected:
         assert f"op-{request_id}" in recorded, request_id
     steer_controls = {
