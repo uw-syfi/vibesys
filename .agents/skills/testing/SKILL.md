@@ -81,9 +81,10 @@ commands) belongs in that codebase's own skill; load it too.
    replays the one reply or exit path that triggered the bug does not cover
    it. Mark a property-based regression test `@pytest.mark.regression` and pin the
    reported input with `@example(...)`: CI draws about 10 derandomized examples,
-   which may never hit the bug. `tests/quality/test_regression_properties_are_pinned.py`
-   fails a `@given` test marked, named or documented as a regression (or citing
-   `#NNNN`) that has no `@example`; its baseline of older violations only shrinks.
+   which may never hit the bug. The check
+   `test_every_property_regression_test_pins_its_input` fails a `@given` test
+   marked, named or documented as a regression (or citing `#NNNN`) that has no
+   `@example`; its baseline of older violations only shrinks.
    A flaky test whose defect is in the test itself is not a product bug:
    fix the test and show the deterministic reproduction in the PR, without a
    test of the test (see [references/flakiness.md](references/flakiness.md)).

@@ -107,8 +107,8 @@ conformance corpus.
 - A property passes on PR depth and fails nightly because the PR profile is
   derandomized and draws few examples: pin each nightly failure with
   `@example(...)` so PR runs replay it. Enforced for regression tests by
-  `tests/quality/test_regression_properties_are_pinned.py`; a nightly find
-  that is not a regression test is unenforced because its result arrives after merge.
+  `test_every_property_regression_test_pins_its_input`. Unenforced for other
+  nightly finds: the result arrives after merge.
 - An `async def` test marked `asyncio` silently leaves the virtual clock and
   then waits in real time; drop the marker unless the test needs
   pytest-asyncio.
