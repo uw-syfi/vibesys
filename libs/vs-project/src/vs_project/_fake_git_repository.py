@@ -192,7 +192,7 @@ class FakeGitRepository:
         require_no_nested_repository(
             scope.root,
             pathspecs,
-            linked_worktrees=(scope.root / path for path in self._skip(scope)),
+            linked_worktrees=lambda: tuple(scope.root / path for path in self._skip(scope)),
         )
 
     def _skip(self, scope: _Scope) -> frozenset[str]:

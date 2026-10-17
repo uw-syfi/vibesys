@@ -149,16 +149,22 @@ class CliGitRepository:
         the guarded command the same way, before it reads the work tree.
         """
         listing = self._run(_LIST_INDEX, index_file=index_file)
-        worktrees = self._run(["worktree", "list", "--porcelain", "-z"])
         require_no_nested_repository(
             self._work_tree or self._root,
             pathspecs,
             gitlinks=_gitlinks(listing.stdout) if listing.returncode == 0 else (),
-            linked_worktrees=(
-                Path(record.removeprefix("worktree "))
-                for record in _text(worktrees.stdout).split("\0")
-                if worktrees.returncode == 0 and record.startswith("worktree ")
-            ),
+            linked_worktrees=self._linked_worktrees,
+        )
+
+    def _linked_worktrees(self) -> tuple[Path, ...]:
+        """The work trees ``git worktree list`` reports now; none when Git cannot list them."""
+        worktrees = self._run(["worktree", "list", "--porcelain", "-z"])
+        if worktrees.returncode != 0:
+            return ()
+        return tuple(
+            Path(record.removeprefix("worktree "))
+            for record in _text(worktrees.stdout).split("\0")
+            if record.startswith("worktree ")
         )
 
     def _prefix(self) -> str:
