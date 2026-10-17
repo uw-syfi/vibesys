@@ -154,6 +154,9 @@ class _TrackedWorkspaces:
         self.candidates.append(candidate)
         return cast("CandidateWorkspace", candidate)
 
+    async def create_measured_candidate(self, revision: str) -> CandidateWorkspace:
+        return await self.create_candidate(revision)
+
     async def adopt(self, revision: str) -> None:
         await self._inner.adopt(revision)
 

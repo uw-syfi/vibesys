@@ -72,6 +72,7 @@ class _World:
     snapshot: str
     stage_running: Callable[[], Awaitable[None]]
     submission_visible: Callable[[str], Awaitable[None]]
+    workspaces: FakeWorkspaces
     printed: dict[str, bytes] = field(default_factory=dict)
     """What each stage's command printed to stdout, as the executor's Fake scripts it."""
 
@@ -122,6 +123,7 @@ async def _local(root: Path, script: _Script, stage_output: StageOutputOpener | 
         snapshot,
         running,
         visible,
+        workspaces,
         dict(_LOCAL_PRINTED),
     )
 
@@ -142,7 +144,7 @@ async def _slurm(root: Path, script: _Script, stage_output: StageOutputOpener | 
         await wait_until_executor_started(cluster.accepted, stack.executor, handle_id)
 
     printed = {"accuracy": b"ok", "benchmark": BENCHMARK_OUTPUT.encode()}
-    return _World(stack.executor, stack.snapshot, running, visible, printed)
+    return _World(stack.executor, stack.snapshot, running, visible, stack.workspaces, printed)
 
 
 BUILDERS = [pytest.param(_local, id="polling"), pytest.param(_slurm, id="semantic-slurm")]
@@ -370,3 +372,22 @@ async def test_each_stage_output_reaches_one_stream_named_by_its_run(
     assert {
         run.stage_id: streams.output[run].kept(OutputStream.STDOUT) for run in runs
     } == world.printed
+
+
+@pytest.mark.parametrize("build", BUILDERS)
+async def test_every_candidate_an_executor_evaluates_is_opened_as_its_measured_input(
+    build: _Build, tmp_path: Path
+) -> None:
+    """The evaluated tree is the measured input's: the task's unread paths are withheld.
+
+    So an official measurement that reuses an earlier run of the same measured input reads
+    the very tree that run read (``Workspaces.create_measured_candidate``).
+    """
+    world = await build(tmp_path, _Script.SUCCEED, None)
+
+    await world.executor.submit(_request(world.snapshot), handle_id=_HANDLE)
+    await _terminal(world.executor)
+
+    assert world.workspaces.candidates
+    assert world.workspaces.measured_candidates == world.workspaces.candidates
+    await world.executor.close()

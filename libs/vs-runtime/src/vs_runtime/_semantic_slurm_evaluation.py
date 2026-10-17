@@ -316,7 +316,7 @@ class SemanticSlurmEvaluationExecutor:
             existing = self._executions.get(handle_id)
             if existing is not None:
                 return existing
-            workspace = await self._workspaces.create_candidate(record.snapshot)
+            workspace = await self._workspaces.create_measured_candidate(record.snapshot)
             executor = self._make_executor(
                 workspace.path,
                 self._stage_streams(record.request),

@@ -136,6 +136,9 @@ class _Resource:
     def measured_input(self, revision: str) -> str:
         return f"input:{self.candidate_patch(revision)}"
 
+    def withhold_unread(self) -> None:
+        """These resources declare no unread paths."""
+
     def is_retained(self, revision: str) -> bool:
         return revision not in self.unavailable_revisions
 

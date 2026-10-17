@@ -395,6 +395,7 @@ class FakeWorkspaces:
         self._closing = False
         self._closed = False
         self._holds: Callable[[], WorkspaceHolds] | None = None
+        self._measured: list[CandidateWorkspace] = []
 
     def script_candidate_retain(
         self, *results: BaseException | None, after_retention: bool = False
@@ -466,6 +467,17 @@ class FakeWorkspaces:
         self._candidate_retains.clear()
         self._candidates.append(candidate)
         return candidate
+
+    async def create_measured_candidate(self, revision: str) -> CandidateWorkspace:
+        """A candidate of *revision*; the fake declares no unread paths, so it withholds none."""
+        candidate = await self.create_candidate(revision)
+        self._measured.append(candidate)
+        return candidate
+
+    @property
+    def measured_candidates(self) -> tuple[CandidateWorkspace, ...]:
+        """The candidates opened to evaluate (``create_measured_candidate``), in order."""
+        return tuple(self._measured)
 
     async def adopt(self, revision: str) -> None:
         """Adopt a retained revision even after its candidate was discarded."""

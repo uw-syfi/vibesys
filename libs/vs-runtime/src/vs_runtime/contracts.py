@@ -350,6 +350,15 @@ class Workspaces(Protocol):
         """
         ...
 
+    async def create_measured_candidate(self, revision: str) -> CandidateWorkspace:
+        """Create an isolated candidate of *revision* to evaluate, as its measured input reads it.
+
+        It holds *revision*'s files less the paths the task declares unread, so its files are
+        exactly what ``Workspace.measured_input`` digests: an evaluation reads nothing the
+        digest does not cover. Errors as :meth:`create_candidate`.
+        """
+        ...
+
     async def adopt(self, revision: str) -> None:
         """Materialize a retained candidate revision in the root workspace."""
         ...
