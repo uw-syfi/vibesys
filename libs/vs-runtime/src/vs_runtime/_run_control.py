@@ -634,8 +634,8 @@ class RuntimeRunControlChannel:
 __all__ = [
     "CapacityWaitEnd",
     "CapacityWake",
-    "QueuedSteer",
     "PauseWake",
+    "QueuedSteer",
     "RunControlChannel",
     "RunControlEventSink",
     "RunControlTransition",

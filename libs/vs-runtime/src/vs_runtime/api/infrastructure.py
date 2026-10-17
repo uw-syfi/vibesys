@@ -194,8 +194,8 @@ from vs_runtime._release import release_all
 from vs_runtime._run_control import (
     CapacityWaitEnd,
     CapacityWake,
-    QueuedSteer,
     PauseWake,
+    QueuedSteer,
     RunControlChannel,
     RunControlEventSink,
     RunControlTransition,
