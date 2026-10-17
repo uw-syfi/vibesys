@@ -32,6 +32,7 @@ from .common import (
     RejectionCode,
     RequestId,
     RevisionRef,
+    RoleId,
     SchemaRef,
     Scope,
     ScopeReopenNormalization,
@@ -293,6 +294,8 @@ class SearchDeclaration(Value):
     optional_operations: tuple[OperationSchemaRef, ...] = ()
     required: frozenset[LifecycleCapability] = frozenset()
     optional: frozenset[LifecycleCapability] = frozenset()
+    roles: tuple[RoleId, ...] = ()
+    """The role ids of the sessions the search's turns run in, sorted; an input may name one."""
 
     @property
     def state_schema(self) -> SchemaRef:

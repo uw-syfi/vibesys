@@ -32,6 +32,7 @@ from ._proofs import (
 )
 from ._registry import ContractError
 from ._routing import SIGNAL_ORDER, event_area
+from ._session_inputs import check_declared_target
 from ._validation import validate_decision
 from ._values import digest, share_unchanged
 from ._waits import (
@@ -1281,6 +1282,7 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
         return _stop_control(state, event, dispatch)
     if state.run.status == RunStatus.TERMINAL:
         raise ContractError(("run", "status"), "terminal run rejects controls")
+    check_declared_target(event.control.target, state.run.declaration)
     if event.control.action in ("resume", "pause") and (
         state.run.status in (RunStatus.CLOSING, RunStatus.BLOCKED) or state.run.result is not None
     ):

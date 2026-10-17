@@ -12,10 +12,10 @@ from .common import (
     ContractValidationError,
     Count,
     InputId,
+    InputTarget,
+    InvocationInputTarget,
     InvocationRef,
-    ItemId,
     Observation,
-    Scope,
     Seconds,
     Value,
 )
@@ -26,33 +26,6 @@ class InputMode(StrEnum):
 
     NEXT_TURN = "next-turn"
     INTERRUPT = "interrupt"
-
-
-class ScopeInputTarget(Value):
-    """Input for a scope, permitted before any invocation exists."""
-
-    kind: Literal["scope"] = "scope"
-    scope: Scope
-
-
-class ItemInputTarget(Value):
-    """Input for an item, permitted before any invocation exists."""
-
-    kind: Literal["item"] = "item"
-    item_id: ItemId
-
-
-class InvocationInputTarget(Value):
-    """Input for one exact invocation, never silently retargeted."""
-
-    kind: Literal["invocation"] = "invocation"
-    invocation: InvocationRef
-
-
-type InputTarget = Annotated[
-    ScopeInputTarget | ItemInputTarget | InvocationInputTarget,
-    Field(discriminator="kind"),
-]
 
 
 class SessionInput(Value):

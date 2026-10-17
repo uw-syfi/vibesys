@@ -31,10 +31,14 @@ from .types.common import (
     ChargeKind,
     CompletionStatus,
     ContractValidationError,
+    InvocationInputTarget,
+    ItemInputTarget,
     ObservationStatus,
     RequestId,
+    RoleInputTarget,
     RunStatus,
     Scope,
+    ScopeInputTarget,
 )
 from .types.kernel import AreaChange, DecisionCompleted
 from .types.records import ExecuteRegisteredOperation, within
@@ -43,9 +47,6 @@ from .types.session_inputs import (
     InputDropped,
     InputDropReason,
     InputRecord,
-    InvocationInputTarget,
-    ItemInputTarget,
-    ScopeInputTarget,
 )
 from .types.sessions import (
     DispatchTurn,
@@ -71,11 +72,12 @@ from .types.strategy import Accepted, Interrupt, Operation, Withdraw
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptView
-    from .types.common import InvocationRef, RevisionRef
+    from .types.common import InputTarget, InvocationRef, RevisionRef
     from .types.kernel import SessionsContext, Signal
     from .types.records import Request
     from .types.session_inputs import SessionInput
     from .types.sessions import Invocation, SessionsEvent, SessionsState
+    from .types.strategy import SearchDeclaration
 
 
 def _run_scope(context: SessionsContext) -> Scope:
@@ -91,6 +93,12 @@ def _matches(item: SessionInput, invocation: Invocation, context: SessionsContex
     target = item.target
     if isinstance(target, InvocationInputTarget):
         return target.invocation == invocation.invocation
+    if isinstance(target, RoleInputTarget):
+        # Like run-wide input, a role's input is for its next conversational turn.
+        return (
+            invocation.turn.session.role_id == target.role_id
+            and invocation.registered_operation is None
+        )
     if isinstance(target, ScopeInputTarget):
         # The run is the ancestor of every attempt scope, so an input addressed to the run
         # reaches whichever of its invocations reserves first.
@@ -101,6 +109,16 @@ def _matches(item: SessionInput, invocation: Invocation, context: SessionsContex
         return target.scope == _run_scope(context) and invocation.registered_operation is None
     owner = attempt_for(context, invocation.scope)
     return owner is not None and owner.item_id == target.item_id
+
+
+def check_declared_target(target: InputTarget | None, declaration: SearchDeclaration) -> None:
+    """Reject an input for a role the run's search does not declare: no turn could take it."""
+    if isinstance(target, RoleInputTarget) and target.role_id not in declaration.roles:
+        declared = ", ".join(role.root for role in declaration.roles) or "none"
+        raise ContractValidationError(
+            "target.role_id",
+            f"role {target.role_id.root!r} is not declared by the search (declared: {declared})",
+        )
 
 
 def _drop(
@@ -115,6 +133,7 @@ def _drop(
 def _received(
     state: SessionsState, context: SessionsContext, item: SessionInput
 ) -> AreaChange[SessionsState]:
+    check_declared_target(item.target, context.run.declaration)
     existing = next((row for row in state.inputs if row.input.input_id == item.input_id), None)
     if existing is not None:
         if existing.input != item:

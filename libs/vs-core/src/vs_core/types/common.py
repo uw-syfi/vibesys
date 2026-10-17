@@ -795,6 +795,43 @@ class StopMode(StrEnum):
     CANCEL = "cancel"
 
 
+class ScopeInputTarget(Value):
+    """Input for a scope, permitted before any invocation exists."""
+
+    kind: Literal["scope"] = "scope"
+    scope: Scope
+
+
+class ItemInputTarget(Value):
+    """Input for an item, permitted before any invocation exists."""
+
+    kind: Literal["item"] = "item"
+    item_id: ItemId
+
+
+class InvocationInputTarget(Value):
+    """Input for one exact invocation, never silently retargeted."""
+
+    kind: Literal["invocation"] = "invocation"
+    invocation: InvocationRef
+
+
+class RoleInputTarget(Value):
+    """Input for the next session turn of one role the search declares.
+
+    The role is the session's ``role_id``; core rejects a role its search does not declare.
+    """
+
+    kind: Literal["role"] = "role"
+    role_id: RoleId
+
+
+type InputTarget = Annotated[
+    ScopeInputTarget | ItemInputTarget | InvocationInputTarget | RoleInputTarget,
+    Field(discriminator="kind"),
+]
+
+
 class ControlInput(Value):
     """Control input lifecycle contract."""
 
@@ -803,12 +840,16 @@ class ControlInput(Value):
     mode: StopMode | None = None
     """Drain or cancel what is in flight: the operator's choice, given with every stop."""
     artifact: ArtifactRef | None = None
+    target: InputTarget | None = None
+    """Whom a steer is for; None is the whole run. Only a steer has a target."""
 
     @model_validator(mode="after")
     def mode_belongs_to_stop(self) -> ControlInput:
-        """A stop names how it ends in-flight work; no other action has a mode."""
+        """A stop names how it ends in-flight work and a steer whom it is for; nothing else."""
         if (self.action == "stop") != (self.mode is not None):
             raise ContractValidationError("mode", "required for stop and only for stop")
+        if self.target is not None and self.action != "steer":
+            raise ContractValidationError("target", "only a steer has a target")
         return self
 
 

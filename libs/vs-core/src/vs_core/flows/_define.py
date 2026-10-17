@@ -100,7 +100,7 @@ class SearchDef[C]:
     def declaration(self) -> SearchDeclaration:
         """What the host must provide for this search, derived from the registration."""
         required, optional = (), ()
-        ops = self.operations
+        ops, ids = self.operations, self.ids
         if ops is not None:
             kinds = ("render_role_artifacts", "verify_parent_revision", "interpret_evidence")
             required = tuple(ops.schema_ref(f"{ops.namespace}.{k}") for k in kinds)
@@ -115,6 +115,9 @@ class SearchDef[C]:
             required_operations=required,
             optional_operations=optional,
             optional=frozenset(_CAPABILITIES),  # ty: ignore[invalid-argument-type]
+            roles=tuple(
+                sorted({ids.role_id(role.identity) for role in self.roles}, key=lambda r: r.root)
+            ),
         )
 
     @property
