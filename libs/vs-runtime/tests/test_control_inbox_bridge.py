@@ -287,7 +287,9 @@ def test_a_capacity_wait_with_no_capacity_pause_is_set_aside() -> None:
     inbox.post("r1", _json(ResumeRequest(control_id="r1", when="capacity_returns")))
 
     assert _bridge(inbox, _Texts()).poll(initial_state(), 1.0) == ()
-    assert [entry.reason for entry in inbox.rejected()] == ["refused: not_paused_on_capacity"]
+    assert [entry.reason for entry in inbox.rejected()] == [
+        "refused by the run: only a paused run waits for capacity"
+    ]
 
 
 def test_inbox_requests_apply_in_id_order_as_their_actions_say() -> None:
