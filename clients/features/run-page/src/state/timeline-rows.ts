@@ -38,7 +38,7 @@ export interface RunClockView {
   readonly now: number | null;
 }
 
-export type SegmentKind = 'solid' | 'hatched' | 'grey';
+type SegmentKind = 'solid' | 'hatched' | 'grey';
 
 /** One step as a piece of a bar. */
 export interface StepSegment {
@@ -50,7 +50,7 @@ export interface StepSegment {
   readonly label: string;
 }
 
-export type BarOutcome = 'ok' | 'err' | 'live' | 'muted';
+type BarOutcome = 'ok' | 'err' | 'live' | 'muted';
 
 /** One idea's row; a `lane` row stands for folded rejected ideas and has no idea to open. */
 export interface TimelineRow {
@@ -64,7 +64,7 @@ export interface TimelineRow {
   readonly lane: boolean;
 }
 
-export interface TimelineTick {
+interface TimelineTick {
   readonly at: number;
   readonly label: string;
 }
@@ -174,7 +174,7 @@ function tickLabel(offset: number): string {
 }
 
 /** Ticks at a round step from the run's start, no more than `MAX_TICKS` over the view. */
-export function timelineTicks(
+function timelineTicks(
   start: number,
   view: {readonly from: number; readonly to: number},
 ): TimelineTick[] {
