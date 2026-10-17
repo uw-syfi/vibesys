@@ -1,6 +1,6 @@
 /**
- * An opened idea's body (the frame draws its pane, with the outcome, ratio and "built on"): the
- * facts (value, against its parent, how long), its attempts (one line each, the latest selected
+ * An opened idea's body (the frame draws its pane, with the outcome, ratio and "built on"; the
+ * header adds the facts: value, against its parent, how long): its attempts (one line each, the latest selected
  * until another is chosen), the strip of the selected attempt's steps over its time, and those
  * steps (agent turns and gates, each led by its role and headline), each opening the step; and the
  * compact step list beside an opened step.
@@ -15,7 +15,7 @@ import {
   endOf,
   versusParent,
 } from '../../../../state/timeline-rows.js';
-import type {ViewBase, Zoom} from '../props.js';
+import type {ViewBase, ViewHeader, Zoom} from '../props.js';
 import {StepStrip} from '../timeline/step-strip.js';
 
 export interface IdeaViewProps extends ViewBase {
@@ -49,6 +49,11 @@ function IdeaFacts(props: IdeaViewProps): JSX.Element | null {
     </Text>
   );
 }
+
+/** The idea's facts after the frame's own (outcome, ratio, built on): value, vs parent, duration. */
+export const ideaHeader: ViewHeader<IdeaViewProps> = props => ({
+  meta: <IdeaFacts {...props} />,
+});
 
 function Attempts(props: {
   readonly lines: readonly AttemptLine[];
@@ -89,7 +94,6 @@ export function IdeaView(props: IdeaViewProps): JSX.Element {
   const number = idea.attempts.indexOf(attempt) + 1;
   return (
     <Stack gap="space-3">
-      <IdeaFacts {...props} />
       {lines.length > 1 ? (
         <Attempts lines={lines} selected={attempt.span} choose={setChosen} />
       ) : null}

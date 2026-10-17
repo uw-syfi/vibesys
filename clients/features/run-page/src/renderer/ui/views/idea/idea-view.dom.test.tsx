@@ -1,0 +1,153 @@
+/**
+ * The idea body through its props, in a DOM: attempts (the latest selected until another is
+ * chosen), the strip and the steps of the selected attempt, each opening its step; the compact
+ * step list; and the header's facts.
+ */
+
+import {afterAll, beforeAll, expect, test} from 'bun:test';
+import type {Candidate} from '@vibesys/run-state/candidates';
+import {Window} from 'happy-dom';
+import {act, type ReactNode} from 'react';
+import {createRoot, type Root} from 'react-dom/client';
+import type {ZoomEvent} from '../../../../state/index.js';
+import {attempt, idea, modelOf} from '../../../../state/timeline-fixtures.js';
+import {IdeaView, ideaHeader, StepList} from './idea-view.js';
+
+const window = new Window();
+const installed = Object.getOwnPropertyNames(window).filter(name => !(name in globalThis));
+
+beforeAll(() => {
+  for (const name of installed) {
+    Object.defineProperty(globalThis, name, {
+      configurable: true,
+      writable: true,
+      value: Reflect.get(window, name),
+    });
+  }
+  Object.assign(globalThis, {window, IS_REACT_ACT_ENVIRONMENT: true});
+});
+
+afterAll(async () => {
+  for (const name of [...installed, 'window', 'IS_REACT_ACT_ENVIRONMENT']) {
+    Reflect.deleteProperty(globalThis, name);
+  }
+  await window.happyDOM.close();
+});
+
+const CLOCK = {start: 0, now: 1000};
+
+async function mount(
+  node: ReactNode,
+): Promise<{container: HTMLElement; root: Root; unmount: () => Promise<void>}> {
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  await act(async () => root.render(node));
+  return {container, root, unmount: () => act(async () => root.unmount())};
+}
+
+function options(container: HTMLElement, name: string): HTMLElement[] {
+  const list = [...container.querySelectorAll('[role="listbox"]')].find(
+    each => each.getAttribute('aria-label') === name,
+  );
+  return list === undefined ? [] : ([...list.querySelectorAll('[role="option"]')] as HTMLElement[]);
+}
+
+function listNames(container: HTMLElement): string[] {
+  return [...container.querySelectorAll('[role="listbox"]')].map(
+    each => each.getAttribute('aria-label') ?? '',
+  );
+}
+
+function tried(): Candidate {
+  const base = idea('mpmc', 'kept', 100, 300);
+  return {
+    ...base,
+    attempts: [
+      attempt('a1', 'rejected', 100, 60),
+      attempt('a2', 'kept', 160, 120),
+      attempt('a3', 'kept', 280, 120),
+    ],
+  };
+}
+
+function view(candidate: Candidate, zoom: (event: ZoomEvent) => void) {
+  return {model: modelOf([candidate]), clock: CLOCK, zoom, idea: candidate};
+}
+
+test('a one-attempt idea shows its steps, role first, and a step opens', async () => {
+  const events: ZoomEvent[] = [];
+  const candidate = idea('mpmc', 'kept', 100, 300);
+  const {container, unmount} = await mount(<IdeaView {...view(candidate, e => events.push(e))} />);
+  expect(listNames(container).some(name => name === 'Attempts')).toBe(false);
+  const steps = options(container, 'mpmc steps');
+  expect(steps.map(row => row.textContent)).toEqual([
+    expect.stringContaining('implementer'),
+    expect.stringContaining('gate'),
+    expect.stringContaining('judge'),
+  ]);
+  expect(steps[0]?.textContent).toContain('1m');
+  await act(async () => steps[1]?.click());
+  expect(events).toEqual([{type: 'open-step', step: 'mpmc-a-g'}]);
+  await unmount();
+});
+
+test('the latest attempt is selected; choosing another shows its steps', async () => {
+  const events: ZoomEvent[] = [];
+  const candidate = tried();
+  const {container, unmount} = await mount(<IdeaView {...view(candidate, e => events.push(e))} />);
+  const lines = options(container, 'Attempts');
+  expect(lines.map(row => row.textContent)).toEqual([
+    expect.stringContaining('build failed'),
+    expect.stringContaining('1.50×'),
+    expect.stringContaining('1.50×'),
+  ]);
+  expect(lines.map(row => row.getAttribute('aria-selected'))).toEqual(['false', 'false', 'true']);
+  expect(options(container, 'Attempt 3 steps').length).toBe(3);
+
+  await act(async () => lines[0]?.click());
+  expect(options(container, 'Attempt 3 steps')).toEqual([]);
+  const first = options(container, 'Attempt 1 steps');
+  await act(async () => first[0]?.click());
+  expect(events).toEqual([{type: 'open-step', step: 'a1-t'}]);
+  await unmount();
+});
+
+test('a segment of the strip opens its step', async () => {
+  const events: ZoomEvent[] = [];
+  const {container, unmount} = await mount(<IdeaView {...view(tried(), e => events.push(e))} />);
+  const segments = [...container.querySelectorAll('.vs-gantt-seg')] as HTMLElement[];
+  expect(segments.map(each => each.getAttribute('data-kind'))).toEqual([
+    'solid',
+    'hatched',
+    'grey',
+  ]);
+  await act(async () => segments[1]?.click());
+  expect(events).toEqual([{type: 'open-step', step: 'a3-g'}]);
+  await unmount();
+});
+
+test('the compact step list highlights the opened step', async () => {
+  const candidate = tried();
+  const {container, unmount} = await mount(
+    <StepList idea={candidate} selected="a3-g" zoom={() => undefined} />,
+  );
+  const rows = options(container, 'mpmc steps');
+  expect(rows.map(row => row.getAttribute('aria-selected'))).toEqual(['false', 'true', 'false']);
+  await unmount();
+});
+
+test('an idea with no attempts has no steps to show', async () => {
+  const candidate = {...idea('mpmc', 'running', 100, 0), attempts: []};
+  const {container, unmount} = await mount(<IdeaView {...view(candidate, () => undefined)} />);
+  expect(container.textContent).toContain('No steps yet');
+  await unmount();
+});
+
+test('the header adds the value and how long it took', async () => {
+  const candidate = idea('mpmc', 'kept', 100, 300);
+  const meta = ideaHeader(view(candidate, () => undefined)).meta;
+  const {container, unmount} = await mount(meta);
+  expect(container.textContent).toBe('40 · 5m');
+  await unmount();
+});
