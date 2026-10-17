@@ -330,6 +330,7 @@ _AGENT_KEY_SAMPLES: dict[str, object] = {
     "env_passthrough": ("SOME_TOKEN",),
     "quota": {"policy": "fail"},
     "roles": {"implementer": {"model": "gpt-5.6-luna"}},
+    "scripted_seed": 7,
 }
 
 

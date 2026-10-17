@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, cast
 
-from launch.agents import BuiltInSessionAgents
+from launch.agents import BuiltInSessionAgents, default_agent_client_factory
 from launch.catalog import built_in_orchestrations
 from launch.composition import STATELESS_TOOL_SERVERS
 from vibesys.api.request import validate_descriptor as _validate_descriptor
@@ -19,7 +19,7 @@ from vibesys.api.request import validate_run_request as _validate_run_request
 from vibesys.api.store import open_run_store as _open_run_store
 from vibesys.api.wiring import NativeProfilerPreflight, SessionImplementations
 from vibesys.api.wiring import create_session as _create_session
-from vs_agent.api import SHIPPED_PROVIDERS, AgentInvocationState, build_agent_client
+from vs_agent.api import SHIPPED_PROVIDERS, AgentInvocationState
 from vs_github.api import GitHubCLI
 from vs_project.api import Git, generate_run_id
 from vs_runtime.api.infrastructure import EnvironmentSystem
@@ -94,7 +94,7 @@ def create_session(
     selected_registry = _catalog(registry if registry is not None else settings.registry)
     timing = settings.timing
     client_factory = (
-        partial(build_agent_client, threads=timing.threads)
+        default_agent_client_factory(threads=timing.threads)
         if settings.agent_client_factory is None
         else settings.agent_client_factory
     )

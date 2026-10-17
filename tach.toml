@@ -1211,7 +1211,7 @@ from = ["vs_evaluation.state_namespace"]
 [[modules]]
 path = "launch"
 visibility = ["entrypoints", "tests", "scripts"]
-depends_on = ["vibesys.api", "vibesys.api.catalog", "vibesys.api.wiring", "vibesys.api.store", "vibesys.api.contracts", "vs_agent", "vs_evaluation.api", "vs_evaluation.api.queue_status", "vs_evaluation.api.tools", "vs_github", "vs_project", "vs_runtime", "vs_runtime.api.wiring", "vs_sandbox", "vs_mcp", "vs_slurm", "vs_sim.api"]
+depends_on = ["vibesys.api", "vibesys.orchestration.dynamic.scripted", "vibesys.api.catalog", "vibesys.api.wiring", "vibesys.api.store", "vibesys.api.contracts", "vs_agent", "vs_evaluation.api", "vs_evaluation.api.queue_status", "vs_evaluation.api.tools", "vs_github", "vs_project", "vs_runtime", "vs_runtime.api.wiring", "vs_sandbox", "vs_mcp", "vs_slurm", "vs_sim.api"]
 
 [[modules]]
 path = "vibesys.api.runs"
@@ -1458,6 +1458,16 @@ depends_on = ["vs_core", "vibesys.candidates", "vibesys.orchestration.dynamic.mo
 
 [[interfaces]]
 from = ["vibesys.orchestration.dynamic.search"]
+expose = ["api", "api\\..*"]
+
+[[modules]]
+# The scripted agents of an agent-less dynamic run: replies and source edits, no model.
+path = "vibesys.orchestration.dynamic.scripted"
+layer = "loops"
+depends_on = ["vibesys.orchestration.dynamic.search", "vs_agent"]
+
+[[interfaces]]
+from = ["vibesys.orchestration.dynamic.scripted"]
 expose = ["api", "api\\..*"]
 
 [[modules]]

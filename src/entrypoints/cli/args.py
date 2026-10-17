@@ -520,11 +520,13 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--agent-backend",
-        choices=["cli"],
+        choices=["cli", "scripted"],
         default=None,
         help=(
             "Which agent backend implementation to use. Overrides "
-            "[agent].backend in agent.toml. Defaults to 'cli'."
+            "[agent].backend in agent.toml. Defaults to 'cli'. 'scripted' runs the real "
+            "backend with scripted agents and no model (dynamic search only; the seed is "
+            "[agent].scripted_seed)."
         ),
     )
     parser.add_argument(

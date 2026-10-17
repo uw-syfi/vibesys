@@ -27,6 +27,8 @@ class AgentBackend(StrEnum):
 
     CLI = "cli"
     STUB = "stub"
+    SCRIPTED = "scripted"
+    """Agent-less runs: scripted replies stand in for the model (see ``ScriptedAgentClient``)."""
 
 
 @dataclass(frozen=True)
@@ -57,6 +59,8 @@ class AgentSpec:
     #: the terminal's ``--allow-unvetted-model`` and by a resume, which keeps
     #: the harness its run was started with.
     allow_unvetted_model: bool = False
+    #: The seed of the ``scripted`` backend's choices; no other backend reads it.
+    scripted_seed: int = 0
 
     def __post_init__(self) -> None:
         """Reject an unsupported provider, an unvetted model, or a bad env name."""

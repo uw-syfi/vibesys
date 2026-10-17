@@ -162,6 +162,39 @@ of both scenarios takes about 5 minutes and about $0.60 of Haiku tokens. It is
 opt-in (`VIBESYS_E2E_AGENTS=1`) and not in PR CI, because real agents are
 nondeterministic.
 
+### Agent-less runs
+
+An agent-less run drives the real backend (workspaces, builds, trusted evaluations, run state, every
+event a frontend renders) with agents that are code, so it needs no model and costs no tokens. Use it
+to exercise the desktop and web apps against live data, and to check a backend change end to end,
+before spending a model on a real run. It supports the `dynamic` search only.
+
+```bash
+vibesys example new data-structures/repositories/queue-rs ~/queue-run
+cd ~/queue-run
+vibesys --task mpmc --outer-loop dynamic --agent-backend scripted --max-rounds 5 --max-in-flight 2
+```
+
+In the desktop app's New run form, open Advanced and enter `--agent-backend scripted --max-rounds 5`
+(any model chosen above is ignored). `[agent].scripted_seed = N` in `agent.toml` sets the seed
+(default `0`): the same seed over the same project plans, edits and judges the same way, in any order
+and across a resume, because each choice is a function of the seed and the hypothesis id alone.
+
+The scripted planner schedules up to three ideas per turn, some built on an earlier candidate. Each idea
+names a recipe, a real edit of `src/lib.rs` in the queue example: ones that speed the queue up, a neutral
+one, one that slows it down, one that does not build and one that fails the trusted check. On top of that,
+a share of implementer turns fail the way real ones do (gives up, nominates nothing, replies against the
+schema, loses the turn, reports blocked) and a share of judged candidates are rejected. Five rounds take
+a few minutes: the candidate is the cheap CPU queue, and each measurement runs about half a minute.
+The code lives in `src/vibesys/orchestration/dynamic/scripted/`; the client is
+`vs_agent.api.ScriptedAgentClient`, the one fake agent client configured for the run (the `stub` backend
+only smoke-tests the interface and measures nothing).
+
+Tests: `tests/vibesys/orchestration/dynamic/test_scripted_agents.py` checks the replies against the real
+reply models without a process. `tests/e2e/test_scripted_run_e2e.py` is the real-tier check: it runs the
+queue example through the production launcher on the executing Fake Slurm cluster (needs `cargo` and
+`go`, skipped without them).
+
 ### Real-cluster tier
 
 `./scripts/run_slurm_cluster_tests.sh` runs the `slurm` run environment, in four

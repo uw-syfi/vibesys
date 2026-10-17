@@ -158,6 +158,7 @@ if TYPE_CHECKING:
     from vs_agent.client import AgentClient
     from vs_agent.factory import agent_supports_tool_servers
     from vs_agent.orphans import OrphanReapError, reap_orphaned_agents
+    from vs_agent.scripted_client import ScriptedAgentClient, ScriptedClientSetup, ScriptedTurn
     from vs_agent.shim_turns import native_schema, native_schema_problems
     from vs_sandbox.api import DockerSandbox, HostResource, ProjectPathPolicy
     from vs_sim.api import Clock, Threads
@@ -244,6 +245,9 @@ __all__ = [
     "ReplyGuard",
     "RoundProgress",
     "SchemaViolation",
+    "ScriptedAgentClient",
+    "ScriptedClientSetup",
+    "ScriptedTurn",
     "SessionConfigurationError",
     "SessionPersistenceError",
     "SessionResumeError",
@@ -300,6 +304,20 @@ def __getattr__(name: str) -> object:
         )
 
         return AgentClient
+    if name in {"ScriptedAgentClient", "ScriptedClientSetup", "ScriptedTurn"}:
+        # The scripted client builds on the fake client, which loads the skill and provider
+        # helpers; only an agent-less run needs it.
+        from vs_agent.scripted_client import (  # noqa: PLC0415  # lint-waiver: LW-482908 [PLC0415]; keep the fake client's imports unloaded for consumers of vs_agent.api that never run agent-less, like the other lazy names here.
+            ScriptedAgentClient,
+            ScriptedClientSetup,
+            ScriptedTurn,
+        )
+
+        return {
+            "ScriptedAgentClient": ScriptedAgentClient,
+            "ScriptedClientSetup": ScriptedClientSetup,
+            "ScriptedTurn": ScriptedTurn,
+        }[name]
     if name == "materialize_skills":
         # Eager import runs provider discovery and loads unused agent backends.
         # Moving the whole helper module would split its existing shared CLI

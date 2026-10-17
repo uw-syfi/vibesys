@@ -220,8 +220,17 @@ class AgentCfg(_Strict):
     backend: str | None = Field(
         default=None,
         description=(
-            "Agent runner backend: 'cli' (drive an external coding-agent CLI). "
+            "Agent runner backend: 'cli' (drive an external coding-agent CLI) or 'scripted' "
+            "(agent-less: the real backend with scripted agents and no model). "
             "The --agent-backend flag overrides; defaults to 'cli'."
+        ),
+    )
+    scripted_seed: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Seed of the 'scripted' backend's choices: with the same seed and the same project, "
+            "the scripted agents plan, edit and judge the same way. Read only with that backend."
         ),
     )
     cli_provider: str | None = Field(

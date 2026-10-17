@@ -130,6 +130,7 @@ def agent_spec_from_config(
         cli_timeout=agent_cfg.cli_timeout,
         env_passthrough=agent_cfg.env_passthrough,
         allow_unvetted_model=allow_unvetted_model,
+        scripted_seed=agent_cfg.scripted_seed,
     )
 
 

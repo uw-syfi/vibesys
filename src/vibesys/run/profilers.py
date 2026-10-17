@@ -17,7 +17,7 @@ from vibesys.orchestration.profilers import (
     profiler_definition,
     resolve_profiler_choice,
 )
-from vs_agent.api import agent_supports_tool_servers
+from vs_agent.api import AgentBackend, agent_supports_tool_servers
 from vs_project.api import Project, ProjectLayoutError
 from vs_runtime.api.infrastructure import (
     NativeCpuProfilerKind,
@@ -152,6 +152,22 @@ def _require_runnable_tool(
     return ProfilerKind.NONE
 
 
+def _without_profiling_for_scripted_agents(
+    request: RunRequest, resolved: ProfilerKind, log: Callable[[str], None] | None
+) -> ProfilerKind:
+    """``resolved``, except that an automatic choice is no profiler for scripted agents.
+
+    A scripted agent never plans or takes a profile workstream, so the capture tool an automatic
+    choice would offer could only go unused. An explicit choice is kept, and refused later.
+    """
+    scripted = (request.agent_backend or request.config.agent.backend) == AgentBackend.SCRIPTED
+    if request.profiler_kind is not ProfilerKind.AUTO or not scripted:
+        return resolved
+    if log is not None:
+        log("[profiler] --profiler auto chose 'none': the scripted agents do not profile.")
+    return ProfilerKind.NONE
+
+
 def resolve_run_profiler(
     request: RunRequest,
     environment: RunEnvironment,
@@ -188,6 +204,7 @@ def resolve_run_profiler(
     resolved = choice.kind
     if choice.reason is not None and log is not None:
         log(f"[profiler] --profiler auto chose 'none': {choice.reason}.")
+    resolved = _without_profiling_for_scripted_agents(request, resolved, log)
     resolved = _require_runnable_tool(request, environment, resolved, log)
     if native_preflight is not None and environment.requires_local_profiler_preflight:
         result = preflight_profiler_kind(resolved, native_preflight=native_preflight)

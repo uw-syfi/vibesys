@@ -1482,6 +1482,14 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
     "src/server/transport/websocket.py": (EdgeKind.STATIC_FILES, "the web client"),
     "src/vibesys/config.py": (EdgeKind.INPUT_LOADER, "VibeSys configuration"),
     "src/vibesys/domains/rendering.py": (EdgeKind.PACKAGED_RESOURCE, "role templates"),
+    "src/vibesys/orchestration/dynamic/scripted/_script.py": (
+        EdgeKind.AGENT_WORKSPACE,
+        "the scripted implementer's source edits and the judge's reads of the candidate",
+    ),
+    "src/vibesys/orchestration/dynamic/scripted/_workload.py": (
+        EdgeKind.AGENT_WORKSPACE,
+        "reads the manifest that tells a scripted agent which project it is in",
+    ),
     "src/vibesys/inputs/_manifest.py": (EdgeKind.INPUT_LOADER, "the task manifest"),
     "src/vibesys/inputs/_objectives.py": (EdgeKind.INPUT_LOADER, "task objectives"),
     "src/vibesys/inputs/_synthesis.py": (EdgeKind.GENERATOR, "writes a synthesized task folder"),
