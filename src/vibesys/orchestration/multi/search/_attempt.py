@@ -85,20 +85,9 @@ class Next(StrEnum):
     """The attempt is over; the workspace closes with what it established."""
 
 
-def planned_reason(
-    config: MultiConfig, ledger: rounds.Ledger, plan: OrchestratorPlan, number: int
-) -> str | None:
-    """Why the official gates are scheduled after this round's candidate, as the prompts show it."""
-    reason = rounds.official_reason(
-        config.hypotheses,
-        ledger,
-        round_number=number,
-        requested=plan.request_official_evaluation,
-    )
-    focus = serial.focus_of(ledger, serial.focus_policy(config.attribution))
-    if reason is None and focus is not None and focus.active_component:
-        return "profile-guided component measurement"
-    return reason
+def official_planned(config: MultiConfig, ledger: rounds.Ledger) -> bool:
+    """Whether the trusted gates will measure this round's candidate once it passes review."""
+    return rounds.official_reason(config.hypotheses, ledger) is not None
 
 
 def conflict_view(conflict: ArchiveConflict) -> ArchiveConflictView:
@@ -185,7 +174,8 @@ class MultiAttempt:
     ledger: rounds.Ledger
     validation_offered: bool
     """Whether the run offers the trusted run of validation recipes."""
-    planned_official_reason: str | None
+    planned_official: bool
+    """Whether the trusted gates will measure the candidate once it passes review."""
     revalidation_required: bool
     feedback: str | None = None
     turns: int = 0
@@ -222,8 +212,7 @@ class MultiAttempt:
             validation_failure=self.validation_failure,
             no_valid_reply=self.no_valid_reply,
             pareto_archive_conflict=self.conflict,
-            official_due=self.planned_official_reason is not None,
-            official_reason=self.planned_official_reason,
+            official_due=self.planned_official,
             benchmark_enabled="benchmark" in self.terms.measured,
             active_component=None if focus is None else (focus.active_component or None),
         )
@@ -240,8 +229,7 @@ class MultiAttempt:
             claims=claims_of(self.response),
             framework=gate_facts(self.ledger.search.active_hypothesis),
             pareto_archive_conflict=self.conflict,
-            official_due=self.planned_official_reason is not None,
-            official_reason=self.planned_official_reason,
+            official_due=self.planned_official,
             benchmark_enabled="benchmark" in self.terms.measured,
             cited_evidence=cited,
         )
@@ -364,18 +352,14 @@ class MultiAttempt:
         return Next.AGAIN
 
     def _approve(self) -> Next:
-        """Approve the reply's claims, then settle or schedule the official gates."""
+        """Approve the reply's claims, then settle or have the trusted gates measure the candidate."""
         reply = self.response
         if reply is None:
             return Next.SETTLE
         hypotheses = self.config.hypotheses
         ledger = reviewed.approve_candidate(hypotheses, self.ledger, reply)
         reason = rounds.official_reason(
-            hypotheses,
-            ledger,
-            round_number=self.number,
-            requested=self.plan.request_official_evaluation,
-            candidate_ready=reviewed.candidate_ready(reply),
+            hypotheses, ledger, candidate_ready=reviewed.candidate_ready(reply)
         )
         if reason is None or not self.terms.measured or self.candidate is None:
             self.ledger = ledger
@@ -440,6 +424,11 @@ class MultiAttempt:
     def turned_down(self) -> bool:
         """Whether the round's own checks turned its work down (`serial_search.turned_down`)."""
         return serial.turned_down(self.finished(), unsettled=UNSETTLED)
+
+    def reported(self) -> tuple[str | None, str] | None:
+        """The implementer's own account: its outcome and its summary; None when it gave none."""
+        reply = self.response
+        return None if reply is None else (reply.hypothesis_outcome.value, reply.summary)
 
     def asserted(self) -> tuple[RevisionRef | None, Assessment]:
         """What the workspace settles with.

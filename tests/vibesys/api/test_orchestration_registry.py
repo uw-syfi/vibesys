@@ -197,7 +197,6 @@ def test_builtin_single_agent_refuses_the_stub_backend_before_any_turn(
                     "interface": "inprocess",
                     "max_rounds": 1,
                     "max_retries_per_round": 1,
-                    "official_eval_every": 1,
                 },
             )
         }
@@ -227,7 +226,6 @@ def test_builtin_plugin_metadata_declares_product_policy() -> None:
         "interface": "service",
         "max_rounds": 4,
         "max_retries_per_round": 2,
-        "official_eval_every": 3,
     }
     # Only the multi search has a judge to ask every so often.
     multi_options: dict[str, JsonValue] = {**single_options, "judge_every": 1}
@@ -289,7 +287,6 @@ def test_builtin_plugin_metadata_declares_product_policy() -> None:
                 "max_rounds": 2,
                 "max_retries_per_round": 2,
                 "judge_every": 1,
-                "official_eval_every": 3,
                 "operator_constraints": ["Preserve ordering"],
                 "metric_space": {
                     "objectives": [{"name": "throughput", "direction": "max"}],

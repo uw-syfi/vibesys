@@ -2,8 +2,12 @@
 
 A serial search plays one round at a time. Each round is told where the search stands
 (`RoundStart`) and ends with what it left behind (`RoundDone`); `SerialRun` folds the rounds in
-order, decides when the search is over and which kept candidate leads. It holds no policy of
-its own about how a round is played: single and multi play rounds differently and share this.
+order, decides when the search is over and which candidate is best. It holds no policy of its
+own about how a round is played: single and multi play rounds differently and share this.
+
+An idea starts from a base. The default base is the best idea so far (the input while none has
+beaten it); an orchestrator may name another passed idea, or the input. An idea that continues
+its own hypothesis builds on its own work in progress.
 """
 
 from dataclasses import dataclass, field
@@ -31,11 +35,21 @@ from vs_core.api.search import (
 )
 
 
-class KeptBy(Value):
-    """A revision a round kept, and the span of the round's workstream that kept it."""
+class Retained(Value):
+    """A revision a round retained, the span of its workstream, and how its idea fared.
 
-    revision_id: str
+    ``passed`` says the idea's own result held: the trusted gates measured the revision and
+    nothing turned it down, so a later idea may start from it. ``value`` and ``unit`` are the
+    headline the gates read.
+    """
+
+    round_number: int = Field(gt=0)
+    revision: RevisionRef
     span: SpanId
+    hypothesis_id: str | None = None
+    passed: bool = False
+    value: float | None = None
+    unit: str | None = None
 
 
 class RoundStart(Value):
@@ -43,17 +57,26 @@ class RoundStart(Value):
 
     number: int = Field(gt=0)
     base: RevisionRef
-    """The newest revision a round may build on: a retained checkpoint, else the input."""
+    """The best revision so far (the input while none beat it): where a new idea starts unless
+    its plan names another base."""
+    best_round: int | None = None
+    """The round whose idea made ``base``; None when it is the input."""
+    work_in_progress: RevisionRef | None = None
+    """What the previous round retained: where an idea continuing its own hypothesis starts."""
     ledger: LedgerJson
     last_profile: LastProfile | None = None
     baseline: candidates.Baseline
-    kept: tuple[KeptBy, ...] = ()
-    """The revisions earlier rounds kept, each with the workstream that kept it."""
+    retained: tuple[Retained, ...] = ()
+    """The revisions earlier rounds retained, each with the workstream that retained it."""
 
-    def kept_by(self, revision: RevisionRef) -> SpanId | None:
-        """The span of the workstream that kept ``revision``; None for the input."""
-        found = (item.span for item in self.kept if item.revision_id == revision.revision_id.root)
+    def retained_as(self, revision: RevisionRef) -> Retained | None:
+        """The latest round that retained ``revision``; None for the input."""
+        found = (item for item in reversed(self.retained) if item.revision == revision)
         return next(found, None)
+
+    def passed_ideas(self) -> tuple[Retained, ...]:
+        """The ideas that passed, oldest first: the bases a plan may name besides the input."""
+        return tuple(item for item in self.retained if item.passed)
 
 
 class Closed(Value):
@@ -63,6 +86,8 @@ class Closed(Value):
     hypothesis_id: str
     kept: Kept | None = None
     """The candidate the settlement retained, if it retained one."""
+    passed: bool = False
+    """The idea's own result held (see `Retained`)."""
     eligible: bool = False
     metrics: tuple[MetricRow, ...] = ()
 
@@ -91,6 +116,7 @@ def round_done(  # noqa: PLR0913  # LW-641205 [PLR0913]; the record joins indepe
     *,
     hypothesis_id: str,
     settlement: Settlement | None,
+    passed: bool,
     metrics: tuple[MetricRow, ...],
     last_profile: LastProfile | None = None,
 ) -> RoundDone:
@@ -104,6 +130,7 @@ def round_done(  # noqa: PLR0913  # LW-641205 [PLR0913]; the record joins indepe
             round_number=start.number,
             hypothesis_id=hypothesis_id,
             kept=Kept.of(settlement),
+            passed=passed,
             eligible=settlement.eligible,
             metrics=metrics,
         ),
@@ -114,7 +141,7 @@ def round_done(  # noqa: PLR0913  # LW-641205 [PLR0913]; the record joins indepe
 
 @dataclass
 class SerialRun:
-    """The record of a serial search: the ledger, the kept candidates and why it might end."""
+    """The record of a serial search: the ledger, the ideas' results and why it might end."""
 
     hypotheses: HypothesisConfig
     input: RevisionRef
@@ -122,10 +149,10 @@ class SerialRun:
     baseline: candidates.Baseline
     ledger: LedgerJson = field(default_factory=LedgerJson)
     counted: int = 0
-    checkpoint: RevisionRef | None = None
+    work_in_progress: RevisionRef | None = None
     last_profile: LastProfile | None = None
     closed: list[Closed] = field(default_factory=list)
-    kept: list[KeptBy] = field(default_factory=list)
+    retained: list[Retained] = field(default_factory=list)
     failure: str | None = None
     stopped: bool = False
 
@@ -140,13 +167,16 @@ class SerialRun:
 
     def start(self) -> RoundStart:
         """The next round, told where the search stands."""
+        best = self._best()
         return RoundStart(
             number=self.counted + 1,
-            base=self.checkpoint or self.input,
+            base=self.input if best is None else best[1].revision,
+            best_round=None if best is None else best[0],
+            work_in_progress=self.work_in_progress,
             ledger=self.ledger,
             last_profile=self.last_profile,
             baseline=self.baseline,
-            kept=tuple(self.kept),
+            retained=tuple(self.retained),
         )
 
     def finished(self, done: RoundDone, span: SpanId | None) -> None:
@@ -155,10 +185,21 @@ class SerialRun:
         self.counted += int(done.counted)
         if done.closed is not None:
             self.closed.append(done.closed)
-        if done.checkpoint is not None:
-            self.checkpoint = done.checkpoint
-            if span is not None:
-                self.kept.append(KeptBy(revision_id=done.checkpoint.revision_id.root, span=span))
+        self.work_in_progress = done.checkpoint
+        if done.checkpoint is not None and span is not None:
+            closed = done.closed
+            headline = None if closed is None or not closed.metrics else closed.metrics[0]
+            self.retained.append(
+                Retained(
+                    round_number=done.number,
+                    revision=done.checkpoint,
+                    span=span,
+                    hypothesis_id=None if closed is None else closed.hypothesis_id,
+                    passed=closed is not None and closed.passed,
+                    value=None if headline is None else headline.value,
+                    unit=None if headline is None else headline.unit,
+                )
+            )
         self.last_profile = done.last_profile or self.last_profile
         self.failure = done.failure or self.failure
         self.stopped = self.stopped or done.stopped
@@ -178,26 +219,36 @@ class SerialRun:
         )
 
     def leader(self) -> Kept | Input:
-        """The kept candidate that leads now, else the input: what the run adopts if it ends."""
+        """The best candidate now, else the input: what the run adopts if it ends."""
         return self.leading()[0]
 
     def leading(self) -> tuple[Kept | Input, Label]:
-        """The leader, with the label of the span that adopts it (``ctx.choose``'s arguments)."""
-        winner = candidates.choose_winner(
+        """The best, with the label of the span that adopts it (``ctx.choose``'s arguments)."""
+        winner = self._winner()
+        base = candidates.input_value(self.baseline)
+        best = self._best(winner)
+        if best is not None:
+            return best[1], adoption_label(best[1], winner.value, base)
+        return INPUT, adoption_label(INPUT, base, base)
+
+    def _winner(self) -> candidates.Winner:
+        return candidates.choose_winner(
             self.eligible(),
             space=candidates.space_of(self.terms),
             baseline=self.input,
             when_unranked=candidates.Unranked.LATEST,
         )
-        base = candidates.input_value(self.baseline)
-        if winner.settlement is not None:
-            for item in self.closed:
-                if (
-                    item.kept is not None
-                    and item.kept.settlement.settlement_id == winner.settlement
-                ):
-                    return item.kept, adoption_label(item.kept, winner.value, base)
-        return INPUT, adoption_label(INPUT, base, base)
+
+    def _best(self, winner: candidates.Winner | None = None) -> tuple[int, Kept] | None:
+        """The round and candidate that are the best (the run's winner); None for the input."""
+        winner = winner or self._winner()
+        if winner.settlement is None:
+            return None
+        for item in self.closed:
+            kept = item.kept
+            if kept is not None and kept.settlement.settlement_id == winner.settlement:
+                return item.round_number, kept
+        return None
 
     def ending(self) -> NoWinner | None:
         """None when the run ends with a winner or the trusted input standing; else why not."""

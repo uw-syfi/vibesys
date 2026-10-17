@@ -68,11 +68,10 @@ may be retained without meeting all terminal gates. Canonical fields come only
 from one fresh canonical selected row; targeted values remain provisional.
 
 {% if official_due %}
-Official evaluation is scheduled after this round because
-`{{ official_reason or 'framework policy' }}`. Do not duplicate
-framework-owned commands.
+The trusted gates measure this round's candidate after it passes self-review. Do not
+duplicate framework-owned commands.
 {% else %}
-Official evaluation is deferred; do not run a ceremonial full sweep or immutable
+The trusted gates will not measure this round (the evaluation budget is spent); do not run a ceremonial full sweep or immutable
 accuracy check merely for bookkeeping.
 {% endif %}
 

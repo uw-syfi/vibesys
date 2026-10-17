@@ -330,7 +330,7 @@ labels at registration, as it declares roles:
 
 ```python
 WORKSTREAM = SpanKind(
-    "workstream", attrs=WorkstreamAttrs, verdicts=("accepted", "rejected"), links=("builds_on",)
+    "workstream", attrs=WorkstreamAttrs, verdicts=("passed", "failed"), links=("builds_on",)
 )
 AGENT_TURN = SpanKind("agent_turn", attrs=AgentTurnAttrs)
 

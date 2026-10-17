@@ -3,11 +3,12 @@
 The measurement's span is the round's gate: it is labelled with the stages it ran and, once the
 evidence is read, with the candidate's headline value, its ratio to the input's and the verdict.
 
-The search runs its gates on a cadence, so a round may keep a candidate they never measured. Its
-agents may have measured it themselves through the evaluation tool, which core holds as trusted
-evidence of the attempt (``label_taken``): the round's gate is then the reading of the latest of
-those that read a value or failed a check, labelled the same way, so every measured round says
-what its candidate measured.
+There is one measurement path. The framework, not the agent, picks the revision it scores (the
+one the round retains) and measures it with the official gates, serially, for every idea that
+passes review while the evaluation budget lasts. An agent's own evaluation (the evaluation tool)
+may run while other agent work shares its host, so its timing is not comparable; the judge may
+read it, but it is never a number the run shows or rests on. A round the gates did not measure
+has no gate and no result.
 """
 
 from __future__ import annotations
@@ -26,7 +27,6 @@ from vs_core.api.search import (
     MeasurementResult,
     RevisionRef,
     SpanId,
-    TaskTerms,
     Value,
     Workspace,
     trusted_keys,
@@ -106,72 +106,6 @@ def _verdict(ctx: Flow, readings: tuple[AcceptedReading, ...], baseline: Baselin
     if not beats_input(baseline, readings, terms):
         return SLOWER
     return PASSED
-
-
-async def label_taken(ctx: Flow, ws: Workspace, revision: RevisionRef, baseline: Baseline) -> None:
-    """Label what the agents' latest telling evaluation of ``revision`` read as its gate.
-
-    For a round whose trusted gates did not measure the candidate it keeps: its agents' own
-    trusted evaluations of that exact revision (``ctx.evaluation.taken``) are what is known of
-    it. They are read in one operation, whose span is labelled a gate with what the latest
-    evaluation that tells something read (`_latest_telling`): its stages, the value, the ratio to
-    the input's and the verdict, as the trusted gates' own are. Nothing is labelled when no
-    evaluation tells anything or the evidence cannot be read: the round's outcome does not
-    depend on it.
-    """
-    refs = ctx.evaluation.taken(ws, revision)
-    if not refs:
-        return
-    read = await _read(ctx, ws, refs)
-    gate = ctx.operation_span
-    if gate is None or not isinstance(read, Gated):
-        return
-    readings = _latest_telling(_as_gates(read.readings, ctx.task.terms), refs)
-    if not readings:
-        return
-    names = tuple(dict.fromkeys(item.stage for item in readings))
-    attrs = GateAttrs.read(",".join(names), readings, input_value(baseline))
-    verdict = _verdict(ctx, readings, baseline)
-    ctx.label(GATE, span=gate, title=" + ".join(names), attrs=attrs, verdict=verdict)
-
-
-def _as_gates(
-    readings: tuple[AcceptedReading, ...], terms: TaskTerms
-) -> tuple[AcceptedReading, ...]:
-    """An agent's evaluation read as the gates its stages are.
-
-    Core records each stage an agent evaluated as one ``local-validation`` record, never as
-    proof; the task's terms say which of the stages it measures is the accuracy check, and the
-    others are its benchmark. Stages the task does not measure are no gate.
-    """
-    return tuple(
-        item.model_copy(
-            update={
-                "kind": EvidenceKind.CORRECTNESS
-                if item.stage == terms.accuracy_stage
-                else EvidenceKind.BENCHMARK
-            }
-        )
-        for item in readings
-        if item.kind is EvidenceKind.LOCAL_VALIDATION and item.stage in terms.measured
-    )
-
-
-def _latest_telling(
-    readings: tuple[AcceptedReading, ...], refs: tuple[EvidenceRef, ...]
-) -> tuple[AcceptedReading, ...]:
-    """The readings of the latest evaluation (``refs`` are oldest first) that tells something.
-
-    An evaluation tells something when it read a benchmark value or a check rejected the
-    candidate; one whose only stage was an accuracy check that passed says neither.
-    """
-    for request in reversed(tuple(dict.fromkeys(item.source_request for item in refs))):
-        taken = tuple(item for item in readings if item.source_request == request)
-        benchmark = reading_of(taken, EvidenceKind.BENCHMARK)
-        valued = benchmark is not None and benchmark.headline() is not None
-        if valued or failed_gate(taken) is not None:
-            return taken
-    return ()
 
 
 async def _gated(

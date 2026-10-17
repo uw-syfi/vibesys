@@ -46,12 +46,19 @@ from vibesys.serial_search._plan_view import (
     Bottleneck,
     FrontierRow,
     LastProfile,
+    PassedIdea,
     PendingClaim,
     PlanEvidence,
     RoundRow,
     plan_evidence,
 )
-from vibesys.serial_search._plans import accept_plan, base_commit, revision_of
+from vibesys.serial_search._plans import (
+    Base,
+    accept_plan,
+    base_commit,
+    continued_base,
+    revision_of,
+)
 from vibesys.serial_search._prompts import (
     PlanCorrection,
     PlanPrompt,
@@ -67,7 +74,15 @@ from vibesys.serial_search._roadmap import (
     read_roadmap,
 )
 from vibesys.serial_search._roles import LOST_TURN_BACKOFF, ORCHESTRATOR
-from vibesys.serial_search._run import Closed, RoundDone, RoundStart, SerialRun, round_done
+from vibesys.serial_search._run import (
+    Closed,
+    Retained,
+    RoundDone,
+    RoundStart,
+    SerialRun,
+    round_done,
+)
+from vibesys.serial_search._spans import round_passed
 from vibesys.serial_search._work import Attempting, Room, Turn, work
 
 PROMPTS_DIR = Path(_prompts.__file__).parent
@@ -85,6 +100,7 @@ __all__ = [
     "Advise",
     "Attempting",
     "AttributionConfig",
+    "Base",
     "Bottleneck",
     "Closed",
     "Designed",
@@ -96,11 +112,13 @@ __all__ = [
     "LedgerJson",
     "NoDesign",
     "NotMeasured",
+    "PassedIdea",
     "PendingClaim",
     "PlanCorrection",
     "PlanEvidence",
     "PlanPrompt",
     "PlanTemplate",
+    "Retained",
     "RoadmapUnavailable",
     "Room",
     "RoundDone",
@@ -120,6 +138,7 @@ __all__ = [
     "bottlenecks_of",
     "capture_attribution",
     "capture_failure",
+    "continued_base",
     "correction_of",
     "design",
     "failed_gate",
@@ -134,6 +153,7 @@ __all__ = [
     "record_round",
     "revision_of",
     "round_done",
+    "round_passed",
     "settle",
     "turned_down",
     "work",

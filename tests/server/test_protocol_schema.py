@@ -114,9 +114,12 @@ def test_the_protocol_exports_the_span_kinds_attribute_schema_of_every_built_in_
     assert set(workstream) == {
         "hypothesis_id",
         "parent_revision",
+        "base_round",
         "round",
         "idea",
         "revision",
+        "outcome",
+        "summary",
         "probe",
     }
     gate = set(defs["GateAttrs"]["properties"])

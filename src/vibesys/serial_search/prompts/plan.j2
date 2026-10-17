@@ -28,6 +28,17 @@ tests, or launch benchmarks.
 {% else %}
 - No round has finished yet.
 {% endif %}
+{% set bests = passed | selectattr('best') | list %}
+{% if passed %}
+- Passed ideas, oldest first (idea number, name, what the trusted gates measured){% if input_value is not none %}; the input measured {{ input_value }}{% endif %}:
+{% for idea in passed %}
+  - idea {{ idea.round_number }}, {{ idea.idea }}{% if idea.value is not none %}: {{ idea.value }}{% if idea.unit %} {{ idea.unit }}{% endif %}{% endif %}{% if idea.best %} (best){% endif %}
+
+{% endfor %}
+{% else %}
+- No idea has passed yet.
+{% endif %}
+- Base: this idea starts from {% if bests %}the current best, idea {{ bests[0].round_number }}{% else %}the input, which no passed idea has beaten{% endif %}, unless {{ reply.base_round }} names another base: a passed idea's number, or 0 for the input. A failed idea cannot be a base.
 {% if frontier %}
 - Pareto frontier (trusted parents, noise-aware):
 {% for row in frontier %}
@@ -59,9 +70,10 @@ minimum from noise, cost, complexity, and allowed tradeoffs. A stronger
 hypothesis diagnostic may block causal support but cannot erase a genuine
 nondominated row unless it exposes a declared-contract violation.
 
-Choose the frontier parent whose gap matches the mechanism. Set
-{{ reply.revert_to_round }} when needed; the framework restores code and preserves memory.
-Reuse trustworthy retained controls; remeasure only for concrete drift.
+Choose the base whose gap matches the mechanism: the current best by default, or set
+{{ reply.base_round }} to build on another passed idea or the input; the framework
+provides that code and preserves memory. Reuse trustworthy retained controls; remeasure only
+for concrete drift.
 
 Profiler findings and suggestions are advisory, not prerequisites. Missing or
 uncalibrated capture is uncertainty, not evidence that optimization must stop.
@@ -176,8 +188,8 @@ the live endpoint"). Adapt the strategy across retries based on what failed.
 Stage cost: cheap capability, comparable point, then expand past noise.
 Stop on fair falsification; reuse plumbing/rows. State hard paid-call maxima
 over retries. A wrapper rejected before target allocation is
-unspent only with raw proof no target phase began. The framework owns official
-gates, rollback, review cadence, and terminal detection.
+unspent only with raw proof no target phase began. The framework owns the
+trusted gates, the base, review cadence, and terminal detection.
 After a correctness failure, cover changed dataflow locally or stagewise isolate
 defects before another target call; leaf-only checks do not suffice.
 
@@ -189,13 +201,10 @@ No framework-parsable benchmark is declared. The implementer must retain raw,
 auditable performance evidence for claims that require measurement.
 {% endif %}
 
-Official evaluation runs every {{ official_eval_every }} accepted
-candidates, on request, and finally. Provisional count:
-{{ provisional_candidates }}; cadence is
-{{ 'due' if official_cadence_due else 'not due' }}. Request
-early when delay blocks a decision, especially after changing the served
-process/listener/entrypoint; an internal controller cannot prove deployment.
-Its production startup must select the retained arm. If an A/B candidate fails
+Every idea that passes review is measured with the trusted gates{% if evaluation_budget is not none %},
+within an evaluation budget ({{ evaluations_spent }} of {{ evaluation_budget }} spent){% endif %}.
+After changing the served process/listener/entrypoint, an internal controller cannot prove
+deployment: its production startup must select the retained arm. If an A/B candidate fails
 but its control is retained, do not leave the failed arm as an implicit default.
 
 ## Skills

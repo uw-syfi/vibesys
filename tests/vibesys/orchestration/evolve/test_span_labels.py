@@ -2,7 +2,7 @@
 
 A run's Overview and Work tabs read only labelled spans. Each child (a cold start, or one slot of
 a generation) is a workstream named for its slot, on the round that runs it, linked to the
-workstream that kept the revision it builds on and accepted or rejected by its settlement; every
+workstream that kept the revision it builds on and passed or failed by its settlement; every
 provider turn is an agent turn naming its role; each trusted measurement is a gate with the value
 it read and its verdict; and the adoption of the winner is a span naming the adopted candidate and
 what it measured. Each story runs live and with a restart after every step.
@@ -44,23 +44,29 @@ def test_a_cold_start_and_the_child_built_on_it_are_workstreams_with_turns_gates
 
     first, second = labelled(host, "workstream")
     assert first.label is not None
-    assert (first.label.title, first.label.verdict) == ("cold start 1", "accepted")
+    assert (first.label.title, first.label.verdict) == ("cold start 1", "passed")
     assert attrs(first) == {
         "hypothesis_id": "bootstrap.1",
         "parent_revision": FACTS.baseline.revision_id.root,
+        "base_round": None,
         "round": 1,
         "idea": "change c1",
         "revision": "c1",
+        "outcome": None,
+        "summary": None,
         "probe": False,
     }
     assert second.label is not None
-    assert (second.label.title, second.label.verdict) == ("generation 1 · child 1", "accepted")
+    assert (second.label.title, second.label.verdict) == ("generation 1 · child 1", "passed")
     assert attrs(second) == {
         "hypothesis_id": "g1.c1",
         "parent_revision": "c1",
+        "base_round": None,
         "round": 2,
         "idea": "change c2",
         "revision": "c2",
+        "outcome": None,
+        "summary": None,
         "probe": False,
     }
     assert [(link.rel, link.to) for link in second.label.links] == [("builds_on", first.id)]
@@ -100,10 +106,10 @@ def test_a_child_the_judge_rejects_is_a_rejected_workstream_and_adoption_keeps_t
 
     cold, child = labelled(host, "workstream")
     assert cold.label is not None
-    assert cold.label.verdict == "accepted"
+    assert cold.label.verdict == "passed"
     assert child.label is not None
-    assert (child.label.verdict, child.label.reason) == ("rejected", "not_passed")
-    assert attrs(child)["revision"] is None, "a rejected child kept nothing"
+    assert (child.label.verdict, child.label.reason) == ("failed", "not_passed")
+    assert attrs(child)["revision"] is None, "a failed child kept nothing"
     assert attrs(child)["idea"], "the mutator said what it tried"
     assert [g.parent for g in labelled(host, "gate")] == [cold.id]
     (adoption,) = labelled(host, "adoption")
@@ -121,7 +127,7 @@ def test_a_cold_start_left_unmeasured_keeps_its_work_in_progress_and_nothing_is_
 
     (cold,) = labelled(host, "workstream")
     assert cold.label is not None
-    assert cold.label.verdict == "accepted", "the next cold start repairs what it left"
+    assert cold.label.verdict == "passed", "the next cold start repairs what it left"
     assert labelled(host, "adoption") == []
 
 
@@ -134,7 +140,7 @@ def test_a_child_whose_mutator_gave_no_reply_is_rejected_for_it(*, restarting: b
 
     (cold,) = labelled(host, "workstream")
     assert cold.label is not None
-    assert (cold.label.verdict, cold.label.reason) == ("rejected", "no-reply")
+    assert (cold.label.verdict, cold.label.reason) == ("failed", "no-reply")
     assert roles_under(host, cold) == ["mutator"]
     assert labelled(host, "gate") == []
 
@@ -144,13 +150,13 @@ def test_regression_a_cold_start_whose_accuracy_failed_is_rejected_though_its_wo
     *, restarting: bool
 ) -> None:
     # the next cold start repairs what it left, so its code is kept; but its own trusted check
-    # turned it down, and it used to read as an accepted workstream
+    # turned it down, and it used to read as a passed workstream
     host = begin(config(bootstrap_max_attempts=1), restarting=restarting, failing={"c1"})
     host.drain()
 
     (cold,) = labelled(host, "workstream")
     assert cold.label is not None
-    assert (cold.label.verdict, cold.label.reason) == ("rejected", "turned_down")
+    assert (cold.label.verdict, cold.label.reason) == ("failed", "turned_down")
     assert attrs(cold)["revision"] == "c1", "it names the code the next cold start repairs"
     (gate,) = labelled(host, "gate")
     assert gate.label is not None

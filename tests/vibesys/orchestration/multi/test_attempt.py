@@ -56,8 +56,7 @@ def attempt(*, validation_offered: bool = False, **changes: object) -> MultiAtte
         rounds.Ledger(rounds.decode(rounds.EncodedLedger()).search),
         plan,
         round_number=1,
-        current_commit=BASE.revision_id.root,
-        input_baseline=BASE.revision_id.root,
+        parent=rounds.Parent(None, BASE.revision_id.root),
     )
     fields = {
         "config": selected,
@@ -68,7 +67,7 @@ def attempt(*, validation_offered: bool = False, **changes: object) -> MultiAtte
         "base": BASE,
         "ledger": ledger,
         "validation_offered": validation_offered,
-        "planned_official_reason": None,
+        "planned_official": True,
         "revalidation_required": False,
         **changes,
     }

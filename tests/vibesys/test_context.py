@@ -170,7 +170,6 @@ def _options(max_rounds: int = 1) -> AgentOrchestrationOptions:
         max_rounds=max_rounds,
         max_retries_per_round=1,
         judge_every=1,
-        official_eval_every=1,
     )
 
 

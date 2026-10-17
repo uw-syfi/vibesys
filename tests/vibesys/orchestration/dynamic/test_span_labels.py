@@ -2,12 +2,12 @@
 
 The run is played from generated schedules, as `test_root_properties.py` plays it. After every
 step and at the end: every workstream span says what it works on (its kind, title, hypothesis
-and parent revision), an accepted one names the revision it kept (as does one turned down
+and parent revision), an passed one names the revision it kept (as does one turned down
 though its code is kept), a profile is a probe that
 reaches no verdict, a workstream links to the latest workstream of the hypothesis it descends
 from, every agent turn names its role, a gate that reached a verdict carries the value it
 measured (and the ratio to the input's, when the input was measured), and a gate that passed
-belongs to an accepted workstream. Live and with a restart after every step, the labels agree.
+belongs to an passed workstream. Live and with a restart after every step, the labels agree.
 """
 
 from __future__ import annotations
@@ -74,7 +74,7 @@ def _check_workstreams(host: Host) -> None:
             assert span.label.verdict is None, f"{span.id} only looks, yet reached a verdict"
         kept = attrs["revision"]
         # so does one its own checks turned down, whose code is kept all the same
-        keeps = span.label.verdict == "accepted" or span.label.reason == "turned_down"
+        keeps = span.label.verdict == "passed" or span.label.reason == "turned_down"
         assert (kept is not None) == keeps, f"{span.id} kept {kept}"
         links = [link.to for link in span.label.links if link.rel == "builds_on"]
         allowed = {latest[p] for p in parents.get(hypothesis, set()) if p in latest}
@@ -104,7 +104,7 @@ def _check_turns_and_gates(host: Host) -> None:
             assert gate.parent is not None
             owner = spans[gate.parent]
             assert owner.label is not None
-            assert owner.label.verdict == "accepted", f"{gate.id} passed in a rejected workstream"
+            assert owner.label.verdict == "passed", f"{gate.id} passed in a failed workstream"
 
 
 # who starts whom: a planning call's planner (or the outliner of a step) starts a workstream's
@@ -200,11 +200,11 @@ def test_regression_a_kept_candidate_a_trusted_check_failed_is_a_rejected_workst
     *, restarting: bool
 ) -> None:
     # its accuracy passed, so the workspace keeps its code for later work to build on; yet its
-    # benchmark check failed, and the workstream read as accepted: kept work nobody vouched for
+    # benchmark check failed, and the workstream read as passed: kept work nobody vouched for
     host = begin(config(), restarting=restarting, failing_benchmarks={"c1"})
     host.drain()
 
     (workstream,) = [s for s in _labelled(host, "workstream") if s.label and s.label.verdict]
     assert workstream.label is not None
-    assert (workstream.label.verdict, workstream.label.reason) == ("rejected", "turned_down")
+    assert (workstream.label.verdict, workstream.label.reason) == ("failed", "turned_down")
     assert _attrs(workstream)["revision"] == "c1", "it names the code the workspace kept"

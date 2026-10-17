@@ -7477,7 +7477,7 @@
     },
     "WorkstreamAttrs": {
       "additionalProperties": false,
-      "description": "A workstream: one attempt at a candidate, what it builds on, and what it kept.\n\n``hypothesis_id`` is the candidate's identity: every attempt at one idea carries the same\none. ``round`` is the round that runs it, for a search that plays rounds (the serial\nsearches); None for one that plans calls instead. A round labels its workstream as it\nbegins, before it has chosen its hypothesis: until then ``hypothesis_id``,\n``parent_revision`` and ``idea`` are None.\n\n``idea`` is what the candidate tries, in the words of the agent that chose it (a planner's\nor designer's title, a mutator's summary, an issue's title); None until an agent said it.\n``revision`` is the revision the attempt kept, set with its ``accepted`` verdict; None while\nit works and when it kept nothing. A ``probe`` only looks (a profile, a performance\nevaluation): it writes no candidate and reaches no verdict, so it is not a candidate.",
+      "description": "A workstream: one attempt at a candidate, the base it starts from, and what it kept.\n\n``hypothesis_id`` is the candidate's identity: every attempt at one idea carries the same\none. ``round`` is the round that runs it, for a search that plays rounds (the serial\nsearches); None for one that plans calls instead. A round labels its workstream as it\nbegins, before it has chosen its hypothesis: until then ``hypothesis_id``,\n``parent_revision`` and ``idea`` are None.\n\n``parent_revision`` is the base: the revision the attempt starts from. ``base_round`` is the\nround of the idea that made it (a serial search); None when the base is the input.\n\n``idea`` is what the candidate tries, in the words of the agent that chose it (a planner's\nor designer's title, a mutator's summary, an issue's title); None until an agent said it.\n``revision`` is the revision the attempt kept, set with its verdict; None while it works and\nwhen it kept nothing. ``outcome`` and ``summary`` are the implementer's own account of the\nattempt (its structured outcome and what it did), set when the attempt settles; None while\nit works and for a search whose agents give none. A ``probe`` only looks (a profile, a\nperformance evaluation): it writes no candidate and reaches no verdict, so it is not a\ncandidate.",
       "properties": {
         "hypothesis_id": {
           "anyOf": [
@@ -7502,6 +7502,18 @@
           ],
           "default": null,
           "title": "Parent Revision"
+        },
+        "base_round": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Base Round"
         },
         "round": {
           "anyOf": [
@@ -7538,6 +7550,30 @@
           ],
           "default": null,
           "title": "Revision"
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Outcome"
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Summary"
         },
         "probe": {
           "default": false,

@@ -108,11 +108,10 @@ metrics for that arm while preserving independently unchanged retained rows.
 {% endif %}
 
 {% if official_due %}
-Official evaluation is scheduled after PASS because
-`{{ official_reason or 'framework policy' }}`. Do not duplicate
+The trusted gates measure this candidate after PASS. Do not duplicate
 framework-owned commands.
 {% else %}
-Official evaluation is deferred. Do not fail a valid scoped result solely for
+The trusted gates will not measure this round (the evaluation budget is spent). Do not fail a valid scoped result solely for
 lacking a ceremonial full sweep or immutable accuracy rerun.
 {% endif %}
 {% if not benchmark_enabled %}

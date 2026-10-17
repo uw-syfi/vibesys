@@ -180,20 +180,20 @@ def test_a_checkpoint_core_declines_leaves_the_round_without_a_candidate(
 
 
 @MODES
-def test_the_gates_are_skipped_on_rounds_the_cadence_does_not_audit(*, restarting: bool) -> None:
-    host = start(config(max_rounds=2, official_eval_every=2), restarting=restarting)
+def test_the_gates_stop_measuring_once_the_evaluation_budget_is_spent(*, restarting: bool) -> None:
+    host = start(config(max_rounds=2, evaluation_budget=1), restarting=restarting)
     design(host)
     host.drain_until_turn(IMPLEMENTER)
     implement(host, candidate="c1")
     host.drain_until_turn(PLANNER)
 
-    assert host.measured == []  # the first round was not audited, so nothing was measured
+    assert host.measured == ["c1"]  # every idea that passes is measured while the budget lasts
     design(host, "h2")
     host.drain_until_turn(IMPLEMENTER)
     implement(host, candidate="c2")
     host.drain()
 
-    assert host.measured == ["c2"]
+    assert host.measured == ["c1"]  # the budget is spent: the second idea was not measured
     assert_flow_closed(host)
 
 

@@ -190,15 +190,21 @@ class EvidenceRef(Value):
         return EvidenceKey(source_request=self.source_request, evidence_id=self.evidence_id)
 
     @model_validator(mode="after")
-    def local_validation_is_never_proof(self) -> EvidenceRef:
-        """Keep an agent's own evaluation out of the kinds that prove eligibility.
+    def only_a_framework_measurement_is_proof(self) -> EvidenceRef:
+        """Count only the framework's own measurement of a revision as proof of it.
 
-        Local-validation purpose records come from the agent's in-turn
-        ``submit_evaluation`` tool. They are advice, never accuracy or benchmark
-        proof, so they carry a kind that no eligibility requirement or
-        ``accuracy_proof`` ever selects. Without this, a candidate with an agent
-        record and its official record would hold two CORRECTNESS rows and
-        ``accuracy_proof`` would call them ambiguous.
+        An agent's own evaluation (``local-validation``, from the in-turn
+        ``submit_evaluation`` tool) may run while other agent work shares its host,
+        so its timing is not comparable with a serial run, and the framework cannot
+        tell from the record whether it ran alone. The rule: a measurement counts as
+        trusted only when the framework took it of the exact revision it retains, and
+        the framework always takes that measurement itself, serially, with the
+        official gates (``official`` purpose; purpose is not part of work identity, so
+        an executor may answer it from an identical earlier result). An agent record is
+        advice: it carries a kind that no eligibility requirement or ``accuracy_proof``
+        ever selects. Without this, a candidate with an agent record and its official
+        record would hold two CORRECTNESS rows and ``accuracy_proof`` would call them
+        ambiguous.
         """
         if self.purpose == "local-validation" and self.kind in _PROOF_KINDS:
             raise ContractValidationError(

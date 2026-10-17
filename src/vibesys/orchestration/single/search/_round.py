@@ -64,7 +64,10 @@ async def _play(ctx: Flow, start: SingleRound) -> RoundDone:
         case Finished():
             return RoundDone(number=start.number, ledger=start.ledger, counted=False)
         case Continue(hypothesis=hypothesis):
-            plan, base, feedback = hypothesis.plan, start.base, hypothesis.feedback
+            plan, feedback = hypothesis.plan, hypothesis.feedback
+            base = serial.continued_base(
+                start, hypothesis.parent_commit, input_revision=ctx.facts.baseline
+            )
             # an earlier round's orchestrator designed it; this round's flow cannot name it
             planned_by: tuple[str, ...] = ()
         case NewHypothesis():
@@ -104,6 +107,7 @@ async def _play(ctx: Flow, start: SingleRound) -> RoundDone:
         closed,
         hypothesis_id=plan.hypothesis_id,
         settlement=settlement,
+        passed=serial.round_passed(settlement, attempt),
         metrics=attempt.benchmark_metrics(),
         last_profile=attempt.last_profile(),
     )

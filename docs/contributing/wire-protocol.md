@@ -79,17 +79,20 @@ trace's order. A span that starts and ends within one commit gets a `span_starte
   `python -m entrypoints.protocol_schema` exports the built-in ones
   (`tests/server/test_protocol_schema.py` holds the committed schema to it). Every search
   labels the same kinds (`vibesys.search_spans`): `planning_call`, `workstream` (verdicts
-  `accepted`, `rejected`; link `builds_on`), `agent_turn`, `gate` (verdicts `passed`,
+  `passed`, `failed`; link `builds_on`), `agent_turn`, `gate` (verdicts `passed`,
   `failed_check`, `slower`) and `adoption` (verdicts `adopted`, `not_adopted`; attributes
   `candidate`, `metric_value`, `vs_baseline`). The adoption span is the operation that adopts the
   run's winner; a run that has not adopted yet has none, and `candidate` is null when the input
   itself stands. Clients read the run's candidates from these spans alone
   (`@vibesys/run-state/candidates`, folded linearly in events): a `workstream` is one attempt;
   attempts sharing `hypothesis_id` are one candidate; `idea` is what it tries; `probe` marks one
-  that only looks; an accepted one names the `revision` it kept, which the adoption's
-  `candidate` names; its `builds_on` link names the workstream it built on; and a gate's
+  that only looks; a passed one (the gates measured its kept code and none turned it down)
+  names the `revision` it kept, which the adoption's `candidate` names when it is the best at
+  the run's end; its `parent_revision` is its base, `base_round` the round whose idea made that
+  base (null: the input), and its `builds_on` link names that workstream; `outcome` and
+  `summary` are the implementer's own account of the attempt; and a gate's
   `failed` names the trusted check that rejected it with its progress (93 of 100 trials). A
-  search that plays one path links each round to the round that kept its base, so its
+  search that plays one path links each round to the round whose code it starts from, so its
   candidates form a chain. An `agent_turn` names its `agent` (its session's id, stable across
   replay and restart), `role`, `model` and `started_by`: the agents whose work started it, none
   when the search did, several for fan-in. Clients read the run's agents and who started whom

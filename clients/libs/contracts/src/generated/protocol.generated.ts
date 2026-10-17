@@ -903,9 +903,12 @@ export type Unit4 = string | null;
 export type Call = number;
 export type HypothesisId1 = string | null;
 export type ParentRevision = string | null;
+export type BaseRound = number | null;
 export type Round3 = number | null;
 export type Idea = string | null;
 export type Revision4 = string | null;
+export type Outcome = string | null;
+export type Summary4 = string | null;
 export type Probe = boolean;
 
 export interface ProtocolDocument {
@@ -2442,7 +2445,7 @@ export interface PlanningAttrs {
   call: Call;
 }
 /**
- * A workstream: one attempt at a candidate, what it builds on, and what it kept.
+ * A workstream: one attempt at a candidate, the base it starts from, and what it kept.
  *
  * ``hypothesis_id`` is the candidate's identity: every attempt at one idea carries the same
  * one. ``round`` is the round that runs it, for a search that plays rounds (the serial
@@ -2450,18 +2453,27 @@ export interface PlanningAttrs {
  * begins, before it has chosen its hypothesis: until then ``hypothesis_id``,
  * ``parent_revision`` and ``idea`` are None.
  *
+ * ``parent_revision`` is the base: the revision the attempt starts from. ``base_round`` is the
+ * round of the idea that made it (a serial search); None when the base is the input.
+ *
  * ``idea`` is what the candidate tries, in the words of the agent that chose it (a planner's
  * or designer's title, a mutator's summary, an issue's title); None until an agent said it.
- * ``revision`` is the revision the attempt kept, set with its ``accepted`` verdict; None while
- * it works and when it kept nothing. A ``probe`` only looks (a profile, a performance
- * evaluation): it writes no candidate and reaches no verdict, so it is not a candidate.
+ * ``revision`` is the revision the attempt kept, set with its verdict; None while it works and
+ * when it kept nothing. ``outcome`` and ``summary`` are the implementer's own account of the
+ * attempt (its structured outcome and what it did), set when the attempt settles; None while
+ * it works and for a search whose agents give none. A ``probe`` only looks (a profile, a
+ * performance evaluation): it writes no candidate and reaches no verdict, so it is not a
+ * candidate.
  */
 export interface WorkstreamAttrs {
   hypothesis_id?: HypothesisId1;
   parent_revision?: ParentRevision;
+  base_round?: BaseRound;
   round?: Round3;
   idea?: Idea;
   revision?: Revision4;
+  outcome?: Outcome;
+  summary?: Summary4;
   probe?: Probe;
 }
 export interface EvolveSpanAttributes {

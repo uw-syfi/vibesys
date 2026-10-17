@@ -39,13 +39,10 @@ the on-disk layout.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 from pydantic import ConfigDict, Field, TypeAdapter, model_validator
 from pydantic.dataclasses import dataclass
-
-if TYPE_CHECKING:
-    from collections.abc import Container
 
 # lint-waiver: LW-007011 [TC001]; Pydantic resolves this dataclass field at runtime
 from vibesys.metrics import MetricComparison  # noqa: TC001
@@ -308,37 +305,3 @@ class RoundHistory:
     def append(self, record: RoundRecord) -> None:
         """Add *record* to the end of the history."""
         self.records.append(record)
-
-    def resolve_rollback_commit(
-        self,
-        target: RoundRecord,
-        failed_outcomes: Container[str],
-    ) -> tuple[str | None, int | None]:
-        """Resolve a requested parent round to the actual failed-child base tree.
-
-        A round record names the historical tree at the end of that round. An
-        immediately following hypothesis can start from a newer tree after a
-        validated operator or framework repair. If that child later fails,
-        restore its recorded pre-hypothesis tree instead of erasing those
-        independent repairs along with the failed implementation.
-
-        *failed_outcomes* names which ``hypothesis_outcome`` values count as
-        a failed hypothesis; the caller derives this from its own outcome
-        enum.
-
-        The second return value identifies the failed child whose base was
-        chosen; ``None`` means the historical target commit is used
-        unchanged.
-        """
-        if not self.records:
-            return target.commit, None
-        latest = self.records[-1]
-        if (
-            latest.round_number > target.round_number
-            and latest.hypothesis_parent_round == target.round_number
-            and latest.hypothesis_parent_commit is not None
-            and latest.hypothesis_outcome is not None
-            and latest.hypothesis_outcome in failed_outcomes
-        ):
-            return latest.hypothesis_parent_commit, latest.round_number
-        return target.commit, None

@@ -33,6 +33,7 @@ from vs_core.api import (
     Withdraw,
     WorkspaceMode,
 )
+from vs_sim.api.testing import examples
 
 MODES = across_restarts
 SEARCHES = pytest.mark.parametrize("search", ["single", "multi"])
@@ -202,19 +203,33 @@ def test_a_failed_attribution_command_ends_the_run_naming_what_ran_and_why(
     assert f"exited with code {exit_code}" in reason
 
 
-# -- the base and the cadence ----------------------------------------------------------------
+# -- the base and the evaluation budget -----------------------------------------------------------
+
+INPUT = FACTS.baseline
+SLOWER_THAN_INPUT = 30.0
+"""What a candidate measures (the input measures 50): it passes review but is slower."""
+
+
+def commit(name: str) -> RevisionRef:
+    return RevisionRef.of_git_commit(name)
+
+
+def next_plan(host: SerialHost, *plans: str) -> None:
+    """The designer answers its next turn; returns once the round's implementer is asked."""
+    design(host, *plans)
+    host.drain_until_turn(IMPLEMENTER)
 
 
 @SEARCHES
 @MODES
-def test_a_plan_that_reverts_to_the_input_starts_its_round_on_the_input(
+def test_a_plan_that_names_the_input_as_its_base_starts_its_round_on_the_input(
     *, search: str, restarting: bool
 ) -> None:
     host = start(search, restarting=restarting, config={"max_rounds": 2})
     design(host, "h1")
     implement(host, search, "c1")
     host.drain_until_turn(PLANNER)
-    host.run.reply_raw(host.run.expect_turn(role=PLANNER), plan_reply("h2", revert_to_round=0))
+    host.run.reply_raw(host.run.expect_turn(role=PLANNER), plan_reply("h2", base_round=0))
     host.drain_until_turn(IMPLEMENTER)
 
     assert bases(host)[1].revision_id == FACTS.baseline.revision_id
@@ -222,28 +237,195 @@ def test_a_plan_that_reverts_to_the_input_starts_its_round_on_the_input(
 
 @SEARCHES
 @MODES
-def test_a_round_the_cadence_skipped_is_never_a_winner_and_is_the_next_base(
+def test_an_idea_starts_from_the_best_not_from_the_slower_idea_retained_after_it(
     *, search: str, restarting: bool
 ) -> None:
-    host = start(search, restarting=restarting, config={"max_rounds": 2, "official_eval_every": 2})
+    """Regression: the base followed the newest retained checkpoint, however slow."""
+    host = start(
+        search,
+        restarting=restarting,
+        config={"max_rounds": 3},
+        throughputs={"c1": 100.0, "c2": SLOWER_THAN_INPUT},
+    )
     design(host, "h1")
     implement(host, search, "c1")
     host.drain_until_turn(PLANNER)
-    first = settlements(host)[0]
+    host.run.reply_raw(host.run.expect_turn(role=PLANNER), plan_reply("h2"))
+    implement(host, search, "c2")
+    host.drain_until_turn(PLANNER)
+    prompt = host.run.expect_turn(role=PLANNER).context
+    host.run.reply_raw(host.run.expect_turn(role=PLANNER), plan_reply("h3"))
+    host.drain_until_turn(IMPLEMENTER)
 
-    assert (first.eligible, first.retention) == (False, "candidate")
-    design_prompt = host.run.expect_turn(role=PLANNER).context
-    assert design_prompt.base_revision == RevisionRef.of_git_commit("c1")  # ty: ignore[unresolved-attribute]
+    assert bases(host) == [INPUT, commit("c1"), commit("c1")]
+    # the designer is shown the passed ideas and which is best
+    assert prompt.base_revision == commit("c1")  # ty: ignore[unresolved-attribute]
+    assert [(item.round_number, item.best) for item in prompt.passed] == [(1, True), (2, False)]  # ty: ignore[unresolved-attribute]
+
+
+@SEARCHES
+@MODES
+def test_a_plan_may_start_from_a_passed_idea_that_is_not_the_best(
+    *, search: str, restarting: bool
+) -> None:
+    host = start(
+        search,
+        restarting=restarting,
+        config={"max_rounds": 3},
+        throughputs={"c1": 100.0, "c2": 150.0},
+    )
+    design(host, "h1")
+    implement(host, search, "c1")
+    host.drain_until_turn(PLANNER)
+    host.run.reply_raw(host.run.expect_turn(role=PLANNER), plan_reply("h2"))
+    implement(host, search, "c2")
+    host.drain_until_turn(PLANNER)
+    host.run.reply_raw(host.run.expect_turn(role=PLANNER), plan_reply("h3", base_round=1))
+    host.drain_until_turn(IMPLEMENTER)
+
+    assert bases(host)[2] == commit("c1")
+
+
+@SEARCHES
+@MODES
+@pytest.mark.parametrize(
+    ("named", "why"),
+    [(1, "names an idea that did not pass"), (7, "names no idea of this run")],
+    ids=["failed", "unknown"],
+)
+def test_a_base_naming_an_unknown_or_failed_idea_is_refused_by_its_number(
+    *, search: str, restarting: bool, named: int, why: str
+) -> None:
+    host = start(
+        search,
+        restarting=restarting,
+        config={"max_rounds": 3, "max_retries_per_round": 1, "max_continuation_rounds": 0},
+    )
+    design(host, "h1")
+    implement(host, search, "c1", passed=False)
+    host.drain_until_turn(PLANNER)
+    host.run.reply_raw(host.run.expect_turn(role=PLANNER), plan_reply("h2", base_round=named))
+    problem = getattr(host.run.expect_turn(role=PLANNER).context, "problem", None)
+
+    assert problem is not None
+    assert f"base_round {named} {why}" in problem
+
+
+@SEARCHES
+@MODES
+def test_an_idea_that_continues_its_hypothesis_builds_on_its_own_work_in_progress(
+    *, search: str, restarting: bool
+) -> None:
+    host = start(
+        search,
+        restarting=restarting,
+        config={"max_rounds": 3},
+        throughputs={"c1": 100.0},
+    )
+    design(host, "h1")
+    implement(host, search, "c1")
+    host.drain_until_turn(PLANNER)
+    host.run.reply_raw(host.run.expect_turn(role=PLANNER), plan_reply("h2"))
+    # h2 retains work in progress that did not pass; the best is still c1
+    implement(host, search, "c2", passed=False)
+    host.drain()
+
+    # round 3 continues h2 (no designer turn), on the work in progress round 2 retained
+    assert bases(host)[:3] == [INPUT, commit("c1"), commit("c2")]
+
+
+@SEARCHES
+@MODES
+def test_a_round_beyond_the_evaluation_budget_is_never_a_winner_and_never_the_next_base(
+    *, search: str, restarting: bool
+) -> None:
+    host = start(search, restarting=restarting, config={"max_rounds": 2, "evaluation_budget": 1})
+    design(host, "h1")
+    implement(host, search, "c1")
+    host.drain_until_turn(PLANNER)
     host.run.reply_raw(host.run.expect_turn(role=PLANNER), plan_reply("h2"))
     implement(host, search, "c2")
     host.drain()
 
+    first, second = settlements(host)[:2]
+    assert (first.eligible, first.retention) == (True, "candidate")
+    assert (second.eligible, second.retention) == (False, "candidate")
+    assert host.measured == ["c1"]
     finish = host.run.finished
     assert isinstance(finish, Finish)
     assert finish.result.selection is not None
     assert finish.result.selection.kind != "retained_candidate" or (
-        finish.result.selection.revision != RevisionRef.of_git_commit("c1")
+        finish.result.selection.revision == commit("c1")
     )
+    assert_flow_closed(host)
+
+
+@SEARCHES
+@MODES
+@settings(max_examples=examples(pr=6, nightly=40), deadline=None, derandomize=True, database=None)
+@given(
+    rounds=st.lists(
+        st.tuples(
+            st.sampled_from([30.0, 70.0, 90.0, 120.0, 160.0]),
+            st.booleans(),
+            st.none() | st.integers(0, 4),
+        ),
+        min_size=1,
+        max_size=4,
+    )
+)
+def test_every_base_is_the_best_a_named_passed_idea_or_the_input_and_the_best_was_measured(
+    *, search: str, restarting: bool, rounds: list[tuple[float, bool, int | None]]
+) -> None:
+    """Whatever each idea measures, passes and names as its base, the run follows the rules.
+
+    The oracle: an idea passes when it passes review (the host's gates always read); it is best
+    when it also beats the input (50) by more than every earlier best; a named base is honored
+    only for the input or a passed idea, else the plan is refused and asked again without one.
+    """
+    speeds = {f"c{number}": speed for number, (speed, _, _) in enumerate(rounds, start=1)}
+    host = start(
+        search,
+        restarting=restarting,
+        config={"max_rounds": len(rounds), "max_continuation_rounds": 0},
+        throughputs=speeds,
+    )
+    passed: dict[int, RevisionRef] = {}
+    best: tuple[float, int] | None = None
+    expected: list[RevisionRef] = []
+    for number, (speed, ok, drawn_base) in enumerate(rounds, start=1):
+        named = drawn_base
+        host.drain_until_turn(PLANNER)
+        asked = host.run.expect_turn(role=PLANNER)
+        base_of_best = INPUT if best is None else commit(f"c{best[1]}")
+        honored = named is None or named == 0 or named in passed
+        extra = {} if named is None else {"base_round": named}
+        host.run.reply_raw(asked, plan_reply(f"h{number}", **extra))
+        if not honored:
+            correction = host.run.expect_turn(role=PLANNER)
+            assert f"base_round {named} " in str(correction.context.problem)  # ty: ignore[unresolved-attribute]
+            host.run.reply_raw(correction, plan_reply(f"h{number}"))
+            named = None
+        expected.append(base_of_best if named is None else INPUT if named == 0 else passed[named])
+        implement(host, search, f"c{number}", passed=ok)
+        if ok:
+            passed[number] = commit(f"c{number}")
+            if speed > 50.0 and (best is None or speed > best[0]):
+                best = (speed, number)
+    host.drain()
+
+    assert bases(host) == expected
+    finish = host.run.finished
+    assert isinstance(finish, Finish)
+    selection = finish.result.selection
+    assert selection is not None
+    if best is None:
+        assert selection.kind != "retained_candidate"
+    else:
+        assert selection.kind == "retained_candidate"
+        assert selection.revision == commit(f"c{best[1]}")
+        # the adopted result rests on a trusted measurement of that exact commit
+        assert selection.revision.revision_id.root in host.measured
     assert_flow_closed(host)
 
 

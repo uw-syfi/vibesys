@@ -80,7 +80,6 @@ from vibesys.hypothesis.results import (
     NewHypothesis,
     NextRoundDecision,
     PlanningContext,
-    RollbackTarget,
     StartedHypothesis,
 )
 from vibesys.hypothesis.search import HypothesisSearch
@@ -146,7 +145,6 @@ __all__ = [
     "RecordInput",
     "RegressionNotice",
     "RetainedTerminalCheckpoint",
-    "RollbackTarget",
     "RoundHistory",
     "RoundRecord",
     "RunEnding",

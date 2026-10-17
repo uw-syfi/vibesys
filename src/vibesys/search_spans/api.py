@@ -1,20 +1,21 @@
 """The kinds of span the hypothesis searches label, shared so every search speaks one vocabulary.
 
 The runtime records what ran; these say what it means, the same way for every search: a planning
-call, a workstream (which hypothesis, built on which revision, accepted or rejected, linked to the
-workstream it builds on), an agent turn (which role and model) and a gate (a trusted measurement:
+call, a workstream (which hypothesis, based on which revision, passed or failed, linked to the
+workstream it is based on), an agent turn (which role and model) and a gate (a trusted measurement:
 its stages, the candidate's value and how it compares with the input, and whether it passed) and
 the adoption (the candidate the run adopts, what it measured and its ratio to the input's).
 Clients read these kinds (``@vibesys/run-state/overview`` and ``/candidates``) and word them.
 
 The candidates of a run are read from its workstreams, the same way for every search: a
 workstream is one attempt at a candidate, attempts at one idea share its ``hypothesis_id``, the
-``builds_on`` link names the workstream (so the candidate) an attempt built on (none: the input),
-the verdict says whether the attempt's code was kept, ``revision`` names the code it kept (which
-the adoption names when it adopts it), ``idea`` is what the candidate tries in an agent's words,
-and the gates under it are what it measured. A workstream that only looks (``probe``) is not a
-candidate. A search that plays one path (a chain of rounds) links each round to the round that
-kept what it builds on, so its tree is a chain with rejected leaves. A search declares
+``builds_on`` link names the workstream (so the candidate) an attempt is based on (none: the
+input), the verdict says whether the idea passed or failed (its own result), ``revision`` names
+the code it kept (which the adoption names when it adopts it as the best at the run's end),
+``idea`` is what the candidate tries in an agent's words, and the gates under it are what it
+measured. A workstream that only looks (``probe``) is not a candidate. A search that plays one
+path (a chain of rounds) links each round to the round whose code it starts from (its base), so
+its tree is a chain with failed leaves. A search declares
 ``SPANS`` at ``@search(spans=...)`` and labels through ``ctx.label`` or ``label=``. How a search
 maps its own steps onto these kinds is its own (the dynamic search's ``_spans``, the serial
 searches' ``serial_search``).
@@ -44,7 +45,7 @@ class PlanningAttrs(Value):
 
 
 class WorkstreamAttrs(Value):
-    """A workstream: one attempt at a candidate, what it builds on, and what it kept.
+    """A workstream: one attempt at a candidate, the base it starts from, and what it kept.
 
     ``hypothesis_id`` is the candidate's identity: every attempt at one idea carries the same
     one. ``round`` is the round that runs it, for a search that plays rounds (the serial
@@ -52,18 +53,27 @@ class WorkstreamAttrs(Value):
     begins, before it has chosen its hypothesis: until then ``hypothesis_id``,
     ``parent_revision`` and ``idea`` are None.
 
+    ``parent_revision`` is the base: the revision the attempt starts from. ``base_round`` is the
+    round of the idea that made it (a serial search); None when the base is the input.
+
     ``idea`` is what the candidate tries, in the words of the agent that chose it (a planner's
     or designer's title, a mutator's summary, an issue's title); None until an agent said it.
-    ``revision`` is the revision the attempt kept, set with its ``accepted`` verdict; None while
-    it works and when it kept nothing. A ``probe`` only looks (a profile, a performance
-    evaluation): it writes no candidate and reaches no verdict, so it is not a candidate.
+    ``revision`` is the revision the attempt kept, set with its verdict; None while it works and
+    when it kept nothing. ``outcome`` and ``summary`` are the implementer's own account of the
+    attempt (its structured outcome and what it did), set when the attempt settles; None while
+    it works and for a search whose agents give none. A ``probe`` only looks (a profile, a
+    performance evaluation): it writes no candidate and reaches no verdict, so it is not a
+    candidate.
     """
 
     hypothesis_id: str | None = None
     parent_revision: str | None = None
+    base_round: int | None = None
     round: int | None = None
     idea: str | None = None
     revision: str | None = None
+    outcome: str | None = None
+    summary: str | None = None
     probe: bool = False
 
 
@@ -166,22 +176,22 @@ class AdoptionAttrs(Value):
         return cls(candidate=found, metric_value=value, vs_baseline=ratio)
 
 
-ACCEPTED: Literal["accepted"] = "accepted"
-REJECTED: Literal["rejected"] = "rejected"
 PASSED: Literal["passed"] = "passed"
+FAILED: Literal["failed"] = "failed"
 FAILED_CHECK: Literal["failed_check"] = "failed_check"
 SLOWER: Literal["slower"] = "slower"
 BUILDS_ON: Literal["builds_on"] = "builds_on"
 TURNED_DOWN: Literal["turned_down"] = "turned_down"
-"""Why a workstream whose own checks turned its work down is rejected though its code is kept.
+"""Why a workstream whose own checks turned its work down failed though its code is kept.
 
 Its review or a trusted gate rejected it, or its implementer gave it up; the workspace may still
-keep the code as work in progress a later one builds on, so the workstream names the revision.
+keep the code as work in progress its own hypothesis continues from, so the workstream names the
+revision.
 """
 
 PLANNING_CALL = SpanKind("planning_call", attrs=PlanningAttrs)
 WORKSTREAM = SpanKind(
-    "workstream", attrs=WorkstreamAttrs, verdicts=(ACCEPTED, REJECTED), links=(BUILDS_ON,)
+    "workstream", attrs=WorkstreamAttrs, verdicts=(PASSED, FAILED), links=(BUILDS_ON,)
 )
 AGENT_TURN = SpanKind("agent_turn", attrs=AgentTurnAttrs)
 GATE = SpanKind("gate", attrs=GateAttrs, verdicts=(PASSED, FAILED_CHECK, SLOWER))
@@ -210,15 +220,14 @@ def turn_label(session: Session) -> Label:
 
 
 __all__ = [
-    "ACCEPTED",
     "ADOPTION",
     "AGENT_TURN",
     "BUILDS_ON",
+    "FAILED",
     "FAILED_CHECK",
     "GATE",
     "PASSED",
     "PLANNING_CALL",
-    "REJECTED",
     "SLOWER",
     "SPANS",
     "TURNED_DOWN",

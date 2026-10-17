@@ -110,11 +110,10 @@ not a substitute.
 {% endif %}
 
 {% if official_due %}
-This working head is scheduled for framework evaluation after review because
-`{{ official_reason or 'framework policy' }}`. Produce the
+The trusted gates measure this working head after it passes review. Produce the
 plan-required evidence but do not duplicate framework-owned commands.
 {% else %}
-Official evaluation is deferred. A scoped supported/disproven result or a
+The trusted gates will not measure this round (the evaluation budget is spent). A scoped supported/disproven result or a
 reviewable provisional frontier point does not require a ceremonial full sweep.
 {% endif %}
 {% if not benchmark_enabled %}

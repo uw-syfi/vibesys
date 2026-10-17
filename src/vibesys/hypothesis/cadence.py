@@ -1,8 +1,8 @@
-"""Review and official-evaluation cadence, ported from ``loops/*/decisions.py``.
+"""Review cadence and the evaluation budget, ported from ``loops/*/decisions.py``.
 
 ``multi/decisions.py`` and ``profile_multi/decisions.py`` carried byte-for-byte
 identical copies of ``review_due``, ``candidate_evidence_is_fresh``, and
-``official_evaluation_reason``, plus two review-cadence overrides duplicated
+``official_evaluation_reason`` (now the evaluation budget), plus two review-cadence overrides duplicated
 in ``multi/session.py`` and ``profile_multi/session.py`` (``review_started``
 forcing a review to completion, and a bounded-continuation retry deferring
 one). This module keeps that one copy.
@@ -13,7 +13,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vibesys.hypothesis.history import CandidateDisposition, HypothesisOutcome
-from vibesys.hypothesis.transitions import provisional_candidates_since_official
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -108,30 +107,37 @@ def review_due(  # noqa: PLR0913  # LW-040039 [PLR0913]; the parameters are inde
     return due
 
 
+MEASURED_AFTER_REVIEW = "review_passed"
+"""Why the trusted gates measure an idea: it passed review and the budget has room."""
+
+
+def evaluations_spent(records: Sequence[RoundRecord]) -> int:
+    """How many rounds the trusted gates measured."""
+    return sum(1 for record in records if record.official_evaluation)
+
+
 def official_due(
-    config: HypothesisConfig,
-    *,
-    records: Sequence[RoundRecord],
-    round_number: int,
-    requested: bool,
-    candidate_ready: bool,
+    config: HypothesisConfig, *, records: Sequence[RoundRecord], candidate_ready: bool
 ) -> str | None:
-    """Schedule official gates by accepted candidates and the final round."""
-    if round_number == config.max_rounds:
-        return "final_round"
+    """Why the trusted gates measure this round's reviewed candidate, or None.
+
+    Every idea that passes review is measured while the evaluation budget lasts; nothing else
+    schedules a measurement.
+    """
     if not candidate_ready:
         return None
-    if requested:
-        return "orchestrator_request"
-    if provisional_candidates_since_official(records) + 1 >= config.official_eval_every:
-        return "cadence"
-    return None
+    budget = config.evaluation_budget
+    if budget is not None and evaluations_spent(records) >= budget:
+        return None
+    return MEASURED_AFTER_REVIEW
 
 
 __all__ = [
+    "MEASURED_AFTER_REVIEW",
     "CandidateDisposition",
     "candidate_evidence_fresh",
     "continuation_requested",
+    "evaluations_spent",
     "keeps_hypothesis_active",
     "official_due",
     "review_due",

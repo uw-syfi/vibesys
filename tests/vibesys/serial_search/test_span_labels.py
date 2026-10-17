@@ -51,16 +51,21 @@ JUDGE = "judge"
 
 
 def begin(
-    search: str, *, rounds: int, restarting: bool, official_every: int = 1, **world: object
+    search: str,
+    *,
+    rounds: int,
+    restarting: bool,
+    budget: int | None = None,
+    **world: object,
 ) -> SerialHost:
     if search == "single":
         return single_host.SingleHost.start(
-            single_host.config(max_rounds=rounds, official_eval_every=official_every),
+            single_host.config(max_rounds=rounds, evaluation_budget=budget),
             restarting=restarting,
             **world,  # ty: ignore[invalid-argument-type]
         )
     return multi_host.MultiHost.start(
-        multi_host.config(max_rounds=rounds, official_eval_every=official_every),
+        multi_host.config(max_rounds=rounds, evaluation_budget=budget),
         restarting=restarting,
         **world,  # ty: ignore[invalid-argument-type]
     )
@@ -156,7 +161,7 @@ def roles_under(host: SerialHost, owner: Span) -> list[str]:
 
 @SEARCHES
 @across_restarts
-def test_a_round_that_adopts_a_candidate_is_an_accepted_workstream_with_its_turns_and_gate(
+def test_a_round_that_adopts_a_candidate_is_a_passed_workstream_with_its_turns_and_gate(
     *, search: str, restarting: bool
 ) -> None:
     host = begin(search, rounds=1, restarting=restarting)
@@ -167,13 +172,16 @@ def test_a_round_that_adopts_a_candidate_is_an_accepted_workstream_with_its_turn
     (workstream,) = labelled(host, "workstream")
     assert workstream.label is not None
     assert workstream.label.title == "title h1"
-    assert workstream.label.verdict == "accepted"
+    assert workstream.label.verdict == "passed"
     assert attrs(workstream) == {
         "hypothesis_id": "h1",
         "parent_revision": FACTS.baseline.revision_id.root,
+        "base_round": None,
         "round": 1,
         "idea": "title h1",
         "revision": "c1",
+        "outcome": None if search == "single" else "nominated",
+        "summary": "did it",
         "probe": False,
     }
     expected_roles = [PLANNER, IMPLEMENTER] if search == "single" else [PLANNER, IMPLEMENTER, JUDGE]
@@ -197,7 +205,7 @@ def test_a_round_that_adopts_a_candidate_is_an_accepted_workstream_with_its_turn
 
 @SEARCHES
 @across_restarts
-def test_a_round_builds_on_the_workstream_that_kept_its_base_and_a_slow_one_is_slower(
+def test_a_round_builds_on_the_workstream_that_made_its_base_and_a_slow_one_is_slower(
     *, search: str, restarting: bool
 ) -> None:
     host = begin(search, rounds=2, restarting=restarting, throughputs={"c2": 10.0})
@@ -211,9 +219,12 @@ def test_a_round_builds_on_the_workstream_that_kept_its_base_and_a_slow_one_is_s
     assert second.label is not None
     assert [(link.rel, link.to) for link in second.label.links] == [("builds_on", first.id)]
     assert attrs(second)["parent_revision"] == "c1"
+    assert attrs(second)["base_round"] == 1
     assert attrs(second)["round"] == 2
     verdicts = [g.label.verdict for g in labelled(host, "gate") if g.label is not None]
     assert verdicts == ["passed", "slower"]
+    # a slower idea still passed its own checks: its gates read and none turned it down
+    assert [w.label.verdict for w in (first, second) if w.label] == ["passed", "passed"]
 
 
 def gates_under(host: SerialHost, owner: Span) -> list[Span]:
@@ -222,43 +233,32 @@ def gates_under(host: SerialHost, owner: Span) -> list[Span]:
 
 @SEARCHES
 @across_restarts
-def test_regression_a_round_the_gates_skip_has_what_its_implementer_measured_as_its_gate(
+def test_a_round_the_gates_did_not_measure_has_no_gate_whatever_its_implementer_measured(
     *, search: str, restarting: bool
 ) -> None:
-    # a live multi run showed "nothing measured yet" through three accepted rounds: the gates
-    # run on a cadence, and the rounds between kept code only the implementer had measured
-    host = begin(
-        search, rounds=2, restarting=restarting, official_every=3, throughputs={"c1": 80.0}
-    )
+    # one measurement path: what an agent measures of its own work is never shown as a gate,
+    # so the run shows only numbers the framework took of the revision it retains
+    host = begin(search, rounds=2, restarting=restarting, budget=1, throughputs={"c1": 80.0})
     design(host, "h1")
-    implement(host, search, "c1", evaluations=[("c0", BOTH_PASS), ("c1", BOTH_PASS)])
+    implement(host, search, "c1")
     design(host, "h2")
-    implement(host, search, "c2")  # the final round: the trusted gates measure it
+    implement(host, search, "c2", evaluations=[("c2", BOTH_PASS)])  # the budget is spent
     host.drain()
 
-    assert host.measured == ["c2"]
+    assert host.measured == ["c1"]
     first, second = labelled(host, "workstream")
     assert [attrs(w)["revision"] for w in (first, second)] == ["c1", "c2"]
-    (taken,) = gates_under(host, first)
-    assert taken.label is not None
-    assert taken.label.verdict == "passed"
-    assert attrs(taken) == {
-        "stage": "accuracy,benchmark",
-        "metric_value": 80.0,
-        "vs_baseline": 80.0 / INPUT_THROUGHPUT,
-        "failed": None,
-    }
-    (official,) = gates_under(host, second)
-    assert attrs(official)["metric_value"] == CANDIDATE_THROUGHPUT
+    (official,) = gates_under(host, first)
+    assert attrs(official)["metric_value"] == 80.0
+    assert gates_under(host, second) == []
+    assert [(w.label.verdict, w.label.reason) for w in (first, second) if w.label] == [
+        ("passed", None),
+        ("failed", "not_measured"),
+    ]
 
 
-EVALUATIONS = {
-    "both": BOTH_PASS,
-    "benchmark": BENCHMARK_ONLY,
-    "accuracy_fails": ACCURACY_FAILS,
-    "accuracy_passes": {"accuracy": True},
-}
-"""The evaluations an implementer may take: all but a passing accuracy check alone tell something."""
+EVALUATIONS = {"both": BOTH_PASS, "benchmark": BENCHMARK_ONLY, "accuracy_fails": ACCURACY_FAILS}
+"""The evaluations an implementer may take of its own work, which no gate ever reads."""
 
 
 @SEARCHES
@@ -274,22 +274,18 @@ EVALUATIONS = {
         min_size=1,
         max_size=3,
     ),
-    official_every=st.integers(1, 4),
+    budget=st.none() | st.integers(1, 3),
 )
-def test_every_measured_round_has_a_gate_with_what_its_latest_measurement_read(
+def test_every_gate_is_the_framework_s_measurement_of_the_revision_its_round_retains(
     *,
     search: str,
     restarting: bool,
     rounds: list[tuple[list[tuple[bool, str]], float]],
-    official_every: int,
+    budget: int | None,
 ) -> None:
     throughputs = {f"c{n}": value for n, (_, value) in enumerate(rounds, start=1)}
     host = begin(
-        search,
-        rounds=len(rounds),
-        restarting=restarting,
-        official_every=official_every,
-        throughputs=throughputs,
+        search, rounds=len(rounds), restarting=restarting, budget=budget, throughputs=throughputs
     )
     for n, (evaluations, _) in enumerate(rounds, start=1):
         design(host, f"h{n}")
@@ -298,25 +294,24 @@ def test_every_measured_round_has_a_gate_with_what_its_latest_measurement_read(
     host.drain()
 
     note(f"officially measured: {host.measured}")
+    # every idea that passes review is measured while the budget lasts, in order
+    expected = [f"c{n}" for n in range(1, len(rounds) + 1)][
+        : len(rounds) if budget is None else budget
+    ]
+    assert host.measured == expected
     for n, workstream in enumerate(labelled(host, "workstream"), start=1):
         candidate, value = f"c{n}", throughputs[f"c{n}"]
-        telling = [k for kept, k in rounds[n - 1][0] if kept and k != "accuracy_passes"]
         gates = gates_under(host, workstream)
-        if candidate not in host.measured and not telling:
-            assert gates == [], f"round {n} measured nothing telling, yet has a gate"
+        if candidate not in host.measured:
+            assert gates == [], f"round {n} was not measured, yet has a gate"
             continue
-        assert len(gates) == 1, f"round {n} has {len(gates)} gates"
         (gate,) = gates
         assert gate.label is not None
         beats = value > INPUT_THROUGHPUT
-        if candidate in host.measured or telling[-1] == "both":
-            expected = (value, value / INPUT_THROUGHPUT, "passed" if beats else "slower")
-        elif telling[-1] == "benchmark":  # no accuracy check: no verdict it could pass
-            expected = (value, value / INPUT_THROUGHPUT, None)
-        else:
-            expected = (None, None, "failed_check")
-        found = (attrs(gate)["metric_value"], attrs(gate)["vs_baseline"], gate.label.verdict)
-        assert found == expected, f"round {n}"
+        assert (attrs(gate)["metric_value"], gate.label.verdict) == (
+            value,
+            "passed" if beats else "slower",
+        ), f"round {n}"
 
 
 RUN_3 = [
@@ -367,45 +362,35 @@ def settled_workstreams(host: SerialHost) -> list[Span]:
 
 
 @across_restarts
-def test_regression_a_round_that_gave_up_its_work_is_rejected_and_shows_the_check_it_failed(
+def test_regression_a_round_that_gave_up_its_work_failed_and_so_did_one_nobody_measured(
     *, restarting: bool
 ) -> None:
     # the live run showed all seven rounds as kept and none measured: three implementers asked
-    # to discard code whose accuracy check failed, and the gates never ran (sparse cadence)
-    config = multi_host.config(max_rounds=10, judge_every=100, official_eval_every=100)
+    # to discard code whose accuracy check failed, and the sparse review cadence reviewed (so the
+    # gates measured) only the nominated one
+    config = multi_host.config(max_rounds=10, judge_every=100)
     host = multi_host.MultiHost.start(config, restarting=restarting)
     for n, (outcome, disposition, evaluations) in enumerate(RUN_3, start=1):
         play_multi_round(host, n, outcome, disposition, evaluations)
     host.drain_until_turn(PLANNER)
 
-    assert host.measured == []
+    assert host.measured == ["c3"]
     rounds = settled_workstreams(host)
     assert [(w.label.verdict, w.label.reason) for w in rounds if w.label] == [
-        ("accepted", None),
-        ("accepted", None),
-        ("accepted", None),
-        ("rejected", "turned_down"),
-        ("rejected", "turned_down"),
-        ("accepted", None),
-        ("rejected", "turned_down"),
+        ("failed", "not_measured"),
+        ("failed", "not_measured"),
+        ("passed", None),
+        ("failed", "turned_down"),
+        ("failed", "turned_down"),
+        ("failed", "not_measured"),
+        ("failed", "turned_down"),
     ]
-    # its code is still kept, and the next round builds on it unless its designer reverts
+    # its code is still kept, and its own hypothesis may continue from it
     assert [attrs(w)["revision"] for w in rounds] == [f"c{n}" for n in range(1, 8)]
     for n, workstream in enumerate(rounds, start=1):
         gates = gates_under(host, workstream)
-        if not RUN_3[n - 1][2]:
-            assert gates == [], f"round {n} measured nothing, yet has a gate"
-            continue
-        (gate,) = gates
-        assert gate.label is not None
-        assert gate.label.verdict == "failed_check"
-        assert attrs(gate)["metric_value"] is None
-        assert attrs(gate)["failed"] == {
-            "check": "correctness",
-            "completed": None,
-            "required": None,
-            "unit": None,
-        }
+        # only the round the gates measured has one: what its implementer measured is no gate
+        assert [g.label.verdict for g in gates if g.label] == (["passed"] if n == 3 else [])
 
 
 @across_restarts
@@ -420,13 +405,13 @@ def test_regression_a_round_that_gave_up_its_work_is_rejected_and_shows_the_chec
         min_size=1,
         max_size=4,
     ),
-    official_every=st.integers(1, 3),
+    budget=st.none() | st.integers(1, 3),
 )
-def test_a_multi_round_is_accepted_when_it_kept_its_work_and_nothing_turned_it_down(
-    *, restarting: bool, rounds: list[tuple[str, str, bool]], official_every: int
+def test_a_multi_round_passed_when_the_gates_measured_it_and_nothing_turned_it_down(
+    *, restarting: bool, rounds: list[tuple[str, str, bool]], budget: int | None
 ) -> None:
     config = multi_host.config(
-        max_rounds=len(rounds) + 1, judge_every=100, official_eval_every=official_every
+        max_rounds=len(rounds) + 1, judge_every=100, evaluation_budget=budget
     )
     host = multi_host.MultiHost.start(config, restarting=restarting)
     designed = 0
@@ -464,9 +449,10 @@ def test_a_multi_round_is_accepted_when_it_kept_its_work_and_nothing_turned_it_d
         turned_down = (
             disposition == "discard" or outcome == "implementation_failed" or rejected_review
         )
-        eligible = f"c{n}" in host.measured and outcome == "nominated" and passes
-        accepted = not turned_down or eligible
-        assert workstream.label.verdict == ("accepted" if accepted else "rejected"), n
+        measured = f"c{n}" in host.measured
+        eligible = measured and outcome == "nominated" and passes
+        passed = measured and (not turned_down or eligible)
+        assert workstream.label.verdict == ("passed" if passed else "failed"), n
         assert attrs(workstream)["revision"] == f"c{n}", "its code is kept either way"
 
 
@@ -500,25 +486,31 @@ def _check(host: SerialHost) -> None:
         assert span.label.title, f"{span.id} has no title"
         found = attrs(span)
         assert isinstance(found["round"], int)
-        # a round names its hypothesis once it has one; one the designer gave none is rejected
+        # a round names its hypothesis once it has one; one the designer gave none failed
         chosen = found.get("hypothesis_id") is not None
         assert chosen == (found.get("parent_revision") is not None)
-        if span.label.verdict == "accepted":
-            assert chosen, f"{span.id} was accepted without a hypothesis"
+        if span.label.verdict == "passed":
+            assert chosen, f"{span.id} passed without a hypothesis"
         if not chosen and span.ended_at is not None and span.label.verdict is not None:
             assert span.label.reason == "no_design"
-        # an accepted round names the revision it kept: what the next round builds on; so does
-        # one its own checks turned down, whose code is kept all the same
+        # a passed round names the revision it kept; so does one its own checks turned down and
+        # one no gate measured, whose code is kept all the same
         kept = found.get("revision")
-        keeps = span.label.verdict == "accepted" or span.label.reason == "turned_down"
+        keeps = span.label.verdict == "passed" or span.label.reason in {
+            "turned_down",
+            "not_measured",
+        }
         assert (kept is not None) == keeps, f"{span.id} kept {kept}"
         assert found.get("probe") is False
         links = [link.to for link in span.label.links]
         assert len(links) <= 1
         assert set(links) <= set(workstreams), f"{span.id} builds on a later span: {links}"
         for link in links:
-            # one path: a round links to the round that kept the revision it builds on
+            # one path: a round links to the round that made the revision it is based on
             assert attrs(by_id[link])["revision"] == found["parent_revision"], span.id
+            assert attrs(by_id[link])["round"] == found["base_round"], span.id
+        # the base is the input (no link, no base round) or an earlier round's retained code
+        assert (found["base_round"] is None) == (not links) or not chosen, span.id
         workstreams.append(span.id)
     turns = [s for s in trace.spans if s.invocation is not None]
     assert all(s.label is not None and s.label.kind == "agent_turn" for s in turns)
@@ -533,7 +525,7 @@ def _check(host: SerialHost) -> None:
         if gate.label.verdict == "passed":
             owner = by_id[str(gate.parent)]
             assert owner.label is not None
-            assert owner.label.verdict != "rejected", f"{gate.id} passed in a rejected round"
+            assert owner.label.verdict != "failed", f"{gate.id} passed in a failed round"
 
 
 @SEARCHES

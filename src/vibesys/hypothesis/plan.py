@@ -1,9 +1,9 @@
 """The designer's round plan: the input to the hypothesis search.
 
 ``OrchestratorPlan`` is both the designer's structured reply schema and the
-search plan type: the framework applies it in this order: optional
-``revert_to_round`` git checkout, then implementer with ``task``, then judge
-with ``pass_criteria``. The skill recommendations and title normalization live
+search plan type: the framework applies it in this order: the base the
+implementer starts from (``base_round``, else the current best), then
+implementer with ``task``, then judge with ``pass_criteria``. The skill recommendations and title normalization live
 here because they are parts of this plan's agent-facing contract.
 """
 
@@ -42,6 +42,22 @@ class InvalidPlanError(ValueError):
     def reused_id(cls, hypothesis_id: str) -> InvalidPlanError:
         """Report a new hypothesis ID already used in this run."""
         return cls(f"hypothesis ID {hypothesis_id!r} was already used")
+
+    @classmethod
+    def unknown_base(cls, base_round: int, passed: tuple[int, ...]) -> InvalidPlanError:
+        """Report a base that names no idea this run has played."""
+        return cls(f"base_round {base_round} names no idea of this run; {_choices(passed)}")
+
+    @classmethod
+    def failed_base(cls, base_round: int, passed: tuple[int, ...]) -> InvalidPlanError:
+        """Report a base that names an idea that did not pass."""
+        return cls(f"base_round {base_round} names an idea that did not pass; {_choices(passed)}")
+
+
+def _choices(passed: tuple[int, ...]) -> str:
+    """The bases a plan may name, for the message that refuses another."""
+    named = ", ".join(str(number) for number in passed) or "none yet"
+    return f"base_round may be 0 (the input) or a passed idea ({named}), or omitted for the best"
 
 
 class SkillResourceSelection(BaseModel):
@@ -134,9 +150,9 @@ class HypothesisStrategyUpdate(BaseModel):
 class OrchestratorPlan(BaseModel):
     """The per-round plan produced by the orchestrator.
 
-    The framework applies the plan in this order: optional
-    ``revert_to_round`` git checkout, then implementer with ``task``,
-    then judge with ``pass_criteria``. The loop always runs the full
+    The framework applies the plan in this order: the base the implementer
+    starts from (``base_round``, else the current best), then implementer with
+    ``task``, then judge with ``pass_criteria``. The loop always runs the full
     ``max_rounds`` budget; there is no early-stop signal from the
     orchestrator.
     """
@@ -228,21 +244,13 @@ class OrchestratorPlan(BaseModel):
             "Reference stable trusted gates by path; they run separately when configured."
         )
     )
-    request_official_evaluation: bool = Field(
-        default=False,
-        description=(
-            "Run the framework-owned canonical evaluation after this hypothesis "
-            "passes independent review, even when the normal sparse-evaluation "
-            "cadence is not yet due."
-        ),
-    )
-    revert_to_round: int | None = Field(
+    base_round: int | None = Field(
         default=None,
         ge=0,
         description=(
-            "Optional round whose candidate tree the framework materializes "
-            "before the implementer runs; 0 is the input implementation. "
-            "Experiment memory is preserved and Git HEAD does not move."
+            "Optional base: the number of a passed idea whose code this idea starts from; "
+            "0 is the input. Omit it to start from the current best. Experiment memory is "
+            "preserved either way."
         ),
     )
     reasoning: str = Field(

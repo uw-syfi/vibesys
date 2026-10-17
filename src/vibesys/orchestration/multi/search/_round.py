@@ -19,7 +19,7 @@ from typing import Self
 from vibesys.candidates.api import space_of, workspace_mode_for
 from vibesys.hypothesis import Continue, Finished, NewHypothesis, rounds
 from vibesys.orchestration.multi.models import ImplementerResponse, JudgeResponse, PreRoundDecision
-from vibesys.orchestration.multi.search._attempt import MultiAttempt, Next, planned_reason
+from vibesys.orchestration.multi.search._attempt import MultiAttempt, Next, official_planned
 from vibesys.orchestration.multi.search._config import MultiConfig
 from vibesys.orchestration.multi.search._operations import VALIDATE_LOCAL_KIND
 from vibesys.orchestration.multi.search._prompts import PreRoundPrompt, ProfilerPrompt
@@ -75,7 +75,10 @@ async def _play(ctx: Flow, start: MultiRound) -> RoundDone:
         case Finished():
             return RoundDone(number=start.number, ledger=start.ledger, counted=False)
         case Continue(hypothesis=hypothesis):
-            plan, base, feedback = hypothesis.plan, start.base, hypothesis.feedback
+            plan, feedback = hypothesis.plan, hypothesis.feedback
+            base = serial.continued_base(
+                start, hypothesis.parent_commit, input_revision=ctx.facts.baseline
+            )
             # an earlier round's orchestrator designed it; this round's flow cannot name it
             planned_by: tuple[str, ...] = ()
         case NewHypothesis():
@@ -113,7 +116,7 @@ async def _play(ctx: Flow, start: MultiRound) -> RoundDone:
         validation_offered=any(
             item.kind == VALIDATE_LOCAL_KIND for item in ctx.capabilities.operations
         ),
-        planned_official_reason=planned_reason(config, ledger, plan, start.number),
+        planned_official=official_planned(config, ledger),
         revalidation_required=active is not None and active.gate_revalidation_pending,
         feedback=feedback,
     )
@@ -125,6 +128,7 @@ async def _play(ctx: Flow, start: MultiRound) -> RoundDone:
         closed,
         hypothesis_id=plan.hypothesis_id,
         settlement=settlement,
+        passed=serial.round_passed(settlement, attempt),
         metrics=attempt.benchmark_metrics(),
     )
 

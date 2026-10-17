@@ -1,7 +1,7 @@
 """The issue-queue search labels its spans in the vocabulary every search shares.
 
 A run's Overview and Work tabs read only labelled spans. Each job is a workstream of the round it
-belongs to: an issue job is named for its issue, accepted when it closed the issue with a change
+belongs to: an issue job is named for its issue, passed when it closed the issue with a change
 and linked to the job that kept the tip it builds on; an evaluation only looks, so it reaches no
 verdict. Every provider turn is an agent turn naming its role, the accuracy proof of the final
 candidate is a gate, and the adoption of the tip is a span naming the adopted candidate. Each
@@ -55,13 +55,16 @@ def test_each_job_is_a_workstream_and_the_issue_that_builds_on_the_tip_links_to_
     first, evaluation, second, last = labelled(host, "workstream")
     base = FACTS.baseline.revision_id.root
     assert first.label is not None
-    assert first.label.verdict == "accepted"
+    assert first.label.verdict == "passed"
     assert attrs(first) == {
         "hypothesis_id": "issue-1",
         "parent_revision": base,
+        "base_round": None,
         "round": 1,
         "idea": "two opaque items",
         "revision": "c1",
+        "outcome": None,
+        "summary": None,
         "probe": False,
     }
     assert first.label.links == ()
@@ -75,7 +78,7 @@ def test_each_job_is_a_workstream_and_the_issue_that_builds_on_the_tip_links_to_
     assert roles_under(host, evaluation) == [PERF]
 
     assert second.label is not None
-    assert (second.label.title, second.label.verdict) == ("#2 faster", "accepted")
+    assert (second.label.title, second.label.verdict) == ("#2 faster", "passed")
     assert attrs(second)["round"] == 2
     assert attrs(second)["parent_revision"] == attrs(first)["revision"], (
         "it builds on the revision the first issue's job kept"
@@ -125,7 +128,7 @@ def test_an_issue_that_runs_out_of_attempts_is_rejected_and_the_input_is_adopted
 
     (issue,) = labelled(host, "workstream")
     assert issue.label is not None
-    assert (issue.label.verdict, issue.label.reason) == ("rejected", "not_closed")
+    assert (issue.label.verdict, issue.label.reason) == ("failed", "not_closed")
     assert labelled(host, "gate") == []
     assert labelled(host, "adoption") == [], "a failed run with nothing to keep adopts nothing"
 
@@ -137,7 +140,7 @@ def test_an_issue_closed_without_a_change_is_rejected_for_it(*, restarting: bool
 
     issue, *_ = labelled(host, "workstream")
     assert issue.label is not None
-    assert (issue.label.verdict, issue.label.reason) == ("rejected", "no_change")
+    assert (issue.label.verdict, issue.label.reason) == ("failed", "no_change")
     (adoption,) = labelled(host, "adoption")
     assert attrs(adoption)["candidate"] is None, "nothing changed: the input stands"
     assert adoption.label is not None

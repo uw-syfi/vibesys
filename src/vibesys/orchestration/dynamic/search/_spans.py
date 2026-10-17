@@ -17,12 +17,11 @@ from vibesys.orchestration.dynamic.search._outcomes import (
 )
 from vibesys.orchestration.dynamic.search._values import WorkKind
 from vibesys.search_spans.api import (
-    ACCEPTED,
     BUILDS_ON,
+    FAILED,
     FAILED_CHECK,
     GATE,
     PASSED,
-    REJECTED,
     SLOWER,
     TURNED_DOWN,
     WORKSTREAM,
@@ -77,10 +76,10 @@ def label_outcome(
 ) -> None:
     """Label how the workstream ended, and what its gate measured, once its settlement is asked.
 
-    A workstream is accepted when its workspace keeps what it made (a candidate, or work in
+    A workstream passed when its workspace keeps what it made (a candidate, or work in
     progress later steps build on) and its own checks did not turn it down (`turned_down`): a
     kept candidate its review rejected, or whose implementer could not implement it, is a
-    rejected workstream that names the revision kept. A profile only looks, so it reaches no
+    failed workstream that names the revision kept. A profile only looks, so it reaches no
     verdict. Its gate
     passed when the candidate is eligible; else it is slower when it does not beat the input,
     and failed a check otherwise.
@@ -93,9 +92,9 @@ def label_outcome(
         revision = None if found is None else found.revision_id.root
         ours = workstream_attrs(w).model_copy(update={"revision": revision})
         if kept and turned_down(closing, unsettled=UNSETTLED):
-            ctx.label(WORKSTREAM, attrs=ours, verdict=REJECTED, reason=TURNED_DOWN)
+            ctx.label(WORKSTREAM, attrs=ours, verdict=FAILED, reason=TURNED_DOWN)
         else:
-            verdict = ACCEPTED if kept else REJECTED
+            verdict = PASSED if kept else FAILED
             ctx.label(WORKSTREAM, attrs=ours, verdict=verdict, reason=reason)
     if work.gate is None:
         return

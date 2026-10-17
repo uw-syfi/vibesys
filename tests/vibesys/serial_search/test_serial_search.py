@@ -9,13 +9,22 @@ from typing import Literal, cast
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.vibesys.serial_search._host import TERMS
 
+from vibesys.candidates.api import NotConfigured
 from vibesys.hypothesis import HypothesisConfig, OrchestratorPlan, rounds
+from vibesys.metrics import MetricRow
 from vibesys.profile_focus import ProfileAttributionError
 from vibesys.profile_focus.attribution import parse_attribution
 from vibesys.serial_search.api import (
     AttributionConfig,
+    Closed,
+    LedgerJson,
+    RoundDone,
+    RoundStart,
+    SerialRun,
     accept_plan,
+    base_commit,
     bottlenecks_of,
     capture_failure,
     focus_of,
@@ -23,13 +32,28 @@ from vibesys.serial_search.api import (
     plan_evidence,
     record_round,
 )
-from vs_core.api import CaptureCommandBase, RevisionId, RevisionRef
+from vs_core.api import (
+    AttemptId,
+    AttemptRef,
+    CaptureCommandBase,
+    RevisionId,
+    RevisionRef,
+    Settlement,
+    SettlementId,
+)
+from vs_core.api.search import Kept
 from vs_runtime.api import CommandResult
 from vs_runtime.api.core import CaptureCommandOwner
 from vs_runtime.api.testing import FakeCommands, FakeWorkspace, FakeWorkspaces
 from vs_sim.api.testing import examples
 
 _CONFIG = HypothesisConfig(max_rounds=4)
+_INPUT = RevisionRef.of_git_commit("input")
+
+
+def _start(number: int = 1) -> RoundStart:
+    """Where a new run stands when round ``number`` begins: nothing has passed."""
+    return RoundStart(number=number, base=_INPUT, ledger=LedgerJson(), baseline=NotConfigured())
 
 
 class _Capture(CaptureCommandBase):
@@ -61,7 +85,7 @@ def test_a_valid_plan_gets_a_stripped_nonempty_id_whatever_the_designer_wrote(
         _CONFIG,
         rounds.Ledger(rounds.decode(rounds.EncodedLedger()).search),
         _reply(identifier),
-        round_number=3,
+        start=_start(3),
     )
     assert isinstance(plan, OrchestratorPlan)
     assert plan.hypothesis_id == (identifier.strip() or "hypothesis-0003")
@@ -72,13 +96,13 @@ def test_a_plan_that_updates_itself_twice_or_reuses_an_id_is_refused() -> None:
     ledger = rounds.decode(rounds.EncodedLedger())
     update = {"hypothesis_id": "old", "disposition": "parked", "reason": "defective"}
     duplicate = accept_plan(
-        _CONFIG, ledger, _reply("h1", hypothesis_updates=[update, update]), round_number=1
+        _CONFIG, ledger, _reply("h1", hypothesis_updates=[update, update]), start=_start()
     )
     selfish = accept_plan(
         _CONFIG,
         ledger,
         _reply("h1", hypothesis_updates=[{**update, "hypothesis_id": "h1"}]),
-        round_number=1,
+        start=_start(),
     )
     assert "more than once" in str(duplicate)
     assert "new hypothesis" in str(selfish)
@@ -162,3 +186,86 @@ def test_the_plan_view_of_a_new_run_shows_no_history() -> None:
     assert evidence.history == ()
     assert evidence.frontier == ()
     assert evidence.older_rounds == 0
+
+
+# -- the base a plan names ----------------------------------------------------------------------
+
+
+def _settlement(number: int, *, eligible: bool) -> Settlement:
+    return Settlement.model_validate(
+        {
+            "settlement_id": SettlementId(root=f"settlement-{number}"),
+            "attempt": AttemptRef(attempt_id=AttemptId(root=f"attempt-{number}"), generation=0),
+            "candidate": RevisionRef.of_git_commit(f"c{number}"),
+            "assessments": (),
+            "eligible": eligible,
+            "retention": "candidate",
+            "outcome": "succeeded",
+        }
+    )
+
+
+def _played(drawn: list[tuple[bool, bool, float]]) -> SerialRun:
+    """A run that played one round per draw: (passed, eligible if it passed, headline value)."""
+    run = SerialRun(
+        hypotheses=HypothesisConfig(max_rounds=10),
+        input=_INPUT,
+        terms=TERMS,
+        baseline=NotConfigured(),
+    )
+    for number, (passed, faster, value) in enumerate(drawn, start=1):
+        eligible = passed and faster
+        kept = Closed(
+            round_number=number,
+            hypothesis_id=f"h{number}",
+            kept=Kept.of(_settlement(number, eligible=eligible)),
+            passed=passed,
+            eligible=eligible,
+            metrics=(MetricRow(name="throughput", value=value, direction="max", unit="tokens/s"),),
+        )
+        done = RoundDone(
+            number=number,
+            ledger=LedgerJson(),
+            closed=kept,
+            checkpoint=RevisionRef.of_git_commit(f"c{number}"),
+        )
+        run.finished(done, f"flow:round#{number}")
+    return run
+
+
+_DRAWN = st.lists(st.tuples(st.booleans(), st.booleans(), st.floats(1, 1000)), max_size=6)
+
+
+@settings(max_examples=examples(pr=10, nightly=100))
+@given(drawn=_DRAWN, named=st.none() | st.integers(0, 9))
+def test_a_plans_base_is_the_best_the_input_or_a_passed_idea_and_anything_else_is_refused_by_id(
+    drawn: list[tuple[bool, bool, float]], named: int | None
+) -> None:
+    run = _played(drawn)
+    start = run.start()
+    passed = {item.round_number: item.revision for item in start.passed_ideas()}
+    ledger = rounds.decode(rounds.EncodedLedger())
+    reply = _reply("next", **({} if named is None else {"base_round": named}))
+
+    accepted = accept_plan(_CONFIG, ledger, reply, start=start)
+
+    if named is None or named == 0 or named in passed:
+        assert isinstance(accepted, OrchestratorPlan)
+        base = base_commit(accepted, start, input_revision=_INPUT)
+        best = run.leader()
+        if named is None:
+            assert base.revision == (best.revision if isinstance(best, Kept) else _INPUT)
+            assert base.round == start.best_round
+        elif named == 0:
+            assert (base.revision, base.round) == (_INPUT, None)
+        else:
+            assert (base.revision, base.round) == (passed[named], named)
+        failed = {
+            RevisionRef.of_git_commit(f"c{number}")
+            for number, (ok, _, _) in enumerate(drawn, start=1)
+            if not ok
+        }
+        assert base.revision not in failed
+    else:
+        assert isinstance(accepted, str)
+        assert f"base_round {named} " in accepted

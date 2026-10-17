@@ -63,7 +63,7 @@ _ROUND: dict[str, JsonValue] = {
     "judge_every": 1,
     "max_retries_per_round": 1,
 }
-_ROUNDS: dict[str, JsonValue] = {**_ROUND, "max_rounds": 2, "official_eval_every": 1}
+_ROUNDS: dict[str, JsonValue] = {**_ROUND, "max_rounds": 2}
 _SINGLE: dict[str, JsonValue] = {k: v for k, v in _ROUNDS.items() if k != "judge_every"}
 _EVOLVE_PROFILER = {
     "profiler_kind": "torch",

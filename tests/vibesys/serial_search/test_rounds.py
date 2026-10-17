@@ -65,11 +65,12 @@ def settlement(name: str, *, eligible: bool) -> Settlement:
     )
 
 
-def closed(number: int, *, eligible: bool, value: float) -> Closed:
+def closed(number: int, *, eligible: bool, value: float, passed: bool | None = None) -> Closed:
     return Closed(
         round_number=number,
         hypothesis_id=f"h{number}",
         kept=Kept.of(settlement(str(number), eligible=eligible)),
+        passed=eligible if passed is None else passed,
         eligible=eligible,
         metrics=(MetricRow(name="throughput", value=value, direction="max", unit="tokens/s"),),
     )
@@ -101,7 +102,7 @@ rounds_drawn = st.lists(
 
 @settings(max_examples=examples(pr=8, nightly=100))
 @given(drawn=rounds_drawn, limit=st.integers(1, 6))
-def test_the_run_counts_the_rounds_that_used_one_and_starts_the_next_on_the_newest_checkpoint(
+def test_the_run_counts_the_rounds_that_used_one_and_starts_the_next_on_the_best(
     drawn: list[tuple[bool, bool, float]], limit: int
 ) -> None:
     run = run_of(limit)
@@ -113,10 +114,37 @@ def test_the_run_counts_the_rounds_that_used_one_and_starts_the_next_on_the_newe
     assert run.counted == sum(counted for counted, _, _ in drawn)
     start = run.start()
     assert start.number == run.counted + 1
-    expected = INPUT_REVISION if not drawn else RevisionRef.of_git_commit(f"c-{len(drawn)}")
-    assert start.base == expected
-    # the next round builds on the workstream that kept its base; the input has none
-    assert start.kept_by(start.base) == (f"flow:round#{len(drawn)}" if drawn else None)
+    # the next idea starts from the best (the input while no round beat it), never merely from
+    # the newest retained checkpoint, and says which round made it
+    best = run.leader()
+    if isinstance(best, Kept):
+        assert start.base == best.revision
+        made = start.retained_as(start.base)
+        assert made is not None
+        assert start.best_round == made.round_number
+        assert made.span == f"flow:round#{made.round_number}"
+    else:
+        assert start.base == INPUT_REVISION
+        assert start.best_round is None
+        assert start.retained_as(start.base) is None
+    # work in progress is what the previous round retained, which a continuation builds on
+    newest = None if not drawn else RevisionRef.of_git_commit(f"c-{len(drawn)}")
+    assert start.work_in_progress == newest
+
+
+def test_an_idea_starts_from_the_best_not_from_a_slower_idea_retained_after_it() -> None:
+    """Regression: the base followed the latest retained checkpoint, however slow."""
+    run = run_of(4)
+    run.finished(done(1, kept=closed(1, eligible=True, value=100.0)), "flow:round#1")
+    run.finished(done(2, kept=closed(2, eligible=True, value=40.0, passed=True)), "flow:round#2")
+    run.finished(done(3, kept=closed(3, eligible=False, value=10.0, passed=False)), "flow:round#3")
+
+    start = run.start()
+
+    assert start.base == RevisionRef.of_git_commit("c-1")
+    assert start.best_round == 1
+    assert [item.round_number for item in start.passed_ideas()] == [1, 2]
+    assert start.work_in_progress == RevisionRef.of_git_commit("c-3")
 
 
 @settings(max_examples=examples(pr=8, nightly=100))

@@ -42,7 +42,7 @@ _NOT_A_REPLY_FIELD: dict[tuple[str, str], tuple[int, str]] = {
         "a system prompt is rendered once per role before any run capability exists, so it "
         "has no `reply`; the judge's schema always offers the field",
     ),
-    ("src/vibesys/prompts/shared/_notices/regression.j2", "revert_to_round"): (
+    ("src/vibesys/prompts/shared/_notices/regression.j2", "base_round"): (
         2,
         "no strategy includes this notice; only the notice goldens render it, without a reply",
     ),

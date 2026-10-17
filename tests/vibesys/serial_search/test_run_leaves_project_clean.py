@@ -53,7 +53,6 @@ _OPTIONS: dict[str, JsonValue] = {
     "interface": "service",
     "max_rounds": 2,
     "max_retries_per_round": 1,
-    "official_eval_every": 1,
 }
 
 

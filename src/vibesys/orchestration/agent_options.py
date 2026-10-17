@@ -34,7 +34,7 @@ class AgentOrchestrationOptions(TaskInputs):
     max_rounds: Annotated[int, Field(gt=0)]
     max_retries_per_round: Annotated[int, Field(gt=0)]
     judge_every: Annotated[int, Field(gt=0)]
-    official_eval_every: Annotated[int, Field(gt=0)]
+    evaluation_budget: Annotated[int, Field(gt=0)] | None = None
     # Seconds to wait before asking an agent again after the provider connection dropped its
     # turn; doubles with each further drop of the same turn.
     turn_drop_backoff_seconds: Annotated[float, Field(gt=0, le=600)] = 5.0

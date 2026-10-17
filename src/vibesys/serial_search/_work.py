@@ -5,8 +5,7 @@ one paid turn at a time, until the attempt is over or its paid turns are spent. 
 does with the reply (a self-review, a judge, the trusted gates) is the search's; this is what
 they share. The workspace is a resource, so it always settles: with the assertion the attempt
 made, with a failure, or as cancelled when the operator stops the run. The round's workstream is
-named for the hypothesis as the work begins and gets its verdict from the settlement. A candidate
-the trusted gates did not measure gets as its gate what its agents measured of it (`label_taken`).
+named for the hypothesis as the work begins and gets its verdict from the settlement.
 """
 
 from __future__ import annotations
@@ -14,7 +13,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from vibesys.serial_search._measure import label_taken
 from vibesys.serial_search._spans import Settling, hypothesis_chosen, round_settled
 from vs_core.api.search import (
     Again,
@@ -114,7 +112,4 @@ async def _work(ctx: Flow, attempt: Attempting, *, room: Room, turn: Turn) -> Se
         await ctx.retry(ask, RetryPolicy(max_tries=room.paid_turns))
         revision, assessment = attempt.asserted()
         ctx.workspaces.keep(opened, revision, assessment)
-        if revision is not None and not attempt.readings:
-            # after the keep, so a stop while the evidence is read still settles what it keeps
-            await label_taken(ctx, opened, revision, attempt.baseline)
     return opened.settlement if isinstance(opened, Workspace) else None

@@ -90,8 +90,7 @@ class SingleAttempt:
             feedback=self.feedback,
             no_valid_reply=self.no_valid_reply,
             dominated_by_rounds=self.dominated_by,
-            official_due=self.official_reason is not None,
-            official_reason=self.official_reason,
+            official_due=rounds.official_reason(self.config.hypotheses, self.ledger) is not None,
         )
 
     # -- what a turn came to -----------------------------------------------------------------
@@ -112,6 +111,7 @@ class SingleAttempt:
     def replied(self, reply: SingleAgentRoundResponse, revision: RevisionRef | None) -> Next:
         """Judge a valid reply: the Pareto guard, the candidate, then whether the gates are due."""
         hypotheses = self.config.hypotheses
+        self.readings = ()  # a reading is of the candidate it measured, never of a later one
         conflict = rounds.pareto_conflict(hypotheses, self.ledger, reply)
         passing = reply.verdict is Verdict.PASS and conflict is None
         guarded = reply
@@ -133,12 +133,7 @@ class SingleAttempt:
             self.no_valid_reply = "the implementer retained no changed candidate"
             self.feedback = "retained no changed candidate"
             return Next.AGAIN
-        reason = rounds.official_reason(
-            hypotheses,
-            self.ledger,
-            round_number=self.number,
-            requested=self.plan.request_official_evaluation,
-        )
+        reason = rounds.official_reason(hypotheses, self.ledger)
         if reason is None or not self.terms.measured:
             self.passed = True
             self.official_reason = None
@@ -195,6 +190,11 @@ class SingleAttempt:
     def turned_down(self) -> bool:
         """Whether the round's own checks turned its work down (`serial_search.turned_down`)."""
         return serial.turned_down(self.finished(), unsettled=UNSETTLED)
+
+    def reported(self) -> tuple[str | None, str] | None:
+        """The implementer's own account: no outcome (single states none) and its summary."""
+        reply = self.response
+        return None if reply is None else (None, reply.summary)
 
     def asserted(self) -> tuple[RevisionRef | None, Assessment]:
         """What the workspace settles with."""

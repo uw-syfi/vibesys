@@ -25,6 +25,7 @@ from vibesys.serial_search.api import (
     Bottleneck,
     FrontierRow,
     LastProfile,
+    PassedIdea,
     PendingClaim,
     PlanPrompt,
     PlanTemplate,
@@ -48,9 +49,20 @@ _PLAN = st.builds(
     round_number=st.integers(1, 5),
     max_rounds=st.integers(5, 9),
     plateau_warning=st.none() | _TEXT,
-    provisional_candidates=st.integers(0, 3),
-    official_eval_every=st.integers(1, 3),
-    official_cadence_due=st.booleans(),
+    evaluation_budget=st.none() | st.integers(1, 3),
+    evaluations_spent=st.integers(0, 3),
+    input_value=st.none() | st.floats(0, 1e6),
+    passed=st.lists(
+        st.builds(
+            PassedIdea,
+            round_number=st.integers(1, 5),
+            idea=_TEXT,
+            value=st.none() | st.floats(0, 1e6),
+            unit=st.none() | _TEXT,
+            best=st.booleans(),
+        ),
+        max_size=3,
+    ).map(tuple),
     benchmark_enabled=st.booleans(),
     history=st.lists(
         st.builds(
@@ -128,7 +140,6 @@ _ROUND = st.builds(
     no_valid_reply=st.none() | _TEXT,
     dominated_by_rounds=st.lists(st.integers(1, 5), max_size=2).map(tuple),
     official_due=st.booleans(),
-    official_reason=st.none() | _TEXT,
 )
 
 
@@ -160,6 +171,17 @@ def test_the_plan_prompt_renders_for_every_context(context: PlanPrompt) -> None:
         assert f"`{item.id}` {item.kind.value}" in text
         assert f"{item.status.value}: {item.title}" in text
     assert ("Roadmap: empty." in text) == (not context.roadmap)
+    # the passed ideas are listed with their numbers, and the best is named as the default base
+    for idea in context.passed:
+        assert f"idea {idea.round_number}, {idea.idea}" in text
+    assert ("No idea has passed yet." in text) == (not context.passed)
+    best = [idea for idea in context.passed if idea.best]
+    assert ("(best)" in text) == bool(best)
+    if best:
+        assert f"starts from the current best, idea {best[0].round_number}" in text
+    else:
+        assert "starts from the input" in text
+    assert ("evaluation budget" in text) == (context.evaluation_budget is not None)
 
 
 @settings(max_examples=examples(pr=8, nightly=100))

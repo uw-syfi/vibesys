@@ -1,11 +1,12 @@
 """The run-scoped steps that design a hypothesis, shared by the serial searches.
 
 A new hypothesis starts before any candidate does. In the profile-guided preset the configured
-attribution command runs first, in a throwaway workspace holding the revision, and its ranked
-components steer the designer. The designer is shown the run's roadmap and answers with a
-plan, which may change roadmap items: the ledger may refuse the plan, or the roadmap the change,
-in which case it is asked once more with the reason. An accepted change is put on the roadmap
-before the hypothesis starts. What a search does between attribution and the plan (multi routes
+attribution command runs first, in a throwaway workspace holding the best revision, and its
+ranked components steer the designer. The designer is shown the run's roadmap and the ideas that
+passed, and answers with a plan, which may name the base to start from (omitted: the best) and
+may change roadmap items: the ledger may refuse the plan (a base that is neither the input nor a
+passed idea), or the roadmap the change, in which case it is asked once more with the reason. An
+accepted change is put on the roadmap before the hypothesis starts. What a search does between attribution and the plan (multi routes
 and profiles) is its own.
 """
 
@@ -24,7 +25,7 @@ from vibesys.serial_search._attribution import (
     focus_policy,
 )
 from vibesys.serial_search._ledger import LedgerJson
-from vibesys.serial_search._plans import accept_plan, base_commit, revision_of
+from vibesys.serial_search._plans import accept_plan, base_commit
 from vibesys.serial_search._prompts import PlanCorrection, PlanPrompt, correction_of, plan_prompt
 from vibesys.serial_search._roadmap import RoadmapUnavailable, put_roadmap, read_roadmap
 from vibesys.serial_search._roles import ORCHESTRATOR
@@ -61,6 +62,7 @@ class AcceptedPlan(Value):
 class Designed(Value):
     """A hypothesis designed for the round: the ledger that started it, its plan and its base.
 
+    ``base`` is the code the idea starts from: the plan's own choice, else the best idea so far.
     ``planned_by`` is the orchestrator agent that planned it, whose plan starts the implementer.
     """
 
@@ -110,7 +112,7 @@ async def ask_plan(
     *,
     hypotheses: HypothesisConfig,
     ledger: rounds.Ledger,
-    number: int,
+    start: RoundStart,
 ) -> AcceptedPlan | NoDesign:
     """Ask the designer for a plan; when the ledger or the roadmap refuses it, ask again.
 
@@ -121,7 +123,7 @@ async def ask_plan(
     for _ in range(1 + PLAN_CORRECTIONS):
         match await planner.turn(asked, label=turn_label(planner)):
             case TurnFinished(reply=OrchestratorPlan() as reply, invocation=turn):
-                accepted = accept_plan(hypotheses, ledger, reply, round_number=number)
+                accepted = accept_plan(hypotheses, ledger, reply, start=start)
                 if isinstance(accepted, OrchestratorPlan):
                     refused = roadmap_problem(prompt.roadmap, accepted.roadmap)
                     if refused is None:
@@ -153,9 +155,9 @@ async def design(
 ) -> Designed | NoDesign:
     """Design a new hypothesis for the round: attribution, the search's own advice, the plan.
 
-    The ledger returned has the hypothesis started in it; its base is the revision the ledger
-    chose to build on (the newest checkpoint, or a frontier parent the plan reverts to). The
-    round's workstream is labelled while it designs, and rejected when no design comes of it.
+    The ledger returned has the hypothesis started in it, on the base the plan named or else the
+    best idea so far. The round's workstream is labelled while it designs, and failed when no
+    design comes of it.
     """
     round_begun(ctx, start)
     designed = await _design(
@@ -193,7 +195,7 @@ async def _design(
         ledger,
         rounds.planning(hypotheses, ledger, start.number),
         focus_of(ledger, focus_policy(attribution)),
-        base=start.base,
+        start=start,
         benchmark_enabled="benchmark" in terms.measured,
         last_profile=profile,
         roadmap=roadmap,
@@ -204,25 +206,24 @@ async def _design(
         prompt,
         hypotheses=hypotheses,
         ledger=ledger,
-        number=start.number,
+        start=start,
     )
     if isinstance(asked, NoDesign):
         return asked
     unwritten = await put_roadmap(ctx, tuple(asked.plan.roadmap))
     if unwritten is not None:
         return NoDesign(reason=unwritten.reason)
-    started_ledger, started = rounds.start(
+    base = base_commit(asked.plan, start, input_revision=ctx.facts.baseline)
+    started_ledger, _ = rounds.start(
         hypotheses,
         ledger,
         asked.plan,
         round_number=start.number,
-        current_commit=start.base.revision_id.root,
-        input_baseline=ctx.facts.baseline.revision_id.root,
+        parent=rounds.Parent(base.round, base.revision.revision_id.root),
     )
-    base = revision_of(base_commit(started), ctx.facts.baseline)
     return Designed(
         ledger=LedgerJson.of(started_ledger),
         plan=asked.plan,
-        base=base,
+        base=base.revision,
         planned_by=orchestrator.agent,
     )

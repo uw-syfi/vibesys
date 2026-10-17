@@ -44,6 +44,20 @@ class RoundRow(Value):
     commit: str | None = None
 
 
+class PassedIdea(Value):
+    """An idea that passed, as the designer is shown the bases it may choose.
+
+    ``value`` is what the trusted gates measured of its code; ``best`` marks the best passed
+    idea so far, which a plan that names no base starts from.
+    """
+
+    round_number: int = Field(gt=0)
+    idea: str
+    value: float | None = None
+    unit: str | None = None
+    best: bool = False
+
+
 class FrontierRow(Value):
     """A trusted point on the noise-aware Pareto frontier."""
 
@@ -88,9 +102,12 @@ class PlanEvidence(Value):
     round_number: int = Field(gt=0)
     max_rounds: int = Field(gt=0)
     plateau_warning: str | None = None
-    provisional_candidates: int = Field(default=0, ge=0)
-    official_eval_every: int = Field(default=1, gt=0)
-    official_cadence_due: bool = False
+    evaluation_budget: int | None = Field(default=None, gt=0)
+    evaluations_spent: int = Field(default=0, ge=0)
+    passed: tuple[PassedIdea, ...] = ()
+    """The ideas that passed, oldest first: each is a base a plan may name."""
+    input_value: float | None = None
+    """What the trusted gates measured of the input; None when it was not measured."""
     benchmark_enabled: bool = True
     history: tuple[RoundRow, ...] = ()
     older_rounds: int = Field(default=0, ge=0)
@@ -144,9 +161,8 @@ def plan_evidence(
         round_number=planning.round_number,
         max_rounds=config.max_rounds,
         plateau_warning=planning.plateau_warning,
-        provisional_candidates=planning.provisional_candidates,
-        official_eval_every=config.official_eval_every,
-        official_cadence_due=planning.provisional_candidates + 1 >= config.official_eval_every,
+        evaluation_budget=config.evaluation_budget,
+        evaluations_spent=planning.evaluations_spent,
         history=tuple(_row(item) for item in records[-_HISTORY_ROWS:]),
         older_rounds=max(len(records) - _HISTORY_ROWS, 0),
         frontier=tuple(

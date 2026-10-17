@@ -335,7 +335,7 @@ def _agent_configuration(
         max_rounds=max_rounds,
         max_retries_per_round=4,
         judge_every=2,
-        official_eval_every=5,
+        evaluation_budget=5,
         operator_constraints=("Preserve the ABI.",),
         profile_guided=profile_guided,
     )
@@ -1757,7 +1757,7 @@ def test_agent_resume_restores_its_configuration(
 
     assert args.max_rounds == 7
     assert args.max_retries_per_round == 4
-    assert args.official_eval_every == 5
+    assert args.evaluation_budget == 5
     assert args.inner_loop == "single-agent"
     assert args.interface == "service"
     assert args.constraint == ["Preserve the ABI."]
@@ -2051,9 +2051,9 @@ def test_resume_rejects_changes_to_immutable_configuration(
     monkeypatch.chdir(project)
 
     with pytest.raises(ConfigurationError) as exc:
-        parse_cli_invocation(["--resume", run_id, "--official-eval-every", "3"])
+        parse_cli_invocation(["--resume", run_id, "--evaluation-budget", "3"])
     assert exc.value.diagnostic.code == "project_resume_configuration_mismatch"
-    assert "official_eval_every" in exc.value.diagnostic.message
+    assert "evaluation_budget" in exc.value.diagnostic.message
 
 
 def _write_unsupported_schema_run(project: Path, run_id: str) -> None:

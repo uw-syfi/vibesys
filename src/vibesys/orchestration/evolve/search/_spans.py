@@ -3,7 +3,7 @@
 A child is a workstream: it is named for its slot and labelled with the revision it builds on
 and the round (the cold start or generation) that runs it, and its idea is the mutator's summary
 once the mutator gave one; it is linked to the workstream that kept the revision it builds on,
-and accepted (naming the revision it kept) or rejected by how its workspace settled. Its
+and passed (naming the revision it kept) or failed by how its workspace settled. Its
 turns are agent turns (``turn_label``) and its trusted measurement is its gate (`_measure`).
 Every label goes through ``ctx.label``; nothing here builds a projection.
 """
@@ -11,9 +11,9 @@ Every label goes through ``ctx.label``; nothing here builds a projection.
 from vibesys.candidates.api import turned_down
 from vibesys.orchestration.evolve.search._values import ChildStart, Closing, Failure
 from vibesys.search_spans.api import (
-    ACCEPTED,
     BUILDS_ON,
-    REJECTED,
+    FAILED,
+    PASSED,
     TURNED_DOWN,
     WORKSTREAM,
     WorkstreamAttrs,
@@ -21,7 +21,7 @@ from vibesys.search_spans.api import (
 from vs_core.api.search import Flow, RevisionRef, SpanId, SpanLink
 
 NOT_PASSED = "not_passed"
-"""Why a child that left no failure is rejected: it did not pass its review or its gates."""
+"""Why a child that left no failure failed: it did not pass its review or its gates."""
 
 
 def title_of(start: ChildStart) -> str:
@@ -54,7 +54,7 @@ def mutated(ctx: Flow, start: ChildStart, closing: Closing) -> None:
 
 def child_refused(ctx: Flow, failure: Failure) -> None:
     """Reject the child's workstream: it never got a workspace, or its parent did not verify."""
-    ctx.label(WORKSTREAM, verdict=REJECTED, reason=failure.kind.value)
+    ctx.label(WORKSTREAM, verdict=FAILED, reason=failure.kind.value)
 
 
 def child_settled(ctx: Flow, start: ChildStart, closing: Closing, *, retained: bool) -> None:
@@ -62,18 +62,18 @@ def child_settled(ctx: Flow, start: ChildStart, closing: Closing, *, retained: b
 
     A workspace keeps a candidate, or a cold start's work in progress the next one repairs. A
     child its own checks turned down (`turned_down`: its review or a trusted gate rejected it)
-    is rejected even when its code is kept, and then names the revision kept.
+    failed even when its code is kept, and then names the revision kept.
     """
     if retained:
         attrs = _attrs(start, closing.summary, closing.candidate)
         if turned_down(closing, unsettled=frozenset()):
-            ctx.label(WORKSTREAM, attrs=attrs, verdict=REJECTED, reason=TURNED_DOWN)
+            ctx.label(WORKSTREAM, attrs=attrs, verdict=FAILED, reason=TURNED_DOWN)
             return
-        ctx.label(WORKSTREAM, attrs=attrs, verdict=ACCEPTED)
+        ctx.label(WORKSTREAM, attrs=attrs, verdict=PASSED)
         return
     reason = NOT_PASSED if closing.cause is None else closing.cause.kind.value
     attrs = _attrs(start, closing.summary)
-    ctx.label(WORKSTREAM, attrs=attrs, verdict=REJECTED, reason=reason)
+    ctx.label(WORKSTREAM, attrs=attrs, verdict=FAILED, reason=reason)
 
 
 def builds_on(ctx: Flow, child: SpanId | None, parent: SpanId | None) -> None:

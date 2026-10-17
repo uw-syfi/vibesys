@@ -778,14 +778,14 @@ def _build_agent_parser() -> _RunArgumentParser:
         ),
     )
     parser.add_argument(
-        "--official-eval-every",
+        "--evaluation-budget",
         type=int,
-        default=3,
+        default=None,
         metavar="N",
         help=(
-            "Run configured framework-owned accuracy/benchmark gates every N "
-            "accepted candidate checkpoints; orchestrator requests and the final "
-            "round run them immediately (default: 3)."
+            "Measure at most N ideas with the configured framework-owned "
+            "accuracy/benchmark gates. Every idea that passes review is measured "
+            "while the budget lasts (default: unbounded)."
         ),
     )
     _add_modality_argument(parser)

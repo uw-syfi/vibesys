@@ -277,9 +277,7 @@ def test_the_judge_is_asked_exactly_when_the_review_cadence_says(
     *, restarting: bool, judge_every: int, outcomes: list[str]
 ) -> None:
     """A round is reviewed at the cadence, in the final round, or on a nominated candidate."""
-    host = start(
-        config(max_rounds=3, judge_every=judge_every, official_eval_every=9), restarting=restarting
-    )
+    host = start(config(max_rounds=3, judge_every=judge_every), restarting=restarting)
     for number, outcome in enumerate(outcomes, start=1):
         design(host, f"h{number}")
         host.drain_until_turn(IMPLEMENTER)
@@ -303,7 +301,7 @@ def test_the_judge_is_asked_exactly_when_the_review_cadence_says(
 
 @MODES
 def test_a_round_whose_review_was_deferred_is_never_a_winner(*, restarting: bool) -> None:
-    host = start(config(max_rounds=2, judge_every=2, official_eval_every=9), restarting=restarting)
+    host = start(config(max_rounds=2, judge_every=2), restarting=restarting)
     design(host, "h1")
     host.drain_until_turn(IMPLEMENTER)
     host.run.reply(
