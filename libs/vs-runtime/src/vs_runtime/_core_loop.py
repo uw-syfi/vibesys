@@ -33,6 +33,7 @@ from vs_core.api import (
     RequestId,
     RequestPhase,
     RequestRecord,
+    RunControlEvent,
     RunEnvelope,
     SearchDriver,
     SearchHost,
@@ -720,7 +721,11 @@ class CoreRuntime[S: StrategyState]:
         The exceptions are an executor's observation and the owner events committed
         with it: the effect already ran and nobody redelivers them, so a rejection
         halts the shell with ``ObservationRejectedError`` or
-        ``OwnerEventRejectedError`` instead of losing the result.
+        ``OwnerEventRejectedError`` instead of losing the result. An operator's control
+        (a ``RunControlEvent`` nobody executed) that core refuses is dropped and the loop
+        goes on: the run's state may have moved since the control bridge judged it (a
+        decision committed first closed the run), and the bridge sees in the committed state
+        that core does not hold it and answers the operator. Any other rejected input raises.
         """
         self._require_active()
         if not self._queue:
@@ -743,6 +748,8 @@ class CoreRuntime[S: StrategyState]:
                     return True
                 self._halted = True
                 raise OwnerEventRejectedError(item.event, error) from error
+            if isinstance(item.event, RunControlEvent):
+                return True
             raise
         return True
 

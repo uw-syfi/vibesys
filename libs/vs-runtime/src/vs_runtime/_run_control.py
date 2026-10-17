@@ -221,15 +221,25 @@ class RunControlChannel(Protocol):
         """Whether the run's latest resume asked for the fallback, taken or not."""
         ...
 
-    def seed(self, pause: RunPause | None) -> None:
+    def capacity_wait_stands(self) -> bool:
+        """Whether the operator's wait for capacity stands for the next quota stop.
+
+        Only a restart leaves one (:meth:`seed`); the next turn that parks on a capacity
+        limit takes it, and any resume, operator pause or stop ends it.
+        """
+        ...
+
+    def seed(self, pause: RunPause | None, *, capacity_wait_stands: bool) -> None:
         """Start from the pause core recorded before a restart (``vs_core.run_pause``).
 
         The operator's hold stays: the run stays paused until the operator resumes it. A
-        quota pause belonged to turns that did not survive the restart, so the run resumes
-        and a turn that stops on the limit again pauses it again with fresh facts. A capacity
-        wait the operator asked for resumes the run too, and the next turn stopped on a
-        capacity limit waits for capacity without asking the operator again. Call it once,
-        before any control.
+        capacity wait asked for under the hold is dropped, since no turn that could tell
+        when capacity returns survived; the operator ends the hold. A quota pause belonged
+        to turns that did not survive the restart, so the run resumes and a turn that stops
+        on the limit again pauses it again with fresh facts. The operator's wait for capacity
+        on a quota pause, or one standing (``vs_core.capacity_wait_stands``), stands: the
+        next turn stopped on a capacity limit waits for capacity without asking the operator
+        again. Call it once, before any control.
         """
         ...
 
@@ -480,6 +490,7 @@ class RuntimeRunControlChannel:
             self._resume_at = None
             self._requested_by["pause"] = control_id
             self._capacity_request = None
+            self._requested_by.pop("capacity", None)
             self._capacity_standing = False
             self._lock.notify_all()
 
@@ -527,6 +538,7 @@ class RuntimeRunControlChannel:
         self._resumed_by = cause
         self._resume_at = None
         self._capacity_request = None
+        self._requested_by.pop("capacity", None)
         # A fallback request answers the pause it ended; one no turn took is stale by now.
         self._fallback_requested = self._resumed_with_fallback = False
         self._capacity_standing = False
@@ -583,15 +595,18 @@ class RuntimeRunControlChannel:
         with self._lock:
             return self._resumed_with_fallback
 
-    def seed(self, pause: RunPause | None) -> None:
+    def capacity_wait_stands(self) -> bool:
+        """Whether a wait for capacity a restart kept still waits for the next quota stop."""
+        with self._lock:
+            return self._capacity_standing
+
+    def seed(self, pause: RunPause | None, *, capacity_wait_stands: bool) -> None:
         """Take the pause core recorded before this process started; see the protocol."""
         with self._lock:
-            if pause is None:
-                return
-            if pause.capacity_wait:
-                self._capacity_standing = True
-            elif pause.owner is PauseOwner.OPERATOR:
+            if pause is not None and pause.owner is PauseOwner.OPERATOR:
                 self._held = True
+            elif capacity_wait_stands or (pause is not None and pause.capacity_wait):
+                self._capacity_standing = True
 
     def request_stop(self, mode: StopMode, control_id: str | None = None) -> None:
         """Request that the run unwind at its next cooperative boundary, as ``mode`` says.
@@ -745,7 +760,9 @@ class RuntimeRunControlChannel:
             self._land_pause()
             waiting, self._capacity_standing = waiting or self._capacity_standing, False
             if waiting and self._paused and not self._stop_requested:
+                # The run asks for itself: no operator control names this request.
                 self._capacity_request = self._next_capacity_request()
+                self._requested_by.pop("capacity", None)
             while (
                 self._paused
                 and not self._stop_requested
@@ -810,6 +827,7 @@ class RuntimeRunControlChannel:
                 self._capacity_turns -= 1
             if not self._capacity_turns:
                 self._capacity_request = None
+                self._requested_by.pop("capacity", None)
             orphaned = (
                 self._quota_paused
                 and not (self._held or self._stop_requested)

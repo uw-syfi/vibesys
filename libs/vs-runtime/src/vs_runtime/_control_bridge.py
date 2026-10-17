@@ -35,8 +35,11 @@ from vs_core.api import (
     RunStatus,
     SessionInputReceived,
     StopMode,
+    capacity_wait_stands,
+    control_refusal,
     pause_after,
     run_pause,
+    stands_after,
 )
 from vs_decode.api import Unreadable, decode_json
 from vs_project.api import ProjectStateError
@@ -66,7 +69,7 @@ from vs_runtime._steer_delivery import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_core.api import CoreEvent, InputId, InputTarget, ResumeWhen
+    from vs_core.api import CoreEvent, InputId, InputTarget, ResumeWhen, RunState
     from vs_project.api import ControlInbox, InboxEntry
     from vs_runtime._operator_control import ControlRequest
     from vs_runtime._run_control import QueuedWithdraw, RunControlChannel
@@ -103,7 +106,12 @@ class RunControlBridge:
     operator paused stays paused across a restart.
 
     With an ``inbox``, each poll also applies the inbox's requests, in id order, each as one
-    control ``op-<control id>``; see the module docstring for how each applies once.
+    control ``op-<control id>``; see the module docstring for how each applies once. The
+    channel's stop and pause are recorded first, and again before each inbox request, so a
+    request is judged against the pause the run is in. Core's ``control_refusal`` alone
+    decides whether a pause or resume is accepted, asked of the run as this bridge has asked
+    core to record it; a refused inbox request is rejected with core's reason, and reaches
+    neither the channel nor core.
 
     ``control`` (by default the inbox's) is where operators submit controls; each poll tells
     it which ids core already records, so a control resent after a restart replays its ack
@@ -125,6 +133,7 @@ class RunControlBridge:
         self._inbox = inbox
         self._control = control if control is not None or inbox is None else inbox.control
         self._submitted: set[str] = set()
+        """Inbox requests emitted since the shell last committed; ``settled`` clears it."""
         # Inbox withdrawals submitted in this poll: one that ends nothing is set aside.
         self._inbox_withdrawals: set[str] = set()
         self._warned_damaged = False
@@ -133,10 +142,12 @@ class RunControlBridge:
         self._consumption = SteerConsumption()
         self._started = False
         self._pause: RunPause | None = None
-        """Core's pause at the first poll, folded with every pause control emitted since.
+        """Core's pause when it last committed, folded with every pause control emitted since.
 
         Emitted events may wait in the shell's queue past the next poll, so this, not the
         state a poll is given, is what the bridge has asked core to record."""
+        self._stands = False
+        """Whether the operator's wait for capacity stands (``capacity_wait_stands``), likewise."""
         self._stopped = False
         self._landed = False
 
@@ -165,7 +176,8 @@ class RunControlBridge:
             self._started = True
             self._channel.set_run_deadline(core.run.deadline_at)
             self._pause = run_pause(core.run)
-            self._channel.seed(self._pause)
+            self._stands = capacity_wait_stands(core.run)
+            self._channel.seed(self._pause, capacity_wait_stands=self._stands)
             self._count = len(core.run.controls)
             self._stopped = any(c.action == "stop" for c in core.run.controls)
         self._position = len(core.run.controls)
@@ -178,6 +190,8 @@ class RunControlBridge:
         withdrawals = self._channel.take_pending_withdrawals()
         events: list[CoreEvent] = list(unrecorded_steers(core, now_at))
         self._take_steers(core, now_at, events)
+        # The pause the run is in reaches core before any request is judged against it.
+        self._record_channel(core, now_at, events)
         if self._inbox is not None:
             # A damaged inbox (a symlinked or misplaced directory) leaves its requests waiting
             # and the run going on; reporting it to the operator is tracked in #3061.
@@ -194,8 +208,13 @@ class RunControlBridge:
         withdrawals += self._channel.take_pending_withdrawals()
         self._take_steers(core, now_at, events)
         self._apply_withdrawals(core, now_at, withdrawals, events)
+        self._record_channel(core, now_at, events)
+        return tuple(events)
+
+    def _record_channel(self, core: CoreState, now_at: float, events: list[CoreEvent]) -> None:
+        """Emit the stop, or the pause changes, the channel holds that core has not recorded."""
         if self._stopped:
-            return tuple(events)
+            return
         if self._channel.stop_requested():
             self._stopped = True
             by = self._channel.requested_by("stop")
@@ -203,24 +222,36 @@ class RunControlBridge:
                 core, now_at, _Change("stop", mode=self._channel.stop_mode(), control_id=by)
             )
             events += () if stop is None else (stop,)
-        else:
-            for change in self._pause_changes():
-                self._record_pause(core, now_at, change, events)
-        return tuple(events)
+            return
+        for change in self._pause_changes():
+            if self._record_pause(core, now_at, change, events) is not None:
+                # Core would refuse it (the run is finishing): the rest builds on it.
+                return
 
     def _pause_changes(self) -> list[_Change]:
         """The pause and resume controls that bring core's record of the pause to the channel's.
 
         The channel holds only its current pause, so changes between two polls that left
-        the pause as it was are not recorded: core only needs the pause the run is in.
+        the pause as it was are not recorded: core only needs the pause the run is in, and
+        whether the operator's wait for capacity stands. A control re-recording a pause the
+        operator already holds has no operator id: its id names the first record.
         """
         recorded, live = self._pause, self._channel.pause_state()
+        stands = self._channel.capacity_wait_stands()
         by = self._channel.requested_by("pause")
+        fallback = self._channel.resumed_with_fallback()
         if live is None:
-            if recorded is None:
+            if recorded is None and self._stands == stands:
                 return []
-            fallback = self._channel.resumed_with_fallback()
-            return [_Change("resume", when="now", fallback=fallback, control_id=by)]
+            return [
+                _Change(
+                    "resume",
+                    when="now",
+                    fallback=fallback,
+                    capacity_wait_stands=stands,
+                    control_id=by,
+                )
+            ]
         changes: list[_Change] = []
         if (
             recorded is not None
@@ -228,15 +259,16 @@ class RunControlBridge:
             and live.owner is not PauseOwner.OPERATOR
         ):
             # Only a resume lifts the operator's hold; a quota stop paused the run again since.
-            changes.append(_Change("resume", when="now", control_id=by))
+            changes.append(_Change("resume", when="now", fallback=fallback, control_id=by))
             recorded = None
         operator = live.owner is PauseOwner.OPERATOR
         if (
             recorded is None
-            or (operator and recorded.owner is not PauseOwner.OPERATOR)
-            or (operator and recorded.capacity_wait and not live.capacity_wait)
+            or recorded.owner is not live.owner
+            or (recorded.capacity_wait and not live.capacity_wait)
         ):
-            owner_id = by if operator else None
+            first = recorded is None or recorded.owner is not live.owner
+            owner_id = by if operator and first else None
             changes.append(_Change("pause", owner=live.owner, control_id=owner_id))
             recorded = RunPause(owner=live.owner)
         if live.capacity_wait and not recorded.capacity_wait:
@@ -246,11 +278,34 @@ class RunControlBridge:
 
     def _record_pause(
         self, core: CoreState, now_at: float, change: _Change, events: list[CoreEvent]
-    ) -> None:
-        """Emit one pause or resume control and fold it into the recorded pause."""
+    ) -> str | None:
+        """Emit one pause or resume control and fold it into the recorded pause.
+
+        Returns why core would refuse it, without emitting it, when core would.
+        """
+        pending = change.control(ControlId(root="pending"))
+        refusal = control_refusal(self._run_as_asked(core), pending)
+        if refusal is not None:
+            return refusal.detail
         control = self._event(core, now_at, change)
         events += () if control is None else (control,)
-        self._pause = pause_after(self._pause, change.control(ControlId(root="pending")))
+        self._pause = pause_after(self._pause, pending)
+        self._stands = stands_after(pending, stood=self._stands)
+        return None
+
+    def _run_as_asked(self, core: CoreState) -> RunState:
+        """The run as core will hold it once it records every control emitted so far.
+
+        Only the status differs from ``core``: a stop emitted closes the run, and the pause
+        controls emitted pause or resume it.
+        """
+        status = core.run.status
+        if status in (RunStatus.RUNNING, RunStatus.PAUSED):
+            if self._stopped:
+                status = RunStatus.CLOSING
+            else:
+                status = RunStatus.RUNNING if self._pause is None else RunStatus.PAUSED
+        return core.run.model_copy(update={"status": status})
 
     def _take_steers(self, core: CoreState, now_at: float, events: list[CoreEvent]) -> None:
         """Emit the queued steers, each under its control's id if it had one.
@@ -355,6 +410,8 @@ class RunControlBridge:
                     reason = "its control_id already named a different control"
                     inbox.requests.reject(entry.request_id, reason)
             elif entry.request_id not in self._submitted:
+                # Judged against the pause the run is in now, which core is asked to record.
+                self._record_channel(core, now_at, events)
                 reason = self._apply(inbox, entry, core, now_at, events)
                 if reason is None:
                     self._submitted.add(entry.request_id)
@@ -375,13 +432,10 @@ class RunControlBridge:
             return request
         identity = request.control_id
         match request:
-            case PauseRequest():
-                change = _Change("pause", owner=PauseOwner.OPERATOR, control_id=identity)
-                self._record_pause(core, now_at, change, events)
-            case ResumeRequest(when=when, fallback=fallback):
+            case PauseRequest() | ResumeRequest():
                 # Core records a capacity wait too, so the entry settles once core holds it.
-                change = _Change("resume", when=when, fallback=fallback, control_id=identity)
-                self._record_pause(core, now_at, change, events)
+                # ``_submitted_request`` asked core's rule first, so this is never refused.
+                self._record_pause(core, now_at, _pause_change(request), events)
             case StopRequest(mode=mode):
                 self._stopped = True
                 stop = self._event(core, now_at, _Change("stop", mode=mode, control_id=identity))
@@ -404,7 +458,7 @@ class RunControlBridge:
             return f"not a control request: {request.details()}"
         if request.control_id != entry.request_id:
             return f"its control_id {request.control_id!r} is not its name in the inbox"
-        refusal = _refusal(request, core, stopped=self._stopped)
+        refusal = self._refusal(request, core)
         if refusal is not None:
             return refusal
         ack = inbox.control.submit(request)
@@ -414,6 +468,30 @@ class RunControlBridge:
             return f"refused: {ack.reason.value}"
         return request
 
+    def _refusal(self, request: ControlRequest, core: CoreState) -> str | None:
+        """Why the run refuses ``request`` now, or None; refused requests never reach core.
+
+        Whether core takes a control is core's rule (``control_refusal``), asked of the run
+        as this bridge has asked core to record it. A steer's target must also resolve; a
+        withdrawal is refused here only by the channel's own check (``request_refusal``),
+        which refuses only what no later state could accept; the rest is checked at take.
+        """
+        if isinstance(request, SteerRequest):
+            target = steer_target(core, request.target)
+            if isinstance(target, TargetRefusal):
+                return target.reason
+        pending = ControlId(root="pending")
+        match request:
+            case StopRequest():
+                return None
+            case PauseRequest() | ResumeRequest():
+                check = _pause_change(request).control(pending)
+            case SteerRequest() | WithdrawRequest():
+                # Core takes a steer and a withdrawal under the same rule.
+                check = ControlInput(control_id=pending, action="steer")
+        refusal = control_refusal(self._run_as_asked(core), check)
+        return None if refusal is None else f"refused by the run: {refusal.detail}"
+
     def settled(self, core: CoreState, *, running: bool) -> None:
         """Report a pause once it has landed: core holds the run paused and nothing runs.
 
@@ -421,7 +499,22 @@ class RunControlBridge:
         a job poll) finishes first; ``running`` says one still is. The pause is reported once
         per stretch of committed ``PAUSED`` status, so the operator sees the run paused when
         it is, not only at an agent turn's end.
+
+        Call it once the shell has committed, or refused, every event the polls before it
+        emitted: what core holds is then what it recorded, so the bridge's record of the
+        pause starts again from it, and an inbox request core does not hold was refused at
+        commit (the run moved on since it was judged). The next poll applies such a request
+        again, which answers it with core's reason or applies it to the run as it is now.
         """
+        held = {control.control_id for control in core.run.controls}
+        for request_id in sorted(self._submitted):
+            if _identity(request_id) not in held:
+                _LOG.warning(
+                    "the run refused control %s when it committed; judging it again", request_id
+                )
+        self._submitted.clear()
+        self._pause = run_pause(core.run)
+        self._stands = capacity_wait_stands(core.run)
         if core.run.status != RunStatus.PAUSED:
             self._landed = False
         elif not running and not self._landed:
@@ -491,6 +584,7 @@ class _Change:
     owner: PauseOwner | None = None
     when: ResumeWhen | None = None
     fallback: bool = False
+    capacity_wait_stands: bool = False
 
     def control(self, identity: ControlId) -> ControlInput:
         """The control core records; a steer carries its text's digest, not the text."""
@@ -511,6 +605,7 @@ class _Change:
             owner=self.owner,
             when=self.when,
             fallback=self.fallback,
+            capacity_wait_stands=self.capacity_wait_stands,
         )
 
 
@@ -582,24 +677,13 @@ def _standing_now(core: CoreState, events: list[CoreEvent], withdraws: str) -> b
     )
 
 
-def _refusal(request: ControlRequest, core: CoreState, *, stopped: bool) -> str | None:
-    """Why core would refuse ``request`` now, or None; refused requests never reach core.
-
-    A withdrawal is refused here only by the channel's own check (``request_refusal``),
-    which refuses only what no later state could accept; the rest is checked at take.
-    """
-    if core.run.status == RunStatus.TERMINAL:
-        return "the run has ended"
-    if isinstance(request, SteerRequest):
-        target = steer_target(core, request.target)
-        return target.reason if isinstance(target, TargetRefusal) else None
-    if not isinstance(request, (PauseRequest, ResumeRequest)):
-        return None
-    if stopped:
-        return "the run is stopping; it cannot pause or resume"
-    if core.run.status in (RunStatus.CLOSING, RunStatus.BLOCKED) or core.run.result is not None:
-        return "the run is finishing; it cannot pause or resume"
-    return None
+def _pause_change(request: PauseRequest | ResumeRequest) -> _Change:
+    """The control an operator's pause or resume records."""
+    if isinstance(request, PauseRequest):
+        return _Change("pause", owner=PauseOwner.OPERATOR, control_id=request.control_id)
+    return _Change(
+        "resume", when=request.when, fallback=request.fallback, control_id=request.control_id
+    )
 
 
 __all__ = ["OperatorInbox", "RunControlBridge", "SteerArtifacts"]

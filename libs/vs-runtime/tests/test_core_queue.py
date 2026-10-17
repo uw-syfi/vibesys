@@ -135,6 +135,29 @@ def test_mixed_queue_commits_input_occurrences_controls_and_wakes_in_order(
     assert restarted.record.envelope.core.sessions.inputs == before_inputs
 
 
+def test_an_operator_control_core_refuses_is_dropped_and_the_run_goes_on() -> None:
+    """Core refuses a control the bridge judged against an older state; the loop goes on.
+
+    Here a wait for capacity reaches a run that is not paused. The control is dropped: core
+    records nothing for it, and the control bridge answers the operator from the committed
+    state. Before, the refusal propagated out of the loop and ended the run.
+    """
+    shell = ticking_runtime(FakeStateStore())
+    shell.start("first", now_at=0, lease_duration=100)
+    before = shell.record
+    refused = ControlInput(
+        control_id=ControlId(root="op-w1"), action="resume", when="capacity_returns"
+    )
+    steer = ControlInput(control_id=ControlId(root="op-s1"), action="steer")
+    shell.submit(RunControlEvent(control=refused, now_at=1), now_at=1)
+    shell.submit(RunControlEvent(control=steer, now_at=2), now_at=2)
+
+    assert shell.advance()
+    assert shell.record == before
+    assert shell.advance()
+    assert [c.control_id.root for c in shell.record.envelope.core.run.controls] == ["op-s1"]
+
+
 def test_disk_reopen_loads_identical_complete_runtime_record(tmp_path: Path) -> None:
     project = Project.open(tmp_path)
     store = project.state_store("run")
