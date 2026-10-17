@@ -18,6 +18,7 @@ from vs_core.api import (
 )
 from vs_runtime.api.core import RunControlBridge
 from vs_runtime.api.infrastructure import (
+    PauseWake,
     RunControlTransition,
     RunControlTransitionKind,
     RunStopped,
@@ -174,7 +175,7 @@ def test_a_bounded_wait_that_times_out_resumes_the_run_itself() -> None:
 
     resumed = threads.run(lambda: control.wait_resumed(0.0))
 
-    assert resumed is False
+    assert resumed is PauseWake.ELAPSED
     assert not control.pause_requested()
     assert [transition.kind for transition in events.transitions] == [
         RunControlTransitionKind.PAUSE_REQUESTED,
@@ -189,7 +190,7 @@ def test_a_bounded_wait_that_something_resumed_reports_it() -> None:
     control.request_pause()
     control.resume()
 
-    assert threads.run(lambda: control.wait_resumed(0.0)) is True
+    assert threads.run(lambda: control.wait_resumed(0.0)) is PauseWake.RESUMED
 
 
 def test_a_stop_ends_a_bounded_wait_and_is_never_cleared_by_its_timeout() -> None:

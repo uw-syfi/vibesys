@@ -22,7 +22,7 @@ from vs_runtime._quota_policy import (
     describe_seconds,
     outage_policy_for,
 )
-from vs_runtime._run_control import CapacityWake
+from vs_runtime._run_control import CapacityWake, PauseWake
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -47,11 +47,12 @@ class CapacityTimer(Protocol):
         """Seconds since the epoch, the timeline provider reset times are on."""
         ...
 
-    def wait_resumed(self, seconds: float, turn: CapacityStops) -> bool:
-        """Park the paused run for at most ``seconds``; True when something resumed it first.
+    def wait_resumed(self, seconds: float, turn: CapacityStops) -> PauseWake:
+        """Arm the run's timed resume ``seconds`` from now and park until the run resumes.
 
-        A wait that times out, or that a cancellation of ``turn`` ends early, resumes the
-        run itself. A stop request raises.
+        As :meth:`RunControlChannel.wait_resumed`: the timed resume belongs to the run, so a
+        cancellation of ``turn`` ends only this turn's wait (``DETACHED``) and leaves the
+        pause and its timed resume in force for the rest of the run. A stop request raises.
         """
         ...
 
@@ -62,7 +63,7 @@ class CapacityTimer(Protocol):
 
         As :meth:`RunControlChannel.wait_for_capacity`: an elapsed wait resumes the run, and
         the operator ends it sooner by resuming, pausing, or asking again. A cancellation
-        of ``turn`` ends it as an elapsed wait.
+        of ``turn`` ends only this turn's wait (``DETACHED``), changing nothing else.
         """
         ...
 
@@ -94,8 +95,8 @@ class ControlCapacityTimer:
         """Seconds since the epoch."""
         return self._now()
 
-    def wait_resumed(self, seconds: float, turn: CapacityStops) -> bool:
-        """Park on the control channel for at most ``seconds``, or until ``turn`` is cancelled."""
+    def wait_resumed(self, seconds: float, turn: CapacityStops) -> PauseWake:
+        """Park on the control channel until the run resumes, or until ``turn`` is cancelled."""
         unsubscribe = turn.on_cancel(self._control.interrupt_waits)
         try:
             return self._control.wait_resumed(seconds, ended=lambda: turn.cancelled)
@@ -253,8 +254,9 @@ class PolicyCapacityGate:
     After a resume the same turn is sent again, so a run that waited and resumed
     on its provider has the same experiment state as one that never stopped. A
     stop request ends the wait by raising ``RunStopped``; a cancellation of the turn
-    ends it with the quota error (a timed wait then resumes the run as if it had
-    elapsed; a wait for the operator leaves the run paused for the operator).
+    ends that turn's wait with the quota error and nothing else: the pause, its timed
+    resume (which the channel owns), the operator's request to wait for capacity and the
+    other turns waiting stay as they were.
 
     A provider outage (``QuotaCondition.UNAVAILABLE``) is waited out under the
     outage policy instead (:func:`outage_policy_for`: the whole budget under ``pause``
@@ -341,12 +343,12 @@ class PolicyCapacityGate:
         self._events.quota_paused(error, plan, context)
         self._control.request_pause()
         if isinstance(decision, WaitFor):
-            by_operator = self._timer.wait_resumed(decision.seconds, stops)
+            wake = self._timer.wait_resumed(decision.seconds, stops)
         else:
-            by_operator = self._hold(error, stops, memory, context)
+            wake = self._hold(error, stops, memory, context)
         waited = self._timer.now() - now
         memory.quota_waited += waited
-        if stops.cancelled:
+        if wake is PauseWake.DETACHED or stops.cancelled:
             self._abandon(
                 error, f"the turn was cancelled after {describe_seconds(waited)}", context, waited
             )
@@ -355,7 +357,7 @@ class PolicyCapacityGate:
                 error, "operator", "the operator resumed with the fallback", context, waited
             )
         self._events.quota_resumed(
-            error, "operator" if by_operator else "wait_elapsed", waited, context
+            error, "operator" if wake is PauseWake.RESUMED else "wait_elapsed", waited, context
         )
 
     def _wait_out_outage(
@@ -429,14 +431,16 @@ class PolicyCapacityGate:
         stops: CapacityStops,
         memory: _TurnMemory,
         context: Attribution,
-    ) -> bool:
+    ) -> PauseWake:
         """Park for the operator, or until capacity returns when the operator asked to wait.
 
-        True when the operator ended the pause, False when capacity should be back. A turn
-        sent again after such a wait that stops on the limit again waits again by itself,
-        polling at the policy's retry interval when the provider gives no reset time. A
-        cancellation of the turn ends the park; the caller sees it on ``stops``.
+        ``RESUMED`` when the operator ended the pause, ``ELAPSED`` when capacity should be
+        back. A turn sent again after such a wait that stops on the limit again waits again
+        by itself, polling at the policy's retry interval when the provider gives no reset
+        time. A cancellation of the turn ends only its own park (``DETACHED``): the operator's
+        request stays in force for the other turns parked on a capacity limit.
         """
+        self._control.enter_capacity()
         try:
             request = self._timer.park_for_capacity(stops, waiting=memory.capacity_requested)
             while request is not None and not stops.cancelled:
@@ -448,17 +452,19 @@ class PolicyCapacityGate:
                 end = self._timer.wait_for_capacity(wait, request, stops)
                 match end.wake:
                     case CapacityWake.ELAPSED:
-                        return False
+                        return PauseWake.ELAPSED
                     case CapacityWake.RESUMED:
                         self._events.quota_wait_cancelled(error.provider, "resumed", context)
-                        return True
+                        return PauseWake.RESUMED
+                    case CapacityWake.DETACHED:
+                        return PauseWake.DETACHED
                     case CapacityWake.CANCELLED:
                         self._events.quota_wait_cancelled(error.provider, "paused", context)
                         memory.capacity_requested = False
                         request = self._timer.park_for_capacity(stops, waiting=False)
                     case CapacityWake.REARMED:
                         request = end.request
-            return True
+            return PauseWake.DETACHED if stops.cancelled else PauseWake.RESUMED
         finally:
             self._control.leave_capacity()
 

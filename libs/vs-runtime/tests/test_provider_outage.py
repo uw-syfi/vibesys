@@ -748,4 +748,4 @@ def test_a_cancel_ends_a_quota_wait_at_once(action: QuotaAction, cancel_after: f
     [(_, reason, _)] = run.sink.abandoned
     assert "cancelled" in reason
     assert run.sink.abandoned_waits == [pytest.approx(cancel_after)]
-    assert run.control.pause_requested() is (action is QuotaAction.PAUSE)
+    assert run.control.pause_requested()

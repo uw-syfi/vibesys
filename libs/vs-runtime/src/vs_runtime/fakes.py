@@ -48,7 +48,12 @@ if TYPE_CHECKING:
 
     from vs_agent.api import CapacityStops
     from vs_runtime._agent_lifecycle import AgentExecutionLifecycleEvent
-    from vs_runtime._run_control import CapacityWaitEnd, RunControlChannel, RunControlTransition
+    from vs_runtime._run_control import (
+        CapacityWaitEnd,
+        PauseWake,
+        RunControlChannel,
+        RunControlTransition,
+    )
     from vs_runtime._workspace_holds import WorkspaceHolds
     from vs_sandbox.api import CommandRunner, HostResource, ProjectPathPolicy
     from vs_sim.api import OutputSink, ProcessSpec, Threads
@@ -239,7 +244,7 @@ class FakeCapacityTimer:
             self._now += seconds
         return self._control.wait_for_capacity(0.0, request, ended=lambda: turn.cancelled)
 
-    def wait_resumed(self, seconds: float, turn: CapacityStops) -> bool:
+    def wait_resumed(self, seconds: float, turn: CapacityStops) -> PauseWake:
         """Spend ``seconds`` of virtual time, or fewer when the operator resumes first.
 
         A cancelled ``turn`` spends no time.
