@@ -44,6 +44,33 @@ def pause_after(pause: RunPause | None, control: ControlInput) -> RunPause | Non
             return pause
 
 
+def capacity_wait_stands(run: RunState) -> bool:
+    """Whether the operator's wait for capacity stands for the run's next quota stop.
+
+    A resume that keeps the wait (``ControlInput.capacity_wait_stands``, which a restart
+    records) makes it stand while the run runs; a quota stop leaves it standing until the
+    stopped turn takes it as the pause's own wait (a ``capacity_returns`` resume). Any other
+    resume, an operator pause or a stop ends it.
+    """
+    stands = False
+    for control in run.controls:
+        stands = stands_after(control, stood=stands)
+    return stands
+
+
+def stands_after(control: ControlInput, *, stood: bool) -> bool:
+    """Whether the wait stands after ``control``, given whether it ``stood`` before; one fold step."""
+    match control.action:
+        case "resume":
+            return control.capacity_wait_stands
+        case "pause" if control.owner is PauseOwner.QUOTA:
+            return stood
+        case "pause" | "stop":
+            return False
+        case _:
+            return stood
+
+
 def control_refusal(run: RunState, control: ControlInput) -> ContractError | None:
     """Why core refuses a new ``control`` for ``run`` as it stands, or None if it takes it.
 
@@ -55,7 +82,7 @@ def control_refusal(run: RunState, control: ControlInput) -> ContractError | Non
         return None
     if run.status == RunStatus.TERMINAL:
         return ContractError(("run", "status"), "terminal run rejects controls")
-    if control.action == "steer":
+    if control.action in ("steer", "withdraw"):
         return None
     if run.status in (RunStatus.CLOSING, RunStatus.BLOCKED) or run.result is not None:
         return ContractError(("run", "cleanup"), "cleanup must finish before pause or resume")
