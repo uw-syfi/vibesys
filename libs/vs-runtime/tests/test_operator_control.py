@@ -168,6 +168,21 @@ class _UnreviewedModel(_Strict):
     target: _Target
 
 
+class _Ignoring(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    action: Literal["f"] = "f"
+
+
+class _IgnoringTarget(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    item: str
+
+
+class _IgnoringNested(_Strict):
+    action: Literal["g"] = "g"
+    target: _IgnoringTarget
+
+
 _ALLOWED = TypeAdapter(Annotated[_Allowed | _Pad, Field(discriminator="action")])
 _UNSAFE = {
     "any": TypeAdapter(Annotated[_Untyped | _Pad, Field(discriminator="action")]),
@@ -177,7 +192,15 @@ _UNSAFE = {
     "unreviewed model": TypeAdapter(
         Annotated[_UnreviewedModel | _Pad, Field(discriminator="action")]
     ),
+    "member ignoring unknown keys": TypeAdapter(
+        Annotated[_Ignoring | _Pad, Field(discriminator="action")]
+    ),
+    "nested model ignoring unknown keys": TypeAdapter(
+        Annotated[_IgnoringNested | _Pad, Field(discriminator="action")]
+    ),
 }
+_UNSAFE_MODELS = frozenset({"_IgnoringTarget"})
+"""Allowed, so the nested case fails on its open keys, not on its being unreviewed."""
 
 
 def test_the_check_lists_integers_and_allowed_models_field_by_field() -> None:
@@ -196,7 +219,7 @@ def test_the_check_lists_integers_and_allowed_models_field_by_field() -> None:
 @pytest.mark.parametrize("case", sorted(_UNSAFE))
 def test_the_check_refuses_a_field_without_one_reviewed_type(case: str) -> None:
     with pytest.raises(UnsafeControlSchemaError):
-        control_schema_fields(_UNSAFE[case].json_schema())
+        control_schema_fields(_UNSAFE[case].json_schema(), models=_UNSAFE_MODELS)
 
 
 @dataclass

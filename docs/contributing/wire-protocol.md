@@ -192,7 +192,8 @@ keeps answered ids for the life of the run session only, so the TypeScript trans
 resend `command.control` after a dropped connection. The server turns `command.pause`,
 `command.resume`, `command.steer` and `command.stop` into the same request, named by their
 envelope's `request_id`, and applies all five through one `RunControl.submit`, so they ack
-alike; a refusal carries a typed reason that the server answers with its own protocol error. It
+alike. A single-action command that reuses a `request_id` with a different command is therefore
+a different control under a used id, and also answers `control_id_conflict`. A refusal carries a typed reason that the server answers with its own protocol error. It
 is a new request type, so a client discovers it by `WP-CAPABILITY-PROBE`.
 
 ## Framing and connection decisions

@@ -27,6 +27,7 @@ from server.api.service import (
     CapacityWaitUnavailableError,
     ControlIdConflictError,
     ControlProtocolCommand,
+    RunControlSlot,
     control_request,
 )
 from server.events import (
@@ -36,11 +37,24 @@ from server.events import (
     RunStatusChangedData,
 )
 from server.run_lifecycle import RunStatus
-from vibesys.api import PauseRequest, RunStopped, SteerRequest
+from vibesys.api import (
+    ControlAck,
+    ControlRequest,
+    ControlStatus,
+    PauseRequest,
+    RefusalReason,
+    RunStopped,
+    SteerRequest,
+)
 from vibesys.events import CoreEventType
 from vibesys.events import EventStatus as CoreEventStatus
 from vs_core.api import StopMode
-from vs_sim.api.testing import ManualClock
+from vs_runtime.api.infrastructure import (
+    ChannelRunControl,
+    RunControlTransition,
+    create_run_control_channel,
+)
+from vs_sim.api.testing import ManualClock, SimThreads
 
 
 def _status_changes(parts: ServerParts) -> list[tuple[RunStatus, RunStatus]]:
@@ -507,3 +521,36 @@ def test_a_resent_control_is_one_control_and_a_reused_id_is_a_conflict(tmp_path:
     assert conflict.value.diagnostic_code == "control_id_conflict"
     assert parts.control.take_pending_steer() == ["prefer latency"]
     assert not parts.control.pause_requested()
+
+
+def _ignore(transition: RunControlTransition) -> None:
+    del transition
+
+
+class _RefusingControl(ChannelRunControl):
+    """The run's control, refusing every request for one reason."""
+
+    def __init__(self, reason: RefusalReason, threads: SimThreads) -> None:
+        super().__init__(create_run_control_channel(_ignore, threads=threads), threads)
+        self.reason = reason
+
+    def submit(self, request: ControlRequest) -> ControlAck:
+        return ControlAck(
+            control_id=request.control_id,
+            action=request.action,
+            status=ControlStatus.REFUSED,
+            reason=self.reason,
+        )
+
+
+@pytest.mark.parametrize("reason", list(RefusalReason))
+def test_every_refusal_reason_answers_with_a_protocol_error(reason: RefusalReason) -> None:
+    """A new refusal reason without its protocol error fails here, not as a server crash."""
+    threads = SimThreads()
+    slot = RunControlSlot(threads.condition(threads.rlock()))
+    slot.install(_RefusingControl(reason, threads))
+
+    with pytest.raises(RuntimeError) as refused:
+        slot.execute(PauseCommand(timestamp=REQUEST_TIME))
+
+    assert isinstance(getattr(refused.value, "diagnostic_code", None), str)

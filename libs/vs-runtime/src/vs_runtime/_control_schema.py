@@ -44,7 +44,9 @@ def _model_fields(
     model: dict[str, Any], definitions: dict[str, Any], models: frozenset[str], *, prefix: str
 ) -> list[tuple[str, str]]:
     found: list[tuple[str, str]] = []
-    if model.get("additionalProperties", False) is not False:
+    # Pydantic writes ``additionalProperties: false`` only for ``extra="forbid"``; a model that
+    # ignores or allows unknown keys omits it, so only an explicit false is closed.
+    if model.get("additionalProperties") is not False:
         message = f"{prefix or 'a member'} accepts keys it does not declare"
         raise UnsafeControlSchemaError(message)
     for name, spec in model.get("properties", {}).items():
