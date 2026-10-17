@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import sys
 from collections import deque
 from dataclasses import dataclass, field
@@ -76,6 +77,8 @@ if TYPE_CHECKING:
     from vs_core.api import OpenWait, Request
     from vs_project.api import Project
     from vs_runtime._core_requests import ExecutionOutcome
+
+_LOG = logging.getLogger(__name__)
 
 
 class CoreTransitions(Protocol):
@@ -749,6 +752,13 @@ class CoreRuntime[S: StrategyState]:
                 self._halted = True
                 raise OwnerEventRejectedError(item.event, error) from error
             if isinstance(item.event, RunControlEvent):
+                control = item.event.control
+                _LOG.warning(
+                    "the run refused operator control %s (%s): %s",
+                    control.control_id.root,
+                    control.action,
+                    error,
+                )
                 return True
             raise
         return True
