@@ -103,8 +103,6 @@ class EvaluationInputs:
     """The task declares a candidate build, measured before its other gates."""
     dedicated_measurement_resources: bool = False
     """The trusted executor runs each measurement on hosts it holds alone."""
-    reuse_agent_run: bool = False
-    """The task opts in to reusing the agent's run for the official measurement."""
 
 
 def evaluation_inputs(run: ResolvedRun) -> EvaluationInputs:
@@ -134,7 +132,6 @@ def evaluation_inputs(run: ResolvedRun) -> EvaluationInputs:
         benchmark_needs_accuracy=EvidenceKind.BENCHMARK in plan.accuracy_gated,
         builds=plan.build is not None,
         dedicated_measurement_resources=run.environment.dedicated_measurement_resources,
-        reuse_agent_run=plan.reuse_agent_run,
     )
 
 

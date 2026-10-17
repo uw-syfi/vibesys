@@ -424,7 +424,7 @@ class ToyHost:
         evidence = tuple(
             core.EvidenceRef(
                 evidence_id=core.EvidenceId(root=f"{stage.stage_id}:{owned.submission_id.root}"),
-                kind=core.EvidenceKind.LOCAL_VALIDATION,
+                kind=core.EvidenceKind.BENCHMARK,
                 purpose=plan.purpose,
                 scope=owned.scope,
                 source_request=owned.submission_id,

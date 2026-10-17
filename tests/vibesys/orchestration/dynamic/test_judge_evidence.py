@@ -81,7 +81,7 @@ def test_the_judge_is_shown_each_trusted_evaluation_of_the_candidate_taken_in_it
     taken: list[EvidenceRef] = [
         evidence_ref(
             f"e{n}",
-            EvidenceKind.LOCAL_VALIDATION,
+            EvidenceKind.BENCHMARK,
             CANDIDATE if same else OTHER,
             scope=mine if own else foreign,
             purpose=purpose,

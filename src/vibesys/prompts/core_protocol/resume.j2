@@ -27,6 +27,18 @@ workspace edits. These are the trusted results; report them as measured:
 
 {{ trusted_evaluations(evidence) }}
 {% endif %}
+{% if comparisons %}
+
+The framework compared each measured candidate with its base, from every run it holds of
+each. These are its numbers, not claims; report them as measured:
+{% for c in comparisons %}
+- `{{ rev(c.candidate) }}` against base `{{ rev(c.base) }}`: **{{ c.verdict.value | replace('_', ' ') }}**. {{ c.metric }} {{ '%.6g' | format(c.candidate_value) }}{% if c.unit %} {{ c.unit }}{% endif %} over {{ c.candidate_samples }} run{{ '' if c.candidate_samples == 1 else 's' }}, base {{ '%.6g' | format(c.base_value) }}{% if c.unit %} {{ c.unit }}{% endif %} over {{ c.base_samples }} run{{ '' if c.base_samples == 1 else 's' }}; ratio {{ '%.4f' | format(c.ratio) }} with noise {{ '%.4f' | format(c.noise) }} (one standard error), where {{ 'higher' if c.direction == 'max' else 'lower' }} is better.
+{%- endfor %}
+
+`better` and `worse` mean the difference exceeds two noises in the metric's direction;
+`within noise` means this measurement cannot tell the candidate from its base. Another run
+of the same candidate content adds a sample and narrows the noise.
+{% endif %}
 {% if repeated_failure %}
 
 Repeated failure: {% if repeated_failure.reason.value == 'repeated-traceback' %}the last {{ repeated_failure.consecutive_failures }} trusted evaluations of your submissions (limit {{ repeated_failure.limit }}) failed with the same traceback{% if repeated_failure.traceback_signature %} ({{ repeated_failure.traceback_signature }}){% endif %}{% else %}the last {{ repeated_failure.consecutive_failures }} trusted benchmarks of your submissions (limit {{ repeated_failure.limit }}) failed to reach the required result{% if repeated_failure.failed_benchmark %}; the latest measured partial rate {{ repeated_failure.failed_benchmark.partial_rate }}, within the comparison interval {{ repeated_failure.failed_benchmark.rate_lower }} to {{ repeated_failure.failed_benchmark.rate_upper }}{% endif %}{% endif %}.

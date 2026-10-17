@@ -343,6 +343,7 @@ class SessionLifecycleRequests:
                     observation=observation,
                     output_schema=None if turn is None else turn.output_schema,
                     output_json=None if turn is None else turn.output_json,
+                    suspension=None if turn is None else turn.suspension,
                 ),
             )
         return ExecutionResult(

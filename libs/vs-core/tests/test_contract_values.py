@@ -172,20 +172,12 @@ PURPOSES = ("baseline", "local-validation", "official", "profile")
 
 
 @given(purpose=st.sampled_from(PURPOSES), kind=st.sampled_from(list(core.EvidenceKind)))
-def test_a_local_validation_record_is_never_correctness_or_benchmark_evidence(
+def test_a_framework_measurement_is_trusted_whoever_requested_it(
     purpose: str, kind: core.EvidenceKind
 ) -> None:
-    """An agent's own evaluation cannot sit beside the official record as a second proof."""
-    allowed = not (
-        purpose == "local-validation"
-        and kind in (core.EvidenceKind.CORRECTNESS, core.EvidenceKind.BENCHMARK)
-    )
+    """The purpose names who asked for a run; no purpose makes its records advice."""
     updates: dict[str, object] = {"purpose": purpose, "kind": kind}
-    if allowed:
-        assert evidence_row("e", updates=updates).purpose == purpose
-    else:
-        with pytest.raises(ValueError, match="local-validation"):
-            evidence_row("e", updates=updates)
+    assert evidence_row("e", updates=updates).purpose == purpose
 
 
 @given(
@@ -199,23 +191,19 @@ def test_a_local_validation_record_is_never_correctness_or_benchmark_evidence(
         max_size=5,
     )
 )
-def test_an_agent_record_beside_the_official_one_never_changes_the_accuracy_proof(
+def test_every_run_of_a_revision_counts_toward_its_accuracy_proof(
     rows: list[tuple[str, core.EvidenceKind, core.ObservationStatus, bool]],
 ) -> None:
-    """Records of every purpose and kind: the proof is the one successful CORRECTNESS row.
+    """Records of every purpose and kind: runs of one revision are samples of one measurement.
 
-    A record for another revision never counts, and neither does any row the contract
-    refuses, so an agent evaluation next to the official record cannot make it ambiguous.
+    The proof is the first successful CORRECTNESS row of the revision, whoever asked for it,
+    unless any of its CORRECTNESS runs failed: a revision that passed once and failed once
+    has no proof. A record for another revision never counts.
     """
     baseline = core.initial_state().run.facts.baseline
     elsewhere = baseline.model_copy(update={"digest": "elsewhere"})
     evidence: list[core.EvidenceRef] = []
     for index, (purpose, kind, status, same_revision) in enumerate(rows):
-        if purpose == "local-validation" and kind in (
-            core.EvidenceKind.CORRECTNESS,
-            core.EvidenceKind.BENCHMARK,
-        ):
-            continue
         updates: dict[str, object] = {
             "purpose": purpose,
             "kind": kind,
@@ -223,15 +211,15 @@ def test_an_agent_record_beside_the_official_one_never_changes_the_accuracy_proo
             "candidate": baseline if same_revision else elsewhere,
         }
         evidence.append(evidence_row(f"e{index}", request=f"r{index}", updates=updates))
-    qualifying = [
+    runs = [
         item
         for item in evidence
-        if item.candidate == baseline
-        and item.kind == core.EvidenceKind.CORRECTNESS
-        and item.status == core.ObservationStatus.SUCCEEDED
+        if item.candidate == baseline and item.kind == core.EvidenceKind.CORRECTNESS
     ]
+    passed = [item for item in runs if item.status == core.ObservationStatus.SUCCEEDED]
+    failed = any(item.status == core.ObservationStatus.FAILED for item in runs)
     state = core.EvaluationState(evidence=tuple(evidence))
-    assert state.accuracy_proof(baseline) == (qualifying[0] if len(qualifying) == 1 else None)
+    assert state.accuracy_proof(baseline) == (passed[0] if passed and not failed else None)
 
 
 @given(commit=COMMITS, other=COMMITS)

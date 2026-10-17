@@ -578,6 +578,7 @@ class _Ask:
             and any(job.by is WaitEnd.QUEUE_BUDGET for job in timeout.unfinished),
             evidence=authorization.evidence,
             repeated_failure=authorization.repeated_failure,
+            comparisons=authorization.comparisons,
         )
         template = self.role.exchanges.resume
         if template is None:

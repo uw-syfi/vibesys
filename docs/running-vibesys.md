@@ -209,40 +209,40 @@ unread = ["NOTES.md", "evidence/"]
 ```
 
 A commit that changes only these paths is the input an earlier run already
-measured, so the strategy's official measurement can reuse that run instead of
-submitting a second job. Each entry is a plain relative file or directory path,
-without wildcards.
+measured, so its runs count as samples of that input and the strategy's
+official measurement can reuse them instead of submitting another job. Each
+entry is a plain relative file or directory path, without wildcards.
 
-### Reusing the agent's own run
+### Measurements, samples and comparison with the base
 
-A task that declares `reuse_agent_run = true` under `[benchmark]` lets the
-strategy's official measurement of a candidate reuse the agent's own earlier
-evaluation of it. The official result then names the run it reused and carries
-that run's records. All of these must hold:
+Every measurement runs the task's gates through the run's executor on a committed
+revision, and is trusted whoever asked for it: the agent's evaluation tool, the
+strategy's final check, or a re-run. Each conclusive run of one measured input is
+a sample of one measurement, recorded with its commit, the measured-input digest,
+its base commit, the gates, the host, and whether the executor held the host alone
+(`dedicated_measurement_resources`; a Slurm executor declares it with that setting
+in its configuration, or with a bare `--exclusive` as the last node-sharing option
+in `sbatch_arguments`; `--exclusive=user`, `=mcs`, `=topo`, `--oversubscribe`, `--share` and
+`-s` share nodes and do not count). A host held alone lowers the noise; a shared host is
+recorded and its spread shows in the noise, but it is not refused.
 
-- The task opts in with `reuse_agent_run = true`. It defaults to `false`, and
-  both the official and the agent measurement plans must carry it. The
-  framework reads it from the project root at start, never from a candidate
-  tree, and changing it changes the measurement's identity.
-- The run is the scope's only admitted measurement run, of any input. If the
-  agent measured two inputs, none is reused.
-- It measured the same input (the commit, or a commit that differs only in
-  `workspace.unread` paths) with the same stages, execution budgets, queue
-  allowance and stage policy.
-- Both measurement plans have dedicated measurement resources: the executor
-  gives each job its GPUs and CPU cores alone. A Slurm executor declares this
-  with `dedicated_measurement_resources = true` in its configuration, or with a
-  bare `--exclusive` as the last node-sharing option in `sbatch_arguments`
-  (`--exclusive=user`, `--exclusive=mcs`, `--exclusive=topo`, `--oversubscribe`,
-  `--share` and `-s` share nodes and do not count).
-- It ended with a pass or a workload failure (the candidate's own failure). A
-  failure of the infrastructure, or an unclassified end, is never reused.
+Samples of one input are aggregated: nothing is picked among them and nothing is
+refused because there are several, so re-running an input until a run suits the
+agent gains nothing. The strategy's official measurement of an input the attempt
+already measured is answered from those samples, and runs afresh only when a
+comparison with the base is a close call that one more sample would narrow.
 
-Reuse is off by default because of optional stopping. An agent that can keep a
-lucky first run and re-measure an unlucky one makes the official score the
-better of its runs, which biases the score upward by up to about 0.4 standard
-deviations of the benchmark's run-to-run noise. Declare it only where that
-noise is small next to the differences the task cares about.
+An agent's evaluation is compared with its base, the revision its workspace
+started from. The base is measured once per (measured input, gates, host) and
+cached in the run's state, and measured again only when its samples are older
+than the task's `base_staleness` on the run clock (6 hours) or a close call earns
+it one more sample (a base holds at most two fresh samples). The
+comparison is the ratio of the candidate's mean over the base's mean, its noise,
+and a verdict: `better`, `within_noise` or `worse`. The noise is one standard
+error of the ratio, computed from the runs' relative spread (never below the
+task's declared `relative_noise`) and the sample counts; a verdict needs two
+noises. The agent's evaluation tool and the resumed turn report it, and the run's
+events carry it as `measurement_compared`.
 
 ## Start from an Example
 

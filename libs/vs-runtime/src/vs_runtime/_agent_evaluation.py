@@ -81,6 +81,7 @@ from vs_core.api import (
     AgentMeasurementRequested,
     AgentRejection,
     ArtifactRef,
+    Comparison,
     Continuation,
     ContinuationId,
     ContinuationPhase,
@@ -102,12 +103,14 @@ from vs_core.api import (
     SuspensionRefusal,
     Transition,
     Within,
+    latest_comparisons,
     suspension_refusal,
 )
 from vs_decode.api import Unreadable, decode_json
 from vs_evaluation.api import (
     RECEIPT_LINE,
     AgentEvaluationCall,
+    EvaluationComparison,
     EvaluationStageOutcome,
     RunStoppingReply,
     SocketFailure,
@@ -259,6 +262,39 @@ def _outcome(core: CoreState, request_id: RequestId) -> str | None:
     return None
 
 
+def _comparison_of(
+    core: CoreState, scope: Scope, request_id: RequestId
+) -> EvaluationComparison | None:
+    """The framework's comparison of a finished candidate with its base, or None while it has none.
+
+    Read from core's log of comparisons for the input the submission measured, so the agent is
+    told exactly what core recorded and replays on resume.
+    """
+    job = next((j for j in core.evaluation.jobs if j.submission_id == request_id), None)
+    measured = None if job is None else job.plan.measured_input
+    if measured is None:
+        return None
+    found = latest_comparisons(core.evaluation, scope, [measured])
+    return agent_comparison(found[-1]) if found else None
+
+
+def agent_comparison(comparison: Comparison) -> EvaluationComparison:
+    """One core comparison as the wire contract the agent reads (the one projection)."""
+    return EvaluationComparison(
+        metric=comparison.metric,
+        unit=comparison.unit,
+        direction=comparison.direction,
+        candidate_value=comparison.candidate_value,
+        base_value=comparison.base_value,
+        ratio=comparison.ratio,
+        noise=comparison.noise,
+        verdict=comparison.verdict.value,
+        base_commit=comparison.base.revision_id.root,
+        candidate_samples=comparison.candidate_samples,
+        base_samples=comparison.base_samples,
+    )
+
+
 def _read_frame(connection: Connection) -> bytes | None:
     """One line with its newline, or what came before the peer closed.
 
@@ -295,8 +331,6 @@ class AgentEvaluationPolicy:
     """Evidence kinds that count only if the accuracy stage passed: the task's trust rule."""
     dedicated_measurement_resources: bool = False
     """The run's executor gives each job its resources alone (``MeasurementRecipe``)."""
-    reuse_agent_run: bool = False
-    """The task opts in to reusing this run for its official measurement."""
     purpose: Literal["baseline", "local-validation", "official", "profile"] = "local-validation"
 
     @classmethod
@@ -319,7 +353,6 @@ class AgentEvaluationPolicy:
             accuracy_stage=recipe.accuracy_stage,
             accuracy_gated=recipe.accuracy_gated,
             dedicated_measurement_resources=recipe.dedicated_measurement_resources,
-            reuse_agent_run=recipe.reuse_agent_run,
             purpose=purpose,
         )
 
@@ -338,7 +371,6 @@ class AgentEvaluationPolicy:
             accuracy_stage=self.accuracy_stage,
             accuracy_gated=self.accuracy_gated,
             dedicated_measurement_resources=self.dedicated_measurement_resources,
-            reuse_agent_run=self.reuse_agent_run,
         )
 
     def plan(
@@ -793,6 +825,7 @@ class AgentEvaluationBridge:
             scoped = self._scoped(scope)
             revision = await self._revision(workspace, scoped)
             measured_input = await workspace.measured_input(revision)
+            base_input = await self._base_input(shell, scope, workspace)
             key = OwedKey(scope=scope, revision=revision, policy=self._policy_digest)
             owed = self._owed.find(key)
             charged = None if owed is None else self._charge_of(shell, owed)
@@ -812,6 +845,7 @@ class AgentEvaluationBridge:
                     ),
                     within=Within(limit=self._policy.measurement.budget()),
                     call_id=owed.call_id,
+                    base_input=base_input,
                 )
                 transition = self._admit(shell, event, now)
                 call = self._call_of(transition.state, owed.call_id)
@@ -843,6 +877,9 @@ class AgentEvaluationBridge:
                 EvaluationStageOutcome.of(self._recorded(call.request_id, item.evidence_id))
                 for item in own
             ),
+            comparison=None
+            if outcome is None
+            else _comparison_of(shell.admitted_core, call.scope, call.request_id),
         )
 
     def _recorded(self, request_id: RequestId, evidence_id: EvidenceId) -> TrustedEvidence:
@@ -854,6 +891,26 @@ class AgentEvaluationBridge:
             message = "core accepted evidence the evidence ledger never recorded"
             raise ContractError(("evidence",), message)
         return entry.evidence
+
+    @staticmethod
+    async def _base_input(
+        shell: AdmissionShell, scope: Scope, workspace: SnapshotWorkspace
+    ) -> str | None:
+        """What the evaluation reads at the attempt's own base revision; None without one.
+
+        Core knows the base (the revision the attempt's workspace was opened on); only the
+        runtime can digest what the evaluation reads there.
+        """
+        owner = next(
+            (
+                row
+                for row in shell.admitted_core.attempts.attempts
+                if row.attempt_id == scope.owner and row.generation == scope.generation
+            ),
+            None,
+        )
+        commit = None if owner is None else owner.workspace.base.git_commit
+        return None if commit is None else await workspace.measured_input(commit)
 
     @staticmethod
     def _call_of(state: CoreState, call_id: str) -> AgentCall:
