@@ -21,6 +21,7 @@ from vs_agent.cli_common import build_schema_hint
 from vs_agent.contracts import (
     DEFAULT_TURN_TIMEOUT_S,
     AgentOutputSchemaError,
+    AgentQuotaError,
     AgentTurnResult,
     AgentTurnTimeoutError,
     SteerOutcome,
@@ -127,6 +128,8 @@ class TurnEvents:
         self.exhausted: list[agentshim.RateLimitStatus] = []
         #: Why the turn in flight was stopped for its reply, or ``None``.
         self.breach: str | None = None
+        #: Whether the caller cancelled the turn in flight.
+        self.cancelled = False
         self._guard = ReplyGuard()
         self._stop: Callable[[], None] | None = None
         self._steers = steers
@@ -136,6 +139,7 @@ class TurnEvents:
         self.structured = structured
         self.exhausted = []
         self.breach = None
+        self.cancelled = False
         self._guard = ReplyGuard()
         self._stop = stop
 
@@ -207,8 +211,10 @@ class LaunchedSession:
         """Stop an in-flight turn by terminating the provider process.
 
         A turn waiting out a transient provider error stops waiting and raises
-        that error instead of retrying.
+        that error instead of retrying, as a plain failure: a cancelled turn is
+        never a capacity stop for the caller to wait out.
         """
+        self.events.cancelled = True
         self.session.interrupt()
 
     def adopt(self, session_id: str) -> bool:
@@ -375,9 +381,11 @@ def _run(
         classified = shim_translation.failure_from(
             exc, provider=live.profile.name, exhausted=live.events.exhausted
         )
-        if classified is not None:
-            raise classified from exc
-        raise
+        if classified is None or (
+            live.events.cancelled and isinstance(classified, AgentQuotaError)
+        ):
+            raise
+        raise classified from exc
 
 
 def _turn_request(live: LaunchedSession, request: AgentTurnRequest) -> agentshim.TurnRequest:

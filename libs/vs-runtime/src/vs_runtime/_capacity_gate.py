@@ -200,9 +200,7 @@ class PolicyCapacityGate:
         if error.condition is QuotaCondition.UNAVAILABLE:
             first = now if stops.first_at is None else stops.first_at
             return decide_outage(self._outage, stop=stops.count, elapsed=now - first)
-        return decide_quota(
-            self._policy, resets_at=error.resets_at, now=now, waited=stops.waited
-        )
+        return decide_quota(self._policy, resets_at=error.resets_at, now=now, waited=stops.waited)
 
     def _plan_action(self, error: AgentQuotaError) -> QuotaAction:
         """The policy the pause reports: an outage is always waited out by itself."""

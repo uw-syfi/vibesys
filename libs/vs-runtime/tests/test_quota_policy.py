@@ -190,5 +190,5 @@ def test_outage_waits_never_shrink_from_one_stop_to_the_next_while_budget_remain
 def test_an_outage_policy_rejects_values_no_decision_can_use(
     budget: float, first: float, cap: float
 ) -> None:
-    with pytest.raises(ValueError, match="outage policy|first_wait_seconds"):
+    with pytest.raises(ValueError, match=r"outage policy|first_wait_seconds"):
         OutagePolicy(budget, first, cap)

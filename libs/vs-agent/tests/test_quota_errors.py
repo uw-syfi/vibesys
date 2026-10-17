@@ -108,16 +108,25 @@ def test_a_failure_that_is_not_a_capacity_limit_stays_a_plain_failure(
 
 
 @pytest.mark.parametrize("provider", PROVIDERS)
-def test_an_overload_with_no_exhausted_window_is_not_a_capacity_limit(
+def test_a_transient_error_with_no_exhausted_window_is_a_provider_outage(
     provider: str, home: Path, tmp_path: Path
 ) -> None:
+    """A gateway answering ``503 No available accounts`` after every retry is an outage.
+
+    It used to propagate as a plain failure, which ended the turn and, for the planner, the
+    run. As a capacity stop it reaches the run's gate, which waits it out.
+    """
     run = scripted_failure(provider, agentshim.FailureKind.TRANSIENT)
     client = _client(provider, [run], home)
 
-    with pytest.raises(agentshim.TurnFailedError) as excinfo:
+    with pytest.raises(AgentQuotaError) as excinfo:
         _invoke(client, tmp_path)
 
-    assert excinfo.value.kind is agentshim.FailureKind.TRANSIENT
+    assert excinfo.value.provider == provider
+    assert excinfo.value.condition is QuotaCondition.UNAVAILABLE
+    assert excinfo.value.resets_at is None
+    assert isinstance(excinfo.value.__cause__, agentshim.TurnFailedError)
+    assert excinfo.value.__cause__.kind is agentshim.FailureKind.TRANSIENT
 
 
 @given(resets_at=st.integers(min_value=1_700_000_000, max_value=1_900_000_000))
@@ -155,7 +164,9 @@ def test_a_turn_after_a_quota_stop_does_not_inherit_its_exhausted_windows(
         _invoke(client, tmp_path)
     assert _invoke(client, tmp_path) == "x"
 
-    with pytest.raises(agentshim.TurnFailedError) as excinfo:
+    with pytest.raises(AgentQuotaError) as excinfo:
         _invoke(client, tmp_path)
 
-    assert not isinstance(excinfo.value, AgentQuotaError)
+    # The later failure reported no window, so it is an outage, not the earlier rate limit.
+    assert excinfo.value.condition is QuotaCondition.UNAVAILABLE
+    assert excinfo.value.resets_at is None

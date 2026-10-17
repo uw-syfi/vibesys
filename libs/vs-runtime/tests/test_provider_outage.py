@@ -22,6 +22,7 @@ from hypothesis import strategies as st
 
 from vs_agent.api import (
     AgentClient,
+    AgentClientProtocol,
     AgentQuotaError,
     AgentTurnRequest,
     Attribution,
@@ -31,7 +32,7 @@ from vs_agent.api import (
     QuotaCondition,
     QuotaPlan,
 )
-from vs_agent.api.testing import FakeProvider, FakeTurnScript
+from vs_agent.api.testing import FakeAgentClient, FakeProvider, FakeTurnScript
 from vs_runtime.api.infrastructure import (
     PROVIDER_OUTAGE,
     CapacityHandling,
@@ -87,13 +88,13 @@ class _Run:
     threads: SimThreads = field(default_factory=SimThreads)
     timer: FakeCapacityTimer | None = None
 
-    def gate(self, client: object) -> FakeCapacityTimer:
+    def gate(self, client: AgentClientProtocol) -> FakeCapacityTimer:
         control = create_run_control_channel(
             FakeRunControlEventSink(on_transition=self.transitions.append), threads=self.threads
         )
         self.timer = FakeCapacityTimer(control, start=START)
         install_capacity_gate(
-            client,  # type: ignore[arg-type]  # any CapacityGated object takes a gate
+            client,
             control=control,
             events=self.sink,
             handling=CapacityHandling(
@@ -140,11 +141,15 @@ def test_a_turn_survives_a_provider_outage_under_the_default_policy() -> None:
     assert run.timer is not None
     assert run.timer.waits == [60.0, 120.0, 240.0, 480.0, 600.0, 600.0]
     # Each stop pauses the run and resumes it by itself: no operator is needed.
-    assert _kinds(run) == [
-        RunControlTransitionKind.PAUSE_REQUESTED,
-        RunControlTransitionKind.PAUSED,
-        RunControlTransitionKind.RESUMED,
-    ] * 6
+    assert (
+        _kinds(run)
+        == [
+            RunControlTransitionKind.PAUSE_REQUESTED,
+            RunControlTransitionKind.PAUSED,
+            RunControlTransitionKind.RESUMED,
+        ]
+        * 6
+    )
     assert run.sink.resumed == ["wait_elapsed"] * 6
     assert run.sink.abandoned == []
     assert [(error.condition, plan.policy) for error, plan in run.sink.paused] == [
@@ -198,13 +203,13 @@ def _expected_waits(failures: int) -> list[float]:
     return waits
 
 
-@dataclass
-class _Capture:
-    """A client that only takes the gate, so a test can call it for several turns at once."""
+class _Capture(FakeAgentClient):
+    """The fake client, keeping the gate it was given so a test can call it for several turns."""
 
     gate: CapacityGate | None = None
 
     def set_capacity_gate(self, gate: CapacityGate) -> None:
+        super().set_capacity_gate(gate)
         self.gate = gate
 
 
@@ -212,7 +217,7 @@ class _Capture:
 def test_turns_that_stop_together_keep_their_own_outage_budgets(order: list[str]) -> None:
     """However the stops of two turns interleave, each turn waits within its own budget."""
     run = _Run()
-    capture = _Capture()
+    capture = _Capture(threads=run.threads)
     timer = run.gate(capture)
     assert capture.gate is not None
     gate = capture.gate

@@ -146,9 +146,7 @@ class OutagePolicy:
 PROVIDER_OUTAGE = OutagePolicy()
 
 
-def decide_outage(
-    policy: OutagePolicy, *, stop: int, elapsed: float
-) -> WaitFor | GiveUp:
+def decide_outage(policy: OutagePolicy, *, stop: int, elapsed: float) -> WaitFor | GiveUp:
     """Decide what to do about the ``stop``-th outage stop of one turn (the first is 1).
 
     ``elapsed`` is the time since the turn's first stop. A wait never runs past the

@@ -58,11 +58,13 @@ from vs_agent.api import (
     AgentEvent,
     AgentEventKind,
     AgentOutputSchemaError,
+    AgentQuotaError,
     AgentSessionKey,
     AgentTurnResult,
     AgentTurnTimeoutError,
     AgentUsage,
     MCPServerSpec,
+    QuotaCondition,
     SessionResumeError,
     SessionScope,
     container_import_roots,
@@ -1255,9 +1257,10 @@ def test_a_fresh_turn_that_fails_is_not_retried(
     del sandbox_builds
     session, fake = _session(tmp_path, provider, FakeRun(returncode=1, stderr=["boom\n"]))
 
-    with pytest.raises(agentshim.CliExitError):
+    with pytest.raises(agentshim.CliExitError) as excinfo:
         session.run_turn(AgentTurnRequest(message="one"))
 
+    assert not isinstance(excinfo.value, AgentQuotaError)
     assert len(fake.requests) == 1
 
 
@@ -1339,10 +1342,13 @@ def test_a_transient_error_that_outlasts_every_delay_propagates(
         transient_retry_delays=delays,
     )
 
-    with pytest.raises(agentshim.CliExitError) as excinfo:
+    with pytest.raises(AgentQuotaError) as excinfo:
         session.run_turn(AgentTurnRequest(message="one"))
 
-    assert excinfo.value.kind is _TRANSIENT
+    # It reaches the caller as an outage, for the run's capacity gate to wait out.
+    assert excinfo.value.condition is QuotaCondition.UNAVAILABLE
+    assert isinstance(excinfo.value.__cause__, agentshim.CliExitError)
+    assert excinfo.value.__cause__.kind is _TRANSIENT
     # The first attempt and one retry per delay.
     assert len(fake.requests) == 1 + len(delays)
 
@@ -1393,7 +1399,7 @@ def test_a_resumed_turn_that_exhausts_its_retries_keeps_the_conversation(
         transient_retry_delays=(),
     )
     session.run_turn(AgentTurnRequest(message="one"))
-    with pytest.raises(agentshim.CliExitError):
+    with pytest.raises(AgentQuotaError):
         session.run_turn(AgentTurnRequest(message="two"))
 
     result = session.run_turn(AgentTurnRequest(message="three"))
@@ -1408,7 +1414,11 @@ def test_cancel_stops_a_turn_waiting_out_a_transient_error(
     tmp_path: Path,
     provider: str,
 ) -> None:
-    """A cancelled turn raises the provider error instead of retrying it."""
+    """A cancelled turn raises the provider error instead of retrying it.
+
+    It is a plain failure, never a capacity stop: a caller's gate would otherwise wait out an
+    outage for a turn nobody wants any more.
+    """
     del sandbox_builds
     sessions: list[LaunchedSession] = []
 
@@ -1427,9 +1437,10 @@ def test_cancel_stops_a_turn_waiting_out_a_transient_error(
     )
     sessions.append(session)
 
-    with pytest.raises(agentshim.CliExitError):
+    with pytest.raises(agentshim.CliExitError) as excinfo:
         session.run_turn(AgentTurnRequest(message="one"))
 
+    assert not isinstance(excinfo.value, AgentQuotaError)
     assert len(fake.requests) == 1
 
 
