@@ -46,6 +46,7 @@ from vs_runtime._operator_control import (
     StopRequest,
     WithdrawRequest,
 )
+from vs_runtime._run_end import ending as run_ending
 from vs_runtime._steer_delivery import (
     SteerConsumption,
     TargetRefusal,
@@ -99,7 +100,7 @@ class RunControlBridge:
     With an ``inbox``, each poll also applies the inbox's requests, in the order they were
     posted, each as one control ``op-<control id>``; see the module docstring for how each
     applies once. Each request the run sets aside is reported (``notify_request_rejected``),
-    and ``end`` closes the inbox once the run has ended.
+    and ``end`` settles or rejects what is left once the run has ended.
 
     ``control`` (by default the inbox's) is where operators submit controls; each poll tells
     it which ids core already records, so a control resent after a restart replays its ack
@@ -159,6 +160,7 @@ class RunControlBridge:
             self._count = len(core.run.controls)
             self._paused = core.run.status == RunStatus.PAUSED
             self._stopped = any(c.action == "stop" for c in core.run.controls)
+            self._serve_inbox()
         self._position = len(core.run.controls)
         if self._control is not None:
             self._control.recall(partial(_held_as, core))
@@ -292,8 +294,9 @@ class RunControlBridge:
 
         Raises ``ProjectStateError`` when the inbox itself cannot be read or marked.
         """
+        held = _held(core)
         for entry in inbox.requests.pending():
-            if self._settle_held(inbox, entry, core):
+            if self._settle_held(inbox, entry, held):
                 continue
             if entry.request_id not in self._submitted:
                 reason = self._apply(inbox, entry, core, now_at, events)
@@ -302,31 +305,38 @@ class RunControlBridge:
                 else:
                     self._reject(inbox, entry.request_id, reason)
 
-    def end(self, core: CoreState) -> None:
-        """Close the inbox of a run that has ended; a run that may resume keeps it open.
+    def _serve_inbox(self) -> None:
+        """Declare this run's inbox format, so ``vibesys control`` knows posting order holds."""
+        if self._inbox is None:
+            return
+        try:
+            self._inbox.requests.serve()
+        except ProjectStateError as error:
+            _LOG.warning("the run's control inbox cannot declare its format: %s", error)
 
-        Every request core holds is settled and every other one rejected with the run's end,
-        then the inbox is closed, then what was posted meanwhile is rejected too. A post
-        that finds the inbox closed is refused (``vs_project``'s ``ControlInbox.post``).
+    def end(self, core: CoreState) -> None:
+        """Settle or reject every request left in the inbox of a run that has ended.
+
+        Only core's TERMINAL status says the run ended (``_run_end``); a run that may resume
+        keeps its requests waiting. Every request core holds is settled and every other one
+        rejected with the run's end, each rejection reported once. This runs after the end is
+        durable, so it finds every request a poster wrote before seeing the end; one written
+        after is refused to its poster, and reads as rejected whether or not this runs.
         """
         inbox = self._inbox
-        if inbox is None or core.run.status != RunStatus.TERMINAL:
+        ending = run_ending(core)
+        if inbox is None or ending is None:
             return
-        result = core.run.result
-        ending = "the run ended" if result is None else f"the run ended: {result.reason}"
         try:
-            self._sweep_ended(inbox, core, ending)
-            inbox.requests.close(ending)
-            self._sweep_ended(inbox, core, ending)
+            for entry in inbox.requests.pending():
+                if not self._settle_held(inbox, entry, _held(core)):
+                    self._reject(inbox, entry.request_id, ended_unapplied(ending))
         except ProjectStateError as error:
-            _LOG.warning("the run's control inbox cannot be closed: %s", error)
+            _LOG.warning("the run's control inbox cannot be set aside at its end: %s", error)
 
-    def _sweep_ended(self, inbox: OperatorInbox, core: CoreState, ending: str) -> None:
-        for entry in inbox.requests.pending():
-            if not self._settle_held(inbox, entry, core):
-                self._reject(inbox, entry.request_id, ended_unapplied(ending))
-
-    def _settle_held(self, inbox: OperatorInbox, entry: InboxEntry, core: CoreState) -> bool:
+    def _settle_held(
+        self, inbox: OperatorInbox, entry: InboxEntry, held: dict[ControlId, ControlInput]
+    ) -> bool:
         """Settle or set aside an entry core already decided; whether it was one.
 
         An unreadable entry is set aside; one whose identity core holds is settled when it
@@ -335,9 +345,7 @@ class RunControlBridge:
         if entry.unreadable is not None:
             self._reject(inbox, entry.request_id, f"unreadable: {entry.unreadable}")
             return True
-        control = next(
-            (c for c in core.run.controls if c.control_id == _identity(entry.request_id)), None
-        )
+        control = held.get(_identity(entry.request_id))
         if control is None:
             return False
         if _is_held(entry, control):
@@ -349,9 +357,12 @@ class RunControlBridge:
         return True
 
     def _reject(self, inbox: OperatorInbox, request_id: str, reason: str) -> None:
-        """Set an inbox request aside with ``reason``, and tell the operator."""
-        inbox.requests.reject(request_id, reason)
-        self._channel.notify_request_rejected(request_id, reason)
+        """Set an inbox request aside with ``reason``, and tell the operator once.
+
+        A request rejected already keeps its first reason, which is what it was reported with.
+        """
+        if inbox.requests.reject(request_id, reason):
+            self._channel.notify_request_rejected(request_id, reason)
 
     def _apply(
         self,
@@ -466,6 +477,11 @@ class OperatorInbox:
 
     requests: ControlInbox
     control: ChannelRunControl
+
+
+def _held(core: CoreState) -> dict[ControlId, ControlInput]:
+    """Each control core records, by its identity."""
+    return {control.control_id: control for control in core.run.controls}
 
 
 def _identity(control_id: str) -> ControlId:

@@ -436,9 +436,16 @@ over a client's socket: pass `--control-id ID` to resend the same control safely
 used, keeps its control: sending a different control under it is refused.
 
 `vibesys control <run-id> status ID` prints what became of a control: `pending`, `applied`, or
-`rejected: <reason>`. A run that has ended takes no more controls: `vibesys control` refuses one
-before writing anything, and a control the run never applied before it ended reads as
-`rejected: the run ended before applying it: ...`.
+`rejected: <reason>`. A run has ended when its core record says so, which is final. It then
+takes no more controls: `vibesys control` refuses a new one before writing anything and exits
+with status 3, and a control the run never applied before it ended reads as
+`rejected: the run ended before applying it: ...`. Sending again, with `--control-id`, a control
+the run applied before it ended succeeds and prints its id, so a retry stays one control.
+
+Posting order needs a run started with a VibeSys that keeps it; such a run declares it in its
+inbox when its loop starts. When a run has not declared it (it has not started yet, or runs an
+older VibeSys, which applies controls in id order), `vibesys control` still posts the control
+and warns on standard error.
 
 `vibesys control` must run on the machine that holds the run's state home, and refuses a run
 whose machine-local state it cannot find there, naming the state home it looked in (set

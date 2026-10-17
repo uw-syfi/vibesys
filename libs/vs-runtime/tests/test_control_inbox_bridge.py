@@ -37,6 +37,7 @@ from vs_project.api import (
     ProjectStateError,
     RequestState,
     RequestStatus,
+    ended_unapplied,
 )
 from vs_project.api.testing import FakeControlInbox
 from vs_runtime.api.core import OperatorInbox, RunControlBridge
@@ -125,6 +126,14 @@ _STEPS = st.lists(
 )
 
 
+def _live() -> str | None:
+    """A poster's view of a run that has not ended."""
+    return None
+
+
+_LIVE = _live
+
+
 def _json(request: BaseModel) -> bytes:
     return request.model_dump_json().encode()
 
@@ -159,8 +168,26 @@ _OTHER_CONTROL_UNDER_A_RECORDED_ID = [
     ("socket", "k0", {"action": "stop", "mode": "drain"}),
 ]
 
+_POSTED_IN_REVERSE_ID_ORDER = [
+    ("post", None, {"action": "pause"}),
+    ("post", None, {"action": "resume"}),
+    ("poll",),
+]
+"""The pause gets the larger id; posting order, not id order, must apply it first."""
+_REJECTED_AND_POLLED_AGAIN_AFTER_RESTART = [
+    ("post", None, {"action": "stop", "mode": "drain"}),
+    ("poll",),
+    ("post", None, {"action": "pause"}),
+    ("poll",),
+    ("restart",),
+    ("poll",),
+]
+"""A pause after a stop is set aside: reported once, though polled again after a restart."""
+
 
 @given(_STEPS)
+@example(_POSTED_IN_REVERSE_ID_ORDER)
+@example(_REJECTED_AND_POLLED_AGAIN_AFTER_RESTART)
 @example(_STEER_AGAIN_AFTER_RESTART)
 @example(_PAUSE_AGAIN_AFTER_RESUME_AND_RESTART)
 @example(_OTHER_CONTROL_UNDER_A_RECORDED_ID)
@@ -198,7 +225,7 @@ def test_every_control_is_recorded_once_whichever_way_it_was_sent(
                 request_id = shared or f"r{999 - index:03d}"
                 contents = _payload(payload, request_id)
                 with contextlib.suppress(ProjectStateError):  # an id holds one request
-                    inbox.post(request_id, contents)
+                    inbox.post(request_id, contents, ended=_LIVE)
                     if request_id not in posted:
                         first_posts.append(request_id)
                     posted.add(request_id)
@@ -243,7 +270,7 @@ def _check_posting_order_and_reports(
         identity for identity in inbox_only if identity in recorded
     ]
     reported = Counter(
-        t.text for t in sink.transitions if t.kind is RunControlTransitionKind.REQUEST_REJECTED
+        t.summary for t in sink.transitions if t.kind is RunControlTransitionKind.REQUEST_REJECTED
     )
     assert reported == Counter(
         f"control request {entry.request_id} rejected: {entry.reason}" for entry in inbox.rejected()
@@ -256,7 +283,7 @@ def test_a_pause_sent_through_the_socket_and_the_inbox_is_recorded_once() -> Non
     control.submit(PauseRequest(control_id="k1"))
     core = _commit(initial_state(), bridge.poll(initial_state(), 1.0))
 
-    inbox.post("k1", _json(PauseRequest(control_id="k1")))
+    inbox.post("k1", _json(PauseRequest(control_id="k1")), ended=_LIVE)
     for at in (2.0, 3.0):
         core = _commit(core, bridge.poll(core, at))
 
@@ -306,7 +333,7 @@ def test_another_control_under_an_id_recorded_before_a_restart_conflicts() -> No
 
 def test_a_request_that_is_not_a_control_is_set_aside_with_its_reason() -> None:
     inbox = FakeControlInbox()
-    inbox.post("r1", b'{"control_id": "r1", "action": "pause", "extra": 1}')
+    inbox.post("r1", b'{"control_id": "r1", "action": "pause", "extra": 1}', ended=_LIVE)
     bridge = _bridge(inbox, _Texts())
 
     assert bridge.poll(initial_state(), 1.0) == ()
@@ -317,7 +344,7 @@ def test_a_request_that_is_not_a_control_is_set_aside_with_its_reason() -> None:
 
 def test_a_capacity_wait_with_no_capacity_pause_is_set_aside() -> None:
     inbox = FakeControlInbox()
-    inbox.post("r1", _json(ResumeRequest(control_id="r1", when="capacity_returns")))
+    inbox.post("r1", _json(ResumeRequest(control_id="r1", when="capacity_returns")), ended=_LIVE)
 
     assert _bridge(inbox, _Texts()).poll(initial_state(), 1.0) == ()
     assert [entry.reason for entry in inbox.rejected()] == ["refused: not_paused_on_capacity"]
@@ -326,9 +353,9 @@ def test_a_capacity_wait_with_no_capacity_pause_is_set_aside() -> None:
 def test_inbox_requests_apply_in_posting_order_as_their_actions_say() -> None:
     """Regression: requests applied in id order, so a resume named "r1" ran before a pause."""
     inbox = FakeControlInbox()
-    inbox.post("r2", _json(SteerRequest(control_id="r2", text="prefer latency")))
-    inbox.post("r3", _json(PauseRequest(control_id="r3")))
-    inbox.post("r1", _json(ResumeRequest(control_id="r1")))
+    inbox.post("r2", _json(SteerRequest(control_id="r2", text="prefer latency")), ended=_LIVE)
+    inbox.post("r3", _json(PauseRequest(control_id="r3")), ended=_LIVE)
+    inbox.post("r1", _json(ResumeRequest(control_id="r1")), ended=_LIVE)
     texts = _Texts()
     bridge = _bridge(inbox, texts)
 
@@ -351,8 +378,8 @@ def test_inbox_requests_apply_in_posting_order_as_their_actions_say() -> None:
 
 def test_a_pause_after_a_stop_is_set_aside() -> None:
     inbox = FakeControlInbox()
-    inbox.post("r1", _json(StopRequest(control_id="r1")))
-    inbox.post("r2", _json(PauseRequest(control_id="r2")))
+    inbox.post("r1", _json(StopRequest(control_id="r1")), ended=_LIVE)
+    inbox.post("r2", _json(PauseRequest(control_id="r2")), ended=_LIVE)
 
     events = _bridge(inbox, _Texts()).poll(initial_state(), 1.0)
 
@@ -365,7 +392,7 @@ def test_a_pause_after_a_stop_is_set_aside() -> None:
 
 def test_a_request_whose_control_id_is_not_its_name_is_set_aside() -> None:
     inbox = FakeControlInbox()
-    inbox.post("r1", _json(PauseRequest(control_id="r2")))
+    inbox.post("r1", _json(PauseRequest(control_id="r2")), ended=_LIVE)
 
     assert _bridge(inbox, _Texts()).poll(initial_state(), 1.0) == ()
     assert [entry.request_id for entry in inbox.rejected()] == ["r1"]
@@ -374,25 +401,25 @@ def test_a_request_whose_control_id_is_not_its_name_is_set_aside() -> None:
 def test_a_settled_id_cannot_be_posted_again_with_another_request() -> None:
     """Regression: a re-post under a settled id was settled unread, so its options were lost."""
     inbox = FakeControlInbox()
-    inbox.post("r1", _json(ResumeRequest(control_id="r1")))
+    inbox.post("r1", _json(ResumeRequest(control_id="r1")), ended=_LIVE)
     bridge = _bridge(inbox, _Texts())
     core = _commit(initial_state(), bridge.poll(initial_state(), 1.0))
     assert bridge.poll(core, 2.0) == ()
     assert inbox.pending() == ()
 
     with pytest.raises(ProjectStateError, match="different request"):
-        inbox.post("r1", _json(ResumeRequest(control_id="r1", fallback=True)))
+        inbox.post("r1", _json(ResumeRequest(control_id="r1", fallback=True)), ended=_LIVE)
 
 
 def test_the_same_request_sent_again_after_it_settled_is_settled_again() -> None:
     inbox = FakeControlInbox()
     request = _json(StopRequest(control_id="r1", mode=StopMode.CANCEL))
-    inbox.post("r1", request)
+    inbox.post("r1", request, ended=_LIVE)
     bridge = _bridge(inbox, _Texts())
     core = _commit(initial_state(), bridge.poll(initial_state(), 1.0))
     bridge.poll(core, 2.0)
 
-    inbox.post("r1", request)
+    inbox.post("r1", request, ended=_LIVE)
     bridge.poll(core, 3.0)
 
     assert inbox.pending() == ()
@@ -402,7 +429,7 @@ def test_the_same_request_sent_again_after_it_settled_is_settled_again() -> None
 def test_an_unreadable_entry_is_set_aside_and_the_rest_apply() -> None:
     inbox = FakeControlInbox()
     inbox.hold_unreadable("r1", "a dir")
-    inbox.post("r2", _json(PauseRequest(control_id="r2")))
+    inbox.post("r2", _json(PauseRequest(control_id="r2")), ended=_LIVE)
 
     core = _commit(initial_state(), _bridge(inbox, _Texts()).poll(initial_state(), 1.0))
 
@@ -423,7 +450,7 @@ class _RacingControl(ChannelRunControl):
 
 def test_a_socket_steer_in_the_same_poll_keeps_its_own_identity() -> None:
     inbox = FakeControlInbox()
-    inbox.post("r1", _json(SteerRequest(control_id="r1", text="from the inbox")))
+    inbox.post("r1", _json(SteerRequest(control_id="r1", text="from the inbox")), ended=_LIVE)
     texts = _Texts()
     threads = SimThreads()
     channel = create_run_control_channel(FakeRunControlEventSink(), threads=threads)
@@ -473,33 +500,59 @@ def _ended(core: CoreState) -> CoreState:
 
 
 def test_an_ended_run_settles_what_it_applied_and_rejects_the_rest_once() -> None:
+    """A request a poster wrote before it saw the end, even one the loop never read, is set
+    aside by ``end`` with one report; a post after the end is refused before it is written."""
     inbox = FakeControlInbox()
     sink = FakeRunControlEventSink()
     bridge, _control = _wired(inbox, _Texts(), sink)
-    inbox.post("applied", _json(PauseRequest(control_id="applied")))
+    inbox.post("applied", _json(PauseRequest(control_id="applied")), ended=_LIVE)
     core = _commit(initial_state(), bridge.poll(initial_state(), 1.0))
-    inbox.post("late", _json(ResumeRequest(control_id="late")))
+    ended = _ended(core)
+    # Core has committed the end; this poster read the record just before it did.
+    inbox.post("late", _json(ResumeRequest(control_id="late")), ended=_LIVE)
 
-    bridge.end(_ended(core))
-    bridge.end(_ended(core))
+    bridge.end(ended)
+    bridge.end(ended)
 
+    ending = "the run ended"
     assert inbox.pending() == ()
-    assert inbox.status("applied") == RequestStatus(RequestState.APPLIED)
-    late = inbox.status("late")
-    assert late is not None
-    assert late.state is RequestState.REJECTED
+    assert inbox.status("applied", ended=ending) == RequestStatus(RequestState.APPLIED)
+    late = inbox.status("late", ended=ending)
+    assert late == RequestStatus(RequestState.REJECTED, ended_unapplied(ending))
     assert [
-        t.text for t in sink.transitions if t.kind is RunControlTransitionKind.REQUEST_REJECTED
+        t.summary for t in sink.transitions if t.kind is RunControlTransitionKind.REQUEST_REJECTED
     ] == [f"control request late rejected: {late.reason}"]
-    with pytest.raises(InboxClosedError):
-        inbox.post("after", _json(PauseRequest(control_id="after")))
+    with pytest.raises(InboxClosedError, match="was not posted"):
+        inbox.post("after", _json(PauseRequest(control_id="after")), ended=lambda: ending)
+    assert inbox.status("after", ended=ending) is None
+
+
+def test_the_end_reports_what_a_poster_wrote_after_it_was_committed() -> None:
+    """Regression guard for the sweep at the end: without it a request written between core's
+    end and the sweep reads as rejected but is never reported to the run's journal."""
+    inbox = FakeControlInbox()
+    sink = FakeRunControlEventSink()
+    bridge, _control = _wired(inbox, _Texts(), sink)
+    core = _commit(initial_state(), bridge.poll(initial_state(), 1.0))
+    polls = iter([None, "the run ended"])
+
+    with pytest.raises(InboxClosedError, match="written as the run ended"):
+        # The poster saw a live run, wrote, then saw the end core committed meanwhile.
+        inbox.post("racing", _json(PauseRequest(control_id="racing")), ended=lambda: next(polls))
+    bridge.end(_ended(core))
+
+    assert [
+        t.request_id
+        for t in sink.transitions
+        if t.kind is RunControlTransitionKind.REQUEST_REJECTED
+    ] == ["racing"]
 
 
 def test_a_run_that_may_resume_keeps_its_inbox_open() -> None:
     inbox = FakeControlInbox()
-    inbox.post("r1", _json(PauseRequest(control_id="r1")))
+    inbox.post("r1", _json(PauseRequest(control_id="r1")), ended=_LIVE)
 
     _bridge(inbox, _Texts()).end(initial_state())
 
-    assert inbox.status("r1") == RequestStatus(RequestState.PENDING)
-    inbox.post("r2", _json(ResumeRequest(control_id="r2")))
+    assert inbox.status("r1", ended=None) == RequestStatus(RequestState.PENDING)
+    inbox.post("r2", _json(ResumeRequest(control_id="r2")), ended=_LIVE)
