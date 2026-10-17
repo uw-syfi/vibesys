@@ -130,7 +130,12 @@ describe('quotaBanner', () => {
       PAUSED,
       fixtureEvent(2, 'quota_paused', {data: {kind: 'quota_paused', ...outage, policy: 'wait'}}),
       fixtureEvent(3, 'quota_resumed', {
-        data: {kind: 'quota_resumed', provider: 'mock', condition: 'unavailable', waited_seconds: 60},
+        data: {
+          kind: 'quota_resumed',
+          provider: 'mock',
+          condition: 'unavailable',
+          waited_seconds: 60,
+        },
       }),
       fixtureEvent(4, 'quota_abandoned', {
         data: {kind: 'quota_abandoned', ...outage, reason: 'the outage budget is spent'},
