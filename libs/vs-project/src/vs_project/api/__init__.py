@@ -10,6 +10,13 @@ Runs use one version 5 manifest containing an ``OrchestrationDescriptor``.
 from typing import TYPE_CHECKING
 
 from vs_project._cli_git_repository import CliGitRepository
+from vs_project._control_inbox import (
+    ControlInbox,
+    FileControlInbox,
+    InboxEntry,
+    RejectedEntry,
+    validate_request_id,
+)
 from vs_project._git_backend import (
     DEFAULT_GIT_BACKEND,
     GIT_BACKEND_ENV,
@@ -150,9 +157,11 @@ __all__ = [
     "ConfigurationRoot",
     "Conflict",
     "ConflictReason",
+    "ControlInbox",
     "FakeStateModels",
     "FakeStateStore",
     "FakeStateStores",
+    "FileControlInbox",
     "FrameworkSnapshotStatus",
     "Git",
     "GitBackend",
@@ -171,6 +180,7 @@ __all__ = [
     "GitTimeoutError",
     "GitTracker",
     "GitTrackerEvents",
+    "InboxEntry",
     "InvalidTaskDefinitionError",
     "InvalidTaskNameError",
     "LocalAtomicWriteEffects",
@@ -195,6 +205,7 @@ __all__ = [
     "Pygit2GitRepository",
     "QuarantinedEnvelope",
     "RecordedRuns",
+    "RejectedEntry",
     "RepositoryLocation",
     "Revision",
     "RunEnvironmentRecord",
@@ -236,6 +247,7 @@ __all__ = [
     "select_git_backend",
     "strip_ansi",
     "user_runtime_root",
+    "validate_request_id",
     "validate_run_id",
     "validate_socket_path",
     "validate_state_namespace",

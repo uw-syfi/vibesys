@@ -1,10 +1,14 @@
 """The owned in-memory test implementations for ``vs_project.api``.
 
+``FakeControlInbox`` is the Fake of ``ControlInbox`` and passes the same contract suite as
+``FileControlInbox`` (``libs/vs-project/tests/test_control_inbox_contract.py``).
+
 ``FakeGitRepositories`` is the Fake of ``GitRepository``: history, refs, and the index
 live in memory, the working tree is the real directory. It passes the same contract
 suite as ``CliGitRepository`` (``libs/vs-project/tests/git_contract``).
 """
 
+from vs_project._control_inbox import FakeControlInbox
 from vs_project._fake_git_repository import FakeGitRepositories, FakeGitRepository
 from vs_project._fake_git_state import RepositoryCensus
 from vs_project._run_history import FakeRunHistory
@@ -25,6 +29,7 @@ __all__ = [
     "IN_MEMORY_GIT",
     "CliWorldGit",
     "ContractProject",
+    "FakeControlInbox",
     "FakeGitRepositories",
     "FakeGitRepository",
     "FakeRunHistory",

@@ -36,6 +36,7 @@ from pydantic import (
 
 import vs_project._paths as project_paths
 from vs_decode.api import Unreadable, ValidationOptions, decode_json
+from vs_project._control_inbox import FileControlInbox
 from vs_project._framework_writes import FRAMEWORK_WRITES
 from vs_project._manifests import (
     _IDENTIFIER_PATTERN,
@@ -1403,6 +1404,10 @@ class ProjectState:
         self.portable_namespace(run_id, _CONTROL_NAMESPACE).write_bytes(
             _STOP_REQUEST_FILE, b"stop\n"
         )
+
+    def control_inbox(self, run_id: str) -> FileControlInbox:
+        """Open the run's inbox of operator control requests (``vibesys control``)."""
+        return FileControlInbox(self.portable_namespace(run_id, _CONTROL_NAMESPACE))
 
     def stop_requested(self, run_id: str) -> bool:
         """Whether the operator's stop of ``run_id`` was recorded (``record_stop_request``)."""
