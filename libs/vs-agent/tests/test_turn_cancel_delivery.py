@@ -14,8 +14,7 @@ from hypothesis import strategies as st
 
 from vs_agent.api import CapacityStops
 
-# test-isolation: the cancel-delivery bookkeeping is shared state between the launched
-# session and its event handler, which the facade deliberately hides.
+# test-isolation: cancel delivery is state shared by a launched session and its event handler
 from vs_agent.shim_turns import SteerLedger, TurnEvents
 from vs_sim.api.testing import SimThreads
 
