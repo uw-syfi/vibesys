@@ -102,6 +102,15 @@ body > div:first-child {
   flex: none;
   width: var(--column-figure);
 }
+.vs-reserve {
+  display: flex;
+  flex-direction: column;
+  visibility: hidden;
+}
+.vs-flex[data-width="chart"] {
+  flex: 1 1 var(--column-chart);
+  min-width: min(100%, var(--column-chart));
+}
 .vs-flex[data-align="start"] {
   align-items: flex-start;
 }
@@ -1469,6 +1478,11 @@ button.vs-stage-head {
 }
 .vs-scrubber-tick:last-child {
   transform: translateX(-100%);
+}
+/* A measured track places each label itself, inside the track and clear of its neighbours. */
+.vs-scrubber-tick[data-placed] {
+  left: var(--tick-left);
+  transform: none;
 }
 
 /* --- chart: drawn in the SVG's own units ------------------------------------------------------- */

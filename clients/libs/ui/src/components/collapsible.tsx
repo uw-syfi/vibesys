@@ -25,6 +25,7 @@ export function Collapsible(props: {
       <button
         type="button"
         className="vs-collapsible-head"
+        title={props.summary === undefined ? props.label : `${props.label}\n${props.summary}`}
         aria-expanded={props.open}
         aria-controls={bodyId}
         onClick={() => props.toggle(!props.open)}

@@ -2,7 +2,17 @@
  * The Ideas face's lineage tree and its controls: the best line over the list, the List | Tree
  * switch, and the tree itself (`ideaTree` rows drawn by the windowed `PickList`).
  */
-import {Button, PickList, PickRow, Row, SegmentedControl, Stack, Text} from '@vibesys/ui';
+import {
+  Button,
+  Fact,
+  FactLine,
+  markdownToPlain,
+  PickList,
+  PickRow,
+  SegmentedControl,
+  Stack,
+  Text,
+} from '@vibesys/ui';
 import {type JSX, useMemo} from 'react';
 import {
   type BestLine,
@@ -44,22 +54,29 @@ export function BestLineRow(props: {
   readonly dispatch: Dispatch;
 }): JSX.Element {
   const {line, dispatch} = props;
+  const title = markdownToPlain(line.title);
   return (
-    <Row gap="space-2" align="center" wrap>
-      <Text variant="small" tone="muted">
-        best:
-      </Text>
-      <Button
-        size="sm"
-        variant="quiet"
-        text={line.title}
-        hint="Show the best idea and the chain that led to it"
-        press={() => dispatch({type: 'ideas-pin', idea: line.id})}
-      />
-      <Text variant="small" tone="muted">
-        {`· ${line.steps} ${line.steps === 1 ? 'step' : 'steps'} from input`}
-      </Text>
-    </Row>
+    <FactLine fit="parent" wrap={false}>
+      <Fact>
+        <Text variant="small" tone="muted">
+          best:
+        </Text>
+      </Fact>
+      <Fact shrink title={title}>
+        <Button
+          size="sm"
+          variant="quiet"
+          text={title}
+          hint="Show the best idea and the chain that led to it"
+          press={() => dispatch({type: 'ideas-pin', idea: line.id})}
+        />
+      </Fact>
+      <Fact>
+        <Text variant="small" tone="muted">
+          {`· ${line.steps} ${line.steps === 1 ? 'step' : 'steps'} from input`}
+        </Text>
+      </Fact>
+    </FactLine>
   );
 }
 
@@ -98,7 +115,10 @@ export function IdeasTreeList(props: {
               id={`fold:${entry.key}`}
               title={entry.label}
               guides={entry.guides}
-              fold="none"
+              fold={{
+                open: false,
+                toggle: () => dispatch({type: 'ideas-open', key: entry.key, open: true}),
+              }}
               select={() => dispatch({type: 'ideas-open', key: entry.key, open: true})}
             />
           ) : (

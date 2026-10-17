@@ -14,6 +14,8 @@ export type CheckId =
   | 'raw-text'
   | 'legend'
   | 'number-label'
+  | 'strike'
+  | 'chart-size'
   | 'stability';
 
 export interface Violation {
@@ -423,6 +425,44 @@ export function legendCheck(): Violation[] {
       message: `the color rgb(${r}, ${g}, ${b}) is drawn but no legend item names it`,
       where,
     });
+  }
+  return found;
+}
+
+/** Struck-through text: it reads as deleted, so no state or count is ever shown that way. */
+export function strikeCheck(): Violation[] {
+  const found: Violation[] = [];
+  for (const {element, text} of textBoxes()) {
+    for (let up: Element | null = element; up !== null; up = up.parentElement) {
+      if (getComputedStyle(up).textDecorationLine.includes('line-through')) {
+        found.push({
+          check: 'strike',
+          message: `text is struck through and reads as deleted: "${text.slice(0, 40)}"`,
+          where: describe(element),
+        });
+        break;
+      }
+    }
+  }
+  return found;
+}
+
+/** The performance chart drawn too small to read: under 480 by 80 px, its labels are specks. */
+export function chartSizeCheck(): Violation[] {
+  const found: Violation[] = [];
+  const [minWidth, minHeight] = [480, 80];
+  const charts = document.body.querySelectorAll(
+    'svg[aria-label*="of each measured idea over the run"]',
+  );
+  for (const chart of charts) {
+    const {width, height} = chart.getBoundingClientRect();
+    if (isShown(chart) && (width < minWidth || height < minHeight)) {
+      found.push({
+        check: 'chart-size',
+        message: `the performance chart is ${Math.round(width)} by ${Math.round(height)} px, under the ${minWidth} by ${minHeight} px it needs to be read`,
+        where: describe(chart),
+      });
+    }
   }
   return found;
 }

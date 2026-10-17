@@ -3,6 +3,7 @@ import {SIZE} from '../tokens/index.js';
 import {Button} from './button.js';
 import type {StyleWithVars} from './css-vars.js';
 import {type Guide, Guides} from './guides.js';
+import {placeLabels, useInlineSize} from './label-fit.js';
 import {navigationKeys, pickKeys} from './listbox.js';
 import {Text} from './text.js';
 import {useWindowed} from './windowing.js';
@@ -173,24 +174,44 @@ function AxisRow(props: {
   readonly figureLabel: string | undefined;
 }): JSX.Element {
   const {view} = props;
+  const [measure, width] = useInlineSize();
+  const shown = props.ticks.filter(tick => tick.at >= view.from && tick.at <= view.to);
+  // Once the track is measured only the labels that can be read side by side are drawn.
+  const placed =
+    width === null
+      ? null
+      : placeLabels(
+          shown.map(tick => ({share: shareOf(tick.at, view.from, view.to), text: tick.label})),
+          width,
+        );
   return (
     <div className="vs-gantt-row" data-axis="" aria-hidden="true">
-      <span className="vs-gantt-name vs-listheader">{props.nameLabel ?? ''}</span>
-      <span className="vs-gantt-track">
-        {props.ticks
-          .filter(tick => tick.at >= view.from && tick.at <= view.to)
-          .map(tick => {
-            const place: StyleWithVars = {
-              '--gantt-from': percent(shareOf(tick.at, view.from, view.to)),
-            };
-            return (
-              <span key={tick.at} className="vs-gantt-tick" style={place}>
-                {tick.label}
-              </span>
-            );
-          })}
+      <span className="vs-gantt-name vs-listheader" title={props.nameLabel}>
+        {props.nameLabel ?? ''}
       </span>
-      <span className="vs-gantt-figure vs-listheader">{props.figureLabel ?? ''}</span>
+      <span ref={measure} className="vs-gantt-track">
+        {(placed ?? shown.map((_, index) => ({index, left: null}))).map(({index, left}) => {
+          const tick = shown[index];
+          if (tick === undefined) return null;
+          const place: StyleWithVars =
+            left === null
+              ? {'--gantt-from': percent(shareOf(tick.at, view.from, view.to))}
+              : {'--tick-left': `${left}px`};
+          return (
+            <span
+              key={tick.at}
+              className="vs-gantt-tick"
+              data-placed={left === null ? undefined : ''}
+              style={place}
+            >
+              {tick.label}
+            </span>
+          );
+        })}
+      </span>
+      <span className="vs-gantt-figure vs-listheader" title={props.figureLabel}>
+        {props.figureLabel ?? ''}
+      </span>
     </div>
   );
 }

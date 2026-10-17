@@ -122,6 +122,24 @@ export const BAD_SCREENS: readonly BadScreen[] = [
     html: `<div style="${PAGE}"><div style="width:200px;overflow-x:auto"><div style="width:600px">wide content</div></div></div>`,
   },
   {
+    name: 'a count struck through',
+    check: 'strike',
+    message: /text is struck through and reads as deleted: "2 failed"/,
+    html: `<div style="${PAGE}"><span style="text-decoration:line-through">2 failed</span></div>`,
+  },
+  {
+    name: 'a struck word inside a chip',
+    check: 'strike',
+    message: /struck through and reads as deleted: "failed"/,
+    html: `<div style="${PAGE}"><button><s><span>failed</span></s></button></div>`,
+  },
+  {
+    name: 'a performance chart a third of the readable width',
+    check: 'chart-size',
+    message: /the performance chart is 330 by 60 px/,
+    html: `<div style="${PAGE}"><svg role="group" aria-label="Metric of each measured idea over the run, with the best so far" width="330" height="60"><circle cx="40" cy="30" r="4" fill="red"/></svg></div>`,
+  },
+  {
     name: 'text drawn outside the window',
     check: 'overflow',
     message: /text runs outside the window/,

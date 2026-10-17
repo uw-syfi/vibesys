@@ -22,46 +22,7 @@ export interface KnownFailure {
   readonly issue: string;
 }
 
-const ISSUE = 'https://github.com/uw-syfi/vibesys/issues/3063';
-const NARROW = /\/1000$/;
-
-export const KNOWN_FAILURES: readonly KnownFailure[] = [
-  {id: 'truncated-without-tooltip', check: 'truncation', message: /./, issue: ISSUE},
-  {
-    id: 'raw-metric-id',
-    check: 'raw-text',
-    message: /snake_case identifier "total_ops_per_sec"/,
-    issue: ISSUE,
-  },
-  {id: 'raw-markdown-in-title', check: 'raw-text', message: /raw markdown/, issue: ISSUE},
-  {
-    id: 'time-bar-labels-overlap',
-    check: 'overlap',
-    message: /"(Call \d+|Live|Back to live)" and "Call \d+"/,
-    issue: ISSUE,
-  },
-  {
-    id: 'timeline-ticks-overlap',
-    check: 'overlap',
-    message: /^text overlaps text: "[0-9hmsd ]+" and "[0-9hmsd ]+"$/,
-    screens: NARROW,
-    issue: ISSUE,
-  },
-  {
-    id: 'best-line-overflows-its-pane',
-    check: 'overflow',
-    message: /a pane scrolls sideways/,
-    screens: /^long-titles\//,
-    issue: ISSUE,
-  },
-  {
-    id: 'chart-moves-when-scrubbed',
-    check: 'stability',
-    message: /performance chart changed its y at "scrubbed"/,
-    screens: NARROW,
-    issue: ISSUE,
-  },
-];
+export const KNOWN_FAILURES: readonly KnownFailure[] = [];
 
 export function isKnown(failure: KnownFailure, screen: string, violation: Violation): boolean {
   return (

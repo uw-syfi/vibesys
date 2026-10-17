@@ -8,7 +8,7 @@
 import type {CoreState} from '@vibesys/run-state';
 import type {AgentNode} from '@vibesys/run-state/agents';
 import type {Candidate, CandidateStep} from '@vibesys/run-state/candidates';
-import {Chip, Pane, Panes} from '@vibesys/ui';
+import {Chip, markdownToPlain, Pane, Panes} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
   implementerOutcomes,
@@ -89,7 +89,7 @@ function IdeaLevel(props: LevelProps & {readonly idea: Candidate}): JSX.Element 
       </Pane>
       <FramedPane
         kicker="idea"
-        title={idea.title}
+        title={markdownToPlain(idea.title)}
         width="fill"
         enterKey={`idea ${idea.id}`}
         actions={<ModeSwitch mode={mode} options={logsOptions('Steps')} zoom={base.zoom} />}
@@ -188,7 +188,7 @@ function StepLevel(
       {zoomed.idea === null ? (
         <AgentsPane {...props} selected={zoomed.agent?.id ?? null} />
       ) : (
-        <Pane kicker="steps" title={zoomed.idea.title} width="list">
+        <Pane kicker="steps" title={markdownToPlain(zoomed.idea.title)} width="list">
           <StepList idea={zoomed.idea} selected={step.span} tokens={base.tokens} zoom={base.zoom} />
         </Pane>
       )}

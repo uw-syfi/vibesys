@@ -101,6 +101,7 @@ function ToolRow(props: {readonly tool: ToolLine}): JSX.Element {
     <button
       type="button"
       className="vs-toolgroup-row"
+      title={toolWords(tool)}
       data-state={tool.state}
       aria-current={tool.selected === true ? 'true' : undefined}
       onClick={tool.press}
@@ -132,6 +133,7 @@ export function ToolGroup(props: {
       <button
         type="button"
         className="vs-toolgroup-head"
+        title={props.tools.map(toolWords).join('\n')}
         aria-expanded={props.open}
         onClick={() => props.toggle(!props.open)}
       >

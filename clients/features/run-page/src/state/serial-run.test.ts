@@ -238,7 +238,7 @@ describe('a multi-agent run', () => {
         (event.data as {span: Span}).span.id === 'op:000002/orchestrator.1',
     );
     expect(nowView(at(events, designing + 1)).map(item => [item.context, item.doing])).toEqual([
-      ['round 2', 'orchestrator · orchestrator'],
+      ['round 2', 'orchestrator'],
     ]);
   });
 });

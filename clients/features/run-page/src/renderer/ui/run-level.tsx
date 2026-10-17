@@ -9,6 +9,7 @@ import {
   Button,
   DotLegend,
   EmptyState,
+  markdownToPlain,
   Pane,
   Panes,
   PickList,
@@ -230,9 +231,10 @@ function NowPane(props: {readonly base: ViewBase}): JSX.Element | null {
           <PickRow
             key={item.id}
             id={item.id}
-            title={item.doing}
+            title={markdownToPlain(item.context)}
             mono
-            summary={item.context}
+            stacked
+            summary={item.doing}
             figure={ageWords(item.since, base.clock.now)}
             figureTone="muted"
             state={{tone: 'live', label: 'running'}}

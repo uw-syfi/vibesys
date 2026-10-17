@@ -15,8 +15,12 @@ interface FlexProps {
   readonly wrap?: boolean;
   /** Take the free space of the `Row` or `Stack` this sits in. */
   readonly grow?: boolean;
-  /** A fixed width, whatever the content: a figure's block (`figure`), so what shares its row never moves. */
-  readonly width?: 'figure';
+  /**
+   * A fixed width, whatever the content: a figure's block (`figure`), so what shares its row never moves; or
+   * a chart (`chart`), which takes the rest of its row and drops to a row of its own, full width, when the
+   * row leaves it less than a readable width.
+   */
+  readonly width?: 'figure' | 'chart';
   readonly children: ReactNode;
 }
 
@@ -37,6 +41,19 @@ function Flex(props: FlexProps & {readonly direction: 'row' | 'column'}): JSX.El
       data-width={props.width}
       style={gapStyle(gap)}
     >
+      {props.children}
+    </div>
+  );
+}
+
+/**
+ * The room `children` would take, kept empty: it is invisible, unreachable and unannounced. A line
+ * that appears and disappears (a state's name before there is a state) is drawn here while absent,
+ * so what shares its column never moves when it comes.
+ */
+export function Reserve(props: {readonly children: ReactNode}): JSX.Element {
+  return (
+    <div className="vs-reserve" aria-hidden="true" inert>
       {props.children}
     </div>
   );

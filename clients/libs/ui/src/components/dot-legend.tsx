@@ -28,7 +28,7 @@ export function DotLegend(props: {readonly items: readonly LegendItem[]}): JSX.E
           </>
         );
         return toggle === undefined ? (
-          <span key={item.label} className="vs-dotlegend-item">
+          <span key={item.label} className="vs-dotlegend-item" data-tone={item.tone}>
             {face}
           </span>
         ) : (
@@ -36,6 +36,7 @@ export function DotLegend(props: {readonly items: readonly LegendItem[]}): JSX.E
             key={item.label}
             type="button"
             className="vs-dotlegend-item"
+            data-tone={item.tone}
             aria-pressed={item.on === true}
             onClick={() => toggle(item.on !== true)}
           >

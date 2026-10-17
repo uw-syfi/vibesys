@@ -658,12 +658,12 @@ test('every face of the run level keeps the time bar and the hero in view', asyn
       await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight),
     ).toBe(true);
   }
-  // Now keeps what runs whole (who and what), even in a narrow window; the idea's title gives way.
+  // Now keeps what runs whole (the role and what it does), even in a narrow window; the idea's name gives way.
   await page.setViewportSize({width: 1024, height: 800});
   const rows = page.getByRole('listbox', {name: 'Running now'}).getByRole('option');
   await expect(rows.first()).toBeVisible();
   for (const row of await rows.all()) {
-    const doing = row.locator('.vs-pickrow-text > :first-child');
+    const doing = row.locator('.vs-pickrow-text > :nth-child(2)');
     await expect(doing).toHaveText(/\S/);
     expect(await doing.evaluate(each => each.scrollWidth <= each.clientWidth)).toBe(true);
   }

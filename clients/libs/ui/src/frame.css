@@ -214,6 +214,29 @@ button.vs-crumb:focus-visible {
     display: none;
   }
 }
+/* A chip with a short form shows it in a narrow list; its tooltip keeps the whole. */
+.vs-pickrow-badge {
+  display: inline-flex;
+  flex: none;
+}
+.vs-pickrow-badge > [data-form="short"] {
+  display: none;
+}
+@container (max-width: 520px) {
+  .vs-pickrow-badge > [data-form="full"] {
+    display: none;
+  }
+  .vs-pickrow-badge > [data-form="short"] {
+    display: inline-flex;
+  }
+}
+/* So does the name of where a row came from: it is the idea's own pane that says it. */
+@container (max-width: 480px) {
+  .vs-pickrow-trail:not([data-short]),
+  .vs-listheader-col[data-fixed="trail"] {
+    display: none;
+  }
+}
 /* A tree row's indentation takes the width: below this, its names win over their descriptions. */
 @container (max-width: 640px) {
   .vs-pickrow-fold ~ .vs-pickrow-text > .vs-text + .vs-text {
@@ -430,6 +453,18 @@ button.vs-crumb:focus-visible {
   align-items: baseline;
   gap: var(--space-3);
 }
+/* A stacked row keeps both lines: the name over what it does, each cut only at the row's edge. */
+.vs-screen[data-density="compact"] .vs-pickrow[data-stacked] {
+  padding-block: var(--space-2);
+}
+.vs-screen[data-density="compact"] .vs-pickrow[data-stacked] .vs-pickrow-text {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+}
+.vs-screen[data-density="compact"] .vs-pickrow[data-stacked] .vs-pickrow-text > .vs-text {
+  flex: 0 0 auto;
+}
 /* The name keeps its room; the line after it gives way first. */
 .vs-screen[data-density="compact"] .vs-pickrow-text > .vs-text {
   flex: 0 1 auto;
@@ -459,7 +494,9 @@ button.vs-crumb:focus-visible {
 }
 .vs-screen[data-density="compact"] .vs-scrubber-head {
   grid-row: span 2;
-  min-height: 0;
+  /* One height whether the head holds a chip or a chip and a button, so scrubbing moves nothing. */
+  min-height: var(--control-sm);
+  flex-wrap: nowrap;
 }
 .vs-screen[data-density="compact"] .vs-scrubber-ticks {
   grid-column: 2;
@@ -580,6 +617,11 @@ button.vs-crumb:focus-visible {
   white-space: nowrap;
 }
 .vs-gantt-tick:first-child {
+  transform: none;
+}
+/* A measured track places each label itself, inside the track and clear of its neighbours. */
+.vs-gantt-tick[data-placed] {
+  left: var(--tick-left);
   transform: none;
 }
 .vs-gantt-bar {
@@ -966,6 +1008,10 @@ button.vs-crumb:focus-visible {
   font-size: var(--text-small-size);
   line-height: var(--text-small-line);
 }
+.vs-pickrow-trail[data-short],
+.vs-listheader-col[data-fixed="time"] {
+  width: var(--gantt-figure);
+}
 .vs-listheader-col[data-fixed="figure"],
 .vs-pickrow:has(.vs-pickrow-trail) .vs-pickrow-figure {
   min-width: var(--gantt-figure);
@@ -1014,8 +1060,9 @@ button.vs-dotlegend-item[aria-pressed="true"] {
   border-color: var(--line);
   background: var(--panel-2);
 }
-button.vs-dotlegend-item[aria-pressed="false"] .vs-text {
-  text-decoration: line-through;
+/* A hidden state is drawn without the pill, never struck through (that reads as deleted); a failed count keeps the failed color. */
+.vs-dotlegend-item[data-tone="err"] .vs-text {
+  color: var(--err);
 }
 button.vs-dotlegend-item:focus-visible {
   outline: var(--focus-ring) solid var(--accent);

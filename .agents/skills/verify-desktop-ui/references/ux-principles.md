@@ -49,7 +49,14 @@ can decide it.
 11. **Nothing is cut without a way to read it.** Text cut with an ellipsis has
     a tooltip; no pane scrolls sideways; no text runs outside the window.
     Enforced by the `truncation` and `overflow` checks.
-12. **Changes are visible, not jarring.** A live update is noticed (a row
+12. **A chart is big enough to read, and a state is never struck through.** The
+    performance chart is at least 480 by 80 px (it drops under the figures
+    when the row is narrow); text is never struck through, since that reads as
+    deleted (a hidden filter is drawn without its pill, a failed count in the
+    failed color). Axis and time-bar labels are thinned to the ones that fit,
+    never overlapped. Enforced by the `chart-size` and `strike` checks and, for
+    labels, the `overlap` check.
+13. **Changes are visible, not jarring.** A live update is noticed (a row
     appears, a figure changes) without the page jumping, flashing or moving
     what the user is reading. Unenforced: needs a person watching.
 

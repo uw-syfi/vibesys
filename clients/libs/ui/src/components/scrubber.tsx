@@ -1,6 +1,7 @@
 import {type JSX, useId} from 'react';
 import {Button} from './button.js';
 import type {StyleWithVars} from './css-vars.js';
+import {placeLabels, useInlineSize} from './label-fit.js';
 import {Chip} from './status.js';
 import {Text} from './text.js';
 
@@ -35,7 +36,17 @@ export function Scrubber(props: {
   readonly backToLive: () => void;
 }): JSX.Element {
   const id = useId();
-  const share = (at: number): number => (props.last === 0 ? 0 : (at / props.last) * 100);
+  const share = (at: number): number => (props.last === 0 ? 0 : at / props.last);
+  const [measure, width] = useInlineSize();
+  const ticks = props.ticks ?? [];
+  // Once the track is measured only the labels that can be read side by side are drawn.
+  const fitted =
+    width === null
+      ? null
+      : placeLabels(
+          ticks.map(tick => ({share: share(tick.at), text: tick.label})),
+          width,
+        );
   return (
     <div className="vs-scrubber">
       <div className="vs-scrubber-head">
@@ -64,11 +75,21 @@ export function Scrubber(props: {
         onChange={event => props.change(Number(event.target.value))}
       />
       {props.ticks === undefined ? null : (
-        <div className="vs-scrubber-ticks" aria-hidden="true">
-          {props.ticks.map(tick => {
-            const place: StyleWithVars = {'--tick-at': `${share(tick.at)}%`};
+        <div ref={measure} className="vs-scrubber-ticks" aria-hidden="true">
+          {(fitted ?? ticks.map((_, index) => ({index, left: null}))).map(({index, left}) => {
+            const tick = ticks[index];
+            if (tick === undefined) return null;
+            const place: StyleWithVars =
+              left === null
+                ? {'--tick-at': `${share(tick.at) * 100}%`}
+                : {'--tick-left': `${left}px`};
             return (
-              <span key={tick.at} className="vs-scrubber-tick" style={place}>
+              <span
+                key={tick.at}
+                className="vs-scrubber-tick"
+                data-placed={left === null ? undefined : ''}
+                style={place}
+              >
                 {tick.label}
               </span>
             );

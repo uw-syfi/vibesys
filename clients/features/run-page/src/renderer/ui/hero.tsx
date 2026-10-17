@@ -7,7 +7,18 @@
  * others dimmed, none removed) and the block gains one line, reserved at every level so the block
  * never changes its size, that reads the idea's result.
  */
-import {Button, Chart, Chip, Fact, FactLine, Row, Stack, Text} from '@vibesys/ui';
+import {
+  Button,
+  Chart,
+  Chip,
+  Fact,
+  FactLine,
+  markdownToPlain,
+  Reserve,
+  Row,
+  Stack,
+  Text,
+} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
   heroView,
@@ -35,19 +46,19 @@ function IdeaLine(props: {readonly view: IdeaFocusView | null}): JSX.Element {
   return (
     <FactLine fit="parent" wrap={false}>
       {view.ratio === null || view.value === null ? (
-        <Fact title={view.title}>
+        <Fact title={markdownToPlain(view.title)}>
           <Text variant="code" tone={view.tone}>
             {`this idea · ${view.outcome}`}
           </Text>
         </Fact>
       ) : (
         <>
-          <Fact title={view.title}>
+          <Fact title={markdownToPlain(view.title)}>
             <Text variant="code" tone={view.tone}>
               {`${view.ratio} vs input`}
             </Text>
           </Fact>
-          <Fact shrink title={view.title}>
+          <Fact shrink title={markdownToPlain(view.title)}>
             <Text variant="code" tone="muted">
               {`this idea · ${view.value}`}
             </Text>
@@ -56,6 +67,39 @@ function IdeaLine(props: {readonly view: IdeaFocusView | null}): JSX.Element {
       )}
     </FactLine>
   );
+}
+
+/**
+ * The line that names which idea the figure belongs to: `best` or `adopted` and the idea. Before
+ * there is one the line is drawn empty and kept (`Reserve`), so the figure under it, and the chart
+ * beside or below, stay where they are when the first idea passes or the run is scrubbed to the start.
+ */
+function StandingLine(props: {
+  readonly standing: 'best' | 'adopted' | null;
+  readonly idea: {readonly id: string; readonly title: string} | null;
+  readonly open: (idea: string) => void;
+}): JSX.Element {
+  const {standing, idea} = props;
+  const shown = standing !== null && idea !== null;
+  const title = shown ? markdownToPlain(idea.title) : '–';
+  const line = (
+    <FactLine fit="parent" wrap={false}>
+      <Fact>
+        <Chip label={shown ? standing : 'best'} tone="ok" dot />
+      </Fact>
+      <Fact shrink title={title}>
+        <Button
+          size="sm"
+          variant="quiet"
+          text={title}
+          press={() => {
+            if (shown) props.open(idea.id);
+          }}
+        />
+      </Fact>
+    </FactLine>
+  );
+  return shown ? line : <Reserve>{line}</Reserve>;
 }
 
 /**
@@ -84,35 +128,25 @@ export function Hero(
     props.lit,
   );
   return (
-    <Row gap="space-6" align="center">
+    <Row gap="space-6" align="center" wrap>
       <Stack gap="space-1" width="figure">
         <Text variant="section">{hero.metric}</Text>
-        {hero.standing === null || hero.bestIdea === null ? null : (
-          <FactLine fit="parent" wrap={false}>
-            <Fact>
-              <Chip label={hero.standing} tone="ok" dot />
-            </Fact>
-            <Fact shrink title={hero.bestIdea.title}>
-              <Button
-                size="sm"
-                variant="quiet"
-                text={hero.bestIdea.title}
-                press={() => {
-                  if (hero.bestIdea !== null) {
-                    props.zoom({type: 'open-idea', idea: hero.bestIdea.id});
-                  }
-                }}
-              />
-            </Fact>
-          </FactLine>
-        )}
+        <StandingLine
+          standing={hero.standing}
+          idea={hero.bestIdea}
+          open={id => props.zoom({type: 'open-idea', idea: id})}
+        />
         <Row gap="space-3" align="baseline">
           <Text variant="hero" tone={hero.ratio === null ? 'muted' : 'ok'}>
             {hero.ratio ?? '–'}
           </Text>
           <Stack gap="space-0">
             <Text variant="code">{hero.value ?? 'nothing measured yet'}</Text>
-            {hero.input === null ? null : (
+            {hero.input === null ? (
+              <Reserve>
+                <Text variant="code">input –</Text>
+              </Reserve>
+            ) : (
               <Text variant="code" tone="muted">
                 {hero.input}
               </Text>
@@ -122,7 +156,7 @@ export function Hero(
         <IdeaLine view={ideaFocusView(props.model, props.idea)} />
       </Stack>
       {chart === null ? null : (
-        <Stack gap="space-0" grow>
+        <Stack gap="space-0" width="chart">
           <Chart
             label={chart.label}
             size="strip"

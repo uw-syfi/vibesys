@@ -22,7 +22,7 @@ import {openWaits} from './span-words.js';
 import {type Route, routeLevel} from './zoom.js';
 
 export interface HeroView {
-  /** The metric and which way is better: `throughput ↑`. */
+  /** The metric in words and which way is better: `Throughput ↑`. */
   readonly metric: string;
   /** The best's ratio to the input (`1.42×`); null before anything passed. */
   readonly ratio: string | null;
@@ -43,6 +43,32 @@ export interface HeroView {
 function unitSuffix(model: RunModel): string {
   const unit = model.overview?.objective.unit;
   return typeof unit === 'string' && unit !== '' ? ` ${unit}` : '';
+}
+
+/**
+ * A metric id in words, for a header a person reads: `TOTAL_OPS_PER_SEC` reads `Total ops/sec`.
+ * The run's objective names its metric by id and sends no label, so the words are made from the
+ * id: its parts lowercased, "X per Y" joined as `X/Y`, the first letter capitalized.
+ */
+function metricLabel(metric: string): string {
+  const parts = metric
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .split(/[\s_-]+/)
+    .filter(part => part !== '')
+    .map(part => part.toLowerCase());
+  const words: string[] = [];
+  for (let at = 0; at < parts.length; at += 1) {
+    const [word, next] = [parts[at] ?? '', parts[at + 1]];
+    const previous = words.at(-1);
+    if (word === 'per' && previous !== undefined && next !== undefined) {
+      words[words.length - 1] = `${previous}/${next}`;
+      at += 1;
+    } else {
+      words.push(word);
+    }
+  }
+  const text = words.join(' ');
+  return text === '' ? text : `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 }
 
 function arrow(direction: Direction): string {
@@ -66,7 +92,7 @@ export function heroView(model: RunModel): HeroView {
   const input = inputValue(model);
   const unit = unitSuffix(model);
   return {
-    metric: `${typeof metric === 'string' && metric !== '' ? metric : 'metric'}${arrow(model.direction)}`,
+    metric: `${typeof metric === 'string' && metric !== '' ? metricLabel(metric) : 'Metric'}${arrow(model.direction)}`,
     ratio: best?.vsBaseline === null || best === null ? null : ratio(best.vsBaseline),
     value:
       best?.metricValue === null || best === null
@@ -239,7 +265,7 @@ export function stripChartView(
   const top = Math.max(...ys);
   const metric = model.overview?.objective.metric;
   return {
-    label: `${typeof metric === 'string' ? metric : 'Metric'} of each measured idea over the run, with the best so far`,
+    label: `${typeof metric === 'string' && metric !== '' ? metricLabel(metric) : 'Metric'} of each measured idea over the run, with the best so far`,
     points,
     edges: chartEdges(
       model.candidates.candidates,
@@ -289,8 +315,11 @@ function waitingSince(span: Span | undefined): number | null {
   return since.length === 0 ? null : Math.max(...since);
 }
 
+/** What a step does: its role, and its title unless that only repeats the role (`implementer`). */
 function stepSummary(step: CandidateStep): string {
-  return step.role === null ? step.title : `${step.role} · ${step.title}`;
+  if (step.role === null) return step.title;
+  const same = step.title.trim().toLowerCase() === step.role.trim().toLowerCase();
+  return same || step.title === '' ? step.role : `${step.role} · ${step.title}`;
 }
 
 /** What runs now: each running idea's latest running step, then agents working outside ideas. */

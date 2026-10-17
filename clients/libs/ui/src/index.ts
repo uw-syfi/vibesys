@@ -47,6 +47,7 @@ export {
 } from './components/gantt.js';
 export type {Guide} from './components/guides.js';
 export {ICON_NAMES, Icon, type IconName} from './components/icon.js';
+export {type AxisLabel, type PlacedLabel, placeLabels} from './components/label-fit.js';
 export {
   type Align,
   Grid,
@@ -54,6 +55,7 @@ export {
   type Justify,
   Page,
   type PageWidth,
+  Reserve,
   Row,
   Split,
   Stack,
@@ -85,7 +87,9 @@ export {
   type ListHeader,
   PickList,
   PickRow,
+  type RowBadge,
   type RowBar,
+  type RowTrail,
 } from './components/pick-list.js';
 export {Breadcrumb, type Crumb, type Density, Screen} from './components/screen.js';
 export {Scrubber, type ScrubberTick} from './components/scrubber.js';

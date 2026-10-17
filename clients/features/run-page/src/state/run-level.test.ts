@@ -288,11 +288,24 @@ describe('the run level', () => {
     expect(hero.input).toBe('input 100');
   });
 
+  test('the hero names the metric in words, never by its id', () => {
+    const named = (metric: string): string =>
+      heroView({...model, overview: {objective: {text: 'goal', metric}}}).metric;
+    expect(named('TOTAL_OPS_PER_SEC')).toBe('Total ops/sec');
+    expect(named('p99_latency_ms')).toBe('P99 latency ms');
+    expect(named('throughput')).toBe('Throughput');
+    expect(named('opsPerSecond')).toBe('Ops/second');
+    expect(named('')).toBe('Metric');
+    for (const id of ['TOTAL_OPS_PER_SEC', 'a_b_c', 'x-y_z', 'MIXED_case_Id']) {
+      expect(named(id)).not.toMatch(/[_-]/);
+    }
+  });
+
   test('Now jumps to the running idea’s live step', () => {
     expect(nowView(model)).toEqual([
       {
         id: 'flow:w4/turn/#1',
-        doing: 'implementer · implementer',
+        doing: 'implementer',
         context: 'arena',
         since: 241,
         open: {kind: 'step', idea: 'flow:w4/#1', step: 'flow:w4/turn/#1'},
@@ -323,7 +336,7 @@ describe('the run level', () => {
       ).find(row => row.context === 'ring');
     expect(rows([again])).toMatchObject({doing: 'starting', since: 600});
     expect(rows([again, implement])).toMatchObject({
-      doing: 'implementer · implementer',
+      doing: 'implementer',
       since: 601,
     });
     const done = {...implement, status: 'done' as const, ended_at: 639};

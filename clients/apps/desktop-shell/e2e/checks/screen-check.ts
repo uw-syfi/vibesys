@@ -9,12 +9,14 @@ import {FAILURE_REASONS} from '@vibesys/run-fixtures';
 import {
   type CheckId,
   type CheckInput,
+  chartSizeCheck,
   HELPERS,
   legendCheck,
   numberLabelCheck,
   overflowCheck,
   overlapCheck,
   rawTextCheck,
+  strikeCheck,
   truncationCheck,
   type Violation,
   wrapCheck,
@@ -32,6 +34,8 @@ const CHECKS: Readonly<Record<PageCheckId, (input: CheckInput) => Violation[]>> 
   'raw-text': rawTextCheck,
   legend: legendCheck,
   'number-label': numberLabelCheck,
+  strike: strikeCheck,
+  'chart-size': chartSizeCheck,
 };
 
 /** Enum values that never read as words: the failure reasons spelled with a hyphen or underscore. */

@@ -9,6 +9,7 @@ import {
   LogPane,
   Menu,
   type MenuItem,
+  markdownToPlain,
   Row,
   Screen,
   Stack,
@@ -280,7 +281,8 @@ function crumbs(zoomed: ResolvedZoom, route: Route, zoom: Zoom): Crumb[] {
   };
   const items: {id: string; label: string; to: Route}[] = [{id: 'run', label: 'Run', to: top}];
   const opened: Route = {...route, step: null, item: null};
-  if (zoomed.idea !== null) items.push({id: 'idea', label: zoomed.idea.title, to: opened});
+  if (zoomed.idea !== null)
+    items.push({id: 'idea', label: markdownToPlain(zoomed.idea.title), to: opened});
   if (zoomed.agent !== null) items.push({id: 'agent', label: zoomed.agent.role, to: opened});
   if (zoomed.step !== null) {
     const label = zoomed.step.role ?? zoomed.step.title;

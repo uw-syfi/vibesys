@@ -17,6 +17,7 @@ import {
   Panes,
   PickList,
   PickRow,
+  Reserve,
   Row,
   Said,
   Screen,
@@ -583,6 +584,16 @@ export const FRAME_ENTRIES = {
   Fact: {
     render: () => (
       <Text tone="muted">Facts are the entries of the FactLine above: whole, or shrinking.</Text>
+    ),
+  },
+  Reserve: {
+    render: () => (
+      <Stack gap="space-1">
+        <Reserve>
+          <Text variant="code">Held room for a line that is not there yet</Text>
+        </Reserve>
+        <Text variant="code">The figure under it does not move when the line arrives.</Text>
+      </Stack>
     ),
   },
   DotLegend: {render: () => <FilterDemo />},

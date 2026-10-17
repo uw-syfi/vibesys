@@ -11,6 +11,7 @@ import {
   Button,
   EmptyState,
   Gantt,
+  markdownToPlain,
   Row,
   SegmentedControl,
   Stack,
@@ -87,7 +88,7 @@ function RunTimeline(props: ViewBase): JSX.Element {
         figureLabel="vs input"
         rows={shown.rows.map(row => ({
           id: row.id,
-          label: row.label,
+          label: row.lane ? row.label : markdownToPlain(row.label),
           start: row.start,
           end: row.end,
           outcome: row.outcome,

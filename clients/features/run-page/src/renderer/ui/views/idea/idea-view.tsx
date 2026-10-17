@@ -14,6 +14,7 @@ import {
   Fact,
   FactLine,
   Markdown,
+  markdownToPlain,
   PickList,
   PickRow,
   Row,
@@ -97,14 +98,14 @@ function IdeaFacts(props: IdeaViewProps): JSX.Element {
           </Text>
         </Fact>
       ) : (
-        <Fact shrink title={parent.title}>
+        <Fact shrink title={markdownToPlain(parent.title)}>
           <Text variant="small" tone="muted">
             from
           </Text>
           <Button
             size="sm"
             variant="quiet"
-            text={parent.title}
+            text={markdownToPlain(parent.title)}
             press={() => props.zoom({type: 'open-idea', idea: parent.id})}
           />
         </Fact>

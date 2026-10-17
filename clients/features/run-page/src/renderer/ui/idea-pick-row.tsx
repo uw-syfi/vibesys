@@ -36,7 +36,7 @@ export function IdeaPickRow(props: {
   return (
     <PickRow
       id={row.id}
-      title={row.title}
+      title={markdownToPlain(row.title)}
       mono
       {...(compact || summary === null ? {} : {summary})}
       state={row.state}
@@ -44,7 +44,9 @@ export function IdeaPickRow(props: {
       {...(compact ? {} : {bar: row.bar})}
       figure={row.runningSince === null ? row.figure : ageWords(row.runningSince, props.now)}
       figureTone={row.figureTone}
-      {...(compact || place !== undefined ? {} : {trail: {label: row.trail.label}})}
+      {...(compact || place !== undefined
+        ? {}
+        : {trail: {label: markdownToPlain(row.trail.label)}})}
       {...(place === undefined
         ? {}
         : {

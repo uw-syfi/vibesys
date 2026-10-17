@@ -4,7 +4,16 @@
  * subtrees folded (`agentTree`); and the pane of one opened agent: its facts and its turns.
  */
 import type {AgentNode} from '@vibesys/run-state/agents';
-import {Button, EmptyState, KeyValue, PickList, PickRow, Stack, Text} from '@vibesys/ui';
+import {
+  Button,
+  EmptyState,
+  KeyValue,
+  PickList,
+  PickRow,
+  type RowBadge,
+  Stack,
+  Text,
+} from '@vibesys/ui';
 import {type JSX, useMemo} from 'react';
 import {type AgentRow, agentTree, type FoldRow} from '../../../../state/agent-tree.js';
 import {type AgentTurn, agentModel, agentTurns} from '../../../../state/agent-turns.js';
@@ -85,20 +94,17 @@ function AgentLine(props: {
       figure={agent.turns.toLocaleString('en-US')}
       figureTone="muted"
       {...(measure === null ? {} : {measure})}
-      {...(time === undefined || view.compact ? {} : {trail: {label: time}})}
+      {...(time === undefined || view.compact ? {} : {trail: {label: time, short: true}})}
       select={() => view.zoom({type: 'open-agent', agent: agent.id})}
     />
   );
 }
 
-function alsoBadge(
-  roles: readonly string[],
-  compact: boolean,
-): {readonly label: string; readonly tone: 'neutral'} {
-  return {
-    label: compact ? `+${roles.length} parent` : `+ also under ${roles.join(', ')}`,
-    tone: 'neutral',
-  };
+/** The fan-in chip: the roles that also started the agent, or only how many in a narrow list. */
+function alsoBadge(roles: readonly string[], compact: boolean): RowBadge {
+  const count = `+${roles.length} parent`;
+  const whole = `+ also under ${roles.join(', ')}`;
+  return compact ? {label: count, tone: 'neutral'} : {label: whole, short: count, tone: 'neutral'};
 }
 
 function FoldLine(props: {readonly row: FoldRow; readonly show: () => void}): JSX.Element {
@@ -143,7 +149,7 @@ export function AgentsView(props: AgentsViewProps): JSX.Element {
               end: [
                 {label: 'turns', fixed: 'figure' as const},
                 ...(hasTokens ? [{label: 'tokens', fixed: 'measure' as const}] : []),
-                {label: 'took', fixed: 'trail' as const},
+                {label: 'took', fixed: 'time' as const},
               ],
             },
           })}

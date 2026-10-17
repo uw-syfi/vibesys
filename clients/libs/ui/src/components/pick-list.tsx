@@ -28,8 +28,8 @@ export interface HeaderColumn {
   readonly label: string;
   /** As wide as a row's bar. */
   readonly bar?: boolean;
-  /** As wide as a row's figure, its measure, or its trail. */
-  readonly fixed?: 'figure' | 'measure' | 'trail';
+  /** As wide as a row's figure, its measure, its trail, or its short trail (a duration). */
+  readonly fixed?: 'figure' | 'measure' | 'trail' | 'time';
 }
 
 /** The one-line caption of a list's columns: `start` over the names, `end` over the trailing columns. */
@@ -41,13 +41,16 @@ export interface ListHeader {
 function Header(props: {readonly header: ListHeader; readonly id: string}): JSX.Element {
   return (
     <div className="vs-listheader" id={props.id}>
-      <span className="vs-listheader-start">{props.header.start}</span>
+      <span className="vs-listheader-start" title={props.header.start}>
+        {props.header.start}
+      </span>
       {(props.header.end ?? []).map(column => (
         <span
           key={column.label}
           className="vs-listheader-col"
           data-bar={column.bar === true || undefined}
           data-fixed={column.fixed}
+          title={column.label}
         >
           {column.label}
         </span>
@@ -148,21 +151,50 @@ export interface Measure {
   readonly title?: string;
 }
 
-/** What follows a row's text: its badges, its bar, its figure, its measure and its trail. */
+/**
+ * A row's last column: `label`, a link when it has `press`. A `short` one is a duration or a count,
+ * as narrow as a figure; any other is a name (such as the idea a row came from) and is the first
+ * thing a narrow list gives up.
+ */
+export interface RowTrail {
+  readonly label: string;
+  readonly press?: () => void;
+  readonly short?: boolean;
+}
+
+/** A chip on a row: `short` is the word it takes in a narrow list, while `label` stays its tooltip. */
+export interface RowBadge {
+  readonly label: string;
+  readonly tone: StatusTone;
+  readonly short?: string;
+}
+
+/** What follows a row's text: its badges, its bar, its figure and its trail. */
 function Trail(props: {
-  readonly badges?: readonly {readonly label: string; readonly tone: StatusTone}[];
+  readonly badges?: readonly RowBadge[];
   readonly bar?: RowBar;
   readonly figure?: string;
   readonly figureTone?: 'default' | 'ok' | 'err' | 'muted';
   readonly measure?: Measure;
-  readonly trail?: {readonly label: string; readonly press?: () => void};
+  readonly trail?: RowTrail;
 }): JSX.Element {
   const trail = props.trail;
   return (
     <>
-      {(props.badges ?? []).map(badge => (
-        <Chip key={badge.label} label={badge.label} tone={badge.tone} />
-      ))}
+      {(props.badges ?? []).map(badge =>
+        badge.short === undefined ? (
+          <Chip key={badge.label} label={badge.label} tone={badge.tone} />
+        ) : (
+          <span key={badge.label} className="vs-pickrow-badge" title={badge.label}>
+            <span data-form="full">
+              <Chip label={badge.label} tone={badge.tone} />
+            </span>
+            <span data-form="short">
+              <Chip label={badge.short} tone={badge.tone} />
+            </span>
+          </span>
+        ),
+      )}
       {props.bar === undefined ? null : (
         <span className="vs-pickrow-bar">
           <Meter label={props.bar.label} value={props.bar.value} tone={props.bar.tone} />
@@ -179,11 +211,19 @@ function Trail(props: {
         </span>
       )}
       {trail === undefined ? null : trail.press === undefined ? (
-        <span className="vs-pickrow-trail">{trail.label}</span>
+        <span
+          className="vs-pickrow-trail"
+          data-short={trail.short === true || undefined}
+          title={trail.label}
+        >
+          {trail.label}
+        </span>
       ) : (
         <button
           type="button"
           className="vs-pickrow-trail"
+          data-short={trail.short === true || undefined}
+          title={trail.label}
           tabIndex={-1}
           onClick={event => {
             event.stopPropagation();
@@ -195,6 +235,11 @@ function Trail(props: {
       )}
     </>
   );
+}
+
+/** What a row's tooltip reads: its title, and its summary under it when it has one. */
+function tooltipOf(title: string, summary: string | undefined): string {
+  return summary === undefined ? title : `${title}\n${summary}`;
 }
 
 /** A row's swatch: its palette color, or hatched; none when it has neither. */
@@ -264,6 +309,8 @@ export function PickRow(props: {
   readonly state?: {readonly tone: StatusTone; readonly label: string};
   readonly fresh?: boolean;
   readonly mono?: boolean;
+  /** The `summary` under the title, in a compact screen too: both lines stay readable in a narrow list. */
+  readonly stacked?: boolean;
   readonly guides?: readonly Guide[];
   /** On the path from the selected or pointed-at row back to the root: guides in accent, a faint fill. */
   readonly path?: boolean;
@@ -273,14 +320,14 @@ export function PickRow(props: {
   /** A muted column after the figure (a count of tokens), one width for every row. */
   readonly measure?: Measure;
   /** A muted last column after the figure, such as "from <parent>"; with `press` it is a link. */
-  readonly trail?: {readonly label: string; readonly press?: () => void};
+  readonly trail?: RowTrail;
   /** An accent stripe down the row's edge: it is on the chain the reader is led along (a winning path). */
   readonly stripe?: boolean;
   /** A square of the palette's color number (`--series-N`) before the title: what the row is, by color. */
   readonly swatch?: number;
   /** A hatched square in place of a color: what the row is has no color of its own (a gate). */
   readonly hatched?: boolean;
-  readonly badges?: readonly {readonly label: string; readonly tone: StatusTone}[];
+  readonly badges?: readonly RowBadge[];
   /**
    * A row of a list that folds: a chevron before the title that opens or closes what the row
    * stands for (Right and Left do too), or `'none'` for a row with nothing to fold, which keeps
@@ -303,6 +350,7 @@ export function PickRow(props: {
       aria-posinset={slot === null ? undefined : slot.index + 1}
       aria-setsize={slot === null ? undefined : slot.size}
       data-fresh={props.fresh === true || undefined}
+      data-stacked={props.stacked === true || undefined}
       data-path={props.path === true || undefined}
       data-stripe={props.stripe === true || undefined}
       onClick={event => clicked(event, fold, props.select)}
@@ -330,7 +378,7 @@ export function PickRow(props: {
         </span>
       )}
       <RowSwatch series={props.swatch} hatched={props.hatched === true} />
-      <span className="vs-pickrow-text">
+      <span className="vs-pickrow-text" title={tooltipOf(props.title, props.summary)}>
         <Text variant={props.mono === true ? 'code' : 'body-strong'}>{props.title}</Text>
         {props.summary === undefined ? null : (
           <Text variant="small" tone="muted">
