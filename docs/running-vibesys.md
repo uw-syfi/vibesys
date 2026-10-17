@@ -233,8 +233,8 @@ that run's records. All of these must hold:
   gives each job its GPUs and CPU cores alone. A Slurm executor declares this
   with `dedicated_measurement_resources = true` in its configuration, or with a
   bare `--exclusive` as the last node-sharing option in `sbatch_arguments`
-  (`--exclusive=user`, `--exclusive=mcs`, `--oversubscribe` and `--share` share
-  nodes and do not count).
+  (`--exclusive=user`, `--exclusive=mcs`, `--exclusive=topo`, `--oversubscribe`,
+  `--share` and `-s` share nodes and do not count).
 - It ended with a pass or a workload failure (the candidate's own failure). A
   failure of the infrastructure, or an unclassified end, is never reused.
 

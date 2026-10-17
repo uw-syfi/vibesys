@@ -78,10 +78,11 @@ though it may share the host with other jobs. Set it for a shared GPU node
 where `sbatch_arguments` allocate whole GPUs and cores (for example
 `--gres=gpu:4 -c 64`) but cannot pass `--exclusive` without taking the whole
 node from other users. A bare `--exclusive` as the last node-sharing option in
-`sbatch_arguments` (`--exclusive=user`, `--exclusive=mcs`, and
-`--oversubscribe`, `--share` share nodes) implies it. When it holds, an official
-measurement of a task that opts in may reuse the scope's earlier trusted measurement of the identical input
-instead of queuing a second job; leave it `false` unless the declaration is
+`sbatch_arguments` implies it (`--exclusive=user`, `--exclusive=mcs`,
+`--exclusive=topo`, `--oversubscribe`, `--share` and `-s` share nodes, so they
+do not count). When it holds, an official measurement of a task that opts in
+may reuse the agent's own run of the identical input instead of queuing a
+second job; leave it `false` unless the declaration is
 true, because it is the only evidence that the two runs faced the same
 conditions.
 

@@ -122,8 +122,13 @@ class WorkspaceInput(BaseModel):
     unread: tuple[str, ...] = ()
     """Workspace paths (files or directories) the evaluation never reads, such as agent notes.
 
-    A commit that changes only these is the input an earlier run already measured, so its
-    official measurement reuses that run instead of running again.
+    A commit that changes only these is the same measured input as one an earlier run
+    already measured. Its official measurement then reuses that run instead of running
+    again, but only when the task sets ``[benchmark] reuse_agent_run = true``, the run was
+    the scope's only measurement submission, both runs had dedicated measurement resources
+    and the same stages, budgets and policy, and it ended in a pass or a workload failure.
+    Without the opt-in the paths still define the measured input, and every official
+    measurement runs fresh.
     """
 
     _check_unread = field_validator("unread")(check_unread_paths)
