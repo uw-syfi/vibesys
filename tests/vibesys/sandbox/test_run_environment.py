@@ -22,10 +22,10 @@ from vibesys.run.environment import open_run_environment
 from vs_agent.api.images import ImagePushError
 from vs_agent.api.testing import FakeDockerBuildRunner, fake_profiles
 from vs_project.api import Project, RunEnvironmentRecord, RunResourceRequest
+from vs_runtime._container_mount_plan import container_mount_plan
 from vs_runtime._run_environment import (
     _cli_container_env,
     _cli_provider_env_and_auth_files,
-    _container_mount_plan,
     _ensure_pushed_for_remote_backend,
     _SkyPilotRunEnvironmentSession,
 )
@@ -113,7 +113,7 @@ def _as_mount_tuples(resources: Sequence[HostResource]) -> list[tuple[str, str, 
     """Invert resource lowering for assertions written against the old shape.
 
     Lets tests keep comparing against plain ``(host, container, readonly)``
-    tuples after ``_container_mount_plan`` moved from raw bind mounts to a
+    tuples after ``container_mount_plan`` moved from raw bind mounts to a
     ``HostResource`` list.
     """
     return [
@@ -1346,8 +1346,8 @@ def test_local_environment_objective_defaults_to_the_bare_workspace_relative_nam
     assert session.view.paths.objective == "OBJECTIVE.md"
 
 
-def test_container_mount_plan_declares_named_resources_with_agent_paths(tmp_path: Path) -> None:
-    """``_container_mount_plan`` returns ``HostResource`` entries, not bind-mount
+def testcontainer_mount_plan_declares_named_resources_with_agent_paths(tmp_path: Path) -> None:
+    """``container_mount_plan`` returns ``HostResource`` entries, not bind-mount
     tuples, with ``access`` and ``agent_path`` set for every named mount."""
     backend = FakeBackend()
     history = tmp_path / "experiment-history"
@@ -1364,7 +1364,7 @@ def test_container_mount_plan_declares_named_resources_with_agent_paths(tmp_path
         cli_provider="codex",
     )
 
-    resources, _symlinks = _container_mount_plan(request)
+    resources, _symlinks = container_mount_plan(request)
 
     assert all(isinstance(resource, HostResource) for resource in resources)
     by_agent_path = {resource.agent_path: resource for resource in resources}
@@ -2366,7 +2366,7 @@ remote_artifact_root = "/remote/vibesys"
     for env_name, backend in backends.items():
         assert backend.calls[0][0] is SandboxKind.DOCKER, env_name
 
-    # (b) The common mount set declared by `_container_mount_plan` — the
+    # (b) The common mount set declared by `container_mount_plan` — the
     # objective doc, the evaluator package, and the CLI auth/framework
     # mounts — carries identical access and agent_path everywhere.
     resources_by_env = {
