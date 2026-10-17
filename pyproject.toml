@@ -151,6 +151,7 @@ markers = [
     "slow: an exhaustive sweep too long for a pull request; the vs-sim plugin deselects it at --depth=pr (keeping one case of each under sim_smoke_slow) and runs it at --depth=nightly",
     "slurm_cluster: runs the slurm environment (SSH, local, local with agent GPU commands, and the deprecated slurm-gpu alias) against a real Slurm cluster in Docker; opt in with VIBESYS_SLURM_CLUSTER=1",
     "minimal_container: starts every in-container process in a real container built on each default base image, on a host without GPUs; opt in with VIBESYS_MINIMAL_CONTAINER=1",
+    "regression: a test that pins a fixed bug; a @given one must also carry @example (tests/quality/test_regression_properties_are_pinned.py)",
     "real_contract: runs a Fake-vs-real contract suite against the real implementation (real DB, subprocess, or service); opt in with VIBESYS_REAL_CONTRACTS=1",
 ]
 
