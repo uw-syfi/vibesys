@@ -22,6 +22,9 @@ Children inherit these defaults. Tests can still set explicit environment inputs
 Process-owned directories are removed at pytest cleanup.
 It also turns off Git auto maintenance through `GIT_CONFIG_*`, as `run_git`
 does for product Git, so a test's commit never starts a background prune.
+It also points `GIT_CONFIG_GLOBAL` at an empty file, sets `GIT_CONFIG_NOSYSTEM=1`, and fixes the
+Git identity, so a developer's hooks, commit signing, or default branch never reach a test.
+`tests/quality/test_git_hermetic.py` bans tests from resetting those variables.
 
 Installed Rust toolchains remain available through explicit CARGO_HOME and
 RUSTUP_HOME paths. Go compiler caches default to a private controller-owned

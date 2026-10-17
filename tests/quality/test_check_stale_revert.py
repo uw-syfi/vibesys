@@ -13,6 +13,7 @@ from pathlib import Path
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from scripts.check_stale_revert import rewritten_append_only, stale_files
+from tests.support import run_test_command
 from tests.support.real_git import REAL_GIT
 
 from vs_sim.api.testing import examples
@@ -32,6 +33,15 @@ def _commit(root: Path, files: dict[str, str], message: str) -> str:
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", message + _TRAILER)
     return _git(root, "rev-parse", "HEAD")
+
+
+def _commit_staged_pin(root: Path, message: str) -> None:
+    """Commit an index-only gitlink as plain Git does.
+
+    The product Git policy sets ``diff.ignoreSubmodules=all``, under which Git sees a
+    pin whose directory is absent as "no changes added to commit".
+    """
+    run_test_command(["git", "commit", "-q", "-m", message + _TRAILER], cwd=root, check=True)
 
 
 def _repository(root: Path) -> None:
@@ -315,10 +325,10 @@ def test_bumping_a_submodule_pin_is_not_a_line_edit() -> None:
         _commit(root, {"README.md": "base\n"}, "base")
         for index, pin in enumerate(("1" * 40, "2" * 40)):
             _git(root, "update-index", "--add", "--cacheinfo", f"160000,{pin},examples/sub")
-            _git(root, "commit", "-q", "-m", f"main: pin {index}{_TRAILER}")
+            _commit_staged_pin(root, f"main: pin {index}")
         _git(root, "branch", "change")
         _git(root, "checkout", "-q", "change")
         _git(root, "update-index", "--cacheinfo", f"160000,{'3' * 40},examples/sub")
-        _git(root, "commit", "-q", "-m", f"change: bump the pin{_TRAILER}")
+        _commit_staged_pin(root, "change: bump the pin")
 
         assert stale_files(root, "main") == []
