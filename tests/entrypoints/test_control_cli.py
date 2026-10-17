@@ -17,7 +17,16 @@ from hypothesis import strategies as st
 
 from entrypoints.control import control_main, time_ordered_id
 from vibesys.api import CONTROL_REQUEST
-from vs_core.api import CoreState, RoleId, RoleInputTarget, initial_state, step
+from vs_core.api import (
+    CoreState,
+    InputDropped,
+    InputDropReason,
+    InputMode,
+    RoleId,
+    RoleInputTarget,
+    initial_state,
+    step,
+)
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
 from vs_runtime.api.core import OperatorInbox, RunControlBridge
@@ -102,6 +111,34 @@ def test_a_posted_control_is_what_the_run_records(
         role = command[command.index("--role") + 1]
         assert core.run.controls[0].target == RoleInputTarget(role_id=RoleId(root=role))
         assert core.sessions.inputs[0].input.target == core.run.controls[0].target
+
+
+def test_a_standing_steer_holds_until_vibesys_control_withdraws_it(tmp_path: Path) -> None:
+    run_id = _project_with_run(tmp_path)
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
+    inbox = OperatorInbox(
+        Project.open(tmp_path).state.control_inbox(run_id),
+        ChannelRunControl(channel, SimThreads()),
+    )
+    bridge = RunControlBridge(channel, _Texts(), inbox=inbox)
+    core = _declaring(("dynamic-planner",))
+
+    assert _control(tmp_path, [run_id, "steer", "keep bf16", "--standing"], "r-1")[0] == 0
+    for event in bridge.poll(core, 1.0):
+        core = step(core, event).state
+    (standing,) = core.sessions.inputs
+    assert (standing.input.mode, standing.receipt) == (InputMode.STANDING, None)
+
+    assert _control(tmp_path, [run_id, "withdraw", "r-1"], "r-2")[0] == 0
+    for event in bridge.poll(core, 2.0):
+        core = step(core, event).state
+    assert [(c.control_id.root, c.action) for c in core.run.controls] == [
+        ("op-r-1", "steer"),
+        ("op-r-2", "withdraw"),
+    ]
+    (withdrawn,) = core.sessions.inputs
+    assert isinstance(withdrawn.receipt, InputDropped)
+    assert withdrawn.receipt.reason is InputDropReason.WITHDRAWN
 
 
 def _declaring(roles: tuple[str, ...]) -> CoreState:

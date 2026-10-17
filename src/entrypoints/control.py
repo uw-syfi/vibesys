@@ -59,6 +59,15 @@ def _parser() -> argparse.ArgumentParser:
             metavar="ID",
             help=f"give it to the next turn of this {kind} only (default: the whole run)",
         )
+    steer.add_argument(
+        "--standing",
+        action="store_true",
+        help="give it to every turn of the target from now on, until withdrawn",
+    )
+    withdraw = actions.add_parser(
+        "withdraw", help="end standing guidance sent earlier as a standing steer"
+    )
+    withdraw.add_argument("withdraws", metavar="CONTROL_ID", help="the standing steer's id")
     actions.add_parser("pause", help="hold the run at its next safe boundary")
     resume = actions.add_parser("resume", help="continue a paused run")
     how = resume.add_mutually_exclusive_group()
@@ -90,7 +99,11 @@ def _payload(arguments: argparse.Namespace, control_id: str) -> dict[str, object
             kinds = ("role", "attempt", "item")
             named = [(kind, getattr(arguments, kind)) for kind in kinds]
             target = next(({"kind": k, "id": i} for k, i in named if i is not None), None)
-            return {**common, "text": arguments.text, **({"target": target} if target else {})}
+            mode = "standing" if arguments.standing else "next_turn"
+            targeted = {"target": target} if target else {}
+            return {**common, "text": arguments.text, "mode": mode, **targeted}
+        case "withdraw":
+            return {**common, "withdraws": arguments.withdraws}
         case "resume":
             return {**common, "fallback": arguments.fallback, "when": arguments.when}
         case "stop":
