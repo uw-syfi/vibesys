@@ -1497,7 +1497,8 @@ const runEventSchema: Record<string, unknown> = {
         "condition": {
           "enum": [
             "quota_exhausted",
-            "rate_limited"
+            "rate_limited",
+            "unavailable"
           ],
           "title": "Condition",
           "type": "string"
@@ -1523,7 +1524,7 @@ const runEventSchema: Record<string, unknown> = {
     },
     "QuotaPausedData": {
       "additionalProperties": false,
-      "description": "A turn stopped on a provider capacity limit and the run paused for it.\n\n``condition`` is ``quota_exhausted`` (a usage, spend or billing limit) or\n``rate_limited`` (sustained rate limiting); ``detail`` is the provider's\ndiagnostic and ``resets_at`` the epoch second the provider said capacity\nreturns, when it said. The run stays paused until it resumes; ``resumes_at`` is the\nepoch second the run's quota policy resumes it by itself, ``None`` when only the\noperator can. ``policy`` is the unattended quota policy; the fallback fields name the\nprovider and model an operator may resume with, ``None`` when none is configured.",
+      "description": "A turn stopped on a provider capacity limit and the run paused for it.\n\n``condition`` is ``quota_exhausted`` (a usage, spend or billing limit),\n``rate_limited`` (sustained rate limiting) or ``unavailable`` (a provider outage,\nwhich the run waits out by itself under its outage budget); ``detail`` is the provider's\ndiagnostic and ``resets_at`` the epoch second the provider said capacity\nreturns, when it said. The run stays paused until it resumes; ``resumes_at`` is the\nepoch second the run's quota policy resumes it by itself, ``None`` when only the\noperator can. ``policy`` is the unattended quota policy; the fallback fields name the\nprovider and model an operator may resume with, ``None`` when none is configured.",
       "properties": {
         "kind": {
           "const": "quota_paused",
@@ -1538,7 +1539,8 @@ const runEventSchema: Record<string, unknown> = {
         "condition": {
           "enum": [
             "quota_exhausted",
-            "rate_limited"
+            "rate_limited",
+            "unavailable"
           ],
           "title": "Condition",
           "type": "string"

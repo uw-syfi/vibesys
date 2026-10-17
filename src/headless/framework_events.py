@@ -85,8 +85,15 @@ def format_quota_event(event: CoreEvent) -> str | None:
     return line
 
 
+_QUOTA_CONDITIONS = {
+    "quota_exhausted": "quota exhausted",
+    "rate_limited": "rate limited",
+    "unavailable": "unavailable",
+}
+
+
 def _quota_condition(condition: str) -> str:
-    return "quota exhausted" if condition == "quota_exhausted" else "rate limited"
+    return _QUOTA_CONDITIONS[condition]
 
 
 def _utc(epoch: float) -> str:

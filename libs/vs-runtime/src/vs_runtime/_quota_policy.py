@@ -106,6 +106,65 @@ class Switch:
 type QuotaDecision = Hold | WaitFor | GiveUp | Switch
 
 
+@dataclass(frozen=True, slots=True)
+class OutagePolicy:
+    """How long one turn waits out a provider outage, and how often it tries again.
+
+    An outage (``QuotaCondition.UNAVAILABLE``) names no limit and no reset time: the
+    provider kept failing with transient errors. Nobody can decide anything about it,
+    so unlike a quota it never waits for the operator. The turn is sent again after
+    ``first_wait_seconds``, then after waits that double up to ``max_wait_seconds``,
+    until ``budget_seconds`` have passed since the turn's first stop; then the turn
+    fails with the error, as it did before there was a gate.
+    """
+
+    budget_seconds: float = 6 * 3600.0
+    """Six hours. It is the longest one turn may already run (vs_agent's
+    ``DEFAULT_TURN_TIMEOUT_S``), so waiting it out holds a turn no longer than working
+    does. It covers the gateway outages seen on live runs (503 "No available accounts"
+    for hours on 2026-10-16) and an incident at a provider, which is usually resolved
+    within hours. An outage longer than that is more likely a revoked account or a
+    removed model, which waiting cannot fix, and the run should end and say so. A stop
+    or the run's deadline ends the wait sooner."""
+    first_wait_seconds: float = 60.0
+    max_wait_seconds: float = 600.0
+    """Ten minutes. Each attempt also spends agentshim's own retries (about fifteen
+    minutes, ``TRANSIENT_RETRY_DELAYS_S``) before it stops again, so a stalled turn
+    probes the provider about every 25 minutes at most."""
+
+    def __post_init__(self) -> None:
+        """Reject values no decision can use."""
+        values = (self.budget_seconds, self.first_wait_seconds, self.max_wait_seconds)
+        if not all(math.isfinite(value) and value > 0 for value in values):
+            message = f"outage policy seconds must be positive numbers, got {values!r}"
+            raise ValueError(message)
+        if self.first_wait_seconds > self.max_wait_seconds:
+            message = "first_wait_seconds must not exceed max_wait_seconds"
+            raise ValueError(message)
+
+
+PROVIDER_OUTAGE = OutagePolicy()
+
+
+def decide_outage(
+    policy: OutagePolicy, *, stop: int, elapsed: float
+) -> WaitFor | GiveUp:
+    """Decide what to do about the ``stop``-th outage stop of one turn (the first is 1).
+
+    ``elapsed`` is the time since the turn's first stop. A wait never runs past the
+    budget, so the time from the first stop to the last attempt is at most the budget.
+    """
+    remaining = policy.budget_seconds - elapsed
+    if remaining <= 0:
+        return GiveUp(
+            f"the provider stayed unavailable for {elapsed:g}s, "
+            f"the whole {policy.budget_seconds:g}s outage budget"
+        )
+    doublings = min(max(stop - 1, 0), 32)  # 2**32 minutes is past any cap
+    wanted = min(policy.first_wait_seconds * 2.0**doublings, policy.max_wait_seconds)
+    return WaitFor(min(wanted, remaining))
+
+
 def capacity_returns_at(*, resets_at: float | None, now: float) -> float | None:
     """When capacity should be back: the provider's reset time plus the margin, if still ahead."""
     if resets_at is not None and resets_at + RESET_MARGIN_SECONDS > now:

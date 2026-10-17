@@ -189,17 +189,19 @@ def failure_from(
     validation errors. agentshim classifies a usage or spend limit as
     ``USAGE_LIMIT`` and has already waited out the transient failures it can. A
     ``TRANSIENT`` failure that outlasted those waits is sustained rate limiting
-    only when the provider also reported an exhausted window during the turn:
-    a server error or an overload names no capacity limit and stays a plain
-    failure. The reset time is the latest of the *exhausted* windows, since
-    capacity returns only when every one of them has reopened.
+    when the provider also reported an exhausted window during the turn, and a
+    provider outage (an overload, a server error) when it did not. Either way
+    the work did not fail and the same turn may be sent again, so both are
+    capacity limits the caller's gate waits out instead of failing the run. The
+    reset time is the latest of the *exhausted* windows, since capacity returns
+    only when every one of them has reopened.
     """
     if error.kind is agentshim.FailureKind.SCHEMA:
         return AgentOutputSchemaError(error.detail)
     if error.kind is agentshim.FailureKind.USAGE_LIMIT:
         condition = QuotaCondition.QUOTA_EXHAUSTED
-    elif error.kind is agentshim.FailureKind.TRANSIENT and exhausted:
-        condition = QuotaCondition.RATE_LIMITED
+    elif error.kind is agentshim.FailureKind.TRANSIENT:
+        condition = QuotaCondition.RATE_LIMITED if exhausted else QuotaCondition.UNAVAILABLE
     else:
         return None
     resets = [window.resets_at for window in exhausted if window.resets_at is not None]

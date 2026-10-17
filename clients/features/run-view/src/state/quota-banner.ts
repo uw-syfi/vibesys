@@ -27,6 +27,13 @@ interface QuotaSwitchBanner {
 
 export type QuotaBanner = QuotaPauseBanner | QuotaSwitchBanner;
 
+/** Why the provider stopped, in the operator's words; one entry per condition the backend sends. */
+const QUOTA_WHY: Readonly<Record<QuotaPause['condition'], string>> = {
+  quota_exhausted: 'is out of quota',
+  rate_limited: 'is rate limited',
+  unavailable: 'is unavailable',
+};
+
 /**
  * The quota banner to render, or `null` for none.
  *
@@ -51,7 +58,7 @@ export function quotaBanner(run: CoreState): QuotaBanner | null {
 }
 
 function pauseFacts(pause: QuotaPause): Omit<QuotaPauseBanner, 'kind'> {
-  const why = pause.condition === 'quota_exhausted' ? 'is out of quota' : 'is rate limited';
+  const why = QUOTA_WHY[pause.condition];
   const reset =
     pause.resetsAt === null ? '' : ` Capacity returns at ${formatEpoch(pause.resetsAt)}.`;
   return {

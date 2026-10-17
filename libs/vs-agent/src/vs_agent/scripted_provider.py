@@ -533,7 +533,15 @@ def _profile(provider: str, reset_after_turn: int | None) -> agentshim.ProviderP
 def _failure_for(
     error: AgentQuotaError, emit: Callable[[agentshim.AgentEvent], None]
 ) -> agentshim.TurnFailedError:
-    """Express a scripted capacity limit the way a provider reports one."""
+    """Express a scripted capacity limit the way a provider reports one.
+
+    An outage is a transient failure with no exhausted window; sustained rate
+    limiting is one with an exhausted window; a quota is a usage limit.
+    """
+    if error.condition is QuotaCondition.UNAVAILABLE:
+        return agentshim.TurnFailedError(
+            str(error), kind=agentshim.FailureKind.TRANSIENT, detail=error.detail
+        )
     if error.condition is QuotaCondition.RATE_LIMITED:
         emit(
             agentshim.RateLimitStatus(

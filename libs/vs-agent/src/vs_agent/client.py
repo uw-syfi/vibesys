@@ -27,6 +27,7 @@ from vs_agent.contracts import (
     AgentTurnTimeoutError,
     AgentUsage,
     AuthStatus,
+    CapacityStops,
     MCPServerSpec,
     ProviderNotReadyError,
     ReadinessProbe,
@@ -945,7 +946,7 @@ class AgentClient:
                 raise RuntimeError(msg)
             self._active_sessions.append(session)
         try:
-            stops = 0
+            stops = CapacityStops()
             while True:
                 try:
                     return session.run_turn(turn, observer)
@@ -953,8 +954,8 @@ class AgentClient:
                     gate = self._capacity_gate
                     if gate is None:
                         raise
-                    stops += 1
-                    gate.wait_for_capacity(error, turn, role=role, attempt=stops)
+                    stops.count += 1
+                    gate.wait_for_capacity(error, turn, role=role, stops=stops)
         finally:
             with self._active_lock:
                 self._active_sessions.remove(session)

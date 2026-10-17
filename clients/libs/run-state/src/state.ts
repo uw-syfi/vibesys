@@ -73,7 +73,7 @@ export interface UsageMeter {
  */
 export interface QuotaPause {
   readonly provider: string;
-  readonly condition: 'quota_exhausted' | 'rate_limited';
+  readonly condition: 'quota_exhausted' | 'rate_limited' | 'unavailable';
   readonly detail: string;
   readonly resetsAt: number | null;
   readonly resumesAt: number | null;

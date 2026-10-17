@@ -367,16 +367,16 @@ def _run(
     except agentshim.TurnTimeoutError as exc:
         raise shim_translation.timeout_error_from(exc) from exc
     except agentshim.TurnFailedError as exc:
-        classified = shim_translation.failure_from(
-            exc, provider=live.profile.name, exhausted=live.events.exhausted
-        )
-        if classified is not None:
-            raise classified from exc
         if held is not None and session.conversation_id is None:
             live.log(
                 f"the resumed {live.profile.name} turn failed; dropped the conversation "
                 "so the next turn starts fresh."
             )
+        classified = shim_translation.failure_from(
+            exc, provider=live.profile.name, exhausted=live.events.exhausted
+        )
+        if classified is not None:
+            raise classified from exc
         raise
 
 

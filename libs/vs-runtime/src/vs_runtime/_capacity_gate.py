@@ -5,15 +5,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from vs_agent.api import Attribution, CapacityGated, ProviderSwitch, QuotaPlan
+from vs_agent.api import Attribution, CapacityGated, ProviderSwitch, QuotaCondition, QuotaPlan
 from vs_runtime._fallback import ProviderFallback
 from vs_runtime._quota_policy import (
+    PROVIDER_OUTAGE,
     GiveUp,
+    OutagePolicy,
+    QuotaAction,
+    QuotaDecision,
     QuotaPolicy,
     Switch,
     WaitFor,
     capacity_returns_at,
     capacity_wait,
+    decide_outage,
     decide_quota,
 )
 from vs_runtime._run_control import CapacityWake
@@ -27,6 +32,7 @@ if TYPE_CHECKING:
         AgentEventSink,
         AgentQuotaError,
         AgentTurnRequest,
+        CapacityStops,
         ProviderSwitchReason,
     )
     from vs_runtime._run_control import CapacityWaitEnd, RunControlChannel
@@ -81,14 +87,17 @@ class ControlCapacityTimer:
 class CapacityHandling:
     """How a run handles provider capacity limits, shared by every session it opens.
 
-    ``fallback`` records which providers the run has replaced and is the one place
-    sessions consult when they open. A ``None`` timer is the production one, built
-    from the run's control channel.
+    ``policy`` governs the limits a provider names (a quota, a rate limit); ``outage``
+    governs a provider that keeps failing without naming one. ``fallback`` records
+    which providers the run has replaced and is the one place sessions consult when
+    they open. A ``None`` timer is the production one, built from the run's control
+    channel.
     """
 
     policy: QuotaPolicy
     fallback: ProviderFallback
     timer: CapacityTimer | None = None
+    outage: OutagePolicy = PROVIDER_OUTAGE
 
     @classmethod
     def for_policy(
@@ -113,6 +122,12 @@ class PolicyCapacityGate:
     on its provider has the same experiment state as one that never stopped. A
     stop request ends the wait by raising ``RunStopped``.
 
+    A provider outage (``QuotaCondition.UNAVAILABLE``) is waited out under the
+    outage policy instead, whatever the quota policy says: the run pauses and
+    resumes itself with backoff until the outage budget is spent, then the turn
+    fails. An outage names no limit an operator could decide about, and a run left
+    unattended overnight must not end on one, nor stay paused for the operator.
+
     A switch to the fallback provider (by the policy once its wait is spent, or at
     the operator's request) is recorded in the run's ``ProviderFallback`` and ends
     the turn in flight with the quota error: a session cannot change provider, so
@@ -132,18 +147,19 @@ class PolicyCapacityGate:
         self._control = control
         self._events = events
         self._policy = handling.policy
+        self._outage = handling.outage
         self._fallback = handling.fallback
         self._timer = timer
-        self._waited = 0.0
         self._capacity_requested = False
 
     def wait_for_capacity(
-        self, error: AgentQuotaError, turn: AgentTurnRequest, *, role: str, attempt: int
+        self, error: AgentQuotaError, turn: AgentTurnRequest, *, role: str, stops: CapacityStops
     ) -> None:
         """Pause the run, publish why, and return once the turn may be sent again."""
         context = Attribution(role, turn.label, turn.invocation_id)
-        if attempt == 1:
-            self._waited = 0.0
+        now = self._timer.now()
+        if stops.first_at is None:
+            stops.first_at = now
             self._capacity_requested = False
         if self._fallback.replaced(error.provider):
             self._abandon(
@@ -151,10 +167,7 @@ class PolicyCapacityGate:
                 f"the run switched away from {error.provider}; this session cannot continue on it",
                 context,
             )
-        now = self._timer.now()
-        decision = decide_quota(
-            self._policy, resets_at=error.resets_at, now=now, waited=self._waited
-        )
+        decision = self._decide(error, stops, now)
         if isinstance(decision, GiveUp):
             self._abandon(error, decision.reason, context)
         if isinstance(decision, Switch):
@@ -162,7 +175,7 @@ class PolicyCapacityGate:
         resumes_at = now + decision.seconds if isinstance(decision, WaitFor) else None
         target = self._fallback.target
         plan = QuotaPlan(
-            self._policy.action.value,
+            self._plan_action(error).value,
             resumes_at,
             None if target is None else target.provider,
             None if target is None else target.model,
@@ -171,7 +184,7 @@ class PolicyCapacityGate:
         self._control.request_pause()
         if isinstance(decision, WaitFor):
             by_operator = self._timer.wait_resumed(decision.seconds)
-            self._waited += self._timer.now() - now
+            stops.waited += self._timer.now() - now
         else:
             by_operator = self._hold(error, context)
         if self._control.consume_fallback_request() and self._fallback.target is not None:
@@ -181,6 +194,21 @@ class PolicyCapacityGate:
         self._events.quota_resumed(
             error.provider, "operator" if by_operator else "wait_elapsed", context
         )
+
+    def _decide(self, error: AgentQuotaError, stops: CapacityStops, now: float) -> QuotaDecision:
+        """The outage policy for an outage, else the quota policy, for this turn's stop."""
+        if error.condition is QuotaCondition.UNAVAILABLE:
+            first = now if stops.first_at is None else stops.first_at
+            return decide_outage(self._outage, stop=stops.count, elapsed=now - first)
+        return decide_quota(
+            self._policy, resets_at=error.resets_at, now=now, waited=stops.waited
+        )
+
+    def _plan_action(self, error: AgentQuotaError) -> QuotaAction:
+        """The policy the pause reports: an outage is always waited out by itself."""
+        if error.condition is QuotaCondition.UNAVAILABLE:
+            return QuotaAction.WAIT
+        return self._policy.action
 
     def _hold(self, error: AgentQuotaError, context: Attribution) -> bool:
         """Park for the operator, or until capacity returns when the operator asked to wait.

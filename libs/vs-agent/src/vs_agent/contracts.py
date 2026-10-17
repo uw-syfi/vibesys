@@ -96,6 +96,10 @@ class QuotaCondition(StrEnum):
     """A usage quota, spend limit or billing limit: retrying now cannot succeed."""
     RATE_LIMITED = "rate_limited"
     """Sustained rate limiting: the provider's retries ran out while a window was exhausted."""
+    UNAVAILABLE = "unavailable"
+    """A provider outage: transient errors (an overload, a server error, a gateway with no
+    accounts) outlasted the provider's retries, and no window was reported exhausted, so
+    capacity may return at any moment."""
 
 
 class AgentQuotaError(RuntimeError):
@@ -170,6 +174,22 @@ class ProviderSwitch:
     detail: str
 
 
+@dataclass(slots=True)
+class CapacityStops:
+    """One turn's capacity stops so far, so a gate can budget that turn's waiting.
+
+    The client makes one record per turn, counts each stop in ``count`` (the first
+    stop is 1) and hands the same record to every gate call of that turn. The gate
+    keeps the rest on its own clock: ``first_at`` is when the first stop reached it
+    and ``waited`` the seconds it has spent waiting since. One record per turn keeps
+    the budgets of turns that stop at the same time apart.
+    """
+
+    count: int = 0
+    first_at: float | None = None
+    waited: float = 0.0
+
+
 class CapacityGate(Protocol):
     """The caller's policy for a turn that stopped on a provider capacity limit.
 
@@ -181,12 +201,12 @@ class CapacityGate(Protocol):
     """
 
     def wait_for_capacity(
-        self, error: AgentQuotaError, turn: AgentTurnRequest, *, role: str, attempt: int
+        self, error: AgentQuotaError, turn: AgentTurnRequest, *, role: str, stops: CapacityStops
     ) -> None:
         """Block until ``turn`` may be sent again, or raise to give up.
 
-        ``attempt`` counts the capacity stops of this one turn, starting at 1, so a
-        gate can budget its waiting per turn.
+        ``stops`` is this turn's record, already counting this stop (see
+        :class:`CapacityStops`).
         """
         ...
 

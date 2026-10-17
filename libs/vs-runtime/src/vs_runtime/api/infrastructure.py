@@ -174,14 +174,17 @@ from vs_runtime._project_run import (
 from vs_runtime._quota_policy import (
     DEFAULT_RETRY_SECONDS,
     PAUSE_FOR_OPERATOR,
+    PROVIDER_OUTAGE,
     RESET_MARGIN_SECONDS,
     GiveUp,
     Hold,
+    OutagePolicy,
     QuotaAction,
     QuotaDecision,
     QuotaPolicy,
     Switch,
     WaitFor,
+    decide_outage,
     decide_quota,
 )
 from vs_runtime._recorded_environment import migrate_recorded_run_environment
@@ -489,6 +492,9 @@ def create_model_request_reconciler(
 __all__ = [
     "CONTROL_ID_PATTERN",
     "CONTROL_REQUEST",
+    "decide_outage",
+    "PROVIDER_OUTAGE",
+    "OutagePolicy",
     "DEFAULT_RETRY_SECONDS",
     "PACKAGE_ROOT_TOKEN",
     "PAUSE_FOR_OPERATOR",

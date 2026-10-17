@@ -470,8 +470,9 @@ class RateLimitUpdateData(EventPayload):
 class QuotaPausedData(EventPayload):
     """A turn stopped on a provider capacity limit and the run paused for it.
 
-    ``condition`` is ``quota_exhausted`` (a usage, spend or billing limit) or
-    ``rate_limited`` (sustained rate limiting); ``detail`` is the provider's
+    ``condition`` is ``quota_exhausted`` (a usage, spend or billing limit),
+    ``rate_limited`` (sustained rate limiting) or ``unavailable`` (a provider outage,
+    which the run waits out by itself under its outage budget); ``detail`` is the provider's
     diagnostic and ``resets_at`` the epoch second the provider said capacity
     returns, when it said. The run stays paused until it resumes; ``resumes_at`` is the
     epoch second the run's quota policy resumes it by itself, ``None`` when only the
@@ -481,7 +482,7 @@ class QuotaPausedData(EventPayload):
 
     kind: Literal["quota_paused"] = "quota_paused"
     provider: str
-    condition: Literal["quota_exhausted", "rate_limited"]
+    condition: Literal["quota_exhausted", "rate_limited", "unavailable"]
     detail: str
     resets_at: float | None = None
     resumes_at: float | None = None
@@ -540,7 +541,7 @@ class QuotaAbandonedData(EventPayload):
 
     kind: Literal["quota_abandoned"] = "quota_abandoned"
     provider: str
-    condition: Literal["quota_exhausted", "rate_limited"]
+    condition: Literal["quota_exhausted", "rate_limited", "unavailable"]
     detail: str
     reason: str
 

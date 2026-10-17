@@ -33,6 +33,7 @@ from vs_agent.contracts import (
     AgentTurnRequest,
     AgentTurnResult,
     AgentUsage,
+    CapacityStops,
     SteerOutcome,
     session_spec_fingerprint,
 )
@@ -760,7 +761,7 @@ class FakeAgentClient:
         self, kind: str, message: str, label: str | None, invocation_id: str | None
     ) -> None:
         """Raise the scripted failure; a quota limit waits at the gate and sends the turn again."""
-        stops = 0
+        stops = CapacityStops()
         while True:
             try:
                 self._raise_scripted(kind)
@@ -768,11 +769,11 @@ class FakeAgentClient:
                 gate = self._capacity_gate
                 if gate is None:
                     raise
-                stops += 1
+                stops.count += 1
                 request = AgentTurnRequest(
                     message=message, label=label, invocation_id=invocation_id
                 )
-                gate.wait_for_capacity(error, request, role=kind, attempt=stops)
+                gate.wait_for_capacity(error, request, role=kind, stops=stops)
             else:
                 return
 
