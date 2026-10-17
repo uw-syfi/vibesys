@@ -344,6 +344,33 @@ The CI-only decision is specific to `tui_e2e`. It does not change the
 selection policy for the other check groups without local-selection keys; each
 has its own prerequisites and needs its own policy decision.
 
+### Client checks before a push
+
+A change under `clients/` fails CI on checks that a package's own tests do not run: biome's
+format check, knip, the TypeScript architecture checks, the frozen-UI check, and the gallery's
+screenshots. One command runs them, as the same repoctl check groups CI runs:
+
+```bash
+./scripts/check_clients.sh            # tui_quality, tui_tests, ui_gallery_linux
+./scripts/check_clients.sh --dry-run  # print the commands
+```
+
+`ui_gallery_linux` compares the gallery's screenshots in the Linux image CI uses and checks
+that two baseline updates write identical images, so it needs Docker. The script leaves out the
+CI groups that need a display or build the shipped packages (`tui_build`, `tui_package_smoke`,
+`tui_e2e`), each named with its reason in the script.
+`tests/quality/test_check_clients_matches_ci.py` fails when CI gains a client group the script
+neither runs nor lists, so the two cannot drift.
+
+To run it before every push that changes `clients/`, install the opt-in hook once per clone:
+
+```bash
+./scripts/install_pre_push_hook.sh            # install
+./scripts/install_pre_push_hook.sh --remove   # remove
+```
+
+Nothing installs the hook for you. Pushing with `--no-verify` skips it for one push.
+
 Use `./support/repoctl/repoctl plan` to inspect the selection without running checks.
 The workflow runs named check groups from `.repoctl/checks.toml`. Run
 `./support/repoctl/repoctl verify-policy --cases tests/repoctl/cases.toml` after

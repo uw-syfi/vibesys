@@ -99,6 +99,19 @@ commands = [
   ["pnpm", "check:clients"],
 ]
 
+# The gallery's screenshot compare in the Linux image CI uses, plus the check that a baseline update
+# is deterministic. CI runs the compare natively inside `tui_e2e`; this group is the local leg that
+# `scripts/check_clients.sh` adds, so a baseline mismatch shows up before the push. Needs Docker.
+[[check_groups]]
+name = "ui_gallery_linux"
+language = "typescript"
+directory = "clients"
+timeout_seconds = 1800
+commands = [
+  ["pnpm", "--filter", "@vibesys/app-ui-gallery", "test:e2e:linux"],
+  ["pnpm", "--filter", "@vibesys/app-ui-gallery", "check:deterministic"],
+]
+
 [[check_groups]]
 name = "tui_build"
 language = "typescript"

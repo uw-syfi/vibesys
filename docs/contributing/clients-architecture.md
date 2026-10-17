@@ -426,6 +426,14 @@ pnpm --filter @vibesys/app-ui-gallery update:screenshots   # rewrite the baselin
 pnpm --filter @vibesys/app-ui-gallery test:e2e:linux       # compare against them locally
 ```
 
+A baseline update rewrites only the screens whose rendering changed: the suite launches
+Chromium with the flags in `DETERMINISTIC_RENDERING` (`playwright.config.ts`), which fix the
+rasterizer's per-run choices (LCD text, hinting, SIMD variants, raster threads) that otherwise
+made two consecutive runs differ in a few pixels per screen.
+`pnpm --filter @vibesys/app-ui-gallery check:deterministic` runs the update twice and fails on
+any difference; `scripts/check_clients.sh` runs it (see "Client checks before a push" in
+[development.md](development.md)).
+
 When the job fails on a screenshot, it uploads the actual and the diff as the
 `ui-gallery-test-results` artifact.
 
