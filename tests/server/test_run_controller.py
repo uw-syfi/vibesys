@@ -624,6 +624,19 @@ def test_a_refused_steer_is_journaled_as_a_failed_control(tmp_path: Path) -> Non
     assert "role 'judge' is not declared" in refused.text
 
 
+def test_a_control_the_run_refuses_is_journaled_as_a_failed_control(tmp_path: Path) -> None:
+    parts = build_server_parts(tmp_path)
+
+    parts.control.notify_control_refused("pause p1: cleanup must finish before pause or resume")
+
+    (refused,) = [
+        event
+        for event in parts.journal.read()
+        if event.type is EventType.CONTROL and event.status is EventStatus.FAILED
+    ]
+    assert refused.text == "/control refused: pause p1: cleanup must finish before pause or resume"
+
+
 @pytest.mark.parametrize(
     ("reason", "code"),
     [

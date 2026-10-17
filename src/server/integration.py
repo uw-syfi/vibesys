@@ -107,6 +107,7 @@ _CONTROL_EVENT_TYPES = frozenset(
         CoreEventType.STOP_REQUESTED,
         CoreEventType.STEER_CONSUMED,
         CoreEventType.STEER_DROPPED,
+        CoreEventType.CONTROL_REFUSED,
         CoreEventType.PAUSED,
         CoreEventType.STOPPED,
     }
@@ -444,6 +445,9 @@ class RunIntegrationAdapter:
                 execution_id=event.execution_id,
             ),
             CoreEventType.STEER_DROPPED: lambda: self.controller.record_steer_dropped(event.text),
+            CoreEventType.CONTROL_REFUSED: lambda: self.controller.record_control_refused(
+                event.text
+            ),
             CoreEventType.PAUSED: self.controller.land_pause_at_boundary,
             CoreEventType.STOPPED: self.controller.land_stop_at_boundary,
         }.get(event.type)

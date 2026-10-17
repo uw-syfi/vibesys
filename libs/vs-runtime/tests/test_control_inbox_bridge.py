@@ -162,8 +162,8 @@ def test_every_control_is_recorded_once_whichever_way_it_was_sent(
     Each inbox request ends settled or set aside; a settled one is recorded as
     ``op-<id>``; each ``op-<id>`` is recorded at most once; and a control is recorded under
     a fresh ``control-<n>`` only if the socket sent it after a restart, before the restarted
-    run's first poll told it which ids the run records, or if it is the resume a restart
-    records for a paused run (its new channel holds no pause).
+    run's first poll told it which ids the run records. A restart records nothing by itself:
+    the new channel starts from the pause core recorded.
     """
     inbox = FakeControlInbox()
     texts = _Texts()
@@ -207,7 +207,7 @@ def test_every_control_is_recorded_once_whichever_way_it_was_sent(
     assert len(recorded) <= len(sent) + restarts
     operator_ids = [identity for identity in recorded if identity.startswith("op-")]
     assert [i for i, n in Counter(operator_ids).items() if n > 1] == []
-    assert len(recorded) - len(operator_ids) <= unrecalled + restarts
+    assert len(recorded) - len(operator_ids) <= unrecalled
     for request_id in posted - rejected:
         assert f"op-{request_id}" in recorded, request_id
     steer_controls = {
@@ -287,7 +287,9 @@ def test_a_capacity_wait_with_no_capacity_pause_is_set_aside() -> None:
     inbox.post("r1", _json(ResumeRequest(control_id="r1", when="capacity_returns")))
 
     assert _bridge(inbox, _Texts()).poll(initial_state(), 1.0) == ()
-    assert [entry.reason for entry in inbox.rejected()] == ["refused: not_paused_on_capacity"]
+    assert [entry.reason for entry in inbox.rejected()] == [
+        "refused by the run: only a paused run waits for capacity"
+    ]
 
 
 def test_inbox_requests_apply_in_id_order_as_their_actions_say() -> None:

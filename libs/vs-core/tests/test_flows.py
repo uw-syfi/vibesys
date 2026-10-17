@@ -183,7 +183,9 @@ def test_other_control_actions_are_ignored(begin: Begin) -> None:
     run = begin(plan_then_end)
     run.send(
         core.StopRequested(
-            control=core.ControlInput(control_id=core.ControlId(root="c"), action="pause")
+            control=core.ControlInput(
+                control_id=core.ControlId(root="c"), action="pause", owner=core.PauseOwner.OPERATOR
+            )
         )
     )
     assert waits(run) == ["planner"]
