@@ -288,6 +288,7 @@ class _Driver[S: StrategyState]:
         self.in_turn = 0
         self.envelope_type = harness.envelope_type
         self.during_turn = harness.during_turn
+        self.operator = harness.operator
         self.shell_events = harness.shell_events
         self.schemas = harness.schemas
 
@@ -298,7 +299,7 @@ class _Driver[S: StrategyState]:
             try:
                 if self.recovering:
                     self.recover()
-                progressed = self.dispatch_all()
+                progressed = self.dispatch_all() or self.control()
                 if not progressed:
                     progressed = self.tick()
                 if not progressed:
@@ -377,6 +378,14 @@ class _Driver[S: StrategyState]:
         trace.steps += 1 + len(submitted)
         if core.run.status.value == "terminal":
             trace.finished = True
+
+    def control(self) -> bool:
+        """Deliver what the operator does while nothing is dispatchable; whether it did anything."""
+        events = self.operator(self.trace.core)
+        for event in events:
+            self.consume(event)
+            self.commit()
+        return bool(events)
 
     def tick(self) -> bool:
         """Move the clock to the next wake-up or request limit; deliver what that causes."""
@@ -837,6 +846,7 @@ class Harness:
     events: tuple[CoreEvent, ...] = ()
     envelope_type: type[RunEnvelope] | None = None
     during_turn: Callable[[Request, CoreState], tuple[CoreEvent, ...]] = lambda _r, _c: ()
+    operator: Callable[[CoreState], tuple[CoreEvent, ...]] = lambda _c: ()
     shell_events: bool = False
     schemas: Mapping[SchemaRef, type[BaseModel]] = field(default_factory=dict)
     deadline_at: float = 100000.0

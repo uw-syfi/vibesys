@@ -1288,9 +1288,9 @@ def test_current_live_owner_guard_holds_at_admission_and_delayed_authorization(
             "run": state.run.model_copy(update={"status": run_status}),
         }
     )
-    permitted = (
-        phase == core.AttemptPhase.ACTIVE and run_status == core.RunStatus.RUNNING and not closing
-    )
+    # A paused run carries on with the work it admitted: a wait is recorded and resumed.
+    carries_on = run_status in (core.RunStatus.RUNNING, core.RunStatus.PAUSED)
+    permitted = phase == core.AttemptPhase.ACTIVE and carries_on and not closing
     if permitted:
         result = persisted_step(state, core.TurnSuspended(continuation=continuation))
         assert len(result.events) == 1

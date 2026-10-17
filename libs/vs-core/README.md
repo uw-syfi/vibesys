@@ -61,7 +61,11 @@ and bounded retries retain the recorded request identity.
 Pause and resume cannot reverse closing or blocked runs, or a committed stop
 result. While a run is paused core takes only a `Finish` or a `Withdraw`; the
 shell holds every other decision the search makes (`deferred`) and submits it on
-the resume, so a pause never reaches the search as a refusal. `RunDrained` defers final publication while attempts, sessions, jobs,
+the resume, so a pause never reaches the search as a refusal. A pause holds
+only that intake (and queued starts): work already admitted carries on and what
+it yields is delivered while paused (`continues_admitted_work`), such as a
+turn's evaluation call and wait, a job's end, or the resume of a wait whose
+jobs ended. `RunDrained` defers final publication while attempts, sessions, jobs,
 records or child ownership remain unresolved. Evidence and assessment kinds are
 closed, and eligibility requirements retain exact provenance, purpose, revision
 and source ownership attribution.

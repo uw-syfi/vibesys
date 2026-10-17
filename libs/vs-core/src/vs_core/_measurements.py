@@ -22,6 +22,7 @@ from ._proofs import (
     Verdict,
     accepted_receipt_for,
     committed_stop,
+    continues_admitted_work,
     current_admission,
     current_closure,
     fresh_observation,
@@ -105,7 +106,7 @@ __all__ = ["advance", "cancel_settled"]
 
 
 def _current(context: EvaluationContext, scope: Scope) -> Verdict[DecisionId | None]:
-    if context.run.status != RunStatus.RUNNING:
+    if not continues_admitted_work(context.run):
         return Missing(ProofReason.UNRESOLVED)
     if scope.owner == context.run.run_id:
         return (
@@ -446,7 +447,7 @@ def _agent_requested(
         return AreaChange(state=state)
     identity = _identity(event.plan)
     rejection: AgentRejection | None = None
-    if context.run.status != RunStatus.RUNNING:
+    if not continues_admitted_work(context.run):
         rejection = AgentRejection.RUN_STOPPING
     elif not isinstance(_current(context, event.scope), Proven):
         rejection = AgentRejection.NOT_ADMITTED

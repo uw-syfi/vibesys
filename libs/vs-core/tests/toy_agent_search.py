@@ -247,6 +247,16 @@ def _final(role: str) -> str:
     return json.dumps({"summary": "done"} if role == "implementer" else {"passed": True})
 
 
+_IN_FLIGHT = frozenset(
+    {core.RequestPhase.PREPARED, core.RequestPhase.DISPATCHED, core.RequestPhase.RECONCILING}
+)
+
+
+def _control(action: Literal["pause", "resume"], now_at: float) -> core.RunControlEvent:
+    control = core.ControlInput(control_id=core.ControlId(root=action), action=action)
+    return core.RunControlEvent(control=control, now_at=now_at)
+
+
 def _lease(session_id: core.SessionId) -> core.ResourceId:
     return core.ResourceId(root=f"lease:{session_id.root}")
 
@@ -271,11 +281,17 @@ class ToyHost:
     """Roles whose turns end with a reply that does not parse."""
     events: tuple[core.CoreEvent, ...] = ()
     """Operator controls delivered before the first decision."""
+    pause_at: int | None = None
+    """The operator pauses the run just before the executor of the n-th request answers (from 0),
+    if the run is open then, and resumes it once nothing of the paused run is in flight."""
+    paused_with: str | None = None
+    """The kind of the request the pause came before, once the operator paused."""
     shares: bool = True
     calls: list[tuple[str, str, str]] = field(default_factory=list)
     """(attempt, role, call id) of every evaluation a turn asked for."""
     _fresh: int = 0
     _jobs: int = 0
+    _requests: int = 0
     _running: dict[str, int] = field(default_factory=dict)
     _asking: dict[str, Ending] = field(default_factory=dict)
 
@@ -284,20 +300,45 @@ class ToyHost:
     def during_turn(
         self, request: core.Request, state: core.CoreState
     ) -> tuple[core.CoreEvent, ...]:
-        """The evaluation a fresh turn submits while it runs, as the bridge admits it."""
-        del state
+        """The operator's pause, then the evaluation a fresh turn submits while it runs."""
+        pause = self._pause(request, state)
         if not isinstance(request, core.DispatchTurn) or request.request_id is None:
-            return ()
+            return pause
         role = request.turn.session.role_id.root.removeprefix("toy-")
         if role in self.submit_only:
-            return (self._call(request, role),)
+            return (*pause, self._call(request, role))
         if role in self.roles and self.waits:
             ordinal = self._fresh
             self._fresh += 1
             if self.waits[ordinal % len(self.waits)]:
                 self._asking[request.request_id.root] = self.ends[ordinal % len(self.ends)]
-                return (self._call(request, role),)
-        return ()
+                return (*pause, self._call(request, role))
+        return pause
+
+    # -- the operator ----------------------------------------------------------------------
+
+    def _pause(self, request: core.Request, state: core.CoreState) -> tuple[core.CoreEvent, ...]:
+        ordinal = self._requests
+        self._requests += 1
+        run = state.run
+        if ordinal != self.pause_at or run.status != core.RunStatus.RUNNING or run.result:
+            return ()
+        self.paused_with = type(request).__name__
+        return (_control("pause", run.now_at),)
+
+    def operator(self, state: core.CoreState) -> tuple[core.CoreEvent, ...]:
+        """Resume a paused run once nothing of it is in flight (asked while nothing dispatches).
+
+        That is where the run sits while it waits on the operator: whatever it was doing when
+        it was paused has finished, and what it decided since is held until the resume.
+        """
+        if state.run.status != core.RunStatus.PAUSED:
+            return ()
+        if core.project(state).next_observe_at is not None or any(
+            record.phase in _IN_FLIGHT for record in state.records.records
+        ):
+            return ()
+        return (_control("resume", state.run.now_at),)
 
     def _call(self, request: core.DispatchTurn, role: str) -> core.AgentMeasurementRequested:
         attempt = request.scope.owner.root
@@ -472,6 +513,7 @@ def run_toy(
         limits=limits,
         lifecycle=frozenset({"suspend"}),
         during_turn=host.during_turn,
+        operator=host.operator,
         shell_events=True,
         schemas=definition.reply_schemas,
         envelope_type=core.RunEnvelope[core.FlowState],

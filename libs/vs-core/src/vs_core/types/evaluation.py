@@ -643,7 +643,7 @@ class AgentRejection(StrEnum):
     """Why core refused an agent's evaluation call; nothing was charged."""
 
     RUN_STOPPING = "run_stopping"
-    """The run is no longer running, so it starts no new work."""
+    """The run is closing or has ended, so it starts no new work (a paused run still does)."""
     NOT_ADMITTED = "not_admitted"
     """The scope is not a current admitted owner: a stale generation, or a closed attempt."""
     INVALID_PLAN = "invalid_plan"
