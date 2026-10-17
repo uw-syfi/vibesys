@@ -6,6 +6,8 @@ them) so each module stays within the file-length ceiling.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -22,7 +24,82 @@ from vs_sandbox.api.docker_workspace import docker_project_path_resources
 from vs_sandbox.api.symlink_mounts import SymlinkMountScope, collect_symlink_mounts, find_mount_root
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from vs_runtime._run_environment import RunEnvironmentRequest
+
+
+class WorkspaceGitLayout(StrEnum):
+    """Where a workspace keeps its Git metadata, which decides how a sandbox binds it."""
+
+    #: ``.git`` is a directory inside the workspace (a main checkout), or there is none.
+    OWN_GIT_DIRECTORY = "own_git_directory"
+    #: ``.git`` is a file naming metadata outside the workspace (``git worktree add``).
+    LINKED_WORKTREE = "linked_worktree"
+
+
+CANDIDATE_GIT_LAYOUT = WorkspaceGitLayout.LINKED_WORKTREE
+"""The layout of every candidate workspace: ``vs_project`` adds each as a linked worktree."""
+
+_GIT_METADATA_ACCESS: Mapping[WorkspaceGitLayout, HostResourceAccess] = {
+    # Inside the workspace, so under the workspace's own read-write mapping.
+    WorkspaceGitLayout.OWN_GIT_DIRECTORY: HostResourceAccess.READ_WRITE,
+    # Bound at its host path read-only: ``git status`` and ``git diff`` work in the
+    # sandbox while history and other candidates' refs and worktrees stay unwritable.
+    WorkspaceGitLayout.LINKED_WORKTREE: HostResourceAccess.READ_ONLY,
+}
+"""How a sandbox binds a workspace's Git metadata: the one rule mounts and facts read."""
+
+
+def git_metadata_writable(layout: WorkspaceGitLayout) -> bool:
+    """Whether an agent can commit in a workspace of *layout*, by the binding rule."""
+    return _GIT_METADATA_ACCESS[layout] is HostResourceAccess.READ_WRITE
+
+
+@dataclass(frozen=True)
+class GitMetadataMounts:
+    """The Git metadata a sandbox binds for one workspace, and what that lets the agent do."""
+
+    layout: WorkspaceGitLayout
+    resources: tuple[HostResource, ...]
+
+    @property
+    def agent_writable(self) -> bool:
+        """Whether the agent can write this workspace's Git metadata (commit, branch)."""
+        return git_metadata_writable(self.layout)
+
+
+def git_metadata_mounts(workspace: Path) -> GitMetadataMounts:
+    """The Git metadata binding of *workspace*, from the layout Git registered for it."""
+    paths = linked_worktree_git_paths(workspace)
+    if not paths:
+        return GitMetadataMounts(WorkspaceGitLayout.OWN_GIT_DIRECTORY, ())
+    access = _GIT_METADATA_ACCESS[WorkspaceGitLayout.LINKED_WORKTREE]
+    return GitMetadataMounts(
+        WorkspaceGitLayout.LINKED_WORKTREE,
+        tuple(HostResource(path, access, "linked worktree Git metadata") for path in paths),
+    )
+
+
+@dataclass(frozen=True)
+class ContainerMountPlan:
+    """What a container mounts for one workspace, and the Git fact those mounts imply.
+
+    ``resources`` are the host resources the sandbox enforces, ``symlinks`` the setup
+    symlinks a lifecycle hook creates once the container is up, and ``git`` the Git
+    metadata binding ``resources`` includes. Reading ``agent_git_writable`` here, rather
+    than recomputing it, keeps the fact an agent is told equal to what it was mounted.
+    """
+
+    resources: list[HostResource]
+    symlinks: list[tuple[str, str]]
+    git: GitMetadataMounts
+
+    @property
+    def agent_git_writable(self) -> bool:
+        """Whether the agent can write the mounted workspace's Git metadata."""
+        return self.git.agent_writable
+
 
 RUNTIME_OBJECTIVE_CONTAINER_PATH = "/opt/vibesys-runtime/objective.md"
 """The runtime resource declaration's ``agent_path`` for the effective objective.
@@ -57,14 +134,12 @@ def container_mount_plan(
     *,
     include_cli_provider_mounts: bool = True,
     same_path: bool = False,
-) -> tuple[list[HostResource], list[tuple[str, str]]]:
-    """Build the host resources + setup symlinks for a sandbox.
+) -> ContainerMountPlan:
+    """Build the host resources, setup symlinks and Git binding for a sandbox.
 
-    Returns the resource list the sandbox enforces and exposes through
+    The resource list is what the sandbox enforces and exposes through
     :meth:`~vs_sandbox.docker_sandbox.DockerSandbox.agent_path` (workspace
-    read-write mapping aside, which the sandbox itself always provides),
-    and the setup symlinks a lifecycle hook must create once the container is
-    up.
+    read-write mapping aside, which the sandbox itself always provides).
 
     ``include_cli_provider_mounts`` controls whether CLI auth state and the
     full project tree are added under ``/opt/vibesys-auth`` and
@@ -153,13 +228,9 @@ def container_mount_plan(
     )
 
     # A candidate workspace is a linked Git worktree whose ``.git`` file names its
-    # metadata by host path. Mounted at that same path, read-only, ``git status``
-    # and ``git diff`` work in the container while history and other candidates'
-    # refs and worktrees stay unwritable (``agent_git_writable_in`` reports that).
-    resources.extend(
-        HostResource(path, HostResourceAccess.READ_ONLY, "linked worktree Git metadata")
-        for path in linked_worktree_git_paths(request.workspace)
-    )
+    # metadata by host path; it is mounted at that same path (``git_metadata_mounts``).
+    git = git_metadata_mounts(request.workspace)
+    resources.extend(git.resources)
 
     if (
         include_cli_provider_mounts
@@ -176,7 +247,7 @@ def container_mount_plan(
             )
         )
 
-    return resources, symlinks
+    return ContainerMountPlan(resources, symlinks, git)
 
 
 def sandbox_workspace_root(request: RunEnvironmentRequest, *, same_path: bool = False) -> str:

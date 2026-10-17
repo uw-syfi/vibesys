@@ -51,7 +51,10 @@ from vs_runtime import _boot_trace as boot_trace
 from vs_runtime._cli_container_env import cli_container_env, cli_provider_env_and_auth_files
 from vs_runtime._command_environment_session import command_environment_session
 from vs_runtime._container_mount_plan import (
+    CANDIDATE_GIT_LAYOUT,
     container_mount_plan,
+    git_metadata_mounts,
+    git_metadata_writable,
     materialize_effective_objective,
     reference_container_path,
     sandbox_workspace_root,
@@ -86,7 +89,6 @@ from vs_runtime._run_environment_facts import (
     ModalEnvironmentFacts,
     RunEnvironmentPresentationFacts,
     SkyPilotEnvironmentFacts,
-    agent_git_writable_in,
 )
 from vs_runtime._tool_location import ToolLocation, ToolSite, assumed_tool
 from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
@@ -220,7 +222,9 @@ class RunEnvironmentView:
     """Run-environment-neutral facts consumed by loops and agent construction."""
 
     paths: AgentPaths
-    agent_git_writable: bool  # required, no default; prompts branch on this
+    #: Whether the agent can write the Git metadata of the workspace this session mounts,
+    #: as that session's mount plan bound it. Required: a missing fact must not read as true.
+    workspace_git_writable: bool
     prompt_notes: str = ""
     isolated: bool = False
     cli_sandboxed: bool = False
@@ -294,6 +298,19 @@ class RunEnvironmentView:
     def supports_parallel_candidate_evaluation(self) -> bool:
         """Whether each candidate can get its own worktree and container session."""
         return self.parallel_candidate_obstacle is None
+
+    @property
+    def agent_git_writable(self) -> bool:
+        """Whether agents can commit where they write candidates: the fact prompts state.
+
+        A session that opens a session per candidate has its agents write in those
+        candidates, linked worktrees bound by the same rule as this session's mounts.
+        Otherwise they write in this session's own workspace. Prompts are rendered for
+        the run, not for one session, so they read this and never the root's own fact.
+        """
+        if self.supports_parallel_candidate_evaluation:
+            return git_metadata_writable(CANDIDATE_GIT_LAYOUT)
+        return self.workspace_git_writable
 
 
 @dataclass(frozen=True)
@@ -705,7 +722,8 @@ class HostEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
                         benchmark_command=evaluation.benchmark_command,
                         profiler_support=request.profiler_support_path,
                     ),
-                    agent_git_writable=True,
+                    # The host sandbox binds a linked worktree's metadata read-only too.
+                    workspace_git_writable=git_metadata_mounts(request.workspace).agent_writable,
                     agent_host_resources=grants,
                 ),
             )
@@ -865,6 +883,15 @@ class EditorExtras:
     attach_accelerator: bool = True
 
 
+@dataclass(frozen=True)
+class EditorSandbox:
+    """A built, unstarted editor sandbox and the Git fact its mount plan implies."""
+
+    runner: CommandRunner
+    #: From the same plan that mounted the workspace's Git metadata.
+    agent_git_writable: bool
+
+
 class DockerEnvironment(NoCaptureRecovery):
     """Run agents and evaluator commands in a Docker sandbox."""
 
@@ -906,14 +933,14 @@ class DockerEnvironment(NoCaptureRecovery):
 
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Resolve Docker presentation facts."""
-        facts = DockerEnvironmentFacts(agent_git_writable=agent_git_writable_in(request.workspace))
-        return _PreparedRunEnvironment(facts, partial(self._open, request))
+        return _PreparedRunEnvironment(DockerEnvironmentFacts(), partial(self._open, request))
 
     def _open(
         self, request: RunEnvironmentRequest, presentation: RunEnvironmentPresentation
     ) -> RunEnvironmentSession:
         """Start the Docker sandbox and resolve candidate-facing paths."""
-        sandbox = self.build_editor(request)
+        editor = self.build_editor(request)
+        sandbox = editor.runner
         view = RunEnvironmentView(
             paths=_isolated_paths(
                 request,
@@ -924,7 +951,7 @@ class DockerEnvironment(NoCaptureRecovery):
             isolated=True,
             cli_sandboxed=True,
             env_kind="docker",
-            agent_git_writable=agent_git_writable_in(request.workspace),
+            workspace_git_writable=editor.agent_git_writable,
         )
         with _starting_container(request) as output:
             return command_environment_session(
@@ -943,7 +970,7 @@ class DockerEnvironment(NoCaptureRecovery):
         self,
         request: RunEnvironmentRequest,
         extras: EditorExtras | None = None,
-    ) -> CommandRunner:
+    ) -> EditorSandbox:
         """Build, without starting, the Docker sandbox the agent edits in.
 
         Every environment whose agent runs in Docker opens its editor here, so
@@ -991,10 +1018,9 @@ class DockerEnvironment(NoCaptureRecovery):
                 clock=request.clock,
             )
         workspace_root = sandbox_workspace_root(request, same_path=extras.same_path_workspace)
-        resources, docker_symlinks = container_mount_plan(
-            request, same_path=extras.same_path_workspace
-        )
-        resources += list(extras.resources)
+        plan = container_mount_plan(request, same_path=extras.same_path_workspace)
+        docker_symlinks = plan.symlinks
+        resources = [*plan.resources, *extras.resources]
         resources += list(
             prepare_docker_evaluator_resources(
                 requirements,
@@ -1045,7 +1071,7 @@ class DockerEnvironment(NoCaptureRecovery):
             run_id=request.run_id,
         )
         log(f"[docker] starting container with image {container_image}")
-        return sandbox
+        return EditorSandbox(sandbox, agent_git_writable=plan.agent_git_writable)
 
     def reap_orphans(
         self, run_id: str, *, system: EnvironmentSystem, log: Callable[[str], None]
@@ -1283,7 +1309,8 @@ class SkyPilotEnvironment(RefusesDockerInDocker, DockerEnvironment):
                 backend_label="SkyPilot",
             )
 
-            resources, docker_symlinks = container_mount_plan(request)
+            plan = container_mount_plan(request)
+            resources, docker_symlinks = plan.resources, plan.symlinks
             cli_provider_env, auth_files = _cli_provider_env_and_auth_files(request)
             cli_provider_env.setdefault("UV_CACHE_DIR", "/workspace/.cache/uv")
             helper_source = evaluator_helpers.SKYPILOT_EVALUATOR_HELPER
@@ -1348,7 +1375,7 @@ class SkyPilotEnvironment(RefusesDockerInDocker, DockerEnvironment):
                 host_device_reselect=False,
                 env_kind="skypilot",
                 profile_execution="remote",
-                agent_git_writable=agent_git_writable_in(request.workspace),
+                workspace_git_writable=plan.agent_git_writable,
             ),
         )
 
@@ -1458,7 +1485,8 @@ class ModalEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
             backend_label="Modal",
         )
 
-        resources, docker_symlinks = container_mount_plan(request)
+        plan = container_mount_plan(request)
+        resources, docker_symlinks = plan.resources, plan.symlinks
         cli_provider_env, auth_files = _cli_provider_env_and_auth_files(request)
         cli_provider_env.setdefault("UV_CACHE_DIR", "/workspace/.cache/uv")
         if request.git_history_root is not None:
@@ -1585,7 +1613,7 @@ class ModalEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
                         host_device_reselect=False,
                         env_kind="modal",
                         profile_execution="remote",
-                        agent_git_writable=agent_git_writable_in(request.workspace),
+                        workspace_git_writable=plan.agent_git_writable,
                         deployment_release_env_var="VIBESYS_RELEASE_MODAL_DEPLOYMENT",
                         framework_setup_timeout_seconds=setup_timeout_seconds,
                     ),

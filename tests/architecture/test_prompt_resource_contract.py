@@ -346,7 +346,9 @@ def representative_context() -> dict[str, object]:
         decision=PreRoundDecision(need_profile=True, profile_focus="queue", reasoning="Measure."),
         evaluation_suspension=True,
         exhaustion_info=ExhaustionNotice(round_number=1, attempts=2, feedback="Retry."),
-        facts=RunFacts(domain_id="generic", objective="Improve throughput."),
+        facts=RunFacts(
+            agent_git_writable=True, domain_id="generic", objective="Improve throughput."
+        ),
         filenames={1: "issue-1.md"},
         groups=((IssueStatus.OPEN, (issue,)),),
         gate_approved_perf_metric=1.0,
@@ -423,7 +425,9 @@ def render_packaged_prompts(installed: Path) -> int:
     context["objective"] = resolve_agent_resource_paths(
         source_objective, list(resource_roots.values())
     )
-    context["facts"] = RunFacts(domain_id="generic", objective=str(context["objective"]))
+    context["facts"] = RunFacts(
+        agent_git_writable=True, domain_id="generic", objective=str(context["objective"])
+    )
     context["agent_gpu"] = {
         "max_gpus": 2,
         "max_time_minutes": 2,

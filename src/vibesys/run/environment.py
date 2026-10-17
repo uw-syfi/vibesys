@@ -14,11 +14,26 @@ from vs_runtime.api.infrastructure import (
     RunEnvironmentPresentation,
     RunEnvironmentRequest,
     RunEnvironmentSession,
+    RunEnvironmentView,
     SkyPilotEnvironmentFacts,
     SlurmEnvironmentFacts,
 )
 
 _TEMPLATE_DIR = PROMPTS_DIR / "environments"
+
+
+def agent_environment_notes(view: RunEnvironmentView) -> str:
+    """The run environment notes every agent prompt states, for the run's root session *view*.
+
+    Prompts are rendered for the run, so the Git sentence follows where agents write
+    (``RunEnvironmentView.agent_git_writable``), not the root session's own checkout.
+    """
+    return render_template(
+        "agent_notes.j2",
+        template_dir=_TEMPLATE_DIR,
+        environment_notes=view.prompt_notes,
+        git_writable=view.agent_git_writable,
+    )
 
 
 def open_run_environment(
@@ -39,7 +54,6 @@ def open_run_environment(
                 "docker/prompt_notes.j2",
                 template_dir=_TEMPLATE_DIR,
                 history_root=request.git_history_root,
-                git_writable=facts.agent_git_writable,
             )
         )
     elif isinstance(facts, SlurmEnvironmentFacts):

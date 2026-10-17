@@ -44,7 +44,6 @@ from vs_runtime._run_environment_facts import (
     AgentGpuFacts,
     ClusterEvaluationFacts,
     SlurmEnvironmentFacts,
-    agent_git_writable_in,
 )
 from vs_runtime._tool_location import ToolLocation, ToolSite, assumed_tool
 from vs_runtime._trusted_evaluation_preparation import (
@@ -546,7 +545,8 @@ class SlurmEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
                 brokers.append(commands)
                 launcher = write_client_launcher(request.log_dir / "slurm-gpu", mode.gpu_client)
                 extras = bridge_editor_extras(commands, launcher, env=mode.editor_env(launcher))
-            sandbox = self._docker.build_editor(request, extras)
+            editor = self._docker.build_editor(request, extras)
+            sandbox = editor.runner
             profiler_mcp = _remote_profiler_mcp(plans, transport_env, transport_resources)
             view = RunEnvironmentView(
                 paths=agent_paths(sandbox, request),
@@ -555,7 +555,7 @@ class SlurmEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
                 cli_sandboxed=True,
                 host_device_reselect=False,
                 env_kind="slurm",
-                agent_git_writable=agent_git_writable_in(request.workspace),
+                workspace_git_writable=editor.agent_git_writable,
                 profile_execution="remote" if remote_profiling else "local",
                 editor_has_gpu=False,
                 framework_setup_timeout_seconds=config.job_timeout_seconds,

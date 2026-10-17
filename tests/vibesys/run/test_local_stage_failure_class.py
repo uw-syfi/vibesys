@@ -131,7 +131,7 @@ class _Session:
     view: RunEnvironmentView = field(
         default_factory=lambda: RunEnvironmentView(
             paths=AgentPaths(accuracy_command=_ACCURACY, benchmark_command=_BENCHMARK),
-            agent_git_writable=True,
+            workspace_git_writable=True,
             cli_sandboxed=True,
             env_kind="modal",
         )

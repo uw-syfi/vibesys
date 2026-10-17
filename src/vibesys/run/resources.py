@@ -43,7 +43,7 @@ from vibesys.orchestration.skill_selection import (
     resolve_skill_source_paths,
 )
 from vibesys.run.contracts import RunRequest
-from vibesys.run.environment import open_run_environment
+from vibesys.run.environment import agent_environment_notes, open_run_environment
 from vibesys.run.evaluation import trusted_evaluation_plan
 from vibesys.run.evaluation_socket import evaluation_socket_mount, remove_evaluation_socket
 from vibesys.run.experiment_repo import ExperimentRepository
@@ -772,7 +772,7 @@ def _run_facts(
     return RunFacts(
         domain_id=bundle.domain.value,
         objective=objective,
-        environment_notes=view.prompt_notes,
+        environment_notes=agent_environment_notes(view),
         agent_git_writable=view.agent_git_writable,
         profile_execution=ProfileExecution(view.profile_execution),
         objective_location=view.paths.objective,

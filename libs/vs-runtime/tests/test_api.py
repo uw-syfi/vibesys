@@ -146,6 +146,7 @@ def test_agent_turn_timeout_error_preserves_the_policy_budget() -> None:
 
 def test_run_facts_are_strict_and_immutable() -> None:
     facts = RunFacts(
+        agent_git_writable=True,
         domain_id="llm_serving",
         objective="Increase serving throughput.",
         environment_notes="Run the service through its public endpoint.",
@@ -161,7 +162,12 @@ def test_run_facts_are_strict_and_immutable() -> None:
     with pytest.raises(ValidationError):
         facts.workspace_sources[0].__setattr__("dest", "other")
     with pytest.raises(ValidationError):
-        RunFacts(domain_id="generic", objective="Improve the candidate.", objective_location="")
+        RunFacts(
+            agent_git_writable=True,
+            domain_id="generic",
+            objective="Improve the candidate.",
+            objective_location="",
+        )
 
 
 @pytest.mark.parametrize(

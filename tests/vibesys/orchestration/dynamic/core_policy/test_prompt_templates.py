@@ -37,8 +37,10 @@ from vibesys.orchestration.dynamic.search.api import (
     ReviewPrompt,
 )
 from vibesys.prompts import CORE_PROTOCOL_DIR, PROMPTS_DIR, CoreProtocolTemplate, render_template
+from vibesys.run.environment import agent_environment_notes
 from vs_core.api import WaitEnd
 from vs_core.api.search import ReplyCorrection, ResumeFacts, WaitUnrecorded
+from vs_runtime.api.infrastructure import AgentPaths, RunEnvironmentView
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
@@ -402,15 +404,14 @@ _READ_ONLY_GIT_NOTE = (
 
 
 def _docker_notes(*, git_writable: bool) -> str:
-    """The Docker run environment's notes, rendered as the product renders them."""
-    return str(
-        render_template(
-            "docker/prompt_notes.j2",
-            template_dir=PROMPTS_DIR / "environments",
-            history_root=None,
-            git_writable=git_writable,
-        )
+    """The notes every agent of a Docker run reads, rendered as the product renders them."""
+    docker = render_template(
+        "docker/prompt_notes.j2", template_dir=PROMPTS_DIR / "environments", history_root=None
     )
+    view = RunEnvironmentView(
+        paths=AgentPaths(), prompt_notes=str(docker), workspace_git_writable=git_writable
+    )
+    return agent_environment_notes(view)
 
 
 def test_the_docker_notes_say_not_to_commit_exactly_when_git_is_read_only() -> None:

@@ -66,7 +66,7 @@ SCOPE = Scope(owner=RunId(root="run"), generation=0)
 _DIGEST = ContentDigest(value="a" * 64)
 
 
-_FACTS = RunFacts(domain_id="generic", objective="Make it faster.")
+_FACTS = RunFacts(agent_git_writable=True, domain_id="generic", objective="Make it faster.")
 _RUN = {
     "facts": _FACTS,
     "objective": _FACTS.objective,

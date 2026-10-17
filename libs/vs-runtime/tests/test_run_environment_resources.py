@@ -97,7 +97,7 @@ def _request(tmp_path: Path, backend: _Backend) -> RunEnvironmentRequest:
 def _session(events: list[str]) -> _Session:
     return _Session(
         FakeCommandRunner(),
-        RunEnvironmentView(paths=AgentPaths(), agent_git_writable=True),
+        RunEnvironmentView(paths=AgentPaths(), workspace_git_writable=True),
         events,
     )
 

@@ -10,24 +10,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vs_sandbox.api import linked_worktree_git_paths
 from vs_sandbox.api.slurm import profile_capture_descriptor
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from vs_evaluation.api import ProfileField
     from vs_sandbox.api.skypilot import ResolvedSkyPilotResources
     from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmOperatorSettings
-
-
-def agent_git_writable_in(workspace: Path) -> bool:
-    """Whether a container leaves the agent's candidate Git metadata writable.
-
-    The linked-worktree metadata mount is the one place a container environment confines
-    it, so the answer and the mount share ``linked_worktree_git_paths``.
-    """
-    return not linked_worktree_git_paths(workspace)
 
 
 @dataclass(frozen=True)
@@ -39,12 +27,9 @@ class HostEnvironmentFacts:
 class DockerEnvironmentFacts:
     """Presentation facts for Docker execution.
 
-    ``agent_git_writable`` is whether the agent can write its candidate's Git metadata
-    (commit, branch, rebase). It is false when the container mounts a linked worktree's
-    metadata read-only, and then the agent's work reaches the run through the working tree.
+    Git writability is not among them: it depends on the workspace a session mounts, so
+    the session's ``RunEnvironmentView`` reports it from that session's mount plan.
     """
-
-    agent_git_writable: bool = True
 
 
 @dataclass(frozen=True)

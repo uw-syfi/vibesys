@@ -5,6 +5,7 @@ import json
 import shlex
 import subprocess
 import sys
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import MagicMock
@@ -18,7 +19,7 @@ from vibesys.inputs import (
     load_project_task,
 )
 from vibesys.orchestration.profilers import ProfilerKind
-from vibesys.run.environment import open_run_environment
+from vibesys.run.environment import agent_environment_notes, open_run_environment
 from vs_agent.api.images import ImagePushError
 from vs_agent.api.testing import FakeDockerBuildRunner, fake_profiles
 from vs_project.api import Project, RunEnvironmentRecord, RunResourceRequest
@@ -913,21 +914,89 @@ def test_a_docker_agent_on_a_linked_worktree_is_told_its_git_is_read_only_and_no
     session.close()
 
     assert session.view.agent_git_writable is False
-    assert _READ_ONLY_GIT_NOTE in session.view.prompt_notes
+    assert _READ_ONLY_GIT_NOTE in agent_environment_notes(session.view)
 
 
-def test_a_docker_agent_whose_git_is_writable_is_not_told_to_avoid_committing(
-    tmp_path: Path, fake_agent_image: list[dict[str, Any]]
+class _RootLayout(StrEnum):
+    """How the run's root workspace keeps its Git metadata."""
+
+    MAIN_CHECKOUT = "main_checkout"
+    LINKED_WORKTREE = "linked_worktree"
+
+
+def _root_workspace(tmp_path: Path, layout: _RootLayout) -> Path:
+    workspace = tmp_path / "workspace"
+    if layout is _RootLayout.LINKED_WORKTREE:
+        _add_linked_worktree(tmp_path / "project", workspace)
+    else:
+        workspace.mkdir()
+        run_test_command(["git", "init", "-q"], cwd=workspace, check=True, capture_output=True)
+    return workspace
+
+
+def _git_metadata_read_only(resources: Sequence[HostResource], repository: Path) -> bool:
+    """Whether a mount set binds *repository*'s Git metadata, and only read-only."""
+    git_dirs = [r for r in resources if r.path.is_relative_to(repository.resolve() / ".git")]
+    return bool(git_dirs) and all(r.access is HostResourceAccess.READ_ONLY for r in git_dirs)
+
+
+@pytest.mark.parametrize("layout", list(_RootLayout))
+def test_a_docker_run_tells_agents_git_is_read_only_whatever_its_root_checkout(
+    tmp_path: Path, fake_agent_image: list[dict[str, Any]], layout: _RootLayout
 ) -> None:
+    """Regression (review P2-3): the prompt-visible fact is the candidates', not the root's.
+
+    A Docker run writes every candidate in a linked worktree of its own, and that
+    worktree's Git metadata is mounted read-only, so no implementer can commit even when
+    the root the run started from is a writable main checkout.
+    """
     del fake_agent_image
-
-    session = _open(
-        build_run_environment(RunEnvironmentSpec("docker")), _request(tmp_path, FakeBackend())
-    )
+    root = _root_workspace(tmp_path, layout)
+    environment = build_run_environment(RunEnvironmentSpec("docker"))
+    session = _open(environment, _request(tmp_path, FakeBackend(), workspace=root))
     session.close()
+    candidate = tmp_path / "candidate"
+    _add_linked_worktree(tmp_path / "candidate-repo", candidate)
+    candidate_mounts = container_mount_plan(
+        _request(tmp_path, FakeBackend(), workspace=candidate)
+    ).resources
 
-    assert session.view.agent_git_writable is True
-    assert "commit" not in session.view.prompt_notes
+    assert session.view.supports_parallel_candidate_evaluation is True
+    assert _git_metadata_read_only(candidate_mounts, tmp_path / "candidate-repo") is True
+    assert session.view.agent_git_writable is False
+    assert _READ_ONLY_GIT_NOTE in agent_environment_notes(session.view)
+
+
+@pytest.mark.parametrize("layout", list(_RootLayout))
+def test_a_container_mount_plan_reports_git_writable_exactly_when_it_mounts_git_writable(
+    tmp_path: Path, layout: _RootLayout
+) -> None:
+    """The fact comes from the plan that mounts the metadata, so the two cannot disagree."""
+    workspace = _root_workspace(tmp_path, layout)
+    repository = tmp_path / "project" if layout is _RootLayout.LINKED_WORKTREE else workspace
+
+    plan = container_mount_plan(_request(tmp_path, FakeBackend(), workspace=workspace))
+
+    # A main checkout's `.git` is inside the workspace, under its read-write mapping.
+    read_only = _git_metadata_read_only(plan.resources, repository)
+    assert read_only is (layout is _RootLayout.LINKED_WORKTREE)
+    assert plan.agent_git_writable is not read_only
+
+
+@pytest.mark.parametrize("layout", list(_RootLayout))
+def test_a_host_run_reports_the_git_writability_of_the_root_it_writes_in(
+    tmp_path: Path, layout: _RootLayout
+) -> None:
+    """A host run writes in its root; a linked root's metadata is bound read-only there too."""
+    root = _root_workspace(tmp_path, layout)
+    session = _open(
+        unconfined_host_environment(), _request(tmp_path, FakeBackend(), workspace=root)
+    )
+
+    assert session.view.supports_parallel_candidate_evaluation is False
+    writable = layout is _RootLayout.MAIN_CHECKOUT
+    assert session.view.agent_git_writable is writable
+    assert (_READ_ONLY_GIT_NOTE in agent_environment_notes(session.view)) is not writable
 
 
 def test_isolated_environment_mounts_and_translates_evaluator_package(
@@ -1427,7 +1496,7 @@ def testcontainer_mount_plan_declares_named_resources_with_agent_paths(tmp_path:
         cli_provider="codex",
     )
 
-    resources, _symlinks = container_mount_plan(request)
+    resources = container_mount_plan(request).resources
 
     assert all(isinstance(resource, HostResource) for resource in resources)
     by_agent_path = {resource.agent_path: resource for resource in resources}

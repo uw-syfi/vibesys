@@ -44,6 +44,7 @@ from vs_sim.api.testing import examples
 _SNAPSHOT_DIR = Path(__file__).with_name("fixtures") / "prompts"
 
 _CONFIGURED = RunFacts(
+    agent_git_writable=True,
     domain_id="llm-serving",
     objective="Maximize measured token throughput without losing correctness.",
     reference_location="reference/model.py",
@@ -53,7 +54,7 @@ _CONFIGURED = RunFacts(
     profile_execution=ProfileExecution.LOCAL,
     environment_notes="Use CUDA with bfloat16.",
 )
-_BARE = RunFacts(domain_id="generic", objective="Build the candidate.")
+_BARE = RunFacts(agent_git_writable=True, domain_id="generic", objective="Build the candidate.")
 
 _ISSUE = IssueDetail(
     id=7,
