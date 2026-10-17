@@ -500,7 +500,7 @@ export const RICH_ENTRIES = {
               {x: 6, y: 130},
             ]}
             yDomain={[0, 143]}
-            yTicks={[0, 50, 100, 150].map(value => ({value, label: String(value)}))}
+            yTicks={[0, 50, 100].map(value => ({value, label: String(value)}))}
             xTicks={[1, 2, 3, 4, 5, 6].map(value => ({value, label: String(value)}))}
             playhead={4.5}
           />
