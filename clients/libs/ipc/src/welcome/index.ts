@@ -105,6 +105,7 @@ const WELCOME_ARGUMENT_COUNTS = {
   [WELCOME_CHANNELS.helperFeatures]: 1,
   [WELCOME_CHANNELS.openRunWindow]: 1,
   [WELCOME_CHANNELS.showMainWindow]: 0,
+  [WELCOME_CHANNELS.openExternal]: 1,
 } as const satisfies Readonly<Record<WelcomeChannel, number>>;
 
 /**

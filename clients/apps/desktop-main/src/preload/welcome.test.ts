@@ -152,6 +152,10 @@ function cases(random: Seeded): Case[] {
       {kind: 'open-run-window', run: {host: key, runId: name}},
     ],
     [bridge => bridge.showMainWindow(), {kind: 'show-main-window'}],
+    [
+      bridge => bridge.openExternal('https://example.com/a?b=1'),
+      {kind: 'open-external', url: 'https://example.com/a?b=1'},
+    ],
   ];
 }
 

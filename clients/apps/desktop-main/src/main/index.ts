@@ -28,7 +28,7 @@ import {
   type WelcomeEvent,
 } from '@vibesys/ipc';
 import {remember, SettingsStore} from '@vibesys/settings';
-import {app, ipcMain, Menu, Notification, nativeTheme, net, powerMonitor} from 'electron';
+import {app, ipcMain, Menu, Notification, nativeTheme, net, powerMonitor, shell} from 'electron';
 import {SHELL_URL} from './app-assets.js';
 import {AppLaunches} from './app-launches.js';
 import {AppLifecycle, realTimers} from './app-lifecycle.js';
@@ -192,6 +192,7 @@ async function openWindow(
     newRun: newRunMain(hosts, settings),
     runWindows: windows.runs,
     shellUrl: SHELL_URL,
+    openExternal: url => shell.openExternal(url),
     welcomeIpc: {
       handle: (channel, listener) =>
         ipcMain.handle(channel, (event, ...args) =>

@@ -284,6 +284,8 @@ export interface FakeWindows {
   readonly opened: string[];
   /** How often the main window was asked to come to the front. */
   shownMain: number;
+  /** Each address asked to open outside the app. */
+  readonly external: string[];
 }
 
 /**
@@ -294,7 +296,7 @@ export interface FakeWindows {
  */
 export function installFakeWindows(): void {
   const windows = new Map<string, Window>();
-  const record: FakeWindows = {opened: [], shownMain: 0};
+  const record: FakeWindows = {opened: [], shownMain: 0, external: []};
   const ok = () => Promise.resolve({ok: true, value: null});
   const page = window as unknown as {vibesysWelcome: object; fakeHost: object};
   Object.assign(page.vibesysWelcome, {
@@ -313,6 +315,10 @@ export function installFakeWindows(): void {
     },
     showMainWindow: () => {
       record.shownMain += 1;
+      return ok();
+    },
+    openExternal: (url: string) => {
+      record.external.push(url);
       return ok();
     },
   });

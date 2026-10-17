@@ -50,6 +50,7 @@ const CHANNELS: Channels = {
   helperFeatures: 'vibesys:welcome:helper-features',
   openRunWindow: 'vibesys:welcome:open-run-window',
   showMainWindow: 'vibesys:welcome:show-main-window',
+  openExternal: 'vibesys:welcome:open-external',
 };
 const EVENTS: Events = {
   recent: 'vibesys:welcome:recent',
@@ -123,6 +124,7 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
     helperFeatures: host => call(CHANNELS.helperFeatures, host),
     openRunWindow: run => call(CHANNELS.openRunWindow, run),
     showMainWindow: () => call(CHANNELS.showMainWindow),
+    openExternal: url => call(CHANNELS.openExternal, url),
     onToggleSidebar: listener => capabilities.on(TOGGLE_SIDEBAR_CHANNEL, () => listener()),
     onRecent: on(EVENTS.recent),
     onListing: on(EVENTS.listing),

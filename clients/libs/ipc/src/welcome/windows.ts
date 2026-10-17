@@ -9,7 +9,32 @@ import type {ChannelOf} from './values.js';
 export const WINDOWS_CHANNELS = {
   openRunWindow: 'vibesys:welcome:open-run-window',
   showMainWindow: 'vibesys:welcome:show-main-window',
+  openExternal: 'vibesys:welcome:open-external',
 } as const;
+
+const MAX_EXTERNAL_URL = 2048;
+/**
+ * A web address (`http` or `https` with a host) or a mail address (`mailto:` and something), with
+ * no space or control character anywhere. This package's neutral runtime has no URL parser, so
+ * this is the whole rule; the address is passed on exactly as it was checked.
+ */
+const EXTERNAL_ADDRESS = /^(?:https?:\/\/[^\s\p{Cc}/?#][^\s\p{Cc}]*|mailto:[^\s\p{Cc}]+)$/iu;
+
+/**
+ * `value` when it is a web or mail address the app may hand to the user's own browser or mail app
+ * (`http`, `https` or `mailto`, nothing else); throws naming `name` otherwise.
+ */
+export function parseExternalUrl(value: unknown, name: string): string {
+  if (typeof value !== 'string' || value.length > MAX_EXTERNAL_URL) {
+    throw new Error(
+      `${name} must be a web or mail address of at most ${MAX_EXTERNAL_URL} characters`,
+    );
+  }
+  if (!EXTERNAL_ADDRESS.test(value)) {
+    throw new Error(`${name} must be an http, https or mailto address`);
+  }
+  return value;
+}
 
 /** The welcome bridge's window requests. */
 export interface WindowsWelcomeBridge {
@@ -17,13 +42,16 @@ export interface WindowsWelcomeBridge {
   openRunWindow(run: RunRef): Promise<WelcomeResult<null>>;
   /** Bring the main window (the sidebar and its screens) to the front. */
   showMainWindow(): Promise<WelcomeResult<null>>;
+  /** Open a web or mail address in the user's own browser or mail app; never in the app. */
+  openExternal(url: string): Promise<WelcomeResult<null>>;
   /** The application menu's "Toggle Sidebar" was chosen. */
   onToggleSidebar(listener: () => void): void;
 }
 
 export type WindowsRequest =
   | {readonly kind: 'open-run-window'; readonly run: RunRef}
-  | {readonly kind: 'show-main-window'};
+  | {readonly kind: 'show-main-window'}
+  | {readonly kind: 'open-external'; readonly url: string};
 
 /** The typed request on `channel` with `args`; throws naming the first invalid value. */
 export function parseWindowsRequest(
@@ -35,6 +63,8 @@ export function parseWindowsRequest(
       return {kind: 'open-run-window', run: parseRunRef(args[0], 'run')};
     case WINDOWS_CHANNELS.showMainWindow:
       return {kind: 'show-main-window'};
+    case WINDOWS_CHANNELS.openExternal:
+      return {kind: 'open-external', url: parseExternalUrl(args[0], 'url')};
   }
 }
 

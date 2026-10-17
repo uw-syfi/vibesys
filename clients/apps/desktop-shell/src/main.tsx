@@ -7,7 +7,7 @@ import '@vibesys/ui/components.css';
 import {bindSidebarShortcut, browserSidebarPreference} from '@vibesys/feature-app-shell/renderer';
 import {pageAppearance} from '@vibesys/feature-settings/renderer';
 import {runOfWindow, type WelcomeBridge} from '@vibesys/ipc';
-import {Card, EmptyState, Page} from '@vibesys/ui';
+import {Card, EmptyState, LinkOpener, Page} from '@vibesys/ui';
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import {windowAddress} from './address.js';
@@ -57,13 +57,17 @@ if (bridge === undefined) {
   if (run === null) {
     bindSidebarShortcut(window, bridge.platform === 'darwin', stores.sidebar.store.dispatch);
   }
+  // A link in written text opens in the user's own browser or mail app, never in this window.
+  const openExternal = (url: string): void => void bridge.openExternal(url);
   createRoot(root).render(
     <StrictMode>
-      {run === null ? (
-        <Shell stores={stores} version={String(import.meta.env['VITE_APP_VERSION'])} />
-      ) : (
-        <RunWindow stores={stores} run={run} />
-      )}
+      <LinkOpener open={openExternal}>
+        {run === null ? (
+          <Shell stores={stores} version={String(import.meta.env['VITE_APP_VERSION'])} />
+        ) : (
+          <RunWindow stores={stores} run={run} />
+        )}
+      </LinkOpener>
     </StrictMode>,
   );
 }

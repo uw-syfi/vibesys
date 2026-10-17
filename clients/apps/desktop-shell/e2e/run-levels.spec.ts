@@ -1,6 +1,12 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Locator, type Page, test} from '@playwright/test';
-import {type FakeBridgeSeed, installFakeBridge, installFakeMachines} from './fake-bridge.js';
+import {
+  type FakeBridgeSeed,
+  type FakeWindows,
+  installFakeBridge,
+  installFakeMachines,
+  installFakeWindows,
+} from './fake-bridge.js';
 import {installFakeLive, moreTurnEvents, turnReplyEvent} from './fake-live.js';
 import {installFakeRun} from './fake-run.js';
 import {type FakeServerSeed, installFakeServer} from './fake-server.js';
@@ -124,7 +130,10 @@ async function openRun(page: Page, live = false, server: FakeServerSeed = SERVER
   await page.addInitScript(installFakeMachines, SEED);
   await page.addInitScript(installFakeRun, LOGS);
   await page.addInitScript(installFakeServer, server);
-  if (live) await page.addInitScript(installFakeLive);
+  if (live) {
+    await page.addInitScript(installFakeLive);
+    await page.addInitScript(installFakeWindows);
+  }
   await page.goto('./shell.html');
   await page
     .getByRole('navigation', {name: 'VibeSys'})
@@ -716,4 +725,16 @@ test('a live turn keeps its scroll position and its element as events arrive', a
   await expect(turn.locator('xpath=self::*[@data-probe]')).toHaveCount(1);
   expect((await scrolls()).filter(top => top !== 400)).toEqual([]);
   expect(await turn.evaluate(element => element.scrollTop)).toBe(400);
+
+  // A link in what the agent said opens through the app's opener, never in the window.
+  const url = page.url();
+  await turn.getByRole('link', {name: 'the notes 11'}).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as unknown as {fakeHost: {windows: FakeWindows}}).fakeHost.windows.external,
+      ),
+    )
+    .toEqual(['https://example.com/notes/11']);
+  expect(page.url()).toBe(url);
 });

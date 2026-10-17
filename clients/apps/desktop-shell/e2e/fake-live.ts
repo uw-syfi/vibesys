@@ -31,7 +31,8 @@ export function moreTurnEvents(
         channel: thinking ? 'analysis' : 'assistant',
         content: thinking
           ? `**Thought title ${number}**\n\n${`Thought number ${number}. `.repeat(8)}`
-          : `Said number ${number}. `.repeat(8),
+          : `Said number ${number}. `.repeat(8) +
+            `See [the notes ${number}](https://example.com/notes/${number}).`,
       },
     };
   });

@@ -122,6 +122,7 @@ function desktopWorld(cleanups: RetirementCleanups = {}) {
   const logs: string[] = [];
   const checkouts: {readonly path: unknown; readonly change: unknown}[] = [];
   const launches: string[] = [];
+  const opened: string[] = [];
   let bound: ReturnType<DesktopDeps['runs']['attached']> = null;
   let releaseCleanup = (): void => {};
   const cleanup = new Promise<void>(resolve => {
@@ -245,9 +246,23 @@ function desktopWorld(cleanups: RetirementCleanups = {}) {
     runWindows,
     shellUrl: SHELL_URL,
     welcomeIpc: ipc,
+    openExternal: async url => {
+      opened.push(url);
+    },
     log: message => logs.push(message),
   });
-  return {runWindowList, ipc, document, desktop, checkouts, launches, events, logs, releaseCleanup};
+  return {
+    opened,
+    runWindowList,
+    ipc,
+    document,
+    desktop,
+    checkouts,
+    launches,
+    events,
+    logs,
+    releaseCleanup,
+  };
 }
 
 describe('Desktop run windows', () => {
@@ -293,6 +308,42 @@ describe('Desktop run windows', () => {
     await expect(fromRunWindow(21, '31:301', WELCOME_CHANNELS.releaseLogs)).resolves.toMatchObject({
       ok: true,
     });
+  });
+});
+
+describe('Desktop external addresses', () => {
+  test('opens a web or mail address from either window, and refuses every other one', async () => {
+    const w = desktopWorld();
+    const run = {host: 'ssh:chelan4', runId: '20261015-163047'};
+    await w.ipc.invoke('10:100', WELCOME_CHANNELS.openRunWindow, run);
+    const runWindowUrl = `${SHELL_URL}?host=ssh%3Achelan4&run=20261015-163047`;
+    await expect(
+      w.ipc.invoke('10:100', WELCOME_CHANNELS.openExternal, 'https://example.com/a'),
+    ).resolves.toEqual({ok: true, value: null});
+    await expect(
+      w.ipc.invokeAs(20, runWindowUrl, '30:300', WELCOME_CHANNELS.openExternal, 'mailto:a@b.co'),
+    ).resolves.toEqual({ok: true, value: null});
+    expect(w.opened).toEqual(['https://example.com/a', 'mailto:a@b.co']);
+    for (const refused of ['javascript:alert(1)', 'file:///etc/passwd', 'app://vibesys/x', 42]) {
+      await expect(
+        w.ipc.invoke('10:100', WELCOME_CHANNELS.openExternal, refused),
+      ).resolves.toMatchObject({ok: false});
+    }
+    expect(w.opened).toHaveLength(2);
+  });
+
+  test('a page that is not the shell cannot open anything', async () => {
+    const w = desktopWorld();
+    await expect(
+      w.ipc.invokeAs(
+        99,
+        'https://evil.example/',
+        '40:400',
+        WELCOME_CHANNELS.openExternal,
+        'https://example.com',
+      ),
+    ).resolves.toMatchObject({ok: false});
+    expect(w.opened).toEqual([]);
   });
 });
 

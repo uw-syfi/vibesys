@@ -57,6 +57,8 @@ export interface DesktopDeps {
   /** The windows that each show one run, whose surface is the shell's page with the run named. */
   readonly runWindows: Pick<RunWindows, 'open' | 'sendWelcome'>;
   readonly welcomeIpc: WelcomeIpc;
+  /** Hand a validated web or mail address to the user's own browser or mail app. */
+  openExternal(url: string): Promise<void>;
   readonly log: (message: string) => void;
 }
 
@@ -77,7 +79,8 @@ type ScreenRequest = Extract<
       | 'start-run'
       | 'helper-features'
       | 'open-run-window'
-      | 'show-main-window';
+      | 'show-main-window'
+      | 'open-external';
   }
 >;
 
@@ -267,6 +270,8 @@ export class Desktop {
       case 'show-main-window':
         this.#deps.window.focus();
         return Promise.resolve(null);
+      case 'open-external':
+        return this.#deps.openExternal(request.url).then(() => null);
       default:
         return this.#deps.newRun.answer(request);
     }
