@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -21,11 +22,13 @@ from vs_agent.api import (
     AgentInvocationState,
     AgentOutputSchemaError,
     AgentQuotaError,
+    AgentSessionCheckpoint,
     AgentSessionKey,
     AgentSessionSpec,
     AgentSessionState,
     AgentSpawnError,
     AgentTurnRequest,
+    AgentTurnResult,
     AgentTurnTimeoutError,
     ClientAgentSessions,
     Completed,
@@ -361,6 +364,28 @@ def test_malformed_ledger_fails_typed_before_dispatch(harness: _Harness) -> None
     sessions = ClientAgentSessions(harness.client, slot, threads=SimThreads())
     sessions.bind(KEY, harness.spec, harness.turn)
     with pytest.raises(SessionPersistenceError, match="read invocation ledger"):
+        sessions.resume(KEY, harness.message, "resume-1")
+    assert harness.boundary.calls == 1
+
+
+def test_a_ledger_an_older_version_wrote_is_refused_naming_the_remedy(harness: _Harness) -> None:
+    """A version-1 ledger (before ``refused_steers`` was stored) is refused before dispatch,
+    and the error names the version it found and what to do: start a new run."""
+    completed = Completed(
+        session_key=str(KEY),
+        invocation_id="turn-1",
+        result=AgentTurnResult(text="done", provider_session_id="p"),
+        checkpoint=AgentSessionCheckpoint(session_key=str(KEY), provider_session_id="p"),
+    )
+    record = AgentInvocationRecord(payload_digest="digest", outcome=completed)
+    stored = json.loads(AgentInvocationState(invocations={"turn-1": record}).model_dump_json())
+    stored["schema_version"] = 1
+    del stored["invocations"]["turn-1"]["outcome"]["result"]["refused_steers"]
+    slot = harness.namespace.slot("v1.json", AgentInvocationState)
+    harness.namespace.write_bytes("v1.json", json.dumps(stored).encode())
+    sessions = ClientAgentSessions(harness.client, slot, threads=SimThreads())
+    sessions.bind(KEY, harness.spec, harness.turn)
+    with pytest.raises(SessionPersistenceError, match=r"version 1 .*start a new run"):
         sessions.resume(KEY, harness.message, "resume-1")
     assert harness.boundary.calls == 1
 

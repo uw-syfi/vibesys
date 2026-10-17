@@ -258,6 +258,20 @@ class AgentInvocationState(BaseModel):
     """2: a completed turn's result stores ``refused_steers``, and every result field is required."""
     invocations: dict[str, AgentInvocationRecord] = Field(default_factory=dict)
 
+    @field_validator("schema_version", mode="before")
+    @classmethod
+    def _this_version(cls, value: object) -> object:
+        """Refuse a ledger another VibeSys version wrote, naming the remedy."""
+        current = cls.model_fields["schema_version"].default
+        if isinstance(value, int) and not isinstance(value, bool) and value != current:
+            message = (
+                f"the ledger is version {value} and this VibeSys reads only version "
+                f"{current}; a run whose agent ledger another version wrote cannot resume "
+                "here: start a new run"
+            )
+            raise ValueError(message)
+        return value
+
     def record(self, record: AgentInvocationRecord) -> None:
         """Preserve dispatch order independently of JSON object key ordering.
 
