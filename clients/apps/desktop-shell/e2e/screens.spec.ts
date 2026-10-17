@@ -122,7 +122,10 @@ test('every known failure still happens, so a fixed defect leaves the list', () 
   // Only the whole matrix can say a failure is gone: a filtered run walked too few screens.
   test.skip(walked < CELLS.length, 'a filtered run: not every screen was walked');
   const stale = KNOWN_FAILURES.filter(failure => !matched.has(failure.id)).map(each => each.id);
-  expect(stale, 'known failures no screen shows any more: delete them').toEqual([]);
+  expect(
+    stale,
+    `known failures no screen shows any more, delete them: ${stale.join(', ')}`,
+  ).toEqual([]);
 });
 
 test('the contact sheet shows every screen', async ({browser}) => {

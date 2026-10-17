@@ -13,7 +13,7 @@ import {type Anchor, anchorsOf, RUN_ANCHORS, stabilityViolations} from './checks
 type Screen = 'run' | 'idea' | 'step' | 'item' | 'timeline' | 'agents' | 'scrubbed';
 
 export interface Journey {
-  /** The title of the idea to open, or null for the first row. */
+  /** The title of the idea to open, or null for the second row. */
   readonly idea: string | null;
   /** The command of a tool call in that idea's implementer turn; null: go no deeper than the idea. */
   readonly command: string | null;
@@ -60,7 +60,14 @@ class Walk {
 async function openIdea(page: Page, idea: string | null): Promise<void> {
   await settled(page);
   const options = page.getByRole('listbox', {name: 'Ideas'}).getByRole('option');
-  await (idea === null ? options.first() : options.filter({hasText: row(idea)}).first()).click();
+  // The first row is the root of the tree: on a long run its first click selects without opening.
+  const other = (await options.count()) > 1 ? options.nth(1) : options.first();
+  const target = idea === null ? other : options.filter({hasText: row(idea)}).first();
+  // Pointing at a row redraws the chart (it lights the row's chain): on a long run that takes long
+  // enough to swallow a click that arrives with the first pointer move, so point first, then press.
+  await target.hover();
+  await settled(page);
+  await target.click();
   await expect(page.getByRole('listbox', {name: /steps$/})).toBeVisible();
 }
 

@@ -35,35 +35,9 @@ export const KNOWN_FAILURES: readonly KnownFailure[] = [
   },
   {id: 'raw-markdown-in-title', check: 'raw-text', message: /raw markdown/, issue: ISSUE},
   {
-    id: 'best-path-label-wraps',
-    check: 'wrap',
-    message: /"best path" is 9 characters|a word is broken across lines: best, path/,
-    issue: ISSUE,
-  },
-  {
-    id: 'count-chips-wrap',
-    check: 'wrap',
-    message: /"\d+ (passed|failed|running)" is \d+ characters/,
-    screens: NARROW,
-    issue: ISSUE,
-  },
-  {
-    id: 'long-title-breaks-a-word',
-    check: 'wrap',
-    message: /a word is broken across lines: sixty-four/,
-    issue: ISSUE,
-  },
-  {
     id: 'time-bar-labels-overlap',
     check: 'overlap',
     message: /"(Call \d+|Live|Back to live)" and "Call \d+"/,
-    issue: ISSUE,
-  },
-  {
-    id: 'ideas-column-headers-overlap',
-    check: 'overlap',
-    message: /"idea" and "vs best"/,
-    screens: NARROW,
     issue: ISSUE,
   },
   {
@@ -74,10 +48,10 @@ export const KNOWN_FAILURES: readonly KnownFailure[] = [
     issue: ISSUE,
   },
   {
-    id: 'agents-header-overlaps',
-    check: 'overlap',
-    message: /"agent · started by the row abo" and "(turns|took)"/,
-    screens: NARROW,
+    id: 'best-line-overflows-its-pane',
+    check: 'overflow',
+    message: /a pane scrolls sideways/,
+    screens: /^long-titles\//,
     issue: ISSUE,
   },
   {
