@@ -38,6 +38,7 @@ from vs_runtime.api.infrastructure import (
     RunEnvironmentRequest,
     RunEnvironmentSession,
     RunEnvironmentSpec,
+    RunEnvironmentView,
     SkyPilotEnvironment,
     TrustedEvaluatorRequirements,
     build_run_environment,
@@ -555,6 +556,33 @@ remote_python = "/remote/venv/bin/python"
     # Without a configured service there is nothing to capture under load.
     assert evaluation.profile_command is None
     session.close()
+
+
+def test_a_slurm_agent_on_a_linked_worktree_is_told_its_git_is_read_only(tmp_path: Path) -> None:
+    config_path = tmp_path / "slurm.toml"
+    config_path.write_text(
+        """[slurm]
+name = "test-cluster"
+remote_workspace_root = "/remote/vibesys"
+job_timeout_seconds = 900
+
+[slurm.transport]
+kind = "ssh"
+host = "test-cluster"
+
+[vibesys]
+remote_python = "/remote/venv/bin/python"
+""",
+        encoding="utf-8",
+    )
+    _add_linked_worktree(tmp_path / "project", tmp_path / "workspace")
+
+    session = _open(
+        build_run_environment(_slurm_spec(config_path)), _request(tmp_path, FakeBackend())
+    )
+    session.close()
+
+    assert session.view.agent_git_writable is False
 
 
 def test_a_slurm_service_with_a_staged_profiler_plans_a_trusted_capture(tmp_path: Path) -> None:
@@ -2329,13 +2357,15 @@ def test_docker_modal_and_skypilot_build_the_same_kind_of_sandbox_from_one_resou
         EvaluatorPackageRequirement(name="vibesys-evaluator-queue", version="0.1.0")
     )
 
+    views: dict[str, RunEnvironmentView] = {}
+
     def _open_environment_case(
         env_name: str, env: RunEnvironment, backend: FakeBackend, **overrides: object
     ) -> None:
         root = tmp_path / env_name
         root.mkdir()
         _add_linked_worktree(root / "project", root / "workspace")
-        _open(
+        views[env_name] = _open(
             env,
             _request(
                 root,
@@ -2346,7 +2376,7 @@ def test_docker_modal_and_skypilot_build_the_same_kind_of_sandbox_from_one_resou
                 cli_provider="codex",
                 **overrides,
             ),
-        )
+        ).view
 
     docker_backend = FakeBackend()
     _open_environment_case(
@@ -2424,6 +2454,12 @@ remote_artifact_root = "/remote/vibesys"
 
     # (d) The workspace is a linked Git worktree.
     _assert_worktree_git_is_read_only_at_its_host_path(tmp_path, backends)
+
+    # What the agent is told follows what was mounted: every environment that mounts a
+    # linked worktree's metadata read-only reports its Git as not writable.
+    assert {name: view.agent_git_writable for name, view in views.items()} == dict.fromkeys(
+        backends, False
+    )
 
     # (c) Nothing outside the workspace-related mounts each plan legitimately
     # marks writable (SkyPilot's caller-state bridge, the shared login) is

@@ -1359,6 +1359,7 @@ class SkyPilotEnvironment(RefusesDockerInDocker, DockerEnvironment):
                 host_device_reselect=False,
                 env_kind="skypilot",
                 profile_execution="remote",
+                agent_git_writable=_agent_git_writable(request),
             ),
         )
 
@@ -1595,6 +1596,7 @@ class ModalEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
                         host_device_reselect=False,
                         env_kind="modal",
                         profile_execution="remote",
+                        agent_git_writable=_agent_git_writable(request),
                         deployment_release_env_var="VIBESYS_RELEASE_MODAL_DEPLOYMENT",
                         framework_setup_timeout_seconds=setup_timeout_seconds,
                     ),
