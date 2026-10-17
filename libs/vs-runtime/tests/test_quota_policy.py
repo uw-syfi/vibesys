@@ -1,4 +1,4 @@
-"""The quota decision is arithmetic over (policy, reset time, now, time already waited)."""
+"""The quota and outage decisions are arithmetic over a policy and the turn's times so far."""
 
 from __future__ import annotations
 
@@ -13,10 +13,12 @@ from vs_runtime.api.infrastructure import (
     FallbackTarget,
     GiveUp,
     Hold,
+    OutagePolicy,
     QuotaAction,
     QuotaPolicy,
     Switch,
     WaitFor,
+    decide_outage,
     decide_quota,
 )
 
@@ -142,3 +144,51 @@ def test_a_pause_policy_that_names_a_fallback_still_holds_for_the_operator(
 def test_the_fallback_action_without_a_target_is_rejected() -> None:
     with pytest.raises(ValueError, match="fallback"):
         QuotaPolicy(QuotaAction.FALLBACK)
+
+
+outage_policies = st.builds(
+    lambda budget, first, extra: OutagePolicy(budget, first, first + extra),
+    budget=seconds,
+    first=st.floats(min_value=0.001, max_value=1e4, allow_nan=False),
+    extra=st.floats(min_value=0, max_value=1e4, allow_nan=False),
+)
+
+
+@given(policy=outage_policies, stop=st.integers(min_value=1, max_value=200), elapsed=seconds)
+def test_an_outage_waits_within_the_cap_and_the_budget_or_gives_up_once_it_is_spent(
+    policy: OutagePolicy, stop: int, elapsed: float
+) -> None:
+    decision = decide_outage(policy, stop=stop, elapsed=elapsed)
+
+    if elapsed >= policy.budget_seconds:
+        assert isinstance(decision, GiveUp)
+        return
+    assert isinstance(decision, WaitFor)
+    assert 0 < decision.seconds <= policy.max_wait_seconds
+    assert elapsed + decision.seconds <= policy.budget_seconds
+
+
+@given(policy=outage_policies, stop=st.integers(min_value=1, max_value=200))
+def test_outage_waits_never_shrink_from_one_stop_to_the_next_while_budget_remains(
+    policy: OutagePolicy, stop: int
+) -> None:
+    now = decide_outage(policy, stop=stop, elapsed=0.0)
+    later = decide_outage(policy, stop=stop + 1, elapsed=0.0)
+
+    assert isinstance(now, WaitFor)
+    assert isinstance(later, WaitFor)
+    assert now.seconds <= later.seconds
+    assert decide_outage(policy, stop=1, elapsed=0.0) == WaitFor(
+        min(policy.first_wait_seconds, policy.budget_seconds)
+    )
+
+
+@pytest.mark.parametrize(
+    ("budget", "first", "cap"),
+    [(0, 1, 1), (1, 0, 1), (1, 2, 1), (float("inf"), 1, 1), (1, 1, float("nan"))],
+)
+def test_an_outage_policy_rejects_values_no_decision_can_use(
+    budget: float, first: float, cap: float
+) -> None:
+    with pytest.raises(ValueError, match="outage policy|first_wait_seconds"):
+        OutagePolicy(budget, first, cap)

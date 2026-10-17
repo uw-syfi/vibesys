@@ -10,7 +10,13 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vs_agent.api import AgentClient, AgentQuotaError, AgentTurnRequest, QuotaCondition
+from vs_agent.api import (
+    AgentClient,
+    AgentQuotaError,
+    AgentTurnRequest,
+    CapacityStops,
+    QuotaCondition,
+)
 from vs_agent.api.testing import FakeProvider, FakeTurnScript
 from vs_sim.api.testing import ManualClock, SimThreads
 
@@ -27,9 +33,9 @@ class _Gate:
     calls: list[tuple[AgentQuotaError, str, str | None, int]] = field(default_factory=list)
 
     def wait_for_capacity(
-        self, error: AgentQuotaError, turn: AgentTurnRequest, *, role: str, attempt: int
+        self, error: AgentQuotaError, turn: AgentTurnRequest, *, role: str, stops: CapacityStops
     ) -> None:
-        self.calls.append((error, role, turn.invocation_id, attempt))
+        self.calls.append((error, role, turn.invocation_id, stops.count))
         if self.refusal is not None:
             raise self.refusal
 
@@ -83,3 +89,30 @@ def test_a_gate_that_raises_ends_the_turn_with_its_error(tmp_path: Path) -> None
         _invoke(client, tmp_path)
 
     assert len(gate.calls) == 1
+
+
+@given(
+    conditions=st.lists(st.sampled_from(QuotaCondition), min_size=1, max_size=5),
+)
+def test_each_capacity_stop_reaches_the_gate_as_the_condition_the_provider_reported(
+    conditions: list[QuotaCondition],
+) -> None:
+    """An outage (a transient failure with no exhausted window) waits at the gate too.
+
+    The scripted provider reports ``UNAVAILABLE`` the way a gateway answering ``503`` does once
+    agentshim's retries ran out: a transient failure that names no limit. Before, that failure
+    skipped the gate and failed the turn.
+    """
+    gate = _Gate()
+    client = _client(
+        (*[AgentQuotaError("claude", c, f"stop {n}") for n, c in enumerate(conditions)], "ok")
+    )
+    client.set_capacity_gate(gate)
+
+    with TemporaryDirectory() as tmp:
+        text = _invoke(client, Path(tmp))
+
+    assert text == "ok"
+    assert [(error.condition, count) for error, _, _, count in gate.calls] == [
+        (condition, n + 1) for n, condition in enumerate(conditions)
+    ]

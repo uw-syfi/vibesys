@@ -31,6 +31,7 @@ from vs_agent.api import (
     AgentCapabilities,
     AgentQuotaError,
     AgentTurnRequest,
+    CapacityStops,
     QuotaCondition,
 )
 from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore
@@ -316,7 +317,7 @@ def test_the_quota_policy_of_the_config_reaches_the_gate(tmp_path: Path) -> None
             error,
             AgentTurnRequest(message="m", label=None, invocation_id=None),
             role="r",
-            attempt=1,
+            stops=CapacityStops(count=1),
         )
 
 
