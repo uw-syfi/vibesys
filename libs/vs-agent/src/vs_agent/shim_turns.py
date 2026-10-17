@@ -135,6 +135,7 @@ class TurnEvents:
         self._stop: Callable[[], None] | None = None
         self._turn: CapacityStops | None = None
         self._cancel_delivered = False
+        self._running = False
         self._steers = steers
 
     def begin_turn(
@@ -154,10 +155,24 @@ class TurnEvents:
         self._stop = stop
         self._turn = turn
         self._cancel_delivered = False
+        self._running = False
+
+    def cancel(self, interrupt: Callable[[], None]) -> None:
+        """Stop the turn in flight now with *interrupt*, and record that it was stopped.
+
+        Once the library has run the turn (it emitted an event), *interrupt* reaches it, so
+        the turn's next event does not stop it again. Before that, an interrupt has nothing
+        to stop, and the turn's first event delivers the cancellation instead.
+        """
+        self.cancelled = True
+        if self._running:
+            self._cancel_delivered = True
+        interrupt()
 
     def on_event(self, event: agentshim.AgentEvent) -> None:
         """Translate and forward one library event, if anyone is listening."""
         self._stop_if_cancelled()
+        self._running = True
         if isinstance(event, agentshim.SteerConsumed):
             self._steers.consumed(event.text)
         elif isinstance(event, agentshim.SteerRejected):
@@ -252,8 +267,7 @@ class LaunchedSession:
         turn = self._turn
         if turn is not None:
             turn.cancel()
-        self.events.cancelled = True
-        self.session.interrupt()
+        self.events.cancel(self.session.interrupt)
 
     def adopt(self, session_id: str) -> bool:
         """Continue ``session_id`` on the next turn, if the session accepts it.
