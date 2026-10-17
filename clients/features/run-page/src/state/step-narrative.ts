@@ -248,7 +248,7 @@ export function itemLines(tool: ToolRow): GateLine[] {
 /**
  * The keys of the reply fields to show at first: its summary (the first prose field whose key says
  * "summary", else the first prose field); the choices ride the title line. Every other field is
- * behind "Show all fields".
+ * after them (the structured reply's own card shows them behind "Show all fields").
  */
 export function replyOverview(fields: readonly ReplyFieldView[]): string[] {
   const prose = fields.filter(field => field.kind === 'prose');

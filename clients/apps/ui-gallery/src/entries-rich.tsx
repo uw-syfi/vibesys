@@ -12,6 +12,7 @@ import {
   KeyValue,
   type LogLine,
   LogPane,
+  Markdown,
   Menu,
   type MenuItem,
   Prose,
@@ -35,6 +36,30 @@ import {type JSX, useState} from 'react';
 import type {ComponentName, GalleryEntry} from './gallery-entry.js';
 
 const noop = (): void => undefined;
+
+const MARKDOWN_SAMPLE = `## Plan
+
+Pad the **head** and **tail** counters so each sits on its own cache line, then re-run the \`mpsc\` bench.
+
+- Expected: throughput *flat* past four producers, not ~~falling~~
+- Risk: the padding grows \`Queue\` by 128 bytes
+  - mitigated by sharing one allocation
+
+1. Measure the baseline
+2. Apply the padding
+3. Compare against [the notes](https://example.com/notes)
+
+| Producers | Before | After |
+| --- | --- | --- |
+| 1 | 31.2 | 31.0 |
+| 8 | 9.4 | 27.8 |
+
+\`\`\`rust
+#[repr(align(128))]
+struct Padded<T>(T); // a long line in a code block scrolls inside the block, never the page
+\`\`\`
+
+> Raw HTML such as <b>this</b> is shown as text, and an image is not loaded: ![the chart](https://example.com/chart.png)`;
 
 const MENU: readonly MenuItem[] = [
   {id: 'window', label: 'Open in new window', press: noop},
@@ -599,6 +624,21 @@ export const RICH_ENTRIES = {
           />
         </SidebarSection>
       </Grid>
+    ),
+  },
+  Markdown: {
+    render: () => (
+      <Card>
+        <Markdown text={MARKDOWN_SAMPLE} />
+      </Card>
+    ),
+  },
+  LinkOpener: {
+    render: () => (
+      <Text tone="muted">
+        Wraps the Markdown above to say where its links open: a web or mail address is handed to the
+        app's opener and the page never navigates.
+      </Text>
     ),
   },
   EmptyState: {

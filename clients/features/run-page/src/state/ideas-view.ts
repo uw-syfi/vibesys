@@ -1,7 +1,7 @@
 /**
- * The run level's Ideas face and best path: one row per candidate, running first and then the
- * rest newest first, the failed collapsed behind a `+ N failed` row unless the filter shows them,
- * and the winning path as a line of names that folds its middle when long.
+ * The run level's Ideas face: one row per candidate, running first and then the rest newest
+ * first, the failed collapsed behind a `+ N failed` row unless the filter shows them. The tree
+ * layout (`ideas-tree.ts`) draws the same rows nested under what each built on.
  *
  * Rows are memoized on the candidate tree and the filter, so a render with neither changed builds
  * nothing (a tree is the same object until a span changes).
@@ -198,10 +198,13 @@ function ordered(candidates: readonly Candidate[]): Candidate[] {
   return [...running, ...rest];
 }
 
-function buildIdeas(model: RunModel, filter: IdeasFilter): IdeasView {
+const rowsMemo = new WeakMap<CandidateTree, ReadonlyMap<string, IdeaRow>>();
+
+/** Every idea's row by id, whatever the filter; the same map while the ideas are unchanged. */
+export function ideaRowsById(model: RunModel): ReadonlyMap<string, IdeaRow> {
   const tree = model.candidates;
-  const counts = {running: 0, passed: 0, failed: 0};
-  for (const item of tree.candidates) counts[item.outcome] += 1;
+  const known = rowsMemo.get(tree);
+  if (known !== undefined) return known;
   const context: RowContext = {
     tree,
     byId: new Map(tree.candidates.map(item => [item.id, item])),
@@ -211,6 +214,16 @@ function buildIdeas(model: RunModel, filter: IdeasFilter): IdeasView {
     unit: unitOf(model),
     changed: model.changed,
   };
+  const rows = new Map(tree.candidates.map(item => [item.id, rowOf(item, context)]));
+  rowsMemo.set(tree, rows);
+  return rows;
+}
+
+function buildIdeas(model: RunModel, filter: IdeasFilter): IdeasView {
+  const tree = model.candidates;
+  const counts = {running: 0, passed: 0, failed: 0};
+  for (const item of tree.candidates) counts[item.outcome] += 1;
+  const rowsById = ideaRowsById(model);
   const query = filter.query.trim();
   const rows: IdeaRow[] = [];
   let hiddenFailed = 0;
@@ -220,7 +233,8 @@ function buildIdeas(model: RunModel, filter: IdeasFilter): IdeasView {
       if (item.outcome === 'failed') hiddenFailed += 1;
       continue;
     }
-    rows.push(rowOf(item, context));
+    const row = rowsById.get(item.id);
+    if (row !== undefined) rows.push(row);
   }
   return {rows, hiddenFailed, counts, total: tree.candidates.length};
 }
@@ -246,59 +260,6 @@ function sameFilter(a: IdeasFilter, b: IdeasFilter): boolean {
   return (
     a.query === b.query && a.passed === b.passed && a.running === b.running && a.failed === b.failed
   );
-}
-
-/** A name on the best path, or the fold standing for the names it hides. */
-type PathCrumb =
-  | {readonly kind: 'idea'; readonly id: string; readonly label: string}
-  | {readonly kind: 'fold'; readonly hidden: number};
-
-export interface BestPathView {
-  readonly crumbs: readonly PathCrumb[];
-  /** The best's ratio to the input, or null when it measured none. */
-  readonly ratio: string | null;
-}
-
-/** Shown whole up to this many names; longer paths fold their middle unless opened. */
-const PATH_SHOWN = 5;
-
-const pathMemo = new WeakMap<CandidateTree, Map<boolean, BestPathView | null>>();
-
-/**
- * The winning path from the input to the best, folded in the middle when long and not `open`; the
- * same object while the ideas and `open` are unchanged.
- */
-export function bestPathView(
-  model: RunModel,
-  open: boolean,
-  meter?: ViewMeter,
-): BestPathView | null {
-  const tree = model.candidates;
-  const views = pathMemo.get(tree) ?? new Map<boolean, BestPathView | null>();
-  pathMemo.set(tree, views);
-  const cached = views.get(open);
-  if (cached !== undefined) return cached;
-  meter?.count(tree.candidates.length);
-  const view = buildPath(tree, open);
-  views.set(open, view);
-  return view;
-}
-
-function buildPath(tree: CandidateTree, open: boolean): BestPathView | null {
-  if (tree.bestPath.length === 0) return null;
-  const byId = new Map(tree.candidates.map(item => [item.id, item]));
-  const names: PathCrumb[] = tree.bestPath.map(id => ({
-    kind: 'idea',
-    id,
-    label: byId.get(id)?.title ?? id,
-  }));
-  const crumbs: PathCrumb[] =
-    open || names.length <= PATH_SHOWN
-      ? names
-      : [...names.slice(0, 2), {kind: 'fold', hidden: names.length - 4}, ...names.slice(-2)];
-  const best = byId.get(tree.bestPath.at(-1) ?? '');
-  const vs = best?.measurement?.vsBaseline ?? null;
-  return {crumbs, ratio: vs === null ? null : ratio(vs)};
 }
 
 /** How long ago `since` was on the run clock at `now`, as the rows word it. */

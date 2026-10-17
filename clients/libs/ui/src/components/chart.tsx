@@ -22,6 +22,21 @@ export interface ChartPoint {
   readonly emphasis?: 'focus' | 'related' | 'dim';
 }
 
+/** Where a connector ends: a point of the chart by its `id`, or a place in the x and y values' units. */
+export type ChartEnd = string | {readonly x: number; readonly y: number};
+
+/**
+ * A thin connector from one point to another (a derived idea to the one it builds on). A `to` or
+ * `from` naming no point is not drawn. `emphasis` `strong` is a path the reader should follow;
+ * `lit` is the path to the point the reader points at. `faint` fades it with its points.
+ */
+export interface ChartEdge {
+  readonly from: ChartEnd;
+  readonly to: string;
+  readonly emphasis?: 'strong' | 'lit';
+  readonly faint?: boolean;
+}
+
 /** A stretch of the x-axis to mark, in the x values' units: a faint band over the plot. */
 export interface ChartSpan {
   readonly from: number;
@@ -189,7 +204,11 @@ export function Chart(props: {
   readonly selected?: string;
   /** Stretches of the x-axis marked by a faint band; they never change the axis' range. */
   readonly spans?: readonly ChartSpan[];
+  /** Connectors between points, drawn under them: faint by default, bolder when emphasized. */
+  readonly edges?: readonly ChartEdge[];
   readonly pick?: (id: string) => void;
+  /** Called with a point's id when the pointer or the focus enters it, and null when it leaves. */
+  readonly hover?: (id: string | null) => void;
 }): JSX.Element {
   const size = props.size ?? 'default';
   const steps = props.steps ?? [];
@@ -237,6 +256,7 @@ export function Chart(props: {
         </g>
       )}
       {steps.length === 0 ? null : <path className="vs-chart-step" d={stepPath(steps, at)} />}
+      <Edges edges={props.edges ?? []} points={props.points} at={at} />
       {drawnPoints(props.points).map(point => (
         <Point
           key={point.id ?? `${point.x}:${point.y}`}
@@ -248,6 +268,7 @@ export function Chart(props: {
           stop={point.id !== undefined && point.id === stop}
           dense={props.points.length > DENSE_ABOVE}
           pick={props.pick}
+          hover={props.hover}
         />
       ))}
       {props.playhead === undefined ? null : (
@@ -265,6 +286,47 @@ export function Chart(props: {
         </text>
       )}
     </svg>
+  );
+}
+
+/** With more connectors than this, the ones not emphasized are nearly invisible. */
+const DENSE_EDGES = 60;
+
+/** The connectors, each from where its ends are; the emphasized last, so they lie over the rest. */
+function Edges(props: {
+  readonly edges: readonly ChartEdge[];
+  readonly points: readonly ChartPoint[];
+  readonly at: Scale;
+}): JSX.Element | null {
+  const {edges, points, at} = props;
+  if (edges.length === 0) return null;
+  const placed = new Map(points.flatMap(p => (p.id === undefined ? [] : [[p.id, p] as const])));
+  const end = (value: ChartEnd): {x: number; y: number} | undefined =>
+    typeof value === 'string' ? placed.get(value) : value;
+  const rank = (edge: ChartEdge): number =>
+    edge.emphasis === 'lit' ? 2 : edge.emphasis === 'strong' ? 1 : 0;
+  const drawn = edges
+    .flatMap(edge => {
+      const from = end(edge.from);
+      const to = placed.get(edge.to);
+      return from === undefined || to === undefined ? [] : [{edge, from, to}];
+    })
+    .sort((a, b) => rank(a.edge) - rank(b.edge));
+  return (
+    <g className="vs-chart-edges" data-dense={edges.length > DENSE_EDGES || undefined}>
+      {drawn.map(({edge, from, to}) => (
+        <line
+          key={`${typeof edge.from === 'string' ? edge.from : 'input'}>${edge.to}`}
+          className="vs-chart-edge"
+          data-emphasis={edge.emphasis}
+          data-faint={edge.faint || undefined}
+          x1={at.x(from.x)}
+          y1={at.y(from.y)}
+          x2={at.x(to.x)}
+          y2={at.y(to.y)}
+        />
+      ))}
+    </g>
   );
 }
 
@@ -347,8 +409,9 @@ function Point(props: {
   readonly stop: boolean;
   readonly dense: boolean;
   readonly pick: ((id: string) => void) | undefined;
+  readonly hover: ((id: string | null) => void) | undefined;
 }): JSX.Element {
-  const {point, at, selected, pick} = props;
+  const {point, at, selected, pick, hover} = props;
   const faint = point.faint ?? (props.dense && !point.filled);
   const id = point.id;
   const cx = at.x(point.x);
@@ -383,6 +446,10 @@ function Point(props: {
       aria-label={point.label ?? id}
       aria-pressed={selected}
       onClick={() => pick(id)}
+      onMouseEnter={hover === undefined ? undefined : () => hover(id)}
+      onMouseLeave={hover === undefined ? undefined : () => hover(null)}
+      onFocus={hover === undefined ? undefined : () => hover(id)}
+      onBlur={hover === undefined ? undefined : () => hover(null)}
       onKeyDown={event => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();

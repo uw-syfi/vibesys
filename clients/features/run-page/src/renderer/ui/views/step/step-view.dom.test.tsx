@@ -359,7 +359,7 @@ describe('an item', () => {
   });
 });
 
-function reply(sequence: number): RunEvent {
+function reply(sequence: number, summary = 'Padded the counters.'): RunEvent {
   return event(sequence, 'agent_execution_finished', {
     invocation_id: 'inv',
     agent_kind: 'implementer',
@@ -378,7 +378,7 @@ function reply(sequence: number): RunEvent {
           required: ['summary'],
           type: 'object',
         },
-        value: {summary: 'Padded the counters.', changed: ['src/lib.rs'], outcome: 'done'},
+        value: {summary, changed: ['src/lib.rs'], outcome: 'done'},
       },
     },
   } as never);
@@ -459,17 +459,32 @@ describe('the turn’s layout', () => {
     const container = await mount(<StepView {...viewProps(fx, fx.turn, null)} />);
     const text = one(container, '.vs-narrative').textContent ?? '';
     expect(text).toContain('Padded the counters.');
-    expect(text).not.toContain('Changed');
+    expect(text).toContain('Changed');
     expect(text).toContain('Counters share a cache line.');
     expect(text.indexOf('Counters share')).toBeLessThan(text.indexOf('Padded the counters.'));
     const blocks = all(one(container, '.vs-narrative'), '.vs-turn-result, .vs-thought, .vs-said');
     expect(blocks.at(-1)?.className).toContain('vs-turn-result');
-    expect(container.textContent).toContain('Show all fields (1 more)');
-    expect(container.textContent).not.toContain('Raw');
+    expect(container.textContent).not.toContain('Show all fields');
+    expect(container.textContent).toContain('src/lib.rs');
     const lead = one(container, '.vs-button');
     expect(lead.textContent).toBe('Implementer reply: done · Padded the counters.');
     expect(container.firstElementChild?.contains(lead)).toBe(true);
     expect(one(container, '.vs-narrative').contains(lead)).toBe(false);
+  });
+
+  test('the reply card reads its prose as Markdown, and the one-line summary as plain words', async () => {
+    const fx = fixture([
+      ...TURN,
+      reply(18, '**Padded** the `counters`:\n\n- [log](https://x.io) shows 2x'),
+    ]);
+    const container = await mount(<StepView {...viewProps(fx, fx.turn, null)} />);
+    const card = one(container, '.vs-turn-result');
+    expect(one(card, '.vs-markdown strong').textContent).toBe('Padded');
+    expect(one(card, '.vs-markdown code').textContent).toBe('counters');
+    expect(one(card, '.vs-markdown a').textContent).toBe('log');
+    const lead = one(container, '.vs-button').textContent ?? '';
+    expect(lead).toContain('Padded the counters');
+    expect(lead).not.toMatch(/[*`]/);
   });
 
   test('shows no summary and no card while the turn runs without a reply', async () => {
@@ -503,13 +518,11 @@ describe('the turn’s layout', () => {
     if (base === undefined) throw new Error('the base is not a link');
     await click(base);
     expect(fx.zooms).toEqual([{type: 'open-idea', idea: 'ws0'}]);
-    expect(card.textContent).not.toContain('fixed-slot-ring');
-    const more = all(card, '.vs-button').find(each =>
-      /Show all fields/.test(each.textContent ?? ''),
-    );
-    if (more === undefined) throw new Error('no Show all fields');
-    await click(more);
+    expect(card.textContent).not.toContain('Show all fields');
     expect(card.textContent).toContain('fixed-slot-ring');
+    expect(card.textContent?.indexOf('The benchmark improves.')).toBeLessThan(
+      card.textContent?.indexOf('fixed-slot-ring') ?? 0,
+    );
   });
 
   test('draws reasoning titles in bold, one row per reasoning item', async () => {

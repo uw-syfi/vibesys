@@ -64,11 +64,25 @@ function IdeaLine(props: {readonly view: IdeaFocusView | null}): JSX.Element {
  * axes; the scrub position is its cursor. `idea` is the open idea's id, or null.
  */
 export function Hero(
-  props: ViewBase & {readonly whole: RunModel; readonly idea: string | null},
+  props: ViewBase & {
+    readonly whole: RunModel;
+    readonly idea: string | null;
+    /** The ideas on the chain the reader points at, lit on the chart; none when omitted. */
+    readonly lit?: ReadonlySet<string>;
+    /** Called with an idea's id as the pointer enters its point, and null as it leaves. */
+    readonly hover?: (idea: string | null) => void;
+  },
 ): JSX.Element {
   const hero = heroView(props.model);
   const scrub = props.model.at === null ? null : (props.model.latest ?? props.clock.start);
-  const chart = stripChartView(props.whole, props.clock.start, props.clock.now, scrub, props.idea);
+  const chart = stripChartView(
+    props.whole,
+    props.clock.start,
+    props.clock.now,
+    scrub,
+    props.idea,
+    props.lit,
+  );
   return (
     <Row gap="space-6" align="center">
       <Stack gap="space-1" width="figure">
@@ -114,6 +128,7 @@ export function Hero(
             size="strip"
             points={chart.points}
             spans={chart.spans}
+            edges={chart.edges}
             yDomain={chart.yDomain}
             steps={chart.steps}
             {...(chart.reference === null ? {} : {reference: chart.reference})}
@@ -121,6 +136,7 @@ export function Hero(
             xTicks={chart.xTicks}
             yTicks={chart.yTicks}
             pick={id => props.zoom({type: 'open-idea', idea: id})}
+            {...(props.hover === undefined ? {} : {hover: props.hover})}
           />
         </Stack>
       )}

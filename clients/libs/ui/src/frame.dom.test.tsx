@@ -642,6 +642,39 @@ describe('Narrative', () => {
     expect(scroller.scrollTop).toBe(1000);
   });
 
+  test('a reader who scrolled up keeps the place when the turn updates before the scroll event arrives', async () => {
+    // A scroll event is delivered a frame after the scroll; an update may land in between.
+    const view = (count: number) => (
+      <Narrative label="Turn" start="end">
+        {Array.from({length: count}, (_, index) => (
+          <Said key={String(index)} text={`block ${index}`} />
+        ))}
+      </Narrative>
+    );
+    const {container, render} = await mount(view(3));
+    const scroller = one(container, 'section');
+    let height = 1000;
+    let top = 0;
+    const clamp = (value: number): number => Math.min(Math.max(value, 0), height - 100);
+    Object.defineProperties(scroller, {
+      scrollHeight: {configurable: true, get: () => height},
+      clientHeight: {configurable: true, value: 100},
+      scrollTop: {configurable: true, get: () => top, set: (value: number) => (top = clamp(value))},
+    });
+    await render(view(3));
+    expect(top).toBe(900);
+
+    top = 400;
+    height = 1200;
+    await render(view(4));
+    expect(top).toBe(400);
+    await act(async () => {
+      scroller.dispatchEvent(new UIEvent('scroll', {bubbles: true}));
+    });
+    expect(top).toBe(400);
+    expect(container.querySelector('.vs-new-below')).not.toBeNull();
+  });
+
   test('a turn that does not follow its end never offers it', async () => {
     const {container} = await mount(
       <Narrative label="Turn">
@@ -708,6 +741,127 @@ describe('PickRow extras', () => {
     );
     await click(one(linked.container, 'button.vs-pickrow-trail'));
     expect(opened).toEqual(['parent']);
+  });
+});
+
+describe('Chart connectors', () => {
+  const points = [
+    {id: 'a', x: 1, y: 2, filled: true},
+    {id: 'b', x: 2, y: 3, filled: true},
+    {id: 'c', x: 3, y: 1, filled: true},
+  ];
+
+  test('draws a line from a point or a place to the point it ends at, and skips ends that are no point', async () => {
+    const {container} = await mount(
+      <Chart
+        label="Series"
+        points={points}
+        edges={[
+          {from: {x: 0, y: 1}, to: 'a'},
+          {from: 'a', to: 'b'},
+          {from: 'b', to: 'missing'},
+          {from: 'missing', to: 'c'},
+        ]}
+      />,
+    );
+    expect(all(container, '.vs-chart-edge')).toHaveLength(2);
+    expect(container.querySelector('.vs-chart-edges')?.hasAttribute('data-dense')).toBe(false);
+  });
+
+  test('draws the emphasized ones last, over the rest, and says which are faint', async () => {
+    const {container} = await mount(
+      <Chart
+        label="Series"
+        points={points}
+        edges={[
+          {from: 'a', to: 'b', emphasis: 'lit'},
+          {from: {x: 0, y: 1}, to: 'a', emphasis: 'strong', faint: true},
+          {from: 'b', to: 'c'},
+        ]}
+      />,
+    );
+    const lines = all(container, '.vs-chart-edge');
+    expect(lines.map(line => line.getAttribute('data-emphasis'))).toEqual([null, 'strong', 'lit']);
+    expect(lines.map(line => line.hasAttribute('data-faint'))).toEqual([false, true, false]);
+  });
+
+  test('marks a crowd of connectors dense, so all but the emphasized ones fade', async () => {
+    const many = Array.from({length: 80}, (_, at) => ({id: `p${at}`, x: at, y: at, filled: true}));
+    const edges = many.slice(1).map((point, at) => ({from: `p${at}`, to: point.id}));
+    const {container} = await mount(<Chart label="Series" points={many} edges={edges} />);
+    expect(container.querySelector('.vs-chart-edges')?.hasAttribute('data-dense')).toBe(true);
+  });
+
+  test('adds no point and moves no axis', async () => {
+    const plain = await mount(<Chart label="Series" points={points} />);
+    const drawn = await mount(
+      <Chart label="Series" points={points} edges={[{from: 'a', to: 'b', emphasis: 'lit'}]} />,
+    );
+    const where = (container: HTMLElement) =>
+      all(container, '.vs-chart-point').map(each => [
+        each.getAttribute('cx'),
+        each.getAttribute('cy'),
+      ]);
+    expect(where(drawn.container)).toEqual(where(plain.container));
+  });
+
+  test('tells the page which point the pointer or the focus is on, and when it leaves', async () => {
+    const seen: (string | null)[] = [];
+    const {container} = await mount(
+      <Chart label="Series" points={points} pick={noop} hover={id => seen.push(id)} />,
+    );
+    const [first] = all(container, '[role="button"]') as [HTMLElement];
+    await act(async () => {
+      first.dispatchEvent(new MouseEvent('mouseover', {bubbles: true}));
+      first.dispatchEvent(new MouseEvent('mouseout', {bubbles: true}));
+    });
+    expect(seen).toEqual(['a', null]);
+  });
+});
+
+describe('PickRow fold', () => {
+  test('a foldable row has a chevron that folds and unfolds it, by click and by Left and Right', async () => {
+    const seen: string[] = [];
+    const {container} = await mount(
+      <PickList label="Ideas">
+        <PickRow
+          id="a"
+          title="a"
+          fold={{open: false, toggle: () => seen.push('a')}}
+          select={() => seen.push('pick')}
+        />
+        <PickRow id="b" title="b" fold={{open: true, toggle: () => seen.push('b')}} select={noop} />
+        <PickRow id="c" title="c" fold="none" select={noop} />
+        <PickRow id="d" title="d" select={noop} />
+      </PickList>,
+    );
+    const [a, b, c, d] = all(container, '[role="option"]') as [
+      HTMLElement,
+      HTMLElement,
+      HTMLElement,
+      HTMLElement,
+    ];
+    expect(one(a, '.vs-pickrow-fold').getAttribute('data-fold')).toBe('closed');
+    expect(one(b, '.vs-pickrow-fold').getAttribute('data-fold')).toBe('open');
+    // A row with nothing to fold keeps the slot so titles line up; a row of another list has none.
+    expect(c.querySelector('.vs-pickrow-fold')).not.toBeNull();
+    expect(c.querySelector('.vs-pickrow-fold')?.hasAttribute('data-fold')).toBe(false);
+    expect(d.querySelector('.vs-pickrow-fold')).toBeNull();
+    // The chevron holds no control of its own, so the option holds none (nothing nested).
+    expect(a.querySelector('button')).toBeNull();
+    await click(one(a, '.vs-pickrow-fold'));
+    expect(seen).toEqual(['a']);
+    await click(one(a, '.vs-pickrow-text'));
+    expect(seen).toEqual(['a', 'pick']);
+    seen.length = 0;
+    await click(one(c, '.vs-pickrow-fold'));
+    expect(seen).toEqual([]);
+    seen.push('a');
+    await press(a, 'ArrowRight');
+    await press(a, 'ArrowLeft');
+    await press(b, 'ArrowLeft');
+    await press(b, 'ArrowRight');
+    expect(seen).toEqual(['a', 'a', 'b']);
   });
 });
 

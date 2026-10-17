@@ -1,5 +1,6 @@
 import {Children, type JSX, type ReactNode} from 'react';
 import {Icon} from './icon.js';
+import {Markdown} from './markdown.js';
 import type {ToolState} from './message.js';
 import {NewBelow} from './new-below.js';
 import {InSlot, useSlot, useWindowed} from './windowing.js';
@@ -61,57 +62,20 @@ export function Narrative(props: {
   );
 }
 
-/** The marks the text carries: `**bold**`, `*italic*` and `` `code` ``. */
-const MARKS = /(\*\*[^*\n]+\*\*|`[^`\n]+`|\*[^*\s][^*\n]*\*)/;
-
-/** A line of text as elements: its marks drawn, never read as markup. */
-function marked(text: string): ReactNode[] {
-  return text.split(MARKS).map((part, index) => {
-    if (part.length > 4 && part.startsWith('**') && part.endsWith('**')) {
-      // biome-ignore lint/suspicious/noArrayIndexKey: the parts of one string, never reordered.
-      return <strong key={index}>{part.slice(2, -2)}</strong>;
-    }
-    if (part.length > 2 && part.startsWith('`') && part.endsWith('`')) {
-      // biome-ignore lint/suspicious/noArrayIndexKey: the parts of one string, never reordered.
-      return <code key={index}>{part.slice(1, -1)}</code>;
-    }
-    if (part.length > 2 && part.startsWith('*') && part.endsWith('*')) {
-      // biome-ignore lint/suspicious/noArrayIndexKey: the parts of one string, never reordered.
-      return <em key={index}>{part.slice(1, -1)}</em>;
-    }
-    return part;
-  });
-}
-
-/** Text as paragraphs (blank lines apart) with its marks drawn. */
-function Paragraphs(props: {readonly text: string}): JSX.Element {
-  return (
-    <>
-      {props.text
-        .trim()
-        .split(/\n{2,}/)
-        .map((paragraph, index) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: the paragraphs of one string, never reordered.
-          <p key={index}>{marked(paragraph)}</p>
-        ))}
-    </>
-  );
-}
-
-/** The thinking: muted and italic, so it stands apart from what was said; `**titles**` are bold. */
+/** The thinking, as Markdown: muted and italic, so it stands apart from what was said. */
 export function Thought(props: {readonly text: string}): JSX.Element {
   return (
     <div ref={useSlot()?.measure} className="vs-thought">
-      <Paragraphs text={props.text} />
+      <Markdown text={props.text} />
     </div>
   );
 }
 
-/** What was said, in body text; `**bold**`, `*italic*` and `code` marks are drawn. */
+/** What was said, as Markdown in body text. */
 export function Said(props: {readonly text: string}): JSX.Element {
   return (
     <div ref={useSlot()?.measure} className="vs-said">
-      <Paragraphs text={props.text} />
+      <Markdown text={props.text} />
     </div>
   );
 }

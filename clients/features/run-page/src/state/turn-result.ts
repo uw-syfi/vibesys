@@ -3,8 +3,7 @@
  * is read by its kind (the reply model's name): the orchestrator's plan has a reader that lays it
  * out for reviewing (the idea's title, what it builds on, its claim, its forecast, its reasoning,
  * the gates it must pass, and what it changes in the others); any other reply keeps the generic
- * reading of its fields (its choices as chips, its summary), with every other field behind "Show
- * all". The card's text is the agent's own and is never cut; only the one-line `summary` that
+ * reading of its fields (its choices as chips, its summary), with every other field after them. The card's text is the agent's own and is never cut; only the one-line `summary` that
  * leads the turn is.
  */
 import type {Candidate} from '@vibesys/run-state/candidates';
@@ -49,7 +48,7 @@ export interface TurnResultView {
   readonly chips: readonly {readonly label: string; readonly tone?: Tone}[];
   readonly builtOn: BuiltOn | null;
   readonly sections: readonly ResultSection[];
-  /** The fields behind "Show all fields", in the reply's order. */
+  /** The fields that follow the body, in the reply's order. */
   readonly more: readonly ReplyFieldView[];
   readonly raw: string;
   /** The one line that leads the turn: `Plan: Pad the counters · builds on input`. */
@@ -162,7 +161,7 @@ function planResult(reply: ReplyRow, context: ResultContext): TurnResultView {
   };
 }
 
-/** Any other reply: its choices as chips, its summary, and every other field behind "Show all". */
+/** Any other reply: its choices as chips, its summary, and every other field after them. */
 function genericResult(reply: ReplyRow): TurnResultView {
   const overview = new Set(replyOverview(reply.fields));
   const chips = reply.fields.flatMap(field =>
