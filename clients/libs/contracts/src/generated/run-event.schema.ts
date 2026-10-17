@@ -1482,7 +1482,7 @@ const runEventSchema: Record<string, unknown> = {
     },
     "QuotaAbandonedData": {
       "additionalProperties": false,
-      "description": "The quota policy ended a turn with the quota error instead of pausing or waiting longer.",
+      "description": "The quota policy ended a turn with the quota error instead of pausing or waiting longer.\n\n``waited_seconds`` is how long this last stop held the turn before it ended (zero when\nit ended without waiting, and in events recorded before the field existed).",
       "properties": {
         "kind": {
           "const": "quota_abandoned",
@@ -1510,6 +1510,11 @@ const runEventSchema: Record<string, unknown> = {
         "reason": {
           "title": "Reason",
           "type": "string"
+        },
+        "waited_seconds": {
+          "default": 0.0,
+          "title": "Waited Seconds",
+          "type": "number"
         }
       },
       "required": [

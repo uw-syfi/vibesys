@@ -590,6 +590,7 @@ export type Provider9 = string;
 export type Condition2 = "quota_exhausted" | "rate_limited" | "unavailable";
 export type Detail2 = string;
 export type Reason6 = string;
+export type WaitedSeconds1 = number;
 export type Kind36 = "quota_waiting";
 export type Provider10 = string;
 export type ResumesAt1 = number | null;
@@ -1955,6 +1956,9 @@ export interface QuotaResumedData {
 }
 /**
  * The quota policy ended a turn with the quota error instead of pausing or waiting longer.
+ *
+ * ``waited_seconds`` is how long this last stop held the turn before it ended (zero when
+ * it ended without waiting, and in events recorded before the field existed).
  */
 export interface QuotaAbandonedData {
   kind: Kind35;
@@ -1962,6 +1966,7 @@ export interface QuotaAbandonedData {
   condition: Condition2;
   detail: Detail2;
   reason: Reason6;
+  waited_seconds?: WaitedSeconds1;
 }
 /**
  * At the operator's request, the run paused on a capacity limit resumes when capacity returns.

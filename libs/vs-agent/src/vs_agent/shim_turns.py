@@ -300,21 +300,23 @@ def _run_turn(
         message = "agent session is closed"
         raise RuntimeError(message)
 
+    turn_record = live.tracked
+    if turn_record is not None and turn_record.cancelled:
+        # Cancelled since the caller last decided to send it, when an interrupt had no
+        # turn to stop: it is not sent. A cancel landing after this check is seen by
+        # ``begin_turn`` or, once the library runs the turn, at its first event.
+        message = "turn cancelled before it was sent"
+        raise agentshim.TurnCancelledError(message)
+
     expected = request.expected_provider_session_id
     events = live.events
     events.observer = observer
-    turn_record = live.tracked
     events.begin_turn(
         structured=request.output_schema is not None,
         stop=live.session.interrupt,
         turn=turn_record,
     )
     try:
-        if turn_record is not None and turn_record.cancelled:
-            # Cancelled since the caller last decided to send it, when an interrupt had
-            # no turn to stop: it is not sent.
-            message = "turn cancelled before it was sent"
-            raise agentshim.TurnCancelledError(message)
         if expected is None:
             turn = _run(live, request, expect_conversation=None)
         else:
