@@ -59,9 +59,11 @@ class TurnFailureKind(StrEnum):
 def unset(value: object) -> bool:
     """Whether an optional field is unset, so a value's serialized form leaves it out.
 
-    For ``Field(exclude_if=unset)`` on fields that joined after runs had stored digests of
-    plans, requests, observations and evidence: left out when unset, every stored digest,
-    budget key and request id still matches, and a run started earlier resumes.
+    For ``Field(exclude_if=unset)`` on optional fields: left out when unset, a value that sets
+    none of them serializes, and so digests, budget keys and request ids, exactly as before the
+    field existed. That keeps identities stable; it does not make an older run resumable. Any
+    new field changes the envelope's shape and version, and core refuses an envelope of
+    another version (there is no migration).
     """
     return value is None
 
