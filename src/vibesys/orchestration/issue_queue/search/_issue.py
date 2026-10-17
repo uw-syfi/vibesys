@@ -93,10 +93,10 @@ async def work_issue(ctx: Flow, job: IssueJob, ws: Workspace) -> Closing:
     """
     try:
         await write(ctx, job.config, writes.claim(job), "claiming the issue")
-        agents = Conversation(
-            implementer=ctx.agents.session(IMPLEMENTER, workspace=ws, revision=job.base),
-            judge=ctx.agents.session(JUDGE, workspace=ws),
-        )
+        implementer = ctx.agents.session(IMPLEMENTER, workspace=ws, revision=job.base)
+        # the implementer's candidate is what the judge reviews: its work started the judge
+        judge = ctx.agents.session(JUDGE, workspace=ws, started_by=(implementer.agent,))
+        agents = Conversation(implementer=implementer, judge=judge)
 
         async def attempt(tries: Tries[Rejection]) -> Closing | Again[Rejection]:
             return await take_attempt(ctx, job, ws, agents, tries)

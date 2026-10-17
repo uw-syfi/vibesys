@@ -76,6 +76,8 @@ async def _play(ctx: Flow, start: MultiRound) -> RoundDone:
             return RoundDone(number=start.number, ledger=start.ledger, counted=False)
         case Continue(hypothesis=hypothesis):
             plan, base, feedback = hypothesis.plan, start.base, hypothesis.feedback
+            # an earlier round's orchestrator designed it; this round's flow cannot name it
+            planned_by: tuple[str, ...] = ()
         case NewHypothesis():
             designed = await serial.design(
                 ctx,
@@ -97,6 +99,7 @@ async def _play(ctx: Flow, start: MultiRound) -> RoundDone:
                 designed.base,
                 None,
             )
+            planned_by = (designed.planned_by,)
             ctx.publish(ledger.search)
     active = ledger.search.active_hypothesis
     attempt = MultiAttempt(
@@ -114,7 +117,7 @@ async def _play(ctx: Flow, start: MultiRound) -> RoundDone:
         revalidation_required=active is not None and active.gate_revalidation_pending,
         feedback=feedback,
     )
-    settlement = await work(ctx, start, attempt)
+    settlement = await work(ctx, start, attempt, planned_by)
     closed = attempt.close(settlement)
     ctx.publish(closed.search)
     return serial.round_done(
@@ -135,8 +138,9 @@ def _advice(ctx: Flow, config: MultiConfig, start: MultiRound) -> serial.Advise:
         evidence = serial.plan_evidence(
             hypotheses, ledger, rounds.planning(hypotheses, ledger, start.number), focus
         )
+        router = ctx.agents.session(ROUTER)
         routed = await route(
-            ctx.agents.session(ROUTER),
+            router,
             PreRoundPrompt(
                 round_number=start.number,
                 has_history=bool(evidence.history),
@@ -149,7 +153,7 @@ def _advice(ctx: Flow, config: MultiConfig, start: MultiRound) -> serial.Advise:
         if routed is None or not routed.need_profile:
             return None
         return await profile(
-            ctx.agents.session(PROFILER),
+            ctx.agents.session(PROFILER, started_by=(router.agent,)),
             ProfilerPrompt(
                 round_number=start.number,
                 profile_focus=routed.profile_focus or DEFAULT_PROFILE_FOCUS,
@@ -190,8 +194,13 @@ async def profile(profiler: Session, prompt: ProfilerPrompt) -> LastProfile | No
             raise TypeError(message)
 
 
-async def work(ctx: Flow, start: RoundStart, attempt: MultiAttempt) -> Settlement | None:
-    """Open the round's workspace, let the implementer work in it, settle it; core's settlement."""
+async def work(
+    ctx: Flow, start: RoundStart, attempt: MultiAttempt, planned_by: tuple[str, ...] = ()
+) -> Settlement | None:
+    """Open the round's workspace, let the implementer work in it, settle it; core's settlement.
+
+    ``planned_by`` names the orchestrator whose plan the implementer works on.
+    """
 
     async def turn(session: Session, ws: Workspace) -> str | None:
         step = await take_turn(ctx, attempt, session, ws)
@@ -207,6 +216,7 @@ async def work(ctx: Flow, start: RoundStart, attempt: MultiAttempt) -> Settlemen
             implementer=IMPLEMENTER,
             mode=workspace_mode_for(isolated_candidates=not attempt.config.exclusive_root),
             paid_turns=attempt.config.max_retries_per_round,
+            started_by=planned_by,
         ),
         turn=turn,
     )
@@ -223,7 +233,7 @@ async def take_turn(ctx: Flow, attempt: MultiAttempt, session: Session, ws: Work
                     f"implementer checkpoint declined ({checkpoint.reason.value})"
                 )
             step = attempt.replied(reply, getattr(checkpoint, "revision", None))
-            return await _onward(ctx, attempt, ws, step)
+            return await _onward(ctx, attempt, ws, step, session.agent)
         case (
             Failed(
                 reason=FailureReason.INVALID_REPLY
@@ -241,10 +251,12 @@ async def take_turn(ctx: Flow, attempt: MultiAttempt, session: Session, ws: Work
             raise TypeError(message)
 
 
-async def _onward(ctx: Flow, attempt: MultiAttempt, ws: Workspace, step: Next) -> Next:
+async def _onward(
+    ctx: Flow, attempt: MultiAttempt, ws: Workspace, step: Next, implementer: str
+) -> Next:
     """Carry a reply through the review, the validation recipes and the trusted gates it owes."""
     if step is Next.REVIEW:
-        step = await review(ctx, attempt, ws)
+        step = await review(ctx, attempt, ws, implementer)
     if step is Next.VALIDATE:
         step = await validate(ctx, attempt, ws)
     if step is Next.GATES and attempt.candidate is not None:
@@ -254,11 +266,12 @@ async def _onward(ctx: Flow, attempt: MultiAttempt, ws: Workspace, step: Next) -
     return step
 
 
-async def review(ctx: Flow, attempt: MultiAttempt, ws: Workspace) -> Next:
+async def review(ctx: Flow, attempt: MultiAttempt, ws: Workspace, implementer: str) -> Next:
     """Have a fresh judge read the exact retained candidate and the evaluations taken of it."""
     revision = attempt.candidate or attempt.base
     cited = () if attempt.candidate is None else ctx.evaluation.taken(ws, revision)
-    judge = ctx.agents.session(JUDGE, workspace=ws, revision=revision)
+    # the implementer's reply asked for the review: its work started the judge
+    judge = ctx.agents.session(JUDGE, workspace=ws, revision=revision, started_by=(implementer,))
     match await judge.turn(attempt.judge_prompt(cited), revision=revision, label=turn_label(judge)):
         case TurnFinished(reply=JudgeResponse() as verdict, invocation=invocation):
             return attempt.judged(verdict, invocation)

@@ -92,6 +92,8 @@ class Scheduled:
     blind: bool = False
     handoff: HandoffWritten | None = None
     """The call's handoff file and every one the owner holds; None when its write failed."""
+    planner: str | None = None
+    """The planner agent whose reply this plan is: it starts the workstreams the plan schedules."""
 
 
 @dataclass(frozen=True)
@@ -112,6 +114,8 @@ class Outlined:
     """The outline call ended with the steps of the plan the run follows."""
 
     steps: tuple[Step, ...]
+    outliner: str | None = None
+    """The outliner agent whose reply the steps are: it starts the steps' workstreams."""
 
 
 type PlanOutcome = Scheduled | NoPlan | Outlined
@@ -193,6 +197,8 @@ class RecordState(Value):
     submitted: tuple[Submission, ...]
     evaluations: QueueState
     input_overdue: InputOverdue | None
+    planned_by: tuple[tuple[str, str], ...] = ()
+    """The agent that planned each queued or started plan, by work id."""
 
 
 class DynamicResume(Value):
@@ -248,6 +254,9 @@ class RunRecord:
     submitted: dict[str, Submission] = field(default_factory=dict)
     """Running workstreams that submitted their candidate for its trusted measurement, by key:
     their agents are done, so they no longer hold an agent slot."""
+    planned_by: dict[str, str] = field(default_factory=dict)
+    """The agent whose reply planned each plan, by work id: the planner, or the outliner for a
+    step it outlined; it starts the plan's workstreams (`WorkstreamStart.started_by`)."""
     evaluations: EvaluationQueue = field(init=False)
     """The submissions waiting for an evaluation slot, and the measurements holding one."""
     input_overdue: InputOverdue | None = None
@@ -294,6 +303,7 @@ class RunRecord:
             submitted=tuple(self.submitted.values()),
             evaluations=self.evaluations.state(),
             input_overdue=self.input_overdue,
+            planned_by=tuple(self.planned_by.items()),
         )
 
     @classmethod
@@ -325,6 +335,7 @@ class RunRecord:
             main_seen=dict(state.main_seen),
             submitted={item.key: item for item in state.submitted},
             input_overdue=state.input_overdue,
+            planned_by=dict(state.planned_by),
         )
         record.main = MainLine.resumed(state.baseline, state.main)
         record.outline = state.outline
@@ -604,24 +615,31 @@ class RunRecord:
                 if handoff is not None:
                     self.handoffs = handoff.listed
                 self.gate.blocked_at_done = None
-            case Outlined(steps=steps):
+            case Outlined(steps=steps, outliner=outliner):
                 self.outline = steps
                 self.gate.last_error = None
-            case Scheduled(check=check, handoff=handoff):
-                if handoff is not None:
-                    self.handoffs = handoff.listed
-                for change in check.updates:
-                    known = self.hypotheses[change.hypothesis_id]
-                    self.hypotheses[change.hypothesis_id] = _hypotheses.with_disposition(
-                        known, change
-                    )
-                self.gate.last_error = None
-                self.gate.blocked_at_done = None
-                self.accepted.extend(self._as_steps(check.accepted))
-                if check.ranking is not None:
-                    self.evaluations.rank(check.ranking)
+                if outliner is not None:
+                    self.planned_by.update((step.id, outliner) for step in steps)
+            case Scheduled() as scheduled:
+                self._scheduled(scheduled)
             case NoPlan(problem=problem, stuck=stuck, blocked_at_done=at_done):
                 self.gate = PlannerGate(failed=stuck, blocked_at_done=at_done, last_error=problem)
+
+    def _scheduled(self, scheduled: Scheduled) -> None:
+        """Fold a planning call that scheduled a plan: queue what it accepted, and who planned it."""
+        check = scheduled.check
+        if scheduled.handoff is not None:
+            self.handoffs = scheduled.handoff.listed
+        if scheduled.planner is not None:
+            self.planned_by.update((plan.work_id, scheduled.planner) for plan in check.accepted)
+        for change in check.updates:
+            known = self.hypotheses[change.hypothesis_id]
+            self.hypotheses[change.hypothesis_id] = _hypotheses.with_disposition(known, change)
+        self.gate.last_error = None
+        self.gate.blocked_at_done = None
+        self.accepted.extend(self._as_steps(check.accepted))
+        if check.ranking is not None:
+            self.evaluations.rank(check.ranking)
 
     def _as_steps(self, plans: tuple[WorkPlan, ...]) -> list[WorkPlan]:
         """The planner's plans, each repair of a plan step carrying the step it repairs."""
@@ -702,6 +720,7 @@ class RunRecord:
                 baseline=self.baseline,
                 merge=self._sources(plan),
                 rebase_onto=rebase,
+                started_by=_started_by(self.planned_by.get(plan.work_id)),
             )
             self.running[start.key] = start
             starts.append(start)
@@ -873,3 +892,8 @@ class RunRecord:
             evaluations=self.evaluations.snapshot(),
             input_overdue=self.input_overdue,
         )
+
+
+def _started_by(planner: str | None) -> tuple[str, ...]:
+    """The agents that start a plan's workstream: the one that planned it, when known."""
+    return () if planner is None else (planner,)

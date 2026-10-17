@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given, note, settings
 from hypothesis import strategies as st
+from tests.vibesys.agent_spawns import spawns
 from tests.vibesys.orchestration.multi import _host as multi_host
 from tests.vibesys.orchestration.single import _host as single_host
 from tests.vibesys.search_faults import Step, Stop, play, steps, stops
@@ -114,6 +115,11 @@ def test_a_round_that_adopts_a_candidate_is_an_accepted_workstream_with_its_turn
     }
     expected_roles = [PLANNER, IMPLEMENTER] if search == "single" else [PLANNER, IMPLEMENTER, JUDGE]
     assert roles_under(host, workstream) == expected_roles
+    # the orchestrator's plan starts the implementer, whose candidate starts the judge
+    started = {PLANNER: {()}, IMPLEMENTER: {(PLANNER,)}}
+    if search != "single":
+        started[JUDGE] = {(IMPLEMENTER,)}
+    assert spawns(host.run.trace().spans) == started
     (gate,) = labelled(host, "gate")
     assert gate.parent == workstream.id
     assert gate.label is not None
@@ -147,9 +153,23 @@ def test_a_round_builds_on_the_workstream_that_kept_its_base_and_a_slow_one_is_s
     assert verdicts == ["passed", "slower"]
 
 
+# who starts whom: the orchestrator that designs a round's hypothesis starts its implementer (a
+# round that continues an earlier round's hypothesis names none); the implementer starts the judge
+# that reviews it, and the router the profiler it asks for; the search starts the rest
+_STARTERS: dict[str, set[tuple[str, ...]]] = {
+    "orchestrator": {()},
+    "router": {()},
+    "implementer": {("orchestrator",), ()},
+    "judge": {("implementer",)},
+    "profiler": {("router",)},
+}
+
+
 def _check(host: SerialHost) -> None:
     """What the labels promise after every step."""
     trace = host.run.trace()
+    for role, starters in spawns(trace.spans).items():
+        assert starters <= _STARTERS[role], f"a {role} was started by {starters}"
     by_id = {s.id: s for s in trace.spans}
     rounds = [s for s in trace.spans if s.name == "play_round"]
     workstreams: list[str] = []

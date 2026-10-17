@@ -99,13 +99,20 @@ class FailedCheck(Value):
 
 
 class AgentTurnAttrs(Value):
-    """An agent turn: the role asked and the model it runs on (None: the run's default).
+    """An agent turn: the agent asked, its role, the model it runs on, and who started it.
 
-    The provider and the reasoning effort are the host's settings, which the search never sees.
+    ``agent`` is the agent's stable identity (the conversation its turns continue): every turn
+    of one agent carries the same, so a client counts an agent's turns by it. ``started_by``
+    names the agents whose work started this one (more than one when it serves several, say a
+    merge of their work); empty when the search itself started it. ``model`` is None for the
+    run's default. The provider and the reasoning effort are the host's settings, which the
+    search never sees.
     """
 
+    agent: str
     role: str
     model: str | None = None
+    started_by: tuple[str, ...] = ()
 
 
 class GateAttrs(Value):
@@ -188,11 +195,12 @@ def adoption_label(winner: Kept | Input, value: float | None, input_value: float
 
 
 def turn_label(session: Session) -> Label:
-    """The label of each provider turn a session's ask makes: its role and model."""
+    """The label of each provider turn a session's ask makes: its agent, role, model, starters."""
     role = session.role
-    return Label(
-        AGENT_TURN, title=role.name, attrs=AgentTurnAttrs(role=role.name, model=role.model)
+    attrs = AgentTurnAttrs(
+        agent=session.agent, role=role.name, model=role.model, started_by=session.started_by
     )
+    return Label(AGENT_TURN, title=role.name, attrs=attrs)
 
 
 __all__ = [

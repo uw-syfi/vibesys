@@ -65,6 +65,8 @@ async def _play(ctx: Flow, start: SingleRound) -> RoundDone:
             return RoundDone(number=start.number, ledger=start.ledger, counted=False)
         case Continue(hypothesis=hypothesis):
             plan, base, feedback = hypothesis.plan, start.base, hypothesis.feedback
+            # an earlier round's orchestrator designed it; this round's flow cannot name it
+            planned_by: tuple[str, ...] = ()
         case NewHypothesis():
             designed = await serial.design(
                 ctx, start, hypotheses=config.hypotheses, attribution=config.attribution
@@ -82,6 +84,7 @@ async def _play(ctx: Flow, start: SingleRound) -> RoundDone:
                 designed.base,
                 None,
             )
+            planned_by = (designed.planned_by,)
             ctx.publish(ledger.search)
     attempt = SingleAttempt(
         config=config,
@@ -93,7 +96,7 @@ async def _play(ctx: Flow, start: SingleRound) -> RoundDone:
         ledger=ledger,
         feedback=feedback,
     )
-    settlement = await work(ctx, start, attempt)
+    settlement = await work(ctx, start, attempt, planned_by)
     closed = attempt.close(settlement)
     ctx.publish(closed.search)
     return serial.round_done(
@@ -106,8 +109,13 @@ async def _play(ctx: Flow, start: SingleRound) -> RoundDone:
     )
 
 
-async def work(ctx: Flow, start: RoundStart, attempt: SingleAttempt) -> Settlement | None:
-    """Open the round's workspace, let the implementer work in it, settle it; core's settlement."""
+async def work(
+    ctx: Flow, start: RoundStart, attempt: SingleAttempt, planned_by: tuple[str, ...] = ()
+) -> Settlement | None:
+    """Open the round's workspace, let the implementer work in it, settle it; core's settlement.
+
+    ``planned_by`` names the orchestrator whose plan the implementer works on.
+    """
 
     async def turn(session: Session, ws: Workspace) -> str | None:
         step = await take_turn(ctx, attempt, session, ws)
@@ -123,6 +131,7 @@ async def work(ctx: Flow, start: RoundStart, attempt: SingleAttempt) -> Settleme
             implementer=IMPLEMENTER,
             mode=workspace_mode_for(isolated_candidates=not attempt.config.exclusive_root),
             paid_turns=attempt.config.max_retries_per_round,
+            started_by=planned_by,
         ),
         turn=turn,
     )

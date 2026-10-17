@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+from tests.vibesys.agent_spawns import spawns
 from tests.vibesys.orchestration.evolve._host import FACTS, Host, begin, config
 from tests.vibesys.vibesys_flows import across_restarts
 
@@ -65,6 +66,8 @@ def test_a_cold_start_and_the_child_built_on_it_are_workstreams_with_turns_gates
     assert [(link.rel, link.to) for link in second.label.links] == [("builds_on", first.id)]
     assert first.label.links == ()
     assert roles_under(host, first) == roles_under(host, second) == ["mutator", "judge"]
+    # the search starts each mutator; a mutator's offspring starts the judge that grades it
+    assert spawns(host.run.trace().spans) == {"mutator": {()}, "judge": {("mutator",)}}
 
     gates = labelled(host, "gate")
     assert [g.parent for g in gates] == [first.id, second.id]

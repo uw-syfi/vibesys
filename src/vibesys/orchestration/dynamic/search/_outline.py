@@ -27,7 +27,7 @@ async def outline(ctx: Flow, run: RunRecord) -> Outlined | NoPlan:
     match await outliner.turn(prompt, label=turn_label(outliner)):
         case TurnFinished(reply=PlanOutline() as given):
             steps = tuple(Step.model_validate(item.model_dump()) for item in given.steps)
-            return Outlined(steps=steps)
+            return Outlined(steps=steps, outliner=outliner.agent)
         case Failed(reason=FailureReason.INVALID_REPLY, errors=errors):
             problem = PlanProblem(kind=ProblemKind.UNPARSEABLE, errors=errors)
         case Failed() as failed:

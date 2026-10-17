@@ -59,11 +59,15 @@ class AcceptedPlan(Value):
 
 
 class Designed(Value):
-    """A hypothesis designed for the round: the ledger that started it, its plan and its base."""
+    """A hypothesis designed for the round: the ledger that started it, its plan and its base.
+
+    ``planned_by`` is the orchestrator agent that planned it, whose plan starts the implementer.
+    """
 
     ledger: LedgerJson
     plan: OrchestratorPlan
     base: RevisionRef
+    planned_by: str
 
 
 class NoDesign(Value):
@@ -194,8 +198,9 @@ async def _design(
         last_profile=profile,
         roadmap=roadmap,
     )
+    orchestrator = ctx.agents.session(ORCHESTRATOR)
     asked = await ask_plan(
-        ctx.agents.session(ORCHESTRATOR),
+        orchestrator,
         prompt,
         hypotheses=hypotheses,
         ledger=ledger,
@@ -215,4 +220,9 @@ async def _design(
         input_baseline=ctx.facts.baseline.revision_id.root,
     )
     base = revision_of(base_commit(started), ctx.facts.baseline)
-    return Designed(ledger=LedgerJson.of(started_ledger), plan=asked.plan, base=base)
+    return Designed(
+        ledger=LedgerJson.of(started_ledger),
+        plan=asked.plan,
+        base=base,
+        planned_by=orchestrator.agent,
+    )

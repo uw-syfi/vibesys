@@ -16,7 +16,9 @@ from typing import Literal
 
 from hypothesis import event, given, note, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.dynamic._host import Host, begin, config
+from tests.vibesys.agent_spawns import spawns
+from tests.vibesys.orchestration.dynamic._host import Host, begin, config, plan_config
+from tests.vibesys.orchestration.dynamic._replies import step
 from tests.vibesys.search_faults import Step, Stop, play, steps, stops
 from tests.vibesys.vibesys_flows import across_restarts
 
@@ -95,9 +97,29 @@ def _check_turns_and_gates(host: Host) -> None:
             assert owner.label.verdict == "accepted", f"{gate.id} passed in a rejected workstream"
 
 
+# who starts whom: a planning call's planner (or the outliner of a step) starts a workstream's
+# agents (a step the task itself declares names none); the implementer starts the judge that
+# reviews its candidate; the search starts the planner and the outliner
+_PLANNED: set[tuple[str, ...]] = {("orchestrator",), ("outliner",), ()}
+_STARTERS: dict[str, set[tuple[str, ...]]] = {
+    "orchestrator": {()},
+    "outliner": {()},
+    "implementer": _PLANNED,
+    "profiler": _PLANNED,
+    "merger": _PLANNED,
+    "judge": {("implementer",)},
+}
+
+
+def _check_spawns(host: Host) -> None:
+    for role, starters in spawns(host.run.trace().spans).items():
+        assert starters <= _STARTERS[role], f"a {role} was started by {starters}"
+
+
 def _check(host: Host) -> None:
     _check_workstreams(host)
     _check_turns_and_gates(host)
+    _check_spawns(host)
 
 
 @across_restarts
@@ -133,3 +155,31 @@ def test_the_dynamic_search_labels_its_spans_whatever_core_answers(
         event(f"gate verdicts: {verdicts}")
     finally:
         note(host.run.timeline())
+
+
+@across_restarts
+def test_the_planner_starts_a_workstreams_implementer_which_starts_its_judge(
+    *, restarting: bool
+) -> None:
+    host = begin(config(), restarting=restarting)
+    host.drain()
+
+    started = spawns(host.run.trace().spans)
+    assert started == {
+        "orchestrator": {()},
+        "implementer": {("orchestrator",)},
+        "judge": {("implementer",)},
+    }
+
+
+@across_restarts
+def test_the_outliner_starts_the_steps_it_outlined_and_a_declared_step_names_no_starter(
+    *, restarting: bool
+) -> None:
+    outlined = begin(plan_config(), restarting=restarting)
+    outlined.drain()
+    declared = begin(plan_config(step("a")), restarting=restarting)
+    declared.drain()
+
+    assert spawns(outlined.run.trace().spans)["implementer"] == {("outliner",)}
+    assert spawns(declared.run.trace().spans)["implementer"] == {()}

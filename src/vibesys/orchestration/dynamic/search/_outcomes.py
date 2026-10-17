@@ -86,6 +86,9 @@ class WorkstreamStart(Value):
     """For a merge: the candidates to merge into ``parent`` (main), in order."""
     rebase_onto: RevisionRef | None = None
     """The run's main, when it advanced past the base of the hypothesis this continues."""
+    started_by: tuple[str, ...] = ()
+    """The agents whose reply planned this workstream (the planner, or the outliner of a step):
+    they start its agents. Empty when no agent's reply is known to have planned it."""
 
     @property
     def attempt(self) -> AttemptId:

@@ -481,8 +481,12 @@
     },
     "AgentTurnAttrs": {
       "additionalProperties": false,
-      "description": "An agent turn: the role asked and the model it runs on (None: the run's default).\n\nThe provider and the reasoning effort are the host's settings, which the search never sees.",
+      "description": "An agent turn: the agent asked, its role, the model it runs on, and who started it.\n\n``agent`` is the agent's stable identity (the conversation its turns continue): every turn\nof one agent carries the same, so a client counts an agent's turns by it. ``started_by``\nnames the agents whose work started this one (more than one when it serves several, say a\nmerge of their work); empty when the search itself started it. ``model`` is None for the\nrun's default. The provider and the reasoning effort are the host's settings, which the\nsearch never sees.",
       "properties": {
+        "agent": {
+          "title": "Agent",
+          "type": "string"
+        },
         "role": {
           "title": "Role",
           "type": "string"
@@ -498,9 +502,18 @@
           ],
           "default": null,
           "title": "Model"
+        },
+        "started_by": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Started By",
+          "type": "array"
         }
       },
       "required": [
+        "agent",
         "role"
       ],
       "title": "AgentTurnAttrs",

@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+from tests.vibesys.agent_spawns import spawns
 from tests.vibesys.orchestration.issue_queue._host import (
     FACTS,
     IMPLEMENTER,
@@ -82,6 +83,9 @@ def test_each_job_is_a_workstream_and_the_issue_that_builds_on_the_tip_links_to_
     assert [(link.rel, link.to) for link in second.label.links] == [("builds_on", first.id)]
     assert last.label is not None
     assert attrs(last)["hypothesis_id"] == "evaluation-2"
+    # the queue starts each job's implementer and each evaluator; the implementer the judge
+    started = spawns(host.run.trace().spans)
+    assert started == {IMPLEMENTER: {()}, JUDGE: {(IMPLEMENTER,)}, PERF: {()}}
 
 
 @across_restarts

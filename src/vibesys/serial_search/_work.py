@@ -68,6 +68,9 @@ class Room:
     """How the workspace opens: its own copy, or the run's root on a host without sandboxes."""
     paid_turns: int
     """The paid implementer turns of the round, which is also the workspace's paid-turn limit."""
+    started_by: tuple[str, ...] = ()
+    """The agents whose plan the implementer works on: the orchestrator that designed the round's
+    hypothesis; none for a round that continues a hypothesis an earlier round designed."""
 
 
 async def work(
@@ -94,7 +97,9 @@ async def _work(ctx: Flow, attempt: Attempting, *, room: Room, turn: Turn) -> Se
         if isinstance(opened, NotOpened):
             attempt.failed(f"the workspace could not be opened ({opened.failed.reason.value})")
             return None
-        session = ctx.agents.session(room.implementer, workspace=opened, revision=attempt.base)
+        session = ctx.agents.session(
+            room.implementer, workspace=opened, revision=attempt.base, started_by=room.started_by
+        )
 
         async def ask(tries: Tries[str]) -> bool | Again[str]:
             del tries

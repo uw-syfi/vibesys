@@ -76,6 +76,8 @@ from ._roles import reply_errors
 from ._sources import First
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from pydantic import BaseModel
 
     from vs_core.types.search import Event
@@ -114,11 +116,14 @@ class Agents:
         *,
         workspace: Workspace | None = None,
         revision: RevisionRef | None = None,
+        started_by: Sequence[str] = (),
     ) -> Session:
         """A new conversation with ``role``, in ``workspace`` (the run when omitted).
 
         ``revision`` is the revision of the role's workspace for its turns, unless a turn names
-        another; it is needed for a role that works on a revision. The role must be one the
+        another; it is needed for a role that works on a revision. ``started_by`` names the
+        agents (each a session's ``agent``) whose work started this one; none when the search
+        itself did. The role must be one the
         search declares (``@search(roles=...)``); the declared role, with the model the operator
         chose for this run, is the one asked.
         """
@@ -134,7 +139,16 @@ class Agents:
         subject = self._kit.path.rstrip("/") or "run"
         if number > 1:
             subject = f"{subject}#{number}"
-        return Session(self._kit, role, subject, workspace, revision)
+        return Session(self._kit, role, subject, _Opened(workspace, revision, tuple(started_by)))
+
+
+@dataclass(frozen=True)
+class _Opened:
+    """What a session is opened with: its workspace, its revision, and the agents that started it."""
+
+    workspace: Workspace | None
+    revision: RevisionRef | None
+    started_by: tuple[str, ...]
 
 
 class Session:
@@ -145,15 +159,29 @@ class Session:
         kit: Kit,
         role: Role,
         subject: str,
-        workspace: Workspace | None,
-        revision: RevisionRef | None,
+        opened: _Opened,
     ) -> None:
         """Make the session; ``ctx.agents.session`` is the way in."""
         self._kit = kit
         self.role = role
         self.subject = subject
-        self.workspace = workspace
-        self.revision = revision
+        self.workspace = opened.workspace
+        self.revision = opened.revision
+        self.started_by = opened.started_by
+        """The agents whose work started this one; empty when the search itself did."""
+
+    @property
+    def agent(self) -> str:
+        """The agent's stable identity in the run: the id of the conversation its turns continue.
+
+        The same across replay and restart: the id scheme derives it from the role and the
+        subject (the flow's path and the session's number among the role's sessions there).
+        """
+        ids = self._kit.run.wiring.ids
+        if ids is None:
+            message = "this search was registered without an id scheme: it cannot ask agents"
+            raise ContractError(("agents", "session"), message)
+        return ids.session_id(self.role.name, self.subject).root
 
     async def turn(
         self,

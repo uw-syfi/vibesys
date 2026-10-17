@@ -886,8 +886,10 @@ export type Traceback = string | null;
 export type Candidate = string | null;
 export type MetricValue = number | null;
 export type VsBaseline = number | null;
+export type Agent = string;
 export type Role1 = string;
 export type Model8 = string | null;
+export type StartedBy = string[];
 export type Stage3 = string;
 export type MetricValue1 = number | null;
 export type VsBaseline1 = number | null;
@@ -2393,13 +2395,20 @@ export interface AdoptionAttrs {
   vs_baseline?: VsBaseline;
 }
 /**
- * An agent turn: the role asked and the model it runs on (None: the run's default).
+ * An agent turn: the agent asked, its role, the model it runs on, and who started it.
  *
- * The provider and the reasoning effort are the host's settings, which the search never sees.
+ * ``agent`` is the agent's stable identity (the conversation its turns continue): every turn
+ * of one agent carries the same, so a client counts an agent's turns by it. ``started_by``
+ * names the agents whose work started this one (more than one when it serves several, say a
+ * merge of their work); empty when the search itself started it. ``model`` is None for the
+ * run's default. The provider and the reasoning effort are the host's settings, which the
+ * search never sees.
  */
 export interface AgentTurnAttrs {
+  agent: Agent;
   role: Role1;
   model?: Model8;
+  started_by?: StartedBy;
 }
 /**
  * A trusted measurement of a candidate: its stages, its value, and the ratio to the input's.
