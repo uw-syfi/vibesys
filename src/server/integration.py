@@ -99,7 +99,9 @@ fatal, per-invocation and per-phase failures are errors.
 _CONTROL_EVENT_TYPES = frozenset(
     {
         CoreEventType.STEER_QUEUED,
+        CoreEventType.GUIDANCE_QUEUED,
         CoreEventType.WITHDRAW_QUEUED,
+        CoreEventType.GUIDANCE_ENDED,
         CoreEventType.PAUSE_REQUESTED,
         CoreEventType.RESUMED,
         CoreEventType.STOP_REQUESTED,
@@ -428,28 +430,25 @@ class RunIntegrationAdapter:
         representation of that state, so this only calls its existing
         bookkeeping methods -- it does not append a second wire event.
         """
-        if event.type is CoreEventType.STEER_QUEUED:
-            self.controller.steer(event.text)
-        elif event.type is CoreEventType.WITHDRAW_QUEUED:
-            self.controller.withdraw(event.text)
-        elif event.type is CoreEventType.PAUSE_REQUESTED:
-            self.controller.pause_after_call()
-        elif event.type is CoreEventType.RESUMED:
-            self.controller.resume()
-        elif event.type is CoreEventType.STOP_REQUESTED:
-            self.controller.stop_after_call()
-        elif event.type is CoreEventType.STEER_CONSUMED:
-            self.controller.record_steer_consumed(
+        handle = {
+            CoreEventType.STEER_QUEUED: lambda: self.controller.steer(event.text),
+            CoreEventType.GUIDANCE_QUEUED: lambda: self.controller.standing_guidance(event.text),
+            CoreEventType.WITHDRAW_QUEUED: lambda: self.controller.withdraw(event.text),
+            CoreEventType.GUIDANCE_ENDED: lambda: self.controller.record_guidance_ended(event.text),
+            CoreEventType.PAUSE_REQUESTED: self.controller.pause_after_call,
+            CoreEventType.RESUMED: self.controller.resume,
+            CoreEventType.STOP_REQUESTED: self.controller.stop_after_call,
+            CoreEventType.STEER_CONSUMED: lambda: self.controller.record_steer_consumed(
                 agent_kind=event.agent_kind,
                 round_label=event.round_label,
                 execution_id=event.execution_id,
-            )
-        elif event.type is CoreEventType.STEER_DROPPED:
-            self.controller.record_steer_dropped(event.text)
-        elif event.type is CoreEventType.PAUSED:
-            self.controller.land_pause_at_boundary()
-        elif event.type is CoreEventType.STOPPED:
-            self.controller.land_stop_at_boundary()
+            ),
+            CoreEventType.STEER_DROPPED: lambda: self.controller.record_steer_dropped(event.text),
+            CoreEventType.PAUSED: self.controller.land_pause_at_boundary,
+            CoreEventType.STOPPED: self.controller.land_stop_at_boundary,
+        }.get(event.type)
+        if handle is not None:
+            handle()
 
     def _route_output_event(self, event: CoreEvent) -> None:
         """Publish one explicitly delivered presentation event."""

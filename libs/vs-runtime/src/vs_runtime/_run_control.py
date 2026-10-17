@@ -22,12 +22,16 @@ class RunControlTransitionKind(StrEnum):
     """Closed set of cooperative run-control observations."""
 
     STEER_QUEUED = "steer_queued"
+    GUIDANCE_QUEUED = "guidance_queued"
+    """A standing steer was queued: guidance in force until withdrawn, not one turn's."""
     PAUSE_REQUESTED = "pause_requested"
     RESUMED = "resumed"
     STOP_REQUESTED = "stop_requested"
     STEER_CONSUMED = "steer_consumed"
     STEER_DROPPED = "steer_dropped"
     WITHDRAW_QUEUED = "withdraw_queued"
+    GUIDANCE_ENDED = "guidance_ended"
+    """Standing guidance reaches no turn any more: withdrawn, or its target or the run ended."""
     PAUSED = "paused"
     STOPPED = "stopped"
 
@@ -206,6 +210,13 @@ class RunControlChannel(Protocol):
         """
         ...
 
+    def notify_guidance_ended(self, reason: str) -> None:
+        """Record that standing guidance reaches no turn any more; ``reason`` names it and why.
+
+        It was withdrawn, its target or the run ended, or its attempt was reopened.
+        """
+        ...
+
     def wait_while_paused(self) -> None:
         """Park while paused and land a stop that releases the wait.
 
@@ -361,7 +372,12 @@ class RuntimeRunControlChannel:
         """Queue free-text steering for the run loop to take at its next control poll."""
         with self._lock:
             self._pending_steer.append(QueuedSteer(text, control_id, target, mode))
-        self._emit(RunControlTransitionKind.STEER_QUEUED, text=text)
+        self._emit(
+            RunControlTransitionKind.GUIDANCE_QUEUED
+            if mode is SteerMode.STANDING
+            else RunControlTransitionKind.STEER_QUEUED,
+            text=text,
+        )
 
     def queue_withdraw(self, withdraws: str, control_id: str) -> None:
         """Queue a withdrawal for the run loop to take at its next control poll."""
@@ -541,6 +557,12 @@ class RuntimeRunControlChannel:
     def notify_steer_dropped(self, reason: str) -> None:
         """Record why a queued steer reached no one."""
         self._events(RunControlTransition(kind=RunControlTransitionKind.STEER_DROPPED, text=reason))
+
+    def notify_guidance_ended(self, reason: str) -> None:
+        """Record that standing guidance reaches no turn any more, and why."""
+        self._events(
+            RunControlTransition(kind=RunControlTransitionKind.GUIDANCE_ENDED, text=reason)
+        )
 
     def wait_while_paused(self) -> None:
         """Park while paused, then land any stop that released the wait."""

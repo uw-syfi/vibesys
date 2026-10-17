@@ -149,6 +149,13 @@ class RunController:
         with self._condition:
             self._journal.record(EventType.CONTROL, f"/steer: {text}", status=EventStatus.PENDING)
 
+    def standing_guidance(self, text: str) -> None:
+        """Journal operator guidance in force for every later turn, until withdrawn."""
+        with self._condition:
+            self._journal.record(
+                EventType.CONTROL, f"/steer --standing: {text}", status=EventStatus.ACTIVE
+            )
+
     def withdraw(self, withdraws: str) -> None:
         """Journal a withdrawal of the standing guidance sent under ``withdraws``."""
         with self._condition:
@@ -321,6 +328,13 @@ class RunController:
         with self._condition:
             self._journal.record(
                 EventType.CONTROL, f"/steer dropped: {reason}", status=EventStatus.FAILED
+            )
+
+    def record_guidance_ended(self, reason: str) -> None:
+        """Journal that standing guidance reaches no turn any more; ``reason`` names it and why."""
+        with self._condition:
+            self._journal.record(
+                EventType.CONTROL, f"/guidance ended: {reason}", status=EventStatus.COMPLETED
             )
 
     def status(self) -> str:

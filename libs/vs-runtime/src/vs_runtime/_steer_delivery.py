@@ -256,7 +256,13 @@ def _sent_as(input_id: InputId) -> str:
 
 
 class SteerConsumption:
-    """Reports each steer once, when core records that a turn received it or dropped it."""
+    """Reports each steer once: when a turn received it, or when it reaches no turn any more.
+
+    A next-turn steer ends when a turn receives it or core drops it. Standing guidance ends
+    when it is withdrawn, or its target or the run ends; guidance to an attempt also stops
+    reaching it when the attempt is reopened as a new generation, which core does not record
+    as an end, so that is reported here once too.
+    """
 
     def __init__(self) -> None:
         """Start with nothing reported; the first poll seeds what already happened."""
@@ -267,38 +273,59 @@ class SteerConsumption:
         core: CoreState,
         delivered: Callable[[str, str, str], None],
         dropped: Callable[[str], None],
+        ended: Callable[[str], None],
     ) -> None:
         """Report each steer settled since last time.
 
-        ``delivered(role, scope owner, invocation)`` for one a turn received, and
-        ``dropped(reason)`` for one core dropped because its target can no longer take input.
+        ``delivered(role, scope owner, invocation)`` for one a turn received,
+        ``dropped(reason)`` for one core dropped because its target can no longer take input,
+        and ``ended(reason)`` for standing guidance that no longer reaches any turn.
         Receipts recorded before the first call are not reported: a resumed run must not
         announce again what its previous process already announced.
         """
-        # Standing guidance is never delivered once and ends by withdrawal or with its target,
-        # not by reaching no turn: its end is the withdrawal's own record.
         settled = {
-            row.input.input_id: row.receipt
+            row.input.input_id: row
             for row in core.sessions.inputs
-            if row.receipt is not None
-            and row.input.input_id.root.startswith("steer-")
-            and row.input.mode is not InputMode.STANDING
+            if row.input.input_id.root.startswith("steer-")
+            and (row.receipt is not None or _superseded(core, row.input))
         }
         if self._reported is None:
             self._reported = set(settled)
             return
-        for input_id, receipt in settled.items():
+        for input_id, row in settled.items():
             if input_id in self._reported:
                 continue
             self._reported.add(input_id)
-            if isinstance(receipt, InputDropped):
+            receipt = row.receipt
+            if row.input.mode is InputMode.STANDING:
+                why = (
+                    receipt.reason.value
+                    if isinstance(receipt, InputDropped)
+                    else "its attempt was reopened"
+                )
+                ended(f"standing guidance {_sent_as(input_id)} ended: {why}")
+            elif isinstance(receipt, InputDropped):
                 dropped(f"steer {_sent_as(input_id)} reached no turn: {receipt.reason.value}")
-                continue
-            invocation = next(
-                row for row in core.sessions.invocations if row.invocation == receipt.invocation
-            )
-            delivered(
-                invocation.turn.session.role_id.root,
-                invocation.scope.owner.root,
-                receipt.invocation.invocation_id.root,
-            )
+            elif receipt is not None:
+                invocation = next(
+                    row for row in core.sessions.invocations if row.invocation == receipt.invocation
+                )
+                delivered(
+                    invocation.turn.session.role_id.root,
+                    invocation.scope.owner.root,
+                    receipt.invocation.invocation_id.root,
+                )
+
+
+def _superseded(core: CoreState, item: SessionInput) -> bool:
+    """Whether standing guidance for one attempt generation outlived it: the attempt reopened.
+
+    An input to an attempt names its generation, so a reopened attempt's turns never match it.
+    """
+    target = item.target
+    if item.mode is not InputMode.STANDING or not isinstance(target, ScopeInputTarget):
+        return False
+    return any(
+        row.attempt_id == target.scope.owner and row.generation > target.scope.generation
+        for row in core.attempts.attempts
+    )

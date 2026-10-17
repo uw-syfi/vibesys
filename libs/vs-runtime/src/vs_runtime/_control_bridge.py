@@ -144,7 +144,10 @@ class RunControlBridge:
         gets that input too.
         """
         self._consumption.newly_settled(
-            core, self._report_consumed, self._channel.notify_steer_dropped
+            core,
+            self._report_consumed,
+            self._channel.notify_steer_dropped,
+            self._channel.notify_guidance_ended,
         )
         if not self._started:
             self._started = True
@@ -156,8 +159,9 @@ class RunControlBridge:
         if self._control is not None:
             self._control.recall(partial(_held_as, core))
             self._control.check_requests(partial(request_refusal, core))
-        # Withdrawals are taken before steers: a withdrawal is accepted only after its
-        # standing steer was queued, so this poll takes that steer too and records it first.
+        # Each batch of withdrawals is taken before the steers that follow it: an operator who
+        # sends a standing steer and then its withdrawal through the socket has the steer
+        # queued first, so this poll takes it too and records it before the withdrawal.
         withdrawals = self._channel.take_pending_withdrawals()
         events: list[CoreEvent] = list(unrecorded_steers(core, now_at))
         self._take_steers(core, now_at, events)
@@ -172,6 +176,10 @@ class RunControlBridge:
                     _LOG.warning(
                         "the run's control inbox cannot be read; its requests wait: %s", error
                     )
+        # The inbox's withdrawals are taken only now, after all of its steers, so a withdrawal
+        # that sorts before its own steer in the inbox still finds it in this poll's events.
+        withdrawals += self._channel.take_pending_withdrawals()
+        self._take_steers(core, now_at, events)
         for withdrawal in withdrawals:
             self._withdraw(core, now_at, withdrawal.withdraws, withdrawal.control_id, events)
         if self._stopped:
@@ -227,8 +235,9 @@ class RunControlBridge:
     ) -> None:
         """Emit the withdrawal of the standing steer sent under ``withdraws``.
 
-        Its guidance must be in force in ``core`` or received earlier in this poll; a
-        withdrawal of anything else becomes no control, and the channel hears why.
+        Its guidance must be in force in ``core`` or received in this poll; a withdrawal of
+        anything else becomes no control, and the channel hears why. A withdrawal of a steer
+        the run has not taken by this poll (one sent later) is dropped the same way.
         """
         input_id = standing_input_id(withdraws)
         if not _standing_now(core, events, withdraws):
@@ -241,10 +250,6 @@ class RunControlBridge:
             core, now_at, _Change("withdraw", control_id=control_id, withdraws=input_id)
         )
         events += () if control is None else (control,)
-
-    def _take_withdrawals(self, core: CoreState, now_at: float, events: list[CoreEvent]) -> None:
-        for withdrawal in self._channel.take_pending_withdrawals():
-            self._withdraw(core, now_at, withdrawal.withdraws, withdrawal.control_id, events)
 
     def _read_inbox(
         self, inbox: OperatorInbox, core: CoreState, now_at: float, events: list[CoreEvent]
@@ -281,7 +286,7 @@ class RunControlBridge:
         events: list[CoreEvent],
     ) -> str | None:
         """Apply one inbox request; the reason it cannot apply, or None once it is submitted."""
-        request = self._submitted_request(inbox, entry, core, events)
+        request = self._submitted_request(inbox, entry, core)
         if isinstance(request, str):
             return request
         identity = request.control_id
@@ -305,12 +310,12 @@ class RunControlBridge:
                 # Applied now, or queued earlier through the socket under the same id.
                 self._take_steers(core, now_at, events)
             case WithdrawRequest():
-                self._take_steers(core, now_at, events)
-                self._take_withdrawals(core, now_at, events)
+                # Queued on the channel; ``poll`` takes it after every steer of this poll.
+                pass
         return None
 
     def _submitted_request(
-        self, inbox: OperatorInbox, entry: InboxEntry, core: CoreState, events: list[CoreEvent]
+        self, inbox: OperatorInbox, entry: InboxEntry, core: CoreState
     ) -> ControlRequest | str:
         """Parse and submit one inbox request; the reason it cannot apply, if it cannot."""
         request = _parsed(entry)
@@ -318,7 +323,7 @@ class RunControlBridge:
             return f"not a control request: {request.details()}"
         if request.control_id != entry.request_id:
             return f"its control_id {request.control_id!r} is not its name in the inbox"
-        refusal = _refusal(request, core, events, stopped=self._stopped)
+        refusal = _refusal(request, core, stopped=self._stopped)
         if refusal is not None:
             return refusal
         ack = inbox.control.submit(request)
@@ -484,28 +489,23 @@ def _standing_now(core: CoreState, events: list[CoreEvent], withdraws: str) -> b
     )
 
 
-def _refusal(
-    request: ControlRequest, core: CoreState, events: list[CoreEvent], *, stopped: bool
-) -> str | None:
-    """Why core would refuse ``request`` now, or None; refused requests never reach core."""
+def _refusal(request: ControlRequest, core: CoreState, *, stopped: bool) -> str | None:
+    """Why core would refuse ``request`` now, or None; refused requests never reach core.
+
+    A withdrawal is refused here only by the channel's own check (``request_refusal``),
+    which refuses only what no later state could accept; the rest is checked at take.
+    """
     if core.run.status == RunStatus.TERMINAL:
         return "the run has ended"
+    if isinstance(request, SteerRequest):
+        target = steer_target(core, request.target)
+        return target.reason if isinstance(target, TargetRefusal) else None
     if not isinstance(request, (PauseRequest, ResumeRequest)):
-        return _input_refusal(request, core, events)
+        return None
     if stopped:
         return "the run is stopping; it cannot pause or resume"
     if core.run.status in (RunStatus.CLOSING, RunStatus.BLOCKED) or core.run.result is not None:
         return "the run is finishing; it cannot pause or resume"
-    return None
-
-
-def _input_refusal(request: ControlRequest, core: CoreState, events: list[CoreEvent]) -> str | None:
-    """Why core would refuse a steer's target or a withdrawal's guidance, or None."""
-    if isinstance(request, SteerRequest):
-        target = steer_target(core, request.target)
-        return target.reason if isinstance(target, TargetRefusal) else None
-    if isinstance(request, WithdrawRequest) and not _standing_now(core, events, request.withdraws):
-        return f"steer {request.withdraws} is not standing guidance in force"
     return None
 
 
