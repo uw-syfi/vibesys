@@ -16,7 +16,6 @@ settled, one it does not is applied again. A control without an id (a session's
 
 from __future__ import annotations
 
-import functools
 import hashlib
 import logging
 from dataclasses import dataclass
@@ -95,7 +94,8 @@ class RunControlBridge:
 
     ``control`` (by default the inbox's) is where operators submit controls; each poll tells
     it which ids core already records, so a control resent after a restart replays its ack
-    and a different control under a recorded id conflicts, as within one process.
+    and a different control under a recorded id conflicts, as within one process, and which
+    steer targets core can still reach, so a steer to any other is refused in its ack.
     """
 
     def __init__(
@@ -139,8 +139,6 @@ class RunControlBridge:
         self._consumption.newly_settled(
             core, self._report_consumed, self._channel.notify_steer_dropped
         )
-        if self._inbox is not None:
-            self._inbox.control.check_targets(partial(target_refusal, core))
         if not self._started:
             self._started = True
             self._count = len(core.run.controls)
@@ -148,7 +146,8 @@ class RunControlBridge:
             self._stopped = any(c.action == "stop" for c in core.run.controls)
         self._position = len(core.run.controls)
         if self._control is not None:
-            self._control.recall(functools.partial(_held_as, core))
+            self._control.recall(partial(_held_as, core))
+            self._control.check_targets(partial(target_refusal, core))
         events: list[CoreEvent] = list(unrecorded_steers(core, now_at))
         self._take_steers(core, now_at, events)
         if self._inbox is not None:
