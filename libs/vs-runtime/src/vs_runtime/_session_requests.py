@@ -50,6 +50,7 @@ from vs_agent.api import (
     SessionConfigurationError,
     SessionPersistenceError,
     SessionResumeError,
+    SteerOutcome,
     Unknown,
     parse_typed_response,
 )
@@ -115,7 +116,14 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_agent.api import AgentSessions, AgentSessionSpec, ClientAgentSessions, InvocationOutcome
-    from vs_core.api import Continuation, DecisionId, InvocationId, Observation, RequestBase
+    from vs_core.api import (
+        Continuation,
+        DecisionId,
+        InvocationId,
+        MidTurnOffer,
+        Observation,
+        RequestBase,
+    )
     from vs_prompts.api import RenderedPrompt
     from vs_runtime._core_requests import OwnerEvent, SessionRoleRequest
     from vs_runtime._receipt_store import ReceiptStore
@@ -128,7 +136,12 @@ _DISPATCHES = "session-dispatches"
 
 def session_binding_key(request: RequestBase, session_id: SessionId) -> str:
     """The one key under which a session's binding and dispatches are stored."""
-    return f"{owner_key(request)}/{session_id.root}"
+    return scope_binding_key(request.scope, session_id)
+
+
+def scope_binding_key(scope: Scope, session_id: SessionId) -> str:
+    """``session_binding_key`` for a session of ``scope``, without a request in hand."""
+    return f"{scope.owner.kind}:{scope.owner.root}:{scope.generation}/{session_id.root}"
 
 
 def load_session_binding(store: ReceiptStore, bkey: str) -> SessionBinding | None:
@@ -230,6 +243,10 @@ class SessionResolver(Protocol):
         Rendering is the resolver's job (templates); this executor never builds
         prompt text. ``None`` means an artifact is missing or fails its digest.
         """
+        ...
+
+    def mid_turn_message(self, item: SessionInput) -> RenderedPrompt | None:
+        """The message offering ``item`` to a turn already running; ``None`` as ``message``."""
         ...
 
 
@@ -453,6 +470,35 @@ class RuntimeSessionRequests:
         """Judges each invocation's writes; the lifecycle executors share it."""
         self._observations = ObservationFactory(store)
         self._locks: dict[str, asyncio.Lock] = {}
+
+    def offer_mid_turn(self, offer: MidTurnOffer, on_rejected: Callable[[], None]) -> SteerOutcome:
+        """Offer an interrupt-mode input to the running turn ``offer`` names.
+
+        Only this instance can reach a turn it runs. A session it never bound, an unreadable
+        binding or input text, or a journal that disowns the invocation leaves no turn here
+        that could take the message: ``NO_RUNNING_TURN``, so core gives it to the next turn.
+        ``on_rejected`` may be called later, from the provider's thread, when the turn takes
+        back a message it was given.
+        """
+        invocation = offer.invocation
+        try:
+            binding = load_session_binding(
+                self._store, scope_binding_key(offer.scope, invocation.session_id)
+            )
+        except ReceiptCorruptError:
+            return SteerOutcome.NO_RUNNING_TURN
+        message = self._resolver.mid_turn_message(offer.input)
+        if binding is None or message is None:
+            return SteerOutcome.NO_RUNNING_TURN
+        try:
+            return self._sessions.steer(
+                AgentSessionKey.parse(binding.session_key),
+                invocation.invocation_id.root,
+                message,
+                on_rejected=on_rejected,
+            )
+        except InvocationConflictError:
+            return SteerOutcome.NO_RUNNING_TURN
 
     async def execute(
         self, request: SessionRoleRequest, context: ExecutionContext

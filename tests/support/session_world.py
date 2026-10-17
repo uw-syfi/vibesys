@@ -246,6 +246,12 @@ class FakeSessionResolver:
             count=len(inputs),
         )
 
+    def mid_turn_message(self, item: SessionInput) -> RenderedPrompt | None:
+        """A rendered mid-turn message that names the input it offers."""
+        if not self.messages_resolve:
+            return None
+        return self.renderer.render_string("mid-turn {{ input }}", input=item.input_id.root)
+
 
 def turn_output(result: ExecutionResult) -> str | None:
     """The structured output JSON a result's TurnObserved event carries."""

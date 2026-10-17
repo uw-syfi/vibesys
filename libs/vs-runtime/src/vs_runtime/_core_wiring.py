@@ -184,4 +184,6 @@ def core_bindings(  # noqa: PLR0913  # lint-waiver: LW-260141 [PLR0913]; the run
         ),
         semantic_events=JournalSemanticEvents(store, receipts),
     )
-    return CoreRuntimeBindings(registry=catalog.registry, executors=executors)
+    return CoreRuntimeBindings(
+        registry=catalog.registry, executors=executors, steering=session.turns
+    )
