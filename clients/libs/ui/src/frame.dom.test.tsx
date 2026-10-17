@@ -592,6 +592,44 @@ describe('Narrative', () => {
     expect(pressed).toEqual(['a']);
   });
 
+  test('a turn that follows its end offers "New below" once scrolled up, and jumps back', async () => {
+    const {container} = await mount(
+      <Narrative label="Turn" start="end">
+        <Said key="a" text="a" />
+        <Said key="b" text="b" />
+      </Narrative>,
+    );
+    expect(container.querySelector('.vs-new-below')).toBeNull();
+    const scroller = one(container, 'section');
+    for (const [name, value] of [
+      ['scrollHeight', 1000],
+      ['clientHeight', 100],
+      ['scrollTop', 0],
+    ] as const) {
+      Object.defineProperty(scroller, name, {configurable: true, writable: true, value});
+    }
+    await act(async () => {
+      scroller.dispatchEvent(new UIEvent('scroll', {bubbles: true}));
+    });
+    await click(one(container, '.vs-new-below'));
+    expect(container.querySelector('.vs-new-below')).toBeNull();
+    expect(scroller.scrollTop).toBe(1000);
+  });
+
+  test('a turn that does not follow its end never offers it', async () => {
+    const {container} = await mount(
+      <Narrative label="Turn">
+        <Said key="a" text="a" />
+      </Narrative>,
+    );
+    const scroller = one(container, 'section');
+    Object.defineProperty(scroller, 'scrollHeight', {configurable: true, value: 1000});
+    await act(async () => {
+      scroller.dispatchEvent(new UIEvent('scroll', {bubbles: true}));
+    });
+    expect(container.querySelector('.vs-new-below')).toBeNull();
+  });
+
   test('says "1 tool" for one and marks the selected call', async () => {
     const [first] = tools() as [ToolLine];
     const {container} = await mount(

@@ -1,18 +1,40 @@
 /**
  * An opened step's body (the frame draws its pane): an agent turn read as narrative (the
- * structured reply first, then thinking and text in time order, tool groups folded and opened in
- * place, failed tools as red lines), or a gate's measurement and log; and, at level 3, one item of
- * the step in full (a tool call's input and output).
+ * structured reply first and collapsible, then thinking and text in time order, tool calls folded
+ * into one line between paragraphs that opens in place, a failed call always its own red line),
+ * or a gate's verdict, numbers and log; and, at level 3, one item of the step in full (a tool
+ * call's outcome, input and result).
  *
- * Stub: the turn's tool calls as a list that opens each (from the transcript rows
- * `turnTranscript` already reads), and the opened tool call in full; the narrative and the gate
- * are still to build (#2997).
+ * A live turn opens at its end and offers "New below" when scrolled up; a finished one opens at
+ * the top. At level 3 the narrative stays as the left pane with the opened call's group open and
+ * its row highlighted. Long turns and logs are windowed by the components.
  */
 import type {AgentNode} from '@vibesys/run-state/agents';
 import type {Candidate, CandidateStep} from '@vibesys/run-state/candidates';
-import {EmptyState, PickList, PickRow, ToolCall} from '@vibesys/ui';
+import {
+  Chip,
+  EmptyState,
+  KeyValue,
+  LogPane,
+  Narrative,
+  Row,
+  Said,
+  StructuredReply,
+  Text,
+  Thought,
+  ToolGroup,
+  type ToolLine,
+} from '@vibesys/ui';
 import {type JSX, useState} from 'react';
-import {type TurnRow, turnTranscript} from '../../../../state/index.js';
+import {
+  type GateView,
+  gateView,
+  itemLines,
+  type NarrativeBlock,
+  toolOf,
+  turnMeta,
+  turnNarrative,
+} from '../../../../state/step-narrative.js';
 import type {ViewBase, WithCore} from '../props.js';
 
 export interface StepViewProps extends ViewBase, WithCore {
@@ -27,46 +49,130 @@ export interface StepViewProps extends ViewBase, WithCore {
   readonly compact: boolean;
 }
 
-type ToolRow = Extract<TurnRow, {kind: 'tool'}>;
+const LIVE = new Set(['running', 'waiting', 'pending']);
 
-/** The step's tool calls, in order. */
-function toolRows(props: ViewBase & WithCore & {readonly step: CandidateStep}): ToolRow[] {
-  const transcript = turnTranscript(props.model.trace, props.core, {
-    filter: 'all',
-    open: new Set(),
-    selected: props.step.span,
-  });
-  return (transcript?.rows ?? []).filter((row): row is ToolRow => row.kind === 'tool');
+function lineOf(
+  tool: Extract<NarrativeBlock, {kind: 'tools'}>['tools'][number],
+  props: StepViewProps,
+): ToolLine {
+  return {
+    id: tool.id,
+    name: tool.name,
+    line: tool.summary ?? '',
+    ...(tool.meta === undefined ? {} : {outcome: tool.meta}),
+    state: tool.state,
+    selected: tool.id === props.item,
+    press: () => props.zoom({type: 'open-item', item: tool.id}),
+  };
+}
+
+function BlockView(args: {
+  readonly block: NarrativeBlock;
+  readonly props: StepViewProps;
+  readonly replyOpen: boolean;
+  readonly setReplyOpen: (open: boolean) => void;
+  readonly open: boolean;
+  readonly toggle: (open: boolean) => void;
+}): JSX.Element {
+  const {block} = args;
+  switch (block.kind) {
+    case 'reply':
+      return (
+        <StructuredReply
+          author={block.reply.author}
+          title={block.reply.title}
+          fields={block.reply.fields}
+          raw={block.reply.raw}
+          open={args.replyOpen}
+          toggle={args.setReplyOpen}
+        />
+      );
+    case 'thought':
+      return <Thought text={block.text} />;
+    case 'said':
+      return <Said text={block.text} />;
+    case 'tools':
+      return (
+        <ToolGroup
+          tools={block.tools.map(tool => lineOf(tool, args.props))}
+          open={args.open}
+          toggle={args.toggle}
+        />
+      );
+  }
+}
+
+function TurnBody(props: StepViewProps): JSX.Element {
+  const {step, item} = props;
+  const [replyOpen, setReplyOpen] = useState(!props.compact);
+  // A group the reader opened or closed; any other is open only when it holds the opened call.
+  const [flipped, setFlipped] = useState<ReadonlyMap<string, boolean>>(new Map());
+  const narrative = turnNarrative(props.model.trace, props.core, step.span);
+  if (narrative === null) return <EmptyState title="Reading the turn…" />;
+  if (narrative.blocks.length === 0) {
+    return (
+      <EmptyState
+        title={LIVE.has(step.status) ? 'Waiting for the agent' : 'Nothing recorded for this step'}
+      />
+    );
+  }
+  const live = LIVE.has(step.status);
+  const end = step.endedAt ?? props.clock.now;
+  const holding = item === null ? null : toolOf(narrative, item)?.block;
+  return (
+    <>
+      <Text variant="small" tone="muted">
+        {turnMeta(end === null ? null : end - step.startedAt, narrative)}
+      </Text>
+      <Narrative key={step.span} label="Agent turn" size="fill" start={live ? 'end' : 'top'}>
+        {narrative.blocks.map(block => (
+          <BlockView
+            key={block.id}
+            block={block}
+            props={props}
+            replyOpen={replyOpen}
+            setReplyOpen={setReplyOpen}
+            open={flipped.get(block.id) ?? block.id === holding}
+            toggle={open => setFlipped(new Map(flipped).set(block.id, open))}
+          />
+        ))}
+      </Narrative>
+    </>
+  );
+}
+
+function GateBody(props: StepViewProps & {readonly gate: GateView}): JSX.Element {
+  const {gate} = props;
+  return (
+    <>
+      <Row gap="space-3">
+        <Chip label={gate.verdict.label} tone={gate.verdict.tone} dot />
+      </Row>
+      {gate.numbers.length === 0 ? null : (
+        <KeyValue items={gate.numbers.map(([key, value]) => ({key, value, mono: true}))} />
+      )}
+      {gate.lines.length === 0 ? (
+        <EmptyState title="No log recorded for this gate" />
+      ) : (
+        <LogPane label="Gate log" lines={gate.lines} size="fill" />
+      )}
+    </>
+  );
+}
+
+/** The value the idea's parent measured, for the ratio to it; null for the input or an agent. */
+function parentValue(props: StepViewProps): number | null {
+  const parent = props.idea?.parent ?? null;
+  if (parent === null) return null;
+  const found = props.model.candidates.candidates.find(each => each.id === parent);
+  return found?.measurement?.metricValue ?? null;
 }
 
 export function StepView(props: StepViewProps): JSX.Element {
-  const tools = toolRows(props);
-  if (tools.length === 0) return <EmptyState title="Nothing recorded for this step yet" />;
-  return (
-    <PickList
-      label="Tool calls"
-      size="fill"
-      {...(props.item === null ? {} : {selected: props.item})}
-    >
-      {tools.map(tool => (
-        <PickRow
-          key={tool.id}
-          id={tool.id}
-          lead={tool.name}
-          title={tool.summary ?? tool.name}
-          mono
-          state={
-            tool.state === 'failed'
-              ? {tone: 'err', label: 'failed'}
-              : tool.state === 'pending'
-                ? {tone: 'live', label: 'running'}
-                : {tone: 'ok', label: 'done'}
-          }
-          select={() => props.zoom({type: 'open-item', item: tool.id})}
-        />
-      ))}
-    </PickList>
-  );
+  if (props.step.kind !== 'gate') return <TurnBody {...props} />;
+  const gate = gateView(props.model.trace, props.core, props.step.span, parentValue(props));
+  if (gate === null) return <EmptyState title="This gate is not in the run" />;
+  return <GateBody {...props} gate={gate} />;
 }
 
 export interface ItemViewProps extends ViewBase, WithCore {
@@ -75,21 +181,30 @@ export interface ItemViewProps extends ViewBase, WithCore {
   readonly item: string;
 }
 
-/** Level 3: the item in full. */
+const OUTCOME = {
+  ok: {label: 'Done', tone: 'ok'},
+  failed: {label: 'Failed', tone: 'err'},
+  pending: {label: 'Running', tone: 'live'},
+} as const;
+
+/** Level 3: the item in full, filling the pane: its outcome, then its input, then its result. */
 export function ItemView(props: ItemViewProps): JSX.Element {
-  const [open, setOpen] = useState(true);
-  const tool = toolRows(props).find(row => row.id === props.item);
-  if (tool === undefined) return <EmptyState title="This item is not in the step" />;
+  const narrative = turnNarrative(props.model.trace, props.core, props.step.span);
+  const found = narrative === null ? null : toolOf(narrative, props.item);
+  if (found === null) return <EmptyState title="This item is not in the step" />;
+  const {tool} = found;
+  const outcome = OUTCOME[tool.state];
   return (
-    <ToolCall
-      name={tool.name}
-      state={tool.state}
-      {...(tool.summary === undefined ? {} : {summary: tool.summary})}
-      {...(tool.meta === undefined ? {} : {meta: tool.meta})}
-      input={tool.input}
-      output={tool.output}
-      open={open}
-      toggle={setOpen}
-    />
+    <>
+      <Row gap="space-3">
+        <Chip label={outcome.label} tone={outcome.tone} dot />
+        {tool.meta === undefined ? null : (
+          <Text variant="small" tone="muted">
+            {tool.meta}
+          </Text>
+        )}
+      </Row>
+      <LogPane label={`${tool.name} call`} lines={itemLines(tool)} size="fill" />
+    </>
   );
 }

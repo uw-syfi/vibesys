@@ -1,5 +1,6 @@
 import {Children, type JSX, type ReactNode} from 'react';
 import {Icon} from './icon.js';
+import {NewBelow} from './new-below.js';
 import type {ToolState} from './message.js';
 import {InSlot, useSlot, useWindowed} from './windowing.js';
 
@@ -11,6 +12,8 @@ const ESTIMATED_BLOCK = 56;
  * first and the tool calls folded between them. It scrolls inside itself (`size` `fill` takes the
  * height of its container) and draws only the blocks near the visible part, between spacers as
  * tall as the rest, so a turn of any length costs a screenful. Give each block a stable `key`.
+ * While following the end (`start` `end`), scrolling up stops following and shows a "New below"
+ * pill that jumps back to the end, as `LogPane` does.
  */
 export function Narrative(props: {
   readonly label: string;
@@ -27,24 +30,31 @@ export function Narrative(props: {
     follow: props.start === 'end',
   });
   return (
-    <section
-      ref={win.scroller}
-      className="vs-narrative"
-      data-size={props.size ?? 'default'}
-      aria-label={props.label}
-      onScroll={win.scrolled}
-    >
-      <div aria-hidden="true" style={{height: win.before}} />
-      {blocks.slice(win.first, win.last).map((block, offset) => (
-        <InSlot
-          key={(block as {readonly key?: string}).key ?? win.first + offset}
-          slot={win.slotOf(win.first + offset)}
-        >
-          {block}
-        </InSlot>
-      ))}
-      <div aria-hidden="true" style={{height: win.after}} />
-    </section>
+    <div className="vs-narrative-wrap" data-size={props.size ?? 'default'}>
+      <section
+        ref={win.scroller}
+        className="vs-narrative"
+        data-size={props.size ?? 'default'}
+        aria-label={props.label}
+        onScroll={win.scrolled}
+      >
+        <div aria-hidden="true" style={{height: win.before}} />
+        {blocks.slice(win.first, win.last).map((block, offset) => (
+          <InSlot
+            key={(block as {readonly key?: string}).key ?? win.first + offset}
+            slot={win.slotOf(win.first + offset)}
+          >
+            {block}
+          </InSlot>
+        ))}
+        <div aria-hidden="true" style={{height: win.after}} />
+      </section>
+      {win.behind ? (
+        <span className="vs-narrative-jump">
+          <NewBelow text="New below" press={win.jump} />
+        </span>
+      ) : null}
+    </div>
   );
 }
 

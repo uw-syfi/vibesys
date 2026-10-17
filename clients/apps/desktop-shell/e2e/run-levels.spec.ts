@@ -161,15 +161,16 @@ test('every level opens from the keyboard alone, and Escape walks back', async (
     await page.keyboard.press('ArrowDown');
   }
   await page.keyboard.press('Enter');
-  const tools = page.getByRole('listbox', {name: 'Tool calls'});
-  await expect(tools).toBeVisible();
+  const turn = page.getByRole('region', {name: 'Agent turn'});
+  await expect(turn).toBeVisible();
 
-  await tabInto(page, tools);
-  const bench = tools.getByRole('option', {name: /cargo bench --bench queue/});
-  await page.keyboard.press('Home');
-  for (let press = 0; press < 40; press += 1) {
+  // Tab reaches the folded tool line; Enter opens it, Tab reaches the call, Enter opens that.
+  await tabInto(page, turn);
+  await page.keyboard.press('Enter');
+  const bench = turn.getByRole('button', {name: /cargo bench --bench queue/}).last();
+  for (let press = 0; press < 10; press += 1) {
     if (await bench.evaluate(element => element === document.activeElement)) break;
-    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('Tab');
   }
   await page.keyboard.press('Enter');
   await expect(page.getByText('queue/mpmc time: 41.2 ms')).toBeVisible();
@@ -228,39 +229,46 @@ test('every level opens by click and walks back by Escape, the crumbs and Back',
     .getByRole('option', {name: /implementer/})
     .first()
     .click();
-  const tools = page.getByRole('listbox', {name: 'Tool calls'});
-  await expect(tools.getByRole('option', {name: /cargo bench --bench queue/})).toBeVisible();
+  // The turn reads as narrative: thinking and text first, the tool call folded into one line.
+  const turn = page.getByRole('region', {name: 'Agent turn'});
+  await expect(turn.getByText('The head and tail counters share a cache line.')).toBeVisible();
+  await expect(turn.getByText('I will pad each counter to its own line')).toBeVisible();
+  const folded = turn.getByRole('button', {name: /1 tool/});
+  await expect(folded).toHaveAttribute('aria-expanded', 'false');
+  await folded.click();
+  await expect(folded).toHaveAttribute('aria-expanded', 'true');
   await check(page, 'ink-step');
 
-  // Level 3: the item in full, beside its step.
-  await tools.getByRole('option', {name: /cargo bench --bench queue/}).click();
+  // Level 3: the item in full, beside its step, whose group stays open with the call marked.
+  await turn.getByRole('button', {name: /cargo bench --bench queue/}).last().click();
+  await expect(turn.locator('[aria-current="true"]')).toBeVisible();
   await expect(page.getByText('queue/mpmc time: 41.2 ms')).toBeVisible();
   await check(page, 'ink-item');
 
   // Escape goes up a level, Back retraces the zooms, the breadcrumb jumps to the run.
   await page.keyboard.press('Escape');
   await expect(page.getByText('queue/mpmc time: 41.2 ms')).toHaveCount(0);
-  await expect(tools).toBeVisible();
+  await expect(turn).toBeVisible();
   // Escape is a zoom of its own: Back returns to the item, Forward to the step again.
   await page.goBack();
   await expect(page.getByText('queue/mpmc time: 41.2 ms')).toBeVisible();
   await page.goForward();
   await expect(page.getByText('queue/mpmc time: 41.2 ms')).toHaveCount(0);
-  await expect(tools).toBeVisible();
+  await expect(turn).toBeVisible();
   // Each crumb is a zoom the address follows, so Back returns to the level it left.
   const crumbs = page.getByRole('navigation', {name: 'Zoom'});
   const stepHash = await page.evaluate(() => window.location.hash);
   await crumbs.getByRole('button', {name: 'Combine W1 ring with W2 padding'}).click();
-  await expect(tools).toHaveCount(0);
+  await expect(turn).toHaveCount(0);
   await expect(page).toHaveURL(/#idea=[^&]+$/);
   await page.goBack();
-  await expect(tools).toBeVisible();
+  await expect(turn).toBeVisible();
   expect(await page.evaluate(() => window.location.hash)).toBe(stepHash);
   await crumbs.getByRole('button', {name: 'run'}).click();
   await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
   expect(await page.evaluate(() => window.location.hash)).toBe('');
   await page.goBack();
-  await expect(tools).toBeVisible();
+  await expect(turn).toBeVisible();
   await page.goForward();
   await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
 

@@ -712,9 +712,19 @@ button.vs-crumb:focus-visible {
 
 /* --- narrative: a turn as thinking, text and folded tool lines ----------------------------------- */
 
+.vs-narrative-wrap {
+  position: relative;
+  min-width: 0;
+  max-width: var(--column-main);
+}
+.vs-narrative-wrap[data-size="fill"] {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
 .vs-narrative {
   box-sizing: border-box;
-  max-width: var(--column-main);
   max-height: var(--thread);
   min-height: 0;
   overflow-y: auto;
@@ -722,6 +732,11 @@ button.vs-crumb:focus-visible {
 .vs-narrative[data-size="fill"] {
   flex: 1 1 auto;
   max-height: none;
+}
+.vs-narrative-jump {
+  position: absolute;
+  right: var(--space-4);
+  bottom: var(--space-4);
 }
 .vs-narrative > * + * {
   margin-top: var(--space-2);
