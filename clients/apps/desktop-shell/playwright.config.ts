@@ -15,7 +15,7 @@ export default defineConfig({
   workers: 1,
   timeout: 30_000,
   webServer: {
-    command: `pnpm exec vite preview --host ${E2E_HOST} --port ${port} --strictPort`,
+    command: `node e2e/serve-dist.mjs ${port}`,
     port,
     reuseExistingServer: false,
   },

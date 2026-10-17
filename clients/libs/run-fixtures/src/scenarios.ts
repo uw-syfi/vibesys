@@ -1,0 +1,535 @@
+/**
+ * The synthetic scenarios: runs that show the cases a screen must survive and that a recording may
+ * not hold. Each is a pure function of nothing (no clock, no randomness), so the committed JSON in
+ * `data/` is exactly what these write and a test holds them equal. The 14-day run, too large to
+ * commit, is `weeks.ts`.
+ */
+import type {RunFixture} from './fixture.js';
+import {parseFixture} from './fixture.js';
+import {
+  addIdea,
+  adoptionSpan,
+  type IdeaSpec,
+  planningSpan,
+  rootSpan,
+  Trace,
+  toolCall,
+  turnTranscript,
+} from './trace.js';
+
+const OBJECTIVE = {
+  text: 'Maximize trusted end-to-end throughput of the MPMC queue. Every candidate must pass the 100-trial correctness check.',
+  metric: 'total_ops_per_sec',
+  unit: 'ops/s',
+  direction: 'max',
+} as const;
+
+export function runHeader(trace: Trace, runId: string): void {
+  trace.event(
+    'run_started',
+    {
+      outer_loop: 'iterate',
+      input: 'objectives/queue.md',
+      max_rounds: 6,
+      expected_roles: ['planner', 'implementer', 'judge'],
+    },
+    0,
+  );
+  trace.event(
+    'run_configured',
+    {
+      run_log_path: `logs/${runId}`,
+      project_root: 'project',
+      model: 'claude-sonnet-5',
+      objective: 'Raise queue throughput',
+      search_policy: 'beam',
+      benchmark_contract: true,
+      pareto_objectives: null,
+      max_continuation_rounds: 3,
+      max_unmeasured_turns: null,
+      source: 'loop',
+    },
+    1,
+  );
+  trace.span('span_started', rootSpan('running'), 2);
+}
+
+interface Scenario {
+  readonly name: string;
+  readonly description: string;
+  readonly runId: string;
+  readonly state: 'live' | 'finished';
+  readonly build: (trace: Trace) => void;
+  readonly liveAfter?: (trace: Trace) => number;
+  readonly dropAfter?: (trace: Trace) => number;
+}
+
+function fixture(scenario: Scenario): RunFixture {
+  const trace = new Trace(scenario.runId);
+  runHeader(trace, scenario.runId);
+  scenario.build(trace);
+  const finished = scenario.state === 'finished';
+  if (finished) {
+    trace.event('run_finished', null, 4000, {status: 'completed'});
+  }
+  return parseFixture({
+    format: 1,
+    name: scenario.name,
+    description: scenario.description,
+    runId: scenario.runId,
+    state: scenario.state,
+    objective: OBJECTIVE,
+    events: trace.events,
+    ...(scenario.liveAfter === undefined ? {} : {liveAfter: scenario.liveAfter(trace)}),
+    ...(scenario.dropAfter === undefined ? {} : {dropAfter: scenario.dropAfter(trace)}),
+    ...(finished ? {end: {outcome: 'adopted', reason: 'adopted the best'}} : {}),
+  });
+}
+
+function plan(trace: Trace, n: number, at: number): void {
+  const span = planningSpan(n, at);
+  trace.span('span_started', {...span, status: 'running'}, at);
+  trace.span('span_ended', span, at + 40);
+}
+
+const LONG_SENTENCE =
+  'Replace the per-slot sequence counters with a single padded head and tail pair, batch the producer-side reservation across up to sixteen enqueues, park idle consumers on a futex after a bounded spin, and re-measure every contention level from one to sixty-four threads before keeping anything';
+const LONG_TOKEN = 'a'.repeat(96);
+
+/** Ideas whose titles are as long, as wide or as strange as an agent makes them. */
+function longTitles(): RunFixture {
+  const titles = [
+    LONG_SENTENCE,
+    `Ring${LONG_TOKEN}Buffer`,
+    '並列キューのためのキャッシュライン整列とバッチ処理 🚀 sequence ring',
+    'Use `crossbeam::utils::CachePadded` for `head` and `tail`, then `Relaxed` loads where the fence allows',
+    'Short one',
+    'Lock-free ring with per-slot sequence numbers (v3, after the review asked for a stricter memory ordering on the consumer side of the ring)',
+    'Tiny',
+    'Batch enqueue → combine → steal: a three-stage pipeline with a work-stealing deque per core and a global overflow list that is drained only when every local deque is empty',
+  ];
+  return fixture({
+    name: 'long-titles',
+    description: 'Ideas whose titles are very long, one unbroken token, wide characters or markup.',
+    runId: '20261015-163047',
+    state: 'live',
+    build: trace => {
+      plan(trace, 1, 10);
+      titles.forEach((title, index) => {
+        const n = index + 1;
+        const end =
+          index % 3 === 0
+            ? ({kind: 'passed', value: 1.2e7 + n * 1e6, ratio: 1.2 + n / 10} as const)
+            : index % 3 === 1
+              ? ({kind: 'slower', value: 0.9e7, ratio: 0.9} as const)
+              : ({kind: 'running'} as const);
+        addIdea(trace, {n, title, at: 100 + n * 20, end, took: 400});
+      });
+      trace.span('span_started', adoptionSpan({n: 1, ratio: 1.3, value: 1.3e7}, 900, false), 900);
+    },
+  });
+}
+
+/** The failure reasons a workstream span can carry, in the wire's spellings. */
+export const FAILURE_REASONS: readonly string[] = [
+  'turned_down',
+  'not_measured',
+  'no_design',
+  'not_opened',
+  'stopped',
+  'parent-unverified',
+  'refused',
+  'ended',
+  'out-of-budget',
+  'turn-failed',
+  'invalid-reply',
+  'render-failed',
+  'wait-refused',
+  'checkpoint-declined',
+  'no-changed-candidate',
+  'implementation-failed',
+  'review-rejected',
+  'no-trusted-evidence',
+  'evidence-refused',
+  'evidence-undecodable',
+  'profile-capture-unavailable',
+  'turn-limit',
+  'repeated-turn',
+  'merge-refused',
+  'merge-unsound',
+  'merge-regressed',
+];
+
+/** One idea per failure reason, and one per way a gate rejects a candidate. */
+function failureReasons(): RunFixture {
+  return fixture({
+    name: 'failure-reasons',
+    description:
+      'Failed ideas: one for each failure reason the search spells, and the gate rejections.',
+    runId: '20261015-171200',
+    state: 'live',
+    build: trace => {
+      plan(trace, 1, 10);
+      let n = 0;
+      for (const reason of FAILURE_REASONS) {
+        n += 1;
+        addIdea(trace, {
+          n,
+          title: `Idea ${n}: ${reason.replace(/[-_]/g, ' ')} case`,
+          at: 100 + n * 15,
+          end: {kind: 'failed', reason},
+          ...(reason.startsWith('implementation') ? {outcome: 'implementation_failed'} : {}),
+          took: 200,
+        });
+      }
+      const gates: readonly IdeaSpec['end'][] = [
+        {kind: 'failed_check', check: 'correctness', completed: 93, required: 100, unit: 'trials'},
+        {kind: 'failed_check', check: 'correctness'},
+        {kind: 'failed_check', check: 'benchmark'},
+        {kind: 'slower', value: 0.8e7, ratio: 0.8},
+        {kind: 'passed', value: 1.4e7, ratio: 1.4},
+      ];
+      for (const end of gates) {
+        n += 1;
+        addIdea(trace, {n, title: `Gate case ${n}`, at: 100 + n * 15, end, took: 200});
+      }
+      // The implementer's reply for the first failed idea, as the server sends it.
+      trace.event(
+        'agent_execution_finished',
+        {
+          result: '{}',
+          reply: {
+            kind: 'ImplementerReply',
+            json_schema: {
+              properties: {
+                summary: {type: 'string'},
+                outcome: {
+                  enum: ['nominated', 'implementation_failed', 'blocked'],
+                  type: 'string',
+                },
+              },
+              required: ['summary', 'outcome'],
+              type: 'object',
+            },
+            value: {
+              summary: 'The borrow checker rejected the shared slot; I could not restructure it.',
+              outcome: 'implementation_failed',
+            },
+          },
+        },
+        900,
+        {
+          status: 'completed',
+          invocation_id: 'inv-w16',
+          agent_kind: 'implementer',
+          span_id: 'op:w16-turn',
+        },
+      );
+    },
+  });
+}
+
+/** Ideas retried once, twice, many times, and one retrying now. */
+function retries(): RunFixture {
+  return fixture({
+    name: 'retries',
+    description:
+      'Ideas whose implementer turn was retried: reasons, counts and one still retrying.',
+    runId: '20261015-180000',
+    state: 'live',
+    build: trace => {
+      plan(trace, 1, 10);
+      const reasons = [
+        'build failed: borrow error in lib.rs',
+        'build failed: missing Send bound',
+        'the correctness check timed out after 600 s',
+        'the agent ended its turn without a reply',
+        'build failed: type mismatch between the slot and its sequence counter',
+      ];
+      addIdea(trace, {
+        n: 1,
+        title: 'Settled after one retry',
+        at: 100,
+        tries: reasons.slice(0, 1),
+        end: {kind: 'passed', value: 1.3e7, ratio: 1.3},
+      });
+      addIdea(trace, {
+        n: 2,
+        title: 'Settled after two retries',
+        at: 110,
+        tries: reasons.slice(0, 2),
+        end: {kind: 'slower', value: 0.9e7, ratio: 0.9},
+      });
+      addIdea(trace, {
+        n: 3,
+        title: 'Gave up after four retries',
+        at: 120,
+        tries: reasons.slice(0, 4),
+        end: {kind: 'failed', reason: 'turn-limit'},
+      });
+      addIdea(trace, {
+        n: 4,
+        title: 'Retrying now',
+        at: 130,
+        tries: reasons.slice(1, 3),
+        end: {kind: 'running'},
+      });
+      addIdea(trace, {
+        n: 5,
+        title: 'Same reason four times',
+        at: 140,
+        tries: [reasons[0], reasons[0], reasons[0], reasons[0]] as string[],
+        end: {kind: 'passed', value: 1.6e7, ratio: 1.6},
+      });
+      trace.span('span_started', adoptionSpan({n: 5, ratio: 1.6, value: 1.6e7}, 900, false), 900);
+    },
+  });
+}
+
+/** A search that plays rounds, including the continuation rounds past the planned ones. */
+function continuationRounds(): RunFixture {
+  return fixture({
+    name: 'continuation-rounds',
+    description:
+      'Rounds one to six, the last three being continuation rounds, each starting from an earlier round.',
+    runId: '20261015-190000',
+    state: 'live',
+    build: trace => {
+      const rounds: readonly {end: IdeaSpec['end']; base: number | null}[] = [
+        {end: {kind: 'passed', value: 1.3e7, ratio: 1.3}, base: null},
+        {end: {kind: 'failed', reason: 'turned_down'}, base: 1},
+        {end: {kind: 'passed', value: 1.7e7, ratio: 1.7}, base: 1},
+        {end: {kind: 'slower', value: 1.5e7, ratio: 1.5}, base: 3},
+        {end: {kind: 'passed', value: 2.1e7, ratio: 2.1}, base: 3},
+        {end: {kind: 'running'}, base: 5},
+      ];
+      rounds.forEach((round, index) => {
+        const n = index + 1;
+        addIdea(trace, {
+          n,
+          title: `Round ${n}${n > 3 ? ' (continuation)' : ''}`,
+          idea: `Try the ${['ring', 'padding', 'batching', 'parking', 'stealing', 'combining'][index]} design`,
+          at: 100 + index * 700,
+          round: n,
+          baseRound: round.base,
+          on: round.base,
+          end: round.end,
+        });
+      });
+      trace.span('span_started', adoptionSpan({n: 5, ratio: 2.1, value: 2.1e7}, 4200, false), 4200);
+    },
+  });
+}
+
+/** Ideas that build on other ideas: chains, a merge of two, a base that itself failed. */
+function nonInputBases(): RunFixture {
+  return fixture({
+    name: 'non-input-bases',
+    description:
+      'Ideas whose base is another idea: a chain, a merge of two, and a base that failed.',
+    runId: '20261015-200000',
+    state: 'live',
+    build: trace => {
+      plan(trace, 1, 10);
+      addIdea(trace, {
+        n: 1,
+        title: 'Padded counters',
+        at: 100,
+        end: {kind: 'passed', value: 1.2e7, ratio: 1.2},
+      });
+      addIdea(trace, {
+        n: 2,
+        title: 'Batched enqueue on the padded counters',
+        at: 200,
+        on: 1,
+        end: {kind: 'passed', value: 1.5e7, ratio: 1.5},
+      });
+      addIdea(trace, {
+        n: 3,
+        title: 'Park idle consumers after the batching',
+        at: 300,
+        on: 2,
+        end: {kind: 'slower', value: 1.4e7, ratio: 1.4},
+      });
+      addIdea(trace, {
+        n: 4,
+        title: 'Continue from the slower idea anyway',
+        at: 400,
+        on: 3,
+        end: {kind: 'passed', value: 1.9e7, ratio: 1.9},
+      });
+      addIdea(trace, {
+        n: 5,
+        title: 'Independent: per-core queues',
+        at: 410,
+        end: {kind: 'passed', value: 1.3e7, ratio: 1.3},
+      });
+      addIdea(trace, {
+        n: 6,
+        title: 'Merge: batching with per-core queues',
+        at: 700,
+        on: 5,
+        end: {kind: 'running'},
+      });
+      addIdea(trace, {
+        n: 7,
+        title: 'Build on a failed base',
+        at: 710,
+        on: 3,
+        end: {kind: 'failed', reason: 'review-rejected'},
+      });
+      trace.span('span_started', adoptionSpan({n: 4, ratio: 1.9, value: 1.9e7}, 900, false), 900);
+    },
+  });
+}
+
+/** A live run in which the first batch holds part of the run and the stream drops mid-way. */
+function liveReconnect(): RunFixture {
+  return fixture({
+    name: 'live-reconnect',
+    description:
+      'A live run mid-stream: events arrive after the first batch, the stream drops, and the rest follow a resubscribe.',
+    runId: '20261015-210000',
+    state: 'live',
+    build: trace => {
+      plan(trace, 1, 10);
+      const ends: IdeaSpec['end'][] = [
+        {kind: 'passed', value: 1.2e7, ratio: 1.2},
+        {kind: 'slower', value: 0.9e7, ratio: 0.9},
+        {kind: 'failed', reason: 'turned_down'},
+        {kind: 'passed', value: 1.6e7, ratio: 1.6},
+        {kind: 'failed_check', check: 'correctness', completed: 7, required: 100, unit: 'trials'},
+        {kind: 'running'},
+      ];
+      ends.forEach((end, index) => {
+        const n = index + 1;
+        addIdea(trace, {
+          n,
+          title: `Live idea ${n}`,
+          at: 100 + index * 120,
+          on: index > 3 ? 4 : null,
+          end,
+        });
+      });
+      turnTranscript(trace, 'op:w6-turn', 'implementer', 900, [
+        {
+          channel: 'analysis',
+          content: '**Reading the queue**\n\nThe tail counter is shared with the slot array.',
+        },
+        {
+          channel: 'assistant',
+          content: 'I will move the tail onto its own cache line and re-measure.',
+        },
+      ]);
+      trace.span('span_started', adoptionSpan({n: 4, ratio: 1.6, value: 1.6e7}, 950, false), 950);
+    },
+    // The first batch ends after the third idea; the stream drops after the fifth.
+    liveAfter: trace => sequenceOf(trace, 'op:w3-turn', 'span_ended'),
+    dropAfter: trace => sequenceOf(trace, 'op:w5-turn', 'span_ended'),
+  });
+}
+
+function sequenceOf(trace: Trace, span: string, type: string): number {
+  const index = trace.events.findIndex(
+    event =>
+      event['type'] === type && ((event['data'] as {span?: {id?: string}}).span?.id ?? '') === span,
+  );
+  if (index < 0) throw new Error(`no ${type} of ${span}`);
+  return index + 1;
+}
+
+/** A run that has ended: every idea settled, the best adopted. */
+function finishedRun(): RunFixture {
+  return fixture({
+    name: 'finished-run',
+    description:
+      'A finished run: two planning calls, ideas that passed, failed and built on each other, the best adopted.',
+    runId: '20261014-090000',
+    state: 'finished',
+    build: trace => {
+      plan(trace, 1, 10);
+      addIdea(trace, {
+        n: 1,
+        title: 'Lock-free ring with per-slot sequence numbers',
+        at: 100,
+        end: {kind: 'passed', value: 1.9e7, ratio: 1.9},
+        outcome: 'nominated',
+        summary:
+          'Each slot carries its own sequence number, so producers and consumers never share a counter.',
+      });
+      addIdea(trace, {
+        n: 2,
+        title: 'Cache-line padding and batched enqueue',
+        at: 110,
+        end: {kind: 'passed', value: 1.55e7, ratio: 1.55},
+      });
+      addIdea(trace, {
+        n: 3,
+        title: 'Spin then park idle consumers',
+        at: 120,
+        end: {kind: 'slower', value: 0.85e7, ratio: 0.85},
+      });
+      addIdea(trace, {
+        n: 4,
+        title: 'Larger batch size',
+        at: 130,
+        end: {
+          kind: 'failed_check',
+          check: 'correctness',
+          completed: 93,
+          required: 100,
+          unit: 'trials',
+        },
+      });
+      plan(trace, 2, 900);
+      addIdea(trace, {
+        n: 5,
+        title: 'Combine the ring with the padding',
+        at: 960,
+        on: 1,
+        end: {kind: 'passed', value: 2.4e7, ratio: 2.4},
+      });
+      turnTranscript(trace, 'op:w5-turn', 'implementer', 1200, [
+        {channel: 'analysis', content: 'The head and tail counters share a cache line. '},
+        {channel: 'assistant', content: 'I will pad each counter to its own line and re-measure.'},
+      ]);
+      toolCall(trace, 'op:w5-turn', 'implementer', 1210, {
+        id: 'c1',
+        tool: 'Bash',
+        command: 'cargo bench --bench queue',
+        output: 'queue/mpmc time: 41.2 ms',
+      });
+      addIdea(trace, {
+        n: 6,
+        title: 'Wait-free consumer path',
+        at: 970,
+        on: 1,
+        tries: ['build failed: missing Send bound'],
+        end: {kind: 'failed', reason: 'implementation-failed'},
+      });
+      addIdea(trace, {
+        n: 7,
+        title: 'Per-core queues with stealing',
+        at: 980,
+        on: 5,
+        end: {kind: 'passed', value: 2.2e7, ratio: 2.2},
+      });
+      trace.span('span_started', adoptionSpan({n: 5, ratio: 2.4, value: 2.4e7}, 1700, false), 1700);
+      trace.span('span_ended', adoptionSpan({n: 5, ratio: 2.4, value: 2.4e7}, 1700, true), 1701);
+      trace.span('span_ended', rootSpan('done', 1710), 1710);
+    },
+  });
+}
+
+/** Every committed synthetic scenario, by name. */
+export function scenarios(): readonly RunFixture[] {
+  return [
+    longTitles(),
+    failureReasons(),
+    retries(),
+    continuationRounds(),
+    nonInputBases(),
+    liveReconnect(),
+    finishedRun(),
+  ];
+}

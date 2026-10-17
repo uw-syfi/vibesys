@@ -71,8 +71,15 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
   },
   'apps/desktop-shell': {
     // The app shell's page (`shell.html`, built by `vite.config.ts`) and its Playwright journey.
-    entry: ['src/main.tsx', 'src/**/*.test.ts', 'src/**/*.test.tsx', 'e2e/**/*.spec.ts'],
-    project: ['src/**/*.ts', 'src/**/*.tsx', 'e2e/**/*.ts'],
+    entry: [
+      'src/main.tsx',
+      'src/**/*.test.ts',
+      'src/**/*.test.tsx',
+      'e2e/**/*.spec.ts',
+      // The static server the suite starts (`playwright.config.ts`).
+      'e2e/serve-dist.mjs',
+    ],
+    project: ['src/**/*.ts', 'src/**/*.tsx', 'e2e/**/*.{ts,mjs}'],
   },
   'apps/ui-gallery': {
     // The development-only component gallery (`index.html`, built by `vite.config.ts`), its

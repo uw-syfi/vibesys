@@ -1,0 +1,29 @@
+{
+  "extends": "../../tools/tsconfig.base.json",
+  "compilerOptions": {
+    "types": [
+      "bun"
+    ],
+    "noEmit": true,
+    "tsBuildInfoFile": ".tsbuild/test.tsbuildinfo",
+    "resolveJsonModule": true
+  },
+  "include": [
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx"
+  ],
+  "references": [
+    {
+      "path": "./tsconfig.lib.json"
+    },
+    {
+      "path": "../contracts/tsconfig.lib.json"
+    },
+    {
+      "path": "../run-state/tsconfig.candidates.json"
+    },
+    {
+      "path": "../store/tsconfig.testing.json"
+    }
+  ]
+}

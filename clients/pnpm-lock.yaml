@@ -149,6 +149,9 @@ importers:
       '@types/react-dom':
         specifier: 19.1.9
         version: 19.1.9(@types/react@19.1.13)
+      '@vibesys/run-fixtures':
+        specifier: workspace:*
+        version: link:../../libs/run-fixtures
       '@vitejs/plugin-react':
         specifier: 5.0.4
         version: 5.0.4(vite@7.1.5(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(yaml@2.9.1))
@@ -891,6 +894,25 @@ importers:
       '@types/bun':
         specifier: 1.4.2
         version: 1.4.2
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  libs/run-fixtures:
+    dependencies:
+      '@vibesys/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
+      '@vibesys/run-state':
+        specifier: workspace:*
+        version: link:../run-state
+      '@vibesys/store':
+        specifier: workspace:*
+        version: link:../store
       typescript:
         specifier: ^5.8.3
         version: 5.9.3

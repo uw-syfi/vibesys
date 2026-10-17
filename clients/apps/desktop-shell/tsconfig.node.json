@@ -9,5 +9,8 @@
     "noEmit": true,
     "tsBuildInfoFile": ".tsbuild/node.tsbuildinfo"
   },
-  "include": ["vite.config.ts", "playwright.config.ts", "../../tools/e2e/free-port.mts", "e2e/**/*.ts"]
+  "include": ["vite.config.ts", "playwright.config.ts", "../../tools/e2e/free-port.mts", "e2e/**/*.ts"],
+  "references": [
+    {"path": "../../libs/run-fixtures/tsconfig.lib.json"}
+  ]
 }

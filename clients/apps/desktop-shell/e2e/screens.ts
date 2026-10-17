@@ -1,0 +1,118 @@
+/**
+ * Walks the Run screen through its levels on a fixture, so every screen on the way can be checked or
+ * photographed: the run (ideas), an idea, a step of it and an item of that step, then the run's
+ * other faces, then the scrubber. `walkScreens` hands each screen's name and the page to `visit`;
+ * the walk itself records what must hold between screens (the anchors stay put).
+ */
+import {expect, type Page} from '@playwright/test';
+import type {Violation} from './checks/in-page.js';
+import {type Anchor, anchorsOf, RUN_ANCHORS, stabilityViolations} from './checks/stability.js';
+
+/** A screen of the walk: a level, or a face of the run level, or the scrubbed run. */
+type Screen = 'run' | 'idea' | 'step' | 'item' | 'timeline' | 'agents' | 'scrubbed';
+
+export interface Journey {
+  /** The title of the idea to open, or null for the first row. */
+  readonly idea: string | null;
+  /** The command of a tool call in that idea's implementer turn; null: go no deeper than the idea. */
+  readonly command: string | null;
+  /** Whether the run is live, so its scrubber can be dragged back and returned to live. */
+  readonly live: boolean;
+}
+
+/** Looks at a screen: what is shown now, under the name the walk gives it. */
+export type Visit = (screen: Screen, page: Page) => Promise<void>;
+
+const source = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const escaped = (text: string): RegExp => new RegExp(source(text));
+/** A row whose name starts with its state word and then `title` (a row's base is in its name too). */
+const row = (title: string): RegExp => new RegExp(`^(?:\\w+ )?${source(title)}`);
+
+class Walk {
+  readonly moved: Violation[] = [];
+  readonly #page: Page;
+  readonly #visit: Visit;
+  readonly #anchors: readonly Anchor[];
+  readonly #before: Awaited<ReturnType<typeof anchorsOf>>;
+
+  constructor(
+    page: Page,
+    visit: Visit,
+    anchors: readonly Anchor[],
+    before: Awaited<ReturnType<typeof anchorsOf>>,
+  ) {
+    this.#page = page;
+    this.#visit = visit;
+    this.#anchors = anchors;
+    this.#before = before;
+  }
+
+  async at(screen: Screen): Promise<void> {
+    await this.#visit(screen, this.#page);
+    this.moved.push(
+      ...(await stabilityViolations(this.#page, screen, this.#before, this.#anchors)),
+    );
+  }
+}
+
+async function openIdea(page: Page, idea: string | null): Promise<void> {
+  const options = page.getByRole('listbox', {name: 'Ideas'}).getByRole('option');
+  await (idea === null ? options.first() : options.filter({hasText: row(idea)}).first()).click();
+  await expect(page.getByRole('listbox', {name: /steps$/})).toBeVisible();
+}
+
+async function openItem(page: Page, command: string): Promise<void> {
+  await page
+    .getByRole('listbox', {name: /steps$/})
+    .getByRole('option', {name: /implementer/})
+    .first()
+    .click();
+  const turn = page.getByRole('region', {name: 'Agent turn'});
+  await expect(turn).toBeVisible();
+  await turn.getByRole('button', {name: /1 tool/}).click();
+  await turn
+    .getByRole('button', {name: escaped(command)})
+    .last()
+    .click();
+  await expect(turn.locator('[aria-current="true"]')).toBeVisible();
+}
+
+/** The run level again, by its crumb, from wherever the walk is. */
+async function backToRun(page: Page): Promise<void> {
+  await page.getByRole('navigation', {name: 'Zoom'}).getByRole('button', {name: 'Run'}).click();
+  await expect(page.getByRole('listbox', {name: 'Ideas'})).toBeVisible();
+}
+
+/** Walks every screen of `journey`, calling `visit` on each; returns what moved between screens. */
+export async function walkScreens(
+  page: Page,
+  journey: Journey,
+  visit: Visit,
+  anchors: readonly Anchor[] = RUN_ANCHORS,
+): Promise<Violation[]> {
+  const ideas = page.getByRole('listbox', {name: 'Ideas'});
+  await expect(ideas.getByRole('option').first()).toBeVisible();
+  const walk = new Walk(page, visit, anchors, await anchorsOf(page, anchors));
+  await walk.at('run');
+  await openIdea(page, journey.idea);
+  await walk.at('idea');
+  if (journey.command !== null) {
+    await openItem(page, journey.command);
+    await walk.at('step');
+    await walk.at('item');
+  }
+  await backToRun(page);
+  const show = page.getByRole('radiogroup', {name: 'Show'});
+  for (const face of ['timeline', 'agents'] as const) {
+    await show.getByText(face === 'timeline' ? 'Timeline' : 'Agents').click();
+    await walk.at(face);
+  }
+  await show.getByText('Ideas').click();
+  if (journey.live) {
+    await page.getByRole('slider', {name: 'Run position'}).focus();
+    await page.keyboard.press('Home');
+    await walk.at('scrubbed');
+    await page.getByRole('button', {name: 'Back to live'}).click();
+  }
+  return walk.moved;
+}

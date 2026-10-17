@@ -53,6 +53,9 @@ clients/
                                               ports, connectRun, WebSession    -> contracts, run-state,
                                                                        transport, store, machine
   libs/transport-node/ @vibesys/transport-node   stdio / unix socket / ssh channel  -> transport
+  libs/run-fixtures/ @vibesys/run-fixtures   replayable run fixtures (recorded, scrubbed of hosts,
+                                              paths and user names, or synthetic) for e2e harnesses
+                                              and screen checks; dev only            -> contracts
   libs/ipc/         @vibesys/ipc              typed main <-> renderer messages, the shell's
                                               requests' parsers per feature      -> hosts, runs
   libs/connection/  @vibesys/connection       host connection manager            -> contracts, transport, hosts,
@@ -114,7 +117,7 @@ cycles, and forbids feature-to-feature and app-to-app edges, because peers share
 | --- | --- | --- | --- |
 | `foundation` | 0 | `contracts`, `ui`, `store` | nothing in the workspace |
 | `core` | 1 | `run-state`, `transport`, `hosts`, `machine` | foundation |
-| `domain` | 2 | `runs`, `run-session`, `transport-node` | foundation, core |
+| `domain` | 2 | `runs`, `run-session`, `transport-node`, `run-fixtures` | foundation, core |
 | `service` | 3 | `ipc`, `connection`, `settings` | foundation, core, domain |
 | `feature` | 4 | `feature-*` | anything below |
 | `app` | 5 | `apps/*` (and the deprecated `tui`) | anything below |

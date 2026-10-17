@@ -15,7 +15,11 @@
     "build": "vite build",
     "check": "tsc -b",
     "test": "node ../../tools/scripts/run_bun_tests.mjs ./src",
-    "test:e2e": "pnpm build && playwright test"
+    "test:e2e": "pnpm build && pnpm e2e",
+    "fixtures": "bun --conditions=@vibesys/source e2e/tools/regenerate-fixtures.ts",
+    "e2e:linux": "bash scripts/linux-e2e.sh",
+    "e2e": "node --conditions=@vibesys/source ../../node_modules/@playwright/test/cli.js test",
+    "record": "bun --conditions=@vibesys/source e2e/tools/record-run-fixture.ts"
   },
   "dependencies": {
     "@vibesys/feature-app-shell": "workspace:*",
@@ -40,6 +44,7 @@
     "@types/node": "^24.0.0",
     "@types/react": "19.1.13",
     "@types/react-dom": "19.1.9",
+    "@vibesys/run-fixtures": "workspace:*",
     "@vitejs/plugin-react": "5.0.4",
     "typescript": "^5.8.3"
   }
