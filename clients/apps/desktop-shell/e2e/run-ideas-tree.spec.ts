@@ -9,8 +9,10 @@ import {installFakeServer} from './fake-server.js';
  * The Ideas pane as a lineage tree against the Fake bridge: a small live-like run (10 ideas) and
  * one of weeks (600 ideas over 14 days). The best idea's chain is open with the accent rail and its
  * `best` badge, every other branch is one folded row that opens in place, the list scrolls windowed,
- * and the header line replaces the old best-path row. `LEVEL_SHOTS` names a directory to save the
- * app window in, at 1440 and at 1000 px wide.
+ * and the header line replaces the old best-path row. On the performance chart, connectors join
+ * each passed idea to its base (the best chain emphasized), and pointing at an idea lights its
+ * chain there and in the tree. `LEVEL_SHOTS` names a directory to save the app window in, at 1440
+ * and at 1000 px wide.
  */
 
 const PROJECT = '/home/me/vibesys-projects/queue-rs';
@@ -92,6 +94,16 @@ test('a small run opens as a tree: the best chain open, other branches folded, o
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
   await shot(page, 'ideas-tree-10-1440');
 
+  // The chart joins each passed idea to its base; pointing at a row lights its chain.
+  const chart = page.getByRole('group', {name: /of each measured idea/});
+  expect(await chart.locator('.vs-chart-edge').count()).toBeGreaterThan(3);
+  expect(await chart.locator('.vs-chart-edge[data-emphasis="strong"]').count()).toBeGreaterThan(0);
+  await expect(chart.locator('.vs-chart-edge[data-emphasis="lit"]')).toHaveCount(0);
+  await ideas.getByRole('option').nth(3).hover();
+  expect(await chart.locator('.vs-chart-edge[data-emphasis="lit"]').count()).toBeGreaterThan(0);
+  await shot(page, 'ideas-tree-10-lit-1440');
+  await page.mouse.move(0, 0);
+
   const folded = ideas.getByRole('option').filter({hasText: '→'}).first();
   if ((await folded.count()) > 0) {
     const before = await ideas.getByRole('option').count();
@@ -114,6 +126,12 @@ test('a run of weeks draws only the rows near the view, and the best line shows 
   expect(await ideas.getByRole('option').count()).toBeLessThan(80);
   await expect(ideas.getByRole('option').filter({hasText: '… '}).first()).toBeVisible();
   await shot(page, 'ideas-tree-600-1440');
+  const chart = page.getByRole('group', {name: /of each measured idea/});
+  expect(await chart.locator('.vs-chart-edge').count()).toBeGreaterThan(100);
+  await ideas.getByRole('option').nth(5).hover();
+  expect(await chart.locator('.vs-chart-edge[data-emphasis="lit"]').count()).toBeGreaterThan(1);
+  await shot(page, 'ideas-tree-600-lit-1440');
+  await page.mouse.move(0, 0);
 
   await page.locator('button[title^="Show the best idea"]').click();
   await expect(ideas.getByRole('option', {selected: true})).toBeVisible();

@@ -22,6 +22,7 @@ import {
   clockStart,
   endedView,
   headerView,
+  ideaAncestry,
   type Offer,
   quotaBannerView,
   type ResolvedZoom,
@@ -312,6 +313,11 @@ export function RunScreen(props: {
     zoom,
   };
   const zoomed = resolveZoom(model, route);
+  // The chain lit on the chart and in the tree: what the pointer is on, else what was pinned or opened.
+  const lit = ideaAncestry(
+    model,
+    state.ideasHovered ?? state.ideasPinned ?? zoomed.idea?.id ?? null,
+  );
   const deep = routeLevel(route) !== 'run' && (zoomed.idea !== null || zoomed.agent !== null);
   const level = {state, base, core: props.core, mode: route.mode, dispatch};
   return (
@@ -339,7 +345,13 @@ export function RunScreen(props: {
       )}
       <EndedBanner state={state} dispatch={dispatch} zoom={zoom} />
       <Startup state={state} />
-      <Hero {...base} whole={props.whole} idea={zoomed.idea?.id ?? null} />
+      <Hero
+        {...base}
+        whole={props.whole}
+        idea={zoomed.idea?.id ?? null}
+        lit={lit}
+        hover={idea => dispatch({type: 'ideas-hover', idea})}
+      />
       {deep ? <Breadcrumb label="Zoom" items={crumbs(zoomed, route, zoom)} /> : null}
       {deep ? <DeepLevel {...level} zoomed={zoomed} /> : <RunLevel {...level} />}
     </Screen>

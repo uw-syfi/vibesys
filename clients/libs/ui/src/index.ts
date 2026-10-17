@@ -17,6 +17,8 @@ export {
 export {Banner, type BannerTone, Card} from './components/card.js';
 export {
   Chart,
+  type ChartEdge,
+  type ChartEnd,
   type ChartPoint,
   type ChartSize,
   type ChartSpan,

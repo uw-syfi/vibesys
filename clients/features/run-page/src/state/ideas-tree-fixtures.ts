@@ -51,6 +51,8 @@ export function modelOfShape(shape: Shape): RunModel {
     candidates: tree,
     direction: 'max',
     overview: null,
+    at: null,
+    latest: null,
     changed: new Set<string>(),
     agents: {agents: []},
     trace: {spans: new Map()},

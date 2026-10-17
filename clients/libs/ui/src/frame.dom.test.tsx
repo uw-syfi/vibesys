@@ -711,6 +711,81 @@ describe('PickRow extras', () => {
   });
 });
 
+describe('Chart connectors', () => {
+  const points = [
+    {id: 'a', x: 1, y: 2, filled: true},
+    {id: 'b', x: 2, y: 3, filled: true},
+    {id: 'c', x: 3, y: 1, filled: true},
+  ];
+
+  test('draws a line from a point or a place to the point it ends at, and skips ends that are no point', async () => {
+    const {container} = await mount(
+      <Chart
+        label="Series"
+        points={points}
+        edges={[
+          {from: {x: 0, y: 1}, to: 'a'},
+          {from: 'a', to: 'b'},
+          {from: 'b', to: 'missing'},
+          {from: 'missing', to: 'c'},
+        ]}
+      />,
+    );
+    expect(all(container, '.vs-chart-edge')).toHaveLength(2);
+    expect(container.querySelector('.vs-chart-edges')?.hasAttribute('data-dense')).toBe(false);
+  });
+
+  test('draws the emphasized ones last, over the rest, and says which are faint', async () => {
+    const {container} = await mount(
+      <Chart
+        label="Series"
+        points={points}
+        edges={[
+          {from: 'a', to: 'b', emphasis: 'lit'},
+          {from: {x: 0, y: 1}, to: 'a', emphasis: 'strong', faint: true},
+          {from: 'b', to: 'c'},
+        ]}
+      />,
+    );
+    const lines = all(container, '.vs-chart-edge');
+    expect(lines.map(line => line.getAttribute('data-emphasis'))).toEqual([null, 'strong', 'lit']);
+    expect(lines.map(line => line.hasAttribute('data-faint'))).toEqual([false, true, false]);
+  });
+
+  test('marks a crowd of connectors dense, so all but the emphasized ones fade', async () => {
+    const many = Array.from({length: 80}, (_, at) => ({id: `p${at}`, x: at, y: at, filled: true}));
+    const edges = many.slice(1).map((point, at) => ({from: `p${at}`, to: point.id}));
+    const {container} = await mount(<Chart label="Series" points={many} edges={edges} />);
+    expect(container.querySelector('.vs-chart-edges')?.hasAttribute('data-dense')).toBe(true);
+  });
+
+  test('adds no point and moves no axis', async () => {
+    const plain = await mount(<Chart label="Series" points={points} />);
+    const drawn = await mount(
+      <Chart label="Series" points={points} edges={[{from: 'a', to: 'b', emphasis: 'lit'}]} />,
+    );
+    const where = (container: HTMLElement) =>
+      all(container, '.vs-chart-point').map(each => [
+        each.getAttribute('cx'),
+        each.getAttribute('cy'),
+      ]);
+    expect(where(drawn.container)).toEqual(where(plain.container));
+  });
+
+  test('tells the page which point the pointer or the focus is on, and when it leaves', async () => {
+    const seen: (string | null)[] = [];
+    const {container} = await mount(
+      <Chart label="Series" points={points} pick={noop} hover={id => seen.push(id)} />,
+    );
+    const [first] = all(container, '[role="button"]') as [HTMLElement];
+    await act(async () => {
+      first.dispatchEvent(new MouseEvent('mouseover', {bubbles: true}));
+      first.dispatchEvent(new MouseEvent('mouseout', {bubbles: true}));
+    });
+    expect(seen).toEqual(['a', null]);
+  });
+});
+
 describe('PickRow fold', () => {
   test('a foldable row has a chevron that folds and unfolds it, by click and by Left and Right', async () => {
     const seen: string[] = [];

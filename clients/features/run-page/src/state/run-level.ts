@@ -7,6 +7,7 @@
 import type {Span} from '@vibesys/contracts';
 import type {AgentNode} from '@vibesys/run-state/agents';
 import type {Candidate, CandidateStep} from '@vibesys/run-state/candidates';
+import {type ChartEdgeView, chartEdges} from './chart-lineage.js';
 import {
   type IdeaResult,
   inputValueOf,
@@ -98,6 +99,12 @@ export interface StripChartView {
   }[];
   /** With an idea open: the stretch of the run clock it took, in minutes, as a band on the x-axis. */
   readonly spans: readonly {readonly from: number; readonly to: number; readonly label: string}[];
+  /**
+   * Connectors from each passed idea's point to its base's point (the input: the baseline at the
+   * start); the best idea's chain is `strong`, the pointed-at idea's chain `lit`. They add no point
+   * and move no axis.
+   */
+  readonly edges: readonly ChartEdgeView[];
   /** The best passed value so far (the input's until an idea beats it), as a step line that reaches the end of the axis. */
   readonly steps: readonly {readonly x: number; readonly y: number}[];
   readonly reference: {readonly y: number; readonly label: string} | null;
@@ -108,6 +115,8 @@ export interface StripChartView {
   /** The cursor: the live clock now, or the scrub position when the reader looks at the past. */
   readonly playhead: number | null;
 }
+
+const NO_IDEAS: ReadonlySet<string> = new Set();
 
 /** The share of the largest value left above it, so the top dot is not on the frame. */
 const HEADROOM = 1.1;
@@ -193,7 +202,8 @@ function emphasisField(emphasis: 'focus' | 'related' | 'dim' | undefined): {
  * reader scrubbed to (null at the live end); it is drawn as the cursor and dims the points after
  * it. `now` is the live clock, else the run's latest time bounds the x-axis.
  *
- * `focus` is the id of the idea the reader has open, or null. It only changes how the same points
+ * `lit` is the set of ideas on the chain the reader points at (`ideaAncestry`); its connectors are
+ * drawn lit. `focus` is the id of the idea the reader has open, or null. It only changes how the same points
  * are drawn (`emphasis`) and adds the idea's time span; the points, steps, ticks and both axes'
  * ranges are the same with or without it, so opening an idea never moves the chart.
  */
@@ -203,6 +213,7 @@ export function stripChartView(
   now: number | null,
   scrub: number | null = null,
   focus: string | null = null,
+  lit: ReadonlySet<string> = NO_IDEAS,
 ): StripChartView | null {
   const minutes = (at: number) => (at - start) / 60;
   const fold = performanceFold(model.candidates.candidates, model.direction, inputValue(model));
@@ -230,6 +241,17 @@ export function stripChartView(
   return {
     label: `${typeof metric === 'string' ? metric : 'Metric'} of each measured idea over the run, with the best so far`,
     points,
+    edges: chartEdges(
+      model.candidates.candidates,
+      fold.points.map((point, at) => ({
+        id: point.id,
+        passed: point.result === 'passed',
+        faint: points[at]?.faint ?? false,
+      })),
+      input === null ? null : {x: 0, y: input},
+      new Set(model.candidates.bestPath),
+      lit,
+    ),
     spans: open.spans(minutes, reached),
     steps,
     reference: input === null ? null : {y: input, label: 'input'},
