@@ -459,16 +459,18 @@ vibesys control <run-id> steer "re-plan around the new profile" --role dynamic-p
 
 A steer reaches one turn. `--standing` makes it standing guidance instead: every turn of its
 target dispatched from then on receives it, in a section of its own, until you withdraw it by
-the id `vibesys control` printed. A launch `--constraint` is standing guidance the run receives
-before its first turn, under the id `constraint-<n>` for the `n`th constraint:
+the id `vibesys control` printed:
 
 ```bash
 vibesys control <run-id> --control-id keep-bf16 steer "keep the weights in bf16" --standing
 vibesys control <run-id> withdraw keep-bf16
-vibesys control <run-id> withdraw constraint-1
 ```
 
 A withdrawal of a steer that is not standing guidance, or that has already ended, is rejected.
+The run's events report once when standing guidance stops reaching turns, with the reason: it
+was withdrawn, its target or the run ended, or the attempt it names was reopened (a reopened
+attempt is a new generation, which the guidance does not reach). A launch `--constraint` is
+not standing guidance: it holds for the whole run and cannot be withdrawn.
 
 ## Supply an Input with CLI Flags
 

@@ -215,7 +215,10 @@ it) is journaled as a `CONTROL` event with status `failed` and the text
 standing guidance (`withdraw_not_standing`); one naming a steer the run has not recorded yet is
 accepted and checked when the run takes it, and journaled as `/steer dropped: withdraw <id> ended
 nothing: ...` if it then names no guidance in force. An accepted withdrawal is journaled as
-`/withdraw: <withdraws>`.
+`/withdraw: <withdraws>` with status `pending`. Accepted standing guidance is journaled with
+status `active` as `/steer --standing: <text>`, and its end, once, with status `completed` as
+`/guidance ended: standing guidance <id> ended: <reason>`, where the reason is `withdrawn`,
+`owner-terminal` or `owner-cancelled` (its target ended), `run-terminal`, or `its attempt was reopened`.
 
 ## Framing and connection decisions
 
