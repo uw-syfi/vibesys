@@ -38,7 +38,14 @@ from vibesys.orchestration.dynamic.search.api import (
 )
 from vibesys.prompts import CORE_PROTOCOL_DIR, PROMPTS_DIR, CoreProtocolTemplate, render_template
 from vibesys.run.environment import agent_environment_notes
-from vs_core.api import WaitEnd
+from vs_core.api import (
+    AttemptId,
+    Comparison,
+    ComparisonVerdict,
+    RevisionRef,
+    Scope,
+    WaitEnd,
+)
 from vs_core.api.search import ReplyCorrection, ResumeFacts, WaitUnrecorded
 from vs_runtime.api.infrastructure import AgentPaths, RunEnvironmentView
 from vs_sim.api.testing import examples
@@ -362,6 +369,49 @@ def test_a_resumed_turn_says_whether_its_wait_timed_out_and_what_was_retained(
     assert ("The retained workspace revision" in text) is (context.retained is not None)
     if context.retained is not None:
         assert context.retained.revision_id.root in text
+
+
+_COMPARISONS = st.builds(
+    Comparison,
+    scope=st.just(Scope(owner=AttemptId(root="attempt"), generation=0)),
+    metric=st.sampled_from(["throughput", "latency_ms"]),
+    unit=st.sampled_from([None, "tokens/s", "ms"]),
+    direction=st.sampled_from(["max", "min"]),
+    candidate=st.text("0123456789abcdef", min_size=7, max_size=12).map(RevisionRef.of_git_commit),
+    candidate_input=st.just("sha256:candidate"),
+    base=st.text("0123456789abcdef", min_size=7, max_size=12).map(RevisionRef.of_git_commit),
+    base_input=st.just("sha256:base"),
+    candidate_value=st.floats(0.5, 1e4, allow_nan=False).map(lambda x: round(x, 3)),
+    base_value=st.floats(0.5, 1e4, allow_nan=False).map(lambda x: round(x, 3)),
+    ratio=st.floats(0.1, 10.0, allow_nan=False).map(lambda x: round(x, 4)),
+    noise=st.floats(0.0, 1.0, allow_nan=False).map(lambda x: round(x, 4)),
+    verdict=st.sampled_from(ComparisonVerdict),
+    candidate_samples=st.integers(1, 6),
+    base_samples=st.integers(1, 6),
+)
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(
+    context=CONTEXTS[CoreProtocolTemplate.RESUME],
+    comparisons=st.lists(_COMPARISONS, max_size=3),
+)
+def test_a_resumed_turn_states_each_comparison_the_framework_made_and_none_it_did_not(
+    context: BaseModel, comparisons: list[Comparison]
+) -> None:
+    assert isinstance(context, ResumeFacts)
+    text = render(
+        CoreProtocolTemplate.RESUME, context.model_copy(update={"comparisons": tuple(comparisons)})
+    )
+
+    assert ("compared each measured candidate with its base" in text) is bool(comparisons)
+    for item in comparisons:
+        assert f"**{item.verdict.value.replace('_', ' ')}**" in text
+        assert item.candidate.revision_id.root[:7] in text
+        assert item.base.revision_id.root[:7] in text
+        assert f"{item.ratio:.4f}" in text
+        assert f"{item.noise:.4f}" in text
+        assert f"{'higher' if item.direction == 'max' else 'lower'} is better" in text
 
 
 @settings(max_examples=examples(pr=8, nightly=100))

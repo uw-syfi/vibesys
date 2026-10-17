@@ -802,6 +802,7 @@ const runEventSchema: Record<string, unknown> = {
         "run_configured",
         "framework_warning",
         "winner_selected",
+        "measurement_compared",
         "workstream_finished",
         "turn_usage_recorded",
         "span_started",
@@ -1300,6 +1301,107 @@ const runEventSchema: Record<string, unknown> = {
       ],
       "title": "JudgeResultData",
       "type": "object"
+    },
+    "MeasurementComparedData": {
+      "additionalProperties": false,
+      "description": "A candidate's measurement was compared with its base's. See ``vibesys.events``.",
+      "properties": {
+        "kind": {
+          "const": "measurement_compared",
+          "default": "measurement_compared",
+          "title": "Kind",
+          "type": "string"
+        },
+        "metric": {
+          "title": "Metric",
+          "type": "string"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        },
+        "direction": {
+          "enum": [
+            "max",
+            "min"
+          ],
+          "title": "Direction",
+          "type": "string"
+        },
+        "candidate_commit": {
+          "title": "Candidate Commit",
+          "type": "string"
+        },
+        "base_commit": {
+          "title": "Base Commit",
+          "type": "string"
+        },
+        "candidate_value": {
+          "title": "Candidate Value",
+          "type": "number"
+        },
+        "base_value": {
+          "title": "Base Value",
+          "type": "number"
+        },
+        "ratio": {
+          "title": "Ratio",
+          "type": "number"
+        },
+        "noise": {
+          "title": "Noise",
+          "type": "number"
+        },
+        "verdict": {
+          "$ref": "#/$defs/MeasurementVerdict"
+        },
+        "candidate_samples": {
+          "title": "Candidate Samples",
+          "type": "integer"
+        },
+        "base_samples": {
+          "title": "Base Samples",
+          "type": "integer"
+        },
+        "source": {
+          "$ref": "#/$defs/FrameworkSource",
+          "default": "gates"
+        }
+      },
+      "required": [
+        "kind",
+        "metric",
+        "direction",
+        "candidate_commit",
+        "base_commit",
+        "candidate_value",
+        "base_value",
+        "ratio",
+        "noise",
+        "verdict",
+        "candidate_samples",
+        "base_samples"
+      ],
+      "title": "MeasurementComparedData",
+      "type": "object"
+    },
+    "MeasurementVerdict": {
+      "description": "Which side of the noise a candidate falls on. Mirrors ``vs_core.api.ComparisonVerdict``.",
+      "enum": [
+        "better",
+        "within_noise",
+        "worse"
+      ],
+      "title": "MeasurementVerdict",
+      "type": "string"
     },
     "ObjectiveOverview": {
       "additionalProperties": false,
@@ -3553,6 +3655,7 @@ const runEventSchema: Record<string, unknown> = {
               "invocation_started": "#/$defs/InvocationStartedData",
               "iterations_changed": "#/$defs/IterationsChangedData",
               "judge_result": "#/$defs/JudgeResultData",
+              "measurement_compared": "#/$defs/MeasurementComparedData",
               "output": "#/$defs/OutputData",
               "phase": "#/$defs/PhaseData",
               "provider_switched": "#/$defs/ProviderSwitchedData",
@@ -3709,6 +3812,9 @@ const runEventSchema: Record<string, unknown> = {
             },
             {
               "$ref": "#/$defs/WinnerSelectedData"
+            },
+            {
+              "$ref": "#/$defs/MeasurementComparedData"
             },
             {
               "$ref": "#/$defs/WorkstreamFinishedData"

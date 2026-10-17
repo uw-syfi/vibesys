@@ -41,6 +41,7 @@ from vs_core.api import (
     Limits,
     RunFacts,
     RunStatus,
+    TaskTerms,
     TurnSpec,
 )
 from vs_core.api.testing import sample_limits
@@ -225,6 +226,8 @@ class World:
     times the store's file writes and directory syncs."""
     evaluations: list[SemanticSlurmEvaluationExecutor] = field(default_factory=list)
     """The evaluation executor of every process started, which a host closes at exit."""
+    task: TaskTerms | None = None
+    """What the task fixes about measuring and comparing, when the world's run has terms."""
 
     def initial(self) -> CoreState:
         """The state of a run that has not started, from the real baseline commit."""
@@ -239,6 +242,7 @@ class World:
             evaluator_digest=DIGEST,
             workload_digest=DIGEST,
             environment_digest=DIGEST,
+            task=self.task,
         )
         return new_core_state(
             RUN_ID,
@@ -541,12 +545,13 @@ def open_skeleton_world(  # noqa: PLR0913  # lint-waiver: LW-731842 [PLR0913]; e
     timed: tuple[Clock, float] | None = None,
     agents: Callable[[Path], SessionHost] | None = None,
     git: GitKind = GitKind.FAKE,
+    unread_paths: tuple[str, ...] = (),
 ) -> Iterator[World]:
     """A fresh run on in-memory Git (or ``git=GitKind.REAL``, real Git) with the Fake Slurm cluster.
 
     Closes every host on exit.
     """
-    with open_workspace_env(tmp_path, git=git) as env:
+    with open_workspace_env(tmp_path, git=git, unread_paths=unread_paths) as env:
         vcs = world_git(tmp_path / "project", env.git_disk)
         hosted = (agents or _open_agents)(tmp_path / "project")
         if isinstance(hosted.resolver, CandidateResolver) and hosted.resolver.writer is not None:
