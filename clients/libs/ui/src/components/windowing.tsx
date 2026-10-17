@@ -87,9 +87,12 @@ export function useWindowed(options: {
   readonly keyOf: (index: number) => string;
   readonly estimate: number;
   readonly follow: boolean;
+  /** A number that, each time it changes, scrolls the list to its end. */
+  readonly toEnd?: number;
 }): Windowed {
-  const {count, keyOf, estimate, follow} = options;
+  const {count, keyOf, estimate, follow, toEnd} = options;
   const following = useRef(follow);
+  const scrolledToEnd = useRef(toEnd);
   const pane = useRef<HTMLElement | null>(null);
   const measured = useRef(new Map<string, number>());
   const pending = useRef<{
@@ -113,6 +116,10 @@ export function useWindowed(options: {
       setView({top: view.top, height: element.clientHeight});
     }
     if (following.current) element.scrollTop = element.scrollHeight;
+    if (scrolledToEnd.current !== toEnd) {
+      scrolledToEnd.current = toEnd;
+      jump();
+    }
     const wanted = pending.current;
     if (wanted === null) return;
     const row = element.querySelector<HTMLElement>(`[aria-posinset="${wanted.index + 1}"]`);
@@ -130,8 +137,11 @@ export function useWindowed(options: {
     setView({top: element.scrollTop, height: element.clientHeight || view.height});
   };
   const jump = (): void => {
-    following.current = true;
-    setBehind(false);
+    // Only a list that follows its end holds the end; any other is just scrolled to it.
+    if (follow) {
+      following.current = true;
+      setBehind(false);
+    }
     if (pane.current !== null) pane.current.scrollTop = pane.current.scrollHeight;
   };
   const reveal = (index: number, then: (row: HTMLElement) => void): void => {

@@ -20,6 +20,8 @@ export function Narrative(props: {
   readonly size?: 'default' | 'fill';
   /** `end` opens scrolled to the last block and stays there until scrolled up (a live turn). */
   readonly start?: 'top' | 'end';
+  /** A number that, each time it changes, scrolls to the last block. */
+  readonly toEnd?: number;
   readonly children: ReactNode;
 }): JSX.Element {
   const blocks = Children.toArray(props.children);
@@ -28,6 +30,7 @@ export function Narrative(props: {
     keyOf: index => String((blocks[index] as {readonly key?: string} | undefined)?.key ?? index),
     estimate: ESTIMATED_BLOCK,
     follow: props.start === 'end',
+    ...(props.toEnd === undefined ? {} : {toEnd: props.toEnd}),
   });
   return (
     <div className="vs-narrative-wrap" data-size={props.size ?? 'default'}>

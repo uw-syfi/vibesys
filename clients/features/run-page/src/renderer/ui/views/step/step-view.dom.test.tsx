@@ -116,7 +116,11 @@ interface Fixture {
 }
 
 /** The run after `transcript`, as a view receives it. */
-function fixture(transcript: readonly RunEvent[], turnStatus: Span['status'] = 'done'): Fixture {
+function fixture(
+  transcript: readonly RunEvent[],
+  turnStatus: Span['status'] = 'done',
+  more: readonly Span[] = [],
+): Fixture {
   let state = runPageInitial({
     identity: {host: 'ssh:chelan4', runId: '20261015-163047'},
     title: {project: '~/p', task: 'mpmc'},
@@ -129,12 +133,12 @@ function fixture(transcript: readonly RunEvent[], turnStatus: Span['status'] = '
     wallMs: 0,
     data: {
       kind: 'events',
-      events: SPANS.map(each => (each.id === 'turn' ? {...each, status: turnStatus} : each)).map(
-        (each, index) => ({
+      events: [...SPANS, ...more]
+        .map(each => (each.id === 'turn' ? {...each, status: turnStatus} : each))
+        .map((each, index) => ({
           ...event(index + 1, 'span_started'),
           data: {kind: 'span_started', span: each},
-        }),
-      ) as RunEvent[],
+        })) as RunEvent[],
     },
   }).state;
   const core = reduceEventBatch(initialCoreState(), transcript);
@@ -380,6 +384,38 @@ function reply(sequence: number): RunEvent {
   } as never);
 }
 
+function plan(sequence: number, base: number | null): RunEvent {
+  return event(sequence, 'agent_execution_finished', {
+    invocation_id: 'inv',
+    agent_kind: 'orchestrator',
+    span_id: 'turn',
+    data: {
+      kind: 'agent_execution_finished',
+      result: '{}',
+      reply: {
+        kind: 'OrchestratorPlan',
+        json_schema: {
+          properties: {
+            hypothesis_id: {type: 'string'},
+            hypothesis: {type: 'string'},
+            title: {type: 'string'},
+            pass_criteria: {type: 'string'},
+            base_round: {anyOf: [{type: 'integer'}, {type: 'null'}]},
+          },
+          type: 'object',
+        },
+        value: {
+          hypothesis_id: 'fixed-slot-ring',
+          hypothesis: 'A ring of slots removes the allocator from the hot path.',
+          title: 'Preallocate fixed-size queue slots',
+          pass_criteria: 'The benchmark improves.',
+          base_round: base,
+        },
+      },
+    },
+  } as never);
+}
+
 describe('a turn that is live', () => {
   async function mountAt(node: ReactNode): Promise<{
     readonly container: HTMLElement;
@@ -418,16 +454,62 @@ describe('a turn that is live', () => {
 });
 
 describe('the turn’s layout', () => {
-  test('shows the reply compactly with its summary, then the narrative below it', async () => {
+  test('ends with the reply as a card, its summary leading the turn', async () => {
     const fx = fixture([...TURN, reply(18)]);
     const container = await mount(<StepView {...viewProps(fx, fx.turn, null)} />);
     const text = one(container, '.vs-narrative').textContent ?? '';
     expect(text).toContain('Padded the counters.');
     expect(text).not.toContain('Changed');
     expect(text).toContain('Counters share a cache line.');
-    expect(text.indexOf('Padded the counters.')).toBeLessThan(text.indexOf('Counters share'));
+    expect(text.indexOf('Counters share')).toBeLessThan(text.indexOf('Padded the counters.'));
+    const blocks = all(one(container, '.vs-narrative'), '.vs-turn-result, .vs-thought, .vs-said');
+    expect(blocks.at(-1)?.className).toContain('vs-turn-result');
     expect(container.textContent).toContain('Show all fields (1 more)');
     expect(container.textContent).not.toContain('Raw');
+    const lead = one(container, '.vs-button');
+    expect(lead.textContent).toBe('Implementer reply: done · Padded the counters.');
+    expect(container.firstElementChild?.contains(lead)).toBe(true);
+    expect(one(container, '.vs-narrative').contains(lead)).toBe(false);
+  });
+
+  test('shows no summary and no card while the turn runs without a reply', async () => {
+    const fx = fixture(TURN, 'running');
+    const container = await mount(<StepView {...viewProps(fx, fx.turn, null)} />);
+    expect(all(container, '.vs-turn-result')).toHaveLength(0);
+    expect(all(container, '.vs-button')).toHaveLength(0);
+  });
+
+  test('the plan card ends the orchestrator’s turn, and its base opens that idea', async () => {
+    const earlier = labelled(
+      'ws0',
+      'flow:root#1',
+      'workstream',
+      'Pad the counters',
+      {},
+      {
+        hypothesis_id: 'h0',
+        round: 1,
+      },
+    );
+    const fx = fixture([...TURN, plan(18, 1)], 'done', [earlier]);
+    const container = await mount(<StepView {...viewProps(fx, fx.turn, null)} />);
+    const card = one(container, '.vs-turn-result');
+    expect(card.textContent).toContain('Preallocate fixed-size queue slots');
+    expect(card.textContent).toContain('builds on');
+    expect(one(container, '.vs-button').textContent).toBe(
+      'Plan: Preallocate fixed-size queue slots · builds on Pad the counters',
+    );
+    const base = all(card, '.vs-button').find(each => each.textContent === 'Pad the counters');
+    if (base === undefined) throw new Error('the base is not a link');
+    await click(base);
+    expect(fx.zooms).toEqual([{type: 'open-idea', idea: 'ws0'}]);
+    expect(card.textContent).not.toContain('fixed-slot-ring');
+    const more = all(card, '.vs-button').find(each =>
+      /Show all fields/.test(each.textContent ?? ''),
+    );
+    if (more === undefined) throw new Error('no Show all fields');
+    await click(more);
+    expect(card.textContent).toContain('fixed-slot-ring');
   });
 
   test('draws reasoning titles in bold, one row per reasoning item', async () => {

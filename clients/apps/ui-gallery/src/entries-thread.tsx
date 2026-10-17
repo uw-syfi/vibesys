@@ -10,6 +10,7 @@ import {
   Thread,
   type ThreadItem,
   ToolCall,
+  TurnResult,
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import type {ComponentName, GalleryEntry} from './gallery-entry.js';
@@ -226,9 +227,66 @@ function StructuredReplyDemo(): JSX.Element {
   );
 }
 
+function TurnResultDemo(): JSX.Element {
+  return (
+    <Stack>
+      <TurnResult
+        label="Plan"
+        author="Orchestrator"
+        headline="Preallocate fixed-size queue slots"
+        context={{prefix: 'builds on', label: 'Batch the producer handoff', press: noop}}
+        sections={[
+          {
+            kind: 'prose',
+            key: 'hypothesis',
+            label: 'Hypothesis',
+            text: 'Allocating a node per push puts the allocator on the hot path; a fixed ring of preallocated slots removes it and keeps producers on separate cache lines.',
+          },
+          {
+            kind: 'prose',
+            key: 'expected_effect',
+            label: 'Expected effect',
+            text: '1.3x to 1.6x more pushes per second at eight producers.',
+          },
+          {
+            kind: 'prose',
+            key: 'pass_criteria',
+            label: 'Pass criteria',
+            text: 'All queue tests pass and the benchmark reports a gain over its base.',
+          },
+          {
+            kind: 'list',
+            key: 'hypothesis_updates',
+            label: 'Updates to other hypotheses',
+            items: ['pad-counters: parked. The gain was inside the noise.'],
+          },
+        ]}
+        more={[
+          {kind: 'fact', key: 'hypothesis_id', label: 'Hypothesis id', value: 'fixed-slot-ring'},
+        ]}
+        raw={'{\n  "title": "Preallocate fixed-size queue slots"\n}'}
+      />
+      <TurnResult
+        label="Judge response"
+        author="Judge"
+        chips={[{label: 'pass', tone: 'ok'}]}
+        context={{prefix: 'builds on', label: 'input'}}
+        sections={[
+          {kind: 'prose', key: 'analysis', label: 'Analysis', text: 'The change holds under test.'},
+        ]}
+        more={[]}
+        raw="{}"
+      />
+    </Stack>
+  );
+}
+
 export const THREAD_ENTRIES: Readonly<
   Record<
-    Extract<ComponentName, 'Collapsible' | 'Message' | 'ToolCall' | 'StructuredReply' | 'Thread'>,
+    Extract<
+      ComponentName,
+      'Collapsible' | 'Message' | 'ToolCall' | 'StructuredReply' | 'Thread' | 'TurnResult'
+    >,
     GalleryEntry
   >
 > = {
@@ -236,6 +294,7 @@ export const THREAD_ENTRIES: Readonly<
   Message: {render: () => <MessageDemo />},
   ToolCall: {render: () => <ToolCallDemo />},
   StructuredReply: {render: () => <StructuredReplyDemo />},
+  TurnResult: {render: () => <TurnResultDemo />},
   Thread: {
     render: () => (
       <Card>
