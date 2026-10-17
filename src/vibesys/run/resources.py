@@ -773,6 +773,7 @@ def _run_facts(
         domain_id=bundle.domain.value,
         objective=objective,
         environment_notes=view.prompt_notes,
+        agent_git_writable=view.agent_git_writable,
         profile_execution=ProfileExecution(view.profile_execution),
         objective_location=view.paths.objective,
         reference_location=ref_name,

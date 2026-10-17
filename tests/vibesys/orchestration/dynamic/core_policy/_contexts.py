@@ -395,7 +395,11 @@ CONTEXTS: dict[Template, st.SearchStrategy[BaseModel]] = {
 
 
 def variables(
-    context: BaseModel, *, agent_evaluation: bool = False, notes: str = ""
+    context: BaseModel,
+    *,
+    agent_evaluation: bool = False,
+    notes: str = "",
+    agent_git_writable: bool = True,
 ) -> dict[str, object]:
     """What the render owner passes the template: run-level variables, then the context's own."""
     return {
@@ -404,6 +408,7 @@ def variables(
             objective=OBJECTIVE,
             environment_notes=notes,
             agent_evaluation=agent_evaluation,
+            agent_git_writable=agent_git_writable,
         ),
         **context_variables(context),
     }

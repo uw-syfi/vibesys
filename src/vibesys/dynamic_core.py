@@ -194,6 +194,7 @@ def _core_plan(context: CoreRunContext) -> CorePlan:
             objective=facts.objective,
             environment_notes=context.facts.environment_notes,
             agent_evaluation=True,
+            agent_git_writable=context.facts.agent_git_writable,
             domain_sections=domain_prompt_sections(
                 context.facts, modality=launch.modality, interface=launch.interface
             ),

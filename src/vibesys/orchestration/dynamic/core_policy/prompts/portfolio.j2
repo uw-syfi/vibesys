@@ -102,6 +102,12 @@ trusted evaluation, then say what follows. An architecture-scale hypothesis is s
 that its first step already produces a measurement. A workstream whose implementer turns
 end without a candidate settles as failed, and its history row says why: do not assign the
 same task again, narrow it to a first step that fits one turn.
+{% if not agent_git_writable %}
+
+An implementer's `.git` is read-only: it cannot commit. It submits its working tree for
+evaluation, which snapshots the tree including new files. Never end a {{ reply.task }} with a
+commit step, and never tell an implementer to commit.
+{% endif %}
 
 Fill every free slot: a slot left free idles until a running workstream finishes.
 

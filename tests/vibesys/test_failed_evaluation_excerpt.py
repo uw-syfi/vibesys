@@ -13,7 +13,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from vibesys.prompts.renderer import render_string
+from vibesys.prompts import CORE_PROTOCOL_DIR
 from vs_evaluation.api import (
     ContentDigest,
     EvaluationRequest,
@@ -26,6 +26,7 @@ from vs_evaluation.api import (
 )
 from vs_evaluation.api.testing import wait_until_executor_started
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster, build_stack
+from vs_prompts.api import TemplateRenderer
 from vs_sim.api.testing import examples, yield_until
 
 if TYPE_CHECKING:
@@ -36,7 +37,7 @@ pytestmark = pytest.mark.asyncio
 _HANDLE = "verdict-1"
 _TERMINAL = frozenset({EvaluationState.SUCCEEDED, EvaluationState.FAILED})
 _EXCERPT = """\
-{% from 'core_protocol/_evaluations.j2' import trusted_evaluations %}
+{% from '_evaluations.j2' import trusted_evaluations %}
 {{ trusted_evaluations(items) }}"""
 
 
@@ -87,7 +88,7 @@ def _excerpt(feedback: str) -> str:
         "partial": None,
         "feedback": feedback,
     }
-    return str(render_string(_EXCERPT, items=[item]))
+    return str(TemplateRenderer(CORE_PROTOCOL_DIR).render_string(_EXCERPT, items=[item]))
 
 
 _ROUTES = "INFO 10-17 route: GET /v1/models, POST /v1/chat/completions, POST /tokenize\n"

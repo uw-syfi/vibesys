@@ -550,6 +550,8 @@ class RunFacts(BaseModel):
     domain_id: str = Field(min_length=1)
     objective: str = Field(min_length=1)
     environment_notes: str = ""
+    agent_git_writable: bool = True
+    """Whether the agent can commit in its workspace; false when its Git metadata is read-only."""
     profile_execution: ProfileExecution = ProfileExecution.LOCAL
     objective_location: str = Field(default="OBJECTIVE.md", min_length=1)
     reference_location: str = Field(default=".", min_length=1)

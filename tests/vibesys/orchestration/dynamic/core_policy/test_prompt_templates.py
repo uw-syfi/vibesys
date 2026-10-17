@@ -9,6 +9,7 @@ context space and checked for the facts of its context.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 import pytest
@@ -35,7 +36,7 @@ from vibesys.orchestration.dynamic.search.api import (
     PromptTemplate,
     ReviewPrompt,
 )
-from vibesys.prompts import CORE_PROTOCOL_DIR, CoreProtocolTemplate
+from vibesys.prompts import CORE_PROTOCOL_DIR, PROMPTS_DIR, CoreProtocolTemplate, render_template
 from vs_core.api import WaitEnd
 from vs_core.api.search import ReplyCorrection, ResumeFacts, WaitUnrecorded
 from vs_sim.api.testing import examples
@@ -387,3 +388,65 @@ def test_search_prompts_name_no_domain_command() -> None:
     # Domain commands live in the bundle's objective; the search's prompts stay generic.
     for template in sorted(ROOT.glob("*.j2")):
         assert "cpu_check" not in template.read_text(), template.name
+
+
+# -- an agent whose Git metadata is read-only ----------------------------------------------------
+
+_COMMIT_ADVICE = re.compile(
+    r"\b(git commit|(commit|committing) (your|the|it|and|then|any|changes?)\b)", re.IGNORECASE
+)
+_READ_ONLY_GIT_NOTE = (
+    "`.git` is read-only; submit_evaluation snapshots your working tree, including new files; "
+    "do not commit"
+)
+
+
+def _docker_notes(*, git_writable: bool) -> str:
+    """The Docker run environment's notes, rendered as the product renders them."""
+    return str(
+        render_template(
+            "docker/prompt_notes.j2",
+            template_dir=PROMPTS_DIR / "environments",
+            history_root=None,
+            git_writable=git_writable,
+        )
+    )
+
+
+def test_the_docker_notes_say_not_to_commit_exactly_when_git_is_read_only() -> None:
+    assert _READ_ONLY_GIT_NOTE in _docker_notes(git_writable=False)
+    assert "commit" not in _docker_notes(git_writable=True)
+
+
+@pytest.mark.parametrize("template", [PromptTemplate.PORTFOLIO, PromptTemplate.IMPLEMENT])
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(data=st.data(), offered=st.booleans())
+def test_a_prompt_for_a_read_only_git_run_never_tells_an_agent_to_commit(
+    template: PromptTemplate, data: st.DataObject, *, offered: bool
+) -> None:
+    # live run: the planner told implementers "(d) Commit and submit." in a run whose `.git`
+    # the container mounts read-only, so each implementer burned a turn on a commit that failed.
+    context = data.draw(CONTEXTS[template])
+
+    text = render(
+        template,
+        context,
+        agent_evaluation=offered,
+        agent_git_writable=False,
+        notes=_docker_notes(git_writable=False),
+    )
+
+    assert _READ_ONLY_GIT_NOTE in text
+    assert _COMMIT_ADVICE.search(text) is None
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(context=PLANNER_PROMPTS, writable=st.booleans())
+def test_the_planner_is_told_implementers_cannot_commit_exactly_when_git_is_read_only(
+    context: PlannerPrompt, *, writable: bool
+) -> None:
+    text = " ".join(
+        render(PromptTemplate.PORTFOLIO, context, agent_git_writable=writable).split()
+    )
+
+    assert ("never tell an implementer to commit" in text) is not writable

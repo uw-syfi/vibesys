@@ -867,6 +867,41 @@ def test_docker_environment_opens_one_started_sandbox_with_agent_paths(
     backend.sandbox.stop.assert_called_once()
 
 
+_READ_ONLY_GIT_NOTE = (
+    "`.git` is read-only; submit_evaluation snapshots your working tree, including new files; "
+    "do not commit"
+)
+
+
+def test_a_docker_agent_on_a_linked_worktree_is_told_its_git_is_read_only_and_not_to_commit(
+    tmp_path: Path, fake_agent_image: list[dict[str, Any]]
+) -> None:
+    del fake_agent_image
+    _add_linked_worktree(tmp_path / "project", tmp_path / "workspace")
+
+    session = _open(
+        build_run_environment(RunEnvironmentSpec("docker")), _request(tmp_path, FakeBackend())
+    )
+    session.close()
+
+    assert session.view.agent_git_writable is False
+    assert _READ_ONLY_GIT_NOTE in session.view.prompt_notes
+
+
+def test_a_docker_agent_whose_git_is_writable_is_not_told_to_avoid_committing(
+    tmp_path: Path, fake_agent_image: list[dict[str, Any]]
+) -> None:
+    del fake_agent_image
+
+    session = _open(
+        build_run_environment(RunEnvironmentSpec("docker")), _request(tmp_path, FakeBackend())
+    )
+    session.close()
+
+    assert session.view.agent_git_writable is True
+    assert "commit" not in session.view.prompt_notes
+
+
 def test_isolated_environment_mounts_and_translates_evaluator_package(
     tmp_path: Path,
     fake_agent_image: list[dict[str, Any]],

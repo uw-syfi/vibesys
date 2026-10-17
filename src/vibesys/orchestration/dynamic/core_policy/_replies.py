@@ -15,6 +15,7 @@ def run_prompt_variables(
     objective: str,
     environment_notes: str,
     agent_evaluation: bool,
+    agent_git_writable: bool,
     domain_sections: Mapping[str, str],
 ) -> dict[str, object]:
     """The run-level variables every dynamic template reads, besides its own context's fields.
@@ -26,6 +27,7 @@ def run_prompt_variables(
         "objective": objective,
         "environment_notes": environment_notes,
         "agent_evaluation": agent_evaluation,
+        "agent_git_writable": agent_git_writable,
         "domain_sections": domain_sections,
         "plan_example": planner_reply_example(),
     }

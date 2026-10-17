@@ -25,7 +25,14 @@ class HostEnvironmentFacts:
 
 @dataclass(frozen=True)
 class DockerEnvironmentFacts:
-    """Presentation facts for Docker execution."""
+    """Presentation facts for Docker execution.
+
+    ``agent_git_writable`` is whether the agent can write its candidate's Git metadata
+    (commit, branch, rebase). It is false when the container mounts a linked worktree's
+    metadata read-only, and then the agent's work reaches the run through the working tree.
+    """
+
+    agent_git_writable: bool = True
 
 
 @dataclass(frozen=True)

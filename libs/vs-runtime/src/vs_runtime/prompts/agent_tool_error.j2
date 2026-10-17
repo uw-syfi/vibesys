@@ -1,7 +1,7 @@
 {# Context: `reason` (ToolRefusal value), `handles` (list[str], unknown handles). Text an agent reads when an evaluation tool call is refused. No trailing newline. #}
 {% if reason == "run_stopping" %}the run is stopping; finish your turn without evaluating
 {%- elif reason == "not_admitted" %}this workspace is no longer a current owner of evaluations; finish your turn without evaluating
-{%- elif reason == "invalid_plan" %}the candidate has no revision to evaluate; commit your change, then submit again
+{%- elif reason == "invalid_plan" %}the candidate has no revision to evaluate; submit_evaluation snapshots your working tree, including new files, so make sure the workspace holds your change, then submit again; do not commit
 {%- elif reason == "not_allowed" %}the run cannot take this evaluation: its plan exceeds a run limit or its deadline, or the budget for this candidate is closed. A candidate this workspace already submitted would have returned that evaluation's handle instead; finish your turn without evaluating
 {%- elif reason == "workspace_gone" %}this workspace no longer exists; finish your turn without evaluating
 {%- elif reason == "turn_ended" %}this turn has ended, so the run takes no more evaluation calls from it; do not call this tool again

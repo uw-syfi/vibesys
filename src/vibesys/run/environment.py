@@ -39,6 +39,7 @@ def open_run_environment(
                 "docker/prompt_notes.j2",
                 template_dir=_TEMPLATE_DIR,
                 history_root=request.git_history_root,
+                git_writable=facts.agent_git_writable,
             )
         )
     elif isinstance(facts, SlurmEnvironmentFacts):

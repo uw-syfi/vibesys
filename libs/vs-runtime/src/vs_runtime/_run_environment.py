@@ -118,6 +118,7 @@ from vs_sandbox.api import (
     deduplicate_host_resources,
     evaluator_helpers,
     host_resource_for_mount,
+    linked_worktree_git_paths,
     require_sysbox_runtime,
     start_sandbox,
     stop_sandbox,
@@ -235,6 +236,9 @@ class RunEnvironmentView:
     # run environment whose GPU work happens elsewhere (Slurm jobs) sets it False, so
     # tools that need the driver in the editor are withheld rather than offered to fail.
     editor_has_gpu: bool = True
+    # Whether the agent can write its candidate's Git metadata (commit, branch, rebase).
+    # Prompt templates branch on this capability rather than on a concrete environment.
+    agent_git_writable: bool = True
     # Optional environment variable understood by the environment-owned
     # evaluator wrapper when the final trusted command should release its
     # deployment lease.
@@ -292,6 +296,15 @@ class RunEnvironmentView:
     def supports_parallel_candidate_evaluation(self) -> bool:
         """Whether each candidate can get its own worktree and container session."""
         return self.parallel_candidate_obstacle is None
+
+
+def _agent_git_writable(request: RunEnvironmentRequest) -> bool:
+    """Whether the container leaves the agent's candidate Git metadata writable.
+
+    The linked-worktree metadata mount is the one place the Docker environment confines
+    it, so the answer and the mount share ``linked_worktree_git_paths``.
+    """
+    return not linked_worktree_git_paths(request.workspace)
 
 
 @dataclass(frozen=True)
@@ -904,7 +917,8 @@ class DockerEnvironment(NoCaptureRecovery):
 
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Resolve Docker presentation facts."""
-        return _PreparedRunEnvironment(DockerEnvironmentFacts(), partial(self._open, request))
+        facts = DockerEnvironmentFacts(agent_git_writable=_agent_git_writable(request))
+        return _PreparedRunEnvironment(facts, partial(self._open, request))
 
     def _open(
         self, request: RunEnvironmentRequest, presentation: RunEnvironmentPresentation
@@ -921,6 +935,7 @@ class DockerEnvironment(NoCaptureRecovery):
             isolated=True,
             cli_sandboxed=True,
             env_kind="docker",
+            agent_git_writable=_agent_git_writable(request),
         )
         with _starting_container(request) as output:
             return command_environment_session(
