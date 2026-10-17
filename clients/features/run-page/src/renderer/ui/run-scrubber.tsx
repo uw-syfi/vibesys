@@ -1,4 +1,4 @@
-import {Card, Scrubber} from '@vibesys/ui';
+import {Scrubber} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {type RunView, scrubberView, type TraceLog, viewAtPosition} from '../../state/index.js';
 
@@ -16,20 +16,18 @@ export function RunScrubber(props: {
   const shown = scrubberView(log, view, ended);
   if (shown === null) return null;
   return (
-    <Card>
-      <Scrubber
-        label="Run position"
-        value={shown.value}
-        last={shown.last}
-        live={shown.latest}
-        pastLabel="Replay"
-        latestLabel={shown.latestLabel}
-        backLabel={shown.backLabel}
-        position={shown.position}
-        ticks={shown.ticks}
-        change={index => change(viewAtPosition(log, index))}
-        backToLive={() => change({at: 'live'})}
-      />
-    </Card>
+    <Scrubber
+      label="Run position"
+      value={shown.value}
+      last={shown.last}
+      live={shown.latest}
+      pastLabel="Replay"
+      latestLabel={shown.latestLabel}
+      backLabel={shown.backLabel}
+      position={shown.position}
+      ticks={shown.ticks}
+      change={index => change(viewAtPosition(log, index))}
+      backToLive={() => change({at: 'live'})}
+    />
   );
 }

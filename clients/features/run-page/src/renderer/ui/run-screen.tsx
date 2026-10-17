@@ -1,61 +1,48 @@
+import type {CoreState} from '@vibesys/run-state';
 import {
   Banner,
+  Breadcrumb,
   Button,
   Card,
   Chip,
-  EmptyState,
+  type Crumb,
   LogPane,
   Menu,
   type MenuItem,
-  Page,
   Row,
-  Split,
+  Screen,
   Stack,
-  Tabs,
   Text,
   Timeline,
-  Tree,
-  TreeRow,
 } from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
-  clockNow,
+  clockAt,
+  clockStart,
   endedView,
   headerView,
-  logGroups,
-  logsNotice,
-  NOTHING_FOLDED,
   type Offer,
-  progressNote,
   quotaBannerView,
-  RUN_TABS,
-  type RunAtView,
+  type ResolvedZoom,
+  type Route,
+  RUN_ROUTE,
+  type RunModel,
   type RunPageAction,
   type RunPageState,
-  type RunTab,
+  resolveZoom,
+  routeLevel,
+  runNow,
   runPhase,
-  shownStream,
-  spanLogs,
-  spansAtView,
   stopBannerView,
   streamLines,
   timelineView,
-  turnTranscript,
-  viewedRun,
 } from '../../state/index.js';
-import {MapTab} from './map-tab.js';
-import {OverviewTab} from './overview-tab.js';
+import {DeepLevel} from './levels.js';
+import {RunLevel} from './run-level.js';
 import {RunScrubber} from './run-scrubber.js';
-import {WorkTab} from './work-tab.js';
+import type {ViewBase, Zoom} from './views/props.js';
 
 type Dispatch = (action: RunPageAction) => void;
-
-const TAB_LABELS: Readonly<Record<RunTab, string>> = {
-  overview: 'Overview',
-  map: 'Map',
-  work: 'Work',
-  logs: 'Logs',
-};
 
 function reason(offer: Offer): {disabledReason?: string} {
   return offer.disabledReason === null ? {} : {disabledReason: offer.disabledReason};
@@ -76,7 +63,7 @@ function Header(props: {readonly state: RunPageState; readonly dispatch: Dispatc
   return (
     <Row justify="between" align="start" wrap>
       <Stack gap="space-2">
-        <Text as="h1" variant="title">
+        <Text as="h1" variant="heading">
           {header.title}
         </Text>
         <Row gap="space-3" wrap>
@@ -214,6 +201,7 @@ function QuotaBanner(props: {
 function EndedBanner(props: {
   readonly state: RunPageState;
   readonly dispatch: Dispatch;
+  readonly zoom: Zoom;
 }): JSX.Element | null {
   const {state, dispatch} = props;
   const ended = endedView(state);
@@ -235,7 +223,11 @@ function EndedBanner(props: {
           <Button
             variant="secondary"
             text="View logs"
-            press={() => dispatch({type: 'view-logs'})}
+            press={() => {
+              dispatch({type: 'view-logs'});
+              props.zoom({type: 'restore', route: RUN_ROUTE});
+              props.zoom({type: 'mode', mode: 'logs'});
+            }}
           />
           <Button
             variant="secondary"
@@ -270,153 +262,105 @@ function Startup(props: {readonly state: RunPageState}): JSX.Element | null {
   );
 }
 
-function LogsTab(props: {readonly state: RunPageState; readonly dispatch: Dispatch}): JSX.Element {
-  const {state, dispatch} = props;
-  const notice = logsNotice(state);
-  const groups = logGroups(state);
-  const shown = shownStream(state);
-  if (notice !== null && groups.length === 0) {
-    return (
-      <Card>
-        <EmptyState title="No logs to show" body={notice} />
-      </Card>
-    );
-  }
-  const label =
-    groups.flatMap(group => group.streams).find(stream => stream.id === shown)?.label ?? 'Log';
-  return (
-    <Split
-      main={
-        <Card section={label}>
-          <LogPane label={label} lines={streamLines(state, shown)} />
-        </Card>
-      }
-      aside={
-        <Card section="Streams">
-          <Tree label="Log streams" {...(shown === null ? {} : {selected: shown})}>
-            {groups.flatMap(group => [
-              <TreeRow
-                key={`group ${group.name}`}
-                id={`group ${group.name}`}
-                depth={0}
-                title={group.name}
-                expanded
-                select={() => {
-                  const first = group.streams[0];
-                  if (first !== undefined) dispatch({type: 'select-stream', streamId: first.id});
-                }}
-              />,
-              ...group.streams.map(stream => (
-                <TreeRow
-                  key={stream.id}
-                  id={stream.id}
-                  depth={1}
-                  title={stream.label}
-                  state={
-                    stream.live
-                      ? {tone: 'live', label: 'Writing'}
-                      : {tone: 'neutral', label: 'Closed'}
-                  }
-                  select={() => dispatch({type: 'select-stream', streamId: stream.id})}
-                />
-              )),
-            ])}
-          </Tree>
-        </Card>
-      }
-    />
-  );
-}
-
 /** Whether the run's trace has reached the window: a snapshot, or a span event, folded. */
 function traceReached(state: RunPageState): boolean {
   const {trace} = state.run;
   return state.session?.hasSnapshot === true || trace.base.sequence > 0 || trace.events.length > 0;
 }
 
-function Panel(props: {
-  readonly state: RunPageState;
-  readonly run: RunAtView;
-  readonly dispatch: Dispatch;
-}): JSX.Element {
-  const {state, run, dispatch} = props;
-  switch (state.tab) {
-    case 'logs':
-      return <LogsTab state={state} dispatch={dispatch} />;
-    case 'overview':
-      return <OverviewTab run={run} state={state} />;
-    case 'work':
-      return (
-        <WorkTab
-          run={run}
-          work={state.work}
-          progress={progressNote(run, state)}
-          now={clockNow(state, spansAtView(run))}
-          dispatch={dispatch}
-        />
-      );
-    case 'map': {
-      const viewed = traceReached(state) ? viewedRun(state) : null;
-      return (
-        <MapTab
-          trace={viewed === null ? null : viewed.trace}
-          map={state.map}
-          logsOf={spanId => spanLogs(state, spanId)}
-          transcript={viewed === null ? null : turnTranscript(viewed.trace, viewed.core, state.map)}
-          actions={{
-            filter: filter => dispatch({type: 'map-filter', filter}),
-            toggle: (id, open) => dispatch({type: 'map-toggle', id, open}),
-            select: id => dispatch({type: 'map-select', id}),
-            openLog: streamId => dispatch({type: 'select-stream', streamId}),
-          }}
-        />
-      );
-    }
+function crumbs(zoomed: ResolvedZoom, route: Route, zoom: Zoom): Crumb[] {
+  const top: Route = {
+    mode: route.agent === null ? 'ideas' : 'agents',
+    idea: null,
+    agent: null,
+    step: null,
+    item: null,
+  };
+  const items: {id: string; label: string; to: Route}[] = [{id: 'run', label: 'run', to: top}];
+  const opened: Route = {...route, step: null, item: null};
+  if (zoomed.idea !== null) items.push({id: 'idea', label: zoomed.idea.title, to: opened});
+  if (zoomed.agent !== null) items.push({id: 'agent', label: zoomed.agent.role, to: opened});
+  if (zoomed.step !== null) {
+    const label = zoomed.step.role ?? zoomed.step.title;
+    items.push({id: 'step', label, to: {...route, item: null}});
   }
+  if (zoomed.item !== null) items.push({id: 'item', label: zoomed.item, to: route});
+  return items.map((item, index) =>
+    index === items.length - 1
+      ? {id: item.id, label: item.label}
+      : {id: item.id, label: item.label, press: () => zoom({type: 'restore', route: item.to})},
+  );
+}
+
+function ZoomBar(props: {
+  readonly zoomed: ResolvedZoom;
+  readonly route: Route;
+  readonly zoom: Zoom;
+}): JSX.Element {
+  return (
+    <Row gap="space-2" align="center">
+      <Button
+        size="sm"
+        variant="quiet"
+        icon="chevron-left"
+        label="Back (Esc)"
+        press={() => props.zoom({type: 'up'})}
+      />
+      <Breadcrumb label="Zoom" items={crumbs(props.zoomed, props.route, props.zoom)} />
+    </Row>
+  );
 }
 
 /**
- * The Run screen: the header with its actions, the stop and ended banners, the startup timeline
- * while the run starts, the time scrubber once the run's trace has reached the window, and the
- * tabs. Everything shown is a selector over `state` and `run`, the folded run at the view (nothing
- * folded until the live connection provides it); the Map and the scrubber read the trace log the
- * state holds.
+ * The Run screen: a fixed page whose header holds the run's title, status, facts and controls and
+ * the one-line time bar, then the banners and the level the route names: the run (the hero and
+ * its chart, the Ideas, Timeline, Agents or Logs face, and Now) or a level below it, at most two
+ * side by side. `model` is the run at the view's sequence (`createRunReader`); `route` is the zoom
+ * (`zoomMachine`), which `zoom` moves.
  */
 export function RunScreen(props: {
   readonly state: RunPageState;
-  readonly run?: RunAtView;
+  readonly model: RunModel;
+  readonly core: CoreState | null;
+  readonly route: Route;
+  readonly zoom: Zoom;
   readonly dispatch: Dispatch;
 }): JSX.Element {
-  const {state, dispatch} = props;
-  const run = props.run ?? NOTHING_FOLDED;
+  const {state, model, route, zoom, dispatch} = props;
+  const base: ViewBase = {
+    model,
+    clock: {start: clockStart(model), now: clockAt(model, runNow(state))},
+    zoom,
+  };
+  const zoomed = resolveZoom(model, route);
+  const deep = routeLevel(route) !== 'run' && (zoomed.idea !== null || zoomed.agent !== null);
+  const level = {state, base, core: props.core, mode: route.mode, dispatch};
   return (
-    <Page width="wide">
-      <Stack gap="space-5">
-        <Header state={state} dispatch={dispatch} />
-        <StopBanner state={state} dispatch={dispatch} />
-        <QuotaBanner state={state} dispatch={dispatch} />
-        {state.notice === null ? null : (
-          <Banner tone="err" title="The run did not take the command" body={state.notice} />
-        )}
-        <EndedBanner state={state} dispatch={dispatch} />
-        <Startup state={state} />
-        {traceReached(state) ? (
-          <RunScrubber
-            log={state.run.trace}
-            view={state.view}
-            ended={runPhase(state).kind === 'ended'}
-            change={view => dispatch({type: 'view', view})}
-          />
-        ) : null}
-        <Tabs
-          label="Run views"
-          tabs={RUN_TABS.map(tab => ({value: tab, label: TAB_LABELS[tab]}))}
-          value={state.tab}
-          change={tab => dispatch({type: 'tab', tab})}
-        >
-          <Panel state={state} run={run} dispatch={dispatch} />
-        </Tabs>
-      </Stack>
-    </Page>
+    <Screen
+      density="compact"
+      header={
+        <Stack gap="space-2">
+          <Header state={state} dispatch={dispatch} />
+          {traceReached(state) ? (
+            <RunScrubber
+              log={state.run.trace}
+              view={state.view}
+              ended={runPhase(state).kind === 'ended'}
+              change={view => dispatch({type: 'view', view})}
+            />
+          ) : null}
+        </Stack>
+      }
+    >
+      <StopBanner state={state} dispatch={dispatch} />
+      <QuotaBanner state={state} dispatch={dispatch} />
+      {state.notice === null ? null : (
+        <Banner tone="err" title="The run did not take the command" body={state.notice} />
+      )}
+      <EndedBanner state={state} dispatch={dispatch} zoom={zoom} />
+      <Startup state={state} />
+      {deep ? <ZoomBar zoomed={zoomed} route={route} zoom={zoom} /> : null}
+      {deep ? <DeepLevel {...level} zoomed={zoomed} /> : <RunLevel {...level} />}
+    </Screen>
   );
 }

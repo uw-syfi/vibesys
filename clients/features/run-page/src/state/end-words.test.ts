@@ -3,7 +3,7 @@ import type {RunOverview, Span} from '@vibesys/contracts';
 import type {HostRun, RunEnd} from '@vibesys/hosts';
 import {EMPTY_TRACE, foldTrace} from '@vibesys/run-state/trace';
 import {endReason, keptCandidate} from './end-words.js';
-import {EMPTY_RUN_FOLD, endedView, type RunPageState, runPageInitial} from './index.js';
+import {EMPTY_RUN_FOLD, endedView, type RunPageState, runPageInitial, traceLog} from './index.js';
 
 type Outcome = NonNullable<RunEnd>['outcome'];
 
@@ -106,10 +106,8 @@ function ended(
       unavailable: {},
     }),
     record: {kind: 'ended', run},
-    run: {...EMPTY_RUN_FOLD, trace: {base: EMPTY_TRACE, baseOverview: overview, events: []}},
-    ...(spans.length === 0
-      ? {}
-      : {run: {...EMPTY_RUN_FOLD, trace: {base: trace, baseOverview: overview, events: []}}}),
+    run: {...EMPTY_RUN_FOLD, trace: traceLog(EMPTY_TRACE, overview, [])},
+    ...(spans.length === 0 ? {} : {run: {...EMPTY_RUN_FOLD, trace: traceLog(trace, overview, [])}}),
   };
 }
 

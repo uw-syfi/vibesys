@@ -15,6 +15,7 @@ import {
   type RunTrace,
   traceFromSnapshot,
   traceSpans,
+  type WorkMeter,
 } from '@vibesys/run-state/trace';
 import {latestTime} from './span-reading.js';
 
@@ -38,16 +39,36 @@ export interface SessionView {
 
 /**
  * The trace as a base (a snapshot's spans, or nothing) plus the span events after it, in sequence
- * order, so it can be folded at any sequence from the base's on.
+ * order, so it can be folded at any sequence from the base's on. The fold at the live end (`head`)
+ * is kept as events arrive, each event folded once, so reading the live trace does no work.
  */
 export interface TraceLog {
   readonly base: RunTrace;
   /** The overview at the base (a snapshot's), or null before one declared it. */
   readonly baseOverview: RunOverview | null;
   readonly events: readonly RunEvent[];
+  /** The trace with every event folded: the base's fold extended by each appended event. */
+  readonly head: RunTrace;
+  /** The overview with every event folded. */
+  readonly headOverview: RunOverview | null;
 }
 
-export const EMPTY_TRACE_LOG: TraceLog = {base: EMPTY_TRACE, baseOverview: null, events: []};
+/** The log of `events` after `base`, its live end folded once. */
+export function traceLog(
+  base: RunTrace,
+  baseOverview: RunOverview | null,
+  events: readonly RunEvent[],
+): TraceLog {
+  return {
+    base,
+    baseOverview,
+    events,
+    head: foldTrace(base, events),
+    headOverview: foldOverview(baseOverview, events),
+  };
+}
+
+export const EMPTY_TRACE_LOG: TraceLog = traceLog(EMPTY_TRACE, null, []);
 
 /** The events the slice keeps: the trace's span events and the overview's declaration. */
 const SPAN_EVENTS: ReadonlySet<string> = new Set([
@@ -73,7 +94,7 @@ function lastSequence(log: TraceLog): number {
 }
 
 /** `log` with the span events of `events` that come after it appended, in order. */
-function appended(log: TraceLog, events: readonly RunEvent[]): TraceLog {
+function appended(log: TraceLog, events: readonly RunEvent[], meter?: WorkMeter): TraceLog {
   let last = lastSequence(log);
   const added: RunEvent[] = [];
   for (const event of events) {
@@ -82,38 +103,53 @@ function appended(log: TraceLog, events: readonly RunEvent[]): TraceLog {
     last = at;
     if (SPAN_EVENTS.has(event.type)) added.push(event);
   }
-  return added.length === 0 ? log : {...log, events: [...log.events, ...added]};
+  if (added.length === 0) return log;
+  return {
+    ...log,
+    events: [...log.events, ...added],
+    // The head is the newest fold of its spans, so folding the new events costs one write each.
+    head: foldTrace(log.head, added, meter),
+    headOverview: foldOverview(log.headOverview, added),
+  };
 }
 
-/** The trace slice after `data`. */
-export function traceStep(log: TraceLog, data: RunData): TraceLog {
+/** The trace slice after `data`; `meter` counts the spans the live fold writes and copies. */
+export function traceStep(log: TraceLog, data: RunData, meter?: WorkMeter): TraceLog {
   switch (data.kind) {
     case 'snapshot': {
       const base = traceFromSnapshot(data.snapshot);
       const after = log.events.filter(event => (event.sequence ?? 0) > base.sequence);
-      return {base, baseOverview: overviewFromSnapshot(data.snapshot), events: after};
+      return traceLog(base, overviewFromSnapshot(data.snapshot), after);
     }
     case 'events':
-      return appended(log, data.events);
+      return appended(log, data.events, meter);
     case 'rebootstrap':
       return appended(
-        data.base === 'preserve' ? {...log, events: []} : EMPTY_TRACE_LOG,
+        data.base === 'preserve' ? traceLog(log.base, log.baseOverview, []) : EMPTY_TRACE_LOG,
         data.events,
+        meter,
       );
   }
 }
 
-/** The trace at sequence `at` (at least the base's), or at the live end when `at` is null. */
-function eventsAt(log: TraceLog, at: number | null): readonly RunEvent[] {
-  return at === null ? log.events : log.events.filter(event => (event.sequence ?? 0) <= at);
+/** The events up to sequence `at`. */
+function eventsAt(log: TraceLog, at: number): readonly RunEvent[] {
+  return log.events.filter(event => (event.sequence ?? 0) <= at);
 }
 
+/**
+ * The trace at sequence `at`, or at the live end when `at` is null. The live end is the log's
+ * `head`, folded as events arrived, so following a run costs nothing per read; a past sequence
+ * folds the base and the events up to it.
+ */
 export function traceAt(log: TraceLog, at: number | null): RunTrace {
+  if (at === null || at >= lastSequence(log)) return log.head;
   return foldTrace(log.base, eventsAt(log, at));
 }
 
 /** The run's overview at sequence `at`, or at the live end when `at` is null. */
 export function overviewAt(log: TraceLog, at: number | null): RunOverview | null {
+  if (at === null || at >= lastSequence(log)) return log.headOverview;
   return foldOverview(log.baseOverview, eventsAt(log, at));
 }
 
@@ -164,6 +200,9 @@ export function traceProblems(log: TraceLog): string[] {
     if (at <= last) problems.push(`trace event ${at} is not after ${last}`);
     if (!SPAN_EVENTS.has(event.type)) problems.push(`trace holds a ${event.type} event`);
     last = at;
+  }
+  if (log.head.sequence !== Math.max(log.base.sequence, last)) {
+    problems.push(`the live trace is at ${log.head.sequence}, the log at ${last}`);
   }
   return problems;
 }

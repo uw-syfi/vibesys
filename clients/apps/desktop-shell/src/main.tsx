@@ -10,6 +10,7 @@ import {runOfWindow, type WelcomeBridge} from '@vibesys/ipc';
 import {Card, EmptyState, Page} from '@vibesys/ui';
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
+import {windowAddress} from './address.js';
 import {shellSessionOptions} from './run-session.js';
 import {createShellStores, RunWindow, Shell} from './shell.js';
 
@@ -45,6 +46,7 @@ if (bridge === undefined) {
     schedule,
     {
       messages: window,
+      address: windowAddress(window),
       now: () => Date.now(),
       session: run => shellSessionOptions(run, {document, window, navigator}),
     },

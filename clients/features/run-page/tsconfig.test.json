@@ -27,6 +27,9 @@
     },
     {
       "path": "../../libs/store/tsconfig.testing.json"
+    },
+    {
+      "path": "../../libs/machine/tsconfig.testing.json"
     }
   ]
 }

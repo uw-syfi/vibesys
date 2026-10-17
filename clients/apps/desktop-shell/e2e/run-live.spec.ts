@@ -83,7 +83,7 @@ async function push(page: Page, listing: unknown): Promise<void> {
 
 test.use({colorScheme: 'dark'});
 
-test('a live run folds its trace and overview into the Overview and Work tabs', async ({page}) => {
+test('a live run folds its trace into the ideas, the rejected behind their row', async ({page}) => {
   await page.addInitScript(installFakeBridge, SEED);
   await page.addInitScript(installFakeMachines, SEED);
   await page.addInitScript(installFakeRun, {streams: [], text: {}});
@@ -94,26 +94,18 @@ test('a live run folds its trace and overview into the Overview and Work tabs', 
     .getByRole('button', {name: /^\S+ queue-rs · mpmc/})
     .click();
 
-  const objective = page.getByRole('region', {name: 'Objective'});
-  await expect(objective.getByText(/Maximize trusted end-to-end throughput/)).toBeVisible();
-  await expect(page.getByRole('region', {name: 'Performance'})).toBeVisible();
+  const ideas = page.getByRole('listbox', {name: 'Ideas'});
+  await expect(ideas.getByRole('option').first()).toBeVisible();
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
   if (shots !== undefined)
-    await page.screenshot({path: `${shots}/ink-live-overview.png`, fullPage: true});
-
-  await page.getByRole('tab', {name: 'Work'}).click();
-  const rows = page.getByRole('table', {name: 'Workstreams'});
-  for (const id of ['W1', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7']) {
-    await expect(rows.getByRole('cell', {name: id, exact: true}).first()).toBeVisible();
-  }
+    await page.getByRole('main').screenshot({path: `${shots}/ink-live-ideas.png`});
+  const shown = await ideas.getByRole('option').count();
+  await page.getByRole('button', {name: /^\+ \d+ rejected$/}).click();
+  await expect.poll(() => ideas.getByRole('option').count()).toBeGreaterThan(shown);
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
-  if (shots !== undefined)
-    await page.screenshot({path: `${shots}/ink-live-work.png`, fullPage: true});
 });
 
-test('a run that has opened no step yet says so on Overview and Work, not "no work yet"', async ({
-  page,
-}) => {
+test('a run that has tried no idea yet says what will appear, not a guess', async ({page}) => {
   await page.addInitScript(installFakeBridge, SEED);
   await page.addInitScript(installFakeMachines, SEED);
   await page.addInitScript(installFakeRun, {streams: [], text: {}});
@@ -123,11 +115,8 @@ test('a run that has opened no step yet says so on Overview and Work, not "no wo
     .getByRole('navigation', {name: 'VibeSys'})
     .getByRole('button', {name: /^\S+ queue-rs · mpmc/})
     .click();
-  await expect(page.getByText('Waiting for the first step')).toBeVisible();
-  await expect(page.getByText('before the first plan')).toBeVisible();
-  await page.getByRole('tab', {name: 'Work'}).click();
-  await expect(page.getByText('Waiting for the first step')).toBeVisible();
-  await expect(page.getByText('No work yet')).toHaveCount(0);
+  await expect(page.getByText('No ideas yet')).toBeVisible();
+  await expect(page.getByText('nothing measured yet')).toBeVisible();
 });
 
 test('a live run pauses and resumes from the header over its session, and is let go', async ({

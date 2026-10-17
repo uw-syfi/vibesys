@@ -67,7 +67,7 @@ test('a run opens in a window of its own, shown alone and live there', async ({p
   await sidebar(page)
     .getByRole('button', {name: /^\S+ queue-rs · mpmc/})
     .click();
-  await expect(page.getByRole('tablist', {name: 'Run views'})).toBeVisible();
+  await expect(page.getByRole('radiogroup', {name: 'Show'})).toBeVisible();
 
   const opening = context.waitForEvent('page');
   await page.getByRole('button', {name: 'More actions'}).click();
@@ -78,7 +78,7 @@ test('a run opens in a window of its own, shown alone and live there', async ({p
   // The main window leaves the run for New run; the new one shows the run, with no sidebar.
   await expect(page.getByRole('heading', {name: 'New run'})).toBeVisible();
   expect(new URL(runWindow.url()).search).toBe(`?host=ssh%3Achelan4&run=${RUN_ID}`);
-  await expect(runWindow.getByRole('tablist', {name: 'Run views'})).toBeVisible();
+  await expect(runWindow.getByRole('radiogroup', {name: 'Show'})).toBeVisible();
   await expect(runWindow.getByText(`chelan4 · ${RUN_ID}`)).toBeVisible();
   await expect(sidebar(runWindow)).toHaveCount(0);
   // The run is live in its window (it attached there), and the main window let it go.

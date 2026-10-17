@@ -8,6 +8,7 @@ export {
   type RunPageStore,
 } from './effects/store.js';
 export {type RunPageOptions, useRunPage} from './effects/use-run-page.js';
+export type {RunPageAddress} from './effects/use-zoom.js';
 export {
   type RunPageBridge,
   type RunPageNavigation,

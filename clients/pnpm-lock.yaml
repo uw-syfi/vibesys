@@ -783,6 +783,9 @@ importers:
       react:
         specifier: 19.1.1
         version: 19.1.1
+      xstate:
+        specifier: 5.33.2
+        version: 5.33.2
     devDependencies:
       '@types/bun':
         specifier: 1.4.2

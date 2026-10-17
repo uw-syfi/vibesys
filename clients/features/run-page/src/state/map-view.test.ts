@@ -15,6 +15,7 @@ import {
   selectedSpan,
   type TraceLog,
   traceAt,
+  traceLog,
   viewAtPosition,
 } from './index.js';
 import {titleOf} from './span-words.js';
@@ -298,7 +299,11 @@ function history(seed: number): TraceLog {
   const cut = random.int(3) === 0 ? random.int(events.length) : 0;
   const at = cut === 0 ? 0 : (events[cut - 1]?.sequence ?? 0);
   const base = at === 0 ? EMPTY_TRACE : traceFromSnapshot(snapshotAt(events, at));
-  return {base, baseOverview: null, events: events.filter(event => (event.sequence ?? 0) > at)};
+  return traceLog(
+    base,
+    null,
+    events.filter(event => (event.sequence ?? 0) > at),
+  );
 }
 
 function mapState(seed: number, trace: ReturnType<typeof traceAt>): MapState {
@@ -562,7 +567,7 @@ describe('a dynamic run on the Map', () => {
       }),
     ),
   ];
-  const run: TraceLog = {base: EMPTY_TRACE, baseOverview: null, events};
+  const run: TraceLog = traceLog(EMPTY_TRACE, null, events);
   const all: MapState = {filter: 'all', open: new Set(), selected: null};
 
   test('orders run, baseline, planning calls, workstreams and their steps; finished work folds', () => {

@@ -4,17 +4,21 @@
  * the logs channel let go) when it unmounts or shows another run.
  */
 import type {ScheduleTimeout} from '@vibesys/machine';
+import type {CoreState} from '@vibesys/run-state';
 import {useEffect, useMemo, useState, useSyncExternalStore} from 'react';
 import {
+  createRunReader,
+  type Route,
+  type RunModel,
   type RunPageAction,
   type RunPageSeed,
   type RunPageState,
   type RunRecord,
   sameRecord,
-  type ViewedRun,
-  viewedRun,
+  type ZoomEvent,
 } from '../../state/index.js';
 import {createRunPageStore, type RunPageStore} from './store.js';
+import {useZoom} from './use-zoom.js';
 import {
   type RunPageBridge,
   type RunPageNavigation,
@@ -41,8 +45,13 @@ const NO_STORE = {
 export function useRunPage(options: RunPageOptions): {
   readonly state: RunPageState;
   readonly dispatch: (action: RunPageAction) => void;
-  /** The run at the view's sequence, for the tabs (`viewedRun`). */
-  readonly run: ViewedRun;
+  /** The run at the view's sequence, read by the page's own reader (`createRunReader`). */
+  readonly model: RunModel;
+  /** The run fold (the transcript the turns read); null before the run reached the window. */
+  readonly core: CoreState | null;
+  /** Where the screen is zoomed, and the way to move it. */
+  readonly route: Route;
+  readonly zoom: (event: ZoomEvent) => void;
 } | null {
   const {seed, record, bridge, navigation, schedule, page} = options;
   const [store, setStore] = useState<RunPageStore | null>(null);
@@ -76,11 +85,11 @@ export function useRunPage(options: RunPageOptions): {
   }, [store, record]);
   const source = store ?? NO_STORE;
   const state = useSyncExternalStore(source.subscribe, source.getState, source.getState);
-  const runSlice = state?.run;
-  const view = state?.view;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the viewed run depends only on the run slice and the view; recomputing it for every other change of `state` would refold the trace on each log line.
-  const run = useMemo(() => (state === null ? null : viewedRun(state)), [runSlice, view]);
-  return store === null || state === null || run === null
-    ? null
-    : {state, dispatch: store.dispatch, run};
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the reader caches one run's folds (`key`); a new run starts a new reader.
+  const reader = useMemo(() => createRunReader(), [key]);
+  const {route, zoom} = useZoom(key, page.address);
+  if (store === null || state === null) return null;
+  const at = state.view.at === 'live' ? null : state.view.at;
+  const model = reader.read(state.run.trace, at);
+  return {state, dispatch: store.dispatch, model, core: state.run.core, route, zoom};
 }

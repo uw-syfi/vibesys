@@ -6,6 +6,19 @@
  */
 
 export {
+  ageWords,
+  type BestPathView,
+  bestPathView,
+  IDEAS_FILTER_DEFAULT,
+  type IdeaRow,
+  type IdeasFilter,
+  type IdeasView,
+  type IdeaTone,
+  ideasView,
+  type PathCrumb,
+  type ViewMeter,
+} from './ideas-view.js';
+export {
   EMPTY_RUN_FOLD,
   EMPTY_TRACE_LOG,
   overviewAt,
@@ -15,6 +28,7 @@ export {
   type SessionView,
   type TraceLog,
   traceAt,
+  traceLog,
   traceStep,
 } from './live.js';
 export {
@@ -43,6 +57,25 @@ export {
 } from './overview-view.js';
 export {runRecord, sameRecord} from './record.js';
 export {clockNow, NOTHING_FOLDED, type RunAtView, spansAtView} from './run-at-view.js';
+export {
+  clockAt,
+  clockStart,
+  type HeroView,
+  heroView,
+  type NowItem,
+  nowView,
+  type ResolvedZoom,
+  resolveZoom,
+  type StripChartView,
+  stripChartView,
+} from './run-level.js';
+export {
+  createRunReader,
+  type Direction,
+  type ReadMeter,
+  type RunModel,
+  type RunReader,
+} from './run-model.js';
 export {
   commandable,
   FIRST_HISTORY_SEQUENCE,
@@ -116,3 +149,16 @@ export {
 } from './views.js';
 export {WORK_FILTER_ALL, WORK_OUTCOMES, type WorkFilter, type WorkOutcome} from './work-filter.js';
 export {type RowOutcome, rowMatches, type WorkRow, type WorkView, workView} from './work-view.js';
+export {
+  type Route,
+  RUN_MODES,
+  RUN_ROUTE,
+  type RunMode,
+  routeFromQuery,
+  routeLevel,
+  routeQuery,
+  routeUp,
+  type ZoomEvent,
+  type ZoomLevel,
+  zoomMachine,
+} from './zoom.js';

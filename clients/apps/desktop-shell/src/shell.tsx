@@ -197,7 +197,16 @@ function RunRoute(props: {
       </Page>
     );
   }
-  return <RunScreen state={page.state} run={page.run} dispatch={page.dispatch} />;
+  return (
+    <RunScreen
+      state={page.state}
+      model={page.model}
+      core={page.core}
+      route={page.route}
+      zoom={page.zoom}
+      dispatch={page.dispatch}
+    />
+  );
 }
 
 /** The window: the sidebar and the selected screen. */

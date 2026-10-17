@@ -29,6 +29,7 @@ import {
   reduceEventBatch,
 } from '@vibesys/run-state';
 import type {RunRef} from '@vibesys/runs';
+import {IDEAS_FILTER_DEFAULT, type IdeasFilter} from './ideas-view.js';
 import {
   EMPTY_RUN_FOLD,
   heardAfter,
@@ -158,6 +159,10 @@ export interface RunPageState {
   readonly selected: string | null;
   /** The Work tab's search query and outcome filter. */
   readonly work: WorkFilter;
+  /** Which ideas the Ideas face shows. */
+  readonly ideas: IdeasFilter;
+  /** The best path shows every name rather than folding its middle. */
+  readonly pathOpen: boolean;
   /** The window's hold on the live run. */
   readonly link: RunLink;
   /** What the attached run's session reports; null while none runs. */
@@ -184,6 +189,8 @@ export type RunPageAction =
   | {readonly type: 'select-stream'; readonly streamId: string}
   | {readonly type: 'work-query'; readonly query: string}
   | {readonly type: 'work-outcome'; readonly outcome: WorkOutcome}
+  | {readonly type: 'ideas-filter'; readonly filter: IdeasFilter}
+  | {readonly type: 'best-path-open'; readonly open: boolean}
   | {readonly type: 'map-filter'; readonly filter: MapFilter}
   | {readonly type: 'map-toggle'; readonly id: string; readonly open: boolean}
   | {readonly type: 'map-select'; readonly id: string}
@@ -263,6 +270,8 @@ export function runPageInitial(seed: RunPageSeed): RunPageState {
     views: {},
     selected: null,
     work: WORK_FILTER_ALL,
+    ideas: IDEAS_FILTER_DEFAULT,
+    pathOpen: false,
     link: {kind: 'none'},
     session: null,
     run: EMPTY_RUN_FOLD,
@@ -667,6 +676,10 @@ export function runPageStep(state: RunPageState, action: RunPageAction): RunPage
       return {state: {...state, work: {...state.work, query: action.query}}, requests: []};
     case 'work-outcome':
       return {state: {...state, work: {...state.work, outcome: action.outcome}}, requests: []};
+    case 'ideas-filter':
+      return {state: {...state, ideas: action.filter}, requests: []};
+    case 'best-path-open':
+      return {state: {...state, pathOpen: action.open}, requests: []};
     case 'view-logs':
       return {state: {...state, tab: 'logs', selected: narration(state)}, requests: []};
     case 'map-filter':

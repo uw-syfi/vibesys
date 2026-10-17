@@ -23,6 +23,7 @@ import type {HistoryReply} from '../../state/index.js';
 import type {LiveSession, SessionObserver} from './live-session.js';
 import {type PortMessages, welcomeRunBridge} from './run-connection.js';
 import type {RunPagePorts} from './store.js';
+import type {RunPageAddress} from './use-zoom.js';
 
 /** The welcome bridge's calls the Run screen makes. */
 export type RunPageBridge = Pick<
@@ -42,6 +43,8 @@ export type RunPageBridge = Pick<
 /** The page the session runs in: where the preload's ports arrive, and the app's session wiring. */
 export interface RunPagePage {
   readonly messages: PortMessages;
+  /** The window's address and keys, where the screen keeps its zoom. */
+  readonly address: RunPageAddress;
   /** The window's clock, in epoch milliseconds. */
   now(): number;
   /** The session's transport and lifecycle over the run's bridge (the app builds transports). */

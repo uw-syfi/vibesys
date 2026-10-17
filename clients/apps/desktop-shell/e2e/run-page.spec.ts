@@ -154,11 +154,11 @@ test('a run starts, writes its logs, stops with Force stop after the bound, and 
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
   await shot(page, 'ink-starting');
 
-  // Running: the timeline goes; the Logs tab groups the streams by owner and follows one.
+  // Running: the timeline goes; the Logs face groups the streams by owner and follows one.
   await push(page, listed([server('running')], []));
   await expect(startup).toHaveCount(0);
   await expect(page.getByRole('button', {name: 'Pause'})).toBeEnabled();
-  await page.getByRole('tab', {name: 'Logs'}).click();
+  await page.getByRole('radiogroup', {name: 'Show'}).getByText('Logs').click();
   const streams = page.getByRole('tree', {name: 'Log streams'});
   for (const group of ['Startup', 'Gates', 'Tool builds', 'Run narration']) {
     await expect(streams.getByRole('treeitem', {name: group, exact: true})).toBeVisible();
@@ -221,37 +221,24 @@ test('a run starts, writes its logs, stops with Force stop after the bound, and 
     .toEqual(['resume', 'ssh:chelan4', PROJECT, RUN_ID]);
 });
 
-test('the Overview and Work tabs read the folded run, and the Work filter is kept', async ({
+test('the run level says what will appear before anything is measured, and keeps the search', async ({
   page,
 }) => {
   await open(page, {...SEED, listings: [listed([server('running')], [])]});
 
-  // Overview: with nothing folded yet, each section says what will appear, not a guess.
-  const objective = page.getByRole('region', {name: 'Objective'});
-  await expect(objective.getByText('has not declared its objective yet')).toBeVisible();
-  for (const label of ['Best vs baseline', 'Round', 'Workstreams', 'Elapsed']) {
-    await expect(page.getByText(label, {exact: true})).toBeVisible();
-  }
-  await expect(page.getByRole('region', {name: 'Performance'})).toContainText(
-    'Nothing measured yet',
-  );
-  await expect(page.getByRole('region', {name: 'Current work'})).toContainText(
-    'Nothing is running',
-  );
+  // With nothing folded yet the hero and the ideas say what will appear, not a guess.
+  await expect(page.getByText('nothing measured yet')).toBeVisible();
+  await expect(page.getByText('No ideas yet')).toBeVisible();
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
-  await shot(page, 'ink-overview-empty');
+  await shot(page, 'ink-run-empty');
 
-  // Work: the search and the outcome filter live in the page state, so a tab switch keeps them.
-  await page.getByRole('tab', {name: 'Work'}).click();
-  await expect(page.getByText('Waiting for the first step')).toBeVisible();
-  await page.getByLabel('Search work').fill('ring');
-  await page.getByRole('radiogroup', {name: 'Show outcomes'}).getByText('Rejected').click();
-  await page.getByRole('tab', {name: 'Overview'}).click();
-  await page.getByRole('tab', {name: 'Work'}).click();
-  await expect(page.getByLabel('Search work')).toHaveValue('ring');
-  await expect(page.getByRole('radio', {name: 'Rejected'})).toBeChecked();
-  expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
-  await shot(page, 'ink-work-empty');
+  // The mode lives in the zoom, the filters in the page state: a switch away and back keeps both.
+  const show = page.getByRole('radiogroup', {name: 'Show'});
+  await show.getByText('Agents').click();
+  await expect(show.getByRole('radio', {name: 'Agents'})).toBeChecked();
+  await show.getByText('Ideas').click();
+  await expect(show.getByRole('radio', {name: 'Ideas'})).toBeChecked();
+  await expect(page.getByText('No ideas yet')).toBeVisible();
 });
 
 test('a cleanly stopped run offers no Resume', async ({page}) => {
@@ -264,5 +251,7 @@ test('a cleanly stopped run offers no Resume', async ({page}) => {
   await expect(page.getByText('Stopped by you.')).toBeVisible();
   await expect(page.getByRole('button', {name: /^Resume/})).toHaveCount(0);
   await page.getByRole('button', {name: 'View logs'}).click();
-  await expect(page.getByRole('tab', {name: 'Logs'})).toHaveAttribute('aria-selected', 'true');
+  await expect(
+    page.getByRole('radiogroup', {name: 'Show'}).getByRole('radio', {name: 'Logs'}),
+  ).toBeChecked();
 });

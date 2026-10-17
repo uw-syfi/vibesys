@@ -1,0 +1,37 @@
+/**
+ * What every view of the Run screen receives: the run at the view's sequence (`RunModel`), the run
+ * clock, and `zoom`, the one way a view moves the screen (open an idea, a step, an item, an agent,
+ * switch the mode, go up). A view reads the run only through these props and the selectors in
+ * `../../../state`; it never reads the route itself, so the frame (`../run-screen.tsx`) decides
+ * which view shows where.
+ *
+ * One folder per view under `views/`, each owned on its own:
+ * - `timeline/`: the Gantt over the run clock (run level) or over one idea's steps;
+ * - `agents/`: the agent tree (run level, and compact beside an opened agent) and the agent pane;
+ * - `logs/`: the logs of the run, an idea or a step;
+ * - `step/`: an opened step (an agent turn as narrative, or a gate) and its item (a tool call);
+ * - `idea/`: an opened idea's body (attempts, step strip, steps) and its compact step list.
+ */
+import type {CoreState} from '@vibesys/run-state';
+import type {RunModel, ZoomEvent} from '../../../state/index.js';
+
+/** Moves the screen: the route machine's events. */
+export type Zoom = (event: ZoomEvent) => void;
+
+/** The run clock (run seconds): where the run started and where it is now (null: unknown). */
+interface RunClock {
+  readonly start: number;
+  readonly now: number | null;
+}
+
+/** What every view gets. */
+export interface ViewBase {
+  readonly model: RunModel;
+  readonly clock: RunClock;
+  readonly zoom: Zoom;
+}
+
+/** What a view that reads agent transcripts also gets: the run fold (null before it reached). */
+export interface WithCore {
+  readonly core: CoreState | null;
+}
