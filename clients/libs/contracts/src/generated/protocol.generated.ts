@@ -137,7 +137,7 @@ export type RequestId17 = string;
 export type ClientId17 = string;
 export type Timestamp17 = string;
 export type Type17 = "command.control";
-export type ControlRequest = SteerRequest | PauseRequest | ResumeRequest | StopRequest;
+export type ControlRequest = SteerRequest | PauseRequest | ResumeRequest | StopRequest | WithdrawRequest;
 export type ControlId = string;
 export type Action = "steer";
 export type Text2 = string;
@@ -146,6 +146,10 @@ export type Text2 = string;
  */
 export type SteerTargetKind = "run" | "role" | "attempt" | "item";
 export type Id = string | null;
+/**
+ * How a steer reaches the turns of its target.
+ */
+export type SteerMode = "next_turn" | "standing";
 export type ControlId1 = string;
 export type Action1 = "pause";
 export type ControlId2 = string;
@@ -158,6 +162,9 @@ export type Action3 = "stop";
  * How a stop treats work in flight: let it finish, or cancel it.
  */
 export type StopMode = "drain" | "cancel";
+export type ControlId4 = string;
+export type Action4 = "withdraw";
+export type Withdraws = string;
 export type ProtocolVersion18 = 1;
 export type RequestId18 = string;
 export type ClientId18 = string;
@@ -188,7 +195,7 @@ export type ValidationPaths = (string | number)[][] | null;
 /**
  * What a control request asks for; the tag of the ``ControlRequest`` union.
  */
-export type ControlAction = "steer" | "pause" | "resume" | "stop";
+export type ControlAction = "steer" | "pause" | "resume" | "stop" | "withdraw";
 export type Status = "pending" | "consumed";
 export type Question = string;
 export type Answer = string;
@@ -735,7 +742,7 @@ export type HypothesisId = string;
 export type Identified = boolean;
 export type Title4 = string | null;
 export type Claim = string | null;
-export type Action4 = string | null;
+export type Action5 = string | null;
 export type FirstRound = number;
 export type LastRound = number;
 export type Round1 = number;
@@ -1208,17 +1215,19 @@ export interface ControlCommand {
   control: ControlRequest;
 }
 /**
- * Free-text guidance for the next agent turn of its target, the whole run by default.
+ * Free-text guidance for the agent turns of its target, the whole run by default.
  *
- * The message reaches exactly one turn of the target, once. A target the run cannot resolve
- * (a role the search does not declare, an attempt or item it does not hold, or an attempt
- * that has ended) is refused, and the message reaches no one.
+ * With ``mode`` ``next_turn`` the message reaches exactly one turn of the target, once; with
+ * ``standing`` it reaches every turn of the target until withdrawn. A target the run cannot
+ * resolve (a role the search does not declare, an attempt or item it does not hold, or an
+ * attempt that has ended) is refused, and the message reaches no one.
  */
 export interface SteerRequest {
   control_id: ControlId;
   action: Action;
   text: Text2;
   target?: SteerTarget;
+  mode?: SteerMode;
 }
 /**
  * Whom a steer is for: the whole run, or one role, attempt or item, by id.
@@ -1255,6 +1264,17 @@ export interface StopRequest {
   control_id: ControlId3;
   action: Action3;
   mode?: StopMode;
+}
+/**
+ * End standing guidance: the standing steer sent under ``withdraws``.
+ *
+ * Turns dispatched after the run takes the withdrawal no longer receive the guidance. A
+ * withdrawal of a steer the run does not hold as standing guidance in force is refused.
+ */
+export interface WithdrawRequest {
+  control_id: ControlId4;
+  action: Action4;
+  withdraws: Withdraws;
 }
 /**
  * Response envelope for all protocol requests.
@@ -2211,7 +2231,7 @@ export interface HypothesisEntry {
   identified?: Identified;
   title?: Title4;
   claim?: Claim;
-  action?: Action4;
+  action?: Action5;
   first_round: FirstRound;
   last_round: LastRound;
   rounds?: Rounds;

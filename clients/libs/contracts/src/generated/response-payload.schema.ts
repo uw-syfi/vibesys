@@ -342,7 +342,8 @@ const responsePayloadSchema: Record<string, unknown> = {
         "steer",
         "pause",
         "resume",
-        "stop"
+        "stop",
+        "withdraw"
       ],
       "title": "ControlAction",
       "type": "string"

@@ -340,7 +340,8 @@
         "steer",
         "pause",
         "resume",
-        "stop"
+        "stop",
+        "withdraw"
       ],
       "title": "ControlAction",
       "type": "string"

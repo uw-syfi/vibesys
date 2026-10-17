@@ -1113,7 +1113,8 @@
         "steer",
         "pause",
         "resume",
-        "stop"
+        "stop",
+        "withdraw"
       ],
       "title": "ControlAction",
       "type": "string"
@@ -1166,7 +1167,8 @@
           "pause": "#/$defs/PauseRequest",
           "resume": "#/$defs/ResumeRequest",
           "steer": "#/$defs/SteerRequest",
-          "stop": "#/$defs/StopRequest"
+          "stop": "#/$defs/StopRequest",
+          "withdraw": "#/$defs/WithdrawRequest"
         },
         "propertyName": "action"
       },
@@ -1182,6 +1184,9 @@
         },
         {
           "$ref": "#/$defs/StopRequest"
+        },
+        {
+          "$ref": "#/$defs/WithdrawRequest"
         }
       ]
     },
@@ -6927,9 +6932,18 @@
       "title": "SteerCommand",
       "type": "object"
     },
+    "SteerMode": {
+      "description": "How a steer reaches the turns of its target.",
+      "enum": [
+        "next_turn",
+        "standing"
+      ],
+      "title": "SteerMode",
+      "type": "string"
+    },
     "SteerRequest": {
       "additionalProperties": false,
-      "description": "Free-text guidance for the next agent turn of its target, the whole run by default.\n\nThe message reaches exactly one turn of the target, once. A target the run cannot resolve\n(a role the search does not declare, an attempt or item it does not hold, or an attempt\nthat has ended) is refused, and the message reaches no one.",
+      "description": "Free-text guidance for the agent turns of its target, the whole run by default.\n\nWith ``mode`` ``next_turn`` the message reaches exactly one turn of the target, once; with\n``standing`` it reaches every turn of the target until withdrawn. A target the run cannot\nresolve (a role the search does not declare, an attempt or item it does not hold, or an\nattempt that has ended) is refused, and the message reaches no one.",
       "properties": {
         "control_id": {
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
@@ -6953,6 +6967,10 @@
             "kind": "run",
             "id": null
           }
+        },
+        "mode": {
+          "$ref": "#/$defs/SteerMode",
+          "default": "next_turn"
         }
       },
       "required": [
@@ -7697,6 +7715,35 @@
     },
     "WireSpan": {
       "$ref": "#/$defs/Span"
+    },
+    "WithdrawRequest": {
+      "additionalProperties": false,
+      "description": "End standing guidance: the standing steer sent under ``withdraws``.\n\nTurns dispatched after the run takes the withdrawal no longer receive the guidance. A\nwithdrawal of a steer the run does not hold as standing guidance in force is refused.",
+      "properties": {
+        "control_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Control Id",
+          "type": "string"
+        },
+        "action": {
+          "const": "withdraw",
+          "default": "withdraw",
+          "title": "Action",
+          "type": "string"
+        },
+        "withdraws": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Withdraws",
+          "type": "string"
+        }
+      },
+      "required": [
+        "control_id",
+        "action",
+        "withdraws"
+      ],
+      "title": "WithdrawRequest",
+      "type": "object"
     },
     "WorkspaceSnapshotData": {
       "additionalProperties": false,
