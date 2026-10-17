@@ -749,3 +749,103 @@ def test_a_cancel_ends_a_quota_wait_at_once(action: QuotaAction, cancel_after: f
     assert "cancelled" in reason
     assert run.sink.abandoned_waits == [pytest.approx(cancel_after)]
     assert run.control.pause_requested()
+
+
+@given(
+    cancelled=st.lists(st.booleans(), min_size=1, max_size=4),
+    cancel_after=st.floats(min_value=1.0, max_value=290.0, allow_nan=False),
+)
+def test_a_cancel_leaves_the_runs_timed_resume_to_the_other_turns(
+    cancelled: list[bool], cancel_after: float
+) -> None:
+    """Turns stopped on one quota under ``wait``: cancelling any of them ends only that turn.
+
+    The run stays paused, the other turns stay parked, and the run resumes itself once, at
+    the retry the first stop armed, even when every turn that armed it was cancelled (the run
+    loop's poll fires it then). Before, the first cancelled turn resumed the run at once.
+    """
+    run = _Run(policy=QuotaPolicy(QuotaAction.WAIT))
+    retry = run.policy.retry_seconds
+    clients = [run.client(OTHER, _quota(), f"later-{i}") for i in range(len(cancelled))]
+    ended: dict[int, tuple[str, float]] = {}
+
+    def turn(index: int) -> None:
+        try:
+            ended[index] = (_turn(clients[index], f"inv-{index}"), run.now())
+        except AgentQuotaError:
+            ended[index] = ("cancelled", run.now())
+
+    def main() -> tuple[bool, dict[int, tuple[str, float]], bool]:
+        workers = [
+            run.threads.spawn(lambda i=i: turn(i), name=f"turn-{i}", daemon=False)
+            for i in range(len(cancelled))
+        ]
+        run.threads.sleep(cancel_after)
+        for client, cancel in zip(clients, cancelled, strict=True):
+            if cancel:
+                client.cancel()
+        run.threads.sleep(1.0)
+        during = (run.control.pause_requested(), dict(ended))
+        run.threads.sleep(START + retry + 1.0 - run.now())
+        paused_at_end = run.control.pause_requested()
+        for worker in workers:
+            worker.join(BUDGET)
+        return (*during, paused_at_end)
+
+    paused_after_cancel, ended_after_cancel, paused_at_end = run.threads.run(main)
+
+    survivors = {i for i, cancel in enumerate(cancelled) if not cancel}
+    assert paused_after_cancel
+    assert ended_after_cancel == {
+        i: ("cancelled", pytest.approx(START + cancel_after))
+        for i in range(len(cancelled))
+        if i not in survivors
+    }
+    assert ended == {
+        i: (f"later-{i}", pytest.approx(START + retry))
+        if i in survivors
+        else ("cancelled", pytest.approx(START + cancel_after))
+        for i in range(len(cancelled))
+    }
+    assert not paused_at_end
+    assert run.kinds().count(RunControlTransitionKind.RESUMED) == 1
+    assert [reason for _, reason, _ in run.sink.resumed] == ["wait_elapsed"] * len(survivors)
+
+
+def test_a_cancelled_turn_leaves_the_operators_capacity_wait_to_the_others() -> None:
+    """Two turns parked on a quota for the operator; one is cancelled. The operator's request to
+    wait for capacity still reaches the other, which resumes the run when capacity returns.
+    Before, the cancelled turn's exit refused every later request for the whole run."""
+    run = _Run(policy=QuotaPolicy(QuotaAction.PAUSE))
+    retry = run.policy.retry_seconds
+    a = run.client(OTHER, _quota(), "a-later")
+    b = run.client(OTHER, _quota(), "b-later")
+    replies: dict[str, tuple[str, float]] = {}
+    accepted: list[bool] = []
+
+    def turn_a() -> None:
+        with pytest.raises(AgentQuotaError):
+            _turn(a, "inv-a")
+        replies["a"] = ("cancelled", run.now())
+
+    def main() -> None:
+        worker = run.threads.spawn(turn_a, name="turn-a", daemon=False)
+        operator = run.threads.spawn(operate, name="operator", daemon=False)
+        replies["b"] = (_turn(b, "inv-b"), run.now())
+        worker.join(BUDGET)
+        operator.join(BUDGET)
+
+    def operate() -> None:
+        run.threads.sleep(10.0)
+        a.cancel()
+        run.threads.sleep(10.0)
+        accepted.append(run.control.resume_when_capacity_returns())
+
+    run.threads.run(main)
+
+    assert accepted == [True]
+    assert replies == {
+        "a": ("cancelled", pytest.approx(START + 10.0)),
+        "b": ("b-later", pytest.approx(START + 20.0 + retry)),
+    }
+    assert not run.control.pause_requested()
