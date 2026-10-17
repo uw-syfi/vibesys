@@ -211,6 +211,9 @@ class EvaluationStepResult(BaseModel):
     duration_s: FiniteFloat | None = Field(default=None, ge=0)
     stdout_tail: str | None = Field(default=None, max_length=STAGE_OUTPUT_TAIL_CHARS)
     stderr_tail: str | None = Field(default=None, max_length=STAGE_OUTPUT_TAIL_CHARS)
+    service_log_tail: str | None = None
+    """The shared service's log tail beside a failed stage, kept apart from ``failure`` (the
+    stage's own output) so a reader that must cut the text keeps the stage's verdict."""
 
     @model_validator(mode="after")
     def _result_matches_state(self) -> EvaluationStepResult:
@@ -220,6 +223,7 @@ class EvaluationStepResult(BaseModel):
             self.failure is not None
             or self.operator_failure is not None
             or self.failure_kind is not None
+            or self.service_log_tail is not None
         ):
             raise ValueError("only failed stage may include failure")  # noqa: TRY003  # lint-waiver: LW-930023 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
         return self

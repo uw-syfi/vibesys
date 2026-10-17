@@ -39,3 +39,15 @@ def render_stage_failure(
     return _RENDERER.render_template(
         "stage_failure.j2", rejected=rejected, observed_failure=observed_failure
     )
+
+
+def render_stage_output_with_service_log(
+    stage_output: str, service_log: str | None
+) -> RenderedPrompt:
+    """A failed stage's own output, preceded by the shared service's log tail when there is one.
+
+    The stage output comes last: the end of the text is what a reader that cuts it keeps.
+    """
+    return _RENDERER.render_template(
+        "stage_output_with_service_log.j2", stage_output=stage_output, service_log=service_log
+    )

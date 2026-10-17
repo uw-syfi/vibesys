@@ -80,6 +80,8 @@ class ScenarioCluster(FakeCluster):
         self.benchmark_exit: int | None = 0
         self.job_exit_code = 0
         self.benchmark_output = BENCHMARK_OUTPUT
+        self.accuracy_output = "ok"
+        self.service_log_tail = ""
         self.profile_output = f"profile captured\n{PROFILE_END}\n"
         self.submissions: list[str] = []
         self.batches: list[SlurmBatchRequest] = []
@@ -126,7 +128,7 @@ class ScenarioCluster(FakeCluster):
         for stage in request.stages:
             exit_code = self.accuracy_exit if stage.name == "accuracy" else self.benchmark_exit
             output = {"benchmark": self.benchmark_output, "profile": self.profile_output}.get(
-                stage.name, "ok"
+                stage.name, self.accuracy_output
             )
             stages.append(
                 SlurmBatchStageResult(
@@ -146,6 +148,7 @@ class ScenarioCluster(FakeCluster):
             stages=tuple(stages),
             phase_timings_seconds={},
             content_cache_hits=0,
+            service_log_tail=self.service_log_tail,
         )
 
 

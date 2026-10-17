@@ -444,8 +444,12 @@ def _facts(
         if benchmark is not None and benchmark.outcome is EvidenceOutcome.FAILED
         else None
     )
-    failure_text = next(
-        (s.failure for s in terminal.stage_results if s.failure is not None), terminal.failure
+    failed_stage = next((s for s in terminal.stage_results if s.failure is not None), None)
+    # The service's log follows the stage's output: its last traceback holds the cause.
+    failure_text = (
+        terminal.failure
+        if failed_stage is None
+        else "\n".join(filter(None, (failed_stage.failure, failed_stage.service_log_tail)))
     )
     return EvaluationTerminalFacts(
         stages=tuple(stages),

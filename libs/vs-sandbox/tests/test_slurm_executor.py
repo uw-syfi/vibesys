@@ -894,11 +894,13 @@ async def test_failed_stage_reports_the_server_log_tail(
     await executor.submit(_request(), handle_id="eval-server-log")
     observed = await _terminal(executor, "eval-server-log")
 
-    failure = observed.stage_results[1].failure
-    assert failure is not None
-    assert failure.startswith(expected_head)
-    assert failure.endswith(server_log)
+    step = observed.stage_results[1]
+    assert step.failure is not None
+    assert step.failure.startswith(expected_head)
+    assert server_log not in step.failure
+    assert step.service_log_tail == server_log
     assert observed.stage_results[0].failure is None
+    assert observed.stage_results[0].service_log_tail is None
 
 
 @pytest.mark.asyncio
