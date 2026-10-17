@@ -209,10 +209,40 @@ unread = ["NOTES.md", "evidence/"]
 ```
 
 A commit that changes only these paths is the input an earlier run already
-measured. When an agent's own evaluation was the attempt's only run of that
-input and its latest run, the strategy's official measurement reuses it
-instead of submitting a second job, and the result names the run it reused.
-Each entry is a plain relative file or directory path, without wildcards.
+measured, so the strategy's official measurement can reuse that run instead of
+submitting a second job. Each entry is a plain relative file or directory path,
+without wildcards.
+
+### Reusing the agent's own run
+
+A task that declares `reuse_agent_run = true` under `[benchmark]` lets the
+strategy's official measurement of a candidate reuse the agent's own earlier
+evaluation of it. The official result then names the run it reused and carries
+that run's records. All of these must hold:
+
+- The task opts in with `reuse_agent_run = true`. It defaults to `false`, and
+  both the official and the agent measurement plans must carry it. The
+  framework reads it from the project root at start, never from a candidate
+  tree, and changing it changes the measurement's identity.
+- The run is the scope's only admitted measurement run, of any input. If the
+  agent measured two inputs, none is reused.
+- It measured the same input (the commit, or a commit that differs only in
+  `workspace.unread` paths) with the same stages, execution budgets, queue
+  allowance and stage policy.
+- Both measurement plans have dedicated measurement resources: the executor
+  gives each job its GPUs and CPU cores alone. A Slurm executor declares this
+  with `dedicated_measurement_resources = true` in its configuration, or with a
+  bare `--exclusive` as the last node-sharing option in `sbatch_arguments`
+  (`--exclusive=user`, `--exclusive=mcs`, `--oversubscribe` and `--share` share
+  nodes and do not count).
+- It ended with a pass or a workload failure (the candidate's own failure). A
+  failure of the infrastructure, or an unclassified end, is never reused.
+
+Reuse is off by default because of optional stopping. An agent that can keep a
+lucky first run and re-measure an unlucky one makes the official score the
+better of its runs, which biases the score upward by up to about 0.4 standard
+deviations of the benchmark's run-to-run noise. Declare it only where that
+noise is small next to the differences the task cares about.
 
 ## Start from an Example
 

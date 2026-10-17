@@ -5,6 +5,10 @@ the official measurement of the same candidate. Both run the task's one evaluati
 input, so the second run would only repeat the first. Core answers the official measurement
 with the earlier run's result instead (`reused_run`) when all of these hold:
 
+- the task opted in (`MeasurementPlan.reuse_agent_run`, declared by the task author and read
+  from the project root): an agent that keeps a lucky run and re-measures an unlucky one would
+  bias the official score upward by the benchmark's noise, so reuse is off unless the task
+  author judges the noise small enough;
 - the run belongs to the same scope (owner and generation), so budgets stay per attempt;
 - it measured the same input with the same evaluation: its identity equals the requested one
   except for the purpose (`MeasurementIdentity.measures_same_input`), and it ran the same
@@ -30,7 +34,9 @@ The decision is a pure function of core state, taken when the Measure is admitte
 in the submission request (`SubmitMeasurement.reuses`), so a resume replays it. Only the first
 submission of an identity can reuse; a retry measures afresh. Records the runtime reports for
 a reusing submission must name the run they re-read (`EvidenceRef.reused_from`) and carry that
-run's own evidence ids and statuses (`reused_record`), so no reused record is new evidence.
+run's own evidence ids, statuses and mapped kinds (`reused_record`), and once the job is
+terminal hold every one of that run's evidence ids (`reused_evidence_complete`), so no reused
+record is new evidence and none of the source's records is dropped.
 """
 
 from __future__ import annotations
