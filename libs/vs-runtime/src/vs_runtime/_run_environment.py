@@ -119,7 +119,6 @@ from vs_sandbox.api import (
     deduplicate_host_resources,
     evaluator_helpers,
     host_resource_for_mount,
-    linked_worktree_git_paths,
     require_sysbox_runtime,
     start_sandbox,
     stop_sandbox,
