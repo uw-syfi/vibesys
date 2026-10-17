@@ -450,7 +450,8 @@ and the message reaches no one. An attempt or item the run does not hold yet is 
 the run may start it before it takes the message; if the run still does not hold it then, or
 the target ends before a turn of it runs, the message is reported as dropped in the run's
 events. A message to a parked attempt, or to an item with no attempts left, is not rejected
-yet: it waits, and is reported as dropped when that attempt or the run ends. For example:
+yet: it waits, and is reported as dropped when the run ends (an attempt reopened later is a
+new generation, which the message does not reach). For example:
 
 ```bash
 vibesys control <run-id> steer "re-plan around the new profile" --role dynamic-planner
