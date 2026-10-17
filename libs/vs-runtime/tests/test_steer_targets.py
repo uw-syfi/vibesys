@@ -13,6 +13,7 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -48,6 +49,7 @@ from vs_core.api import (
     initial_state,
     step,
 )
+from vs_project.api import ProjectStateError
 from vs_project.api.testing import FakeControlInbox
 from vs_runtime.api.core import OperatorInbox, RunControlBridge
 from vs_runtime.api.infrastructure import (
@@ -240,13 +242,16 @@ def test_an_inbox_steer_is_recorded_for_its_target_or_set_aside(
     for event in events:
         core = step(core, event).state
 
-    # The same id again settles only if it names the same text and the same target.
+    # The same id again is the same request only if it names the same text and target.
     run.bridge.poll(core, 2.0)
+    if (other.kind, other.id) != (target.kind, target.id):
+        with pytest.raises(ProjectStateError, match="different request"):
+            run.inbox.post("r1", _payload("r1", "prefer latency", other))
+        return
     run.inbox.post("r1", _payload("r1", "prefer latency", other))
     assert _run(run.inbox).bridge.poll(core, 3.0) == ()
     assert run.inbox.pending() == ()
-    same = (other.kind, other.id) == (target.kind, target.id)
-    assert (run.inbox.rejected() == ()) == same
+    assert run.inbox.rejected() == ()
 
 
 def test_a_socket_steer_to_an_undeclared_role_reaches_no_one_and_says_why() -> None:

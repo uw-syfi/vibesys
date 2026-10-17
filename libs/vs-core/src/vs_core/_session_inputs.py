@@ -298,9 +298,10 @@ def _release_record(
 ) -> tuple[InputRecord, InputDropped | None]:
     if isinstance(record.input.target, InvocationInputTarget):
         return _drop(record, InputDropReason.INVOCATION_TERMINAL, at)
-    if _addressed_to_run(record.input, context):
-        # The run outlives the attempt whose turn reserved it, and any later invocation can
-        # take it, so a cancelled or ended reserver never consumes it: it waits again.
+    if _addressed_to_run(record.input, context) or isinstance(record.input.target, RoleInputTarget):
+        # The run and a role outlive the attempt whose turn reserved the input, and a later
+        # invocation (of that role) can take it, so a cancelled or ended reserver never
+        # consumes it: it waits again.
         return record.model_copy(update={"reserved_to": None}), None
     owner = attempt_for(context, invocation.scope)
     closure = current_closure(owner, owner.closure if owner is not None else None)
