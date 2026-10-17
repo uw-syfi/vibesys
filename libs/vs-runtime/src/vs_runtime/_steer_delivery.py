@@ -278,12 +278,14 @@ class SteerConsumption:
         self,
         core: CoreState,
         delivered: Callable[[str, str, str], None],
+        delivered_mid_turn: Callable[[str, str, str], None],
         dropped: Callable[[str], None],
         ended: Callable[[str], None],
     ) -> None:
         """Report each steer settled since last time.
 
-        ``delivered(role, scope owner, invocation)`` for one a turn received,
+        ``delivered(role, scope owner, invocation)`` for one a turn received in its prompt,
+        ``delivered_mid_turn`` alike for one a turn accepted while it ran,
         ``dropped(reason)`` for one core dropped because its target can no longer take input,
         and ``ended(reason)`` for standing guidance that no longer reaches any turn.
         Receipts recorded before the first call are not reported: a resumed run must not
@@ -311,12 +313,14 @@ class SteerConsumption:
                 )
                 ended(f"standing guidance {_sent_as(input_id)} ended: {why}")
             elif isinstance(receipt, InputDropped):
-                dropped(f"steer {_sent_as(input_id)} reached no turn: {receipt.reason.value}")
+                name = _sent_as(row.redelivers or input_id)
+                dropped(f"steer {name} reached no turn: {receipt.reason.value}")
             elif receipt is not None:
                 invocation = next(
                     row for row in core.sessions.invocations if row.invocation == receipt.invocation
                 )
-                delivered(
+                report = delivered_mid_turn if receipt.mid_turn else delivered
+                report(
                     invocation.turn.session.role_id.root,
                     invocation.scope.owner.root,
                     receipt.invocation.invocation_id.root,

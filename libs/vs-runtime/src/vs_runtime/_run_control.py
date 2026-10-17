@@ -28,6 +28,8 @@ class RunControlTransitionKind(StrEnum):
     RESUMED = "resumed"
     STOP_REQUESTED = "stop_requested"
     STEER_CONSUMED = "steer_consumed"
+    STEER_DELIVERED_MID_TURN = "steer_delivered_mid_turn"
+    """An interrupt-mode steer reached a turn while it ran; the turn accepted it."""
     STEER_DROPPED = "steer_dropped"
     WITHDRAW_QUEUED = "withdraw_queued"
     GUIDANCE_ENDED = "guidance_ended"
@@ -227,6 +229,12 @@ class RunControlChannel(Protocol):
         execution_id: str | None,
     ) -> None:
         """Record which invocation consumed queued steering."""
+        ...
+
+    def notify_steer_delivered_mid_turn(
+        self, *, agent_kind: str, round_label: str, execution_id: str
+    ) -> None:
+        """Record the running invocation an interrupt-mode steer reached, which accepted it."""
         ...
 
     def notify_steer_dropped(self, reason: str) -> None:
@@ -627,6 +635,19 @@ class RuntimeRunControlChannel:
                     execution_id=execution_id,
                 )
             )
+
+    def notify_steer_delivered_mid_turn(
+        self, *, agent_kind: str, round_label: str, execution_id: str
+    ) -> None:
+        """Record the running invocation an interrupt-mode steer reached."""
+        self._events(
+            RunControlTransition(
+                kind=RunControlTransitionKind.STEER_DELIVERED_MID_TURN,
+                agent_kind=agent_kind,
+                round_label=round_label,
+                execution_id=execution_id,
+            )
+        )
 
     def notify_steer_dropped(self, reason: str) -> None:
         """Record why a queued steer reached no one."""
