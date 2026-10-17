@@ -22,8 +22,6 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Protocol
 
-from pydantic import ValidationError
-
 from vs_core.api import (
     ArtifactId,
     ArtifactRef,
@@ -34,6 +32,7 @@ from vs_core.api import (
     RunStatus,
     StopMode,
 )
+from vs_decode.api import Unreadable, decode_json
 from vs_project.api import ProjectStateError
 from vs_runtime._operator_control import (
     CONTROL_REQUEST,
@@ -59,6 +58,9 @@ type ControlAction = Literal["pause", "resume", "stop", "steer"]
 
 
 _LOG = logging.getLogger(__name__)
+
+_MAX_REQUEST_BYTES = 1 << 20
+"""The largest inbox request the run reads: a steer's text with ample room."""
 
 
 class SteerArtifacts(Protocol):
@@ -237,10 +239,9 @@ class RunControlBridge:
         self, inbox: OperatorInbox, entry: InboxEntry, core: CoreState
     ) -> ControlRequest | str:
         """Parse and submit one inbox request; the reason it cannot apply, if it cannot."""
-        try:
-            request = CONTROL_REQUEST.validate_json(entry.payload)
-        except ValidationError as error:
-            return f"not a control request: {error}"
+        request = _parsed(entry)
+        if isinstance(request, Unreadable):
+            return f"not a control request: {request.details()}"
         if request.control_id != entry.request_id:
             return f"its control_id {request.control_id!r} is not its name in the inbox"
         refusal = _refusal(request, core, stopped=self._stopped)
@@ -340,11 +341,18 @@ class _Change:
 
 def _is_held(entry: InboxEntry, control: ControlInput) -> bool:
     """Whether ``control``, which core holds under the entry's identity, is the entry's request."""
-    try:
-        request = CONTROL_REQUEST.validate_json(entry.payload)
-    except ValidationError:
-        return False
-    return _records(control, request)
+    request = _parsed(entry)
+    return not isinstance(request, Unreadable) and _records(control, request)
+
+
+def _parsed(entry: InboxEntry) -> ControlRequest | Unreadable:
+    """The request an inbox entry holds, or why it holds none; another process wrote it."""
+    return decode_json(
+        entry.payload,
+        CONTROL_REQUEST,
+        source=f"control inbox entry {entry.request_id}",
+        max_bytes=_MAX_REQUEST_BYTES,
+    )
 
 
 def _held_as(core: CoreState, request: ControlRequest) -> bool | None:
