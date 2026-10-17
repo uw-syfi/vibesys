@@ -1,4 +1,4 @@
-import {afterEach, describe, expect, it} from 'bun:test';
+import {afterEach, beforeEach, describe, expect, it} from 'bun:test';
 import {spawn} from 'node:child_process';
 import {
   access,
@@ -26,7 +26,35 @@ const savedArgsFile = process.env['VIBESYS_FAKE_BACKEND_ARGS_FILE'];
 const savedReleaseSmokeMarker = process.env['VIBESYS_RELEASE_SMOKE_MARKER'];
 const originalCwd = process.cwd();
 
+/**
+ * Ambient variables that change how a Node child starts and so decide whether the fake backends
+ * and frontends below survive their own `process.exit`. `NODE_USE_SYSTEM_CA=1` (common in a
+ * developer shell) makes Node 24 load the macOS keychain certificates on a background thread at
+ * startup, and that thread segfaults when `process.exit` runs before it finishes: about one fake
+ * child in seven died with SIGSEGV, which the launcher reports as exit code 1. The launcher
+ * inherits `process.env`, so the tests drop these for their duration.
+ */
+const AMBIENT_NODE_STARTUP_VARIABLES = ['NODE_USE_SYSTEM_CA'] as const;
+let restoreAmbientNodeEnvironment: (() => void) | undefined;
+
+function isolateAmbientNodeEnvironment(): () => void {
+  const saved = AMBIENT_NODE_STARTUP_VARIABLES.map(name => [name, process.env[name]] as const);
+  for (const name of AMBIENT_NODE_STARTUP_VARIABLES) delete process.env[name];
+  return () => {
+    for (const [name, value] of saved) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  };
+}
+
+beforeEach(() => {
+  restoreAmbientNodeEnvironment = isolateAmbientNodeEnvironment();
+});
+
 afterEach(async () => {
+  restoreAmbientNodeEnvironment?.();
+  restoreAmbientNodeEnvironment = undefined;
   process.chdir(originalCwd);
   if (savedPython === undefined) delete process.env['VIBESYS_PYTHON'];
   else process.env['VIBESYS_PYTHON'] = savedPython;
@@ -525,6 +553,29 @@ process.exit(0);
     await expect(launch(['--stub-agent', '--runs-dir', '/tmp/vibesys-test-runs'])).resolves.toBe(0);
     expect(await readFile(smokeMarker, 'utf8')).toBe('started');
     expect(await readFile(backendTerminated, 'utf8')).toBe('terminated');
+  });
+
+  it('starts fake children without the ambient Node system-CA loader', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'vs-launcher-test-'));
+    const seen = join(tempDir, 'system-ca');
+    const backend = await writeExecutable(
+      'env-backend.mjs',
+      `
+import {writeFileSync} from 'node:fs';
+writeFileSync(${JSON.stringify(seen)}, process.env.NODE_USE_SYSTEM_CA ?? 'unset');
+`,
+    );
+    process.env['NODE_USE_SYSTEM_CA'] = '1';
+    const restore = isolateAmbientNodeEnvironment();
+    process.env['VIBESYS_PYTHON'] = backend;
+
+    try {
+      await expect(launch(['validate', 'examples/kv-store'])).resolves.toBe(0);
+      expect(await readFile(seen, 'utf8')).toBe('unset');
+    } finally {
+      restore();
+    }
+    expect(process.env['NODE_USE_SYSTEM_CA']).toBe('1');
   });
 
   it('runs validation directly without starting the interactive client', async () => {
