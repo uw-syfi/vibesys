@@ -15,6 +15,9 @@ import {
   Fact,
   FactLine,
   Field,
+  type ParetoAxis,
+  ParetoChart,
+  type ParetoPoint,
   PathInput,
   Scrubber,
   SegmentedControl,
@@ -432,5 +435,77 @@ describe('FactLine', () => {
     expect(facts.map(fact => fact.textContent)).toEqual(['one', 'a long name']);
     expect(facts.map(fact => fact.hasAttribute('data-shrink'))).toEqual([false, true]);
     expect(container.querySelector('.vs-factline')?.hasAttribute('data-wrap')).toBe(false);
+  });
+});
+
+describe('ParetoChart', () => {
+  const x: ParetoAxis = {name: 'Throughput', unit: 'ops/s', direction: 'higher'};
+  const y: ParetoAxis = {name: 'Latency', unit: 'ms', direction: 'lower'};
+  const points: ParetoPoint[] = [
+    {id: 'input', label: 'Input', x: 100, y: 50, time: 0, state: 'input'},
+    {id: 'a', label: 'Ring buffer', x: 140, y: 45, time: 1, state: 'accepted'},
+    {id: 'b', label: 'Batching', x: 120, y: 60, time: 2, state: 'accepted'},
+    {id: 'c', label: 'Padding', x: 130, y: 30, time: 3, state: 'accepted'},
+    {id: 'd', label: 'Unsafe', x: 300, y: 10, time: 4, state: 'rejected'},
+  ];
+  const roles = (root: HTMLElement): Record<string, string> =>
+    Object.fromEntries(
+      [...root.querySelectorAll('.vs-chart .vs-pareto-point')].map(point => [
+        point.querySelector('title')?.textContent?.split(' · ')[0] ?? '',
+        point.getAttribute('data-role') ?? '',
+      ]),
+    );
+
+  test('marks the input, the frontier, the dominated and the turned down', async () => {
+    const root = await mount(<ParetoChart label="Trade-off" points={points} x={x} y={y} />);
+    expect(roles(root)).toEqual({
+      Input: 'input',
+      'Ring buffer': 'frontier',
+      Batching: 'dominated',
+      Padding: 'frontier',
+      Unsafe: 'rejected',
+    });
+    expect([...root.querySelectorAll('li')].map(li => li.textContent)).toEqual([
+      'Input',
+      'On the frontier',
+      'Dominated',
+      'Turned down',
+    ]);
+    expect(root.querySelector('svg')?.textContent).toContain('lower is better');
+  });
+
+  test('draws only the points measured by the cursor, and the frontier of those', async () => {
+    const root = await mount(
+      <ParetoChart label="Trade-off" points={points} x={x} y={y} cursor={2} />,
+    );
+    expect(roles(root)).toEqual({
+      Input: 'input',
+      'Ring buffer': 'frontier',
+      Batching: 'dominated',
+    });
+  });
+
+  test('hovering a point names it with its values; leaving removes the name', async () => {
+    const root = await mount(<ParetoChart label="Trade-off" points={points} x={x} y={y} />);
+    const point = [...root.querySelectorAll('.vs-pareto-point')].find(p =>
+      p.querySelector('title')?.textContent?.startsWith('Padding'),
+    );
+    await act(async () => {
+      point?.dispatchEvent(new MouseEvent('mouseover', {bubbles: true}));
+    });
+    expect(root.querySelector('.vs-pareto-hover-text')?.textContent).toBe(
+      'Padding · 130 ops/s · 30 ms',
+    );
+    await act(async () => {
+      point?.dispatchEvent(new MouseEvent('mouseout', {bubbles: true}));
+    });
+    expect(root.querySelector('.vs-pareto-hover')).toBeNull();
+  });
+
+  test('rings the highlighted points', async () => {
+    const root = await mount(
+      <ParetoChart label="Trade-off" points={points} x={x} y={y} highlighted={['b']} />,
+    );
+    expect(root.querySelectorAll('.vs-chart-ring')).toHaveLength(1);
   });
 });
