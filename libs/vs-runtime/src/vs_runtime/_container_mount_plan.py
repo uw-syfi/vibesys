@@ -155,7 +155,7 @@ def container_mount_plan(
     # A candidate workspace is a linked Git worktree whose ``.git`` file names its
     # metadata by host path. Mounted at that same path, read-only, ``git status``
     # and ``git diff`` work in the container while history and other candidates'
-    # refs and worktrees stay unwritable (``_agent_git_writable`` reports that).
+    # refs and worktrees stay unwritable (``agent_git_writable_in`` reports that).
     resources.extend(
         HostResource(path, HostResourceAccess.READ_ONLY, "linked worktree Git metadata")
         for path in linked_worktree_git_paths(request.workspace)

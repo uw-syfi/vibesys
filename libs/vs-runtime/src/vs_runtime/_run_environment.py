@@ -86,6 +86,7 @@ from vs_runtime._run_environment_facts import (
     ModalEnvironmentFacts,
     RunEnvironmentPresentationFacts,
     SkyPilotEnvironmentFacts,
+    agent_git_writable_in,
 )
 from vs_runtime._tool_location import ToolLocation, ToolSite, assumed_tool
 from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
@@ -236,9 +237,7 @@ class RunEnvironmentView:
     # run environment whose GPU work happens elsewhere (Slurm jobs) sets it False, so
     # tools that need the driver in the editor are withheld rather than offered to fail.
     editor_has_gpu: bool = True
-    # Whether the agent can write its candidate's Git metadata (commit, branch, rebase).
-    # Prompt templates branch on this capability rather than on a concrete environment.
-    agent_git_writable: bool = True
+    agent_git_writable: bool = True  # prompts branch on this, not on the environment
     # Optional environment variable understood by the environment-owned
     # evaluator wrapper when the final trusted command should release its
     # deployment lease.
@@ -296,15 +295,6 @@ class RunEnvironmentView:
     def supports_parallel_candidate_evaluation(self) -> bool:
         """Whether each candidate can get its own worktree and container session."""
         return self.parallel_candidate_obstacle is None
-
-
-def _agent_git_writable(request: RunEnvironmentRequest) -> bool:
-    """Whether the container leaves the agent's candidate Git metadata writable.
-
-    The linked-worktree metadata mount is the one place the Docker environment confines
-    it, so the answer and the mount share ``linked_worktree_git_paths``.
-    """
-    return not linked_worktree_git_paths(request.workspace)
 
 
 @dataclass(frozen=True)
@@ -917,7 +907,7 @@ class DockerEnvironment(NoCaptureRecovery):
 
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Resolve Docker presentation facts."""
-        facts = DockerEnvironmentFacts(agent_git_writable=_agent_git_writable(request))
+        facts = DockerEnvironmentFacts(agent_git_writable=agent_git_writable_in(request.workspace))
         return _PreparedRunEnvironment(facts, partial(self._open, request))
 
     def _open(
@@ -935,7 +925,7 @@ class DockerEnvironment(NoCaptureRecovery):
             isolated=True,
             cli_sandboxed=True,
             env_kind="docker",
-            agent_git_writable=_agent_git_writable(request),
+            agent_git_writable=agent_git_writable_in(request.workspace),
         )
         with _starting_container(request) as output:
             return command_environment_session(
@@ -1359,7 +1349,7 @@ class SkyPilotEnvironment(RefusesDockerInDocker, DockerEnvironment):
                 host_device_reselect=False,
                 env_kind="skypilot",
                 profile_execution="remote",
-                agent_git_writable=_agent_git_writable(request),
+                agent_git_writable=agent_git_writable_in(request.workspace),
             ),
         )
 
@@ -1596,7 +1586,7 @@ class ModalEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
                         host_device_reselect=False,
                         env_kind="modal",
                         profile_execution="remote",
-                        agent_git_writable=_agent_git_writable(request),
+                        agent_git_writable=agent_git_writable_in(request.workspace),
                         deployment_release_env_var="VIBESYS_RELEASE_MODAL_DEPLOYMENT",
                         framework_setup_timeout_seconds=setup_timeout_seconds,
                     ),

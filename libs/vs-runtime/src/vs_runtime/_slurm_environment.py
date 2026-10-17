@@ -33,7 +33,6 @@ from vs_runtime._run_environment import (
     RunEnvironmentSession,
     RunEnvironmentSessionRole,
     RunEnvironmentView,
-    _agent_git_writable,
     _command_argv,
     _make_host_sandbox,
     _NoopWorkspaceRecovery,
@@ -45,6 +44,7 @@ from vs_runtime._run_environment_facts import (
     AgentGpuFacts,
     ClusterEvaluationFacts,
     SlurmEnvironmentFacts,
+    agent_git_writable_in,
 )
 from vs_runtime._tool_location import ToolLocation, ToolSite, assumed_tool
 from vs_runtime._trusted_evaluation_preparation import (
@@ -555,7 +555,7 @@ class SlurmEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
                 cli_sandboxed=True,
                 host_device_reselect=False,
                 env_kind="slurm",
-                agent_git_writable=_agent_git_writable(request),
+                agent_git_writable=agent_git_writable_in(request.workspace),
                 profile_execution="remote" if remote_profiling else "local",
                 editor_has_gpu=False,
                 framework_setup_timeout_seconds=config.job_timeout_seconds,

@@ -10,12 +10,24 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from vs_sandbox.api import linked_worktree_git_paths
 from vs_sandbox.api.slurm import profile_capture_descriptor
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from vs_evaluation.api import ProfileField
     from vs_sandbox.api.skypilot import ResolvedSkyPilotResources
     from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmOperatorSettings
+
+
+def agent_git_writable_in(workspace: Path) -> bool:
+    """Whether a container leaves the agent's candidate Git metadata writable.
+
+    The linked-worktree metadata mount is the one place a container environment confines
+    it, so the answer and the mount share ``linked_worktree_git_paths``.
+    """
+    return not linked_worktree_git_paths(workspace)
 
 
 @dataclass(frozen=True)
