@@ -156,6 +156,7 @@ class ServerParts:
     api: RunApi
     core_events: CoreEventJournal
     control: RunControlChannel
+    operator_control: ChannelRunControl
     clock: ManualClock
 
     def start_execution(
@@ -291,6 +292,7 @@ def build_server_parts(
         api=api,
         core_events=core_events,
         control=control,
+        operator_control=control_bridge,
         clock=clock,
     )
     if log_dir is not None:

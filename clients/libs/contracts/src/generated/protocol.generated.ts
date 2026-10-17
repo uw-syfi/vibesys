@@ -144,7 +144,7 @@ export type Text2 = string;
 /**
  * What a steer is addressed to.
  */
-export type SteerTargetKind = "run" | "role" | "attempt" | "item" | "invocation";
+export type SteerTargetKind = "run" | "role" | "attempt" | "item";
 export type Id = string | null;
 export type ControlId1 = string;
 export type Action1 = "pause";
@@ -1208,8 +1208,8 @@ export interface ControlCommand {
  * Free-text guidance for the next agent turn of its target, the whole run by default.
  *
  * The message reaches exactly one turn of the target, once. A target the run cannot resolve
- * (a role the search does not declare, an attempt, item or invocation it does not hold, or
- * one that has ended) is refused, and the message reaches no one.
+ * (a role the search does not declare, an attempt or item it does not hold, or an attempt
+ * that has ended) is refused, and the message reaches no one.
  */
 export interface SteerRequest {
   control_id: ControlId;
@@ -1218,7 +1218,7 @@ export interface SteerRequest {
   target?: SteerTarget;
 }
 /**
- * Whom a steer is for: the whole run, or one role, attempt, item or invocation, by id.
+ * Whom a steer is for: the whole run, or one role, attempt or item, by id.
  */
 export interface SteerTarget {
   kind?: SteerTargetKind;

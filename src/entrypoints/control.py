@@ -53,7 +53,7 @@ def _parser() -> argparse.ArgumentParser:
     steer = actions.add_parser("steer", help="give the run's next agent turn guidance")
     steer.add_argument("text", help="the guidance")
     to = steer.add_mutually_exclusive_group()
-    for kind in ("role", "attempt", "item", "invocation"):
+    for kind in ("role", "attempt", "item"):
         to.add_argument(
             f"--{kind}",
             metavar="ID",
@@ -87,7 +87,7 @@ def _payload(arguments: argparse.Namespace, control_id: str) -> dict[str, object
     common = {"control_id": control_id, "action": arguments.action}
     match arguments.action:
         case "steer":
-            kinds = ("role", "attempt", "item", "invocation")
+            kinds = ("role", "attempt", "item")
             named = [(kind, getattr(arguments, kind)) for kind in kinds]
             target = next(({"kind": k, "id": i} for k, i in named if i is not None), None)
             return {**common, "text": arguments.text, **({"target": target} if target else {})}

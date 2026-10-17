@@ -45,6 +45,8 @@ from vibesys.api import (
     RefusalReason,
     RunStopped,
     SteerRequest,
+    SteerTarget,
+    SteerTargetKind,
 )
 from vibesys.events import CoreEventType
 from vibesys.events import EventStatus as CoreEventStatus
@@ -569,3 +571,43 @@ def test_a_refused_steer_is_journaled_as_a_failed_control(tmp_path: Path) -> Non
         if event.type is EventType.CONTROL and event.status is EventStatus.FAILED
     ]
     assert "role 'judge' is not declared" in refused.text
+
+
+@pytest.mark.parametrize(
+    ("reason", "code"),
+    [
+        (RefusalReason.UNKNOWN_TARGET, "steer_target_unknown"),
+        (RefusalReason.ENDED_TARGET, "steer_target_ended"),
+    ],
+)
+def test_a_steer_the_run_refuses_answers_its_protocol_error(
+    tmp_path: Path, reason: RefusalReason, code: str
+) -> None:
+    parts = build_server_parts(tmp_path)
+    parts.operator_control.check_targets(lambda _target: reason)
+    steer = SteerRequest(
+        control_id="s1",
+        text="look again",
+        target=SteerTarget(kind=SteerTargetKind.ROLE, id="fake-judge"),
+    )
+
+    with pytest.raises(RuntimeError) as refused:
+        parts.api.execute(ControlCommand(timestamp=REQUEST_TIME, control=steer))
+
+    assert getattr(refused.value, "diagnostic_code", None) == code
+    assert parts.control.take_pending_steer() == []
+
+
+@pytest.mark.parametrize("reason", list(RefusalReason))
+def test_every_refusal_reason_answers_a_protocol_error(
+    tmp_path: Path, reason: RefusalReason
+) -> None:
+    """A new reason without a protocol error would surface as a server KeyError."""
+    parts = build_server_parts(tmp_path)
+    parts.operator_control.check_targets(lambda _target: reason)
+    steer = SteerRequest(control_id="s1", text="look again")
+
+    with pytest.raises(RuntimeError) as refused:
+        parts.api.execute(ControlCommand(timestamp=REQUEST_TIME, control=steer))
+
+    assert isinstance(getattr(refused.value, "diagnostic_code", None), str)

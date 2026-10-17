@@ -2,7 +2,7 @@
 
 A steer control is the operator's free text, recorded by core as a ``steer`` control that
 carries only the digest of the text and whom it is for. ``steer_target`` resolves the
-operator's target (the run, a role, an attempt, an item or an invocation, by id) against core
+operator's target (the run, a role, an attempt or an item, by id) against core
 state into core's input target. This module turns each such control into one
 ``SessionInputReceived`` for that target, which core reserves for the next matching turn,
 delivers when that turn is accepted, and records as a receipt. Core's input
@@ -33,7 +33,6 @@ from vs_core.api import (
     ScopeInputTarget,
     SessionInput,
     SessionInputReceived,
-    SessionPhase,
 )
 from vs_runtime._operator_control import RefusalReason, SteerTargetKind
 
@@ -83,37 +82,18 @@ def _item(core: CoreState, item: str) -> InputTarget | TargetRefusal:
     return ItemInputTarget(item_id=rows[0].item_id)
 
 
-def _invocation(core: CoreState, invocation: str) -> InputTarget | TargetRefusal:
-    held = [
-        row for row in core.sessions.invocations if row.invocation.invocation_id.root == invocation
-    ]
-    if not held:
-        return TargetRefusal(
-            f"the run holds no invocation {invocation!r}", RefusalReason.UNKNOWN_TARGET
-        )
-    latest = max(held, key=lambda row: row.invocation.generation)
-    # Core gives an invocation its inputs once, as its turn is dispatched; only one still
-    # acquiring its session has not yet taken them.
-    if latest.phase is not SessionPhase.ACQUIRING:
-        return TargetRefusal(
-            f"invocation {invocation!r} has already taken its input", RefusalReason.ENDED_TARGET
-        )
-    return InvocationInputTarget(invocation=latest.invocation)
-
-
 _RESOLVERS: dict[SteerTargetKind, Callable[[CoreState, str], InputTarget | TargetRefusal]] = {
     SteerTargetKind.ROLE: _role,
     SteerTargetKind.ATTEMPT: _attempt,
     SteerTargetKind.ITEM: _item,
-    SteerTargetKind.INVOCATION: _invocation,
 }
 
 
 def steer_target(core: CoreState, target: SteerTarget) -> InputTarget | TargetRefusal | None:
     """Core's input target for ``target``, None for the whole run, or why there is none.
 
-    A role the search does not declare is refused, as is an attempt, item or invocation core
-    does not hold or that has ended, since no turn could take a message for it.
+    A role the search does not declare is refused, as is an attempt or item core does not
+    hold or an attempt that has ended, since no turn could take a message for it now.
     """
     if target.id is None:
         return None
@@ -121,9 +101,19 @@ def steer_target(core: CoreState, target: SteerTarget) -> InputTarget | TargetRe
 
 
 def target_refusal(core: CoreState, target: SteerTarget) -> RefusalReason | None:
-    """Why ``core`` refuses a steer to ``target`` now, or None when a turn could take it."""
+    """Why no later state of ``core`` could take a steer to ``target``, or None.
+
+    ``core`` may be a poll behind the run, so only what cannot change is refused: a role the
+    search does not declare, or an attempt that has ended. An attempt or item core does not
+    hold yet may be created before the run takes the steer; the take resolves it again
+    against the state then, and reports it dropped if it still cannot.
+    """
     resolved = steer_target(core, target)
-    return resolved.kind if isinstance(resolved, TargetRefusal) else None
+    if not isinstance(resolved, TargetRefusal):
+        return None
+    if target.kind is SteerTargetKind.ROLE or resolved.kind is RefusalReason.ENDED_TARGET:
+        return resolved.kind
+    return None
 
 
 def names_target(target: SteerTarget, held: InputTarget | None) -> bool:
@@ -140,8 +130,8 @@ def names_target(target: SteerTarget, held: InputTarget | None) -> bool:
             named = (SteerTargetKind.ATTEMPT, scope.owner.root)
         case ItemInputTarget(item_id=item):
             named = (SteerTargetKind.ITEM, item.root)
-        case InvocationInputTarget(invocation=invocation):
-            named = (SteerTargetKind.INVOCATION, invocation.invocation_id.root)
+        case InvocationInputTarget():
+            return False  # an operator's steer never names one invocation
     return (target.kind, target.id) == named
 
 
@@ -192,6 +182,15 @@ def unrecorded_steers(core: CoreState, now_at: float) -> tuple[SessionInputRecei
     )
 
 
+def _sent_as(input_id: InputId) -> str:
+    """The id the operator sent a steer under, from its input's id (``steer-op-<id>``).
+
+    A steer sent without an id (a ``control-<n>`` control) is named by that control id.
+    """
+    control = input_id.root.removeprefix("steer-")
+    return control.removeprefix("op-")
+
+
 class SteerConsumption:
     """Reports each steer once, when core records that a turn received it or dropped it."""
 
@@ -225,8 +224,7 @@ class SteerConsumption:
                 continue
             self._reported.add(input_id)
             if isinstance(receipt, InputDropped):
-                control = input_id.root.removeprefix("steer-")
-                dropped(f"steer {control} reached no turn: {receipt.reason.value}")
+                dropped(f"steer {_sent_as(input_id)} reached no turn: {receipt.reason.value}")
                 continue
             invocation = next(
                 row for row in core.sessions.invocations if row.invocation == receipt.invocation

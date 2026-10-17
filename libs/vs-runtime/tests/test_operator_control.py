@@ -117,7 +117,7 @@ A new field fails ``test_every_control_field_is_reviewed`` until it is added her
 """
 
 _REVIEWED_MODELS = frozenset({"SteerTarget"})
-"""The structures a control may hold: a steer's target names a role, attempt, item or invocation."""
+"""The structures a control may hold: a steer's target names a role, attempt or item."""
 
 
 def test_every_control_field_is_reviewed() -> None:

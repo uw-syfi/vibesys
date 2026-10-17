@@ -187,7 +187,7 @@ server rejects it as an unknown field.
 
 `command.control` carries one `control`, a `ControlRequest` (`vibesys.api`): the schema every
 control ingress accepts, so a client and a headless run's inbox say the same things. Its
-`action` is `steer` (`text`, and a `target` of `kind` `run`, the default, or `role`, `attempt`, `item` or `invocation` with its `id`), `pause`, `resume` (`fallback`, `when`, as `command.resume`) or
+`action` is `steer` (`text`, and a `target` of `kind` `run`, the default, or `role`, `attempt` or `item` with its `id`), `pause`, `resume` (`fallback`, `when`, as `command.resume`) or
 `stop` (`mode`: `drain`, the default, or `cancel`, which also cancels the work in flight). Like
 every protocol model it forbids unknown keys, and it has no field that reaches evaluation,
 checkers, trust rules or resource partitions: `vs_runtime`'s `control_schema_fields` holds every
@@ -204,11 +204,11 @@ The server turns `command.pause`,
 envelope's `request_id`, and applies all five through one `RunControl.submit`, so they ack
 alike. A single-action command that reuses a `request_id` with a different command is therefore
 a different control under a used id, and also answers `control_id_conflict`. A refusal carries a typed reason that the server answers with its own protocol error. It
-is a new request type, so a client discovers it by `WP-CAPABILITY-PROBE`. A steer's target is resolved when it is submitted, against the run's
-latest control poll: a target the run does not know answers the protocol error
-`steer_target_unknown`, and one no turn can take any more (an ended attempt or invocation, or an
-invocation that has already taken its input) answers `steer_target_ended`. A resend gets the same
-answer. An accepted steer that later reaches no turn (its target ended first, or core dropped
+is a new request type, so a client discovers it by `WP-CAPABILITY-PROBE`. When a steer is submitted, the run refuses
+only a target no later state could accept: a role the search does not declare answers the
+protocol error `steer_target_unknown`, and an attempt that has ended answers
+`steer_target_ended`. A resend gets the same answer. An attempt or item the run does not hold
+yet is accepted, and resolved again when the run takes the steer. An accepted steer that later reaches no turn (its target ended first, or core dropped
 it) is journaled as a `CONTROL` event with status `failed` and the text
 `/steer dropped: steer <id> reached no turn: <reason>`.
 

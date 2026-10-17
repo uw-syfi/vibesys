@@ -6900,7 +6900,7 @@
     },
     "SteerRequest": {
       "additionalProperties": false,
-      "description": "Free-text guidance for the next agent turn of its target, the whole run by default.\n\nThe message reaches exactly one turn of the target, once. A target the run cannot resolve\n(a role the search does not declare, an attempt, item or invocation it does not hold, or\none that has ended) is refused, and the message reaches no one.",
+      "description": "Free-text guidance for the next agent turn of its target, the whole run by default.\n\nThe message reaches exactly one turn of the target, once. A target the run cannot resolve\n(a role the search does not declare, an attempt or item it does not hold, or an attempt\nthat has ended) is refused, and the message reaches no one.",
       "properties": {
         "control_id": {
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
@@ -6936,7 +6936,7 @@
     },
     "SteerTarget": {
       "additionalProperties": false,
-      "description": "Whom a steer is for: the whole run, or one role, attempt, item or invocation, by id.",
+      "description": "Whom a steer is for: the whole run, or one role, attempt or item, by id.",
       "properties": {
         "kind": {
           "$ref": "#/$defs/SteerTargetKind",
@@ -6966,8 +6966,7 @@
         "run",
         "role",
         "attempt",
-        "item",
-        "invocation"
+        "item"
       ],
       "title": "SteerTargetKind",
       "type": "string"

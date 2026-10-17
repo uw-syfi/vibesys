@@ -63,23 +63,21 @@ class SteerTargetKind(StrEnum):
     """The next turn in this attempt."""
     ITEM = "item"
     """The next turn of any attempt at this work item."""
-    INVOCATION = "invocation"
-    """This one invocation, if it takes input again (a suspended turn that resumes)."""
 
 
 class SteerTarget(BaseModel):
-    """Whom a steer is for: the whole run, or one role, attempt, item or invocation, by id."""
+    """Whom a steer is for: the whole run, or one role, attempt or item, by id."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     kind: SteerTargetKind = SteerTargetKind.RUN
     id: str | None = Field(default=None, min_length=1, max_length=256)
-    """The role, attempt, item or invocation id; absent for the run."""
+    """The role, attempt or item id; absent for the run."""
 
     @model_validator(mode="after")
     def _id_names_the_target(self) -> SteerTarget:
         if (self.kind is SteerTargetKind.RUN) != (self.id is None):
-            message = "id names the role, attempt, item or invocation; the run takes none"
+            message = "id names the role, attempt or item; the run takes none"
             raise ValueError(message)
         return self
 
@@ -88,8 +86,8 @@ class SteerRequest(_Request):
     """Free-text guidance for the next agent turn of its target, the whole run by default.
 
     The message reaches exactly one turn of the target, once. A target the run cannot resolve
-    (a role the search does not declare, an attempt, item or invocation it does not hold, or
-    one that has ended) is refused, and the message reaches no one.
+    (a role the search does not declare, an attempt or item it does not hold, or an attempt
+    that has ended) is refused, and the message reaches no one.
     """
 
     action: Literal[ControlAction.STEER] = ControlAction.STEER
@@ -171,11 +169,13 @@ class RefusalReason(StrEnum):
     NOT_PAUSED_ON_CAPACITY = "not_paused_on_capacity"
     """A wait for capacity, for a run not paused on a provider capacity limit."""
     UNKNOWN_TARGET = "unknown_target"
-    """A steer to a role the search does not declare, or an attempt, item or invocation the
-    run does not hold."""
+    """A steer to a role the search does not declare: no later state of the run declares it.
+
+    An attempt or item the run does not hold yet is not refused when submitted, since the run
+    may create it before taking the steer; one it still does not hold then is reported dropped.
+    """
     ENDED_TARGET = "ended_target"
-    """A steer to an attempt or invocation that has ended, or an invocation that has already
-    taken its input: no turn of it could take the message."""
+    """A steer to an attempt that has ended: no turn of it could take the message."""
 
 
 class ControlAck(_Request):
@@ -223,9 +223,11 @@ class ChannelRunControl:
     def check_targets(self, check: Callable[[SteerTarget], RefusalReason | None]) -> None:
         """Refuse each later steer whose target ``check`` refuses, when it is submitted.
 
-        The run loop installs a check over its latest state at each control poll, so a steer
-        to a target the run does not know, or one that has ended, is refused in its ack. A
-        target that ends between the ack and the run taking the steer is reported as dropped.
+        The run loop installs a check over its latest state at each control poll. That state
+        may be a poll behind, and a refusal is the id's answer for good, so the check refuses
+        only a target no later state could take (an undeclared role, an ended attempt). The
+        run resolves an accepted steer's target again when it takes it, and reports one it
+        cannot resolve then as dropped.
         """
         with self._lock:
             self._target_check = check
