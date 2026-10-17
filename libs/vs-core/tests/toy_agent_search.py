@@ -99,6 +99,7 @@ EXCHANGES = core.Exchanges(
 )
 IMPLEMENTER = core.Role(
     name="implementer",
+    title="Implementer",
     prompt="toy/implementer.j2",
     reply=Result,
     workspace=core.WorkspaceMode.ISOLATED_CHILD,
@@ -113,6 +114,7 @@ IMPLEMENTER = core.Role(
 """The implementer writes a candidate."""
 JUDGE = core.Role(
     name="judge",
+    title="Judge",
     prompt="toy/judge.j2",
     reply=Verdict,
     workspace=core.WorkspaceMode.READ_ONLY_REVISION,

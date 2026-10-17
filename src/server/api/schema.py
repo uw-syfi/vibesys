@@ -34,6 +34,7 @@ from vibesys.api import (
     IterationSummary,
     LogOwner,
 )
+from vibesys.api.display_catalog import display_names
 from vs_logs.api import NarrationLine
 
 if TYPE_CHECKING:
@@ -337,6 +338,19 @@ def run_event_json_schema() -> dict[str, Any]:
 def run_event_typescript() -> str:
     """Return the generated browser-compatible event-validation module."""
     return _schema_typescript("runEventSchema", run_event_json_schema())
+
+
+def display_names_typescript() -> str:
+    """Return the generated module of the names a person reads for harnesses, models and roles.
+
+    One definition (``vibesys.api.display_catalog``) with the TypeScript clients' copy
+    generated from it, so a screen never maps an id itself and the two cannot drift.
+    """
+    document = json.dumps(display_names().model_dump(), indent=2)
+    return (
+        "/* Generated from the Python display names (vibesys.api.display_catalog). Do not edit. */\n\n"
+        f"export const DISPLAY_NAMES = {document} as const;\n"
+    )
 
 
 def _schema_typescript(name: str, schema: dict[str, Any]) -> str:
@@ -1254,6 +1268,11 @@ def main() -> None:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(host_helper_typescript())
         return
+    elif len(arguments) == _OPTION_ARGUMENT_COUNT and arguments[0] == "--display-names-module":
+        output = Path(arguments[1])
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(display_names_typescript())
+        return
     elif len(arguments) == _OPTION_ARGUMENT_COUNT and arguments[0] == "--run-event-module":
         output = Path(arguments[1])
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -1264,7 +1283,7 @@ def main() -> None:
             "usage: python -m server.api.schema "
             "(--host-helper-schema|--host-helper-module|--response-payload-schema|"
             "--response-payload-module|"
-            "--response-payload-fixture|--run-event-module) OUTPUT; the protocol schema itself "
+            "--response-payload-fixture|--run-event-module|--display-names-module) OUTPUT; the protocol schema itself "
             "is written by python -m entrypoints.protocol_schema OUTPUT"
         )
         raise SystemExit(message)

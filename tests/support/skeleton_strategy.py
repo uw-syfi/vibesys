@@ -78,6 +78,7 @@ OPERATIONS = core.StrategyOperations("skeleton", Render, Verify, Interpret)
 
 IMPLEMENTER_ROLE = Role(
     name="implementer",
+    title="Implementer",
     prompt="skeleton.j2",
     reply=Implementation,
     access=core.Access.WRITE_CANDIDATE,

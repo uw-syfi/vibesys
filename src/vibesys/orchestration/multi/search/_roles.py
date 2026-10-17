@@ -32,6 +32,7 @@ EXCHANGES = Exchanges(
 
 ROUTER = Role(
     name="router",
+    title="Router",
     agent="orchestrator",
     prompt="pre_round.j2",
     reply=PreRoundDecision,
@@ -52,6 +53,7 @@ prompt and recorded runs are the designer's.
 
 PROFILER = Role(
     name="profiler",
+    title="Profiler",
     prompt="profiler.j2",
     reply=ProfilerSummary,
     workspace=None,
@@ -67,6 +69,7 @@ PROFILER = Role(
 
 IMPLEMENTER = Role(
     name="implementer",
+    title="Implementer",
     prompt="implement.j2",
     reply=ImplementerResponse,
     workspace=WorkspaceMode.ISOLATED_CHILD,
@@ -83,6 +86,7 @@ IMPLEMENTER = Role(
 
 JUDGE = Role(
     name="judge",
+    title="Judge",
     prompt="judge.j2",
     reply=JudgeResponse,
     workspace=WorkspaceMode.READ_ONLY_REVISION,

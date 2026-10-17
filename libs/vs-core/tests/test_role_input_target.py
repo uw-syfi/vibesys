@@ -32,6 +32,7 @@ _NAMES = st.sampled_from(("planner", "worker", "judge", "critic", "editor"))
 def _role(name: str, agent: str | None = None) -> core.Role:
     return core.Role(
         name=name,
+        title=name.capitalize(),
         prompt=f"{name}.j2",
         reply=Plan,
         workspace=None,

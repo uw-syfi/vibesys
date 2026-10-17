@@ -44,6 +44,7 @@ EXCHANGES = core.Exchanges(correction="c.j2", resume="r.j2", wait_unrecorded="w.
 
 BASE: dict[str, Any] = {
     "name": "worker",
+    "title": "Worker",
     "prompt": "worker.j2",
     "reply": Plan,
     "workspace": None,
@@ -305,3 +306,19 @@ def test_the_reply_schemas_of_a_search_are_those_of_its_declared_roles() -> None
         plain.reply_schema: plain.wire_reply,
         waiting.reply_schema: waiting.wire_reply,
     }
+
+
+@given(
+    st.from_regex(r"[a-z][a-z0-9]*([-_][a-z0-9]+)+", fullmatch=True)
+    | st.sampled_from(
+        ("judge", "claude", "perf-evaluator", "Perf_evaluator", "", " Judge", "Judge ")
+    )
+)
+def test_a_title_that_is_an_id_or_not_sentence_case_is_refused(title: str) -> None:
+    with pytest.raises(ValidationError, match="title"):
+        declare(title=title)
+
+
+@given(st.from_regex(r"[A-Z][A-Za-z0-9]{0,8}( [a-z0-9][A-Za-z0-9]{0,8}){0,3}", fullmatch=True))
+def test_a_sentence_case_title_is_kept(title: str) -> None:
+    assert declare(title=title).title == title

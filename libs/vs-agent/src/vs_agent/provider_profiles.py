@@ -59,6 +59,21 @@ def launch_shell_environment() -> Mapping[str, str]:
     return _agentshim().interactive_env()
 
 
+def provider_display_name(provider: str) -> str:
+    """How a person reads *provider*'s CLI: ``Claude Code`` for ``claude``, as agentshim's profile names it."""
+    return provider_profile(provider).display_name
+
+
+def model_display_name(provider: str, model: str | None) -> str | None:
+    """How a person reads *model* when *provider* runs it (``Opus 5.5``), or ``None`` when unknown.
+
+    agentshim owns the fact (``agentshim.model_display_name``). An unknown model is
+    ``None``, never a name guessed from the id, so a caller shows the identifier as an
+    identifier rather than a wrong name.
+    """
+    return _agentshim().model_display_name(provider, model)
+
+
 def model_context_window(provider: str, model: str | None) -> int | None:
     """*model*'s context window in tokens when *provider* runs it, or ``None`` when unknown.
 

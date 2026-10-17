@@ -62,6 +62,7 @@ def role_of(**changes: object) -> core.Role:
     """A read-only worker role with these settings changed."""
     fields: dict[str, Any] = {
         "name": "worker",
+        "title": "Worker",
         "prompt": "worker.j2",
         "reply": Plan,
         "workspace": None,

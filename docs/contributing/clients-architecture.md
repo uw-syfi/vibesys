@@ -440,6 +440,24 @@ any difference; `scripts/check_clients.sh` runs it (see "Client checks before a 
 When the job fails on a screenshot, it uploads the actual and the diff as the
 `ui-gallery-test-results` artifact.
 
+## Display names
+
+A screen never shows an id a program matches on (`claude`, a model's vendor id, `perf-evaluator`).
+Each closed vocabulary has one owner of its names, and the clients receive them as one generated
+catalog in `@vibesys/contracts` (`harnessName`, `modelName`, `roleName`):
+
+- a harness's and a model's name are agentshim's (`ProviderProfile.display_name`,
+  `model_display_name`), read through `vs_agent.api`;
+- a role's name is the `title` its search declares on its `Role`;
+- the Python side gathers them in `vibesys.api.display_catalog`, and `pnpm generate:protocol`
+  writes `display-names.generated.ts` from it. The `tui_quality` group regenerates it and fails
+  on a diff, and `test_every_vetted_model_has_a_name_that_is_not_its_id` and the role `title`
+  pattern fail a registry entry with no readable name.
+
+A role a plugin declares reads as the words of its id; a model no registry names stays an
+identifier, drawn in a `data-mono-id` element. Names are title case for products (Claude Code,
+Opus 5.5) and sentence case for everything else (Perf evaluator).
+
 ## State
 
 Client state comes in two kinds, and each has one form.

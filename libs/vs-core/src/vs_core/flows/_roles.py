@@ -3,7 +3,7 @@
 A search declares each agent it asks once, next to the search::
 
     IMPLEMENTER = Role(
-        name="implementer", prompt="dynamic/implementer.j2", reply=ImplementerResult,
+        name="implementer", title="Implementer", prompt="dynamic/implementer.j2", reply=ImplementerResult,
         workspace=WorkspaceMode.ISOLATED_CHILD, access=Access.WRITE_CANDIDATE,
         turn_time=minutes(45), corrections=1, lost_turns=2,
         may_wait_for_evaluations=True, charge=Charge.ATTEMPT, exchanges=EXCHANGES,
@@ -103,6 +103,10 @@ class Role(BaseModel):
 
     name: Annotated[str, Field(pattern=r"^[a-z][a-z0-9_-]*$")]
     """The role's identity in ids, logs and ``agent.toml``."""
+    title: Annotated[
+        str, Field(pattern=r"^[A-Z][A-Za-z0-9]*(?: [a-z0-9][A-Za-z0-9]*)*$", max_length=40)
+    ]
+    """What a person calls the role on a screen: sentence case (``Perf evaluator``), never the id."""
     prompt: Annotated[str, Field(min_length=1)]
     """The template file the renderer reads for the role's own turns."""
     reply: type[BaseModel]
