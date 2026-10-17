@@ -8,6 +8,7 @@ withdrawal of guidance that has already ended changes nothing.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Literal
 
 import pytest
@@ -17,10 +18,12 @@ from hypothesis import strategies as st
 import vs_core.api as core
 from vs_sim.api.testing import examples
 
+from .test_agent_turn_runs import SCENARIOS, Scenario
 from .test_role_input_target import _role_turn
 from .test_run_scoped_input_delivery import _fate_event, _with_inputs
 from .test_session_inputs import occurrence
 from .test_session_turns import invocation, reload_step, waiting_turn_state
+from .toy_agent_search import Config, ToyHost, run_toy
 
 _Fate = Literal["deliver", "rejected", "failed", "cancelled", "crash"]
 _ROLES = ("planner", "worker")
@@ -101,3 +104,68 @@ def test_a_withdrawal_names_standing_guidance_of_the_run() -> None:
         _withdraw(state, next_turn.input_id, 0)
     with pytest.raises(core.ContractValidationError, match="withdraws"):
         _withdraw(state, core.InputId(root="input-unknown"), 0)
+
+
+_TARGETS = st.sampled_from(["run", "toy-implementer", "toy-judge", "attempt", "item"])
+
+
+def _toy_target(name: str) -> core.InputTarget | None:
+    match name:
+        case "run":
+            return None
+        case "attempt":
+            return core.ScopeInputTarget(
+                scope=core.Scope(owner=core.AttemptId(root="w0"), generation=0)
+            )
+        case "item":
+            return core.ItemInputTarget(item_id=core.ItemId(root="w0"))
+        case role:
+            return core.RoleInputTarget(role_id=core.RoleId(root=role))
+
+
+def _toy_matches(name: str, request: core.DispatchTurn | core.ResumeSessionTurn) -> bool:
+    if name == "run":
+        return True
+    if name in ("attempt", "item"):
+        return request.scope.owner.root == "w0"
+    return request.turn.session.role_id.root == name
+
+
+@settings(max_examples=examples(pr=4, nightly=40), deadline=None, derandomize=True, database=None)
+@given(scenario=SCENARIOS, target=_TARGETS, reload=st.booleans())
+def test_standing_guidance_reaches_every_dispatched_and_resumed_turn_of_its_target(
+    scenario: Scenario, target: str, reload: bool
+) -> None:
+    """On the real kernel: each fresh and resumed turn of the target gets it once, until it ends.
+
+    Guidance to the run or a role ends when the run does; guidance to an attempt or an item
+    ends when that attempt is drained, and no turn of it runs after.
+    """
+    item = _standing(_toy_target(target))
+    faults = replace(scenario.faults, reload=reload)
+    host = ToyHost(
+        waits=scenario.waits,
+        polls=scenario.polls,
+        roles=scenario.roles,
+        ends=scenario.ends,
+        shares=scenario.shares,
+        events=(core.SessionInputReceived(input=item),),
+    )
+    trace = run_toy(
+        host, Config(workstreams=scenario.workstreams, in_flight=scenario.in_flight), faults=faults
+    )
+    turns = [
+        r for r in trace.requests if isinstance(r, (core.DispatchTurn, core.ResumeSessionTurn))
+    ]
+    for request in turns:
+        assert item not in request.inputs
+        assert request.guidance == ((item,) if _toy_matches(target, request) else ())
+    (record,) = [r for r in trace.core.sessions.inputs if r.input.input_id == item.input_id]
+    assert isinstance(record.receipt, core.InputDropped)
+    if target in ("attempt", "item"):
+        assert record.receipt.reason in (
+            core.InputDropReason.OWNER_TERMINAL,
+            core.InputDropReason.OWNER_CANCELLED,
+        )
+    else:
+        assert record.receipt.reason is core.InputDropReason.RUN_TERMINAL
