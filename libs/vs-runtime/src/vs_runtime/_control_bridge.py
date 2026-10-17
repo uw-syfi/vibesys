@@ -381,9 +381,9 @@ class RunControlBridge:
             self._landed = True
             self._channel.land_pause()
 
-    def _report_consumed(self, role: str, round_label: str, execution_id: str) -> None:
+    def _report_consumed(self, role: str, round_label: str, execution_id: str, note: str) -> None:
         self._channel.notify_steer_consumed(
-            agent_kind=role, round_label=round_label, execution_id=execution_id
+            agent_kind=role, round_label=round_label, execution_id=execution_id, note=note
         )
 
     def _report_mid_turn(self, role: str, round_label: str, execution_id: str) -> None:

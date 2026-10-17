@@ -58,6 +58,8 @@ from vs_core.api import (
     REPLY_ERROR_MESSAGE_LIMIT,
     DispatchTurn,
     EnsureSession,
+    InputId,
+    InputMidTurnReleased,
     InspectTurn,
     InvocationRef,
     ObservationStatus,
@@ -313,6 +315,24 @@ class _Facts:
     settles: bool = True
     """False when the answer proves nothing about what the request holds (a reused identity),
     so even a terminal one claims no release and no complete children."""
+    refused_steers: tuple[str, ...] = ()
+    """Interrupt-mode inputs the provider took into the turn and did not keep, by input id."""
+
+
+def _refusals(
+    invocation: InvocationRef, facts: _Facts, now_at: float
+) -> tuple[InputMidTurnReleased, ...]:
+    """The interrupt-mode inputs the turn's provider refused, released ahead of its acceptance.
+
+    They ride in the same result as the turn's end, so the refusal commits with it and core
+    gives each input to the next turn instead of delivering it with this one.
+    """
+    return tuple(
+        InputMidTurnReleased(
+            input_id=InputId(root=steer_id), invocation=invocation, now_at=now_at, refused=True
+        )
+        for steer_id in facts.refused_steers
+    )
 
 
 def _reply_errors(violations: tuple[SchemaViolation, ...]) -> tuple[ReplyError, ...]:
@@ -471,14 +491,14 @@ class RuntimeSessionRequests:
         self._observations = ObservationFactory(store)
         self._locks: dict[str, asyncio.Lock] = {}
 
-    def offer_mid_turn(self, offer: MidTurnOffer, on_rejected: Callable[[], None]) -> SteerOutcome:
+    def offer_mid_turn(self, offer: MidTurnOffer) -> SteerOutcome:
         """Offer an interrupt-mode input to the running turn ``offer`` names.
 
         Only this instance can reach a turn it runs. A session it never bound, an unreadable
         binding or input text, or a journal that disowns the invocation leaves no turn here
         that could take the message: ``NO_RUNNING_TURN``, so core gives it to the next turn.
-        ``on_rejected`` may be called later, from the provider's thread, when the turn takes
-        back a message it was given.
+        A ``DELIVERED`` message the provider then refuses comes back with the turn's result,
+        which releases it before the turn's acceptance commits.
         """
         invocation = offer.invocation
         try:
@@ -495,7 +515,7 @@ class RuntimeSessionRequests:
                 AgentSessionKey.parse(binding.session_key),
                 invocation.invocation_id.root,
                 message,
-                on_rejected=on_rejected,
+                steer_id=offer.input.input_id.root,
             )
         except InvocationConflictError:
             return SteerOutcome.NO_RUNNING_TURN
@@ -618,7 +638,10 @@ class RuntimeSessionRequests:
                 and facts.status == ObservationStatus.SUCCEEDED
                 else None
             )
-            events = (self._turn_event(invocation, observation, facts, suspension),)
+            events = (
+                *_refusals(invocation, facts, context.now_at),
+                self._turn_event(invocation, observation, facts, suspension),
+            )
         return ExecutionResult(
             observation=RequestObserved(
                 observation=observation,
@@ -1110,6 +1133,7 @@ class RuntimeSessionRequests:
                         resource_id=resource,
                         diagnostic=f"reply fails its schema: {error.detail}",
                         reply_errors=_reply_errors(error.violations),
+                        refused_steers=outcome.result.refused_steers,
                     )
                 return _Facts(
                     ObservationStatus.SUCCEEDED,
@@ -1117,6 +1141,7 @@ class RuntimeSessionRequests:
                     resource_id=resource,
                     output_schema=ref,
                     output_json=reply.model_dump_json(),
+                    refused_steers=outcome.result.refused_steers,
                 )
             case InvalidResponse():
                 return _Facts(
@@ -1255,7 +1280,10 @@ class RuntimeSessionRequests:
                     reply_errors=target.reply_errors,
                 ),
             ),
-            owner_events=(self._turn_event(request.invocation, seen, target),),
+            owner_events=(
+                *_refusals(request.invocation, target, context.now_at),
+                self._turn_event(request.invocation, seen, target),
+            ),
         )
 
 

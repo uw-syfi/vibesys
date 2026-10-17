@@ -443,6 +443,7 @@ class RunIntegrationAdapter:
                 agent_kind=event.agent_kind,
                 round_label=event.round_label,
                 execution_id=event.execution_id,
+                note=event.text,
             ),
             CoreEventType.STEER_DELIVERED_MID_TURN: lambda: self.controller.record_steer_consumed(
                 agent_kind=event.agent_kind,
