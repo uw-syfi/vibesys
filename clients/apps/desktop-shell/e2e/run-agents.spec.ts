@@ -3,13 +3,15 @@ import {expect, type Page, test} from '@playwright/test';
 import {type FakeBridgeSeed, installFakeBridge, installFakeMachines} from './fake-bridge.js';
 import {installFakeRun} from './fake-run.js';
 import {type FakeServerSeed, installFakeServer} from './fake-server.js';
-import {judgeEvents, RUN_ID, traceEvents, turnEvents, W5_GATE} from './fake-trace.js';
+import {judgeEvents, RUN_ID, traceEvents, turnEvents, usageEvents, W5_GATE} from './fake-trace.js';
 
 /**
  * The Agents face of the Run screen against the Fake bridge and a fake run server whose span
  * events name each agent turn's agent and who started it: the tree of who started whom (with the
  * judge's fan-in), an agent opened beside the tree with its facts and turns, and a turn opened as
- * a step. Checked in the Ink theme at 1440x900; `LEVEL_SHOTS` names a directory to save the
+ * a step. The turns report what they spent (`turn_usage_recorded`): the run's total sits in the
+ * header, each agent's in the tree and its pane, each turn's in its row and its pane header.
+ * Checked in the Ink theme at 1440x900 and 1000x900; `LEVEL_SHOTS` names a directory to save the
  * screens in (the app's main region only).
  */
 
@@ -54,10 +56,12 @@ const SEED: FakeBridgeSeed = {
 
 const SPAN_EVENTS = traceEvents();
 const TURN_EVENTS = turnEvents(SPAN_EVENTS.length);
+const JUDGE_EVENTS = judgeEvents(SPAN_EVENTS.length + TURN_EVENTS.length);
 const EVENTS = [
   ...SPAN_EVENTS,
   ...TURN_EVENTS,
-  ...judgeEvents(SPAN_EVENTS.length + TURN_EVENTS.length),
+  ...JUDGE_EVENTS,
+  ...usageEvents(SPAN_EVENTS.length + TURN_EVENTS.length + JUDGE_EVENTS.length),
 ];
 
 const SERVER: FakeServerSeed = {
@@ -146,4 +150,54 @@ test('the agents tree shows who started whom, and an agent opens beside it with 
   await expect(turns).toHaveCount(0);
   await page.keyboard.press('Escape');
   await expect(turns).toBeVisible();
+});
+
+test('the run, each agent and each turn name the tokens they spent', async ({page}) => {
+  await openRun(page);
+  // The run: every turn's input and output, 1,517,700 in all, exact on hover.
+  const total = page.getByText('1.5M tokens');
+  await expect(total).toBeVisible();
+  await expect(total).toHaveAttribute(
+    'title',
+    'Input 1,466,600 (1,299,500 cached)\nOutput 51,100 (17,100 reasoning)\nTotal 1,517,700',
+  );
+
+  await page.getByRole('radiogroup', {name: 'Show'}).getByText('Agents').click();
+  const agents = page.getByRole('listbox', {name: 'Agents'});
+  await expect(page.getByText('tokens', {exact: true})).toBeVisible();
+  // Each agent's turns summed: the first implementer's one turn, the planner's one measured turn.
+  await expect(agents.getByRole('option', {name: /implementer/}).nth(0)).toContainText('1.2M');
+  await expect(agents.getByRole('option', {name: /planner/}).nth(0)).toContainText('191.6k');
+  await check(page, 'ink-agents-tokens');
+
+  // W5's implementer: its pane totals it, and its turn opens with its tokens in the header.
+  await agents
+    .getByRole('option', {name: /implementer/})
+    .nth(1)
+    .click();
+  await expect(page.getByText('50.9k', {exact: true}).first()).toBeVisible();
+  await page.getByRole('listbox', {name: 'Turns'}).getByRole('option').first().click();
+  await expect(page.getByText(/· 50\.9k tokens$/)).toBeVisible();
+  await check(page, 'ink-turn-tokens');
+});
+
+test.describe('at 1000px', () => {
+  test.use({viewport: {width: 1000, height: 900}});
+
+  test('the token figures fit beside the run’s other facts', async ({page}) => {
+    await openRun(page);
+    await expect(page.getByText('1.5M tokens')).toBeVisible();
+    await page.getByRole('radiogroup', {name: 'Show'}).getByText('Agents').click();
+    const agents = page.getByRole('listbox', {name: 'Agents'});
+    await expect(agents.getByRole('option', {name: /implementer/}).nth(0)).toContainText('1.2M');
+    await check(page, 'ink-agents-tokens-1000');
+    await agents
+      .getByRole('option', {name: /implementer/})
+      .nth(1)
+      .click();
+    await check(page, 'ink-agent-tokens-1000');
+    await page.getByRole('listbox', {name: 'Turns'}).getByRole('option').first().click();
+    await expect(page.getByText(/· 50\.9k tokens$/)).toBeVisible();
+    await check(page, 'ink-turn-tokens-1000');
+  });
 });

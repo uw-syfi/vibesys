@@ -7,6 +7,7 @@ import {afterAll, beforeAll, expect, test} from 'bun:test';
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun} from '@vibesys/hosts';
 import {emptyLogView, type LogView} from '@vibesys/logs';
+import {EMPTY_LEDGER} from '@vibesys/run-state';
 import type {Candidate, CandidateAttempt, CandidateStep} from '@vibesys/run-state/candidates';
 import {Seeded} from '@vibesys/store/testing';
 import {Window} from 'happy-dom';
@@ -163,6 +164,7 @@ async function show(state: RunPageState, scope: LogScope, click?: string): Promi
       <LogsView
         model={MODEL}
         clock={CLOCK}
+        tokens={EMPTY_LEDGER}
         zoom={() => undefined}
         state={state}
         scope={scope}

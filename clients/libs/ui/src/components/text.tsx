@@ -29,12 +29,20 @@ export function Text(props: {
   readonly as?: TextElement;
   /** For a region or control to be named by this text (`aria-labelledby`). */
   readonly id?: string;
+  /** What the pointer shows over the text: the same thing in full, or what the text abbreviates. */
+  readonly title?: string;
   readonly children: ReactNode;
 }): JSX.Element {
   const {variant = 'body', as: Element = 'span'} = props;
   const tone = props.tone ?? (variant === 'section' ? 'muted' : 'default');
   return (
-    <Element className="vs-text" id={props.id} data-tone={tone} style={typeStyle(variant)}>
+    <Element
+      className="vs-text"
+      id={props.id}
+      title={props.title}
+      data-tone={tone}
+      style={typeStyle(variant)}
+    >
       {props.children}
     </Element>
   );

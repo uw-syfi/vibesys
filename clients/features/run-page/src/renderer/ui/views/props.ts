@@ -12,7 +12,7 @@
  * - `step/`: an opened step (an agent turn as narrative, or a gate) and its item (a tool call);
  * - `idea/`: an opened idea's body (attempts, step strip, steps) and its compact step list.
  */
-import type {CoreState} from '@vibesys/run-state';
+import type {CoreState, TokenLedger} from '@vibesys/run-state';
 import type {ReactNode} from 'react';
 import type {RunModel, ZoomEvent} from '../../../state/index.js';
 
@@ -29,6 +29,8 @@ interface RunClock {
 export interface ViewBase {
   readonly model: RunModel;
   readonly clock: RunClock;
+  /** The tokens the run's turns spent, by turn span (empty before any turn finished). */
+  readonly tokens: TokenLedger;
   readonly zoom: Zoom;
 }
 

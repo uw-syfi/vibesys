@@ -59,6 +59,15 @@ export {
   runPhase,
 } from './run-page.js';
 export {scrubberView, viewAtPosition} from './scrub.js';
+export {tokensByAgent, turnTokens} from './token-usage.js';
+export {
+  type TokensReading,
+  tokensColumn,
+  tokensFigure,
+  tokensLabel,
+  tokensReading,
+  tokensTitle,
+} from './token-words.js';
 export {
   endedView,
   followedStreams,

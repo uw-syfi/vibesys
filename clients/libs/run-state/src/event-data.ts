@@ -24,6 +24,7 @@ import {
   type MutableCoreState,
   type QuotaState,
 } from './state.js';
+import {ledgerWith} from './token-usage.js';
 import {appendTranscript, eventToTranscriptEntry, RUN_TRANSCRIPT} from './transcript-fold.js';
 import type {TranscriptFolder} from './transcript-folder.js';
 import {workstreamsWithFinish, workstreamsWithUsage} from './workstream.js';
@@ -214,8 +215,10 @@ function applyWorkstreamFinishedData(
 function applyTurnUsageData(state: CoreState, event: RunEvent): CoreState {
   const data = event.data;
   if (data?.kind !== 'turn_usage_recorded') return state;
-  const workstreams = workstreamsWithUsage(state.workstreams, event, data);
-  return workstreams === state.workstreams ? state : cloneCoreStateWith(state, {workstreams});
+  return cloneCoreStateWith(state, {
+    workstreams: workstreamsWithUsage(state.workstreams, event, data),
+    tokens: ledgerWith(state.tokens, data),
+  });
 }
 
 function applyExperimentsChangedData(

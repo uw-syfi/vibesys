@@ -903,3 +903,47 @@ describe('the live run clock', () => {
     expect(runNow({...state, view: {at: 2}})).toBeNull();
   });
 });
+
+describe('the header’s token figure', () => {
+  const live = (): RunPageState =>
+    runPageStep(
+      runPageInitial({
+        identity: RUN,
+        title: {project: '~/p', task: 'mpmc'},
+        hostLabel: 'chelan4',
+        unavailable: {},
+      }),
+      {type: 'record', record: {kind: 'live', run: server('running')}},
+    ).state;
+  const usage = (sequence: number, tokens: Record<string, number>): RunEvent =>
+    ({
+      protocol_version: 1,
+      run_id: RUN.runId,
+      sequence,
+      timestamp: '2026-01-01T00:00:00Z',
+      type: 'turn_usage_recorded',
+      data: {kind: 'turn_usage_recorded', ...tokens},
+    }) as RunEvent;
+  const withCore = (state: RunPageState, events: readonly RunEvent[]): RunPageState =>
+    runPageStep(
+      {...state, link: {kind: 'attached', instance: 'a1b2c3d4e5f6'}},
+      {type: 'run-core', core: events.reduce(reduceEvent, initialCoreState())},
+    ).state;
+
+  test('is absent until a turn reports tokens', () => {
+    expect(headerView(live()).spent).toBeNull();
+    expect(headerView(withCore(live(), [usage(1, {})])).spent).toBeNull();
+  });
+
+  test('sums every turn, with the exact counts for the hover, and follows each new turn', () => {
+    const first = withCore(live(), [usage(1, {input_tokens: 1_000_000, output_tokens: 20_000})]);
+    expect(headerView(first).spent?.label).toBe('1M');
+    const second = withCore(live(), [
+      usage(1, {input_tokens: 1_000_000, output_tokens: 20_000}),
+      usage(2, {input_tokens: 150_000, cache_read_input_tokens: 100_000, output_tokens: 30_000}),
+    ]);
+    const spent = headerView(second).spent;
+    expect(spent?.label).toBe('1.2M');
+    expect(spent?.title).toBe('Input 1,150,000 (100,000 cached)\nOutput 50,000\nTotal 1,200,000');
+  });
+});

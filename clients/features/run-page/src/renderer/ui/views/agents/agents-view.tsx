@@ -8,6 +8,14 @@ import {Button, EmptyState, KeyValue, PickList, PickRow, Stack, Text} from '@vib
 import {type JSX, useMemo} from 'react';
 import {type AgentRow, agentTree, type FoldRow} from '../../../../state/agent-tree.js';
 import {type AgentTurn, agentModel, agentTurns} from '../../../../state/agent-turns.js';
+import {
+  type TokensReading,
+  tokensByAgent,
+  tokensColumn,
+  tokensFigure,
+  tokensTitle,
+  turnTokens,
+} from '../../../../state/index.js';
 import {roleSeries} from '../../../../state/role-series.js';
 import {duration} from '../../../../state/span-reading.js';
 import type {ViewBase, WithCore} from '../props.js';
@@ -51,7 +59,12 @@ function took(agent: AgentNode, now: number | null): string | undefined {
   return end === null ? undefined : duration(end - agent.startedAt);
 }
 
-function AgentLine(props: {readonly row: AgentRow; readonly view: AgentsViewProps}): JSX.Element {
+function AgentLine(props: {
+  readonly row: AgentRow;
+  readonly view: AgentsViewProps;
+  /** The agent's cell of the tokens column; null when the list has no such column. */
+  readonly measure: TokensReading | null;
+}): JSX.Element {
   const {row, view} = props;
   const {agent} = row;
   const summary = [agent.activity.within?.title, row.headline]
@@ -59,6 +72,7 @@ function AgentLine(props: {readonly row: AgentRow; readonly view: AgentsViewProp
     .join(' · ');
   const also = row.alsoUnder.length === 0 ? [] : [alsoBadge(row.alsoUnder, view.compact)];
   const time = took(agent, view.clock.now);
+  const {measure} = props;
   return (
     <PickRow
       id={agent.id}
@@ -70,6 +84,7 @@ function AgentLine(props: {readonly row: AgentRow; readonly view: AgentsViewProp
       badges={also}
       figure={agent.turns.toLocaleString('en-US')}
       figureTone="muted"
+      {...(measure === null ? {} : {measure})}
       {...(time === undefined || view.compact ? {} : {trail: {label: time}})}
       select={() => view.zoom({type: 'open-agent', agent: agent.id})}
     />
@@ -102,10 +117,18 @@ export function AgentsView(props: AgentsViewProps): JSX.Element {
   const {agents} = props.model;
   const spans = props.model.trace.spans;
   const {unfolded, unfold} = props;
+  const spent = useMemo(() => tokensByAgent(spans, props.tokens), [spans, props.tokens]);
   const rows = useMemo(
     () => agentTree(agents, spans, unfolded, props.selected),
     [agents, spans, unfolded, props.selected],
   );
+  // The tokens column is for the full list: beside an opened agent there is no room for it.
+  const agentRows = rows.filter(row => row.kind === 'agent');
+  const cells = tokensColumn(
+    props.compact ? agentRows.map(() => null) : agentRows.map(row => spent.get(row.agent.id)),
+  );
+  const cellOf = new Map(agentRows.map((row, index) => [row.agent.id, cells[index] ?? null]));
+  const hasTokens = cells.some(cell => cell !== null);
   if (agents.agents.length === 0) return <EmptyState title="No agents yet" />;
   return (
     <PickList
@@ -119,6 +142,7 @@ export function AgentsView(props: AgentsViewProps): JSX.Element {
               start: 'agent · started by the row above · now',
               end: [
                 {label: 'turns', fixed: 'figure' as const},
+                ...(hasTokens ? [{label: 'tokens', fixed: 'measure' as const}] : []),
                 {label: 'took', fixed: 'trail' as const},
               ],
             },
@@ -126,7 +150,12 @@ export function AgentsView(props: AgentsViewProps): JSX.Element {
     >
       {rows.map(row =>
         row.kind === 'agent' ? (
-          <AgentLine key={row.agent.id} row={row} view={props} />
+          <AgentLine
+            key={row.agent.id}
+            row={row}
+            view={props}
+            measure={cellOf.get(row.agent.id) ?? null}
+          />
         ) : (
           <FoldLine key={`fold:${row.parent}`} row={row} show={() => unfold(row.parent)} />
         ),
@@ -145,6 +174,8 @@ export function AgentPane(props: AgentPaneProps): JSX.Element {
   const spans = model.trace.spans;
   const turns = useMemo(() => agentTurns(spans, agent.id), [spans, agent.id]);
   const modelName = agentModel(agent, props.core);
+  const spent = tokensByAgent(spans, props.tokens).get(agent.id);
+  const spentFigure = spent === undefined ? null : tokensFigure(spent);
   const parents = agent.startedBy
     .map(id => model.agents.agents.find(item => item.id === id))
     .filter((item): item is AgentNode => item !== undefined);
@@ -170,10 +201,18 @@ export function AgentPane(props: AgentPaneProps): JSX.Element {
                   )),
           },
           {key: 'turns', value: String(agent.turns)},
+          ...(spent === undefined || spentFigure === null
+            ? []
+            : [
+                {
+                  key: 'tokens',
+                  value: <span title={tokensTitle(spent)}>{spentFigure}</span>,
+                },
+              ]),
           {key: 'status', value: agent.status},
         ]}
       />
-      <TurnList turns={turns} clock={props.clock} zoom={zoom} />
+      <TurnList turns={turns} clock={props.clock} tokens={props.tokens} zoom={zoom} />
     </Stack>
   );
 }
@@ -181,6 +220,7 @@ export function AgentPane(props: AgentPaneProps): JSX.Element {
 function TurnList(props: {
   readonly turns: readonly AgentTurn[];
   readonly clock: ViewBase['clock'];
+  readonly tokens: ViewBase['tokens'];
   readonly zoom: ViewBase['zoom'];
 }): JSX.Element {
   if (props.turns.length === 0) {
@@ -190,9 +230,11 @@ function TurnList(props: {
       </Text>
     );
   }
+  const cells = tokensColumn(props.turns.map(turn => turnTokens(props.tokens, turn.span)));
   return (
     <PickList label="Turns" size="fill">
-      {props.turns.map(turn => {
+      {props.turns.map((turn, index) => {
+        const measure = cells[index] ?? null;
         const end = turn.endedAt ?? props.clock.now;
         return (
           <PickRow
@@ -203,6 +245,7 @@ function TurnList(props: {
             state={{tone: tone(turn.status), label: turn.status}}
             {...(end === null ? {} : {figure: duration(end - turn.startedAt)})}
             figureTone="muted"
+            {...(measure === null ? {} : {measure})}
             select={() => props.zoom({type: 'open-step', step: turn.span})}
           />
         );

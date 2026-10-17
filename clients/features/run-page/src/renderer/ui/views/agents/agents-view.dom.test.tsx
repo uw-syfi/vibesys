@@ -6,7 +6,7 @@
 
 import {afterAll, beforeAll, describe, expect, test} from 'bun:test';
 import type {RunEvent, Span} from '@vibesys/contracts';
-import {initialCoreState} from '@vibesys/run-state';
+import {EMPTY_LEDGER, initialCoreState, type TokenLedger} from '@vibesys/run-state';
 import {EMPTY_TRACE} from '@vibesys/run-state/trace';
 import {Window} from 'happy-dom';
 import {act} from 'react';
@@ -14,6 +14,7 @@ import {createRoot} from 'react-dom/client';
 import {FOLD_FROM} from '../../../../state/agent-tree.js';
 import {traceLog} from '../../../../state/live.js';
 import {createRunReader, type RunModel} from '../../../../state/run-model.js';
+import {ledgerOf} from '../../../../state/usage-fixtures.js';
 import type {ZoomEvent} from '../../../../state/zoom.js';
 import type {ViewBase} from '../props.js';
 import {AgentPane, AgentsView} from './agents-view.js';
@@ -105,7 +106,12 @@ function modelOf(turns: readonly TurnOf[]): RunModel {
 }
 
 function base(model: RunModel, sent: ZoomEvent[]): ViewBase {
-  return {model, clock: {start: 0, now: 500}, zoom: event => void sent.push(event)};
+  return {
+    model,
+    clock: {start: 0, now: 500},
+    tokens: EMPTY_LEDGER,
+    zoom: event => void sent.push(event),
+  };
 }
 
 /** The page's side of the list's folds: the groups it keeps unfolded, and where unfolds go. */
@@ -355,5 +361,116 @@ describe('AgentPane', () => {
       {type: 'open-agent', agent: 'boss'},
       {type: 'open-step', step: 'turn:impl:100'},
     ]);
+  });
+});
+
+describe('token usage', () => {
+  const MODEL = modelOf([
+    {agent: 'boss', at: 1, role: 'orchestrator', status: 'running'},
+    {agent: 'impl', at: 2, role: 'implementer', startedBy: ['boss'], title: 'Pad the ring'},
+    {agent: 'impl', at: 100, role: 'implementer', startedBy: ['boss'], title: 'Measure it'},
+  ]);
+  const LEDGER = ledgerOf([
+    {span: 'turn:impl:2', input: 30_000, cached: 24_000, output: 2_000, reasoning: 500},
+    {span: 'turn:impl:100', input: 18_000, output: 1_000},
+  ]);
+
+  test('the list gives each agent its total in a tokens column, exact on hover', async () => {
+    const view = await mount(
+      <AgentsView
+        {...base(MODEL, [])}
+        tokens={LEDGER}
+        {...folds()}
+        selected={null}
+        compact={false}
+      />,
+    );
+    expect(view.textContent).toContain('tokens');
+    expect(option(view, 'implementer').textContent).toContain('51k');
+    expect(option(view, 'orchestrator').textContent).not.toMatch(/\d+(\.\d)?k/);
+    const figure = option(view, 'implementer').querySelector('.vs-pickrow-measure');
+    expect(figure?.getAttribute('title')).toBe(
+      'Input 48,000 (24,000 cached)\nOutput 3,000 (500 reasoning)\nTotal 51,000',
+    );
+  });
+
+  test('a row without a reading keeps the column’s cell, so every row’s figures line up', async () => {
+    const view = await mount(
+      <AgentsView
+        {...base(MODEL, [])}
+        tokens={LEDGER}
+        {...folds()}
+        selected={null}
+        compact={false}
+      />,
+    );
+    const cells = options(view).map(each => each.querySelector('.vs-pickrow-measure')?.textContent);
+    expect(cells).toEqual(['', '51k']);
+  });
+
+  test('a run that reports no tokens has no column at all', async () => {
+    const view = await mount(
+      <AgentsView {...base(MODEL, [])} {...folds()} selected={null} compact={false} />,
+    );
+    expect(view.querySelector('.vs-pickrow-measure')).toBeNull();
+    expect(view.textContent).not.toContain('tokens');
+  });
+
+  test('beside an opened agent the compact list leaves the column out', async () => {
+    const view = await mount(
+      <AgentsView {...base(MODEL, [])} tokens={LEDGER} {...folds()} selected="impl" compact />,
+    );
+    expect(view.querySelector('.vs-pickrow-measure')).toBeNull();
+  });
+
+  test('the pane names the agent’s total and each turn’s own', async () => {
+    const agent = MODEL.agents.agents.find(each => each.id === 'impl');
+    if (agent === undefined) throw new Error('no agent');
+    const view = await mount(
+      <AgentPane {...base(MODEL, [])} tokens={LEDGER} core={null} agent={agent} />,
+    );
+    expect(view.textContent).toMatch(/tokens\s*51k/);
+    expect(options(view).map(each => each.textContent)).toEqual([
+      expect.stringMatching(/Pad the ring.*32k/),
+      expect.stringMatching(/Measure it.*19k/),
+    ]);
+  });
+
+  test('a turn whose provider reported no counts shows none, not a zero', async () => {
+    const quiet = ledgerOf([{span: 'turn:impl:2'}]);
+    const agent = MODEL.agents.agents.find(each => each.id === 'impl');
+    if (agent === undefined) throw new Error('no agent');
+    const view = await mount(
+      <AgentPane {...base(MODEL, [])} tokens={quiet} core={null} agent={agent} />,
+    );
+    expect(view.textContent).not.toContain('tokens');
+    expect(view.querySelector('.vs-pickrow-measure')).toBeNull();
+  });
+
+  test('the figures follow the ledger as turns finish', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const draw = (tokens: TokenLedger) =>
+      act(async () =>
+        root.render(
+          <AgentsView
+            {...base(MODEL, [])}
+            tokens={tokens}
+            {...folds()}
+            selected={null}
+            compact={false}
+          />,
+        ),
+      );
+    await draw(ledgerOf([{span: 'turn:impl:2', input: 1_000}]));
+    expect(option(container, 'implementer').textContent).toContain('1k');
+    await draw(
+      ledgerOf([
+        {span: 'turn:impl:2', input: 1_000},
+        {span: 'turn:impl:100', input: 1_500},
+      ]),
+    );
+    expect(option(container, 'implementer').textContent).toContain('2.5k');
   });
 });

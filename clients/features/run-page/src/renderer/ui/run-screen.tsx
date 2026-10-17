@@ -1,4 +1,4 @@
-import type {CoreState} from '@vibesys/run-state';
+import {type CoreState, EMPTY_LEDGER} from '@vibesys/run-state';
 import {
   Banner,
   Breadcrumb,
@@ -75,6 +75,11 @@ function Header(props: {readonly state: RunPageState; readonly dispatch: Dispatc
           <Text variant="code" tone="muted">
             {header.subtitle}
           </Text>
+          {header.spent === null ? null : (
+            <Text variant="code" tone="muted" title={header.spent.title}>
+              {`· ${header.spent.label} tokens`}
+            </Text>
+          )}
         </Row>
       </Stack>
       <Row gap="space-3">
@@ -310,6 +315,7 @@ export function RunScreen(props: {
   const base: ViewBase = {
     model,
     clock: {start: clockStart(model), now: clockAt(model, runNow(state))},
+    tokens: props.core?.tokens ?? EMPTY_LEDGER,
     zoom,
   };
   const zoomed = resolveZoom(model, route);

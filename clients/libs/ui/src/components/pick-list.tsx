@@ -28,8 +28,8 @@ export interface HeaderColumn {
   readonly label: string;
   /** As wide as a row's bar. */
   readonly bar?: boolean;
-  /** As wide as a row's figure, or as a row's trail. */
-  readonly fixed?: 'figure' | 'trail';
+  /** As wide as a row's figure, its measure, or its trail. */
+  readonly fixed?: 'figure' | 'measure' | 'trail';
 }
 
 /** The one-line caption of a list's columns: `start` over the names, `end` over the trailing columns. */
@@ -141,12 +141,20 @@ export interface RowBar {
   readonly label: string;
 }
 
-/** What follows a row's text: its badges, its bar, its figure and its trail. */
+/** A row's muted figure in a column of its own, with the exact reading in a hover title. */
+export interface Measure {
+  readonly label: string;
+  /** What the pointer shows over the figure: the reading in full. */
+  readonly title?: string;
+}
+
+/** What follows a row's text: its badges, its bar, its figure, its measure and its trail. */
 function Trail(props: {
   readonly badges?: readonly {readonly label: string; readonly tone: StatusTone}[];
   readonly bar?: RowBar;
   readonly figure?: string;
   readonly figureTone?: 'default' | 'ok' | 'err' | 'muted';
+  readonly measure?: Measure;
   readonly trail?: {readonly label: string; readonly press?: () => void};
 }): JSX.Element {
   const trail = props.trail;
@@ -163,6 +171,11 @@ function Trail(props: {
       {props.figure === undefined ? null : (
         <span className="vs-pickrow-figure" data-tone={props.figureTone ?? 'default'}>
           {props.figure}
+        </span>
+      )}
+      {props.measure === undefined ? null : (
+        <span className="vs-pickrow-measure" title={props.measure.title}>
+          {props.measure.label}
         </span>
       )}
       {trail === undefined ? null : trail.press === undefined ? (
@@ -257,6 +270,8 @@ export function PickRow(props: {
   /** Called when the pointer or the focus enters (true) or leaves (false) the row. */
   readonly hover?: (on: boolean) => void;
   readonly bar?: RowBar;
+  /** A muted column after the figure (a count of tokens), one width for every row. */
+  readonly measure?: Measure;
   /** A muted last column after the figure, such as "from <parent>"; with `press` it is a link. */
   readonly trail?: {readonly label: string; readonly press?: () => void};
   /** An accent stripe down the row's edge: it is on the chain the reader is led along (a winning path). */

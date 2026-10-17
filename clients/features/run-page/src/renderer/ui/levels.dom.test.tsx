@@ -3,6 +3,7 @@
  */
 
 import {afterAll, beforeAll, expect, test} from 'bun:test';
+import {EMPTY_LEDGER} from '@vibesys/run-state';
 import {Window} from 'happy-dom';
 import {act} from 'react';
 import {createRoot} from 'react-dom/client';
@@ -57,7 +58,7 @@ async function chipsOf(
     root.render(
       <DeepLevel
         state={state}
-        base={{model, clock: {start: 0, now: 1000}, zoom: () => undefined}}
+        base={{model, clock: {start: 0, now: 1000}, tokens: EMPTY_LEDGER, zoom: () => undefined}}
         core={null}
         mode="ideas"
         dispatch={() => undefined}

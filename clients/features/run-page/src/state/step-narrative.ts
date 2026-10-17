@@ -133,12 +133,20 @@ export function toolOf(
   return null;
 }
 
-/** "1m 40s · 14 tools · 1 failed", for a turn that ran for `seconds` (null: unknown). */
-export function turnMeta(seconds: number | null, narrative: TurnNarrative): string {
+/**
+ * "1m 40s · 14 tools · 1 failed · 48k tokens", for a turn that ran for `seconds` (null: unknown)
+ * and spent `tokens` (null: none reported, so none shown).
+ */
+export function turnMeta(
+  seconds: number | null,
+  narrative: TurnNarrative,
+  tokens: string | null = null,
+): string {
   const parts = [
     ...(seconds === null ? [] : [duration(seconds)]),
     `${narrative.tools} ${narrative.tools === 1 ? 'tool' : 'tools'}`,
     ...(narrative.failed > 0 ? [`${narrative.failed} failed`] : []),
+    ...(tokens === null ? [] : [tokens]),
   ];
   return parts.join(' · ');
 }

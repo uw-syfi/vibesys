@@ -5,12 +5,14 @@
  */
 
 import {afterAll, beforeAll, expect, test} from 'bun:test';
+import {EMPTY_LEDGER} from '@vibesys/run-state';
 import type {Candidate, CandidateStep} from '@vibesys/run-state/candidates';
 import {Window} from 'happy-dom';
 import {act, type ReactNode} from 'react';
 import {createRoot, type Root} from 'react-dom/client';
 import type {ZoomEvent} from '../../../../state/index.js';
 import {attempt, idea, modelOf, step} from '../../../../state/timeline-fixtures.js';
+import {ledgerOf} from '../../../../state/usage-fixtures.js';
 import {IdeaView, ideaHeader, StepList} from './idea-view.js';
 
 const window = new Window();
@@ -72,7 +74,14 @@ function tried(): Candidate {
 }
 
 function view(candidate: Candidate, zoom: (event: ZoomEvent) => void) {
-  return {model: modelOf([candidate]), clock: CLOCK, zoom, idea: candidate, outcome: null};
+  return {
+    model: modelOf([candidate]),
+    clock: CLOCK,
+    tokens: EMPTY_LEDGER,
+    zoom,
+    idea: candidate,
+    outcome: null,
+  };
 }
 
 test('a one-attempt idea shows its steps, role first, and a step opens', async () => {
@@ -130,7 +139,7 @@ test('a segment of the strip opens its step', async () => {
 test('the compact step list highlights the opened step', async () => {
   const candidate = tried();
   const {container, unmount} = await mount(
-    <StepList idea={candidate} selected="a3-g" zoom={() => undefined} />,
+    <StepList idea={candidate} selected="a3-g" tokens={EMPTY_LEDGER} zoom={() => undefined} />,
   );
   const rows = options(container, 'mpmc steps');
   expect(rows.map(row => row.getAttribute('aria-selected'))).toEqual(['false', 'true', 'false']);
@@ -251,5 +260,27 @@ test('a step row names its role once, in its strip color, with status only when 
     null,
   ]);
   expect(rows.some(row => row.querySelector('.vs-pickrow-dot') !== null)).toBe(false);
+  await unmount();
+});
+
+test('an agent turn’s step shows its tokens beside its duration; a gate and a quiet turn show none', async () => {
+  const candidate = idea('mpmc', 'passed', 100, 300);
+  const tokens = ledgerOf([
+    {span: 'mpmc-a-t', input: 40_000, cached: 30_000, output: 8_000, reasoning: 3_000},
+    {span: 'mpmc-a-g', input: 999},
+  ]);
+  const {container, unmount} = await mount(
+    <IdeaView {...view(candidate, () => undefined)} tokens={tokens} />,
+  );
+  const steps = options(container, 'mpmc steps');
+  const figure = (row: HTMLElement | undefined) => row?.querySelector('.vs-pickrow-measure');
+  expect(figure(steps[0])?.textContent).toBe('48k');
+  expect(figure(steps[0])?.getAttribute('title')).toBe(
+    'Input 40,000 (30,000 cached)\nOutput 8,000 (3,000 reasoning)\nTotal 48,000',
+  );
+  expect(steps[0]?.textContent).toContain('1m');
+  // A gate and a turn with no reading keep a blank cell, so the figures line up.
+  expect(figure(steps[1])?.textContent).toBe('');
+  expect(figure(steps[2])?.textContent).toBe('');
   await unmount();
 });

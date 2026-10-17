@@ -460,3 +460,72 @@ export function judgeEvents(after: number): readonly Record<string, unknown>[] {
     },
   ];
 }
+
+/**
+ * What each finished agent turn spent, as a Codex run's `turn_usage_recorded` events name them: the
+ * turn's own increment (input with its cached share, output with its reasoning share), keyed to the
+ * turn's span. W6's turn is still running and the planner's second call reports no counts, so a
+ * row shows a reading, a live turn and a turn the provider did not measure. `after` is the last
+ * event's sequence.
+ */
+export function usageEvents(after: number): readonly Record<string, unknown>[] {
+  const stamp = new Date(START + 1760 * 1000).toISOString().slice(0, 19);
+  const turns: readonly (readonly [string, string, string, Record<string, number>])[] = [
+    [
+      'op:plan1-turn',
+      'planner',
+      'inv-plan1',
+      {
+        input_tokens: 182_400,
+        cache_read_input_tokens: 151_000,
+        output_tokens: 9_200,
+        reasoning_output_tokens: 4_100,
+      },
+    ],
+    [
+      'op:w1-turn',
+      'implementer',
+      'inv-w1',
+      {
+        input_tokens: 1_204_000,
+        cache_read_input_tokens: 1_090_000,
+        output_tokens: 38_600,
+        reasoning_output_tokens: 11_900,
+      },
+    ],
+    [
+      'op:w5-turn',
+      'implementer',
+      'inv-w5',
+      {
+        input_tokens: 48_300,
+        cache_read_input_tokens: 31_000,
+        output_tokens: 2_600,
+        reasoning_output_tokens: 900,
+      },
+    ],
+    [
+      'op:w5-judge',
+      'judge',
+      'inv-w5-judge',
+      {
+        input_tokens: 31_900,
+        cache_read_input_tokens: 27_500,
+        output_tokens: 700,
+        reasoning_output_tokens: 200,
+      },
+    ],
+    ['op:plan2-turn', 'planner', 'inv-plan2', {}],
+  ];
+  return turns.map(([span, kind, invocation, counts], index) => ({
+    protocol_version: 1,
+    run_id: RUN_ID,
+    sequence: after + index + 1,
+    timestamp: `${stamp}+00:00`,
+    type: 'turn_usage_recorded',
+    invocation_id: invocation,
+    agent_kind: kind,
+    span_id: span,
+    data: {kind: 'turn_usage_recorded', span_id: span, ...counts},
+  }));
+}

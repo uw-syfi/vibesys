@@ -4,6 +4,7 @@
  */
 
 import {afterAll, beforeAll, expect, test} from 'bun:test';
+import {EMPTY_LEDGER} from '@vibesys/run-state';
 import type {Candidate} from '@vibesys/run-state/candidates';
 import {Window} from 'happy-dom';
 import {act, type ReactNode} from 'react';
@@ -58,6 +59,7 @@ function base(candidates: readonly Candidate[], now: number, events: ZoomEvent[]
   return {
     model: modelOf(candidates),
     clock: {start: 0, now},
+    tokens: EMPTY_LEDGER,
     zoom: (event: ZoomEvent) => events.push(event),
     idea: null,
   };

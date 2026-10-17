@@ -6,6 +6,7 @@
 
 import {afterAll, beforeAll, expect, test} from 'bun:test';
 import type {HostRun} from '@vibesys/hosts';
+import {EMPTY_LEDGER} from '@vibesys/run-state';
 import {Window} from 'happy-dom';
 import {act} from 'react';
 import {createRoot} from 'react-dom/client';
@@ -88,7 +89,7 @@ async function face(state: RunPageState, mode: RunMode): Promise<string> {
   document.body.append(container);
   const root = createRoot(container);
   const model = createRunReader().read(state.run.trace, null);
-  const base = {model, clock: {start: 0, now: null}, zoom: () => undefined};
+  const base = {model, clock: {start: 0, now: null}, tokens: EMPTY_LEDGER, zoom: () => undefined};
   await act(async () =>
     root.render(
       <RunLevel state={state} base={base} core={null} mode={mode} dispatch={() => undefined} />,
@@ -143,7 +144,7 @@ async function chartAt(scrub: number | null): Promise<{yLabels: string[]; cursor
   document.body.append(container);
   const root = createRoot(container);
   const model = measuredRun(scrub);
-  const base = {model, clock: {start: 0, now: null}, zoom: () => undefined};
+  const base = {model, clock: {start: 0, now: null}, tokens: EMPTY_LEDGER, zoom: () => undefined};
   await act(async () =>
     root.render(
       <>
@@ -197,7 +198,7 @@ async function textOf(model: RunModel, showFailed: boolean): Promise<string> {
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
-  const base = {model, clock: {start: 0, now: null}, zoom: () => undefined};
+  const base = {model, clock: {start: 0, now: null}, tokens: EMPTY_LEDGER, zoom: () => undefined};
   await act(async () =>
     root.render(
       <>
@@ -237,6 +238,7 @@ test('the performance row is one element whatever idea is open: dots are singled
   const base = {
     model,
     clock: {start: 0, now: null},
+    tokens: EMPTY_LEDGER,
     zoom: (event: ZoomEvent) => {
       opened.push(event);
     },

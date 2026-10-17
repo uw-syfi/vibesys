@@ -189,7 +189,7 @@ function StepLevel(
         <AgentsPane {...props} selected={zoomed.agent?.id ?? null} />
       ) : (
         <Pane kicker="steps" title={zoomed.idea.title} width="list">
-          <StepList idea={zoomed.idea} selected={step.span} zoom={base.zoom} />
+          <StepList idea={zoomed.idea} selected={step.span} tokens={base.tokens} zoom={base.zoom} />
         </Pane>
       )}
       <StepPane {...props} />

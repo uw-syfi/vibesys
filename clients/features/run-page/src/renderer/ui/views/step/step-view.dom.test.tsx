@@ -3,12 +3,13 @@
 import {afterAll, beforeAll, describe, expect, test} from 'bun:test';
 import type {RunEvent, Span} from '@vibesys/contracts';
 import {event} from '@vibesys/contracts/testing';
-import {initialCoreState, reduceEventBatch} from '@vibesys/run-state';
+import {EMPTY_LEDGER, initialCoreState, reduceEventBatch} from '@vibesys/run-state';
 import type {CandidateStep} from '@vibesys/run-state/candidates';
 import {Window} from 'happy-dom';
 import {act, type ReactNode} from 'react';
 import {createRoot} from 'react-dom/client';
 import {createRunReader, runPageInitial, runPageStep} from '../../../../state/index.js';
+import {ledgerOf} from '../../../../state/usage-fixtures.js';
 import type {ZoomEvent} from '../../../../state/zoom.js';
 import type {ViewBase} from '../props.js';
 import {ItemView, itemHeader, StepView, type StepViewProps, stepHeader} from './step-view.js';
@@ -150,7 +151,12 @@ function fixture(
   if (turn === undefined || gate === undefined) throw new Error('the fixture has no steps');
   const zooms: ZoomEvent[] = [];
   return {
-    base: {model, clock: {start: 0, now: 101}, zoom: each => zooms.push(each)},
+    base: {
+      model,
+      clock: {start: 0, now: 101},
+      tokens: EMPTY_LEDGER,
+      zoom: each => zooms.push(each),
+    },
     core: state.run.core,
     turn,
     gate,
@@ -278,6 +284,27 @@ describe('an agent turn', () => {
     const header = stepHeader(viewProps(fx, fx.turn, null));
     expect(header.kicker).toBeUndefined();
     expect(header.meta).toBeDefined();
+  });
+
+  test('its header adds the turn’s tokens beside duration and tools, exact on hover', async () => {
+    const fx = fixture(TURN);
+    const tokens = ledgerOf([
+      {span: fx.turn.span, input: 40_000, cached: 30_000, output: 8_000, reasoning: 3_000},
+    ]);
+    const header = stepHeader({...viewProps(fx, fx.turn, null), tokens});
+    const meta = await mount(header.meta);
+    expect(meta.textContent).toMatch(/ · 48k tokens$/);
+    expect(meta.querySelector('[title]')?.getAttribute('title')).toBe(
+      'Input 40,000 (30,000 cached)\nOutput 8,000 (3,000 reasoning)\nTotal 48,000',
+    );
+  });
+
+  test('a turn with no reported tokens keeps the header as it was', async () => {
+    const fx = fixture(TURN);
+    const header = stepHeader(viewProps(fx, fx.turn, null));
+    const meta = await mount(header.meta);
+    expect(meta.textContent).not.toContain('tokens');
+    expect(meta.querySelector('[title]')).toBeNull();
   });
 });
 

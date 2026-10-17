@@ -5,6 +5,7 @@
  * steps (agent turns and gates, each marked by its role's color and named by its role and headline), each opening the step; and the
  * compact step list beside an opened step.
  */
+import type {TokenLedger} from '@vibesys/run-state';
 import type {Candidate, CandidateStep} from '@vibesys/run-state/candidates';
 import {
   Button,
@@ -22,6 +23,7 @@ import {
 import {type JSX, useState} from 'react';
 import type {ImplementerOutcome} from '../../../../state/idea-outcomes.js';
 import {outcomeWords} from '../../../../state/ideas-view.js';
+import {tokensColumn, turnTokens} from '../../../../state/index.js';
 import {roleSeries} from '../../../../state/role-series.js';
 import {duration, words} from '../../../../state/span-reading.js';
 import {
@@ -180,6 +182,7 @@ export function IdeaView(props: IdeaViewProps): JSX.Element {
         steps={attempt.steps}
         label={lines.length > 1 ? `Attempt ${number} steps` : `${idea.title} steps`}
         selected={null}
+        tokens={props.tokens}
         zoom={zoom}
         size="default"
       />
@@ -191,6 +194,8 @@ export interface StepListProps {
   readonly idea: Candidate;
   /** The opened step's span, highlighted; null when none is open. */
   readonly selected: string | null;
+  /** What the run's turns spent, for the figure beside each turn's duration. */
+  readonly tokens: TokenLedger;
   readonly zoom: Zoom;
 }
 
@@ -223,23 +228,30 @@ function StepRows(props: {
   readonly steps: readonly CandidateStep[];
   readonly label: string;
   readonly selected: string | null;
+  readonly tokens: TokenLedger;
   readonly zoom: Zoom;
   readonly size: 'default' | 'fill';
 }): JSX.Element {
   if (props.steps.length === 0) return <EmptyState title="No steps yet" />;
+  const cells = tokensColumn(
+    props.steps.map(step =>
+      step.kind === 'agent_turn' ? turnTokens(props.tokens, step.span) : null,
+    ),
+  );
   return (
     <PickList
       label={props.label}
       size={props.size}
       {...(props.selected === null ? {} : {selected: props.selected})}
     >
-      {props.steps.map(step => {
+      {props.steps.map((step, index) => {
         const took = tookOf(step);
         const name = step.role ?? words(step.kind);
         const badges = noteworthy(step);
         // Every row reads alike: its mark, its name (the role, or the kind for a gate), then the
         // step's headline after it when it has one beyond the name.
         const titled = step.title !== '' && step.title !== name;
+        const measure = cells[index] ?? null;
         return (
           <PickRow
             key={step.span}
@@ -251,6 +263,7 @@ function StepRows(props: {
               : {swatch: roleSeries(step.role)})}
             badges={badges}
             {...(took === undefined ? {} : {figure: took})}
+            {...(measure === null ? {} : {measure})}
             select={() => props.zoom({type: 'open-step', step: step.span})}
           />
         );
@@ -266,6 +279,7 @@ export function StepList(props: StepListProps): JSX.Element {
       steps={props.idea.attempts.at(-1)?.steps ?? []}
       label={`${props.idea.title} steps`}
       selected={props.selected}
+      tokens={props.tokens}
       zoom={props.zoom}
       size="fill"
     />

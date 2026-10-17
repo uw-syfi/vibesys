@@ -54,3 +54,11 @@ export {
   type UsageMeter,
   type WinnerSelection,
 } from './state.js';
+export {
+  addTokens,
+  EMPTY_LEDGER,
+  NO_TOKENS,
+  type TokenLedger,
+  type TokenTally,
+  totalTokens,
+} from './token-usage.js';

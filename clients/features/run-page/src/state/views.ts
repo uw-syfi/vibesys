@@ -19,6 +19,7 @@ import {
   type StopFlow,
   type Unavailable,
 } from './run-page.js';
+import {type TokensReading, tokensReading} from './token-words.js';
 
 export type Tone = 'neutral' | 'live' | 'ok' | 'warn' | 'err';
 
@@ -32,6 +33,8 @@ export interface HeaderView {
   readonly title: string;
   readonly subtitle: string;
   readonly status: {readonly label: string; readonly tone: Tone};
+  /** What the run's turns have spent so far, whole; null until a turn reports any. */
+  readonly spent: TokensReading | null;
   readonly pause: Offer;
   readonly resume: Offer;
   readonly stop: Offer;
@@ -91,6 +94,7 @@ export function headerView(state: RunPageState): HeaderView {
     title: task === null ? name : `${name} · ${task}`,
     subtitle: `${state.hostLabel} · ${state.identity.runId}`,
     status: status(state),
+    spent: tokensReading(state.run.core?.tokens.total),
     pause: offer(phase.kind === 'running' && !phase.pausing, commandReason(state)),
     // A run paused by a usage limit is resumed from its banner, which also offers to wait.
     resume: offer(phase.kind === 'paused' && phase.by === 'user', commandReason(state)),

@@ -20,6 +20,7 @@ import {
   type RunMapProvenance,
   rehydrateRunMapProvenance,
 } from './run-map.js';
+import {EMPTY_LEDGER, type TokenLedger} from './token-usage.js';
 import type {TranscriptEntry} from './transcript-fold.js';
 import type {WorkstreamMap} from './workstream.js';
 
@@ -307,6 +308,11 @@ export interface CoreState {
    * has no entry here.
    */
   readonly workstreams: WorkstreamMap;
+  /**
+   * Token spend folded from `turn_usage_recorded`: the run's total and each agent-turn span's.
+   * Join a span's usage to its agent through the trace (see `TokenLedger`).
+   */
+  readonly tokens: TokenLedger;
   readonly diagnostics: readonly CoreDiagnostic[];
   /** Sequence of the latest semantic experiment invalidation. */
   readonly experimentsRevision: number;
@@ -360,6 +366,7 @@ export function initialCoreState(): CoreState {
     winner: null,
     benchmarks: [],
     workstreams: {},
+    tokens: EMPTY_LEDGER,
     diagnostics: [],
     experimentsRevision: 0,
     typedToolEvents: false,
