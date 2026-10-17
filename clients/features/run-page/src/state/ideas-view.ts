@@ -226,9 +226,29 @@ export interface BestPathView {
 /** Shown whole up to this many names; longer paths fold their middle unless opened. */
 const PATH_SHOWN = 5;
 
-/** The winning path from the input to the best, folded in the middle when long and not `open`. */
-export function bestPathView(model: RunModel, open: boolean): BestPathView | null {
+const pathMemo = new WeakMap<CandidateTree, Map<boolean, BestPathView | null>>();
+
+/**
+ * The winning path from the input to the best, folded in the middle when long and not `open`; the
+ * same object while the ideas and `open` are unchanged.
+ */
+export function bestPathView(
+  model: RunModel,
+  open: boolean,
+  meter?: ViewMeter,
+): BestPathView | null {
   const tree = model.candidates;
+  const views = pathMemo.get(tree) ?? new Map<boolean, BestPathView | null>();
+  pathMemo.set(tree, views);
+  const cached = views.get(open);
+  if (cached !== undefined) return cached;
+  meter?.count(tree.candidates.length);
+  const view = buildPath(tree, open);
+  views.set(open, view);
+  return view;
+}
+
+function buildPath(tree: CandidateTree, open: boolean): BestPathView | null {
   if (tree.bestPath.length === 0) return null;
   const byId = new Map(tree.candidates.map(item => [item.id, item]));
   const names: PathCrumb[] = tree.bestPath.map(id => ({
