@@ -9,6 +9,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    FiniteFloat,
     JsonValue,
     model_validator,
 )
@@ -150,6 +151,31 @@ class EvaluationStageOutcome(BaseModel):
         )
 
 
+class EvaluationComparison(BaseModel):
+    """The framework's comparison of a candidate with its base, as the agent is told it.
+
+    Every number is the framework's: the candidate's mean over its samples and the base's mean
+    over its own, their ``ratio`` (candidate over base), the ``noise`` (one standard error of
+    that ratio) and the ``verdict`` it reached. ``better`` and ``worse`` need the difference to
+    exceed two noises in the metric's direction (``max`` or ``min`` is better); anything closer
+    is ``within_noise``. ``base_commit`` is the revision the base was measured at. More runs of
+    the same candidate content add samples and narrow the noise.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    metric: str = Field(min_length=1)
+    unit: str | None = None
+    direction: Literal["max", "min"]
+    candidate_value: FiniteFloat
+    base_value: FiniteFloat
+    ratio: FiniteFloat
+    noise: FiniteFloat = Field(ge=0)
+    verdict: Literal["better", "within_noise", "worse"]
+    base_commit: str = Field(min_length=1)
+    candidate_samples: int = Field(ge=1)
+    base_samples: int = Field(ge=1)
+
+
 class SubmittedReply(BaseModel):
     """Nonblocking submission receipt.
 
@@ -173,6 +199,14 @@ class SubmittedReply(BaseModel):
         description=(
             "What each finished stage measured: its verdict, every metric with value, unit "
             "and direction, and the end of its summary, generated from the trusted record."
+        ),
+    )
+    comparison: EvaluationComparison | None = Field(
+        default=None,
+        description=(
+            "How the finished candidate measured against its base: both values, the ratio, "
+            "the noise, the framework's verdict and the base commit. Absent while the "
+            "evaluation runs, and while the base's own measurement has not ended."
         ),
     )
 

@@ -34,6 +34,7 @@ from vs_core.api import (
     Observation,
     ObservationStatus,
     PreparedSubmissionReceipt,
+    Reading,
     RequestId,
     ResourceId,
     RevisionRef,
@@ -362,19 +363,24 @@ def _terminal_view(
     )
 
 
-def _core_kind(kind: StageKind, purpose: str) -> EvidenceKind:
+def _core_kind(kind: StageKind) -> EvidenceKind:
+    """The evidence kind of a stage: a framework run is trusted whoever asked for it."""
     if kind is StageKind.PROFILE:
         return EvidenceKind.PROFILING
-    if purpose == "local-validation":
-        return EvidenceKind.LOCAL_VALIDATION
     return EvidenceKind.CORRECTNESS if kind is StageKind.ACCURACY else EvidenceKind.BENCHMARK
 
 
-def _proof_kind(kind: StageKind, purpose: str) -> EvidenceKind | None:
-    """The kind an official run would give this stage's record, named on an agent's record."""
-    if purpose != "local-validation" or kind is StageKind.PROFILE:
+def _reading(item: TrustedEvidence) -> Reading | None:
+    """The headline reading of a benchmark record: its first metric, as the record states it."""
+    if item.kind is not StageKind.BENCHMARK or not item.metrics:
         return None
-    return EvidenceKind.CORRECTNESS if kind is StageKind.ACCURACY else EvidenceKind.BENCHMARK
+    headline = item.metrics[0]
+    return Reading(
+        metric=headline.name,
+        value=headline.value,
+        direction=headline.direction,
+        unit=headline.unit,
+    )
 
 
 def _evidence(
@@ -400,8 +406,7 @@ def _evidence(
         refs.append(
             EvidenceRef(
                 evidence_id=EvidenceId(root=item.evidence_id),
-                kind=_core_kind(item.kind, plan.purpose),
-                proof_kind=_proof_kind(item.kind, plan.purpose),
+                kind=_core_kind(item.kind),
                 purpose=plan.purpose,
                 scope=subject.scope,
                 source_request=subject.request_id,
@@ -420,6 +425,7 @@ def _evidence(
                     ArtifactRef(artifact_id=ArtifactId(root=a.path), digest=a.digest.value)
                     for a in item.artifacts
                 ),
+                reading=_reading(item),
             )
         )
     return tuple(refs), by_stage
