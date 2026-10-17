@@ -1299,6 +1299,31 @@ const responsePayloadSchema: Record<string, unknown> = {
       "title": "IterationUnavailableReason",
       "type": "string"
     },
+    "ObjectiveAxis": {
+      "additionalProperties": false,
+      "description": "One axis the task ranks candidates on, and which way is better.",
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "direction": {
+          "enum": [
+            "max",
+            "min"
+          ],
+          "title": "Direction",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "direction"
+      ],
+      "title": "ObjectiveAxis",
+      "type": "object"
+    },
     "ObjectiveOverview": {
       "additionalProperties": false,
       "description": "What the run optimizes: the task's objective and the metric it is judged on.\n\n``unit`` and ``direction`` come from the run's own measurements and objectives once it has\nthem; ``correctness_check`` is the argv of the check a candidate must pass (empty when the\ntask gates on none).",
@@ -1346,6 +1371,14 @@ const responsePayloadSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "Direction"
+        },
+        "objectives": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ObjectiveAxis"
+          },
+          "title": "Objectives",
+          "type": "array"
         },
         "correctness_check": {
           "default": [],

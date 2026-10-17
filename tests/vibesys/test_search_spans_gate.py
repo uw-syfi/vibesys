@@ -27,8 +27,20 @@ def _readings(draw: st.DrawFn) -> list[EvidenceReading]:
         passed = draw(st.booleans())
         metrics = ()
         if draw(st.booleans()):
-            value = draw(st.floats(0.1, 1e6))
-            metrics = (MetricRow(name="throughput", value=value, direction="max"),)
+            names = draw(
+                st.lists(
+                    st.sampled_from(("throughput", "latency", "memory")), unique=True, min_size=1
+                )
+            )
+            metrics = tuple(
+                MetricRow(
+                    name=name,
+                    value=draw(st.floats(0.1, 1e6)),
+                    direction="min" if name != "throughput" else "max",
+                    unit=draw(st.sampled_from((None, "ms"))),
+                )
+                for name in names
+            )
         partial = None
         if not passed and draw(st.booleans()):
             required = draw(st.integers(1, 1000))
@@ -68,6 +80,9 @@ def test_a_gate_reads_the_benchmark_headline_and_the_first_check_that_rejected(
     benchmark = _latest(readings, EvidenceKind.BENCHMARK)
     value = None if benchmark is None or not benchmark.metrics else benchmark.metrics[0].value
     assert attrs.metric_value == value
+    # Every reading the benchmark reported reaches the label, headline first, units and all.
+    assert attrs.metrics == (() if benchmark is None else benchmark.metrics)
+    assert GateAttrs.model_validate_json(attrs.model_dump_json()).metrics == attrs.metrics
     if value is None or input_value is None:
         assert attrs.vs_baseline is None
     else:
@@ -111,3 +126,24 @@ def test_a_correctness_check_that_passed_93_of_100_trials_says_so() -> None:
     assert FailedCheck.of([reading]) == FailedCheck(
         check=EvidenceKind.CORRECTNESS, completed=93, required=100, unit="trials"
     )
+
+
+def test_a_benchmark_that_reports_two_objectives_labels_its_gate_with_both() -> None:
+    reading = EvidenceReading(
+        evidence_id=EvidenceId(root="benchmark"),
+        kind=EvidenceKind.BENCHMARK,
+        passed=True,
+        stage="benchmark",
+        metrics=(
+            MetricRow(name="throughput", value=120.0, direction="max", unit="ops/s"),
+            MetricRow(name="p99_latency", value=8.5, direction="min", unit="ms"),
+        ),
+    )
+
+    attrs = GateAttrs.read("benchmark", [reading], 100.0)
+
+    assert attrs.metric_value == 120.0
+    assert [(m.name, m.value, m.unit, m.direction) for m in attrs.metrics] == [
+        ("throughput", 120.0, "ops/s", "max"),
+        ("p99_latency", 8.5, "ms", "min"),
+    ]

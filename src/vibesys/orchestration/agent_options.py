@@ -6,6 +6,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from vibesys.events import ObjectiveAxis
 from vibesys.inputs import ProfileGuidedInput
 from vibesys.metrics import MetricSpace
 
@@ -37,6 +38,16 @@ class AgentOrchestrationOptions(TaskInputs):
     # Seconds to wait before asking an agent again after the provider connection dropped its
     # turn; doubles with each further drop of the same turn.
     turn_drop_backoff_seconds: Annotated[float, Field(gt=0, le=600)] = 5.0
+
+
+def objective_axes_of(options: BaseModel) -> tuple[ObjectiveAxis, ...]:
+    """The axes the run ranks candidates on, as its options' metric space declares them."""
+    if not isinstance(options, TaskInputs):
+        return ()
+    return tuple(
+        ObjectiveAxis(name=axis.name, direction=axis.direction)
+        for axis in options.metric_space.objectives
+    )
 
 
 def attribution_command_of(options: BaseModel) -> tuple[str, ...] | None:

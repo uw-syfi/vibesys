@@ -4,14 +4,23 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.events import BenchmarkVersions, EvaluatorIdentity, ObjectiveOverview, RunOverview
+from vibesys.events import (
+    BenchmarkVersions,
+    EvaluatorIdentity,
+    ObjectiveAxis,
+    ObjectiveOverview,
+    RunOverview,
+)
 
 if TYPE_CHECKING:
     from vibesys.inputs import InputBundle
 
 
-def overview_of(bundle: InputBundle) -> RunOverview:
+def overview_of(bundle: InputBundle, objectives: tuple[ObjectiveAxis, ...] = ()) -> RunOverview:
     """The objective text, the benchmark's metric, the correctness check and the pinned evaluator.
+
+    ``objectives`` are the axes the run ranks candidates on: the run's metric space, which the
+    operator may override, so the bundle alone cannot say them.
 
     The metric's unit and direction are not the bundle's facts: the run's measurements and
     objectives add them later (the server's snapshot does).
@@ -23,6 +32,7 @@ def overview_of(bundle: InputBundle) -> RunOverview:
             text=bundle.objective,
             metric=manifest.metric
             or (manifest.benchmark.result.metric if manifest.benchmark.result else None),
+            objectives=objectives,
             correctness_check=bundle.accuracy_command,
         ),
         benchmarks=BenchmarkVersions(
