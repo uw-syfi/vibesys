@@ -40,20 +40,52 @@ function RunItem(props: {
 }
 
 /**
+ * The icon-only control that hides or shows the sidebar: named, and described with its shortcut,
+ * for what pressing it does now.
+ */
+function SidebarToggle(props: {
+  readonly shown: boolean;
+  readonly shortcut: string;
+  readonly press: () => void;
+}): JSX.Element {
+  const label = props.shown ? 'Hide sidebar' : 'Show sidebar';
+  return (
+    <Button
+      variant="quiet"
+      size="sm"
+      icon="sidebar"
+      label={label}
+      hint={`${label} (${props.shortcut})`}
+      press={props.press}
+    />
+  );
+}
+
+/**
  * The app's one window: the sidebar (New run, Live, Recent with "Show all", Machines and
- * Settings) beside the selected screen, which `screen` renders.
+ * Settings) beside the selected screen, which `screen` renders. The sidebar can be hidden
+ * completely; its toggle is in the sidebar's header, and in the main area's top strip while the
+ * sidebar is hidden. `shortcut` is the toggle's keyboard shortcut, as a tooltip shows it.
  */
 export function AppShell(props: {
   readonly state: SidebarState;
   readonly dispatch: (action: SidebarAction) => void;
   readonly actions: ShellActions;
   readonly version: string;
+  readonly shortcut: string;
   readonly screen: (screen: Screen) => ReactNode;
 }): JSX.Element {
   const {state, dispatch, actions} = props;
   const live = liveRows(state);
   const recent = recentRows(state);
   const machines = machineCounts(state);
+  const toggle = (
+    <SidebarToggle
+      shown={state.shown}
+      shortcut={props.shortcut}
+      press={() => dispatch({type: 'toggle-sidebar'})}
+    />
+  );
   const select = (screen: Screen) => () => dispatch({type: 'select', screen});
   const item = (row: RunRow) => (
     <RunItem
@@ -67,15 +99,20 @@ export function AppShell(props: {
   return (
     <AppFrame
       label="VibeSys"
+      navHidden={!state.shown}
+      reveal={toggle}
       nav={
         <>
           <Row justify="between">
-            <Text variant="section" tone="default">
-              VibeSys
-            </Text>
-            <Text variant="code" tone="muted">
-              {props.version}
-            </Text>
+            <Row gap="space-3">
+              <Text variant="section" tone="default">
+                VibeSys
+              </Text>
+              <Text variant="code" tone="muted">
+                {props.version}
+              </Text>
+            </Row>
+            {toggle}
           </Row>
           <Button
             variant="primary"

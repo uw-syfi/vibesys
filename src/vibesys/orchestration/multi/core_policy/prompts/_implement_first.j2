@@ -1,5 +1,6 @@
 {% from '_revision.j2' import rev %}
 {% from 'domain_section.j2' import domain_section %}
+{% from '_prose.j2' import item as prose_item %}
 {% if active_component %}
 ## Focus this round: `{{ active_component }}`
 
@@ -18,14 +19,15 @@ and measure only what is needed; report truthfully.
 Hypothesis `{{ plan.hypothesis_id }}`{% if plan.title %} ({{ plan.title }}){% endif %}, round {{ round_number }}, attempt {{ retry }}.
 Your workspace is an isolated candidate at `{{ rev(base_revision) }}`; edit it freely.
 
-- Claim: {{ plan.hypothesis }}
-- Task: {{ plan.task }}
-- Pass criteria: {{ plan.pass_criteria }}
-{% if plan.invariants %}- Invariants: {{ plan.invariants }}
-{% endif %}{% if plan.activation_evidence %}- Activation evidence: {{ plan.activation_evidence }}
-{% endif %}{% if plan.falsification_criteria %}- Falsifier: {{ plan.falsification_criteria }}
-{% endif %}{% if plan.minimum_acceptance_criteria %}- Minimum acceptance: {{ plan.minimum_acceptance_criteria }}
+{{ prose_item('Claim', plan.hypothesis) }}
+{{ prose_item('Task', plan.task) }}
+{{ prose_item('Pass criteria', plan.pass_criteria) }}
+{% if plan.invariants %}{{ prose_item('Invariants', plan.invariants) }}
+{% endif %}{% if plan.activation_evidence %}{{ prose_item('Activation evidence', plan.activation_evidence) }}
+{% endif %}{% if plan.falsification_criteria %}{{ prose_item('Falsifier', plan.falsification_criteria) }}
+{% endif %}{% if plan.minimum_acceptance_criteria %}{{ prose_item('Minimum acceptance', plan.minimum_acceptance_criteria) }}
 {% endif %}
+
 Read the code and the objective with tools. Files in the workspace override memory.
 {% if retry > 1 %}
 
@@ -186,4 +188,5 @@ Repair only the affected local contract.
 
 ## Progress tracking
 
+{% include 'reply_markdown.j2' %}
 Return only the schema-valid JSON object. The framework records it.

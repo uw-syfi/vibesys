@@ -9,6 +9,7 @@
  */
 import type {Candidate} from '@vibesys/run-state/candidates';
 import type {ReplyFieldView} from './reply-fields.js';
+import {words} from './span-reading.js';
 import {replyOverview} from './step-narrative.js';
 import type {TurnRow} from './turn-transcript.js';
 import type {Tone} from './views.js';
@@ -144,7 +145,9 @@ function planResult(reply: ReplyRow, context: ResultContext): TurnResultView {
   const sections = planSections(reply.value);
   const shown = new Set([...sections.map(section => section.key), 'title']);
   const headline = text(reply.value, 'title');
-  const builtOn = builtOnOf(reply.value, context);
+  // Only the orchestrator plans a base; a turn of another role (a judge) builds on nothing.
+  const builtOn =
+    reply.author.toLowerCase() === 'orchestrator' ? builtOnOf(reply.value, context) : null;
   return {
     id: reply.id,
     label: 'Plan',
@@ -164,7 +167,7 @@ function genericResult(reply: ReplyRow): TurnResultView {
   const overview = new Set(replyOverview(reply.fields));
   const chips = reply.fields.flatMap(field =>
     field.kind === 'badge'
-      ? [{label: field.value, ...(field.tone === undefined ? {} : {tone: field.tone})}]
+      ? [{label: words(field.value), ...(field.tone === undefined ? {} : {tone: field.tone})}]
       : [],
   );
   const sections = reply.fields.flatMap((field): ResultSection[] =>

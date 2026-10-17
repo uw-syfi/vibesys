@@ -3,6 +3,8 @@ import {
   Button,
   Card,
   DotLegend,
+  Fact,
+  FactLine,
   Gantt,
   type GanttRow,
   type GanttView,
@@ -538,6 +540,49 @@ export const FRAME_ENTRIES = {
         The dim lines of the Narrative above: tool calls folded into one line that opens in place; a
         failed call stays visible when closed, and the selected call is marked.
       </Text>
+    ),
+  },
+  FactLine: {
+    render: () => (
+      <Stack>
+        <FactLine>
+          <Fact>
+            <Text variant="code">Passed</Text>
+          </Fact>
+          <Fact>
+            <Text variant="code" tone="muted">
+              0.91× vs base
+            </Text>
+          </Fact>
+          <Fact
+            shrink
+            title="Replace the per-slot sequence numbers of the lock-free ring with a contiguous payload arena"
+          >
+            <Text variant="small" tone="muted">
+              from
+            </Text>
+            <Text variant="small">
+              Replace the per-slot sequence numbers of the lock-free ring with a contiguous payload
+              arena and batched cursor publication
+            </Text>
+          </Fact>
+        </FactLine>
+        <FactLine wrap={false}>
+          <Fact>
+            <Text variant="code">3.83× vs input</Text>
+          </Fact>
+          <Fact shrink>
+            <Text variant="code" tone="muted">
+              this idea · 6,054,154 total_ops_per_sec with a name too long for the line
+            </Text>
+          </Fact>
+        </FactLine>
+      </Stack>
+    ),
+  },
+  Fact: {
+    render: () => (
+      <Text tone="muted">Facts are the entries of the FactLine above: whole, or shrinking.</Text>
     ),
   },
   DotLegend: {render: () => <FilterDemo />},

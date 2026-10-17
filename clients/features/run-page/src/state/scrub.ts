@@ -55,6 +55,7 @@ function timeOfDay(seconds: number | null, carried: number): string | null {
 }
 
 function positionWords(log: TraceLog, at: number, carried: number): string {
+  if (log.earlier !== null && at < log.handoff) return positionWords(log.earlier, at, carried);
   const event = log.events.lastWhile(each => sequenceOf(each) <= at);
   // At the base the time is the snapshot's: the latest its spans carry.
   const time =

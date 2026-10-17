@@ -36,6 +36,30 @@ function atBottom(element: HTMLElement): boolean {
   return element.scrollHeight - element.scrollTop - element.clientHeight < 2;
 }
 
+/** Whether a following list's reader has scrolled above `placed`, where it last put itself. */
+function leftTheEnd(element: HTMLElement, following: boolean, placed: number): boolean {
+  return following && !atBottom(element) && element.scrollTop < placed - 1;
+}
+
+/** Scrolls to the end and returns where that landed. */
+function scrollToEnd(element: HTMLElement): number {
+  element.scrollTop = element.scrollHeight;
+  return element.scrollTop;
+}
+
+/** The element of the row at `index`, or null while it is not drawn. */
+function drawnRow(element: HTMLElement, index: number): HTMLElement | null {
+  return element.querySelector<HTMLElement>(`[aria-posinset="${index + 1}"]`);
+}
+
+/** Records the height `row` has now under `key`; whether that is a change. */
+function remeasured(row: HTMLElement, key: string, measured: Map<string, number>): boolean {
+  const height = row.offsetHeight;
+  if (height === 0 || measured.get(key) === height) return false;
+  measured.set(key, height);
+  return true;
+}
+
 /** What a row of a windowed list is told about its place: for its position and its measuring. */
 interface Slot {
   readonly index: number;
@@ -94,6 +118,9 @@ export function useWindowed(options: {
   const following = useRef(follow);
   const scrolledToEnd = useRef(toEnd);
   const pane = useRef<HTMLElement | null>(null);
+  // Where the list last put itself at its end: a reader above that has left it, even before the
+  // scroll event that says so arrives.
+  const placed = useRef(0);
   const measured = useRef(new Map<string, number>());
   const pending = useRef<{
     readonly index: number;
@@ -115,14 +142,19 @@ export function useWindowed(options: {
     if (element.clientHeight > 0 && element.clientHeight !== view.height) {
       setView({top: view.top, height: element.clientHeight});
     }
-    if (following.current) element.scrollTop = element.scrollHeight;
+    if (leftTheEnd(element, following.current, placed.current)) {
+      // The reader scrolled up in the frame before the scroll event: let them go.
+      following.current = false;
+      setBehind(true);
+    }
+    if (following.current) placed.current = scrollToEnd(element);
     if (scrolledToEnd.current !== toEnd) {
       scrolledToEnd.current = toEnd;
       jump();
     }
     const wanted = pending.current;
     if (wanted === null) return;
-    const row = element.querySelector<HTMLElement>(`[aria-posinset="${wanted.index + 1}"]`);
+    const row = drawnRow(element, wanted.index);
     if (row !== null) {
       pending.current = null;
       wanted.then(row);
@@ -142,7 +174,7 @@ export function useWindowed(options: {
       following.current = true;
       setBehind(false);
     }
-    if (pane.current !== null) pane.current.scrollTop = pane.current.scrollHeight;
+    if (pane.current !== null) placed.current = scrollToEnd(pane.current);
   };
   const reveal = (index: number, then: (row: HTMLElement) => void): void => {
     const element = pane.current;
@@ -155,7 +187,7 @@ export function useWindowed(options: {
     if (start < view.top) next = start;
     else if (end > view.top + height) next = end - height;
     element.scrollTop = next;
-    const row = element.querySelector<HTMLElement>(`[aria-posinset="${index + 1}"]`);
+    const row = drawnRow(element, index);
     if (row !== null) {
       then(row);
     } else {
@@ -167,11 +199,7 @@ export function useWindowed(options: {
     index,
     size: count,
     measure: row => {
-      if (row === null) return;
-      const height = row.offsetHeight;
-      const key = keyOf(index);
-      if (height > 0 && measured.current.get(key) !== height) {
-        measured.current.set(key, height);
+      if (row !== null && remeasured(row, keyOf(index), measured.current)) {
         setMeasures(tick => tick + 1);
       }
     },

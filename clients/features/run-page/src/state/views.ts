@@ -465,16 +465,23 @@ export interface EndedView {
   readonly resume: string | null;
 }
 
+/** What the ended banner says while the history that settles its verdict is still being read. */
+const HISTORY_PENDING = 'Reading the run’s history…';
+
 /** The ended banner, from the end record. */
 export function endedView(state: RunPageState): EndedView | null {
   const phase = runPhase(state);
   if (phase.kind !== 'ended') return null;
   const {label, tone} = endedStatus(phase.run.phase, phase.end);
   const end = phase.end;
+  // An adoption is read from the whole trace: a prefix of the history would name the wrong one.
+  const incomplete = end?.outcome === 'adopted' && state.history.kind === 'reading';
   const reason =
     end === null
       ? (phase.run.reason ?? 'The run’s record does not say why it ended.')
-      : endReason(end.outcome, end.reason, ...adoptedAtEnd(state));
+      : incomplete
+        ? HISTORY_PENDING
+        : endReason(end.outcome, end.reason, ...adoptedAtEnd(state));
   const round = end?.resume_from_round ?? null;
   const resume =
     end?.resumable === true ? (round === null ? 'Resume' : `Resume from round ${round}`) : null;

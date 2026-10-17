@@ -44,6 +44,7 @@ export type SizeToken =
   | 'column-field'
   | 'column-tile'
   | 'column-swatch'
+  | 'column-figure'
   | 'pane-list'
   | 'row-dense'
   | 'gantt-label'
@@ -74,6 +75,7 @@ export const SIZE: Readonly<Record<SizeToken, number>> = {
   'column-field': 240,
   'column-tile': 200,
   'column-swatch': 160,
+  'column-figure': 320,
   'pane-list': 380,
   'row-dense': 28,
   'gantt-label': 220,

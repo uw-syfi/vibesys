@@ -8,7 +8,7 @@
  * drawing data.
  */
 import type {Candidate} from '@vibesys/run-state/candidates';
-import type {Direction} from './run-model.js';
+import type {Direction} from './direction.js';
 
 /** What an idea's own measurement made of it. */
 export type IdeaResult = 'passed' | 'failed' | 'pending';
@@ -50,6 +50,16 @@ function resultOf(item: Candidate): IdeaResult {
 /** Whether `value` beats `than` where `direction` says which way is better. */
 function beats(value: number, than: number, direction: Direction): boolean {
   return direction === 'min' ? value < than : value > than;
+}
+
+/** The input's value: any measurement's value over its ratio to the input; null when unknown. */
+export function inputValueOf(candidates: readonly Candidate[]): number | null {
+  for (const item of candidates) {
+    const value = item.measurement?.metricValue ?? null;
+    const vs = item.measurement?.vsBaseline ?? null;
+    if (value !== null && vs !== null && vs !== 0) return value / vs;
+  }
+  return null;
 }
 
 /**

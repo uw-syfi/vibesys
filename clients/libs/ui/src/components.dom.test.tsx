@@ -5,10 +5,15 @@ import {Window} from 'happy-dom';
 import {act, type ReactNode, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {
+  AppFrame,
   Button,
+  Chart,
+  type ChartPoint,
   Checkbox,
   type ChoiceOption,
   type Completion,
+  Fact,
+  FactLine,
   Field,
   PathInput,
   Scrubber,
@@ -182,6 +187,59 @@ describe('Button', () => {
   });
 });
 
+describe('AppFrame', () => {
+  const frame = (hidden: boolean) => (
+    <AppFrame
+      label="Side"
+      nav={<Button text="New run" press={() => undefined} />}
+      navHidden={hidden}
+      reveal={
+        <Button
+          icon="sidebar"
+          label="Show sidebar"
+          hint="Show sidebar (Cmd+K)"
+          press={() => undefined}
+        />
+      }
+    >
+      <main>Main</main>
+    </AppFrame>
+  );
+
+  test('shown, the navigation is available and there is no strip; hidden, it is inert, out of the accessibility tree, and the reveal control is in the main area', async () => {
+    const container = await mount(frame(false));
+    const nav = one(container, 'nav');
+    expect(nav.hasAttribute('inert')).toBe(false);
+    expect(nav.hasAttribute('aria-hidden')).toBe(false);
+    expect(container.querySelector('.vs-app-strip')).toBeNull();
+
+    const hidden = await mount(frame(true));
+    const hiddenNav = one(hidden, 'nav');
+    expect(hiddenNav.hasAttribute('inert')).toBe(true);
+    expect(hiddenNav.getAttribute('aria-hidden')).toBe('true');
+    const reveal = one(one(hidden, '.vs-app-main'), '.vs-app-strip button');
+    expect(reveal.getAttribute('aria-label')).toBe('Show sidebar');
+    expect(reveal.textContent).toBe('');
+    expect(one(hidden, 'main').textContent).toBe('Main');
+  });
+});
+
+describe('Button hint', () => {
+  test('a hint is the hover tooltip, beside the accessible name', async () => {
+    const container = await mount(
+      <Button
+        icon="sidebar"
+        label="Hide sidebar"
+        hint="Hide sidebar (Ctrl+K)"
+        press={() => undefined}
+      />,
+    );
+    const button = one(container, 'button');
+    expect(button.getAttribute('title')).toBe('Hide sidebar (Ctrl+K)');
+    expect(button.getAttribute('aria-label')).toBe('Hide sidebar');
+  });
+});
+
 describe('Field', () => {
   test('labels its control and describes it by help and error', async () => {
     const container = await mount(
@@ -290,5 +348,89 @@ describe('Scrubber', () => {
     expect(backs).toBe(1);
     const range = past.querySelector('input[type="range"]');
     expect(range?.getAttribute('aria-valuetext')).toBe('16:39:12');
+  });
+});
+
+describe('Chart emphasis and spans', () => {
+  const points: ChartPoint[] = [
+    {id: 'a', x: 1, y: 10, filled: true},
+    {id: 'b', x: 2, y: 20, filled: true},
+    {id: 'c', x: 3, y: 15, filled: false},
+  ];
+  const frame = (container: HTMLElement) =>
+    [...container.querySelectorAll('.vs-chart-pick')].map(pick => [
+      pick.getAttribute('aria-label'),
+      pick.querySelector('circle.vs-chart-point')?.getAttribute('cx'),
+    ]);
+
+  test('emphasis marks dots and the ring follows the focus, with every dot still drawn', async () => {
+    const container = await mount(
+      <Chart
+        label="c"
+        points={points.map(point => ({
+          ...point,
+          emphasis:
+            point.id === 'b'
+              ? ('focus' as const)
+              : point.id === 'a'
+                ? ('related' as const)
+                : ('dim' as const),
+        }))}
+        pick={() => undefined}
+      />,
+    );
+    const kinds = [...container.querySelectorAll('.vs-chart-pick')].map(each =>
+      each.getAttribute('data-emphasis'),
+    );
+    expect(kinds).toEqual(['related', 'focus', 'dim']);
+    expect(container.querySelectorAll('.vs-chart-ring')).toHaveLength(1);
+    expect(container.querySelectorAll('.vs-chart-related')).toHaveLength(1);
+    expect(
+      container
+        .querySelector('.vs-chart-pick[data-emphasis="focus"]')
+        ?.getAttribute('aria-pressed'),
+    ).toBe('true');
+  });
+
+  test('neither emphasis nor spans move a dot or the axes', async () => {
+    const xTicks = [
+      {value: 0, label: '0'},
+      {value: 4, label: '4'},
+    ];
+    const plain = await mount(
+      <Chart label="c" points={points} xTicks={xTicks} pick={() => undefined} />,
+    );
+    const marked = await mount(
+      <Chart
+        label="c"
+        points={points.map(point => ({...point, emphasis: 'dim' as const}))}
+        spans={[{from: -50, to: 2, label: 'an idea'}]}
+        xTicks={xTicks}
+        pick={() => undefined}
+      />,
+    );
+    expect(frame(marked)).toEqual(frame(plain));
+    expect(marked.querySelectorAll('.vs-chart-span')).toHaveLength(1);
+    // The band is clipped to the plot: it starts at the axis, not at x = -50.
+    const band = marked.querySelector('.vs-chart-span-band');
+    const axis = marked.querySelector('line.vs-chart-axis');
+    expect(band?.getAttribute('x')).toBe(axis?.getAttribute('x1'));
+  });
+});
+
+describe('FactLine', () => {
+  test('lays its facts out in order, a shrinking one marked', async () => {
+    const container = await mount(
+      <FactLine wrap={false}>
+        <Fact>one</Fact>
+        <Fact shrink title="a long name">
+          a long name
+        </Fact>
+      </FactLine>,
+    );
+    const facts = [...container.querySelectorAll('.vs-fact')];
+    expect(facts.map(fact => fact.textContent)).toEqual(['one', 'a long name']);
+    expect(facts.map(fact => fact.hasAttribute('data-shrink'))).toEqual([false, true]);
+    expect(container.querySelector('.vs-factline')?.hasAttribute('data-wrap')).toBe(false);
   });
 });

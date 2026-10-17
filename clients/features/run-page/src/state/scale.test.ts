@@ -1,7 +1,8 @@
 import {describe, expect, test} from 'bun:test';
 import type {RunEvent, Span} from '@vibesys/contracts';
 import {Seeded} from '@vibesys/store/testing';
-import {bestPathView, IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
+import {ideaTree} from './ideas-tree.js';
+import {IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
 import {EMPTY_TRACE_LOG, type TraceLog, traceStep} from './live.js';
 import {createRunReader} from './run-model.js';
 import {scrubberView} from './scrub.js';
@@ -12,7 +13,7 @@ import {scrubberView} from './scrub.js';
  *
  * 1. folding N events costs work linear in N;
  * 2. one new event on a long run costs work independent of the run's length;
- * 5. the ideas, the winning path and the agents are not rebuilt while the run is unchanged;
+ * 5. the ideas, the tree and the agents are not rebuilt while the run is unchanged;
  * 7. the same seed gives the same run, byte for byte.
  */
 
@@ -264,21 +265,22 @@ describe('the Run screen at scale', () => {
     expect(work(30)).toBe(short);
   });
 
-  test('the ideas, the winning path and the agents are not rebuilt while the run is unchanged', () => {
+  test('the ideas, the tree and the agents are not rebuilt while the run is unchanged', () => {
     const log = logOf(scaleRun(WEEKS));
     const reader = createRunReader();
     const model = reader.read(log, null);
     let units = 0;
     const meter = {count: (count: number) => (units += count)};
     const ideas = ideasView(model, IDEAS_FILTER_DEFAULT, meter);
-    const path = bestPathView(model, false, meter);
+    const shape = {filter: IDEAS_FILTER_DEFAULT, open: new Set<string>(), pinned: null};
+    const tree = ideaTree(model, shape);
     const built = units;
     expect(built).toBeGreaterThan(0);
     const again = reader.read(log, null);
     expect(again).toBe(model);
     expect(again.agents).toBe(model.agents);
     expect(ideasView(again, {...IDEAS_FILTER_DEFAULT}, meter)).toBe(ideas);
-    expect(bestPathView(again, false, meter)).toBe(path);
+    expect(ideaTree(again, shape).rows).toEqual(tree.rows);
     expect(units).toBe(built);
   });
 });

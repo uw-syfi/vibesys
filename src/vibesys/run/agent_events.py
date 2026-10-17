@@ -246,6 +246,7 @@ class CoreAgentEventSink:
                 cache_creation_input_tokens=usage.cache_creation_input_tokens,
                 cache_read_input_tokens=usage.cache_read_input_tokens,
                 output_tokens=usage.output_tokens,
+                reasoning_output_tokens=usage.reasoning_output_tokens,
                 total_cost_usd=usage.total_cost_usd,
                 duration_ms=usage.duration_ms,
             ),

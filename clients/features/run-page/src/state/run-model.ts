@@ -19,7 +19,9 @@ import {AgentFold, type AgentGraph, agentGraph} from '@vibesys/run-state/agents'
 import {CandidateFold, type CandidateTree, candidateTree} from '@vibesys/run-state/candidates';
 import {type RunTrace, traceSpans} from '@vibesys/run-state/trace';
 import type {AppendLog} from './append-log.js';
+import type {Direction} from './direction.js';
 import {overviewAt, type TraceLog, traceAt} from './live.js';
+import {withLiveBest} from './live-best.js';
 import {latestTime} from './span-reading.js';
 
 /** Counts the units of work a read does (spans folded, nodes built); tests bound it. */
@@ -27,8 +29,7 @@ export interface ReadMeter {
   count(units: number): void;
 }
 
-/** Which way the run's metric improves; null before the run declared it. */
-export type Direction = 'max' | 'min' | null;
+export type {Direction};
 
 /** The run at one sequence. */
 export interface RunModel {
@@ -116,7 +117,7 @@ class LiveFollower {
     const restarted = this.#follow(log);
     const overview = log.headOverview;
     const direction = directionOf(overview);
-    const candidates = this.#candidates.tree();
+    const candidates = withLiveBest(this.#candidates.tree(), direction);
     const agents = this.#agents.graph();
     const previous = restarted ? null : this.#model;
     this.#log = log;
@@ -210,7 +211,7 @@ function foldedAt(log: TraceLog, at: number, meter: ReadMeter): RunModel {
     trace,
     overview,
     direction,
-    candidates: candidateTree(spans),
+    candidates: withLiveBest(candidateTree(spans), direction),
     agents: agentGraph(spans),
     latest: latestTime(spans),
     changed: NOTHING_CHANGED,

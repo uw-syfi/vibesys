@@ -62,13 +62,37 @@ function log(message: string): void {
   console.error(`vibesys-desktop: ${message}`);
 }
 
-function applicationMenu(): Menu {
+/**
+ * The application menu. View's "Toggle Sidebar" only shows the shortcut: the app shell's page
+ * handles the key itself, so the menu must not register it too and toggle twice.
+ */
+function applicationMenu(toggleSidebar: () => void): Menu {
   const first: Electron.MenuItemConstructorOptions =
     process.platform === 'darwin' ? {role: 'appMenu'} : {role: 'fileMenu'};
   return Menu.buildFromTemplate([
     first,
     {role: 'editMenu'},
-    {role: 'viewMenu'},
+    {
+      label: 'View',
+      submenu: [
+        {
+          label: 'Toggle Sidebar',
+          accelerator: 'CmdOrCtrl+\\',
+          registerAccelerator: false,
+          click: toggleSidebar,
+        },
+        {type: 'separator'},
+        {role: 'reload'},
+        {role: 'forceReload'},
+        {role: 'toggleDevTools'},
+        {type: 'separator'},
+        {role: 'resetZoom'},
+        {role: 'zoomIn'},
+        {role: 'zoomOut'},
+        {type: 'separator'},
+        {role: 'togglefullscreen'},
+      ],
+    },
     {role: 'windowMenu'},
   ]);
 }
@@ -100,7 +124,7 @@ async function openWindow(
 ): Promise<Desktop> {
   lockDownSession(log);
   serveBundledUi();
-  Menu.setApplicationMenu(applicationMenu());
+  Menu.setApplicationMenu(applicationMenu(() => windows.main.toggleSidebar()));
   const userData = app.getPath('userData');
   const settings = new SettingsStore({
     settingsPath: join(userData, 'hosts.json'),

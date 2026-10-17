@@ -258,3 +258,104 @@ def test_the_review_prompt_renders_for_every_context(context: JudgePrompt) -> No
 @pytest.mark.parametrize("kind", sorted(kind.value for kind in ACTIVE_PROFILER_KINDS))
 def test_every_runnable_profiler_has_a_template_in_the_shared_tree(kind: str) -> None:
     assert (PROMPTS_DIR / "shared" / "profilers" / f"{kind}.j2").is_file()
+
+
+_MARKDOWN_LINE = st.from_regex(r"(- )?[a-z]{1,6}( [a-z]{1,6}){0,2}", fullmatch=True)
+_MARKDOWN_PROSE = st.lists(_MARKDOWN_LINE, min_size=2, max_size=5).map("\n\n".join)
+_REVISION = RevisionRef(revision_id=RevisionId(root="a1"), digest="git-commit:a1")
+_GATES_OFF = GateFacts(revert_applied=False, revalidation_pending=False)
+
+
+def _prose_plan(prose: str) -> HypothesisPlan:
+    return HypothesisPlan(
+        hypothesis_id="h1",
+        title="t",
+        hypothesis=prose,
+        task=prose,
+        pass_criteria=prose,
+        invariants=prose,
+    )
+
+
+def _implement_context(plan: HypothesisPlan) -> ImplementPrompt:
+    return ImplementPrompt(
+        round_number=1,
+        retry=1,
+        plan=plan,
+        base_revision=_REVISION,
+        framework=_GATES_OFF,
+        benchmark_enabled=True,
+    )
+
+
+def _judge_context(plan: HypothesisPlan, prose: str) -> JudgePrompt:
+    return JudgePrompt(
+        round_number=1,
+        retry=1,
+        plan=plan,
+        claims=ImplementerClaims(
+            summary=prose,
+            expected_behavior=prose,
+            hypothesis_outcome="nominated",
+            evidence=prose,
+            next_step=prose,
+            candidate_disposition="unassessed",
+        ),
+        framework=_GATES_OFF,
+        benchmark_enabled=True,
+    )
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(prose=_MARKDOWN_PROSE)
+def test_a_multiline_markdown_field_of_an_earlier_agent_stays_inside_its_list_item(
+    prose: str,
+) -> None:
+    plan = _prose_plan(prose)
+    indented = [f"  {line}" if line else "" for line in prose.splitlines()]
+    cases = (
+        (
+            _render(PromptTemplate.IMPLEMENT, _implement_context(plan)),
+            ("Claim", "Task", "Pass criteria", "Invariants"),
+        ),
+        (
+            _render(PromptTemplate.JUDGE, _judge_context(plan, prose)),
+            (
+                "Claim",
+                "Task",
+                "Pass criteria",
+                "Invariants",
+                "Summary",
+                "Expected behavior",
+                "Next step",
+                "Evidence",
+            ),
+        ),
+    )
+    for text, labels in cases:
+        lines = text.splitlines()
+        for label in labels:
+            start = lines.index(f"- {label}:")
+            assert lines[start + 1 : start + 1 + len(indented)] == indented
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        PromptTemplate.PRE_ROUND,
+        PromptTemplate.PROFILER,
+        PromptTemplate.IMPLEMENT,
+        PromptTemplate.JUDGE,
+    ],
+)
+def test_every_reply_prompt_tells_the_agent_its_prose_fields_are_markdown(
+    template: PromptTemplate,
+) -> None:
+    plan = _prose_plan("claim")
+    contexts: dict[PromptTemplate, Value] = {
+        PromptTemplate.PRE_ROUND: PreRoundPrompt(round_number=1, has_history=False),
+        PromptTemplate.PROFILER: ProfilerPrompt(round_number=1, profile_focus="focus"),
+        PromptTemplate.IMPLEMENT: _implement_context(plan),
+        PromptTemplate.JUDGE: _judge_context(plan, "claim"),
+    }
+    assert "as Markdown" in _render(template, contexts[template])

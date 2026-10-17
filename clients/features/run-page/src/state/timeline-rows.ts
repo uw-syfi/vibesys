@@ -150,7 +150,8 @@ function figureOfRow(item: Candidate): {figure: string; figureTitle: string | nu
     failed !== null && failed.completed !== null && failed.required !== null
       ? `${failed.completed}/${failed.required}`
       : null;
-  const short = progress ?? `${whole.slice(0, FIGURE_FITS - 1)}…`;
+  const short =
+    progress ?? (item.outcome === 'failed' ? 'failed' : `${whole.slice(0, FIGURE_FITS - 1)}…`);
   return {figure: short, figureTitle: whole};
 }
 

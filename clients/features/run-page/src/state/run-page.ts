@@ -29,6 +29,7 @@ import {
   reduceEventBatch,
 } from '@vibesys/run-state';
 import type {RunRef} from '@vibesys/runs';
+import type {IdeasLayout} from './ideas-tree.js';
 import {IDEAS_FILTER_DEFAULT, type IdeasFilter} from './ideas-view.js';
 import {
   EMPTY_RUN_FOLD,
@@ -140,8 +141,14 @@ export interface RunPageState {
   readonly selected: string | null;
   /** Which ideas the Ideas face shows. */
   readonly ideas: IdeasFilter;
-  /** The best path shows every name rather than folding its middle. */
-  readonly pathOpen: boolean;
+  /** The Ideas face's layout; null until the reader picks one (the face then picks by the run). */
+  readonly ideasLayout: IdeasLayout | null;
+  /** What the reader opened in the ideas tree (`ideaTree`'s keys). */
+  readonly ideasOpen: ReadonlySet<string>;
+  /** The idea the reader pinned (the header line, a pick): its ancestry is open and lit. */
+  readonly ideasPinned: string | null;
+  /** The idea the pointer or focus is on: its ancestry lights, nothing moves. */
+  readonly ideasHovered: string | null;
   /**
    * The agents whose finished agents the Agents list shows rather than folds, by the parent's id.
    * The page keeps them, so a group stays open while the user opens agents elsewhere in the tree.
@@ -170,7 +177,10 @@ export type RunPageAction =
   | {readonly type: 'record'; readonly record: RunRecord}
   | {readonly type: 'select-stream'; readonly streamId: string}
   | {readonly type: 'ideas-filter'; readonly filter: IdeasFilter}
-  | {readonly type: 'best-path-open'; readonly open: boolean}
+  | {readonly type: 'ideas-layout'; readonly layout: IdeasLayout}
+  | {readonly type: 'ideas-open'; readonly key: string; readonly open: boolean}
+  | {readonly type: 'ideas-pin'; readonly idea: string | null}
+  | {readonly type: 'ideas-hover'; readonly idea: string | null}
   | {readonly type: 'agents-open'; readonly id: string; readonly open: boolean}
   | {readonly type: 'view-logs'}
   | {readonly type: 'ask-stop'}
@@ -248,7 +258,10 @@ export function runPageInitial(seed: RunPageSeed): RunPageState {
     views: {},
     selected: null,
     ideas: IDEAS_FILTER_DEFAULT,
-    pathOpen: false,
+    ideasLayout: null,
+    ideasOpen: new Set(),
+    ideasPinned: null,
+    ideasHovered: null,
     agentsOpen: new Set(),
     link: {kind: 'none'},
     session: null,
@@ -649,8 +662,22 @@ export function runPageStep(state: RunPageState, action: RunPageAction): RunPage
       return {state: {...state, followingLogs: true, selected: action.streamId}, requests: []};
     case 'ideas-filter':
       return {state: {...state, ideas: action.filter}, requests: []};
-    case 'best-path-open':
-      return {state: {...state, pathOpen: action.open}, requests: []};
+    case 'ideas-layout':
+      return {state: {...state, ideasLayout: action.layout}, requests: []};
+    case 'ideas-open':
+      return {
+        state: {
+          ...state,
+          ideasOpen: toggled(state.ideasOpen, {id: action.key, open: action.open}),
+        },
+        requests: [],
+      };
+    case 'ideas-pin':
+      return {state: {...state, ideasPinned: action.idea}, requests: []};
+    case 'ideas-hover':
+      return state.ideasHovered === action.idea
+        ? {state, requests: []}
+        : {state: {...state, ideasHovered: action.idea}, requests: []};
     case 'agents-open':
       return {state: {...state, agentsOpen: toggled(state.agentsOpen, action)}, requests: []};
     case 'view-logs':

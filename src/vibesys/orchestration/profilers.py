@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 from vibesys.config import BUNDLED_RESOURCES
 from vibesys.constants import ComputeBackend, DomainName
 from vibesys.run.contracts import ProfilerKind
+from vs_core.api.search import markdown_prose
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -499,10 +500,14 @@ class ProfilerSummary(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    analysis: str = Field(description="Detailed interpretation of the profile data.")
-    bottlenecks: str = Field(description="Ranked bottlenecks with concrete numbers.")
+    analysis: str = Field(
+        description=markdown_prose("Detailed interpretation of the profile data.")
+    )
+    bottlenecks: str = Field(
+        description=markdown_prose("Ranked bottlenecks with concrete numbers.")
+    )
     suggestions: str = Field(
-        description=(
+        description=markdown_prose(
             "Advisory optimization or measurement suggestions tied to bottlenecks; "
             "they do not impose a planning prerequisite."
         )

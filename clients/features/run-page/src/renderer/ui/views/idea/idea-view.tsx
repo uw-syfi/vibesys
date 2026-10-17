@@ -1,16 +1,28 @@
 /**
- * An opened idea's body (the frame draws its pane, with the outcome, ratio and "built on"; the
- * header adds the facts: value, against its parent, how long): its attempts (one line each, the latest selected
+ * An opened idea's body (the frame draws its pane; the header is its facts on one line: outcome,
+ * what it is built on, against that, how long): its attempts (one line each, the latest selected
  * until another is chosen), the strip of the selected attempt's steps over its time, and those
  * steps (agent turns and gates, each marked by its role's color and named by its role and headline), each opening the step; and the
  * compact step list beside an opened step.
  */
 import type {Candidate, CandidateStep} from '@vibesys/run-state/candidates';
-import {Chip, EmptyState, PickList, PickRow, Row, Stack, Text} from '@vibesys/ui';
+import {
+  Button,
+  Chip,
+  EmptyState,
+  Fact,
+  FactLine,
+  PickList,
+  PickRow,
+  Row,
+  Stack,
+  Text,
+} from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import type {ImplementerOutcome} from '../../../../state/idea-outcomes.js';
+import {outcomeWords} from '../../../../state/ideas-view.js';
 import {roleSeries} from '../../../../state/role-series.js';
-import {duration, formatValue, words} from '../../../../state/span-reading.js';
+import {duration, words} from '../../../../state/span-reading.js';
 import {
   type AttemptLine,
   attemptLines,
@@ -31,30 +43,74 @@ function unitOf(model: ViewBase['model']): string {
   return typeof unit === 'string' ? unit : '';
 }
 
-function IdeaFacts(props: IdeaViewProps): JSX.Element | null {
+const OUTCOME_TONE: Readonly<Record<Candidate['outcome'], 'live' | 'ok' | 'err'>> = {
+  running: 'live',
+  passed: 'ok',
+  failed: 'err',
+};
+
+/** `Failed · turned down`: the outcome capitalized, with its reason when the idea failed. */
+function outcomeLabel(idea: Candidate): string {
+  const text = outcomeWords(idea);
+  return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+}
+
+/**
+ * The idea's facts, which never overlap or break inside: its outcome, its value against the base's,
+ * how long it took, and what it is built on (the base's title once, which gives way first and
+ * opens the base). The idea's own figure against the input is the performance row's, above.
+ */
+function IdeaFacts(props: IdeaViewProps): JSX.Element {
   const {idea, model, clock} = props;
-  const unit = unitOf(model);
   const parent =
     idea.parent === null
       ? null
       : (model.candidates.candidates.find(c => c.id === idea.parent) ?? null);
-  const value = idea.measurement?.metricValue ?? null;
   const vs = versusParent(idea, parent, model.direction);
   const known = idea.endedAt !== null || clock.now !== null;
-  const facts = [
-    value === null ? null : `${formatValue(value)}${unit === '' ? '' : ` ${unit}`}`,
-    vs === null || parent === null ? null : `${vs} ${parent.title}`,
-    known ? duration(endOf(idea.startedAt, idea.endedAt, clock.now) - idea.startedAt) : null,
-  ].filter((fact): fact is string => fact !== null);
-  if (facts.length === 0) return null;
   return (
-    <Text variant="code" tone="muted">
-      {facts.join(' · ')}
-    </Text>
+    <FactLine>
+      <Fact>
+        <Chip label={outcomeLabel(idea)} tone={OUTCOME_TONE[idea.outcome]} dot />
+      </Fact>
+      {vs === null ? null : (
+        <Fact>
+          <Text variant="code" tone="muted">
+            {`${vs} vs base`}
+          </Text>
+        </Fact>
+      )}
+      {known ? (
+        <Fact>
+          <Text variant="code" tone="muted">
+            {duration(endOf(idea.startedAt, idea.endedAt, clock.now) - idea.startedAt)}
+          </Text>
+        </Fact>
+      ) : null}
+      {parent === null ? (
+        <Fact>
+          <Text variant="small" tone="muted">
+            from input
+          </Text>
+        </Fact>
+      ) : (
+        <Fact shrink title={parent.title}>
+          <Text variant="small" tone="muted">
+            from
+          </Text>
+          <Button
+            size="sm"
+            variant="quiet"
+            text={parent.title}
+            press={() => props.zoom({type: 'open-idea', idea: parent.id})}
+          />
+        </Fact>
+      )}
+    </FactLine>
   );
 }
 
-/** The idea's facts after the frame's own (outcome, ratio, built on): value, vs parent, duration. */
+/** The idea's facts as the pane's meta line. */
 export const ideaHeader: ViewHeader<IdeaViewProps> = props => ({
   meta: <IdeaFacts {...props} />,
 });
@@ -180,14 +236,15 @@ function StepRows(props: {
         const took = tookOf(step);
         const name = step.role ?? words(step.kind);
         const badges = noteworthy(step);
-        // The role once: a step titled by its role (or untitled) shows it as the title, else led by it.
+        // Every row reads alike: its mark, its name (the role, or the kind for a gate), then the
+        // step's headline after it when it has one beyond the name.
         const titled = step.title !== '' && step.title !== name;
         return (
           <PickRow
             key={step.span}
             id={step.span}
-            {...(titled ? {lead: name} : {})}
-            title={titled ? step.title : name}
+            title={name}
+            {...(titled ? {summary: step.title} : {})}
             {...(step.role === null
               ? {hatched: step.kind === 'gate'}
               : {swatch: roleSeries(step.role)})}

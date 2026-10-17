@@ -3025,6 +3025,18 @@ const runEventSchema: Record<string, unknown> = {
           "default": null,
           "title": "Output Tokens"
         },
+        "reasoning_output_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reasoning Output Tokens"
+        },
         "total_cost_usd": {
           "anyOf": [
             {

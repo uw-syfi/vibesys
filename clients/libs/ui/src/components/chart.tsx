@@ -15,6 +15,18 @@ export interface ChartPoint {
   readonly faint?: boolean;
   /** The color: the accent (the default), muted grey, or the error red; not text, a mark's own color. */
   readonly tone?: 'accent' | 'muted' | 'err';
+  /**
+   * How the point stands against the others: `focus` is drawn larger and ringed at full opacity,
+   * `related` has a thin outline ring, `dim` is faded. Without it the point is drawn as usual.
+   */
+  readonly emphasis?: 'focus' | 'related' | 'dim';
+}
+
+/** A stretch of the x-axis to mark, in the x values' units: a faint band over the plot. */
+export interface ChartSpan {
+  readonly from: number;
+  readonly to: number;
+  readonly label?: string;
 }
 
 /** A value on an axis and the text it is labelled with. */
@@ -175,6 +187,8 @@ export function Chart(props: {
   readonly yDomain?: readonly [number, number];
   readonly size?: ChartSize;
   readonly selected?: string;
+  /** Stretches of the x-axis marked by a faint band; they never change the axis' range. */
+  readonly spans?: readonly ChartSpan[];
   readonly pick?: (id: string) => void;
 }): JSX.Element {
   const size = props.size ?? 'default';
@@ -204,6 +218,9 @@ export function Chart(props: {
       role={props.pick === undefined ? 'img' : 'group'}
       aria-label={props.label}
     >
+      {(props.spans ?? []).map(span => (
+        <Span key={`${span.from}:${span.to}`} span={span} plot={plot} at={at} />
+      ))}
       <Axes plot={plot} at={at} xTicks={xTicks} yTicks={yTicks} />
       {props.reference === undefined ? null : (
         <g>
@@ -225,7 +242,9 @@ export function Chart(props: {
           key={point.id ?? `${point.x}:${point.y}`}
           point={point}
           at={at}
-          selected={point.id !== undefined && point.id === props.selected}
+          selected={
+            point.emphasis === 'focus' || (point.id !== undefined && point.id === props.selected)
+          }
           stop={point.id !== undefined && point.id === stop}
           dense={props.points.length > DENSE_ABOVE}
           pick={props.pick}
@@ -249,6 +268,38 @@ export function Chart(props: {
   );
 }
 
+/** A span's band over the plot, clipped to it, with a bar on the axis. */
+function Span(props: {
+  readonly span: ChartSpan;
+  readonly plot: Plot;
+  readonly at: Scale;
+}): JSX.Element {
+  const {plot, at, span} = props;
+  const left = Math.max(plot.left, Math.min(at.x(span.from), at.x(span.to)));
+  const right = Math.min(plot.right, Math.max(at.x(span.from), at.x(span.to)));
+  const width = Math.max(0, right - left);
+  return (
+    <g className="vs-chart-span">
+      {span.label === undefined ? null : <title>{span.label}</title>}
+      <rect
+        className="vs-chart-span-band"
+        x={left}
+        y={plot.top}
+        width={width}
+        height={plot.bottom - plot.top}
+      />
+      <rect
+        className="vs-chart-span-bar"
+        x={left}
+        y={plot.bottom - SPAN_BAR}
+        width={width}
+        height={SPAN_BAR}
+      />
+    </g>
+  );
+}
+
+const SPAN_BAR = 4;
 const POINT_RADIUS = 5.5;
 const SELECTED_RADIUS = 8;
 /** With more points than this, the hollow ones are small and faint, so the kept ones lead. */
@@ -307,6 +358,7 @@ function Point(props: {
       className="vs-chart-point"
       data-filled={point.filled || undefined}
       data-faint={faint || undefined}
+      data-emphasis={point.emphasis}
       data-tone={point.tone}
       cx={cx}
       cy={cy}
@@ -314,18 +366,18 @@ function Point(props: {
     />
   );
   if (id === undefined || pick === undefined) {
-    return selected ? (
-      <SelectedPoint cx={cx} cy={cy}>
+    return (
+      <g data-emphasis={point.emphasis}>
+        <Rings cx={cx} cy={cy} selected={selected} related={point.emphasis === 'related'} />
         {dot}
-      </SelectedPoint>
-    ) : (
-      dot
+      </g>
     );
   }
   return (
     // biome-ignore lint/a11y/useSemanticElements: an SVG point cannot be a <button>; the group carries the button role, name, state and keys instead.
     <g
       className="vs-chart-pick"
+      data-emphasis={point.emphasis}
       role="button"
       tabIndex={props.stop ? 0 : -1}
       aria-label={point.label ?? id}
@@ -341,7 +393,7 @@ function Point(props: {
       }}
     >
       <title>{point.label ?? id}</title>
-      {selected ? <circle className="vs-chart-ring" cx={cx} cy={cy} r={SELECTED_RADIUS} /> : null}
+      <Rings cx={cx} cy={cy} selected={selected} related={point.emphasis === 'related'} />
       {dot}
     </g>
   );
@@ -367,15 +419,21 @@ function moveAmong(current: SVGGElement, key: string): boolean {
   return true;
 }
 
-function SelectedPoint(props: {
+/** The ring of the selected point, or the thin outline of a related one. */
+function Rings(props: {
   readonly cx: number;
   readonly cy: number;
-  readonly children: JSX.Element;
+  readonly selected: boolean;
+  readonly related: boolean;
 }): JSX.Element {
   return (
-    <g>
-      <circle className="vs-chart-ring" cx={props.cx} cy={props.cy} r={SELECTED_RADIUS} />
-      {props.children}
-    </g>
+    <>
+      {props.selected ? (
+        <circle className="vs-chart-ring" cx={props.cx} cy={props.cy} r={SELECTED_RADIUS} />
+      ) : null}
+      {props.related ? (
+        <circle className="vs-chart-related" cx={props.cx} cy={props.cy} r={SELECTED_RADIUS} />
+      ) : null}
+    </>
   );
 }

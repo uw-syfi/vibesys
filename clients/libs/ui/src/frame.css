@@ -166,6 +166,8 @@ button.vs-crumb:focus-visible {
   outline: none;
 }
 .vs-pane-meta {
+  min-width: 0;
+  max-width: 100%;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -203,6 +205,14 @@ button.vs-crumb:focus-visible {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  container-type: inline-size;
+}
+/* A narrow list gives the bar's width back to the names: the figure still says the same. */
+@container (max-width: 480px) {
+  .vs-pickrow-bar,
+  .vs-listheader-col[data-bar] {
+    display: none;
+  }
 }
 .vs-picklist-rows {
   max-height: var(--thread);
@@ -291,6 +301,21 @@ button.vs-crumb:focus-visible {
 .vs-pickrow-bar {
   flex: none;
   width: var(--column-swatch);
+}
+.vs-pickrow-fold {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-5);
+  margin-right: calc(-1 * var(--space-2));
+  color: var(--muted);
+}
+.vs-pickrow-fold[data-fold] {
+  cursor: pointer;
+}
+.vs-pickrow-fold[data-fold]:hover {
+  color: var(--text);
 }
 .vs-pickrow-lead {
   flex: none;
@@ -410,6 +435,10 @@ button.vs-crumb:focus-visible {
 }
 .vs-screen[data-density="compact"] .vs-pickrow-lead {
   min-width: calc(var(--space-8) * 2 + var(--space-3));
+}
+/* A depth number in a list that folds is a couple of digits, not a column. */
+.vs-screen .vs-pickrow-fold ~ .vs-pickrow-lead {
+  min-width: 0;
 }
 .vs-screen[data-density="compact"] .vs-guide {
   margin: calc(-1 * var(--space-1)) 0;
@@ -668,6 +697,8 @@ button.vs-crumb:focus-visible {
 .vs-listheader-start {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .vs-listheader-col {
   flex: none;
@@ -719,6 +750,7 @@ button.vs-crumb:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  white-space: nowrap;
 }
 .vs-serieslegend {
   margin: 0;
@@ -872,6 +904,26 @@ button.vs-crumb:focus-visible {
 .vs-chart-point[data-faint] {
   opacity: 0.45;
 }
+/* A chart that singles points out: the others stay, dimmed. */
+.vs-chart-point[data-emphasis="dim"] {
+  opacity: 0.25;
+}
+.vs-chart-point[data-emphasis="focus"] {
+  stroke-width: 3;
+}
+.vs-chart-related {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+.vs-chart-span-band {
+  fill: var(--accent);
+  opacity: 0.08;
+}
+.vs-chart-span-bar {
+  fill: var(--accent);
+  opacity: 0.5;
+}
 
 /* --- flat lists: a trailing column ("from <parent>") -------------------------------------------- */
 
@@ -948,4 +1000,58 @@ button.vs-dotlegend-item:focus-visible {
 }
 .vs-searchbox:focus-within {
   border-color: var(--accent);
+}
+
+/* --- facts: one line that never wraps or overlaps ---------------------------------------------- */
+
+.vs-factline {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+.vs-factline[data-wrap] {
+  flex-wrap: wrap;
+}
+/* Its facts add nothing to the width of what holds it: the line fills that width and clips. */
+.vs-factline[data-fit="parent"] {
+  contain: inline-size;
+  width: 100%;
+}
+.vs-fact {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+  white-space: nowrap;
+}
+/* It takes what the others leave, down to nothing; on a wrapping line it stays on the line while
+   a field's width is left and goes to a line of its own below that. */
+.vs-fact[data-shrink] {
+  flex: 1 1 var(--column-field);
+  min-width: 0;
+  max-width: 100%;
+}
+.vs-fact[data-shrink] > * {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A label before the shrinking part keeps its width. */
+.vs-fact[data-shrink] > .vs-text {
+  flex: none;
+}
+.vs-fact[data-shrink] > .vs-button {
+  flex: 0 1 auto;
+}
+.vs-fact[data-shrink] .vs-button > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
