@@ -11,8 +11,9 @@ is the exhaustive flag reference.
 ## Entry Point
 
 Use the installed `vibesys` command. It launches the interactive TUI by default
-and runs headless with `--headless`, `--help`, `validate`, or when not attached
-to a TTY. Examples below use this command.
+and runs headless with `--headless`, `--help`, `validate`, `preflight`, `control`
+(see [Control a Running Run](running-vibesys.md#control-a-running-run)), or when not
+attached to a TTY. Examples below use this command.
 
 ### Agent configuration
 
