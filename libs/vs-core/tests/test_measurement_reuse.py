@@ -1,9 +1,11 @@
-"""An official measurement is answered by the scope's one run of the same input (#2949).
+"""An official measurement is answered by the scope's runs of the same input (#2949, #3047).
 
-An agent's own evaluation runs the task's evaluation on its candidate. When the strategy then
-asks for the official measurement of the same input, core answers it with that run instead of
-a second one: the submission names the run it reuses, and the records the runtime reports for
-it must be that run's own. These tests drive the kernel through its public events only.
+An agent's own evaluation runs the task's evaluation on its candidate. A framework run is
+trusted whoever asked for it, so every conclusive run of one input is a sample of one
+measurement. When the strategy then asks for the official measurement of the same input, core
+answers it from those samples instead of a new run: the submission names the run that carries
+the answer, and the records the runtime reports for it must be that run's own. These tests
+drive the kernel through its public events only.
 """
 
 from typing import Literal
@@ -20,6 +22,18 @@ type Outcome = Literal["passed", "failed", "machinery", "ambiguous", "unknown"]
 type Variant = Literal[
     "same", "environment", "evaluator", "workload", "stages", "budget", "queue", "shared-host"
 ]
+_UNLIKE: tuple[Variant, ...] = (
+    "environment",
+    "evaluator",
+    "workload",
+    "stages",
+    "budget",
+    "queue",
+)
+"""How a run may differ from the official one and still be another measurement.
+
+A shared host is not among them: the host is recorded, and it widens the noise, but a run
+timed beside other work is as trusted as any framework run."""
 _CONCLUSIVE: tuple[Outcome, ...] = ("passed", "failed")
 """Outcomes a reuse may stand on: the candidate's own pass or failure."""
 
@@ -65,7 +79,7 @@ _VARIANTS: dict[Variant, dict[str, object]] = {
     "queue": {"queue_allowance": 9.0},
     "shared-host": {"dedicated_measurement_resources": False},
 }
-"""How a run's plan may differ from the official one; only ``same`` may be reused."""
+"""How a run's plan may differ from the official one; only the unlike ones are not reused."""
 
 
 def measured(
@@ -73,21 +87,13 @@ def measured(
     candidate: str,
     measured_input: str | None,
     variant: Variant = "same",
-    *,
-    opted_in: bool = True,
 ) -> core.MeasurementPlan:
-    """A plan of ``candidate`` on an executor that holds its hosts alone, unless ``variant``.
-
-    The task opts in to reuse unless ``opted_in`` is false.
-    """
+    """A plan of ``candidate`` on an executor that holds its hosts alone, unless ``variant``."""
     return plan(
         purpose=purpose,
         candidate=revision(candidate),
         measured_input=measured_input,
-        **(
-            {"dedicated_measurement_resources": True, "reuse_agent_run": opted_in}
-            | _VARIANTS[variant]
-        ),
+        **({"dedicated_measurement_resources": True} | _VARIANTS[variant]),
     )
 
 
@@ -142,12 +148,7 @@ def record(
 ) -> core.EvidenceRef:
     """One stage's record as the runtime reports it for ``request``, reusing run ``reused``."""
     assert isinstance(request.plan.candidate, core.RevisionRef)
-    if request.plan.purpose == "local-validation":
-        kind = core.EvidenceKind.LOCAL_VALIDATION
-    elif stage == "accuracy":
-        kind = core.EvidenceKind.CORRECTNESS
-    else:
-        kind = core.EvidenceKind.BENCHMARK
+    kind = core.EvidenceKind.CORRECTNESS if stage == "accuracy" else core.EvidenceKind.BENCHMARK
     source = request.request_id if reused is None else reused
     assert source is not None
     made = core.EvidenceRef(
@@ -163,13 +164,6 @@ def record(
         environment_digest=request.plan.environment_digest,
         provenance="trusted",
         status=status,
-        proof_kind=(
-            None
-            if request.plan.purpose != "local-validation"
-            else core.EvidenceKind.CORRECTNESS
-            if stage == "accuracy"
-            else core.EvidenceKind.BENCHMARK
-        ),
         artifacts=(
             core.ArtifactRef(
                 artifact_id=core.ArtifactId(root=f"{source.root}-{stage}.json"),
@@ -363,30 +357,28 @@ def test_a_reusing_submission_takes_only_its_runs_own_records() -> None:
     ),
     target=st.tuples(st.integers(min_value=0, max_value=2), st.integers(min_value=0, max_value=2)),
     input_known=st.booleans(),
-    conditions=st.tuples(st.booleans(), st.booleans(), st.booleans()),
+    exclusive=st.booleans(),
     reload_at=st.integers(min_value=0, max_value=4),
 )
-def test_an_official_measurement_reuses_only_the_scopes_one_matching_conclusive_run(
+def test_an_official_measurement_is_answered_by_the_scopes_conclusive_runs_of_its_input(
     *,
     runs: list[tuple[int, int, Outcome, Variant]],
     target: tuple[int, int],
     input_known: bool,
-    conditions: tuple[bool, bool, bool],
+    exclusive: bool,
     reload_at: int,
 ) -> None:
     """Any sequence of agent runs of inputs (two commits each), with a reload anywhere.
 
     Each run may differ from the official measurement in its environment, evaluator or
-    workload digest, its stage set, a stage's budget, its queue allowance, or run on a shared
+    workload digest, its stage set, a stage's budget or its queue allowance, or run on a shared
     host, and may end passed, failed, or in a machinery, ambiguous or unknown failure. The
-    official measurement of input ``target[0]`` (at commit ``target[1]``, on an exclusive
-    executor iff ``exclusive``, for a task that opted in iff ``opted_in``, whose agent run
-    carried the opt-in iff ``source_opted_in``) reuses a run iff it is the scope's only admitted submission,
-    of that input, alike in every respect but the purpose, ended passed or failed, and both
-    hold their hosts alone; a commit the agent never ran matches by measured input only when
-    it is known.
+    official measurement of input ``target[0]`` (at commit ``target[1]``, on any host) is
+    answered by the scope's conclusive runs of that input that are alike in every respect but
+    the purpose: by a failed one if any failed, else by the first. It never refuses because
+    there are several, other inputs' runs never matter, and a commit the agent never ran
+    matches by measured input only when it is known.
     """
-    exclusive, opted_in, source_opted_in = conditions
     state = core.initial_state()
     jobs: list[tuple[int, int, Outcome, Variant, core.RequestId]] = []
     for number, (source_input, commit, outcome, variant) in enumerate(runs):
@@ -396,13 +388,7 @@ def test_an_official_measurement_reuses_only_the_scopes_one_matching_conclusive_
         state, request = agent_run(
             state,
             f"call-{number}",
-            measured(
-                "local-validation",
-                name,
-                f"sha256:{source_input}",
-                variant,
-                opted_in=source_opted_in,
-            ),
+            measured("local-validation", name, f"sha256:{source_input}", variant),
             outcome,
         )
         if request is not None:
@@ -413,29 +399,22 @@ def test_an_official_measurement_reuses_only_the_scopes_one_matching_conclusive_
     wanted, commit = target
     measured_input = f"sha256:{wanted}" if input_known else None
     asked_plan = measured(
-        "official",
-        f"i{wanted}c{commit}",
-        measured_input,
-        "same" if exclusive else "shared-host",
-        opted_in=opted_in,
+        "official", f"i{wanted}c{commit}", measured_input, "same" if exclusive else "shared-host"
     )
     asked = official(state, asked_plan)
     (submission,) = [r for r in asked.requests if isinstance(r, core.SubmitMeasurement)]
 
-    only = jobs[0] if len(jobs) == 1 else None
-    expected = (
-        only[4]
-        if only is not None
-        and exclusive
-        and opted_in
-        and source_opted_in
-        and only[0] == wanted
-        and (input_known or only[1] == commit)
-        and only[2] in _CONCLUSIVE
-        and only[3] == "same"
-        else None
-    )
-    assert submission.reuses == expected
+    matching = [
+        job
+        for job in jobs
+        if job[0] == wanted
+        and (input_known or job[1] == commit)
+        and job[2] in _CONCLUSIVE
+        and job[3] not in _UNLIKE
+    ]
+    failed = [job for job in matching if job[2] == "failed"]
+    chosen = (failed or matching or [None])[0]
+    assert submission.reuses == (None if chosen is None else chosen[4])
     again = transition(
         asked.state,
         core.DecisionSubmitted(
@@ -454,28 +433,32 @@ def test_an_official_measurement_reuses_only_the_scopes_one_matching_conclusive_
     assert reloaded(asked.state) == asked.state
 
 
-def test_an_official_measurement_runs_fresh_once_the_agent_measured_another_input() -> None:
-    """Two inputs measured: the official score must not pick among them, even the first."""
-    state, _ = agent_run(
+def test_several_runs_of_other_inputs_never_stop_the_official_measurement_reusing_its_own() -> None:
+    """Two inputs measured: nothing is refused for there being several, and nothing is picked."""
+    state, first = agent_run(
         core.initial_state(), "c1", measured("local-validation", "a", "sha256:a"), "passed"
     )
     state, other = agent_run(state, "c2", measured("local-validation", "b", "sha256:b"), "passed")
+    assert first is not None
     assert other is not None
     asked = official(state, measured("official", "a", "sha256:a"))
     (submission,) = [r for r in asked.requests if isinstance(r, core.SubmitMeasurement)]
-    assert submission.reuses is None
+    assert submission.reuses == first.request_id
+    asked = official(state, measured("official", "b", "sha256:b"))
+    (submission,) = [r for r in asked.requests if isinstance(r, core.SubmitMeasurement)]
+    assert submission.reuses == other.request_id
 
 
-def test_an_official_measurement_runs_fresh_beside_an_admitted_run_not_yet_accepted() -> None:
-    """Runs are counted as core admitted them, not as their jobs were accepted."""
-    state, _ = agent_run(
+def test_a_run_not_yet_ended_is_no_sample_and_does_not_hold_the_official_measurement_back() -> None:
+    """Only a conclusive run answers; one still running is not one of the samples yet."""
+    state, first = agent_run(
         core.initial_state(), "c1", measured("local-validation", "a", "sha256:a"), "passed"
     )
     pending = transition(
         state,
         core.AgentMeasurementRequested(
             scope=scope_of(state),
-            plan=measured("local-validation", "b", "sha256:b"),
+            plan=measured("local-validation", "b", "sha256:a"),
             within=core.Within(limit=100.0),
             call_id="c2",
         ),
@@ -483,10 +466,24 @@ def test_an_official_measurement_runs_fresh_beside_an_admitted_run_not_yet_accep
     assert len(submissions(pending)) == 2
     asked = official(pending, measured("official", "a2", "sha256:a"))
     (submission,) = [r for r in asked.requests if isinstance(r, core.SubmitMeasurement)]
-    assert submission.reuses is None
+    assert first is not None
+    assert submission.reuses == first.request_id
 
 
-@pytest.mark.parametrize("variant", [v for v in _VARIANTS if v != "same"])
+def test_a_failed_run_is_the_one_that_answers_when_any_run_of_the_input_failed() -> None:
+    """A candidate that failed once did not pass: the passing run never hides it."""
+    state, _ = agent_run(
+        core.initial_state(), "c1", measured("local-validation", "a", "sha256:a"), "passed"
+    )
+    state, failing = agent_run(state, "c2", measured("local-validation", "b", "sha256:a"), "failed")
+    state, _ = agent_run(state, "c3", measured("local-validation", "c", "sha256:a"), "passed")
+    assert failing is not None
+    asked = official(state, measured("official", "d", "sha256:a"))
+    (submission,) = [r for r in asked.requests if isinstance(r, core.SubmitMeasurement)]
+    assert submission.reuses == failing.request_id
+
+
+@pytest.mark.parametrize("variant", _UNLIKE)
 def test_a_run_unlike_the_official_one_in_any_respect_is_not_reused(variant: Variant) -> None:
     """Budgets and the queue allowance are outside the identity, yet still another run."""
     state, agent = agent_run(
@@ -511,21 +508,6 @@ def test_only_a_run_the_candidate_itself_passed_or_failed_is_reused(outcome: Out
     asked = official(state, measured("official", "a", "sha256:a"))
     (submission,) = [r for r in asked.requests if isinstance(r, core.SubmitMeasurement)]
     assert submission.reuses == (agent.request_id if outcome in _CONCLUSIVE else None)
-
-
-def test_a_task_that_has_not_opted_in_never_reuses_a_run() -> None:
-    """Reuse lets an agent keep a lucky run and re-measure an unlucky one: it is opt-in."""
-    for source_in, asked_in in ((False, True), (True, False), (False, False)):
-        state, agent = agent_run(
-            core.initial_state(),
-            "c1",
-            measured("local-validation", "a", "sha256:a", opted_in=source_in),
-            "passed",
-        )
-        assert agent is not None
-        asked = official(state, measured("official", "a", "sha256:a", opted_in=asked_in))
-        (submission,) = [r for r in asked.requests if isinstance(r, core.SubmitMeasurement)]
-        assert submission.reuses is None, (source_in, asked_in)
 
 
 def _reusing_job(
@@ -641,8 +623,8 @@ def test_a_short_reused_result_is_retried_with_a_fresh_measurement() -> None:
     assert fresh.request_id != submission.request_id
 
 
-def test_a_run_on_a_host_the_executor_does_not_hold_alone_is_never_reused() -> None:
-    """An agent's run timed beside other work never stands for an official run."""
+def test_a_run_on_a_shared_host_is_as_trusted_as_one_on_a_host_held_alone() -> None:
+    """Hosts held alone lower the noise; they are recorded, never required for trust."""
     for source, asked_on in (("shared-host", "same"), ("same", "shared-host")):
         state, agent = agent_run(
             core.initial_state(),
@@ -653,7 +635,7 @@ def test_a_run_on_a_host_the_executor_does_not_hold_alone_is_never_reused() -> N
         assert agent is not None
         asked = official(state, measured("official", "a", "sha256:a", asked_on))
         (submission,) = [r for r in asked.requests if isinstance(r, core.SubmitMeasurement)]
-        assert submission.reuses is None, (source, asked_on)
+        assert submission.reuses == agent.request_id, (source, asked_on)
 
 
 def attempt_with_checkpoints(inputs: dict[str, str]) -> tuple[core.CoreState, core.Scope]:
@@ -694,10 +676,7 @@ def measure_in(
         decision_id=core.DecisionId(root=name),
         scope=scope,
         plan=plan(
-            purpose="official",
-            candidate=revision(candidate),
-            dedicated_measurement_resources=True,
-            reuse_agent_run=True,
+            purpose="official", candidate=revision(candidate), dedicated_measurement_resources=True
         ),
     )
     asked = transition(

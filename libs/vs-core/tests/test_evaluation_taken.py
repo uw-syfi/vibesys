@@ -32,7 +32,7 @@ def record(name: str, sequence: int = 1, **changes: object) -> core.EvidenceRef:
     """A trusted local-validation record of the candidate taken by the attempt under test."""
     ref = core.EvidenceRef(
         evidence_id=core.EvidenceId(root=name),
-        kind=core.EvidenceKind.LOCAL_VALIDATION,
+        kind=core.EvidenceKind.BENCHMARK,
         purpose="local-validation",
         scope=core.Scope(owner=ATTEMPT, generation=GENERATION),
         source_request=core.RequestId(root=f"request-{name}"),
