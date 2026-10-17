@@ -268,13 +268,16 @@ class RunEnvironmentView:
         return self.cluster_evaluation is not None and self.cluster_evaluation.captures_profile
 
     @property
-    def exclusive_measurement_hosts(self) -> bool:
+    def dedicated_measurement_resources(self) -> bool:
         """Whether the trusted executor runs each measurement on hosts it holds alone.
 
         Only a cluster that submits every evaluation job exclusively declares it; an executor
         that evaluates beside the agent (the local one) never does.
         """
-        return self.cluster_evaluation is not None and self.cluster_evaluation.exclusive_hosts
+        return (
+            self.cluster_evaluation is not None
+            and self.cluster_evaluation.dedicated_measurement_resources
+        )
 
     @property
     def supported_profile_fields(self) -> tuple[ProfileField, ...]:

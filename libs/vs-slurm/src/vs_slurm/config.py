@@ -232,6 +232,11 @@ class SlurmConfig(BaseModel):
     # Replaces the derived 1-CPU request for minimal jobs (the startup probe) on sites
     # whose partitions require a GPU or other resources; see ``minimal_job``.
     probe_sbatch_arguments: tuple[str, ...] | None = None
+    # Declares that each measurement job gets its GPUs and CPU cores to itself through the
+    # scheduler (for example ``--gres=gpu:4 -c 64``), though it may share the host with other
+    # jobs. A bare ``--exclusive`` in ``sbatch_arguments`` implies it. It lets an official
+    # measurement reuse an earlier trusted one of the same input, so leave it false unless true.
+    dedicated_measurement_resources: bool = False
     poll_interval_seconds: Annotated[float, Field(gt=0)] = 5.0
     # Bounds a job's run, from when it is first seen running; queue wait is not counted.
     job_timeout_seconds: Annotated[int, Field(gt=0)] = 3600
@@ -254,13 +259,18 @@ class SlurmConfig(BaseModel):
     ] = _PROCESS_EXIT_WAIT_DEFAULT_SECONDS
 
     @property
-    def exclusive_hosts(self) -> bool:
-        """Whether each job holds its nodes alone: the last sharing option is a bare ``--exclusive``.
+    def dedicates_measurement_resources(self) -> bool:
+        """Whether each measurement job gets its GPUs and CPU cores to itself.
+
+        True when the operator declares ``dedicated_measurement_resources``, or when the last
+        sharing option in ``sbatch_arguments`` is a bare ``--exclusive``.
 
         ``--exclusive=user``, ``=mcs`` or ``=topo`` share nodes with other jobs (the agent's
         own GPU jobs run as the same user), and ``--oversubscribe`` (``-s``) shares them too;
         sbatch takes the last of these options it reads.
         """
+        if self.dedicated_measurement_resources:
+            return True
         sharing = [
             argument
             for argument in self.sbatch_arguments

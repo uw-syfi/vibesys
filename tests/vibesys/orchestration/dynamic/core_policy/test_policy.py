@@ -298,12 +298,14 @@ def _slurm_view(
     service: bool,
     profile_command: tuple[str, ...] | None = ("profile",),
     sbatch_arguments: tuple[str, ...] = (),
+    dedicated_measurement_resources: bool = False,
 ) -> RunEnvironmentView:
     """The view of a real Slurm run whose capture command comes from the production wiring."""
     path = root / "slurm.toml"
     operator = _OPERATOR.replace(
         "job_timeout_seconds = 1800\n",
-        f"job_timeout_seconds = 1800\nsbatch_arguments = {json.dumps(list(sbatch_arguments))}\n",
+        f"job_timeout_seconds = 1800\nsbatch_arguments = {json.dumps(list(sbatch_arguments))}\n"
+        f"dedicated_measurement_resources = {json.dumps(dedicated_measurement_resources)}\n",
     )
     path.write_text(operator + (_SERVICE if service else ""), encoding="utf-8")
     settings = load_slurm_operator_settings(path)
@@ -361,26 +363,38 @@ def test_profile_work_follows_the_evaluation_plan_and_the_capture_the_run_offers
 
 
 @pytest.mark.parametrize(
-    ("environment", "sbatch_arguments", "exclusive"),
+    ("environment", "sbatch_arguments", "declared", "exclusive"),
     [
-        ("host", (), False),
-        ("slurm", (), False),
-        ("slurm", ("--exclusive",), True),
-        ("slurm", ("--exclusive=user",), False),
-        ("slurm", ("--exclusive", "--oversubscribe"), False),
+        ("host", (), False, False),
+        ("slurm", (), False, False),
+        ("slurm", ("--exclusive",), False, True),
+        ("slurm", ("--exclusive=user",), False, False),
+        ("slurm", ("--exclusive", "--oversubscribe"), False, False),
+        ("slurm", ("--gres=gpu:4", "-c", "64"), True, True),
+        ("slurm", ("--oversubscribe",), True, True),
     ],
 )
-def test_measurement_plans_run_on_exclusive_hosts_only_when_the_executor_declares_them(
-    tmp_path: Path, environment: str, sbatch_arguments: tuple[str, ...], *, exclusive: bool
+def test_measurement_plans_carry_dedicated_resources_only_when_the_executor_declares_them(
+    tmp_path: Path,
+    environment: str,
+    sbatch_arguments: tuple[str, ...],
+    *,
+    declared: bool,
+    exclusive: bool,
 ) -> None:
     """The executor's capability reaches every measurement plan; only then may one be reused."""
     view = (
         candidate_environment()
         if environment == "host"
-        else _slurm_view(tmp_path, service=False, sbatch_arguments=sbatch_arguments)
+        else _slurm_view(
+            tmp_path,
+            service=False,
+            sbatch_arguments=sbatch_arguments,
+            dedicated_measurement_resources=declared,
+        )
     )
     made = plan_of(resolved(tmp_path, environment=view))
-    assert made.facts.exclusive_measurement_hosts is exclusive
+    assert made.facts.dedicated_measurement_resources is exclusive
 
 
 @_SETTINGS

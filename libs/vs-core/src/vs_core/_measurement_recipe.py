@@ -48,8 +48,8 @@ class MeasurementRecipe(Value):
     """The stage whose pass is the correctness gate, used by plans that include it."""
     accuracy_gated: tuple[EvidenceKind, ...]
     """Evidence kinds that count only if the accuracy stage passed; the task's trust rule."""
-    exclusive_hosts: bool = Field(default=False, exclude_if=unset)
-    """The run's executor runs each job on hosts it holds alone (``RunFacts``)."""
+    dedicated_measurement_resources: bool = Field(default=False, exclude_if=unset)
+    """The run's executor gives each job its resources alone (``RunFacts``)."""
 
     @classmethod
     def of(cls, facts: RunFacts) -> MeasurementRecipe:
@@ -70,7 +70,7 @@ class MeasurementRecipe(Value):
             queue_allowance=task.queue_allowance,
             accuracy_stage=task.accuracy_stage,
             accuracy_gated=task.accuracy_gated,
-            exclusive_hosts=facts.exclusive_measurement_hosts,
+            dedicated_measurement_resources=facts.dedicated_measurement_resources,
         )
 
     def requiring(self, stage_id: str, outputs: tuple[str, ...]) -> MeasurementRecipe:
@@ -146,7 +146,7 @@ class MeasurementRecipe(Value):
             recipe=self.recipe,
             submitted_at=now_at,
             queue_allowance=self.queue_allowance,
-            exclusive_hosts=self.exclusive_hosts,
+            dedicated_measurement_resources=self.dedicated_measurement_resources,
         )
 
     def budget(self, stages: tuple[str, ...] | None = None) -> float:
