@@ -207,6 +207,11 @@ func (g *graph) add(c component) error {
 			return fmt.Errorf("%s has unknown job %q", c.ID, job)
 		}
 	}
+	for _, job := range c.LocalJobs {
+		if !contains(g.Jobs, job) {
+			return fmt.Errorf("%s has unknown local job %q", c.ID, job)
+		}
+	}
 	g.Components[c.ID] = c
 	g.Order = append(g.Order, c.ID)
 	return nil

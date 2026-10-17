@@ -27,17 +27,21 @@ type Check struct {
 // collection; PackageCommands run once for each value. Commands run when the
 // collection is empty, or when no collection is set.
 type Suite struct {
-	Name            string            `toml:"name"`
-	TriggerJob      string            `toml:"trigger_job"`
-	IncludeInTest   bool              `toml:"include_in_test"`
-	Language        string            `toml:"language"`
-	Directory       string            `toml:"directory"`
-	AlwaysCommands  [][]string        `toml:"always_commands"`
-	Commands        [][]string        `toml:"commands"`
-	PackageCommands [][]string        `toml:"package_commands"`
-	Collection      string            `toml:"collection"`
-	Env             map[string]string `toml:"env"`
-	TimeoutSeconds  int               `toml:"timeout_seconds"`
+	Name            string     `toml:"name"`
+	TriggerJob      string     `toml:"trigger_job"`
+	IncludeInTest   bool       `toml:"include_in_test"`
+	Language        string     `toml:"language"`
+	Directory       string     `toml:"directory"`
+	AlwaysCommands  [][]string `toml:"always_commands"`
+	Commands        [][]string `toml:"commands"`
+	PackageCommands [][]string `toml:"package_commands"`
+	Collection      string     `toml:"collection"`
+	// LocalPaths narrows `repoctl test` only (never `run-checks`, which CI
+	// uses): when set, the group runs locally only if a changed path equals or
+	// is under one of these repository-relative paths.
+	LocalPaths     []string          `toml:"local_paths"`
+	Env            map[string]string `toml:"env"`
+	TimeoutSeconds int               `toml:"timeout_seconds"`
 }
 
 // Planner validates and translates a configured suite and selected collection

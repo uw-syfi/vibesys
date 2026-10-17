@@ -25,6 +25,11 @@ func (g *graph) validateCheckGroups(groups []execution.Suite) error {
 		if suite.IncludeInTest && suite.TriggerJob == "" {
 			return fmt.Errorf("check_groups.%s: include_in_test requires trigger_job", suite.Name)
 		}
+		for _, path := range suite.LocalPaths {
+			if !validPath(path) {
+				return fmt.Errorf("check_groups.%s: unsafe local_paths entry %q", suite.Name, path)
+			}
+		}
 		if suite.Directory != "." && !validPath(suite.Directory) {
 			return fmt.Errorf("check_groups.%s: unsafe directory %q", suite.Name, suite.Directory)
 		}

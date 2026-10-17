@@ -24,6 +24,9 @@ type Component struct {
 	OwnershipGroup       string   `toml:"ownership_group"`
 	SelectAllJobs        bool     `toml:"select_all_jobs"`
 	SelectAllCollections bool     `toml:"select_all_collections"`
+	// LocalJobs replaces SelectAllJobs and SelectAllCollections in `repoctl test`
+	// (never in `plan`, which CI uses): the component selects only these jobs there.
+	LocalJobs []string `toml:"local_jobs"`
 }
 
 // Spec is one policy discovery entry. Adapter selects the parser. Class,

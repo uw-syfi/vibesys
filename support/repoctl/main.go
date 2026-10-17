@@ -119,7 +119,7 @@ func writeOutputs(path string, p plan) error {
 	return nil
 }
 
-func planAtRevisions(root, configPath string, headGraph graph, base, head, event string) (plan, error) {
+func planAtRevisions(root, configPath string, headGraph graph, base, head, event string, local bool) (plan, error) {
 	comparison, err := gitrepo.Compare(root, base, head, event)
 	if err != nil {
 		return plan{}, err
@@ -132,6 +132,9 @@ func planAtRevisions(root, configPath string, headGraph graph, base, head, event
 			return plan{}, err
 		}
 		defer cleanup()
+		if local {
+			baseGraph = baseGraph.forLocalTest()
+		}
 	}
 	return selectChangedRecords(baseGraph, headGraph, comparison.Changes)
 }
@@ -230,7 +233,8 @@ func cli(args []string) error {
 		if fs.NArg() != 0 {
 			return fmt.Errorf("unexpected test arguments")
 		}
-		p, err := planAtRevisions(root, configPath, g, *base, *head, *event)
+		g = g.forLocalTest()
+		p, err := planAtRevisions(root, configPath, g, *base, *head, *event, true)
 		if err != nil {
 			return err
 		}
@@ -244,7 +248,7 @@ func cli(args []string) error {
 				return err
 			}
 			defer cleanup()
-			localPlan, err := selectChangedRecords(localBase, g, localChanges)
+			localPlan, err := selectChangedRecords(localBase.forLocalTest(), g, localChanges)
 			if err != nil {
 				return err
 			}
@@ -330,7 +334,7 @@ func cli(args []string) error {
 				return err
 			}
 		}
-		p, err := planAtRevisions(root, configPath, g, *base, *head, *event)
+		p, err := planAtRevisions(root, configPath, g, *base, *head, *event, false)
 		if err != nil {
 			return err
 		}

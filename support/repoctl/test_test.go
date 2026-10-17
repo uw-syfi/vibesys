@@ -46,7 +46,7 @@ func testFixture() (graph, plan) {
 
 func TestSelectedTestChecksUsePackagesAndNativeTargets(t *testing.T) {
 	g, p := testFixture()
-	checks, targets, _, err := selectedTestChecks(g, p)
+	checks, targets, _, _, err := selectedTestChecks(g, p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestSelectedTestChecksUsePackagesAndNativeTargets(t *testing.T) {
 		t.Fatalf("commands = %v, targets = %v", got, targets)
 	}
 	delete(p.Collections, "pnpm_packages")
-	checks, _, _, err = selectedTestChecks(g, p)
+	checks, _, _, _, err = selectedTestChecks(g, p)
 	if err != nil || !reflect.DeepEqual(checks[1].Args, []string{"pnpm", "test:clients"}) {
 		t.Fatalf("fallback command = %v, err = %v", checks, err)
 	}
@@ -96,7 +96,7 @@ func TestSelectedTestChecksRejectsUnknownLanguage(t *testing.T) {
 	suite := g.CheckGroups["python"]
 	suite.Language = "unknown"
 	g.CheckGroups["python"] = suite
-	if _, _, _, err := selectedTestChecks(g, p); err == nil || !strings.Contains(err.Error(), `unknown language "unknown"`) {
+	if _, _, _, _, err := selectedTestChecks(g, p); err == nil || !strings.Contains(err.Error(), `unknown language "unknown"`) {
 		t.Fatalf("error = %v", err)
 	}
 }
@@ -223,7 +223,7 @@ func TestSelectedJobWithoutLocalTargetIsSkipped(t *testing.T) {
 				nativeCalls++
 				return nil
 			}
-			_, _, skipped, err := selectedTestChecks(g, p)
+			_, _, skipped, _, err := selectedTestChecks(g, p)
 			if err != nil || !reflect.DeepEqual(skipped, tc.wantSkipped) {
 				t.Fatalf("skipped = %v, err = %v, want %v", skipped, err, tc.wantSkipped)
 			}
