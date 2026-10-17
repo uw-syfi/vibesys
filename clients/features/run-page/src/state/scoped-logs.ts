@@ -23,7 +23,7 @@ export type LogScope =
   | {readonly kind: 'step'; readonly step: CandidateStep};
 
 /** The spans a scope covers: null is every stream of the run. */
-export function scopeSpans(scope: LogScope): ReadonlySet<string> | null {
+function scopeSpans(scope: LogScope): ReadonlySet<string> | null {
   switch (scope.kind) {
     case 'run':
       return null;
@@ -41,7 +41,7 @@ export function scopeSpans(scope: LogScope): ReadonlySet<string> | null {
 }
 
 /** One stream of a scope, as a row: its owner, whether it is still written, and its last line. */
-export interface ScopedStream {
+interface ScopedStream {
   readonly id: string;
   readonly owner: LogGroupName;
   readonly label: string;
