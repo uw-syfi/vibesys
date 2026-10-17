@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from vibesys.api.contracts import EventSink, RunResult, RunView
     from vibesys.plugin_catalog import OrchestrationRegistry
     from vibesys.run.contracts import RunRequest
+    from vs_runtime.api.infrastructure import ControlAck, ControlRequest
 
 
 class RunQuery(Protocol):
@@ -25,13 +26,20 @@ class RunQuery(Protocol):
 class RunControl(Protocol):
     """Messages to the run loop, the sole writer of run state.
 
-    `steer`/`pause`/`resume`/`stop` are messages to the writer, which holds
-    an exclusive write lease, not writes performed by the caller. `pause`
+    `submit` is the one entry point every control ingress calls (the server's socket, the
+    headless inbox): it takes a `ControlRequest`, the one schema of operator controls, and
+    applies it through the per-action methods below. `steer`/`pause`/`resume`/`stop` are
+    messages to the writer, which holds an exclusive write lease, not writes performed by
+    the caller. `pause`
     means: reach the next safe boundary, checkpoint durable state, and
     release the lease. `resume` means: acquire the lease, restore the
     checkpoint, and continue. A cross-process resume is
     `Runs.resume(RunRequest(resume=ResumeRef(run_id), ...))`.
     """
+
+    def submit(self, request: ControlRequest) -> ControlAck:
+        """Apply one operator control request and say what became of it."""
+        ...
 
     def steer(self, text: str) -> None:
         """Send free-text steering input to the active run."""

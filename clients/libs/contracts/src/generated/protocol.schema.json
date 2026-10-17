@@ -1114,6 +1114,73 @@
       "title": "ConfigurationFailedData",
       "type": "object"
     },
+    "ControlCommand": {
+      "additionalProperties": false,
+      "description": "Send one operator control in the schema every control ingress shares.\n\n``control`` is a ``vibesys.api.ControlRequest``, the request the headless inbox carries\ntoo, so a client and ``vibesys control`` say the same things. The single-action commands\nabove remain; the server turns each into the same request. A server that predates this\ncommand rejects it (``WP-CAPABILITY-PROBE``).",
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "client_id": {
+          "default": "",
+          "title": "Client Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "type": {
+          "const": "command.control",
+          "default": "command.control",
+          "title": "Type",
+          "type": "string"
+        },
+        "control": {
+          "$ref": "#/$defs/ControlRequest"
+        }
+      },
+      "required": [
+        "timestamp",
+        "type",
+        "control"
+      ],
+      "title": "ControlCommand",
+      "type": "object"
+    },
+    "ControlRequest": {
+      "discriminator": {
+        "mapping": {
+          "pause": "#/$defs/PauseRequest",
+          "resume": "#/$defs/ResumeRequest",
+          "steer": "#/$defs/SteerRequest",
+          "stop": "#/$defs/StopRequest"
+        },
+        "propertyName": "action"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/SteerRequest"
+        },
+        {
+          "$ref": "#/$defs/PauseRequest"
+        },
+        {
+          "$ref": "#/$defs/ResumeRequest"
+        },
+        {
+          "$ref": "#/$defs/StopRequest"
+        }
+      ]
+    },
     "DesignFileChange": {
       "additionalProperties": false,
       "description": "One workspace file a round's commit range touched.",
@@ -3932,6 +3999,23 @@
       "title": "PauseCommand",
       "type": "object"
     },
+    "PauseRequest": {
+      "additionalProperties": false,
+      "description": "Reach the next safe boundary and hold the run there.",
+      "properties": {
+        "action": {
+          "const": "pause",
+          "default": "pause",
+          "title": "Action",
+          "type": "string"
+        }
+      },
+      "title": "PauseRequest",
+      "type": "object",
+      "required": [
+        "action"
+      ]
+    },
     "PerfDeltaReason": {
       "description": "Why a headline measurement carries no causal delta.\n\nAlways re-derived from round evidence (``perf_provenance`` and the\nbaseline fields), never stored on the round record, so it cannot drift\nfrom them. Absent entirely for records that predate provenance tracking:\na legacy absolute number keeps reading as a deliberate absolute rather\nthan being relabelled as unresolved.",
       "enum": [
@@ -5072,6 +5156,37 @@
       ],
       "title": "ResumeCommand",
       "type": "object"
+    },
+    "ResumeRequest": {
+      "additionalProperties": false,
+      "description": "Continue a paused run.\n\n``fallback`` switches a run paused on a provider capacity limit to its configured fallback\nprovider as it resumes. ``when=\"capacity_returns\"`` keeps such a run paused until capacity\nshould be back, then resumes it; it is refused when the run is not paused on a capacity\nlimit, and cannot be combined with ``fallback``, which resumes now.",
+      "properties": {
+        "action": {
+          "const": "resume",
+          "default": "resume",
+          "title": "Action",
+          "type": "string"
+        },
+        "fallback": {
+          "default": false,
+          "title": "Fallback",
+          "type": "boolean"
+        },
+        "when": {
+          "default": "now",
+          "enum": [
+            "now",
+            "capacity_returns"
+          ],
+          "title": "When",
+          "type": "string"
+        }
+      },
+      "title": "ResumeRequest",
+      "type": "object",
+      "required": [
+        "action"
+      ]
     },
     "RoundFinishedData": {
       "additionalProperties": false,
@@ -6767,6 +6882,29 @@
       "title": "SteerCommand",
       "type": "object"
     },
+    "SteerRequest": {
+      "additionalProperties": false,
+      "description": "Free-text guidance for the run's next agent turn.",
+      "properties": {
+        "action": {
+          "const": "steer",
+          "default": "steer",
+          "title": "Action",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "text"
+      ],
+      "title": "SteerRequest",
+      "type": "object"
+    },
     "StopCommand": {
       "additionalProperties": false,
       "description": "Request stopping after the active agent call.",
@@ -6810,6 +6948,36 @@
       ],
       "title": "StopCommand",
       "type": "object"
+    },
+    "StopMode": {
+      "description": "How a stop treats work in flight: let it finish, or cancel it.",
+      "enum": [
+        "drain",
+        "cancel"
+      ],
+      "title": "StopMode",
+      "type": "string"
+    },
+    "StopRequest": {
+      "additionalProperties": false,
+      "description": "End the run, draining or cancelling the work in flight.",
+      "properties": {
+        "action": {
+          "const": "stop",
+          "default": "stop",
+          "title": "Action",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/StopMode",
+          "default": "drain"
+        }
+      },
+      "title": "StopRequest",
+      "type": "object",
+      "required": [
+        "action"
+      ]
     },
     "SubprocessOutputData": {
       "additionalProperties": false,
@@ -7714,6 +7882,7 @@
     "request": {
       "discriminator": {
         "mapping": {
+          "command.control": "#/$defs/ControlCommand",
           "command.pause": "#/$defs/PauseCommand",
           "command.resume": "#/$defs/ResumeCommand",
           "command.steer": "#/$defs/SteerCommand",
@@ -7785,6 +7954,9 @@
         },
         {
           "$ref": "#/$defs/SubscribeRequest"
+        },
+        {
+          "$ref": "#/$defs/ControlCommand"
         }
       ],
       "title": "Request"

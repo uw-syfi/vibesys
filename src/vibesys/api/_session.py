@@ -26,7 +26,7 @@ from vibesys.run.profilers import (
 )
 from vs_core.api import StopMode
 from vs_project.api import Project
-from vs_runtime.api.infrastructure import RunStopped
+from vs_runtime.api.infrastructure import ChannelRunControl, RunStopped
 from vs_sim.api import CloseOnce, ReleaseStack
 
 if TYPE_CHECKING:
@@ -54,6 +54,8 @@ if TYPE_CHECKING:
     from vs_runtime.api.core import RunTiming
     from vs_runtime.api.infrastructure import (
         AgentExecutionEnvironment,
+        ControlAck,
+        ControlRequest,
         RunState,
         ScopedAgentEnvironment,
         StopTimer,
@@ -129,9 +131,9 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
 class _LocalRunSession:
     """`RunSession` that awaits one selected policy in-process.
 
-    `RunControl` methods write to `self._integration.control`, the same
-    `vs_runtime.api.infrastructure.RunControlChannel` consumed by runtime run
-    boundaries and agent turns.
+    `RunControl` methods go through one `ChannelRunControl` over
+    `self._integration.control`, the same `RunControlChannel` consumed by runtime
+    run boundaries and agent turns.
     """
 
     def __init__(
@@ -167,6 +169,7 @@ class _LocalRunSession:
             threads=implementations.timing.threads,
             system=implementations.system,
         )
+        self._control = ChannelRunControl(self._integration.control)
         self._integration.add_committed_state_listener(self._handle_committed_state)
         self._integration.add_resource_listener(self._handle_resources)
         self._committed_view_listener: Callable[[RunView, tuple[str, ...] | None], None] | None = (
@@ -382,32 +385,36 @@ class _LocalRunSession:
             loop=self._request.orchestration.id,
         )
 
+    def submit(self, request: ControlRequest) -> ControlAck:
+        """Apply one operator control request; every control ingress calls this."""
+        return self._control.submit(request)
+
     def steer(self, text: str) -> None:
         """Send free-text steering input to the active run."""
-        self._integration.control.queue_steer(text)
+        self._control.steer(text)
 
     def pause(self) -> None:
         """Request the run reach its next safe boundary and release the write lease."""
-        self._integration.control.request_pause()
+        self._control.pause()
 
     def resume(self) -> None:
         """Request the run acquire the write lease and continue from checkpoint."""
-        self._integration.control.resume()
+        self._control.resume()
 
     def resume_with_fallback(self) -> None:
         """Resume the run and switch a quota-paused run to its configured fallback."""
-        self._integration.control.resume_with_fallback()
+        self._control.resume_with_fallback()
 
     def resume_when_capacity_returns(self) -> bool:
         """Resume a quota-paused run once capacity returns; False when it is not quota-paused."""
-        return self._integration.control.resume_when_capacity_returns()
+        return self._control.resume_when_capacity_returns()
 
     def stop(self, mode: StopMode = StopMode.DRAIN) -> None:
         """Request the run terminate; the operator chooses to drain or cancel work in flight.
 
         Draining is the default at this edge; core and the runtime take the mode explicitly.
         """
-        self._integration.control.request_stop(mode)
+        self._control.stop(mode)
 
     def close(self) -> None:
         """Close the run-owned auxiliary scope, preserving transferred scopes.

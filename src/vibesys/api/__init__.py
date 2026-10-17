@@ -124,9 +124,20 @@ from vibesys.repository import RepositoryVisibility
 from vibesys.run import CoreAgentEventSink
 from vs_agent.api import AgentBackend, AgentSpec, Harness, check_harness, harnesses, vetted_models
 from vs_runtime.api import boot_trace
-from vs_runtime.api.infrastructure import RunStopped
+from vs_runtime.api.infrastructure import (
+    CONTROL_REQUEST,
+    ControlAck,
+    ControlRequest,
+    ControlStatus,
+    PauseRequest,
+    ResumeRequest,
+    RunStopped,
+    SteerRequest,
+    StopRequest,
+)
 
 __all__ = [
+    "CONTROL_REQUEST",
     "KNOWN_COMPUTE_BACKENDS",
     "AgentBackend",
     "AgentExecutionStartedData",
@@ -147,6 +158,9 @@ __all__ = [
     "ConfigurationCause",
     "ConfigurationDiagnostic",
     "ConfigurationError",
+    "ControlAck",
+    "ControlRequest",
+    "ControlStatus",
     "CoreAgentEventSink",
     "CoreEvent",
     "CoreEventType",
@@ -174,6 +188,7 @@ __all__ = [
     "ModelNotVetted",
     "OrchestrationDescriptor",
     "OrchestrationRegistry",
+    "PauseRequest",
     "PluginProjection",
     "ProfilerKind",
     "ProviderSwitchedData",
@@ -185,6 +200,7 @@ __all__ = [
     "RateLimitUpdateData",
     "RepositoryVisibility",
     "ResumeRef",
+    "ResumeRequest",
     "RolesNotDeclared",
     "RunConfiguredData",
     "RunControl",
@@ -213,6 +229,8 @@ __all__ = [
     "SpanStartedData",
     "SpanUpdatedData",
     "StartupStep",
+    "SteerRequest",
+    "StopRequest",
     "TaskImageUnsupported",
     "TaskNeedsProvisioning",
     "TaskNotFound",

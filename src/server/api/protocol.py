@@ -22,7 +22,7 @@ from server.execution import ActiveAgentExecution
 from server.host_api import PROTOCOL_VERSION
 from server.run_lifecycle import RunStatus
 from server.settings import InteractiveSetupDefaults
-from vibesys.api import IterationUnavailable
+from vibesys.api import ControlRequest, IterationUnavailable
 from vibesys.api.hypothesis import (
     CandidateDisposition,
     HypothesisOutcome,
@@ -139,6 +139,19 @@ class SteerCommand(Request):
 
     type: Literal["command.steer"] = "command.steer"
     text: str = Field(min_length=1)
+
+
+class ControlCommand(Request):
+    """Send one operator control in the schema every control ingress shares.
+
+    ``control`` is a ``vibesys.api.ControlRequest``, the request the headless inbox carries
+    too, so a client and ``vibesys control`` say the same things. The single-action commands
+    above remain; the server turns each into the same request. A server that predates this
+    command rejects it (``WP-CAPABILITY-PROBE``).
+    """
+
+    type: Literal["command.control"] = "command.control"
+    control: ControlRequest
 
 
 class SnapshotQuery(Request):
@@ -321,7 +334,8 @@ ProtocolRequest = Annotated[
     | DesignQuery
     | DesignPatchQuery
     | EventsQuery
-    | SubscribeRequest,
+    | SubscribeRequest
+    | ControlCommand,
     Field(discriminator="type"),
 ]
 

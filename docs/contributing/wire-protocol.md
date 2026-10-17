@@ -35,7 +35,7 @@ The authoritative message taxonomy is three unions in `src/server/api/protocol.p
 
 | Direction | Union | Members |
 | --- | --- | --- |
-| client to server | `ProtocolRequest` | `command.*`, `query.*`, `subscribe` (17 types) |
+| client to server | `ProtocolRequest` | `command.*`, `query.*`, `subscribe` (18 types) |
 | server to client, control | `Response` | one per request, correlated by `request_id` |
 | server to client, stream | `ServerMessage` | `subscribed`, `event`, `event_batch`, `active_executions_chunk`, `protocol_error` |
 
@@ -174,6 +174,17 @@ A run paused on a provider capacity limit (`quota_paused`) resumes when the oper
 The wait is held by the live run server: if the server ends, the run ends like any other. `when`
 is a new request field, so a client discovers support for it by `WP-CAPABILITY-PROBE`: an older
 server rejects it as an unknown field.
+
+## Operator controls
+
+`command.control` carries one `control`, a `ControlRequest` (`vibesys.api`): the schema every
+control ingress accepts, so a client and a headless run's inbox say the same things. Its
+`action` is `steer` (`text`), `pause`, `resume` (`fallback`, `when`, as `command.resume`) or
+`stop` (`mode`: `drain` or `cancel`). Like every protocol model it forbids unknown keys, and it
+has no field that reaches evaluation, checkers, trust rules or resource partitions. The server
+turns `command.pause`, `command.resume`, `command.steer` and `command.stop` into the same
+request and applies all five through one `RunControl.submit`, so they ack alike. It is a new
+request type, so a client discovers it by `WP-CAPABILITY-PROBE`.
 
 ## Framing and connection decisions
 

@@ -25,7 +25,7 @@ from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.events import CoreEventType, EventStatus
 from vibesys.run.event_journal import EventJournal as CoreEventJournal
 from vibesys.run.integration import LocalRunIntegration
-from vs_core.api import StopMode
+from vs_runtime.api.infrastructure import ChannelRunControl
 from vs_runtime.api.testing import idle_environment_system
 from vs_sim.api import OsThreads
 from vs_sim.api.testing import (
@@ -40,7 +40,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from vs_runtime.api.infrastructure import RunControlChannel
     from vs_sim.api import Connection
 
 _CONFIGURATION = ConfigurationError(
@@ -323,31 +322,6 @@ def test_runtime_waits_for_reconnected_subscriber_before_teardown(
     _on_sim(seed, body)
 
 
-class _SessionControlStub:
-    """The stop half of ``vibesys.api.RunControl`` over a ``RunControlChannel``."""
-
-    def __init__(self, control: RunControlChannel) -> None:
-        self._control = control
-
-    def steer(self, text: str) -> None:
-        self._control.queue_steer(text)
-
-    def pause(self) -> None:
-        self._control.request_pause()
-
-    def resume(self) -> None:
-        self._control.resume()
-
-    def resume_with_fallback(self) -> None:
-        self._control.resume_with_fallback()
-
-    def resume_when_capacity_returns(self) -> bool:
-        return self._control.resume_when_capacity_returns()
-
-    def stop(self) -> None:
-        self._control.request_stop(StopMode.DRAIN)
-
-
 @_SEEDS
 @given(seed=st.integers(0, 2**32))
 def test_runtime_returns_cleanly_after_an_operator_stop(
@@ -384,7 +358,7 @@ def test_runtime_returns_cleanly_after_an_operator_stop(
         integration.events.subscribe(runtime.integration.project_event)
 
         def run() -> str:
-            control = _SessionControlStub(integration.control)
+            control = ChannelRunControl(integration.control)
             runtime.controls.install(control)
             try:
                 runtime.api.execute(StopCommand(timestamp=REQUEST_TIME))

@@ -271,7 +271,7 @@ depends_on = ["vs_agent", "vibesys", "vs_project", "vibesys.errors", "vibesys.ru
 
 [[modules]]
 path = "vibesys.api.session"
-depends_on = ["vibesys.api._session", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.assembly", "vibesys.plugin_catalog", "vibesys.run.contracts"]
+depends_on = ["vibesys.api._session", "vs_runtime", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.assembly", "vibesys.plugin_catalog", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.api._session"

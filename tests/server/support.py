@@ -23,9 +23,9 @@ from vibesys.orchestration.agent_options import (
     AgentOrchestrationOptions,
 )
 from vibesys.run.event_journal import EventJournal as CoreEventJournal
-from vs_core.api import StopMode
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api.infrastructure import (
+    ChannelRunControl,
     RunControlChannel,
     RunControlTransition,
     create_run_control_channel,
@@ -99,37 +99,6 @@ class RecordingObserver:
     def terminated(self) -> None:
         """Note ``"terminated"``."""
         self.facts.append("terminated")
-
-
-class _ControlBridge:
-    """Adapt a `RunControlChannel` to the `vibesys.api.RunControl` shape.
-
-    Mirrors what `vibesys.api._session._LocalRunSession`'s `steer`/`pause`/
-    `resume`/`stop` methods do in production: translate the `RunControl`
-    protocol's names onto the channel's writer-side methods. The control slot
-    installs this so `RunApi` can route exactly as it would to a live session.
-    """
-
-    def __init__(self, channel: RunControlChannel) -> None:
-        self._channel = channel
-
-    def steer(self, text: str) -> None:
-        self._channel.queue_steer(text)
-
-    def pause(self) -> None:
-        self._channel.request_pause()
-
-    def resume(self) -> None:
-        self._channel.resume()
-
-    def resume_with_fallback(self) -> None:
-        self._channel.resume_with_fallback()
-
-    def resume_when_capacity_returns(self) -> bool:
-        return self._channel.resume_when_capacity_returns()
-
-    def stop(self) -> None:
-        self._channel.request_stop(StopMode.DRAIN)
 
 
 def _record_control_transition(
@@ -297,7 +266,7 @@ def build_server_parts(
     control = create_run_control_channel(
         lambda transition: _record_control_transition(core_events, transition), threads=OsThreads()
     )
-    control_bridge = _ControlBridge(control)
+    control_bridge = ChannelRunControl(control)
     controls = RunControlSlot(condition)
     controls.install(control_bridge)
     api = RunApi(

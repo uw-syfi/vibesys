@@ -39,7 +39,7 @@ from server.runtime import ServerRuntime
 from server.transport.discovery import WebInstanceClaim, WebInstanceRecord
 from vibesys.run.integration import LocalRunIntegration
 from vs_core.api import StopMode
-from vs_runtime.api.infrastructure import RunControlChannel
+from vs_runtime.api.infrastructure import ChannelRunControl, RunControlChannel
 from vs_runtime.api.testing import idle_environment_system
 from vs_sim.api import OsThreads, Platform
 from vs_sim.api.testing import ManualClock, SimThreads
@@ -63,37 +63,20 @@ _INDEX_HTML = "<!doctype html><title>composed bundle</title>"
 _DEADLOCK_GUARD_SECONDS = 30.0
 
 
-class _SessionControlStub:
-    """Adapt a `RunControlChannel` to the `vibesys.api.RunControl` shape.
+class _SessionControlStub(ChannelRunControl):
+    """The session's controls over a ``RunControlChannel``, counting the stops it applies.
 
-    Mirrors what `vibesys.api._session._LocalRunSession`'s `steer`/`pause`/
-    `resume`/`stop` methods do in production, so a bare `runtime.run(...)`
-    callback (which never goes through `ServerRuntime.drive`) can install the
-    same control role that a live session provides.
+    A bare ``runtime.run(...)`` callback never goes through ``ServerRuntime.drive``, so the
+    test installs the control role a live session provides.
     """
 
     def __init__(self, control: RunControlChannel) -> None:
-        self._control = control
+        super().__init__(control)
         self.stop_calls = 0
 
-    def steer(self, text: str) -> None:
-        self._control.queue_steer(text)
-
-    def pause(self) -> None:
-        self._control.request_pause()
-
-    def resume(self) -> None:
-        self._control.resume()
-
-    def resume_with_fallback(self) -> None:
-        self._control.resume_with_fallback()
-
-    def resume_when_capacity_returns(self) -> bool:
-        return self._control.resume_when_capacity_returns()
-
-    def stop(self) -> None:
+    def stop(self, mode: StopMode = StopMode.DRAIN) -> None:
         self.stop_calls += 1
-        self._control.request_stop(StopMode.DRAIN)
+        super().stop(mode)
 
 
 def _await_socket(runtime: ServerRuntime) -> None:

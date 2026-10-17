@@ -132,6 +132,17 @@ from vs_runtime._model_artifacts import (
 )
 from vs_runtime._model_requests import ModelRequestError, _ModelRequestReconciler
 from vs_runtime._objective_document import materialize_objective_document
+from vs_runtime._operator_control import (
+    CONTROL_REQUEST,
+    ChannelRunControl,
+    ControlAck,
+    ControlRequest,
+    ControlStatus,
+    PauseRequest,
+    ResumeRequest,
+    SteerRequest,
+    StopRequest,
+)
 from vs_runtime._project_materialization import (
     FreshProjectError,
     FreshProjectErrorKind,
@@ -468,6 +479,7 @@ def create_model_request_reconciler(
 
 
 __all__ = [
+    "CONTROL_REQUEST",
     "DEFAULT_RETRY_SECONDS",
     "PACKAGE_ROOT_TOKEN",
     "PAUSE_FOR_OPERATOR",
@@ -497,8 +509,12 @@ __all__ = [
     "CapacityTimer",
     "CapacityWaitEnd",
     "CapacityWake",
+    "ChannelRunControl",
     "ClusterEvaluationFacts",
     "CommandExecutionResult",
+    "ControlAck",
+    "ControlRequest",
+    "ControlStatus",
     "DockerEnvironment",
     "DockerEnvironmentConfig",
     "DockerEnvironmentFacts",
@@ -557,6 +573,7 @@ __all__ = [
     "NativeCpuProfilerPreflight",
     "OwnedWorkspaces",
     "ParallelCandidateObstacle",
+    "PauseRequest",
     "PreparedModelArtifacts",
     "PreparedTrustedEvaluator",
     "ProjectMaterializationEffects",
@@ -578,6 +595,7 @@ __all__ = [
     "QuotaPolicy",
     "RecordState",
     "ResolvedEvaluatorPackage",
+    "ResumeRequest",
     "RootBaselineDrifted",
     "RunControlChannel",
     "RunControlEventSink",
@@ -615,7 +633,9 @@ __all__ = [
     "StartupOutputOpener",
     "StateBuildStore",
     "StateValidationPasses",
+    "SteerRequest",
     "StopGraceError",
+    "StopRequest",
     "StopTimer",
     "Switch",
     "TaskImageBuildStep",
