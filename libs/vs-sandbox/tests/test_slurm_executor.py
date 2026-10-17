@@ -389,12 +389,12 @@ class _RunningThenEndedCluster(_BlockingCluster):
     def __init__(self, config: SlurmConfig) -> None:
         super().__init__(config)
         self._scheduler_states = (SlurmJobStatus.RUNNING, SlurmJobStatus.COMPLETED)
-        self.ended_reported = threading.Event()
+        self.ended_reported = Gate()
 
     def inspect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterInspectOutcome:
         observed = super().inspect(target, by_job_id=by_job_id)
         if isinstance(observed, ClusterObservation) and observed.status is SlurmJobStatus.COMPLETED:
-            self.ended_reported.set()
+            self.ended_reported.open()
         return observed
 
 
@@ -2102,7 +2102,7 @@ async def test_a_poll_joining_an_owner_that_is_cancelled_returns_instead_of_rais
         await wait_until_executor_started(runner.wait_started, executor, "eval-polled")
         # The scheduler reports the job ended while the owner is still settling it.
         poll = asyncio.create_task(executor.poll("eval-polled"))
-        await wait_until_started(runner.ended_reported, poll)
+        await runner.ended_reported.wait(poll)
         # The poll has its answer; with the owner blocked, its next steps need no clock,
         # so a bounded number of turns takes it to waiting on the owner.
         for _ in range(50):
