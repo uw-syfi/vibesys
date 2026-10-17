@@ -12,6 +12,7 @@ import {Button, Chip, Pane, Panes, Row, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
   implementerOutcomes,
+  outcomeWords,
   type ResolvedZoom,
   type RunMode,
   type RunModel,
@@ -56,13 +57,17 @@ export interface LevelProps {
   readonly dispatch: Dispatch;
 }
 
-const OUTCOME: Readonly<
-  Record<Candidate['outcome'], {tone: 'live' | 'ok' | 'err'; label: string}>
-> = {
-  running: {tone: 'live', label: 'Running'},
-  passed: {tone: 'ok', label: 'Passed'},
-  failed: {tone: 'err', label: 'Failed'},
+const OUTCOME_TONE: Readonly<Record<Candidate['outcome'], 'live' | 'ok' | 'err'>> = {
+  running: 'live',
+  passed: 'ok',
+  failed: 'err',
 };
+
+/** `Failed · turned down`: the outcome capitalized, with its reason when the idea failed. */
+function outcomeLabel(idea: Candidate): string {
+  const text = outcomeWords(idea);
+  return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+}
 
 function stepChip(step: CandidateStep): {tone: 'live' | 'ok' | 'err' | 'neutral'; label: string} {
   if (step.status === 'running' || step.status === 'waiting' || step.status === 'pending') {
@@ -90,7 +95,7 @@ function IdeaFacts(props: {readonly idea: Candidate; readonly base: ViewBase}): 
   const vs = idea.measurement?.vsBaseline ?? null;
   return (
     <>
-      <Chip label={OUTCOME[idea.outcome].label} tone={OUTCOME[idea.outcome].tone} dot />
+      <Chip label={outcomeLabel(idea)} tone={OUTCOME_TONE[idea.outcome]} dot />
       {vs === null ? null : (
         <Text variant="metric" tone={idea.outcome === 'passed' ? 'ok' : 'err'}>
           {`${vs.toFixed(2)}×`}

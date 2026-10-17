@@ -19,6 +19,7 @@ import {
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import {
+  legendItems,
   TIMELINE_RANGES,
   type TimelineRange,
   type TimelineRow,
@@ -46,10 +47,7 @@ function RunTimeline(props: ViewBase): JSX.Element {
     if (row.lane) setExpanded(true);
     else zoom({type: 'open-idea', idea: row.id});
   };
-  const key = [
-    ...shown.legend.roles.map(({role, series}) => ({label: role, series})),
-    ...(shown.legend.gates ? [{label: 'gate', hatched: true}] : []),
-  ];
+  const key = legendItems(shown.legend);
   const summary =
     shown.folded > 0
       ? `${shown.rows.length - 1} passed and running · failed as one lane`

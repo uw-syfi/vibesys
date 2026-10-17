@@ -79,11 +79,16 @@ function share(value: number, best: number, direction: Direction): number {
   return Math.min(1, direction === 'min' ? best / value : value / best);
 }
 
-function stateOf(item: Candidate): IdeaRow['state'] {
-  if (item.outcome === 'running') return {tone: 'live', label: 'running'};
-  if (item.outcome === 'passed') return {tone: 'ok', label: 'passed'};
+/** An idea's outcome in words: `running`, `passed`, or `failed`, then why when it is known. */
+export function outcomeWords(item: Candidate): string {
+  if (item.outcome !== 'failed') return item.outcome;
   const why = item.reason ?? item.measurement?.failed?.check ?? null;
-  return {tone: 'err', label: why === null ? 'failed' : `failed · ${words(why)}`};
+  return why === null ? 'failed' : `failed · ${words(why)}`;
+}
+
+function stateOf(item: Candidate): IdeaRow['state'] {
+  const tone = {running: 'live', passed: 'ok', failed: 'err'} as const;
+  return {tone: tone[item.outcome], label: outcomeWords(item)};
 }
 
 /** The figure at the right of an idea's row: its ratio, its failed check's progress, or why not. */

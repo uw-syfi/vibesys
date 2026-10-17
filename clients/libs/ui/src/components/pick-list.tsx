@@ -169,6 +169,20 @@ function Trail(props: {
   );
 }
 
+/** A row's swatch: its palette color, or hatched; none when it has neither. */
+function RowSwatch(props: {
+  readonly series: number | undefined;
+  readonly hatched: boolean;
+}): JSX.Element | null {
+  if (props.series === undefined && !props.hatched) return null;
+  return (
+    <Swatch
+      {...(props.series === undefined ? {} : {series: props.series})}
+      {...(props.hatched ? {hatched: true} : {})}
+    />
+  );
+}
+
 /**
  * One row of a `PickList`, one line (28 px in a compact screen): what it is (`title`), its most
  * important line (`summary`, which gives way first when the row is narrow), `badges`, a `bar`, a
@@ -199,6 +213,8 @@ export function PickRow(props: {
   readonly stripe?: boolean;
   /** A square of the palette's color number (`--series-N`) before the title: what the row is, by color. */
   readonly swatch?: number;
+  /** A hatched square in place of a color: what the row is has no color of its own (a gate). */
+  readonly hatched?: boolean;
   readonly badges?: readonly {readonly label: string; readonly tone: StatusTone}[];
   readonly select: () => void;
 }): JSX.Element {
@@ -237,7 +253,7 @@ export function PickRow(props: {
           </Text>
         </span>
       )}
-      {props.swatch === undefined ? null : <Swatch series={props.swatch} />}
+      <RowSwatch series={props.swatch} hatched={props.hatched === true} />
       <span className="vs-pickrow-text">
         <Text variant={props.mono === true ? 'code' : 'body-strong'}>{props.title}</Text>
         {props.summary === undefined ? null : (

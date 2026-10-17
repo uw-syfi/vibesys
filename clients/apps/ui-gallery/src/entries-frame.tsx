@@ -272,11 +272,47 @@ const SERIES_ROWS: readonly GanttRow[] = [
   },
 ];
 
-/** Bars colored per role, with the legend that names each color. */
+const STEP_STRIP: GanttRow = {
+  id: 'steps',
+  label: 'ring-v1 steps over time',
+  start: 0,
+  end: 9,
+  outcome: 'ok',
+  press: noop,
+  figure: '1.40×',
+  segments: [
+    {id: 'a', start: 0, end: 3, kind: 'solid', series: 1, label: 'implementer · 3m'},
+    {id: 'b', start: 3, end: 6, kind: 'hatched', label: 'gate · 3m'},
+    {id: 'c', start: 6, end: 9, kind: 'solid', series: 3, label: 'judge · 3m'},
+  ],
+};
+
+/** Bars colored per role, with the legend that names each color; and a strip of steps with its rows. */
 function SeriesBarsDemo(): JSX.Element {
+  const key = [
+    {label: 'implementer', series: 1},
+    {label: 'judge', series: 3},
+    {label: 'gate', hatched: true},
+  ];
   return (
     <Card>
       <Stack>
+        <Stack gap="space-1">
+          <SwatchLegend label="Step colors" items={key} />
+          <Gantt label="Steps over time" strip from={0} to={9} rows={[STEP_STRIP]} />
+        </Stack>
+        <PickList label="Steps">
+          <PickRow id="a" title="implementer" swatch={1} figure="3m" select={noop} />
+          <PickRow id="b" title="gate" hatched figure="3m" select={noop} />
+          <PickRow
+            id="c"
+            title="judge"
+            swatch={3}
+            badges={[{label: 'failed', tone: 'err'}]}
+            figure="3m"
+            select={noop}
+          />
+        </PickList>
         <SwatchLegend
           label="Bar colors"
           items={[

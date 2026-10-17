@@ -5,12 +5,12 @@
  */
 
 import {afterAll, beforeAll, expect, test} from 'bun:test';
-import type {Candidate} from '@vibesys/run-state/candidates';
+import type {Candidate, CandidateStep} from '@vibesys/run-state/candidates';
 import {Window} from 'happy-dom';
 import {act, type ReactNode} from 'react';
 import {createRoot, type Root} from 'react-dom/client';
 import type {ZoomEvent} from '../../../../state/index.js';
-import {attempt, idea, modelOf} from '../../../../state/timeline-fixtures.js';
+import {attempt, idea, modelOf, step} from '../../../../state/timeline-fixtures.js';
 import {IdeaView, ideaHeader, StepList} from './idea-view.js';
 
 const window = new Window();
@@ -161,5 +161,95 @@ test('shows the implementer outcome as a chip and its summary in the idea view',
   const {container, unmount} = await mount(<IdeaView {...props} />);
   expect(container.querySelector('.vs-chip')?.textContent).toBe('blocked');
   expect(container.textContent).toContain('Padded the counters.');
+  await unmount();
+});
+
+/** An idea whose one attempt has these steps: [role or null for a gate, title, status]. */
+function withSteps(
+  steps: readonly (readonly [string | null, string, CandidateStep['status']])[],
+): Candidate {
+  const base = idea('mpmc', 'passed', 100, 300);
+  const first = base.attempts[0];
+  if (first === undefined) throw new Error('fixture');
+  const made = steps.map(([role, title, status], at) => ({
+    ...step(`s${at}`, role === null ? 'gate' : 'agent_turn', role, 100 + at * 50, 40),
+    title,
+    status,
+  }));
+  return {...base, attempts: [{...first, steps: made}]};
+}
+
+function colorsOf(nodes: Iterable<Element>): string[] {
+  return [...nodes].map(node => (node as HTMLElement).style.getPropertyValue('--seg-color'));
+}
+
+test('the strip is keyed by a legend of exactly the roles in it, in the segments colors', async () => {
+  const candidate = withSteps([
+    ['orchestrator', 'orchestrator', 'done'],
+    ['implementer', 'Padded the counters', 'done'],
+    ['orchestrator', 'orchestrator', 'done'],
+    [null, 'gate', 'done'],
+  ]);
+  const {container, unmount} = await mount(<IdeaView {...view(candidate, () => undefined)} />);
+  const legend = container.querySelector('ul[aria-label="Step colors"]');
+  expect(legend).not.toBeNull();
+  const entries = [...(legend?.querySelectorAll('li') ?? [])];
+  expect(entries.map(each => each.textContent)).toEqual(['implementer', 'orchestrator', 'gate']);
+  const swatches = entries.map(each => each.querySelector('.vs-series-swatch') as HTMLElement);
+  expect(swatches.map(each => each.getAttribute('data-hatched') !== null)).toEqual([
+    false,
+    false,
+    true,
+  ]);
+  const [implementer, orchestrator] = colorsOf(swatches);
+  expect(colorsOf(container.querySelectorAll('.vs-gantt-seg'))).toEqual([
+    orchestrator as string,
+    implementer as string,
+    orchestrator as string,
+    '',
+  ]);
+  await unmount();
+});
+
+test('a strip without a gate has no gate entry, and a role is listed once', async () => {
+  const candidate = withSteps([
+    ['judge', 'judge', 'done'],
+    ['judge', 'judge', 'done'],
+  ]);
+  const {container, unmount} = await mount(<IdeaView {...view(candidate, () => undefined)} />);
+  const legend = container.querySelector('ul[aria-label="Step colors"]');
+  expect([...(legend?.querySelectorAll('li') ?? [])].map(each => each.textContent)).toEqual([
+    'judge',
+  ]);
+  await unmount();
+});
+
+test('a step row names its role once, in its strip color, with status only when unusual', async () => {
+  const candidate = withSteps([
+    ['orchestrator', 'orchestrator', 'done'],
+    ['implementer', 'Padded the counters', 'done'],
+    ['judge', 'judge', 'failed'],
+    [null, 'gate', 'done'],
+  ]);
+  const {container, unmount} = await mount(<IdeaView {...view(candidate, () => undefined)} />);
+  const rows = options(container, 'mpmc steps');
+  const occurrences = (row: HTMLElement | undefined, word: string): number =>
+    (row?.textContent ?? '').split(word).length - 1;
+  expect(occurrences(rows[0], 'orchestrator')).toBe(1);
+  expect(occurrences(rows[1], 'implementer')).toBe(1);
+  expect(rows[1]?.textContent).toContain('Padded the counters');
+  expect(occurrences(rows[2], 'judge')).toBe(1);
+  expect(occurrences(rows[3], 'gate')).toBe(1);
+  const swatches = rows.map(row => row.querySelector('.vs-series-swatch') as HTMLElement);
+  expect(colorsOf(swatches)).toEqual(colorsOf(container.querySelectorAll('.vs-gantt-seg')));
+  expect(swatches[3]?.getAttribute('data-hatched')).not.toBeNull();
+  // Status shows only for the failed step, as a badge, and no row has a status dot.
+  expect(rows.map(row => row.querySelector('.vs-chip')?.textContent ?? null)).toEqual([
+    null,
+    null,
+    'failed',
+    null,
+  ]);
+  expect(rows.some(row => row.querySelector('.vs-pickrow-dot') !== null)).toBe(false);
   await unmount();
 });

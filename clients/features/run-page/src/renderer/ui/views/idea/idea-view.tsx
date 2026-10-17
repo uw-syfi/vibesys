@@ -2,13 +2,14 @@
  * An opened idea's body (the frame draws its pane, with the outcome, ratio and "built on"; the
  * header adds the facts: value, against its parent, how long): its attempts (one line each, the latest selected
  * until another is chosen), the strip of the selected attempt's steps over its time, and those
- * steps (agent turns and gates, each led by its role and headline), each opening the step; and the
+ * steps (agent turns and gates, each marked by its role's color and named by its role and headline), each opening the step; and the
  * compact step list beside an opened step.
  */
 import type {Candidate, CandidateStep} from '@vibesys/run-state/candidates';
 import {Chip, EmptyState, PickList, PickRow, Row, Stack, Text} from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import type {ImplementerOutcome} from '../../../../state/idea-outcomes.js';
+import {roleSeries} from '../../../../state/role-series.js';
 import {duration, formatValue, words} from '../../../../state/span-reading.js';
 import {
   type AttemptLine,
@@ -151,6 +152,11 @@ function stateOf(step: CandidateStep): {tone: 'live' | 'ok' | 'err' | 'neutral';
   }
 }
 
+/** The step's status as a badge, only when it is not the usual finished-ok: failed, running, waiting. */
+function noteworthy(step: CandidateStep): ReturnType<typeof stateOf>[] {
+  return step.status === 'done' ? [] : [stateOf(step)];
+}
+
 /** How long a finished step took; empty while it runs (a list has no clock). */
 function tookOf(step: CandidateStep): string | undefined {
   return step.endedAt === null ? undefined : duration(step.endedAt - step.startedAt);
@@ -172,13 +178,20 @@ function StepRows(props: {
     >
       {props.steps.map(step => {
         const took = tookOf(step);
+        const name = step.role ?? words(step.kind);
+        const badges = noteworthy(step);
+        // The role once: a step titled by its role (or untitled) shows it as the title, else led by it.
+        const titled = step.title !== '' && step.title !== name;
         return (
           <PickRow
             key={step.span}
             id={step.span}
-            lead={step.role ?? words(step.kind)}
-            title={step.title}
-            state={stateOf(step)}
+            {...(titled ? {lead: name} : {})}
+            title={titled ? step.title : name}
+            {...(step.role === null
+              ? {hatched: step.kind === 'gate'}
+              : {swatch: roleSeries(step.role)})}
+            badges={badges}
             {...(took === undefined ? {} : {figure: took})}
             select={() => props.zoom({type: 'open-step', step: step.span})}
           />

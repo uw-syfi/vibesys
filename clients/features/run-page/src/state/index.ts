@@ -16,6 +16,7 @@ export {
   type IdeaRow,
   type IdeasFilter,
   ideasView,
+  outcomeWords,
 } from './ideas-view.js';
 export {EMPTY_TRACE_LOG, type RunData, type SessionView, type TraceLog} from './live.js';
 export {runRecord, sameRecord} from './record.js';

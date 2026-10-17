@@ -238,20 +238,32 @@ function ordered(candidates: readonly Candidate[]): Candidate[] {
   return [...running, ...rest];
 }
 
-function legendOf(rows: readonly TimelineRow[]): TimelineLegend {
+/** The roles whose turns are among `segments` (sorted by name) and whether a gate is. */
+function legendOfSegments(segments: readonly StepSegment[]): TimelineLegend {
   const roles = new Set<string>();
   let gates = false;
-  for (const row of rows) {
-    if (row.lane) continue;
-    for (const segment of row.segments) {
-      if (segment.role !== null) roles.add(segment.role);
-      else if (segment.kind === 'hatched') gates = true;
-    }
+  for (const segment of segments) {
+    if (segment.role !== null) roles.add(segment.role);
+    else if (segment.kind === 'hatched') gates = true;
   }
   return {
     roles: [...roles].sort().map(role => ({role, series: roleSeries(role)})),
     gates,
   };
+}
+
+function legendOf(rows: readonly TimelineRow[]): TimelineLegend {
+  return legendOfSegments(rows.filter(row => !row.lane).flatMap(row => row.segments));
+}
+
+/** A legend's entries for a `SwatchLegend`: each role by its color, a gate hatched. */
+export function legendItems(
+  legend: TimelineLegend,
+): readonly {readonly label: string; readonly series?: number; readonly hatched?: boolean}[] {
+  return [
+    ...legend.roles.map(({role, series}) => ({label: role, series})),
+    ...(legend.gates ? [{label: 'gate', hatched: true}] : []),
+  ];
 }
 
 /**
@@ -352,6 +364,8 @@ export interface AttemptStrip {
   readonly to: number;
   readonly playhead: number | null;
   readonly row: TimelineRow;
+  /** What the segments are colored by, for the legend. */
+  readonly legend: TimelineLegend;
 }
 
 export function attemptStrip(
@@ -361,6 +375,7 @@ export function attemptStrip(
 ): AttemptStrip {
   const end = endOf(attempt.startedAt, attempt.endedAt, now);
   const vs = attempt.measurement?.vsBaseline ?? null;
+  const segments = stepSegments(attempt.steps, now);
   return {
     from: attempt.startedAt,
     to: Math.max(end, attempt.startedAt + 1),
@@ -373,9 +388,10 @@ export function attemptStrip(
       outcome: OUTCOME[attempt.outcome],
       figure: attempt.outcome === 'running' || vs === null ? '' : ratio(vs),
       figureTitle: null,
-      segments: stepSegments(attempt.steps, now),
+      segments,
       lane: false,
     },
+    legend: legendOfSegments(segments),
   };
 }
 
