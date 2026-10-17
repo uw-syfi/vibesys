@@ -398,8 +398,12 @@ class _RunningThenEndedCluster(_BlockingCluster):
         return observed
 
 
+class _OwnerAbortedError(BaseException):
+    """An owner failure that no handler inside the owner converts into a published outcome."""
+
+
 class _RunningThenFailingOwnerCluster(_RunningThenEndedCluster):
-    """As above, but the owner's blocked inspection fails with a non-cancellation error."""
+    """As above, but the owner's blocked inspection raises past every handler of the owner."""
 
     def __init__(self, config: SlurmConfig) -> None:
         super().__init__(config)
@@ -410,7 +414,7 @@ class _RunningThenFailingOwnerCluster(_RunningThenEndedCluster):
         if self.wait_finished.is_set() and not self.owner_failed:
             self.owner_failed = True
             message = "scheduler connection lost"
-            raise ConnectionError(message)
+            raise _OwnerAbortedError(message)
         return observed
 
 
@@ -2143,7 +2147,12 @@ async def test_a_poll_joining_an_owner_that_is_cancelled_returns_instead_of_rais
 async def test_a_poll_joining_an_owner_that_fails_returns_instead_of_raising(
     tmp_path: Path,
 ) -> None:
-    """An owner ending with its own error is the owner's outcome, not the read-only poll's."""
+    """An owner that dies with an uncaught exception is not the read-only poll's error.
+
+    The owner's own handlers publish an outcome for every ``Exception``, so this owner raises a
+    ``BaseException`` past them: it ends with no terminal publication. The poll joining it must
+    return and let the durable path answer, not re-raise the owner's exception.
+    """
     config = _config()
     runner = _RunningThenFailingOwnerCluster(config)
     executor = SlurmEvaluationExecutor(
@@ -2168,11 +2177,9 @@ async def test_a_poll_joining_an_owner_that_fails_returns_instead_of_raising(
         runner.release()
         result = await poll
         assert runner.owner_failed
-        assert result is not None
+        # The owner published nothing, so the durable path (ledger plus cluster) answers.
         assert result.phase is PollPhase.ENDED
         assert result.terminal is not None
-        assert result.terminal.state is EvaluationState.FAILED
-        assert result.terminal.failure == "ConnectionError: scheduler connection lost"
     finally:
         runner.release()
         await executor.close()

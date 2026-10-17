@@ -12,18 +12,18 @@ from dataclasses import replace
 from typing import Literal
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
 from vs_sim.api.testing import examples
 
-from .test_agent_turn_runs import SCENARIOS, Scenario
+from .test_agent_turn_runs import ROLES, SCENARIOS, Scenario
 from .test_role_input_target import _role_turn
 from .test_run_scoped_input_delivery import _fate_event, _with_inputs
 from .test_session_inputs import occurrence
 from .test_session_turns import invocation, reload_step, waiting_turn_state
-from .toy_agent_search import Config, ToyHost, run_toy
+from .toy_agent_search import Config, Faults, ToyHost, run_toy
 
 _Fate = Literal["deliver", "rejected", "failed", "cancelled", "crash"]
 _ROLES = ("planner", "worker")
@@ -41,7 +41,21 @@ def _withdraw(state: core.CoreState, input_id: core.InputId, index: int) -> core
     return reload_step(state, core.RunControlEvent(control=control, now_at=1.0))
 
 
+# PR CI draws only a handful of examples, so each edge of the schedule is pinned: a withdrawal
+# before any turn, one after every turn (never withdrawn), and the idempotent double withdrawal,
+# each for guidance to the run and to a role.
 @settings(max_examples=examples(pr=5, nightly=100))
+@example(addressed_to="run", turns=[("planner", "deliver")] * 3, withdrawn_after=0, withdrawals=1)
+@example(
+    addressed_to="planner", turns=[("planner", "failed")] * 3, withdrawn_after=1, withdrawals=2
+)
+@example(
+    addressed_to="planner",
+    turns=[("worker", "crash"), ("planner", "cancelled")],
+    withdrawn_after=8,
+    withdrawals=1,
+)
+@example(addressed_to="run", turns=[], withdrawn_after=0, withdrawals=2)
 @given(
     addressed_to=st.sampled_from(["run", "planner"]),
     turns=st.lists(st.tuples(st.sampled_from(_ROLES), _FATES), max_size=8),
@@ -131,7 +145,32 @@ def _toy_matches(name: str, request: core.DispatchTurn | core.ResumeSessionTurn)
     return request.turn.session.role_id.root == name
 
 
+# A resumed turn (the first waits for its job) and a second workstream, so that guidance to
+# attempt "w0" or item "w0" must skip the other workstream's turns.
+_PINNED = Scenario(
+    workstreams=2,
+    in_flight=1,
+    waits=(True,),
+    polls=(1,),
+    roles=ROLES,
+    ends=("wait",),
+    shares=True,
+    faults=Faults(),
+)
+
+
 @settings(max_examples=examples(pr=4, nightly=40), deadline=None, derandomize=True, database=None)
+# PR CI draws only a few of the 5 targets x 2 reload settings, so every one is pinned.
+@example(scenario=_PINNED, target="run", reload=False)
+@example(scenario=_PINNED, target="run", reload=True)
+@example(scenario=_PINNED, target="toy-implementer", reload=False)
+@example(scenario=_PINNED, target="toy-implementer", reload=True)
+@example(scenario=_PINNED, target="toy-judge", reload=False)
+@example(scenario=_PINNED, target="toy-judge", reload=True)
+@example(scenario=_PINNED, target="attempt", reload=False)
+@example(scenario=_PINNED, target="attempt", reload=True)
+@example(scenario=_PINNED, target="item", reload=False)
+@example(scenario=_PINNED, target="item", reload=True)
 @given(scenario=SCENARIOS, target=_TARGETS, reload=st.booleans())
 def test_standing_guidance_reaches_every_dispatched_and_resumed_turn_of_its_target(
     scenario: Scenario, target: str, *, reload: bool
