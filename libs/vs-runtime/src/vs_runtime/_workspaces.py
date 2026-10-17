@@ -92,6 +92,10 @@ class WorkspaceResource(Protocol):
         """The digest of what the task's evaluation of *revision* reads (``GitTracker``)."""
         ...
 
+    def withhold_unread(self) -> None:
+        """Remove the paths the task declares unread, so the files are what the digest covers."""
+        ...
+
     def is_retained(self, revision: str) -> bool: ...
 
     def trusted_input_changes(self) -> list[str]: ...
@@ -510,6 +514,21 @@ class RuntimeWorkspaces:
                 if member_id is not None:
                     self._members.add(workspace_id)
                 return self._register(workspace_id, resource)
+
+    async def create_measured_candidate(self, revision: str) -> CandidateWorkspace:
+        """A fresh candidate of *revision* holding exactly what its measured input digests.
+
+        The paths the task declares unread are removed (``WorkspaceResource.withhold_unread``),
+        so an evaluation in it reads what ``measured_input`` names, and two revisions with one
+        measured input are evaluated on byte-identical trees. A failure discards the candidate.
+        """
+        candidate = await self.create_candidate(revision)
+        try:
+            await run_sync(self._runner, self.resource_for(candidate).withhold_unread)
+        except BaseException:
+            await candidate.discard()
+            raise
+        return candidate
 
     def _open_candidate(self, workspace_id: str, revision: str) -> WorkspaceResource:
         """Open the candidate, refusing a revision the run's repository does not hold.

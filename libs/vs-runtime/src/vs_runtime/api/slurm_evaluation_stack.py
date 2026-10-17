@@ -167,6 +167,7 @@ class Stack:
     executor: SemanticSlurmEvaluationExecutor
     cluster: ScenarioCluster
     snapshot: str
+    workspaces: FakeWorkspaces
 
 
 def _config() -> SlurmConfig:
@@ -225,7 +226,7 @@ async def build_stack(
         cluster=cluster,
         stage_output=stage_output,
     )
-    return Stack(executor, cluster, snapshot)
+    return Stack(executor, cluster, snapshot, workspaces)
 
 
 def plan(

@@ -163,7 +163,7 @@ class PollingEvaluationExecutor:
         failure: str | None = None
         operator_failure: str | None = None
         try:
-            workspace = await self._workspaces.create_candidate(first.snapshot)
+            workspace = await self._workspaces.create_measured_candidate(first.snapshot)
             self._publish(
                 handle_id,
                 ExecutorObservation(

@@ -68,3 +68,41 @@ def test_a_notes_only_commit_keeps_the_measured_input_and_a_code_change_moves_it
 
     with _workspaces(tmp_path) as workspaces:
         asyncio.run(exercise(workspaces))
+
+
+def test_a_measured_candidate_holds_the_revision_less_its_unread_paths(tmp_path: Path) -> None:
+    """What an evaluation reads is what the measured input digests: no ``NOTES.md``."""
+
+    async def exercise(workspaces: RuntimeWorkspaces) -> None:
+        executor, _ = _executor(workspaces)
+        attempt = _attempt()
+        await _run(executor, _ensure(workspaces, attempt, "ensure-1"))
+        path = _candidate_path(workspaces)
+        (path / "candidate.py").write_text("VALUE = 7\n", encoding="utf-8")
+        (path / "NOTES.md").write_text("tried 7\n", encoding="utf-8")
+        snapshot = SnapshotAndRetain(
+            **_common(attempt, "snap-notes"),
+            attempt=attempt,
+            retention="wip",
+            invocation=InvocationRef(
+                session_id=SessionId(root="implementer"),
+                invocation_id=InvocationId(root="turn-1"),
+                generation=0,
+            ),
+        )
+        revision = (await _run(executor, snapshot)).observation.revision
+        assert revision is not None
+        commit = revision.git_commit
+        assert commit is not None
+        agents = await workspaces.create_candidate(commit)
+        measured = await workspaces.create_measured_candidate(commit)
+        try:
+            assert (agents.path / "NOTES.md").read_text(encoding="utf-8") == "tried 7\n"
+            assert not (measured.path / "NOTES.md").exists()
+            assert (measured.path / "candidate.py").read_text(encoding="utf-8") == "VALUE = 7\n"
+        finally:
+            await agents.discard()
+            await measured.discard()
+
+    with _workspaces(tmp_path) as workspaces:
+        asyncio.run(exercise(workspaces))

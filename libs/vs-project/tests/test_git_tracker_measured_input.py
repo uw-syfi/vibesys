@@ -7,11 +7,13 @@ digest, any other change moves it. The property drives real Git on every Git bac
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
+from tests.support import run_test_command
 from tests.support.real_git import real_git_tracker
 
 from vs_project.api import GIT_BACKEND_ENV, NullGitTrackerEvents
@@ -76,3 +78,119 @@ def test_commits_share_a_measured_input_iff_they_agree_on_every_read_path(
     for digest, read in seen:
         for other_digest, other_read in seen:
             assert (digest == other_digest) == (read == other_read)
+
+
+_IDENTITY = {
+    "GIT_AUTHOR_NAME": "test",
+    "GIT_AUTHOR_EMAIL": "test@example.com",
+    "GIT_COMMITTER_NAME": "test",
+    "GIT_COMMITTER_EMAIL": "test@example.com",
+}
+_FILES = (*_READ, *_UNREAD, ".vibesys/task.toml")
+"""Paths an edit writes: read, unread, and VibeSys's own file, which the digest covers."""
+_LINKS = ("link", "notes/alias")
+"""Symlinks: one the evaluation reads, one inside an unread directory."""
+_TARGETS = ("NOTES.md", "notes/round.md", "main.py", "notes")
+_EDITS = st.one_of(
+    st.tuples(st.just("write"), st.sampled_from(_FILES), st.integers(min_value=0, max_value=2)),
+    st.tuples(st.just("link"), st.sampled_from(_LINKS), st.sampled_from(_TARGETS)),
+    st.tuples(st.just("remove"), st.sampled_from(_FILES + _LINKS), st.just(0)),
+)
+
+
+def _git(root: Path, *args: str) -> str:
+    return run_test_command(
+        ["git", *args],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+        env={**os.environ, **_IDENTITY},
+    ).stdout
+
+
+def _apply(root: Path, edit: tuple[str, str, int | str]) -> None:
+    kind, path, value = edit
+    target = root / path
+    if kind == "remove":
+        if target.is_symlink() or target.is_file():
+            target.unlink()
+        return
+    if target.parent.is_symlink() or target.parent.is_file():
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.is_symlink() or target.is_file():
+        target.unlink()
+    elif target.exists():
+        return
+    if kind == "write":
+        target.write_text(f"{path} = {value}\n", encoding="utf-8")
+    else:
+        target.symlink_to(os.path.relpath(root / str(value), target.parent))
+
+
+def _tree(root: Path) -> dict[str, tuple[str, str]]:
+    """Every entry below ``root`` but Git's own: a symlink's target, a file's mode and bytes."""
+    entries: dict[str, tuple[str, str]] = {}
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root).as_posix()
+        if relative == ".git" or relative.startswith(".git/"):
+            continue
+        if path.is_symlink():
+            entries[relative] = ("link", path.readlink().as_posix())
+        elif path.is_file():
+            mode = oct(path.stat().st_mode & 0o111)
+            entries[relative] = (mode, path.read_text(encoding="utf-8"))
+        elif path.is_dir() and not any(path.iterdir()):
+            entries[relative] = ("empty", "")
+    return entries
+
+
+@settings(
+    max_examples=examples(pr=4, nightly=25),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+@given(edits=st.lists(_EDITS, min_size=1, max_size=6))
+@example(
+    edits=[
+        ("link", "link", "NOTES.md"),
+        ("write", "NOTES.md", 1),
+        ("write", "notes/round.md", 1),
+        ("link", "notes/alias", "main.py"),
+        ("write", ".vibesys/task.toml", 1),
+        ("write", "NOTES.md", 2),
+    ]
+)
+def test_commits_with_one_measured_input_are_evaluated_on_byte_identical_trees(
+    tmp_path: Path, edits: list[tuple[str, str, int | str]]
+) -> None:
+    """A fresh worktree of a commit, less its unread paths, is exactly what the digest covers.
+
+    Edits write and remove files, and point symlinks into and out of the unread paths. Each
+    edit is a commit; for every pair of commits with one digest, the evaluated trees (each
+    a fresh linked worktree after ``withhold_unread``) hold the same entries, bytes and modes.
+    """
+    case = tmp_path / f"case-{len(list(tmp_path.iterdir()))}"
+    root = case / "repo"
+    root.mkdir(parents=True)
+    (root / "main.py").write_text("VALUE = 0\n", encoding="utf-8")
+    (root / "NOTES.md").write_text("baseline notes\n", encoding="utf-8")
+    tracker = real_git_tracker(root, run_id="input-run", events=NullGitTrackerEvents())
+    tracker.init(existing=False)
+    seen: list[tuple[str, dict[str, tuple[str, str]]]] = []
+    for number, edit in enumerate(edits):
+        _apply(root, edit)
+        _git(root, "add", "-A", "-f", "--", ".", ":(exclude).vibesys/state")
+        _git(root, "commit", "-q", "--allow-empty", "-m", f"step {number}")
+        commit = _git(root, "rev-parse", "HEAD").strip()
+        worktree = case / f"evaluated-{number}"
+        _git(root, "worktree", "add", "-q", "--detach", str(worktree), commit)
+        real_git_tracker(
+            worktree, run_id="input-run", events=NullGitTrackerEvents()
+        ).withhold_unread(_DECLARED)
+        seen.append((tracker.measured_input(commit, _DECLARED), _tree(worktree)))
+    for digest, tree in seen:
+        for other_digest, other_tree in seen:
+            if digest == other_digest:
+                assert tree == other_tree
