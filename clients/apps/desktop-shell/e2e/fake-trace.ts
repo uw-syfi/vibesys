@@ -60,7 +60,15 @@ function workstream(
   };
 }
 
-function turn(id: string, parent: string, role: string, at: number): FakeSpan {
+/** An agent turn; `agent` is the agent's stable id and `startedBy` the agents whose work began it. */
+function turn(
+  id: string,
+  parent: string,
+  role: string,
+  at: number,
+  agent: string = id,
+  startedBy: readonly string[] = [],
+): FakeSpan {
   return {
     id,
     parent,
@@ -71,7 +79,7 @@ function turn(id: string, parent: string, role: string, at: number): FakeSpan {
     label: {
       kind: 'agent_turn',
       title: role,
-      attrs_json: JSON.stringify({role, model: 'claude-sonnet-5'}),
+      attrs_json: JSON.stringify({role, model: 'claude-sonnet-5', agent, started_by: startedBy}),
     },
   };
 }
@@ -158,7 +166,7 @@ function firstCall(): readonly Step[] {
     started_at: 330,
   };
   const plan = planning(1, 374);
-  const planner = turn('op:plan1-turn', plan.id, 'planner', 375);
+  const planner = turn('op:plan1-turn', plan.id, 'planner', 375, 'planner-1');
   const titles = [
     'Lock-free ring with per-slot sequence numbers',
     'Cache-line padding and batched enqueue',
@@ -167,7 +175,7 @@ function firstCall(): readonly Step[] {
   ];
   const [w1, w2, w3, w4] = titles.map((title, index) => workstream(index + 1, title, 410 + index));
   if (w1 === undefined || w2 === undefined || w3 === undefined || w4 === undefined) return [];
-  const w1Turn = turn('op:w1-turn', w1.id, 'implementer', 412);
+  const w1Turn = turn('op:w1-turn', w1.id, 'implementer', 412, 'impl-w1', ['planner-1']);
   const w1Gate = gate('op:w1-gate', w1.id, 900);
   const borrow = 'build failed: borrow error in lib.rs';
   const measured = {stage: 'correctness,benchmark', metric_value: 48.6, vs_baseline: 1.18};
@@ -203,7 +211,7 @@ function firstCall(): readonly Step[] {
 /** The second planning call: three workstreams building on earlier ones, still at work. */
 function secondCall(): readonly Step[] {
   const plan = planning(2, 1211);
-  const planner = turn('op:plan2-turn', plan.id, 'planner', 1212);
+  const planner = turn('op:plan2-turn', plan.id, 'planner', 1212, 'planner-2');
   const w5 = workstream(5, 'Combine W1 ring with W2 padding', 1239, [1]);
   const w6 = workstream(6, 'Wait-free consumer path', 1240, [1]);
   const w7: FakeSpan = {
@@ -211,9 +219,9 @@ function secondCall(): readonly Step[] {
     status: 'waiting',
     waiting_on: [{kind: 'slot', ref: 'group', since: 1241}],
   };
-  const w5Turn = turn('op:w5-turn', w5.id, 'implementer', 1240);
-  const w6Turn = turn('op:w6-turn', w6.id, 'implementer', 1241);
-  const w5Judge = turn('op:w5-judge', w5.id, 'judge', 1640);
+  const w5Turn = turn('op:w5-turn', w5.id, 'implementer', 1240, 'impl-w5', ['planner-2']);
+  const w6Turn = turn('op:w6-turn', w6.id, 'implementer', 1241, 'impl-w6', ['planner-2']);
+  const w5Judge = turn('op:w5-judge', w5.id, 'judge', 1640, 'judge-w5', ['planner-2', 'impl-w5']);
   const probe: FakeSpan = {
     id: 'op:cache-warmup',
     parent: ROOT,
