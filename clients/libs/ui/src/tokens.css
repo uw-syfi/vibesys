@@ -96,6 +96,7 @@
   --pane-list: 380px;
   --row-dense: 28px;
   --gantt-label: 220px;
+  --gantt-label-max: 420px;
   --gantt-figure: 96px;
   --gantt-bar: 12px;
   --hairline: 1px;

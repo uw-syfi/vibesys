@@ -137,3 +137,15 @@ test('an opened idea shows the strip of its latest attempt; a run with no ideas 
   expect(empty.container.textContent).toContain('No ideas yet');
   await empty.unmount();
 });
+
+test('a long idea name is in full on the row’s name, for hover and assistive tech', async () => {
+  const long = 'Per-core queues with work stealing and a batched, padded, cache-aligned ring';
+  const {container, unmount} = await mount(
+    <TimelineView {...base([idea(long, 'kept', 0, 600)], 700)} />,
+  );
+  expect(container.querySelector('[role="option"] .vs-gantt-name')?.getAttribute('title')).toBe(
+    long,
+  );
+  expect(names(container)).toEqual([long]);
+  await unmount();
+});

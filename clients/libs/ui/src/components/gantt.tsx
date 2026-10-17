@@ -320,7 +320,7 @@ export function Gantt(props: {
             onKeyDown={event => pickKeys(event, row.press)}
           >
             {strip ? null : (
-              <span className="vs-gantt-name">
+              <span className="vs-gantt-name" title={row.label}>
                 <Guides guides={row.guides} />
                 <Text variant="code">{row.label}</Text>
               </span>

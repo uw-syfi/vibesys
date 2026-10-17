@@ -474,7 +474,7 @@ button.vs-crumb:focus-visible {
 }
 .vs-gantt-row {
   display: grid;
-  grid-template-columns: var(--gantt-label) 1fr var(--gantt-figure);
+  grid-template-columns: clamp(var(--gantt-label), 36%, var(--gantt-label-max)) 1fr var(--gantt-figure);
   align-items: center;
   column-gap: var(--space-3);
   min-height: var(--row-dense);
@@ -516,6 +516,11 @@ button.vs-crumb:focus-visible {
 }
 .vs-gantt-name .vs-guide {
   margin: 0;
+}
+.vs-gantt-name > .vs-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .vs-gantt-track {
   position: relative;
