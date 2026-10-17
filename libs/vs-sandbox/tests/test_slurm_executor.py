@@ -383,6 +383,14 @@ class _BlockingCluster(_ScenarioCluster):
         return cancelled
 
 
+class _RunningThenEndedCluster(_BlockingCluster):
+    """A scheduler that reports the job running to its owner, then ended to a later observer."""
+
+    def __init__(self, config: SlurmConfig) -> None:
+        super().__init__(config)
+        self._scheduler_states = (SlurmJobStatus.RUNNING, SlurmJobStatus.COMPLETED)
+
+
 class _GatedScancelCluster(_BlockingCluster):
     """A scheduler whose scancel is slow: it ends only when the test opens its gate."""
 
@@ -2057,6 +2065,57 @@ async def test_poll_reports_each_lifecycle_phase_without_submitting_or_recoverin
         # No stage result was scripted, so both clusters end without inventing a success.
         assert ended.terminal.state is EvaluationState.FAILED
     finally:
+        await executor.close()
+
+
+def _awaiting(task: asyncio.Task[object], function_name: str) -> bool:
+    """Whether the task is suspended inside the coroutine function of that name."""
+    awaited: object = task.get_coro()
+    while awaited is not None:
+        if getattr(getattr(awaited, "cr_code", None), "co_name", None) == function_name:
+            return True
+        awaited = getattr(awaited, "cr_await", None)
+    return False
+
+
+@pytest.mark.asyncio
+async def test_a_poll_joining_an_owner_that_is_cancelled_returns_instead_of_raising(
+    tmp_path: Path,
+) -> None:
+    """A poll waiting for the owner to settle is not cancelled when cancel() ends the owner.
+
+    The run's loop polls a job while a stop cancels it; the owner's cancellation must not
+    surface as the cancellation of the poll, which the loop reads as a failed request.
+    """
+    config = _config()
+    runner = _RunningThenEndedCluster(config)
+    executor = SlurmEvaluationExecutor(
+        config,
+        workspace=_workspace(tmp_path),
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        cluster=runner,
+        clock=ManualClock(),
+        sleeper=ManualClock(),
+    )
+    try:
+        await executor.submit(_request(), handle_id="eval-polled")
+        await wait_until_executor_started(runner.wait_started, executor, "eval-polled")
+        # The scheduler reports the job ended while the owner is still settling it.
+        poll = asyncio.create_task(executor.poll("eval-polled"))
+        while not poll.done() and not _awaiting(poll, "_settled_owner_poll"):
+            await yield_now()
+        owners = [t for t in asyncio.all_tasks() if t.get_name().startswith("vibesys-slurm-")]
+        assert len(owners) == 1
+        owners[0].cancel()
+        runner.release()
+        await asyncio.gather(*owners, return_exceptions=True)
+        result = await poll
+        assert result is None or result.phase in set(PollPhase)
+    finally:
+        runner.release()
         await executor.close()
 
 
