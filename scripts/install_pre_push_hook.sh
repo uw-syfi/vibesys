@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Installs an opt-in git pre-push hook that runs scripts/check_clients.sh when the branch being
-# pushed changes anything under clients/. Nothing installs it for you: run this once per clone.
+# Installs an opt-in git pre-push hook. On every push it runs scripts/check_private_terms.sh
+# (a no-op without your private terms list); when the branch being pushed changes anything
+# under clients/ it also runs scripts/check_clients.sh. Nothing installs it for you: run this
+# once per clone, and again to pick up a changed hook.
 # `git push --no-verify` skips it for one push. It refuses to replace a hook it did not write.
 #
 #   ./scripts/install_pre_push_hook.sh            # install
@@ -32,6 +34,7 @@ $marker
 set -euo pipefail
 root="\$(git rev-parse --show-toplevel)"
 cd "\$root"
+./scripts/check_private_terms.sh
 if git diff --quiet --exit-code origin/main...HEAD -- clients/ 2>/dev/null; then
   exit 0
 fi

@@ -39,9 +39,9 @@ function pageState(
   };
   return {
     ...runPageInitial({
-      identity: {host: 'ssh:chelan4', runId: 'run'},
+      identity: {host: 'ssh:host-b', runId: 'run'},
       title: {project: 'queue-rs', task: 'mpmc'},
-      hostLabel: 'chelan4',
+      hostLabel: 'host-b',
       unavailable: {},
     }),
     record: {kind: 'live', run},
@@ -147,7 +147,7 @@ test('the narration is listed once: its label already says what the owner would'
 test('developer boot timing stays out of the narration unless diagnostics are asked for', () => {
   const lines = [
     narration('boot span run_preamble: 100ms'),
-    narration('started on chelan4'),
+    narration('started on host-b'),
     'boot span context: 431ms',
     narration('boot span context.project_open: 12ms (raised ValueError)'),
     'round 2 started',
@@ -157,7 +157,7 @@ test('developer boot timing stays out of the narration unless diagnostics are as
     gate: viewOf(['boot span build: 5ms']),
   });
   expect(paneLines(state, 'narration').map(line => line.text)).toEqual([
-    '16:36:20 INFO started on chelan4',
+    '16:36:20 INFO started on host-b',
     'round 2 started',
   ]);
   expect(paneLines(state, 'narration', true)).toHaveLength(5);

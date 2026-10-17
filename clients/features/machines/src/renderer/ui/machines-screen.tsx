@@ -60,7 +60,7 @@ function AddMachine(props: {
           <Field label="SSH host" help="As you’d type after ssh; your SSH config and keys apply.">
             <TextInput
               value={adding.host}
-              placeholder="chelan5"
+              placeholder="host-c"
               change={value => dispatch({type: 'add-host', value})}
             />
           </Field>

@@ -35,7 +35,7 @@ function server(phase: string, paused: string | null = null): Record<string, unk
 }
 
 function listed(live: unknown[]): Record<string, unknown> {
-  return {kind: 'listed', host: 'ssh:chelan4', live, ended: [], unreadable: [], unverified: []};
+  return {kind: 'listed', host: 'ssh:host-b', live, ended: [], unreadable: [], unverified: []};
 }
 
 const SEED: FakeBridgeSeed = {
@@ -45,8 +45,8 @@ const SEED: FakeBridgeSeed = {
   listings: [listed([server('running')])],
   recent: [
     {
-      host: 'ssh:chelan4',
-      hostLabel: 'chelan4',
+      host: 'ssh:host-b',
+      hostLabel: 'host-b',
       project: PROJECT,
       task: 'mpmc',
       runId: RUN_ID,

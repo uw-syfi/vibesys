@@ -36,7 +36,7 @@ import {
   viewedRun,
 } from './views.js';
 
-const RUN = {host: 'ssh:chelan4', runId: '20261015-163047'} as const;
+const RUN = {host: 'ssh:host-b', runId: '20261015-163047'} as const;
 
 function server(phase: HostRun['phase'], extra: Partial<HostRun> = {}): HostRun {
   return {
@@ -96,7 +96,7 @@ function initial(unavailable: Unavailable = {}): RunPageState {
   return runPageInitial({
     identity: RUN,
     title: {project: '~/vibesys-projects/queue-rs', task: 'mpmc'},
-    hostLabel: 'chelan4',
+    hostLabel: 'host-b',
     unavailable,
   });
 }
@@ -824,7 +824,7 @@ describe('the Agents list folds', () => {
 });
 
 describe('the live run clock', () => {
-  // The chelan4 run: the last span changes at 01:23:36, then a pause, a resume and a control
+  // The host-b run: the last span changes at 01:23:36, then a pause, a resume and a control
   // change no span time until 01:27:43; the window hears them and ticks 17 s after the last.
   const waiting = {kind: 'operation', ref: 'resume of evaluation', since: AT_012331 + 5};
   const events = [
@@ -910,7 +910,7 @@ describe('the header’s token figure', () => {
       runPageInitial({
         identity: RUN,
         title: {project: '~/p', task: 'mpmc'},
-        hostLabel: 'chelan4',
+        hostLabel: 'host-b',
         unavailable: {},
       }),
       {type: 'record', record: {kind: 'live', run: server('running')}},

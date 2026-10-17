@@ -277,20 +277,20 @@ function Sidebar(): JSX.Element {
     <SidebarSection title="Live">
       <SidebarItem
         label="queue-rs · mpmc"
-        detail="chelan4"
+        detail="host-b"
         status={{tone: 'live', label: 'Running'}}
         active
         press={noop}
       />
       <SidebarItem
         label="kv-cache · decode"
-        detail="chelan4"
+        detail="host-b"
         status={{tone: 'ok', label: 'Finished'}}
         press={noop}
       />
       <SidebarItem
         label="queue-rs · mpmc"
-        detail="chelan4"
+        detail="host-b"
         status={{tone: 'neutral', label: 'Stopped'}}
         press={noop}
       />
@@ -310,7 +310,7 @@ function Header(props: {readonly flags: DesignFlags; readonly compactHero: boole
           <Row gap="space-3" wrap>
             <Chip label={ended ? 'Finished' : 'Running'} tone={ended ? 'ok' : 'live'} dot />
             <Text variant="small" tone="muted">
-              chelan4 · model-a · {ended ? '22m' : '14m / 1h'}
+              host-b · model-a · {ended ? '22m' : '14m / 1h'}
             </Text>
           </Row>
         </Row>

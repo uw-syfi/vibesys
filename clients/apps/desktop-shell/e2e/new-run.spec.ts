@@ -16,7 +16,7 @@ test('New run is prefilled from the last run on its machine and starts once the 
 }) => {
   await open(page);
   await expect(page.getByRole('heading', {name: 'New run'})).toBeVisible();
-  await expect(page.getByLabel('Run on')).toHaveValue('ssh:chelan4');
+  await expect(page.getByLabel('Run on')).toHaveValue('ssh:host-b');
   await expect(page.getByLabel('Project', {exact: true})).toHaveValue(PROJECT);
   await expect(page.getByLabel('Task', {exact: true})).toHaveValue('mpmc');
   await expect(page.getByLabel('Model', {exact: true})).toHaveValue('claude-opus-4-5');
@@ -26,7 +26,7 @@ test('New run is prefilled from the last run on its machine and starts once the 
 
   await start(page).click();
   await expect(page.getByRole('radiogroup', {name: 'Show'})).toBeVisible();
-  await expect(page.getByText('chelan4 · 20261015-200000')).toBeVisible();
+  await expect(page.getByText('host-b · 20261015-200000')).toBeVisible();
   const {started} = await fakeNewRun(page);
   expect(started).toEqual([
     {
@@ -44,7 +44,7 @@ test('a project inside another repository is copied out by its fix, then may sta
 }) => {
   await open(page);
   await page.getByRole('radio', {name: 'Open a folder'}).check();
-  await page.getByLabel('Folder on chelan4').fill('/home/me/vibesys/examples/queue-rs');
+  await page.getByLabel('Folder on host-b').fill('/home/me/vibesys/examples/queue-rs');
   await page.getByRole('button', {name: 'Open', exact: true}).click();
   const copy = ready(page).getByRole('button', {name: 'Copy to its own repository'});
   await expect(copy).toBeVisible();
@@ -54,7 +54,7 @@ test('a project inside another repository is copied out by its fix, then may sta
 
   await copy.click();
   await expect(copy).toHaveCount(0);
-  await expect(ready(page)).toContainText('queue-rs-2 · mpmc · chelan4');
+  await expect(ready(page)).toContainText('queue-rs-2 · mpmc · host-b');
   await expect(start(page)).not.toHaveAttribute('aria-disabled', 'true');
 });
 
@@ -87,7 +87,7 @@ test('extra arguments may not repeat an option set above, and roles change the r
   await expect(start(page)).not.toHaveAttribute('aria-disabled', 'true');
   await start(page).click();
   await expect(page.getByRole('radiogroup', {name: 'Show'})).toBeVisible();
-  await expect(page.getByText('chelan4 · 20261015-200000')).toBeVisible();
+  await expect(page.getByText('host-b · 20261015-200000')).toBeVisible();
   const {started} = await fakeNewRun(page);
   expect(started).toEqual([
     {
@@ -111,7 +111,7 @@ test('a machine whose VibeSys predates New run says so and is never asked to sta
   if (newRun === undefined) throw new Error('the seed has no New run helper');
   await open(page, {...SEED, newRun: {...newRun, features: ['harnesses']}});
   await expect(ready(page)).toContainText(
-    'VibeSys on chelan4 is older than this app: update its checkout to start runs from here ' +
+    'VibeSys on host-b is older than this app: update its checkout to start runs from here ' +
       '(it lacks run_options, preflight, examples).',
   );
   await expect(start(page)).toHaveAttribute('aria-disabled', 'true');
@@ -139,7 +139,7 @@ test('a machine whose VibeSys does not report its roles says every role runs as 
 test('the folder field completes paths on the machine', async ({page}) => {
   await open(page);
   await page.getByRole('radio', {name: 'Open a folder'}).check();
-  const field = page.getByLabel('Folder on chelan4');
+  const field = page.getByLabel('Folder on host-b');
   await field.fill('/home/me/pro');
   await page.getByRole('option', {name: '/home/me/projects/'}).click();
   await expect(field).toHaveValue('/home/me/projects/');
@@ -152,7 +152,7 @@ test('the folder field completes paths on the machine', async ({page}) => {
 
 test("Machines' New run here opens New run on that machine", async ({page}) => {
   await open(page);
-  await expect(page.getByLabel('Run on')).toHaveValue('ssh:chelan4');
+  await expect(page.getByLabel('Run on')).toHaveValue('ssh:host-b');
   await page
     .getByRole('navigation', {name: 'VibeSys'})
     .getByRole('button', {name: /^Machines/})

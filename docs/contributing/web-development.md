@@ -529,7 +529,7 @@ The gateway intentionally binds only to loopback. For the one-command demo,
 create the tunnel when connecting from the laptop:
 
 ```bash
-ssh -L 8765:127.0.0.1:8765 USER@chelan3
+ssh -L 8765:127.0.0.1:8765 USER@remote-host
 ```
 
 In that remote shell, run:
@@ -547,7 +547,7 @@ For the separate Vite browser harness workflow, start the gateway on the remote
 host with a fixed port and the SSH target that you will use from your laptop:
 
 ```bash
-uv run python -m entrypoints.web live --demo --port 8765 --ssh-target USER@chelan3
+uv run python -m entrypoints.web live --demo --port 8765 --ssh-target USER@remote-host
 ```
 
 On the laptop, start the browser harness and run the printed tunnel command in
@@ -555,13 +555,13 @@ separate terminals:
 
 ```bash
 uv run python -m entrypoints.web dev --port 5173
-ssh -N -L 8765:127.0.0.1:8765 USER@chelan3
+ssh -N -L 8765:127.0.0.1:8765 USER@remote-host
 ```
 
 The remote command must allow the browser harness origin:
 
 ```bash
-uv run python -m entrypoints.web live --demo --port 8765 --browser-origin http://127.0.0.1:5173 --ssh-target USER@chelan3
+uv run python -m entrypoints.web live --demo --port 8765 --browser-origin http://127.0.0.1:5173 --ssh-target USER@remote-host
 ```
 
 Open the `Browser harness URL` printed by the remote command after starting
@@ -571,7 +571,7 @@ is forwarded to the remote gateway.
 The tunnel helper is equivalent when the capability URL is already available:
 
 ```bash
-uv run python -m entrypoints.web tunnel --host USER@chelan3 --url 'http://127.0.0.1:8765/?token=TOKEN'
+uv run python -m entrypoints.web tunnel --host USER@remote-host --url 'http://127.0.0.1:8765/?token=TOKEN'
 ```
 
 Open the `Open locally` URL printed by the helper. The local and remote ports

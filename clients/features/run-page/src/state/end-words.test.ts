@@ -102,9 +102,9 @@ function ended(
   );
   return {
     ...runPageInitial({
-      identity: {host: 'ssh:chelan4', runId: 'run'},
+      identity: {host: 'ssh:host-b', runId: 'run'},
       title: {project: 'queue-rs', task: 'mpmc'},
-      hostLabel: 'chelan4',
+      hostLabel: 'host-b',
       unavailable: {},
     }),
     record: {kind: 'ended', run},

@@ -270,7 +270,7 @@ _UNPAUSED_END = ("success", "adopted: settlement:settle.1")
 
 
 @settings(max_examples=examples(pr=4, nightly=40), deadline=None)
-# Pauses during the baseline measurement (the chelan4 case: a pause before the first step).
+# Pauses during the baseline measurement (the host-b case: a pause before the first step).
 @example(pause_at=7, held_for=20)
 @example(pause_at=40, held_for=5)
 @example(pause_at=4, held_for=1)

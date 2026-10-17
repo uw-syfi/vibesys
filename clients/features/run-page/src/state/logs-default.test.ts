@@ -30,9 +30,9 @@ function logs(phase: HostRun['phase'], streams: readonly LogStream[], selected: 
   };
   const state: RunPageState = {
     ...runPageInitial({
-      identity: {host: 'ssh:chelan4', runId: 'run'},
+      identity: {host: 'ssh:host-b', runId: 'run'},
       title: {project: 'queue-rs', task: 'mpmc'},
-      hostLabel: 'chelan4',
+      hostLabel: 'host-b',
       unavailable: {},
     }),
     record: phase === 'completed' ? {kind: 'ended', run} : {kind: 'live', run},

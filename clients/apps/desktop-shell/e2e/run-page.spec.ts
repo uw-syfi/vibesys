@@ -39,7 +39,7 @@ function server(phase: string, end: unknown = null): Record<string, unknown> {
 }
 
 function listed(live: unknown[], ended: unknown[]): Record<string, unknown> {
-  return {kind: 'listed', host: 'ssh:chelan4', live, ended, unreadable: [], unverified: []};
+  return {kind: 'listed', host: 'ssh:host-b', live, ended, unreadable: [], unverified: []};
 }
 
 function stream(id: string, owner: Record<string, unknown>, outcome: string | null) {
@@ -62,8 +62,8 @@ const SEED: FakeBridgeSeed = {
   listings: [listed([server('starting')], [])],
   recent: [
     {
-      host: 'ssh:chelan4',
-      hostLabel: 'chelan4',
+      host: 'ssh:host-b',
+      hostLabel: 'host-b',
       project: PROJECT,
       task: 'mpmc',
       runId: RUN_ID,
@@ -146,7 +146,7 @@ test('a run starts, writes its logs, stops with Force stop after the bound, and 
 
   // Starting: the header and the startup timeline, the active step showing its live log.
   await expect(page.getByRole('heading', {name: 'queue-rs · mpmc'})).toBeVisible();
-  await expect(page.getByText('chelan4 · 20261015-163047')).toBeVisible();
+  await expect(page.getByText('host-b · 20261015-163047')).toBeVisible();
   await expect(page.getByText('Starting', {exact: true}).first()).toBeVisible();
   const startup = page.getByRole('region', {name: 'Starting'});
   await expect(startup.getByText('Starting the agent container')).toBeVisible();
@@ -179,7 +179,7 @@ test('a run starts, writes its logs, stops with Force stop after the bound, and 
   await expect(page.getByText('cannot be resumed')).toBeVisible();
   await shot(page, 'ink-stop-confirm');
   await page.getByRole('button', {name: 'Stop run'}).click();
-  await expect.poll(() => calls(page)).toEqual([['stopConfirmed', 'ssh:chelan4', INSTANCE, false]]);
+  await expect.poll(() => calls(page)).toEqual([['stopConfirmed', 'ssh:host-b', INSTANCE, false]]);
   await push(page, listed([server('stopping')], []));
   const force = page.getByRole('button', {name: 'Force stop'});
   await page.clock.fastForward('01:59');
@@ -192,8 +192,8 @@ test('a run starts, writes its logs, stops with Force stop after the bound, and 
   await expect
     .poll(() => calls(page))
     .toEqual([
-      ['stopConfirmed', 'ssh:chelan4', INSTANCE, false],
-      ['stopConfirmed', 'ssh:chelan4', INSTANCE, true],
+      ['stopConfirmed', 'ssh:host-b', INSTANCE, false],
+      ['stopConfirmed', 'ssh:host-b', INSTANCE, true],
     ]);
 
   // Ended: the banner reads the end record; Resume names the round, only when resumable.
@@ -218,7 +218,7 @@ test('a run starts, writes its logs, stops with Force stop after the bound, and 
   await page.getByRole('button', {name: 'Resume from round 2'}).click();
   await expect
     .poll(async () => (await calls(page)).at(-1))
-    .toEqual(['resume', 'ssh:chelan4', PROJECT, RUN_ID]);
+    .toEqual(['resume', 'ssh:host-b', PROJECT, RUN_ID]);
 });
 
 test('the run level says what will appear before anything is measured, and keeps the search', async ({

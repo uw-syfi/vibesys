@@ -77,9 +77,9 @@ test('a run opens in a window of its own, shown alone and live there', async ({p
 
   // The main window leaves the run for New run; the new one shows the run, with no sidebar.
   await expect(page.getByRole('heading', {name: 'New run'})).toBeVisible();
-  expect(new URL(runWindow.url()).search).toBe(`?host=ssh%3Achelan4&run=${RUN_ID}`);
+  expect(new URL(runWindow.url()).search).toBe(`?host=ssh%3Ahost-b&run=${RUN_ID}`);
   await expect(runWindow.getByRole('radiogroup', {name: 'Show'})).toBeVisible();
-  await expect(runWindow.getByText(`chelan4 · ${RUN_ID}`)).toBeVisible();
+  await expect(runWindow.getByText(`host-b · ${RUN_ID}`)).toBeVisible();
   await expect(sidebar(runWindow)).toHaveCount(0);
   // The run is live in its window (it attached there), and the main window let it go.
   await expect.poll(() => commands(runWindow)).toContain('attach 00000000000a');
@@ -94,7 +94,7 @@ test('a run opens in a window of its own, shown alone and live there', async ({p
   await page.getByRole('menuitem', {name: 'Open in new window'}).click();
   await expect
     .poll(async () => (await windows(page)).opened)
-    .toEqual([`ssh:chelan4 ${RUN_ID}`, `ssh:chelan4 ${RUN_ID}`]);
+    .toEqual([`ssh:host-b ${RUN_ID}`, `ssh:host-b ${RUN_ID}`]);
   expect(context.pages()).toHaveLength(2);
 
   // Closing it leaves the main window as it was.

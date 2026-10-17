@@ -8,8 +8,8 @@ import {FakeClock} from '@vibesys/transport/testing';
 import {MachinesMain} from './index.js';
 
 const LOCAL: HostId = {kind: 'local'};
-const CHELAN4: HostId = {kind: 'ssh', alias: 'chelan4'};
-const CHELAN3: HostId = {kind: 'ssh', alias: 'chelan3'};
+const HOST_B: HostId = {kind: 'ssh', alias: 'host-b'};
+const HOST_A: HostId = {kind: 'ssh', alias: 'host-a'};
 const CONFIG = {delaysMs: [1], deadlineMs: 60_000, heartbeatMs: 15_000};
 
 /** The machines over real settings and a real connection manager, each host behind its own Fake. */
@@ -26,7 +26,7 @@ async function subject(links: ReadonlyMap<string, FakeLink>): Promise<{
     log: () => {},
   });
   await settings.updateHosts(current =>
-    withHostSettings(withHostSettings(current, CHELAN4, {checkout: '~/vibesys'}), CHELAN3, {
+    withHostSettings(withHostSettings(current, HOST_B, {checkout: '~/vibesys'}), HOST_A, {
       checkout: '/mnt/data/vibesys',
     }),
   );
@@ -64,8 +64,8 @@ describe('MachinesMain', () => {
     await using _ = manager;
     expect(await machines.machines()).toEqual([
       {host: 'local', label: 'This Mac', checkout: '/Users/me/vibesys'},
-      {host: 'ssh:chelan3', label: 'chelan3', checkout: '/mnt/data/vibesys'},
-      {host: 'ssh:chelan4', label: 'chelan4', checkout: '~/vibesys'},
+      {host: 'ssh:host-a', label: 'host-a', checkout: '/mnt/data/vibesys'},
+      {host: 'ssh:host-b', label: 'host-b', checkout: '~/vibesys'},
     ]);
   });
 
@@ -84,9 +84,9 @@ describe('MachinesMain', () => {
       [locked, 'sign-in'],
     ];
     for (const [link, kind] of cases) {
-      const {machines, manager} = await subject(new Map([['ssh:chelan4', link]]));
+      const {machines, manager} = await subject(new Map([['ssh:host-b', link]]));
       await using _ = manager;
-      const report = await machines.report(CHELAN4);
+      const report = await machines.report(HOST_B);
       expect(report.kind).toBe(kind as typeof report.kind);
       if (report.kind === 'ready') expect(report.facts).toEqual(link.helper.host.machine);
     }
@@ -99,27 +99,27 @@ describe('MachinesMain', () => {
       version: '0.0.9',
       min: '0.1.0',
     });
-    const {machines, manager} = await subject(new Map([['ssh:chelan4', link]]));
+    const {machines, manager} = await subject(new Map([['ssh:host-b', link]]));
     await using _ = manager;
-    expect(await machines.inspect(CHELAN4, '/home/me/vibesys-old')).toEqual({
+    expect(await machines.inspect(HOST_B, '/home/me/vibesys-old')).toEqual({
       state: 'too_old',
       version: '0.0.9',
       min: '0.1.0',
     });
-    expect(await machines.inspect(CHELAN4, '/nowhere')).toEqual({state: 'not_found'});
+    expect(await machines.inspect(HOST_B, '/nowhere')).toEqual({state: 'not_found'});
   });
 
   test('removing a machine forgets only it; This Mac stays on the app’s own checkout', async () => {
     const {machines, settings, manager} = await subject(new Map());
     await using _ = manager;
-    expect((await machines.remove(CHELAN4)).map(entry => entry.host)).toEqual([
+    expect((await machines.remove(HOST_B)).map(entry => entry.host)).toEqual([
       'local',
-      'ssh:chelan3',
+      'ssh:host-a',
     ]);
-    expect(Object.keys((await settings.hosts()).settings.hosts)).toEqual(['ssh:chelan3']);
+    expect(Object.keys((await settings.hosts()).settings.hosts)).toEqual(['ssh:host-a']);
     expect((await machines.remove(LOCAL)).map(entry => entry.host)).toEqual([
       'local',
-      'ssh:chelan3',
+      'ssh:host-a',
     ]);
   });
 });

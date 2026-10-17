@@ -315,7 +315,7 @@ describe('the run level', () => {
 
   test('Now says a running idea waits between steps, and when its running attempt started', () => {
     // ring tries again (the same hypothesis): its implementer runs, finishes and yields to an
-    // evaluation, as the chelan4 run's round 4 did.
+    // evaluation, as the host-b run's round 4 did.
     const again = {...workstream(A, 'running'), id: 'flow:w1/#2', started_at: 600};
     const implement = {
       ...turn(A, 'running'),
@@ -380,9 +380,9 @@ describe('following the Logs face', () => {
 
   function page(): RunPageState {
     const initial = runPageInitial({
-      identity: {host: 'ssh:chelan4', runId: 'run'},
+      identity: {host: 'ssh:host-b', runId: 'run'},
       title: {project: 'queue-rs', task: 'mpmc'},
-      hostLabel: 'chelan4',
+      hostLabel: 'host-b',
       unavailable: {},
     });
     const streams = [

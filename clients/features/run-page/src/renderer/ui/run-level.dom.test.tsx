@@ -61,9 +61,9 @@ const RUNNING: HostRun = {
 /** A live run's page attached and waiting for its first snapshot. */
 function attaching(): RunPageState {
   let state = runPageInitial({
-    identity: {host: 'ssh:chelan4', runId: 'run-1'},
+    identity: {host: 'ssh:host-b', runId: 'run-1'},
     title: {project: 'queue-rs', task: null},
-    hostLabel: 'chelan4',
+    hostLabel: 'host-b',
     unavailable: {},
   });
   const asked: RunPageRequest[] = [];

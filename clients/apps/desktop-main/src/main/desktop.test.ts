@@ -144,8 +144,8 @@ function desktopWorld(cleanups: RetirementCleanups = {}) {
     attach: async (id, instanceId) => {
       launches.push(`attach:${JSON.stringify(id)}:${instanceId}`);
       bound = {
-        host: 'ssh:chelan4',
-        hostLabel: 'chelan4',
+        host: 'ssh:host-b',
+        hostLabel: 'host-b',
         instanceId,
         runId: '20261015-163047',
         project: '/p',
@@ -268,11 +268,11 @@ function desktopWorld(cleanups: RetirementCleanups = {}) {
 describe('Desktop run windows', () => {
   test('a run opens in its own window once, whose surface is answered until it closes', async () => {
     const w = desktopWorld();
-    const run = {host: 'ssh:chelan4', runId: '20261015-163047'};
+    const run = {host: 'ssh:host-b', runId: '20261015-163047'};
     const fromRunWindow = (id: number, generation: string, channel: string, ...args: unknown[]) =>
       w.ipc.invokeAs(
         id,
-        `${SHELL_URL}?host=ssh%3Achelan4&run=20261015-163047`,
+        `${SHELL_URL}?host=ssh%3Ahost-b&run=20261015-163047`,
         generation,
         channel,
         ...args,
@@ -283,8 +283,8 @@ describe('Desktop run windows', () => {
       value: null,
     });
     const [window] = w.runWindowList;
-    expect(window?.url).toBe(`${SHELL_URL}?host=ssh%3Achelan4&run=20261015-163047`);
-    expect(window?.title).toBe('VibeSys · chelan4 · 20261015-163047');
+    expect(window?.url).toBe(`${SHELL_URL}?host=ssh%3Ahost-b&run=20261015-163047`);
+    expect(window?.title).toBe('VibeSys · host-b · 20261015-163047');
 
     // Its surface is answered.
     await expect(fromRunWindow(20, '30:300', WELCOME_CHANNELS.releaseLogs)).resolves.toMatchObject({
@@ -314,9 +314,9 @@ describe('Desktop run windows', () => {
 describe('Desktop external addresses', () => {
   test('opens a web or mail address from either window, and refuses every other one', async () => {
     const w = desktopWorld();
-    const run = {host: 'ssh:chelan4', runId: '20261015-163047'};
+    const run = {host: 'ssh:host-b', runId: '20261015-163047'};
     await w.ipc.invoke('10:100', WELCOME_CHANNELS.openRunWindow, run);
-    const runWindowUrl = `${SHELL_URL}?host=ssh%3Achelan4&run=20261015-163047`;
+    const runWindowUrl = `${SHELL_URL}?host=ssh%3Ahost-b&run=20261015-163047`;
     await expect(
       w.ipc.invoke('10:100', WELCOME_CHANNELS.openExternal, 'https://example.com/a'),
     ).resolves.toEqual({ok: true, value: null});
@@ -400,15 +400,15 @@ describe('Desktop launches', () => {
     const w = desktopWorld();
     await w.desktop.open({
       kind: 'instance',
-      host: {kind: 'ssh', alias: 'chelan4'},
+      host: {kind: 'ssh', alias: 'host-b'},
       instanceId: '0123456789ab',
     });
     expect(w.launches).toEqual([
-      'attach:{"kind":"ssh","alias":"chelan4"}:0123456789ab',
+      'attach:{"kind":"ssh","alias":"host-b"}:0123456789ab',
       'detach:20261015-163047',
     ]);
     expect(w.runWindowList.map(window => window.url)).toEqual([
-      `${SHELL_URL}?host=ssh%3Achelan4&run=20261015-163047`,
+      `${SHELL_URL}?host=ssh%3Ahost-b&run=20261015-163047`,
     ]);
   });
 
