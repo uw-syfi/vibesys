@@ -21,6 +21,8 @@ from vs_runtime.api.infrastructure import (
     WaitFor,
     decide_outage,
     decide_quota,
+    describe_seconds,
+    outage_policy_for,
 )
 
 if TYPE_CHECKING:
@@ -148,10 +150,11 @@ def test_the_fallback_action_without_a_target_is_rejected() -> None:
 
 
 outage_policies = st.builds(
-    lambda budget, first, extra: OutagePolicy(budget, first, first + extra),
+    lambda budget, first, extra, switch: OutagePolicy(budget, first, first + extra, switch),
     budget=seconds,
     first=st.floats(min_value=0.001, max_value=1e4, allow_nan=False),
     extra=st.floats(min_value=0, max_value=1e4, allow_nan=False),
+    switch=st.booleans(),
 )
 
 
@@ -162,7 +165,7 @@ def test_an_outage_waits_within_the_cap_and_the_budget_or_gives_up_once_it_is_sp
     decision = decide_outage(policy, stop=stop, elapsed=elapsed, run_left=None)
 
     if elapsed >= policy.budget_seconds:
-        assert isinstance(decision, GiveUp)
+        assert isinstance(decision, Switch if policy.switch_when_spent else GiveUp)
         return
     assert isinstance(decision, WaitFor)
     assert 0 < decision.seconds <= policy.max_wait_seconds
@@ -222,4 +225,75 @@ def test_an_outage_that_spent_its_budget_says_so_in_hours_and_minutes() -> None:
 
     assert decision == GiveUp(
         "the provider stayed unavailable for 6 h 2 min 5 s, the whole 6 h outage budget"
+    )
+
+
+_TARGET = FallbackTarget("codex", "gpt-6-luna")
+
+
+def _quota_policy(action: QuotaAction) -> QuotaPolicy:
+    return QuotaPolicy(action, fallback=_TARGET if action is QuotaAction.FALLBACK else None)
+
+
+@given(
+    action=st.sampled_from(QuotaAction),
+    stops=st.lists(seconds, min_size=1, max_size=40),
+)
+def test_the_quota_policy_bounds_how_long_an_outage_is_waited_out(
+    action: QuotaAction, stops: list[float]
+) -> None:
+    """``pause`` and ``wait`` wait an outage out for the whole budget; ``fail`` and ``fallback``
+    wait one backoff step, then fail or switch to the fallback.
+
+    ``stops`` are the times each later stop took to come back (the send's own retries); the
+    turn waits what each decision says, and the sequence ends at the first decision that
+    does not wait.
+    """
+    policy = outage_policy_for(_quota_policy(action))
+    elapsed = 0.0
+    waits: list[float] = []
+    decision = decide_outage(policy, stop=1, elapsed=0.0, run_left=None)
+    for stop, send in enumerate(stops, start=2):
+        if not isinstance(decision, WaitFor):
+            break
+        waits.append(decision.seconds)
+        elapsed += decision.seconds + send
+        decision = decide_outage(policy, stop=stop, elapsed=elapsed, run_left=None)
+
+    first = PROVIDER_OUTAGE.first_wait_seconds
+    if action in (QuotaAction.PAUSE, QuotaAction.WAIT):
+        assert policy == PROVIDER_OUTAGE
+    else:
+        # One backoff step, then the policy's own end: a switch only under fallback.
+        assert waits == [first]
+        assert isinstance(decision, Switch if action is QuotaAction.FALLBACK else GiveUp)
+        assert describe_seconds(first) in decision.reason
+
+
+@given(left=seconds)
+def test_a_deadline_never_switches_providers(left: float) -> None:
+    """A run out of time ends the turn; switching would only start work that cannot finish."""
+    policy = outage_policy_for(_quota_policy(QuotaAction.FALLBACK))
+
+    decision = decide_outage(policy, stop=2, elapsed=policy.budget_seconds + left, run_left=-left)
+
+    assert isinstance(decision, GiveUp)
+
+
+@given(waited=seconds, wanted=seconds)
+def test_quota_give_up_reasons_state_durations_in_hours_minutes_and_seconds(
+    waited: float, wanted: float
+) -> None:
+    spent = decide_quota(
+        QuotaPolicy(QuotaAction.WAIT, wait_seconds=waited), resets_at=None, now=1e9, waited=waited
+    )
+    now, resets_at = 1e9, 1e9 + 2e8 + wanted
+    late = decide_quota(
+        QuotaPolicy(QuotaAction.WAIT, wait_seconds=1e8), resets_at=resets_at, now=now, waited=0.0
+    )
+
+    assert spent == GiveUp(f"waited {describe_seconds(waited)} for capacity, the whole budget")
+    returns_in = describe_seconds(resets_at + RESET_MARGIN_SECONDS - now)
+    assert late == GiveUp(
+        f"capacity returns in {returns_in}, past the {describe_seconds(1e8)} still allowed"
     )

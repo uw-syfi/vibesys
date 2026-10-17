@@ -346,9 +346,12 @@ class TestQuotaEvents:
         assert out == "[quota] claude turn waited 10 min out of an outage; sending it again\n"
 
     def test_the_run_end_reports_the_total_outage_wait(self) -> None:
+        """Every outage wait counts, including the last wait of a turn it ended (a cancel,
+        the run's deadline), which publishes ``quota_abandoned`` instead of a resume."""
         out = StringIO()
         renderer = HeadlessRenderer(out=out)
-        for waited, condition in ((3600.0, "unavailable"), (125.0, "unavailable"), (900.0, None)):
+        resumed = ((3600.0, "unavailable"), (60.0, "unavailable"), (900.0, None))
+        for waited, condition in resumed:
             renderer.handle(
                 make_core_event(
                     CoreEventType.QUOTA_RESUMED,
@@ -356,6 +359,20 @@ class TestQuotaEvents:
                         provider="claude",
                         condition=condition,
                         reason="wait_elapsed",
+                        waited_seconds=waited,
+                    ),
+                    timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+                )
+            )
+        for waited, condition in ((65.0, "unavailable"), (900.0, "rate_limited")):
+            renderer.handle(
+                make_core_event(
+                    CoreEventType.QUOTA_ABANDONED,
+                    data=QuotaAbandonedData(
+                        provider="claude",
+                        condition=condition,
+                        detail="503",
+                        reason="the turn was cancelled after 1 min 5 s",
                         waited_seconds=waited,
                     ),
                     timestamp=datetime(2026, 1, 1, tzinfo=UTC),

@@ -62,8 +62,10 @@ class _RecordingSink(NullAgentEventSink):
         del waited_seconds, where
         self.resumed.append((error.provider, reason))
 
-    def quota_abandoned(self, error: AgentQuotaError, reason: str, where: Attribution) -> None:
-        del where
+    def quota_abandoned(
+        self, error: AgentQuotaError, reason: str, waited_seconds: float, where: Attribution
+    ) -> None:
+        del waited_seconds, where
         self.abandoned.append((error, reason))
 
     def provider_switched(self, switch: ProviderSwitch, where: Attribution) -> None:

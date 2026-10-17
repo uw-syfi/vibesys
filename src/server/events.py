@@ -554,13 +554,18 @@ class ProviderSwitchedData(EventPayload):
 
 
 class QuotaAbandonedData(EventPayload):
-    """The quota policy ended a turn with the quota error instead of pausing or waiting longer."""
+    """The quota policy ended a turn with the quota error instead of pausing or waiting longer.
+
+    ``waited_seconds`` is how long this last stop held the turn before it ended (zero when
+    it ended without waiting, and in events recorded before the field existed).
+    """
 
     kind: Literal["quota_abandoned"] = "quota_abandoned"
     provider: str
     condition: Literal["quota_exhausted", "rate_limited", "unavailable"]
     detail: str
     reason: str
+    waited_seconds: float = 0.0
 
 
 class SubprocessOutputData(EventPayload):

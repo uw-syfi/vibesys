@@ -133,19 +133,31 @@ class TurnEvents:
         self.cancelled = False
         self._guard = ReplyGuard()
         self._stop: Callable[[], None] | None = None
+        self._turn: CapacityStops | None = None
+        self._cancel_delivered = False
         self._steers = steers
 
-    def begin_turn(self, *, structured: bool, stop: Callable[[], None]) -> None:
-        """Start watching a turn; *stop* ends it when its reply crosses a limit."""
+    def begin_turn(
+        self, *, structured: bool, stop: Callable[[], None], turn: CapacityStops | None
+    ) -> None:
+        """Start watching a turn; *stop* ends it when its reply crosses a limit.
+
+        ``turn`` is the caller's record of the turn, when it keeps one. A cancellation
+        it already holds stays in force, and one that lands before the library runs the
+        turn (when an interrupt has nothing to stop) stops it at its first event.
+        """
         self.structured = structured
         self.exhausted = []
         self.breach = None
-        self.cancelled = False
+        self.cancelled = turn is not None and turn.cancelled
         self._guard = ReplyGuard()
         self._stop = stop
+        self._turn = turn
+        self._cancel_delivered = False
 
     def on_event(self, event: agentshim.AgentEvent) -> None:
         """Translate and forward one library event, if anyone is listening."""
+        self._stop_if_cancelled()
         if isinstance(event, agentshim.SteerConsumed):
             self._steers.consumed(event.text)
         elif isinstance(event, agentshim.SteerRejected):
@@ -161,6 +173,16 @@ class TurnEvents:
         translated = shim_translation.event_from(event, structured=self.structured)
         if translated is not None:
             observer.on_event(translated)
+
+    def _stop_if_cancelled(self) -> None:
+        """Stop the turn once if its caller cancelled it, even before the library ran it."""
+        turn = self._turn
+        if turn is None or self._cancel_delivered or not turn.cancelled:
+            return
+        self._cancel_delivered = True
+        self.cancelled = True
+        if self._stop is not None:
+            self._stop()
 
     def _refuse_reply(self, text: str) -> bool:
         """Stop the turn the first time its reply crosses a limit; whether *text* is refused."""
@@ -206,6 +228,11 @@ class LaunchedSession:
     def track(self, turn: CapacityStops | None) -> None:
         """Make :meth:`cancel` reach ``turn``, the caller's record of the turn in flight."""
         self._turn = turn
+
+    @property
+    def tracked(self) -> CapacityStops | None:
+        """The caller's record of the turn in flight, when it keeps one."""
+        return self._turn
 
     def close(self) -> None:
         """Release this logical session, stopping any turn it still owns."""
@@ -276,8 +303,18 @@ def _run_turn(
     expected = request.expected_provider_session_id
     events = live.events
     events.observer = observer
-    events.begin_turn(structured=request.output_schema is not None, stop=live.session.interrupt)
+    turn_record = live.tracked
+    events.begin_turn(
+        structured=request.output_schema is not None,
+        stop=live.session.interrupt,
+        turn=turn_record,
+    )
     try:
+        if turn_record is not None and turn_record.cancelled:
+            # Cancelled since the caller last decided to send it, when an interrupt had
+            # no turn to stop: it is not sent.
+            message = "turn cancelled before it was sent"
+            raise agentshim.TurnCancelledError(message)
         if expected is None:
             turn = _run(live, request, expect_conversation=None)
         else:

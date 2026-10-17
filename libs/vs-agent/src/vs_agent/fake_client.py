@@ -777,7 +777,7 @@ class FakeAgentClient:
         the turn (or of its key) ends the gate's wait, and a cancelled turn is not sent
         again. A turn that gets through is reported to the gate as served.
         """
-        stops = CapacityStops(self.threads)
+        stops = CapacityStops(self.threads, model=self.model_for_kind(kind))
         entry = (session_key, stops)
         with self._turns_lock:
             self._turns.append(entry)
@@ -799,7 +799,7 @@ class FakeAgentClient:
                 else:
                     gate = self._capacity_gate
                     if gate is not None and self._provider is not None:
-                        gate.turn_served(self._provider)
+                        gate.turn_served(self._provider, stops.model)
                     return
         finally:
             with self._turns_lock:

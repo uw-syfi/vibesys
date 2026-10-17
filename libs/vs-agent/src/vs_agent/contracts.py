@@ -181,26 +181,26 @@ class CapacityStops:
     The client makes one record per turn, before its first send, and hands the same
     record to every gate call of that turn, so the record outlives each resend. It
     counts each stop in ``count`` (the first stop is 1) and calls :meth:`cancel` when
-    the caller cancels the turn; it never sends a cancelled turn again.
+    the caller cancels the turn; it never sends a cancelled turn again. ``model`` is the
+    model the turn runs on (``None`` for the provider's default), so a gate can tell one
+    model that is down from another the same provider still serves.
 
-    The gate keeps its own memory of the turn here, on its own clock: ``first_at`` is
-    when the first stop reached it, ``waited`` the seconds it has spent waiting since,
-    ``served_at_first`` its count of turns the provider had served at the first stop,
-    and ``capacity_requested`` whether the operator asked this turn to wait for
-    capacity. One record per turn keeps the budgets of turns that stop at the same
-    time apart. A gate waits with :meth:`park`, which :meth:`cancel` and
-    :meth:`interrupt` end early.
+    ``memory`` belongs to the gate: what it keeps about this turn between stops (its
+    budgets, its outage backoff). The client never reads it. One record per turn keeps
+    the budgets of turns that stop at the same time apart. A gate waits with
+    :meth:`park`, which :meth:`cancel` and :meth:`interrupt` end early, and a gate that
+    parks elsewhere learns of a cancellation through :meth:`on_cancel`.
     """
 
-    def __init__(self, threads: Threads) -> None:
+    def __init__(self, threads: Threads, *, model: str | None = None) -> None:
         """Start a turn with no stops; ``threads`` makes the event a wait parks on."""
         self.count = 0
-        self.first_at: float | None = None
-        self.waited = 0.0
-        self.served_at_first = 0
-        self.capacity_requested = False
+        self.model = model
+        self.memory: object | None = None
         self._cancelled = False
         self._wake = threads.event()
+        self._lock = threads.lock()
+        self._listeners: list[Callable[[], object]] = []
 
     @property
     def cancelled(self) -> bool:
@@ -208,9 +208,33 @@ class CapacityStops:
         return self._cancelled
 
     def cancel(self) -> None:
-        """Mark the turn cancelled and end a wait in progress."""
-        self._cancelled = True
+        """Mark the turn cancelled, end a wait in progress and tell the cancel listeners."""
+        with self._lock:
+            self._cancelled = True
+            listeners = tuple(self._listeners)
         self._wake.set()
+        for listener in listeners:
+            listener()
+
+    def on_cancel(self, listener: Callable[[], object]) -> Callable[[], None]:
+        """Call ``listener`` when the turn is cancelled; return its unsubscribe callable.
+
+        A listener added after the cancellation is called at once. It runs on the
+        cancelling thread and must not block.
+        """
+        with self._lock:
+            already = self._cancelled
+            if not already:
+                self._listeners.append(listener)
+        if already:
+            listener()
+
+        def unsubscribe() -> None:
+            with self._lock:
+                if listener in self._listeners:
+                    self._listeners.remove(listener)
+
+        return unsubscribe
 
     def interrupt(self) -> None:
         """End a wait in progress without cancelling the turn (a stop request, say)."""
@@ -248,11 +272,12 @@ class CapacityGate(Protocol):
         """
         ...
 
-    def turn_served(self, provider: str) -> None:
-        """Note that a turn on ``provider`` just succeeded.
+    def turn_served(self, provider: str, model: str | None) -> None:
+        """Note that a turn on ``provider`` and ``model`` just succeeded.
 
-        The client calls it after every successful turn, so the gate can tell a
-        provider that is down from one that fails only this turn.
+        The client calls it after every successful turn, with the ``model`` it gave the
+        turn's :class:`CapacityStops`, so the gate can tell a model that is down from
+        one that fails only this turn.
         """
         ...
 

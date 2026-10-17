@@ -291,6 +291,7 @@ class _Hooks:
     """What a session reports to and takes from its test."""
 
     on_turn: Callable[[AgentTurnRequest], None] | None
+    on_send: Callable[[AgentTurnRequest], None] | None
     cancels: FakeCancels
     resumed: list[str]
 
@@ -329,6 +330,8 @@ class ScriptedSession(LaunchedSession):
         with self.state_lock:
             self.turns_in_progress += 1
         try:
+            if self.hooks.on_send is not None:
+                self.hooks.on_send(request)
             self.in_flight.request = request
             self.in_flight.barrier_error = None
             try:
@@ -377,6 +380,7 @@ class FakeProvider:
         answer: BaseModel | Mapping[str, object] | str | None = None,
         script: FakeTurnScript | None = None,
         on_turn: Callable[[AgentTurnRequest], None] | None = None,
+        on_send: Callable[[AgentTurnRequest], None] | None = None,
         threads: Threads,
         close_failures: int = 0,
     ) -> None:
@@ -388,7 +392,9 @@ class FakeProvider:
         more turns than ``turns`` has entries, its last entry keeps repeating.
         ``turn=[...]`` is sugar for ``turns=[[...]]``. ``on_turn`` observes
         each accepted request and may block at a deterministic barrier or
-        raise a scheduled boundary failure. Passing neither runs a turn that
+        raise a scheduled boundary failure. ``on_send`` observes each send
+        before the session starts it, while the library has no turn in flight
+        that an interrupt could stop. Passing neither runs a turn that
         emits no events. ``answer`` sets the text or structured payload every
         turn returns. It is required for a structured turn, keeping
         application response policy out of this fake. ``script.answers``
@@ -417,6 +423,7 @@ class FakeProvider:
         self._cancels = FakeCancels(self._threads)
         self._resumed: list[str] = []
         self._on_turn = on_turn
+        self._on_send = on_send
         self._turns = resolved_turns
         self._script = script if script is not None else FakeTurnScript((answer,))
         self._sessions: list[ScriptedSession] = []
@@ -486,7 +493,7 @@ class FakeProvider:
                 timeout=None,
                 log=_ignore,
             ),
-            hooks=_Hooks(self._on_turn, self._cancels, self._resumed),
+            hooks=_Hooks(self._on_turn, self._on_send, self._cancels, self._resumed),
             in_flight=in_flight,
         )
         with self._lock:

@@ -60,6 +60,11 @@ class CapacityWaitEnd:
     request: int
 
 
+def _never() -> bool:
+    """The *ended* condition of a wait only the channel's own state ends."""
+    return False
+
+
 class RunControlEventSink(Protocol):
     """Receive one run-control transition before its operation returns."""
 
@@ -147,13 +152,14 @@ class RunControlChannel(Protocol):
         """Park while paused and land a stop that releases the wait."""
         ...
 
-    def wait_resumed(self, timeout: float) -> bool:
+    def wait_resumed(self, timeout: float, *, ended: Callable[[], bool] = _never) -> bool:
         """Park like :meth:`wait_while_paused` for at most *timeout* seconds.
 
         Returns True when something resumed the run, and False when the timeout
         elapsed first. On a timeout the channel resumes the run itself, atomically,
-        so a stop request that arrives at the same moment is never cleared.
-        A stop request ends the wait by raising :class:`RunStopped`.
+        so a stop request that arrives at the same moment is never cleared. *ended*
+        (rechecked when :meth:`interrupt_waits` wakes the wait) ends it early as a
+        timeout does. A stop request ends the wait by raising :class:`RunStopped`.
         """
         ...
 
@@ -170,22 +176,34 @@ class RunControlChannel(Protocol):
         """
         ...
 
-    def park_for_capacity(self, *, waiting: bool = False) -> int | None:
+    def park_for_capacity(
+        self, *, waiting: bool = False, ended: Callable[[], bool] = _never
+    ) -> int | None:
         """Park a turn stopped on a capacity limit until the operator resumes it or asks to wait.
 
         Returns the operator's capacity request (``resume_when_capacity_returns``) when one
-        ended the park, and ``None`` when the run was resumed. With ``waiting`` (the turn
-        already waited for capacity at the operator's request) it does not park, and returns
-        a fresh request. A stop request ends the park by raising :class:`RunStopped`.
+        ended the park, and ``None`` when the run was resumed or *ended* became true (then
+        the run stays paused for the operator). With ``waiting`` (the turn already waited
+        for capacity at the operator's request) it does not park, and returns a fresh
+        request. A stop request ends the park by raising :class:`RunStopped`.
         """
         ...
 
-    def wait_for_capacity(self, seconds: float, request: int) -> CapacityWaitEnd:
+    def wait_for_capacity(
+        self, seconds: float, request: int, *, ended: Callable[[], bool] = _never
+    ) -> CapacityWaitEnd:
         """Wait at most ``seconds`` for capacity under ``request``; see :class:`CapacityWake`.
 
         On ``ELAPSED`` the channel has resumed the run itself, atomically, so a stop arriving
-        at that moment is never cleared. A stop request ends the wait by raising
-        :class:`RunStopped`.
+        at that moment is never cleared; *ended* becoming true ends the wait the same way.
+        A stop request ends the wait by raising :class:`RunStopped`.
+        """
+        ...
+
+    def interrupt_waits(self) -> None:
+        """Wake every parked wait, so each rechecks its *ended* condition.
+
+        Nothing else changes: a wait whose condition still holds parks again.
         """
         ...
 
@@ -394,14 +412,16 @@ class RuntimeRunControlChannel:
                 self._lock.wait()
         self.raise_if_stopped()
 
-    def wait_resumed(self, timeout: float) -> bool:
+    def wait_resumed(self, timeout: float, *, ended: Callable[[], bool] = _never) -> bool:
         """Park for at most *timeout* seconds; resume the run itself if the timeout elapses."""
         with self._lock:
             should_emit_paused = self._paused and not self._stop_requested
         if should_emit_paused:
             self._emit(RunControlTransitionKind.PAUSED)
         with self._lock:
-            self._lock.wait_for(lambda: not self._paused or self._stop_requested, timeout)
+            self._lock.wait_for(
+                lambda: not self._paused or self._stop_requested or ended(), timeout
+            )
             timed_out = self._paused and not self._stop_requested
             if timed_out:
                 self._paused = False
@@ -420,8 +440,10 @@ class RuntimeRunControlChannel:
             self._lock.notify_all()
         return True
 
-    def park_for_capacity(self, *, waiting: bool = False) -> int | None:
-        """Park until resumed (``None``) or asked to wait for capacity (the request)."""
+    def park_for_capacity(
+        self, *, waiting: bool = False, ended: Callable[[], bool] = _never
+    ) -> int | None:
+        """Park until resumed or *ended* (``None``) or asked to wait for capacity (the request)."""
         with self._lock:
             self._capacity_listening = True
             should_emit_paused = self._paused and not self._stop_requested
@@ -430,18 +452,28 @@ class RuntimeRunControlChannel:
         with self._lock:
             if waiting and self._paused and not self._stop_requested:
                 self._capacity_request = self._next_capacity_request()
-            while self._paused and not self._stop_requested and self._capacity_request is None:
+            while (
+                self._paused
+                and not self._stop_requested
+                and self._capacity_request is None
+                and not ended()
+            ):
                 self._lock.wait()
-            request = self._capacity_request if self._paused else None
+            request = self._capacity_request if self._paused and not ended() else None
         self.raise_if_stopped()
         return request
 
-    def wait_for_capacity(self, seconds: float, request: int) -> CapacityWaitEnd:
+    def wait_for_capacity(
+        self, seconds: float, request: int, *, ended: Callable[[], bool] = _never
+    ) -> CapacityWaitEnd:
         """Wait for capacity under ``request``, ending as :class:`CapacityWake` says."""
         with self._lock:
             self._lock.wait_for(
                 lambda: (
-                    self._stop_requested or not self._paused or self._capacity_request != request
+                    self._stop_requested
+                    or not self._paused
+                    or self._capacity_request != request
+                    or ended()
                 ),
                 seconds,
             )
@@ -454,6 +486,11 @@ class RuntimeRunControlChannel:
             self._emit(RunControlTransitionKind.RESUMED)
         self.raise_if_stopped()
         return end
+
+    def interrupt_waits(self) -> None:
+        """Wake every parked wait to recheck its *ended* condition."""
+        with self._lock:
+            self._lock.notify_all()
 
     def leave_capacity(self) -> None:
         """Refuse capacity requests until a turn parks on a capacity limit again."""

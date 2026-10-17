@@ -320,7 +320,9 @@ class CoreAgentEventSink:
             where,
         )
 
-    def quota_abandoned(self, error: AgentQuotaError, reason: str, where: Attribution) -> None:
+    def quota_abandoned(
+        self, error: AgentQuotaError, reason: str, waited_seconds: float, where: Attribution
+    ) -> None:
         """Emit that the turn ended with the quota error."""
         self._attributed(
             CoreEventType.QUOTA_ABANDONED,
@@ -329,6 +331,7 @@ class CoreAgentEventSink:
                 condition=error.condition.value,
                 detail=error.detail,
                 reason=reason,
+                waited_seconds=waited_seconds,
             ),
             where,
         )

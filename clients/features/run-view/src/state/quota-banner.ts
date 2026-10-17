@@ -27,11 +27,10 @@ interface QuotaSwitchBanner {
 
 export type QuotaBanner = QuotaPauseBanner | QuotaSwitchBanner;
 
-/** Why the provider stopped, in the operator's words; one entry per condition the backend sends. */
+/** Why the provider stopped, in the operator's words; one entry per condition that pauses the run. */
 const QUOTA_WHY: Readonly<Record<QuotaPause['condition'], string>> = {
   quota_exhausted: 'is out of quota',
   rate_limited: 'is rate limited',
-  unavailable: 'is unavailable',
 };
 
 /**

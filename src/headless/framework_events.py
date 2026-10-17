@@ -18,6 +18,7 @@ from vibesys.api import (
     RunConfiguredData,
     WinnerSelectedData,
     WorkspaceSnapshotData,
+    describe_seconds,
 )
 
 _EXCLUDED_PATHS_SHOWN = 5
@@ -83,7 +84,7 @@ def format_quota_event(event: CoreEvent) -> str | None:
 
 
 def _format_quota_resumed(data: QuotaResumedData) -> str:
-    waited = format_duration(data.waited_seconds)
+    waited = describe_seconds(data.waited_seconds)
     if data.condition == "unavailable":
         return f"[quota] {data.provider} turn waited {waited} out of an outage; sending it again"
     by = "the wait elapsed" if data.reason == "wait_elapsed" else "resumed"
@@ -120,9 +121,13 @@ def _quota_condition(condition: str) -> str:
 
 
 def outage_wait_seconds(event: CoreEvent) -> float:
-    """Seconds a turn waited out a provider outage in this event; zero for any other event."""
+    """Seconds a turn waited out a provider outage in this event; zero for any other event.
+
+    A wait counts whether the turn was then sent again (``quota_resumed``) or the wait
+    ended it (``quota_abandoned``: cancelled, or the run's deadline came).
+    """
     data = event.data
-    if isinstance(data, QuotaResumedData) and data.condition == "unavailable":
+    if isinstance(data, QuotaResumedData | QuotaAbandonedData) and data.condition == "unavailable":
         return data.waited_seconds
     return 0.0
 
@@ -131,16 +136,7 @@ def format_outage_summary(seconds: float) -> str | None:
     """The run-end line for the time turns spent waiting out provider outages, or None."""
     if seconds <= 0:
         return None
-    return f"[quota] turns waited out provider outages for {format_duration(seconds)} in total"
-
-
-def format_duration(seconds: float) -> str:
-    """A duration in hours, minutes and seconds, dropping the zero parts: ``1 h 5 min``."""
-    whole = max(round(seconds), 0)
-    hours, rest = divmod(whole, 3600)
-    minutes, secs = divmod(rest, 60)
-    parts = [f"{n} {unit}" for n, unit in ((hours, "h"), (minutes, "min"), (secs, "s")) if n]
-    return " ".join(parts) or "0 s"
+    return f"[quota] turns waited out provider outages for {describe_seconds(seconds)} in total"
 
 
 def _utc(epoch: float) -> str:

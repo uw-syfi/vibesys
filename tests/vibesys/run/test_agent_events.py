@@ -238,7 +238,7 @@ def test_a_quota_pause_and_its_resolutions_are_recorded_with_the_provider_diagno
     error = AgentQuotaError("claude", QuotaCondition.RATE_LIMITED, "429 too many", 1.5e9)
     sink.quota_paused(error, QuotaPlan("fallback", 1.6e9, "codex", "gpt-5"), where)
     sink.quota_resumed(error, "wait_elapsed", 90.0, where)
-    sink.quota_abandoned(error, "policy", Attribution("implementer"))
+    sink.quota_abandoned(error, "policy", 30.0, Attribution("implementer"))
     sink.provider_switched(
         ProviderSwitch("claude", "codex", "gpt-5", "operator", "the operator resumed"), where
     )
@@ -265,7 +265,11 @@ def test_a_quota_pause_and_its_resolutions_are_recorded_with_the_provider_diagno
         provider="claude", condition="rate_limited", reason="wait_elapsed", waited_seconds=90.0
     )
     assert abandoned.data == QuotaAbandonedData(
-        provider="claude", condition="rate_limited", detail="429 too many", reason="policy"
+        provider="claude",
+        condition="rate_limited",
+        detail="429 too many",
+        reason="policy",
+        waited_seconds=30.0,
     )
     assert switched.data == ProviderSwitchedData(
         from_provider="claude",

@@ -32,6 +32,7 @@ from vs_agent.api import (
     CapacityGate,
     CapacityStops,
     NullAgentEventSink,
+    ProviderSwitch,
     QuotaCondition,
     QuotaPlan,
 )
@@ -47,7 +48,10 @@ from vs_runtime.api.infrastructure import (
     RunControlTransition,
     RunControlTransitionKind,
     RunStopped,
+    WaitFor,
     create_run_control_channel,
+    decide_outage,
+    decide_quota,
     install_capacity_gate,
 )
 from vs_runtime.api.testing import FakeCapacityTimer, FakeRunControlEventSink
@@ -83,6 +87,9 @@ class _Sink(NullAgentEventSink):
         self.paused: list[tuple[AgentQuotaError, QuotaPlan]] = []
         self.resumed: list[tuple[str, str, float]] = []
         self.abandoned: list[tuple[AgentQuotaError, str, float]] = []
+        self.abandoned_waits: list[float] = []
+        self.switched: list[ProviderSwitch] = []
+        self.ended: dict[str | None, str] = {}
 
     def quota_paused(self, error: AgentQuotaError, plan: QuotaPlan, where: Attribution) -> None:
         del where
@@ -94,9 +101,16 @@ class _Sink(NullAgentEventSink):
         del where
         self.resumed.append((error.provider, reason, waited_seconds))
 
-    def quota_abandoned(self, error: AgentQuotaError, reason: str, where: Attribution) -> None:
-        del where
+    def quota_abandoned(
+        self, error: AgentQuotaError, reason: str, waited_seconds: float, where: Attribution
+    ) -> None:
         self.abandoned.append((error, reason, self._now()))
+        self.abandoned_waits.append(waited_seconds)
+        self.ended[where.invocation_id] = reason
+
+    def provider_switched(self, switch: ProviderSwitch, where: Attribution) -> None:
+        del where
+        self.switched.append(switch)
 
 
 @dataclass
@@ -126,19 +140,31 @@ class _Run:
         self.handling = CapacityHandling.for_policy(self.policy, self.threads)
         self.sink = _Sink(self.clock.now)
 
-    def client(self, provider: str, *answers: AgentQuotaError | str) -> AgentClient:
-        """A client on ``provider`` whose sends answer ``answers`` in order, behind the run's gate."""
+    def client(
+        self,
+        provider: str,
+        *answers: AgentQuotaError | str,
+        model: str = "m",
+        send_seconds: float = 0.0,
+    ) -> AgentClient:
+        """A client on ``provider`` whose sends answer ``answers`` in order, behind the run's gate.
+
+        Each send takes ``send_seconds`` of virtual time, as agentshim's own retries do
+        before a failing send reaches the gate.
+        """
 
         def count(request: TurnRequest) -> None:
             del request
             self.sends[provider] = self.sends.get(provider, 0) + 1
+            if send_seconds:
+                self.threads.sleep(send_seconds)
 
         client = AgentClient(
             FakeProvider(
                 script=FakeTurnScript(answers=answers), on_turn=count, threads=self.threads
             ),
             provider=provider,
-            model_name="m",
+            model_name=model,
             clock=ManualClock(START),
             threads=self.threads,
         )
@@ -200,15 +226,55 @@ def test_a_turn_survives_a_provider_outage_without_pausing_the_run() -> None:
     assert run.sink.paused[0][1].resumes_at == START + 60.0
 
 
-@pytest.mark.parametrize("action", list(QuotaAction), ids=lambda action: action.value)
-def test_the_quota_policy_does_not_decide_about_an_outage(action: QuotaAction) -> None:
-    """``fail`` and ``pause`` are about limits an operator can act on; an outage is waited out."""
-    target = FallbackTarget("codex", "gpt-6-luna") if action is QuotaAction.FALLBACK else None
-    run = _Run(policy=QuotaPolicy(action, fallback=target))
+@pytest.mark.parametrize("action", [QuotaAction.PAUSE, QuotaAction.WAIT], ids=str)
+def test_under_pause_and_wait_an_outage_is_waited_out(action: QuotaAction) -> None:
+    """``pause`` is about limits an operator can act on; an outage never waits for one."""
+    run = _Run(policy=QuotaPolicy(action))
     client = run.client(OUTAGE, _outage(), _outage(), "ok")
 
     assert run.threads.run(lambda: _turn(client)) == "ok"
     assert [reason for _, reason, _ in run.sink.resumed] == ["wait_elapsed"] * 2
+    assert run.kinds() == []
+
+
+def test_under_fail_an_outage_is_waited_out_for_one_backoff_step_only() -> None:
+    run = _Run(policy=QuotaPolicy(QuotaAction.FAIL))
+    blip = run.client(OUTAGE, _outage(), "ok")
+    down = run.client(OUTAGE, _outage(), _outage(), "ok")
+
+    assert run.threads.run(lambda: _turn(blip)) == "ok"
+
+    def failing() -> None:
+        with pytest.raises(AgentQuotaError):
+            _turn(down, "inv-2")
+
+    run.threads.run(failing)
+
+    first = PROVIDER_OUTAGE.first_wait_seconds
+    assert [waited for _, _, waited in run.sink.resumed] == [first, first]
+    [(_, reason, _)] = run.sink.abandoned
+    assert "1 min outage budget" in reason
+    assert run.sink.switched == []
+    assert run.kinds() == []
+
+
+def test_under_fallback_an_outage_switches_providers_after_one_backoff_step() -> None:
+    target = FallbackTarget("codex", "gpt-6-luna")
+    run = _Run(policy=QuotaPolicy(QuotaAction.FALLBACK, fallback=target))
+    client = run.client(OUTAGE, _outage(), _outage(), "ok")
+
+    def failing() -> None:
+        with pytest.raises(AgentQuotaError):
+            _turn(client)
+
+    run.threads.run(failing)
+
+    assert [waited for _, _, waited in run.sink.resumed] == [PROVIDER_OUTAGE.first_wait_seconds]
+    assert [(switch.from_provider, switch.to_provider) for switch in run.sink.switched] == [
+        (OUTAGE, "codex")
+    ]
+    assert run.handling.fallback.replaced(OUTAGE)
+    assert run.now() == START + PROVIDER_OUTAGE.first_wait_seconds
 
 
 def test_the_rest_of_the_run_goes_on_while_a_turn_waits_out_an_outage() -> None:
@@ -390,9 +456,14 @@ class _Capture(FakeAgentClient):
         self.gate = gate
 
 
-def _gate() -> tuple[CapacityGate, FakeCapacityTimer, _Sink]:
-    """The run's gate over a virtual timer, called directly with each turn's record."""
-    threads = SimThreads()
+def _gate(
+    policy: QuotaPolicy | None = None, threads: SimThreads | None = None
+) -> tuple[CapacityGate, FakeCapacityTimer, _Sink]:
+    """The run's gate over a virtual timer, called directly with each turn's record.
+
+    A test whose stops pause the run (a quota) calls the gate inside ``threads.run``.
+    """
+    threads = threads or SimThreads()
     control = create_run_control_channel(FakeRunControlEventSink(), threads=threads)
     timer = FakeCapacityTimer(control, start=START)
     sink = _Sink(timer.now)
@@ -401,70 +472,280 @@ def _gate() -> tuple[CapacityGate, FakeCapacityTimer, _Sink]:
         capture,
         control=control,
         events=sink,
-        handling=CapacityHandling.for_policy(QuotaPolicy(), threads, timer),
+        handling=CapacityHandling.for_policy(policy or QuotaPolicy(), threads, timer),
         clock=ManualClock(START),
     )
     assert capture.gate is not None
     return capture.gate, timer, sink
 
 
-def _stop(gate: CapacityGate, stops: CapacityStops, error: AgentQuotaError) -> bool:
+def _stop(
+    gate: CapacityGate, stops: CapacityStops, error: AgentQuotaError, turn: str = "inv-1"
+) -> bool:
     """One capacity stop of a turn; whether the gate let the turn be sent again."""
     stops.count += 1
     try:
-        gate.wait_for_capacity(error, AgentTurnRequest(message="m"), role=ROLE, stops=stops)
+        gate.wait_for_capacity(
+            error, AgentTurnRequest(message="m", invocation_id=turn), role=ROLE, stops=stops
+        )
     except AgentQuotaError:
         return False
     return True
 
 
+def _record(model: str = "m") -> CapacityStops:
+    return CapacityStops(SimThreads(), model=model)
+
+
 @given(order=st.lists(st.sampled_from(("a", "b")), min_size=1, max_size=80))
 def test_turns_that_stop_together_keep_their_own_outage_budgets(order: list[str]) -> None:
     """However the stops of two turns interleave, each turn waits within its own budget."""
-    gate, timer, _ = _gate()
-    threads = SimThreads()
-    stops = {"a": CapacityStops(threads), "b": CapacityStops(threads)}
-    gave_up: set[str] = set()
+    gate, timer, sink = _gate()
+    stops = {"a": _record(), "b": _record()}
+    first_stop: dict[str, float] = {}
+    gave_up: dict[str, float] = {}
 
     for turn in order:
-        if turn not in gave_up and not _stop(gate, stops[turn], _outage()):
-            gave_up.add(turn)
-
-    for turn, record in stops.items():
-        assert record.waited <= BUDGET
-        # A turn gives up only once the outage outlasted its budget since its own first stop.
         if turn in gave_up:
-            assert record.first_at is not None
-            assert timer.now() - record.first_at >= BUDGET
+            continue
+        first_stop.setdefault(turn, timer.now())
+        if not _stop(gate, stops[turn], _outage(), turn):
+            gave_up[turn] = timer.now()
+
+    for turn, at in gave_up.items():
+        # A turn gives up only once the outage outlasted its budget since its own first stop.
+        assert "outage budget" in sink.ended[turn]
+        assert at - first_stop[turn] >= BUDGET
 
 
-_EVENTS = st.lists(
-    st.sampled_from(("stop", f"served:{OUTAGE}", f"served:{OTHER}")), min_size=1, max_size=30
+@given(
+    kinds=st.lists(st.sampled_from(("outage", "quota")), min_size=1, max_size=40),
+    quota_budget=st.floats(min_value=1.0, max_value=4 * 3600.0, allow_nan=False),
+)
+def test_quota_and_outage_stops_of_one_turn_never_spend_each_others_budget(
+    kinds: list[str], quota_budget: float
+) -> None:
+    """Each stop is decided on its own condition's history only.
+
+    A quota stop is decided on the time the turn waited on quotas alone, and ends the
+    turn's outage streak; an outage stop is decided on its streak alone (its stops and
+    the time since its first). Before, both shared one record: an outage after a quota
+    inherited the quota's start time and stop count, and an outage wait spent the quota
+    budget.
+    """
+    policy = QuotaPolicy(QuotaAction.WAIT, wait_seconds=quota_budget)
+    threads = SimThreads()
+    gate, timer, _ = _gate(policy, threads)
+    record = _record()
+    threads.run(lambda: _stop_in_turn(gate, timer, record, policy, kinds))
+
+
+def _stop_in_turn(
+    gate: CapacityGate,
+    timer: FakeCapacityTimer,
+    record: CapacityStops,
+    policy: QuotaPolicy,
+    kinds: list[str],
+) -> None:
+    """Send one turn's stops of ``kinds`` to the gate, checking each against its decision."""
+    quota_waited = 0.0
+    streak: list[float] = []  # the start time of each stop in the current outage streak
+
+    for kind in kinds:
+        now = timer.now()
+        if kind == "quota":
+            streak = []
+            expected = decide_quota(policy, resets_at=None, now=now, waited=quota_waited)
+            error = _quota(OUTAGE)
+        else:
+            streak.append(now)
+            expected = decide_outage(
+                PROVIDER_OUTAGE, stop=len(streak), elapsed=now - streak[0], run_left=None
+            )
+            error = _outage()
+
+        sent_again = _stop(gate, record, error)
+
+        assert sent_again == isinstance(expected, WaitFor)
+        if not isinstance(expected, WaitFor):
+            return
+        waited = timer.now() - now
+        assert waited == pytest.approx(expected.seconds, abs=1e-6)
+        if kind == "quota":
+            quota_waited += waited
+
+
+_ROUTE_EVENTS = st.lists(
+    st.sampled_from(("a", "b", "served", "served-other-model")), min_size=1, max_size=30
 )
 
 
-@given(events=_EVENTS)
-def test_a_stop_is_an_outage_only_while_the_provider_serves_no_other_turn(
+@dataclass
+class _TurnModel:
+    """What the rule says about one turn: its record, and the route as it last let it go."""
+
+    record: CapacityStops = field(default_factory=_record)
+    released: tuple[int, int] | None = None
+
+
+@given(events=_ROUTE_EVENTS)
+def test_a_stop_is_an_outage_unless_the_route_served_others_while_none_of_them_failed(
     events: list[str],
 ) -> None:
-    """A provider that served another turn since this turn first stopped is up.
+    """A route (provider and model) that served turns while this turn's latest send was
+    failing, and saw no other turn stop on an outage then, is up: the failure is the turn's
+    own, and the turn fails at once, as before the gate waited out outages.
 
-    agentshim calls any server error transient, so a turn that keeps failing while its
-    provider answers other turns fails at once, as it did before the gate waited out
-    outages. Turns served by another provider say nothing about this one.
+    Two turns, ``a`` and ``b``, stop on one route; ``served`` is a turn that route served,
+    ``served-other-model`` one the same provider served on another model, which says
+    nothing about this one. Only what lands between a turn's release and its next stop
+    counts, so a success long ago, or during the turn's own wait, never fails it. Sends
+    take no time here, so each event lands after the turn's previous release.
     """
     gate, _, sink = _gate()
-    stops = CapacityStops(SimThreads())
-    served_since_first = False
+    turns = {"a": _TurnModel(), "b": _TurnModel()}
+    served = 0
+    outage_stops = 0
+
     for event in events:
-        if event.startswith("served:"):
-            gate.turn_served(event.removeprefix("served:"))
-            served_since_first |= stops.first_at is not None and event == f"served:{OUTAGE}"
+        if event == "served":
+            gate.turn_served(OUTAGE, "m")
+            served += 1
             continue
-        sent_again = _stop(gate, stops, _outage())
-        if served_since_first:
-            assert not sent_again
-            [(_, reason, _)] = sink.abandoned
-            assert "served other turns" in reason
-            return
-        assert sent_again
+        if event == "served-other-model":
+            gate.turn_served(OUTAGE, "other-model")
+            continue
+        turn = turns[event]
+        up = turn.released is not None and (
+            served > turn.released[0] and outage_stops == turn.released[1]
+        )
+
+        sent_again = _stop(gate, turn.record, _outage(), event)
+
+        assert sent_again == (not up)
+        if up:
+            assert "served other turns" in sink.ended[event]
+            turns[event] = _TurnModel()  # the caller's next turn has a fresh record
+            continue
+        outage_stops += 1
+        turn.released = (served, outage_stops)
+
+
+def test_one_model_down_while_another_on_the_same_provider_is_served_is_still_an_outage() -> None:
+    """The live incident's shape: a gateway served one model while the other had no accounts.
+
+    Turns on the served model succeed throughout; the turn on the model that is down waits
+    the outage out instead of failing at its second stop.
+    """
+    run = _Run()
+    down = run.client(OUTAGE, *[_outage()] * 4, "ok", model="down", send_seconds=900.0)
+    up = run.client(OUTAGE, "fine", model="up")
+    replies: list[str] = []
+
+    def served_model() -> None:
+        for n in range(40):
+            run.threads.sleep(120.0)
+            replies.append(_turn(up, f"up-{n}"))
+
+    def main() -> str:
+        worker = run.threads.spawn(served_model, name="served-model", daemon=False)
+        reply = _turn(down)
+        worker.join(BUDGET)
+        return reply
+
+    assert run.threads.run(main) == "ok"
+    assert run.sink.abandoned == []
+    assert replies == ["fine"] * 40
+
+
+def test_one_success_during_a_partial_outage_does_not_fail_the_turns_still_failing() -> None:
+    """A route that serves one turn while others keep stopping on it is still down for them.
+
+    Turn ``a`` and turn ``c`` stop on the same route; one turn on it succeeds while ``a``'s
+    second send is failing, but ``c`` stopped in that window too, so ``a`` keeps waiting.
+    Before, the gate compared with its count at ``a``'s first stop, once, and the one
+    success failed every turn still waiting.
+    """
+    run = _Run()
+    a = run.client(OUTAGE, *[_outage()] * 3, "a-ok", send_seconds=900.0)
+    c = run.client(OUTAGE, *[_outage()] * 3, "c-ok", send_seconds=900.0)
+    b = run.client(OUTAGE, "b-ok")
+    replies: dict[str, str] = {}
+
+    def turn_c() -> None:
+        run.threads.sleep(300.0)
+        replies["c"] = _turn(c, "inv-c")
+
+    def turn_b() -> None:
+        # ``a`` stops at 900 s, waits 60 s, and its second send fails from 960 s to 1860 s;
+        # ``c`` stops at 1200 s, inside that window.
+        run.threads.sleep(1500.0)
+        replies["b"] = _turn(b, "inv-b")
+
+    def main() -> None:
+        workers = [
+            run.threads.spawn(turn_c, name="turn-c", daemon=False),
+            run.threads.spawn(turn_b, name="turn-b", daemon=False),
+        ]
+        replies["a"] = _turn(a)
+        for worker in workers:
+            worker.join(BUDGET)
+
+    run.threads.run(main)
+
+    assert replies == {"a": "a-ok", "b": "b-ok", "c": "c-ok"}
+    assert run.sink.abandoned == []
+
+
+def test_a_success_while_only_this_turn_fails_ends_it_as_its_own_failure() -> None:
+    """The route served another turn during this turn's failing send, and nothing else
+    failed: the failure is the turn's own, and the turn ends at that stop."""
+    run = _Run()
+    a = run.client(OUTAGE, *[_outage()] * 3, "a-ok", send_seconds=900.0)
+    b = run.client(OUTAGE, "b-ok")
+
+    def turn_b() -> None:
+        run.threads.sleep(1500.0)
+        assert _turn(b, "inv-b") == "b-ok"
+
+    def main() -> None:
+        worker = run.threads.spawn(turn_b, name="turn-b", daemon=False)
+        with pytest.raises(AgentQuotaError):
+            _turn(a)
+        worker.join(BUDGET)
+
+    run.threads.run(main)
+
+    [(_, reason, at)] = run.sink.abandoned
+    assert "served other turns" in reason
+    assert at == START + 900.0 + 60.0 + 900.0
+
+
+@pytest.mark.parametrize("action", [QuotaAction.PAUSE, QuotaAction.WAIT], ids=str)
+@given(cancel_after=st.floats(min_value=1.0, max_value=290.0, allow_nan=False))
+def test_a_cancel_ends_a_quota_wait_at_once(action: QuotaAction, cancel_after: float) -> None:
+    """The gate's contract: a cancellation of the turn ends its wait, for a quota as for an
+    outage. Under ``pause`` the run stays paused for the operator; under ``wait`` the run
+    resumes, as the wait's own end would have resumed it (here a 300 s retry)."""
+    run = _Run(policy=QuotaPolicy(action))
+    client = run.client(OTHER, _quota(), "later")
+    ended: list[float] = []
+
+    def canceller() -> None:
+        run.threads.sleep(cancel_after)
+        client.cancel()
+
+    def main() -> None:
+        run.threads.spawn(canceller, name="canceller", daemon=False)
+        with pytest.raises(AgentQuotaError):
+            _turn(client)
+        ended.append(run.now())
+
+    run.threads.run(main)
+
+    assert ended == [START + cancel_after]
+    assert run.sends[OTHER] == 1
+    [(_, reason, _)] = run.sink.abandoned
+    assert "cancelled" in reason
+    assert run.sink.abandoned_waits == [pytest.approx(cancel_after)]
+    assert run.control.pause_requested() is (action is QuotaAction.PAUSE)

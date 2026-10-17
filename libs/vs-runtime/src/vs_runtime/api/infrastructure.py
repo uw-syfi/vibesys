@@ -186,6 +186,8 @@ from vs_runtime._quota_policy import (
     WaitFor,
     decide_outage,
     decide_quota,
+    describe_seconds,
+    outage_policy_for,
 )
 from vs_runtime._recorded_environment import migrate_recorded_run_environment
 from vs_runtime._release import release_all
@@ -706,6 +708,7 @@ __all__ = [
     "create_workspace_runtime",
     "decide_outage",
     "decide_quota",
+    "describe_seconds",
     "decode_trusted_benchmark_output",
     "decode_trusted_benchmark_run",
     "derived_environment_name",
@@ -737,6 +740,7 @@ __all__ = [
     "open_run_environment_resources",
     "open_run_host",
     "open_workspace_environment_resources",
+    "outage_policy_for",
     "parse_profile_command",
     "preflight_native_cpu_profiler",
     "prepare_docker_evaluator_resources",

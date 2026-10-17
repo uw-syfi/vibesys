@@ -140,6 +140,7 @@ from vs_runtime.api.infrastructure import (
     StopMode,
     StopRequest,
     check_one_way_to_resume,
+    describe_seconds,
 )
 
 __all__ = [
@@ -264,6 +265,7 @@ __all__ = [
     "cli_wording",
     "configuration_error",
     "create_session",
+    "describe_seconds",
     "domain_modalities",
     "harnesses",
     "load_config",

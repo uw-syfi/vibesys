@@ -943,7 +943,7 @@ class AgentClient:
         cancellation that lands while the gate waits ends the wait, and one
         that lands after it keeps the turn from being sent again.
         """
-        stops = CapacityStops(self._threads)
+        stops = CapacityStops(self._threads, model=session.spec.model)
         with self._active_lock:
             if self._cancelled:
                 msg = "agent client is cancelled"
@@ -966,7 +966,7 @@ class AgentClient:
                 else:
                     gate = self._capacity_gate
                     if gate is not None:
-                        gate.turn_served(session.profile.name)
+                        gate.turn_served(session.profile.name, stops.model)
                     return result
         finally:
             with self._active_lock:

@@ -71,8 +71,10 @@ class _Sink(NullAgentEventSink):
         del error, waited_seconds, where
         self.events.append(f"resumed:{reason}")
 
-    def quota_abandoned(self, error: AgentQuotaError, reason: str, where: Attribution) -> None:
-        del error, reason, where
+    def quota_abandoned(
+        self, error: AgentQuotaError, reason: str, waited_seconds: float, where: Attribution
+    ) -> None:
+        del error, reason, waited_seconds, where
         self.events.append("abandoned")
 
 
