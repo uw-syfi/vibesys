@@ -1048,3 +1048,42 @@ def test_a_steer_the_provider_took_is_settled_once_by_the_turn_result(
     assert isinstance(result, Completed)
     assert result.result.refused_steers == refused
     assert sessions.inspect(KEY, "busy") == result
+
+
+def test_a_refusal_left_by_a_turn_that_raised_reaches_no_later_turn(tmp_path: Path) -> None:
+    """A steer refused in a turn that raised is named in no later turn's ``refused_steers``.
+
+    A turn whose reply fails its schema raises, and the client keeps its live session for the
+    caller's correction turn. The raising turn returns no result, so its refusal belongs to no
+    turn; the correction turn on the same session reports only its own.
+    """
+    threads = SimThreads()
+    rejection = AgentOutputSchemaError("invalid reply")
+    outcomes: list[SteerOutcome] = []
+    holder: list[AgentClient] = []
+
+    def steer_on_second_send(_request: AgentTurnRequest) -> None:
+        if holder and not outcomes:
+            outcomes.append(holder[0].steer_session(KEY, "change course", steer_id="s1"))
+
+    provider = FakeProvider(
+        script=FakeTurnScript(("opened", rejection, "done"), steering=FakeSteering.REJECTED),
+        on_turn=steer_on_second_send,
+        threads=threads,
+    )
+    client = AgentClient(provider, provider="codex", clock=ManualClock(), threads=threads)
+    spec = AgentSessionSpec(
+        role="implementer",
+        provider="codex",
+        workspace=tmp_path,
+        policy=AgentExecutionPolicy(require_enforcement=False),
+    )
+    client.run(session_spec=spec, turn=AgentTurnRequest(message="first"), session_key=KEY)
+    holder.append(client)
+    with pytest.raises(AgentOutputSchemaError):
+        client.run(session_spec=spec, turn=AgentTurnRequest(message="steered"), session_key=KEY)
+    after = client.run(session_spec=spec, turn=AgentTurnRequest(message="fix"), session_key=KEY)
+    client.close()
+
+    assert outcomes == [SteerOutcome.DELIVERED]
+    assert after.refused_steers == ()
