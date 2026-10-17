@@ -35,6 +35,7 @@ import {
   type RunPageAction,
   type RunPageState,
   stripChartView,
+  traceArrival,
   type ZoomEvent,
 } from '../../state/index.js';
 import {FramedPane} from './framed-pane.js';
@@ -333,6 +334,10 @@ function runFace(
   mode: RunMode,
   dispatch: Dispatch,
 ): {readonly header: PaneHeader; readonly body: JSX.Element} {
+  if (mode !== 'logs' && traceArrival(state) === 'awaited') {
+    // Until the run's spans arrive, a face would read as empty: say they are on their way.
+    return {header: {}, body: <EmptyState title="Reading the run…" />};
+  }
   switch (mode) {
     case 'timeline': {
       const view: TimelineViewProps = {...base, idea: null};

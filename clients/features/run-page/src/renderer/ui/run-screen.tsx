@@ -37,6 +37,7 @@ import {
   stopBannerView,
   streamLines,
   timelineView,
+  traceArrival,
 } from '../../state/index.js';
 import {DeepLevel} from './levels.js';
 import {RunLevel} from './run-level.js';
@@ -262,12 +263,6 @@ function Startup(props: {readonly state: RunPageState}): JSX.Element | null {
   );
 }
 
-/** Whether the run's trace has reached the window: a snapshot, or a span event, folded. */
-function traceReached(state: RunPageState): boolean {
-  const {trace} = state.run;
-  return state.session?.hasSnapshot === true || trace.base.sequence > 0 || trace.events.length > 0;
-}
-
 function crumbs(zoomed: ResolvedZoom, route: Route, zoom: Zoom): Crumb[] {
   const top: Route = {
     mode: route.agent === null ? 'ideas' : 'agents',
@@ -341,7 +336,7 @@ export function RunScreen(props: {
       header={
         <Stack gap="space-2">
           <Header state={state} dispatch={dispatch} />
-          {traceReached(state) ? (
+          {traceArrival(state) === 'arrived' ? (
             <RunScrubber
               log={state.run.trace}
               view={state.view}

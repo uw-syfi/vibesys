@@ -433,6 +433,30 @@ function keptAtEnd(
   return [keptCandidate(traceSpans(traceAt(state.run.trace, null)), direction), direction];
 }
 
+/**
+ * Whether the run's spans have reached the window: `arrived` once a snapshot or a span event is
+ * folded; `awaited` while they are on their way (a live run attaching or waiting for its first
+ * snapshot, an ended run's history being read); `none` when nothing is coming (a run the host
+ * does not list, a refused attach, a failed or unsupported history read). A face shows loading
+ * while they are awaited, and says it is empty only once they arrived or none will.
+ */
+export type TraceArrival = 'arrived' | 'awaited' | 'none';
+
+export function traceArrival(state: RunPageState): TraceArrival {
+  const {trace} = state.run;
+  if (state.session?.hasSnapshot === true || trace.base.sequence > 0 || trace.events.length > 0) {
+    return 'arrived';
+  }
+  switch (state.record.kind) {
+    case 'live':
+      return state.link.kind === 'attaching' || state.link.kind === 'attached' ? 'awaited' : 'none';
+    case 'ended':
+      return state.history.kind === 'reading' ? 'awaited' : 'none';
+    case 'unlisted':
+      return 'none';
+  }
+}
+
 export interface EndedView {
   readonly title: string;
   readonly tone: 'neutral' | 'ok' | 'warn' | 'err';

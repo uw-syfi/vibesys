@@ -145,7 +145,9 @@ export {
   stopBannerView,
   streamLines,
   type Tone,
+  type TraceArrival,
   timelineView,
+  traceArrival,
   type ViewedRun,
   viewedRun,
 } from './views.js';
