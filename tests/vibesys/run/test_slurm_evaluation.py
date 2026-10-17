@@ -29,9 +29,12 @@ from vs_evaluation.api import (
     StageFailureKind,
     StageState,
     TrustedEvidence,
-    loop_evaluation_deadline,
 )
-from vs_evaluation.api.testing import InMemoryEvaluationStore, wait_until_executor_started
+from vs_evaluation.api.testing import (
+    FakeDeadlineFactory,
+    InMemoryEvaluationStore,
+    wait_until_executor_started,
+)
 from vs_project.api import StateNamespace
 from vs_runtime.api import ProfileField, RunCleanupError
 from vs_runtime.api.infrastructure import ScalarBenchmarkContract, TrustedEvaluationPlan
@@ -72,6 +75,10 @@ if TYPE_CHECKING:
 
 # The blocking wait runs on a worker thread of the Slurm runner, so its latches are the OS's.
 _THREADS = OsThreads()
+
+# The executor stages and runs real far-side processes on worker threads, so a coordinator
+# wait bounded on the event loop's clock times out whenever the host is slow. The coordinator
+# tests pass a manual deadline that never fires; pytest-timeout alone guards against a hang.
 
 
 class _World:
@@ -503,7 +510,7 @@ async def test_coordinator_retains_completed_stages_after_late_infrastructure_fa
         InMemoryEvaluationStore(),
         ManualClock(),
         max_await_timeout_s=5,
-        deadline_factory=loop_evaluation_deadline,
+        deadline_factory=FakeDeadlineFactory(),
     )
     handle = await coordinator.submit(_request(snapshot))
     assert isinstance(await handle.await_result(5), EvaluationFailed)
@@ -610,7 +617,7 @@ async def test_unsupported_profile_evaluation_fails_instead_of_staying_queued(
         InMemoryEvaluationStore(),
         clock,
         max_await_timeout_s=5,
-        deadline_factory=loop_evaluation_deadline,
+        deadline_factory=FakeDeadlineFactory(),
     )
 
     handle = await coordinator.submit(_request(snapshot, (EvidenceKind.PROFILE,)))
@@ -650,7 +657,7 @@ async def test_a_kind_without_a_command_is_rejected_not_passed(
         InMemoryEvaluationStore(),
         ManualClock(),
         max_await_timeout_s=5,
-        deadline_factory=loop_evaluation_deadline,
+        deadline_factory=FakeDeadlineFactory(),
     )
 
     availability = await executor.availability(ResourceRequirements())
