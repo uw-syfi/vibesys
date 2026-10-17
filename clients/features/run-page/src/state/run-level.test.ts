@@ -3,8 +3,9 @@ import type {RunEvent, Span} from '@vibesys/contracts';
 import {EMPTY_TRACE} from '@vibesys/run-state/trace';
 import {bestPathView, IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
 import {EMPTY_TRACE_LOG, type TraceLog, traceAt, traceLog, traceStep} from './live.js';
-import {heroView, nowView, resolveZoom} from './run-level.js';
+import {clockCarried, heroView, nowView, resolveZoom} from './run-level.js';
 import {createRunReader} from './run-model.js';
+import {scrubberView} from './scrub.js';
 import {RUN_ROUTE} from './zoom.js';
 
 const ROOT: Span = {
@@ -184,6 +185,24 @@ describe('the run reader', () => {
   });
 });
 
+describe('the run clock between events', () => {
+  test('carries the live position past the last event on the window clock, not a past one', () => {
+    const log = logOf(run());
+    const model = createRunReader().read(log, null);
+    const latest = model.latest ?? 0;
+    expect(clockCarried(model, null)).toBe(0);
+    expect(clockCarried(model, latest - 5)).toBe(0);
+    // Two minutes and five seconds after the run's last word, the live position says so.
+    const carried = clockCarried(model, latest + 125);
+    expect(carried).toBe(125);
+    expect(scrubberView(log, {at: 'live'}, false, carried)?.position).toStartWith('00:02:05');
+    expect(scrubberView(log, {at: 'live'}, false, 0)?.position).toStartWith('00:00:00');
+    // An ended run's end and a past position read their event's own time.
+    expect(scrubberView(log, {at: 'live'}, true, carried)?.position).toStartWith('00:00:00');
+    expect(scrubberView(log, {at: 3}, false, carried)?.position).toStartWith('00:00:00');
+  });
+});
+
 describe('fresh ideas', () => {
   test('are the ideas the events just read changed or brought, never the history', () => {
     const all = run();
@@ -245,6 +264,45 @@ describe('the run level', () => {
         open: {kind: 'step', idea: 'flow:w4/#1', step: 'flow:w4/turn/#1'},
       },
     ]);
+  });
+
+  test('Now says a running idea waits between steps, and when its running attempt started', () => {
+    // ring tries again (the same hypothesis): its implementer runs, finishes and yields to an
+    // evaluation, as the chelan4 run's round 4 did.
+    const again = {...workstream(A, 'running'), id: 'flow:w1/#2', started_at: 600};
+    const implement = {
+      ...turn(A, 'running'),
+      id: 'flow:w1/#2/turn',
+      parent: again.id,
+      started_at: 601,
+    };
+    const yielded: Span = {
+      ...again,
+      waiting_on: [
+        {kind: 'operation', ref: 'resume of inv:implementer/evaluation', since: 640},
+        {kind: 'time', ref: 'timer', since: 600},
+      ],
+    };
+    const rows = (versions: readonly Span[]) =>
+      nowView(
+        createRunReader().read(logOf(events([ROOT, ...finished(A), ...versions])), null),
+      ).find(row => row.title === 'ring');
+    expect(rows([again])).toMatchObject({summary: 'starting', since: 600});
+    expect(rows([again, implement])).toMatchObject({
+      summary: 'implementer · implementer',
+      since: 601,
+    });
+    const done = {...implement, status: 'done' as const, ended_at: 639};
+    expect(rows([again, implement, done, yielded])).toMatchObject({
+      summary: 'waiting after implementer',
+      since: 640,
+      open: {kind: 'step', idea: 'flow:w1/#1', step: 'flow:w1/#2/turn'},
+    });
+    // Without a wait it has said, it waits since its last step ended.
+    expect(rows([again, implement, done])).toMatchObject({
+      summary: 'waiting after implementer',
+      since: 639,
+    });
   });
 
   test('a route resolves what the run holds and falls back a level otherwise', () => {

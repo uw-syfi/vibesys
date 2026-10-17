@@ -207,16 +207,20 @@ export function overviewAt(log: TraceLog, at: number | null): RunOverview | null
 }
 
 /**
- * Where the run clock stood when this window last heard the run's spans change, and the window's
- * clock then (epoch ms). The run's own clock is read only from its spans, which change when a step
+ * Where the run clock stood when this window last heard the run say anything, and the window's
+ * clock then (epoch ms). The run's own clock is read from its spans, which change when a step
  * does, so a step that runs for minutes shows no time passing; this lets the page carry the run
- * clock forward on its own clock. Both are this window's: a remote host's clock never enters.
+ * clock forward on its own clock. Events that change no span time (a status change, a control, a
+ * span's new label) still move it: by how far their timestamps are past the timestamp of the event
+ * that last moved it. Only differences between the run's own timestamps enter, never their value
+ * against this window's clock, so a remote host's clock that runs ahead or behind does no harm.
  */
 export interface Heard {
   readonly run: number;
+  /** The timestamp (epoch ms) of the event that last moved `run`; null when it came from none. */
+  readonly stampMs: number | null;
   readonly wallMs: number;
 }
-
 /** The run fold and trace a live or recorded run has produced so far. */
 export interface RunFold {
   readonly core: CoreState | null;
@@ -227,21 +231,44 @@ export interface RunFold {
 
 export const EMPTY_RUN_FOLD: RunFold = {core: null, trace: EMPTY_TRACE_LOG, heard: null};
 
-/** The latest run-clock time the spans carry that `data` brings, or null when it brings none. */
-function timeOf(data: RunData): number | null {
-  const spans =
-    data.kind === 'snapshot'
-      ? (data.snapshot.spans ?? [])
-      : traceSpans(foldTrace(EMPTY_TRACE, data.events));
-  return latestTime(spans);
+function stampOf(event: RunEvent): number | null {
+  const ms = typeof event.timestamp === 'string' ? Date.parse(event.timestamp) : Number.NaN;
+  return Number.isNaN(ms) ? null : ms;
 }
 
-/** What the window heard after `data` arrived at `wallMs`: the run clock moves only forward. */
+/** The run clock after `event`: a later span time, else carried by its timestamp's advance. */
+function heardEvent(
+  heard: {run: number | null; stampMs: number | null},
+  event: RunEvent,
+): {run: number | null; stampMs: number | null} {
+  const span = spanOf(event);
+  const time = span === null ? null : latestTime([span]);
+  const stamp = stampOf(event);
+  if (time !== null && (heard.run === null || time > heard.run)) return {run: time, stampMs: stamp};
+  if (heard.run === null || stamp === null) return heard;
+  if (heard.stampMs === null) return {run: heard.run, stampMs: stamp};
+  if (stamp <= heard.stampMs) return heard;
+  return {run: heard.run + (stamp - heard.stampMs) / 1000, stampMs: stamp};
+}
+
+/**
+ * What the window heard after `data` arrived at `wallMs`: the run clock moves only forward, by the
+ * span times the data carries and by how far its events' timestamps advance.
+ */
 export function heardAfter(heard: Heard | null, data: RunData, wallMs: number): Heard | null {
   if (data.kind === 'rebootstrap' && data.base === 'reset') return null;
-  const run = timeOf(data);
-  if (run === null || (heard !== null && run <= heard.run)) return heard;
-  return {run, wallMs};
+  if (data.kind === 'snapshot') {
+    const run = latestTime(data.snapshot.spans ?? []);
+    if (run === null || (heard !== null && run <= heard.run)) return heard;
+    return {run, stampMs: null, wallMs};
+  }
+  let next: {run: number | null; stampMs: number | null} = heard ?? {run: null, stampMs: null};
+  for (const event of data.events) next = heardEvent(next, event);
+  if (next.run === null) return heard;
+  if (heard !== null && next.run === heard.run) {
+    return next.stampMs === heard.stampMs ? heard : {...heard, stampMs: next.stampMs};
+  }
+  return {run: next.run, stampMs: next.stampMs, wallMs};
 }
 
 /** What must hold of the trace slice: its events are span events, in increasing sequence. */

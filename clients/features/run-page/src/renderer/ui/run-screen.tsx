@@ -18,6 +18,7 @@ import {
 import type {JSX} from 'react';
 import {
   clockAt,
+  clockCarried,
   clockStart,
   endedView,
   headerView,
@@ -225,8 +226,7 @@ function EndedBanner(props: {
             text="View logs"
             press={() => {
               dispatch({type: 'view-logs'});
-              props.zoom({type: 'restore', route: RUN_ROUTE});
-              props.zoom({type: 'mode', mode: 'logs'});
+              props.zoom({type: 'jump', route: {...RUN_ROUTE, mode: 'logs'}});
             }}
           />
           <Button
@@ -288,7 +288,7 @@ function crumbs(zoomed: ResolvedZoom, route: Route, zoom: Zoom): Crumb[] {
   return items.map((item, index) =>
     index === items.length - 1
       ? {id: item.id, label: item.label}
-      : {id: item.id, label: item.label, press: () => zoom({type: 'restore', route: item.to})},
+      : {id: item.id, label: item.label, press: () => zoom({type: 'jump', route: item.to})},
   );
 }
 
@@ -346,6 +346,7 @@ export function RunScreen(props: {
               log={state.run.trace}
               view={state.view}
               ended={runPhase(state).kind === 'ended'}
+              carried={clockCarried(model, runNow(state))}
               change={view => dispatch({type: 'view', view})}
             />
           ) : null}

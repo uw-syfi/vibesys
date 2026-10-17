@@ -236,7 +236,21 @@ test('every level opens by click and walks back by Escape, the crumbs and Back',
   await page.goForward();
   await expect(page.getByText('queue/mpmc time: 41.2 ms')).toHaveCount(0);
   await expect(tools).toBeVisible();
-  await page.getByRole('navigation', {name: 'Zoom'}).getByRole('button', {name: 'run'}).click();
+  // Each crumb is a zoom the address follows, so Back returns to the level it left.
+  const crumbs = page.getByRole('navigation', {name: 'Zoom'});
+  const stepHash = await page.evaluate(() => window.location.hash);
+  await crumbs.getByRole('button', {name: 'Combine W1 ring with W2 padding'}).click();
+  await expect(tools).toHaveCount(0);
+  await expect(page).toHaveURL(/#idea=[^&]+$/);
+  await page.goBack();
+  await expect(tools).toBeVisible();
+  expect(await page.evaluate(() => window.location.hash)).toBe(stepHash);
+  await crumbs.getByRole('button', {name: 'run'}).click();
+  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  expect(await page.evaluate(() => window.location.hash)).toBe('');
+  await page.goBack();
+  await expect(tools).toBeVisible();
+  await page.goForward();
   await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
 
   // Now jumps straight to the live step; Escape walks up to the run.
@@ -273,4 +287,9 @@ test('the scrubber replays the run’s ideas at an earlier event and returns to 
   );
   await expect(page.getByText('Stopped by you.')).toBeVisible();
   await check(page, 'ink-run-ended');
+  // The banner's View logs is a zoom the address follows too.
+  await page.getByRole('button', {name: 'View logs'}).click();
+  await expect(page).toHaveURL(/#mode=logs$/);
+  await page.goBack();
+  expect(await page.evaluate(() => window.location.hash)).toBe('');
 });

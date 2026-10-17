@@ -59,6 +59,7 @@ export {runRecord, sameRecord} from './record.js';
 export {clockNow, NOTHING_FOLDED, type RunAtView, spansAtView} from './run-at-view.js';
 export {
   clockAt,
+  clockCarried,
   clockStart,
   type HeroView,
   heroView,

@@ -7,6 +7,8 @@ import type {RunTracePublication} from '@vibesys/run-session';
 import {type CoreState, initialCoreState, reduceEvent} from '@vibesys/run-state';
 import {checkModel, type Seeded} from '@vibesys/store/testing';
 import {
+  clockCarried,
+  createRunReader,
   endedView,
   FIRST_HISTORY_SEQUENCE,
   FORCE_STOP_BOUND_MS,
@@ -21,10 +23,12 @@ import {
   type RunPageRequest,
   type RunPageState,
   type RunRecord,
+  runNow,
   runPageInitial,
   runPageInvariants,
   runPageStep,
   runPhase,
+  scrubberView,
   stopBannerView,
   streamLines,
   timelineView,
@@ -797,5 +801,78 @@ describe('the Work tab filter', () => {
       {type: 'work-outcome', outcome: 'rejected'},
     ]);
     expect(both.state.work).toEqual({query: 'ring', outcome: 'rejected'});
+  });
+});
+
+/** An event at `clock` (UTC time of day on 2026-10-17); a span event carries `span`. */
+function liveEvent(sequence: number, clock: string, type: string, span?: Span): RunEvent {
+  return {
+    protocol_version: 1,
+    run_id: RUN.runId,
+    sequence,
+    timestamp: `2026-10-17T${clock}Z`,
+    type,
+    data: span === undefined ? {kind: type} : {kind: type, span},
+  } as RunEvent;
+}
+
+/** 2026-10-17T01:23:31Z on the run's own clock, the epoch seconds its spans carry. */
+const AT_012331 = 1792200211;
+
+function round(status: Span['status']): Span {
+  return {
+    id: 'flow:round/#1',
+    parent: null,
+    type: 'flow',
+    name: 'play_round',
+    status,
+    started_at: AT_012331,
+  };
+}
+
+describe('the live run clock', () => {
+  // The chelan4 run: the last span changes at 01:23:36, then a pause, a resume and a control
+  // change no span time until 01:27:43; the window hears them and ticks 17 s after the last.
+  const waiting = {kind: 'operation', ref: 'resume of evaluation', since: AT_012331 + 5};
+  const events = [
+    liveEvent(1, '01:23:31', 'span_started', round('running')),
+    liveEvent(2, '01:23:36', 'span_updated', {...round('running'), waiting_on: [waiting]} as Span),
+    liveEvent(3, '01:24:19', 'run_status_changed'),
+    liveEvent(4, '01:24:20', 'run_status_changed'),
+    liveEvent(5, '01:25:32', 'run_status_changed'),
+    liveEvent(6, '01:27:43', 'control'),
+  ];
+  const NOW = AT_012331 + (4 * 60 + 12) + 17;
+
+  function heard(batches: readonly (readonly RunEvent[])[]): RunPageState {
+    const last = batches.length - 1;
+    return fold(attached(), [
+      ...batches.map((batch, index) => ({
+        type: 'run-data' as const,
+        wallMs: 1000 * index,
+        data: {kind: 'events' as const, events: batch},
+      })),
+      {type: 'tick', wallMs: 1000 * last + 17_000},
+    ]).state;
+  }
+
+  test('follows the run’s newest event, even one that changes no span time', () => {
+    // However the events arrive in batches, the clock reads the newest one's time.
+    for (let cut = 1; cut <= events.length; cut += 1) {
+      const batches = [events.slice(0, cut), events.slice(cut)].filter(each => each.length > 0);
+      const state = heard(batches);
+      const now = runNow(state);
+      expect(now).toBe(NOW);
+      const model = createRunReader().read(state.run.trace, null);
+      const shown = scrubberView(state.run.trace, state.view, false, clockCarried(model, now));
+      expect(shown?.position).toStartWith('01:28:00');
+    }
+  });
+
+  test('moves only forward, and a past view reads no live clock', () => {
+    // A late event stamped earlier moves nothing: the clock carries on from 01:27:43, 18 s later.
+    const state = heard([events, [liveEvent(7, '01:20:00', 'control')]]);
+    expect(runNow(state)).toBe(NOW + 1);
+    expect(runNow({...state, view: {at: 2}})).toBeNull();
   });
 });

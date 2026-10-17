@@ -11,6 +11,7 @@ import {
   routeQuery,
   routeUp,
   type ZoomEvent,
+  type ZoomMachineEvent,
   zoomMachine,
 } from './zoom.js';
 
@@ -25,7 +26,7 @@ function randomRoute(random: Seeded): Route {
   return {mode: random.pick(RUN_MODES), idea, agent, step, item};
 }
 
-function randomEvent(random: Seeded): ZoomEvent {
+function randomZoom(random: Seeded): ZoomEvent {
   return random.pick<ZoomEvent>([
     {type: 'open-idea', idea: random.pick(IDS)},
     {type: 'open-agent', agent: random.pick(IDS)},
@@ -35,11 +36,63 @@ function randomEvent(random: Seeded): ZoomEvent {
     {type: 'mode', mode: random.pick(RUN_MODES)},
     {type: 'up'},
     {type: 'up'},
-    {type: 'restore', route: randomRoute(random)},
+    {type: 'jump', route: randomRoute(random)},
   ]);
 }
 
-function zoom(...events: ZoomEvent[]): {route: Route; remembered: string[]} {
+function randomEvent(random: Seeded): ZoomMachineEvent {
+  return random.int(9) === 0 ? {type: 'restore', route: randomRoute(random)} : randomZoom(random);
+}
+
+/** The window's history as the page drives it: entries of fragments, and where it stands. */
+class FakeHistory {
+  readonly entries: string[];
+  at = 0;
+
+  constructor(fragment: string) {
+    this.entries = [fragment];
+  }
+
+  push(fragment: string): void {
+    this.entries.splice(this.at + 1, this.entries.length, fragment);
+    this.at = this.entries.length - 1;
+  }
+
+  /** Goes `by` entries back (negative) or forward; returns the fragment, or null at an end. */
+  go(by: number): string | null {
+    const to = this.at + by;
+    if (to < 0 || to >= this.entries.length) return null;
+    this.at = to;
+    return this.entries[to] ?? null;
+  }
+
+  get fragment(): string {
+    return this.entries[this.at] ?? '';
+  }
+}
+
+/**
+ * Drives the machine as the page does for `steps` random moves: a user's zoom pushes the route
+ * into the history, a Back or Forward restores the entry it lands on. After each, the entry the
+ * history stands at names the route the machine shows.
+ */
+function walkHistory(random: Seeded, steps: number): void {
+  const history = new FakeHistory(routeQuery(randomRoute(random)));
+  const actor = createActor(
+    zoomMachine.provide({
+      actions: {remember: ({context}) => history.push(routeQuery(context.route))},
+    }),
+  ).start();
+  actor.send({type: 'restore', route: routeFromQuery(history.fragment)});
+  for (let n = 0; n < steps; n += 1) {
+    const back = random.int(4) === 0 ? history.go(random.bool() ? -1 : 1) : null;
+    actor.send(back === null ? randomZoom(random) : {type: 'restore', route: routeFromQuery(back)});
+    expect(routeFromQuery(history.fragment)).toEqual(actor.getSnapshot().context.route);
+  }
+  actor.stop();
+}
+
+function zoom(...events: ZoomMachineEvent[]): {route: Route; remembered: string[]} {
   const remembered: string[] = [];
   const actor = createActor(
     zoomMachine.provide({
@@ -73,6 +126,29 @@ describe('the zoom machine', () => {
         else expect(remembered).toBe(changed);
       },
     });
+  });
+
+  test('after any zooms, Backs and Forwards, the address names the route shown', () => {
+    for (const seed of SEEDS) walkHistory(new Seeded(seed), 200);
+  });
+
+  test('a crumb jumps up and is remembered, so Back returns to the level it left', () => {
+    const steps = [
+      {type: 'open-idea', idea: 'i1'},
+      {type: 'open-step', step: 's1'},
+    ] as const;
+    expect(zoom(...steps, {type: 'jump', route: RUN_ROUTE}).remembered).toEqual([
+      'idea=i1',
+      'idea=i1&step=s1',
+      '',
+    ]);
+    const toIdea = zoom(...steps, {type: 'jump', route: {...RUN_ROUTE, idea: 'i1'}});
+    expect(toIdea.route).toEqual({...RUN_ROUTE, idea: 'i1'});
+    expect(toIdea.remembered.at(-1)).toBe('idea=i1');
+    // A jump to the route shown adds no history entry.
+    expect(
+      zoom(...steps, {type: 'jump', route: {...RUN_ROUTE, idea: 'i1', step: 's1'}}).remembered,
+    ).toHaveLength(2);
   });
 
   test('up walks item, step, idea, run, then back to the Ideas', () => {

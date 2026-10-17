@@ -99,13 +99,13 @@ class Followers {
   }
 }
 
-/** How often the clock ticks while a tab shows ages: a second, the finest the screen writes. */
+/** How often the clock ticks at the live end: a second, the finest the screen writes. */
 const TICK_MS = 1000;
 
 /**
- * Ticks this window's clock into the store while the screen shows the ages of a live run's open
- * steps (the Overview and Work tabs at the live end of an attached run), and not otherwise: a
- * tick re-renders the screen, so it runs only where time passing is on screen.
+ * Ticks this window's clock into the store while an attached run is at its live end, where the
+ * run clock moves on screen, and not otherwise: a tick re-renders the screen, so it runs only
+ * where time passing is on screen.
  */
 class Ticker {
   #cancel: (() => void) | null = null;
@@ -117,10 +117,9 @@ class Ticker {
   ) {}
 
   reconcile(state: RunPageState): void {
-    const wanted =
-      state.link.kind === 'attached' &&
-      state.view.at === 'live' &&
-      (state.tab === 'overview' || state.tab === 'work');
+    // The run clock is on screen at every level and face (the time bar, the hero, ages), so it
+    // ticks whenever an attached run is at its live end.
+    const wanted = state.link.kind === 'attached' && state.view.at === 'live';
     if (wanted && this.#cancel === null) this.#arm();
     if (!wanted) this.stop();
   }

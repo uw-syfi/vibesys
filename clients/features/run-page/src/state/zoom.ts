@@ -5,8 +5,10 @@
  * the route, which lives in the window's address (`routeQuery`, `routeFromQuery`) so browser Back
  * walks the zoom back.
  *
- * Every zoom the user makes runs the `remember` action, which the page provides to push the route
- * into the window's history; `restore` (Back, Forward, or a crumb) sets a route without pushing.
+ * Every zoom the user makes (`ZoomEvent`, a crumb's `jump` among them) runs the `remember` action,
+ * which the page provides to push the route into the window's history, so the address always names
+ * the route shown. Only the window itself sends `restore` (its address on open, Back, Forward),
+ * which sets the route the address already holds without pushing (`ZoomMachineEvent`).
  * The mode (`ideas`, `timeline`, `agents`, `logs`) switches what the panes show and keeps the
  * level. `up` goes one level up: from an item to its step, a step to its idea or agent, an idea or
  * agent to the run, and at the run back to the Ideas.
@@ -40,8 +42,15 @@ export type ZoomEvent =
   | {readonly type: 'open-item'; readonly item: string}
   | {readonly type: 'mode'; readonly mode: RunMode}
   | {readonly type: 'up'}
-  /** Set the route without remembering it: Back, Forward, a crumb that names a route. */
-  | {readonly type: 'restore'; readonly route: Route};
+  /** Go straight to a route the screen names: a crumb, or a banner's shortcut. */
+  | {readonly type: 'jump'; readonly route: Route};
+
+/**
+ * What the machine takes: the user's zooms, and `restore`, which sets the route the window's
+ * address already holds (on open, Back, Forward) without remembering it. Views get `ZoomEvent`
+ * only, so nothing on the screen can move the zoom without the address following.
+ */
+export type ZoomMachineEvent = ZoomEvent | {readonly type: 'restore'; readonly route: Route};
 
 /** How deep a route goes. */
 export type ZoomLevel = 'run' | 'opened' | 'step' | 'item';
@@ -67,17 +76,40 @@ export function routeUp(route: Route): Route {
   }
 }
 
+function sameRoute(a: Route, b: Route): boolean {
+  return (
+    a.mode === b.mode &&
+    a.idea === b.idea &&
+    a.agent === b.agent &&
+    a.step === b.step &&
+    a.item === b.item
+  );
+}
+
+/** A transition to `level` for a `restore` that names a route there. */
 const fromRestore = (level: ZoomLevel) => ({
-  guard: ({event}: {event: ZoomEvent}) =>
+  guard: ({event}: {event: ZoomMachineEvent}) =>
     event.type === 'restore' && routeLevel(event.route) === level,
+  actions: 'setRoute' as const,
+});
+
+/** A transition to `level` for a `jump` to a route there other than the one shown, remembered. */
+const fromJump = (level: ZoomLevel) => ({
+  guard: ({context, event}: {context: {route: Route}; event: ZoomMachineEvent}) =>
+    event.type === 'jump' &&
+    routeLevel(event.route) === level &&
+    !sameRoute(event.route, context.route),
+  actions: ['setRoute' as const, 'remember' as const],
 });
 
 export const zoomMachine = setup({
-  types: {context: {} as {route: Route}, events: {} as ZoomEvent},
+  types: {context: {} as {route: Route}, events: {} as ZoomMachineEvent},
   actions: {
     /** Push the route into the window's history; the page provides it. */
     remember: () => undefined,
-    restoreRoute: assign(({event}) => (event.type === 'restore' ? {route: event.route} : {})),
+    setRoute: assign(({event}) =>
+      event.type === 'restore' || event.type === 'jump' ? {route: event.route} : {},
+    ),
     goUp: assign(({context}) => ({route: routeUp(context.route)})),
     openStep: assign(({context, event}) =>
       event.type === 'open-step'
@@ -120,11 +152,17 @@ export const zoomMachine = setup({
         'remember',
       ],
     },
+    jump: [
+      {target: '.run', ...fromJump('run')},
+      {target: '.opened', ...fromJump('opened')},
+      {target: '.step', ...fromJump('step')},
+      {target: '.item', ...fromJump('item')},
+    ],
     restore: [
-      {target: '.run', ...fromRestore('run'), actions: 'restoreRoute'},
-      {target: '.opened', ...fromRestore('opened'), actions: 'restoreRoute'},
-      {target: '.step', ...fromRestore('step'), actions: 'restoreRoute'},
-      {target: '.item', ...fromRestore('item'), actions: 'restoreRoute'},
+      {target: '.run', ...fromRestore('run')},
+      {target: '.opened', ...fromRestore('opened')},
+      {target: '.step', ...fromRestore('step')},
+      {target: '.item', ...fromRestore('item')},
     ],
   },
   states: {

@@ -9,6 +9,7 @@ import {
   headerView,
   overviewView,
   quotaBannerView,
+  type RunPageAction,
   runNow,
   stopBannerView,
   viewedRun,
@@ -350,18 +351,30 @@ test('an open step keeps aging while the run says nothing, on the window clock',
   store.dispose();
 });
 
-test('time is carried only while an attached run is at its live end on a tab that shows ages', async () => {
+test('time is carried while an attached run is at its live end, whatever the screen shows', async () => {
   const app = new FakeApp();
   const clock = new FakeClock();
   const store = liveStore(app, clock);
   await Promise.resolve();
+  app.wallMs = 1_000_000;
   app.observer?.session(LIVE_VIEW);
   app.observer?.data({kind: 'snapshot', snapshot: snapshotWith(10)});
   expect(clock.pending).toBe(1);
-  store.dispatch({type: 'tab', tab: 'map'});
-  expect(clock.pending).toBe(0);
-  store.dispatch({type: 'tab', tab: 'work'});
-  expect(clock.pending).toBe(1);
+  const start = runNow(store.getState()) ?? 0;
+  // Every action that shows a log or another face once stopped the clock (the old tabs).
+  const faces: RunPageAction[] = [
+    {type: 'tab', tab: 'map'},
+    {type: 'view-logs'},
+    {type: 'select-stream', streamId: 's1'},
+    {type: 'tab', tab: 'logs'},
+  ];
+  for (const [index, action] of faces.entries()) {
+    store.dispatch(action);
+    expect(clock.pending).toBe(1);
+    app.wallMs += 60_000;
+    clock.advance(1000);
+    expect(runNow(store.getState())).toBe(start + 60 * (index + 1));
+  }
   store.dispatch({type: 'view', view: {at: 3}});
   expect(clock.pending).toBe(0);
   expect(runNow(store.getState())).toBeNull();

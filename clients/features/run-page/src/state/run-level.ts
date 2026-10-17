@@ -9,6 +9,7 @@ import type {AgentNode} from '@vibesys/run-state/agents';
 import type {Candidate, CandidateStep} from '@vibesys/run-state/candidates';
 import type {Direction, RunModel} from './run-model.js';
 import {duration, formatValue, ratio} from './span-reading.js';
+import {openWaits} from './span-words.js';
 import type {Route} from './zoom.js';
 
 export interface HeroView {
@@ -162,6 +163,15 @@ export interface NowItem {
     | {readonly kind: 'agent'; readonly agent: string};
 }
 
+/** When the span began its newest wait on something other than a timer or the stop; null if none. */
+function waitingSince(span: Span | undefined): number | null {
+  if (span === undefined) return null;
+  const since = openWaits(span)
+    .filter(wait => wait.kind !== 'time' && wait.kind !== 'stop')
+    .map(wait => wait.since);
+  return since.length === 0 ? null : Math.max(...since);
+}
+
 function stepSummary(step: CandidateStep): string {
   return step.role === null ? step.title : `${step.role} · ${step.title}`;
 }
@@ -171,7 +181,7 @@ export function nowView(model: RunModel): readonly NowItem[] {
   const running = model.candidates.candidates.filter(item => item.outcome === 'running');
   const attempts = new Set(running.flatMap(item => item.attempts.map(attempt => attempt.span)));
   return [
-    ...running.map(ideaNow),
+    ...running.map(item => ideaNow(item, model.trace.spans)),
     ...model.agents.agents
       .filter(
         agent => agent.status === 'running' && !attempts.has(agent.activity.within?.span ?? ''),
@@ -180,11 +190,29 @@ export function nowView(model: RunModel): readonly NowItem[] {
   ];
 }
 
-function ideaNow(item: Candidate): NowItem {
+/**
+ * A running idea's row: its newest running step; between steps (its agent yielded to an
+ * evaluation, say) the step it last finished, waiting since the attempt began to wait; and before
+ * its first step, starting since its running attempt began (a later attempt of a kept idea starts
+ * long after the idea did).
+ */
+function ideaNow(item: Candidate, spans: ReadonlyMap<string, Span>): NowItem {
   const step = item.running.at(-1);
   if (step === undefined) {
-    const open = {kind: 'idea', idea: item.id} as const;
-    return {id: item.id, title: item.title, summary: 'starting', since: item.startedAt, open};
+    const attempt = item.attempts.filter(each => each.outcome === 'running').at(-1);
+    const last = attempt?.steps.at(-1);
+    if (attempt === undefined || last === undefined) {
+      const open = {kind: 'idea', idea: item.id} as const;
+      const since = attempt?.startedAt ?? item.startedAt;
+      return {id: item.id, title: item.title, summary: 'starting', since, open};
+    }
+    return {
+      id: attempt.span,
+      title: item.title,
+      summary: `waiting after ${last.role ?? last.title}`,
+      since: waitingSince(spans.get(attempt.span)) ?? last.endedAt ?? attempt.startedAt,
+      open: {kind: 'step', idea: item.id, step: last.span},
+    };
   }
   return {
     id: step.span,
@@ -209,6 +237,14 @@ function agentNow(agent: AgentNode): NowItem {
 /** The run clock now: the live clock when the page carries one, else the latest the spans say. */
 export function clockAt(model: RunModel, live: number | null): number | null {
   return live ?? model.latest;
+}
+
+/**
+ * How far the run clock now (`live`, carried on this window's clock) is past the latest time the
+ * spans carry: what has passed since the run last said anything. 0 without a live clock.
+ */
+export function clockCarried(model: RunModel, live: number | null): number {
+  return live === null || model.latest === null ? 0 : Math.max(0, live - model.latest);
 }
 
 /** The run clock's start: the first span's start. */

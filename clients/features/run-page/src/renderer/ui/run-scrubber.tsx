@@ -10,10 +10,12 @@ export function RunScrubber(props: {
   readonly log: TraceLog;
   readonly view: RunView;
   readonly ended: boolean;
+  /** Seconds the run clock has moved since the run's last event (see `scrubberView`). */
+  readonly carried: number;
   readonly change: (view: RunView) => void;
 }): JSX.Element | null {
   const {log, view, ended, change} = props;
-  const shown = scrubberView(log, view, ended);
+  const shown = scrubberView(log, view, ended, props.carried);
   if (shown === null) return null;
   return (
     <Scrubber

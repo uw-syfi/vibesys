@@ -46,14 +46,19 @@ function indexOf(positions: AppendLog<number>, at: number): number {
   return Math.max(0, positions.countWhile(position => position <= at) - 1);
 }
 
-function clock(event: RunEvent | undefined): string | null {
+/** The event's time of day, `carried` seconds later (the run clock carried past its last event). */
+function clock(event: RunEvent | undefined, carried: number): string | null {
   const stamp = event?.timestamp;
-  return typeof stamp === 'string' && stamp.length >= 19 ? stamp.slice(11, 19) : null;
+  if (typeof stamp !== 'string' || stamp.length < 19) return null;
+  const ms = carried > 0 ? Date.parse(stamp) : Number.NaN;
+  return Number.isNaN(ms)
+    ? stamp.slice(11, 19)
+    : new Date(ms + carried * 1000).toISOString().slice(11, 19);
 }
 
-function positionWords(log: TraceLog, at: number): string {
+function positionWords(log: TraceLog, at: number, carried: number): string {
   const event = log.events.lastWhile(each => sequenceOf(each) <= at);
-  const time = at === log.base.sequence ? null : clock(event);
+  const time = at === log.base.sequence ? null : clock(event, carried);
   const call = log.calls.countWhile(start => start <= at);
   const when = time ?? (log.base.sequence === 0 ? 'Start' : 'When the page connected');
   return call === 0 ? when : `${when} · planning call ${call}`;
@@ -62,9 +67,16 @@ function positionWords(log: TraceLog, at: number): string {
 /**
  * The scrubber at `view`, or null when the page has no event to scrub through yet. On an ended
  * run the newest position reads as the end rather than live. It reads the positions and planning
- * calls the log keeps, so its work is in the planning calls, not the run's events.
+ * calls the log keeps, so its work is in the planning calls, not the run's events. While a live
+ * run says nothing, its newest position reads its last event's time `carried` seconds later (the
+ * run clock carried forward on this window's clock, `clockCarried`), so it follows real time.
  */
-export function scrubberView(log: TraceLog, view: RunView, ended: boolean): ScrubberView | null {
+export function scrubberView(
+  log: TraceLog,
+  view: RunView,
+  ended: boolean,
+  carried = 0,
+): ScrubberView | null {
   const {positions} = log;
   const last = positions.length - 1;
   if (last === 0) return null;
@@ -75,7 +87,11 @@ export function scrubberView(log: TraceLog, view: RunView, ended: boolean): Scru
     latest: view.at === 'live',
     latestLabel: ended ? 'End' : 'Live',
     backLabel: ended ? 'Jump to end' : 'Back to live',
-    position: positionWords(log, positions.at(value) ?? 0),
+    position: positionWords(
+      log,
+      positions.at(value) ?? 0,
+      view.at === 'live' && !ended ? carried : 0,
+    ),
     ticks: [...log.calls].map((start, index) => ({
       at: indexOf(positions, start),
       label: `Call ${index + 1}`,

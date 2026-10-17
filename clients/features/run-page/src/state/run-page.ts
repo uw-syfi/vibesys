@@ -307,8 +307,8 @@ function recordPhase(record: RunRecord): RunPhase {
 }
 
 /**
- * The run clock's time now: the time of the run's latest span change, carried forward by this
- * window's clock since the window heard it. Null at a past view or without a live attachment,
+ * The run clock's time now: where the run's newest event put it (`Heard`), carried forward by
+ * this window's clock since the window heard it. Null at a past view or without a live attachment,
  * where the latest time the spans carry is the run's time (`latestTime`).
  */
 export function runNow(state: RunPageState): number | null {
