@@ -13,7 +13,7 @@ import type {Span} from '@vibesys/contracts';
 import type {AgentGraph, AgentNode} from '@vibesys/run-state/agents';
 
 /** One lineage cell before a row, as the list draws it. */
-export type TreeGuide = 'pipe' | 'tee' | 'elbow' | 'blank';
+type TreeGuide = 'pipe' | 'tee' | 'elbow' | 'blank';
 
 /** How many finished sibling subtrees a parent needs before they fold. */
 export const FOLD_FROM = 4;
