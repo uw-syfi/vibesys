@@ -482,6 +482,10 @@ export class SshLink implements Link {
         'ControlPersist=30m',
         '-o',
         'ConnectTimeout=20',
+        // Every helper channel is a session on this master, so this compresses all of them. A
+        // run's journal is text that shrinks 8-20x; an 8 MB history reads in less than half the time.
+        '-o',
+        'Compression=yes',
         '--',
         this.#options.alias,
         'true',

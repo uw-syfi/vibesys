@@ -37,6 +37,9 @@ import {
 } from '@vibesys/settings';
 import {discoverSshConfigAliases, type SshConfigFilesystem} from './ssh-config.js';
 
+/** The most events a helper without `run_history_pages` serves in one `runs.read_events` page. */
+const LEGACY_HISTORY_PAGE_EVENTS = 500;
+
 export interface HostsDeps {
   readonly manager: ConnectionManager;
   /** The settings files' one writer. */
@@ -306,18 +309,25 @@ export class Hosts {
   ): Promise<RunHistoryPage> {
     await using lease = await this.connection(id);
     try {
+      // A helper without `run_history_pages` refuses more events per page than it served before
+      // the feature, and does not name the journal's totals.
+      await lease.connection.ready();
+      const pages = lease.connection.features?.includes('run_history_pages') === true;
       const reply = await lease.connection.request({
         type: 'runs.read_events',
         project,
         run_id: runId,
         from_sequence: from,
-        max,
+        max: pages ? max : Math.min(max, LEGACY_HISTORY_PAGE_EVENTS),
+        ...(pages ? {with_totals: true} : {}),
       });
       return {
         kind: 'page',
         events: reply.events,
         next: reply.next_sequence,
         complete: reply.complete,
+        ...(typeof reply.total_events === 'number' ? {totalEvents: reply.total_events} : {}),
+        ...(typeof reply.total_bytes === 'number' ? {totalBytes: reply.total_bytes} : {}),
       };
     } catch (error) {
       if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {

@@ -3,6 +3,7 @@ import type {RunOverview, Span} from '@vibesys/contracts';
 import type {HostRun, RunEnd} from '@vibesys/hosts';
 import {EMPTY_TRACE, foldTrace} from '@vibesys/run-state/trace';
 import {adoptedCandidate, endReason} from './end-words.js';
+import {startHistory} from './history-pager.js';
 import {EMPTY_RUN_FOLD, traceLog} from './live.js';
 import {type RunPageState, runPageInitial} from './run-page.js';
 import {endedView} from './views.js';
@@ -203,8 +204,7 @@ describe('the ended banner', () => {
         ...ended('adopted', 'adopted: s', prefix),
         history: {
           kind: 'reading',
-          token: 1,
-          from: 1,
+          pager: startHistory(1, 2000, 1).pager,
           progress: {events: 0, bytes: 0, total: null},
         },
       } as const;

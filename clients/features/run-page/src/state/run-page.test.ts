@@ -12,6 +12,7 @@ import {
   FIRST_HISTORY_SEQUENCE,
   FORCE_STOP_BOUND_MS,
   HISTORY_PAGE_EVENTS,
+  historyAwaiting,
   type RunPageAction,
   type RunPageRequest,
   type RunPageState,
@@ -300,7 +301,8 @@ function awaited(state: RunPageState) {
     bound: state.stop.kind === 'stopping' ? state.stop.bound : null,
     logs: state.logs.kind === 'listing' ? state.logs.token : null,
     attach: state.link.kind === 'attaching' ? state.link.token : null,
-    history: state.history.kind === 'reading' ? state.history.token : null,
+    // Each page in flight is its own slot: a reply is awaited by the token it was asked under.
+    ...Object.fromEntries(historyAwaiting(state.history).map(token => [`history:${token}`, token])),
   };
 }
 
@@ -308,7 +310,7 @@ function reply(action: RunPageAction) {
   if (action.type === 'bound-elapsed') return {slot: 'bound', token: action.token};
   if (action.type === 'streams') return {slot: 'logs', token: action.token};
   if (action.type === 'attached') return {slot: 'attach', token: action.token};
-  if (action.type === 'history') return {slot: 'history', token: action.token};
+  if (action.type === 'history') return {slot: `history:${action.token}`, token: action.token};
   return null;
 }
 

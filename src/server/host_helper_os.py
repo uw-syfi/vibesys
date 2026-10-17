@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, BinaryIO
 
 from pydantic import TypeAdapter
 
@@ -75,6 +76,40 @@ _LAUNCH_OUTPUT_TAIL = 2000
 _LAUNCH_RECORD_LIMIT = 1 << 20
 
 
+_TALLY_CHUNK_BYTES = 1 << 20
+
+
+@dataclass(frozen=True)
+class JournalTally:
+    """The complete lines of a journal's first ``size`` bytes."""
+
+    size: int
+    lines: int
+
+
+def tally_journal(stream: BinaryIO, previous: JournalTally) -> JournalTally:
+    """``previous`` extended over what ``stream`` now holds past it, counting whole lines only.
+
+    A journal that is shorter than ``previous`` is counted from its start. A last line
+    still being written has no newline yet and is not counted: the tally ends before it.
+    """
+    stream.seek(0, os.SEEK_END)
+    if stream.tell() < previous.size:
+        previous = JournalTally(0, 0)
+    stream.seek(previous.size)
+    size, lines = previous.size, previous.lines
+    while True:
+        start = stream.tell()
+        chunk = stream.read(_TALLY_CHUNK_BYTES)
+        if not chunk:
+            break
+        newlines = chunk.count(b"\n")
+        if newlines:
+            lines += newlines
+            size = start + chunk.rindex(b"\n") + 1
+    return JournalTally(size, lines)
+
+
 class FileProjects:
     """Projects read through ``vs_project``'s ``Project`` on this filesystem.
 
@@ -86,6 +121,8 @@ class FileProjects:
     def __init__(self, repositories: GitRepositoryFactory) -> None:
         """Read run branches through the repositories ``repositories`` opens."""
         self._repositories = repositories
+        self._journals: dict[tuple[Path, str], Path] = {}
+        self._tallies: dict[Path, JournalTally] = {}
 
     def tasks(self, project: Path) -> TaskList:
         """The project's tasks, ordered by name."""
@@ -125,14 +162,54 @@ class FileProjects:
         """The project's root, once it is known to define tasks."""
         return self._initialized(project).root
 
-    def run_events(self, project: Path, run_id: str, from_sequence: int, limit: int) -> EventPage:
+    def run_events(
+        self, project: Path, run_id: str, from_sequence: int, limit: int, *, with_totals: bool
+    ) -> EventPage:
         """A page of run ``run_id``'s journal, once the project is known to have the run."""
         journal = self._journal(project, run_id)
         try:
             with journal.open("rb") as lines:
-                return event_page(lines, from_sequence, limit, RUN_EVENTS_READ_MAX_BYTES)
+                page = event_page(lines, from_sequence, limit, RUN_EVENTS_READ_MAX_BYTES)
+                if not with_totals:
+                    return page
+                tally = self._tally(journal, lines)
         except FileNotFoundError:
-            return EventPage((), from_sequence, complete=True)
+            nothing = EventPage((), from_sequence, complete=True)
+            return replace(nothing, total_events=0, total_bytes=0) if with_totals else nothing
+        return replace(page, total_events=tally.lines, total_bytes=tally.size)
+
+    def _journal(self, project: Path, run_id: str) -> Path:
+        """The journal of ``run_id``, found through the project's run history once per channel.
+
+        Every page of one run's history used to list the project's runs through git again.
+        The helper serves one channel, so a run it found stays found. The cache is a dict
+        of immutable paths that workers only ever add to: two workers racing to resolve
+        the same run store the same value, so it needs no lock.
+        """
+        key = (project, run_id)
+        known = self._journals.get(key)
+        if known is not None:
+            return known
+        root, runs = self.runs(project)
+        if all(run.run_id != run_id for run in runs):
+            message = f"{root} has no run {run_id!r}"
+            raise ProjectLookupError(HelperErrorCode.UNKNOWN_RUN, str(root), message)
+        journal = Project.log_directory_for(root, run_id) / RUN_EVENTS_FILE
+        self._journals[key] = journal
+        return journal
+
+    def _tally(self, journal: Path, stream: BinaryIO) -> JournalTally:
+        """The journal's complete lines, counted from where the last count stopped.
+
+        A journal is append-only, so the count of its first ``size`` bytes never changes;
+        a shorter file than the last count read is a different journal and counts afresh.
+        Each worker stores a whole ``JournalTally`` (never a half-updated one), so a race
+        leaves a correct, if older, tally.
+        """
+        last = self._tallies.get(journal)
+        tally = tally_journal(stream, last if last is not None else JournalTally(0, 0))
+        self._tallies[journal] = tally
+        return tally
 
     def run_summary(self, project: Path, run_id: str) -> Summarized:
         """The fold of run ``run_id``'s journal, from the cache beside it and what it gained since."""
@@ -142,14 +219,6 @@ class FileProjects:
         from server.run_summary_cache import summarize_journal  # noqa: PLC0415
 
         return summarize_journal(self._journal(project, run_id))
-
-    def _journal(self, project: Path, run_id: str) -> Path:
-        """Run ``run_id``'s journal file, once the project is known to have the run."""
-        root, runs = self.runs(project)
-        if all(run.run_id != run_id for run in runs):
-            message = f"{root} has no run {run_id!r}"
-            raise ProjectLookupError(HelperErrorCode.UNKNOWN_RUN, str(root), message)
-        return Project.log_directory_for(root, run_id) / RUN_EVENTS_FILE
 
     def _open(self, project: Path) -> Project:
         try:

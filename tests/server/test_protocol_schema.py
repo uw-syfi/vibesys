@@ -231,6 +231,7 @@ def test_host_helper_schema_exports_the_authoritative_field_feature_gates() -> N
             "with_project_clean": "project_clean",
         },
         "logs.list": {"span_id": "logs_by_span"},
+        "runs.read_events": {"with_totals": "run_history_pages"},
     }
     request_refs = document["properties"]["request"]["discriminator"]["mapping"]
     for tag, fields in gates.items():
