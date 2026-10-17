@@ -165,7 +165,7 @@ class CapacityWaitUnavailableError(RuntimeError):
 
 
 class SteerTargetUnknownError(RuntimeError):
-    """A steer to a role the search does not declare, or a target the run does not hold."""
+    """A steer to a role the search does not declare."""
 
     diagnostic_code = "steer_target_unknown"
 
@@ -175,7 +175,7 @@ class SteerTargetUnknownError(RuntimeError):
 
 
 class SteerTargetEndedError(RuntimeError):
-    """A steer to a target that has ended, or an invocation that has taken its input."""
+    """A steer to an attempt that has ended."""
 
     diagnostic_code = "steer_target_ended"
 
