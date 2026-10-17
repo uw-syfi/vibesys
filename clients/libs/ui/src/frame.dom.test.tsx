@@ -751,6 +751,14 @@ describe('at scale: windowed lists draw a bounded number of rows', () => {
     expect(counts[0]).toBe(counts[1] as number);
   });
 
+  test('LogPane: start="top" opens at the first line of 50k', async () => {
+    const lines = Array.from({length: 5 * MANY}, (_, index) => ({text: `line ${index}`}));
+    const {container} = await mount(<LogPane label="Log" lines={lines} start="top" />);
+    const drawn = all(container, '.vs-log-line');
+    expect(drawn.length).toBeLessThan(DRAWN_AT_MOST);
+    expect(drawn.at(0)?.textContent).toBe('line 0');
+  });
+
   test('Narrative: 10k blocks', async () => {
     const blocks = Array.from({length: MANY}, (_, index) => ({
       id: `b${index}`,

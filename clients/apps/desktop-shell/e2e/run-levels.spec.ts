@@ -79,6 +79,14 @@ const SERVER: FakeServerSeed = {
 const LOGS = {
   streams: [
     {
+      id: 's1',
+      owner: {kind: 'run_narration'},
+      command: 'vibesys run',
+      retained_start: 0,
+      size: 0,
+      outcome: null,
+    },
+    {
       id: 's3',
       owner: {
         kind: 'gate_stage',
@@ -93,7 +101,10 @@ const LOGS = {
       outcome: null,
     },
   ],
-  text: {s3: 'vibesys-queue benchmark, 3 repetitions\nrepetition 1: 41.2 Mops/s\n'},
+  text: {
+    s1: '{"at":"2026-10-15T16:00:01+00:00","level":"info","message":"round 2 started"}\n',
+    s3: 'vibesys-queue benchmark, 3 repetitions\nrepetition 1: 41.2 Mops/s\n',
+  },
 };
 
 const shots = process.env['LEVEL_SHOTS'];
@@ -226,4 +237,29 @@ test('the scrubber replays the run’s ideas at an earlier event and returns to 
   );
   await expect(page.getByText('Stopped by you.')).toBeVisible();
   await check(page, 'ink-run-ended');
+});
+
+test('the Logs face lists the run’s streams by owner, and an idea shows only its own', async ({
+  page,
+}) => {
+  await openRun(page);
+  const show = page.getByRole('radiogroup', {name: 'Show'});
+  await show.getByText('Logs').click();
+  const streams = page.getByRole('listbox', {name: 'Log streams'});
+  await expect(streams.getByRole('option')).toHaveCount(2);
+  await streams.getByRole('option', {name: /benchmark/}).click();
+  const log = page.getByRole('log', {name: /benchmark/});
+  await expect(log).toContainText('repetition 1: 41.2 Mops/s');
+  await check(page, 'ink-logs-run');
+
+  // The idea that owns the benchmark gate shows that stream alone: no list, one pane.
+  await page.getByRole('radiogroup', {name: 'Show'}).getByText('Ideas').click();
+  await page
+    .getByRole('listbox', {name: 'Ideas'})
+    .getByRole('option', {name: /^running Combine W1 ring with W2 padding/})
+    .click();
+  await page.getByRole('radiogroup', {name: 'Show'}).getByText('Logs').click();
+  await expect(page.getByRole('log', {name: /benchmark/})).toContainText('repetition 1');
+  await expect(page.getByRole('listbox', {name: 'Log streams'})).toHaveCount(0);
+  await check(page, 'ink-logs-idea');
 });

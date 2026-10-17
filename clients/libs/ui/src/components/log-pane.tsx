@@ -21,6 +21,11 @@ export function LogPane(props: {
   readonly lines: readonly LogLine[];
   /** `fill` takes the height of its container (a pane body); the others have fixed heights. */
   readonly size?: 'sm' | 'md' | 'fill';
+  /**
+   * Where it opens: `tail` (the default) follows the end as lines arrive; `top` opens at the first
+   * line and does not follow, for a log that is finished.
+   */
+  readonly start?: 'tail' | 'top';
 }): JSX.Element {
   const {lines} = props;
   const win = useWindowed({
@@ -28,7 +33,7 @@ export function LogPane(props: {
     // Lines only append, so a line's index is its identity.
     keyOf: index => String(index),
     estimate: TYPE.code.line,
-    follow: true,
+    follow: props.start !== 'top',
   });
   return (
     <div className="vs-log" data-size={props.size ?? 'md'}>
