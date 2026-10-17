@@ -204,9 +204,13 @@ The server turns `command.pause`,
 envelope's `request_id`, and applies all five through one `RunControl.submit`, so they ack
 alike. A single-action command that reuses a `request_id` with a different command is therefore
 a different control under a used id, and also answers `control_id_conflict`. A refusal carries a typed reason that the server answers with its own protocol error. It
-is a new request type, so a client discovers it by `WP-CAPABILITY-PROBE`. A steer's target is resolved when the run takes the steer, after the ack: a target the run
-does not know, or one that has ended, reaches no one, and the server journals a `CONTROL` event
-with status `failed` and the text `/steer refused: <reason>`.
+is a new request type, so a client discovers it by `WP-CAPABILITY-PROBE`. A steer's target is resolved when it is submitted, against the run's
+latest control poll: a target the run does not know answers the protocol error
+`steer_target_unknown`, and one no turn can take any more (an ended attempt or invocation, or an
+invocation that has already taken its input) answers `steer_target_ended`. A resend gets the same
+answer. An accepted steer that later reaches no turn (its target ended first, or core dropped
+it) is journaled as a `CONTROL` event with status `failed` and the text
+`/steer dropped: steer <id> reached no turn: <reason>`.
 
 ## Framing and connection decisions
 

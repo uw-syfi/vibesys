@@ -170,6 +170,12 @@ class RefusalReason(StrEnum):
 
     NOT_PAUSED_ON_CAPACITY = "not_paused_on_capacity"
     """A wait for capacity, for a run not paused on a provider capacity limit."""
+    UNKNOWN_TARGET = "unknown_target"
+    """A steer to a role the search does not declare, or an attempt, item or invocation the
+    run does not hold."""
+    ENDED_TARGET = "ended_target"
+    """A steer to an attempt or invocation that has ended, or an invocation that has already
+    taken its input: no turn of it could take the message."""
 
 
 class ControlAck(_Request):
@@ -200,6 +206,7 @@ class ChannelRunControl:
         self._lock = threads.lock()
         self._answered: dict[str, tuple[ControlRequest, ControlAck]] = {}
         self._recorded: Callable[[ControlRequest], bool | None] = _nothing_recorded
+        self._target_check: Callable[[SteerTarget], RefusalReason | None] | None = None
 
     def recall(self, recorded: Callable[[ControlRequest], bool | None]) -> None:
         """Answer ids the run recorded before this process, as ``recorded`` says.
@@ -212,6 +219,16 @@ class ChannelRunControl:
         """
         with self._lock:
             self._recorded = recorded
+
+    def check_targets(self, check: Callable[[SteerTarget], RefusalReason | None]) -> None:
+        """Refuse each later steer whose target ``check`` refuses, when it is submitted.
+
+        The run loop installs a check over its latest state at each control poll, so a steer
+        to a target the run does not know, or one that has ended, is refused in its ack. A
+        target that ends between the ack and the run taking the steer is reported as dropped.
+        """
+        with self._lock:
+            self._target_check = check
 
     def submit(self, request: ControlRequest) -> ControlAck:
         """Apply one control request once per ``control_id`` and say what became of it."""
@@ -241,6 +258,11 @@ class ChannelRunControl:
     def _apply(self, request: ControlRequest) -> ControlAck:
         reason = None
         match request:
+            case SteerRequest(target=target) if (
+                self._target_check is not None
+                and (refusal := self._target_check(target)) is not None
+            ):
+                status, reason = ControlStatus.REFUSED, refusal
             case SteerRequest(text=text, control_id=control_id, target=target):
                 self._channel.queue_steer(text, control_id, target)
                 status = ControlStatus.PENDING

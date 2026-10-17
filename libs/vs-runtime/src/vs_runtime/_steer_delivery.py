@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 from vs_core.api import (
     AttemptPhase,
     CoreState,
-    InputDelivered,
+    InputDropped,
     InputId,
     InvocationInputTarget,
     ItemInputTarget,
@@ -35,7 +35,7 @@ from vs_core.api import (
     SessionInputReceived,
     SessionPhase,
 )
-from vs_runtime._operator_control import SteerTargetKind
+from vs_runtime._operator_control import RefusalReason, SteerTargetKind
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -49,6 +49,7 @@ class TargetRefusal:
     """Why the run cannot resolve a steer's target: no turn could take a message for it."""
 
     reason: str
+    kind: RefusalReason
 
 
 _ENDED_ATTEMPT = frozenset({AttemptPhase.CLOSING, AttemptPhase.TERMINAL})
@@ -58,24 +59,27 @@ def _role(core: CoreState, role: str) -> InputTarget | TargetRefusal:
     declared = core.run.declaration.roles
     if RoleId(root=role) not in declared:
         names = ", ".join(row.root for row in declared) or "none"
-        return TargetRefusal(f"role {role!r} is not declared by the search (declared: {names})")
+        return TargetRefusal(
+            f"role {role!r} is not declared by the search (declared: {names})",
+            RefusalReason.UNKNOWN_TARGET,
+        )
     return RoleInputTarget(role_id=RoleId(root=role))
 
 
 def _attempt(core: CoreState, attempt: str) -> InputTarget | TargetRefusal:
     rows = [row for row in core.attempts.attempts if row.attempt_id.root == attempt]
     if not rows:
-        return TargetRefusal(f"the run holds no attempt {attempt!r}")
+        return TargetRefusal(f"the run holds no attempt {attempt!r}", RefusalReason.UNKNOWN_TARGET)
     latest = max(rows, key=lambda row: row.generation)
     if latest.phase in _ENDED_ATTEMPT:
-        return TargetRefusal(f"attempt {attempt!r} has ended")
+        return TargetRefusal(f"attempt {attempt!r} has ended", RefusalReason.ENDED_TARGET)
     return ScopeInputTarget(scope=Scope(owner=latest.attempt_id, generation=latest.generation))
 
 
 def _item(core: CoreState, item: str) -> InputTarget | TargetRefusal:
     rows = [row for row in core.attempts.attempts if row.item_id.root == item]
     if not rows:
-        return TargetRefusal(f"the run holds no item {item!r}")
+        return TargetRefusal(f"the run holds no item {item!r}", RefusalReason.UNKNOWN_TARGET)
     return ItemInputTarget(item_id=rows[0].item_id)
 
 
@@ -84,10 +88,16 @@ def _invocation(core: CoreState, invocation: str) -> InputTarget | TargetRefusal
         row for row in core.sessions.invocations if row.invocation.invocation_id.root == invocation
     ]
     if not held:
-        return TargetRefusal(f"the run holds no invocation {invocation!r}")
+        return TargetRefusal(
+            f"the run holds no invocation {invocation!r}", RefusalReason.UNKNOWN_TARGET
+        )
     latest = max(held, key=lambda row: row.invocation.generation)
-    if latest.phase is SessionPhase.TERMINAL:
-        return TargetRefusal(f"invocation {invocation!r} has ended")
+    # Core gives an invocation its inputs once, as its turn is dispatched; only one still
+    # acquiring its session has not yet taken them.
+    if latest.phase is not SessionPhase.ACQUIRING:
+        return TargetRefusal(
+            f"invocation {invocation!r} has already taken its input", RefusalReason.ENDED_TARGET
+        )
     return InvocationInputTarget(invocation=latest.invocation)
 
 
@@ -108,6 +118,12 @@ def steer_target(core: CoreState, target: SteerTarget) -> InputTarget | TargetRe
     if target.id is None:
         return None
     return _RESOLVERS[target.kind](core, target.id)
+
+
+def target_refusal(core: CoreState, target: SteerTarget) -> RefusalReason | None:
+    """Why ``core`` refuses a steer to ``target`` now, or None when a turn could take it."""
+    resolved = steer_target(core, target)
+    return resolved.kind if isinstance(resolved, TargetRefusal) else None
 
 
 def names_target(target: SteerTarget, held: InputTarget | None) -> bool:
@@ -177,35 +193,45 @@ def unrecorded_steers(core: CoreState, now_at: float) -> tuple[SessionInputRecei
 
 
 class SteerConsumption:
-    """Reports each steer once, when core records that a turn received it."""
+    """Reports each steer once, when core records that a turn received it or dropped it."""
 
     def __init__(self) -> None:
-        """Start with no delivery reported; the first poll seeds what already happened."""
+        """Start with nothing reported; the first poll seeds what already happened."""
         self._reported: set[InputId] | None = None
 
-    def newly_delivered(self, core: CoreState, report: Callable[[str, str, str], None]) -> None:
-        """Call ``report(role, scope owner, invocation)`` for each steer delivered since last time.
+    def newly_settled(
+        self,
+        core: CoreState,
+        delivered: Callable[[str, str, str], None],
+        dropped: Callable[[str], None],
+    ) -> None:
+        """Report each steer settled since last time.
 
-        Deliveries recorded before the first call are not reported: a resumed run must not
+        ``delivered(role, scope owner, invocation)`` for one a turn received, and
+        ``dropped(reason)`` for one core dropped because its target can no longer take input.
+        Receipts recorded before the first call are not reported: a resumed run must not
         announce again what its previous process already announced.
         """
-        delivered = {
+        settled = {
             row.input.input_id: row.receipt
             for row in core.sessions.inputs
-            if isinstance(row.receipt, InputDelivered)
-            and row.input.input_id.root.startswith("steer-")
+            if row.receipt is not None and row.input.input_id.root.startswith("steer-")
         }
         if self._reported is None:
-            self._reported = set(delivered)
+            self._reported = set(settled)
             return
-        for input_id, receipt in delivered.items():
+        for input_id, receipt in settled.items():
             if input_id in self._reported:
                 continue
             self._reported.add(input_id)
+            if isinstance(receipt, InputDropped):
+                control = input_id.root.removeprefix("steer-")
+                dropped(f"steer {control} reached no turn: {receipt.reason.value}")
+                continue
             invocation = next(
                 row for row in core.sessions.invocations if row.invocation == receipt.invocation
             )
-            report(
+            delivered(
                 invocation.turn.session.role_id.root,
                 invocation.scope.owner.root,
                 receipt.invocation.invocation_id.root,

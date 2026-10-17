@@ -444,9 +444,11 @@ A steer goes to the next agent turn of any role unless it names a target. `--rol
 to the next turn of one role the run's search declares (role ids are the session role ids in the
 run's events, such as `dynamic-planner`; a run keeps the roles it started with, even when it
 resumes under code that changed them); `--attempt ID`, `--item ID` and `--invocation ID` give
-it to the next turn in that attempt, of that work item, or of that one invocation. The message
-reaches exactly one matching turn, once. A target the run does not know, or one that has
-ended, is rejected with the reason, and the message reaches no one:
+it to the next turn in that attempt, of that work item, or of that one invocation (an
+invocation takes its messages as its turn starts, so only one not yet started can take one).
+The message reaches at most one matching turn, once. A target the run does not know, or one
+no turn can take any more, is rejected with the reason, and the message reaches no one; a
+message whose target ends before a turn of it runs is reported as dropped in the run's events:
 
 ```bash
 vibesys control <run-id> steer "re-plan around the new profile" --role dynamic-planner

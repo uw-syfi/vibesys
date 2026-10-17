@@ -164,6 +164,26 @@ class CapacityWaitUnavailableError(RuntimeError):
         super().__init__("The run is not paused on a provider capacity limit")
 
 
+class SteerTargetUnknownError(RuntimeError):
+    """A steer to a role the search does not declare, or a target the run does not hold."""
+
+    diagnostic_code = "steer_target_unknown"
+
+    def __init__(self) -> None:
+        """Say why no turn could take the steer."""
+        super().__init__("The run has no such steer target")
+
+
+class SteerTargetEndedError(RuntimeError):
+    """A steer to a target that has ended, or an invocation that has taken its input."""
+
+    diagnostic_code = "steer_target_ended"
+
+    def __init__(self) -> None:
+        """Say why no turn could take the steer."""
+        super().__init__("The steer's target can no longer take a message")
+
+
 class ControlIdConflictError(RuntimeError):
     """A control whose ``control_id`` already named a different control."""
 
@@ -176,6 +196,8 @@ class ControlIdConflictError(RuntimeError):
 
 _REFUSALS: dict[RefusalReason, type[Exception]] = {
     RefusalReason.NOT_PAUSED_ON_CAPACITY: CapacityWaitUnavailableError,
+    RefusalReason.UNKNOWN_TARGET: SteerTargetUnknownError,
+    RefusalReason.ENDED_TARGET: SteerTargetEndedError,
 }
 """The protocol error each refusal answers with."""
 

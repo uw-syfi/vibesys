@@ -20,6 +20,7 @@ import functools
 import hashlib
 import logging
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING, Literal, Protocol
 
 from vs_core.api import (
@@ -49,6 +50,7 @@ from vs_runtime._steer_delivery import (
     names_target,
     steer_input,
     steer_target,
+    target_refusal,
     unrecorded_steers,
 )
 
@@ -134,7 +136,11 @@ class RunControlBridge:
         turn (``_steer_delivery``), and a steer control whose input core never recorded
         gets that input too.
         """
-        self._consumption.newly_delivered(core, self._report_consumed)
+        self._consumption.newly_settled(
+            core, self._report_consumed, self._channel.notify_steer_dropped
+        )
+        if self._inbox is not None:
+            self._inbox.control.check_targets(partial(target_refusal, core))
         if not self._started:
             self._started = True
             self._count = len(core.run.controls)
@@ -181,7 +187,9 @@ class RunControlBridge:
         for steer in self._channel.take_pending_steer():
             target = None if steer.target is None else steer_target(core, steer.target)
             if isinstance(target, TargetRefusal):
-                self._channel.notify_steer_refused(target.reason)
+                # Its target ended between the ack and this poll.
+                name = steer.control_id or "steer"
+                self._channel.notify_steer_dropped(f"steer {name} reached no turn: {target.reason}")
                 continue
             control = self._event(
                 core,

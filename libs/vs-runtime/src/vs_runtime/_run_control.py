@@ -24,7 +24,7 @@ class RunControlTransitionKind(StrEnum):
     RESUMED = "resumed"
     STOP_REQUESTED = "stop_requested"
     STEER_CONSUMED = "steer_consumed"
-    STEER_REFUSED = "steer_refused"
+    STEER_DROPPED = "steer_dropped"
     PAUSED = "paused"
     STOPPED = "stopped"
 
@@ -92,8 +92,8 @@ class RunControlChannel(Protocol):
 
         ``control_id`` names the control that sent it. The queue is the single source of
         truth. The run loop drains it (:meth:`take_pending_steer`) and turns each message into
-        a durable session input, which the next matching turn receives exactly once, or
-        refuses it (:meth:`notify_steer_refused`) when the run cannot resolve its target.
+        a durable session input, which the next matching turn receives exactly once; one that
+        reaches no turn is reported (:meth:`notify_steer_dropped`).
         """
         ...
 
@@ -152,8 +152,11 @@ class RunControlChannel(Protocol):
         """Record which invocation consumed queued steering."""
         ...
 
-    def notify_steer_refused(self, reason: str) -> None:
-        """Record that a queued steer reached no one: the run could not resolve its target."""
+    def notify_steer_dropped(self, reason: str) -> None:
+        """Record that an accepted steer reached no turn; ``reason`` names the steer and why.
+
+        Its target ended or became unknown before the run took it, or before a turn of it ran.
+        """
         ...
 
     def wait_while_paused(self) -> None:
@@ -375,9 +378,9 @@ class RuntimeRunControlChannel:
             )
         )
 
-    def notify_steer_refused(self, reason: str) -> None:
+    def notify_steer_dropped(self, reason: str) -> None:
         """Record why a queued steer reached no one."""
-        self._events(RunControlTransition(kind=RunControlTransitionKind.STEER_REFUSED, text=reason))
+        self._events(RunControlTransition(kind=RunControlTransitionKind.STEER_DROPPED, text=reason))
 
     def wait_while_paused(self) -> None:
         """Park while paused, then land any stop that released the wait."""

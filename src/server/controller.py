@@ -309,11 +309,11 @@ class RunController:
                 execution_id=execution_id,
             )
 
-    def record_steer_refused(self, reason: str) -> None:
-        """Journal that queued steering reached no one: the run could not resolve its target."""
+    def record_steer_dropped(self, reason: str) -> None:
+        """Journal that an accepted steer reached no one; ``reason`` names the steer and why."""
         with self._condition:
             self._journal.record(
-                EventType.CONTROL, f"/steer refused: {reason}", status=EventStatus.FAILED
+                EventType.CONTROL, f"/steer dropped: {reason}", status=EventStatus.FAILED
             )
 
     def status(self) -> str:

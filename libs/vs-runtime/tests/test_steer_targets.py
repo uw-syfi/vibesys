@@ -25,6 +25,8 @@ from vs_core.api import (
     AttemptPhase,
     AttemptView,
     CoreState,
+    InputDropped,
+    InputDropReason,
     InputTarget,
     Invocation,
     InvocationId,
@@ -54,6 +56,8 @@ from vs_project.api.testing import FakeControlInbox
 from vs_runtime.api.core import OperatorInbox, RunControlBridge
 from vs_runtime.api.infrastructure import (
     ChannelRunControl,
+    ControlStatus,
+    RefusalReason,
     RunControlTransitionKind,
     SteerRequest,
     SteerTarget,
@@ -72,7 +76,14 @@ _ATTEMPTS = {
     "parked": AttemptPhase.PARKED,
     "done": AttemptPhase.TERMINAL,
 }
-_INVOCATIONS = {"waiting": SessionPhase.SUSPENDED, "finished": SessionPhase.TERMINAL}
+_INVOCATIONS = {
+    "acquiring": SessionPhase.ACQUIRING,
+    "running": SessionPhase.EXECUTING,
+    "waiting": SessionPhase.SUSPENDED,
+    "finished": SessionPhase.TERMINAL,
+}
+"""Core gives an invocation its inputs as its turn is dispatched, so only one still acquiring
+can take a steer."""
 
 
 @dataclass
@@ -173,7 +184,7 @@ def _expected(core: CoreState, target: SteerTarget) -> InputTarget | None | str:
         return None
     name = target.id
     live_attempt = _ATTEMPTS.get(name) not in (None, AttemptPhase.TERMINAL)
-    live_invocation = _INVOCATIONS.get(name) not in (None, SessionPhase.TERMINAL)
+    live_invocation = _INVOCATIONS.get(name) is SessionPhase.ACQUIRING
     invocations = {row.invocation.invocation_id.root: row for row in core.sessions.invocations}
     oracle: dict[SteerTargetKind, tuple[bool, Callable[[], InputTarget]]] = {
         SteerTargetKind.ROLE: (
@@ -254,17 +265,73 @@ def test_an_inbox_steer_is_recorded_for_its_target_or_set_aside(
     assert run.inbox.rejected() == ()
 
 
-def test_a_socket_steer_to_an_undeclared_role_reaches_no_one_and_says_why() -> None:
+@given(target=_TARGETS)
+def test_a_socket_steer_to_a_target_no_turn_can_take_is_refused_in_its_ack(
+    target: SteerTarget,
+) -> None:
+    """Regression: such a steer was acked pending and then only journaled, with no id."""
+    run = _run()
+    core = _core()
+    run.bridge.poll(core, 1.0)
+
+    ack = run.control.submit(SteerRequest(control_id="s1", text="look again", target=target))
+
+    expected = _expected(core, target)
+    if isinstance(expected, str):
+        assert ack.status is ControlStatus.REFUSED
+        assert ack.reason in (RefusalReason.UNKNOWN_TARGET, RefusalReason.ENDED_TARGET)
+        assert run.bridge.poll(core, 2.0) == ()
+    else:
+        assert ack.status is ControlStatus.PENDING
+        (control, _delivery) = run.bridge.poll(core, 2.0)
+        assert isinstance(control, RunControlEvent)
+        assert control.control.target == expected
+    assert (
+        run.control.submit(SteerRequest(control_id="s1", text="look again", target=target)) == ack
+    )
+
+
+def test_a_steer_whose_target_ends_before_the_run_takes_it_is_reported_dropped() -> None:
     run = _run()
     target = SteerTarget(kind=SteerTargetKind.ROLE, id="fake-judge")
-    run.control.submit(SteerRequest(control_id="s1", text="look again", target=target))
+    ack = run.control.submit(SteerRequest(control_id="s1", text="look again", target=target))
+    assert ack.status is ControlStatus.PENDING  # no poll yet: the run has not been seen
 
     assert run.bridge.poll(_core(), 1.0) == ()
-    (refused,) = [
-        t for t in run.sink.transitions if t.kind is RunControlTransitionKind.STEER_REFUSED
+    (dropped,) = [
+        t for t in run.sink.transitions if t.kind is RunControlTransitionKind.STEER_DROPPED
     ]
-    assert "fake-judge" in refused.text
-    assert "fake-planner" in refused.text
+    assert "s1" in dropped.text
+    assert "fake-judge" in dropped.text
+
+
+def test_a_steer_core_drops_is_reported_once() -> None:
+    """Regression: only deliveries were reported, so a dropped steer was never heard of."""
+    run = _run()
+    core = _core()
+    run.bridge.poll(core, 1.0)
+    run.control.submit(SteerRequest(control_id="s1", text="look again"))
+    for event in run.bridge.poll(core, 2.0):
+        core = step(core, event).state
+    (record,) = core.sessions.inputs
+    receipt = InputDropped(
+        input_id=record.input.input_id,
+        target=record.input.target,
+        reason=InputDropReason.RUN_TERMINAL,
+        at=3.0,
+    )
+    dropped = core.sessions.model_copy(
+        update={"inputs": (record.model_copy(update={"receipt": receipt}),)}
+    )
+    core = core.model_copy(update={"sessions": dropped})
+
+    run.bridge.poll(core, 3.0)
+    run.bridge.poll(core, 4.0)
+
+    reports = [
+        t.text for t in run.sink.transitions if t.kind is RunControlTransitionKind.STEER_DROPPED
+    ]
+    assert reports == ["steer op-s1 reached no turn: run-terminal"]
 
 
 def test_a_steer_with_no_target_is_for_the_whole_run() -> None:
