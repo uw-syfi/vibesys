@@ -498,8 +498,7 @@ class SemanticSlurmEvaluationExecutor:
             evidence, operator_evidence_summary = self._evidence(
                 stage,
                 raw,
-                raw_step.failure,
-                raw_step.service_log_tail,
+                raw_step,
                 handle_id=handle_id,
                 metadata=metadata,
             )
@@ -598,12 +597,13 @@ class SemanticSlurmEvaluationExecutor:
         self,
         stage: SemanticEvaluationStage,
         raw: SlurmCommandResult,
-        failure: str | None,
-        service_log_tail: str | None,
+        raw_step: EvaluationStepResult,
         *,
         handle_id: str,
         metadata: SlurmExecutionMetadata | None,
     ) -> tuple[TrustedEvidence, str | None]:
+        failure = raw_step.failure
+        service_log_tail = raw_step.service_log_tail
         passed = _completed(raw, metadata) and raw.exit_code == 0
         service_not_ready = metadata is not None and metadata.service_not_ready
         metrics: tuple[EvidenceMetric, ...] = ()

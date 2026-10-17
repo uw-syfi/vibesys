@@ -13,7 +13,9 @@ import pytest
 # test-isolation: the wording of the closed refusal set is private; the API carries it as text.
 from vs_runtime._agent_tool_errors import ToolRefusal, render_tool_refusal
 
-_COMMIT_ADVICE = re.compile(r"\b(git commit|commit (your|the|it|and|then|changes?)\b)", re.IGNORECASE)
+_COMMIT_ADVICE = re.compile(
+    r"\b(git commit|commit (your|the|it|and|then|changes?)\b)", re.IGNORECASE
+)
 
 
 @pytest.mark.parametrize("reason", list(ToolRefusal), ids=lambda reason: reason.value)

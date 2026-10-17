@@ -445,8 +445,6 @@ def test_a_prompt_for_a_read_only_git_run_never_tells_an_agent_to_commit(
 def test_the_planner_is_told_implementers_cannot_commit_exactly_when_git_is_read_only(
     context: PlannerPrompt, *, writable: bool
 ) -> None:
-    text = " ".join(
-        render(PromptTemplate.PORTFOLIO, context, agent_git_writable=writable).split()
-    )
+    text = " ".join(render(PromptTemplate.PORTFOLIO, context, agent_git_writable=writable).split())
 
     assert ("never tell an implementer to commit" in text) is not writable

@@ -1287,7 +1287,9 @@ class SlurmEvaluationExecutor:
                 failure = unknown if failure is None else f"{unknown}; {failure}"
             elif failure is None and raw.exit_code != 0:
                 failure = _stage_failure(step, raw, item.elapsed_seconds)
-                service_log_tail = batch.service_log_tail if batch.service_log_tail.strip() else None
+                service_log_tail = (
+                    batch.service_log_tail if batch.service_log_tail.strip() else None
+                )
             results.append(
                 EvaluationStepResult(
                     name=step.name,

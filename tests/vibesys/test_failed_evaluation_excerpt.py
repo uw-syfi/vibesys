@@ -25,8 +25,8 @@ from vs_evaluation.api import (
     TrustedEvidence,
 )
 from vs_evaluation.api.testing import wait_until_executor_started
-from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster, build_stack
 from vs_prompts.api import TemplateRenderer
+from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster, build_stack
 from vs_sim.api.testing import examples, yield_until
 
 if TYPE_CHECKING:
@@ -95,7 +95,9 @@ _ROUTES = "INFO 10-17 route: GET /v1/models, POST /v1/chat/completions, POST /to
 
 
 async def test_a_checker_verdict_survives_a_56_kb_server_log(tmp_path: Path) -> None:
-    verdict = ("checking sample 0..99\n" * 150) + "FAIL: sample 17 expected 'Paris'\nFAIL: 3 of 100\n"
+    verdict = (
+        "checking sample 0..99\n" * 150
+    ) + "FAIL: sample 17 expected 'Paris'\nFAIL: 3 of 100\n"
     log = _ROUTES * (56_000 // len(_ROUTES))
 
     excerpt = _excerpt(await _feedback(tmp_path, verdict, log))
@@ -106,7 +108,9 @@ async def test_a_checker_verdict_survives_a_56_kb_server_log(tmp_path: Path) -> 
 
 @settings(max_examples=examples(pr=5, nightly=30), deadline=None)
 @given(
-    verdict=st.text(st.characters(whitelist_categories=("L", "N", "Zs")), min_size=1, max_size=4_000),
+    verdict=st.text(
+        st.characters(whitelist_categories=("L", "N", "Zs")), min_size=1, max_size=4_000
+    ),
     log_size=st.integers(0, 60_000),
 )
 async def test_the_excerpt_ends_with_the_stage_output_for_any_sizes(
