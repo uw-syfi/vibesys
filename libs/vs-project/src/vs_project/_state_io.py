@@ -218,7 +218,7 @@ def exclusive_write_bytes(path: Path, contents: bytes) -> bool:
             stream.flush()
             filesystem.sync_file(stream)
         try:
-            with FRAMEWORK_WRITES.publishing(path, contents):
+            with FRAMEWORK_WRITES.creating(path, contents):
                 os.link(temporary_path, path, follow_symlinks=False)
         except FileExistsError:
             return False

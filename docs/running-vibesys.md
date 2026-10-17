@@ -435,6 +435,11 @@ same control also arrives over a client's socket: pass `--control-id ID` to rese
 control safely. An id, once used, keeps its control: sending a different control under it is
 refused.
 
+`vibesys control` must run on the machine that holds the run's state home, and refuses a run
+whose machine-local state it cannot find there, naming the state home it looked in (set
+`VIBESYS_STATE_HOME` to point elsewhere). Controls still pending stay on that machine: if you
+resume the run on another host, send them again there; resending under the same id is safe.
+
 ## Supply an Input with CLI Flags
 
 Automation can supply the task contract without first writing a project.

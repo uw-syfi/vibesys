@@ -112,6 +112,7 @@ class _Events:
 @dataclass(frozen=True)
 class _Integration:
     control: object
+    run_control: object = None
     events: _Events = field(default_factory=_Events)
 
 

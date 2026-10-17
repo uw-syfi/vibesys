@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from vs_core.api import (
@@ -36,6 +38,7 @@ from vs_runtime.api.infrastructure import (
     ChannelRunControl,
     ControlAck,
     ControlRequest,
+    ControlStatus,
     PauseRequest,
     ResumeRequest,
     SteerRequest,
@@ -122,15 +125,45 @@ def _commit(core: CoreState, events: tuple[CoreEvent, ...]) -> CoreState:
     return core
 
 
+_STEER_AGAIN_AFTER_RESTART = [
+    ("socket", "k0", {"action": "steer", "text": "t"}),
+    ("poll",),
+    ("restart",),
+    ("poll",),
+    ("socket", "k0", {"action": "steer", "text": "t"}),
+]
+_PAUSE_AGAIN_AFTER_RESUME_AND_RESTART = [
+    ("socket", "k0", {"action": "pause"}),
+    ("poll",),
+    ("socket", "k1", {"action": "resume"}),
+    ("poll",),
+    ("restart",),
+    ("poll",),
+    ("socket", "k0", {"action": "pause"}),
+]
+_OTHER_CONTROL_UNDER_A_RECORDED_ID = [
+    ("post", "k0", {"action": "pause"}),
+    ("poll",),
+    ("restart",),
+    ("poll",),
+    ("socket", "k0", {"action": "stop", "mode": "drain"}),
+]
+
+
 @given(_STEPS)
+@example(_STEER_AGAIN_AFTER_RESTART)
+@example(_PAUSE_AGAIN_AFTER_RESUME_AND_RESTART)
+@example(_OTHER_CONTROL_UNDER_A_RECORDED_ID)
 def test_every_control_is_recorded_once_whichever_way_it_was_sent(
     history: list[tuple[object, ...]],
 ) -> None:
     """Regression: a control sent through the socket and the inbox under one id applied twice.
 
     Each inbox request ends settled or set aside; a settled one is recorded as
-    ``op-<id>``; and no request, sent any number of times through either ingress, is
-    recorded more than once.
+    ``op-<id>``; each ``op-<id>`` is recorded at most once; and a control is recorded under
+    a fresh ``control-<n>`` only if the socket sent it after a restart, before the restarted
+    run's first poll told it which ids the run records, or if it is the resume a restart
+    records for a paused run (its new channel holds no pause).
     """
     inbox = FakeControlInbox()
     texts = _Texts()
@@ -138,12 +171,16 @@ def test_every_control_is_recorded_once_whichever_way_it_was_sent(
     bridge, control = _wired(inbox, texts)
     posted: set[str] = set()
     sent: set[tuple[str, bytes]] = set()
+    fresh = True
+    unrecalled = 0
+    restarts = 0
     for index, operation in enumerate(history):
         match operation:
             case ("socket", str(control_id), dict(payload)):
                 request = CONTROL_REQUEST.validate_json(_payload(payload, control_id))
                 control.submit(request)
                 sent.add((control_id, _json(request)))
+                unrecalled += fresh
             case ("post", str() | None as shared, dict() | bytes() as payload):
                 request_id = shared or f"r{index:03d}"
                 contents = _payload(payload, request_id)
@@ -153,18 +190,24 @@ def test_every_control_is_recorded_once_whichever_way_it_was_sent(
                     sent.add((request_id, contents))
             case ("poll",):
                 core = _commit(core, bridge.poll(core, float(index)))
+                fresh = False
             case ("lost poll",):
                 bridge.poll(core, float(index))
                 bridge, control = _wired(inbox, texts)
+                fresh, restarts = True, restarts + 1
             case ("restart",):
                 bridge, control = _wired(inbox, texts)
+                fresh, restarts = True, restarts + 1
     for settle in range(3):
         core = _commit(core, bridge.poll(core, 1000.0 + settle))
 
     recorded = [control.control_id.root for control in core.run.controls]
     rejected = {entry.request_id for entry in inbox.rejected()}
     assert inbox.pending() == ()
-    assert len(recorded) <= len(sent)
+    assert len(recorded) <= len(sent) + restarts
+    operator_ids = [identity for identity in recorded if identity.startswith("op-")]
+    assert [i for i, n in Counter(operator_ids).items() if n > 1] == []
+    assert len(recorded) - len(operator_ids) <= unrecalled + restarts
     for request_id in posted - rejected:
         assert f"op-{request_id}" in recorded, request_id
     steer_controls = {
@@ -187,6 +230,45 @@ def test_a_pause_sent_through_the_socket_and_the_inbox_is_recorded_once() -> Non
     assert [(c.control_id.root, c.action) for c in core.run.controls] == [("op-k1", "pause")]
     assert inbox.pending() == ()
     assert inbox.rejected() == ()
+
+
+def test_a_control_resent_after_a_restart_replays_its_ack_and_changes_nothing() -> None:
+    """Regression: a pause resent after a resume and a restart paused the channel but not core."""
+    inbox = FakeControlInbox()
+    bridge, control = _wired(inbox, _Texts())
+    first = control.submit(PauseRequest(control_id="p"))
+    core = _commit(initial_state(), bridge.poll(initial_state(), 1.0))
+    control.submit(ResumeRequest(control_id="r"))
+    core = _commit(core, bridge.poll(core, 2.0))
+    threads = SimThreads()
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=threads)
+    control = ChannelRunControl(channel, threads)
+    bridge = RunControlBridge(channel, _Texts(), inbox=OperatorInbox(inbox, control))
+    core = _commit(core, bridge.poll(core, 3.0))
+
+    again = control.submit(PauseRequest(control_id="p"))
+    events = bridge.poll(core, 4.0)
+
+    assert again == first
+    assert events == ()
+    assert not channel.pause_requested()
+    assert [c.control_id.root for c in core.run.controls] == ["op-p", "op-r"]
+
+
+def test_another_control_under_an_id_recorded_before_a_restart_conflicts() -> None:
+    """Regression: a stop reusing a recorded pause's id after a restart stopped the run."""
+    inbox = FakeControlInbox()
+    bridge, control = _wired(inbox, _Texts())
+    control.submit(PauseRequest(control_id="p"))
+    core = _commit(initial_state(), bridge.poll(initial_state(), 1.0))
+    bridge, control = _wired(inbox, _Texts())
+    core = _commit(core, bridge.poll(core, 2.0))
+
+    ack = control.submit(StopRequest(control_id="p", mode=StopMode.DRAIN))
+    core = _commit(core, bridge.poll(core, 3.0))
+
+    assert ack.status is ControlStatus.CONFLICT
+    assert [c.action for c in core.run.controls if c.action == "stop"] == []
 
 
 def test_a_request_that_is_not_a_control_is_set_aside_with_its_reason() -> None:
@@ -332,12 +414,19 @@ class _DamagedInbox(FakeControlInbox):
         raise ProjectStateError(message)
 
 
-def test_a_damaged_inbox_never_fails_the_run() -> None:
+def test_a_damaged_inbox_never_fails_the_run_and_is_reported_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Regression: a symlinked inbox directory raised out of the control poll."""
     inbox = _DamagedInbox()
     bridge, control = _wired(inbox, _Texts())
     control.submit(PauseRequest(control_id="k1"))
 
-    core = _commit(initial_state(), bridge.poll(initial_state(), 1.0))
+    with caplog.at_level(logging.WARNING):
+        core = _commit(initial_state(), bridge.poll(initial_state(), 1.0))
+        core = _commit(core, bridge.poll(core, 2.0))
 
     assert [c.control_id.root for c in core.run.controls] == ["op-k1"]
+    assert [r.getMessage() for r in caplog.records if "control inbox" in r.getMessage()] == [
+        "the run's control inbox cannot be read; its requests wait: VibeSys state path is a symlink"
+    ]

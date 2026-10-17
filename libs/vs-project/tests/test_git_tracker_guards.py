@@ -717,3 +717,17 @@ def test_a_control_another_process_posts_is_not_the_agents_write(tmp_path: Path)
     (inbox / "second.json").write_bytes(b"{}")  # as the operator's process writes it
 
     assert tracker.pending_changes() == []
+
+
+def test_a_file_the_framework_did_not_create_stays_the_agents(tmp_path: Path) -> None:
+    """Regression: a create that found the file already there recorded it as the framework's."""
+    tracker = _initialized_tracker(tmp_path)
+    project = _project(tmp_path, tracker)
+    namespace = project.state.portable_namespace(tracker.run_id, "probe")
+    assert namespace.create_bytes("first.json", b"{}")
+    planted = next(tmp_path.rglob("first.json")).parent / "second.json"
+    planted.write_bytes(b"{}")  # as an agent writes it, with the bytes the framework would
+
+    assert not namespace.create_bytes("second.json", b"{}")
+
+    assert planted.relative_to(tmp_path).as_posix() in tracker.pending_changes()

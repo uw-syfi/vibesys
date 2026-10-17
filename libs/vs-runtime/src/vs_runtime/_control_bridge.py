@@ -16,8 +16,9 @@ settled, one it does not is applied again. A control without an id (a session's
 
 from __future__ import annotations
 
-import contextlib
+import functools
 import hashlib
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Protocol
 
@@ -57,6 +58,9 @@ if TYPE_CHECKING:
 type ControlAction = Literal["pause", "resume", "stop", "steer"]
 
 
+_LOG = logging.getLogger(__name__)
+
+
 class SteerArtifacts(Protocol):
     """Where the text of a steer control lives; the control carries only its digest."""
 
@@ -77,6 +81,10 @@ class RunControlBridge:
 
     With an ``inbox``, each poll also applies the inbox's requests, in id order, each as one
     control ``op-<control id>``; see the module docstring for how each applies once.
+
+    ``control`` (by default the inbox's) is where operators submit controls; each poll tells
+    it which ids core already records, so a control resent after a restart replays its ack
+    and a different control under a recorded id conflicts, as within one process.
     """
 
     def __init__(
@@ -84,12 +92,16 @@ class RunControlBridge:
         channel: RunControlChannel,
         steer: SteerArtifacts,
         inbox: OperatorInbox | None = None,
+        *,
+        control: ChannelRunControl | None = None,
     ) -> None:
-        """Bind the mailbox, the steer text store and, for a headless run, its inbox."""
+        """Bind the mailbox, the steer text store, a headless run's inbox, operators' controls."""
         self._channel = channel
         self._steer = steer
         self._inbox = inbox
+        self._control = control if control is not None or inbox is None else inbox.control
         self._submitted: set[str] = set()
+        self._warned_damaged = False
         self._count = 0
         self._position = 0
         self._consumption = SteerConsumption()
@@ -120,13 +132,21 @@ class RunControlBridge:
             self._paused = core.run.status == RunStatus.PAUSED
             self._stopped = any(c.action == "stop" for c in core.run.controls)
         self._position = len(core.run.controls)
+        if self._control is not None:
+            self._control.recall(functools.partial(_held_as, core))
         events: list[CoreEvent] = list(unrecorded_steers(core, now_at))
         self._take_steers(core, now_at, events)
         if self._inbox is not None:
             # A damaged inbox (a symlinked or misplaced directory) leaves its requests waiting
             # and the run going on; reporting it to the operator is tracked in #3061.
-            with contextlib.suppress(ProjectStateError):
+            try:
                 self._read_inbox(self._inbox, core, now_at, events)
+            except ProjectStateError as error:
+                if not self._warned_damaged:
+                    self._warned_damaged = True
+                    _LOG.warning(
+                        "the run's control inbox cannot be read; its requests wait: %s", error
+                    )
         if self._stopped:
             return tuple(events)
         if self._channel.stop_requested():
@@ -255,9 +275,11 @@ class RunControlBridge:
     def _event(self, core: CoreState, now_at: float, change: _Change) -> RunControlEvent | None:
         """The event recording one control, or None when core already holds that control.
 
-        A control with an id is recorded as ``op-<id>``; if core holds a different control
-        under it (a socket request reusing an id after a restart), it is recorded as
-        ``control-<n>`` instead, so it is applied and never conflicts with the record.
+        A control with an id is recorded as ``op-<id>``. Each poll tells the operators'
+        controls which ids core records, so a reused id is refused at submission; only one
+        submitted after a restart and before the first poll can reach here under an id core
+        holds for a different control. It is recorded as ``control-<n>``, with a warning, so
+        it applies and never conflicts with the record.
         """
         if change.control_id is not None:
             control = change.control(_identity(change.control_id))
@@ -266,6 +288,10 @@ class RunControlBridge:
                 return None
             if held is None:
                 return self._recorded(control, change.text, now_at)
+            _LOG.warning(
+                "control %s reuses an id the run recorded for another control; recorded as a new control",
+                change.control_id,
+            )
         self._count += 1
         control = change.control(ControlId(root=f"control-{self._count}"))
         return self._recorded(control, change.text, now_at)
@@ -313,15 +339,27 @@ class _Change:
 
 
 def _is_held(entry: InboxEntry, control: ControlInput) -> bool:
-    """Whether ``control``, which core holds under the entry's identity, is the entry's request.
-
-    Core records the action, a stop's mode and the digest of a steer's text; a request that
-    differs in any of them reuses the id for a different control.
-    """
+    """Whether ``control``, which core holds under the entry's identity, is the entry's request."""
     try:
         request = CONTROL_REQUEST.validate_json(entry.payload)
     except ValidationError:
         return False
+    return _records(control, request)
+
+
+def _held_as(core: CoreState, request: ControlRequest) -> bool | None:
+    """Whether core holds ``request`` under its id: None if nothing, False if another control."""
+    identity = _identity(request.control_id)
+    control = next((c for c in core.run.controls if c.control_id == identity), None)
+    return None if control is None else _records(control, request)
+
+
+def _records(control: ControlInput, request: ControlRequest) -> bool:
+    """Whether ``control`` records ``request``.
+
+    Core records the action, a stop's mode and the digest of a steer's text; a request that
+    differs in any of them reuses the id for a different control.
+    """
     match request:
         case SteerRequest(text=text):
             digest = hashlib.sha256(text.encode()).hexdigest()

@@ -108,6 +108,7 @@ def control_main(
         )
         project = Project.open(arguments.project or cwd)
         project.state.load_run(arguments.run_id)
+        project.state.require_local_run(arguments.run_id)
         project.state.control_inbox(arguments.run_id).post(
             request.control_id, request.model_dump_json().encode()
         )

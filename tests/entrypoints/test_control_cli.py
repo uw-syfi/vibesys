@@ -1,6 +1,6 @@
 """``vibesys control`` posts a validated request that the run then applies.
 
-The command writes to the run's file inbox in the project; a run's control bridge reading
+The command writes to the run's file inbox in its machine-local state; a run's control bridge reading
 that inbox records the request as its own control. Invalid requests and unknown runs are
 refused before anything is written.
 """
@@ -45,6 +45,8 @@ def _project_with_run(root: Path) -> str:
         now=datetime(2026, 1, 1, tzinfo=UTC),
     )
     project.state.create_run(manifest)
+    with project.state.exclusive_run_host(manifest.run_id):  # the run started on this machine
+        pass
     return manifest.run_id
 
 
@@ -124,6 +126,23 @@ def test_a_pending_id_cannot_be_posted_again_with_another_request(tmp_path: Path
     assert "different request" in err
     (entry,) = Project.open(tmp_path).state.control_inbox(run_id).pending()
     assert b"prefer latency" in entry.payload
+
+
+def test_a_control_under_another_state_home_is_refused_and_names_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: posting under another state home exited 0 and the run never saw it."""
+    (tmp_path / "project").mkdir()
+    run_id = _project_with_run(tmp_path / "project")
+    other = tmp_path / "other-home"
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(other))
+
+    status, out, err = _control(tmp_path / "project", [run_id, "stop"])
+
+    assert (status, out) == (2, "")
+    assert str(other.resolve()) in err
+    assert "VIBESYS_STATE_HOME" in err
+    assert not any(other.rglob("*.json"))
 
 
 def test_fallback_and_a_capacity_wait_cannot_be_combined(tmp_path: Path) -> None:

@@ -27,6 +27,8 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 from vs_core.api import StopMode
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from vs_runtime._run_control import RunControlChannel
     from vs_sim.api import Threads
 
@@ -159,6 +161,19 @@ class ChannelRunControl:
         self._channel = channel
         self._lock = threads.lock()
         self._answered: dict[str, tuple[ControlRequest, ControlAck]] = {}
+        self._recorded: Callable[[ControlRequest], bool | None] = _nothing_recorded
+
+    def recall(self, recorded: Callable[[ControlRequest], bool | None]) -> None:
+        """Answer ids the run recorded before this process, as ``recorded`` says.
+
+        ``recorded(request)`` is None when the run holds no control under the request's id,
+        True when it holds this request, and False when it holds a different one. The run
+        loop installs it at each control poll, so after a restart a resent control replays
+        its ack without touching the channel, and a different one under its id conflicts,
+        as within one process.
+        """
+        with self._lock:
+            self._recorded = recorded
 
     def submit(self, request: ControlRequest) -> ControlAck:
         """Apply one control request once per ``control_id`` and say what became of it."""
@@ -169,7 +184,19 @@ class ChannelRunControl:
                 if first == request:
                     return ack
                 return self._ack(request, ControlStatus.CONFLICT)
-            ack = self._apply(request)
+            match self._recorded(request):
+                case True:
+                    # Applied by an earlier process: the status it was answered with then.
+                    status = (
+                        ControlStatus.CONSUMED
+                        if isinstance(request, ResumeRequest)
+                        else ControlStatus.PENDING
+                    )
+                    ack = self._ack(request, status)
+                case False:
+                    return self._ack(request, ControlStatus.CONFLICT)
+                case None:
+                    ack = self._apply(request)
             self._answered[request.control_id] = (request, ack)
             return ack
 
@@ -228,6 +255,12 @@ class ChannelRunControl:
     def stop(self, mode: StopMode = StopMode.DRAIN) -> None:
         """Request the run end; draining is the default at this edge."""
         self._channel.request_stop(mode)
+
+
+def _nothing_recorded(request: ControlRequest) -> bool | None:
+    """Before the run loop's first poll: no control is known to be recorded."""
+    del request
+    return None
 
 
 __all__ = [

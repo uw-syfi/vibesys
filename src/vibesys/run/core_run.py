@@ -143,6 +143,7 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
         inbox=None
         if services.control_inbox is None
         else OperatorInbox(services.control_inbox, integration.run_control),
+        control=integration.run_control,
     )
     loop = CoreRunHost(shell, delivery, services.clock, controls, workspaces=host.workspaces)
     config = _loop_config(services.run_id, host.timing.lease_seconds)

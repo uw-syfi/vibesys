@@ -73,6 +73,30 @@ class FrameworkWrites:
         with self._lock:
             self._files[key] = frozenset({incoming})
 
+    @contextmanager
+    def creating(self, path: Path, contents: bytes) -> Iterator[None]:
+        """Cover the framework creating *path* with *contents*, unless it already exists.
+
+        Like ``publishing``, except that a body raising ``FileExistsError`` created nothing:
+        the file there is not the framework's write, so the record is left as it was.
+        """
+        key = _key(path)
+        incoming = _digest(contents)
+        with self._lock:
+            outgoing = self._files.get(key)
+            self._files[key] = (outgoing or frozenset()) | {incoming}
+        try:
+            yield
+        except FileExistsError:
+            with self._lock:
+                if outgoing is None:
+                    self._files.pop(key, None)
+                else:
+                    self._files[key] = outgoing
+            raise
+        with self._lock:
+            self._files[key] = frozenset({incoming})
+
     def adopt(self, path: Path) -> None:
         """Record the regular file at *path*, with the bytes it holds now, as the framework's.
 
