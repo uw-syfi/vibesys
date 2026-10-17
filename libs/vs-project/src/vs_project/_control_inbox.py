@@ -8,15 +8,22 @@ crashed, is applied after the run resumes. The request's own id names its file, 
 is never removed: posting the same request again is one request, and an id, once posted,
 never names another request.
 
+Requests apply in the order they were posted, whatever their ids: each post claims the next
+free number of a sequence, which only an exclusive file creation hands out, so two posters
+on any processes never share one and a post that returned is ordered before any post that
+starts after it.
+
 The inbox stores opaque bytes; what a request says is the run's business
 (``vs_runtime``'s ``ControlRequest``). A request the run cannot apply is marked rejected with
-the reason, never silently dropped.
+the reason, never silently dropped. When the run ends it closes its inbox: a post is then
+refused, and a request it never applied reads as rejected.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Protocol
 
@@ -29,8 +36,11 @@ _REQUEST_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 _POSTED = PurePosixPath("inbox")
 _SETTLED = PurePosixPath("settled")
 _REJECTED = PurePosixPath("rejected")
+_ORDER = PurePosixPath("order")
+_CLOSED = PurePosixPath("closed")
 _SUFFIX = ".json"
 _REASON_SUFFIX = ".reason"
+_SEQUENCE = re.compile(r"[0-9]{12}")
 
 
 def validate_request_id(request_id: str) -> str:
@@ -46,6 +56,32 @@ def validate_request_id(request_id: str) -> str:
         )
         raise ProjectStateError(message)
     return request_id
+
+
+class InboxClosedError(ProjectStateError):
+    """The run has ended and closed its inbox: no request posted now can apply."""
+
+
+class RequestState(StrEnum):
+    """What became of one posted request."""
+
+    PENDING = "pending"
+    """The run has not applied it yet; it applies at the run's next control poll."""
+    APPLIED = "applied"
+    REJECTED = "rejected"
+
+
+@dataclass(frozen=True)
+class RequestStatus:
+    """One request's state, and the reason for a rejected one."""
+
+    state: RequestState
+    reason: str | None = None
+
+
+def ended_unapplied(reason: str) -> str:
+    """Why a request the run never applied before it ended is rejected."""
+    return f"the run ended before applying it: {reason}"
 
 
 @dataclass(frozen=True)
@@ -72,25 +108,44 @@ class RejectedEntry:
 
 
 class ControlInbox(Protocol):
-    """Durable requests for one run, in the order of their ids.
+    """Durable requests for one run, in the order they were posted.
 
     ``post`` is idempotent per id and refuses a different payload under an id ever posted,
-    pending or not. ``pending`` lists what has been neither settled nor rejected, ordered by
-    id; it never fails on one bad entry. ``settle`` marks a request the run applied;
+    pending or not. ``pending`` lists what has been neither settled nor rejected, in posting
+    order; it never fails on one bad entry. ``settle`` marks a request the run applied;
     ``reject`` marks one it could not apply, with the reason. Both are idempotent, neither
     touches another request, and a settled or rejected request is never pending again.
+    ``close`` records that the run ended; ``status`` says what became of one request.
     """
 
     def post(self, request_id: str, payload: bytes) -> None:
-        """Hold ``payload`` as the request ``request_id``.
+        """Hold ``payload`` as the request ``request_id``, ordered after every earlier post.
 
-        Posting the same payload again is one request; a different payload under an id
-        already posted raises ``ProjectStateError``, also when two posts race.
+        Posting the same payload again is one request, in its first place; a different
+        payload under an id already posted raises ``ProjectStateError``, also when two posts
+        race. Raises ``InboxClosedError`` when the run has ended: before writing anything
+        when it had ended already, and after writing when it ended during the post (the
+        request then reads as rejected).
         """
         ...
 
     def pending(self) -> tuple[InboxEntry, ...]:
-        """Every request neither settled nor rejected, ordered by id."""
+        """Every request neither settled nor rejected, in posting order.
+
+        An entry no post ordered (one whose post died before claiming its place, or one the
+        inbox cannot read) comes after every ordered one, by id.
+        """
+        ...
+
+    def status(self, request_id: str) -> RequestStatus | None:
+        """What became of ``request_id``, or None when it was never posted.
+
+        After the run closed the inbox, a request it never marked reads as rejected.
+        """
+        ...
+
+    def close(self, reason: str) -> None:
+        """Record that the run ended (``reason``); the first reason stays."""
         ...
 
     def settle(self, request_id: str) -> None:
@@ -124,16 +179,28 @@ class FileControlInbox:
         self._namespace = namespace
 
     def post(self, request_id: str, payload: bytes) -> None:
-        """Create the request's file, unless its id already holds a different request."""
-        path = _POSTED / f"{validate_request_id(request_id)}{_SUFFIX}"
-        if self._namespace.create_bytes(path, payload):
-            return
-        if self._namespace.read_bytes(path) != payload:
+        """Create the request's file and claim its place, unless the run has ended.
+
+        The run's end is checked before the write and again after it. An ending run settles
+        or rejects every request it read, writes its closed marker, then sets aside what was
+        posted meanwhile; so a post that sees no marker afterwards is read by the run, now or
+        when it resumes, and one that sees it was applied before the end or never will be.
+        """
+        name = validate_request_id(request_id)
+        _refuse_closed(self._closed(), name, written=False)
+        path = _POSTED / f"{name}{_SUFFIX}"
+        if not self._namespace.create_bytes(path, payload) and (
+            self._namespace.read_bytes(path) != payload
+        ):
             message = f"control request {request_id!r} was already posted with a different request"
             raise ProjectStateError(message)
+        self._claim_place(name)
+        closed = self._closed()
+        if closed is not None and self.status(name) != RequestStatus(RequestState.APPLIED):
+            _refuse_closed(closed, name, written=True)
 
     def pending(self) -> tuple[InboxEntry, ...]:
-        """Read every unmarked request file, ordered by id.
+        """Read every unmarked request file, in posting order.
 
         An entry that cannot be read is listed with the reason, so one bad entry never hides
         the others or fails the run.
@@ -158,7 +225,57 @@ class FileControlInbox:
                 continue
             if payload is not None:
                 entries.append(InboxEntry(request_id, payload))
-        return tuple(sorted(entries, key=lambda entry: entry.request_id))
+        places = self._places()
+        return tuple(sorted(entries, key=lambda entry: _posting_key(places, entry.request_id)))
+
+    def status(self, request_id: str) -> RequestStatus | None:
+        """Read the request's markers; an unmarked one is pending until the run ends."""
+        name = validate_request_id(request_id)
+        if name not in {
+            _request_id_of(entry) for entry in self._namespace.entries(_POSTED, list_symlinks=True)
+        }:
+            return None
+        if name in self._namespace.entries(_SETTLED):
+            return RequestStatus(RequestState.APPLIED)
+        reason = self._namespace.read_bytes(_REJECTED / f"{name}{_REASON_SUFFIX}")
+        if reason is not None:
+            return RequestStatus(RequestState.REJECTED, reason.decode(errors="replace"))
+        closed = self._closed()
+        if closed is not None:
+            return RequestStatus(RequestState.REJECTED, ended_unapplied(closed))
+        return RequestStatus(RequestState.PENDING)
+
+    def close(self, reason: str) -> None:
+        """Write the closed marker with ``reason``; the first reason stays."""
+        self._namespace.create_bytes(_CLOSED, reason.encode())
+
+    def _closed(self) -> str | None:
+        reason = self._namespace.read_bytes(_CLOSED)
+        return None if reason is None else reason.decode(errors="replace")
+
+    def _places(self) -> dict[str, int]:
+        """Each ordered request's place: the first number it claimed."""
+        places: dict[str, int] = {}
+        for entry in sorted(self._namespace.entries(_ORDER)):
+            if not _SEQUENCE.fullmatch(entry):
+                continue
+            held = self._namespace.read_bytes(_ORDER / entry)
+            if held is not None:
+                places.setdefault(held.decode(errors="replace"), int(entry))
+        return places
+
+    def _claim_place(self, name: str) -> None:
+        """Claim the next free number for ``name``, unless it holds one already.
+
+        Each failed claim means another post took that number first, so the loop ends after
+        at most one step per concurrent post.
+        """
+        places = self._places()
+        if name in places:
+            return
+        number = max(places.values(), default=0) + 1
+        while not self._namespace.create_bytes(_ORDER / f"{number:012d}", name.encode()):
+            number += 1
 
     def settle(self, request_id: str) -> None:
         """Write the request's settled marker."""
@@ -198,8 +315,10 @@ class FakeControlInbox:
     def __init__(self) -> None:
         """Start empty."""
         self._posted: dict[str, bytes | InboxEntry] = {}
+        self._places: dict[str, int] = {}
         self._settled: set[str] = set()
         self._rejected: dict[str, str] = {}
+        self._closed: str | None = None
 
     def hold_unreadable(self, request_id: str, reason: str) -> None:
         """Hold an entry the run cannot read, as a directory in a file inbox would be."""
@@ -208,21 +327,43 @@ class FakeControlInbox:
         )
 
     def post(self, request_id: str, payload: bytes) -> None:
-        """Hold the request, unless its id already holds a different one."""
-        held = self._posted.setdefault(validate_request_id(request_id), payload)
+        """Hold the request in its place, unless its id holds a different one or the run ended."""
+        name = validate_request_id(request_id)
+        _refuse_closed(self._closed, name, written=False)
+        held = self._posted.setdefault(name, payload)
         if isinstance(held, InboxEntry):
             raise ProjectStateError(held.unreadable or "unreadable")
         if held != payload:
             message = f"control request {request_id!r} was already posted with a different request"
             raise ProjectStateError(message)
+        self._places.setdefault(name, len(self._places) + 1)
 
     def pending(self) -> tuple[InboxEntry, ...]:
-        """The unmarked requests, ordered by id."""
-        return tuple(
+        """The unmarked requests, in posting order."""
+        found = [
             held if isinstance(held, InboxEntry) else InboxEntry(key, held)
-            for key, held in sorted(self._posted.items())
+            for key, held in self._posted.items()
             if key not in self._settled and key not in self._rejected
-        )
+        ]
+        return tuple(sorted(found, key=lambda entry: _posting_key(self._places, entry.request_id)))
+
+    def status(self, request_id: str) -> RequestStatus | None:
+        """The request's state; an unmarked one is pending until the run ends."""
+        name = validate_request_id(request_id)
+        if name not in self._posted:
+            return None
+        if name in self._settled:
+            return RequestStatus(RequestState.APPLIED)
+        if name in self._rejected:
+            return RequestStatus(RequestState.REJECTED, self._rejected[name])
+        if self._closed is not None:
+            return RequestStatus(RequestState.REJECTED, ended_unapplied(self._closed))
+        return RequestStatus(RequestState.PENDING)
+
+    def close(self, reason: str) -> None:
+        """Record the run's end; the first reason stays."""
+        if self._closed is None:
+            self._closed = reason
 
     def settle(self, request_id: str) -> None:
         """Mark the request settled."""
@@ -242,6 +383,25 @@ class FakeControlInbox:
         return tuple(found)
 
 
+def _refuse_closed(reason: str | None, request_id: str, *, written: bool) -> None:
+    if reason is None:
+        return
+    if written:
+        message = (
+            f"control request {request_id!r} was written as the run ended ({reason}); "
+            "it will not apply"
+        )
+    else:
+        message = f"the run has ended ({reason}); control request {request_id!r} was not posted"
+    raise InboxClosedError(message)
+
+
+def _posting_key(places: dict[str, int], request_id: str) -> tuple[int, int, str]:
+    """Ordered requests by their place, then any without one, by id."""
+    place = places.get(request_id)
+    return (0, place, "") if place is not None else (1, 0, request_id)
+
+
 def _request_id_of(name: str) -> str | None:
     """The id a pending or rejected file holds, or None for any other file."""
     if not name.endswith(_SUFFIX):
@@ -254,7 +414,11 @@ __all__ = [
     "ControlInbox",
     "FakeControlInbox",
     "FileControlInbox",
+    "InboxClosedError",
     "InboxEntry",
     "RejectedEntry",
+    "RequestState",
+    "RequestStatus",
+    "ended_unapplied",
     "validate_request_id",
 ]

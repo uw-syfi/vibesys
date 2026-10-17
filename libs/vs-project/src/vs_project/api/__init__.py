@@ -13,8 +13,12 @@ from vs_project._cli_git_repository import CliGitRepository
 from vs_project._control_inbox import (
     ControlInbox,
     FileControlInbox,
+    InboxClosedError,
     InboxEntry,
     RejectedEntry,
+    RequestState,
+    RequestStatus,
+    ended_unapplied,
     validate_request_id,
 )
 from vs_project._git_backend import (
@@ -180,6 +184,7 @@ __all__ = [
     "GitTimeoutError",
     "GitTracker",
     "GitTrackerEvents",
+    "InboxClosedError",
     "InboxEntry",
     "InvalidTaskDefinitionError",
     "InvalidTaskNameError",
@@ -207,6 +212,8 @@ __all__ = [
     "RecordedRuns",
     "RejectedEntry",
     "RepositoryLocation",
+    "RequestState",
+    "RequestStatus",
     "Revision",
     "RunEnvironmentRecord",
     "RunExecutionRecord",
@@ -238,6 +245,7 @@ __all__ = [
     "UnsafeProjectPathError",
     "atomic_write_bytes",
     "decode_state_document",
+    "ended_unapplied",
     "ensure_private_directory",
     "generate_run_id",
     "git_repositories",
