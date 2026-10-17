@@ -229,6 +229,41 @@ def test_a_rate_limit_report_reaches_the_wire_journal_under_the_active_execution
     assert update.data.exhausted is True
 
 
+@pytest.mark.parametrize(
+    ("event_type", "note", "line"),
+    [
+        (CoreEventType.STEER_CONSUMED, "", "/steer"),
+        (
+            CoreEventType.STEER_CONSUMED,
+            "interrupt steer 1 reached the next turn: no running turn kept it",
+            "/steer: interrupt steer 1 reached the next turn: no running turn kept it",
+        ),
+        (CoreEventType.STEER_DELIVERED_MID_TURN, "", "/steer --interrupt"),
+    ],
+)
+def test_where_a_steer_reached_a_turn_reaches_the_wire_journal_with_its_reason(
+    tmp_path: Path, event_type: CoreEventType, note: str, line: str
+) -> None:
+    """The operator reads in the journal why an interrupt-mode steer reached the next turn."""
+    parts = build_server_parts(tmp_path)
+    execution_id = _emit_execution_started(
+        parts, "round-1", _execution_started_data("implementer", "work")
+    )
+
+    parts.core_events.emit(
+        event_type,
+        note,
+        agent_kind="implementer",
+        round_label="round-1",
+        execution_id=execution_id,
+    )
+
+    [control] = [e for e in parts.journal.read() if e.type is EventType.CONTROL]
+    assert control.text == line
+    assert control.status is EventStatus.CONSUMED
+    assert control.execution_id == execution_id
+
+
 def test_a_quota_pause_reaches_the_wire_journal_under_the_active_execution(
     tmp_path: Path,
 ) -> None:
