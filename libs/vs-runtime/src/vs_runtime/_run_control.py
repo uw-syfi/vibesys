@@ -162,7 +162,10 @@ class RunControlChannel(Protocol):
         ...
 
     def wait_while_paused(self) -> None:
-        """Park while paused and land a stop that releases the wait."""
+        """Park while paused and land a stop that releases the wait.
+
+        The run's timed resume (see :meth:`wait_resumed`) ends the wait when it comes due.
+        """
         ...
 
     def wait_resumed(self, timeout: float, *, ended: Callable[[], bool] = _never) -> PauseWake:
@@ -247,7 +250,11 @@ class RunControlChannel(Protocol):
         ...
 
     def pause_requested(self) -> bool:
-        """Return whether a pause is pending, without parking on it."""
+        """Return whether a pause is pending, without parking on it.
+
+        The run loop polls it, so it resumes the run first when the run's timed resume
+        (see :meth:`wait_resumed`) is due, even when no turn waits on it any more.
+        """
         ...
 
     def on_stop_requested(self, listener: Callable[[], object]) -> Callable[[], None]:
