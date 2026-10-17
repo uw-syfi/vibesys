@@ -62,16 +62,14 @@ __all__ = ["checkpoint_input", "reused_evidence_complete", "reused_record", "reu
 _RUN_PURPOSES = frozenset({"local-validation", "official"})
 """Purposes of runs that measure the task's evaluation on a candidate (not a profile)."""
 
-_PROOF_KINDS = frozenset({EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK})
 
+def _official_kind(source: EvidenceRef) -> EvidenceKind | None:
+    """The kind an official record must take when it re-reads ``source``.
 
-def _official_kinds(source: EvidenceKind) -> frozenset[EvidenceKind]:
-    """The kinds an official record may take when it re-reads a record of kind ``source``.
-
-    An agent's record is ``local-validation`` whatever stage it read, so it stands for
-    either proof kind; an official source's record keeps its kind.
+    An agent's record is ``local-validation`` whatever stage it read and names the kind of its
+    stage (`EvidenceRef.proof_kind`); an official source's record keeps its kind.
     """
-    return _PROOF_KINDS if source is EvidenceKind.LOCAL_VALIDATION else frozenset({source})
+    return source.proof_kind if source.kind is EvidenceKind.LOCAL_VALIDATION else source.kind
 
 
 _CONCLUSIVE = frozenset({ObservationStatus.SUCCEEDED, ObservationStatus.FAILED})
@@ -201,8 +199,8 @@ def reused_record(
 
     A new run's record names no earlier run. A reusing submission's record names the run it
     re-reads and carries one of that run's evidence ids with its status and artifacts, and
-    its kind is the one the source record's kind maps to (an agent's ``local-validation``
-    record becomes a correctness or a benchmark record).
+    its kind is exactly the one its source record maps to (an agent's ``local-validation``
+    record becomes the correctness or benchmark record its stage names).
     """
     reuses = job.reuses if isinstance(job, OwnedJob) else None
     if evidence.reused_from != reuses:
@@ -215,7 +213,7 @@ def reused_record(
             item.evidence_id == evidence.evidence_id
             and item.status == evidence.status
             and item.artifacts == evidence.artifacts
-            and evidence.kind in _official_kinds(item.kind)
+            and evidence.kind == _official_kind(item)
             for item in source.evidence
         )
         for source in state.jobs

@@ -801,14 +801,24 @@ def _resource_taken(state: EvaluationState, observation: Observation, owner: Req
 
 
 def _canonical_failure(
-    observation: Observation, claim: MeasurementFailure | None, *, has_facts: bool
+    observation: Observation,
+    claim: MeasurementFailure | None,
+    *,
+    has_facts: bool,
+    reuse_incomplete: bool = False,
 ) -> MeasurementFailure | None:
     """Restrict the caller's failure claim to what the committed facts allow.
 
     A classification can only narrow what the canonical observation proves. It never
     grants retry authority after execution succeeded, never contradicts committed
     scientific facts, and never exists before a conclusive terminal observation.
+
+    The one claim of its own is a reusing job that ended without all of its source's records
+    (``reuse_incomplete``): the result says nothing about the candidate, so it is an
+    infrastructure failure whatever the observation's status, and a retry measures afresh.
     """
+    if reuse_incomplete and _conclusive(observation):
+        return MeasurementFailure.INFRASTRUCTURE
     if claim is None or not _conclusive(observation):
         return None
     if observation.accepted:
@@ -828,7 +838,11 @@ def _conclusive(observation: Observation | None) -> bool:
 
 
 def _submission_receipt(
-    budget: SubmissionBudget, event: MeasurementSubmissionObserved, source: RequestRecord
+    budget: SubmissionBudget,
+    event: MeasurementSubmissionObserved,
+    source: RequestRecord,
+    *,
+    reuse_incomplete: bool = False,
 ) -> Verdict[SubmissionBudget]:
     matches = tuple(
         r
@@ -848,7 +862,10 @@ def _submission_receipt(
         update={
             "observation": event.observation,
             "failure": _canonical_failure(
-                event.observation, event.failure, has_facts=source.evaluation_result is not None
+                event.observation,
+                event.failure,
+                has_facts=source.evaluation_result is not None,
+                reuse_incomplete=reuse_incomplete,
             ),
         }
     )
@@ -1234,10 +1251,6 @@ def _store_evidence(
             refused = True
         elif incoming not in accepted:
             accepted.append(incoming)
-    if not reused_evidence_complete(
-        state, job, tuple(accepted), terminal=event.observation.terminal
-    ):
-        refused = True
     return tuple(accepted), tuple(ledger), refused
 
 
@@ -1256,6 +1269,9 @@ def _job_observed(
     if observation.resource_id is None:
         return AreaChange(state=state)
     accepted, ledger, refused = _store_evidence(state, job, event)
+    incomplete = not reused_evidence_complete(
+        state, job, accepted, terminal=event.observation.terminal
+    )
     previous = (
         ObservedJobFacts(
             resource_id=observation.resource_id,
@@ -1298,7 +1314,7 @@ def _job_observed(
         event.failure if isinstance(event, JobObserved) else None,
         has_facts=event.evaluation_result is not None,
     )
-    state = _job_budget(state, context, updated, claim)
+    state = _job_budget(state, context, updated, claim, reuse_incomplete=incomplete)
     wake = ContinuationJobsChanged(
         resource_id=observation.resource_id, observation=observation, previous=previous
     )
@@ -1309,7 +1325,15 @@ def _job_observed(
     if _conclusive(observation):
         newly = tuple(e for e in accepted if e not in job.evidence)
         # A refused evidence id is reported as an unclassified failure, never hidden.
-        failure = MeasurementFailure.UNKNOWN if refused else claim
+        # A reused result short of its source's records says nothing of the candidate, so it
+        # is the machinery's failure and the budget admits one fresh measurement.
+        failure = (
+            MeasurementFailure.UNKNOWN
+            if refused
+            else MeasurementFailure.INFRASTRUCTURE
+            if incomplete
+            else claim
+        )
         if reported and not _conclusive(job.observation):
             events = (
                 *events,
@@ -1323,7 +1347,7 @@ def _job_observed(
                     operator_diagnostic=event.operator_diagnostic[-MEASUREMENT_DIAGNOSTIC_LIMIT:],
                 ),
             )
-        elif reported and (newly or refused):
+        elif reported and (newly or refused or incomplete):
             # Late evidence is published once, as the delta, never replayed or dropped.
             events = (
                 *events,
@@ -1568,6 +1592,8 @@ def _job_budget(
     context: EvaluationContext,
     job: OwnedJob | RegisteredOwnedJob,
     claim: MeasurementFailure | None = None,
+    *,
+    reuse_incomplete: bool = False,
 ) -> EvaluationState:
     if job.observation is None:
         return state
@@ -1595,6 +1621,7 @@ def _job_budget(
             failure=(receipt.failure if receipt is not None else None) or claim,
         ),
         source,
+        reuse_incomplete=reuse_incomplete,
     )
     return (
         state.model_copy(

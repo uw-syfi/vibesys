@@ -210,6 +210,15 @@ class EvidenceRef(Value):
     checked carries the same evidence id and status (`vs_core._measurement_reuse`).
     """
 
+    proof_kind: EvidenceKind | None = Field(default=None, exclude_if=unset)
+    """On a ``local-validation`` record, the proof kind its stage would have in an official run.
+
+    An agent's record is ``local-validation`` whatever stage it read, so it carries the kind of
+    its stage here (correctness for the accuracy stage, benchmark for the others). Core
+    answers an official measurement from it only with a record of exactly this kind, so a
+    reused result cannot swap two stages' kinds. None on any other record.
+    """
+
     @property
     def key(self) -> EvidenceKey:
         """Run-wide identity: evidence IDs are unique only within a source request."""
@@ -237,6 +246,12 @@ class EvidenceRef(Value):
         if self.purpose == "local-validation" and self.kind in _PROOF_KINDS:
             raise ContractValidationError(
                 "kind", "a local-validation record cannot be correctness or benchmark proof"
+            )
+        if self.proof_kind is not None and (
+            self.kind is not EvidenceKind.LOCAL_VALIDATION or self.proof_kind not in _PROOF_KINDS
+        ):
+            raise ContractValidationError(
+                "proof_kind", "only a local-validation record names a correctness or benchmark kind"
             )
         return self
 
