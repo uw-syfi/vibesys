@@ -9,6 +9,15 @@ from hypothesis import strategies as st
 import vs_core.api as core
 
 
+def _control(action: Literal["pause", "resume"]) -> core.ControlInput:
+    identity = core.ControlId(root="control")
+    if action == "pause":
+        return core.ControlInput(
+            control_id=identity, action="pause", owner=core.PauseOwner.OPERATOR
+        )
+    return core.ControlInput(control_id=identity, action="resume", when="now")
+
+
 @given(
     st.sampled_from([core.RunStatus.CLOSING, core.RunStatus.BLOCKED]),
     st.sampled_from(["resume", "pause"]),
@@ -28,7 +37,7 @@ def test_cleanup_status_cannot_resume_or_pause_into_an_admissible_run(
         }
     )
     event = core.RunControlEvent(
-        control=core.ControlInput(control_id=core.ControlId(root="control"), action=action),
+        control=_control(action),
         now_at=10.0,
     )
     with pytest.raises(core.ContractError, match="cleanup"):
@@ -60,7 +69,9 @@ def test_paused_run_with_stop_result_cannot_resume_before_cleanup_finishes() -> 
         }
     )
     event = core.RunControlEvent(
-        control=core.ControlInput(control_id=core.ControlId(root="resume"), action="resume"),
+        control=core.ControlInput(
+            control_id=core.ControlId(root="resume"), action="resume", when="now"
+        ),
         now_at=10.0,
     )
     with pytest.raises(core.ContractError, match="cleanup"):

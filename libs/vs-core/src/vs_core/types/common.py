@@ -795,6 +795,27 @@ class StopMode(StrEnum):
     CANCEL = "cancel"
 
 
+class PauseOwner(StrEnum):
+    """Who paused the run, which decides what may end the pause."""
+
+    OPERATOR = "operator"
+    """The operator holds the run: only the operator's resume ends the hold."""
+    QUOTA = "quota"
+    """A provider quota stop paused the run: the turns that stopped own the pause."""
+
+
+type ResumeWhen = Literal["now", "capacity_returns"]
+"""Resume at once, or once provider capacity should be back."""
+
+
+class RunPause(Value):
+    """Why a paused run is paused, and whether the operator asked it to resume itself."""
+
+    owner: PauseOwner
+    capacity_wait: bool = False
+    """The operator asked the run to resume itself once provider capacity returns."""
+
+
 class ScopeInputTarget(Value):
     """Input for a scope, permitted before any invocation exists."""
 
@@ -859,10 +880,16 @@ class ControlInput(Value):
     """How a steer reaches its target's turns; None is the next turn. Only a steer has one."""
     withdraws: InputId | None = None
     """The standing input a withdraw ends. Exactly a withdraw names one."""
+    owner: PauseOwner | None = None
+    """Who paused the run: given with every pause, and only with a pause."""
+    when: ResumeWhen | None = None
+    """When a resume takes effect: given with every resume, and only with a resume."""
+    fallback: bool = False
+    """A resume that switches the stopped turns to the quota fallback; only an immediate one."""
 
     @model_validator(mode="after")
     def mode_belongs_to_stop(self) -> ControlInput:
-        """Each action carries its own fields: a stop's mode, a steer's target, a withdraw's input."""
+        """Each action carries exactly the fields that say what it does; nothing else."""
         if (self.action == "stop") != (self.mode is not None):
             raise ContractValidationError("mode", "required for stop and only for stop")
         if self.target is not None and self.action != "steer":
@@ -875,6 +902,12 @@ class ControlInput(Value):
             )
         if (self.action == "withdraw") != (self.withdraws is not None):
             raise ContractValidationError("withdraws", "required for withdraw and only for it")
+        if (self.action == "pause") != (self.owner is not None):
+            raise ContractValidationError("owner", "required for pause and only for pause")
+        if (self.action == "resume") != (self.when is not None):
+            raise ContractValidationError("when", "required for resume and only for resume")
+        if self.fallback and self.when != "now":
+            raise ContractValidationError("fallback", "only an immediate resume has a fallback")
         return self
 
 
