@@ -246,13 +246,15 @@ class _ScriptedConversation:
         resumed = self._id is not None
         invocation = transport.next_invocation()
         events = transport.turns[min(invocation, len(transport.turns)) - 1]
+        answer = transport.answers[min(invocation, len(transport.answers)) - 1]
+        # A turn that stops on a capacity limit stops before it reports its steers' fate.
+        stops = isinstance(answer, AgentQuotaError)
         for event in events:
             emit(event)
-            self._answer_steers(emit)
-        self._answer_steers(emit)
+            self._answer_steers(emit, report=not stops)
+        self._answer_steers(emit, report=not stops)
         if self._id is None:
             self._id = transport.new_conversation_id()
-        answer = transport.answers[min(invocation, len(transport.answers)) - 1]
         if isinstance(answer, AgentOutputSchemaError):
             raise agentshim.TurnFailedError(
                 str(answer), kind=agentshim.FailureKind.SCHEMA, detail=answer.detail
@@ -282,12 +284,18 @@ class _ScriptedConversation:
                 raise agentshim.NoRunningTurnError(message)
             self._steered.append(text)
 
-    def _answer_steers(self, emit: Callable[[agentshim.AgentEvent], None]) -> None:
-        """Report each message steered in so far, as the script says, after the event before."""
+    def _answer_steers(self, emit: Callable[[agentshim.AgentEvent], None], *, report: bool) -> None:
+        """Report each message steered in so far, as the script says, after the event before.
+
+        Without ``report`` the provider only acknowledges each: it stops before saying
+        whether the model read them.
+        """
         with self._lock:
             steered, self._steered = self._steered, []
         for text in steered:
             emit(agentshim.SteerDelivered(text=text))
+            if not report:
+                continue
             if self._transport.steering is FakeSteering.REJECTED:
                 emit(agentshim.SteerRejected(text=text, reason="the fake refuses steers"))
             else:

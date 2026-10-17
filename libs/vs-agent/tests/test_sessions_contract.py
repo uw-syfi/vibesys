@@ -20,6 +20,7 @@ from vs_agent.api import (
     AgentInvocationRecord,
     AgentInvocationState,
     AgentOutputSchemaError,
+    AgentQuotaError,
     AgentSessionKey,
     AgentSessionSpec,
     AgentSessionState,
@@ -32,6 +33,7 @@ from vs_agent.api import (
     InvalidResponse,
     InvocationConflictError,
     Pending,
+    QuotaCondition,
     SessionConfigurationError,
     SessionPersistenceError,
     SessionResumeError,
@@ -63,7 +65,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
     from pathlib import Path
 
-    from vs_agent.api import AgentInvocationStore
+    from vs_agent.api import AgentInvocationStore, CapacityStops
     from vs_project.api import StateNamespace
     from vs_prompts.api import RenderedPrompt
     from vs_sim.api.testing import Sim
@@ -882,11 +884,11 @@ def test_a_steer_reaches_no_turn_but_the_running_invocation(harness: _Harness) -
     seen: list[SteerOutcome] = []
 
     def during_turn() -> None:
-        seen.append(harness.sessions.steer(KEY, "idle", "text", on_rejected=lambda: None))
+        seen.append(harness.sessions.steer(KEY, "idle", "text", steer_id="s1"))
 
     harness.boundary.effect = during_turn
     assert isinstance(harness.sessions.resume(KEY, harness.message, "busy"), Completed)
-    after = harness.sessions.steer(KEY, "busy", "text", on_rejected=lambda: None)
+    after = harness.sessions.steer(KEY, "busy", "text", steer_id="s1")
     assert seen == [SteerOutcome.NO_RUNNING_TURN]
     assert after is SteerOutcome.NO_RUNNING_TURN
 
@@ -904,17 +906,15 @@ def test_a_steer_to_the_running_invocation_is_answered_by_its_provider(
     harness: _Harness,
 ) -> None:
     seen: list[SteerOutcome] = []
-    rejected: list[str] = []
 
     def during_turn() -> None:
-        seen.append(
-            harness.sessions.steer(KEY, "busy", "text", on_rejected=lambda: rejected.append("x"))
-        )
+        seen.append(harness.sessions.steer(KEY, "busy", "text", steer_id="s1"))
 
     harness.boundary.effect = during_turn
-    assert isinstance(harness.sessions.resume(KEY, harness.message, "busy"), Completed)
+    result = harness.sessions.resume(KEY, harness.message, "busy")
+    assert isinstance(result, Completed)
     assert seen == [_STEERED[harness.implementation]]
-    assert rejected == []
+    assert result.result.refused_steers == ()
 
 
 @pytest.mark.parametrize("method", ["cancel", "steer", "release"])
@@ -922,7 +922,7 @@ def test_cancel_and_release_reject_a_nondurable_key(harness: _Harness, method: s
     key = AgentSessionKey(SessionScope.ROLE, "worker")
     call = {
         "cancel": lambda: harness.sessions.cancel(key, "inv"),
-        "steer": lambda: harness.sessions.steer(key, "inv", "text", on_rejected=lambda: None),
+        "steer": lambda: harness.sessions.steer(key, "inv", "text", steer_id="s1"),
         "release": lambda: harness.sessions.release(key),
     }[method]
     with pytest.raises(SessionConfigurationError, match="not durable"):
@@ -961,3 +961,90 @@ def test_a_steerable_fake_hands_back_a_refused_steer_once(
 
     assert rejected == ["back"] * rejections
     assert client.steer("late", on_rejected=lambda: None) is SteerOutcome.NO_RUNNING_TURN
+
+
+@dataclass
+class _ImmediateGate:
+    """A capacity gate that lets every stopped turn go again at once."""
+
+    stops: int = 0
+
+    def wait_for_capacity(
+        self, error: AgentQuotaError, turn: AgentTurnRequest, *, role: str, stops: CapacityStops
+    ) -> None:
+        del error, turn, role, stops
+        self.stops += 1
+
+    def turn_served(self, provider: str, model: str | None) -> None:
+        del provider, model
+
+
+_FATES = {
+    "consumed": (FakeSteering.CONSUMED, False, ()),
+    "refused": (FakeSteering.REJECTED, False, ("s1",)),
+    "quota-stop-then-resent": (FakeSteering.CONSUMED, True, ("s1",)),
+}
+"""How the provider settles a steer it took, and what the turn's result must say: a message
+the provider refused, or never settled before a capacity stop, is in ``refused_steers``."""
+
+
+@pytest.mark.parametrize("factory", [FakeAgentSessions, ClientAgentSessions])
+@pytest.mark.parametrize("fate", sorted(_FATES))
+def test_a_steer_the_provider_took_is_settled_once_by_the_turn_result(
+    tmp_path: Path, factory: type[ClientAgentSessions], fate: str
+) -> None:
+    """Every ``DELIVERED`` steer ends the turn consumed or named in ``refused_steers``, once.
+
+    A quota stop resends the same turn without the message, so the message counts as refused
+    even though the resent turn completes; the completed invocation keeps the answer durably.
+    """
+    steering, stops, refused = _FATES[fate]
+    threads = SimThreads()
+    # The first answer opens the conversation the steered turn continues.
+    answers: tuple[object, ...] = ("opened", "done")
+    if stops:
+        quota = AgentQuotaError("codex", QuotaCondition.QUOTA_EXHAUSTED, "used up")
+        answers = ("opened", quota, "done")
+    outcomes: list[SteerOutcome] = []
+    holder: list[ClientAgentSessions] = []
+
+    def steer_on_first_send(_request: AgentTurnRequest) -> None:
+        if holder and not outcomes:
+            outcomes.append(holder[0].steer(KEY, "busy", "change course", steer_id="s1"))
+
+    provider = FakeProvider(
+        script=FakeTurnScript(answers, steering=steering),  # type: ignore[arg-type]
+        on_turn=steer_on_first_send,
+        threads=threads,
+    )
+    client = AgentClient(provider, provider="codex", clock=ManualClock(), threads=threads)
+    gate = _ImmediateGate()
+    client.set_capacity_gate(gate)
+    spec = AgentSessionSpec(
+        role="implementer",
+        provider="codex",
+        workspace=tmp_path,
+        policy=AgentExecutionPolicy(require_enforcement=False),
+    )
+    client.run(session_spec=spec, turn=AgentTurnRequest(message="first"), session_key=KEY)
+    sessions = factory(client, FakeAgentInvocationStore(), threads=threads)
+    sessions.bind(
+        KEY,
+        spec,
+        AgentTurnRequest(
+            message="",
+            instructions="",
+            expected_provider_session_id=client.provider_session_id(KEY),
+        ),
+    )
+    holder.append(sessions)
+    (tmp_path / "message.j2").write_text("{{ content }}", encoding="utf-8")
+    message = TemplateRenderer(tmp_path).render_template("message.j2", content="work")
+    result = sessions.resume(KEY, message, "busy")
+    client.close()
+
+    assert outcomes == [SteerOutcome.DELIVERED]
+    assert gate.stops == int(stops)
+    assert isinstance(result, Completed)
+    assert result.result.refused_steers == refused
+    assert sessions.inspect(KEY, "busy") == result
