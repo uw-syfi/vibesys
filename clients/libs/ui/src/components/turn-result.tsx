@@ -12,8 +12,8 @@ import {useSlot} from './windowing.js';
  * What a turn ends with, laid out to be reviewed: a `label` and the author, a large `headline`
  * (a plan's idea title), its choices as chips, a `context` line (what it builds on, a link when it
  * can be opened), then `sections` in reading order, text in full (wrapped, never cut) and lists as
- * lists. The fields of `more` are one press away behind "Show all fields", with a "Raw" button for
- * the reply as the JSON it came as. The caller decides which fields lead; this draws them.
+ * lists, then every field of `more` after them, with a "Raw" button for the reply as the JSON it
+ * came as. The caller decides which fields lead; this draws them.
  */
 export function TurnResult(props: {
   readonly label: string;
@@ -32,7 +32,6 @@ export function TurnResult(props: {
   readonly raw: string;
 }): JSX.Element {
   const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
-  const [all, setAll] = useState(false);
   const [raw, setRaw] = useState(false);
   const flip = (path: string): void => {
     const next = new Set(opened);
@@ -76,33 +75,18 @@ export function TurnResult(props: {
           )}
           <ReplyFields fields={props.sections} path="" reading={{opened, flip}} />
           {props.more.length === 0 ? null : (
-            <>
-              <span>
-                <Button
-                  size="sm"
-                  variant="quiet"
-                  text={all ? 'Show fewer fields' : `Show all fields (${props.more.length} more)`}
-                  expanded={all}
-                  press={() => setAll(!all)}
-                />
-              </span>
-              {all ? (
-                <ReplyFields fields={props.more} path="more" reading={{opened, flip}} />
-              ) : null}
-            </>
+            <ReplyFields fields={props.more} path="more" reading={{opened, flip}} />
           )}
-          {all ? (
-            <span>
-              <Button
-                size="sm"
-                variant="quiet"
-                text="Raw"
-                expanded={raw}
-                press={() => setRaw(!raw)}
-              />
-            </span>
-          ) : null}
-          {raw && all ? <Code label="Raw" text={props.raw} /> : null}
+          <span>
+            <Button
+              size="sm"
+              variant="quiet"
+              text="Raw"
+              expanded={raw}
+              press={() => setRaw(!raw)}
+            />
+          </span>
+          {raw ? <Code label="Raw" text={props.raw} /> : null}
         </Stack>
       </Card>
     </div>

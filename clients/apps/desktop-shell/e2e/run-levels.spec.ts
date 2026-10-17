@@ -684,10 +684,9 @@ test('a live turn keeps its scroll position and its element as events arrive', a
   await emit([turnReplyEvent('op:w6-turn', sequence)]);
   const turn = page.getByRole('region', {name: 'Agent turn'});
 
-  // Thinking and text come first and the reply is compact; no Raw toggle stands in the way.
+  // Thinking and text come first, and the reply shows every one of its fields, with no collapse.
   await expect(turn).toContainText('Said number 11');
-  await expect(turn.getByRole('button', {name: /Show all fields/})).toBeVisible();
-  await expect(turn.getByRole('button', {name: 'Raw'})).toHaveCount(0);
+  await expect(turn.getByRole('button', {name: /Show all fields/})).toHaveCount(0);
   await expect(turn.locator('.vs-thought strong').first()).toBeVisible();
   expect(await turn.evaluate(element => element.textContent?.includes('**'))).toBe(false);
 

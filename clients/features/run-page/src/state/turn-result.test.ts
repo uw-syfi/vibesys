@@ -207,7 +207,7 @@ describe('the plan an orchestrator turn ends with', () => {
     expect(roadmap?.kind === 'list' && roadmap.items).toEqual(['Lock-free handoff (todo)']);
   });
 
-  test('keeps the less useful fields behind Show all, and none of them in the body', () => {
+  test('lists the less useful fields after the body, and none of them in the body', () => {
     const card = resultOf(world(recorded), 'turn2', 2);
     expect(card?.more.map(each => each.key)).toEqual([
       'hypothesis_id',
@@ -312,7 +312,7 @@ describe('another role’s reply keeps its fields and ends the turn', () => {
     } as never);
   }
 
-  test('puts its choice on a chip, its summary in the body, the rest behind Show all', () => {
+  test('puts its choice on a chip, its summary in the body, the rest after it', () => {
     const w = world([
       chunk(10, 'turn2', 'Working.'),
       implementer({

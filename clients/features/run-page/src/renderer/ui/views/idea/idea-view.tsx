@@ -12,6 +12,7 @@ import {
   EmptyState,
   Fact,
   FactLine,
+  Markdown,
   PickList,
   PickRow,
   Row,
@@ -126,7 +127,7 @@ function Implemented(props: {readonly outcome: ImplementerOutcome}): JSX.Element
         </Text>
         {outcome === null ? null : <Chip label={outcome.label} tone={outcome.tone} dot />}
       </Row>
-      {summary === null ? null : <Text variant="body">{summary}</Text>}
+      {summary === null ? null : <Markdown text={summary} />}
     </Stack>
   );
 }

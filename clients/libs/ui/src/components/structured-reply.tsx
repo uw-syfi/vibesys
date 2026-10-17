@@ -1,6 +1,7 @@
 import {type JSX, useState} from 'react';
 import {Button} from './button.js';
 import {Collapsible} from './collapsible.js';
+import {Markdown} from './markdown.js';
 import {Code} from './message.js';
 import {Chip, type StatusTone} from './status.js';
 import {Text} from './text.js';
@@ -50,7 +51,7 @@ function FieldView(props: {
       return (
         <div className="vs-reply-field">
           <Text variant="section">{field.label}</Text>
-          <div className="vs-message-text">{field.text}</div>
+          <Markdown text={field.text} />
         </div>
       );
     case 'badge':
@@ -75,7 +76,7 @@ function FieldView(props: {
             {field.items.map((item, index) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: the items are a fixed list read from one reply, never reordered.
               <li key={index}>
-                <Text>{item}</Text>
+                <Markdown text={item} />
               </li>
             ))}
           </ul>

@@ -811,20 +811,6 @@ button.vs-crumb:focus-visible {
   font-size: var(--text-body-size);
   line-height: var(--text-body-line);
 }
-.vs-thought p,
-.vs-said p {
-  margin: 0;
-  white-space: pre-line;
-}
-.vs-thought p + p,
-.vs-said p + p {
-  margin-top: var(--space-2);
-}
-.vs-thought code,
-.vs-said code {
-  font-family: var(--text-code-family);
-  font-style: normal;
-}
 .vs-thought {
   padding-left: var(--space-3);
   border-left: var(--hairline) solid var(--line);

@@ -17,6 +17,7 @@ import {
   EmptyState,
   KeyValue,
   LogPane,
+  markdownToPlain,
   Narrative,
   Row,
   Said,
@@ -135,10 +136,13 @@ function BlockView(args: {
 function resultSummary(narrative: TurnNarrative, props: StepViewProps): string | null {
   const last = narrative.blocks.at(-1);
   if (last?.kind !== 'reply') return null;
-  return turnResult(last.reply, {
-    candidates: props.model.candidates.candidates,
-    idea: props.idea,
-  }).summary;
+  // The line is one line of plain words, though the reply's prose it quotes is Markdown.
+  return markdownToPlain(
+    turnResult(last.reply, {
+      candidates: props.model.candidates.candidates,
+      idea: props.idea,
+    }).summary,
+  );
 }
 
 function TurnBody(props: StepViewProps): JSX.Element {

@@ -3,7 +3,7 @@
  * place (guides, depth), whether the row folds what is below it, and the pointer's hooks; a flat
  * row adds the `from` column instead.
  */
-import {type Guide, PickRow} from '@vibesys/ui';
+import {type Guide, markdownToPlain, PickRow} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {ageWords, type IdeaRow, type ImplementerOutcomes} from '../../state/index.js';
 import type {Zoom} from './views/props.js';
@@ -31,7 +31,8 @@ export function IdeaPickRow(props: {
 }): JSX.Element {
   const {row, compact, zoom, place} = props;
   const reported = props.outcomes.get(row.id)?.outcome ?? null;
-  const summary = place?.summary ?? row.summary;
+  // The idea's own text is Markdown; a row shows it as one line of plain words.
+  const summary = place?.summary ?? (row.summary === null ? null : markdownToPlain(row.summary));
   return (
     <PickRow
       id={row.id}

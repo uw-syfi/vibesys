@@ -1,6 +1,8 @@
 import {type JSX, useState} from 'react';
 import {Button} from './button.js';
 import {Collapsible} from './collapsible.js';
+import {Markdown} from './markdown.js';
+import {markdownToPlain} from './markdown-plain.js';
 import {Chip, StatusDot, type StatusTone} from './status.js';
 import {Text} from './text.js';
 
@@ -23,15 +25,16 @@ const CHIP_TONE: Readonly<Record<MessageTone, StatusTone>> = {
   err: 'err',
 };
 
-/** The first non-empty line of `text`, to preview a closed message. */
+/** The first non-empty line of `text` as plain words, to preview a closed message. */
 function firstLine(text: string): string {
-  return text.split('\n').find(line => line.trim() !== '') ?? '';
+  return markdownToPlain(text.split('\n').find(line => line.trim() !== '') ?? '');
 }
 
 /**
  * One message: who wrote it (`author`), what kind it is, and its text, which the reader opens
- * and closes. Closed, it shows the text's first line. The text is plain, never markup, with its
- * line breaks kept; `notice` is a caveat about it, such as that it was cut short.
+ * and closes. Closed, it shows the text's first line as plain words. A `reply` or `reasoning`
+ * is Markdown; a `prompt` or `note` is plain text with its line breaks kept. `notice` is a caveat
+ * about it, such as that it was cut short.
  */
 export function Message(props: {
   readonly author: string;
@@ -51,6 +54,8 @@ export function Message(props: {
       <StatusDot tone={CHIP_TONE[tone]} label={tone === 'ok' ? 'Succeeded' : 'Failed'} />
     );
   const preview = firstLine(props.text);
+  // A reply and its reasoning are written text, read as Markdown; a prompt and a note are not.
+  const written = props.variant === 'reply' || props.variant === 'reasoning';
   return (
     <div className="vs-message" data-variant={props.variant} data-tone={tone}>
       <Collapsible
@@ -63,7 +68,9 @@ export function Message(props: {
         {props.text === '' ? (
           <Text tone="muted">Nothing was written.</Text>
         ) : (
-          <div className="vs-message-text">{props.text}</div>
+          <div className="vs-message-text" data-markdown={written}>
+            {written ? <Markdown text={props.text} /> : props.text}
+          </div>
         )}
         {props.notice === undefined ? null : (
           <Text variant="small" tone="warn">
