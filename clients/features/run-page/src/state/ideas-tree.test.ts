@@ -58,6 +58,10 @@ function expandedAll(model: RunModel, filter = ALL, pinned: string | null = null
   }
 }
 
+/** A row's level from the root: its guides, or its written depth once they are capped. */
+const levelOf = (entry: {guides: readonly unknown[]; depth: number | null}): number =>
+  entry.depth === null ? entry.guides.length : entry.depth - 1;
+
 const numberOf = (id: string): number => Number(id.slice(1));
 
 /** The ideas below `index` (at any depth) that `keep` accepts. */
@@ -92,14 +96,13 @@ describe('the ideas tree', () => {
       // Row by row: a node's parent is the nearest row above it one level up (none for a root).
       const placed = tree.rows.flatMap(entry => (entry.kind === 'idea' ? [entry] : []));
       placed.forEach((entry, at) => {
-        const level = entry.guides.length;
+        const level = levelOf(entry);
         const index = Number(entry.row.id.slice(1));
         const base = plan.parents[index] ?? null;
-        if (level >= INDENT_CAP) return;
         const above = placed
           .slice(0, at)
           .reverse()
-          .find(each => each.guides.length === level - 1);
+          .find(each => levelOf(each) === level - 1);
         expect(level === 0 ? null : (above?.row.id ?? null)).toBe(
           base === null ? null : idOf(base),
         );
@@ -215,6 +218,33 @@ describe('the ideas tree', () => {
     });
     expect(ids(folded)).toEqual(Array.from({length: CHAIN_TAIL + 1}, (_, at) => idOf(8 + at)));
     expect(ids(ideaTree(model, shape(ALL, new Set([EARLIER]))))).toHaveLength(14);
+  });
+
+  test('pinning the best keeps the older ancestors folded; pinning one of them opens them', () => {
+    const parents: (number | null)[] = Array.from({length: 14}, (_, at) =>
+      at === 0 ? null : at - 1,
+    );
+    const model = modelOfShape({parents, best: 13});
+    const pinnedBest = ideaTree(model, shape(ALL, new Set(), idOf(13)));
+    expect(pinnedBest.rows[0]).toMatchObject({kind: 'fold', key: EARLIER});
+    expect(ids(pinnedBest)).toHaveLength(CHAIN_TAIL + 1);
+    // A side branch off an early ancestor must be reachable.
+    const branched = modelOfShape({parents: [...parents, 2], best: 13});
+    expect(ids(ideaTree(branched, shape(ALL, new Set(), idOf(14))))).toContain(idOf(14));
+  });
+
+  test('a row says nothing under its title when its words only repeat it', () => {
+    const model = modelOfShape({parents: [null, null]});
+    const items = model.candidates.candidates;
+    const worded = items.map((item, at) => ({
+      ...item,
+      idea: at === 0 ? 'Try: IDEA 0.' : 'Try: something else',
+    }));
+    const again = {...model, candidates: {...model.candidates, candidates: worded}} as RunModel;
+    const rows = ideaTree(again, shape()).rows.flatMap(entry =>
+      entry.kind === 'idea' ? [entry.row] : [],
+    );
+    expect(rows.map(row => row.summary)).toEqual(['Try: something else', null]);
   });
 
   test('a search shows the ideas that match and the ideas they build on, all open', () => {

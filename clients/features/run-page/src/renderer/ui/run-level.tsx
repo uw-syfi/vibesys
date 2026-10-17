@@ -178,6 +178,7 @@ function IdeasFace(props: {
   const layout = ideasLayout(state, base.model);
   return (
     <>
+      <IdeasLegend state={state} base={base} dispatch={dispatch} />
       {line === null ? null : <BestLineRow line={line} dispatch={dispatch} />}
       <Row gap="space-3" align="center">
         <Stack gap="space-0" grow>
@@ -318,9 +319,6 @@ export function RunLevel(props: {
         kicker={KICKERS[mode]}
         title={mode === 'logs' ? 'run' : `${total}`}
         width="fill"
-        {...(mode === 'ideas'
-          ? {meta: <IdeasLegend state={state} base={base} dispatch={dispatch} />}
-          : {})}
         actions={<ModeSwitch mode={mode} options={MODES} zoom={base.zoom} />}
         header={face.header}
       >

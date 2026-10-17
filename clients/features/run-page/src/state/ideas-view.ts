@@ -153,6 +153,17 @@ function trailOf(item: Candidate, parent: Candidate | null): IdeaRow['trail'] {
     : {label: parent.title, parent: parent.id};
 }
 
+/** An idea's words, none when they only repeat its title (`Try: <title>` included). */
+function summaryOf(item: Candidate): string | null {
+  const plain = (text: string): string =>
+    text
+      .trim()
+      .replace(/^try:\s*/i, '')
+      .replace(/[.\s]+$/, '')
+      .toLowerCase();
+  return item.idea !== null && plain(item.idea) === plain(item.title) ? null : item.idea;
+}
+
 function rowOf(item: Candidate, context: RowContext): IdeaRow {
   const {figure, tone} = figureOf(item);
   const parent = item.parent === null ? null : (context.byId.get(item.parent) ?? null);
@@ -160,7 +171,7 @@ function rowOf(item: Candidate, context: RowContext): IdeaRow {
   return {
     id: item.id,
     title: isPlanning(item) ? PLANNING : item.title,
-    summary: item.idea,
+    summary: summaryOf(item),
     outcome: item.outcome,
     state: stateOf(item),
     figure,

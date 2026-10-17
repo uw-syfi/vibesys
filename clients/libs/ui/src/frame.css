@@ -214,6 +214,12 @@ button.vs-crumb:focus-visible {
     display: none;
   }
 }
+/* A tree row's indentation takes the width: below this, its names win over their descriptions. */
+@container (max-width: 640px) {
+  .vs-pickrow-fold ~ .vs-pickrow-text > .vs-text + .vs-text {
+    display: none;
+  }
+}
 .vs-picklist-rows {
   max-height: var(--thread);
   overflow-y: auto;

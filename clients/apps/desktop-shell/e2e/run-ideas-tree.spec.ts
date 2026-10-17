@@ -75,7 +75,28 @@ async function openRun(
     .click();
 }
 
+/** The pane's counts stay on one line, and no row repeats its title as its subtitle. */
+async function expectTidy(page: Page): Promise<void> {
+  const tops = await page
+    .locator('.vs-dotlegend-item')
+    .evaluateAll(items => items.map(item => Math.round(item.getBoundingClientRect().top)));
+  expect(new Set(tops).size).toBe(1);
+  const rows = await page
+    .getByRole('listbox', {name: 'Ideas'})
+    .getByRole('option')
+    .evaluateAll(options =>
+      options.map(option =>
+        [...option.querySelectorAll('.vs-pickrow-text > .vs-text')].map(t => t.textContent ?? ''),
+      ),
+    );
+  for (const [title = '', subtitle] of rows) {
+    if (subtitle === undefined) continue;
+    expect(subtitle.toLowerCase().replace(/^try:\s*/, '')).not.toBe(title.toLowerCase());
+  }
+}
+
 async function shot(page: Page, name: string): Promise<void> {
+  await expectTidy(page);
   if (shots !== undefined) await page.screenshot({path: `${shots}/${name}.png`});
 }
 
@@ -93,6 +114,9 @@ test('a small run opens as a tree: the best chain open, other branches folded, o
   await expect(page.getByText(/steps from input$/)).toBeVisible();
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
   await shot(page, 'ideas-tree-10-1440');
+  await page.setViewportSize({width: 1920, height: 1080});
+  await shot(page, 'ideas-tree-10-1920');
+  await page.setViewportSize({width: 1440, height: 900});
 
   // The chart joins each passed idea to its base; pointing at a row lights its chain.
   const chart = page.getByRole('group', {name: /of each measured idea/});
@@ -126,6 +150,9 @@ test('a run of weeks draws only the rows near the view, and the best line shows 
   expect(await ideas.getByRole('option').count()).toBeLessThan(80);
   await expect(ideas.getByRole('option').filter({hasText: '… '}).first()).toBeVisible();
   await shot(page, 'ideas-tree-600-1440');
+  await page.setViewportSize({width: 1920, height: 1080});
+  await shot(page, 'ideas-tree-600-1920');
+  await page.setViewportSize({width: 1440, height: 900});
   const chart = page.getByRole('group', {name: /of each measured idea/});
   expect(await chart.locator('.vs-chart-edge').count()).toBeGreaterThan(100);
   await ideas.getByRole('option').nth(5).hover();
@@ -135,6 +162,8 @@ test('a run of weeks draws only the rows near the view, and the best line shows 
 
   await page.locator('button[title^="Show the best idea"]').click();
   await expect(ideas.getByRole('option', {selected: true})).toBeVisible();
+  // Pinning the best keeps its older ancestors folded.
+  await expect(ideas.getByRole('option').filter({hasText: /… \d+ earlier/})).toHaveCount(1);
   await expect(ideas.getByRole('option', {selected: true}).getByText('best')).toBeVisible();
   await page.setViewportSize({width: 1000, height: 800});
   await shot(page, 'ideas-tree-600-1000');

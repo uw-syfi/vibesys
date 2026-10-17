@@ -29,7 +29,9 @@ export const CHAIN_TAIL = 5;
 /** How many ideas a one-child run must hold between its ends to fold into `… N ideas …`. */
 export const COMPRESS_FROM = 3;
 /** The levels of guides drawn; deeper rows write their depth instead. */
-export const INDENT_CAP = 6;
+export const INDENT_CAP = 4;
+/** The cells a capped row keeps: its own branch and its parent's, beside the depth number. */
+const CAPPED_CELLS = 2;
 /** The key in `open` of the best chain's `… N earlier` row. */
 export const EARLIER = 'earlier';
 
@@ -150,6 +152,7 @@ function visibleIdeas(model: RunModel, shown: ReadonlySet<string>): Set<string> 
 
 interface Walk {
   readonly lineage: Lineage;
+  readonly parents: ReadonlyMap<string, string | null>;
   readonly direction: RunModel['direction'];
   readonly rows: ReadonlyMap<string, IdeaRow>;
   readonly visible: ReadonlySet<string>;
@@ -182,7 +185,7 @@ function below(more: readonly boolean[], last: boolean | null): TreeGuide[] {
 
 function drawn(guides: readonly TreeGuide[]): {guides: TreeGuide[]; capped: boolean} {
   const capped = guides.length > INDENT_CAP;
-  return {guides: capped ? guides.slice(-INDENT_CAP) : [...guides], capped};
+  return {guides: capped ? guides.slice(-CAPPED_CELLS) : [...guides], capped};
 }
 
 function pushFold(walk: Walk, key: string, label: string, guides: readonly TreeGuide[]): void {
@@ -272,13 +275,26 @@ function children(
   });
 }
 
+/**
+ * Whether the pinned idea sits on a branch that leaves the chain inside `hidden`: only then must
+ * the earlier ancestors show. A pinned idea on the chain's tail (or the best itself) hides them.
+ */
+function opensHidden(walk: Walk, hidden: ReadonlySet<string>): boolean {
+  for (const id of [...walk.held, walk.shape.pinned ?? '']) {
+    if (walk.onChain.has(id)) continue;
+    const parent = walk.parents.get(id);
+    if (parent !== undefined && parent !== null && hidden.has(parent)) return true;
+  }
+  return false;
+}
+
 /** The best chain's rows: the last `CHAIN_TAIL` ancestors and itself, under `… N earlier`. */
 function chained(walk: Walk, roots: readonly string[]): boolean {
   const {chain} = walk;
   const hidden = chain.length - (CHAIN_TAIL + 1);
   const top = chain[0];
   if (top === undefined || hidden < 2 || walk.shape.open.has(EARLIER)) return false;
-  if (chain.slice(0, hidden).some(id => walk.held.has(id))) return false;
+  if (opensHidden(walk, new Set(chain.slice(0, hidden)))) return false;
   // The roots stand as siblings (newest first), the chain's own at its place with `… N earlier`.
   for (const id of roots) {
     if (id !== top) {
@@ -303,6 +319,7 @@ export function ideaTree(model: RunModel, shape: TreeShape): IdeaTree {
   for (const id of ideaAncestry(model, shape.pinned)) if (id !== shape.pinned) held.add(id);
   const walk: Walk = {
     lineage,
+    parents: new Map(model.candidates.candidates.map(item => [item.id, item.parent])),
     direction: model.direction,
     rows: ideaRowsById(model),
     visible,
