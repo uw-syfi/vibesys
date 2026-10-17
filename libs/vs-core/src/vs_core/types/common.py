@@ -777,6 +777,12 @@ class RunFacts(Value):
     ``--exclusive`` or an operator declaration), never from a backend's name. A run timed so is timed as an official
     measurement is, so only such a run may answer one (``vs_core._measurement_reuse``).
     """
+    reuse_agent_run: bool = Field(default=False, exclude_if=unset)
+    """The task opts in to answering an official measurement with the agent's own run.
+
+    Declared by the task author. Off by default because reuse lets an agent re-measure until
+    a run suits it, which biases the official score upward by the benchmark's noise.
+    """
     artifacts: tuple[ArtifactRef, ...] = ()
     task: TaskTerms | None = None
     """What the task fixes; a search that measures candidates reads it with ``ctx.task``."""

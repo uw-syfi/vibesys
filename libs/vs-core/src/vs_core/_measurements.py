@@ -13,7 +13,12 @@ from typing import TYPE_CHECKING
 from . import _wait_clock
 from ._deadlines import resolve_until
 from ._evaluation_history import produce_history
-from ._measurement_reuse import checkpoint_input, reused_record, reused_run
+from ._measurement_reuse import (
+    checkpoint_input,
+    reused_evidence_complete,
+    reused_record,
+    reused_run,
+)
 from ._proofs import (
     Mismatch,
     Missing,
@@ -1229,6 +1234,10 @@ def _store_evidence(
             refused = True
         elif incoming not in accepted:
             accepted.append(incoming)
+    if not reused_evidence_complete(
+        state, job, tuple(accepted), terminal=event.observation.terminal
+    ):
+        refused = True
     return tuple(accepted), tuple(ledger), refused
 
 

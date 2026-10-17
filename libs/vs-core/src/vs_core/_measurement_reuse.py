@@ -37,7 +37,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .types.common import ObservationStatus, RevisionRef
+from .types.common import EvidenceKind, ObservationStatus, RevisionRef
 from .types.evaluation import MeasurementIdentity, OwnedJob, PreparedSubmissionReceipt
 from .types.job_observations import MeasurementFailure
 
@@ -51,10 +51,22 @@ if TYPE_CHECKING:
     )
     from .types.kernel import EvaluationContext
 
-__all__ = ["checkpoint_input", "reused_record", "reused_run"]
+__all__ = ["checkpoint_input", "reused_evidence_complete", "reused_record", "reused_run"]
 
 _RUN_PURPOSES = frozenset({"local-validation", "official"})
 """Purposes of runs that measure the task's evaluation on a candidate (not a profile)."""
+
+_PROOF_KINDS = frozenset({EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK})
+
+
+def _official_kinds(source: EvidenceKind) -> frozenset[EvidenceKind]:
+    """The kinds an official record may take when it re-reads a record of kind ``source``.
+
+    An agent's record is ``local-validation`` whatever stage it read, so it stands for
+    either proof kind; an official source's record keeps its kind.
+    """
+    return _PROOF_KINDS if source is EvidenceKind.LOCAL_VALIDATION else frozenset({source})
+
 
 _CONCLUSIVE = frozenset({ObservationStatus.SUCCEEDED, ObservationStatus.FAILED})
 
@@ -130,6 +142,7 @@ def reused_run(
     """
     if (
         identity.purpose != "official"
+        or not plan.reuse_agent_run
         or not plan.dedicated_measurement_resources
         or any(
             budget.scope == scope and budget.identity == identity
@@ -167,7 +180,8 @@ def reused_run(
 def _same_execution(source: MeasurementPlan, requested: MeasurementPlan) -> bool:
     """Whether ``source`` ran as ``requested`` would: same stages, budgets, queue and dedicated resources."""
     return (
-        source.dedicated_measurement_resources
+        source.reuse_agent_run
+        and source.dedicated_measurement_resources
         and source.stages == requested.stages
         and source.queue_allowance == requested.queue_allowance
         and source.policy == requested.policy
@@ -180,7 +194,9 @@ def reused_record(
     """Whether ``evidence`` may enter the ledger as ``job``'s, as far as reuse is concerned.
 
     A new run's record names no earlier run. A reusing submission's record names the run it
-    re-reads and carries one of that run's evidence ids with its status and artifacts.
+    re-reads and carries one of that run's evidence ids with its status and artifacts, and
+    its kind is the one the source record's kind maps to (an agent's ``local-validation``
+    record becomes a correctness or a benchmark record).
     """
     reuses = job.reuses if isinstance(job, OwnedJob) else None
     if evidence.reused_from != reuses:
@@ -193,7 +209,30 @@ def reused_record(
             item.evidence_id == evidence.evidence_id
             and item.status == evidence.status
             and item.artifacts == evidence.artifacts
+            and evidence.kind in _official_kinds(item.kind)
             for item in source.evidence
         )
+        for source in state.jobs
+    )
+
+
+def reused_evidence_complete(
+    state: EvaluationState,
+    job: OwnedJob | RegisteredOwnedJob,
+    accepted: tuple[EvidenceRef, ...],
+    *,
+    terminal: bool,
+) -> bool:
+    """Whether a reusing job, once terminal, holds every evidence id of the run it re-reads.
+
+    A reused result is the source's whole result: dropping the record of a failed stage would
+    turn a failure into a pass. A job that reuses nothing, or is not yet terminal, is complete.
+    """
+    reuses = job.reuses if isinstance(job, OwnedJob) else None
+    if reuses is None or not terminal:
+        return True
+    held = {item.evidence_id for item in accepted}
+    return any(
+        source.submission_id == reuses and {item.evidence_id for item in source.evidence} <= held
         for source in state.jobs
     )

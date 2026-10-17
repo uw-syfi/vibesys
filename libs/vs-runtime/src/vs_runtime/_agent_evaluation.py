@@ -295,6 +295,8 @@ class AgentEvaluationPolicy:
     """Evidence kinds that count only if the accuracy stage passed: the task's trust rule."""
     dedicated_measurement_resources: bool = False
     """The run's executor gives each job its resources alone (``MeasurementRecipe``)."""
+    reuse_agent_run: bool = False
+    """The task opts in to reusing this run for its official measurement."""
     purpose: Literal["baseline", "local-validation", "official", "profile"] = "local-validation"
 
     @classmethod
@@ -317,6 +319,7 @@ class AgentEvaluationPolicy:
             accuracy_stage=recipe.accuracy_stage,
             accuracy_gated=recipe.accuracy_gated,
             dedicated_measurement_resources=recipe.dedicated_measurement_resources,
+            reuse_agent_run=recipe.reuse_agent_run,
             purpose=purpose,
         )
 
@@ -335,6 +338,7 @@ class AgentEvaluationPolicy:
             accuracy_stage=self.accuracy_stage,
             accuracy_gated=self.accuracy_gated,
             dedicated_measurement_resources=self.dedicated_measurement_resources,
+            reuse_agent_run=self.reuse_agent_run,
         )
 
     def plan(

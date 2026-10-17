@@ -102,6 +102,8 @@ class MeasurementPlan(Value):
     Only a run with it may answer another measurement: an agent's evaluation on a shared
     host is timed beside other work, so it can never stand for an official run.
     """
+    reuse_agent_run: bool = Field(default=False, exclude_if=unset)
+    """The task opts in to reuse (``RunFacts.reuse_agent_run``); both runs must carry it."""
     measured_input: str | None = Field(default=None, min_length=1, exclude_if=unset)
     """The digest of what the evaluation reads at ``candidate``, when the runtime computed it.
 

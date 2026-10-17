@@ -276,6 +276,12 @@ class BenchmarkCommand(InputCommand):
     #: passed. A task whose benchmark is meaningful without a passing accuracy check
     #: declares ``requires_accuracy = false``.
     requires_accuracy: StrictBool = True
+    #: Opt-in to answering an official measurement with the agent's own earlier evaluation of
+    #: the identical input (see ``docs/running-vibesys.md``). Off by default: an agent that
+    #: keeps a lucky first run and re-measures an unlucky one would bias the official score
+    #: upward, so only a task whose benchmark noise is small enough declares
+    #: ``reuse_agent_run = true``.
+    reuse_agent_run: StrictBool = False
 
     @model_validator(mode="after")
     def _one_result_contract(self) -> BenchmarkCommand:
@@ -695,6 +701,8 @@ def _append_benchmark(lines: list[str], manifest: InputManifest) -> None:
         lines.append(f"result_protocol = {manifest.benchmark.result_protocol}")
     if not manifest.benchmark.requires_accuracy:
         lines.append("requires_accuracy = false")
+    if manifest.benchmark.reuse_agent_run:
+        lines.append("reuse_agent_run = true")
     if manifest.benchmark.result is not None:
         lines.extend(
             [
