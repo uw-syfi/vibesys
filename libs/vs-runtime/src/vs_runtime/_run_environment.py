@@ -221,6 +221,7 @@ class RunEnvironmentView:
     """Run-environment-neutral facts consumed by loops and agent construction."""
 
     paths: AgentPaths
+    agent_git_writable: bool  # required, no default; prompts branch on this
     prompt_notes: str = ""
     isolated: bool = False
     cli_sandboxed: bool = False
@@ -237,7 +238,6 @@ class RunEnvironmentView:
     # run environment whose GPU work happens elsewhere (Slurm jobs) sets it False, so
     # tools that need the driver in the editor are withheld rather than offered to fail.
     editor_has_gpu: bool = True
-    agent_git_writable: bool = True  # prompts branch on this, not on the environment
     # Optional environment variable understood by the environment-owned
     # evaluator wrapper when the final trusted command should release its
     # deployment lease.
@@ -695,11 +695,10 @@ class HostEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
         del presentation
         materialize_effective_objective(request)
         document, grants = outside_objective(request.objective, request.log_dir)
-        sandbox = _make_host_sandbox(request)
         evaluation = _host_evaluation_plan(request)
         return command_environment_session(
             SandboxSession.borrowed(
-                sandbox=sandbox,
+                sandbox=_make_host_sandbox(request),
                 view=RunEnvironmentView(
                     paths=AgentPaths(
                         objective=(str(document) if document is not None else "OBJECTIVE.md"),
@@ -707,6 +706,7 @@ class HostEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
                         benchmark_command=evaluation.benchmark_command,
                         profiler_support=request.profiler_support_path,
                     ),
+                    agent_git_writable=True,
                     agent_host_resources=grants,
                 ),
             )

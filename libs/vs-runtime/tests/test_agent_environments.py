@@ -86,6 +86,7 @@ def _session(*, sandboxed: bool) -> _Session:
         _PathRunner(),
         RunEnvironmentView(
             paths=AgentPaths(),
+            agent_git_writable=True,
             cli_sandboxed=sandboxed,
             share_agent_session=False,
         ),

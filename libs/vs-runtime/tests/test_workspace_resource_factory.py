@@ -133,7 +133,7 @@ def test_factory_owns_candidate_lifecycle_and_reports_restore_failure(tmp_path: 
     def open_session(_request: RunEnvironmentRequest) -> RunEnvironmentSession:
         session = _Session(
             FakeCommandRunner(),
-            RunEnvironmentView(paths=AgentPaths(), cli_sandboxed=True),
+            RunEnvironmentView(paths=AgentPaths(), agent_git_writable=True, cli_sandboxed=True),
         )
         opened_sessions.append(session)
         return session
@@ -201,7 +201,7 @@ def test_workspace_factory_cannot_reconcile_through_a_replacement_session(
     )
     project.record_capture_intent("candidate-1", execution)
     sandbox = FakeCommandRunner()
-    session = _Session(sandbox, RunEnvironmentView(paths=AgentPaths()))
+    session = _Session(sandbox, RunEnvironmentView(paths=AgentPaths(), agent_git_writable=True))
     environment = open_run_environment_resources(
         RunEnvironmentRequest(
             log_dir=project.logger.log_dir,
@@ -259,7 +259,9 @@ def test_root_agent_scope_uses_injected_environment_opener(tmp_path: Path) -> No
             clock=ManualClock(),
             system=idle_environment_system(),
         ),
-        lambda _request: _Session(FakeCommandRunner(), RunEnvironmentView(paths=AgentPaths())),
+        lambda _request: _Session(
+            FakeCommandRunner(), RunEnvironmentView(paths=AgentPaths(), agent_git_writable=True)
+        ),
         clock=ManualClock(),
     )
     opened = FakeAgentExecutionEnvironment(project_path_policy=ProjectPathPolicy())
@@ -399,7 +401,9 @@ def test_a_baseline_never_fingerprints_a_file_outside_the_workspace(tmp_path: Pa
             clock=ManualClock(),
             system=idle_environment_system(),
         ),
-        lambda _request: _Session(FakeCommandRunner(), RunEnvironmentView(paths=AgentPaths())),
+        lambda _request: _Session(
+            FakeCommandRunner(), RunEnvironmentView(paths=AgentPaths(), agent_git_writable=True)
+        ),
         clock=ManualClock(),
     )
     factory = WorkspaceResourceFactory(

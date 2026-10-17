@@ -66,7 +66,7 @@ def launch_of(options: Mapping[str, object] | None = None) -> EvolveLaunch:
 def candidate_environment(**changes: object) -> RunEnvironmentView:
     """A run environment that opens a sandbox per candidate, with ``changes`` applied."""
     return replace(
-        RunEnvironmentView(paths=AgentPaths()),
+        RunEnvironmentView(paths=AgentPaths(), agent_git_writable=True),
         **{"env_kind": "docker", "cli_sandboxed": True, "share_agent_session": False, **changes},
     )
 

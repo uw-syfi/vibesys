@@ -150,7 +150,9 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
                 ),
                 lambda _request: _EnvironmentSession(
                     FakeCommandRunner(),
-                    RunEnvironmentView(paths=AgentPaths(), cli_sandboxed=True),
+                    RunEnvironmentView(
+                        paths=AgentPaths(), agent_git_writable=True, cli_sandboxed=True
+                    ),
                 ),
                 clock=ManualClock(),
             )

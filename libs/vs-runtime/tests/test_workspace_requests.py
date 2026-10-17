@@ -128,7 +128,9 @@ if TYPE_CHECKING:
 class _Session:
     sandbox: CommandRunner = field(default_factory=FakeCommandRunner)
     view: RunEnvironmentView = field(
-        default_factory=lambda: RunEnvironmentView(paths=AgentPaths(), cli_sandboxed=True)
+        default_factory=lambda: RunEnvironmentView(
+            paths=AgentPaths(), agent_git_writable=True, cli_sandboxed=True
+        )
     )
     capture_execution: CaptureExecutionIdentity | None = None
 

@@ -29,6 +29,7 @@ class _Session:
             paths=AgentPaths(
                 accuracy_command="trusted-accuracy", benchmark_command="trusted-bench"
             ),
+            agent_git_writable=True,
             framework_setup_timeout_seconds=7,
         )
     )
