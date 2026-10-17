@@ -136,8 +136,9 @@ class FileProjects:
 
     def run_summary(self, project: Path, run_id: str) -> Summarized:
         """The fold of run ``run_id``'s journal, from the cache beside it and what it gained since."""
-        # Loaded on the first summary, never for ``hello``: the fold and its cache cost the
-        # helper's start-up no modules until a client asks for a summary.
+        # lint-waiver: LW-640283 [PLC0415]; the summary fold costs the helper nothing until asked.
+        # > At module level every channel would load the fold and its cache before `hello`, which
+        # > the helper's start-up ceiling forbids; the import stays visible to tach.
         from server.run_summary_cache import summarize_journal  # noqa: PLC0415
 
         return summarize_journal(self._journal(project, run_id))
