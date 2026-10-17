@@ -442,21 +442,19 @@ When the job fails on a screenshot, it uploads the actual and the diff as the
 
 ## Display names
 
-A screen never shows an id a program matches on (`claude`, a model's vendor id, `perf-evaluator`).
-Each closed vocabulary has one owner of its names, and the clients receive them as one generated
-catalog in `@vibesys/contracts` (`harnessName`, `modelName`, `roleName`):
+A screen never shows an id a program matches on (`judge`, `perf-evaluator`, `claude`, a model's
+vendor id). Each vocabulary has one owner of its names:
 
-- a harness's and a model's name are agentshim's (`ProviderProfile.display_name`,
-  `model_display_name`), read through `vs_agent.api`;
-- a role's name is the `title` its search declares on its `Role`;
-- the Python side gathers them in `vibesys.api.display_catalog`, and `pnpm generate:protocol`
-  writes `display-names.generated.ts` from it. The `tui_quality` group regenerates it and fails
-  on a diff, and `test_every_vetted_model_has_a_name_that_is_not_its_id` and the role `title`
-  pattern fail a registry entry with no readable name.
+- an agent role's name is the `title` its search declares on its `Role`; `vibesys.api.display_catalog`
+  gathers them and `pnpm generate:protocol` writes `display-names.generated.ts` from it, which
+  `@vibesys/contracts` serves as `roleName`. The `tui_quality` group regenerates it and fails on a
+  diff; the role `title` pattern and `test_every_role_name_reads_as_words` fail a role with no
+  readable name. A role a plugin declares reads as the words of its id;
+- harness and model names are agentshim's, served by the backend. A client renders the field it
+  receives and never maps or prettifies those ids.
 
-A role a plugin declares reads as the words of its id; a model no registry names stays an
-identifier, drawn in a `data-mono-id` element. Names are title case for products (Claude Code,
-Opus 5.5) and sentence case for everything else (Perf evaluator).
+`CODE_IDS` (generated beside the names) lists the harness, model and role ids, so the desktop's
+screen checks fail on any a screen draws as text outside a `data-mono-id` element.
 
 ## State
 

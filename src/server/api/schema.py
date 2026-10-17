@@ -34,7 +34,7 @@ from vibesys.api import (
     IterationSummary,
     LogOwner,
 )
-from vibesys.api.display_catalog import display_names
+from vibesys.api.display_catalog import code_ids, display_names
 from vs_logs.api import NarrationLine
 
 if TYPE_CHECKING:
@@ -341,15 +341,17 @@ def run_event_typescript() -> str:
 
 
 def display_names_typescript() -> str:
-    """Return the generated module of the names a person reads for harnesses, models and roles.
+    """Return the generated module of the role names a person reads and the ids a screen must not draw.
 
     One definition (``vibesys.api.display_catalog``) with the TypeScript clients' copy
     generated from it, so a screen never maps an id itself and the two cannot drift.
     """
-    document = json.dumps(display_names().model_dump(), indent=2)
+    names = json.dumps(display_names().model_dump(), indent=2)
+    ids = json.dumps(code_ids().model_dump(), indent=2)
     return (
         "/* Generated from the Python display names (vibesys.api.display_catalog). Do not edit. */\n\n"
-        f"export const DISPLAY_NAMES = {document} as const;\n"
+        f"export const DISPLAY_NAMES = {names} as const;\n\n"
+        f"export const CODE_IDS = {ids} as const;\n"
     )
 
 

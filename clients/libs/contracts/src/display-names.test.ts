@@ -1,51 +1,35 @@
 import {describe, it} from 'node:test';
-import {
-  DISPLAY_IDS,
-  harnessName,
-  isNamedModel,
-  modelName,
-  roleName,
-  wordsOfId,
-} from './display-names.js';
+import {CODE_IDS, roleName, wordsOfId} from './display-names.js';
 import {expect} from './test-support/expect.js';
 
-describe('the catalog the backend registries generate', () => {
-  it('names every harness, model and role id with words, not the id', () => {
-    for (const harness of DISPLAY_IDS.harnesses) {
-      expect(harnessName(harness)).not.toBe(harness);
-      expect(harnessName(harness)).toMatch(/^[A-Z]/);
-    }
-    for (const model of DISPLAY_IDS.models) {
-      const name = modelName(model);
-      expect(isNamedModel(model)).toBe(true);
-      expect(name).not.toBe(model);
-      expect(name).toMatch(/^[A-Z]/);
-    }
-    for (const role of DISPLAY_IDS.roles) {
+describe('the catalog the backend declarations generate', () => {
+  it('names every role id with words, not the id', () => {
+    for (const role of CODE_IDS.roles) {
       expect(roleName(role)).not.toBe(role);
       expect(roleName(role)).toMatch(/^[A-Z][^_]*$/);
     }
   });
 
   it('reads the examples a person expects', () => {
-    expect(harnessName('claude')).toBe('Claude Code');
-    expect(harnessName('codex')).toBe('Codex');
-    expect(modelName('claude-opus-5-5')).toBe('Opus 5.5');
     expect(roleName('judge')).toBe('Judge');
     expect(roleName('perf-evaluator')).toBe('Perf evaluator');
     expect(roleName('dynamic-implementer')).toBe('Implementer');
   });
+
+  it('lists the harness and model ids the screens must not draw', () => {
+    expect(CODE_IDS.harnesses.length).toBeGreaterThan(0);
+    expect(CODE_IDS.models.length).toBeGreaterThan(0);
+  });
 });
 
-describe('what a screen shows for an id no registry names', () => {
-  it('reads a role or harness as the words of its id, capitalised', () => {
+describe('what a screen shows for a role no declaration names', () => {
+  it('reads it as the words of its id, capitalised', () => {
     expect(roleName('my-plugin_critic')).toBe('My plugin critic');
-    expect(harnessName('mock')).toBe('Mock');
   });
 
-  it('leaves an unknown model as the identifier it is', () => {
-    expect(modelName('model-nobody-registered')).toBe('model-nobody-registered');
-    expect(isNamedModel('model-nobody-registered')).toBe(false);
+  it('leaves text that is already words as it is', () => {
+    expect(roleName('Lock-free ring')).toBe('Lock-free ring');
+    expect(roleName('Spin then park')).toBe('Spin then park');
   });
 
   it('turns every kebab, snake or dotted id into capitalised words, once', () => {
