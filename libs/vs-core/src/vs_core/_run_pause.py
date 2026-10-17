@@ -19,6 +19,20 @@ if TYPE_CHECKING:
     from .types.kernel import RunState
 
 
+class ControlRefusedError(ContractError):
+    """Core refuses ``control`` in the run's state as it stands (``control_refusal``).
+
+    Only this rule raises it, so a shell can tell a refusal, which an operator hears about
+    and the run outlives, from a malformed control (an identity conflict, an undeclared
+    steer target), which is a defect in whatever built the control.
+    """
+
+    def __init__(self, control: ControlInput, path: tuple[str | int, ...], detail: str) -> None:
+        """Name the refused control, and where and why core refuses it."""
+        self.control = control
+        super().__init__(path, detail)
+
+
 def run_pause(run: RunState) -> RunPause | None:
     """The pause the run's controls hold it in; None unless the run is paused."""
     if run.status != RunStatus.PAUSED:
@@ -71,21 +85,23 @@ def stands_after(control: ControlInput, *, stood: bool) -> bool:
             return stood
 
 
-def control_refusal(run: RunState, control: ControlInput) -> ContractError | None:
+def control_refusal(run: RunState, control: ControlInput) -> ControlRefusedError | None:
     """Why core refuses a new ``control`` for ``run`` as it stands, or None if it takes it.
 
     The one statement of the rule: core raises the error when the control arrives, and a
-    shell that must answer an operator before core commits asks the same question. A stop is
-    never refused.
+    shell that must answer an operator before core commits asks the same question. A
+    terminal run refuses every control; any other run takes a stop.
     """
-    if control.action == "stop":
-        return None
     if run.status == RunStatus.TERMINAL:
-        return ContractError(("run", "status"), "terminal run rejects controls")
-    if control.action in ("steer", "withdraw"):
+        return ControlRefusedError(control, ("run", "status"), "terminal run rejects controls")
+    if control.action in ("stop", "steer", "withdraw"):
         return None
     if run.status in (RunStatus.CLOSING, RunStatus.BLOCKED) or run.result is not None:
-        return ContractError(("run", "cleanup"), "cleanup must finish before pause or resume")
+        return ControlRefusedError(
+            control, ("run", "cleanup"), "cleanup must finish before pause or resume"
+        )
     if control.when == "capacity_returns" and run.status != RunStatus.PAUSED:
-        return ContractError(("control", "when"), "only a paused run waits for capacity")
+        return ControlRefusedError(
+            control, ("control", "when"), "only a paused run waits for capacity"
+        )
     return None

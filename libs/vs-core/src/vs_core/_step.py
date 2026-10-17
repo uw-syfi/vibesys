@@ -1251,8 +1251,9 @@ def _soft_stop(state: CoreState, event: RunControlEvent) -> Transition:
     """Record a stop request that carries no result: the search is told and ends the run."""
     if any(control.control_id == event.control.control_id for control in state.run.controls):
         return Transition(state=state)
-    if state.run.status == RunStatus.TERMINAL:
-        raise ContractError(("run", "status"), "terminal run rejects controls")
+    refusal = control_refusal(state.run, event.control)
+    if refusal is not None:
+        raise refusal
     run = state.run.model_copy(
         update={
             "controls": (*state.run.controls, event.control),

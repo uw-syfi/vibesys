@@ -54,6 +54,7 @@ from vs_core._registry import (
     validate_startup,
 )
 from vs_core._run_pause import (
+    ControlRefusedError,
     capacity_wait_stands,
     control_refusal,
     pause_after,
@@ -887,6 +888,7 @@ __all__ = [
     "ContinuationRetireRequested",
     "ContinuationScopeReopened",
     "ContractError",
+    "ControlRefusedError",
     "ContractValidationError",
     "ControlChanged",
     "ControlId",
