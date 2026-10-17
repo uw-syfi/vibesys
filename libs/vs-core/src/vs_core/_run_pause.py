@@ -25,11 +25,12 @@ def run_pause(run: RunState) -> RunPause | None:
         return None
     pause: RunPause | None = None
     for control in run.controls:
-        pause = _after(pause, control)
+        pause = pause_after(pause, control)
     return pause
 
 
-def _after(pause: RunPause | None, control: ControlInput) -> RunPause | None:
+def pause_after(pause: RunPause | None, control: ControlInput) -> RunPause | None:
+    """The pause ``control`` leaves the run in when it was in ``pause``; one step of the fold."""
     match control.action:
         case "pause" if control.owner is PauseOwner.OPERATOR:
             return RunPause(owner=PauseOwner.OPERATOR)

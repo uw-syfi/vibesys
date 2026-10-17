@@ -53,7 +53,7 @@ from vs_core._registry import (
     operation_result,
     validate_startup,
 )
-from vs_core._run_pause import control_refusal, run_pause
+from vs_core._run_pause import control_refusal, pause_after, run_pause
 from vs_core._search_events import Translated, run_view, search_events, translate
 from vs_core._search_run import (
     Advanced,
@@ -1362,6 +1362,7 @@ __all__ = [
     "operation_trace",
     "orphan_waits",
     "owned_job_subject",
+    "pause_after",
     "pending_requests",
     "phase_waits",
     "plain_line",

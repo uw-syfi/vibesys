@@ -804,7 +804,7 @@ class PauseOwner(StrEnum):
     """A provider quota stop paused the run: the turns that stopped own the pause."""
 
 
-type ResumeWhen = Literal["now", "capacity_returns"]
+ResumeWhen = Literal["now", "capacity_returns"]
 """Resume at once, or once provider capacity should be back."""
 
 

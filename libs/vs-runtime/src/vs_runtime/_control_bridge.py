@@ -29,10 +29,14 @@ from vs_core.api import (
     ControlInput,
     CoreState,
     InputMode,
+    PauseOwner,
     RunControlEvent,
+    RunPause,
     RunStatus,
     SessionInputReceived,
     StopMode,
+    pause_after,
+    run_pause,
 )
 from vs_decode.api import Unreadable, decode_json
 from vs_project.api import ProjectStateError
@@ -62,7 +66,7 @@ from vs_runtime._steer_delivery import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_core.api import CoreEvent, InputId, InputTarget
+    from vs_core.api import CoreEvent, InputId, InputTarget, ResumeWhen
     from vs_project.api import ControlInbox, InboxEntry
     from vs_runtime._operator_control import ControlRequest
     from vs_runtime._run_control import QueuedWithdraw, RunControlChannel
@@ -126,7 +130,8 @@ class RunControlBridge:
         self._position = 0
         self._consumption = SteerConsumption()
         self._started = False
-        self._paused = False
+        self._pause: RunPause | None = None
+        """The pause as this bridge has recorded it in core: what core's controls say."""
         self._stopped = False
         self._landed = False
 
@@ -155,7 +160,7 @@ class RunControlBridge:
             self._started = True
             self._channel.set_run_deadline(core.run.deadline_at)
             self._count = len(core.run.controls)
-            self._paused = core.run.status == RunStatus.PAUSED
+            self._pause = run_pause(core.run)
             self._stopped = any(c.action == "stop" for c in core.run.controls)
         self._position = len(core.run.controls)
         if self._control is not None:
@@ -192,13 +197,54 @@ class RunControlBridge:
                 core, now_at, _Change("stop", mode=self._channel.stop_mode(), control_id=by)
             )
             events += () if stop is None else (stop,)
-        elif self._channel.pause_requested() != self._paused:
-            self._paused = not self._paused
-            action = "pause" if self._paused else "resume"
-            by = self._channel.requested_by("pause")
-            change = self._event(core, now_at, _Change(action, control_id=by))
-            events += () if change is None else (change,)
+        else:
+            for change in self._pause_changes():
+                self._record_pause(core, now_at, change, events)
         return tuple(events)
+
+    def _pause_changes(self) -> list[_Change]:
+        """The pause and resume controls that bring core's record of the pause to the channel's.
+
+        The channel holds only its current pause, so changes between two polls that left
+        the pause as it was are not recorded: core only needs the pause the run is in.
+        """
+        recorded, live = self._pause, self._channel.pause_state()
+        by = self._channel.requested_by("pause")
+        if live is None:
+            if recorded is None:
+                return []
+            fallback = self._channel.resumed_with_fallback()
+            return [_Change("resume", when="now", fallback=fallback, control_id=by)]
+        changes: list[_Change] = []
+        if (
+            recorded is not None
+            and recorded.owner is PauseOwner.OPERATOR
+            and live.owner is not PauseOwner.OPERATOR
+        ):
+            # Only a resume lifts the operator's hold; a quota stop paused the run again since.
+            changes.append(_Change("resume", when="now", control_id=by))
+            recorded = None
+        operator = live.owner is PauseOwner.OPERATOR
+        if (
+            recorded is None
+            or (operator and recorded.owner is not PauseOwner.OPERATOR)
+            or (operator and recorded.capacity_wait and not live.capacity_wait)
+        ):
+            owner_id = by if operator else None
+            changes.append(_Change("pause", owner=live.owner, control_id=owner_id))
+            recorded = RunPause(owner=live.owner)
+        if live.capacity_wait and not recorded.capacity_wait:
+            by_capacity = self._channel.requested_by("capacity")
+            changes.append(_Change("resume", when="capacity_returns", control_id=by_capacity))
+        return changes
+
+    def _record_pause(
+        self, core: CoreState, now_at: float, change: _Change, events: list[CoreEvent]
+    ) -> None:
+        """Emit one pause or resume control and fold it into the recorded pause."""
+        control = self._event(core, now_at, change)
+        events += () if control is None else (control,)
+        self._pause = pause_after(self._pause, change.control(ControlId(root="pending")))
 
     def _take_steers(self, core: CoreState, now_at: float, events: list[CoreEvent]) -> None:
         """Emit the queued steers, each under its control's id if it had one.
@@ -323,17 +369,13 @@ class RunControlBridge:
             return request
         identity = request.control_id
         match request:
-            case ResumeRequest(when="capacity_returns"):
-                # The channel holds the wait and core records nothing: the request is done.
-                inbox.requests.settle(identity)
             case PauseRequest():
-                self._paused = True
-                change = self._event(core, now_at, _Change("pause", control_id=identity))
-                events += () if change is None else (change,)
-            case ResumeRequest():
-                self._paused = False
-                change = self._event(core, now_at, _Change("resume", control_id=identity))
-                events += () if change is None else (change,)
+                change = _Change("pause", owner=PauseOwner.OPERATOR, control_id=identity)
+                self._record_pause(core, now_at, change, events)
+            case ResumeRequest(when=when, fallback=fallback):
+                # Core records a capacity wait too, so the entry settles once core holds it.
+                change = _Change("resume", when=when, fallback=fallback, control_id=identity)
+                self._record_pause(core, now_at, change, events)
             case StopRequest(mode=mode):
                 self._stopped = True
                 stop = self._event(core, now_at, _Change("stop", mode=mode, control_id=identity))
@@ -440,6 +482,9 @@ class _Change:
     target: InputTarget | None = None
     input_mode: InputMode | None = None
     withdraws: InputId | None = None
+    owner: PauseOwner | None = None
+    when: ResumeWhen | None = None
+    fallback: bool = False
 
     def control(self, identity: ControlId) -> ControlInput:
         """The control core records; a steer carries its text's digest, not the text."""
@@ -457,6 +502,9 @@ class _Change:
             target=self.target,
             input_mode=self.input_mode,
             withdraws=self.withdraws,
+            owner=self.owner,
+            when=self.when,
+            fallback=self.fallback,
         )
 
 
@@ -486,8 +534,9 @@ def _held_as(core: CoreState, request: ControlRequest) -> bool | None:
 def _records(control: ControlInput, request: ControlRequest) -> bool:
     """Whether ``control`` records ``request``.
 
-    Core records the action, a stop's mode, and the digest and target of a steer's text; a
-    request that differs in any of them reuses the id for a different control.
+    Core records the action, a stop's mode, a resume's ``when`` and ``fallback``, a pause's
+    owner, and the digest and target of a steer's text; a request that differs in any of
+    them reuses the id for a different control.
     """
     match request:
         case SteerRequest(text=text, target=target, mode=mode):
@@ -504,8 +553,13 @@ def _records(control: ControlInput, request: ControlRequest) -> bool:
             )
         case StopRequest(mode=mode):
             return control.action == "stop" and control.mode == mode
-        case _:
-            return control.action == request.action.value
+        case ResumeRequest(when=when, fallback=fallback):
+            return control.action == "resume" and (control.when, control.fallback) == (
+                when,
+                fallback,
+            )
+        case PauseRequest():
+            return control.action == "pause" and control.owner is PauseOwner.OPERATOR
 
 
 def _standing_now(core: CoreState, events: list[CoreEvent], withdraws: str) -> bool:
