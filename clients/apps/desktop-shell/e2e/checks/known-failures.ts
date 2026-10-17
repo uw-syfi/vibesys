@@ -55,13 +55,6 @@ export const KNOWN_FAILURES: readonly KnownFailure[] = [
     issue: ISSUE,
   },
   {
-    id: 'ideas-pane-scrolls-sideways',
-    check: 'overflow',
-    message: /a pane scrolls sideways/,
-    screens: NARROW,
-    issue: ISSUE,
-  },
-  {
     id: 'chart-moves-when-scrubbed',
     check: 'stability',
     message: /performance chart changed its y at "scrubbed"/,
