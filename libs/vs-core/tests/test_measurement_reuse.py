@@ -73,13 +73,21 @@ def measured(
     candidate: str,
     measured_input: str | None,
     variant: Variant = "same",
+    *,
+    opted_in: bool = True,
 ) -> core.MeasurementPlan:
-    """A plan of ``candidate`` on an executor that holds its hosts alone, unless ``variant``."""
+    """A plan of ``candidate`` on an executor that holds its hosts alone, unless ``variant``.
+
+    The task opts in to reuse unless ``opted_in`` is false.
+    """
     return plan(
         purpose=purpose,
         candidate=revision(candidate),
         measured_input=measured_input,
-        **({"dedicated_measurement_resources": True} | _VARIANTS[variant]),
+        **(
+            {"dedicated_measurement_resources": True, "reuse_agent_run": opted_in}
+            | _VARIANTS[variant]
+        ),
     )
 
 
@@ -349,6 +357,8 @@ def test_a_reusing_submission_takes_only_its_runs_own_records() -> None:
     target=st.tuples(st.integers(min_value=0, max_value=2), st.integers(min_value=0, max_value=2)),
     input_known=st.booleans(),
     exclusive=st.booleans(),
+    opted_in=st.booleans(),
+    source_opted_in=st.booleans(),
     reload_at=st.integers(min_value=0, max_value=4),
 )
 def test_an_official_measurement_reuses_only_the_scopes_one_matching_conclusive_run(
@@ -357,6 +367,8 @@ def test_an_official_measurement_reuses_only_the_scopes_one_matching_conclusive_
     target: tuple[int, int],
     input_known: bool,
     exclusive: bool,
+    opted_in: bool,
+    source_opted_in: bool,
     reload_at: int,
 ) -> None:
     """Any sequence of agent runs of inputs (two commits each), with a reload anywhere.
@@ -365,7 +377,8 @@ def test_an_official_measurement_reuses_only_the_scopes_one_matching_conclusive_
     workload digest, its stage set, a stage's budget, its queue allowance, or run on a shared
     host, and may end passed, failed, or in a machinery, ambiguous or unknown failure. The
     official measurement of input ``target[0]`` (at commit ``target[1]``, on an exclusive
-    executor iff ``exclusive``) reuses a run iff it is the scope's only admitted submission,
+    executor iff ``exclusive``, for a task that opted in iff ``opted_in``, whose agent run
+    carried the opt-in iff ``source_opted_in``) reuses a run iff it is the scope's only admitted submission,
     of that input, alike in every respect but the purpose, ended passed or failed, and both
     hold their hosts alone; a commit the agent never ran matches by measured input only when
     it is known.
@@ -379,7 +392,13 @@ def test_an_official_measurement_reuses_only_the_scopes_one_matching_conclusive_
         state, request = agent_run(
             state,
             f"call-{number}",
-            measured("local-validation", name, f"sha256:{source_input}", variant),
+            measured(
+                "local-validation",
+                name,
+                f"sha256:{source_input}",
+                variant,
+                opted_in=source_opted_in,
+            ),
             outcome,
         )
         if request is not None:
@@ -390,7 +409,11 @@ def test_an_official_measurement_reuses_only_the_scopes_one_matching_conclusive_
     wanted, commit = target
     measured_input = f"sha256:{wanted}" if input_known else None
     asked_plan = measured(
-        "official", f"i{wanted}c{commit}", measured_input, "same" if exclusive else "shared-host"
+        "official",
+        f"i{wanted}c{commit}",
+        measured_input,
+        "same" if exclusive else "shared-host",
+        opted_in=opted_in,
     )
     asked = official(state, asked_plan)
     (submission,) = [r for r in asked.requests if isinstance(r, core.SubmitMeasurement)]
@@ -400,6 +423,8 @@ def test_an_official_measurement_reuses_only_the_scopes_one_matching_conclusive_
         only[4]
         if only is not None
         and exclusive
+        and opted_in
+        and source_opted_in
         and only[0] == wanted
         and (input_known or only[1] == commit)
         and only[2] in _CONCLUSIVE
@@ -484,6 +509,116 @@ def test_only_a_run_the_candidate_itself_passed_or_failed_is_reused(outcome: Out
     assert submission.reuses == (agent.request_id if outcome in _CONCLUSIVE else None)
 
 
+def test_a_task_that_has_not_opted_in_never_reuses_a_run() -> None:
+    """Reuse lets an agent keep a lucky run and re-measure an unlucky one: it is opt-in."""
+    for source_in, asked_in in ((False, True), (True, False), (False, False)):
+        state, agent = agent_run(
+            core.initial_state(),
+            "c1",
+            measured("local-validation", "a", "sha256:a", opted_in=source_in),
+            "passed",
+        )
+        assert agent is not None
+        asked = official(state, measured("official", "a", "sha256:a", opted_in=asked_in))
+        (submission,) = [r for r in asked.requests if isinstance(r, core.SubmitMeasurement)]
+        assert submission.reuses is None, (source_in, asked_in)
+
+
+def _reusing_job(
+    source_purpose: Literal["local-validation", "official"],
+) -> tuple[core.CoreState, core.SubmitMeasurement, core.Observation, core.Observation]:
+    """A submission reusing the scope's one earlier run (of ``source_purpose``), up to its end."""
+    state = core.initial_state()
+    if source_purpose == "local-validation":
+        state, source = agent_run(
+            state, "c1", measured("local-validation", "a", "sha256:a"), "passed"
+        )
+    else:
+        asked = official(state, measured("official", "a", "sha256:a"))
+        (source,) = [r for r in asked.requests if isinstance(r, core.SubmitMeasurement)]
+        state = ended(asked.state, source, "passed").state
+    assert source is not None
+    asked = requested(state, identity="second", measurement=measured("official", "b", "sha256:a"))
+    (submission,) = [r for r in asked.requests if isinstance(r, core.SubmitMeasurement)]
+    assert submission.reuses == source.request_id
+    started = seen(submission, 1)
+    after = committed(asked.state, started)
+    after = transition(after, core.MeasurementSubmissionObserved(observation=started)).state
+    finished = seen(
+        submission, 2, status=core.ObservationStatus.SUCCEEDED, terminal=True, released=True
+    )
+    return after, submission, started, finished
+
+
+def _report(
+    state: core.CoreState,
+    submission: core.SubmitMeasurement,
+    started: core.Observation,
+    finished: core.Observation,
+    evidence: tuple[core.EvidenceRef, ...],
+) -> core.Transition:
+    assert started.resource_id is not None
+    return transition(
+        committed(state, finished, _PASSED),
+        core.JobObserved(
+            resource_id=started.resource_id,
+            observation=finished,
+            evidence=evidence,
+            evaluation_result=_PASSED,
+        ),
+    )
+
+
+_STAGES = ("accuracy", "benchmark")
+_KINDS = tuple(core.EvidenceKind)
+
+
+@pytest.mark.parametrize("source_purpose", ["local-validation", "official"])
+@given(
+    kinds=st.tuples(st.sampled_from(_KINDS), st.sampled_from(_KINDS)),
+)
+def test_a_reused_record_takes_only_the_kind_its_source_record_maps_to(
+    source_purpose: Literal["local-validation", "official"],
+    kinds: tuple[core.EvidenceKind, core.EvidenceKind],
+) -> None:
+    """An agent record stands for a correctness or benchmark record; an official one keeps its kind."""
+    state, submission, started, finished = _reusing_job(source_purpose)
+    honest = {"accuracy": core.EvidenceKind.CORRECTNESS, "benchmark": core.EvidenceKind.BENCHMARK}
+    allowed = (
+        {core.EvidenceKind.CORRECTNESS, core.EvidenceKind.BENCHMARK}
+        if source_purpose == "local-validation"
+        else None
+    )
+    evidence = tuple(
+        record(
+            submission, finished, stage, core.ObservationStatus.SUCCEEDED, reused=submission.reuses
+        ).model_copy(update={"kind": kind})
+        for stage, kind in zip(_STAGES, kinds, strict=True)
+    )
+    done = _report(state, submission, started, finished, evidence)
+    kept = {item.key for item in core.project(done.state).measurements}
+    for stage, item in zip(_STAGES, evidence, strict=True):
+        ok = item.kind in allowed if allowed is not None else item.kind is honest[stage]
+        assert (item.key in kept) is ok, (stage, item.kind)
+
+
+def test_a_reusing_job_that_ends_without_all_its_sources_records_is_refused() -> None:
+    """Dropping the record of one stage would turn the source's failure into a pass."""
+    state, submission, started, finished = _reusing_job("local-validation")
+    both = tuple(
+        record(
+            submission, finished, stage, core.ObservationStatus.SUCCEEDED, reused=submission.reuses
+        )
+        for stage in _STAGES
+    )
+    short = _report(state, submission, started, finished, both[1:])
+    (result,) = results(short)
+    assert result.failure is core.MeasurementFailure.UNKNOWN
+    full = _report(state, submission, started, finished, both)
+    (result,) = results(full)
+    assert result.failure is None
+
+
 def test_a_run_on_a_host_the_executor_does_not_hold_alone_is_never_reused() -> None:
     """An agent's run timed beside other work never stands for an official run."""
     for source, asked_on in (("shared-host", "same"), ("same", "shared-host")):
@@ -537,7 +672,10 @@ def measure_in(
         decision_id=core.DecisionId(root=name),
         scope=scope,
         plan=plan(
-            purpose="official", candidate=revision(candidate), dedicated_measurement_resources=True
+            purpose="official",
+            candidate=revision(candidate),
+            dedicated_measurement_resources=True,
+            reuse_agent_run=True,
         ),
     )
     asked = transition(
