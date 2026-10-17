@@ -229,7 +229,7 @@ def test_an_offer_is_asked_once_committed_and_a_declined_one_waits_for_the_next_
     record = run.record()
     assert record.receipt is None
     assert record.offered_to == (ref if taken else None)
-    assert record.taken is taken
+    assert (record.taken_by == ref) is taken
     # Settled: further polls neither ask again nor offer it to the same turn again.
     asked = list(run.provider.asked)
     assert run.poll() == ()

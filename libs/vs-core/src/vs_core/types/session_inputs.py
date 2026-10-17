@@ -132,14 +132,47 @@ class InputRecord(Value):
     Never set together with ``reserved_to``: an offered input waits for that turn's end
     (delivered with it, or returned to pending) and no next turn reserves it meanwhile.
     """
-    taken: bool = False
-    """A running turn's provider took the input mid-turn, and no turn end has refused it since.
+    taken_by: InvocationRef | None = None
+    """The running turn, the one it is offered to, whose provider took the input mid-turn.
 
-    The input joins that turn only if the turn ends accepted while it is still offered there.
-    Otherwise it waits for the next turn, and stays marked: the agent may have read it, so a
-    drop records ``DELIVERY_UNKNOWN`` instead of saying it reached no turn.
+    A fact of that one offer: the input joins that turn only if the turn ends accepted while
+    the offer stands. Every release of the offer clears it.
+    """
+    possibly_read: bool = False
+    """A turn whose provider took the input ended without delivering or refusing it.
+
+    The agent may have read it, so a later drop records ``DELIVERY_UNKNOWN`` instead of saying
+    it reached no turn. It stays set when the input is offered or reserved again.
     """
     receipt: InputReceipt | None = None
+
+    @model_validator(mode="after")
+    def offer_correspondence(self) -> InputRecord:
+        """An offer, and a take of it, are of one interrupt-mode input by the turn holding it."""
+        if self.offered_to is not None:
+            if self.reserved_to is not None:
+                raise ContractValidationError("offered_to", "an offered input is not reserved")
+            if self.input.mode is not InputMode.INTERRUPT:
+                raise ContractValidationError(
+                    "offered_to", "only an interrupt-mode input is offered"
+                )
+        if (self.taken_by is not None or self.possibly_read) and (
+            self.input.mode is not InputMode.INTERRUPT
+        ):
+            raise ContractValidationError(
+                "taken_by", "only an interrupt-mode input is taken mid-turn"
+            )
+        if self.taken_by is not None and self.taken_by != self.offered_to:
+            raise ContractValidationError("taken_by", "a turn takes only the offer it holds")
+        if (
+            isinstance(self.receipt, InputDelivered)
+            and self.receipt.mid_turn
+            and self.taken_by != self.receipt.invocation
+        ):
+            raise ContractValidationError(
+                "receipt.mid_turn", "only the turn that took an offer gets it mid-turn"
+            )
+        return self
 
     @model_validator(mode="after")
     def receipt_correspondence(self) -> InputRecord:
@@ -150,15 +183,6 @@ class InputRecord(Value):
             self.reserved_to is not None and self.reserved_to != self.input.target.invocation
         ):
             raise ContractValidationError("reserved_to", "does not match invocation target")
-        if self.offered_to is not None:
-            if self.reserved_to is not None:
-                raise ContractValidationError("offered_to", "an offered input is not reserved")
-            if self.input.mode is not InputMode.INTERRUPT:
-                raise ContractValidationError(
-                    "offered_to", "only an interrupt-mode input is offered"
-                )
-        if self.taken and self.input.mode is not InputMode.INTERRUPT:
-            raise ContractValidationError("taken", "only an interrupt-mode input is taken mid-turn")
         if isinstance(self.receipt, InputDelivered):
             holder = self.offered_to if self.receipt.mid_turn else self.reserved_to
             if self.receipt.invocation != holder:

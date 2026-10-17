@@ -32,7 +32,7 @@ from ._proofs import (
 )
 from ._registry import ContractError
 from ._routing import SIGNAL_ORDER, event_area
-from ._session_inputs import check_declared_target
+from ._session_inputs import check_declared_target, may_have_been_read
 from ._session_inputs import mid_turn_offers as _mid_turn_offers
 from ._validation import validate_decision
 from ._values import digest, share_unchanged
@@ -579,7 +579,11 @@ def validate_terminal_inputs(
         if old.receipt is None and (
             not isinstance(new.receipt, InputDropped)
             or new.receipt.reason
-            != (InputDropReason.DELIVERY_UNKNOWN if old.taken else InputDropReason.RUN_TERMINAL)
+            != (
+                InputDropReason.DELIVERY_UNKNOWN
+                if may_have_been_read(old)
+                else InputDropReason.RUN_TERMINAL
+            )
             or new.receipt.at != now_at
             or new.receipt.target != old.input.target
             or new.receipt.input_id != old.input.input_id

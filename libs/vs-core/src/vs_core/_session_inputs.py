@@ -175,11 +175,20 @@ def check_declared_target(target: InputTarget | None, declaration: SearchDeclara
         )
 
 
+def may_have_been_read(record: InputRecord) -> bool:
+    """Whether a provider took ``record``'s input mid-turn and no turn refused it since.
+
+    So when the turn holding the offer took it, or an earlier turn took it and ended without
+    delivering or refusing it.
+    """
+    return record.taken_by is not None or record.possibly_read
+
+
 def _drop(
     record: InputRecord, reason: InputDropReason, at: float
 ) -> tuple[InputRecord, InputDropped]:
     """Settle ``record`` with no turn; one a provider took mid-turn may have been read."""
-    if record.taken:
+    if may_have_been_read(record):
         reason = InputDropReason.DELIVERY_UNKNOWN
     receipt = InputDropped(
         input_id=record.input.input_id, target=record.input.target, reason=reason, at=at
@@ -375,8 +384,19 @@ def _release_record(
 
 
 def _pending(record: InputRecord) -> InputRecord:
-    """The record waiting again, held by no turn; whether a provider took it stays recorded."""
-    return record.model_copy(update={"reserved_to": None, "offered_to": None})
+    """The record waiting again, held by no turn.
+
+    The offer ends, so does its take; a take that no refusal answered is kept as
+    ``possibly_read``.
+    """
+    return record.model_copy(
+        update={
+            "reserved_to": None,
+            "offered_to": None,
+            "taken_by": None,
+            "possibly_read": may_have_been_read(record),
+        }
+    )
 
 
 def _acceptance(
@@ -414,7 +434,7 @@ def _acceptance(
                 and record.input.input_id in invocation.input_ids
             )
         ):
-            if delivery and offered and not record.taken:
+            if delivery and offered and record.taken_by != event.invocation:
                 # Offered, but the provider never took it (or its answer was never committed):
                 # the turn ended without it, so the next turn gets it.
                 record, receipt = _release_record(record, context, invocation, obs.observed_at)
@@ -864,9 +884,14 @@ def _taken(
     """Record that the provider took an offer core still holds for that turn."""
     del context
     record = _interrupt_record(state, event.input_id)
-    if record.offered_to != event.invocation or record.receipt is not None or record.taken:
+    if (
+        record.offered_to != event.invocation
+        or record.receipt is not None
+        or record.taken_by is not None
+    ):
         return AreaChange(state=state)
-    return AreaChange(state=_with_record(state, record.model_copy(update={"taken": True})))
+    taken = record.model_copy(update={"taken_by": event.invocation})
+    return AreaChange(state=_with_record(state, taken))
 
 
 def _mid_turn_released(
@@ -874,14 +899,15 @@ def _mid_turn_released(
 ) -> AreaChange[SessionsState]:
     """Return an offer that did not stay in the turn to wait for the next one.
 
-    A refusal clears ``taken``: the agent did not read the message. Any other release keeps
-    it, because a host that died after the provider took the message cannot say otherwise.
+    A refusal ends this turn's take: its agent did not read the message. Any other release
+    keeps the take as ``possibly_read``, because a host that died after the provider took the
+    message cannot say otherwise. A take by an earlier turn is kept either way.
     """
     record = _interrupt_record(state, event.input_id)
     if record.offered_to != event.invocation or record.receipt is not None:
         return AreaChange(state=state)
     if event.refused:
-        record = record.model_copy(update={"taken": False})
+        record = record.model_copy(update={"taken_by": None})
     invocation = proven_invocation(state, event.invocation)
     if invocation is None:
         return AreaChange(state=_with_record(state, _pending(record)))

@@ -253,7 +253,8 @@ def test_an_input_a_provider_took_that_no_turn_confirms_is_dropped_as_unknown(ca
     taken, refused, expected = _TAKEN_CASES[case]
     state = _running_with_offer(taken=taken, refused=refused)
     (row,) = state.sessions.inputs
-    assert row.taken is (taken and not refused)
+    assert row.possibly_read is (taken and not refused)
+    assert row.taken_by is None
     assert (row.offered_to, row.receipt) == (None, None)
     closing = closing_state()
     closing = closing.model_copy(
@@ -354,3 +355,69 @@ def test_an_interrupt_input_cannot_name_one_invocation() -> None:
     target = core.InvocationInputTarget(invocation=invocation(spec))
     with pytest.raises(ValueError, match="interrupt input is for a run"):
         _interrupt(target)
+
+
+def _two_running_planner_turns() -> tuple[
+    core.CoreState, tuple[core.InvocationRef, core.Request], tuple[core.InvocationRef, core.Request]
+]:
+    """A run with two turns of one role running at once, each dispatched, with no input yet."""
+    first, other = _role_turn("turn-0", "planner"), _role_turn("turn-1", "planner")
+    session = other.session.model_copy(update={"session_id": core.SessionId(root="session-1")})
+    second = other.model_copy(update={"session": session})
+    a, b = waiting_turn_state(first), waiting_for_reservation(second)
+    state = a.model_copy(
+        update={
+            "records": b.records,
+            "sessions": a.sessions.model_copy(
+                update={
+                    "sessions": (*a.sessions.sessions, *b.sessions.sessions),
+                    "invocations": (*a.sessions.invocations, *b.sessions.invocations),
+                    "run_charges": (*a.sessions.run_charges, *b.sessions.run_charges),
+                }
+            ),
+        }
+    )
+    running = []
+    for spec in (first, second):
+        reserved = reload_step(state, core.InputReservationRequested(invocation=invocation(spec)))
+        (request,) = reserved.requests
+        assert isinstance(request, core.DispatchTurn)
+        state = reserved.state
+        running.append((invocation(spec), request))
+    return state, running[0], running[1]
+
+
+def test_a_take_by_a_turn_that_failed_never_delivers_the_offer_to_another_turn() -> None:
+    """Regression: a stale take marked an untaken offer to a second running turn as delivered.
+
+    Turn A's provider takes the message and A fails. The message is offered to turn B, which
+    runs alongside, and B ends before the shell asks B's provider. B never got the message, so
+    it waits for the next turn, marked as possibly read by A.
+    """
+    run = _Run()
+    state, *turns = _two_running_planner_turns()
+    item = _interrupt()
+    state = run.record(reload_step(state, core.SessionInputReceived(input=item)))
+    (offer,) = core.mid_turn_offers(state)
+    took, other = turns if turns[0][0] == offer.invocation else turns[::-1]
+    for event in (
+        core.InputOfferedMidTurn(input_id=item.input_id, invocation=took[0], now_at=0.0),
+        core.InputTakenMidTurn(input_id=item.input_id, invocation=took[0], now_at=0.0),
+    ):
+        state = run.record(reload_step(state, event))
+    failed = _fate_event("failed", *took)
+    assert failed is not None
+    state = run.record(reload_step(state, failed))
+    (offer,) = core.mid_turn_offers(state)
+    assert offer.invocation == other[0]
+    offered = core.InputOfferedMidTurn(input_id=item.input_id, invocation=other[0], now_at=0.0)
+    state = run.record(reload_step(state, offered))
+    ended = _fate_event("deliver", *other)
+    assert ended is not None
+    state = run.record(reload_step(state, ended))
+
+    (row,) = state.sessions.inputs
+    assert row.receipt is None, "a turn that never took the message was told it received it"
+    assert (row.offered_to, row.reserved_to, row.taken_by) == (None, None, None)
+    assert row.possibly_read
+    assert run.receipts == {}

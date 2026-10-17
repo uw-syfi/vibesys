@@ -153,8 +153,9 @@ class Scenario:
         steer = _steer(_sessions(envelope))
         if steer is None or steer.offered_to is None or steer.receipt is not None:
             return False
-        return (self.boundary is Boundary.AFTER_OFFER and not steer.taken) or (
-            self.boundary is Boundary.AFTER_TAKEN and steer.taken
+        taken = steer.taken_by is not None
+        return (self.boundary is Boundary.AFTER_OFFER and not taken) or (
+            self.boundary is Boundary.AFTER_TAKEN and taken
         )
 
     def die(self) -> HostDiedError:
