@@ -5,7 +5,7 @@ import {BrandMark, Card, ChoiceTiles, Field, Select, Stack, Text} from '@vibesys
 import type {JSX} from 'react';
 import {vettedModels} from '../../state/index.js';
 import type {CardProps} from './card-props.js';
-import {harnessMark, harnessName, modelName} from './view.js';
+import {harnessMark} from './view.js';
 
 /** The harness and the model every role runs; each role's model and effort are under More options. */
 export function AgentCard(props: CardProps): JSX.Element {
@@ -38,7 +38,7 @@ export function AgentCard(props: CardProps): JSX.Element {
           change={provider => dispatch({type: 'provider', provider})}
           options={providers.map(provider => ({
             value: provider,
-            label: harnessName(provider),
+            label: provider,
             leading: <BrandMark mark={harnessMark(provider)} />,
           }))}
         />
@@ -48,7 +48,7 @@ export function AgentCard(props: CardProps): JSX.Element {
           value={agent.model}
           options={vettedModels(offers, agent.provider).map(model => ({
             value: model,
-            label: modelName(model),
+            label: model,
           }))}
           change={model => dispatch({type: 'model', model})}
         />

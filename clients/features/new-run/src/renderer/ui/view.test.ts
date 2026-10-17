@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
-import {harnessMark, harnessName, projectLabels, type Readiness, readinessStatus} from './view.js';
+import {harnessMark, projectLabels, type Readiness, readinessStatus} from './view.js';
 
 const STATES = ['ok', 'warn', 'fail', 'pending'] as const;
 
@@ -93,12 +93,6 @@ describe('projectLabels', () => {
 });
 
 describe('names', () => {
-  test('a harness reads by its product name, an unknown one by its id', () => {
-    expect(harnessName('claude')).toBe('Claude Code');
-    expect(harnessName('codex')).toBe('Codex');
-    expect(harnessName('something-new')).toBe('something-new');
-  });
-
   test('a harness without a mark in the package has none', () => {
     expect(harnessMark('claude')).toBe('claudecode');
     expect(harnessMark('codex')).toBeNull();

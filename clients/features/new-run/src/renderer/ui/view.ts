@@ -116,25 +116,6 @@ export function projectLabels(paths: readonly string[]): ReadonlyMap<string, str
 }
 
 /**
- * How a harness reads, the one place names for harnesses come from. The host sends only the
- * provider id, so the shipped providers are named here until the host sends names.
- */
-export function harnessName(provider: string): string {
-  switch (provider) {
-    case 'claude':
-      return 'Claude Code';
-    case 'codex':
-      return 'Codex';
-    case 'gemini':
-      return 'Gemini CLI';
-    case 'opencode':
-      return 'OpenCode';
-    default:
-      return provider;
-  }
-}
-
-/**
  * The mark drawn beside a harness's name, or null for the generic glyph. The marks are
  * `simple-icons`'s, shown only beside the product's name to say which product runs; a harness
  * the package has no mark for (Codex today) has none.
@@ -150,11 +131,6 @@ export function harnessMark(provider: string): BrandMarkName | null {
     default:
       return null;
   }
-}
-
-/** How a model reads: the one place names for models come from; today the id the host sent. */
-export function modelName(model: string): string {
-  return model;
 }
 
 /**
@@ -341,7 +317,7 @@ export function summary(context: NewRunContext): string | null {
     task,
     machineLabel(machine),
     ...(backend === null ? [] : [backendLabel(backend)]),
-    modelName(agent.model),
+    agent.model,
     rounds,
   ].join(' · ');
 }

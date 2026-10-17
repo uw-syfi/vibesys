@@ -29,7 +29,7 @@ import {
   vettedModels,
 } from '../../state/index.js';
 import type {CardProps} from './card-props.js';
-import {modelName, moreOptionsSummary, type RolesView, rolesView} from './view.js';
+import {moreOptionsSummary, type RolesView, rolesView} from './view.js';
 
 const NONE = '';
 
@@ -73,7 +73,7 @@ function RoleRows(
                 value={choice.model ?? NONE}
                 options={[
                   {value: NONE, label: 'Same as run'},
-                  ...models.map(m => ({value: m, label: modelName(m)})),
+                  ...models.map(m => ({value: m, label: m})),
                 ]}
                 change={model =>
                   dispatch({type: 'role', role: {...choice, model: model === NONE ? null : model}})

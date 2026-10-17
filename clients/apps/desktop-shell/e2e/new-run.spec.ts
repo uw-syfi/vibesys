@@ -19,7 +19,7 @@ test('New run is prefilled from the last run on its machine and starts once the 
   await expect(page.getByLabel('Run on')).toHaveValue('ssh:host-b');
   await expect(page.getByLabel('Project', {exact: true})).toHaveValue(PROJECT);
   await expect(page.getByLabel('Task', {exact: true})).toHaveValue('mpmc');
-  await expect(page.getByRole('radio', {name: 'Claude Code'})).toBeChecked();
+  await expect(page.getByRole('radio', {name: 'claude'})).toBeChecked();
   await expect(page.getByLabel('Model', {exact: true})).toHaveValue('claude-opus-4-5');
   // All is well: the checks fold into one line, which opens to show each of them.
   await expect(ready(page)).toContainText(/Ready · \d+ checks passed/);
@@ -210,7 +210,7 @@ test('the harness is chosen from tiles with a mark and a name each', async ({pag
   // A harness with a mark in the package draws it; one without draws the generic glyph.
   await expect(harness.locator('svg.vs-brand-mark')).toHaveCount(2);
   await expect(harness.locator('svg.vs-brand-mark[data-generic]')).toHaveCount(1);
-  await page.getByRole('radio', {name: 'Codex'}).check();
+  await page.getByRole('radio', {name: 'codex'}).check();
   await expect(page.getByLabel('Model', {exact: true})).toHaveValue('gpt-5-codex');
   await start(page).click();
   const {started} = await fakeNewRun(page);
