@@ -223,8 +223,10 @@ class EvidenceRef(Value):
         tell from the record whether it ran alone. The rule: a measurement counts as
         trusted only when the framework took it of the exact revision it retains, and
         the framework always takes that measurement itself, serially, with the
-        official gates (``official`` purpose; purpose is not part of work identity, so
-        an executor may answer it from an identical earlier result). An agent record is
+        official gates (``official`` purpose). Core alone may answer it from an earlier
+        framework-run job of the same measured input, and only when that job's plan says
+        its executor held the hosts alone (``vs_core._measurement_reuse``); the records
+        it then adds are new ``official`` rows naming that job. An agent record is
         advice: it carries a kind that no eligibility requirement or ``accuracy_proof``
         ever selects. Without this, a candidate with an agent record and its official
         record would hold two CORRECTNESS rows and ``accuracy_proof`` would call them
