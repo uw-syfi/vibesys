@@ -80,6 +80,18 @@ class BaseRun(Value):
     candidate: RequestId
 
 
+class Runaway(Value):
+    """An attempt whose agent has asked for an unusual number of evaluations.
+
+    A warning and nothing more: it is recorded once per scope, when the count of the scope's
+    admitted evaluations first reaches ``limit``, and it never refuses a call.
+    """
+
+    scope: Scope
+    evaluations: Count
+    limit: Count
+
+
 class ComparisonVerdict(StrEnum):
     """Which side of the noise a candidate's result falls on, against its base."""
 

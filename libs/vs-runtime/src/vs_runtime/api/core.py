@@ -63,6 +63,7 @@ from vs_runtime._core_record import (
     RuntimeRecord,
     WinnerSelection,
     new_comparisons,
+    new_runaways,
     winner_selection,
 )
 from vs_runtime._core_requests import (
@@ -452,6 +453,7 @@ __all__ = [
     "handle_for",
     "new_comparisons",
     "new_core_state",
+    "new_runaways",
     "open_session_requests",
     "operation_roles",
     "owner_key",

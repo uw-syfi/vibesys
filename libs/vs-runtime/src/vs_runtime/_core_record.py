@@ -28,7 +28,7 @@ from vs_runtime._core_requests import ExecutionLease, OwnerEvent
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_core.api import Comparison
+    from vs_core.api import Comparison, Runaway
     from vs_project.api import StoredEnvelope
 
 RUNTIME_SCHEMA_VERSION = 1
@@ -228,6 +228,17 @@ def new_comparisons(
     """
     held = 0 if previous is None else len(previous.envelope.core.evaluation.comparisons)
     return current.envelope.core.evaluation.comparisons[held:]
+
+
+def new_runaways(
+    previous: RuntimeRecord[Any] | None, current: RuntimeRecord[Any]
+) -> tuple[Runaway, ...]:
+    """The runaway evaluation counts that ``current`` recorded beyond ``previous``.
+
+    Like the comparisons, core's log of them only grows, so the new ones are the tail.
+    """
+    held = 0 if previous is None else len(previous.envelope.core.evaluation.runaways)
+    return current.envelope.core.evaluation.runaways[held:]
 
 
 def winner_selection(record: RuntimeRecord[Any] | None) -> WinnerSelection | None:

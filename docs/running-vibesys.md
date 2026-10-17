@@ -244,6 +244,12 @@ task's declared `relative_noise`) and the sample counts; a verdict needs two
 noises. The agent's evaluation tool and the resumed turn report it, and the run's
 events carry it as `measurement_compared`.
 
+Evaluations have no allowance. A plan cannot cap them and core admits every call it can;
+only the turn's own time limit bounds an agent's work. A conservative runaway flag only
+warns: when one attempt's agent has had `runaway_evaluations` calls admitted (40 by default,
+each a call for a different candidate), the run emits one `framework_warning` event for
+that attempt. The flag never refuses a call or waits on anything.
+
 ## Start from an Example
 
 The examples under `examples/<category>/` in a VibeSys source checkout are

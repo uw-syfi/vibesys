@@ -41,6 +41,7 @@ from ._proofs import (
     submission_budget_for,
 )
 from ._registry import ContractError
+from ._runaway import runaway_noted
 from ._submission_receipts import (
     canonical_failure,
     conclusive,
@@ -405,7 +406,10 @@ def _agent_requested(
     call = AgentCall.answered(
         event, outbound.request.request_id, _deadline_at(context, outbound), repeat=False
     )
-    return _recorded(with_base(change, context, event, base, outbound.request.request_id), call)
+    recorded = _recorded(with_base(change, context, event, base, outbound.request.request_id), call)
+    return recorded.model_copy(
+        update={"state": runaway_noted(recorded.state, context, event.scope)}
+    )
 
 
 def _deadline_at(context: EvaluationContext, outbound: Outbound) -> Seconds:

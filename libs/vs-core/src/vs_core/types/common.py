@@ -748,6 +748,11 @@ class TaskTerms(Value):
 
     A candidate's comparison reads only base samples this young, on the run clock, and a base
     with none fresh is measured again (`vs_core._comparison`)."""
+    runaway_evaluations: int = Field(default=40, ge=1)
+    """How many evaluations one attempt's agent may ask for before the run warns of it.
+
+    Evaluations have no allowance, so this refuses nothing: it marks only an egregious count
+    (`vs_core._runaway`)."""
     profile_fields: tuple[str, ...] = ()
     """The measurement fields the task's profile capture supplies."""
 
