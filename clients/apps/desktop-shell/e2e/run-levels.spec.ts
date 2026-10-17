@@ -274,3 +274,48 @@ test('the scrubber replays the run’s ideas at an earlier event and returns to 
   await expect(page.getByText('Stopped by you.')).toBeVisible();
   await check(page, 'ink-run-ended');
 });
+
+test('the timeline draws one row per idea; a segment opens its step, a row its idea', async ({
+  page,
+}) => {
+  await openRun(page);
+  await page.getByRole('radiogroup', {name: 'Show'}).getByText('Timeline', {exact: true}).click();
+  const gantt = page.getByRole('listbox', {name: 'Ideas on the timeline'});
+  // The Ideas list's order: running first, then the kept newest first.
+  await expect(gantt.getByRole('option')).toHaveText([
+    /Per-core queues with stealing/,
+    /Wait-free consumer path/,
+    /Combine W1 ring with W2 padding/,
+    /Larger batch size/,
+    /Spin then park/,
+    /Cache-line padding and batched enqueue/,
+    /Lock-free ring with per-slot sequence numbers/,
+  ]);
+  const range = page.getByRole('radiogroup', {name: 'Range'});
+  await range.getByText('Last hour').click();
+  await expect(range.getByLabel('Last hour')).toBeChecked();
+  await range.getByText('All', {exact: true}).click();
+  await check(page, 'ink-timeline');
+
+  // A segment opens its step, beside the idea's steps.
+  await gantt
+    .getByRole('option', {name: /Combine W1 ring/})
+    .locator('.vs-gantt-seg')
+    .first()
+    .click();
+  await expect(page.getByRole('listbox', {name: /steps$/})).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  // Up from a step is its idea: its steps and the strip of them over time.
+  await expect(
+    page.getByRole('listbox', {name: 'Combine W1 ring with W2 padding steps', exact: true}),
+  ).toBeVisible();
+  await expect(page.getByRole('listbox', {name: /steps over time$/})).toBeVisible();
+  await check(page, 'ink-idea-steps');
+
+  // A row opens its idea.
+  await page.keyboard.press('Escape');
+  await page.getByRole('radiogroup', {name: 'Show'}).getByText('Timeline', {exact: true}).click();
+  await gantt.getByRole('option', {name: /Wait-free consumer path/}).click();
+  await expect(page.getByRole('heading', {name: 'Wait-free consumer path'})).toBeVisible();
+});

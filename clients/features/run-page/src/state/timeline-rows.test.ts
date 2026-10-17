@@ -1,0 +1,218 @@
+import {describe, expect, test} from 'bun:test';
+import type {
+  Candidate,
+  CandidateAttempt,
+  CandidateOutcome,
+  CandidateStep,
+  CandidateTree,
+} from '@vibesys/run-state/candidates';
+import {SEEDS, Seeded} from '@vibesys/store/testing';
+import type {RunModel} from './run-model.js';
+import {
+  attemptLines,
+  attemptStrip,
+  REJECTED_DENSE,
+  stepSegments,
+  type TimelineRow,
+  type TimelineRows,
+  timelineRows,
+  versusParent,
+} from './timeline-rows.js';
+
+/**
+ * The Timeline rows, attempt lines and step segments over generated ideas: the order is the Ideas
+ * list's, every segment lies on its row's bar, the folded lane stands for exactly the rejected
+ * ideas in range, and a shorter range never shows an idea that ended before it.
+ */
+
+function step(span: string, kind: string, role: string | null, at: number, took: number) {
+  return {
+    span,
+    kind,
+    title: `${kind} ${span}`,
+    role,
+    status: 'done',
+    startedAt: at,
+    endedAt: at + took,
+  } satisfies CandidateStep;
+}
+
+function attempt(id: string, outcome: CandidateOutcome, at: number, took: number) {
+  return {
+    span: id,
+    title: id,
+    idea: null,
+    round: null,
+    outcome,
+    reason: outcome === 'rejected' ? 'build_failed' : null,
+    revision: null,
+    startedAt: at,
+    endedAt: outcome === 'running' ? null : at + took,
+    measurement:
+      outcome === 'kept'
+        ? {
+            span: `${id}-g`,
+            at: at + took,
+            metricValue: 40,
+            vsBaseline: 1.5,
+            verdict: 'passed',
+            failed: null,
+          }
+        : null,
+    passed: [],
+    steps: [
+      step(`${id}-t`, 'agent_turn', 'implementer', at, took / 3),
+      step(`${id}-g`, 'gate', null, at + took / 3, took / 3),
+      step(`${id}-j`, 'agent_turn', 'judge', at + (2 * took) / 3, took / 3),
+    ],
+  } satisfies CandidateAttempt;
+}
+
+function idea(id: string, outcome: CandidateOutcome, at: number, took: number): Candidate {
+  const tried = attempt(`${id}-a`, outcome, at, took);
+  return {
+    id,
+    hypothesis: null,
+    parent: null,
+    title: id,
+    idea: null,
+    round: null,
+    outcome,
+    reason: tried.reason,
+    measurement: tried.measurement,
+    attempts: [tried],
+    startedAt: at,
+    endedAt: tried.endedAt,
+    running: [],
+  };
+}
+
+function modelOf(candidates: readonly Candidate[]): RunModel {
+  const tree: CandidateTree = {candidates, best: null, bestPath: []};
+  return {candidates: tree, direction: 'max'} as unknown as RunModel;
+}
+
+const OUTCOMES: readonly CandidateOutcome[] = ['running', 'kept', 'rejected'];
+
+function randomIdeas(random: Seeded): Candidate[] {
+  const count = random.int(71);
+  return Array.from({length: count}, (_, at) =>
+    idea(`i${at}`, OUTCOMES[random.int(3)] as CandidateOutcome, at * 600, 100 + random.int(900)),
+  );
+}
+
+function checkOrder(rows: readonly TimelineRow[]): void {
+  const live = rows.map(row => row.outcome === 'live');
+  expect(live).toEqual([...live].sort((a, b) => Number(b) - Number(a)));
+  const starts = rows.filter(row => row.outcome !== 'live').map(row => row.start);
+  expect(starts).toEqual([...starts].sort((a, b) => b - a));
+}
+
+function checkBars(shown: TimelineRows): void {
+  for (const row of shown.rows) {
+    expect(row.end).toBeGreaterThanOrEqual(row.start);
+    for (const segment of row.segments) {
+      expect(segment.start).toBeGreaterThanOrEqual(row.start - 1e-9);
+      expect(segment.end).toBeLessThanOrEqual(row.end + 1e-9);
+    }
+    if (!row.lane) expect(row.end >= shown.view.from && row.start <= shown.view.to).toBe(true);
+  }
+}
+
+function checkLane(shown: TimelineRows): void {
+  const rows = shown.rows.filter(row => !row.lane);
+  expect(shown.rows.length - rows.length).toBe(shown.folded > 0 ? 1 : 0);
+  expect(shown.folded === 0 || shown.folded > REJECTED_DENSE).toBe(true);
+  expect(shown.folded + rows.filter(row => row.outcome === 'err').length).toBe(
+    shown.rejectedInRange,
+  );
+}
+
+describe('timeline rows', () => {
+  test('over any run: running first then newest first, segments inside bars, lane counts the rejected', () => {
+    for (const seed of SEEDS) {
+      const ideas = randomIdeas(new Seeded(seed));
+      const clock = {start: 0, now: ideas.length * 600 + 1000};
+      for (const range of ['hour', 'day', 'all'] as const) {
+        const shown = timelineRows(modelOf(ideas), range, clock, false);
+        checkOrder(shown.rows.filter(row => !row.lane));
+        checkBars(shown);
+        checkLane(shown);
+        expect(timelineRows(modelOf(ideas), range, clock, true).folded).toBe(0);
+      }
+    }
+  });
+
+  test('a range shows a subset of the ideas the longer range shows', () => {
+    const ideas = Array.from({length: 30}, (_, at) => idea(`i${at}`, 'kept', at * 7200, 600));
+    const clock = {start: 0, now: 30 * 7200};
+    const ids = (range: 'hour' | 'day' | 'all') =>
+      timelineRows(modelOf(ideas), range, clock, true).rows.map(row => row.id);
+    expect(ids('hour').length).toBeLessThan(ids('day').length);
+    expect(ids('day').length).toBeLessThan(ids('all').length);
+    expect(ids('all').length).toBe(30);
+    for (const id of ids('hour')) expect(ids('day')).toContain(id);
+  });
+
+  test('the figure is the ratio of a kept idea and empty while running', () => {
+    const shown = timelineRows(
+      modelOf([idea('a', 'kept', 0, 100), idea('b', 'running', 200, 100)]),
+      'all',
+      {start: 0, now: 400},
+      false,
+    );
+    expect(shown.rows.map(row => [row.id, row.figure])).toEqual([
+      ['b', ''],
+      ['a', '1.50×'],
+    ]);
+  });
+});
+
+describe('step segments', () => {
+  test('an agent turn is solid, a gate hatched, a judge grey, and a running step reaches now', () => {
+    const steps: CandidateStep[] = [
+      step('t', 'agent_turn', 'implementer', 0, 10),
+      step('g', 'gate', null, 10, 10),
+      step('j', 'agent_turn', 'judge', 20, 10),
+      {...step('r', 'agent_turn', 'implementer', 30, 0), endedAt: null, status: 'running'},
+    ];
+    const segments = stepSegments(steps, 50);
+    expect(segments.map(segment => segment.kind)).toEqual(['solid', 'hatched', 'grey', 'solid']);
+    expect(segments[3]?.end).toBe(50);
+    expect(segments[0]?.label).toBe('implementer · agent_turn t · 10s');
+  });
+});
+
+describe('attempts', () => {
+  test('lines read build failed, the ratio or running, in the order the attempts began', () => {
+    const base = idea('x', 'kept', 0, 300);
+    const failed = attempt('f', 'rejected', 0, 60);
+    const kept = attempt('k', 'kept', 60, 120);
+    const live = attempt('l', 'running', 200, 0);
+    const lines = attemptLines({...base, attempts: [failed, kept, live]}, 260, 'ops/s');
+    expect(lines.map(line => [line.title, line.result, line.tone])).toEqual([
+      ['attempt 1', 'build failed', 'err'],
+      ['attempt 2', '1.50×', 'ok'],
+      ['attempt 3', 'running', 'live'],
+    ]);
+    expect(lines[1]?.value).toBe('40 ops/s');
+    expect(lines.map(line => line.took)).toEqual(['1m', '2m', '1m']);
+  });
+
+  test('the strip spans the attempt and carries its steps', () => {
+    const base = idea('x', 'kept', 100, 300);
+    const strip = attemptStrip(base, base.attempts[0] as CandidateAttempt, null);
+    expect([strip.from, strip.to, strip.playhead]).toEqual([100, 400, null]);
+    expect(strip.row.segments.length).toBe(3);
+  });
+
+  test('versus parent follows the metric direction', () => {
+    const kept = idea('a', 'kept', 0, 10);
+    const measured = kept.measurement;
+    if (measured === null) throw new Error('fixture');
+    const parent = {...idea('p', 'kept', 0, 10), measurement: {...measured, metricValue: 20}};
+    expect(versusParent(kept, parent, 'max')).toBe('2.00×');
+    expect(versusParent(kept, parent, 'min')).toBe('0.50×');
+    expect(versusParent(kept, null, 'max')).toBeNull();
+  });
+});
