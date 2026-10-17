@@ -8,6 +8,7 @@ import type {RunFixture} from './fixture.js';
 import {parseFixture} from './fixture.js';
 import {
   addIdea,
+  addJudgeTurn,
   adoptionSpan,
   type IdeaSpec,
   planningSpan,
@@ -498,6 +499,21 @@ function finishedRun(): RunFixture {
         tool: 'Bash',
         command: 'cargo bench --bench queue',
         output: 'queue/mpmc time: 41.2 ms',
+      });
+      // The judge's turn of idea 5: two lines of thinking, then a card with a long analysis.
+      addJudgeTurn(trace, {
+        n: 5,
+        at: 1322,
+        took: 26,
+        thinking: [
+          'The candidate source matches the declared outcome.\n',
+          'The benchmark and correctness gates both passed on the final revision.',
+        ],
+        reply: {
+          verdict: 'pass',
+          analysis:
+            'The candidate source matches the declared outcome: the head and tail counters now sit on separate cache lines, the ring still uses per-slot sequence numbers, and the correctness gate passed all 100 trials. The padding adds 128 bytes per queue, which the benchmark shows is repaid by the removed false sharing. No test was weakened and no dependency was added.',
+        },
       });
       addIdea(trace, {
         n: 6,

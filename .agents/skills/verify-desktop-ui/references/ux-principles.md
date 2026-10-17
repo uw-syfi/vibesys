@@ -26,9 +26,11 @@ can decide it.
 
 ## Show what matters, where it is expected
 
-5. **A result goes at the end, with a one-line summary at the top.** A user
-   learns the outcome in three seconds, then reads down for why. Unenforced:
-   judgment.
+5. **A result goes at the end, with a one-line summary at the top when it is
+   out of sight.** A user learns the outcome in three seconds, then reads down
+   for why. A card already in view (a turn of thinking and a reply) needs no
+   line above it that repeats it, and its header is one label: the kind, then
+   the verdict. Unenforced: judgment.
 6. **Nothing important is collapsed by default.** Fields a reviewer must read
    (a plan's fields, a reply's fields) are shown, not behind a toggle. Folding
    is for detail nobody has to read. Unenforced: judgment.
@@ -59,6 +61,14 @@ can decide it.
 13. **Changes are visible, not jarring.** A live update is noticed (a row
     appears, a figure changes) without the page jumping, flashing or moving
     what the user is reading. Unenforced: needs a person watching.
+
+14. **Content fills its pane; cap only prose line length.** A turn, card or
+    log spans its pane's width with normal padding; a paragraph alone is
+    capped (about 105 characters), so text stays readable while code, tables
+    and tool output use the whole width. A list that only opened a wider pane
+    (the steps of an idea, a transcript) is narrow. Enforced by the
+    `pane-fill` check: the column holding wrapped text covers at least 85% of
+    its pane's inner width.
 
 ## Sizes the checks cover
 

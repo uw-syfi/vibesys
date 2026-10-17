@@ -353,3 +353,74 @@ export function toolCall(
     stamp,
   );
 }
+
+/** What a judge's `JudgeResponse` says; a long analysis is what makes the card wide. */
+export interface JudgeVerdict {
+  readonly analysis: string;
+  readonly verdict: 'pass' | 'fail';
+  readonly feedback?: string;
+}
+
+const JUDGE_SCHEMA = {
+  $defs: {Verdict: {enum: ['pass', 'fail'], type: 'string'}},
+  properties: {
+    analysis: {type: 'string'},
+    feedback: {type: 'string'},
+    verdict: {$ref: '#/$defs/Verdict'},
+  },
+  required: ['analysis', 'feedback', 'verdict'],
+  type: 'object',
+};
+
+/**
+ * A multi-judge turn of idea `n` over `[at, at + took]`: lines of thinking and then its structured
+ * reply, as the server sends them (`agent_execution_finished` carries the reply).
+ */
+export function addJudgeTurn(
+  trace: Trace,
+  args: {
+    readonly n: number;
+    readonly at: number;
+    readonly took: number;
+    readonly thinking: readonly string[];
+    readonly reply: JudgeVerdict;
+  },
+): void {
+  const id = `op:w${args.n}-judge`;
+  const span = (status: Span['status'], ended: boolean): Span => ({
+    id,
+    parent: ideaId(args.n),
+    type: 'operation',
+    name: 'agent.turn',
+    status,
+    started_at: args.at,
+    ...(ended ? {ended_at: args.at + args.took} : {}),
+    label: label('agent_turn', 'judge', {
+      role: 'judge',
+      model: 'example-model',
+      agent: `judge-${args.n}`,
+      started_by: ['planner-1'],
+    }),
+  });
+  trace.span('span_started', span('running', false), args.at);
+  const stamp = {invocation_id: `inv-${id}`, agent_kind: 'multi-judge', span_id: id};
+  for (const line of args.thinking) {
+    trace.event('agent_output_chunk', {channel: 'analysis', content: line}, args.at + 1, stamp);
+  }
+  const value = {
+    analysis: args.reply.analysis,
+    feedback: args.reply.feedback ?? '',
+    verdict: args.reply.verdict,
+    skills_used: [],
+  };
+  trace.event(
+    'agent_execution_finished',
+    {
+      result: JSON.stringify({reply: value}),
+      reply: {kind: 'JudgeResponse', json_schema: JUDGE_SCHEMA, value},
+    },
+    args.at + args.took - 1,
+    {status: 'completed', ...stamp},
+  );
+  trace.span('span_ended', span('done', true), args.at + args.took);
+}

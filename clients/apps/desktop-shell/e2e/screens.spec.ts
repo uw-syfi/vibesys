@@ -21,9 +21,10 @@ import {type Journey, walkScreens} from './screens.js';
 const DEEP: Journey = {
   idea: 'Combine W1 ring with W2 padding',
   command: 'cargo bench --bench queue',
+  judge: true,
   live: true,
 };
-const SHALLOW: Journey = {idea: null, command: null, live: true};
+const SHALLOW: Journey = {idea: null, command: null, judge: false, live: true};
 
 interface Cell {
   readonly fixture: string;

@@ -14,6 +14,7 @@ import {
   legendCheck,
   numberLabelCheck,
   overflowCheck,
+  paneFillCheck,
   overlapCheck,
   rawTextCheck,
   strikeCheck,
@@ -36,6 +37,7 @@ const CHECKS: Readonly<Record<PageCheckId, (input: CheckInput) => Violation[]>> 
   'number-label': numberLabelCheck,
   strike: strikeCheck,
   'chart-size': chartSizeCheck,
+  'pane-fill': paneFillCheck,
 };
 
 /** Enum values that never read as words: the failure reasons spelled with a hyphen or underscore. */

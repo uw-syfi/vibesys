@@ -322,7 +322,7 @@ describe('another role’s reply keeps its fields and ends the turn', () => {
       }),
     ]);
     const card = resultOf(w, 'turn2', 2);
-    expect(card?.label).toBe('Implementer response');
+    expect(card?.label).toBe('Implementer');
     expect(card?.headline).toBeNull();
     expect(card?.chips).toEqual([{label: 'done'}]);
     expect(card?.sections.map(each => each.key)).toEqual(['summary']);

@@ -521,6 +521,17 @@ describe('the turn’s layout', () => {
     expect(all(container, '.vs-button')).toHaveLength(0);
   });
 
+  test('a turn of thinking and a reply shows its card at once, with no line repeating it', async () => {
+    const fx = fixture([chunk(10, 'analysis', 'Counters share a cache line.'), reply(18)]);
+    const container = await mount(<StepView {...viewProps(fx, fx.turn, null)} />);
+    expect(all(container, '.vs-turn-result')).toHaveLength(1);
+    expect(all(container, '.vs-button').map(each => each.textContent)).not.toContain(
+      'Implementer reply: done · Padded the counters.',
+    );
+    expect(one(container, '.vs-turn-result').textContent).toContain('Implementer');
+    expect(one(container, '.vs-turn-result').textContent).not.toContain('Implementer reply');
+  });
+
   test('the plan card ends the orchestrator’s turn, and its base opens that idea', async () => {
     const earlier = labelled(
       'ws0',

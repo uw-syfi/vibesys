@@ -10,13 +10,15 @@ import {settled} from './checks/settle.js';
 import {type Anchor, anchorsOf, RUN_ANCHORS, stabilityViolations} from './checks/stability.js';
 
 /** A screen of the walk: a level, or a face of the run level, or the scrubbed run. */
-type Screen = 'run' | 'idea' | 'step' | 'item' | 'timeline' | 'agents' | 'scrubbed';
+type Screen = 'run' | 'idea' | 'step' | 'item' | 'judge' | 'timeline' | 'agents' | 'scrubbed';
 
 export interface Journey {
   /** The title of the idea to open, or null for the second row. */
   readonly idea: string | null;
   /** The command of a tool call in that idea's implementer turn; null: go no deeper than the idea. */
   readonly command: string | null;
+  /** Whether the idea has a judge turn to open after its implementer's. */
+  readonly judge: boolean;
   /** Whether the run is live, so its scrubber can be dragged back and returned to live. */
   readonly live: boolean;
 }
@@ -71,21 +73,33 @@ async function openIdea(page: Page, idea: string | null): Promise<void> {
   await expect(page.getByRole('listbox', {name: /steps$/})).toBeVisible();
 }
 
-async function openItem(page: Page, command: string): Promise<void> {
+async function openStep(page: Page, role: RegExp): Promise<void> {
   await settled(page);
   await page
     .getByRole('listbox', {name: /steps$/})
-    .getByRole('option', {name: /implementer/})
+    .getByRole('option', {name: role})
     .first()
     .click();
+  await expect(page.getByRole('region', {name: 'Agent turn'})).toBeVisible();
+}
+
+/** A tool call of the opened turn, in full. */
+async function openItem(page: Page, command: string): Promise<void> {
+  await settled(page);
   const turn = page.getByRole('region', {name: 'Agent turn'});
-  await expect(turn).toBeVisible();
   await turn.getByRole('button', {name: /1 tool/}).click();
   await turn
     .getByRole('button', {name: escaped(command)})
     .last()
     .click();
   await expect(turn.locator('[aria-current="true"]')).toBeVisible();
+}
+
+/** The idea level again, by its crumb (the second), from a step or item. */
+async function backToIdea(page: Page): Promise<void> {
+  await settled(page);
+  await page.getByRole('navigation', {name: 'Zoom'}).getByRole('button').nth(1).click();
+  await expect(page.getByRole('listbox', {name: /steps$/})).toBeVisible();
 }
 
 /** The run level again, by its crumb, from wherever the walk is. */
@@ -110,9 +124,15 @@ export async function walkScreens(
   await openIdea(page, journey.idea);
   await walk.at('idea');
   if (journey.command !== null) {
-    await openItem(page, journey.command);
+    await openStep(page, /implementer/);
     await walk.at('step');
+    await openItem(page, journey.command);
     await walk.at('item');
+    if (journey.judge) {
+      await backToIdea(page);
+      await openStep(page, /judge/);
+      await walk.at('judge');
+    }
   }
   await backToRun(page);
   const show = page.getByRole('radiogroup', {name: 'Show'});

@@ -46,7 +46,7 @@ export function TurnResult(props: {
       <Card>
         <Stack gap="space-4">
           <Row gap="space-3" wrap>
-            <Chip label={props.label} />
+            <Text variant="section">{props.label}</Text>
             {(props.chips ?? []).map(chip => (
               <Chip
                 key={chip.label}
