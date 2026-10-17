@@ -205,6 +205,14 @@ button.vs-crumb:focus-visible {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  container-type: inline-size;
+}
+/* A narrow list gives the bar's width back to the names: the figure still says the same. */
+@container (max-width: 480px) {
+  .vs-pickrow-bar,
+  .vs-listheader-col[data-bar] {
+    display: none;
+  }
 }
 .vs-picklist-rows {
   max-height: var(--thread);
@@ -293,6 +301,21 @@ button.vs-crumb:focus-visible {
 .vs-pickrow-bar {
   flex: none;
   width: var(--column-swatch);
+}
+.vs-pickrow-fold {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-5);
+  margin-right: calc(-1 * var(--space-2));
+  color: var(--muted);
+}
+.vs-pickrow-fold[data-fold] {
+  cursor: pointer;
+}
+.vs-pickrow-fold[data-fold]:hover {
+  color: var(--text);
 }
 .vs-pickrow-lead {
   flex: none;
@@ -412,6 +435,10 @@ button.vs-crumb:focus-visible {
 }
 .vs-screen[data-density="compact"] .vs-pickrow-lead {
   min-width: calc(var(--space-8) * 2 + var(--space-3));
+}
+/* A depth number in a list that folds is a couple of digits, not a column. */
+.vs-screen .vs-pickrow-fold ~ .vs-pickrow-lead {
+  min-width: 0;
 }
 .vs-screen[data-density="compact"] .vs-guide {
   margin: calc(-1 * var(--space-1)) 0;
@@ -670,6 +697,8 @@ button.vs-crumb:focus-visible {
 .vs-listheader-start {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .vs-listheader-col {
   flex: none;
@@ -721,6 +750,7 @@ button.vs-crumb:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  white-space: nowrap;
 }
 .vs-serieslegend {
   margin: 0;

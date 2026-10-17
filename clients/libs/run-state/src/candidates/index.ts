@@ -26,6 +26,12 @@ import {CandidateFold} from './fold.js';
 import type {Candidate, CandidateTree} from './types.js';
 
 export {CandidateFold, type WorkMeter} from './fold.js';
+export {
+  candidateLineage,
+  type Lineage,
+  type MetricDirection,
+  type SubtreeStats,
+} from './lineage.js';
 export type {
   BestCandidate,
   Candidate,

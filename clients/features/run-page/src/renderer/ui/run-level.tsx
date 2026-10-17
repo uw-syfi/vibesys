@@ -6,9 +6,7 @@
 
 import type {CoreState} from '@vibesys/run-state';
 import {
-  Breadcrumb,
   Button,
-  type Crumb,
   DotLegend,
   EmptyState,
   Pane,
@@ -19,26 +17,29 @@ import {
   SearchBox,
   SegmentedControl,
   Stack,
-  Text,
 } from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
   ageWords,
-  bestPathView,
-  type IdeaRow,
+  bestLine,
+  defaultLayout,
   type IdeasFilter,
+  type IdeasLayout,
   type ImplementerOutcomes,
   ideasView,
   implementerOutcomes,
   type NowItem,
   nowView,
   type RunMode,
+  type RunModel,
   type RunPageAction,
   type RunPageState,
   traceArrival,
   type ZoomEvent,
 } from '../../state/index.js';
 import {FramedPane} from './framed-pane.js';
+import {IdeaPickRow} from './idea-pick-row.js';
+import {BestLineRow, IdeasTreeList, LayoutSwitch} from './ideas-tree.js';
 import {AgentsView, type AgentsViewProps} from './views/agents/agents-view.js';
 import {agentsHeader, logsHeader, timelineHeader} from './views/headers.js';
 import {LogsView, type LogsViewProps} from './views/logs/logs-view.js';
@@ -66,67 +67,6 @@ export function ModeSwitch(props: {
       options={props.options}
       value={props.mode}
       change={mode => props.zoom({type: 'mode', mode})}
-    />
-  );
-}
-
-function BestPath(props: {
-  readonly state: RunPageState;
-  readonly base: ViewBase;
-  readonly dispatch: Dispatch;
-}): JSX.Element | null {
-  const path = bestPathView(props.base.model, props.state.pathOpen);
-  if (path === null) return null;
-  const items: Crumb[] = path.crumbs.map((crumb, index) =>
-    crumb.kind === 'fold'
-      ? {
-          id: 'fold',
-          label: `… ${crumb.hidden}`,
-          press: () => props.dispatch({type: 'best-path-open', open: true}),
-        }
-      : {
-          id: crumb.id,
-          label:
-            index === path.crumbs.length - 1 && path.ratio !== null
-              ? `${crumb.label} ${path.ratio}`
-              : crumb.label,
-          press: () => props.base.zoom({type: 'open-idea', idea: crumb.id}),
-        },
-  );
-  return (
-    <Row gap="space-2" align="center">
-      <Text variant="small" tone="muted">
-        best path
-      </Text>
-      <Breadcrumb label="Best path" items={items} />
-    </Row>
-  );
-}
-
-function IdeaPickRow(props: {
-  readonly row: IdeaRow;
-  readonly outcomes: ImplementerOutcomes;
-  readonly compact: boolean;
-  readonly now: number | null;
-  readonly zoom: Zoom;
-}): JSX.Element {
-  const {row, compact, zoom} = props;
-  const reported = props.outcomes.get(row.id)?.outcome ?? null;
-  return (
-    <PickRow
-      id={row.id}
-      title={row.title}
-      mono
-      {...(compact || row.summary === null ? {} : {summary: row.summary})}
-      state={row.state}
-      badges={compact || reported === null ? row.badges : [...row.badges, reported]}
-      {...(compact ? {} : {bar: row.bar})}
-      figure={row.runningSince === null ? row.figure : ageWords(row.runningSince, props.now)}
-      figureTone={row.figureTone}
-      {...(compact ? {} : {trail: {label: row.trail.label}})}
-      stripe={row.stripe}
-      fresh={row.fresh}
-      select={() => zoom({type: 'open-idea', idea: row.id})}
     />
   );
 }
@@ -219,6 +159,11 @@ function IdeasLegend(props: {
   );
 }
 
+/** The layout the Ideas face is in: the reader's pick, else by the run. */
+function ideasLayout(state: RunPageState, model: RunModel): IdeasLayout {
+  return state.ideasLayout ?? defaultLayout(model);
+}
+
 function IdeasFace(props: {
   readonly state: RunPageState;
   readonly base: ViewBase;
@@ -229,23 +174,34 @@ function IdeasFace(props: {
   if (base.model.candidates.candidates.length === 0) {
     return <EmptyState title="No ideas yet" body="Each idea the run tries shows here." />;
   }
+  const line = bestLine(base.model);
+  const layout = ideasLayout(state, base.model);
   return (
     <>
-      <BestPath state={state} base={base} dispatch={dispatch} />
-      <SearchBox
-        label="Search ideas"
-        placeholder="Search ideas"
-        value={state.ideas.query}
-        change={query => dispatch({type: 'ideas-filter', filter: {...state.ideas, query}})}
-      />
-      <IdeasList
-        base={base}
-        outcomes={outcomes}
-        filter={state.ideas}
-        selected={null}
-        compact={false}
-        dispatch={dispatch}
-      />
+      {line === null ? null : <BestLineRow line={line} dispatch={dispatch} />}
+      <Row gap="space-3" align="center">
+        <Stack gap="space-0" grow>
+          <SearchBox
+            label="Search ideas"
+            placeholder="Search ideas"
+            value={state.ideas.query}
+            change={query => dispatch({type: 'ideas-filter', filter: {...state.ideas, query}})}
+          />
+        </Stack>
+        <LayoutSwitch layout={layout} dispatch={dispatch} />
+      </Row>
+      {layout === 'tree' ? (
+        <IdeasTreeList base={base} outcomes={outcomes} state={state} dispatch={dispatch} />
+      ) : (
+        <IdeasList
+          base={base}
+          outcomes={outcomes}
+          filter={state.ideas}
+          selected={null}
+          compact={false}
+          dispatch={dispatch}
+        />
+      )}
     </>
   );
 }

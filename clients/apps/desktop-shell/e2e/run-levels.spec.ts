@@ -132,6 +132,11 @@ async function openRun(page: Page, live = false, server: FakeServerSeed = SERVER
     .click();
 }
 
+/** The Ideas pane opens as a tree once ideas build on others; these tests read the flat list. */
+async function showList(page: Page): Promise<void> {
+  await page.getByRole('radiogroup', {name: 'Ideas layout'}).getByText('List').click();
+}
+
 /** Presses Tab until the focus is inside `target`; at most `limit` presses (guards a hang). */
 async function tabInto(page: Page, target: Locator, limit = 60): Promise<void> {
   for (let press = 0; press < limit; press += 1) {
@@ -145,6 +150,7 @@ test.use({colorScheme: 'dark', viewport: {width: 1440, height: 900}});
 
 test('every level opens from the keyboard alone, and Escape walks back', async ({page}) => {
   await openRun(page);
+  await showList(page);
   const ideas = page.getByRole('listbox', {name: 'Ideas'});
   await expect(ideas.getByRole('option').first()).toBeVisible();
   await tabInto(page, ideas);
@@ -186,6 +192,7 @@ test('the run level shows the best ratio, the ideas running first, and what runs
   page,
 }) => {
   await openRun(page);
+  await showList(page);
   const ideas = page.getByRole('listbox', {name: 'Ideas'});
   // Running first, then the passed newest first; the failed wait behind their row.
   await expect(ideas.getByRole('option')).toHaveText([
@@ -522,6 +529,7 @@ test('the scrubber replays the run’s ideas at an earlier event and returns to 
   page,
 }) => {
   await openRun(page);
+  await showList(page);
   const ideas = page.getByRole('listbox', {name: 'Ideas'});
   await expect(ideas.getByRole('option')).toHaveCount(5);
   await page.getByRole('slider', {name: 'Run position'}).focus();

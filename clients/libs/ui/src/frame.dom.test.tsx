@@ -711,6 +711,52 @@ describe('PickRow extras', () => {
   });
 });
 
+describe('PickRow fold', () => {
+  test('a foldable row has a chevron that folds and unfolds it, by click and by Left and Right', async () => {
+    const seen: string[] = [];
+    const {container} = await mount(
+      <PickList label="Ideas">
+        <PickRow
+          id="a"
+          title="a"
+          fold={{open: false, toggle: () => seen.push('a')}}
+          select={() => seen.push('pick')}
+        />
+        <PickRow id="b" title="b" fold={{open: true, toggle: () => seen.push('b')}} select={noop} />
+        <PickRow id="c" title="c" fold="none" select={noop} />
+        <PickRow id="d" title="d" select={noop} />
+      </PickList>,
+    );
+    const [a, b, c, d] = all(container, '[role="option"]') as [
+      HTMLElement,
+      HTMLElement,
+      HTMLElement,
+      HTMLElement,
+    ];
+    expect(one(a, '.vs-pickrow-fold').getAttribute('data-fold')).toBe('closed');
+    expect(one(b, '.vs-pickrow-fold').getAttribute('data-fold')).toBe('open');
+    // A row with nothing to fold keeps the slot so titles line up; a row of another list has none.
+    expect(c.querySelector('.vs-pickrow-fold')).not.toBeNull();
+    expect(c.querySelector('.vs-pickrow-fold')?.hasAttribute('data-fold')).toBe(false);
+    expect(d.querySelector('.vs-pickrow-fold')).toBeNull();
+    // The chevron holds no control of its own, so the option holds none (nothing nested).
+    expect(a.querySelector('button')).toBeNull();
+    await click(one(a, '.vs-pickrow-fold'));
+    expect(seen).toEqual(['a']);
+    await click(one(a, '.vs-pickrow-text'));
+    expect(seen).toEqual(['a', 'pick']);
+    seen.length = 0;
+    await click(one(c, '.vs-pickrow-fold'));
+    expect(seen).toEqual([]);
+    seen.push('a');
+    await press(a, 'ArrowRight');
+    await press(a, 'ArrowLeft');
+    await press(b, 'ArrowLeft');
+    await press(b, 'ArrowRight');
+    expect(seen).toEqual(['a', 'a', 'b']);
+  });
+});
+
 describe('Breadcrumb figure', () => {
   test('names a chain with its result after the last level', async () => {
     const {container} = await mount(
