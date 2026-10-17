@@ -31,6 +31,7 @@ from .types.common import (
     ChargeKind,
     CompletionStatus,
     ContractValidationError,
+    InputId,
     InvocationInputTarget,
     ItemInputTarget,
     ObservationStatus,
@@ -48,10 +49,13 @@ from .types.session_inputs import (
     InputDropReason,
     InputMode,
     InputRecord,
+    MidTurnOffer,
 )
 from .types.sessions import (
     DispatchTurn,
     InputAcceptanceObserved,
+    InputMidTurnReleased,
+    InputOfferedMidTurn,
     InputReservationReleased,
     InputReservationRequested,
     InputWithdrawRequested,
@@ -218,6 +222,7 @@ def _reserve(
         row.model_copy(update={"reserved_to": event.invocation})
         if row.receipt is None
         and row.reserved_to is None
+        and row.offered_to is None
         and row.input.mode is not InputMode.STANDING
         and _matches(row.input, invocation, context)
         else row
@@ -352,7 +357,7 @@ def _release_record(
         # The run and a role outlive the attempt whose turn reserved the input, and a later
         # invocation (of that role) can take it, so a cancelled or ended reserver never
         # consumes it: it waits again.
-        return record.model_copy(update={"reserved_to": None}), None
+        return _pending(record), None
     owner = attempt_for(context, invocation.scope)
     closure = current_closure(owner, owner.closure if owner is not None else None)
     if isinstance(closure, Proven) and closure.value.disposition != "park":
@@ -362,7 +367,12 @@ def _release_record(
             else InputDropReason.OWNER_TERMINAL
         )
         return _drop(record, reason, at)
-    return record.model_copy(update={"reserved_to": None}), None
+    return _pending(record), None
+
+
+def _pending(record: InputRecord) -> InputRecord:
+    """The record waiting again, held by no turn."""
+    return record.model_copy(update={"reserved_to": None, "offered_to": None})
 
 
 def _acceptance(
@@ -392,14 +402,22 @@ def _acceptance(
     events = []
     for original in state.inputs:
         record = original
-        if (
-            record.reserved_to == event.invocation
-            and record.receipt is None
-            and record.input.input_id in invocation.input_ids
+        offered = record.offered_to == event.invocation
+        if record.receipt is None and (
+            offered
+            or (
+                record.reserved_to == event.invocation
+                and record.input.input_id in invocation.input_ids
+            )
         ):
             if delivery:
+                # An offered input the provider took mid-turn and did not hand back before the
+                # turn ended joined that turn; a later refusal is a redelivery (_mid_turn_released).
                 receipt = InputDelivered(
-                    input_id=record.input.input_id, invocation=event.invocation, observation=obs
+                    input_id=record.input.input_id,
+                    invocation=event.invocation,
+                    observation=obs,
+                    mid_turn=offered,
                 )
                 record = record.model_copy(update={"receipt": receipt})
                 events.append(receipt)
@@ -737,7 +755,12 @@ def _drain(
                 )
             )
         )
-        if eligible and record.receipt is None and record.reserved_to is None:
+        if (
+            eligible
+            and record.receipt is None
+            and record.reserved_to is None
+            and record.offered_to is None
+        ):
             record, receipt = _drop(
                 record,
                 InputDropReason.OWNER_CANCELLED
@@ -750,6 +773,118 @@ def _drain(
     return AreaChange(
         state=state.model_copy(update={"inputs": tuple(records)}), events=tuple(events)
     )
+
+
+def _takes_mid_turn(context: SessionsContext, invocation: Invocation, item: SessionInput) -> bool:
+    """Whether ``invocation`` is a running session turn that ``item`` may join."""
+    return (
+        invocation.phase == SessionPhase.EXECUTING
+        and invocation.registered_operation is None
+        and scope_active(context, invocation.scope)
+        and _matches(item, invocation, context)
+    )
+
+
+def _awaiting_offer(record: InputRecord) -> bool:
+    return (
+        record.input.mode is InputMode.INTERRUPT
+        and record.receipt is None
+        and record.reserved_to is None
+        and record.offered_to is None
+    )
+
+
+def mid_turn_offers(state: SessionsState, context: SessionsContext) -> tuple[MidTurnOffer, ...]:
+    """The running turn each pending interrupt-mode input can be offered to now, in order.
+
+    An input with no running turn to join waits for its next turn instead.
+    """
+    offers = []
+    for record in sorted(
+        (row for row in state.inputs if _awaiting_offer(row)),
+        key=lambda row: (row.input.sequence, row.input.input_id.root),
+    ):
+        invocation = next(
+            (row for row in state.invocations if _takes_mid_turn(context, row, record.input)), None
+        )
+        if invocation is not None:
+            offers.append(
+                MidTurnOffer(
+                    input=record.input, invocation=invocation.invocation, scope=invocation.scope
+                )
+            )
+    return tuple(offers)
+
+
+def _interrupt_record(state: SessionsState, input_id: InputId) -> InputRecord:
+    record = next((row for row in state.inputs if row.input.input_id == input_id), None)
+    if record is None or record.input.mode is not InputMode.INTERRUPT:
+        raise ContractValidationError("input_id", "names no interrupt-mode input of this run")
+    return record
+
+
+def _with_record(state: SessionsState, record: InputRecord) -> SessionsState:
+    identity = record.input.input_id
+    rows = tuple(record if row.input.input_id == identity else row for row in state.inputs)
+    if not any(row.input.input_id == identity for row in state.inputs):
+        rows = (*rows, record)
+    return state.model_copy(update={"inputs": rows})
+
+
+def _offered(
+    state: SessionsState, context: SessionsContext, event: InputOfferedMidTurn
+) -> AreaChange[SessionsState]:
+    """Record that the shell may now ask the provider; an offer no turn can take is a no-op."""
+    record = _interrupt_record(state, event.input_id)
+    invocation = proven_invocation(state, event.invocation)
+    if (
+        not _awaiting_offer(record)
+        or invocation is None
+        or not _takes_mid_turn(context, invocation, record.input)
+    ):
+        return AreaChange(state=state)
+    return AreaChange(
+        state=_with_record(state, record.model_copy(update={"offered_to": event.invocation}))
+    )
+
+
+def redelivery_id(input_id: InputId) -> InputId:
+    """The identity of the next-turn copy of an input whose mid-turn delivery was taken back."""
+    return InputId(root=f"{input_id.root}.redelivery")
+
+
+def _mid_turn_released(
+    state: SessionsState, context: SessionsContext, event: InputMidTurnReleased
+) -> AreaChange[SessionsState]:
+    """Return an offer that did not reach the turn, or redeliver one the turn took back."""
+    record = _interrupt_record(state, event.input_id)
+    if record.offered_to != event.invocation:
+        return AreaChange(state=state)
+    invocation = proven_invocation(state, event.invocation)
+    at = context.run.now_at
+    if record.receipt is None:
+        if invocation is None:
+            return AreaChange(state=_with_record(state, _pending(record)))
+        released, receipt = _release_record(record, context, invocation, at)
+        return AreaChange(
+            state=_with_record(state, released), events=() if receipt is None else (receipt,)
+        )
+    if not (isinstance(record.receipt, InputDelivered) and record.receipt.mid_turn):
+        return AreaChange(state=state)
+    identity = redelivery_id(record.input.input_id)
+    if any(row.input.input_id == identity for row in state.inputs):
+        return AreaChange(state=state)
+    copy = InputRecord(
+        input=record.input.model_copy(update={"input_id": identity, "mode": InputMode.NEXT_TURN}),
+        redelivers=record.input.input_id,
+    )
+    receipt = None
+    if context.run.status == RunStatus.TERMINAL:
+        copy, receipt = _drop(copy, InputDropReason.RUN_TERMINAL, at)
+    elif invocation is not None:
+        # The copy waits for the target's next turn, unless the target has already ended.
+        copy, receipt = _release_record(copy, context, invocation, at)
+    return AreaChange(state=_with_record(state, copy), events=() if receipt is None else (receipt,))
 
 
 def _received_input(
@@ -774,6 +909,8 @@ _HANDLERS: dict[
 ] = {
     SessionInputReceived: _received_input,
     InputWithdrawRequested: _withdraw,
+    InputOfferedMidTurn: _offered,
+    InputMidTurnReleased: _mid_turn_released,
     SteerReceived: _steers,
     InputReservationRequested: _reserve,
     InputAcceptanceObserved: _acceptance,

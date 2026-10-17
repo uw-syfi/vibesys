@@ -17,6 +17,7 @@ from .common import (
     InvocationInputTarget,
     InvocationRef,
     Observation,
+    Scope,
     Seconds,
     Value,
 )
@@ -39,10 +40,16 @@ class SessionInput(Value):
 
     @model_validator(mode="after")
     def standing_outlives_one_turn(self) -> SessionInput:
-        """Standing input is for every matching turn, so it cannot name one invocation."""
-        if self.mode is InputMode.STANDING and isinstance(self.target, InvocationInputTarget):
+        """Standing and interrupt input outlive one turn, so neither can name one invocation.
+
+        Standing input is for every matching turn; interrupt input falls back to the next
+        matching turn when the running one cannot take it.
+        """
+        if self.mode in (InputMode.STANDING, InputMode.INTERRUPT) and isinstance(
+            self.target, InvocationInputTarget
+        ):
             raise ContractValidationError(
-                "mode", "standing guidance is for a run, role, attempt or item"
+                "mode", f"{self.mode.value} input is for a run, role, attempt or item"
             )
         return self
 
@@ -69,6 +76,8 @@ class InputDelivered(Value):
     input_id: InputId
     invocation: InvocationRef
     observation: Observation
+    mid_turn: bool = False
+    """The input joined the invocation's running turn instead of opening its next one."""
 
     @model_validator(mode="after")
     def confirmed_acceptance(self) -> InputDelivered:
@@ -93,6 +102,14 @@ class InputDropped(Value):
 type InputReceipt = Annotated[InputDelivered | InputDropped, Field(discriminator="kind")]
 
 
+class MidTurnOffer(Value):
+    """A pending interrupt-mode input and the running turn it can be offered to now."""
+
+    input: SessionInput
+    invocation: InvocationRef
+    scope: Scope
+
+
 class InputRecord(Value):
     """Sole reservation authority for an occurrence and its terminal receipt.
 
@@ -106,6 +123,14 @@ class InputRecord(Value):
 
     input: SessionInput
     reserved_to: InvocationRef | None = None
+    offered_to: InvocationRef | None = None
+    """The running turn an interrupt-mode input was offered to, before any provider call.
+
+    Never set together with ``reserved_to``: an offered input waits for that turn's end
+    (delivered with it, or returned to pending) and no next turn reserves it meanwhile.
+    """
+    redelivers: InputId | None = None
+    """The input whose mid-turn delivery the provider took back: this is its next-turn copy."""
     receipt: InputReceipt | None = None
 
     @model_validator(mode="after")
@@ -117,8 +142,22 @@ class InputRecord(Value):
             self.reserved_to is not None and self.reserved_to != self.input.target.invocation
         ):
             raise ContractValidationError("reserved_to", "does not match invocation target")
-        if isinstance(self.receipt, InputDelivered) and self.receipt.invocation != self.reserved_to:
-            raise ContractValidationError("receipt.invocation", "does not match reserved_to")
+        if self.offered_to is not None:
+            if self.reserved_to is not None:
+                raise ContractValidationError("offered_to", "an offered input is not reserved")
+            if self.input.mode is not InputMode.INTERRUPT:
+                raise ContractValidationError(
+                    "offered_to", "only an interrupt-mode input is offered"
+                )
+        if isinstance(self.receipt, InputDelivered):
+            holder = self.offered_to if self.receipt.mid_turn else self.reserved_to
+            if self.receipt.invocation != holder:
+                raise ContractValidationError(
+                    "receipt.invocation",
+                    "does not match offered_to"
+                    if self.receipt.mid_turn
+                    else "does not match reserved_to",
+                )
         if isinstance(self.receipt, InputDropped) and self.receipt.target != self.input.target:
             raise ContractValidationError("receipt.target", "does not match input.target")
         return self

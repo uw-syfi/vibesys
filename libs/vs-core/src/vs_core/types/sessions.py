@@ -764,6 +764,37 @@ class InputWithdrawRequested(Value):
     input_id: InputId
 
 
+class InputOfferedMidTurn(Value):
+    """The shell is about to offer an interrupt-mode input to a running turn.
+
+    Committed before the provider is asked, so a crash after the call cannot lose the
+    fact that it may have been made. Core records the offer only for a pending
+    interrupt-mode input and an executing session turn that would take it; any other
+    offer is a no-op the shell sees in the committed state before it calls.
+    """
+
+    kind: Literal["input_offered_mid_turn"] = "input_offered_mid_turn"
+    input_id: InputId
+    invocation: InvocationRef
+    now_at: Seconds
+
+
+class InputMidTurnReleased(Value):
+    """An offered input did not reach the running turn, or the turn refused it later.
+
+    The shell raises it when the provider takes no mid-turn input, has no turn running,
+    refuses the message at turn end, or when it finds an offer an earlier host made and
+    cannot prove reached the turn. A pending offer returns to pending; an offer already
+    delivered gets a next-turn redelivery, so the message is never lost (and may arrive
+    twice).
+    """
+
+    kind: Literal["input_mid_turn_released"] = "input_mid_turn_released"
+    input_id: InputId
+    invocation: InvocationRef
+    now_at: Seconds
+
+
 class InputReservationRequested(Value):
     """Reserve eligible pending inputs before dispatching the exact invocation."""
 
@@ -957,6 +988,8 @@ type SessionsEvent = Annotated[
     | InterruptRequested
     | SessionInputReceived
     | InputWithdrawRequested
+    | InputOfferedMidTurn
+    | InputMidTurnReleased
     | InputReservationRequested
     | TurnInputsReserved
     | InputAcceptanceObserved
