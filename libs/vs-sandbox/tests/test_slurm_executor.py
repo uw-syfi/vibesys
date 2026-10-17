@@ -389,6 +389,13 @@ class _RunningThenEndedCluster(_BlockingCluster):
     def __init__(self, config: SlurmConfig) -> None:
         super().__init__(config)
         self._scheduler_states = (SlurmJobStatus.RUNNING, SlurmJobStatus.COMPLETED)
+        self.ended_reported = threading.Event()
+
+    def inspect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterInspectOutcome:
+        observed = super().inspect(target, by_job_id=by_job_id)
+        if isinstance(observed, ClusterObservation) and observed.status is SlurmJobStatus.COMPLETED:
+            self.ended_reported.set()
+        return observed
 
 
 class _GatedScancelCluster(_BlockingCluster):
@@ -2068,16 +2075,6 @@ async def test_poll_reports_each_lifecycle_phase_without_submitting_or_recoverin
         await executor.close()
 
 
-def _awaiting(task: asyncio.Task[object], function_name: str) -> bool:
-    """Whether the task is suspended inside the coroutine function of that name."""
-    awaited: object = task.get_coro()
-    while awaited is not None:
-        if getattr(getattr(awaited, "cr_code", None), "co_name", None) == function_name:
-            return True
-        awaited = getattr(awaited, "cr_await", None)
-    return False
-
-
 @pytest.mark.asyncio
 async def test_a_poll_joining_an_owner_that_is_cancelled_returns_instead_of_raising(
     tmp_path: Path,
@@ -2105,8 +2102,12 @@ async def test_a_poll_joining_an_owner_that_is_cancelled_returns_instead_of_rais
         await wait_until_executor_started(runner.wait_started, executor, "eval-polled")
         # The scheduler reports the job ended while the owner is still settling it.
         poll = asyncio.create_task(executor.poll("eval-polled"))
-        while not poll.done() and not _awaiting(poll, "_settled_owner_poll"):
+        await wait_until_started(runner.ended_reported, poll)
+        # The poll has its answer; with the owner blocked, its next steps need no clock,
+        # so a bounded number of turns takes it to waiting on the owner.
+        for _ in range(50):
             await yield_now()
+        assert not poll.done()
         owners = [t for t in asyncio.all_tasks() if t.get_name().startswith("vibesys-slurm-")]
         assert len(owners) == 1
         owners[0].cancel()
