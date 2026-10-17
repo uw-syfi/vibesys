@@ -398,6 +398,22 @@ class _RunningThenEndedCluster(_BlockingCluster):
         return observed
 
 
+class _RunningThenFailingOwnerCluster(_RunningThenEndedCluster):
+    """As above, but the owner's blocked inspection fails with a non-cancellation error."""
+
+    def __init__(self, config: SlurmConfig) -> None:
+        super().__init__(config)
+        self.owner_failed = False
+
+    def inspect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterInspectOutcome:
+        observed = super().inspect(target, by_job_id=by_job_id)
+        if self.wait_finished.is_set() and not self.owner_failed:
+            self.owner_failed = True
+            message = "scheduler connection lost"
+            raise ConnectionError(message)
+        return observed
+
+
 class _GatedScancelCluster(_BlockingCluster):
     """A scheduler whose scancel is slow: it ends only when the test opens its gate."""
 
@@ -2114,7 +2130,49 @@ async def test_a_poll_joining_an_owner_that_is_cancelled_returns_instead_of_rais
         runner.release()
         await asyncio.gather(*owners, return_exceptions=True)
         result = await poll
-        assert result is None or result.phase in set(PollPhase)
+        assert result is not None
+        assert result.phase is PollPhase.ENDED
+        assert result.terminal is not None
+        assert result.terminal.state is EvaluationState.CANCELED
+    finally:
+        runner.release()
+        await executor.close()
+
+
+@pytest.mark.asyncio
+async def test_a_poll_joining_an_owner_that_fails_returns_instead_of_raising(
+    tmp_path: Path,
+) -> None:
+    """An owner ending with its own error is the owner's outcome, not the read-only poll's."""
+    config = _config()
+    runner = _RunningThenFailingOwnerCluster(config)
+    executor = SlurmEvaluationExecutor(
+        config,
+        workspace=_workspace(tmp_path),
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        cluster=runner,
+        clock=ManualClock(),
+        sleeper=ManualClock(),
+    )
+    try:
+        await executor.submit(_request(), handle_id="eval-owner-fails")
+        await wait_until_executor_started(runner.wait_started, executor, "eval-owner-fails")
+        poll = asyncio.create_task(executor.poll("eval-owner-fails"))
+        await runner.ended_reported.wait(poll)
+        for _ in range(50):
+            await yield_now()
+        assert not poll.done()
+        runner.release()
+        result = await poll
+        assert runner.owner_failed
+        assert result is not None
+        assert result.phase is PollPhase.ENDED
+        assert result.terminal is not None
+        assert result.terminal.state is EvaluationState.FAILED
+        assert result.terminal.failure == "ConnectionError: scheduler connection lost"
     finally:
         runner.release()
         await executor.close()

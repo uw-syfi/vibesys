@@ -634,20 +634,14 @@ class SlurmEvaluationExecutor:
     ) -> ExecutorPoll | None:
         """Wake and join the live owner before exposing its terminal publication.
 
-        The join is shielded so canceling a read-only poll cannot cancel the task that
-        owns stream and ledger settlement.  If the task ends without a terminal
-        publication, returning ``None`` lets the durable observer reconcile it.
+        ``asyncio.wait`` joins without raising the owner's outcome and without cancelling
+        it, so canceling a read-only poll cannot cancel the task that owns stream and
+        ledger settlement, and an owner that was cancelled or failed is not the poll's
+        own error: the poll reports what the owner published.  If the owner ends without
+        a terminal publication, returning ``None`` lets the durable observer reconcile it.
         """
         self._wake_owner(handle_id)
-        try:
-            await asyncio.shield(task)
-        except asyncio.CancelledError:
-            # Joining a cancelled owner raises the owner's cancellation in the poller.
-            # It is the owner's end, not a cancellation of this poll: the owner was
-            # cancelled by cancel() or close(), and the poll reports what it published.
-            current = asyncio.current_task()
-            if not task.cancelled() or (current is not None and current.cancelling()):
-                raise
+        await asyncio.wait({task})
         return self._completed_owner_poll(handle_id, self._lifecycle.observation(handle_id))
 
     def _completed_owner_poll(
