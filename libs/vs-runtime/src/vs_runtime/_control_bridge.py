@@ -132,11 +132,13 @@ class RunControlBridge:
     def _take_steers(
         self, core: CoreState, now_at: float, events: list[CoreEvent], inbox_id: str | None = None
     ) -> None:
-        """Emit the queued steers; the last one, if ``inbox_id`` sent it, under that id."""
-        queued = self._channel.take_pending_steer()
-        for index, steer in enumerate(queued):
-            from_inbox = index == len(queued) - 1 and inbox_id is not None
-            from_inbox = from_inbox and steer.control_id == inbox_id
+        """Emit the queued steers; the one ``inbox_id`` sent, if any, under that id.
+
+        The inbox's steer is recognised by its control id, so a socket steer queued in the
+        same poll keeps its own identity.
+        """
+        for steer in self._channel.take_pending_steer():
+            from_inbox = inbox_id is not None and steer.control_id == inbox_id
             control = self._event(
                 "steer", now_at, text=steer.text, inbox_id=inbox_id if from_inbox else None
             )
@@ -146,10 +148,18 @@ class RunControlBridge:
         self, inbox: OperatorInbox, core: CoreState, now_at: float, events: list[CoreEvent]
     ) -> None:
         """Settle the requests core holds and apply, once per process, the ones it does not."""
-        held = {control.control_id.root for control in core.run.controls}
+        held = {control.control_id.root: control for control in core.run.controls}
         for entry in inbox.requests.pending():
-            if _identity(entry.request_id).root in held:
-                inbox.requests.settle(entry.request_id)
+            if entry.unreadable is not None:
+                inbox.requests.reject(entry.request_id, f"unreadable: {entry.unreadable}")
+                continue
+            control = held.get(_identity(entry.request_id).root)
+            if control is not None:
+                if _is_held(entry, control):
+                    inbox.requests.settle(entry.request_id)
+                else:
+                    reason = "its control_id already named a different control"
+                    inbox.requests.reject(entry.request_id, reason)
             elif entry.request_id not in self._submitted:
                 reason = self._apply(inbox, entry, core, now_at, events)
                 if reason is None:
@@ -263,6 +273,26 @@ class OperatorInbox:
 def _identity(control_id: str) -> ControlId:
     """The identity core records an inbox request's control under."""
     return ControlId(root=f"op-{control_id}")
+
+
+def _is_held(entry: InboxEntry, control: ControlInput) -> bool:
+    """Whether ``control``, which core holds under the entry's identity, is the entry's request.
+
+    Core records the action, a stop's mode and the digest of a steer's text; a request that
+    differs in any of them reuses the id for a different control.
+    """
+    try:
+        request = CONTROL_REQUEST.validate_json(entry.payload)
+    except ValidationError:
+        return False
+    match request:
+        case SteerRequest(text=text):
+            digest = hashlib.sha256(text.encode()).hexdigest()
+            return control.artifact is not None and control.artifact.digest == digest
+        case StopRequest(mode=mode):
+            return control.action == "stop" and control.mode == mode
+        case _:
+            return control.action == request.action.value
 
 
 def _refusal(request: ControlRequest, core: CoreState, *, stopped: bool) -> str | None:

@@ -26,7 +26,7 @@ from vibesys.run.profilers import (
 )
 from vs_core.api import StopMode
 from vs_project.api import Project
-from vs_runtime.api.infrastructure import ChannelRunControl, RunStopped
+from vs_runtime.api.infrastructure import RunStopped
 from vs_sim.api import CloseOnce, ReleaseStack
 
 if TYPE_CHECKING:
@@ -169,7 +169,7 @@ class _LocalRunSession:
             threads=implementations.timing.threads,
             system=implementations.system,
         )
-        self._control = ChannelRunControl(self._integration.control, implementations.timing.threads)
+        self._control = self._integration.run_control
         self._integration.add_committed_state_listener(self._handle_committed_state)
         self._integration.add_resource_listener(self._handle_resources)
         self._committed_view_listener: Callable[[RunView, tuple[str, ...] | None], None] | None = (

@@ -38,6 +38,7 @@ from vs_runtime.api.infrastructure import (
     AgentExecutionLifecycleEvent,
     AgentExecutionStarted,
     AgentExecutionStatus,
+    ChannelRunControl,
     RootBaselineDrifted,
     RunControlTransition,
     WorkspaceResourceEvent,
@@ -513,6 +514,8 @@ class LocalRunIntegration:
         self.events = EventJournal(clock, threads)
         self.agent_events = CoreAgentEventSink(self.events.record, clock)
         self.control = create_run_control_channel(_CoreRunControlEvents(self.events), threads)
+        self.run_control = ChannelRunControl(self.control, threads)
+        """The run's one control entry point: every ingress submits here, so ids are shared."""
         self._closed = False
         self._committed_state_listener: (
             Callable[[str, BaseModel, tuple[str, ...] | None], None] | None

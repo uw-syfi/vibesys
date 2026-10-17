@@ -33,7 +33,7 @@ from vs_runtime.api.core import (
     reject_legacy_resume,
     start_core_awaiting_lease,
 )
-from vs_runtime.api.infrastructure import ChannelRunControl, RunStopped
+from vs_runtime.api.infrastructure import RunStopped
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -142,10 +142,7 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
         _SteerTexts(services.artifacts),
         inbox=None
         if services.control_inbox is None
-        else OperatorInbox(
-            services.control_inbox,
-            ChannelRunControl(integration.control, host.timing.threads),
-        ),
+        else OperatorInbox(services.control_inbox, integration.run_control),
     )
     loop = CoreRunHost(shell, delivery, services.clock, controls, workspaces=host.workspaces)
     config = _loop_config(services.run_id, host.timing.lease_seconds)

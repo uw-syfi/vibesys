@@ -26,10 +26,13 @@ from vs_core.api import (
     initial_state,
     step,
 )
+from vs_project.api import InboxEntry, RejectedEntry
 from vs_project.api.testing import FakeControlInbox
 from vs_runtime.api.core import OperatorInbox, RunControlBridge
 from vs_runtime.api.infrastructure import (
     ChannelRunControl,
+    ControlAck,
+    ControlRequest,
     PauseRequest,
     ResumeRequest,
     SteerRequest,
@@ -53,12 +56,16 @@ class _Texts:
         self.held[ref.artifact_id.root] = text
 
 
-def _bridge(inbox: FakeControlInbox, texts: _Texts) -> RunControlBridge:
+def _wired(inbox: FakeControlInbox, texts: _Texts) -> tuple[RunControlBridge, ChannelRunControl]:
+    """A bridge over ``inbox`` and the run control a socket would submit to."""
     threads = SimThreads()
     channel = create_run_control_channel(FakeRunControlEventSink(), threads=threads)
-    return RunControlBridge(
-        channel, texts, inbox=OperatorInbox(inbox, ChannelRunControl(channel, threads))
-    )
+    control = ChannelRunControl(channel, threads)
+    return RunControlBridge(channel, texts, inbox=OperatorInbox(inbox, control)), control
+
+
+def _bridge(inbox: FakeControlInbox, texts: _Texts) -> RunControlBridge:
+    return _wired(inbox, texts)[0]
 
 
 def _payload(request: dict[str, object] | bytes, control_id: str) -> bytes:
@@ -89,6 +96,7 @@ _PAYLOADS: st.SearchStrategy[dict[str, object] | bytes] = st.one_of(
 _STEPS = st.lists(
     st.one_of(
         st.tuples(st.just("post"), _PAYLOADS),
+        st.tuples(st.just("socket steer"), st.text(min_size=1, max_size=12)),
         st.tuples(st.just("poll")),
         st.tuples(st.just("lost poll")),
         st.tuples(st.just("restart")),
@@ -114,10 +122,12 @@ def test_every_inbox_request_is_recorded_once_or_set_aside(
     inbox = FakeControlInbox()
     texts = _Texts()
     core = initial_state()
-    bridge = _bridge(inbox, texts)
+    bridge, control = _wired(inbox, texts)
     posted: list[str] = []
     for index, operation in enumerate(history):
         match operation:
+            case ("socket steer", str(text)):
+                control.submit(SteerRequest(control_id=f"s{index:03d}", text=text))
             case ("post", dict() | bytes() as payload):
                 request_id = f"r{index:03d}"
                 inbox.post(request_id, _payload(payload, request_id))
@@ -126,9 +136,9 @@ def test_every_inbox_request_is_recorded_once_or_set_aside(
                 core = _commit(core, bridge.poll(core, float(index)))
             case ("lost poll",):
                 bridge.poll(core, float(index))
-                bridge = _bridge(inbox, texts)
+                bridge, control = _wired(inbox, texts)
             case ("restart",):
-                bridge = _bridge(inbox, texts)
+                bridge, control = _wired(inbox, texts)
     for settle in range(3):
         core = _commit(core, bridge.poll(core, 1000.0 + settle))
 
@@ -209,3 +219,98 @@ def test_a_request_whose_control_id_is_not_its_name_is_set_aside() -> None:
 
     assert _bridge(inbox, _Texts()).poll(initial_state(), 1.0) == ()
     assert [entry.request_id for entry in inbox.rejected()] == ["r1"]
+
+
+def test_a_settled_id_sent_again_with_another_request_is_set_aside() -> None:
+    inbox = FakeControlInbox()
+    inbox.post("r1", _json(SteerRequest(control_id="r1", text="prefer latency")))
+    bridge = _bridge(inbox, _Texts())
+    core = _commit(initial_state(), bridge.poll(initial_state(), 1.0))
+    assert bridge.poll(core, 2.0) == ()
+    assert inbox.pending() == ()
+
+    inbox.post("r1", _json(SteerRequest(control_id="r1", text="prefer throughput")))
+    inbox.post("r2", _json(SteerRequest(control_id="r2", text="prefer memory")))
+    for restarted in (bridge, _bridge(inbox, _Texts())):
+        events = restarted.poll(core, 3.0)
+        core = _commit(core, events)
+
+    assert [entry.request_id for entry in inbox.rejected()] == ["r1"]
+    assert [c.control_id.root for c in core.run.controls] == ["op-r1", "op-r2"]
+
+
+def test_the_same_request_sent_again_after_it_settled_is_settled_again() -> None:
+    inbox = FakeControlInbox()
+    request = _json(StopRequest(control_id="r1", mode=StopMode.CANCEL))
+    inbox.post("r1", request)
+    bridge = _bridge(inbox, _Texts())
+    core = _commit(initial_state(), bridge.poll(initial_state(), 1.0))
+    bridge.poll(core, 2.0)
+
+    inbox.post("r1", request)
+    bridge.poll(core, 3.0)
+
+    assert inbox.pending() == ()
+    assert inbox.rejected() == ()
+
+
+def test_an_unreadable_entry_is_set_aside_and_the_rest_apply() -> None:
+    inbox = _UnreadableInbox()
+    inbox.post("r2", _json(PauseRequest(control_id="r2")))
+
+    core = _commit(initial_state(), _bridge(inbox, _Texts()).poll(initial_state(), 1.0))
+
+    assert [c.control_id.root for c in core.run.controls] == ["op-r2"]
+    assert [(e.request_id, e.reason) for e in inbox.rejected()] == [("r1", "unreadable: a dir")]
+
+
+class _RacingControl(ChannelRunControl):
+    """A run control where a socket steer lands just after each inbox request it applies."""
+
+    def submit(self, request: ControlRequest) -> ControlAck:
+        ack = super().submit(request)
+        if not request.control_id.startswith("s"):
+            super().submit(SteerRequest(control_id=f"s-{request.control_id}", text="socket"))
+        return ack
+
+
+def test_a_socket_steer_in_the_same_poll_keeps_its_own_identity() -> None:
+    inbox = FakeControlInbox()
+    inbox.post("r1", _json(SteerRequest(control_id="r1", text="from the inbox")))
+    texts = _Texts()
+    threads = SimThreads()
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=threads)
+    bridge = RunControlBridge(
+        channel, texts, inbox=OperatorInbox(inbox, _RacingControl(channel, threads))
+    )
+
+    core = _commit(initial_state(), bridge.poll(initial_state(), 1.0))
+    for restarted in (bridge, _bridge(inbox, texts)):
+        core = _commit(core, restarted.poll(core, 2.0))
+
+    assert sorted(c.control_id.root for c in core.run.controls) == ["control-1", "op-r1"]
+    assert texts.held["steer-op-r1"] == "from the inbox"
+    assert inbox.pending() == ()
+
+
+class _UnreadableInbox(FakeControlInbox):
+    """An inbox holding one entry it cannot read, as a directory under ``inbox/`` would be."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._unreadable = True
+
+    def pending(self) -> tuple[InboxEntry, ...]:
+        bad = (InboxEntry("r1", b"", unreadable="a dir"),) if self._unreadable else ()
+        return bad + super().pending()
+
+    def reject(self, request_id: str, reason: str) -> None:
+        if request_id == "r1" and self._unreadable:
+            self._unreadable = False
+            self._rejected_unreadable = RejectedEntry("r1", b"", reason)
+            return
+        super().reject(request_id, reason)
+
+    def rejected(self) -> tuple[RejectedEntry, ...]:
+        mine = getattr(self, "_rejected_unreadable", None)
+        return ((mine,) if mine is not None else ()) + super().rejected()

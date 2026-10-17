@@ -113,6 +113,19 @@ def test_an_invalid_control_is_refused_and_nothing_is_written(
     assert Project.open(tmp_path).state.control_inbox(run_id).pending() == ()
 
 
+def test_a_pending_id_cannot_be_posted_again_with_another_request(tmp_path: Path) -> None:
+    run_id = _project_with_run(tmp_path)
+    assert _control(tmp_path, [run_id, "steer", "prefer latency"])[0] == 0
+    assert _control(tmp_path, [run_id, "steer", "prefer latency"])[0] == 0
+
+    status, out, err = _control(tmp_path, [run_id, "steer", "prefer throughput"])
+
+    assert (status, out) == (2, "")
+    assert "different request" in err
+    (entry,) = Project.open(tmp_path).state.control_inbox(run_id).pending()
+    assert b"prefer latency" in entry.payload
+
+
 def test_fallback_and_a_capacity_wait_cannot_be_combined(tmp_path: Path) -> None:
     run_id = _project_with_run(tmp_path)
     with pytest.raises(SystemExit):
