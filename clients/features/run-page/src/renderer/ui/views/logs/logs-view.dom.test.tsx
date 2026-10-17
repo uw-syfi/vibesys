@@ -58,10 +58,10 @@ function attempt(span: string, steps: readonly string[]): CandidateAttempt {
     outcome: 'running',
     reason: null,
     revision: null,
+    baseRound: null,
     startedAt: 0,
     endedAt: null,
     measurement: null,
-    passed: [],
     steps: steps.map(step),
   };
 }
@@ -76,6 +76,7 @@ function idea(id: string, attempts: readonly CandidateAttempt[]): Candidate {
     round: null,
     outcome: 'running',
     reason: null,
+    baseRound: null,
     measurement: null,
     attempts,
     startedAt: 0,

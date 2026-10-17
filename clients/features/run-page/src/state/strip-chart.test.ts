@@ -15,7 +15,7 @@ function result(
   value: number,
   verdict: 'passed' | 'slower' | 'failed_check',
 ): Candidate {
-  const base = idea(id, verdict === 'passed' ? 'kept' : 'rejected', at, 10);
+  const base = idea(id, verdict === 'passed' ? 'passed' : 'failed', at, 10);
   return {
     ...base,
     measurement: {

@@ -25,9 +25,8 @@ export function statusWords(status: Status): {readonly label: string; readonly t
 }
 
 const VERDICTS: Readonly<Record<string, {readonly label: string; readonly tone: Tone}>> = {
-  accepted: {label: 'Accepted', tone: 'ok'},
-  rejected: {label: 'Rejected', tone: 'neutral'},
   passed: {label: 'Passed', tone: 'ok'},
+  failed: {label: 'Failed', tone: 'err'},
   slower: {label: 'Slower than the input', tone: 'warn'},
   failed_check: {label: 'Failed a check', tone: 'err'},
   adopted: {label: 'Adopted', tone: 'ok'},

@@ -2,7 +2,7 @@ import {describe, expect, test} from 'bun:test';
 import type {RunOverview, Span} from '@vibesys/contracts';
 import type {HostRun, RunEnd} from '@vibesys/hosts';
 import {EMPTY_TRACE, foldTrace} from '@vibesys/run-state/trace';
-import {endReason, keptCandidate} from './end-words.js';
+import {adoptedCandidate, endReason} from './end-words.js';
 import {EMPTY_RUN_FOLD, traceLog} from './live.js';
 import {type RunPageState, runPageInitial} from './run-page.js';
 import {endedView} from './views.js';
@@ -25,7 +25,7 @@ const CORE_REASONS = [
   'adopted: settlement:000002/settle.1',
   'kept-input: the input',
   'stopped: kept-input: the input',
-  'no-winner: every round was rejected',
+  'no-winner: every round failed',
   'adoption-failed: verify_failed',
   'finish-refused: run_closed',
   'deadline: kept-input: the input',
@@ -116,7 +116,7 @@ function ended(
 const ROOT = span('flow:root#1', null, {name: 'multi'});
 
 describe('the ended banner', () => {
-  test('says which candidate was kept, from which round, and how much faster', () => {
+  test('says which candidate was adopted, from which round, and how much faster', () => {
     const state = ended('adopted', 'adopted: settlement:000002/settle.1', [
       ROOT,
       ...round(1, 100, 1.4),
@@ -124,7 +124,7 @@ describe('the ended banner', () => {
       ...round(3, 50, 0.6, 'slower'),
     ]);
     expect(endedView(state)?.reason).toBe(
-      'Kept the candidate from round 2, 5.72× faster than the input.',
+      'Adopted the candidate from round 2, 5.72× faster than the input.',
     );
   });
 
@@ -147,7 +147,7 @@ describe('the ended banner', () => {
       adopted,
     ]);
     expect(endedView(state)?.reason).toBe(
-      'Kept the candidate from round 2, 5.72× faster than the input.',
+      'Adopted the candidate from round 2, 5.72× faster than the input.',
     );
   });
 
@@ -157,33 +157,35 @@ describe('the ended banner', () => {
       label: {kind: 'adoption', title: 'adopt', attrs_json: '{}', verdict: 'adopted', links: []},
     });
     const state = ended('adopted', 'adopted: the input', [ROOT, ...round(1, 100, 1.4), input]);
-    expect(endedView(state)?.reason).toBe('No candidate beat the input, so it was kept as it was.');
+    expect(endedView(state)?.reason).toBe('No candidate beat the input, so it stands as it was.');
   });
 
   test('reads a lower-is-better objective the same way', () => {
     const state = ended('adopted', 'adopted: s', [ROOT, ...round(1, 25, 0.25)], 'min');
     expect(endedView(state)?.reason).toBe(
-      'Kept the candidate from round 1, 4.00× faster than the input.',
+      'Adopted the candidate from round 1, 4.00× faster than the input.',
     );
   });
 
   test('says no more than it knows', () => {
-    expect(endedView(ended('adopted', 'adopted: x', []))?.reason).toBe('Kept the best candidate.');
+    expect(endedView(ended('adopted', 'adopted: x', []))?.reason).toBe(
+      'Adopted the best candidate.',
+    );
     const slower = ended('adopted', 'adopted: x', [ROOT, ...round(1, 90, 0.9)]);
-    expect(endedView(slower)?.reason).toBe('Kept the candidate from round 1.');
+    expect(endedView(slower)?.reason).toBe('Adopted the candidate from round 1.');
   });
 
-  test('a run that kept its input says so', () => {
+  test('a run whose input stands says so', () => {
     expect(endedView(ended('kept-input', 'kept-input: the input', [ROOT]))?.reason).toBe(
-      'No candidate beat the input, so it was kept as it was.',
+      'No candidate beat the input, so it stands as it was.',
     );
   });
 
   test('never shows core’s own account of an ending, for any outcome or trace', () => {
     for (const outcome of OUTCOMES.filter(each => each !== 'failed' && each !== 'force_stopped')) {
       for (const reason of CORE_REASONS) {
-        for (const kept of [null, keptCandidate([ROOT, ...round(2, 410, 5.7)], 'max')]) {
-          const words = endReason(outcome, reason, kept, 'max');
+        for (const stands of [null, adoptedCandidate([ROOT, ...round(2, 410, 5.7)], 'max')]) {
+          const words = endReason(outcome, reason, stands, 'max');
           expect(words).not.toContain(reason);
           expect(words).not.toMatch(/settlement:|kept-input|no-winner|[a-z]+_[a-z]+/);
         }

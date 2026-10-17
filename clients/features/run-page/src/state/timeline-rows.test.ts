@@ -11,7 +11,7 @@ import {attempt, idea, modelOf, step} from './timeline-fixtures.js';
 import {
   attemptLines,
   attemptStrip,
-  REJECTED_DENSE,
+  FAILED_DENSE,
   stepSegments,
   type TimelineRow,
   type TimelineRows,
@@ -21,11 +21,11 @@ import {
 
 /**
  * The Timeline rows, attempt lines and step segments over generated ideas: the order is the Ideas
- * list's, every segment lies on its row's bar, the folded lane stands for exactly the rejected
+ * list's, every segment lies on its row's bar, the folded lane stands for exactly the failed
  * ideas in range, and a shorter range never shows an idea that ended before it.
  */
 
-const OUTCOMES: readonly CandidateOutcome[] = ['running', 'kept', 'rejected'];
+const OUTCOMES: readonly CandidateOutcome[] = ['running', 'passed', 'failed'];
 
 function randomIdeas(random: Seeded): Candidate[] {
   const count = random.int(71);
@@ -55,14 +55,12 @@ function checkBars(shown: TimelineRows): void {
 function checkLane(shown: TimelineRows): void {
   const rows = shown.rows.filter(row => !row.lane);
   expect(shown.rows.length - rows.length).toBe(shown.folded > 0 ? 1 : 0);
-  expect(shown.folded === 0 || shown.folded > REJECTED_DENSE).toBe(true);
-  expect(shown.folded + rows.filter(row => row.outcome === 'err').length).toBe(
-    shown.rejectedInRange,
-  );
+  expect(shown.folded === 0 || shown.folded > FAILED_DENSE).toBe(true);
+  expect(shown.folded + rows.filter(row => row.outcome === 'err').length).toBe(shown.failedInRange);
 }
 
 describe('timeline rows', () => {
-  test('over any run: running first then newest first, segments inside bars, lane counts the rejected', () => {
+  test('over any run: running first then newest first, segments inside bars, lane counts the failed', () => {
     for (const seed of SEEDS) {
       const ideas = randomIdeas(new Seeded(seed));
       const clock = {start: 0, now: ideas.length * 600 + 1000};
@@ -77,7 +75,7 @@ describe('timeline rows', () => {
   });
 
   test('a range shows a subset of the ideas the longer range shows', () => {
-    const ideas = Array.from({length: 30}, (_, at) => idea(`i${at}`, 'kept', at * 7200, 600));
+    const ideas = Array.from({length: 30}, (_, at) => idea(`i${at}`, 'passed', at * 7200, 600));
     const clock = {start: 0, now: 30 * 7200};
     const ids = (range: 'hour' | 'day' | 'all') =>
       timelineRows(modelOf(ideas), range, clock, true).rows.map(row => row.id);
@@ -87,9 +85,9 @@ describe('timeline rows', () => {
     for (const id of ids('hour')) expect(ids('day')).toContain(id);
   });
 
-  test('the figure is the ratio of a kept idea and empty while running', () => {
+  test('the figure is the ratio of a passed idea and empty while running', () => {
     const shown = timelineRows(
-      modelOf([idea('a', 'kept', 0, 100), idea('b', 'running', 200, 100)]),
+      modelOf([idea('a', 'passed', 0, 100), idea('b', 'running', 200, 100)]),
       'all',
       {start: 0, now: 400},
       false,
@@ -126,7 +124,7 @@ describe('the timeline legend', () => {
   });
 
   test('says nothing for an idea with no steps', () => {
-    const bare = idea('a', 'kept', 0, 100);
+    const bare = idea('a', 'passed', 0, 100);
     const none = {...bare, attempts: [{...(bare.attempts[0] as CandidateAttempt), steps: []}]};
     const shown = timelineRows(modelOf([none]), 'all', {start: 0, now: 200}, false);
     expect(shown.legend).toEqual({roles: [], gates: false});
@@ -134,7 +132,7 @@ describe('the timeline legend', () => {
 
   test('names the roles a run used: implementer and judge here, and a gate', () => {
     const shown = timelineRows(
-      modelOf([idea('a', 'kept', 0, 100)]),
+      modelOf([idea('a', 'passed', 0, 100)]),
       'all',
       {start: 0, now: 200},
       false,
@@ -167,14 +165,14 @@ describe('step segments', () => {
 });
 
 describe('attempts', () => {
-  test('lines read build failed, the ratio or running, in the order the attempts began', () => {
-    const base = idea('x', 'kept', 0, 300);
-    const failed = attempt('f', 'rejected', 0, 60);
-    const kept = attempt('k', 'kept', 60, 120);
+  test('lines read turned down, the ratio or running, in the order the attempts began', () => {
+    const base = idea('x', 'passed', 0, 300);
+    const failed = attempt('f', 'failed', 0, 60);
+    const kept = attempt('k', 'passed', 60, 120);
     const live = attempt('l', 'running', 200, 0);
     const lines = attemptLines({...base, attempts: [failed, kept, live]}, 260, 'ops/s');
     expect(lines.map(line => [line.title, line.result, line.tone])).toEqual([
-      ['attempt 1', 'build failed', 'err'],
+      ['attempt 1', 'turned down', 'err'],
       ['attempt 2', '1.50×', 'ok'],
       ['attempt 3', 'running', 'live'],
     ]);
@@ -183,17 +181,17 @@ describe('attempts', () => {
   });
 
   test('the strip spans the attempt and carries its steps', () => {
-    const base = idea('x', 'kept', 100, 300);
+    const base = idea('x', 'passed', 100, 300);
     const strip = attemptStrip(base, base.attempts[0] as CandidateAttempt, null);
     expect([strip.from, strip.to, strip.playhead]).toEqual([100, 400, null]);
     expect(strip.row.segments.length).toBe(3);
   });
 
   test('versus parent follows the metric direction', () => {
-    const kept = idea('a', 'kept', 0, 10);
+    const kept = idea('a', 'passed', 0, 10);
     const measured = kept.measurement;
     if (measured === null) throw new Error('fixture');
-    const parent = {...idea('p', 'kept', 0, 10), measurement: {...measured, metricValue: 20}};
+    const parent = {...idea('p', 'passed', 0, 10), measurement: {...measured, metricValue: 20}};
     expect(versusParent(kept, parent, 'max')).toBe('2.00×');
     expect(versusParent(kept, parent, 'min')).toBe('0.50×');
     expect(versusParent(kept, null, 'max')).toBeNull();

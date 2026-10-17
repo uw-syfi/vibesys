@@ -9,7 +9,7 @@ import {endedLook, type HostRun, type RunEnd} from '@vibesys/hosts';
 import {decodeNarrationLine, type LogView, logViewRecords} from '@vibesys/logs';
 import type {CoreState} from '@vibesys/run-state';
 import {type RunTrace, traceSpans} from '@vibesys/run-state/trace';
-import {endReason, type KeptCandidate, keptCandidate} from './end-words.js';
+import {type AdoptedCandidate, adoptedCandidate, endReason} from './end-words.js';
 import {overviewAt, traceAt} from './live.js';
 import {
   commandable,
@@ -425,12 +425,12 @@ export function logsNotice(state: RunPageState): string | null {
   }
 }
 
-/** The candidate the run kept and its objective's direction, as the trace at the end says. */
-function keptAtEnd(
+/** The candidate the run adopted and its objective's direction, as the trace at the end says. */
+function adoptedAtEnd(
   state: RunPageState,
-): [KeptCandidate | 'input' | null, 'max' | 'min' | null | undefined] {
+): [AdoptedCandidate | 'input' | null, 'max' | 'min' | null | undefined] {
   const direction = overviewAt(state.run.trace, null)?.objective.direction;
-  return [keptCandidate(traceSpans(traceAt(state.run.trace, null)), direction), direction];
+  return [adoptedCandidate(traceSpans(traceAt(state.run.trace, null)), direction), direction];
 }
 
 /**
@@ -474,7 +474,7 @@ export function endedView(state: RunPageState): EndedView | null {
   const reason =
     end === null
       ? (phase.run.reason ?? 'The run’s record does not say why it ended.')
-      : endReason(end.outcome, end.reason, ...keptAtEnd(state));
+      : endReason(end.outcome, end.reason, ...adoptedAtEnd(state));
   const round = end?.resume_from_round ?? null;
   const resume =
     end?.resumable === true ? (round === null ? 'Resume' : `Resume from round ${round}`) : null;

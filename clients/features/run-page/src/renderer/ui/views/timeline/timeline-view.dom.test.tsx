@@ -1,6 +1,6 @@
 /**
  * The Timeline through its props, in a DOM: rows in the Ideas list's order, a row opening its
- * idea, a segment its step, the range, the folded rejected lane, and an opened idea's strip.
+ * idea, a segment its step, the range, the folded failed lane, and an opened idea's strip.
  */
 
 import {afterAll, beforeAll, expect, test} from 'bun:test';
@@ -10,7 +10,7 @@ import {act, type ReactNode} from 'react';
 import {createRoot} from 'react-dom/client';
 import type {ZoomEvent} from '../../../../state/index.js';
 import {idea, modelOf} from '../../../../state/timeline-fixtures.js';
-import {REJECTED_DENSE} from '../../../../state/timeline-rows.js';
+import {FAILED_DENSE} from '../../../../state/timeline-rows.js';
 import {TimelineView} from './timeline-view.js';
 
 const window = new Window();
@@ -64,9 +64,9 @@ function base(candidates: readonly Candidate[], now: number, events: ZoomEvent[]
 }
 
 const IDEAS = [
-  idea('old', 'kept', 0, 600),
-  idea('bad', 'rejected', 1000, 200),
-  idea('mid', 'kept', 2000, 600),
+  idea('old', 'passed', 0, 600),
+  idea('bad', 'failed', 1000, 200),
+  idea('mid', 'passed', 2000, 600),
   idea('live', 'running', 3000, 0),
 ];
 
@@ -96,7 +96,7 @@ test('a row opens its idea and a segment opens its step under that idea', async 
 });
 
 test('Last hour keeps only the ideas that overlap the last hour', async () => {
-  const many = [idea('long-ago', 'kept', 0, 600), idea('recent', 'kept', 90_000, 600)];
+  const many = [idea('long-ago', 'passed', 0, 600), idea('recent', 'passed', 90_000, 600)];
   const {container, unmount} = await mount(<TimelineView {...base(many, 90_700)} />);
   expect(names(container)).toEqual(['recent', 'long-ago']);
   const hour = [...container.querySelectorAll('input[type="radio"]')].find(
@@ -107,25 +107,25 @@ test('Last hour keeps only the ideas that overlap the last hour', async () => {
   await unmount();
 });
 
-test('many rejected ideas fold into one lane that opens them', async () => {
+test('many failed ideas fold into one lane that opens them', async () => {
   const dense = [
-    idea('kept-one', 'kept', 0, 100),
-    ...Array.from({length: REJECTED_DENSE + 1}, (_, at) => idea(`r${at}`, 'rejected', at * 10, 50)),
+    idea('passed-one', 'passed', 0, 100),
+    ...Array.from({length: FAILED_DENSE + 1}, (_, at) => idea(`r${at}`, 'failed', at * 10, 50)),
   ];
   const events: ZoomEvent[] = [];
   const {container, unmount} = await mount(<TimelineView {...base(dense, 1000, events)} />);
-  expect(names(container)).toEqual([`+ ${REJECTED_DENSE + 1} rejected`, 'kept-one']);
+  expect(names(container)).toEqual([`+ ${FAILED_DENSE + 1} failed`, 'passed-one']);
   await act(async () => rows(container)[0]?.click());
   // The list is windowed, so what shows is the lane gone and the way to fold it back.
-  expect(names(container)).not.toContain(`+ ${REJECTED_DENSE + 1} rejected`);
-  expect(container.textContent).toContain(`Fold ${REJECTED_DENSE + 1} rejected`);
+  expect(names(container)).not.toContain(`+ ${FAILED_DENSE + 1} failed`);
+  expect(container.textContent).toContain(`Fold ${FAILED_DENSE + 1} failed`);
   expect(events).toEqual([]);
   await unmount();
 });
 
 test('an opened idea shows the strip of its latest attempt; a run with no ideas says so', async () => {
   const events: ZoomEvent[] = [];
-  const candidate = idea('mid', 'kept', 2000, 600);
+  const candidate = idea('mid', 'passed', 2000, 600);
   const opened = {...base([candidate], 3600, events), idea: candidate};
   const {container, unmount} = await mount(<TimelineView {...opened} />);
   const segments = [...container.querySelectorAll('.vs-gantt-seg')] as HTMLElement[];
@@ -141,7 +141,7 @@ test('an opened idea shows the strip of its latest attempt; a run with no ideas 
 test('a long idea name is in full on the row’s name, for hover and assistive tech', async () => {
   const long = 'Per-core queues with work stealing and a batched, padded, cache-aligned ring';
   const {container, unmount} = await mount(
-    <TimelineView {...base([idea(long, 'kept', 0, 600)], 700)} />,
+    <TimelineView {...base([idea(long, 'passed', 0, 600)], 700)} />,
   );
   expect(container.querySelector('[role="option"] .vs-gantt-name')?.getAttribute('title')).toBe(
     long,
@@ -151,8 +151,8 @@ test('a long idea name is in full on the row’s name, for hover and assistive t
 });
 
 test('a figure too long for its column is a short form, with the whole on hover', async () => {
-  const slower = {...idea('slow', 'rejected', 0, 100), reason: 'slower_than_input'};
-  const checked = idea('checked', 'rejected', 200, 100);
+  const long = {...idea('long', 'failed', 0, 100), reason: 'implementer_gave_up'};
+  const checked = idea('checked', 'failed', 200, 100);
   const failing = {
     ...checked,
     measurement: {
@@ -164,10 +164,8 @@ test('a figure too long for its column is a short form, with the whole on hover'
       failed: {check: 'correctness', completed: 93, required: 100, unit: 'trials'},
     },
   };
-  const fits = idea('fits', 'kept', 400, 100);
-  const {container, unmount} = await mount(
-    <TimelineView {...base([slower, failing, fits], 600)} />,
-  );
+  const fits = idea('fits', 'passed', 400, 100);
+  const {container, unmount} = await mount(<TimelineView {...base([long, failing, fits], 600)} />);
   const figures = [...container.querySelectorAll('[role="option"] .vs-gantt-figure')].map(each => [
     each.textContent,
     each.getAttribute('title'),
@@ -175,7 +173,7 @@ test('a figure too long for its column is a short form, with the whole on hover'
   expect(figures).toEqual([
     ['1.50×', null],
     ['93/100', '93/100 trials'],
-    ['slower', 'slower than input'],
+    ['implementer…', 'implementer gave up'],
   ]);
   await unmount();
 });

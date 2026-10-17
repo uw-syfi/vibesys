@@ -60,8 +60,8 @@ const OUTCOME: Readonly<
   Record<Candidate['outcome'], {tone: 'live' | 'ok' | 'err'; label: string}>
 > = {
   running: {tone: 'live', label: 'Running'},
-  kept: {tone: 'ok', label: 'Kept'},
-  rejected: {tone: 'err', label: 'Rejected'},
+  passed: {tone: 'ok', label: 'Passed'},
+  failed: {tone: 'err', label: 'Failed'},
 };
 
 function stepChip(step: CandidateStep): {tone: 'live' | 'ok' | 'err' | 'neutral'; label: string} {
@@ -92,13 +92,13 @@ function IdeaFacts(props: {readonly idea: Candidate; readonly base: ViewBase}): 
     <>
       <Chip label={OUTCOME[idea.outcome].label} tone={OUTCOME[idea.outcome].tone} dot />
       {vs === null ? null : (
-        <Text variant="metric" tone={idea.outcome === 'kept' ? 'ok' : 'err'}>
+        <Text variant="metric" tone={idea.outcome === 'passed' ? 'ok' : 'err'}>
           {`${vs.toFixed(2)}×`}
         </Text>
       )}
       <Row gap="space-1" align="center">
         <Text variant="small" tone="muted">
-          built on
+          from
         </Text>
         {parent === null ? (
           <Text variant="small">input</Text>

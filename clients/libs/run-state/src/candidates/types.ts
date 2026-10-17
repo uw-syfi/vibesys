@@ -3,8 +3,8 @@ import type {Span} from '@vibesys/contracts';
 
 type SpanStatus = Span['status'];
 
-/** Where a candidate stands: still worked on, its code kept, or not kept. */
-export type CandidateOutcome = 'running' | 'kept' | 'rejected';
+/** Where a candidate stands: still worked on, or its own measurement passed or failed it. */
+export type CandidateOutcome = 'running' | 'passed' | 'failed';
 
 /** The trusted check that rejected a candidate, and how far it came (`93` of `100` `trials`). */
 export interface FailedCheck {
@@ -52,16 +52,16 @@ export interface CandidateAttempt {
   /** The round that ran it, for a search that plays rounds. */
   readonly round: number | null;
   readonly outcome: CandidateOutcome;
-  /** Why it was not kept, when the search or the span says. */
+  /** Why it failed (`turned_down`, `not_measured`, `no_design`, `not_opened`), when the span says. */
   readonly reason: string | null;
   /** The revision it kept; null while it works and when it kept nothing. */
   readonly revision: string | null;
+  /** The round of the idea whose code it started from; null: the input. */
+  readonly baseRound: number | null;
   readonly startedAt: number;
   readonly endedAt: number | null;
   /** Its latest gate that measured a value or reached a verdict. */
   readonly measurement: CandidateMeasurement | null;
-  /** The values its passed gates measured, in the order the gates started. */
-  readonly passed: readonly number[];
   /** Its steps, in the order they started. */
   readonly steps: readonly CandidateStep[];
 }
@@ -78,11 +78,14 @@ export interface Candidate {
   /** What it tries, in an agent's own words; null until an agent said it. */
   readonly idea: string | null;
   readonly round: number | null;
-  /** Running while an attempt runs; else kept when an attempt kept its code; else rejected. */
+  /** Running while an attempt runs; else passed when an attempt passed; else failed. */
   readonly outcome: CandidateOutcome;
+  /** Why it failed; null unless it failed and the span says. */
   readonly reason: string | null;
+  /** The round of the idea its first attempt started from; null: the input. */
+  readonly baseRound: number | null;
   /**
-   * What it measured: a kept candidate's latest measured kept attempt, else its latest measured
+   * What it measured: a passed candidate's latest measured passed attempt, else its latest measured
    * attempt; null when nothing was measured.
    */
   readonly measurement: CandidateMeasurement | null;
@@ -95,11 +98,14 @@ export interface Candidate {
   readonly running: readonly CandidateStep[];
 }
 
-/** The candidate the run stands on: the one it adopted, or (before adopting) the best measured. */
+/**
+ * The candidate the run's adoption span names: the best so far while the run works, the adopted
+ * result once it ended (the search updates the span's candidate as the best changes).
+ */
 export interface BestCandidate {
   /** The candidate; null when the input itself stands. */
   readonly candidate: string | null;
-  /** The run adopted it (or is adopting it); false for the best passed measurement so far. */
+  /** The run ended and adopted it; false while the run works and the best may still change. */
   readonly adopted: boolean;
 }
 
@@ -107,7 +113,7 @@ export interface BestCandidate {
 export interface CandidateTree {
   /** In the order they began, so every candidate comes after its parent. */
   readonly candidates: readonly Candidate[];
-  /** Null while nothing passed and nothing was adopted, and when the adoption failed. */
+  /** Null before the run labels an adoption, and when the adoption failed. */
   readonly best: BestCandidate | null;
   /**
    * The winning path: the candidates from the input to the best, each built on the one before

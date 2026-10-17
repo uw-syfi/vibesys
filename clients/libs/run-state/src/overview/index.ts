@@ -123,26 +123,26 @@ export interface WorkstreamCounts {
   readonly live: number;
   /** Waiting on time, a latch or the stop (a slot, the input's measurement). */
   readonly waiting: number;
-  readonly accepted: number;
-  readonly rejected: number;
+  readonly passed: number;
+  readonly failed: number;
 }
 
-/** The workstreams of the run, counted by status and verdict. */
+/** The workstreams of the run, counted by status and verdict (passed or failed). */
 export function workstreamCounts(spans: readonly Span[]): WorkstreamCounts {
   let total = 0;
   let live = 0;
   let waiting = 0;
-  let accepted = 0;
-  let rejected = 0;
+  let passed = 0;
+  let failed = 0;
   for (const span of spans) {
     if (span.label?.kind !== 'workstream') continue;
     total += 1;
     if (span.status === 'running') live += 1;
     if (span.status === 'waiting' || span.status === 'pending') waiting += 1;
-    if (span.label.verdict === 'accepted') accepted += 1;
-    if (span.label.verdict === 'rejected') rejected += 1;
+    if (span.label.verdict === 'passed') passed += 1;
+    if (span.label.verdict === 'failed') failed += 1;
   }
-  return {total, live, waiting, accepted, rejected};
+  return {total, live, waiting, passed, failed};
 }
 
 function gateReading(span: Span): GateReading {

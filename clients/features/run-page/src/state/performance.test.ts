@@ -7,8 +7,9 @@ import {idea} from './timeline-fixtures.js';
 
 /**
  * The performance chart's fold over generated runs: the best-so-far line only improves and is the
- * best passed value up to each time; an idea sits on it exactly when it set a new best; ideas that
- * passed without beating it never rise above it, and a failed idea is never on it.
+ * best passed value up to each time that beats the input; an idea sits on it exactly when it set a
+ * new best; ideas that passed without beating it never rise above it, and a failed idea is never on
+ * it. An idea's result is its own outcome (passed or failed), whatever its gate's verdict.
  */
 
 type Verdict = 'passed' | 'failed_check' | 'slower' | null;
@@ -32,7 +33,7 @@ function measured(item: Candidate, value: number, at: number, verdict: Verdict):
 function randomRun(random: Seeded): Candidate[] {
   const count = random.int(40);
   return Array.from({length: count}, (_, at) => {
-    const outcome = random.pick(['running', 'kept', 'rejected'] as const);
+    const outcome = random.pick(['running', 'passed', 'failed'] as const);
     const verdict = random.pick(VERDICTS);
     // Some ideas are measured out of the order they began, and some tie on time.
     const when = random.int(30) * 10;
@@ -47,8 +48,12 @@ function better(a: number, b: number, direction: Direction): boolean {
 
 const DIRECTIONS: readonly Direction[] = ['max', 'min'];
 
-function checkLine(points: readonly PerformancePoint[], direction: Direction): void {
-  let best: number | null = null;
+function checkLine(
+  points: readonly PerformancePoint[],
+  direction: Direction,
+  input: number | null,
+): void {
+  let best: number | null = input;
   for (const point of points) {
     if (point.result === 'passed' && (best === null || better(point.value, best, direction))) {
       expect(point.best).toBe(true);
@@ -74,56 +79,88 @@ function checkSteps(fold: PerformanceFold, direction: Direction): void {
 }
 
 /** The line at each point's time is the best passed value measured up to that time. */
-function checkBestUpTo(fold: PerformanceFold, direction: Direction): void {
+function checkBestUpTo(fold: PerformanceFold, direction: Direction, input: number | null): void {
   for (const point of fold.points) {
     const passed = fold.points
       .filter(each => each.result === 'passed' && each.at <= point.at)
-      .map(each => each.value);
+      .map(each => each.value)
+      .filter(value => input === null || better(value, input, direction));
     const line = fold.best.filter(step => step.at <= point.at).at(-1)?.value;
     const expected = direction === 'min' ? Math.min(...passed) : Math.max(...passed);
     expect(line).toBe(passed.length === 0 ? undefined : expected);
   }
 }
 
+/** An idea's result is its own outcome, passed or failed; pending while it runs. */
+function checkResults(fold: PerformanceFold, items: readonly Candidate[]): void {
+  for (const point of fold.points) {
+    const outcome = items.find(each => each.id === point.id)?.outcome ?? 'running';
+    expect(point.result).toBe(outcome === 'running' ? 'pending' : outcome);
+  }
+}
+
 describe('the performance fold', () => {
   test('over any run the line improves, is the best passed value up to each time, and carries exactly the new bests', () => {
     for (const seed of SEEDS) {
-      const items = randomRun(new Seeded(seed));
+      const random = new Seeded(seed);
+      const items = randomRun(random);
+      const input = random.int(3) === 0 ? null : random.int(1000) / 8;
       for (const direction of DIRECTIONS) {
-        const fold = performanceFold(items, direction);
+        const fold = performanceFold(items, direction, input);
         checkSteps(fold, direction);
-        checkLine(fold.points, direction);
-        checkBestUpTo(fold, direction);
+        checkLine(fold.points, direction, input);
+        checkBestUpTo(fold, direction, input);
+        checkResults(fold, items);
       }
     }
   });
 
-  test('a failed idea, however good its number, never sets the best', () => {
+  test('a failed idea, however good its number, never sets the best; a slower passed idea is passed', () => {
     const fold = performanceFold(
       [
-        measured(idea('a', 'kept', 0, 5), 10, 10, 'passed'),
-        measured(idea('b', 'rejected', 0, 5), 99, 20, 'failed_check'),
-        measured(idea('c', 'kept', 0, 5), 99, 30, 'slower'),
-        measured(idea('d', 'kept', 0, 5), 8, 40, 'passed'),
+        measured(idea('a', 'passed', 0, 5), 10, 10, 'passed'),
+        measured(idea('b', 'failed', 0, 5), 99, 20, 'failed_check'),
+        measured(idea('c', 'passed', 0, 5), 9, 30, 'slower'),
+        measured(idea('d', 'passed', 0, 5), 8, 40, 'passed'),
       ],
       'max',
+      null,
     );
     expect(fold.points.map(point => [point.id, point.result, point.best])).toEqual([
       ['a', 'passed', true],
       ['b', 'failed', false],
-      ['c', 'failed', false],
+      ['c', 'passed', false],
       ['d', 'passed', false],
     ]);
     expect(fold.best).toEqual([{at: 10, value: 10}]);
   });
 
+  test('a passed idea slower than the input is grey: the input stands as the best', () => {
+    const fold = performanceFold(
+      [
+        measured(idea('a', 'passed', 0, 5), 8, 10, 'slower'),
+        measured(idea('b', 'passed', 0, 5), 12, 20, 'passed'),
+      ],
+      'max',
+      10,
+    );
+    expect(fold.points.map(point => [point.id, point.result, point.best])).toEqual([
+      ['a', 'passed', false],
+      ['b', 'passed', true],
+    ]);
+    expect(fold.best).toEqual([{at: 20, value: 12}]);
+  });
+
   test('an idea still running, with no verdict yet, is pending and not on the line', () => {
-    const fold = performanceFold([measured(idea('a', 'running', 0, 5), 10, 10, null)], 'max');
+    const fold = performanceFold([measured(idea('a', 'running', 0, 5), 10, 10, null)], 'max', null);
     expect(fold.points.map(point => [point.result, point.best])).toEqual([['pending', false]]);
     expect(fold.best).toEqual([]);
   });
 
   test('ideas with nothing measured are not on the chart', () => {
-    expect(performanceFold([idea('a', 'rejected', 0, 5)], 'max')).toEqual({points: [], best: []});
+    expect(performanceFold([idea('a', 'failed', 0, 5)], 'max', null)).toEqual({
+      points: [],
+      best: [],
+    });
   });
 });

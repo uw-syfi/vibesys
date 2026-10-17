@@ -20,7 +20,9 @@ export const PROJECT = '/home/me/projects/queue-rs';
 
 export function server(id: string, runId: string, phase: string): Record<string, unknown> {
   const end =
-    phase === 'completed' ? {outcome: 'adopted', reason: 'kept the best', resumable: false} : null;
+    phase === 'completed'
+      ? {outcome: 'adopted', reason: 'adopted the best', resumable: false}
+      : null;
   const paused = phase === 'paused' ? 'user' : null;
   return {
     id,

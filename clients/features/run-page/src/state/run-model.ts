@@ -116,7 +116,7 @@ class LiveFollower {
     const restarted = this.#follow(log);
     const overview = log.headOverview;
     const direction = directionOf(overview);
-    const candidates = this.#candidates.tree(direction);
+    const candidates = this.#candidates.tree();
     const agents = this.#agents.graph();
     const previous = restarted ? null : this.#model;
     this.#log = log;
@@ -210,7 +210,7 @@ function foldedAt(log: TraceLog, at: number, meter: ReadMeter): RunModel {
     trace,
     overview,
     direction,
-    candidates: candidateTree(spans, direction),
+    candidates: candidateTree(spans),
     agents: agentGraph(spans),
     latest: latestTime(spans),
     changed: NOTHING_CHANGED,

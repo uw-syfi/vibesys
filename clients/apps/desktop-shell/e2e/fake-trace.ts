@@ -2,7 +2,7 @@
  * The fake run's trace: the span events a dynamic run on queue-rs writes over two planning calls,
  * as the server sends them (`span_started`, `span_updated`, `span_ended`, each with the whole
  * span). The run's root, the input's measurement, two planning calls, seven workstreams (some
- * building on earlier ones, finished ones accepted or rejected), their agent turns and gates, and
+ * building on earlier ones, finished ones passed or failed), their agent turns and gates, and
  * one span of a kind no client knows. Times are run-clock seconds from the run's start.
  */
 
@@ -126,6 +126,16 @@ function ended(
   return {...span, status, ended_at: at, waiting_on: [], ...extra};
 }
 
+/** A settled workstream's attributes: the base it started from and the code it kept. */
+function settled(n: number, kept: boolean): Record<string, unknown> {
+  return {
+    hypothesis_id: `W${n}`,
+    parent_revision: 'r0',
+    base_round: null,
+    ...(kept ? {revision: `r${n}`} : {}),
+  };
+}
+
 function verdict(
   span: FakeSpan,
   value: string,
@@ -178,6 +188,20 @@ function firstCall(): readonly Step[] {
   const w1Turn = turn('op:w1-turn', w1.id, 'implementer', 412, 'impl-w1', ['planner-1']);
   const w1Gate = gate('op:w1-gate', w1.id, 900);
   const borrow = 'build failed: borrow error in lib.rs';
+  // the search's current best: the first idea to pass, adopted when the run ends
+  const adoption: FakeSpan = {
+    id: 'op:adopt',
+    parent: ROOT,
+    type: 'operation',
+    name: 'adopt',
+    status: 'running',
+    started_at: 1100,
+    label: {
+      kind: 'adoption',
+      title: 'r1',
+      attrs_json: JSON.stringify({candidate: 'r1', metric_value: 48.6, vs_baseline: 1.18}),
+    },
+  };
   const measured = {stage: 'correctness,benchmark', metric_value: 48.6, vs_baseline: 1.18};
   return [
     ['span_started', input],
@@ -195,13 +219,23 @@ function firstCall(): readonly Step[] {
       'span_ended',
       ended(w1Gate, 1100, 'done', {label: verdict(w1Gate, 'passed', undefined, measured)}),
     ],
-    ['span_ended', ended(w1, 1101, 'done', {label: verdict(w1, 'accepted')})],
-    ['span_ended', ended(w2, 1150, 'done', {label: verdict(w2, 'accepted')})],
-    ['span_ended', ended(w3, 1180, 'done', {label: verdict(w3, 'rejected', 'slower_than_input')})],
+    ['span_started', adoption],
+    [
+      'span_ended',
+      ended(w1, 1101, 'done', {label: verdict(w1, 'passed', undefined, settled(1, true))}),
+    ],
+    [
+      'span_ended',
+      ended(w2, 1150, 'done', {label: verdict(w2, 'passed', undefined, settled(2, true))}),
+    ],
+    [
+      'span_ended',
+      ended(w3, 1180, 'done', {label: verdict(w3, 'failed', 'turned_down', settled(3, false))}),
+    ],
     [
       'span_ended',
       ended(w4, 1200, 'failed', {
-        label: verdict(w4, 'rejected', 'failed_check'),
+        label: verdict(w4, 'failed', 'turned_down', settled(4, false)),
         failure: {kind: 'outcome', message: 'the correctness check failed'},
       }),
     ],

@@ -13,10 +13,10 @@ import {indexSpans, nearest, numberAttr, ratio, stringAttr} from './span-reading
 
 type Outcome = NonNullable<RunEnd>['outcome'];
 
-const KEPT_INPUT = 'No candidate beat the input, so it was kept as it was.';
+const INPUT_STANDS = 'No candidate beat the input, so it stands as it was.';
 
-/** The candidate a run kept, as its trace says: where it came from and how it compares. */
-export interface KeptCandidate {
+/** The candidate a run adopted, as its trace says: where it came from and how it compares. */
+export interface AdoptedCandidate {
   /** The round that made it, for a search that plays rounds; null for one that does not. */
   readonly round: number | null;
   /** The hypothesis it tested, when the search names one and no round says where it came from. */
@@ -30,7 +30,7 @@ function madeBy(
   spans: readonly Span[],
   gate: string | null,
   vsBaseline: number | null,
-): KeptCandidate {
+): AdoptedCandidate {
   const index = indexSpans(spans);
   const span = gate === null ? undefined : index.byId.get(gate);
   const workstream = span === undefined ? null : nearest(index, span, 'workstream');
@@ -42,16 +42,16 @@ function madeBy(
 }
 
 /**
- * The candidate the run kept, `'input'` when the input stood, or null when the trace does not say.
+ * The candidate the run adopted, `'input'` when the input stood, or null when the trace does not say.
  * The search's own account decides (its
  * `adoption` span: the candidate and how it measured, or the input standing); the workstream that
  * made it is the one whose passed gate measured that value. A run whose search labels no adoption
  * is read from its best passed gate.
  */
-export function keptCandidate(
+export function adoptedCandidate(
   spans: readonly Span[],
   direction: 'max' | 'min' | null | undefined,
-): KeptCandidate | 'input' | null {
+): AdoptedCandidate | 'input' | null {
   const adopted = adoption(spans);
   if (adopted !== null) {
     if (adopted.verdict !== 'adopted') return null;
@@ -67,46 +67,46 @@ export function keptCandidate(
 
 /** How much better than the input the candidate is, in words, or null when it is not known or not. */
 function improvement(
-  kept: KeptCandidate,
+  adopted: AdoptedCandidate,
   direction: 'max' | 'min' | null | undefined,
 ): string | null {
-  const {vsBaseline} = kept;
+  const {vsBaseline} = adopted;
   if (vsBaseline === null || vsBaseline <= 0) return null;
   if (direction === 'min') return vsBaseline < 1 ? `${ratio(1 / vsBaseline)} faster` : null;
   return direction === 'max' && vsBaseline > 1 ? `${ratio(vsBaseline)} faster` : null;
 }
 
-function keptWords(
-  kept: KeptCandidate | 'input' | null,
+function adoptedWords(
+  adopted: AdoptedCandidate | 'input' | null,
   direction: 'max' | 'min' | null | undefined,
 ): string {
-  if (kept === null) return 'Kept the best candidate.';
-  if (kept === 'input') return KEPT_INPUT;
+  if (adopted === null) return 'Adopted the best candidate.';
+  if (adopted === 'input') return INPUT_STANDS;
   const from =
-    kept.round !== null
-      ? ` from round ${kept.round}`
-      : kept.hypothesis === null
+    adopted.round !== null
+      ? ` from round ${adopted.round}`
+      : adopted.hypothesis === null
         ? ''
-        : ` for ${kept.hypothesis}`;
-  const better = improvement(kept, direction);
-  return `Kept the candidate${from}${better === null ? '' : `, ${better} than the input`}.`;
+        : ` for ${adopted.hypothesis}`;
+  const better = improvement(adopted, direction);
+  return `Adopted the candidate${from}${better === null ? '' : `, ${better} than the input`}.`;
 }
 
 /**
- * The ended banner's line, for an end record's `outcome` and `reason`. `kept` and `direction` come
+ * The ended banner's line, for an end record's `outcome` and `reason`. `adopted` and `direction` come
  * from the run's trace and declared objective; null when the page has not read them.
  */
 export function endReason(
   outcome: Outcome,
   reason: string,
-  kept: KeptCandidate | 'input' | null,
+  adopted: AdoptedCandidate | 'input' | null,
   direction: 'max' | 'min' | null | undefined,
 ): string {
   switch (outcome) {
     case 'adopted':
-      return keptWords(kept, direction);
+      return adoptedWords(adopted, direction);
     case 'kept-input':
-      return KEPT_INPUT;
+      return INPUT_STANDS;
     case 'no-winner':
       return 'The run ended without a winner.';
     case 'adoption-failed':

@@ -3,7 +3,7 @@
  * per idea in the Ideas list's order (rows open ideas, segments open steps; an agent turn in its
  * role's color, a gate hatched, both named by the legend; the end of a bar coloured by outcome,
  * the ratio or verdict at the right);
- * the range is the last hour, the last day or all, and a dense run folds its rejected ideas into
+ * the range is the last hour, the last day or all, and a dense run folds its failed ideas into
  * one lane. For an opened idea, the strip of its latest attempt's steps.
  */
 import type {Candidate} from '@vibesys/run-state/candidates';
@@ -52,7 +52,7 @@ function RunTimeline(props: ViewBase): JSX.Element {
   ];
   const summary =
     shown.folded > 0
-      ? `${shown.rows.length - 1} kept and running · rejected as one lane`
+      ? `${shown.rows.length - 1} passed and running · failed as one lane`
       : `${shown.rows.length} ideas`;
   return (
     <Stack gap="space-2">
@@ -67,11 +67,11 @@ function RunTimeline(props: ViewBase): JSX.Element {
         <Text variant="small" tone="muted">
           {summary}
         </Text>
-        {expanded && shown.rejectedInRange > 0 ? (
+        {expanded && shown.failedInRange > 0 ? (
           <Button
             size="sm"
             variant="quiet"
-            text={`Fold ${shown.rejectedInRange} rejected`}
+            text={`Fold ${shown.failedInRange} failed`}
             press={() => setExpanded(false)}
           />
         ) : null}

@@ -25,6 +25,13 @@ export interface HeroView {
   /** The input's value: `input 9,380,000`. */
   readonly input: string | null;
   readonly measured: number;
+  /**
+   * What the figure is, by the run's adoption span: `adopted` once the run ended, `best` while it
+   * works; null when the run has no best (no adoption yet, or the input stands).
+   */
+  readonly standing: 'best' | 'adopted' | null;
+  /** The idea the figure belongs to, to open it; null when `standing` is null. */
+  readonly bestIdea: {readonly id: string; readonly title: string} | null;
 }
 
 function unitSuffix(model: RunModel): string {
@@ -54,7 +61,8 @@ function inputValue(model: RunModel): number | null {
 
 export function heroView(model: RunModel): HeroView {
   const metric = model.overview?.objective.metric;
-  const best = bestCandidate(model)?.measurement ?? null;
+  const leader = bestCandidate(model);
+  const best = leader?.measurement ?? null;
   const input = inputValue(model);
   const unit = unitSuffix(model);
   return {
@@ -67,6 +75,8 @@ export function heroView(model: RunModel): HeroView {
     input: input === null ? null : `input ${formatValue(input)}`,
     measured: model.candidates.candidates.filter(item => item.measurement?.metricValue != null)
       .length,
+    standing: leader === null ? null : model.candidates.best?.adopted === true ? 'adopted' : 'best',
+    bestIdea: leader === null ? null : {id: leader.id, title: leader.title},
   };
 }
 
@@ -82,7 +92,7 @@ export interface StripChartView {
     /** After the scrub position: drawn dimmed, not removed. */
     readonly faint: boolean;
   }[];
-  /** The best passed value so far, as a step line that reaches the end of the axis. */
+  /** The best passed value so far (the input's until an idea beats it), as a step line that reaches the end of the axis. */
   readonly steps: readonly {readonly x: number; readonly y: number}[];
   readonly reference: {readonly y: number; readonly label: string} | null;
   readonly xTicks: readonly {readonly value: number; readonly label: string}[];
@@ -139,7 +149,7 @@ export function stripChartView(
   scrub: number | null = null,
 ): StripChartView | null {
   const minutes = (at: number) => (at - start) / 60;
-  const fold = performanceFold(model.candidates.candidates, model.direction);
+  const fold = performanceFold(model.candidates.candidates, model.direction, inputValue(model));
   if (fold.points.length === 0) return null;
   const points = fold.points.map(point => ({
     id: point.id,

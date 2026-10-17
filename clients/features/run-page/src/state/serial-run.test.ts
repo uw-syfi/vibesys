@@ -9,7 +9,7 @@ import {createRunReader, type RunModel} from './run-model.js';
 /**
  * A multi-agent (serial) run, as its span events arrive: the input's measurement, then one round
  * after another, each a workstream that is labelled `round N` as it begins, named for its
- * hypothesis once the designer chose one, and accepted or rejected as its workspace settles. Each
+ * hypothesis once the designer chose one, and passed or failed as its workspace settles. Each
  * round's designer, implementer and judge turns and its gate are its own operations. The spans are
  * those the multi search's fake-core story records (`tests/vibesys/serial_search/
  * test_span_labels.py`), with times. Regression: before the serial searches labelled their spans,
@@ -66,6 +66,23 @@ class Recording {
   }
 }
 
+/** A round's attributes once it settled: its base and the code it kept. */
+const settled = (n: number, builds?: string): string =>
+  JSON.stringify({
+    hypothesis_id: `h${n}`,
+    parent_revision: builds === undefined ? 'base' : `c${n - 1}`,
+    base_round: builds === undefined ? null : n - 1,
+    round: n,
+    revision: `c${n}`,
+  });
+
+/** The search's adoption span: its current best (a revision), and the verdict once it ended. */
+function adopt(run: Recording, candidate: string, value: number, vs: number): void {
+  run.relabel('op:adopt', {
+    attrs_json: JSON.stringify({candidate, metric_value: value, vs_baseline: vs}),
+  });
+}
+
 const turn = (role: string): Label => ({
   kind: 'agent_turn',
   title: role,
@@ -99,6 +116,7 @@ function round(
     attrs_json: JSON.stringify({
       hypothesis_id: hypothesis,
       parent_revision: builds === undefined ? 'base' : `c${n - 1}`,
+      base_round: builds === undefined ? null : n - 1,
       round: n,
     }),
     links: builds === undefined ? [] : [{rel: 'builds_on', to: builds}],
@@ -116,7 +134,7 @@ function round(
       vs_baseline: measured.vs,
     }),
   });
-  run.end(id, {verdict: 'accepted'});
+  run.end(id, {verdict: 'passed', attrs_json: settled(n, builds)});
   return id;
 }
 
@@ -125,7 +143,14 @@ function recorded(): Recording {
   run.start('flow:#1', null, 'root');
   run.start('op:measure.1', 'flow:#1', 'measure');
   run.end('op:measure.1');
+  run.start('op:adopt', 'flow:#1', 'adopt', {
+    kind: 'adoption',
+    title: 'the input',
+    attrs_json: JSON.stringify({candidate: null, metric_value: 50, vs_baseline: 1}),
+  });
   const first = round(run, 1, {value: 100, vs: 2, verdict: 'passed'});
+  adopt(run, 'c1', 100, 2);
+  // a round slower than the input still passes, and is not the best
   round(run, 2, {value: 10, vs: 0.2, verdict: 'slower'}, first);
   return run;
 }
@@ -166,7 +191,12 @@ describe('scrubbing a multi-agent run', () => {
 describe('a multi-agent run', () => {
   test('regression: the run level shows the best idea, its chart and both rounds', () => {
     const model = at(recorded().events);
-    expect(heroView(model)).toMatchObject({ratio: '2.00×', value: '100 ops/s', measured: 2});
+    expect(heroView(model)).toMatchObject({
+      ratio: '2.00×',
+      value: '100 ops/s',
+      measured: 2,
+      standing: 'best',
+    });
     const chart = stripChartView(model, clockStart(model), null);
     expect(chart?.points.map(point => point.y)).toEqual([100, 10]);
     expect(chart?.reference?.y).toBe(50);
@@ -174,10 +204,30 @@ describe('a multi-agent run', () => {
 
   test('the ideas list each round by its hypothesis, with its ratio and what it builds on', () => {
     const {rows} = ideasView(at(recorded().events), IDEAS_FILTER_DEFAULT);
-    expect(rows.map(row => [row.title, row.figure, row.trail.label]).sort()).toEqual([
-      ['title h1', '2.00×', 'from input'],
-      ['title h2', '0.20×', 'from title h1'],
+    expect(
+      rows.map(row => [row.title, row.figure, row.trail.label, row.state.label]).sort(),
+    ).toEqual([
+      ['title h1', '2.00×', 'input', 'passed'],
+      ['title h2', '0.20×', 'title h1', 'passed'],
     ]);
+    expect(rows.map(row => [row.title, row.badges.map(badge => badge.label)]).sort()).toEqual([
+      ['title h1', ['best']],
+      ['title h2', []],
+    ]);
+  });
+
+  test('the hero follows the adoption span as a better round lands, then calls it adopted', () => {
+    const run = recorded();
+    const better = round(run, 3, {value: 300, vs: 6, verdict: 'passed'}, 'flow:000001/#1');
+    adopt(run, 'c3', 300, 6);
+    expect(better).toBe('flow:000003/#1');
+    expect(heroView(at(run.events))).toMatchObject({ratio: '6.00×', standing: 'best'});
+    run.end('op:adopt', {verdict: 'adopted'});
+    const model = at(run.events);
+    expect(heroView(model)).toMatchObject({ratio: '6.00×', standing: 'adopted'});
+    const rows = ideasView(model, IDEAS_FILTER_DEFAULT).rows;
+    expect(rows.filter(row => row.badges.some(badge => badge.label === 'adopted'))).toHaveLength(1);
+    expect(rows.some(row => row.badges.some(badge => badge.label === 'best'))).toBe(false);
   });
 
   test('a round choosing its hypothesis reads as its orchestrator running now', () => {
@@ -214,16 +264,22 @@ function liveRoundOne(run: Recording): void {
     title: 'title h1',
     attrs_json: JSON.stringify({hypothesis_id: 'h1', parent_revision: 'base', round: 1}),
   });
+  run.start('op:adopt', 'flow:#1', 'adopt', {
+    kind: 'adoption',
+    title: 'the input',
+    attrs_json: JSON.stringify({candidate: null, metric_value: 50, vs_baseline: 1}),
+  });
   run.start('op:000001/measure.1', id, 'measure', gate());
   run.end('op:000001/measure.1');
   run.relabel('op:000001/measure.1', {
     verdict: 'passed',
     attrs_json: JSON.stringify({stage: 'accuracy,benchmark', metric_value: 100, vs_baseline: 2}),
   });
-  run.end(id, {verdict: 'accepted'});
+  run.end(id, {verdict: 'passed', attrs_json: settled(1)});
+  adopt(run, 'c1', 100, 2);
 }
 
-describe('a live multi run with an accepted round 1', () => {
+describe('a live multi run whose round 1 passed', () => {
   test('mid-run the hero shows the best idea and the chart its point', () => {
     const run = new Recording();
     liveRoundOne(run);
@@ -233,7 +289,12 @@ describe('a live multi run with an accepted round 1', () => {
       attrs_json: JSON.stringify({hypothesis_id: null, parent_revision: null, round: 2}),
     });
     const model = at(run.events);
-    expect(heroView(model)).toMatchObject({ratio: '2.00×', value: '100 ops/s'});
+    expect(heroView(model)).toMatchObject({
+      ratio: '2.00×',
+      value: '100 ops/s',
+      standing: 'best',
+      bestIdea: {title: 'title h1'},
+    });
     const chart = stripChartView(model, clockStart(model), null);
     expect(chart?.points.map(point => point.y)).toEqual([100]);
   });
@@ -241,9 +302,10 @@ describe('a live multi run with an accepted round 1', () => {
   test('once the run finished nothing runs now, and the best stays', () => {
     const run = new Recording();
     liveRoundOne(run);
+    run.end('op:adopt', {verdict: 'adopted'});
     run.end('flow:#1');
     const model = at(run.events);
     expect(nowView(model)).toEqual([]);
-    expect(heroView(model).ratio).toBe('2.00×');
+    expect(heroView(model)).toMatchObject({ratio: '2.00×', standing: 'adopted'});
   });
 });

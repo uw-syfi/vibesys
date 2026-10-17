@@ -1,7 +1,7 @@
 /**
  * The run level's Ideas face and best path: one row per candidate, running first and then the
- * rest newest first, the rejected collapsed behind a `+ N rejected` row unless the filter shows
- * them, and the winning path as a line of names that folds its middle when long.
+ * rest newest first, the failed collapsed behind a `+ N failed` row unless the filter shows them,
+ * and the winning path as a line of names that folds its middle when long.
  *
  * Rows are memoized on the candidate tree and the filter, so a render with neither changed builds
  * nothing (a tree is the same object until a span changes).
@@ -13,16 +13,16 @@ import {duration, formatValue, ratio, words} from './span-reading.js';
 /** Which ideas the Ideas face shows. */
 export interface IdeasFilter {
   readonly query: string;
-  readonly kept: boolean;
+  readonly passed: boolean;
   readonly running: boolean;
-  readonly rejected: boolean;
+  readonly failed: boolean;
 }
 
 export const IDEAS_FILTER_DEFAULT: IdeasFilter = {
   query: '',
-  kept: true,
+  passed: true,
   running: true,
-  rejected: false,
+  failed: false,
 };
 
 export type IdeaTone = 'ok' | 'err' | 'muted';
@@ -46,7 +46,7 @@ export interface IdeaRow {
     readonly label: string;
   } | null;
   readonly badges: readonly {readonly label: string; readonly tone: 'ok' | 'neutral'}[];
-  /** `from <parent>`; `parent` null: it built on the input. */
+  /** Where it started from: `input`, else the idea it built on (`parent`, which opens). */
   readonly trail: {readonly label: string; readonly parent: string | null};
   /** On the winning path. */
   readonly stripe: boolean;
@@ -56,8 +56,8 @@ export interface IdeaRow {
 
 export interface IdeasView {
   readonly rows: readonly IdeaRow[];
-  /** Rejected ideas the filter hides (the `+ N rejected` row); 0 when shown or none. */
-  readonly hiddenRejected: number;
+  /** Failed ideas the filter hides (the `+ N failed` row); 0 when shown or none. */
+  readonly hiddenFailed: number;
   readonly counts: Readonly<Record<CandidateOutcome, number>>;
   readonly total: number;
 }
@@ -81,9 +81,9 @@ function share(value: number, best: number, direction: Direction): number {
 
 function stateOf(item: Candidate): IdeaRow['state'] {
   if (item.outcome === 'running') return {tone: 'live', label: 'running'};
-  if (item.outcome === 'kept') return {tone: 'ok', label: 'kept'};
-  const why = item.measurement?.failed?.check ?? item.reason;
-  return {tone: 'err', label: why === null ? 'rejected' : `rejected · ${words(why)}`};
+  if (item.outcome === 'passed') return {tone: 'ok', label: 'passed'};
+  const why = item.reason ?? item.measurement?.failed?.check ?? null;
+  return {tone: 'err', label: why === null ? 'failed' : `failed · ${words(why)}`};
 }
 
 /** The figure at the right of an idea's row: its ratio, its failed check's progress, or why not. */
@@ -99,7 +99,7 @@ export function figureOf(item: Candidate): {figure: string; tone: IdeaTone} {
     return {figure: progress, tone: 'err'};
   }
   if (measured?.vsBaseline !== null && measured?.vsBaseline !== undefined) {
-    return {figure: ratio(measured.vsBaseline), tone: item.outcome === 'kept' ? 'ok' : 'err'};
+    return {figure: ratio(measured.vsBaseline), tone: item.outcome === 'passed' ? 'ok' : 'err'};
   }
   return {figure: item.reason === null ? '–' : words(item.reason), tone: 'muted'};
 }
@@ -133,17 +133,17 @@ function rowOf(item: Candidate, context: RowContext): IdeaRow {
         ? null
         : {
             value: share(value, context.best, context.direction),
-            tone: item.outcome === 'kept' ? 'ok' : 'muted',
+            tone: item.outcome === 'passed' ? 'ok' : 'muted',
             label: `${formatValue(value)}${context.unit === '' ? '' : ` ${context.unit}`}`,
           },
     badges: [
-      ...(context.tree.best?.candidate === item.id ? [{label: 'best', tone: 'ok' as const}] : []),
+      ...(context.tree.best?.candidate === item.id
+        ? [{label: context.tree.best.adopted ? 'adopted' : 'best', tone: 'ok' as const}]
+        : []),
       ...(attempts > 1 ? [{label: `×${attempts}`, tone: 'neutral' as const}] : []),
     ],
     trail:
-      parent === null
-        ? {label: 'from input', parent: null}
-        : {label: `from ${parent.title}`, parent: parent.id},
+      parent === null ? {label: 'input', parent: null} : {label: parent.title, parent: parent.id},
     stripe: context.path.has(item.id),
     fresh: context.changed.has(item.id),
   };
@@ -170,7 +170,7 @@ function ordered(candidates: readonly Candidate[]): Candidate[] {
 
 function buildIdeas(model: RunModel, filter: IdeasFilter): IdeasView {
   const tree = model.candidates;
-  const counts = {running: 0, kept: 0, rejected: 0};
+  const counts = {running: 0, passed: 0, failed: 0};
   for (const item of tree.candidates) counts[item.outcome] += 1;
   const context: RowContext = {
     tree,
@@ -183,16 +183,16 @@ function buildIdeas(model: RunModel, filter: IdeasFilter): IdeasView {
   };
   const query = filter.query.trim();
   const rows: IdeaRow[] = [];
-  let hiddenRejected = 0;
+  let hiddenFailed = 0;
   for (const item of ordered(tree.candidates)) {
     if (!matches(item, query)) continue;
     if (!filter[item.outcome]) {
-      if (item.outcome === 'rejected') hiddenRejected += 1;
+      if (item.outcome === 'failed') hiddenFailed += 1;
       continue;
     }
     rows.push(rowOf(item, context));
   }
-  return {rows, hiddenRejected, counts, total: tree.candidates.length};
+  return {rows, hiddenFailed, counts, total: tree.candidates.length};
 }
 
 /** Counts the ideas views built, for the memoization tests. */
@@ -214,7 +214,7 @@ export function ideasView(model: RunModel, filter: IdeasFilter, meter?: ViewMete
 
 function sameFilter(a: IdeasFilter, b: IdeasFilter): boolean {
   return (
-    a.query === b.query && a.kept === b.kept && a.running === b.running && a.rejected === b.rejected
+    a.query === b.query && a.passed === b.passed && a.running === b.running && a.failed === b.failed
   );
 }
 

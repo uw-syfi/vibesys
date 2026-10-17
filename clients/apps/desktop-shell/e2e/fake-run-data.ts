@@ -43,7 +43,7 @@ interface Workstream {
   readonly call: string;
   readonly start: number;
   readonly buildsOn: readonly number[];
-  readonly verdict: 'accepted' | 'rejected' | null;
+  readonly verdict: 'passed' | 'failed' | null;
   /** The gate's value and ratio to the baseline, or null while it has not measured. */
   readonly gate: {value: number; ratio: number; verdict: string} | null;
 }
@@ -55,7 +55,7 @@ const WORKSTREAMS: readonly Workstream[] = [
     call: 'p1',
     start: 420,
     buildsOn: [],
-    verdict: 'accepted',
+    verdict: 'passed',
     gate: {value: 1.9e7, ratio: 1.9, verdict: 'passed'},
   },
   {
@@ -64,7 +64,7 @@ const WORKSTREAMS: readonly Workstream[] = [
     call: 'p1',
     start: 420,
     buildsOn: [],
-    verdict: 'accepted',
+    verdict: 'passed',
     gate: {value: 1.55e7, ratio: 1.55, verdict: 'passed'},
   },
   {
@@ -73,7 +73,7 @@ const WORKSTREAMS: readonly Workstream[] = [
     call: 'p1',
     start: 900,
     buildsOn: [],
-    verdict: 'rejected',
+    verdict: 'failed',
     gate: {value: 0.85e7, ratio: 0.85, verdict: 'slower'},
   },
   {
@@ -82,7 +82,7 @@ const WORKSTREAMS: readonly Workstream[] = [
     call: 'p1',
     start: 960,
     buildsOn: [],
-    verdict: 'rejected',
+    verdict: 'failed',
     gate: {value: 0, ratio: 0, verdict: 'failed_check'},
   },
   {
@@ -128,9 +128,15 @@ function workstreamSpans(w: Workstream): FakeSpan[] {
     label: label(
       'workstream',
       w.title,
-      {hypothesis_id: `W${w.n}`, parent_revision: 'r0'},
+      {
+        hypothesis_id: `W${w.n}`,
+        parent_revision: 'r0',
+        base_round: null,
+        ...(w.verdict === 'passed' ? {revision: `r${w.n}`} : {}),
+      },
       {
         ...(w.verdict === null ? {} : {verdict: w.verdict}),
+        ...(w.verdict === 'failed' ? {reason: 'turned_down'} : {}),
         links: w.buildsOn.map(other => ({rel: 'builds_on', to: `w${other}`})),
       },
     ),
@@ -195,6 +201,15 @@ function spans(): FakeSpan[] {
     },
     call('p1', 1, 385),
     call('p2', 2, 1220),
+    {
+      id: 'adopt',
+      parent: 'run',
+      type: 'operation',
+      name: 'adopt',
+      status: 'running',
+      started_at: 1100,
+      label: label('adoption', 'r1', {candidate: 'r1', metric_value: 1.9e7, vs_baseline: 1.9}),
+    },
     ...WORKSTREAMS.flatMap(workstreamSpans),
   ];
 }

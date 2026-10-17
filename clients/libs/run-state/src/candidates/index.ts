@@ -10,12 +10,12 @@
  *   `hypothesis_id` (an attempt without one yet is a candidate of its own); a `probe` only looks
  *   and is no candidate;
  * - its `builds_on` link names the workstream, so the candidate, it built on; none is the input;
- * - its verdict says whether the attempt's code was kept, and `revision` names that code, which
- *   the run's `adoption` names when it adopts it;
+ * - its verdict says whether the attempt passed or failed, and `revision` names the code it kept,
+ *   which the run's `adoption` span names while it is the best and when the run adopts it;
  * - the labelled spans under it (agent turns, gates) are its steps, and its gates what it measured.
  *
- * A search that plays one path links each round to the round that kept what it built on, so its
- * tree is a chain whose rejected rounds are leaves.
+ * A search that plays one path links each round to the round whose code it started from (its
+ * `base_round`), so its tree is a chain whose failed rounds are leaves.
  *
  * Spans carry no agent-spawn relation (which agent started which): an agent turn's span parent is
  * the flow task that awaited it, so a candidate's steps say which attempt ran a turn, not who
@@ -38,13 +38,10 @@ export type {
 } from './types.js';
 
 /** The candidate tree of the run whose spans these are, in the order they started. */
-export function candidateTree(
-  spans: readonly Span[],
-  direction: 'max' | 'min' | null | undefined,
-): CandidateTree {
+export function candidateTree(spans: readonly Span[]): CandidateTree {
   const fold = new CandidateFold();
   fold.applySpans(spans);
-  return fold.tree(direction);
+  return fold.tree();
 }
 
 /** The candidates that built on `parent` (null: on the input), in the order they began. */

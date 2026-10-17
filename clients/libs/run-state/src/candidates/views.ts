@@ -69,16 +69,16 @@ function failedCheck(value: unknown): FailedCheck | null {
   };
 }
 
-/** Whether a workstream's attempt was kept, rejected, or still runs. */
+/** Whether an attempt passed, failed, or still runs; a span that ended with no verdict failed. */
 function attemptOutcome(span: Span): CandidateOutcome {
   const verdict = span.label?.verdict ?? null;
-  if (verdict === 'accepted') return 'kept';
-  return verdict !== null || ENDED.has(span.status) ? 'rejected' : 'running';
+  if (verdict === 'passed') return 'passed';
+  return verdict !== null || ENDED.has(span.status) ? 'failed' : 'running';
 }
 
-/** The revision a workstream kept; null while it works and when it kept nothing. */
-export function keptRevision(span: Span): string | null {
-  return attemptOutcome(span) === 'kept' ? stringOrNull(attributes(span)['revision']) : null;
+/** The revision a workstream kept (the code the adoption names when it is the best); else null. */
+export function revisionOf(span: Span): string | null {
+  return stringOrNull(attributes(span)['revision']);
 }
 
 /** One attempt: its workstream span and the labelled spans under it, in the order they started. */
@@ -87,7 +87,7 @@ export function attempt(span: Span, labelled: readonly Span[]): CandidateAttempt
   const outcome = attemptOutcome(span);
   const verdict = span.label?.verdict ?? null;
   const reason =
-    outcome !== 'rejected'
+    outcome !== 'failed'
       ? null
       : (span.label?.reason ?? span.failure?.kind ?? (verdict === null ? span.status : null));
   const steps = labelled.map(entry => step(entry, entry.label?.kind ?? ''));
@@ -99,15 +99,12 @@ export function attempt(span: Span, labelled: readonly Span[]): CandidateAttempt
     round: numberOrNull(attrs['round']),
     outcome,
     reason: reason ?? null,
-    revision: keptRevision(span),
+    revision: revisionOf(span),
+    baseRound: numberOrNull(attrs['base_round']),
     startedAt: span.started_at,
     endedAt: span.ended_at ?? null,
     measurement:
       gates.filter(gate => gate.metricValue !== null || gate.verdict !== null).at(-1) ?? null,
-    passed: gates
-      .filter(gate => gate.verdict === 'passed')
-      .map(gate => gate.metricValue)
-      .filter(value => value !== null),
     steps,
   };
 }
@@ -121,9 +118,9 @@ export function candidate(
 ): Candidate {
   const last = attempts.at(-1);
   const running = attempts.some(item => item.outcome === 'running');
-  const kept = attempts.filter(item => item.outcome === 'kept');
-  const outcome: CandidateOutcome = running ? 'running' : kept.length > 0 ? 'kept' : 'rejected';
-  const measuredFrom = outcome === 'kept' ? kept : attempts;
+  const passed = attempts.filter(item => item.outcome === 'passed');
+  const outcome: CandidateOutcome = running ? 'running' : passed.length > 0 ? 'passed' : 'failed';
+  const measuredFrom = outcome === 'passed' ? passed : attempts;
   const shown = measuredFrom.filter(item => item.measurement !== null).at(-1);
   return {
     id,
@@ -137,7 +134,8 @@ export function candidate(
         .at(-1) ?? null,
     round: last?.round ?? null,
     outcome,
-    reason: outcome === 'rejected' ? (last?.reason ?? null) : null,
+    reason: outcome === 'failed' ? (last?.reason ?? null) : null,
+    baseRound: attempts[0]?.baseRound ?? null,
     measurement: shown?.measurement ?? null,
     attempts,
     startedAt: attempts[0]?.startedAt ?? 0,
@@ -151,19 +149,4 @@ function endOf(attempts: readonly CandidateAttempt[], running: boolean): number 
   const ends = attempts.map(item => item.endedAt);
   if (running || ends.length === 0 || ends.some(end => end === null)) return null;
   return Math.max(...(ends as number[]));
-}
-
-/** The best value a passed gate of the candidate measured, the first of equals. */
-export function bestPassed(item: Candidate, direction: 'max' | 'min'): number | null {
-  let found: number | null = null;
-  for (const entry of item.attempts) {
-    for (const value of entry.passed) {
-      if (found === null || better(value, found, direction)) found = value;
-    }
-  }
-  return found;
-}
-
-export function better(value: number, than: number, direction: 'max' | 'min'): boolean {
-  return direction === 'min' ? value < than : value > than;
 }

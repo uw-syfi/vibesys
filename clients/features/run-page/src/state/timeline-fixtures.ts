@@ -27,12 +27,13 @@ export function attempt(id: string, outcome: CandidateOutcome, at: number, took:
     idea: null,
     round: null,
     outcome,
-    reason: outcome === 'rejected' ? 'build_failed' : null,
+    reason: outcome === 'failed' ? 'turned_down' : null,
     revision: null,
+    baseRound: null,
     startedAt: at,
     endedAt: outcome === 'running' ? null : at + took,
     measurement:
-      outcome === 'kept'
+      outcome === 'passed'
         ? {
             span: `${id}-g`,
             at: at + took,
@@ -42,7 +43,6 @@ export function attempt(id: string, outcome: CandidateOutcome, at: number, took:
             failed: null,
           }
         : null,
-    passed: [],
     steps: [
       step(`${id}-t`, 'agent_turn', 'implementer', at, took / 3),
       step(`${id}-g`, 'gate', null, at + took / 3, took / 3),
@@ -62,6 +62,7 @@ export function idea(id: string, outcome: CandidateOutcome, at: number, took: nu
     round: null,
     outcome,
     reason: tried.reason,
+    baseRound: null,
     measurement: tried.measurement,
     attempts: [tried],
     startedAt: at,
@@ -70,7 +71,10 @@ export function idea(id: string, outcome: CandidateOutcome, at: number, took: nu
   };
 }
 
-export function modelOf(candidates: readonly Candidate[]): RunModel {
-  const tree: CandidateTree = {candidates, best: null, bestPath: []};
+export function modelOf(
+  candidates: readonly Candidate[],
+  best: CandidateTree['best'] = null,
+): RunModel {
+  const tree: CandidateTree = {candidates, best, bestPath: best?.candidate ? [best.candidate] : []};
   return {candidates: tree, direction: 'max'} as unknown as RunModel;
 }

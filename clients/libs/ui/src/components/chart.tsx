@@ -11,7 +11,7 @@ export interface ChartPoint {
   readonly x: number;
   readonly y: number;
   readonly filled: boolean;
-  /** A minor point (a rejected try): small and faint. Without it, hollow points turn faint when there are many. */
+  /** A minor point (a failed try): small and faint. Without it, hollow points turn faint when there are many. */
   readonly faint?: boolean;
   /** The color: the accent (the default), muted grey, or the error red; not text, a mark's own color. */
   readonly tone?: 'accent' | 'muted' | 'err';

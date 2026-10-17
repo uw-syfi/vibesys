@@ -60,13 +60,13 @@ function listNames(container: HTMLElement): string[] {
 }
 
 function tried(): Candidate {
-  const base = idea('mpmc', 'kept', 100, 300);
+  const base = idea('mpmc', 'passed', 100, 300);
   return {
     ...base,
     attempts: [
-      attempt('a1', 'rejected', 100, 60),
-      attempt('a2', 'kept', 160, 120),
-      attempt('a3', 'kept', 280, 120),
+      attempt('a1', 'failed', 100, 60),
+      attempt('a2', 'passed', 160, 120),
+      attempt('a3', 'passed', 280, 120),
     ],
   };
 }
@@ -77,7 +77,7 @@ function view(candidate: Candidate, zoom: (event: ZoomEvent) => void) {
 
 test('a one-attempt idea shows its steps, role first, and a step opens', async () => {
   const events: ZoomEvent[] = [];
-  const candidate = idea('mpmc', 'kept', 100, 300);
+  const candidate = idea('mpmc', 'passed', 100, 300);
   const {container, unmount} = await mount(<IdeaView {...view(candidate, e => events.push(e))} />);
   expect(listNames(container).some(name => name === 'Attempts')).toBe(false);
   const steps = options(container, 'mpmc steps');
@@ -98,7 +98,7 @@ test('the latest attempt is selected; choosing another shows its steps', async (
   const {container, unmount} = await mount(<IdeaView {...view(candidate, e => events.push(e))} />);
   const lines = options(container, 'Attempts');
   expect(lines.map(row => row.textContent)).toEqual([
-    expect.stringContaining('build failed'),
+    expect.stringContaining('turned down'),
     expect.stringContaining('1.50×'),
     expect.stringContaining('1.50×'),
   ]);
@@ -145,7 +145,7 @@ test('an idea with no attempts has no steps to show', async () => {
 });
 
 test('the header adds the value and how long it took', async () => {
-  const candidate = idea('mpmc', 'kept', 100, 300);
+  const candidate = idea('mpmc', 'passed', 100, 300);
   const meta = ideaHeader(view(candidate, () => undefined)).meta;
   const {container, unmount} = await mount(meta);
   expect(container.textContent).toBe('40 · 5m');
@@ -153,7 +153,7 @@ test('the header adds the value and how long it took', async () => {
 });
 
 test('shows the implementer outcome as a chip and its summary in the idea view', async () => {
-  const candidate = idea('mpmc', 'kept', 100, 300);
+  const candidate = idea('mpmc', 'passed', 100, 300);
   const props = {
     ...view(candidate, () => undefined),
     outcome: {outcome: {label: 'blocked', tone: 'err' as const}, summary: 'Padded the counters.'},

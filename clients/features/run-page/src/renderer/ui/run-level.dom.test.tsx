@@ -125,7 +125,7 @@ test('a face reads the run until the first snapshot, and only then says it is em
 /** The run's ideas as measured at 100, 200 and 300 seconds, read to their live end or as of `scrub`. */
 function measuredRun(scrub: number | null): RunModel {
   const all = [10, 20, 30].map((value, at) => {
-    const item = idea(`i${at}`, 'kept', at * 100, 90);
+    const item = idea(`i${at}`, 'passed', at * 100, 90);
     const measured = item.measurement;
     if (measured === null) throw new Error('fixture');
     return {...item, measurement: {...measured, at: (at + 1) * 100, metricValue: value}};
@@ -185,4 +185,58 @@ test('regression: scrubbing keeps the chart drawn with the same axes, before and
     expect(seen?.yLabels).toEqual(live?.yLabels as string[]);
     expect(seen?.cursor).toBe(true);
   }
+});
+
+/** Three ideas: one passed (the best), one failed for a reason, one running; `adopted` once over. */
+function namedRun(adopted: boolean): RunModel {
+  const failed = {...idea('turned', 'failed', 100, 90), reason: 'turned_down'};
+  const items = [idea('good', 'passed', 0, 90), failed, idea('going', 'running', 200, 90)];
+  return {
+    ...modelOf(items, {candidate: 'good', adopted}),
+    overview: null,
+    changed: new Set<string>(),
+    agents: {agents: []},
+    trace: {spans: new Map()},
+  } as unknown as RunModel;
+}
+
+async function textOf(model: RunModel, showFailed: boolean): Promise<string> {
+  const state = runPageStep(attaching(), SNAPSHOT).state;
+  const shown = showFailed ? {...state, ideas: {...state.ideas, failed: true}} : state;
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const base = {model, clock: {start: 0, now: null}, zoom: () => undefined};
+  await act(async () =>
+    root.render(
+      <RunLevel
+        state={shown}
+        base={base}
+        whole={model}
+        core={null}
+        mode="ideas"
+        dispatch={() => undefined}
+      />,
+    ),
+  );
+  const text = container.textContent ?? '';
+  await act(async () => root.unmount());
+  container.remove();
+  return text;
+}
+
+test('the run level says passed, failed, best and adopted, never accepted, kept or rejected', async () => {
+  for (const adopted of [false, true]) {
+    for (const showFailed of [false, true]) {
+      const text = await textOf(namedRun(adopted), showFailed);
+      expect(text).toContain('1 passed');
+      expect(text).toContain('1 failed');
+      expect(text).toContain('1 running');
+      expect(text).toContain(adopted ? 'adopted' : 'best');
+      if (showFailed) expect(text).toContain('turned down');
+      else expect(text).toContain('+ 1 failed');
+      expect(text).not.toMatch(/accepted|kept|rejected/i);
+    }
+  }
+  expect(await textOf(namedRun(false), false)).not.toContain('adopted');
 });

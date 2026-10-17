@@ -45,7 +45,7 @@ const turnOf = (candidate: Candidate, attemptAt: number): string =>
 
 describe('the implementer outcome of an idea', () => {
   test('is the reply’s outcome and summary, with the tone its word carries', () => {
-    const ideas = [idea('a', 'kept', 0, 60), idea('b', 'rejected', 100, 60)];
+    const ideas = [idea('a', 'passed', 0, 60), idea('b', 'failed', 100, 60)];
     const core = reduceEventBatch(initialCoreState(), [
       reply(1, turnOf(ideas[0] as Candidate, 0), {
         summary: 'Padded the counters.',
@@ -63,7 +63,7 @@ describe('the implementer outcome of an idea', () => {
   });
 
   test('reads a reply whose choice is named for its hypothesis', () => {
-    const ideas = [idea('a', 'kept', 0, 60)];
+    const ideas = [idea('a', 'passed', 0, 60)];
     const schema = {
       properties: {
         summary: {type: 'string'},
@@ -87,9 +87,9 @@ describe('the implementer outcome of an idea', () => {
   });
 
   test('is the latest attempt’s reply, and absent for an idea whose implementer said nothing', () => {
-    const base = idea('a', 'kept', 0, 60);
-    const first = attempt('a1', 'rejected', 0, 30);
-    const second = attempt('a2', 'kept', 40, 30);
+    const base = idea('a', 'passed', 0, 60);
+    const first = attempt('a1', 'failed', 0, 30);
+    const second = attempt('a2', 'passed', 40, 30);
     const twice = {...base, attempts: [first, second]};
     const silent = idea('s', 'running', 100, 0);
     const core = reduceEventBatch(initialCoreState(), [
@@ -103,14 +103,16 @@ describe('the implementer outcome of an idea', () => {
   });
 
   test('is empty before the run fold reaches the window', () => {
-    expect(implementerOutcomes(null, modelOf([idea('a', 'kept', 0, 60)]).candidates).size).toBe(0);
+    expect(implementerOutcomes(null, modelOf([idea('a', 'passed', 0, 60)]).candidates).size).toBe(
+      0,
+    );
   });
 
   test('over any run, each idea reads its own latest reply and nothing else', () => {
     for (const seed of SEEDS) {
       const random = new Seeded(seed);
       const ideas = Array.from({length: 1 + random.int(8)}, (_, at) =>
-        idea(`i${at}`, 'kept', at * 100, 60),
+        idea(`i${at}`, 'passed', at * 100, 60),
       );
       const events: RunEvent[] = [];
       const expected = new Map<string, string>();

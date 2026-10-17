@@ -37,18 +37,18 @@ interface Candidate {
   readonly idea: string;
   readonly share: number;
   readonly figure: string;
-  readonly state: 'kept' | 'rejected' | 'running';
+  readonly state: 'passed' | 'failed' | 'running';
 }
 
 const CANDIDATES: readonly Candidate[] = [
-  {id: 'input', guides: [], idea: 'your project', share: 0.17, figure: '1.00×', state: 'kept'},
+  {id: 'input', guides: [], idea: 'your project', share: 0.17, figure: '1.00×', state: 'passed'},
   {
     id: 'ring-v1',
     guides: ['elbow'],
     idea: 'sequence ring',
     share: 0.7,
     figure: '4.09×',
-    state: 'kept',
+    state: 'passed',
   },
   {
     id: 'padding',
@@ -56,7 +56,7 @@ const CANDIDATES: readonly Candidate[] = [
     idea: 'pad counters',
     share: 1,
     figure: '5.72×',
-    state: 'kept',
+    state: 'passed',
   },
   {
     id: 'batching',
@@ -64,14 +64,14 @@ const CANDIDATES: readonly Candidate[] = [
     idea: 'batch dequeue',
     share: 0.6,
     figure: '3.82×',
-    state: 'rejected',
+    state: 'failed',
   },
   {id: 'backoff', guides: [], idea: 'spin backoff', share: 0, figure: '1m 05s', state: 'running'},
 ];
 
 const STATE_DOT = {
-  kept: {tone: 'ok', label: 'kept'},
-  rejected: {tone: 'err', label: 'rejected · slower than parent'},
+  passed: {tone: 'ok', label: 'passed'},
+  failed: {tone: 'err', label: 'failed · turned down'},
   running: {tone: 'live', label: 'running'},
 } as const;
 
@@ -113,7 +113,7 @@ function CandidateList(props: {
               })}
           figure={candidate.figure}
           figureTone={
-            candidate.state === 'rejected' ? 'err' : candidate.state === 'running' ? 'muted' : 'ok'
+            candidate.state === 'failed' ? 'err' : candidate.state === 'running' ? 'muted' : 'ok'
           }
           path={pointed === 'batching' && ['input', 'ring-v1', 'batching'].includes(candidate.id)}
           hover={on => setPointed(on ? candidate.id : null)}
@@ -323,15 +323,15 @@ function GanttDemo(): JSX.Element {
 }
 
 function FilterDemo(): JSX.Element {
-  const [rejected, setRejected] = useState(false);
+  const [failed, setFailed] = useState(false);
   const [text, setText] = useState('');
   return (
     <Row gap="space-4" align="center">
       <DotLegend
         items={[
-          {tone: 'ok', label: '40 kept', on: true, toggle: noop},
+          {tone: 'ok', label: '40 passed', on: true, toggle: noop},
           {tone: 'live', label: '3 running', on: true, toggle: noop},
-          {tone: 'err', label: '557 rejected', on: rejected, toggle: setRejected},
+          {tone: 'err', label: '557 failed', on: failed, toggle: setFailed},
         ]}
       />
       <SearchBox label="Search ideas" value={text} change={setText} placeholder="Search ideas" />
@@ -369,8 +369,8 @@ function ScreenDemo(): JSX.Element {
           meta={
             <DotLegend
               items={[
-                {tone: 'ok', label: '3 kept'},
-                {tone: 'err', label: '1 rejected'},
+                {tone: 'ok', label: '3 passed'},
+                {tone: 'err', label: '1 failed'},
                 {tone: 'live', label: '1 running'},
               ]}
             />

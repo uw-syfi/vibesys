@@ -129,10 +129,10 @@ function ideas(): readonly Candidate[] {
   return [...CANDIDATES].reverse().sort((a, b) => b.startedAt - a.startedAt);
 }
 
-/** The kept candidate with the best value: the end of the winning path. */
+/** The passed candidate with the best value: the end of the winning path. */
 function best(): Candidate {
-  const kept = CANDIDATES.filter(c => c.outcome === 'kept' && c.value !== null);
-  return kept.reduce((top, c) => ((c.value ?? 0) > (top.value ?? 0) ? c : top));
+  const passed = CANDIDATES.filter(c => c.outcome === 'passed' && c.value !== null);
+  return passed.reduce((top, c) => ((c.value ?? 0) > (top.value ?? 0) ? c : top));
 }
 
 /** The agents as a tree (depth first, parents before children), with their guides. */
@@ -157,24 +157,23 @@ function agentName(a: Agent): string {
 function figureOf(c: Candidate): {figure: string; tone: 'ok' | 'err' | 'muted' | 'default'} {
   if (c.outcome === 'running') return {figure: c.took, tone: 'muted'};
   if (c.value === null) return {figure: c.verdict ?? '–', tone: 'err'};
-  if (c.outcome === 'rejected') return {figure: ratio(c.value), tone: 'err'};
+  if (c.outcome === 'failed') return {figure: ratio(c.value), tone: 'err'};
   return {figure: ratio(c.value), tone: c.id === 'input' ? 'muted' : 'ok'};
 }
 
 function settled(c: Candidate, ended: boolean): Candidate {
   if (!ended || c.outcome !== 'running') return c;
   const value = c.id === 'spin-backoff' ? 12_900_000 : 11_480_000;
-  return {...c, outcome: 'rejected', value, verdict: null, fresh: false};
+  return {...c, outcome: 'failed', value, verdict: null, fresh: false};
 }
 
 /** What a candidate's dot means, in the words its tooltip shows. */
 function statusOf(c: Candidate): {tone: 'ok' | 'err' | 'live'; label: string} {
   if (c.outcome === 'running') return {tone: 'live', label: 'running'};
-  if (c.outcome === 'kept')
-    return {tone: 'ok', label: c.id === 'input' ? 'kept · the root' : 'kept'};
+  if (c.outcome === 'passed') return {tone: 'ok', label: c.id === 'input' ? 'input' : 'passed'};
   return {
     tone: 'err',
-    label: c.value === null ? 'rejected · failed check' : 'rejected · slower than parent',
+    label: c.value === null ? 'failed · not measured' : 'failed · turned down',
   };
 }
 
@@ -192,12 +191,12 @@ function pathOf(id: string | null): Set<string> {
 function legend(ended: boolean): {tone: 'ok' | 'err' | 'live'; label: string}[] {
   return ended
     ? [
-        {tone: 'ok', label: '2 kept'},
-        {tone: 'err', label: '4 rejected'},
+        {tone: 'ok', label: '2 passed'},
+        {tone: 'err', label: '4 failed'},
       ]
     : [
-        {tone: 'ok', label: '2 kept'},
-        {tone: 'err', label: '2 rejected'},
+        {tone: 'ok', label: '2 passed'},
+        {tone: 'err', label: '2 failed'},
         {tone: 'live', label: '2 running'},
       ];
 }
@@ -260,7 +259,7 @@ function ganttRow(
     outcome:
       c.outcome === 'running'
         ? 'live'
-        : c.outcome === 'kept'
+        : c.outcome === 'passed'
           ? c.id === 'input'
             ? 'muted'
             : 'ok'
@@ -346,7 +345,7 @@ function Header(props: {readonly flags: DesignFlags; readonly compactHero: boole
         </Row>
       </Row>
       {ended ? (
-        <Banner tone="ok" title="Kept mpmc-ring-padding" body="vibesys-runs/20261016-211736" />
+        <Banner tone="ok" title="Adopted mpmc-ring-padding" body="vibesys-runs/20261016-211736" />
       ) : null}
       <Scrubber
         label="Run time"
@@ -455,7 +454,7 @@ function WinningPath(props: {readonly open: (id: string) => void}): JSX.Element 
 
 function barOf(c: Candidate): RowBar | undefined {
   if (c.value === null) return undefined;
-  const tone = c.outcome === 'kept' && c.id !== 'input' ? 'ok' : 'muted';
+  const tone = c.outcome === 'passed' && c.id !== 'input' ? 'ok' : 'muted';
   return {value: c.value / BEST, tone, label: `${c.value.toLocaleString('en-US')} ops/s`};
 }
 
@@ -751,7 +750,7 @@ function CandidateDetail(props: {
         <>
           <Chip label={dot.label} tone={dot.tone} dot />
           {c.value === null ? null : (
-            <Text variant="metric" tone={c.outcome === 'kept' ? 'ok' : 'err'}>
+            <Text variant="metric" tone={c.outcome === 'passed' ? 'ok' : 'err'}>
               {ratio(c.value)}
             </Text>
           )}

@@ -10,6 +10,7 @@ import {
   Breadcrumb,
   Button,
   Chart,
+  Chip,
   type Crumb,
   DotLegend,
   EmptyState,
@@ -88,6 +89,19 @@ function Hero(props: ViewBase & {readonly whole: RunModel}): JSX.Element {
     <Row gap="space-6" align="center">
       <Stack gap="space-1">
         <Text variant="section">{hero.metric}</Text>
+        {hero.standing === null || hero.bestIdea === null ? null : (
+          <Row gap="space-2" align="center">
+            <Chip label={hero.standing} tone="ok" dot />
+            <Button
+              size="sm"
+              variant="quiet"
+              text={hero.bestIdea.title}
+              press={() => {
+                if (hero.bestIdea !== null) props.zoom({type: 'open-idea', idea: hero.bestIdea.id});
+              }}
+            />
+          </Row>
+        )}
         <Row gap="space-3" align="baseline">
           <Text variant="hero" tone={hero.ratio === null ? 'muted' : 'ok'}>
             {hero.ratio ?? '–'}
@@ -224,12 +238,12 @@ export function IdeasList(props: {
           />
         ))}
       </PickList>
-      {view.hiddenRejected === 0 ? null : (
+      {view.hiddenFailed === 0 ? null : (
         <Button
           size="sm"
           variant="quiet"
-          text={`+ ${view.hiddenRejected} rejected`}
-          press={() => dispatch({type: 'ideas-filter', filter: {...filter, rejected: true}})}
+          text={`+ ${view.hiddenFailed} failed`}
+          press={() => dispatch({type: 'ideas-filter', filter: {...filter, failed: true}})}
         />
       )}
     </Stack>
@@ -243,12 +257,17 @@ function IdeasLegend(props: {
 }): JSX.Element {
   const filter = props.state.ideas;
   const {counts} = ideasView(props.base.model, filter);
-  const toggle = (key: 'kept' | 'running' | 'rejected') => (on: boolean) =>
+  const toggle = (key: 'passed' | 'running' | 'failed') => (on: boolean) =>
     props.dispatch({type: 'ideas-filter', filter: {...filter, [key]: on}});
   return (
     <DotLegend
       items={[
-        {tone: 'ok', label: `${counts.kept} kept`, on: filter.kept, toggle: toggle('kept')},
+        {
+          tone: 'ok',
+          label: `${counts.passed} passed`,
+          on: filter.passed,
+          toggle: toggle('passed'),
+        },
         {
           tone: 'live',
           label: `${counts.running} running`,
@@ -257,9 +276,9 @@ function IdeasLegend(props: {
         },
         {
           tone: 'err',
-          label: `${counts.rejected} rejected`,
-          on: filter.rejected,
-          toggle: toggle('rejected'),
+          label: `${counts.failed} failed`,
+          on: filter.failed,
+          toggle: toggle('failed'),
         },
       ]}
     />

@@ -1,7 +1,7 @@
 /**
  * What the Timeline and the idea body draw as bars: the run's ideas as Gantt rows (running first,
  * then the rest newest first, as the Ideas list orders them) over a range of the run clock, the
- * rejected folded into one density lane when there are many; an idea's attempts as lines; and an
+ * failed folded into one density lane when there are many; an idea's attempts as lines; and an
  * attempt's steps as segments (an agent turn in its role's color, a gate hatched).
  *
  * Pure over the candidates the run folded and the run clock; the views add presses and layout.
@@ -29,8 +29,8 @@ const RANGE_SECONDS: Readonly<Record<Exclude<TimelineRange, 'all'>, number>> = {
   day: 86_400,
 };
 
-/** More rejected ideas than this in range fold into one lane (unless the reader expands them). */
-export const REJECTED_DENSE = 24;
+/** More failed ideas than this in range fold into one lane (unless the reader expands them). */
+export const FAILED_DENSE = 24;
 /** The folded lane has one mark per bin of this many divisions of its span. */
 const LANE_BINS = 48;
 
@@ -57,7 +57,7 @@ export interface StepSegment {
 
 type BarOutcome = 'ok' | 'err' | 'live' | 'muted';
 
-/** One idea's row; a `lane` row stands for folded rejected ideas and has no idea to open. */
+/** One idea's row; a `lane` row stands for folded failed ideas and has no idea to open. */
 export interface TimelineRow {
   readonly id: string;
   readonly label: string;
@@ -84,10 +84,10 @@ export interface TimelineRows {
   readonly view: {readonly from: number; readonly to: number};
   readonly ticks: readonly TimelineTick[];
   readonly rows: readonly TimelineRow[];
-  /** Rejected ideas in range that are folded into the lane (0 when none are). */
+  /** Failed ideas in range that are folded into the lane (0 when none are). */
   readonly folded: number;
-  /** Rejected ideas in range, folded or not. */
-  readonly rejectedInRange: number;
+  /** Failed ideas in range, folded or not. */
+  readonly failedInRange: number;
   readonly total: number;
   /** What the bars in view are colored by, for the legend. */
   readonly legend: TimelineLegend;
@@ -101,8 +101,8 @@ interface TimelineLegend {
 
 const OUTCOME: Readonly<Record<CandidateOutcome, BarOutcome>> = {
   running: 'live',
-  kept: 'ok',
-  rejected: 'err',
+  passed: 'ok',
+  failed: 'err',
 };
 
 /** The end of something that began at `start`: its end, else the clock's now, else its start. */
@@ -136,11 +136,7 @@ export function stepSegments(
 
 /** The figure column fits about this many characters. */
 const FIGURE_FITS = 12;
-/** What a reason that would not fit reads in the column; the hover has the whole reason. */
-const REASON_SHORT: Readonly<Record<string, string>> = {
-  slower_than_input: 'slower',
-  failed_check: 'failed',
-};
+/** A figure that would not fit is cut; the hover has the whole of it. */
 
 /**
  * An idea's figure in the column: the ratio, a failed check's progress, or the reason, in a short
@@ -154,10 +150,7 @@ function figureOfRow(item: Candidate): {figure: string; figureTitle: string | nu
     failed !== null && failed.completed !== null && failed.required !== null
       ? `${failed.completed}/${failed.required}`
       : null;
-  const short =
-    progress ??
-    (item.reason === null ? null : (REASON_SHORT[item.reason] ?? null)) ??
-    `${whole.slice(0, FIGURE_FITS - 1)}…`;
+  const short = progress ?? `${whole.slice(0, FIGURE_FITS - 1)}…`;
   return {figure: short, figureTitle: whole};
 }
 
@@ -175,12 +168,12 @@ function rowOf(item: Candidate, now: number | null): TimelineRow {
   };
 }
 
-function laneOf(rejected: readonly TimelineRow[]): TimelineRow {
-  const start = Math.min(...rejected.map(row => row.start));
-  const end = Math.max(...rejected.map(row => row.end));
+function laneOf(failed: readonly TimelineRow[]): TimelineRow {
+  const start = Math.min(...failed.map(row => row.start));
+  const end = Math.max(...failed.map(row => row.end));
   const width = (end - start) / LANE_BINS;
   const marked = new Set<number>();
-  for (const row of rejected) {
+  for (const row of failed) {
     if (width <= 0) {
       marked.add(0);
       continue;
@@ -197,11 +190,11 @@ function laneOf(rejected: readonly TimelineRow[]): TimelineRow {
       end: start + (bin + 1) * width,
       kind: 'grey',
       role: null,
-      label: 'rejected ideas',
+      label: 'failed ideas',
     }));
   return {
-    id: 'rejected-lane',
-    label: `+ ${rejected.length} rejected`,
+    id: 'failed-lane',
+    label: `+ ${failed.length} failed`,
     start,
     end,
     outcome: 'muted',
@@ -263,7 +256,7 @@ function legendOf(rows: readonly TimelineRow[]): TimelineLegend {
 
 /**
  * The Timeline's rows over `range`: ideas that overlap the range, in the Ideas list's order. When
- * more than `REJECTED_DENSE` rejected ideas are in range and `expanded` is false, they fold into
+ * more than `FAILED_DENSE` failed ideas are in range and `expanded` is false, they fold into
  * one lane at the top.
  */
 export function timelineRows(
@@ -283,17 +276,17 @@ export function timelineRows(
   const inRange = ordered(all)
     .map(item => rowOf(item, clock.now))
     .filter(row => row.end >= view.from && row.start <= view.to);
-  const rejected = inRange.filter(row => row.outcome === 'err');
-  const fold = !expanded && rejected.length > REJECTED_DENSE;
-  const rows = fold ? [laneOf(rejected), ...inRange.filter(row => row.outcome !== 'err')] : inRange;
+  const failed = inRange.filter(row => row.outcome === 'err');
+  const fold = !expanded && failed.length > FAILED_DENSE;
+  const rows = fold ? [laneOf(failed), ...inRange.filter(row => row.outcome !== 'err')] : inRange;
   return {
     from,
     to,
     view,
     ticks: timelineTicks(clock.start, view),
     rows,
-    folded: fold ? rejected.length : 0,
-    rejectedInRange: rejected.length,
+    folded: fold ? failed.length : 0,
+    failedInRange: failed.length,
     total: all.length,
     legend: legendOf(rows),
   };
@@ -322,13 +315,13 @@ function resultOf(attempt: CandidateAttempt): string {
     return ratio(measured.vsBaseline);
   }
   if (measured?.verdict !== null && measured?.verdict !== undefined) return words(measured.verdict);
-  return attempt.reason === null ? 'rejected' : words(attempt.reason);
+  return attempt.reason === null ? 'failed' : words(attempt.reason);
 }
 
 const ATTEMPT_TONE: Readonly<Record<CandidateOutcome, AttemptLine['tone']>> = {
   running: 'live',
-  kept: 'ok',
-  rejected: 'err',
+  passed: 'ok',
+  failed: 'err',
 };
 
 /** An idea's attempts as lines, in the order they began. */

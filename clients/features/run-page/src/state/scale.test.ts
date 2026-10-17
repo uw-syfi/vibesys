@@ -32,7 +32,7 @@ interface ScaleShape {
 
 const WEEKS: ScaleShape = {seed: SEED, ideas: 600, turns: 1, updates: 0};
 
-type Outcome = 'kept' | 'rejected' | 'running';
+type Outcome = 'passed' | 'failed' | 'running';
 
 interface Idea {
   readonly n: number;
@@ -40,35 +40,36 @@ interface Idea {
   readonly on: number | null;
   readonly vs: number;
   readonly start: number;
+  readonly onPath: boolean;
 }
 
 function outcomeOf(random: Seeded, shape: ScaleShape, n: number, onPath: boolean): Outcome {
   if (n >= shape.ideas - 3) return 'running';
-  return onPath || random.int(shape.ideas) < 25 ? 'kept' : 'rejected';
+  return onPath || random.int(shape.ideas) < 25 ? 'passed' : 'failed';
 }
 
-/** What an idea builds on: the path's last idea for the next on the path, else a recent kept. */
-function parentOf(random: Seeded, kept: readonly Idea[], onPath: boolean): number | null {
-  if (kept.length === 0) return null;
-  const back = onPath ? 0 : random.int(Math.min(3, kept.length));
-  return kept.at(-1 - back)?.n ?? null;
+/** What an idea builds on: the path's last idea for the next on the path, else a recent passed. */
+function parentOf(random: Seeded, passed: readonly Idea[], onPath: boolean): number | null {
+  if (passed.length === 0) return null;
+  const back = onPath ? 0 : random.int(Math.min(3, passed.length));
+  return passed.at(-1 - back)?.n ?? null;
 }
 
-/** 600 ideas over 14 days: a 15-long winning path to 7.35×, about 40 kept, 3 running. */
+/** 600 ideas over 14 days: a 15-long winning path to 7.35×, about 40 passed, 3 running. */
 function ideasOf(random: Seeded, shape: ScaleShape): Idea[] {
   const span = (14 * DAY) / shape.ideas;
   const pathAt = new Set(Array.from({length: 15}, (_, k) => Math.floor((k * shape.ideas) / 16)));
   const ideas: Idea[] = [];
-  const kept: Idea[] = [];
+  const passed: Idea[] = [];
   let best = 1;
   for (let n = 0; n < shape.ideas; n += 1) {
     const onPath = pathAt.has(n);
-    const on = parentOf(random, kept, onPath);
+    const on = parentOf(random, passed, onPath);
     const outcome = outcomeOf(random, shape, n, onPath);
     const vs = onPath ? best + (7.35 - 1) / 15 : best * (0.6 + random.int(35) / 100);
     if (onPath) best = vs;
-    const idea: Idea = {n, outcome, on, vs, start: Math.floor(n * span)};
-    if (outcome === 'kept') kept.push(idea);
+    const idea: Idea = {n, outcome, on, vs, start: Math.floor(n * span), onPath};
+    if (outcome === 'passed') passed.push(idea);
     ideas.push(idea);
   }
   return ideas;
@@ -87,9 +88,13 @@ function flow(idea: Idea, status: Span['status']): Span {
     label: {
       kind: 'workstream',
       title: `idea ${idea.n}`,
-      ...(status === 'done' ? {verdict: idea.outcome === 'kept' ? 'accepted' : 'rejected'} : {}),
+      ...(status === 'done' ? {verdict: idea.outcome === 'passed' ? 'passed' : 'failed'} : {}),
       links,
-      attrs_json: JSON.stringify({hypothesis_id: `h${idea.n}`, idea: `try idea ${idea.n}`}),
+      attrs_json: JSON.stringify({
+        hypothesis_id: `h${idea.n}`,
+        idea: `try idea ${idea.n}`,
+        ...(status === 'done' && idea.outcome === 'passed' ? {revision: `c${idea.n}`} : {}),
+      }),
     },
   } as Span;
 }
@@ -134,7 +139,7 @@ function gate(idea: Idea): Span {
     label: {
       kind: 'gate',
       title: 'benchmark',
-      verdict: idea.outcome === 'kept' ? 'passed' : 'slower',
+      verdict: idea.outcome === 'passed' ? 'passed' : 'failed_check',
       attrs_json: JSON.stringify({
         stage: 'benchmark',
         metric_value: 100 * idea.vs,
@@ -171,7 +176,21 @@ function scaleRun(shape: ScaleShape): RunEvent[] {
     status: 'running',
     started_at: 0,
   };
-  const versions = [root, ...ideasOf(random, shape).flatMap(idea => versionsOf(idea, shape))];
+  const ideas = ideasOf(random, shape);
+  const best = ideas.filter(idea => idea.onPath && idea.outcome === 'passed').at(-1);
+  const adoption: Span = {
+    id: 'op:adopt',
+    parent: ROOT,
+    type: 'operation',
+    name: 'adopt',
+    status: 'running',
+    started_at: 0,
+    label: {
+      kind: 'adoption',
+      attrs_json: JSON.stringify({candidate: best === undefined ? null : `c${best.n}`}),
+    },
+  };
+  const versions = [root, adoption, ...ideas.flatMap(idea => versionsOf(idea, shape))];
   const seen = new Set<string>();
   return versions.map((span, index) => {
     const type = !seen.has(span.id)
@@ -211,8 +230,8 @@ describe('the Run screen at scale', () => {
     const model = createRunReader().read(logOf(run), null);
     const counts = ideasView(model, IDEAS_FILTER_DEFAULT).counts;
     expect(counts.running).toBe(3);
-    expect(counts.kept + counts.rejected + counts.running).toBe(600);
-    expect(counts.kept).toBeGreaterThanOrEqual(15);
+    expect(counts.passed + counts.failed + counts.running).toBe(600);
+    expect(counts.passed).toBeGreaterThanOrEqual(15);
     expect(model.candidates.bestPath.length).toBeGreaterThanOrEqual(15);
     expect(model.agents.agents.length).toBeGreaterThan(20);
   });

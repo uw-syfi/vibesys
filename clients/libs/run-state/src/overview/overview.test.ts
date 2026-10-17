@@ -30,7 +30,7 @@ class Seeded {
 
 const STATUSES = ['running', 'waiting', 'pending', 'done', 'failed', 'stopped'] as const;
 const GATE_VERDICTS = [null, 'passed', 'failed_check', 'slower'] as const;
-const WORKSTREAM_VERDICTS = [null, 'accepted', 'rejected'] as const;
+const WORKSTREAM_VERDICTS = [null, 'passed', 'failed'] as const;
 
 function overview(text: string): RunOverview {
   return {overview_version: 1, objective: {text, metric: 'throughput'}, benchmarks: {}};
@@ -128,7 +128,7 @@ describe('run overview', () => {
       const counts = workstreamCounts(run);
       expect(counts.total).toBe(workstreams.length);
       expect(counts.live).toBe(workstreams.filter(span => span.status === 'running').length);
-      expect(counts.accepted + counts.rejected).toBeLessThanOrEqual(counts.total);
+      expect(counts.passed + counts.failed).toBeLessThanOrEqual(counts.total);
       expect(counts.live + counts.waiting).toBeLessThanOrEqual(counts.total);
 
       const gates = gateTrajectory(run);

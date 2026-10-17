@@ -5,7 +5,7 @@
  */
 import type {ChartPoint, KeyValueItem, LogLine, StatusTone, ToolState} from '@vibesys/ui';
 
-export type Outcome = 'kept' | 'rejected' | 'running';
+export type Outcome = 'passed' | 'failed' | 'running';
 
 export interface Step {
   readonly id: string;
@@ -28,7 +28,7 @@ export interface Candidate {
   readonly outcome: Outcome;
   /** Measured value of the headline metric, or null (not measured, failed, running). */
   readonly value: number | null;
-  /** Why it was rejected, in numbers or a short verdict. */
+  /** Why it failed, in numbers or a short verdict. */
   readonly verdict: string | null;
   readonly startedAt: number;
   readonly took: string;
@@ -84,7 +84,7 @@ export const CANDIDATES: readonly Candidate[] = [
     id: 'input',
     parent: null,
     hypothesis: 'your project',
-    outcome: 'kept',
+    outcome: 'passed',
     value: INPUT,
     verdict: null,
     startedAt: 0,
@@ -95,7 +95,7 @@ export const CANDIDATES: readonly Candidate[] = [
     id: 'mpmc-ring-v1',
     parent: 'input',
     hypothesis: 'Use a sequence-numbered MPMC ring',
-    outcome: 'kept',
+    outcome: 'passed',
     value: 9_530_114,
     verdict: null,
     startedAt: 1,
@@ -132,7 +132,7 @@ export const CANDIDATES: readonly Candidate[] = [
     id: 'treiber-stack',
     parent: 'input',
     hypothesis: 'Replace the mutex with a lock-free Treiber stack',
-    outcome: 'rejected',
+    outcome: 'failed',
     value: null,
     verdict: '93/100 trials',
     startedAt: 1,
@@ -161,7 +161,7 @@ export const CANDIDATES: readonly Candidate[] = [
     id: 'mpmc-ring-padding',
     parent: 'mpmc-ring-v1',
     hypothesis: 'Pad producer and consumer counters to separate cache lines',
-    outcome: 'kept',
+    outcome: 'passed',
     value: BEST,
     verdict: null,
     startedAt: 7,
@@ -190,7 +190,7 @@ export const CANDIDATES: readonly Candidate[] = [
     id: 'batch-dequeue',
     parent: 'mpmc-ring-v1',
     hypothesis: 'Dequeue in batches of eight',
-    outcome: 'rejected',
+    outcome: 'failed',
     value: 8_912_330,
     verdict: '0.94× parent',
     startedAt: 7,
@@ -259,8 +259,8 @@ export const CANDIDATES: readonly Candidate[] = [
 export const OUTCOME_DOT: Readonly<
   Record<Outcome, {readonly tone: StatusTone; readonly label: string}>
 > = {
-  kept: {tone: 'ok', label: 'Kept'},
-  rejected: {tone: 'err', label: 'Rejected'},
+  passed: {tone: 'ok', label: 'Passed'},
+  failed: {tone: 'err', label: 'Failed'},
   running: {tone: 'live', label: 'Running'},
 };
 
@@ -400,11 +400,11 @@ export const NARRATION: readonly LogLine[] = [
   {text: '21:17:36  started on chelan4 · codex model-a · 1 h'},
   {text: '21:17:41  input measured: 2,330,000 ops/s'},
   {text: '21:18:20  planned: mpmc-ring-v1, treiber-stack'},
-  {text: '21:23:52  treiber-stack rejected: FIFO order broken in 7/100 trials'},
-  {text: '21:24:10  mpmc-ring-v1 kept: 9,530,114 ops/s (4.09×)'},
+  {text: '21:23:52  treiber-stack failed: FIFO order broken in 7/100 trials'},
+  {text: '21:24:10  mpmc-ring-v1 passed: 9,530,114 ops/s (4.09×)'},
   {text: '21:24:40  planned: mpmc-ring-padding, batch-dequeue'},
-  {text: '21:27:05  batch-dequeue rejected: 0.94× its parent'},
-  {text: '21:28:31  mpmc-ring-padding kept: 13,318,503 ops/s (5.72×)'},
+  {text: '21:27:05  batch-dequeue failed: 0.94× its parent'},
+  {text: '21:28:31  mpmc-ring-padding passed: 13,318,503 ops/s (5.72×)'},
   {text: '21:28:58  planned: spin-backoff, slot-arena'},
 ];
 

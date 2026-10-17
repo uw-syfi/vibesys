@@ -13,22 +13,12 @@
  */
 import type {RunEvent, RunSnapshot, Span} from '@vibesys/contracts';
 import type {BestCandidate, Candidate, CandidateAttempt, CandidateTree} from './types.js';
-import {
-  attempt,
-  attributes,
-  bestPassed,
-  better,
-  candidate,
-  keptRevision,
-  stringOrNull,
-} from './views.js';
+import {attempt, attributes, candidate, revisionOf, stringOrNull} from './views.js';
 
 /** Counts the fold's work, in spans, links and views visited; tests bound it per event. */
 export interface WorkMeter {
   count(units: number): void;
 }
-
-type Direction = 'max' | 'min';
 
 interface AttemptState {
   span: Span;
@@ -47,7 +37,7 @@ interface GroupState {
   readonly key: string;
   /** Its attempts, in the order they started. */
   readonly attempts: string[];
-  view: {candidate: Candidate; max: number | null; min: number | null} | null;
+  view: {candidate: Candidate} | null;
 }
 
 const SPAN_EVENTS: ReadonlySet<string> = new Set(['span_started', 'span_updated', 'span_ended']);
@@ -68,7 +58,7 @@ export class CandidateFold {
   readonly #byRevision = new Map<string, Set<string>>();
   #adoption: Span | null = null;
   #candidates: readonly Candidate[] | null = null;
-  readonly #trees = new Map<Direction, CandidateTree>();
+  #tree: CandidateTree | null = null;
 
   constructor(meter: WorkMeter = NO_METER) {
     this.#meter = meter;
@@ -99,15 +89,13 @@ export class CandidateFold {
   }
 
   /** The candidate tree now; the same object until a span changes. */
-  tree(direction: Direction | null | undefined): CandidateTree {
-    const towards: Direction = direction === 'min' ? 'min' : 'max';
-    const cached = this.#trees.get(towards);
-    if (cached !== undefined) return cached;
+  tree(): CandidateTree {
+    if (this.#tree !== null) return this.#tree;
     const candidates = this.#list();
-    const best = this.#best(candidates, towards);
+    const best = this.#adoption === null ? null : this.#adopted(this.#adoption);
     const tree = {candidates, best, bestPath: pathTo(candidates, best?.candidate ?? null)};
     this.#meter.count(candidates.length);
-    this.#trees.set(towards, tree);
+    this.#tree = tree;
     return tree;
   }
 
@@ -117,7 +105,7 @@ export class CandidateFold {
     if (previous === undefined) this.#start(span);
     this.#spans.set(span.id, span);
     this.#candidates = null;
-    this.#trees.clear();
+    this.#tree = null;
     if (span.label?.kind === 'workstream') {
       if (previous !== undefined && previous.label?.kind !== 'workstream') {
         this.#dropStep(span.id);
@@ -187,7 +175,7 @@ export class CandidateFold {
     if (attrs['probe'] === true) key = null;
     if (key !== state.key) this.#regroup(state, key);
     this.#relink(state, span);
-    this.#rerevision(state, keptRevision(span));
+    this.#rerevision(state, revisionOf(span));
   }
 
   /** A new workstream, and the spans under it that started before it was one. */
@@ -332,7 +320,7 @@ export class CandidateFold {
       this.#parent(group, states),
       states.map(state => this.#attemptView(state)),
     );
-    group.view = {candidate: built, max: bestPassed(built, 'max'), min: bestPassed(built, 'min')};
+    group.view = {candidate: built};
     return built;
   }
 
@@ -370,17 +358,17 @@ export class CandidateFold {
     return null;
   }
 
-  #best(candidates: readonly Candidate[], direction: Direction): BestCandidate | null {
-    return this.#adoption === null
-      ? this.#bestMeasured(candidates, direction)
-      : this.#adopted(this.#adoption);
-  }
-
-  /** The candidate the adoption names, by the revision one of its attempts kept. */
+  /**
+   * The candidate the adoption span names, by the revision one of its attempts kept: the best so
+   * far while the span has no verdict, the adopted result once it says `adopted`. The search owns
+   * which candidate is best; the fold only reads it.
+   */
   #adopted(adoption: Span): BestCandidate | null {
-    if (adoption.label?.verdict === 'not_adopted') return null;
+    const verdict = adoption.label?.verdict ?? null;
+    if (verdict === 'not_adopted') return null;
+    const adopted = verdict === 'adopted';
     const revision = stringOrNull(attributes(adoption)['candidate']);
-    if (revision === null) return {candidate: null, adopted: true};
+    if (revision === null) return {candidate: null, adopted};
     let found: GroupState | null = null;
     for (const holder of this.#byRevision.get(revision) ?? []) {
       const key = this.#attempts.get(holder)?.key ?? null;
@@ -389,24 +377,7 @@ export class CandidateFold {
       if (found === null || this.#firstOrder(group) < this.#firstOrder(found)) found = group;
     }
     const id = found?.attempts[0];
-    return id === undefined ? null : {candidate: id, adopted: true};
-  }
-
-  /** The candidate of the best passed gate by the objective's direction (the first of equals). */
-  #bestMeasured(candidates: readonly Candidate[], direction: Direction): BestCandidate | null {
-    let leader: {id: string; value: number} | null = null;
-    for (const item of candidates) {
-      const group = this.#groups.get(this.#keyOf(item.id));
-      const value = group?.view?.[direction] ?? null;
-      if (value !== null && (leader === null || better(value, leader.value, direction))) {
-        leader = {id: item.id, value};
-      }
-    }
-    return leader === null ? null : {candidate: leader.id, adopted: false};
-  }
-
-  #keyOf(attemptId: string): string {
-    return this.#attempts.get(attemptId)?.key ?? '';
+    return id === undefined ? null : {candidate: id, adopted};
   }
 }
 

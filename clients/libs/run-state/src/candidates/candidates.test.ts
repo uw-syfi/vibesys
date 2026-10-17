@@ -89,8 +89,8 @@ function folded(events: readonly RunEvent[]): Span[] {
   return [...traceSpans(foldTrace(EMPTY_TRACE, events))];
 }
 
-function treeOf(events: readonly RunEvent[], direction: 'max' | 'min' = 'max'): CandidateTree {
-  return candidateTree(folded(events), direction);
+function treeOf(events: readonly RunEvent[]): CandidateTree {
+  return candidateTree(folded(events));
 }
 
 const root: Span = {
@@ -176,11 +176,11 @@ function generatedAttempt(random: Seeded, n: number, targets: readonly string[])
   const id = `flow:w${n}/#1`;
   const hypothesis = random.int(5) === 0 ? null : `h${random.int(4)}`;
   const probe = random.int(6) === 0;
-  const verdict = probe ? null : random.pick([null, 'accepted', 'rejected']);
+  const verdict = probe ? null : random.pick([null, 'passed', 'failed']);
   const links =
     targets.length > 0 && random.int(3) > 0 ? [{rel: 'builds_on', to: random.pick(targets)}] : [];
   const attrs = {hypothesis_id: hypothesis, idea: hypothesis && `idea ${hypothesis}`, probe};
-  const revision = verdict === 'accepted' ? `c${n}` : null;
+  const revision = verdict === null ? null : `c${n}`;
   const status = random.pick([...LIVE, ...ENDED]);
   // a workstream may start unlabelled, or before it chose its idea, and be labelled later
   const late = random.int(4);
@@ -279,8 +279,8 @@ function checkCandidates(spans: readonly Span[], tree: CandidateTree): void {
     expect(ideas.size).toBe(1);
     if (item.hypothesis === null) expect(item.attempts).toHaveLength(1);
     const running = item.attempts.some(a => a.outcome === 'running');
-    const kept = item.attempts.some(a => a.outcome === 'kept');
-    expect(item.outcome).toBe(running ? 'running' : kept ? 'kept' : 'rejected');
+    const passed = item.attempts.some(a => a.outcome === 'passed');
+    expect(item.outcome).toBe(running ? 'running' : passed ? 'passed' : 'failed');
     const closed = item.attempts.every(a => a.endedAt !== null);
     expect(item.endedAt !== null).toBe(closed && !running);
     for (const entry of item.running) expect(ENDED).not.toContain(entry.status);
@@ -314,18 +314,25 @@ function checkSteps(spans: readonly Span[], tree: CandidateTree): void {
   }
 }
 
-/** The best is the candidate the adoption names, by the revision its attempt kept. */
+/**
+ * The best is the candidate the adoption span names, by the revision its attempt kept (never a
+ * guess from the measurements): adopted once the span says so, else the best so far.
+ */
 function checkBest(spans: readonly Span[], tree: CandidateTree): void {
   const adopted = spans.filter(s => s.label?.kind === 'adoption').at(-1);
-  if (adopted === undefined) return;
+  if (adopted === undefined) {
+    expect(tree.best).toBeNull();
+    return;
+  }
   if (adopted.label?.verdict === 'not_adopted') {
     expect(tree.best).toBeNull();
     return;
   }
   const revision = attrsOf(adopted)['candidate'];
+  const done = adopted.label?.verdict === 'adopted';
   const owner = tree.candidates.find(item => item.attempts.some(a => a.revision === revision));
-  if (revision === null) expect(tree.best).toEqual({candidate: null, adopted: true});
-  else expect(tree.best).toEqual(owner ? {candidate: owner.id, adopted: true} : null);
+  if (revision === null) expect(tree.best).toEqual({candidate: null, adopted: done});
+  else expect(tree.best).toEqual(owner ? {candidate: owner.id, adopted: done} : null);
 }
 
 /** The winning path runs from a candidate built on the input, parent to child, to the best. */
@@ -345,7 +352,7 @@ function checkPath(tree: CandidateTree): void {
 
 function check(events: readonly RunEvent[]): void {
   const spans = folded(events);
-  const tree = candidateTree(spans, 'max');
+  const tree = candidateTree(spans);
   checkCandidates(spans, tree);
   checkAttempts(spans, tree);
   checkSteps(spans, tree);
@@ -373,7 +380,7 @@ function longAttempt(idea: number, attemptAt: number, at: number): Span[][] {
   const kept = idea % 4 !== 3 && attemptAt === 0;
   const attrs = {hypothesis_id: `h${idea}`, idea: `idea ${idea}`};
   const decided = {...attrs, revision: kept ? `c${idea}` : null};
-  const verdict = kept ? 'accepted' : 'rejected';
+  const verdict = kept ? 'passed' : 'failed';
   const lists: Span[][] = [
     [workstream(id, at, attrs, {links}), workstream(id, at, decided, {links, verdict}, 'done')],
   ];
@@ -465,8 +472,7 @@ describe('candidate tree', () => {
         const next = Math.min(events.length, end + 1 + random.int(4));
         fold.apply(events.slice(end, next));
         end = next;
-        const direction = random.pick(['max', 'min'] as const);
-        expect(fold.tree(direction)).toEqual(treeOf(events.slice(0, end), direction));
+        expect(fold.tree()).toEqual(treeOf(events.slice(0, end)));
       }
     }
   });
@@ -479,7 +485,7 @@ describe('candidate tree', () => {
       const snapshot = {sequence: cut, spans: folded(events.slice(0, cut))} as RunSnapshot;
       const fold = CandidateFold.fromSnapshot(snapshot);
       fold.apply(events);
-      expect(fold.tree('max')).toEqual(treeOf(events));
+      expect(fold.tree()).toEqual(treeOf(events));
     }
   });
 
@@ -505,19 +511,19 @@ describe('candidate tree', () => {
       applied += meter.units - before;
       const touched = new Set(slice.flatMap(e => owner.get(spanIdOf(e)) ?? []));
       const reading = meter.units;
-      const tree = fold.tree('max');
+      const tree = fold.tree();
       // a read builds again only the candidates this batch touched, plus one pass over the list
       const rebuilt = [...touched].reduce((sum, idea) => sum + 3 * (size[idea] ?? 0), 0);
       expect(meter.units - reading).toBeLessThanOrEqual(tree.candidates.length + rebuilt);
       // reading again with no event in between is the same tree, for no work
       const again = meter.units;
-      expect(fold.tree('max')).toBe(tree);
+      expect(fold.tree()).toBe(tree);
       expect(meter.units).toBe(again);
     }
     expect(events.length).toBeGreaterThan(100_000);
     expect(applied).toBeLessThanOrEqual(2 * events.length);
 
-    const tree = fold.tree('max');
+    const tree = fold.tree();
     expect(tree).toEqual(treeOf(events));
     expect(tree.candidates).toHaveLength(LONG_IDEAS);
     const idOf = (idea: number) => `flow:i${idea}/a0/#1`;
@@ -533,35 +539,35 @@ describe('candidate tree', () => {
     expect(tree.bestPath).toEqual([0, ...path].map(idOf));
   });
 
-  it('is a chain with rejected leaves for a search that plays one path', () => {
+  it('is a chain with failed leaves for a search that plays one path', () => {
     const r1 = workstream(
       'flow:r1/#1',
       1,
       {hypothesis_id: 'h1', revision: 'c1', round: 1},
-      {verdict: 'accepted'},
+      {verdict: 'passed'},
       'done',
     );
     const r2 = workstream(
       'flow:r2/#1',
       2,
       {hypothesis_id: 'h2', round: 2},
-      {verdict: 'rejected', links: [{rel: 'builds_on', to: r1.id}]},
+      {verdict: 'failed', links: [{rel: 'builds_on', to: r1.id}]},
       'done',
     );
     const r3 = workstream(
       'flow:r3/#1',
       3,
       {hypothesis_id: 'h3', revision: 'c3', round: 3},
-      {verdict: 'accepted', links: [{rel: 'builds_on', to: r1.id}]},
+      {verdict: 'passed', links: [{rel: 'builds_on', to: r1.id}]},
       'done',
     );
     const r4 = workstream('flow:r4/#1', 4, {round: 4}, {title: 'round 4'});
     const tree = treeOf(sequenced([[root], [r1], [r2], [r3], [r4]]));
 
     expect(tree.candidates.map(c => [c.id, c.parent, c.outcome])).toEqual([
-      [r1.id, null, 'kept'],
-      [r2.id, r1.id, 'rejected'],
-      [r3.id, r1.id, 'kept'],
+      [r1.id, null, 'passed'],
+      [r2.id, r1.id, 'failed'],
+      [r3.id, r1.id, 'passed'],
       [r4.id, null, 'running'],
     ]);
     expect(candidateChildren(tree, r1.id).map(c => c.id)).toEqual([r2.id, r3.id]);
@@ -570,13 +576,13 @@ describe('candidate tree', () => {
 
   it('shows the latest measured attempt of an idea, and its attempts inside it', () => {
     const idea = {hypothesis_id: 'h1', idea: 'fuse kernels'};
-    const first = workstream('flow:a1/#1', 1, idea, {verdict: 'rejected'}, 'done');
+    const first = workstream('flow:a1/#1', 1, idea, {verdict: 'failed'}, 'done');
     const failed = {check: 'correctness', completed: 93, required: 100, unit: 'trials'};
     const second = workstream(
       'flow:a2/#1',
       2,
       {...idea, revision: 'c2'},
-      {verdict: 'accepted'},
+      {verdict: 'passed'},
       'done',
     );
     const tree = treeOf(
@@ -592,7 +598,7 @@ describe('candidate tree', () => {
 
     expect(tree.candidates).toHaveLength(1);
     const [only] = tree.candidates as [Candidate];
-    expect([only.id, only.idea, only.outcome]).toEqual([first.id, 'fuse kernels', 'kept']);
+    expect([only.id, only.idea, only.outcome]).toEqual([first.id, 'fuse kernels', 'passed']);
     expect(only.measurement?.metricValue).toBe(150);
     expect(only.attempts.map(a => a.measurement?.verdict)).toEqual(['failed_check', 'passed']);
     expect(only.attempts[0]?.measurement?.failed).toEqual(failed);
@@ -602,48 +608,42 @@ describe('candidate tree', () => {
     ]);
   });
 
-  it('shows what a kept idea measured when a later attempt at it was slower', () => {
-    const kept = workstream(
+  it('shows what a passed idea measured when a later attempt at it failed', () => {
+    const first = workstream(
       'flow:k1/#1',
       1,
       {hypothesis_id: 'h1', revision: 'c1'},
-      {verdict: 'accepted'},
+      {verdict: 'passed'},
       'done',
     );
-    const slower = workstream(
-      'flow:k2/#1',
-      2,
-      {hypothesis_id: 'h1'},
-      {verdict: 'rejected'},
-      'done',
-    );
+    const slower = workstream('flow:k2/#1', 2, {hypothesis_id: 'h1'}, {verdict: 'failed'}, 'done');
     const tree = treeOf(
       sequenced([
         [root],
-        [kept],
-        [gate('op:k1/gate', kept.id, 1.5, {metric_value: 120}, 'passed')],
+        [first],
+        [gate('op:k1/gate', first.id, 1.5, {metric_value: 120}, 'passed')],
         [slower],
         [gate('op:k2/gate', slower.id, 2.5, {metric_value: 80}, 'slower')],
       ]),
     );
 
     expect(tree.candidates[0]?.measurement?.metricValue).toBe(120);
-    expect(tree.candidates[0]?.outcome).toBe('kept');
+    expect(tree.candidates[0]?.outcome).toBe('passed');
   });
 
-  it('names as best the adopted candidate, the input, or before adopting the best passed gate', () => {
+  it('names as best what the adoption span names: the best so far, then the adopted result', () => {
     const a = workstream(
       'flow:a/#1',
       1,
       {hypothesis_id: 'a', revision: 'ca'},
-      {verdict: 'accepted'},
+      {verdict: 'passed'},
       'done',
     );
     const b = workstream(
       'flow:b/#1',
       2,
       {hypothesis_id: 'b', revision: 'cb'},
-      {verdict: 'accepted'},
+      {verdict: 'passed'},
       'done',
     );
     const run = [
@@ -656,12 +656,82 @@ describe('candidate tree', () => {
     const adopting = (candidate: string | null, verdict: string | null) =>
       treeOf(sequenced([...run, [adoption(candidate, verdict)]])).best;
 
-    expect(treeOf(sequenced(run)).best).toEqual({candidate: a.id, adopted: false});
-    expect(treeOf(sequenced(run), 'min').best).toEqual({candidate: b.id, adopted: false});
+    // no adoption span yet: no guess from the gates, whichever idea measured best
+    expect(treeOf(sequenced(run)).best).toBeNull();
+    expect(adopting('ca', null)).toEqual({candidate: a.id, adopted: false});
+    expect(adopting('cb', null)).toEqual({candidate: b.id, adopted: false});
     expect(adopting('cb', 'adopted')).toEqual({candidate: b.id, adopted: true});
-    expect(adopting('cb', null)).toEqual({candidate: b.id, adopted: true});
+    expect(adopting(null, null)).toEqual({candidate: null, adopted: false});
     expect(adopting(null, 'adopted')).toEqual({candidate: null, adopted: true});
     expect(adopting('cb', 'not_adopted')).toBeNull();
+  });
+
+  it('follows the adoption span as the best changes during the run', () => {
+    const a = workstream(
+      'flow:a/#1',
+      1,
+      {hypothesis_id: 'a', revision: 'ca'},
+      {verdict: 'passed'},
+      'done',
+    );
+    const b = workstream(
+      'flow:b/#1',
+      2,
+      {hypothesis_id: 'b', revision: 'cb'},
+      {verdict: 'passed'},
+      'done',
+    );
+    const fold = new CandidateFold();
+    fold.apply(sequenced([[root], [a], [b], [adoption('ca', null)]]));
+    expect(fold.tree().best).toEqual({candidate: a.id, adopted: false});
+    fold.apply(eventsIn([root, a, b, adoption('ca', null), adoption('cb', null)]).slice(-1));
+    expect(fold.tree().best).toEqual({candidate: b.id, adopted: false});
+    fold.apply(
+      eventsIn([
+        root,
+        a,
+        b,
+        adoption('ca', null),
+        adoption('cb', null),
+        adoption('cb', 'adopted'),
+      ]).slice(-1),
+    );
+    expect(fold.tree().best).toEqual({candidate: b.id, adopted: true});
+  });
+
+  it('reads the base round: null is the input, else the round of an earlier idea it builds on', () => {
+    const r1 = workstream('flow:r1/#1', 1, {hypothesis_id: 'h1', round: 1, base_round: null});
+    const r2 = workstream(
+      'flow:r2/#1',
+      2,
+      {hypothesis_id: 'h2', round: 2, base_round: 1},
+      {links: [{rel: 'builds_on', to: r1.id}]},
+    );
+    const r3 = workstream('flow:r3/#1', 3, {hypothesis_id: 'h3', round: 3, base_round: null});
+    const tree = treeOf(sequenced([[root], [r1], [r2], [r3]]));
+
+    expect(tree.candidates.map(c => [c.round, c.baseRound, c.parent])).toEqual([
+      [1, null, null],
+      [2, 1, r1.id],
+      [3, null, null],
+    ]);
+  });
+
+  it('says why a failed idea failed, as the span does', () => {
+    const turned = workstream(
+      'flow:t/#1',
+      1,
+      {hypothesis_id: 't', revision: 'ct'},
+      {verdict: 'failed', reason: 'turned_down'},
+      'done',
+    );
+    const passed = workstream('flow:p/#1', 2, {hypothesis_id: 'p'}, {verdict: 'passed'}, 'done');
+    const tree = treeOf(sequenced([[root], [turned], [passed]]));
+
+    expect(tree.candidates.map(c => [c.outcome, c.reason])).toEqual([
+      ['failed', 'turned_down'],
+      ['passed', null],
+    ]);
   });
 
   it('leaves out a probe, which only looks', () => {
@@ -692,11 +762,11 @@ describe('candidate tree', () => {
     const joined = workstream('flow:a/#1', 1, {round: 1, hypothesis_id: 'h'});
     const fold = new CandidateFold();
     fold.apply(sequenced([[root], [early], [linker], [target]]));
-    const before = fold.tree('max');
+    const before = fold.tree();
     fold.apply(eventsIn([root, early, linker, target, joined]).slice(-1));
 
     expect(before.candidates.find(c => c.id === linker.id)?.parent).toBeNull();
-    expect(fold.tree('max').candidates.map(c => [c.id, c.parent])).toEqual([
+    expect(fold.tree().candidates.map(c => [c.id, c.parent])).toEqual([
       [early.id, null],
       [linker.id, early.id],
     ]);

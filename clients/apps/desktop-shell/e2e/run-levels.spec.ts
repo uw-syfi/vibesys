@@ -187,7 +187,7 @@ test('the run level shows the best ratio, the ideas running first, and what runs
 }) => {
   await openRun(page);
   const ideas = page.getByRole('listbox', {name: 'Ideas'});
-  // Running first, then the kept newest first; the rejected wait behind their row.
+  // Running first, then the passed newest first; the failed wait behind their row.
   await expect(ideas.getByRole('option')).toHaveText([
     /Per-core queues with stealing/,
     /Wait-free consumer path/,
@@ -200,8 +200,8 @@ test('the run level shows the best ratio, the ideas running first, and what runs
   await expect(now.getByRole('option', {name: /Combine W1 ring/}).first()).toBeVisible();
   await check(page, 'ink-run');
 
-  // The rejected join the list from their row, and the search narrows it.
-  await page.getByRole('button', {name: '+ 2 rejected'}).click();
+  // The failed join the list from their row, and the search narrows it.
+  await page.getByRole('button', {name: '+ 2 failed'}).click();
   await expect(ideas.getByRole('option', {name: /Spin then park/})).toBeVisible();
   await page.getByLabel('Search ideas').fill('spin');
   await expect(ideas.getByRole('option')).toHaveText([/Spin then park/]);
@@ -349,7 +349,7 @@ test('the timeline draws one row per idea; a segment opens its step, a row its i
   await openRun(page);
   await page.getByRole('radiogroup', {name: 'Show'}).getByText('Timeline', {exact: true}).click();
   const gantt = page.getByRole('listbox', {name: 'Ideas on the timeline'});
-  // The Ideas list's order: running first, then the kept newest first.
+  // The Ideas list's order: running first, then the rest newest first.
   await expect(gantt.getByRole('option')).toHaveText([
     /Per-core queues with stealing/,
     /Wait-free consumer path/,

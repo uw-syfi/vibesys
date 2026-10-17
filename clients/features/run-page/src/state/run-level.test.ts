@@ -52,7 +52,7 @@ interface IdeaOf {
   readonly n: number;
   readonly title: string;
   readonly on?: number;
-  readonly verdict?: 'accepted' | 'rejected';
+  readonly verdict?: 'passed' | 'failed';
   readonly value?: number;
   readonly vs?: number;
 }
@@ -72,7 +72,31 @@ function workstream(of: IdeaOf, status: Span['status']): Span {
       title: of.title,
       ...(status === 'done' && of.verdict !== undefined ? {verdict: of.verdict} : {}),
       links,
-      attrs_json: JSON.stringify({hypothesis_id: `h${of.n}`, idea: `try ${of.title}`}),
+      attrs_json: JSON.stringify({
+        hypothesis_id: `h${of.n}`,
+        idea: `try ${of.title}`,
+        round: of.n,
+        base_round: of.on ?? null,
+        ...(status === 'done' && of.verdict === 'passed' ? {revision: `c${of.n}`} : {}),
+      }),
+    },
+  } as Span;
+}
+
+/** The adoption span: the search's current best (a revision), adopted once it has a verdict. */
+function adopting(candidate: string | null, verdict: 'adopted' | null): Span {
+  return {
+    id: 'op:adopt',
+    parent: ROOT.id,
+    type: 'operation',
+    name: 'adopt',
+    status: verdict === null ? 'running' : 'done',
+    started_at: 500,
+    ended_at: verdict === null ? null : 500,
+    label: {
+      kind: 'adoption',
+      ...(verdict === null ? {} : {verdict}),
+      attrs_json: JSON.stringify({candidate}),
     },
   } as Span;
 }
@@ -110,7 +134,7 @@ function gate(of: IdeaOf): Span {
     label: {
       kind: 'gate',
       title: 'benchmark',
-      verdict: of.verdict === 'accepted' ? 'passed' : 'slower',
+      verdict: of.verdict === 'passed' ? 'passed' : 'slower',
       attrs_json: JSON.stringify({stage: 'benchmark', metric_value: of.value, vs_baseline: of.vs}),
     },
   };
@@ -127,12 +151,12 @@ function finished(of: IdeaOf): Span[] {
   ];
 }
 
-const A: IdeaOf = {n: 1, title: 'ring', verdict: 'accepted', value: 150, vs: 1.5};
-const B: IdeaOf = {n: 2, title: 'ring-pad', on: 1, verdict: 'accepted', value: 200, vs: 2};
-const C: IdeaOf = {n: 3, title: 'spin', on: 2, verdict: 'rejected', value: 120, vs: 1.2};
+const A: IdeaOf = {n: 1, title: 'ring', verdict: 'passed', value: 150, vs: 1.5};
+const B: IdeaOf = {n: 2, title: 'ring-pad', on: 1, verdict: 'passed', value: 200, vs: 2};
+const C: IdeaOf = {n: 3, title: 'spin', on: 2, verdict: 'failed', value: 120, vs: 1.2};
 const D: IdeaOf = {n: 4, title: 'arena', on: 2};
 
-function run(): RunEvent[] {
+function run(adoption: Span = adopting('c2', null)): RunEvent[] {
   return events([
     ROOT,
     ...finished(A),
@@ -140,6 +164,7 @@ function run(): RunEvent[] {
     ...finished(C),
     workstream(D, 'running'),
     turn(D, 'running'),
+    adoption,
   ]);
 }
 
@@ -234,27 +259,28 @@ describe('fresh ideas', () => {
 describe('the run level', () => {
   const model = createRunReader().read(logOf(run()), null);
 
-  test('ideas show running first, then newest first, the rejected folded away', () => {
+  test('ideas show running first, then newest first, the failed folded away', () => {
     const view = ideasView(model, IDEAS_FILTER_DEFAULT);
     expect(view.rows.map(row => row.title)).toEqual(['arena', 'ring-pad', 'ring']);
-    expect(view.hiddenRejected).toBe(1);
-    expect(view.counts).toEqual({running: 1, kept: 2, rejected: 1});
+    expect(view.hiddenFailed).toBe(1);
+    expect(view.counts).toEqual({running: 1, passed: 2, failed: 1});
     const ringPad = view.rows[1];
     expect(ringPad?.badges).toEqual([{label: 'best', tone: 'ok'}]);
-    expect(ringPad?.trail).toEqual({label: 'from ring', parent: 'flow:w1/#1'});
+    expect(ringPad?.trail).toEqual({label: 'ring', parent: 'flow:w1/#1'});
+    expect(view.rows[2]?.trail).toEqual({label: 'input', parent: null});
     expect(view.rows.map(row => row.stripe)).toEqual([false, true, true]);
     expect(ideasView(model, IDEAS_FILTER_DEFAULT)).toBe(view);
   });
 
-  test('the filter shows the rejected and searches titles and ideas', () => {
-    const all = ideasView(model, {...IDEAS_FILTER_DEFAULT, rejected: true});
+  test('the filter shows the failed and searches titles and ideas', () => {
+    const all = ideasView(model, {...IDEAS_FILTER_DEFAULT, failed: true});
     expect(all.rows.map(row => row.title)).toEqual(['arena', 'spin', 'ring-pad', 'ring']);
     expect(all.rows[1]?.figure).toBe('1.20×');
-    const found = ideasView(model, {...IDEAS_FILTER_DEFAULT, rejected: true, query: 'try spin'});
+    const found = ideasView(model, {...IDEAS_FILTER_DEFAULT, failed: true, query: 'try spin'});
     expect(found.rows.map(row => row.title)).toEqual(['spin']);
   });
 
-  test('the best path names the kept chain, and the hero its ratio', () => {
+  test('the best path names the winning chain, and the hero its ratio', () => {
     expect(
       bestPathView(model, false)?.crumbs.map(crumb => (crumb.kind === 'idea' ? crumb.label : '…')),
     ).toEqual(['ring', 'ring-pad']);
