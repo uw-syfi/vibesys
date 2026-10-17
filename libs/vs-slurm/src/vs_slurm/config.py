@@ -266,7 +266,7 @@ class SlurmConfig(BaseModel):
         sharing option in ``sbatch_arguments`` is a bare ``--exclusive``.
 
         ``--exclusive=user``, ``=mcs`` or ``=topo`` share nodes with other jobs (the agent's
-        own GPU jobs run as the same user), and ``--oversubscribe`` (``-s``) shares them too;
+        own GPU jobs run as the same user), and ``--oversubscribe`` (``-s``, or its older spelling ``--share``) shares them too;
         sbatch takes the last of these options it reads.
         """
         if self.dedicated_measurement_resources:
@@ -274,7 +274,7 @@ class SlurmConfig(BaseModel):
         sharing = [
             argument
             for argument in self.sbatch_arguments
-            if argument in {"--oversubscribe", "-s"} or argument.startswith("--exclusive")
+            if argument in {"--oversubscribe", "--share", "-s"} or argument.startswith("--exclusive")
         ]
         return bool(sharing) and sharing[-1] == "--exclusive"
 

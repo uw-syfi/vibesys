@@ -79,8 +79,8 @@ where `sbatch_arguments` allocate whole GPUs and cores (for example
 `--gres=gpu:4 -c 64`) but cannot pass `--exclusive` without taking the whole
 node from other users. A bare `--exclusive` as the last node-sharing option in
 `sbatch_arguments` (`--exclusive=user`, `--exclusive=mcs`, and
-`--oversubscribe` share nodes) implies it. When it holds, an official
-measurement may reuse an earlier trusted measurement of the identical input
+`--oversubscribe`, `--share` share nodes) implies it. When it holds, an official
+measurement of a task that opts in may reuse the scope's earlier trusted measurement of the identical input
 instead of queuing a second job; leave it `false` unless the declaration is
 true, because it is the only evidence that the two runs faced the same
 conditions.
