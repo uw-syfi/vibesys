@@ -5,7 +5,14 @@
  * transports report through. Runtime neutral: no DOM, no Node.
  */
 
-export {DISPLAY_IDS, harnessName, modelName, roleName, wordsOfId} from './display-names.js';
+export {
+  DISPLAY_IDS,
+  harnessName,
+  isNamedModel,
+  modelName,
+  roleName,
+  wordsOfId,
+} from './display-names.js';
 export {
   BackendClientError,
   type BackendErrorKind,

@@ -1,5 +1,12 @@
 import {describe, it} from 'node:test';
-import {DISPLAY_IDS, harnessName, modelName, roleName, wordsOfId} from './display-names.js';
+import {
+  DISPLAY_IDS,
+  harnessName,
+  isNamedModel,
+  modelName,
+  roleName,
+  wordsOfId,
+} from './display-names.js';
 import {expect} from './test-support/expect.js';
 
 describe('the catalog the backend registries generate', () => {
@@ -10,7 +17,7 @@ describe('the catalog the backend registries generate', () => {
     }
     for (const model of DISPLAY_IDS.models) {
       const name = modelName(model);
-      expect(name).not.toBeNull();
+      expect(isNamedModel(model)).toBe(true);
       expect(name).not.toBe(model);
       expect(name).toMatch(/^[A-Z]/);
     }
@@ -36,8 +43,9 @@ describe('what a screen shows for an id no registry names', () => {
     expect(harnessName('mock')).toBe('Mock');
   });
 
-  it('gives no name for an unknown model', () => {
-    expect(modelName('model-nobody-registered')).toBeNull();
+  it('leaves an unknown model as the identifier it is', () => {
+    expect(modelName('model-nobody-registered')).toBe('model-nobody-registered');
+    expect(isNamedModel('model-nobody-registered')).toBe(false);
   });
 
   it('turns every kebab, snake or dotted id into capitalised words, once', () => {

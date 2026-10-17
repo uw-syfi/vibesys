@@ -7,8 +7,8 @@
  *
  * - a role a plugin declares reads as the words of its id, in sentence case;
  * - a harness reads the same way, with its first letter capitalised;
- * - a model no registry names stays its identifier, and `modelName` returns null so the screen
- *   shows it as an identifier (`data-mono-id`), never as a name.
+ * - a model no registry names stays its identifier, which is what it is: `modelName` returns it
+ *   unchanged, and `isNamedModel` says whether a registry named it.
  */
 import {DISPLAY_NAMES} from './generated/display-names.generated.js';
 
@@ -39,9 +39,14 @@ export function harnessName(provider: string): string {
   return NAMES.harnesses[provider] ?? wordsOfId(provider);
 }
 
-/** The model a person reads ("Opus 5.5"), or null for a model no registry names. */
-export function modelName(model: string): string | null {
-  return NAMES.models[model] ?? null;
+/** The model a person reads ("Opus 5.5"); a model no registry names stays its identifier. */
+export function modelName(model: string): string {
+  return NAMES.models[model] ?? model;
+}
+
+/** Whether a registry names `model`; when not, `modelName` returns the identifier itself. */
+export function isNamedModel(model: string): boolean {
+  return model in NAMES.models;
 }
 
 /** An agent role a person reads: "Judge", "Perf evaluator". */
