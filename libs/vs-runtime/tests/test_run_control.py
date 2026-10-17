@@ -397,6 +397,65 @@ _WAITERS = st.lists(
 )
 
 
+class _ParkedTurns:
+    """Turns parked on one paused run, each ending only through the channel's public waits.
+
+    A turn's cancellation is its *ended* condition becoming true, followed by
+    ``interrupt_waits``, as the capacity gate's production timer does. ``outcomes`` holds
+    each finished turn's wake and the time it ended; ``requests`` the operator's request
+    each capacity turn waited under.
+    """
+
+    def __init__(self, waiters: list[_Waiter], seed: int) -> None:
+        self.waiters = waiters
+        self.threads = SimThreads(schedule_seed=seed)
+        self.events = FakeRunControlEventSink()
+        self.control = create_run_control_channel(self.events, threads=self.threads)
+        self.control.request_pause()
+        self.base = self.threads.now()
+        self.ended = [False] * len(waiters)
+        self.outcomes: dict[int, tuple[object, float]] = {}
+        self.requests: dict[int, int] = {}
+
+    def turn(self, index: int) -> None:
+        waiter, control = self.waiters[index], self.control
+
+        def gone() -> bool:
+            return self.ended[index]
+
+        if waiter.kind == "timed":
+            wake = control.wait_resumed(waiter.seconds, ended=gone)
+            self.outcomes[index] = (wake, self.threads.now())
+            return
+        control.enter_capacity()
+        try:
+            request = control.park_for_capacity(ended=gone)
+            assert request is not None
+            self.requests[index] = request
+            end = control.wait_for_capacity(waiter.seconds, request, ended=gone)
+            self.outcomes[index] = (end.wake, self.threads.now())
+            assert end.request == request
+        finally:
+            control.leave_capacity()
+
+    def cancel(self) -> None:
+        for index, waiter in enumerate(self.waiters):
+            if waiter.cancelled:
+                self.ended[index] = True
+        self.control.interrupt_waits()
+
+    def survivors_parked(self) -> bool:
+        return all(
+            index not in self.outcomes
+            for index, waiter in enumerate(self.waiters)
+            if not waiter.cancelled
+        )
+
+    def resumed(self) -> int:
+        kinds = [transition.kind for transition in self.events.transitions]
+        return kinds.count(RunControlTransitionKind.RESUMED)
+
+
 @given(
     waiters=_WAITERS,
     cancel_at=st.floats(min_value=2.0, max_value=99.0),
@@ -415,76 +474,43 @@ def test_a_turns_cancel_ends_only_its_own_wait(
     Before, a cancelled wait counted as elapsed and resumed the run, and the first capacity
     turn to leave dropped the operator's request for all of them.
     """
-    threads = SimThreads(schedule_seed=seed)
-    events = FakeRunControlEventSink()
-    control = create_run_control_channel(events, threads=threads)
-    control.request_pause()
-    ended = [False] * len(waiters)
-    outcomes: dict[int, tuple[object, float]] = {}
-    requests: dict[int, int] = {}
-
-    def turn(index: int, waiter: _Waiter) -> None:
-        def gone() -> bool:
-            return ended[index]
-
-        if waiter.kind == "timed":
-            outcomes[index] = (control.wait_resumed(waiter.seconds, ended=gone), threads.now())
-            return
-        control.enter_capacity()
-        try:
-            request = control.park_for_capacity(ended=gone)
-            assert request is not None
-            requests[index] = request
-            end = control.wait_for_capacity(waiter.seconds, request, ended=gone)
-            outcomes[index] = (end.wake, threads.now())
-            assert end.request == request
-        finally:
-            control.leave_capacity()
-
+    run = _ParkedTurns(waiters, seed)
+    threads, control = run.threads, run.control
     deadlines = [w.seconds for w in waiters if w.kind == "timed"]
     deadlines += [1.0 + w.seconds for w in waiters if w.kind == "capacity" and not w.cancelled]
     resume_at = min(deadlines, default=None)
 
-    base = threads.now()
-
     def main() -> tuple[bool, bool, bool]:
         workers = [
-            threads.spawn(lambda i=i, w=w: turn(i, w), name=f"turn-{i}", daemon=False)
-            for i, w in enumerate(waiters)
+            threads.spawn(lambda i=i: run.turn(i), name=f"turn-{i}", daemon=False)
+            for i in range(len(waiters))
         ]
         threads.sleep(1.0)
         if any(w.kind == "capacity" for w in waiters):
             assert control.resume_when_capacity_returns()
         threads.sleep(cancel_at - 1.0)
-        for index, waiter in enumerate(waiters):
-            if waiter.cancelled:
-                ended[index] = True
-        control.interrupt_waits()
+        run.cancel()
         threads.sleep(1.0)
-        paused_after_cancel = control.pause_requested()
-        survivors_parked = all(
-            index not in outcomes for index, w in enumerate(waiters) if not w.cancelled
-        )
+        after_cancel = (control.pause_requested(), run.survivors_parked())
         # The run loop's control poll, after the earliest deadline still in force.
-        threads.sleep(max(base + (resume_at or 0.0) + 1.0 - threads.now(), 0.0))
+        threads.sleep(max(run.base + (resume_at or 0.0) + 1.0 - threads.now(), 0.0))
         paused_at_end = control.pause_requested()
         for worker in workers:
             worker.join(HANG_GUARD_S)
-        return paused_after_cancel, survivors_parked, paused_at_end
+        return (*after_cancel, paused_at_end)
 
     paused_after_cancel, survivors_parked, paused_at_end = threads.run(main)
 
     assert paused_after_cancel
     assert survivors_parked
-    assert len(set(requests.values())) <= 1
-    resumed = [t.kind for t in events.transitions].count(RunControlTransitionKind.RESUMED)
+    assert len(set(run.requests.values())) <= 1
     assert paused_at_end is (resume_at is None)
-    assert resumed == (0 if resume_at is None else 1)
+    assert run.resumed() == (0 if resume_at is None else 1)
     for index, waiter in enumerate(waiters):
-        wake, at = outcomes[index] if index in outcomes else (None, None)
+        wake, at = run.outcomes.get(index, (None, None))
         if waiter.cancelled:
             assert wake in {PauseWake.DETACHED, CapacityWake.DETACHED}
-            assert at == pytest.approx(base + cancel_at)
+            assert at == pytest.approx(run.base + cancel_at)
         elif resume_at is not None:
             assert wake in {PauseWake.ELAPSED, CapacityWake.ELAPSED}
-            assert at == pytest.approx(base + resume_at)
+            assert at == pytest.approx(run.base + resume_at)
