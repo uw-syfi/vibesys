@@ -145,6 +145,7 @@ from vs_runtime._operator_control import (
     ResumeRequest,
     ResumeWhen,
     SteerRequest,
+    StopMode,
     StopRequest,
     check_one_way_to_resume,
 )
@@ -188,6 +189,7 @@ from vs_runtime._release import release_all
 from vs_runtime._run_control import (
     CapacityWaitEnd,
     CapacityWake,
+    QueuedSteer,
     RunControlChannel,
     RunControlEventSink,
     RunControlTransition,
@@ -598,6 +600,7 @@ __all__ = [
     "ProjectTreeCopy",
     "ProtocolBenchmarkContract",
     "ProviderFallback",
+    "QueuedSteer",
     "QuotaAction",
     "QuotaDecision",
     "QuotaPolicy",
@@ -645,6 +648,7 @@ __all__ = [
     "StateValidationPasses",
     "SteerRequest",
     "StopGraceError",
+    "StopMode",
     "StopRequest",
     "StopTimer",
     "Switch",

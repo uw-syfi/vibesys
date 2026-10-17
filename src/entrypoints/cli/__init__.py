@@ -23,8 +23,10 @@ mode entries share.
 
 from __future__ import annotations
 
+import secrets
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 from entrypoints.cli.args import (
@@ -62,6 +64,7 @@ from entrypoints.cli.loops import (
 )
 from entrypoints.cli.preflight import run_preflight
 from entrypoints.cli.resume import _resolve_resume_args
+from entrypoints.control import control_main, time_ordered_id
 from vibesys.api import ConfigurationError, RunRequest, boot_trace
 from vibesys.api.request import (
     generate_experiment_name,
@@ -213,6 +216,16 @@ def dispatch(argv: list[str], runs: Runs | None = None) -> None:
     if argv and argv[0] == "validate":
         _run_validate(argv[1:])
         return
+    if argv and argv[0] == "control":
+        raise SystemExit(
+            control_main(
+                argv[1:],
+                cwd=Path.cwd(),
+                new_request_id=lambda: time_ordered_id(SystemClock().now(), secrets.token_hex(4)),
+                out=sys.stdout,
+                err=sys.stderr,
+            )
+        )
     if argv and argv[0] == "preflight":
         run_preflight(argv[1:], lambda arguments: parse_cli_invocation(arguments).args)
         return

@@ -273,6 +273,6 @@ def test_submit_applies_each_control_id_once_as_its_action_says(
         assert (ack.reason is RefusalReason.NOT_PAUSED_ON_CAPACITY) == (
             ack.status is ControlStatus.REFUSED
         )
-    assert channel.take_pending_steer() == expected.steers
+    assert [steer.text for steer in channel.take_pending_steer()] == expected.steers
     assert channel.pause_requested() == expected.paused
     assert channel.stop_mode() == expected.stop

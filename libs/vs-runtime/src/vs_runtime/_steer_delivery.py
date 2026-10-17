@@ -38,13 +38,18 @@ def steer_input_id(control: ControlInput) -> InputId:
     return InputId(root=f"steer-{control.control_id.root}")
 
 
-def steer_input(core: CoreState, control: ControlInput, now_at: float) -> SessionInputReceived:
-    """The run-wide next-turn input for ``control``, which must be a steer with its text."""
+def steer_input(
+    core: CoreState, control: ControlInput, now_at: float, position: int
+) -> SessionInputReceived:
+    """The run-wide next-turn input for ``control``, which must be a steer with its text.
+
+    ``position`` is the control's 1-based place among the run's controls; it orders the
+    steers, whatever their identities.
+    """
     if control.action != "steer" or control.artifact is None:
         message = "only a steer control with its text becomes session input"
         raise ValueError(message)
-    # The control identities are ``control-<n>`` and count up, so n orders the steers.
-    sequence = int(control.control_id.root.rsplit("-", 1)[-1])
+    sequence = position
     return SessionInputReceived(
         input=SessionInput(
             input_id=steer_input_id(control),
@@ -66,8 +71,8 @@ def unrecorded_steers(core: CoreState, now_at: float) -> tuple[SessionInputRecei
     """
     recorded = {row.input.input_id for row in core.sessions.inputs}
     return tuple(
-        steer_input(core, control, now_at)
-        for control in core.run.controls
+        steer_input(core, control, now_at, position)
+        for position, control in enumerate(core.run.controls, start=1)
         if control.action == "steer"
         and control.artifact is not None
         and steer_input_id(control) not in recorded

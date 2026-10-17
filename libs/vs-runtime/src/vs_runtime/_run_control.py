@@ -68,11 +68,19 @@ class RunControlEventSink(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class QueuedSteer:
+    """One queued steer: its text and, for a request from the run's inbox, the request's id."""
+
+    text: str
+    request_id: str | None = None
+
+
 class RunControlChannel(Protocol):
     """Cooperative control mailbox shared by callers and the run thread."""
 
-    def queue_steer(self, text: str) -> None:
-        """Queue steering for the next turn.
+    def queue_steer(self, text: str, request_id: str | None = None) -> None:
+        """Queue steering for the next turn; ``request_id`` names an inbox request.
 
         The queue is the single source of truth. The run loop drains it
         (:meth:`take_pending_steer`) and turns each message into a durable session input,
@@ -113,7 +121,7 @@ class RunControlChannel(Protocol):
         """Request an unwind at the next cooperative boundary, draining or cancelling work."""
         ...
 
-    def take_pending_steer(self) -> list[str]:
+    def take_pending_steer(self) -> list[QueuedSteer]:
         """Drain queued steering exactly once."""
         ...
 
@@ -209,7 +217,7 @@ class RuntimeRunControlChannel:
         """Bind the channel to a synchronous semantic event sink; ``threads`` makes its lock."""
         self._events = events
         self._lock = threads.condition(threads.lock())
-        self._pending_steer: list[str] = []
+        self._pending_steer: list[QueuedSteer] = []
         self._paused = False
         self._stop_requested = False
         self._stop_mode: StopMode | None = None
@@ -219,10 +227,10 @@ class RuntimeRunControlChannel:
         self._capacity_request: int | None = None
         self._capacity_requests = 0
 
-    def queue_steer(self, text: str) -> None:
+    def queue_steer(self, text: str, request_id: str | None = None) -> None:
         """Queue free-text steering for the run loop to take at its next control poll."""
         with self._lock:
-            self._pending_steer.append(text)
+            self._pending_steer.append(QueuedSteer(text, request_id))
         self._emit(RunControlTransitionKind.STEER_QUEUED, text=text)
 
     def request_pause(self) -> None:
@@ -312,7 +320,7 @@ class RuntimeRunControlChannel:
 
         return unsubscribe
 
-    def take_pending_steer(self) -> list[str]:
+    def take_pending_steer(self) -> list[QueuedSteer]:
         """Drain steering queued since the previous invocation boundary."""
         with self._lock:
             pending, self._pending_steer = self._pending_steer, []
@@ -443,6 +451,7 @@ class RuntimeRunControlChannel:
 __all__ = [
     "CapacityWaitEnd",
     "CapacityWake",
+    "QueuedSteer",
     "RunControlChannel",
     "RunControlEventSink",
     "RunControlTransition",

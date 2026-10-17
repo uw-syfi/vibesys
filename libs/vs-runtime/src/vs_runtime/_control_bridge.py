@@ -1,15 +1,22 @@
 """How the run loop hears the operator: control requests in, core control events out.
 
 ``RunControlBridge`` reads the cooperative ``RunControlChannel`` mailbox (the server's socket
-and the session's ``RunControl`` write there) and turns what changed since the last poll into
-``RunControlEvent``s with stable identities, followed, for a steer, by the session input that
-delivers it (``_steer_delivery``).
+and the session's ``RunControl`` write there) and the run's durable inbox (``vibesys control``
+writes there), and turns what changed since the last poll into ``RunControlEvent``s with stable
+identities, followed, for a steer, by the session input that delivers it (``_steer_delivery``).
+
+An inbox request is applied through the same ``ChannelRunControl.submit`` as a socket request,
+and core records it under the identity ``op-<request id>``. The bridge removes the request from
+the inbox only once core holds that identity, so a request is applied exactly once across a
+crash or a resume: a request core already holds is settled, one it does not is applied again.
 """
 
 from __future__ import annotations
 
 import hashlib
 from typing import TYPE_CHECKING, Literal, Protocol
+
+from pydantic import ValidationError
 
 from vs_core.api import (
     ArtifactId,
@@ -21,12 +28,23 @@ from vs_core.api import (
     RunStatus,
     StopMode,
 )
+from vs_runtime._operator_control import (
+    CONTROL_REQUEST,
+    ChannelRunControl,
+    ControlStatus,
+    PauseRequest,
+    ResumeRequest,
+    SteerRequest,
+    StopRequest,
+)
 from vs_runtime._steer_delivery import SteerConsumption, steer_input, unrecorded_steers
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_core.api import CoreEvent
+    from vs_project.api import ControlInbox, InboxEntry
+    from vs_runtime._operator_control import ControlRequest
     from vs_runtime._run_control import RunControlChannel
 
 
@@ -49,17 +67,25 @@ class RunControlBridge:
     identities ``control-<n>`` that continue the count of controls core already holds,
     so a resumed run never reuses an identity. A stop carries no result: the search
     adopts its last choice and ends the run itself.
+
+    With an ``inbox``, each poll also applies the inbox's requests, in id order, each as one
+    control ``op-<request id>``; see the module docstring for how each applies once.
     """
 
     def __init__(
         self,
         channel: RunControlChannel,
         steer: SteerArtifacts,
+        inbox: ControlInbox | None = None,
     ) -> None:
-        """Bind the mailbox and the steer text store."""
+        """Bind the mailbox, the steer text store and, for a headless run, its inbox."""
         self._channel = channel
+        self._control = ChannelRunControl(channel)
         self._steer = steer
+        self._inbox = inbox
+        self._submitted: set[str] = set()
         self._count = 0
+        self._position = 0
         self._consumption = SteerConsumption()
         self._started = False
         self._paused = False
@@ -87,10 +113,11 @@ class RunControlBridge:
             self._count = len(core.run.controls)
             self._paused = core.run.status == RunStatus.PAUSED
             self._stopped = any(c.action == "stop" for c in core.run.controls)
+        self._position = len(core.run.controls)
         events: list[CoreEvent] = list(unrecorded_steers(core, now_at))
-        for text in self._channel.take_pending_steer():
-            control = self._event("steer", now_at, text=text)
-            events += (control, steer_input(core, control.control, now_at))
+        self._take_steers(core, now_at, events)
+        if self._inbox is not None:
+            self._read_inbox(self._inbox, core, now_at, events)
         if self._stopped:
             return tuple(events)
         if self._channel.stop_requested():
@@ -100,6 +127,62 @@ class RunControlBridge:
             self._paused = not self._paused
             events.append(self._event("pause" if self._paused else "resume", now_at))
         return tuple(events)
+
+    def _take_steers(self, core: CoreState, now_at: float, events: list[CoreEvent]) -> None:
+        for queued in self._channel.take_pending_steer():
+            control = self._event("steer", now_at, text=queued.text, request_id=queued.request_id)
+            events += (control, steer_input(core, control.control, now_at, self._position))
+
+    def _read_inbox(
+        self, inbox: ControlInbox, core: CoreState, now_at: float, events: list[CoreEvent]
+    ) -> None:
+        """Settle the requests core holds and apply, once per process, the ones it does not."""
+        held = {control.control_id.root for control in core.run.controls}
+        for entry in inbox.pending():
+            if _identity(entry.request_id).root in held:
+                inbox.settle(entry.request_id)
+            elif entry.request_id not in self._submitted:
+                reason = self._apply(inbox, entry, core, now_at, events)
+                if reason is None:
+                    self._submitted.add(entry.request_id)
+                else:
+                    inbox.reject(entry.request_id, reason)
+
+    def _apply(
+        self,
+        inbox: ControlInbox,
+        entry: InboxEntry,
+        core: CoreState,
+        now_at: float,
+        events: list[CoreEvent],
+    ) -> str | None:
+        """Apply one inbox request; the reason it cannot apply, or None once it is submitted."""
+        try:
+            request = CONTROL_REQUEST.validate_json(entry.payload)
+        except ValidationError as error:
+            return f"not a control request: {error}"
+        refusal = _refusal(request, core, stopped=self._stopped)
+        if refusal is not None:
+            return refusal
+        ack = self._control.submit(request, entry.request_id)
+        if ack.status is ControlStatus.REFUSED:
+            return "the run is not paused on a provider capacity limit"
+        match request:
+            case ResumeRequest(when="capacity_returns"):
+                # The channel holds the wait and core records nothing: the request is done.
+                inbox.settle(entry.request_id)
+            case PauseRequest():
+                self._paused = True
+                events.append(self._event("pause", now_at, request_id=entry.request_id))
+            case ResumeRequest():
+                self._paused = False
+                events.append(self._event("resume", now_at, request_id=entry.request_id))
+            case StopRequest(mode=mode):
+                self._stopped = True
+                events.append(self._event("stop", now_at, mode=mode, request_id=entry.request_id))
+            case SteerRequest():
+                self._take_steers(core, now_at, events)
+        return None
 
     def settled(self, core: CoreState, *, running: bool) -> None:
         """Report a pause once it has landed: core holds the run paused and nothing runs.
@@ -127,9 +210,14 @@ class RunControlBridge:
         *,
         text: str | None = None,
         mode: StopMode | None = None,
+        request_id: str | None = None,
     ) -> RunControlEvent:
-        self._count += 1
-        identity = ControlId(root=f"control-{self._count}")
+        self._position += 1
+        if request_id is None:
+            self._count += 1
+            identity = ControlId(root=f"control-{self._count}")
+        else:
+            identity = _identity(request_id)
         artifact = None
         if text is not None:
             artifact = ArtifactRef(
@@ -139,6 +227,24 @@ class RunControlBridge:
             self._steer.put(artifact, text)
         control = ControlInput(control_id=identity, action=action, mode=mode, artifact=artifact)
         return RunControlEvent(control=control, now_at=now_at)
+
+
+def _identity(request_id: str) -> ControlId:
+    """The identity core records an inbox request's control under."""
+    return ControlId(root=f"op-{request_id}")
+
+
+def _refusal(request: ControlRequest, core: CoreState, *, stopped: bool) -> str | None:
+    """Why core would refuse ``request`` now, or None; refused requests never reach core."""
+    if core.run.status == RunStatus.TERMINAL:
+        return "the run has ended"
+    if not isinstance(request, (PauseRequest, ResumeRequest)):
+        return None
+    if stopped:
+        return "the run is stopping; it cannot pause or resume"
+    if core.run.status in (RunStatus.CLOSING, RunStatus.BLOCKED) or core.run.result is not None:
+        return "the run is finishing; it cannot pause or resume"
+    return None
 
 
 __all__ = ["RunControlBridge", "SteerArtifacts"]

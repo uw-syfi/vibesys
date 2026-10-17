@@ -34,7 +34,9 @@ def test_control_transitions_keep_the_existing_persisted_event_format(
     )
     try:
         integration.control.queue_steer("focus on latency")
-        assert integration.control.take_pending_steer() == ["focus on latency"]
+        assert [steer.text for steer in integration.control.take_pending_steer()] == [
+            "focus on latency"
+        ]
         integration.control.notify_steer_consumed(
             agent_kind="implementer",
             round_label="round-1",

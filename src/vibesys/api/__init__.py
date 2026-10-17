@@ -137,6 +137,7 @@ from vs_runtime.api.infrastructure import (
     ResumeWhen,
     RunStopped,
     SteerRequest,
+    StopMode,
     StopRequest,
     check_one_way_to_resume,
 )
@@ -239,6 +240,7 @@ __all__ = [
     "SpanUpdatedData",
     "StartupStep",
     "SteerRequest",
+    "StopMode",
     "StopRequest",
     "TaskImageUnsupported",
     "TaskNeedsProvisioning",

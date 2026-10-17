@@ -176,8 +176,8 @@ class ChannelRunControl:
     def _apply(self, request: ControlRequest) -> ControlAck:
         reason = None
         match request:
-            case SteerRequest(text=text):
-                self.steer(text)
+            case SteerRequest(text=text, control_id=control_id):
+                self._channel.queue_steer(text, control_id)
                 status = ControlStatus.PENDING
             case PauseRequest():
                 self.pause()

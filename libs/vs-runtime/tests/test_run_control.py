@@ -34,7 +34,7 @@ def test_steering_is_ordered_and_drained_exactly_once() -> None:
     control.queue_steer("focus on latency")
     control.queue_steer("check for reward hacking")
 
-    assert control.take_pending_steer() == [
+    assert [steer.text for steer in control.take_pending_steer()] == [
         "focus on latency",
         "check for reward hacking",
     ]

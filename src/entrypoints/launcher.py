@@ -8,7 +8,7 @@ It routes to the headless engine, with no JavaScript runtime required, when:
 
 * ``--headless`` is passed,
 * ``--web`` is passed,
-* the first argument is ``validate``, or
+* the first argument is ``validate``, ``preflight`` or ``control``, or
 * stdin/stdout is not a TTY (pipes, CI).
 
 Otherwise it starts the interactive OpenTUI client, resolving the TUI in order:
@@ -196,7 +196,7 @@ def bundled_tui() -> BundledTui | None:
 def _headless_requested(args: list[str]) -> bool:
     """Whether to run the engine directly instead of the interactive TUI.
 
-    ``--help``/``-h`` and ``validate`` never need the TUI, so they always go to
+    ``--help``/``-h``, ``validate`` and ``control`` never need the TUI, so they always go to
     the engine (and never trigger a source-checkout build).
     """
     if (
@@ -208,7 +208,7 @@ def _headless_requested(args: list[str]) -> bool:
         or "-h" in args
     ):
         return True
-    if args and args[0] in {"tui-defaults", "validate", "preflight", "web"}:
+    if args and args[0] in {"tui-defaults", "validate", "preflight", "web", "control"}:
         return True
     return not (sys.stdin.isatty() and sys.stdout.isatty())
 

@@ -116,8 +116,13 @@ def ensure_not_legacy_resume(project_root: Path, run_id: str) -> None:
         ) from error
 
 
-async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> RunEnd:
+async def drive_core_run(
+    host: CoreHost, integration: LocalRunIntegration, project_root: Path
+) -> RunEnd:
     """Run one core run to its terminal status over ``host.services``.
+
+    The loop reads operator controls from ``integration.control`` and from the run's
+    control inbox in the project at ``project_root``, where ``vibesys control`` writes.
 
     Raises ``RunStopped`` when the operator's stop ended the run, so the session reports
     a stopped run, and ``CoreRunRefusedError`` when composition left an executor role
@@ -136,6 +141,7 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
     controls = RunControlBridge(
         integration.control,
         _SteerTexts(services.artifacts),
+        inbox=Project.open(project_root).state.control_inbox(services.run_id),
     )
     loop = CoreRunHost(shell, delivery, services.clock, controls, workspaces=host.workspaces)
     config = _loop_config(services.run_id, host.timing.lease_seconds)
