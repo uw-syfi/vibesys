@@ -17,6 +17,8 @@ export interface WindowsWelcomeBridge {
   openRunWindow(run: RunRef): Promise<WelcomeResult<null>>;
   /** Bring the main window (the sidebar and its screens) to the front. */
   showMainWindow(): Promise<WelcomeResult<null>>;
+  /** The application menu's "Toggle Sidebar" was chosen. */
+  onToggleSidebar(listener: () => void): void;
 }
 
 export type WindowsRequest =

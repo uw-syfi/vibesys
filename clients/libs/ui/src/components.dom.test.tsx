@@ -5,6 +5,7 @@ import {Window} from 'happy-dom';
 import {act, type ReactNode, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {
+  AppFrame,
   Button,
   Checkbox,
   type ChoiceOption,
@@ -179,6 +180,59 @@ describe('Button', () => {
     expect(pressed).toBe(2);
     expect(one(container, '[aria-label="More actions"]').tagName).toBe('BUTTON');
     expect(one(container, 'a').getAttribute('href')).toBe('#docs');
+  });
+});
+
+describe('AppFrame', () => {
+  const frame = (hidden: boolean) => (
+    <AppFrame
+      label="Side"
+      nav={<Button text="New run" press={() => undefined} />}
+      navHidden={hidden}
+      reveal={
+        <Button
+          icon="sidebar"
+          label="Show sidebar"
+          hint="Show sidebar (Cmd+K)"
+          press={() => undefined}
+        />
+      }
+    >
+      <main>Main</main>
+    </AppFrame>
+  );
+
+  test('shown, the navigation is available and there is no strip; hidden, it is inert, out of the accessibility tree, and the reveal control is in the main area', async () => {
+    const container = await mount(frame(false));
+    const nav = one(container, 'nav');
+    expect(nav.hasAttribute('inert')).toBe(false);
+    expect(nav.hasAttribute('aria-hidden')).toBe(false);
+    expect(container.querySelector('.vs-app-strip')).toBeNull();
+
+    const hidden = await mount(frame(true));
+    const hiddenNav = one(hidden, 'nav');
+    expect(hiddenNav.hasAttribute('inert')).toBe(true);
+    expect(hiddenNav.getAttribute('aria-hidden')).toBe('true');
+    const reveal = one(one(hidden, '.vs-app-main'), '.vs-app-strip button');
+    expect(reveal.getAttribute('aria-label')).toBe('Show sidebar');
+    expect(reveal.textContent).toBe('');
+    expect(one(hidden, 'main').textContent).toBe('Main');
+  });
+});
+
+describe('Button hint', () => {
+  test('a hint is the hover tooltip, beside the accessible name', async () => {
+    const container = await mount(
+      <Button
+        icon="sidebar"
+        label="Hide sidebar"
+        hint="Hide sidebar (Ctrl+K)"
+        press={() => undefined}
+      />,
+    );
+    const button = one(container, 'button');
+    expect(button.getAttribute('title')).toBe('Hide sidebar (Ctrl+K)');
+    expect(button.getAttribute('aria-label')).toBe('Hide sidebar');
   });
 });
 

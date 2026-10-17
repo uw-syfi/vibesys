@@ -60,6 +60,8 @@ const FIRST_PAINT_CHANNEL: typeof import('@vibesys/ipc').FIRST_PAINT_CHANNEL =
   'vibesys:welcome:first-paint';
 const CONNECT_CHANNEL: typeof import('@vibesys/ipc').CONNECT_CHANNEL = 'vibesys:connect';
 const WAKE_CHANNEL: typeof import('@vibesys/ipc').WAKE_CHANNEL = 'vibesys:wake';
+const TOGGLE_SIDEBAR_CHANNEL: typeof import('@vibesys/ipc').TOGGLE_SIDEBAR_CHANNEL =
+  'vibesys:toggle-sidebar';
 const RUN_PORT_MESSAGE: typeof import('@vibesys/ipc').RUN_PORT_MESSAGE = 'vibesys:run-port';
 
 /** Effects the sandbox grants this preload, injectable so the exposed bridge has a public Fake. */
@@ -121,6 +123,7 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
     helperFeatures: host => call(CHANNELS.helperFeatures, host),
     openRunWindow: run => call(CHANNELS.openRunWindow, run),
     showMainWindow: () => call(CHANNELS.showMainWindow),
+    onToggleSidebar: listener => capabilities.on(TOGGLE_SIDEBAR_CHANNEL, () => listener()),
     onRecent: on(EVENTS.recent),
     onListing: on(EVENTS.listing),
     onPreferences: on(EVENTS.preferences),

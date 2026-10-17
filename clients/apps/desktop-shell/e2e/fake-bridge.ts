@@ -72,6 +72,7 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
     sequence += 1;
     for (const listener of listeners[event] ?? []) listener({sequence, value});
   };
+  const toggleListeners: (() => void)[] = [];
   const ok = (value: unknown) => Promise.resolve({ok: true, value});
   const on = (event: string) => (listener: Listener) => {
     listeners[event] = [...(listeners[event] ?? []), listener];
@@ -108,8 +109,15 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
       onPreferences: on('preferences'),
       onChrome: on('chrome'),
       onShowHost: on('showHost'),
+      onToggleSidebar: (listener: () => void) => {
+        toggleListeners.push(listener);
+      },
     },
     fakeHost: {
+      /** The application menu's "Toggle Sidebar". */
+      toggleSidebar: () => {
+        for (const listener of toggleListeners) listener();
+      },
       listing: (listing: {host: string}) => {
         listings.set(listing.host, listing);
         push('listing', listing);

@@ -1499,6 +1499,33 @@ button.vs-stage-head {
 .vs-app-nav :is(a, button, input, select, textarea, [tabindex]) {
   -webkit-app-region: no-drag;
 }
+/*
+ * Hidden, the column has no width, border or padding, and is not visible: `visibility` goes last,
+ * after the size has changed, and takes the column out of the accessibility tree and the tab order.
+ */
+.vs-app-nav {
+  transition:
+    flex-basis var(--duration-fast) var(--easing),
+    max-width var(--duration-fast) var(--easing),
+    padding var(--duration-fast) var(--easing),
+    border-width var(--duration-fast) var(--easing),
+    visibility 0s linear;
+}
+.vs-app-nav[data-hidden] {
+  flex-basis: 0;
+  max-width: 0;
+  padding-right: 0;
+  padding-left: 0;
+  border-right-width: 0;
+  overflow: hidden;
+  visibility: hidden;
+  transition:
+    flex-basis var(--duration-fast) var(--easing),
+    max-width var(--duration-fast) var(--easing),
+    padding var(--duration-fast) var(--easing),
+    border-width var(--duration-fast) var(--easing),
+    visibility 0s linear var(--duration-fast);
+}
 .vs-app-nav-top,
 .vs-app-nav-footer {
   display: flex;
@@ -1511,9 +1538,33 @@ button.vs-stage-head {
   border-top: var(--hairline) solid var(--line);
 }
 .vs-app-main {
+  display: flex;
   flex: 999 1 var(--column-main);
+  flex-direction: column;
   min-width: 0;
   max-height: 100%;
+}
+.vs-app-content {
+  flex: 1 1 0;
+  min-height: 0;
+}
+/*
+ * With the column hidden, the strip holds its control beside the window's own controls
+ * (`--chrome-inset-width`) and keeps the page below them; its background drags the window.
+ */
+.vs-app-strip {
+  display: flex;
+  flex: none;
+  align-items: center;
+  box-sizing: border-box;
+  min-height: max(var(--chrome-inset-height, var(--space-0)), calc(var(--control) + var(--space-3)));
+  padding: var(--space-2) var(--space-4) var(--space-2)
+    max(var(--chrome-inset-width, var(--space-0)), var(--space-4));
+  -webkit-app-region: drag;
+  background: var(--bg);
+}
+.vs-app-strip :is(a, button, input, select, textarea, [tabindex]) {
+  -webkit-app-region: no-drag;
 }
 
 /* --- theme swatch ------------------------------------------------------------------------------ */

@@ -14,6 +14,7 @@ import {
   type SidebarState,
   sidebarStep,
 } from '../../state/index.js';
+import type {SidebarPreference} from './sidebar-visibility.js';
 
 /** The bridge calls and pushes the sidebar uses. */
 export type ShellBridge = Pick<
@@ -27,6 +28,7 @@ export type ShellBridge = Pick<
   | 'onListing'
   | 'onRecent'
   | 'onPreferences'
+  | 'onToggleSidebar'
 >;
 
 /** Ask what `request` names; its reply is dispatched as the action that carries its token. */
@@ -61,17 +63,28 @@ function perform(
  * The sidebar store over `bridge`. Pushes that arrive before the overview are ordered by their
  * sequence: one at or before the overview's cursor is already in it and is dropped.
  */
-export function createSidebarStore(bridge: ShellBridge): {
+export function createSidebarStore(
+  bridge: ShellBridge,
+  preference: SidebarPreference,
+): {
   readonly store: Store<SidebarState, SidebarAction>;
   readonly actions: ShellActions;
 } {
-  const initial = initialSidebar();
+  const initial = initialSidebar(preference.read() ?? true);
   const store = createStore<SidebarState, SidebarAction, SidebarRequest>(
     sidebarStep,
     initial.state,
     (request, dispatch) => perform(bridge, request, dispatch),
   );
   for (const request of initial.requests) perform(bridge, request, store.dispatch);
+  let shown = initial.state.shown;
+  store.subscribe(() => {
+    const now = store.getState().shown;
+    if (now === shown) return;
+    shown = now;
+    preference.write(shown);
+  });
+  bridge.onToggleSidebar(() => store.dispatch({type: 'toggle-sidebar'}));
   let cursor: number | null = null;
   const early: {sequence: number; action: SidebarAction}[] = [];
   const pushed = (sequence: number, action: SidebarAction): void => {
