@@ -337,7 +337,7 @@ depends_on = ["vibesys.issue_queue_core", "vibesys.orchestration.issue_queue.lau
 # Pure, deterministic hypothesis policy: never agents/prompts/I/O.
 path = "vibesys.hypothesis"
 layer = "roles_search"
-depends_on = ["vibesys.profile_focus", "vibesys.metrics", "vs_issue_tracker", "vs_runtime"]
+depends_on = ["vibesys.profile_focus", "vibesys.metrics", "vs_core", "vs_issue_tracker", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.profile_focus"
@@ -352,7 +352,7 @@ depends_on = ["vs_core"]
 [[modules]]
 path = "vibesys.orchestration.profilers"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.run.contracts"]
+depends_on = ["vibesys", "vibesys.run.contracts", "vs_core"]
 
 [[modules]]
 path = "vibesys.orchestration.skill_selection"

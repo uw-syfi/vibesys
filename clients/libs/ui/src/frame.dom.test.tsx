@@ -116,7 +116,7 @@ describe('Breadcrumb', () => {
     const {container} = await mount(
       <Breadcrumb
         label="Zoom"
-        items={['run', 'candidate', 'step'].map((id, index) => ({
+        items={['Run', 'candidate', 'step'].map((id, index) => ({
           id,
           label: id,
           ...(index === 2 ? {} : {press: () => visited.push(id)}),
@@ -125,10 +125,35 @@ describe('Breadcrumb', () => {
     );
     expect(one(container, 'nav').getAttribute('aria-label')).toBe('Zoom');
     const links = all(container, 'button');
-    expect(links.map(link => link.textContent)).toEqual(['run', 'candidate']);
+    expect(links.map(link => link.textContent)).toEqual(['Run', 'candidate']);
     await click(links[1] as HTMLElement);
     expect(visited).toEqual(['candidate']);
     expect(one(container, '[aria-current="location"]').textContent).toBe('step');
+  });
+
+  test('separates levels with quiet marks that are neither read nor focusable', async () => {
+    const {container} = await mount(
+      <Breadcrumb
+        label="Zoom"
+        items={['Run', 'candidate', 'step'].map((id, index) => ({
+          id,
+          label: id,
+          ...(index === 2 ? {} : {press: noop}),
+        }))}
+      />,
+    );
+    const separators = all(container, '.vs-crumb-sep');
+    expect(separators).toHaveLength(2);
+    for (const separator of separators) {
+      expect(separator.getAttribute('aria-hidden')).toBe('true');
+      expect(separator.querySelector('button, a, [tabindex]')).toBeNull();
+      expect(separator.textContent).toBe('/');
+    }
+    // Only the two earlier levels act; the current level is plain text, and no bare chevron
+    // button stands beside the crumbs.
+    expect(all(container, 'button')).toHaveLength(2);
+    expect(one(container, '[aria-current="location"]').tagName).toBe('SPAN');
+    expect(all(container, 'svg')).toHaveLength(0);
   });
 });
 
@@ -617,6 +642,39 @@ describe('Narrative', () => {
     expect(scroller.scrollTop).toBe(1000);
   });
 
+  test('a reader who scrolled up keeps the place when the turn updates before the scroll event arrives', async () => {
+    // A scroll event is delivered a frame after the scroll; an update may land in between.
+    const view = (count: number) => (
+      <Narrative label="Turn" start="end">
+        {Array.from({length: count}, (_, index) => (
+          <Said key={String(index)} text={`block ${index}`} />
+        ))}
+      </Narrative>
+    );
+    const {container, render} = await mount(view(3));
+    const scroller = one(container, 'section');
+    let height = 1000;
+    let top = 0;
+    const clamp = (value: number): number => Math.min(Math.max(value, 0), height - 100);
+    Object.defineProperties(scroller, {
+      scrollHeight: {configurable: true, get: () => height},
+      clientHeight: {configurable: true, value: 100},
+      scrollTop: {configurable: true, get: () => top, set: (value: number) => (top = clamp(value))},
+    });
+    await render(view(3));
+    expect(top).toBe(900);
+
+    top = 400;
+    height = 1200;
+    await render(view(4));
+    expect(top).toBe(400);
+    await act(async () => {
+      scroller.dispatchEvent(new UIEvent('scroll', {bubbles: true}));
+    });
+    expect(top).toBe(400);
+    expect(container.querySelector('.vs-new-below')).not.toBeNull();
+  });
+
   test('a turn that does not follow its end never offers it', async () => {
     const {container} = await mount(
       <Narrative label="Turn">
@@ -683,6 +741,52 @@ describe('PickRow extras', () => {
     );
     await click(one(linked.container, 'button.vs-pickrow-trail'));
     expect(opened).toEqual(['parent']);
+  });
+});
+
+describe('PickRow fold', () => {
+  test('a foldable row has a chevron that folds and unfolds it, by click and by Left and Right', async () => {
+    const seen: string[] = [];
+    const {container} = await mount(
+      <PickList label="Ideas">
+        <PickRow
+          id="a"
+          title="a"
+          fold={{open: false, toggle: () => seen.push('a')}}
+          select={() => seen.push('pick')}
+        />
+        <PickRow id="b" title="b" fold={{open: true, toggle: () => seen.push('b')}} select={noop} />
+        <PickRow id="c" title="c" fold="none" select={noop} />
+        <PickRow id="d" title="d" select={noop} />
+      </PickList>,
+    );
+    const [a, b, c, d] = all(container, '[role="option"]') as [
+      HTMLElement,
+      HTMLElement,
+      HTMLElement,
+      HTMLElement,
+    ];
+    expect(one(a, '.vs-pickrow-fold').getAttribute('data-fold')).toBe('closed');
+    expect(one(b, '.vs-pickrow-fold').getAttribute('data-fold')).toBe('open');
+    // A row with nothing to fold keeps the slot so titles line up; a row of another list has none.
+    expect(c.querySelector('.vs-pickrow-fold')).not.toBeNull();
+    expect(c.querySelector('.vs-pickrow-fold')?.hasAttribute('data-fold')).toBe(false);
+    expect(d.querySelector('.vs-pickrow-fold')).toBeNull();
+    // The chevron holds no control of its own, so the option holds none (nothing nested).
+    expect(a.querySelector('button')).toBeNull();
+    await click(one(a, '.vs-pickrow-fold'));
+    expect(seen).toEqual(['a']);
+    await click(one(a, '.vs-pickrow-text'));
+    expect(seen).toEqual(['a', 'pick']);
+    seen.length = 0;
+    await click(one(c, '.vs-pickrow-fold'));
+    expect(seen).toEqual([]);
+    seen.push('a');
+    await press(a, 'ArrowRight');
+    await press(a, 'ArrowLeft');
+    await press(b, 'ArrowLeft');
+    await press(b, 'ArrowRight');
+    expect(seen).toEqual(['a', 'a', 'b']);
   });
 });
 

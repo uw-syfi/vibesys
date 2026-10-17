@@ -116,6 +116,11 @@ export interface CandidateTree {
   /** Null before the run labels an adoption, and when the adoption failed. */
   readonly best: BestCandidate | null;
   /**
+   * Whether the run has an adoption span at all. It opens when the run ends, so while the run works
+   * this is false and `best` is null; a reader that shows the best so far must fill it in itself.
+   */
+  readonly adoptionOpened: boolean;
+  /**
    * The winning path: the candidates from the input to the best, each built on the one before
    * (the best last); empty while the input stands or nothing is best.
    */

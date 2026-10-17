@@ -3,6 +3,8 @@ import {
   Button,
   Card,
   DotLegend,
+  Fact,
+  FactLine,
   Gantt,
   type GanttRow,
   type GanttView,
@@ -272,11 +274,47 @@ const SERIES_ROWS: readonly GanttRow[] = [
   },
 ];
 
-/** Bars colored per role, with the legend that names each color. */
+const STEP_STRIP: GanttRow = {
+  id: 'steps',
+  label: 'ring-v1 steps over time',
+  start: 0,
+  end: 9,
+  outcome: 'ok',
+  press: noop,
+  figure: '1.40×',
+  segments: [
+    {id: 'a', start: 0, end: 3, kind: 'solid', series: 1, label: 'implementer · 3m'},
+    {id: 'b', start: 3, end: 6, kind: 'hatched', label: 'gate · 3m'},
+    {id: 'c', start: 6, end: 9, kind: 'solid', series: 3, label: 'judge · 3m'},
+  ],
+};
+
+/** Bars colored per role, with the legend that names each color; and a strip of steps with its rows. */
 function SeriesBarsDemo(): JSX.Element {
+  const key = [
+    {label: 'implementer', series: 1},
+    {label: 'judge', series: 3},
+    {label: 'gate', hatched: true},
+  ];
   return (
     <Card>
       <Stack>
+        <Stack gap="space-1">
+          <SwatchLegend label="Step colors" items={key} />
+          <Gantt label="Steps over time" strip from={0} to={9} rows={[STEP_STRIP]} />
+        </Stack>
+        <PickList label="Steps">
+          <PickRow id="a" title="implementer" swatch={1} figure="3m" select={noop} />
+          <PickRow id="b" title="gate" hatched figure="3m" select={noop} />
+          <PickRow
+            id="c"
+            title="judge"
+            swatch={3}
+            badges={[{label: 'failed', tone: 'err'}]}
+            figure="3m"
+            select={noop}
+          />
+        </PickList>
         <SwatchLegend
           label="Bar colors"
           items={[
@@ -357,7 +395,7 @@ function ScreenDemo(): JSX.Element {
       <Breadcrumb
         label="Where in the screen"
         items={[
-          {id: 'run', label: 'run', press: noop},
+          {id: 'run', label: 'Run', press: noop},
           {id: 'candidate', label: 'padding'},
         ]}
       />
@@ -441,7 +479,7 @@ export const FRAME_ENTRIES = {
       <Breadcrumb
         label="Zoom"
         items={[
-          {id: 'run', label: 'run', press: noop},
+          {id: 'run', label: 'Run', press: noop},
           {id: 'candidate', label: 'padding', press: noop},
           {id: 'step', label: 'implementer', press: noop},
           {id: 'item', label: 'cargo test --locked'},
@@ -502,6 +540,49 @@ export const FRAME_ENTRIES = {
         The dim lines of the Narrative above: tool calls folded into one line that opens in place; a
         failed call stays visible when closed, and the selected call is marked.
       </Text>
+    ),
+  },
+  FactLine: {
+    render: () => (
+      <Stack>
+        <FactLine>
+          <Fact>
+            <Text variant="code">Passed</Text>
+          </Fact>
+          <Fact>
+            <Text variant="code" tone="muted">
+              0.91× vs base
+            </Text>
+          </Fact>
+          <Fact
+            shrink
+            title="Replace the per-slot sequence numbers of the lock-free ring with a contiguous payload arena"
+          >
+            <Text variant="small" tone="muted">
+              from
+            </Text>
+            <Text variant="small">
+              Replace the per-slot sequence numbers of the lock-free ring with a contiguous payload
+              arena and batched cursor publication
+            </Text>
+          </Fact>
+        </FactLine>
+        <FactLine wrap={false}>
+          <Fact>
+            <Text variant="code">3.83× vs input</Text>
+          </Fact>
+          <Fact shrink>
+            <Text variant="code" tone="muted">
+              this idea · 6,054,154 total_ops_per_sec with a name too long for the line
+            </Text>
+          </Fact>
+        </FactLine>
+      </Stack>
+    ),
+  },
+  Fact: {
+    render: () => (
+      <Text tone="muted">Facts are the entries of the FactLine above: whole, or shrinking.</Text>
     ),
   },
   DotLegend: {render: () => <FilterDemo />},

@@ -179,6 +179,16 @@ describe('the welcome contract', () => {
     expect(woke).toBe(1);
   });
 
+  test('the menu choosing Toggle Sidebar reaches the view', () => {
+    const main = new ParsingMain();
+    let toggled = 0;
+    main.bridge.onToggleSidebar(() => {
+      toggled += 1;
+    });
+    main.subscribed.get('vibesys:toggle-sidebar')?.(undefined);
+    expect(toggled).toBe(1);
+  });
+
   test('every event the main process sends reaches the listener the view registered', () => {
     const main = new ParsingMain();
     const heard: Array<readonly [string, unknown]> = [];

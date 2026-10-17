@@ -8,9 +8,14 @@ import {
   AppShell,
   createSidebarStore,
   PlaceholderScreen,
+  type SidebarPreference,
   WORDMARK,
 } from '@vibesys/feature-app-shell/renderer';
-import type {Screen, SidebarState} from '@vibesys/feature-app-shell/state';
+import {
+  type Screen,
+  type SidebarState,
+  sidebarShortcutLabel,
+} from '@vibesys/feature-app-shell/state';
 import {createMachinesStore, MachinesScreen} from '@vibesys/feature-machines/renderer';
 import {createNewRunStore, machineOptions, NewRunScreen} from '@vibesys/feature-new-run/renderer';
 import {
@@ -94,6 +99,7 @@ export function createShellStores(
   document: ThemeTarget,
   schedule: Schedule,
   page: RunPagePage,
+  sidebarPreference: SidebarPreference,
 ): ShellStores {
   const settings = createSettingsStore(bridge, system);
   const follow = (): void => {
@@ -101,7 +107,7 @@ export function createShellStores(
     if (state.kind === 'ready') applyTheme(shownTheme(state, DEFAULT_APPEARANCE), document);
   };
   settings.subscribe(follow);
-  const sidebar = createSidebarStore(bridge);
+  const sidebar = createSidebarStore(bridge, sidebarPreference);
   const newRun = createNewRunStore(bridge, {
     recent: sidebar.store.getState().recent,
     schedule,
@@ -268,6 +274,7 @@ export function Shell(props: {
       dispatch={sidebar.store.dispatch}
       actions={sidebar.actions}
       version={props.version}
+      shortcut={sidebarShortcutLabel(props.stores.bridge.platform === 'darwin')}
       screen={screen}
     />
   );

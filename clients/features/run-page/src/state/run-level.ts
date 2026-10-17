@@ -7,7 +7,12 @@
 import type {Span} from '@vibesys/contracts';
 import type {AgentNode} from '@vibesys/run-state/agents';
 import type {Candidate, CandidateStep} from '@vibesys/run-state/candidates';
-import {type IdeaResult, type PerformancePoint, performanceFold} from './performance.js';
+import {
+  type IdeaResult,
+  inputValueOf,
+  type PerformancePoint,
+  performanceFold,
+} from './performance.js';
 import type {Direction, RunModel} from './run-model.js';
 import type {RunPageState} from './run-page.js';
 import {type LogScope, streamToFollow} from './scoped-logs.js';
@@ -49,14 +54,8 @@ function bestCandidate(model: RunModel): Candidate | null {
   return model.candidates.candidates.find(item => item.id === id) ?? null;
 }
 
-/** The input's value: any measurement's value over its ratio to the input. */
 function inputValue(model: RunModel): number | null {
-  for (const item of model.candidates.candidates) {
-    const value = item.measurement?.metricValue ?? null;
-    const vs = item.measurement?.vsBaseline ?? null;
-    if (value !== null && vs !== null && vs !== 0) return value / vs;
-  }
-  return null;
+  return inputValueOf(model.candidates.candidates);
 }
 
 export function heroView(model: RunModel): HeroView {
@@ -91,7 +90,14 @@ export interface StripChartView {
     readonly tone: 'accent' | 'muted' | 'err';
     /** After the scrub position: drawn dimmed, not removed. */
     readonly faint: boolean;
+    /**
+     * With an idea open: its point is `focus`, its base idea's `related`, the rest `dim` (all
+     * stay drawn); without one, or when the open idea has no point, the points are not singled out.
+     */
+    readonly emphasis?: 'focus' | 'related' | 'dim';
   }[];
+  /** With an idea open: the stretch of the run clock it took, in minutes, as a band on the x-axis. */
+  readonly spans: readonly {readonly from: number; readonly to: number; readonly label: string}[];
   /** The best passed value so far (the input's until an idea beats it), as a step line that reaches the end of the axis. */
   readonly steps: readonly {readonly x: number; readonly y: number}[];
   readonly reference: {readonly y: number; readonly label: string} | null;
@@ -132,6 +138,51 @@ function pointTone(point: PerformancePoint): 'accent' | 'muted' | 'err' {
   return point.result === 'failed' ? 'err' : 'muted';
 }
 
+/** The open idea's reading of the chart: how each dot is singled out, and the idea's time span. */
+interface FocusReading {
+  emphasisOf(id: string): 'focus' | 'related' | 'dim' | undefined;
+  spans(minutes: (at: number) => number, reached: number | null): StripChartView['spans'];
+}
+
+const NO_FOCUS: FocusReading = {emphasisOf: () => undefined, spans: () => []};
+
+/**
+ * The idea `focus` names in `model` as the chart reads it: its dot is the focus, its base's dot is
+ * related, the others dim (when the idea has a dot to single out); nothing when none is open.
+ */
+function focusOn(
+  model: RunModel,
+  points: readonly PerformancePoint[],
+  focus: string | null,
+): FocusReading {
+  const open = focus === null ? undefined : model.candidates.candidates.find(i => i.id === focus);
+  if (open === undefined) return NO_FOCUS;
+  const dots = points.some(point => point.id === open.id);
+  return {
+    emphasisOf(id) {
+      if (id === open.id) return 'focus';
+      if (id === open.parent) return 'related';
+      return dots ? 'dim' : undefined;
+    },
+    spans(minutes, reached) {
+      const to = open.endedAt ?? reached ?? open.startedAt;
+      return [
+        {
+          from: minutes(open.startedAt),
+          to: minutes(to),
+          label: `${open.title} · ${duration(to - open.startedAt)}`,
+        },
+      ];
+    },
+  };
+}
+
+function emphasisField(emphasis: 'focus' | 'related' | 'dim' | undefined): {
+  readonly emphasis?: 'focus' | 'related' | 'dim';
+} {
+  return emphasis === undefined ? {} : {emphasis};
+}
+
 /**
  * Every measured idea as a point on the run clock (minutes from the run's start) over a y-axis
  * that starts at 0: the ideas that set a new best sit on the step line of the best so far, ideas
@@ -141,16 +192,22 @@ function pointTone(point: PerformancePoint): 'accent' | 'muted' | 'err' {
  * shows and the range of both axes depend on the run alone. `scrub` is the run-clock time the
  * reader scrubbed to (null at the live end); it is drawn as the cursor and dims the points after
  * it. `now` is the live clock, else the run's latest time bounds the x-axis.
+ *
+ * `focus` is the id of the idea the reader has open, or null. It only changes how the same points
+ * are drawn (`emphasis`) and adds the idea's time span; the points, steps, ticks and both axes'
+ * ranges are the same with or without it, so opening an idea never moves the chart.
  */
 export function stripChartView(
   model: RunModel,
   start: number,
   now: number | null,
   scrub: number | null = null,
+  focus: string | null = null,
 ): StripChartView | null {
   const minutes = (at: number) => (at - start) / 60;
   const fold = performanceFold(model.candidates.candidates, model.direction, inputValue(model));
   if (fold.points.length === 0) return null;
+  const open = focusOn(model, fold.points, focus);
   const points = fold.points.map(point => ({
     id: point.id,
     label: `${point.title} · ${formatValue(point.value)} · ${point.best ? 'new best' : RESULT_WORDS[point.result]}`,
@@ -159,6 +216,7 @@ export function stripChartView(
     filled: point.result !== 'pending',
     tone: pointTone(point),
     faint: scrub !== null && point.at > scrub,
+    ...emphasisField(open.emphasisOf(point.id)),
   }));
   const reached = now ?? model.latest;
   const end = Math.max(reached === null ? 0 : minutes(reached), ...points.map(point => point.x));
@@ -172,6 +230,7 @@ export function stripChartView(
   return {
     label: `${typeof metric === 'string' ? metric : 'Metric'} of each measured idea over the run, with the best so far`,
     points,
+    spans: open.spans(minutes, reached),
     steps,
     reference: input === null ? null : {y: input, label: 'input'},
     xTicks: ticks(0, end, value => duration(value * 60)),

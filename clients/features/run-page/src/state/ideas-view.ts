@@ -1,7 +1,7 @@
 /**
- * The run level's Ideas face and best path: one row per candidate, running first and then the
- * rest newest first, the failed collapsed behind a `+ N failed` row unless the filter shows them,
- * and the winning path as a line of names that folds its middle when long.
+ * The run level's Ideas face: one row per candidate, running first and then the rest newest
+ * first, the failed collapsed behind a `+ N failed` row unless the filter shows them. The tree
+ * layout (`ideas-tree.ts`) draws the same rows nested under what each built on.
  *
  * Rows are memoized on the candidate tree and the filter, so a render with neither changed builds
  * nothing (a tree is the same object until a span changes).
@@ -39,12 +39,12 @@ export interface IdeaRow {
   readonly figureTone: IdeaTone;
   /** Running: when it started on the run clock, so the screen words its age. */
   readonly runningSince: number | null;
-  /** `vs best`: the share of the best value (1 is the best); null when nothing was measured. */
+  /** `vs best`: the share of the best value (1 is the best); an empty track when not measured. */
   readonly bar: {
     readonly value: number;
     readonly tone: 'ok' | 'muted';
     readonly label: string;
-  } | null;
+  };
   readonly badges: readonly {readonly label: string; readonly tone: 'ok' | 'neutral'}[];
   /** Where it started from: `input`, else the idea it built on (`parent`, which opens). */
   readonly trail: {readonly label: string; readonly parent: string | null};
@@ -79,11 +79,16 @@ function share(value: number, best: number, direction: Direction): number {
   return Math.min(1, direction === 'min' ? best / value : value / best);
 }
 
-function stateOf(item: Candidate): IdeaRow['state'] {
-  if (item.outcome === 'running') return {tone: 'live', label: 'running'};
-  if (item.outcome === 'passed') return {tone: 'ok', label: 'passed'};
+/** An idea's outcome in words: `running`, `passed`, or `failed`, then why when it is known. */
+export function outcomeWords(item: Candidate): string {
+  if (item.outcome !== 'failed') return item.outcome;
   const why = item.reason ?? item.measurement?.failed?.check ?? null;
-  return {tone: 'err', label: why === null ? 'failed' : `failed · ${words(why)}`};
+  return why === null ? 'failed' : `failed · ${words(why)}`;
+}
+
+function stateOf(item: Candidate): IdeaRow['state'] {
+  const tone = {running: 'live', passed: 'ok', failed: 'err'} as const;
+  return {tone: tone[item.outcome], label: outcomeWords(item)};
 }
 
 /** The figure at the right of an idea's row: its ratio, its failed check's progress, or why not. */
@@ -96,13 +101,26 @@ export function figureOf(item: Candidate): {figure: string; tone: IdeaTone} {
       failed.completed !== null && failed.required !== null
         ? `${failed.completed}/${failed.required}${failed.unit === null ? '' : ` ${failed.unit}`}`
         : words(failed.check);
-    return {figure: progress, tone: 'err'};
+    return {figure: `failed · ${progress}`, tone: 'err'};
   }
   if (measured?.vsBaseline !== null && measured?.vsBaseline !== undefined) {
     return {figure: ratio(measured.vsBaseline), tone: item.outcome === 'passed' ? 'ok' : 'err'};
   }
-  return {figure: item.reason === null ? '–' : words(item.reason), tone: 'muted'};
+  if (item.outcome === 'failed') return {figure: outcomeWords(item), tone: 'err'};
+  return {figure: '–', tone: 'muted'};
 }
+
+/**
+ * An idea the orchestrator has not planned yet: it runs, but no agent has said what it tries, so
+ * its title is the run's placeholder (`round 5`) and its base is not known.
+ */
+function isPlanning(item: Candidate): boolean {
+  return item.outcome === 'running' && item.idea === null && item.hypothesis === null;
+}
+
+/** What a row says before its idea has a name or a base. */
+const PLANNING = 'planning…';
+const BASE_UNKNOWN = '…';
 
 interface RowContext {
   readonly tree: CandidateTree;
@@ -114,36 +132,48 @@ interface RowContext {
   readonly changed: ReadonlySet<string>;
 }
 
+/** The `vs best` share. Every row holds the column, so an unmeasured one leaves an empty track. */
+function barOf(item: Candidate, context: RowContext): IdeaRow['bar'] {
+  const value = item.measurement?.metricValue ?? null;
+  if (value === null || context.best === null) {
+    return {value: 0, tone: 'muted', label: 'not measured'};
+  }
+  return {
+    value: share(value, context.best, context.direction),
+    tone: item.outcome === 'passed' ? 'ok' : 'muted',
+    label: `${formatValue(value)}${context.unit === '' ? '' : ` ${context.unit}`}`,
+  };
+}
+
+/** Where the idea started from: unknown while it is planned, else the input or the idea it built on. */
+function trailOf(item: Candidate, parent: Candidate | null): IdeaRow['trail'] {
+  if (isPlanning(item)) return {label: BASE_UNKNOWN, parent: null};
+  return parent === null
+    ? {label: 'input', parent: null}
+    : {label: parent.title, parent: parent.id};
+}
+
 function rowOf(item: Candidate, context: RowContext): IdeaRow {
   const {figure, tone} = figureOf(item);
-  const value = item.measurement?.metricValue ?? null;
   const parent = item.parent === null ? null : (context.byId.get(item.parent) ?? null);
   const attempts = item.attempts.length;
   return {
     id: item.id,
-    title: item.title,
+    title: isPlanning(item) ? PLANNING : item.title,
     summary: item.idea,
     outcome: item.outcome,
     state: stateOf(item),
     figure,
     figureTone: tone,
     runningSince: item.outcome === 'running' ? item.startedAt : null,
-    bar:
-      value === null || context.best === null
-        ? null
-        : {
-            value: share(value, context.best, context.direction),
-            tone: item.outcome === 'passed' ? 'ok' : 'muted',
-            label: `${formatValue(value)}${context.unit === '' ? '' : ` ${context.unit}`}`,
-          },
+    bar: barOf(item, context),
     badges: [
       ...(context.tree.best?.candidate === item.id
         ? [{label: context.tree.best.adopted ? 'adopted' : 'best', tone: 'ok' as const}]
         : []),
       ...(attempts > 1 ? [{label: `×${attempts}`, tone: 'neutral' as const}] : []),
     ],
-    trail:
-      parent === null ? {label: 'input', parent: null} : {label: parent.title, parent: parent.id},
+    trail: trailOf(item, parent),
     stripe: context.path.has(item.id),
     fresh: context.changed.has(item.id),
   };
@@ -168,10 +198,13 @@ function ordered(candidates: readonly Candidate[]): Candidate[] {
   return [...running, ...rest];
 }
 
-function buildIdeas(model: RunModel, filter: IdeasFilter): IdeasView {
+const rowsMemo = new WeakMap<CandidateTree, ReadonlyMap<string, IdeaRow>>();
+
+/** Every idea's row by id, whatever the filter; the same map while the ideas are unchanged. */
+export function ideaRowsById(model: RunModel): ReadonlyMap<string, IdeaRow> {
   const tree = model.candidates;
-  const counts = {running: 0, passed: 0, failed: 0};
-  for (const item of tree.candidates) counts[item.outcome] += 1;
+  const known = rowsMemo.get(tree);
+  if (known !== undefined) return known;
   const context: RowContext = {
     tree,
     byId: new Map(tree.candidates.map(item => [item.id, item])),
@@ -181,6 +214,16 @@ function buildIdeas(model: RunModel, filter: IdeasFilter): IdeasView {
     unit: unitOf(model),
     changed: model.changed,
   };
+  const rows = new Map(tree.candidates.map(item => [item.id, rowOf(item, context)]));
+  rowsMemo.set(tree, rows);
+  return rows;
+}
+
+function buildIdeas(model: RunModel, filter: IdeasFilter): IdeasView {
+  const tree = model.candidates;
+  const counts = {running: 0, passed: 0, failed: 0};
+  for (const item of tree.candidates) counts[item.outcome] += 1;
+  const rowsById = ideaRowsById(model);
   const query = filter.query.trim();
   const rows: IdeaRow[] = [];
   let hiddenFailed = 0;
@@ -190,7 +233,8 @@ function buildIdeas(model: RunModel, filter: IdeasFilter): IdeasView {
       if (item.outcome === 'failed') hiddenFailed += 1;
       continue;
     }
-    rows.push(rowOf(item, context));
+    const row = rowsById.get(item.id);
+    if (row !== undefined) rows.push(row);
   }
   return {rows, hiddenFailed, counts, total: tree.candidates.length};
 }
@@ -216,59 +260,6 @@ function sameFilter(a: IdeasFilter, b: IdeasFilter): boolean {
   return (
     a.query === b.query && a.passed === b.passed && a.running === b.running && a.failed === b.failed
   );
-}
-
-/** A name on the best path, or the fold standing for the names it hides. */
-type PathCrumb =
-  | {readonly kind: 'idea'; readonly id: string; readonly label: string}
-  | {readonly kind: 'fold'; readonly hidden: number};
-
-export interface BestPathView {
-  readonly crumbs: readonly PathCrumb[];
-  /** The best's ratio to the input, or null when it measured none. */
-  readonly ratio: string | null;
-}
-
-/** Shown whole up to this many names; longer paths fold their middle unless opened. */
-const PATH_SHOWN = 5;
-
-const pathMemo = new WeakMap<CandidateTree, Map<boolean, BestPathView | null>>();
-
-/**
- * The winning path from the input to the best, folded in the middle when long and not `open`; the
- * same object while the ideas and `open` are unchanged.
- */
-export function bestPathView(
-  model: RunModel,
-  open: boolean,
-  meter?: ViewMeter,
-): BestPathView | null {
-  const tree = model.candidates;
-  const views = pathMemo.get(tree) ?? new Map<boolean, BestPathView | null>();
-  pathMemo.set(tree, views);
-  const cached = views.get(open);
-  if (cached !== undefined) return cached;
-  meter?.count(tree.candidates.length);
-  const view = buildPath(tree, open);
-  views.set(open, view);
-  return view;
-}
-
-function buildPath(tree: CandidateTree, open: boolean): BestPathView | null {
-  if (tree.bestPath.length === 0) return null;
-  const byId = new Map(tree.candidates.map(item => [item.id, item]));
-  const names: PathCrumb[] = tree.bestPath.map(id => ({
-    kind: 'idea',
-    id,
-    label: byId.get(id)?.title ?? id,
-  }));
-  const crumbs: PathCrumb[] =
-    open || names.length <= PATH_SHOWN
-      ? names
-      : [...names.slice(0, 2), {kind: 'fold', hidden: names.length - 4}, ...names.slice(-2)];
-  const best = byId.get(tree.bestPath.at(-1) ?? '');
-  const vs = best?.measurement?.vsBaseline ?? null;
-  return {crumbs, ratio: vs === null ? null : ratio(vs)};
 }
 
 /** How long ago `since` was on the run clock at `now`, as the rows word it. */

@@ -36,8 +36,12 @@ export type TurnRow =
       readonly kind: 'reply';
       readonly id: string;
       readonly author: string;
+      /** The reply model's name (`OrchestratorPlan`): what kind of reply this is. */
+      readonly replyKind: string;
       readonly title: string;
       readonly fields: readonly ReplyFieldView[];
+      /** The validated reply as JSON, for a reader that knows the kind. */
+      readonly value: Readonly<Record<string, unknown>>;
       readonly raw: string;
     }
   | {
@@ -140,8 +144,10 @@ function replyRow(entry: TranscriptEntry, author: string): TurnRow {
     kind: 'reply',
     id: entry.id,
     author,
+    replyKind: reply.kind,
     title: replyTitle(reply.kind),
     fields: replyFields(reply.json_schema as Readonly<Record<string, unknown>>, value),
+    value,
     raw: JSON.stringify(value, null, 2),
   };
 }

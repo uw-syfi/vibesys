@@ -42,6 +42,7 @@ function fakeBridge(): WelcomeBridge {
     onListing: ignore,
     onRecent: ignore,
     onPreferences: ignore,
+    onToggleSidebar: ignore,
     describeMachine: () => ok({kind: 'unsupported' as const}),
     harnesses: () => ok({kind: 'unsupported' as const}),
     examples: () => ok({kind: 'unsupported' as const}),
@@ -65,6 +66,7 @@ test('the page follows the stored theme for the system mode, and each change of 
         throw new Error('this test opens no run');
       },
     },
+    {read: () => null, write: ignore},
   );
   await Promise.resolve();
   await Promise.resolve();
@@ -92,6 +94,7 @@ test('New run opened for a machine starts on it; opened plainly, it keeps its ma
         throw new Error('this test opens no run');
       },
     },
+    {read: () => null, write: ignore},
   );
   const select = (screen: Screen): void => stores.sidebar.store.dispatch({type: 'select', screen});
   const machine = () => stores.newRun.getState().context.form.machine;
@@ -118,6 +121,7 @@ test('regression: Run again opens New run with the options the run was started w
         throw new Error('this test opens no run');
       },
     },
+    {read: () => null, write: ignore},
   );
   const run = {host: 'ssh:gpu-box', runId: '20261015-163047'} as const;
   stores.sidebar.store.dispatch({

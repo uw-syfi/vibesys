@@ -174,7 +174,12 @@ def _run(
 
 @pytest.mark.parametrize("role", _ROLES, ids=lambda role: role.name)
 @settings(
-    max_examples=8, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=8,
+    deadline=None,
+    # A reply model with a cross-field validator (the performance evaluator's metrics must match
+    # its trend fields) accepts about 1% of schema-shaped values by design, so `_replies` filters
+    # heavily; whether Hypothesis's filter health check fired was a matter of the seed.
+    suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.filter_too_much],
 )
 @given(data=st.data())
 def test_every_role_reply_is_reported_as_its_typed_reply(

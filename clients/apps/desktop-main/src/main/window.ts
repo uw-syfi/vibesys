@@ -10,7 +10,12 @@
  */
 
 import type {RelayPort} from '@vibesys/feature-run-control/main';
-import {CONNECT_CHANNEL, WAKE_CHANNEL, type WelcomeEvent} from '@vibesys/ipc';
+import {
+  CONNECT_CHANNEL,
+  TOGGLE_SIDEBAR_CHANNEL,
+  WAKE_CHANNEL,
+  type WelcomeEvent,
+} from '@vibesys/ipc';
 import {BaseWindow, ipcMain, type MessagePortMain, type WebContentsView} from 'electron';
 import {SHELL_URL} from './app-assets.js';
 import {sandboxedView} from './app-security.js';
@@ -172,6 +177,14 @@ export class AppWindow {
     const surface = this.#pages.current;
     if (surface !== null && !surface.webContents.isDestroyed()) {
       surface.webContents.send(channel, event);
+    }
+  }
+
+  /** Tell the surface the menu asked to toggle its sidebar. */
+  toggleSidebar(): void {
+    const surface = this.#pages.current;
+    if (surface !== null && !surface.webContents.isDestroyed()) {
+      surface.webContents.send(TOGGLE_SIDEBAR_CHANNEL);
     }
   }
 

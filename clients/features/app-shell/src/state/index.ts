@@ -23,3 +23,10 @@ export {
   sidebarInvariants,
   sidebarStep,
 } from './sidebar.js';
+export {
+  isSidebarShortcut,
+  parseSidebarShown,
+  type ShortcutKey,
+  sidebarShortcutLabel,
+  storeSidebarShown,
+} from './sidebar-visibility.js';

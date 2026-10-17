@@ -93,7 +93,12 @@ export class CandidateFold {
     if (this.#tree !== null) return this.#tree;
     const candidates = this.#list();
     const best = this.#adoption === null ? null : this.#adopted(this.#adoption);
-    const tree = {candidates, best, bestPath: pathTo(candidates, best?.candidate ?? null)};
+    const tree = {
+      candidates,
+      best,
+      adoptionOpened: this.#adoption !== null,
+      bestPath: pathTo(candidates, best?.candidate ?? null),
+    };
     this.#meter.count(candidates.length);
     this.#tree = tree;
     return tree;

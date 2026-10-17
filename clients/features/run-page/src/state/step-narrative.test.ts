@@ -35,8 +35,10 @@ const reply: TurnRow = {
   kind: 'reply',
   id: 'r',
   author: 'Agent',
+  replyKind: 'Result',
   title: 'Result',
   fields: [],
+  value: {},
   raw: '{}',
 };
 
@@ -44,14 +46,14 @@ const shape = (narrative: TurnNarrative): string[] =>
   narrative.blocks.map(block => `${block.kind}:${block.id}`);
 
 describe('an agent turn as narrative', () => {
-  test('keeps thinking and text in time order, with the structured reply first', () => {
+  test('keeps thinking and text in time order, with the structured reply last', () => {
     const narrative = narrativeOf([
       say('a', 'reasoning', 'hmm'),
       say('b', 'reply', 'I will pad'),
       reply,
       say('c', 'reasoning', 'ok'),
     ]);
-    expect(shape(narrative)).toEqual(['reply:r', 'thought:a', 'said:b', 'thought:c']);
+    expect(shape(narrative)).toEqual(['thought:a', 'said:b', 'thought:c', 'reply:r']);
   });
 
   test('folds consecutive tool calls into one group, and text splits groups', () => {
@@ -110,6 +112,30 @@ describe('an agent turn as narrative', () => {
         rows.flatMap(row => (row.kind === 'tool' ? [row.id] : [])),
       );
       expect(new Set(shape(narrative)).size).toBe(narrative.blocks.length);
+    }
+  });
+
+  test('whatever the order of the rows, the replies come last, in the order they arrived', () => {
+    let seed = 11;
+    const next = (): number => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed;
+    };
+    for (let round = 0; round < 50; round++) {
+      const rows: TurnRow[] = Array.from({length: 40}, (_, index) => {
+        const pick = next() % 5;
+        if (pick === 0) return {...reply, id: `r${index}`};
+        if (pick === 1) return say(`m${index}`, 'reasoning', 'x');
+        return tool(`t${index}`);
+      });
+      const kinds = narrativeOf(rows).blocks.map(block => block.kind);
+      const firstReply = kinds.indexOf('reply');
+      if (firstReply >= 0)
+        expect(kinds.slice(firstReply).every(kind => kind === 'reply')).toBe(true);
+      const replies = narrativeOf(rows).blocks.flatMap(block =>
+        block.kind === 'reply' ? [block.id] : [],
+      );
+      expect(replies).toEqual(rows.flatMap(row => (row.kind === 'reply' ? [row.id] : [])));
     }
   });
 

@@ -62,6 +62,13 @@ export interface TraceLog {
   readonly latest: number | null;
   /** The latest run-clock time the base's spans carry: when the snapshot was taken, or null. */
   readonly baseLatest: number | null;
+  /**
+   * The log this one replaced when a snapshot or a replay moved its base, so the scrubber keeps
+   * what it could reach: `positions` and `calls` cover both logs, and a sequence below `handoff`
+   * is read from `earlier` (what the page itself had folded then), not from this base.
+   */
+  readonly earlier: TraceLog | null;
+  readonly handoff: number;
 }
 
 const TRACE_SPAN_EVENTS: ReadonlySet<string> = new Set([
@@ -123,8 +130,40 @@ export function traceLog(
     calls: AppendLog.of<number>([]),
     latest: baseLatest,
     baseLatest,
+    earlier: null,
+    handoff: base.sequence,
   };
   return events.length === 0 ? empty : extended(empty, events);
+}
+
+/** The sequences of `positions` below `handoff`. */
+function before(positions: AppendLog<number>, handoff: number): number[] {
+  return positions.slice(
+    0,
+    positions.countWhile(position => position < handoff),
+  );
+}
+
+/**
+ * `next` (a log that replaced `previous`) with the scrubber's reach kept: the positions and planning
+ * calls of `previous` below `handoff` stay, and those sequences are read from `previous`. A log
+ * with nothing to scrub to has nothing to keep.
+ */
+function replacing(next: TraceLog, previous: TraceLog, handoff: number): TraceLog {
+  if (previous.positions.length <= 1) return next;
+  return {
+    ...next,
+    positions: AppendLog.of([
+      ...before(previous.positions, handoff),
+      ...next.positions.slice(next.positions.countWhile(position => position < handoff)),
+    ]),
+    calls: AppendLog.of([
+      ...before(previous.calls, handoff),
+      ...next.calls.slice(next.calls.countWhile(start => start < handoff)),
+    ]),
+    earlier: previous,
+    handoff,
+  };
 }
 
 export const EMPTY_TRACE_LOG: TraceLog = traceLog(EMPTY_TRACE, null, []);
@@ -173,16 +212,20 @@ export function traceStep(log: TraceLog, data: RunData, meter?: WorkMeter): Trac
       const after = log.events.slice(
         log.events.countWhile(event => (event.sequence ?? 0) <= base.sequence),
       );
-      return traceLog(base, overviewFromSnapshot(data.snapshot), after);
+      return replacing(
+        traceLog(base, overviewFromSnapshot(data.snapshot), after),
+        log,
+        base.sequence,
+      );
     }
     case 'events':
       return appended(log, data.events, meter);
-    case 'rebootstrap':
-      return appended(
-        data.base === 'preserve' ? traceLog(log.base, log.baseOverview, []) : EMPTY_TRACE_LOG,
-        data.events,
-        meter,
-      );
+    case 'rebootstrap': {
+      if (data.base === 'reset') return appended(EMPTY_TRACE_LOG, data.events, meter);
+      const replayed = appended(traceLog(log.base, log.baseOverview, []), data.events, meter);
+      // What the replay does not replace stays reachable: the page's own earlier fold.
+      return replacing(replayed, log, replayed.positions.at(1) ?? log.base.sequence);
+    }
   }
 }
 
@@ -201,12 +244,14 @@ function eventsAt(log: TraceLog, at: number): readonly RunEvent[] {
  */
 export function traceAt(log: TraceLog, at: number | null): RunTrace {
   if (at === null || at >= lastSequence(log)) return log.head;
+  if (log.earlier !== null && at < log.handoff) return traceAt(log.earlier, at);
   return foldTrace(log.base, eventsAt(log, at));
 }
 
 /** The run's overview at sequence `at`, or at the live end when `at` is null. */
 export function overviewAt(log: TraceLog, at: number | null): RunOverview | null {
   if (at === null || at >= lastSequence(log)) return log.headOverview;
+  if (log.earlier !== null && at < log.handoff) return overviewAt(log.earlier, at);
   return foldOverview(log.baseOverview, eventsAt(log, at));
 }
 

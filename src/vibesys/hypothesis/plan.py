@@ -13,6 +13,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from vs_core.api import markdown_prose, plain_line
 from vs_issue_tracker.api import RoadmapItem
 from vs_runtime.api import AgentId
 
@@ -136,7 +137,10 @@ class HypothesisStrategyUpdate(BaseModel):
     # Exact: it is matched against recorded hypothesis IDs, never normalized.
     hypothesis_id: AgentId
     disposition: HypothesisStrategyDisposition
-    reason: str = Field(min_length=1)
+    reason: str = Field(
+        min_length=1,
+        description=markdown_prose("Why this hypothesis is parked or abandoned."),
+    )
 
     @field_validator("reason")
     @classmethod
@@ -183,36 +187,40 @@ class OrchestratorPlan(BaseModel):
     )
     hypothesis: str = Field(
         default="",
-        description="Causal, falsifiable claim explaining why the proposed change should help.",
+        description=markdown_prose(
+            "Causal, falsifiable claim explaining why the proposed change should help."
+        ),
     )
     title: str = Field(
         default="",
-        description=(
+        description=plain_line(
             f"Short plain-language title (<={HYPOTHESIS_TITLE_MAX_LEN} chars, no "
             f"trailing period or 'Hypothesis:' prefix)."
         ),
     )
     activation_evidence: str = Field(
         default="",
-        description=(
+        description=markdown_prose(
             "Concise observable evidence that the intended code path or mechanism "
             "ran; include only hypothesis-specific signals."
         ),
     )
     falsification_criteria: str = Field(
         default="",
-        description="Evidence that would disprove the causal hypothesis for this workload.",
+        description=markdown_prose(
+            "Evidence that would disprove the causal hypothesis for this workload."
+        ),
     )
     expected_effect: str = Field(
         default="",
-        description=(
+        description=markdown_prose(
             "Analytical forecast range used to prioritize and later calibrate the "
             "hypothesis; this is not an acceptance threshold."
         ),
     )
     minimum_acceptance_criteria: str = Field(
         default="",
-        description=(
+        description=markdown_prose(
             "Minimum observed end-to-end benefit and allowed tradeoffs that justify "
             "retaining the change, derived separately from forecast uncertainty, "
             "benchmark noise, and implementation cost."
@@ -220,7 +228,7 @@ class OrchestratorPlan(BaseModel):
     )
     invariants: str = Field(
         default="",
-        description=(
+        description=markdown_prose(
             "Hypothesis-specific invariants and diagnostics. Cite authoritative "
             "objective/runtime paths for stable constraints instead of restating them."
         ),
@@ -233,13 +241,13 @@ class OrchestratorPlan(BaseModel):
         ),
     )
     task: str = Field(
-        description=(
+        description=markdown_prose(
             "Causally complete component/interface and staged-evaluation delta handed "
             "to the implementer, without restating stable authoritative contracts."
         )
     )
     pass_criteria: str = Field(
-        description=(
+        description=markdown_prose(
             "Hypothesis-specific activation, correctness, cleanup, and evidence gates. "
             "Reference stable trusted gates by path; they run separately when configured."
         )
@@ -254,5 +262,7 @@ class OrchestratorPlan(BaseModel):
         ),
     )
     reasoning: str = Field(
-        description="Brief decisive comparison supporting this round's parent and mechanism."
+        description=markdown_prose(
+            "Brief decisive comparison supporting this round's parent and mechanism."
+        )
     )
