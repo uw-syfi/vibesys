@@ -39,12 +39,12 @@ export interface IdeaRow {
   readonly figureTone: IdeaTone;
   /** Running: when it started on the run clock, so the screen words its age. */
   readonly runningSince: number | null;
-  /** `vs best`: the share of the best value (1 is the best); null when nothing was measured. */
+  /** `vs best`: the share of the best value (1 is the best); an empty track when not measured. */
   readonly bar: {
     readonly value: number;
     readonly tone: 'ok' | 'muted';
     readonly label: string;
-  } | null;
+  };
   readonly badges: readonly {readonly label: string; readonly tone: 'ok' | 'neutral'}[];
   /** Where it started from: `input`, else the idea it built on (`parent`, which opens). */
   readonly trail: {readonly label: string; readonly parent: string | null};
@@ -101,13 +101,26 @@ export function figureOf(item: Candidate): {figure: string; tone: IdeaTone} {
       failed.completed !== null && failed.required !== null
         ? `${failed.completed}/${failed.required}${failed.unit === null ? '' : ` ${failed.unit}`}`
         : words(failed.check);
-    return {figure: progress, tone: 'err'};
+    return {figure: `failed · ${progress}`, tone: 'err'};
   }
   if (measured?.vsBaseline !== null && measured?.vsBaseline !== undefined) {
     return {figure: ratio(measured.vsBaseline), tone: item.outcome === 'passed' ? 'ok' : 'err'};
   }
-  return {figure: item.reason === null ? '–' : words(item.reason), tone: 'muted'};
+  if (item.outcome === 'failed') return {figure: outcomeWords(item), tone: 'err'};
+  return {figure: '–', tone: 'muted'};
 }
+
+/**
+ * An idea the orchestrator has not planned yet: it runs, but no agent has said what it tries, so
+ * its title is the run's placeholder (`round 5`) and its base is not known.
+ */
+function isPlanning(item: Candidate): boolean {
+  return item.outcome === 'running' && item.idea === null && item.hypothesis === null;
+}
+
+/** What a row says before its idea has a name or a base. */
+const PLANNING = 'planning…';
+const BASE_UNKNOWN = '…';
 
 interface RowContext {
   readonly tree: CandidateTree;
@@ -119,36 +132,48 @@ interface RowContext {
   readonly changed: ReadonlySet<string>;
 }
 
+/** The `vs best` share. Every row holds the column, so an unmeasured one leaves an empty track. */
+function barOf(item: Candidate, context: RowContext): IdeaRow['bar'] {
+  const value = item.measurement?.metricValue ?? null;
+  if (value === null || context.best === null) {
+    return {value: 0, tone: 'muted', label: 'not measured'};
+  }
+  return {
+    value: share(value, context.best, context.direction),
+    tone: item.outcome === 'passed' ? 'ok' : 'muted',
+    label: `${formatValue(value)}${context.unit === '' ? '' : ` ${context.unit}`}`,
+  };
+}
+
+/** Where the idea started from: unknown while it is planned, else the input or the idea it built on. */
+function trailOf(item: Candidate, parent: Candidate | null): IdeaRow['trail'] {
+  if (isPlanning(item)) return {label: BASE_UNKNOWN, parent: null};
+  return parent === null
+    ? {label: 'input', parent: null}
+    : {label: parent.title, parent: parent.id};
+}
+
 function rowOf(item: Candidate, context: RowContext): IdeaRow {
   const {figure, tone} = figureOf(item);
-  const value = item.measurement?.metricValue ?? null;
   const parent = item.parent === null ? null : (context.byId.get(item.parent) ?? null);
   const attempts = item.attempts.length;
   return {
     id: item.id,
-    title: item.title,
+    title: isPlanning(item) ? PLANNING : item.title,
     summary: item.idea,
     outcome: item.outcome,
     state: stateOf(item),
     figure,
     figureTone: tone,
     runningSince: item.outcome === 'running' ? item.startedAt : null,
-    bar:
-      value === null || context.best === null
-        ? null
-        : {
-            value: share(value, context.best, context.direction),
-            tone: item.outcome === 'passed' ? 'ok' : 'muted',
-            label: `${formatValue(value)}${context.unit === '' ? '' : ` ${context.unit}`}`,
-          },
+    bar: barOf(item, context),
     badges: [
       ...(context.tree.best?.candidate === item.id
         ? [{label: context.tree.best.adopted ? 'adopted' : 'best', tone: 'ok' as const}]
         : []),
       ...(attempts > 1 ? [{label: `×${attempts}`, tone: 'neutral' as const}] : []),
     ],
-    trail:
-      parent === null ? {label: 'input', parent: null} : {label: parent.title, parent: parent.id},
+    trail: trailOf(item, parent),
     stripe: context.path.has(item.id),
     fresh: context.changed.has(item.id),
   };

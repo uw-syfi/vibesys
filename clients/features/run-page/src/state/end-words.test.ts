@@ -193,6 +193,22 @@ describe('the ended banner', () => {
     }
   });
 
+  test('claims no final verdict while the history is still being read', () => {
+    // Regression: a prefix of an opened run's history read as "Adopted the candidate from round 1".
+    const rounds = [1, 2, 3, 4, 5, 6].map(n => round(n, 100 * n, 1 + n));
+    const full = [ROOT, ...rounds.flat()];
+    for (let count = 0; count <= rounds.length; count += 1) {
+      const prefix = [ROOT, ...rounds.slice(0, count).flat()];
+      const reading = {
+        ...ended('adopted', 'adopted: s', prefix),
+        history: {kind: 'reading', token: 1, from: 1},
+      } as const;
+      expect(endedView(reading)?.reason).toMatch(/^Reading the run.s history/);
+    }
+    const read = {...ended('adopted', 'adopted: s', full), history: {kind: 'read'}} as const;
+    expect(endedView(read)?.reason).toMatch(/^Adopted the candidate from round /);
+  });
+
   test('shows a failure’s own message', () => {
     expect(endReason('failed', 'W6’s benchmark timed out after 300 s.', null, 'max')).toBe(
       'W6’s benchmark timed out after 300 s.',

@@ -238,6 +238,15 @@ describe('the plan an orchestrator turn ends with', () => {
     expect(resultOf(w, 'turn2', null)?.builtOn).toBeNull();
   });
 
+  test('a turn of another role (a judge) builds on nothing, whatever its reply carries', () => {
+    const w = world(recorded);
+    const last = w.narrative('turn2')?.blocks.at(-1);
+    if (last?.kind !== 'reply') throw new Error('no reply');
+    const judged = turnResult({...last.reply, author: 'Judge'}, w.context(2));
+    expect(judged.builtOn).toBeNull();
+    expect(judged.summary).not.toContain('builds on');
+  });
+
   test('leads the turn with one line: the title and what it builds on', () => {
     const w = world(recorded);
     expect(resultOf(w, 'turn2', 2)?.summary).toBe(

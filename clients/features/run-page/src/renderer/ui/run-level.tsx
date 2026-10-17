@@ -186,7 +186,7 @@ function IdeaPickRow(props: {
       {...(compact || row.summary === null ? {} : {summary: row.summary})}
       state={row.state}
       badges={compact || reported === null ? row.badges : [...row.badges, reported]}
-      {...(compact || row.bar === null ? {} : {bar: row.bar})}
+      {...(compact ? {} : {bar: row.bar})}
       figure={row.runningSince === null ? row.figure : ageWords(row.runningSince, props.now)}
       figureTone={row.figureTone}
       {...(compact ? {} : {trail: {label: row.trail.label}})}
