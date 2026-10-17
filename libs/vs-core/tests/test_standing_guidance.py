@@ -134,7 +134,7 @@ def _toy_matches(name: str, request: core.DispatchTurn | core.ResumeSessionTurn)
 @settings(max_examples=examples(pr=4, nightly=40), deadline=None, derandomize=True, database=None)
 @given(scenario=SCENARIOS, target=_TARGETS, reload=st.booleans())
 def test_standing_guidance_reaches_every_dispatched_and_resumed_turn_of_its_target(
-    scenario: Scenario, target: str, reload: bool
+    scenario: Scenario, target: str, *, reload: bool
 ) -> None:
     """On the real kernel: each fresh and resumed turn of the target gets it once, until it ends.
 
