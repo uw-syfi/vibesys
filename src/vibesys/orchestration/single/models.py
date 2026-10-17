@@ -7,7 +7,7 @@ from vibesys.hypothesis import (
     SkillResourceSelection,
 )
 from vibesys.orchestration.review import Verdict
-from vs_core.api.search import RevisionReply
+from vs_core.api.search import RevisionReply, markdown_prose
 
 
 class SingleAgentRoundResponse(RevisionReply):
@@ -20,15 +20,20 @@ class SingleAgentRoundResponse(RevisionReply):
     verdict.
     """
 
-    summary: str = Field(description="What was implemented or changed this round.")
+    summary: str = Field(description=markdown_prose("What was implemented or changed this round."))
     expected_behavior: str = Field(
-        description="What behavior the implementation should exhibit (server contract, etc.)."
+        description=markdown_prose(
+            "What behavior the implementation should exhibit (server contract, etc.)."
+        )
     )
     self_review: str = Field(
-        description="Self-review of correctness, accuracy, benchmark sanity, and reward-hack risk — same gates the judge would enforce."
+        description=markdown_prose(
+            "Self-review of correctness, accuracy, benchmark sanity, and reward-hack risk — "
+            "same gates the judge would enforce."
+        )
     )
     feedback: str = Field(
-        description="Concrete issues to fix on retry; empty when verdict is PASS."
+        description=markdown_prose("Concrete issues to fix on retry; empty when verdict is PASS.")
     )
     verdict: Verdict = Field(
         description=(
@@ -37,11 +42,17 @@ class SingleAgentRoundResponse(RevisionReply):
             "completion. FAIL otherwise."
         )
     )
-    bottlenecks: str = Field(description="Ranked profile bottlenecks with concrete numbers.")
-    suggestions: str = Field(
-        description="Actionable optimization suggestions for the next round, tied to bottlenecks."
+    bottlenecks: str = Field(
+        description=markdown_prose("Ranked profile bottlenecks with concrete numbers.")
     )
-    profile_analysis: str = Field(description="Detailed interpretation of the captured profile.")
+    suggestions: str = Field(
+        description=markdown_prose(
+            "Actionable optimization suggestions for the next round, tied to bottlenecks."
+        )
+    )
+    profile_analysis: str = Field(
+        description=markdown_prose("Detailed interpretation of the captured profile.")
+    )
     perf_metric: FiniteFloat | None = Field(
         default=None,
         description="Headline perf metric from the benchmark (per OBJECTIVE.md). None if not measured.",
@@ -68,7 +79,7 @@ class SingleAgentRoundResponse(RevisionReply):
     )
     candidate_retention_reason: str = Field(
         default="",
-        description="Reason for retaining or discarding the candidate checkpoint.",
+        description=markdown_prose("Reason for retaining or discarding the candidate checkpoint."),
     )
     skill_context_updates: list[SkillResourceSelection] = Field(
         default_factory=list,

@@ -10,16 +10,18 @@ from vibesys.hypothesis import (
     SkillResourceSelection,
 )
 from vibesys.orchestration.review import Verdict
-from vs_core.api.search import RevisionReply
+from vs_core.api.search import RevisionReply, markdown_prose
 from vs_runtime.api import VALIDATION_RECIPE_ARTIFACT_DESCRIPTION, ValidationRecipeArtifactPath
 
 
 class ImplementerResponse(RevisionReply):
     """Structured response from a multi-policy implementer."""
 
-    summary: str = Field(description="What was implemented or changed this iteration.")
+    summary: str = Field(
+        description=markdown_prose("What was implemented or changed this iteration.")
+    )
     expected_behavior: str = Field(
-        description="Observable behavior expected from the implementation."
+        description=markdown_prose("Observable behavior expected from the implementation.")
     )
     hypothesis_outcome: HypothesisOutcome = Field(
         default=HypothesisOutcome.NOMINATED,
@@ -30,11 +32,13 @@ class ImplementerResponse(RevisionReply):
     )
     evidence: str = Field(
         default="",
-        description="Observed evidence supporting the reported hypothesis outcome.",
+        description=markdown_prose("Observed evidence supporting the reported hypothesis outcome."),
     )
     next_step: str = Field(
         default="",
-        description="Concrete remaining action for a nonterminal or failed outcome.",
+        description=markdown_prose(
+            "Concrete remaining action for a nonterminal or failed outcome."
+        ),
     )
     perf_metric: FiniteFloat | None = Field(
         default=None,
@@ -72,7 +76,7 @@ class ImplementerResponse(RevisionReply):
     )
     candidate_retention_reason: str = Field(
         default="",
-        description="Reason for the checkpoint retention recommendation.",
+        description=markdown_prose("Reason for the checkpoint retention recommendation."),
     )
     skill_context_updates: list[SkillResourceSelection] = Field(
         default_factory=list,
@@ -95,12 +99,14 @@ class JudgeResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     analysis: str = Field(
-        description=(
+        description=markdown_prose(
             "Detailed analysis covering correctness, completeness, dependencies, "
             "tests, and code quality."
         )
     )
-    feedback: str = Field(description="Specific actionable feedback. Empty string if passing.")
+    feedback: str = Field(
+        description=markdown_prose("Specific actionable feedback. Empty string if passing.")
+    )
     verdict: Verdict = Field(
         description=(
             "PASS when verified evidence supports the declared outcome and checkpoint "
@@ -127,9 +133,9 @@ class PreRoundDecision(BaseModel):
     )
     profile_focus: str = Field(
         default="",
-        description="Profiler guidance. Empty when need_profile is False.",
+        description=markdown_prose("Profiler guidance. Empty when need_profile is False."),
     )
-    reasoning: str = Field(description="Short explanation of the decision.")
+    reasoning: str = Field(description=markdown_prose("Short explanation of the decision."))
 
 
 __all__ = ["ImplementerResponse", "JudgeResponse", "PreRoundDecision"]
