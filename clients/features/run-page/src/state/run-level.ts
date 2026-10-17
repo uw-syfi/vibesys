@@ -8,9 +8,11 @@ import type {Span} from '@vibesys/contracts';
 import type {AgentNode} from '@vibesys/run-state/agents';
 import type {Candidate, CandidateStep} from '@vibesys/run-state/candidates';
 import type {Direction, RunModel} from './run-model.js';
+import type {RunPageState} from './run-page.js';
+import {type LogScope, streamToFollow} from './scoped-logs.js';
 import {duration, formatValue, ratio} from './span-reading.js';
 import {openWaits} from './span-words.js';
-import type {Route} from './zoom.js';
+import {type Route, routeLevel} from './zoom.js';
 
 export interface HeroView {
   /** The metric and which way is better: `throughput ↑`. */
@@ -301,4 +303,32 @@ export function resolveZoom(model: RunModel, route: Route): ResolvedZoom {
   if (route.step !== null && agent !== null)
     step = turnStep(model.trace.spans.get(route.step), agent);
   return {idea, agent, step, item: step === null ? null : route.item};
+}
+
+/**
+ * Whose logs the screen shows for `route`, or null when no Logs face is on screen: the run's at the
+ * run level, an idea's at the idea, a step's at the step (under an idea or an agent). An agent and
+ * an item have no Logs face. The shell follows the shown stream with it (`streamToFollow`).
+ */
+export function shownLogScope(route: Route, zoomed: ResolvedZoom): LogScope | null {
+  if (route.mode !== 'logs') return null;
+  if (routeLevel(route) === 'run' || (zoomed.idea === null && zoomed.agent === null)) {
+    return {kind: 'run'};
+  }
+  if (zoomed.step !== null) return zoomed.item === null ? {kind: 'step', step: zoomed.step} : null;
+  return zoomed.idea === null ? null : {kind: 'idea', idea: zoomed.idea};
+}
+
+/**
+ * The stream the page must select so it fetches what the Logs face on screen shows, or null when
+ * no Logs face is on screen or the page already follows it. The shell dispatches `select-stream`
+ * with it; a view runs no effects.
+ */
+export function logStreamToFollow(
+  state: RunPageState,
+  model: RunModel,
+  route: Route,
+): string | null {
+  const scope = shownLogScope(route, resolveZoom(model, route));
+  return scope === null ? null : streamToFollow(state, scope);
 }

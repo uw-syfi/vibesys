@@ -3,10 +3,19 @@ import type {RunEvent, Span} from '@vibesys/contracts';
 import {EMPTY_TRACE} from '@vibesys/run-state/trace';
 import {bestPathView, IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
 import {EMPTY_TRACE_LOG, type TraceLog, traceAt, traceLog, traceStep} from './live.js';
-import {clockCarried, heroView, nowView, resolveZoom} from './run-level.js';
+import {
+  clockCarried,
+  heroView,
+  logStreamToFollow,
+  nowView,
+  resolveZoom,
+  shownLogScope,
+} from './run-level.js';
 import {createRunReader} from './run-model.js';
+import {type RunPageState, runPageInitial, runPageStep} from './run-page.js';
+import {scopedLogs} from './scoped-logs.js';
 import {scrubberView} from './scrub.js';
-import {RUN_ROUTE} from './zoom.js';
+import {type Route, RUN_MODES, RUN_ROUTE} from './zoom.js';
 
 const ROOT: Span = {
   id: 'flow:search/#1',
@@ -314,5 +323,74 @@ describe('the run level', () => {
     const stale = resolveZoom(model, {...route, step: 'gone'});
     expect([stale.idea?.title, stale.step, stale.item]).toEqual(['ring-pad', null, null]);
     expect(resolveZoom(model, {...route, idea: 'gone'}).idea).toBeNull();
+  });
+});
+
+describe('following the Logs face', () => {
+  const model = createRunReader().read(logOf(run()), null);
+
+  function stream(id: string, span: string | null, live: boolean) {
+    return {
+      id,
+      owner: {kind: 'gate_stage', gate: 'build', execution_id: id, attempt: 0, span_id: span},
+      command: 'cmd',
+      retained_start: 0,
+      size: 0,
+      outcome: live ? null : 'ended',
+    };
+  }
+
+  function page(): RunPageState {
+    const initial = runPageInitial({
+      identity: {host: 'ssh:chelan4', runId: 'run'},
+      title: {project: 'queue-rs', task: 'mpmc'},
+      hostLabel: 'chelan4',
+      unavailable: {},
+    });
+    const streams = [
+      stream('s-run', null, false),
+      stream('s-ring-pad', 'flow:w2/turn/#1', false),
+      stream('s-arena', 'flow:w4/turn/#1', true),
+    ];
+    return {...initial, logs: {kind: 'listed', instanceId: 'i', streams}} as RunPageState;
+  }
+
+  const ROUTES: readonly Route[] = RUN_MODES.flatMap(mode => [
+    {...RUN_ROUTE, mode},
+    {...RUN_ROUTE, mode, idea: 'flow:w2/#1'},
+    {...RUN_ROUTE, mode, idea: 'flow:w2/#1', step: 'flow:w2/turn/#1'},
+    {...RUN_ROUTE, mode, idea: 'flow:w2/#1', step: 'flow:w2/turn/#1', item: 'tool-1'},
+    {...RUN_ROUTE, mode, idea: 'flow:w4/#1'},
+    {...RUN_ROUTE, mode, idea: 'gone'},
+  ]);
+
+  test('selects the stream the face shows, once, and nothing when no Logs face is on screen', () => {
+    for (const route of ROUTES) {
+      let state = page();
+      let dispatched = 0;
+      for (
+        let follow = logStreamToFollow(state, model, route);
+        follow !== null && dispatched < 3;
+      ) {
+        state = runPageStep(state, {type: 'select-stream', streamId: follow}).state;
+        dispatched += 1;
+        follow = logStreamToFollow(state, model, route);
+      }
+      const scope = shownLogScope(route, resolveZoom(model, route));
+      if (route.mode !== 'logs' || scope === null) {
+        expect(dispatched).toBe(0);
+        continue;
+      }
+      expect(dispatched).toBeLessThanOrEqual(1);
+      expect(state.selected).toBe(scopedLogs(state, scope).shown);
+    }
+  });
+
+  test('an idea follows its own live stream; a step its own; an item shows no Logs face', () => {
+    const at = (route: Route) => logStreamToFollow(page(), model, {...route, mode: 'logs'});
+    expect(at({...RUN_ROUTE, idea: 'flow:w4/#1'})).toBe('s-arena');
+    expect(at({...RUN_ROUTE, idea: 'flow:w2/#1', step: 'flow:w2/turn/#1'})).toBe('s-ring-pad');
+    expect(at({...RUN_ROUTE, idea: 'flow:w2/#1', step: 'flow:w2/turn/#1', item: 't'})).toBeNull();
+    expect(at({...RUN_ROUTE, idea: 'flow:w1/#1'})).toBeNull();
   });
 });

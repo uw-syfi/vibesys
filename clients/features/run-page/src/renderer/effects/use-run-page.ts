@@ -8,6 +8,7 @@ import type {CoreState} from '@vibesys/run-state';
 import {useEffect, useMemo, useState, useSyncExternalStore} from 'react';
 import {
   createRunReader,
+  logStreamToFollow,
   type Route,
   type RunModel,
   type RunPageAction,
@@ -88,8 +89,18 @@ export function useRunPage(options: RunPageOptions): {
   // biome-ignore lint/correctness/useExhaustiveDependencies: the reader caches one run's folds (`key`); a new run starts a new reader.
   const reader = useMemo(() => createRunReader(), [key]);
   const {route, zoom} = useZoom(key, page.address);
-  if (store === null || state === null) return null;
-  const at = state.view.at === 'live' ? null : state.view.at;
-  const model = reader.read(state.run.trace, at);
+  const model =
+    state === null
+      ? null
+      : reader.read(state.run.trace, state.view.at === 'live' ? null : state.view.at);
+  // The page fetches lines only for its selected stream: while a Logs face is on screen, select
+  // the stream it shows. Once selected the function returns null, so this dispatches once per
+  // stream the face moves to.
+  const follow = state === null || model === null ? null : logStreamToFollow(state, model, route);
+  useEffect(() => {
+    if (store !== null && follow !== null)
+      store.dispatch({type: 'select-stream', streamId: follow});
+  }, [store, follow]);
+  if (store === null || state === null || model === null) return null;
   return {state, dispatch: store.dispatch, model, core: state.run.core, route, zoom};
 }

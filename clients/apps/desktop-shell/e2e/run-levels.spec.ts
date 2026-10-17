@@ -374,3 +374,15 @@ test('the timeline draws one row per idea; a segment opens its step, a row its i
   await gantt.getByRole('option', {name: /Wait-free consumer path/}).click();
   await expect(page.getByRole('heading', {name: 'Wait-free consumer path'})).toBeVisible();
 });
+
+test('an idea’s Logs face shows its stream without a pick: the page follows what it shows', async ({
+  page,
+}) => {
+  await openRun(page);
+  await page
+    .getByRole('listbox', {name: 'Ideas'})
+    .getByRole('option', {name: /^running Combine W1 ring with W2 padding/})
+    .click();
+  await page.getByRole('radiogroup', {name: 'Show'}).getByText('Logs').click();
+  await expect(page.getByRole('log', {name: /benchmark/})).toContainText('repetition 1: 41.2');
+});

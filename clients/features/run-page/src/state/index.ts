@@ -63,6 +63,7 @@ export {
   clockStart,
   type HeroView,
   heroView,
+  logStreamToFollow,
   type NowItem,
   nowView,
   type ResolvedZoom,
