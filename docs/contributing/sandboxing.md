@@ -171,6 +171,12 @@ macOS when full read confinement matters.
   both at startup. The operator's control inbox (`vibesys control`) is machine-local
   state outside the project, so the project's write grant does not reach it. A project under
   a tree Landlock must grant, such as `/tmp`, is refused.
+- **Steer targets are predictable.** Role ids are the session role ids in a run's events
+  (for example `dynamic-judge`), so whoever can submit a control can aim a steer at one role,
+  including the one that judges an agent's work. A steer is guidance only: no control schema
+  has a field that reaches measurement or acceptance. Whether an agent can send one depends on
+  whether it can reach a control ingress. The inbox is outside the project's write grant
+  (above). A client connection is limited only by the network access each backend leaves open.
 - **Seatbelt** reads are broader than bubblewrap (above).
 - **Hidden-path design.** The planning issue for prebuilt agent images (#674,
   closed) proposed "no explicit hidden access: deny what is not listed". The
