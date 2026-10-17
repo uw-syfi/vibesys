@@ -2,7 +2,7 @@ import {describe, expect, test} from 'bun:test';
 import type {RunEvent, Span} from '@vibesys/contracts';
 import {event} from '@vibesys/contracts/testing';
 import {initialCoreState, reduceEventBatch} from '@vibesys/run-state';
-import {runPageInitial, runPageStep, type TurnRow, viewedRun} from './index.js';
+import {runPageInitial, runPageStep} from './run-page.js';
 import {
   gateView,
   itemLines,
@@ -11,6 +11,8 @@ import {
   toolOf,
   turnMeta,
 } from './step-narrative.js';
+import type {TurnRow} from './turn-transcript.js';
+import {viewedRun} from './views.js';
 
 type ToolRow = Extract<TurnRow, {kind: 'tool'}>;
 

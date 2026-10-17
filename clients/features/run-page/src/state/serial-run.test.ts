@@ -1,15 +1,10 @@
 import {describe, expect, test} from 'bun:test';
 import type {RunEvent, RunOverview, Span} from '@vibesys/contracts';
-import {EMPTY_TRACE, foldTrace} from '@vibesys/run-state/trace';
-import {
-  type KeyNumber,
-  overviewView,
-  type RunAtView,
-  type RunPageState,
-  runPageInitial,
-  type WorkFilter,
-  workView,
-} from './index.js';
+import {EMPTY_TRACE} from '@vibesys/run-state/trace';
+import {IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
+import {traceLog} from './live.js';
+import {clockStart, heroView, nowView, stripChartView} from './run-level.js';
+import {createRunReader, type RunModel} from './run-model.js';
 
 /**
  * A multi-agent (serial) run, as its span events arrive: the input's measurement, then one round
@@ -18,7 +13,8 @@ import {
  * round's designer, implementer and judge turns and its gate are its own operations. The spans are
  * those the multi search's fake-core story records (`tests/vibesys/serial_search/
  * test_span_labels.py`), with times. Regression: before the serial searches labelled their spans,
- * this run's Overview said no candidate had passed, 0 workstreams and nothing measured.
+ * this run's Overview said no candidate had passed, 0 workstreams and nothing measured; the run
+ * level reads its best, its chart, its ideas and what runs now from the same spans.
  */
 
 const OVERVIEW: RunOverview = {
@@ -26,31 +22,6 @@ const OVERVIEW: RunOverview = {
   objective: {text: 'Maximize throughput.', metric: 'throughput', unit: 'ops/s', direction: 'max'},
   benchmarks: {},
 };
-
-const LIVE: RunPageState = {
-  ...runPageInitial({
-    identity: {host: 'ssh:chelan4', runId: 'run'},
-    title: {project: 'queue-rs', task: 'mpmc'},
-    hostLabel: 'chelan4',
-    unavailable: {},
-  }),
-  record: {
-    kind: 'live',
-    run: {
-      id: 'a1b2c3d4e5f6',
-      projectRoot: '~/vibesys-projects/queue-rs',
-      runId: 'run',
-      status: 'running',
-      phase: 'running',
-      paused: null,
-      end: null,
-      startedAt: 1,
-      reason: null,
-    },
-  },
-};
-
-const ALL: WorkFilter = {query: '', outcome: 'all'};
 
 type Label = NonNullable<Span['label']>;
 
@@ -159,146 +130,38 @@ function recorded(): Recording {
   return run;
 }
 
-function at(events: readonly RunEvent[], sequence = events.length): RunAtView {
-  return {trace: foldTrace(EMPTY_TRACE, events.slice(0, sequence)), overview: OVERVIEW};
+/** The run the screen reads after the first `sequence` events. */
+function at(events: readonly RunEvent[], sequence = events.length): RunModel {
+  return createRunReader().read(traceLog(EMPTY_TRACE, OVERVIEW, events.slice(0, sequence)), null);
 }
 
 describe('a multi-agent run', () => {
-  test('regression: the Overview shows the best candidate, its round and the workstreams', () => {
-    const view = overviewView(at(recorded().events), LIVE);
-    const [best, round, workstreams] = view.numbers;
-    expect(best).toEqual({label: 'Best vs baseline', value: '2.00×', sub: '100 ops/s · so far'});
-    expect(round).toEqual({label: 'Round', value: '2', sub: 'working'});
-    expect(workstreams).toEqual({label: 'Workstreams', value: '2', sub: '0 live · 0 waiting'});
-    expect(view.chart?.points.map(point => [point.y, point.filled])).toEqual([
-      [100, true],
-      [10, true],
-    ]);
-    expect(view.chart?.reference?.y).toBe(50);
+  test('regression: the run level shows the best idea, its chart and both rounds', () => {
+    const model = at(recorded().events);
+    expect(heroView(model)).toMatchObject({ratio: '2.00×', value: '100 ops/s', measured: 2});
+    const chart = stripChartView(model, clockStart(model), null);
+    expect(chart?.points.map(point => point.y)).toEqual([100, 10]);
+    expect(chart?.reference?.y).toBe(50);
   });
 
-  test('the Work tab lists each round with its hypothesis, agents, gate and what it builds on', () => {
-    const view = workView(at(recorded().events), ALL);
-    expect(view.labelled).toBe(true);
-    expect(
-      view.rows.map(row => [row.id, row.hypothesis, row.buildsOn, row.turns, row.gate]),
-    ).toEqual([
-      ['h1', 'title h1', 'input', '3 · orchestrator, implementer, judge', 'passed · 2.00×'],
-      ['h2', 'title h2', 'h1', '3 · orchestrator, implementer, judge', 'slower · 0.20×'],
+  test('the ideas list each round by its hypothesis, with its ratio and what it builds on', () => {
+    const {rows} = ideasView(at(recorded().events), IDEAS_FILTER_DEFAULT);
+    expect(rows.map(row => [row.title, row.figure, row.trail.label]).sort()).toEqual([
+      ['title h1', '2.00×', 'from input'],
+      ['title h2', '0.20×', 'from title h1'],
     ]);
-    expect(view.rows.map(row => row.outcome.kind)).toEqual(['accepted', 'accepted']);
   });
 
-  test('a round choosing its hypothesis reads as planning that round', () => {
+  test('a round choosing its hypothesis reads as its orchestrator running now', () => {
     const {events} = recorded();
     const designing = events.findIndex(
       event =>
         event.type === 'span_started' &&
         (event.data as {span: Span}).span.id === 'op:000002/orchestrator.1',
     );
-    const view = overviewView(at(events, designing + 1), LIVE);
-    expect(view.numbers[1]).toEqual({label: 'Round', value: '2', sub: 'planning'});
-    expect(view.current.map(item => [item.title, item.doing])).toEqual([
-      ['round 2', 'Orchestrator turn, 0s'],
+    expect(nowView(at(events, designing + 1)).map(item => [item.context, item.doing])).toEqual([
+      ['round 2', 'orchestrator · orchestrator'],
     ]);
-  });
-});
-
-/**
- * The adoption the run ends with, as its span events arrive: the operation that adopts the
- * winner is labelled with the adopted candidate, what it measured and its ratio to the input's,
- * and gets its verdict once core has answered (`tests/vibesys/search_faults.py` holds every
- * search to it). The Overview shows what the run adopted, not what it inferred from its gates.
- */
-
-const ENDED: RunPageState = {
-  ...LIVE,
-  record: {
-    kind: 'ended',
-    run: {...(LIVE.record as {run: object}).run, phase: 'completed', end: null},
-  } as RunPageState['record'],
-};
-
-interface Adopting {
-  readonly candidate: string | null;
-  readonly value: number | null;
-  readonly vs: number | null;
-  readonly verdict: 'adopted' | 'not_adopted' | null;
-}
-
-function adopting(run: Recording, adoption: Adopting): void {
-  run.start('op:adopt.1', 'flow:#1', 'propose_winner', {
-    kind: 'adoption',
-    title: adoption.candidate ?? 'the input',
-    attrs_json: JSON.stringify({
-      candidate: adoption.candidate,
-      metric_value: adoption.value,
-      vs_baseline: adoption.vs,
-    }),
-  });
-  if (adoption.verdict === null) return;
-  run.end('op:adopt.1', {verdict: adoption.verdict});
-}
-
-function bestOf(run: Recording, state: RunPageState): KeyNumber {
-  const best = overviewView(at(run.events), state).numbers.find(
-    number => number.label === 'Best vs baseline',
-  );
-  if (best === undefined) throw new Error('the Overview has no best candidate number');
-  return best;
-}
-
-describe('the best candidate of a run that adopts', () => {
-  test('is the adopted one, even when a passed gate measured better', () => {
-    const run = recorded();
-    adopting(run, {candidate: 'c1', value: 80, vs: 1.6, verdict: 'adopted'});
-    // round 1 measured 100 (2.00×) and passed, but the search adopted a candidate that read 80
-    expect(bestOf(run, ENDED)).toEqual({
-      label: 'Best vs baseline',
-      value: '1.60×',
-      sub: '80 ops/s · adopted',
-    });
-    expect(bestOf(run, LIVE)).toEqual(bestOf(run, ENDED));
-  });
-
-  test('is the best passed gate while the run is live and has not adopted yet', () => {
-    const run = recorded();
-    const expected = {label: 'Best vs baseline', value: '2.00×', sub: '100 ops/s · so far'};
-    expect(bestOf(run, LIVE)).toEqual(expected);
-    adopting(run, {candidate: 'c1', value: 100, vs: 2, verdict: null});
-    expect(bestOf(run, LIVE)).toEqual(expected); // core has not answered: not adopted yet
-  });
-
-  test('names no candidate once the run ended without adopting one', () => {
-    const run = recorded();
-    expect(bestOf(run, ENDED)).toEqual({
-      label: 'Best vs baseline',
-      value: '–',
-      sub: 'no candidate adopted',
-    });
-    adopting(run, {candidate: 'c1', value: 100, vs: 2, verdict: 'not_adopted'});
-    expect(bestOf(run, ENDED).sub).toBe('the adoption failed');
-    expect(bestOf(run, LIVE).value).toBe('2.00×'); // while it runs, the gates are all there is
-  });
-
-  test('says the input stood when that is what was adopted', () => {
-    const run = recorded();
-    adopting(run, {candidate: null, value: 50, vs: 1, verdict: 'adopted'});
-    expect(bestOf(run, ENDED)).toEqual({
-      label: 'Best vs baseline',
-      value: '–',
-      sub: 'no candidate beat the input',
-    });
-  });
-
-  test('shows the measured value when the input was never measured', () => {
-    const run = recorded();
-    adopting(run, {candidate: 'c1', value: 100, vs: null, verdict: 'adopted'});
-    expect(bestOf(run, ENDED)).toEqual({
-      label: 'Best vs baseline',
-      value: '100 ops/s',
-      sub: 'adopted',
-    });
   });
 });
 
@@ -333,7 +196,7 @@ function liveRoundOne(run: Recording): void {
 }
 
 describe('a live multi run with an accepted round 1', () => {
-  test('mid-run the Overview shows the best candidate and a chart point, and Work its gate', () => {
+  test('mid-run the hero shows the best idea and the chart its point', () => {
     const run = new Recording();
     liveRoundOne(run);
     run.start('flow:000002/#1', 'flow:#1', 'play_round', {
@@ -341,26 +204,18 @@ describe('a live multi run with an accepted round 1', () => {
       title: 'round 2',
       attrs_json: JSON.stringify({hypothesis_id: null, parent_revision: null, round: 2}),
     });
-    const view = overviewView(at(run.events), LIVE);
-    expect(view.numbers[0]).toEqual({
-      label: 'Best vs baseline',
-      value: '2.00×',
-      sub: '100 ops/s · so far',
-    });
-    expect(view.numbers[1]).toEqual({label: 'Round', value: '2', sub: 'planning'});
-    expect(view.chart?.points.map(point => [point.y, point.filled])).toEqual([[100, true]]);
-    const [first] = workView(at(run.events), ALL).rows;
-    expect(first?.gate).toBe('passed · 2.00×');
+    const model = at(run.events);
+    expect(heroView(model)).toMatchObject({ratio: '2.00×', value: '100 ops/s'});
+    const chart = stripChartView(model, clockStart(model), null);
+    expect(chart?.points.map(point => point.y)).toEqual([100]);
   });
 
-  test('once the run finished the Overview says its last round finished, not working', () => {
+  test('once the run finished nothing runs now, and the best stays', () => {
     const run = new Recording();
     liveRoundOne(run);
-    adopting(run, {candidate: 'c1', value: 100, vs: 2, verdict: 'adopted'});
     run.end('flow:#1');
-    const view = overviewView(at(run.events), ENDED);
-    expect(view.numbers[1]).toEqual({label: 'Round', value: '1', sub: 'finished'});
-    expect(view.numbers[0]?.value).toBe('2.00×');
-    expect(view.current).toEqual([]);
+    const model = at(run.events);
+    expect(nowView(model)).toEqual([]);
+    expect(heroView(model).ratio).toBe('2.00×');
   });
 });

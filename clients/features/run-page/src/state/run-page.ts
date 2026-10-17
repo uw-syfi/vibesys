@@ -40,7 +40,6 @@ import {
   traceProblems,
   traceStep,
 } from './live.js';
-import {WORK_FILTER_ALL, type WorkFilter, type WorkOutcome} from './work-filter.js';
 
 /** When a Resume takes effect: now, or once the provider's capacity returns. */
 export type ResumeWhen = 'now' | 'capacity_returns';
@@ -48,11 +47,8 @@ export type ResumeWhen = 'now' | 'capacity_returns';
 /** How long a Stop may take before "Force stop" is offered. */
 export const FORCE_STOP_BOUND_MS = 2 * 60 * 1000;
 
-export type RunTab = 'overview' | 'map' | 'work' | 'logs';
-export const RUN_TABS: readonly RunTab[] = ['overview', 'map', 'work', 'logs'];
-
 /** What the app could not do for this run, with why; an action named here is shown disabled. */
-export type RunCapability = 'open-window' | 'logs';
+type RunCapability = 'open-window' | 'logs';
 export type Unavailable = Readonly<Partial<Record<RunCapability, string>>>;
 
 /** The run as the host's registry lists it: live, ended, or not (yet) listed. */
@@ -80,7 +76,7 @@ export const FIRST_HISTORY_SEQUENCE = 1;
  * An ended run's recorded events, read page by page (`runs.read_events`) into the run fold: not
  * asked yet, a page awaited under a token, all read, not served by this host, or failed.
  */
-export type RunHistory =
+type RunHistory =
   | {readonly kind: 'idle'}
   | {readonly kind: 'reading'; readonly token: number; readonly from: number}
   | {readonly kind: 'read'}
@@ -110,29 +106,10 @@ export type StopFlow =
       readonly forced: boolean;
     };
 
-/** Which spans the Map shows, by state; `finished` is done or stopped. */
-export type MapFilter = 'all' | 'running' | 'waiting' | 'failed' | 'finished';
-export const MAP_FILTERS: readonly MapFilter[] = [
-  'all',
-  'running',
-  'waiting',
-  'failed',
-  'finished',
-];
-
-/** The Map's own state: its filter, the groups the user opened, and the selected span. */
-export interface MapState {
-  readonly filter: MapFilter;
-  /** Ids of the groups shown open (a planning call's finished workstreams, by its span id). */
-  readonly open: ReadonlySet<string>;
-  /** The selected span's id; null, or a span not in the trace at the view, selects the root. */
-  readonly selected: string | null;
-}
-
 /** Where the scrubber stands: following the newest event, or at one event's sequence. */
 export type RunView = {readonly at: 'live'} | {readonly at: number};
 
-export type RunLogs =
+type RunLogs =
   | {readonly kind: 'idle'}
   | {
       readonly kind: 'listing';
@@ -150,15 +127,17 @@ export interface RunPageState {
   readonly hostLabel: string;
   readonly unavailable: Unavailable;
   readonly record: RunRecord;
-  readonly tab: RunTab;
+  /**
+   * Whether the page follows the selected stream's lines: set once a Logs face, or View logs,
+   * picks a stream.
+   */
+  readonly followingLogs: boolean;
   readonly stop: StopFlow;
   readonly logs: RunLogs;
   /** The latest view of each followed stream, by stream id. */
   readonly views: Readonly<Record<string, LogView>>;
-  /** The stream the Logs tab shows; null shows the first one. */
+  /** The stream the Logs face shows; null shows the first one. */
   readonly selected: string | null;
-  /** The Work tab's search query and outcome filter. */
-  readonly work: WorkFilter;
   /** Which ideas the Ideas face shows. */
   readonly ideas: IdeasFilter;
   /** The best path shows every name rather than folding its middle. */
@@ -176,11 +155,10 @@ export interface RunPageState {
   readonly run: RunFold;
   /** This window's clock (epoch ms) at its latest tick; null before the first one. */
   readonly clockMs: number | null;
-  /** The sequence the tabs show: the live end, or a past one the scrubber chose. */
+  /** The sequence the screen shows: the live end, or a past one the scrubber chose. */
   readonly view: RunView;
   /** Why the last command the run refused failed, until the next one. */
   readonly notice: string | null;
-  readonly map: MapState;
   /** An ended run's recorded events, read into `run`. */
   readonly history: RunHistory;
   /** Why the attached run refused to wait for its quota; the wait is not offered again for it. */
@@ -190,16 +168,10 @@ export interface RunPageState {
 
 export type RunPageAction =
   | {readonly type: 'record'; readonly record: RunRecord}
-  | {readonly type: 'tab'; readonly tab: RunTab}
   | {readonly type: 'select-stream'; readonly streamId: string}
-  | {readonly type: 'work-query'; readonly query: string}
-  | {readonly type: 'work-outcome'; readonly outcome: WorkOutcome}
   | {readonly type: 'ideas-filter'; readonly filter: IdeasFilter}
   | {readonly type: 'best-path-open'; readonly open: boolean}
   | {readonly type: 'agents-open'; readonly id: string; readonly open: boolean}
-  | {readonly type: 'map-filter'; readonly filter: MapFilter}
-  | {readonly type: 'map-toggle'; readonly id: string; readonly open: boolean}
-  | {readonly type: 'map-select'; readonly id: string}
   | {readonly type: 'view-logs'}
   | {readonly type: 'ask-stop'}
   | {readonly type: 'cancel-stop'}
@@ -270,12 +242,11 @@ export function runPageInitial(seed: RunPageSeed): RunPageState {
   return {
     ...seed,
     record: {kind: 'unlisted'},
-    tab: 'overview',
+    followingLogs: false,
     stop: {kind: 'idle'},
     logs: {kind: 'idle'},
     views: {},
     selected: null,
-    work: WORK_FILTER_ALL,
     ideas: IDEAS_FILTER_DEFAULT,
     pathOpen: false,
     agentsOpen: new Set(),
@@ -285,7 +256,6 @@ export function runPageInitial(seed: RunPageSeed): RunPageState {
     clockMs: null,
     view: {at: 'live'},
     notice: null,
-    map: {filter: 'all', open: new Set(), selected: null},
     history: {kind: 'idle'},
     waitRefused: null,
     next: 1,
@@ -589,7 +559,7 @@ export function quotaPause(state: RunPageState): QuotaPause | null {
 }
 
 /** Whether the run waits for its quota now (it acknowledged a Resume when capacity returns). */
-export function waitingForQuota(state: RunPageState): boolean {
+function waitingForQuota(state: RunPageState): boolean {
   return quotaPause(state)?.waiting != null;
 }
 
@@ -675,14 +645,8 @@ export function runPageStep(state: RunPageState, action: RunPageAction): RunPage
         state: {...state, views: {...state.views, [action.streamId]: action.view}},
         requests: [],
       };
-    case 'tab':
-      return {state: {...state, tab: action.tab}, requests: []};
     case 'select-stream':
-      return {state: {...state, tab: 'logs', selected: action.streamId}, requests: []};
-    case 'work-query':
-      return {state: {...state, work: {...state.work, query: action.query}}, requests: []};
-    case 'work-outcome':
-      return {state: {...state, work: {...state.work, outcome: action.outcome}}, requests: []};
+      return {state: {...state, followingLogs: true, selected: action.streamId}, requests: []};
     case 'ideas-filter':
       return {state: {...state, ideas: action.filter}, requests: []};
     case 'best-path-open':
@@ -690,16 +654,7 @@ export function runPageStep(state: RunPageState, action: RunPageAction): RunPage
     case 'agents-open':
       return {state: {...state, agentsOpen: toggled(state.agentsOpen, action)}, requests: []};
     case 'view-logs':
-      return {state: {...state, tab: 'logs', selected: narration(state)}, requests: []};
-    case 'map-filter':
-      return {state: {...state, map: {...state.map, filter: action.filter}}, requests: []};
-    case 'map-toggle':
-      return {
-        state: {...state, map: {...state.map, open: toggled(state.map.open, action)}},
-        requests: [],
-      };
-    case 'map-select':
-      return {state: {...state, map: {...state.map, selected: action.id}}, requests: []};
+      return {state: {...state, followingLogs: true, selected: narration(state)}, requests: []};
     default:
       return {state, requests: []};
   }

@@ -219,7 +219,7 @@ function sameFilter(a: IdeasFilter, b: IdeasFilter): boolean {
 }
 
 /** A name on the best path, or the fold standing for the names it hides. */
-export type PathCrumb =
+type PathCrumb =
   | {readonly kind: 'idea'; readonly id: string; readonly label: string}
   | {readonly kind: 'fold'; readonly hidden: number};
 

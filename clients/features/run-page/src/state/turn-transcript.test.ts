@@ -3,15 +3,9 @@ import type {RunEvent, Span} from '@vibesys/contracts';
 import {event} from '@vibesys/contracts/testing';
 import {initialCoreState, reduceEventBatch} from '@vibesys/run-state';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
-import {
-  type RunPageAction,
-  type RunPageState,
-  runPageInitial,
-  runPageStep,
-  type TurnRow,
-  turnTranscript,
-  viewedRun,
-} from './index.js';
+import {type RunPageAction, type RunPageState, runPageInitial, runPageStep} from './run-page.js';
+import {type TurnRow, turnTranscript} from './turn-transcript.js';
+import {viewedRun} from './views.js';
 
 /** A run's turns as the server sends them: span events, then each turn's events stamped with it. */
 
@@ -83,10 +77,15 @@ function result(sequence: number, spanId: string, callId: string, content: strin
   });
 }
 
-function page(transcript: readonly RunEvent[], selected: string | null): RunPageState {
+/** A page that folded `transcript`, and the step whose turns the test reads. */
+interface Selected {
+  readonly state: RunPageState;
+  readonly span: string;
+}
+
+function page(transcript: readonly RunEvent[], span: string): Selected {
   const actions: RunPageAction[] = [
     {type: 'run-core', core: reduceEventBatch(initialCoreState(), transcript)},
-    ...(selected === null ? [] : [{type: 'map-select' as const, id: selected}]),
   ];
   let state = runPageInitial({
     identity: RUN,
@@ -102,20 +101,20 @@ function page(transcript: readonly RunEvent[], selected: string | null): RunPage
     data: {kind: 'events', events: SPANS.map((each, index) => started(index + 1, each))},
   }).state;
   for (const action of actions) state = runPageStep(state, action).state;
-  return state;
+  return {state, span};
 }
 
-function turns(state: RunPageState): ReturnType<typeof turnTranscript> {
-  const viewed = viewedRun(state);
-  return turnTranscript(viewed.trace, viewed.core, state.map);
+function turns(selected: Selected): ReturnType<typeof turnTranscript> {
+  const viewed = viewedRun(selected.state);
+  return turnTranscript(viewed.trace, viewed.core, selected.span);
 }
 
 const kinds = (rows: readonly TurnRow[]): string[] => rows.map(row => row.kind);
 
-describe('the turns under the selected Map step', () => {
+describe('the turns under a step', () => {
   test('are unknown until the run’s fold has reached the page', () => {
-    const state = page([], 'op:1');
-    expect(turnTranscript(viewedRun(state).trace, null, state.map)).toBeNull();
+    const {state, span} = page([], 'op:1');
+    expect(turnTranscript(viewedRun(state).trace, null, span)).toBeNull();
   });
 
   test('a selected agent turn shows its messages, reasoning and tool calls in order', () => {
@@ -164,19 +163,22 @@ describe('the turns under the selected Map step', () => {
     );
     expect(turns(state)?.rows[1]).toMatchObject({kind: 'tool', state: 'failed', output: 'boom'});
     state = page([call(10, 'op:1', 'c1', 'make')], 'op:1');
-    state = runPageStep(state, {
-      type: 'run-data',
-      wallMs: 0,
-      data: {
-        kind: 'events',
-        events: ended
-          .filter(each => each.id === 'op:1')
-          .map(each => ({
-            ...event(20, 'span_ended'),
-            data: {kind: 'span_ended', span: each},
-          })) as RunEvent[],
-      },
-    }).state;
+    state = {
+      ...state,
+      state: runPageStep(state.state, {
+        type: 'run-data',
+        wallMs: 0,
+        data: {
+          kind: 'events',
+          events: ended
+            .filter(each => each.id === 'op:1')
+            .map(each => ({
+              ...event(20, 'span_ended'),
+              data: {kind: 'span_ended', span: each},
+            })) as RunEvent[],
+        },
+      }).state,
+    };
     expect(turns(state)?.rows[1]).toMatchObject({kind: 'tool', state: 'ok', output: null});
   });
 
@@ -291,7 +293,7 @@ function rowsOf(events: readonly RunEvent[], selected: string): readonly TurnRow
   return turns(page(events, selected))?.rows ?? [];
 }
 
-describe('a structured reply under the selected Map step', () => {
+describe('a structured reply under a step', () => {
   const JUDGE = {
     analysis: 'The current src/lib.rs matches.',
     feedback: '',

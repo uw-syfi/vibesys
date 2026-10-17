@@ -6,19 +6,12 @@ import {emptyLogView, foldChunk} from '@vibesys/logs';
 import type {RunTracePublication} from '@vibesys/run-session';
 import {type CoreState, initialCoreState, reduceEvent} from '@vibesys/run-state';
 import {checkModel, type Seeded} from '@vibesys/store/testing';
+import {clockCarried} from './run-level.js';
+import {createRunReader} from './run-model.js';
 import {
-  clockCarried,
-  createRunReader,
-  endedView,
   FIRST_HISTORY_SEQUENCE,
   FORCE_STOP_BOUND_MS,
-  followedStreams,
   HISTORY_PAGE_EVENTS,
-  headerView,
-  logGroups,
-  MAP_FILTERS,
-  quotaBannerView,
-  RUN_TABS,
   type RunPageAction,
   type RunPageRequest,
   type RunPageState,
@@ -28,13 +21,20 @@ import {
   runPageInvariants,
   runPageStep,
   runPhase,
-  scrubberView,
+  type Unavailable,
+} from './run-page.js';
+import {scrubberView} from './scrub.js';
+import {
+  endedView,
+  followedStreams,
+  headerView,
+  logGroups,
+  quotaBannerView,
   stopBannerView,
   streamLines,
   timelineView,
-  type Unavailable,
   viewedRun,
-} from './index.js';
+} from './views.js';
 
 const RUN = {host: 'ssh:chelan4', runId: '20261015-163047'} as const;
 
@@ -152,8 +152,6 @@ const USER_ACTIONS: readonly RunPageAction[] = [
   {type: 'run-again'},
   {type: 'view-logs'},
   {type: 'select-stream', streamId: 's3'},
-  {type: 'work-query', query: 'ring'},
-  {type: 'work-outcome', outcome: 'accepted'},
   {type: 'agents-open', id: 'boss', open: true},
   {type: 'agents-open', id: 'boss', open: false},
 ];
@@ -270,14 +268,9 @@ function randomAction(random: Seeded, issued: readonly number[]): RunPageAction 
           : {ok: false, failure: {code: 'transport', message: 'channel closed'}},
       };
     case 3:
-      return {type: 'tab', tab: random.pick(RUN_TABS)};
+      return {type: 'agents-open', id: random.pick(['p1', 'p2']), open: random.bool()};
     case 4:
-      return random.pick<RunPageAction>([
-        {type: 'map-filter', filter: random.pick(MAP_FILTERS)},
-        {type: 'map-toggle', id: random.pick(['p1', 'p2']), open: random.bool()},
-        {type: 'map-select', id: random.pick(['root', 'w1'])},
-        {type: 'view', view: random.bool() ? {at: 'live'} : {at: random.int(40)}},
-      ]);
+      return {type: 'view', view: random.bool() ? {at: 'live'} : {at: random.int(40)}};
     default:
       return random.pick(USER_ACTIONS);
   }
@@ -530,17 +523,9 @@ describe('the run page store', () => {
     expect(ended.state.stop).toEqual({kind: 'idle'});
   });
 
-  test('the Map and the scrubber are page state that asks for no I/O', () => {
-    const {state, requests} = fold(initial(), [
-      {type: 'map-filter', filter: 'failed'},
-      {type: 'map-toggle', id: 'p1', open: true},
-      {type: 'map-toggle', id: 'p2', open: true},
-      {type: 'map-toggle', id: 'p1', open: false},
-      {type: 'map-select', id: 'w1'},
-      {type: 'view', view: {at: 12}},
-    ]);
+  test('the scrubber is page state that asks for no I/O', () => {
+    const {state, requests} = fold(initial(), [{type: 'view', view: {at: 12}}]);
     expect(requests).toEqual([]);
-    expect(state.map).toEqual({filter: 'failed', open: new Set(['p2']), selected: 'w1'});
     expect(state.view).toEqual({at: 12});
     expect(fold(state, [{type: 'view', view: {at: 'live'}}]).state.view).toEqual({at: 'live'});
   });
@@ -629,7 +614,7 @@ describe('the run page store', () => {
       {type: 'log-view', streamId: 's5', view: narration},
       {type: 'view-logs'},
     ]).state;
-    expect(shown.tab).toBe('logs');
+    expect(shown.followingLogs).toBe(true);
     expect(streamLines(shown, 's5')).toEqual([{text: '16:30:51 INFO run started', stream: 'out'}]);
   });
 
@@ -786,25 +771,6 @@ function readEventsLine(from: number, max: number): string {
     max,
   });
 }
-
-describe('the Work tab filter', () => {
-  test('changes only the work filter and asks for nothing', () => {
-    const state = initial();
-    for (const action of [
-      {type: 'work-query', query: 'ring'},
-      {type: 'work-outcome', outcome: 'rejected'},
-    ] as const) {
-      const step = runPageStep(state, action);
-      expect(step.requests).toEqual([]);
-      expect({...step.state, work: state.work}).toEqual(state);
-    }
-    const both = fold(state, [
-      {type: 'work-query', query: 'ring'},
-      {type: 'work-outcome', outcome: 'rejected'},
-    ]);
-    expect(both.state.work).toEqual({query: 'ring', outcome: 'rejected'});
-  });
-});
 
 /** An event at `clock` (UTC time of day on 2026-10-17); a span event carries `span`. */
 function liveEvent(sequence: number, clock: string, type: string, span?: Span): RunEvent {

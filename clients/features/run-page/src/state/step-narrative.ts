@@ -87,7 +87,7 @@ export function turnNarrative(
   core: CoreState | null,
   span: string,
 ): TurnNarrative | null {
-  const transcript = turnTranscript(trace, core, {filter: 'all', open: new Set(), selected: span});
+  const transcript = turnTranscript(trace, core, span);
   return transcript === null ? null : narrativeOf(transcript.rows);
 }
 

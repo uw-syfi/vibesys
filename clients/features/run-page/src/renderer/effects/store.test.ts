@@ -6,15 +6,15 @@ import type {LogReadInput, LogReadOutcome, LogTransport} from '@vibesys/logs';
 import {initialCoreState, reduceEvent} from '@vibesys/run-state';
 import type {AbortSignalLike} from '@vibesys/transport';
 import {
+  ageWords,
+  clockAt,
+  createRunReader,
   headerView,
-  overviewView,
+  nowView,
   quotaBannerView,
   type RunPageAction,
   runNow,
   stopBannerView,
-  viewedRun,
-  WORK_FILTER_ALL,
-  workView,
 } from '../../state/index.js';
 import type {LiveSession, SessionObserver} from '../index.js';
 import {createRunPageStore, type RunPagePorts} from '../index.js';
@@ -338,16 +338,18 @@ test('an open step keeps aging while the run says nothing, on the window clock',
   app.wallMs = 1_000_000;
   app.observer?.session(LIVE_VIEW);
   app.observer?.data({kind: 'snapshot', snapshot: snapshotWith(10)});
-  const doing = (): string | undefined =>
-    overviewView(viewedRun(store.getState()), store.getState()).current[0]?.doing;
-  expect(doing()).toBe('Orchestrator turn, 0s');
+  // How long the step Now shows has run, as its row reads it.
+  const age = (): string | undefined => {
+    const state = store.getState();
+    const model = createRunReader().read(state.run.trace, null);
+    const [item] = nowView(model);
+    return item === undefined ? undefined : ageWords(item.since, clockAt(model, runNow(state)));
+  };
+  expect(age()).toBe('0s');
   // Ten minutes pass with no event from the run.
   app.wallMs += 10 * 60_000;
   clock.advance(1000);
-  expect(doing()).toBe('Orchestrator turn, 10m');
-  const row = workView(viewedRun(store.getState()), WORK_FILTER_ALL, runNow(store.getState()))
-    .rows[0];
-  expect(row?.took).toBe('10m');
+  expect(age()).toBe('10m');
   store.dispose();
 });
 
@@ -361,13 +363,8 @@ test('time is carried while an attached run is at its live end, whatever the scr
   app.observer?.data({kind: 'snapshot', snapshot: snapshotWith(10)});
   expect(clock.pending).toBe(1);
   const start = runNow(store.getState()) ?? 0;
-  // Every action that shows a log or another face once stopped the clock (the old tabs).
-  const faces: RunPageAction[] = [
-    {type: 'tab', tab: 'map'},
-    {type: 'view-logs'},
-    {type: 'select-stream', streamId: 's1'},
-    {type: 'tab', tab: 'logs'},
-  ];
+  // Every action that shows a log once stopped the clock.
+  const faces: RunPageAction[] = [{type: 'view-logs'}, {type: 'select-stream', streamId: 's1'}];
   for (const [index, action] of faces.entries()) {
     store.dispatch(action);
     expect(clock.pending).toBe(1);

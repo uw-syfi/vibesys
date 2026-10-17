@@ -27,7 +27,7 @@ export function indexSpans(spans: readonly Span[]): SpanIndex {
 }
 
 /** The span's label kind, or null when its search did not label it. */
-export function kindOf(span: Span): string | null {
+function kindOf(span: Span): string | null {
   return span.label?.kind ?? null;
 }
 
@@ -62,17 +62,6 @@ export function stepName(name: string): string | null {
   const whole = STEP_NAMES[name];
   if (whole !== undefined) return whole;
   return name.includes('.') ? (STEP_NAMES[name.slice(name.indexOf('.') + 1)] ?? null) : null;
-}
-
-/**
- * What a span is called: its label's title, else its registered name in words (a name the
- * registry does not list reads as it is).
- */
-export function titleOf(span: Span): string {
-  const title = span.label?.title;
-  return title === undefined || title === null || title === ''
-    ? (stepName(span.name) ?? span.name)
-    : title;
 }
 
 /** The label's attributes as a record; empty when it has none or they do not parse to one. */
@@ -112,27 +101,6 @@ export function nearest(index: SpanIndex, span: Span, kind: string): Span | null
   return null;
 }
 
-/** Every descendant of `span`, depth first in start order. */
-export function descendants(index: SpanIndex, span: Span): Span[] {
-  const found: Span[] = [];
-  const seen = new Set<string>([span.id]);
-  const visit = (id: string): void => {
-    for (const child of index.children.get(id) ?? []) {
-      if (seen.has(child.id)) continue;
-      seen.add(child.id);
-      found.push(child);
-      visit(child.id);
-    }
-  };
-  visit(span.id);
-  return found;
-}
-
-/** Whether the span is still under way: running, waiting, or not yet started. */
-export function isOpen(span: Span): boolean {
-  return span.status === 'running' || span.status === 'waiting' || span.status === 'pending';
-}
-
 /** The latest run-clock time any span records, or null with no spans. */
 export function latestTime(spans: readonly Span[]): number | null {
   let latest: number | null = null;
@@ -151,15 +119,6 @@ export function latestTime(spans: readonly Span[]): number | null {
     see(span.stop?.requested_at);
   }
   return latest;
-}
-
-/** The earliest run-clock time a span started at, or null with no spans. */
-export function earliestTime(spans: readonly Span[]): number | null {
-  let earliest: number | null = null;
-  for (const span of spans) {
-    if (earliest === null || span.started_at < earliest) earliest = span.started_at;
-  }
-  return earliest;
 }
 
 /** A duration in seconds as the screen writes it: `45s`, `9m`, `2h 05m`. */
@@ -182,11 +141,6 @@ export function formatValue(value: number): string {
 /** A ratio to the baseline as the screen writes it: `1.42×`. */
 export function ratio(value: number): string {
   return `${value.toFixed(2)}×`;
-}
-
-/** `text` with its first letter capitalized. */
-export function upperFirst(text: string): string {
-  return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 }
 
 /** Snake-case words as the screen writes them: `failed_check` reads `failed check`. */

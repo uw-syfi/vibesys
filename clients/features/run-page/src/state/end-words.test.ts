@@ -3,7 +3,9 @@ import type {RunOverview, Span} from '@vibesys/contracts';
 import type {HostRun, RunEnd} from '@vibesys/hosts';
 import {EMPTY_TRACE, foldTrace} from '@vibesys/run-state/trace';
 import {endReason, keptCandidate} from './end-words.js';
-import {EMPTY_RUN_FOLD, endedView, type RunPageState, runPageInitial, traceLog} from './index.js';
+import {EMPTY_RUN_FOLD, traceLog} from './live.js';
+import {type RunPageState, runPageInitial} from './run-page.js';
+import {endedView} from './views.js';
 
 type Outcome = NonNullable<RunEnd>['outcome'];
 

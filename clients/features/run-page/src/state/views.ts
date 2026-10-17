@@ -268,7 +268,7 @@ export function followedStreams(state: RunPageState): readonly string[] {
   if (runPhase(state).kind === 'starting') {
     for (const stage of timelineView(state)) if (stage.streamId !== null) ids.add(stage.streamId);
   }
-  if (state.tab === 'logs') {
+  if (state.followingLogs) {
     const shown = shownStream(state);
     if (shown !== null) ids.add(shown);
   }
@@ -284,7 +284,7 @@ const GROUP_ORDER: readonly LogGroupName[] = [
   'Other',
 ];
 
-export interface LogStreamItem {
+interface LogStreamItem {
   readonly id: string;
   readonly label: string;
   readonly live: boolean;

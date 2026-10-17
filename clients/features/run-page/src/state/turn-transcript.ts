@@ -9,13 +9,11 @@ import type {Span} from '@vibesys/contracts';
 import type {CoreState} from '@vibesys/run-state';
 import {type RunTrace, traceSpans} from '@vibesys/run-state/trace';
 import {type TranscriptEntry, transcriptBySpan} from '@vibesys/run-state/transcript';
-import {selectedSpan} from './map-view.js';
 import {type ReplyFieldView, replyFields, replyTitle} from './reply-fields.js';
-import type {MapState} from './run-page.js';
 import {ended, plain, statusWords, titleOf} from './span-words.js';
 
 /** What a message is: a reply, the thinking behind it, the prompt it answers, or a note. */
-export type TurnVoice = 'reply' | 'reasoning' | 'prompt' | 'note';
+type TurnVoice = 'reply' | 'reasoning' | 'prompt' | 'note';
 
 /** One row of the turn-by-turn view. */
 export type TurnRow =
@@ -170,19 +168,19 @@ function rowOf(entry: TranscriptEntry, turnEnded: boolean): TurnRow {
 }
 
 /**
- * The selected step's turns: for the selected span and every span under it that has entries, a
- * heading (the span's title and state) and its entries as rows, in the order the spans started.
- * Null until the run's fold has reached the window, so the screen can tell that from a step with
- * no turns.
+ * The turns of the step `span`: for it and every span under it that has entries, a heading (the
+ * span's title and state) and its entries as rows, in the order the spans started; none when the
+ * trace does not hold `span`. Null until the run's fold has reached the window, so the screen can
+ * tell that from a step with no turns.
  */
 export function turnTranscript(
   trace: RunTrace,
   core: CoreState | null,
-  map: MapState,
+  span: string,
 ): TurnTranscript | null {
   if (core === null) return null;
-  const selected = selectedSpan(trace, map);
-  if (selected === null) return NO_TRANSCRIPT;
+  const selected = trace.spans.get(span);
+  if (selected === undefined) return NO_TRANSCRIPT;
   const spans = traceSpans(trace);
   const entries = transcriptBySpan(core.transcript, subtree(spans, selected.id));
   const rows: TurnRow[] = [];

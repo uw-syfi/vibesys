@@ -3,7 +3,7 @@ import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun} from '@vibesys/hosts';
 import {emptyLogView, type LogView} from '@vibesys/logs';
 import {Seeded} from '@vibesys/store/testing';
-import {type RunPageState, runPageInitial} from './index.js';
+import {type RunPageState, runPageInitial} from './run-page.js';
 import {paneLines, scopedLogs} from './scoped-logs.js';
 
 type Owner = LogStream['owner'];

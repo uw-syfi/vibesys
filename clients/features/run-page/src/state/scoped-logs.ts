@@ -237,5 +237,5 @@ function emptyNotice(state: RunPageState, scope: LogScope): string | null {
  */
 export function streamToFollow(state: RunPageState, scope: LogScope): string | null {
   const {shown} = scopedLogs(state, scope);
-  return shown !== null && (state.selected !== shown || state.tab !== 'logs') ? shown : null;
+  return shown !== null && (state.selected !== shown || !state.followingLogs) ? shown : null;
 }

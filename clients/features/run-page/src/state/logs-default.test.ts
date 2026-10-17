@@ -1,7 +1,8 @@
 import {expect, test} from 'bun:test';
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun} from '@vibesys/hosts';
-import {type RunPageState, runPageInitial, shownStream} from './index.js';
+import {type RunPageState, runPageInitial} from './run-page.js';
+import {shownStream} from './views.js';
 
 function stream(id: string, owner: LogStream['owner']): LogStream {
   return {id, owner, command: 'cmd', retained_start: 0, size: 0, outcome: 'ended'};

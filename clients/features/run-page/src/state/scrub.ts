@@ -16,15 +16,6 @@ function sequenceOf(event: RunEvent): number {
   return event.sequence ?? 0;
 }
 
-/**
- * The sequences the scrubber can stand at, oldest first: the snapshot's, then each span event's.
- * The log keeps them as events arrive (`TraceLog.positions`); this copies them, so it is for tests
- * and one-off reads, not for every render.
- */
-export function scrubPositions(log: TraceLog): readonly number[] {
-  return log.positions.toArray();
-}
-
 /** What the scrubber shows: its playhead among the positions, its words, and its ticks. */
 export interface ScrubberView {
   /** The index of the newest position. */
