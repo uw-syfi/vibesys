@@ -642,6 +642,39 @@ describe('Narrative', () => {
     expect(scroller.scrollTop).toBe(1000);
   });
 
+  test('a reader who scrolled up keeps the place when the turn updates before the scroll event arrives', async () => {
+    // A scroll event is delivered a frame after the scroll; an update may land in between.
+    const view = (count: number) => (
+      <Narrative label="Turn" start="end">
+        {Array.from({length: count}, (_, index) => (
+          <Said key={String(index)} text={`block ${index}`} />
+        ))}
+      </Narrative>
+    );
+    const {container, render} = await mount(view(3));
+    const scroller = one(container, 'section');
+    let height = 1000;
+    let top = 0;
+    const clamp = (value: number): number => Math.min(Math.max(value, 0), height - 100);
+    Object.defineProperties(scroller, {
+      scrollHeight: {configurable: true, get: () => height},
+      clientHeight: {configurable: true, value: 100},
+      scrollTop: {configurable: true, get: () => top, set: (value: number) => (top = clamp(value))},
+    });
+    await render(view(3));
+    expect(top).toBe(900);
+
+    top = 400;
+    height = 1200;
+    await render(view(4));
+    expect(top).toBe(400);
+    await act(async () => {
+      scroller.dispatchEvent(new UIEvent('scroll', {bubbles: true}));
+    });
+    expect(top).toBe(400);
+    expect(container.querySelector('.vs-new-below')).not.toBeNull();
+  });
+
   test('a turn that does not follow its end never offers it', async () => {
     const {container} = await mount(
       <Narrative label="Turn">
