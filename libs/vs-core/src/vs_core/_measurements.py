@@ -56,7 +56,6 @@ from ._submissions import (
     rejected,
     submission_released,
 )
-from ._values import digest
 from .types.attempts import (
     AttemptEvaluationHistoryUpdated,
     CloseAttemptScope,
