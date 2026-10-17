@@ -61,7 +61,10 @@ _SCENARIOS = tuple(
 # matcher and stream redactor instead of retaining a second implementation.
 # The reservable worker implementation adds the standard-library-only ``queue`` and ``_queue``
 # modules so a refused native worker start can be reported before relay I/O is committed.
-_MODULE_CEILING = 347
+# server.host_envelope and server.host_run_summary (the helper's request and reply bases and the
+# runs.summary messages, split out of server.host_api) add 2; the summary's fold and cache load on
+# the first runs.summary, never for hello (asserted below).
+_MODULE_CEILING = 349
 """The most modules a helper may load to answer ``hello``; lower it as the helper sheds imports."""
 _HELLO = {
     "type": "hello",
@@ -171,6 +174,8 @@ def test_hello_loads_no_engine_and_reports_its_start_up_time(
     # The launcher's light commands load on dispatch: hello pays for none of them, so the
     # ``evals`` command's Slurm ledger (about 85 modules) stays out of the helper.
     assert [name for name in loaded if name.split(".")[0] == "vs_slurm"] == []
+    # The run summary's fold and cache load on the first summary request.
+    assert {"server.run_summary", "server.run_summary_cache"}.isdisjoint(loaded)
 
 
 def test_run_connect_makes_the_channel_a_relay_to_the_run(

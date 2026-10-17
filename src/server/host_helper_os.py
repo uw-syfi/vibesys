@@ -58,7 +58,6 @@ from server.host_helper_requests import (
     event_page,
 )
 from server.host_preflight import PreflightReport
-from server.run_summary_cache import summarize_journal
 from vs_decode.api import Unreadable, decode_json
 from vs_project.api import GitRunHistory, NullGitTrackerEvents, Project, ProjectError
 from vs_sim.api import ProcessSpec
@@ -137,6 +136,10 @@ class FileProjects:
 
     def run_summary(self, project: Path, run_id: str) -> Summarized:
         """The fold of run ``run_id``'s journal, from the cache beside it and what it gained since."""
+        # Loaded on the first summary, never for ``hello``: the fold and its cache cost the
+        # helper's start-up no modules until a client asks for a summary.
+        from server.run_summary_cache import summarize_journal  # noqa: PLC0415
+
         return summarize_journal(self._journal(project, run_id))
 
     def _journal(self, project: Path, run_id: str) -> Path:
