@@ -10,7 +10,10 @@ import (
 	"repoctl/execution"
 )
 
-func selectedTestChecks(g graph, p plan) ([]execution.Check, []string, error) {
+// selectedTestChecks plans the local test run for a plan. The third result
+// lists selected jobs with no local check group or native target; they run in
+// CI only, so the caller reports them as skipped instead of failing.
+func selectedTestChecks(g graph, p plan) ([]execution.Check, []string, []string, error) {
 	allTargets := false
 	for id := range p.Components {
 		allTargets = allTargets || g.Components[id].SelectAllCollections
@@ -43,27 +46,32 @@ func selectedTestChecks(g graph, p plan) ([]execution.Check, []string, error) {
 		}
 		planner, ok := testPlanners[suite.Language]
 		if !ok {
-			return nil, nil, fmt.Errorf("check group %q: unknown language %q", suite.Name, suite.Language)
+			return nil, nil, nil, fmt.Errorf("check group %q: unknown language %q", suite.Name, suite.Language)
 		}
 		planned, err := planner.Plan(suite, p.Collections[suite.Collection])
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		checks = append(checks, planned...)
 		coveredJobs[suite.TriggerJob] = true
 	}
+	skipped := []string{}
 	for job, selected := range p.Jobs {
 		if selected && !coveredJobs[job] {
-			return nil, nil, fmt.Errorf("selected job %q has no runnable check group or native target", job)
+			skipped = append(skipped, job)
 		}
 	}
-	return checks, targets, nil
+	sort.Strings(skipped)
+	return checks, targets, skipped, nil
 }
 
 func runSelectedTests(root string, g graph, p plan, dryRun bool, runner execution.Runner, nativeRun nativeCommand) error {
-	checks, targets, err := selectedTestChecks(g, p)
+	checks, targets, skipped, err := selectedTestChecks(g, p)
 	if err != nil {
 		return err
+	}
+	for _, job := range skipped {
+		fmt.Printf("skipped job %q: no local target, runs in CI only\n", job)
 	}
 	if err := runChecks(root, checks, dryRun, runner); err != nil {
 		return err

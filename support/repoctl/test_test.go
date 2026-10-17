@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -45,7 +46,7 @@ func testFixture() (graph, plan) {
 
 func TestSelectedTestChecksUsePackagesAndNativeTargets(t *testing.T) {
 	g, p := testFixture()
-	checks, targets, err := selectedTestChecks(g, p)
+	checks, targets, _, err := selectedTestChecks(g, p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +63,7 @@ func TestSelectedTestChecksUsePackagesAndNativeTargets(t *testing.T) {
 		t.Fatalf("commands = %v, targets = %v", got, targets)
 	}
 	delete(p.Collections, "pnpm_packages")
-	checks, _, err = selectedTestChecks(g, p)
+	checks, _, _, err = selectedTestChecks(g, p)
 	if err != nil || !reflect.DeepEqual(checks[1].Args, []string{"pnpm", "test:clients"}) {
 		t.Fatalf("fallback command = %v, err = %v", checks, err)
 	}
@@ -90,20 +91,12 @@ func TestSelectedTestsRunAndDryRun(t *testing.T) {
 	}
 }
 
-func TestMissingSelectedSuiteFails(t *testing.T) {
-	g, p := testFixture()
-	delete(g.CheckGroups, "python")
-	if _, _, err := selectedTestChecks(g, p); err == nil {
-		t.Fatal("missing selected suite accepted")
-	}
-}
-
 func TestSelectedTestChecksRejectsUnknownLanguage(t *testing.T) {
 	g, p := testFixture()
 	suite := g.CheckGroups["python"]
 	suite.Language = "unknown"
 	g.CheckGroups["python"] = suite
-	if _, _, err := selectedTestChecks(g, p); err == nil || !strings.Contains(err.Error(), `unknown language "unknown"`) {
+	if _, _, _, err := selectedTestChecks(g, p); err == nil || !strings.Contains(err.Error(), `unknown language "unknown"`) {
 		t.Fatalf("error = %v", err)
 	}
 }
@@ -196,17 +189,75 @@ func TestRunCheckGroupUsesAlwaysAndSelectedPackageCommands(t *testing.T) {
 	}
 }
 
-func TestSelectedJobWithoutRunnableChecksFails(t *testing.T) {
+func TestSelectedJobWithoutLocalTargetIsSkipped(t *testing.T) {
+	// real_tiers has no check group included in test and no native target.
+	withReal := func(p plan, jobs ...string) plan {
+		for _, job := range jobs {
+			p.Jobs[job] = true
+		}
+		return p
+	}
+	cases := []struct {
+		name        string
+		jobs        map[string]bool
+		wantSkipped []string
+		wantChecks  int
+		wantNative  int
+	}{
+		{"untargeted job alone", map[string]bool{"real_tiers": true}, []string{"real_tiers"}, 0, 0},
+		{"mixed with runnable jobs", map[string]bool{"real_tiers": true, "python": true, "tui": true, "evaluators": true}, []string{"real_tiers"}, 3, 1},
+		{"two untargeted jobs", map[string]bool{"real_tiers": true, "slurm": true, "python": true}, []string{"real_tiers", "slurm"}, 1, 0},
+		{"runnable jobs only", map[string]bool{"python": true, "tui": true, "evaluators": true}, []string{}, 3, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			g, p := testFixture()
+			p.Jobs = map[string]bool{}
+			withReal(p, keys(tc.jobs)...)
+			if _, ok := tc.jobs["evaluators"]; !ok {
+				p.Components = map[string][]string{}
+			}
+			runner := &recordingRunner{}
+			nativeCalls := 0
+			nativeRun := func(_ context.Context, _, _ string, _ []string, _ []string) error {
+				nativeCalls++
+				return nil
+			}
+			_, _, skipped, err := selectedTestChecks(g, p)
+			if err != nil || !reflect.DeepEqual(skipped, tc.wantSkipped) {
+				t.Fatalf("skipped = %v, err = %v, want %v", skipped, err, tc.wantSkipped)
+			}
+			if err := runSelectedTests(t.TempDir(), g, p, false, runner, nativeRun); err != nil {
+				t.Fatalf("run failed: %v", err)
+			}
+			if len(runner.checks) != tc.wantChecks || nativeCalls != tc.wantNative {
+				t.Fatalf("ran %d checks and %d native, want %d and %d", len(runner.checks), nativeCalls, tc.wantChecks, tc.wantNative)
+			}
+		})
+	}
+}
+
+func TestSkippedJobDoesNotMaskRunnableFailure(t *testing.T) {
 	g, p := testFixture()
-	delete(g.CheckGroups, "python")
-	if _, _, err := selectedTestChecks(g, p); err == nil || !strings.Contains(err.Error(), `selected job "python"`) {
-		t.Fatalf("error = %v", err)
+	p.Jobs["real_tiers"] = true
+	runner := &failingRunner{}
+	if err := runSelectedTests(t.TempDir(), g, p, false, runner, nil); err == nil {
+		t.Fatal("failing runnable group reported success")
 	}
-	delete(p.Components, "native:a")
-	delete(p.Jobs, "python")
-	if _, _, err := selectedTestChecks(g, p); err == nil || !strings.Contains(err.Error(), `selected job "evaluators"`) {
-		t.Fatalf("error = %v", err)
+}
+
+type failingRunner struct{}
+
+func (failingRunner) Run(context.Context, string, execution.Check) error {
+	return fmt.Errorf("boom")
+}
+
+func keys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
 	}
+	return out
 }
 
 func TestPolicyRejectsJobWithoutRunnableChecks(t *testing.T) {
