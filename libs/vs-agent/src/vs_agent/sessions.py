@@ -36,7 +36,7 @@ from vs_project.api import ProjectError
 from vs_prompts.api import RenderedPrompt
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Iterator
     from contextlib import AbstractContextManager
 
     from vs_agent.contracts import AgentCapabilities, AgentObserver
@@ -168,17 +168,14 @@ class AgentSessions(Protocol):
         ...
 
     def steer(
-        self,
-        key: AgentSessionKey,
-        invocation_id: str,
-        text: str,
-        *,
-        on_rejected: Callable[[], None],
+        self, key: AgentSessionKey, invocation_id: str, text: str, *, steer_id: str
     ) -> SteerOutcome:
         """Offer *text* to *invocation_id*'s turn if this instance is running it.
 
-        ``NO_RUNNING_TURN`` when it is not; ``DELIVERED`` is a provider receipt
-        that a later *on_rejected* call may still take back.
+        ``NO_RUNNING_TURN`` when it is not. ``DELIVERED`` says the provider took the
+        message; the turn's result settles it exactly once, whether the turn returns or
+        raises and however often a capacity stop resends it: consumed, or named by
+        *steer_id* in ``AgentTurnResult.refused_steers`` of the completed invocation.
         """
         ...
 
@@ -344,12 +341,11 @@ class AgentTurnExecutor(Protocol):
         """Ask the keyed conversation's in-flight turn to stop, keeping its checkpoint."""
         ...
 
-    def steer_session(
-        self, key: AgentSessionKey, text: str, *, on_rejected: Callable[[], None]
-    ) -> SteerOutcome:
+    def steer_session(self, key: AgentSessionKey, text: str, *, steer_id: str) -> SteerOutcome:
         """Offer *text* to the keyed conversation's in-flight turn, queuing nothing.
 
-        ``DELIVERED`` may still be refused at turn end through *on_rejected*.
+        A ``DELIVERED`` message the provider does not keep is named by *steer_id* in the
+        turn's ``AgentTurnResult.refused_steers``.
         """
         ...
 
@@ -435,12 +431,7 @@ class ClientAgentSessions:
             self._client.cancel_session(key)
 
     def steer(
-        self,
-        key: AgentSessionKey,
-        invocation_id: str,
-        text: str,
-        *,
-        on_rejected: Callable[[], None],
+        self, key: AgentSessionKey, invocation_id: str, text: str, *, steer_id: str
     ) -> SteerOutcome:
         """Offer *text* to *invocation_id*'s turn if this instance is running it."""
         self._validate_invocation(key, invocation_id)
@@ -448,7 +439,7 @@ class ClientAgentSessions:
             running = invocation_id in self._active
         if not running:
             return SteerOutcome.NO_RUNNING_TURN
-        return self._client.steer_session(key, text, on_rejected=on_rejected)
+        return self._client.steer_session(key, text, steer_id=steer_id)
 
     def release(self, key: AgentSessionKey) -> None:
         """Release the key's live provider resources, keeping its durable checkpoint."""
