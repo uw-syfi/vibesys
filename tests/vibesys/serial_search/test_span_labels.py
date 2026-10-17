@@ -79,7 +79,7 @@ def measure_itself(host: SerialHost, evaluations: list[tuple[str, bool]]) -> Non
     """
     attempt = host.opened[-1]
     scope = Scope(owner=attempt.attempt_id, generation=attempt.generation)
-    taken = list(host.run.view.changes.get("measurements", ()))
+    taken = list(host.run.view.current().measurements)
     for candidate, accuracy in evaluations:
         request = RequestId(root=f"agent-evaluation-{len(taken)}")
         for stage in ("accuracy", "benchmark") if accuracy else ("benchmark",):
