@@ -24,7 +24,7 @@ def dynamic_responders(
     seed: int,
     sink: AgentEventSink,
     workloads: tuple[Workload, ...] = WORKLOADS,
-) -> Mapping[str, Callable[[ScriptedTurn], Mapping[str, object]]]:
+) -> Mapping[str, Callable[[ScriptedTurn], dict[str, object]]]:
     """The responder of each role a scripted dynamic run asks, keyed by the role's agent kind.
 
     The profiler, the merger and the outliner have none: a plan that asks for them, which the
@@ -34,7 +34,7 @@ def dynamic_responders(
 
     def answering(
         reply: Callable[[ScriptedTurn], dict[str, object]],
-    ) -> Callable[[ScriptedTurn], Mapping[str, object]]:
+    ) -> Callable[[ScriptedTurn], dict[str, object]]:
         return lambda turn: wire(turn, reply(turn))
 
     return {

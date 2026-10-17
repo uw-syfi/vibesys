@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 from tests.e2e.dynamic_loop_harness import _AGENT_CONFIG, LoopInput, run_request
 
 from vibesys.api import RunStatus
-from vibesys.events import CoreEventType
+from vibesys.events import CoreEventType, WorkstreamFinishedData
 from vibesys.orchestration.dynamic.scripted.api import (
     CHAT_REPLY,
     IMPLEMENTER_KIND,
@@ -139,7 +139,7 @@ def test_scripted_agents_plan_edit_and_judge_through_the_real_backend(tmp_path: 
     ended = [
         event.data.last_error
         for event in run.events
-        if event.type is CoreEventType.WORKSTREAM_FINISHED
+        if isinstance(event.data, WorkstreamFinishedData)
     ]
     assert None in ended
     assert any(error is not None for error in ended)
