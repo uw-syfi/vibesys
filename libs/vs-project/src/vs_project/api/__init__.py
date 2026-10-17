@@ -11,7 +11,9 @@ from typing import TYPE_CHECKING
 
 from vs_project._cli_git_repository import CliGitRepository
 from vs_project._control_inbox import (
+    INBOX_FORMAT,
     ControlInbox,
+    Ended,
     FileControlInbox,
     InboxClosedError,
     InboxEntry,
@@ -145,6 +147,7 @@ __all__ = [
     "COMMIT_IDENTITY_NAME",
     "DEFAULT_GIT_BACKEND",
     "GIT_BACKEND_ENV",
+    "INBOX_FORMAT",
     "LPRINT_LOGGER",
     "MAX_SOCKET_PATH_BYTES",
     "PROJECT_SCHEMA_VERSION",
@@ -162,6 +165,7 @@ __all__ = [
     "Conflict",
     "ConflictReason",
     "ControlInbox",
+    "Ended",
     "FakeStateModels",
     "FakeStateStore",
     "FakeStateStores",

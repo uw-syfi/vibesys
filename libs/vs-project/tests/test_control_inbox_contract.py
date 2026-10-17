@@ -1,25 +1,28 @@
 """Contract of the ``ControlInbox`` interface, run against every implementation.
 
-Each case applies one generated sequence of operations (post, settle, reject, close, planting
-an entry the inbox cannot read, and reopening the inbox as a new reader would) to every
-implementation and to a plain model, and checks that each implementation lists exactly what
-the model holds, in posting order whatever the ids, and reports each request's status as the
-model does. ``FileControlInbox`` also survives being reopened, as a run reads its inbox again
+Each case applies one generated sequence of operations (post, settle, reject, the run's end,
+a post the run ends during, planting an entry the inbox cannot read, and reopening the inbox
+as a new reader would) to every implementation and to a plain model, and checks that each
+implementation lists exactly what the model holds, in posting order whatever the ids, and
+reports each request's status as the model does. The run's end is what the poster reads from
+the run's record (``ended``); the inbox keeps no copy of it. ``FileControlInbox`` also survives being reopened, as a run reads its inbox again
 after a restart.
 """
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 
 from vs_project.api import (
+    INBOX_FORMAT,
     FileControlInbox,
     InboxClosedError,
     InboxEntry,
@@ -40,6 +43,12 @@ if TYPE_CHECKING:
 
     from vs_project.api import ControlInbox
 
+
+def _live() -> str | None:
+    """A poster's read of a run that has not ended."""
+    return None
+
+
 _IDS = st.from_regex(r"[A-Za-z0-9][A-Za-z0-9._-]{0,8}", fullmatch=True)
 _PAYLOADS = st.binary(max_size=40)
 
@@ -55,7 +64,8 @@ _OPERATIONS = st.lists(
         st.tuples(st.just("reject"), _IDS, st.text(max_size=20)),
         st.tuples(st.just("unreadable"), _IDS, st.sampled_from(_UNREADABLE)),
         st.tuples(st.just("reopen")),
-        st.tuples(st.just("close"), st.sampled_from(["completed", "stopped"])),
+        st.tuples(st.just("end"), st.sampled_from(["completed", "stopped"])),
+        st.tuples(st.just("post-as-it-ends"), _IDS, _PAYLOADS),
     ),
     max_size=20,
 )
@@ -86,7 +96,7 @@ class _Model:
     """The ids posted through the inbox, in the order of their first post."""
     settled: set[str] = field(default_factory=set)
     rejected: dict[str, str] = field(default_factory=dict)
-    closed: str | None = None
+    ended: str | None = None
 
     def pending(self) -> tuple[tuple[str, bytes, bool], ...]:
         """What is neither settled nor rejected: posted ones in order, then the rest by id."""
@@ -104,8 +114,8 @@ class _Model:
             return RequestStatus(RequestState.APPLIED)
         if request_id in self.rejected:
             return RequestStatus(RequestState.REJECTED, self.rejected[request_id])
-        if self.closed is not None:
-            return RequestStatus(RequestState.REJECTED, ended_unapplied(self.closed))
+        if self.ended is not None:
+            return RequestStatus(RequestState.REJECTED, ended_unapplied(self.ended))
         return RequestStatus(RequestState.PENDING)
 
     def rejected_entries(self) -> tuple[RejectedEntry, ...]:
@@ -120,18 +130,27 @@ class _Model:
 
     def apply(self, operation: tuple[object, ...]) -> None:
         match operation:
-            case ("post", str(request_id), bytes(payload)) if self.closed is None:
-                self.posted.setdefault(request_id, payload)
-                if request_id not in self.order:
-                    self.order.append(request_id)
+            case ("post", str(request_id), bytes(payload)) if self.ended is None and not (
+                self.refuses(request_id, payload)
+            ):
+                self._place(request_id, payload)
+            case ("post-as-it-ends", str(request_id), bytes(payload)) if self.ended is None:
+                if not self.refuses(request_id, payload):
+                    self._place(request_id, payload)
+                self.ended = "completed"
             case ("unreadable", str(request_id), str()):
                 self.posted.setdefault(request_id, None)
             case ("settle", str(request_id)):
                 self.settled.add(request_id)
             case ("reject", str(request_id), str(reason)):
                 self.rejected.setdefault(request_id, reason)
-            case ("close", str(reason)):
-                self.closed = self.closed or reason
+            case ("end", str(reason)):
+                self.ended = self.ended or reason
+
+    def _place(self, request_id: str, payload: bytes) -> None:
+        self.posted.setdefault(request_id, payload)
+        if request_id not in self.order:
+            self.order.append(request_id)
 
 
 @dataclass(frozen=True)
@@ -167,6 +186,25 @@ def _fake_inbox(_: Path) -> _Opened:
 @pytest.mark.parametrize("opener", [_file_inbox, _fake_inbox], ids=["file", "fake"])
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
 @given(operations=_OPERATIONS)
+@example(operations=[("post", "z", b"1"), ("post", "a", b"2"), ("post", "m", b"3")])
+@example(operations=[("end", "completed"), ("post", "late", b"{}")])
+@example(
+    operations=[
+        ("post", "stop-1", b"{}"),
+        ("settle", "stop-1"),
+        ("end", "completed"),
+        ("post", "stop-1", b"{}"),
+    ]
+)
+@example(
+    operations=[
+        ("post", "r1", b"{}"),
+        ("reject", "r1", "no"),
+        ("end", "completed"),
+        ("post", "r1", b"{}"),
+    ]
+)
+@example(operations=[("post-as-it-ends", "racing", b"{}")])
 def test_an_inbox_lists_what_was_posted_in_posting_order_and_reports_each_status(
     tmp_path_factory: pytest.TempPathFactory,
     opener: Callable[[Path], _Opened],
@@ -174,8 +212,9 @@ def test_an_inbox_lists_what_was_posted_in_posting_order_and_reports_each_status
 ) -> None:
     """An id holds one request for good, in the place of its first post, whatever the ids.
 
-    An unreadable entry is listed until it is set aside; a closed inbox refuses every post
-    before writing it, and a request never marked then reads as rejected.
+    An unreadable entry is listed until it is set aside. Once the run has ended, a post of
+    a request it applied succeeds, any other post is refused before writing, and a request
+    never marked reads as rejected; a post the run ends during is written and refused.
     """
     opened = opener(tmp_path_factory.mktemp("inbox"))
     inbox = opened.reopen()
@@ -196,30 +235,52 @@ def test_an_inbox_lists_what_was_posted_in_posting_order_and_reports_each_status
     assert inbox.rejected() == model.rejected_entries()
     named = {str(operation[1]) for operation in operations if operation[0] in _NAMING}
     for request_id in sorted(named):
-        assert inbox.status(request_id) == model.status(request_id)
+        assert inbox.status(request_id, ended=model.ended) == model.status(request_id)
 
 
-_NAMING = frozenset({"post", "settle", "reject", "unreadable"})
+_NAMING = frozenset({"post", "post-as-it-ends", "settle", "reject", "unreadable"})
 """The operations that name one request."""
 
 
 def _apply(inbox: ControlInbox, model: _Model, operation: tuple[object, ...]) -> None:
     """Apply one operation that goes through the inbox, as the model says it answers."""
+    ended = model.ended
     match operation:
-        case ("post", str(request_id), bytes(payload)) if model.closed is not None:
-            with pytest.raises(InboxClosedError, match="was not posted"):
-                inbox.post(request_id, payload)
         case ("post", str(request_id), bytes(payload)) if model.refuses(request_id, payload):
-            with pytest.raises(ProjectStateError):
-                inbox.post(request_id, payload)
+            with pytest.raises(ProjectStateError, match="different request"):
+                inbox.post(request_id, payload, ended=lambda: ended)
+        case ("post", str(request_id), bytes(payload)) if ended is not None:
+            _post_to_ended(inbox, model, request_id, payload)
         case ("post", str(request_id), bytes(payload)):
-            inbox.post(request_id, payload)
+            inbox.post(request_id, payload, ended=lambda: None)
+        case ("post-as-it-ends", str(request_id), bytes(payload)) if ended is None:
+            reads = iter([None, "completed"])
+            applied = model.status(request_id) == RequestStatus(RequestState.APPLIED)
+            if model.refuses(request_id, payload):
+                with pytest.raises(ProjectStateError, match="different request"):
+                    inbox.post(request_id, payload, ended=lambda: next(reads))
+            elif applied:
+                inbox.post(request_id, payload, ended=lambda: next(reads))
+            else:
+                with pytest.raises(InboxClosedError, match="written as the run ended"):
+                    inbox.post(request_id, payload, ended=lambda: next(reads))
+        case ("post-as-it-ends", str(request_id), bytes(payload)):
+            _post_to_ended(inbox, model, request_id, payload)
         case ("settle", str(request_id)):
             inbox.settle(request_id)
         case ("reject", str(request_id), str(reason)):
-            inbox.reject(request_id, reason)
-        case ("close", str(reason)):
-            inbox.close(reason)
+            assert inbox.reject(request_id, reason) is (request_id not in model.rejected)
+
+
+def _post_to_ended(inbox: ControlInbox, model: _Model, request_id: str, payload: bytes) -> None:
+    """A post after the run ended: what applied stays posted; nothing else is written."""
+    status = model.status(request_id)
+    if status == RequestStatus(RequestState.APPLIED):
+        inbox.post(request_id, payload, ended=lambda: model.ended)
+        return
+    expected = "was not posted" if status is None else "was rejected"
+    with pytest.raises(InboxClosedError, match=expected):
+        inbox.post(request_id, payload, ended=lambda: model.ended)
 
 
 @pytest.mark.parametrize("opener", [_file_inbox, _fake_inbox], ids=["file", "fake"])
@@ -232,9 +293,9 @@ def test_a_named_request_applies_in_its_posting_place(
     resume a run before pausing it.
     """
     inbox = opener(tmp_path).reopen()
-    inbox.post("hold", b"pause")
-    inbox.post("1760000000000-k3", b"resume")
-    inbox.post("hold", b"pause")  # posted again after a lost answer: keeps its first place
+    inbox.post("hold", b"pause", ended=_live)
+    inbox.post("1760000000000-k3", b"resume", ended=_live)
+    inbox.post("hold", b"pause", ended=_live)  # again after a lost answer: keeps its place
 
     assert [entry.payload for entry in inbox.pending()] == [b"pause", b"resume"]
 
@@ -243,20 +304,27 @@ def test_a_named_request_applies_in_its_posting_place(
 def test_an_ended_run_refuses_a_post_before_writing_it(
     tmp_path: Path, opener: Callable[[Path], _Opened]
 ) -> None:
-    """Once the run closed its inbox, nothing posted is written, and what applied says so."""
+    """Once the run's record says it ended, nothing new is written; a retry of what applied
+    succeeds, and a request it never applied reads as rejected, with no marker of the end."""
     inbox = opener(tmp_path).reopen()
-    inbox.post("applied", b"{}")
+    inbox.post("applied", b"{}", ended=_live)
     inbox.settle("applied")
-    inbox.post("unread", b"{}")
-    inbox.close("completed")
+    inbox.post("unread", b"{}", ended=_live)
+
+    def ended() -> str:
+        return "completed"
 
     with pytest.raises(InboxClosedError, match="was not posted"):
-        inbox.post("late", b"{}")
-    assert inbox.status("late") is None
-    assert inbox.status("applied") == RequestStatus(RequestState.APPLIED)
-    assert inbox.status("unread") == RequestStatus(
+        inbox.post("late", b"{}", ended=ended)
+    inbox.post("applied", b"{}", ended=ended)
+    with pytest.raises(InboxClosedError, match="was rejected: the run ended before applying"):
+        inbox.post("unread", b"{}", ended=ended)
+    assert inbox.status("late", ended="completed") is None
+    assert inbox.status("applied", ended="completed") == RequestStatus(RequestState.APPLIED)
+    assert inbox.status("unread", ended="completed") == RequestStatus(
         RequestState.REJECTED, ended_unapplied("completed")
     )
+    assert inbox.status("unread", ended=None) == RequestStatus(RequestState.PENDING)
 
 
 @pytest.mark.parametrize("opener", [_file_inbox, _fake_inbox], ids=["file", "fake"])
@@ -266,18 +334,50 @@ def test_an_id_that_is_not_one_file_name_is_refused(
 ) -> None:
     inbox = opener(tmp_path).reopen()
     with pytest.raises(ProjectStateError, match="control request id"):
-        inbox.post(request_id, b"{}")
+        inbox.post(request_id, b"{}", ended=_live)
 
 
 def test_a_file_inbox_ignores_files_that_are_not_requests(tmp_path: Path) -> None:
     project, run_id = _project_with_run(tmp_path)
     inbox = project.state.control_inbox(run_id)
-    inbox.post("r1", b"{}")
+    inbox.post("r1", b"{}", ended=_live)
     namespace = project.state.local_namespace(run_id, "control")
     namespace.write_bytes("inbox/notes.txt", b"not a request")
 
     assert inbox.pending() == (InboxEntry("r1", b"{}"),)
     assert isinstance(inbox, FileControlInbox)
+
+
+def test_a_file_inbox_warns_once_about_each_file_its_order_does_not_use(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    project, run_id = _project_with_run(tmp_path)
+    inbox = project.state.control_inbox(run_id)
+    inbox.post("r1", b"{}", ended=_live)
+    namespace = project.state.local_namespace(run_id, "control")
+    namespace.write_bytes("order/stray.txt", b"r1")
+    namespace.write_bytes("order/000000000099", b"../escape")
+
+    with caplog.at_level(logging.WARNING):
+        inbox.pending()
+        inbox.pending()
+
+    assert sorted(r.getMessage() for r in caplog.records) == [
+        "the control inbox ignores order/000000000099: it names no valid request id",
+        "the control inbox ignores order/stray.txt: it is not a place in the posting order",
+    ]
+    assert inbox.pending() == (InboxEntry("r1", b"{}"),)
+
+
+@pytest.mark.parametrize("opener", [_file_inbox, _fake_inbox], ids=["file", "fake"])
+def test_an_inbox_says_which_format_its_reader_declared(
+    tmp_path: Path, opener: Callable[[Path], _Opened]
+) -> None:
+    opened = opener(tmp_path)
+    assert opened.reopen().served_format() is None
+    opened.reopen().serve()
+    opened.reopen().serve()
+    assert opened.reopen().served_format() == INBOX_FORMAT
 
 
 def test_creating_a_state_file_never_replaces_one(tmp_path: Path) -> None:
