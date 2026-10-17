@@ -14,6 +14,7 @@ from tests.vibesys.vibesys_grid import diagonal
 
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vs_evaluation.api import (
+    STAGE_OUTPUT_TAIL_CHARS,
     ContentDigest,
     EvaluationCoordinator,
     EvaluationFailed,
@@ -807,6 +808,71 @@ async def test_failed_accuracy_fails_the_evaluation_with_its_diagnostics(tmp_pat
     accuracy = TrustedEvidence.model_validate(observed.stage_results[0].result)
     assert accuracy.outcome is EvidenceOutcome.FAILED
     assert observed.stage_results[1].state is StageState.SKIPPED
+    await executor.close()
+
+
+_SECRET = "sk-" + "a1b2c3d4e5f6a7b8c9d0e1f2a3b4"
+_SECRET_SERVICE_LOG = (
+    "decode step\n" * 1_000 + f"OPENAI_API_KEY={_SECRET}\n" + "final traceback line"
+)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_stage_keeps_a_bounded_credential_free_service_log_tail(
+    tmp_path: Path,
+) -> None:
+    run = _World(tmp_path / "project")
+    snapshot = await run.workspaces.root.snapshot("candidate")
+    config = _config()
+    runner = _Runner(
+        tmp_path / "runner",
+        stages=(
+            SlurmBatchStageResult(
+                name="accuracy",
+                exit_code=0,
+                stdout="ok",
+                stderr="",
+                elapsed_seconds=1.0,
+                skipped=False,
+            ),
+            SlurmBatchStageResult(
+                name="benchmark",
+                exit_code=124,
+                stdout="",
+                stderr="",
+                elapsed_seconds=600.0,
+                skipped=False,
+            ),
+        ),
+        service_log_tail=_SECRET_SERVICE_LOG,
+    )
+    runner.job_exit_code = 1
+    executor = SlurmSemanticEvaluationExecutor(
+        config,
+        SlurmExecutionPolicy(),
+        SlurmEvaluationPlan(
+            config_path=tmp_path / "slurm.toml",
+            accuracy_command=("python", "accuracy.py"),
+            benchmark_command=("python", "benchmark.py"),
+        ),
+        TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
+        _TrackedWorkspaces(run.workspaces),
+        _namespace(tmp_path),
+        tmp_path / "handles",
+        cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
+        clock=ManualClock(),
+        sleeper=ManualClock(),
+    )
+
+    await executor.submit(_request(snapshot), handle_id="fused")
+    observed = await _terminal(executor, "fused")
+
+    tail = observed.stage_results[1].service_log_tail
+    assert tail is not None
+    assert len(tail) <= STAGE_OUTPUT_TAIL_CHARS
+    assert _SECRET not in tail
+    assert "OPENAI_API_KEY" in tail
+    assert tail.endswith("final traceback line")
     await executor.close()
 
 

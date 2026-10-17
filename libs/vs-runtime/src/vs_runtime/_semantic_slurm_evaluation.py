@@ -100,6 +100,13 @@ def _completed(raw: SlurmCommandResult, metadata: SlurmExecutionMetadata | None)
     )
 
 
+def _redacted_service_log(step: EvaluationStepResult) -> str | None:
+    """The step's service log tail, credential-redacted and bounded like the output tails."""
+    if step.service_log_tail is None:
+        return None
+    return redact_diagnostic_tail(step.service_log_tail, max_chars=STAGE_OUTPUT_TAIL_CHARS) or None
+
+
 def _stage_failure_kind(evidence: TrustedEvidence) -> StageFailureKind:
     """An ambiguous stage ran and was cut short; every other unsettled one lost its result."""
     if evidence.failure_kind is BenchmarkFailureKind.AMBIGUOUS:
@@ -488,7 +495,11 @@ class SemanticSlurmEvaluationExecutor:
                 )
                 results.append(
                     raw_step.model_copy(
-                        update={"name": step.name, "operator_failure": operator_step_failure}
+                        update={
+                            "name": step.name,
+                            "operator_failure": operator_step_failure,
+                            "service_log_tail": _redacted_service_log(raw_step),
+                        }
                     )
                 )
                 continue
@@ -538,7 +549,7 @@ class SemanticSlurmEvaluationExecutor:
                         redact_diagnostic_tail(raw.stderr, max_chars=STAGE_OUTPUT_TAIL_CHARS)
                         or None
                     ),
-                    service_log_tail=None if completed else raw_step.service_log_tail,
+                    service_log_tail=None if completed else _redacted_service_log(raw_step),
                     failure_kind=None if completed else _stage_failure_kind(evidence),
                     failure=(
                         None

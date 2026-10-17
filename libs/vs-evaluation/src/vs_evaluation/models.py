@@ -191,7 +191,8 @@ STAGE_OUTPUT_TAIL_CHARS = 4000
 class EvaluationStepResult(BaseModel):
     """Terminal result and elapsed duration for one planned stage.
 
-    ``stdout_tail`` and ``stderr_tail`` are credential-redacted tails of what the
+    ``stdout_tail``, ``stderr_tail`` and ``service_log_tail`` are credential-redacted
+    tails (each at most ``STAGE_OUTPUT_TAIL_CHARS``) of what the
     stage's command printed, for an operator watching the run. They are no
     evidence: they never enter an evidence identity and no agent reads them.
     """
@@ -211,7 +212,7 @@ class EvaluationStepResult(BaseModel):
     duration_s: FiniteFloat | None = Field(default=None, ge=0)
     stdout_tail: str | None = Field(default=None, max_length=STAGE_OUTPUT_TAIL_CHARS)
     stderr_tail: str | None = Field(default=None, max_length=STAGE_OUTPUT_TAIL_CHARS)
-    service_log_tail: str | None = None
+    service_log_tail: str | None = Field(default=None, max_length=STAGE_OUTPUT_TAIL_CHARS)
     """The shared service's log tail beside a failed stage, kept apart from ``failure`` (the
     stage's own output) so a reader that must cut the text keeps the stage's verdict."""
 

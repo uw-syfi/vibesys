@@ -56,6 +56,7 @@ from vs_evaluation.api import (
 )
 from vs_evaluation.api import EvidenceKind as StageKind
 from vs_evaluator_protocol.api import ProfileField
+from vs_runtime._evaluation_failure_text import render_stage_output_with_service_log
 from vs_runtime._failure_classification import job_failure
 from vs_runtime._observation_factory import ObservationFacts, ObservationSubject
 
@@ -314,7 +315,12 @@ def _terminal_view(
     # A stage's own failure text says more than the job's summary (a benchmark's last
     # output, say), and is all that explains a failure that left no evidence.
     diagnostic = next(
-        (s.failure for s in terminal.stage_results if s.failure), terminal.failure or ""
+        (
+            render_stage_output_with_service_log(s.failure, s.service_log_tail)
+            for s in terminal.stage_results
+            if s.failure
+        ),
+        terminal.failure or "",
     )
     operator_diagnostic = next(
         (s.operator_failure for s in terminal.stage_results if s.operator_failure is not None),

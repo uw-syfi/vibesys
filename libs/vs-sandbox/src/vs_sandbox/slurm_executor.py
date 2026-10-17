@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, assert_never
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from vs_evaluation.api import (
+    STAGE_OUTPUT_TAIL_CHARS,
     AvailabilitySnapshot,
     AvailabilityState,
     CostClass,
@@ -1288,7 +1289,9 @@ class SlurmEvaluationExecutor:
             elif failure is None and raw.exit_code != 0:
                 failure = _stage_failure(step, raw, item.elapsed_seconds)
                 service_log_tail = (
-                    batch.service_log_tail if batch.service_log_tail.strip() else None
+                    batch.service_log_tail[-STAGE_OUTPUT_TAIL_CHARS:]
+                    if batch.service_log_tail.strip()
+                    else None
                 )
             results.append(
                 EvaluationStepResult(
