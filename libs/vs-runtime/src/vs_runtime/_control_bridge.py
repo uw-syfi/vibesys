@@ -148,6 +148,7 @@ class RunControlBridge:
         self._consumption.newly_settled(
             core,
             self._report_consumed,
+            self._report_mid_turn,
             self._channel.notify_steer_dropped,
             self._channel.notify_guidance_ended,
         )
@@ -382,6 +383,11 @@ class RunControlBridge:
 
     def _report_consumed(self, role: str, round_label: str, execution_id: str) -> None:
         self._channel.notify_steer_consumed(
+            agent_kind=role, round_label=round_label, execution_id=execution_id
+        )
+
+    def _report_mid_turn(self, role: str, round_label: str, execution_id: str) -> None:
+        self._channel.notify_steer_delivered_mid_turn(
             agent_kind=role, round_label=round_label, execution_id=execution_id
         )
 

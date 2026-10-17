@@ -11,10 +11,20 @@ of being offered to the same turn at every poll.
 
 from __future__ import annotations
 
+import asyncio
+import tempfile
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import pytest
+from tests.support.session_world import (
+    SCOPE,
+    SESSION,
+    dispatch_request,
+    ensure_request,
+    open_host,
+)
 
 from vs_agent.api import SteerOutcome
 from vs_core.api import (
@@ -48,7 +58,10 @@ from vs_core.api import (
     step,
 )
 from vs_core.testing.builders import initial_state
-from vs_runtime.api.core import MidTurnSteering
+from vs_project.api import Project
+from vs_runtime.api.core import MidTurnSteering, ReceiptStore
+from vs_runtime.api.executor_contexts import context_for
+from vs_sim.api.testing import SimThreads, wait_until_started
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -232,3 +245,57 @@ def test_an_offer_to_a_turn_core_no_longer_holds_is_released_without_asking() ->
     assert run.provider is not None
     assert run.provider.asked == []
     assert run.record().offered_to is None
+
+
+def _offer(invocation: str, scope: Scope = SCOPE) -> MidTurnOffer:
+    item = SessionInput(
+        input_id=_INPUT,
+        target=ScopeInputTarget(scope=SCOPE),
+        artifact=ArtifactRef(artifact_id=ArtifactId(root="steer"), digest="0" * 64),
+        received_at=0.0,
+        sequence=1,
+        mode=InputMode.INTERRUPT,
+    )
+    return MidTurnOffer(
+        input=item,
+        invocation=InvocationRef(
+            session_id=SESSION, invocation_id=InvocationId(root=invocation), generation=0
+        ),
+        scope=scope,
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_session_executor_reaches_only_the_turn_it_runs_for_the_offer() -> None:
+    """The offer reaches the live provider turn of the invocation and scope it names, only.
+
+    The Fake provider takes no message mid-turn, so a reached turn answers ``UNSUPPORTED``;
+    any other turn, scope or a turn that ended is ``NO_RUNNING_TURN``.
+    """
+    with tempfile.TemporaryDirectory() as raw:
+        base = Path(raw)
+        (base / "project").mkdir()
+        (base / "workspace").mkdir()
+        project = Project.open(base / "project")
+        host = open_host(base / "workspace", hang_until_cancelled=True)
+        store = ReceiptStore(project.state.state_store_namespace("run"), threads=SimThreads())
+        await host.run(ensure_request(), store)
+        executor = host.executor(store)
+        request = dispatch_request()
+        context = context_for(request).model_copy(update={"until": Until(at=100.0)})
+        dispatch = asyncio.ensure_future(executor.execute(request, context))
+        await wait_until_started(host.turn_started, dispatch)
+
+        def ignore() -> None:
+            return None
+
+        later = Scope(owner=SCOPE.owner, generation=1)
+        assert executor.offer_mid_turn(_offer("inv-1"), ignore) is SteerOutcome.UNSUPPORTED
+        assert executor.offer_mid_turn(_offer("inv-2"), ignore) is SteerOutcome.NO_RUNNING_TURN
+        assert (
+            executor.offer_mid_turn(_offer("inv-1", later), ignore) is SteerOutcome.NO_RUNNING_TURN
+        )
+        dispatch.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await dispatch
+        assert executor.offer_mid_turn(_offer("inv-1"), ignore) is SteerOutcome.NO_RUNNING_TURN
