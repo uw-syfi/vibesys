@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from vs_agent.api import AgentTurnRequest, ClientAgentSessions, MCPServerSpec
-from vs_core.api import Access, Scope
+from vs_core.api import Access, InputMode, Scope
 from vs_prompts.api import TemplateRenderer
 from vs_runtime._artifact_store import ArtifactStoreError
 from vs_runtime._session_lifecycle_requests import SessionLifecycleRequests
@@ -187,8 +187,9 @@ class ProductionSessionResolver:
 class TurnMessages:
     """Renders a turn's message from its prompts and the inputs reserved for it.
 
-    Operator steering reaches a turn here: every reserved input is a steer, and the template
-    shows every reserved input after the prompts, in reservation order.
+    Operator steering reaches a turn here: every input is a steer. The template shows the
+    standing guidance in force, then the inputs reserved for this turn alone, each after the
+    prompts in reservation order.
     """
 
     def __init__(self, artifacts: ArtifactStore, renderer: TemplateRenderer | None = None) -> None:
@@ -202,13 +203,20 @@ class TurnMessages:
         try:
             prompts = [self._text(ref) for ref in turn.prompts]
             texts = [
-                {"mode": item.mode.value, "text": self._text(item.artifact)} for item in ordered
+                {"mode": item.mode.value, "text": self._text(item.artifact)}
+                for item in ordered
+                if item.mode is not InputMode.STANDING
+            ]
+            guidance = [
+                self._text(item.artifact) for item in ordered if item.mode is InputMode.STANDING
             ]
             for dependency in turn.artifact_dependencies:
                 self._text(dependency)
         except (ArtifactStoreError, UnicodeDecodeError, _MissingArtifactError):
             return None
-        return self._renderer.render_template(_TEMPLATE, prompts=prompts, steers=texts)
+        return self._renderer.render_template(
+            _TEMPLATE, prompts=prompts, guidance=guidance, steers=texts
+        )
 
     def _text(self, ref: ArtifactRef) -> str:
         content = self._artifacts.read_digest(ref.digest)

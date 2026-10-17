@@ -559,6 +559,7 @@ class SessionLifecycleRequests:
             admission_id=request.admission_id,
             turn=turn,
             inputs=request.inputs,
+            guidance=request.guidance,
         )
         outcome = await self._dispatcher.dispatch_on_behalf_of(
             dispatch, core_identity(request), context

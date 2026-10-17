@@ -99,6 +99,7 @@ fatal, per-invocation and per-phase failures are errors.
 _CONTROL_EVENT_TYPES = frozenset(
     {
         CoreEventType.STEER_QUEUED,
+        CoreEventType.WITHDRAW_QUEUED,
         CoreEventType.PAUSE_REQUESTED,
         CoreEventType.RESUMED,
         CoreEventType.STOP_REQUESTED,
@@ -429,6 +430,8 @@ class RunIntegrationAdapter:
         """
         if event.type is CoreEventType.STEER_QUEUED:
             self.controller.steer(event.text)
+        elif event.type is CoreEventType.WITHDRAW_QUEUED:
+            self.controller.withdraw(event.text)
         elif event.type is CoreEventType.PAUSE_REQUESTED:
             self.controller.pause_after_call()
         elif event.type is CoreEventType.RESUMED:

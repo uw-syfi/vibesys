@@ -725,7 +725,7 @@ class RuntimeSessionRequests:
             raise _RefusalError(_rejected("the turn's workspace or access cannot be resolved"))
         spec = self._resolver.agent_spec(turn, workspace)
         template = self._resolver.template(turn)
-        message = self._resolver.message(turn, request.inputs)
+        message = self._resolver.message(turn, (*request.inputs, *request.guidance))
         if spec is None or template is None or message is None:
             raise _RefusalError(
                 _rejected("the turn's session, prompts or inputs cannot be resolved")

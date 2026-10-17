@@ -149,6 +149,13 @@ class RunController:
         with self._condition:
             self._journal.record(EventType.CONTROL, f"/steer: {text}", status=EventStatus.PENDING)
 
+    def withdraw(self, withdraws: str) -> None:
+        """Journal a withdrawal of the standing guidance sent under ``withdraws``."""
+        with self._condition:
+            self._journal.record(
+                EventType.CONTROL, f"/withdraw: {withdraws}", status=EventStatus.PENDING
+            )
+
     def start_agent_execution(
         self,
         request: AgentExecutionRequest,

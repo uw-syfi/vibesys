@@ -184,6 +184,16 @@ class SteerTargetEndedError(RuntimeError):
         super().__init__("The steer's target can no longer take a message")
 
 
+class WithdrawNotStandingError(RuntimeError):
+    """A withdrawal of a steer that is not, or is no longer, standing guidance."""
+
+    diagnostic_code = "withdraw_not_standing"
+
+    def __init__(self) -> None:
+        """Say why nothing could be withdrawn."""
+        super().__init__("The withdrawal names no standing guidance in force")
+
+
 class ControlIdConflictError(RuntimeError):
     """A control whose ``control_id`` already named a different control."""
 
@@ -198,6 +208,7 @@ _REFUSALS: dict[RefusalReason, type[Exception]] = {
     RefusalReason.NOT_PAUSED_ON_CAPACITY: CapacityWaitUnavailableError,
     RefusalReason.UNKNOWN_TARGET: SteerTargetUnknownError,
     RefusalReason.ENDED_TARGET: SteerTargetEndedError,
+    RefusalReason.NOT_STANDING: WithdrawNotStandingError,
 }
 """The protocol error each refusal answers with."""
 
