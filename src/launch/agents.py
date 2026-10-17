@@ -7,9 +7,10 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
+from launch.scripted_agents import ScriptedDynamicAgents
 from vibesys.api import agent_spec_from_config
 from vibesys.api.wiring import platform_skill_selection
-from vibesys.orchestration.dynamic.scripted.api import CHAT_REPLY, dynamic_responders
+from vibesys.orchestration.dynamic.scripted.api import CHAT_REPLY
 from vs_agent.api import AgentBackend, ScriptedAgentClient, ScriptedClientSetup, build_agent_client
 from vs_mcp.api import ToolServerDescriptor, expose_as_tools
 from vs_runtime.api.infrastructure import (
@@ -156,7 +157,7 @@ def scripted_agent_client(
     not needed, so they are not read: ``_unused`` takes what the run host passes.
     """
     setup = ScriptedClientSetup(
-        responders=dynamic_responders(seed=spec.scripted_seed, sink=events),
+        responders=ScriptedDynamicAgents(seed=spec.scripted_seed, sink=events).responders(),
         chat=CHAT_REPLY,
         provider=spec.provider,
         model=spec.model,

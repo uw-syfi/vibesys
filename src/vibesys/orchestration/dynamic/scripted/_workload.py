@@ -8,7 +8,11 @@ from typing import TYPE_CHECKING
 from vibesys.orchestration.dynamic.scripted._recipes import QUEUE_RECIPES, Recipe
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from collections.abc import Callable
+
+
+type Reader = Callable[[str], str | None]
+"""Reads a file of the checkout by its path relative to the checkout's root; ``None`` if absent."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,13 +28,13 @@ class Workload:
     """Text the manifest holds when the project is this workload."""
     recipes: tuple[Recipe, ...]
 
-    def recognizes(self, root: Path) -> bool:
-        """Whether the checkout at ``root`` is this workload."""
-        manifest = root / self.manifest
+    def recognizes(self, read: Reader) -> bool:
+        """Whether the checkout ``read`` reads is this workload."""
+        manifest = read(self.manifest)
         return (
-            manifest.is_file()
-            and self.manifest_text in manifest.read_text(encoding="utf-8")
-            and (root / self.source).is_file()
+            manifest is not None
+            and self.manifest_text in manifest
+            and read(self.source) is not None
         )
 
 
@@ -47,6 +51,6 @@ WORKLOADS = (QUEUE_RS,)
 """Every workload the scripted agents know."""
 
 
-def recognized(root: Path, workloads: tuple[Workload, ...]) -> Workload | None:
-    """The workload the checkout at ``root`` is, or ``None`` when no workload claims it."""
-    return next((workload for workload in workloads if workload.recognizes(root)), None)
+def recognized(read: Reader, workloads: tuple[Workload, ...]) -> Workload | None:
+    """The workload the checkout ``read`` reads is, or ``None`` when no workload claims it."""
+    return next((workload for workload in workloads if workload.recognizes(read)), None)

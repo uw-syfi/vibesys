@@ -1464,7 +1464,7 @@ expose = ["api", "api\\..*"]
 # The scripted agents of an agent-less dynamic run: replies and source edits, no model.
 path = "vibesys.orchestration.dynamic.scripted"
 layer = "loops"
-depends_on = ["vibesys.orchestration.dynamic.search", "vs_agent"]
+depends_on = ["vibesys.orchestration.dynamic.search"]
 
 [[interfaces]]
 from = ["vibesys.orchestration.dynamic.scripted"]

@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 
 from tests.e2e.dynamic_loop_harness import _AGENT_CONFIG, LoopInput, run_request
 
+from launch.scripted_agents import ScriptedDynamicAgents
 from vibesys.api import RunStatus
 from vibesys.events import CoreEventType, WorkstreamFinishedData
 from vibesys.orchestration.dynamic.scripted.api import (
@@ -28,7 +29,6 @@ from vibesys.orchestration.dynamic.scripted.api import (
     EditKind,
     Recipe,
     Workload,
-    dynamic_responders,
 )
 from vs_agent.api import ScriptedAgentClient, ScriptedClientSetup
 from vs_sim.api import OsThreads
@@ -89,9 +89,9 @@ def _scripted_client(
 ) -> AgentClientProtocol:
     """The scripted client over this scenario's workload, as the launcher's factory builds it."""
     setup = ScriptedClientSetup(
-        responders=dynamic_responders(
+        responders=ScriptedDynamicAgents(
             seed=spec.scripted_seed, sink=events, workloads=(VALUE_WORKLOAD,)
-        ),
+        ).responders(),
         chat=CHAT_REPLY,
         provider=spec.provider,
         model=spec.model,

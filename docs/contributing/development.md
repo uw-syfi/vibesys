@@ -186,7 +186,7 @@ one, one that slows it down, one that does not build and one that fails the trus
 a share of implementer turns fail the way real ones do (gives up, nominates nothing, replies against the
 schema, loses the turn, reports blocked) and a share of judged candidates are rejected. Five rounds take
 a few minutes: the candidate is the cheap CPU queue, and each measurement runs about half a minute.
-The code lives in `src/vibesys/orchestration/dynamic/scripted/`; the client is
+The decisions are pure and live in `src/vibesys/orchestration/dynamic/scripted/`; `src/launch/scripted_agents.py` reads and edits the workspace; the client is
 `vs_agent.api.ScriptedAgentClient`, the one fake agent client configured for the run (the `stub` backend
 only smoke-tests the interface and measures nothing).
 
