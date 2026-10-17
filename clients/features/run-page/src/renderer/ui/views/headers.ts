@@ -15,5 +15,5 @@ export const timelineHeader: ViewHeader<TimelineViewProps> = NONE;
 export const agentsHeader: ViewHeader<AgentsViewProps> = NONE;
 export const agentHeader: ViewHeader<AgentPaneProps> = NONE;
 export const logsHeader: ViewHeader<LogsViewProps> = NONE;
-export {itemHeader, stepHeader} from './step/step-view.js';
 export {ideaHeader} from './idea/idea-view.js';
+export {itemHeader, stepHeader} from './step/step-view.js';
