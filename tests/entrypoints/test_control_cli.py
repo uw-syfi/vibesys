@@ -104,6 +104,10 @@ def test_a_posted_control_is_what_the_run_records(
     request = CONTROL_REQUEST.validate_json(entry.payload)
     assert request.action == command[0]
     channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
+    if "--fallback" in command:
+        # Only a turn waiting on a quota stop takes a fallback resume (wire-protocol.md).
+        channel.enter_capacity()
+        channel.pause_for_quota()
     inbox = OperatorInbox(
         Project.open(root).state.control_inbox(run_id), ChannelRunControl(channel, SimThreads())
     )
@@ -111,10 +115,11 @@ def test_a_posted_control_is_what_the_run_records(
     core = _declaring(("dynamic-planner", "dynamic-worker"))
     for event in bridge.poll(core, 1.0):
         core = step(core, event).state
-    assert [(c.control_id.root, c.action) for c in core.run.controls] == [("op-r-1", command[0])]
+    posted = [c for c in core.run.controls if c.control_id.root.startswith("op-")]
+    assert [(c.control_id.root, c.action) for c in posted] == [("op-r-1", command[0])]
     if "--role" in command:
         role = command[command.index("--role") + 1]
-        assert core.run.controls[0].target == RoleInputTarget(role_id=RoleId(root=role))
+        assert posted[0].target == RoleInputTarget(role_id=RoleId(root=role))
         assert core.sessions.inputs[0].input.target == core.run.controls[0].target
 
 
