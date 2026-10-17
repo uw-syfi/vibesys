@@ -21,6 +21,7 @@ knowledge of application response schemas or policy defaults.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, override
 
@@ -148,12 +149,24 @@ class FakeCancels:
         return self._event.wait(timeout)
 
 
+class FakeSteering(StrEnum):
+    """How a fake provider answers a message sent into its running turn (``steer``)."""
+
+    UNSUPPORTED = "unsupported"
+    """The profile takes no message mid-turn, like a one-shot provider process."""
+    CONSUMED = "consumed"
+    """The provider accepts the message and the model takes it into the turn."""
+    REJECTED = "rejected"
+    """The provider accepts the message, then refuses it before the model sees it."""
+
+
 @dataclass(frozen=True, slots=True)
 class FakeTurnScript:
-    """Per-turn replies and an optional successful-turn renewal threshold."""
+    """Per-turn replies, an optional successful-turn renewal threshold and mid-turn steering."""
 
     answers: tuple[Answer, ...]
     reset_after_turn: int | None = None
+    steering: FakeSteering = FakeSteering.UNSUPPORTED
 
     def __post_init__(self) -> None:
         """Reject empty scripts and invalid renewal boundaries."""
@@ -190,6 +203,9 @@ class _ScriptedConversation:
         self._transport = transport
         self._id = spec.resume_id
         self._closed = False
+        self._lock = transport.in_flight.threads.lock()
+        self._running = False
+        self._steered: list[str] = []
 
     @property
     def conversation_id(self) -> str | None:
@@ -204,6 +220,16 @@ class _ScriptedConversation:
         if self._closed:
             message = "conversation is closed"
             raise agentshim.SessionStateError(message)
+        with self._lock:
+            self._running = True
+        try:
+            return self._turn(emit)
+        finally:
+            with self._lock:
+                self._running = False
+                self._steered.clear()
+
+    def _turn(self, emit: Callable[[agentshim.AgentEvent], None]) -> agentshim.TurnResult:
         transport = self._transport
         flight = transport.in_flight
         if flight.on_turn is not None and flight.request is not None:
@@ -220,11 +246,15 @@ class _ScriptedConversation:
         resumed = self._id is not None
         invocation = transport.next_invocation()
         events = transport.turns[min(invocation, len(transport.turns)) - 1]
+        answer = transport.answers[min(invocation, len(transport.answers)) - 1]
+        # A turn that stops on a capacity limit stops before it reports its steers' fate.
+        stops = isinstance(answer, AgentQuotaError)
         for event in events:
             emit(event)
+            self._answer_steers(emit, report=not stops)
+        self._answer_steers(emit, report=not stops)
         if self._id is None:
             self._id = transport.new_conversation_id()
-        answer = transport.answers[min(invocation, len(transport.answers)) - 1]
         if isinstance(answer, AgentOutputSchemaError):
             raise agentshim.TurnFailedError(
                 str(answer), kind=agentshim.FailureKind.SCHEMA, detail=answer.detail
@@ -242,6 +272,34 @@ class _ScriptedConversation:
             duration_ms=_USAGE_DURATION_MS if cost is not None else 0,
             exit_code=0,
         )
+
+    def steer(self, text: str) -> None:
+        """Take *text* into the running turn; its fate is reported on the turn's thread.
+
+        Only a transport whose profile can steer opens conversations the library steers.
+        """
+        with self._lock:
+            if not self._running:
+                message = "no turn is running in this fake conversation"
+                raise agentshim.NoRunningTurnError(message)
+            self._steered.append(text)
+
+    def _answer_steers(self, emit: Callable[[agentshim.AgentEvent], None], *, report: bool) -> None:
+        """Report each message steered in so far, as the script says, after the event before.
+
+        Without ``report`` the provider only acknowledges each: it stops before saying
+        whether the model read them.
+        """
+        with self._lock:
+            steered, self._steered = self._steered, []
+        for text in steered:
+            emit(agentshim.SteerDelivered(text=text))
+            if not report:
+                continue
+            if self._transport.steering is FakeSteering.REJECTED:
+                emit(agentshim.SteerRejected(text=text, reason="the fake refuses steers"))
+            else:
+                emit(agentshim.SteerConsumed(text=text))
 
     def interrupt(self) -> None:
         """Scripted turns finish on their own; there is nothing to stop."""
@@ -264,6 +322,7 @@ class _ScriptedTransport:
     ) -> None:
         self.turns = turns
         self.answers = script.answers
+        self.steering = script.steering
         self.in_flight = in_flight
         self._profile = profile
         self._ids = ids
@@ -464,7 +523,7 @@ class FakeProvider:
                 raise FakeProviderError.provider_closed()
             self._session_count += 1
             ordinal = self._session_count
-        profile = _profile(spec.provider, self._script.reset_after_turn)
+        profile = _profile(spec.provider, self._script.reset_after_turn, self._script.steering)
         in_flight = _InFlight(self._threads, on_turn=self._on_turn)
         transport = _ScriptedTransport(
             turns=self._turns,
@@ -519,8 +578,10 @@ def _ignore(_message: str) -> None:
     """Discard diagnostics: a fake has no run log."""
 
 
-def _profile(provider: str, reset_after_turn: int | None) -> agentshim.ProviderProfile:
-    """A resumable, non-steerable profile named for the provider a spec asks for."""
+def _profile(
+    provider: str, reset_after_turn: int | None, steering: FakeSteering = FakeSteering.UNSUPPORTED
+) -> agentshim.ProviderProfile:
+    """A resumable profile named for the provider a spec asks for, steerable if scripted so."""
     base = agentshim.get_provider("claude").profile
     renewal = (
         base.renewal
@@ -532,7 +593,7 @@ def _profile(provider: str, reset_after_turn: int | None) -> agentshim.ProviderP
         name=provider,
         display_name=provider.title(),
         binary=provider,
-        supports_steer=False,
+        supports_steer=steering is not FakeSteering.UNSUPPORTED,
         renewal=renewal,
     )
 

@@ -211,7 +211,8 @@ run starts reserves the input, renders it into that turn's prompt, and the run
 journals `steer_consumed` once the message has reached a turn. An input is
 delivered exactly once: a turn that is cancelled or rejected before the provider
 accepts it returns the input to pending, and a later turn receives it. A turn
-already running is never interrupted by a steer.
+already running is never interrupted by a default steer; an `--interrupt` steer is
+offered to it first, as [Running VibeSys](../running-vibesys.md) describes.
 
 ## Provider session resume
 

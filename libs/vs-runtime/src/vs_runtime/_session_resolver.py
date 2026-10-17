@@ -59,6 +59,7 @@ type SessionSpecFactory = Callable[[AgentRole, Path], AgentSessionSpec]
 """Provider session configuration for one role in one workspace directory."""
 
 _TEMPLATE = "session_turn.j2"
+_MID_TURN_TEMPLATE = "mid_turn_steer.j2"
 _RANK = {WorkspaceAccess.READ_ONLY: 0, WorkspaceAccess.LIMITED: 1, WorkspaceAccess.READ_WRITE: 2}
 
 
@@ -183,6 +184,10 @@ class ProductionSessionResolver:
         """The turn message, or None when any artifact is missing, corrupt or unreadable."""
         return self._messages.render(turn, inputs)
 
+    def mid_turn_message(self, item: SessionInput) -> RenderedPrompt | None:
+        """The message offering ``item`` to a running turn, or None when its text is unreadable."""
+        return self._messages.render_mid_turn(item)
+
 
 class TurnMessages:
     """Renders a turn's message from its prompts and the inputs reserved for it.
@@ -217,6 +222,14 @@ class TurnMessages:
         return self._renderer.render_template(
             _TEMPLATE, prompts=prompts, guidance=guidance, steers=texts
         )
+
+    def render_mid_turn(self, item: SessionInput) -> RenderedPrompt | None:
+        """The message offering ``item`` to a running turn, or None when its text is unreadable."""
+        try:
+            text = self._text(item.artifact)
+        except (ArtifactStoreError, UnicodeDecodeError, _MissingArtifactError):
+            return None
+        return self._renderer.render_template(_MID_TURN_TEMPLATE, text=text)
 
     def _text(self, ref: ArtifactRef) -> str:
         content = self._artifacts.read_digest(ref.digest)

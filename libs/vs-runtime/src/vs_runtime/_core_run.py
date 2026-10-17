@@ -49,6 +49,7 @@ from vs_core.api import (
     unreleased_records,
 )
 from vs_runtime._core_loop import LeaseUnavailableError
+from vs_runtime._mid_turn_steering import MidTurnSteering
 from vs_runtime._workspace_holds import core_workspace_holds
 
 if TYPE_CHECKING:
@@ -296,6 +297,8 @@ class _Loop:
         self._delivery = host.delivery
         self._clock = host.clock
         self._controls = host.controls
+        steering = host.shell.steering
+        self._steering = None if steering is None else MidTurnSteering(steering)
         self._config = config
         self._next_wake = next_wake
         self._stall_notes = stall_notes
@@ -433,6 +436,8 @@ class _Loop:
     def _due_controls(self, now: float) -> tuple[CoreEvent, ...]:
         core = self._core()
         events: list[CoreEvent] = list(self._controls.poll(core, now) if self._controls else ())
+        if self._steering is not None:
+            events.extend(self._steering.poll(core, now))
         live = core.run.status in (RunStatus.RUNNING, RunStatus.PAUSED)
         if (
             now >= core.run.deadline_at

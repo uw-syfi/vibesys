@@ -93,8 +93,11 @@ from .types.sessions import (
     AcquisitionStalled,
     CheckpointStalled,
     InputAcceptanceObserved,
+    InputMidTurnReleased,
+    InputOfferedMidTurn,
     InputReservationReleased,
     InputReservationRequested,
+    InputTakenMidTurn,
     InputWithdrawRequested,
     InterruptRequested,
     InvocationCancellationRequested,
@@ -197,6 +200,9 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | InvocationCheckpointPending()
             | SessionInputReceived()
             | InputWithdrawRequested()
+            | InputOfferedMidTurn()
+            | InputTakenMidTurn()
+            | InputMidTurnReleased()
             | InputReservationRequested()
             | InputAcceptanceObserved()
             | InputReservationReleased()

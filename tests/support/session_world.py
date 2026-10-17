@@ -22,7 +22,13 @@ from vs_agent.api import (
     AgentSessionSpec,
     AgentTurnRequest,
 )
-from vs_agent.api.testing import FakeAgentInvocationStore, FakeAgentSessions, FakeProvider
+from vs_agent.api.testing import (
+    FakeAgentInvocationStore,
+    FakeAgentSessions,
+    FakeProvider,
+    FakeSteering,
+    FakeTurnScript,
+)
 from vs_core.api import (
     Access,
     ArtifactId,
@@ -246,6 +252,12 @@ class FakeSessionResolver:
             count=len(inputs),
         )
 
+    def mid_turn_message(self, item: SessionInput) -> RenderedPrompt | None:
+        """A rendered mid-turn message that names the input it offers."""
+        if not self.messages_resolve:
+            return None
+        return self.renderer.render_string("mid-turn {{ input }}", input=item.input_id.root)
+
 
 def turn_output(result: ExecutionResult) -> str | None:
     """The structured output JSON a result's TurnObserved event carries."""
@@ -336,11 +348,13 @@ def open_host(
     answer: dict[str, object] | None = None,
     effect: Callable[[], None] | None = None,
     hang_until_cancelled: bool = False,
+    steering: FakeSteering = FakeSteering.UNSUPPORTED,
 ) -> SessionHost:
     """A host whose Fake provider answers every turn with *answer*, records it, runs *effect*.
 
     With *hang_until_cancelled* every turn starts, then never returns until the provider is
-    asked to cancel it (``turn_started`` is set once the turn is running).
+    asked to cancel it (``turn_started`` is set once the turn is running). *steering* says
+    how the provider answers a message sent into a running turn.
     """
     turns: list[AgentTurnRequest] = []
     faults = ProviderFaults()
@@ -359,7 +373,11 @@ def open_host(
             message = "provider died after accepting the turn"
             raise ConnectionError(message)
 
-    driver = FakeProvider(answer=answer or {"value": 7}, on_turn=on_turn, threads=OsThreads())
+    driver = FakeProvider(
+        script=FakeTurnScript((answer or {"value": 7},), steering=steering),
+        on_turn=on_turn,
+        threads=OsThreads(),
+    )
     client = AgentClient(driver, clock=ManualClock(), threads=OsThreads())
     return SessionHost(
         FakeSessionResolver(workspace, TemplateRenderer(workspace)),

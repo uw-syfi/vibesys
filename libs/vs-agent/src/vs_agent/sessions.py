@@ -21,6 +21,7 @@ from vs_agent.contracts import (
     AgentTurnRequest,
     AgentTurnResult,
     SchemaViolation,
+    SteerOutcome,
     session_spec_fingerprint,
 )
 from vs_agent.runner import parse_typed_response
@@ -163,6 +164,18 @@ class AgentSessions(Protocol):
 
         A request, not a proof: only a later ``inspect`` that is not ``Pending``
         shows the turn ended. Any other invocation is left alone.
+        """
+        ...
+
+    def steer(
+        self, key: AgentSessionKey, invocation_id: str, text: str, *, steer_id: str
+    ) -> SteerOutcome:
+        """Offer *text* to *invocation_id*'s turn if this instance is running it.
+
+        ``NO_RUNNING_TURN`` when it is not. ``DELIVERED`` says the provider took the
+        message; the turn's result settles it exactly once, whether the turn returns or
+        raises and however often a capacity stop resends it: consumed, or named by
+        *steer_id* in ``AgentTurnResult.refused_steers`` of the completed invocation.
         """
         ...
 
@@ -328,6 +341,14 @@ class AgentTurnExecutor(Protocol):
         """Ask the keyed conversation's in-flight turn to stop, keeping its checkpoint."""
         ...
 
+    def steer_session(self, key: AgentSessionKey, text: str, *, steer_id: str) -> SteerOutcome:
+        """Offer *text* to the keyed conversation's in-flight turn, queuing nothing.
+
+        A ``DELIVERED`` message the provider does not keep is named by *steer_id* in the
+        turn's ``AgentTurnResult.refused_steers``.
+        """
+        ...
+
     def release_session(self, key: AgentSessionKey) -> None:
         """Release the keyed conversation's live resources, keeping its checkpoint."""
         ...
@@ -408,6 +429,17 @@ class ClientAgentSessions:
             running = invocation_id in self._active
         if running:
             self._client.cancel_session(key)
+
+    def steer(
+        self, key: AgentSessionKey, invocation_id: str, text: str, *, steer_id: str
+    ) -> SteerOutcome:
+        """Offer *text* to *invocation_id*'s turn if this instance is running it."""
+        self._validate_invocation(key, invocation_id)
+        with self._lock:
+            running = invocation_id in self._active
+        if not running:
+            return SteerOutcome.NO_RUNNING_TURN
+        return self._client.steer_session(key, text, steer_id=steer_id)
 
     def release(self, key: AgentSessionKey) -> None:
         """Release the key's live provider resources, keeping its durable checkpoint."""
