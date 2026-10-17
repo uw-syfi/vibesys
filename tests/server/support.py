@@ -107,7 +107,7 @@ def _record_control_transition(
     """Adapt runtime transitions to the core journal in test composition."""
     return events.emit(
         CoreEventType(transition.kind.value),
-        transition.text,
+        transition.summary,
         agent_kind=transition.agent_kind,
         round_label=transition.round_label,
         execution_id=transition.execution_id,

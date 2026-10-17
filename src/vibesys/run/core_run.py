@@ -175,6 +175,9 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
                     f"{type(cleanup_error).__name__}: {cleanup_error}"
                 )
         finally:
+            # An ended run sets aside what is left in its inbox, also when the loop raised
+            # after core recorded the end; a run that may resume keeps its requests.
+            controls.end(shell.record.envelope.core)
             # A crashed process cannot reach this line, so its restart waits out the lease
             # (see ``start_core_awaiting_lease``); any return or raise here frees it.
             shell.release_lease(now_at=services.clock.now())

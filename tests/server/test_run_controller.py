@@ -634,3 +634,21 @@ def test_standing_guidance_is_journaled_in_force_then_ended(tmp_path: Path) -> N
         ("/withdraw: keep", EventStatus.PENDING),
         ("/guidance ended: standing guidance keep ended: withdrawn", EventStatus.COMPLETED),
     ]
+
+
+def test_an_inbox_request_the_run_set_aside_is_journaled_as_failed(tmp_path: Path) -> None:
+    parts = build_server_parts(tmp_path)
+
+    parts.control.notify_request_rejected("w-1", "it ended nothing: no standing steer w-0")
+
+    controls = [
+        (event.text, event.status)
+        for event in parts.journal.read()
+        if event.type is EventType.CONTROL
+    ]
+    assert controls == [
+        (
+            "/control request w-1 rejected: it ended nothing: no standing steer w-0",
+            EventStatus.FAILED,
+        )
+    ]

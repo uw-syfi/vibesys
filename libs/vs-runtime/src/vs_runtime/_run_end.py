@@ -1,0 +1,84 @@
+"""Whether a run has ended, as its core record says: the one fact for "no request applies now".
+
+Core's TERMINAL status is final: a TERMINAL run never resumes (resume refuses it with
+``run_ended``). So a request posted to a TERMINAL run's inbox never applies, and one it never
+applied before it ended never will. The run's own end of inbox (``RunControlBridge.end``) and
+``vibesys control``, which reads the record from outside the run, both judge the end by this
+status; neither keeps a copy of it.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from pydantic import JsonValue, TypeAdapter
+
+from vs_core.api import RunStatus
+from vs_decode.api import Unreadable, decode_json
+from vs_project.api import ProjectStateError, StoredEnvelope
+
+if TYPE_CHECKING:
+    from vs_core.api import CoreState
+    from vs_project.api import Project
+
+_STORE_DOCUMENT = "store.json"
+
+
+def ending(core: CoreState) -> str | None:
+    """Why the run ended, or None while core may still apply a request."""
+    if core.run.status != RunStatus.TERMINAL:
+        return None
+    return _ending(None if core.run.result is None else core.run.result.reason)
+
+
+def _ending(reason: str | None) -> str:
+    return "the run ended" if reason is None else f"the run ended: {reason}"
+
+
+_RECORD_MAX_BYTES = 256 * 1024 * 1024
+"""The largest state document the project's stores read; a core record is one."""
+
+_ANY_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+"""The record as plain JSON: only two fields of it are read, in any envelope version.
+
+A typed model of the record would refuse the record of another VibeSys version, whose
+envelope this version cannot decode; ``status`` and ``result.reason`` of core's run state
+have kept their place and meaning across versions.
+"""
+
+
+def _member(value: JsonValue, *path: str) -> JsonValue:
+    for key in path:
+        value = value.get(key) if isinstance(value, dict) else None
+    return value
+
+
+def recorded_ending(project: Project, run_id: str) -> str | None:
+    """Why ``run_id`` ended, as its durable core record says, or None while it may apply more.
+
+    A run whose core has not committed its first record has not ended. A quarantined record
+    has not ended either: the run cannot go on until an operator repairs it, and then it may.
+
+    Raises ``ProjectStateError`` when the record cannot be read.
+    """
+    if project.state.state_store_namespace(run_id).read_bytes(_STORE_DOCUMENT) is None:
+        # Probe first, as resume does, so a read never creates the store's lock or directory.
+        return None
+    stored = project.state_store(run_id).load()
+    if not isinstance(stored, StoredEnvelope):
+        return None
+    record = decode_json(
+        stored.payload, _ANY_JSON, source=f"run {run_id!r} core record", max_bytes=_RECORD_MAX_BYTES
+    )
+    run = None if isinstance(record, Unreadable) else _member(record, "envelope", "core", "run")
+    status = _member(run, "status")
+    if status not in {member.value for member in RunStatus}:
+        message = f"run {run_id!r}: its core record does not say whether it ended"
+        raise ProjectStateError(message)
+    if status != RunStatus.TERMINAL.value:
+        return None
+    reason = _member(run, "result", "reason")
+    return _ending(reason if isinstance(reason, str) else None)
+
+
+__all__ = ["ending", "recorded_ending"]
