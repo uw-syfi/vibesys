@@ -57,7 +57,7 @@ interface ScopedStream {
  * A row of the stream list: one stream, or the repeats of one startup step folded into a row with
  * a count. A fold is open while the shown stream is one of its streams, and then lists them.
  */
-export type ScopedRow =
+type ScopedRow =
   | {readonly kind: 'stream'; readonly stream: ScopedStream; readonly nested: boolean}
   | {
       readonly kind: 'fold';
