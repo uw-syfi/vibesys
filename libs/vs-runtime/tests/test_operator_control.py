@@ -258,11 +258,11 @@ def _expected_status(request: ControlRequest, expected: _Expected) -> ControlSta
         case PauseRequest():
             expected.paused = True
             return ControlStatus.PENDING
-        case ResumeRequest(when="capacity_returns"):
-            # No turn is parked on a capacity limit here, so the wait is refused.
-            return ControlStatus.REFUSED
-        case ResumeRequest(fallback=True) if not expected.quota_paused or expected.stop:
-            # A switch to the fallback answers only a quota stop's pause.
+        case ResumeRequest(when=when, fallback=fallback) if when == "capacity_returns" or (
+            fallback and (not expected.quota_paused or expected.stop)
+        ):
+            # No turn is parked for the operator here, so a wait for capacity is refused; a
+            # switch to the fallback answers only a quota stop's pause with a turn waiting.
             return ControlStatus.REFUSED
         case ResumeRequest(fallback=fallback):
             expected.paused = expected.quota_paused = False

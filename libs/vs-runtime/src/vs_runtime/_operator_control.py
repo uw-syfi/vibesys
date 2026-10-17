@@ -305,17 +305,8 @@ class ChannelRunControl:
             case PauseRequest(control_id=control_id):
                 self._channel.request_pause(control_id)
                 status = ControlStatus.PENDING
-            case ResumeRequest(when="capacity_returns"):
-                status = ControlStatus.PENDING
-                if not self.resume_when_capacity_returns():
-                    status, reason = ControlStatus.REFUSED, self._capacity_refusal()
-            case ResumeRequest(fallback=True, control_id=control_id):
-                status = ControlStatus.CONSUMED
-                if not self._channel.resume_with_fallback(control_id):
-                    status, reason = ControlStatus.REFUSED, self._capacity_refusal()
-            case ResumeRequest(control_id=control_id):
-                self._channel.resume(control_id)
-                status = ControlStatus.CONSUMED
+            case ResumeRequest():
+                status, reason = self._resume(request)
             case StopRequest(mode=mode, control_id=control_id):
                 self._channel.request_stop(mode, control_id)
                 status = ControlStatus.PENDING
@@ -324,15 +315,23 @@ class ChannelRunControl:
     def _refusal(self, request: SteerRequest | WithdrawRequest) -> RefusalReason | None:
         return None if self._check is None else self._check(request)
 
-    def _capacity_refusal(self) -> RefusalReason:
-        """Why the channel just refused a capacity wait or a fallback.
-
-        A stop stays pending until a resume, and the refused request was no resume, so a
-        stop pending now was pending when the channel refused.
-        """
+    def _resume(self, request: ResumeRequest) -> tuple[ControlStatus, RefusalReason | None]:
+        """Apply a resume: at once, with the fallback, or when capacity returns."""
+        if request.when == "capacity_returns":
+            accepted, status = self.resume_when_capacity_returns(), ControlStatus.PENDING
+        elif request.fallback:
+            accepted = self._channel.resume_with_fallback(request.control_id)
+            status = ControlStatus.CONSUMED
+        else:
+            self._channel.resume(request.control_id)
+            return ControlStatus.CONSUMED, None
+        if accepted:
+            return status, None
+        # A stop stays pending until a resume, and the refused request resumed nothing, so a
+        # stop pending now was pending when the channel refused.
         if self._channel.stop_requested():
-            return RefusalReason.STOPPING
-        return RefusalReason.NOT_PAUSED_ON_CAPACITY
+            return ControlStatus.REFUSED, RefusalReason.STOPPING
+        return ControlStatus.REFUSED, RefusalReason.NOT_PAUSED_ON_CAPACITY
 
     @staticmethod
     def _ack(
