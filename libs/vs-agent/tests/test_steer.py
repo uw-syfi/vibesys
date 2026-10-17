@@ -32,9 +32,11 @@ from vs_agent.api import (
     AgentEvent,
     AgentEventKind,
     AgentExecutionPolicy,
+    AgentSessionKey,
     AgentSessionSpec,
     AgentTurnRequest,
     NullAgentEventSink,
+    SessionScope,
     SteerOutcome,
 )
 
@@ -172,6 +174,47 @@ def test_a_steer_reaches_the_running_turn_through_the_client(tmp_path: Path, hom
     assert answer == "STEERED"
     assert rejected == []
     assert len(script.requests("turn/steer")) == 1
+
+
+def test_a_keyed_steer_reaches_only_the_conversation_it_names(tmp_path: Path, home: Path) -> None:
+    script = CodexScript().turn(RunCommand("sleep 20"), AwaitSteer(then=(Say("STEERED"),)))
+    launcher = _launcher(
+        "codex", FakeExecutor([], peers=script.peer), home, agentshim.TransportKind.STREAM
+    )
+    key = AgentSessionKey(SessionScope.HYPOTHESIS, "H-01")
+    other = AgentSessionKey(SessionScope.HYPOTHESIS, "H-02")
+    elsewhere: list[SteerOutcome] = []
+
+    def offer() -> SteerOutcome:
+        elsewhere.append(client.steer_session(other, TEXT, on_rejected=lambda: None))
+        return client.steer_session(key, TEXT, on_rejected=lambda: None)
+
+    steerer = _SteerWhenRunning(offer)
+
+    class _Sink(NullAgentEventSink):
+        """Offers the steer at each callback of the running turn, on the turn's thread."""
+
+        def agent_output(self, *_args: object, **_kwargs: object) -> None:
+            steerer.on_event(AgentEvent(kind=AgentEventKind.THINKING))
+
+        def tool_call(self, *_args: object, **_kwargs: object) -> None:
+            steerer.on_event(AgentEvent(kind=AgentEventKind.THINKING))
+
+    client = AgentClient(
+        launcher, provider="codex", event_sink=_Sink(), clock=ManualClock(), threads=SimThreads()
+    )
+
+    result = client.run(
+        session_spec=_spec(tmp_path), turn=AgentTurnRequest(message="go"), session_key=key
+    )
+
+    assert _delivered(steerer.outcomes)
+    assert result.text == "STEERED"
+    assert set(elsewhere) == {SteerOutcome.NO_RUNNING_TURN}
+    assert len(script.requests("turn/steer")) == 1
+    assert client.steer_session(key, TEXT, on_rejected=lambda: None) is (
+        SteerOutcome.NO_RUNNING_TURN
+    )
 
 
 def test_a_steer_is_delivered_once_and_reported_on_the_diagnostic_channel(

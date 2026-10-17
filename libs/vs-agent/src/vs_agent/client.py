@@ -891,6 +891,19 @@ class AgentClient:
         session = active[-1]
         return session.steer(text, on_rejected=on_rejected)
 
+    def steer_session(
+        self, key: AgentSessionKey, text: str, *, on_rejected: Callable[[], None]
+    ) -> SteerOutcome:
+        """Offer *text* to the turn running now in the conversation *key* names.
+
+        A key with no live session runs no turn; otherwise the session answers as
+        :meth:`steer` does, without queuing anything.
+        """
+        cached = self._sessions.get(key)
+        if cached is None:
+            return SteerOutcome.NO_RUNNING_TURN
+        return cached.session.steer(text, on_rejected=on_rejected)
+
     def cancel_session(self, key: AgentSessionKey) -> None:
         """Stop the in-flight turn of one keyed conversation, keeping its checkpoint.
 

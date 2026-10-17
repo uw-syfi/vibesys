@@ -21,6 +21,7 @@ from vs_agent.contracts import (
     AgentTurnRequest,
     AgentTurnResult,
     SchemaViolation,
+    SteerOutcome,
     session_spec_fingerprint,
 )
 from vs_agent.runner import parse_typed_response
@@ -35,7 +36,7 @@ from vs_project.api import ProjectError
 from vs_prompts.api import RenderedPrompt
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
     from contextlib import AbstractContextManager
 
     from vs_agent.contracts import AgentCapabilities, AgentObserver
@@ -163,6 +164,21 @@ class AgentSessions(Protocol):
 
         A request, not a proof: only a later ``inspect`` that is not ``Pending``
         shows the turn ended. Any other invocation is left alone.
+        """
+        ...
+
+    def steer(
+        self,
+        key: AgentSessionKey,
+        invocation_id: str,
+        text: str,
+        *,
+        on_rejected: Callable[[], None],
+    ) -> SteerOutcome:
+        """Offer *text* to *invocation_id*'s turn if this instance is running it.
+
+        ``NO_RUNNING_TURN`` when it is not; ``DELIVERED`` is a provider receipt
+        that a later *on_rejected* call may still take back.
         """
         ...
 
@@ -328,6 +344,15 @@ class AgentTurnExecutor(Protocol):
         """Ask the keyed conversation's in-flight turn to stop, keeping its checkpoint."""
         ...
 
+    def steer_session(
+        self, key: AgentSessionKey, text: str, *, on_rejected: Callable[[], None]
+    ) -> SteerOutcome:
+        """Offer *text* to the keyed conversation's in-flight turn, queuing nothing.
+
+        ``DELIVERED`` may still be refused at turn end through *on_rejected*.
+        """
+        ...
+
     def release_session(self, key: AgentSessionKey) -> None:
         """Release the keyed conversation's live resources, keeping its checkpoint."""
         ...
@@ -408,6 +433,22 @@ class ClientAgentSessions:
             running = invocation_id in self._active
         if running:
             self._client.cancel_session(key)
+
+    def steer(
+        self,
+        key: AgentSessionKey,
+        invocation_id: str,
+        text: str,
+        *,
+        on_rejected: Callable[[], None],
+    ) -> SteerOutcome:
+        """Offer *text* to *invocation_id*'s turn if this instance is running it."""
+        self._validate_invocation(key, invocation_id)
+        with self._lock:
+            running = invocation_id in self._active
+        if not running:
+            return SteerOutcome.NO_RUNNING_TURN
+        return self._client.steer_session(key, text, on_rejected=on_rejected)
 
     def release(self, key: AgentSessionKey) -> None:
         """Release the key's live provider resources, keeping its durable checkpoint."""

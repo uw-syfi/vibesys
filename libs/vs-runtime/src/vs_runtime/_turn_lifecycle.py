@@ -25,6 +25,8 @@ from vs_runtime._agent_lifecycle import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from vs_agent.api import (
         AgentCapabilities,
         AgentObserver,
@@ -32,6 +34,7 @@ if TYPE_CHECKING:
         AgentSessionSpec,
         AgentTurnRequest,
         AgentTurnResult,
+        SteerOutcome,
     )
     from vs_runtime._agent_lifecycle import AgentExecutionLifecycleSink
 
@@ -94,6 +97,12 @@ class LifecycleReportingExecutor:
     def cancel_session(self, key: AgentSessionKey) -> None:
         """Ask the keyed conversation's in-flight turn to stop."""
         self._client.cancel_session(key)
+
+    def steer_session(
+        self, key: AgentSessionKey, text: str, *, on_rejected: Callable[[], None]
+    ) -> SteerOutcome:
+        """Offer a message to the keyed conversation's in-flight turn."""
+        return self._client.steer_session(key, text, on_rejected=on_rejected)
 
     def release_session(self, key: AgentSessionKey) -> None:
         """Release the keyed conversation's live resources."""
