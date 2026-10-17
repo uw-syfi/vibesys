@@ -45,6 +45,8 @@ from vs_agent.api.testing import (
     FakeExecutor,
     FakeProvider,
     FakeRun,
+    FakeSteering,
+    FakeTurnScript,
     fake_agentshim_launcher,
     scripted_turn,
 )
@@ -122,13 +124,13 @@ class _Harness:
     threads: SimThreads
 
     def reconstruct(self) -> ClientAgentSessions:
-        factory = FakeAgentSessions if self.implementation == "fake" else ClientAgentSessions
+        factory = ClientAgentSessions if self.implementation == "client" else FakeAgentSessions
         sessions = factory(self.client, self.ledger, threads=self.threads)
         sessions.bind(KEY, self.spec, self.turn)
         return sessions
 
 
-@pytest.fixture(params=["fake", "client"])
+@pytest.fixture(params=["fake", "steerable-fake", "client"])
 def harness(
     request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sim: Sim
 ) -> Iterator[_Harness]:
@@ -147,6 +149,12 @@ def harness(
     boundary = _Boundary()
     if request.param == "fake":
         launcher = FakeProvider(answer="done", on_turn=lambda _: boundary.accept(), threads=threads)
+    elif request.param == "steerable-fake":
+        launcher = FakeProvider(
+            script=FakeTurnScript(("done",), steering=FakeSteering.CONSUMED),
+            on_turn=lambda _: boundary.accept(),
+            threads=threads,
+        )
     else:
 
         def execute(_request: object) -> FakeRun:
@@ -180,11 +188,11 @@ def harness(
         message="", instructions="", expected_provider_session_id=client.provider_session_id(KEY)
     )
     ledger = (
-        FakeAgentInvocationStore()
-        if request.param == "fake"
-        else namespace.slot("invocations.json", AgentInvocationState)
+        namespace.slot("invocations.json", AgentInvocationState)
+        if request.param == "client"
+        else FakeAgentInvocationStore()
     )
-    factory = FakeAgentSessions if request.param == "fake" else ClientAgentSessions
+    factory = ClientAgentSessions if request.param == "client" else FakeAgentSessions
     sessions = factory(client, ledger, threads=threads)
     sessions.bind(KEY, spec, turn)
     (tmp_path / "message.j2").write_text("{{ content }}", encoding="utf-8")
@@ -883,6 +891,32 @@ def test_a_steer_reaches_no_turn_but_the_running_invocation(harness: _Harness) -
     assert after is SteerOutcome.NO_RUNNING_TURN
 
 
+_STEERED = {
+    "fake": SteerOutcome.UNSUPPORTED,
+    "steerable-fake": SteerOutcome.DELIVERED,
+    "client": SteerOutcome.UNSUPPORTED,
+}
+"""What the running turn answers a steer: the plain fake and the one-shot Codex process cannot
+take one, and the steerable fake takes it."""
+
+
+def test_a_steer_to_the_running_invocation_is_answered_by_its_provider(
+    harness: _Harness,
+) -> None:
+    seen: list[SteerOutcome] = []
+    rejected: list[str] = []
+
+    def during_turn() -> None:
+        seen.append(
+            harness.sessions.steer(KEY, "busy", "text", on_rejected=lambda: rejected.append("x"))
+        )
+
+    harness.boundary.effect = during_turn
+    assert isinstance(harness.sessions.resume(KEY, harness.message, "busy"), Completed)
+    assert seen == [_STEERED[harness.implementation]]
+    assert rejected == []
+
+
 @pytest.mark.parametrize("method", ["cancel", "steer", "release"])
 def test_cancel_and_release_reject_a_nondurable_key(harness: _Harness, method: str) -> None:
     key = AgentSessionKey(SessionScope.ROLE, "worker")
@@ -893,3 +927,37 @@ def test_cancel_and_release_reject_a_nondurable_key(harness: _Harness, method: s
     }[method]
     with pytest.raises(SessionConfigurationError, match="not durable"):
         call()
+
+
+@pytest.mark.parametrize(
+    ("steering", "rejections"), [(FakeSteering.CONSUMED, 0), (FakeSteering.REJECTED, 1)]
+)
+def test_a_steerable_fake_hands_back_a_refused_steer_once(
+    tmp_path: Path, steering: FakeSteering, rejections: int
+) -> None:
+    """The steerable fake reports a message's fate as a provider does: consumed, or refused
+    after it was accepted, which reaches the caller's fallback exactly once."""
+    threads = SimThreads()
+    rejected: list[str] = []
+    client: AgentClient | None = None
+
+    def steer_now(_request: AgentTurnRequest) -> None:
+        assert client is not None
+        outcome = client.steer("change course", on_rejected=lambda: rejected.append("back"))
+        assert outcome is SteerOutcome.DELIVERED
+
+    provider = FakeProvider(
+        script=FakeTurnScript(("done",), steering=steering), on_turn=steer_now, threads=threads
+    )
+    client = AgentClient(provider, provider="codex", clock=ManualClock(), threads=threads)
+    spec = AgentSessionSpec(
+        role="implementer",
+        provider="codex",
+        workspace=tmp_path,
+        policy=AgentExecutionPolicy(require_enforcement=False),
+    )
+    client.run(session_spec=spec, turn=AgentTurnRequest(message="first"), session_key=KEY)
+    client.close()
+
+    assert rejected == ["back"] * rejections
+    assert client.steer("late", on_rejected=lambda: None) is SteerOutcome.NO_RUNNING_TURN
