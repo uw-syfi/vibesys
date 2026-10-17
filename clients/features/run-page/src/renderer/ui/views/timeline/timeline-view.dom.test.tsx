@@ -149,3 +149,33 @@ test('a long idea name is in full on the row’s name, for hover and assistive t
   expect(names(container)).toEqual([long]);
   await unmount();
 });
+
+test('a figure too long for its column is a short form, with the whole on hover', async () => {
+  const slower = {...idea('slow', 'rejected', 0, 100), reason: 'slower_than_input'};
+  const checked = idea('checked', 'rejected', 200, 100);
+  const failing = {
+    ...checked,
+    measurement: {
+      span: 'g',
+      at: 300,
+      metricValue: null,
+      vsBaseline: null,
+      verdict: 'failed_check',
+      failed: {check: 'correctness', completed: 93, required: 100, unit: 'trials'},
+    },
+  };
+  const fits = idea('fits', 'kept', 400, 100);
+  const {container, unmount} = await mount(
+    <TimelineView {...base([slower, failing, fits], 600)} />,
+  );
+  const figures = [...container.querySelectorAll('[role="option"] .vs-gantt-figure')].map(each => [
+    each.textContent,
+    each.getAttribute('title'),
+  ]);
+  expect(figures).toEqual([
+    ['1.50×', null],
+    ['93/100', '93/100 trials'],
+    ['slower', 'slower than input'],
+  ]);
+  await unmount();
+});

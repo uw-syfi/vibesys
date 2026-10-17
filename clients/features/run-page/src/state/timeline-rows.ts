@@ -59,7 +59,10 @@ export interface TimelineRow {
   readonly start: number;
   readonly end: number;
   readonly outcome: BarOutcome;
+  /** Short enough for the figure column. */
   readonly figure: string;
+  /** The figure in full when `figure` is a short form of it; else null. */
+  readonly figureTitle: string | null;
   readonly segments: readonly StepSegment[];
   readonly lane: boolean;
 }
@@ -117,6 +120,33 @@ export function stepSegments(
   });
 }
 
+/** The figure column fits about this many characters. */
+const FIGURE_FITS = 12;
+/** What a reason that would not fit reads in the column; the hover has the whole reason. */
+const REASON_SHORT: Readonly<Record<string, string>> = {
+  slower_than_input: 'slower',
+  failed_check: 'failed',
+};
+
+/**
+ * An idea's figure in the column: the ratio, a failed check's progress, or the reason, in a short
+ * form when the whole does not fit, with the whole as the hover (`figureTitle`).
+ */
+function figureOfRow(item: Candidate): {figure: string; figureTitle: string | null} {
+  const whole = figureOf(item).figure;
+  if (whole.length <= FIGURE_FITS) return {figure: whole, figureTitle: null};
+  const failed = item.measurement?.failed ?? null;
+  const progress =
+    failed !== null && failed.completed !== null && failed.required !== null
+      ? `${failed.completed}/${failed.required}`
+      : null;
+  const short =
+    progress ??
+    (item.reason === null ? null : (REASON_SHORT[item.reason] ?? null)) ??
+    `${whole.slice(0, FIGURE_FITS - 1)}…`;
+  return {figure: short, figureTitle: whole};
+}
+
 function rowOf(item: Candidate, now: number | null): TimelineRow {
   const steps = item.attempts.flatMap(attempt => attempt.steps);
   return {
@@ -125,7 +155,7 @@ function rowOf(item: Candidate, now: number | null): TimelineRow {
     start: item.startedAt,
     end: endOf(item.startedAt, item.endedAt, now),
     outcome: OUTCOME[item.outcome],
-    figure: figureOf(item).figure,
+    ...figureOfRow(item),
     segments: stepSegments(steps, now),
     lane: false,
   };
@@ -161,6 +191,7 @@ function laneOf(rejected: readonly TimelineRow[]): TimelineRow {
     end,
     outcome: 'muted',
     figure: '',
+    figureTitle: null,
     segments,
     lane: true,
   };
@@ -316,6 +347,7 @@ export function attemptStrip(
       end,
       outcome: OUTCOME[attempt.outcome],
       figure: attempt.outcome === 'running' || vs === null ? '' : ratio(vs),
+      figureTitle: null,
       segments: stepSegments(attempt.steps, now),
       lane: false,
     },

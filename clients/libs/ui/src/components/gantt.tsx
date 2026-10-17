@@ -31,6 +31,8 @@ export interface GanttRow {
   readonly end: number;
   readonly outcome: 'ok' | 'err' | 'live' | 'muted';
   readonly figure?: string;
+  /** The figure in full, as the hover shows it, when the figure is a short form. */
+  readonly figureTitle?: string;
   readonly segments: readonly GanttSegment[];
   readonly selected?: boolean;
   readonly fresh?: boolean;
@@ -329,7 +331,7 @@ export function Gantt(props: {
               <GanttBar row={row} view={view} aggregate={detail === 'aggregate'} />
               {playhead === null ? null : <span className="vs-gantt-playhead" style={playhead} />}
             </span>
-            <span className="vs-gantt-figure" data-outcome={row.outcome}>
+            <span className="vs-gantt-figure" data-outcome={row.outcome} title={row.figureTitle}>
               {row.figure ?? ''}
             </span>
           </div>

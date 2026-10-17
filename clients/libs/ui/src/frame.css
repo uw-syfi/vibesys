@@ -610,6 +610,9 @@ button.vs-crumb:focus-visible {
   line-height: var(--text-code-line);
   text-align: right;
   white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--muted);
 }
 .vs-gantt-figure[data-outcome="ok"] {

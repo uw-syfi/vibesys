@@ -79,6 +79,7 @@ function RunTimeline(props: ViewBase): JSX.Element {
           end: row.end,
           outcome: row.outcome,
           figure: row.figure,
+          ...(row.figureTitle === null ? {} : {figureTitle: row.figureTitle}),
           segments: row.segments.map(segment => ({
             ...segment,
             ...(row.lane
