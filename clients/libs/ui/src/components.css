@@ -93,7 +93,7 @@ body > div:first-child {
 .vs-page[data-fixed-header] {
   overflow: hidden;
   padding-bottom: var(--space-5);
-  --scroll-shade: color-mix(in srgb, var(--text) 14%, transparent);
+  --scroll-shade: var(--line);
 }
 .vs-page[data-fixed-header] > .vs-page-content {
   height: 100%;

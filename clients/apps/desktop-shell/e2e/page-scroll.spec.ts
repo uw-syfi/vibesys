@@ -97,7 +97,10 @@ for (const size of SIZES) {
       if (shots !== undefined) {
         const name = `${where.replace(' ', '-').toLowerCase()}__${size.width}x${size.height}`;
         await page.screenshot({path: `${shots}/page-scroll__${name}.png`});
-        sheet.push({name: `${where} ${size.width}x${size.height}`, file: `page-scroll__${name}.png`});
+        sheet.push({
+          name: `${where} ${size.width}x${size.height}`,
+          file: `page-scroll__${name}.png`,
+        });
       }
       expect(g.documentOverflow, 'the window scrolls as a whole').toBeLessThanOrEqual(0);
       expect(g.windowScrollY).toBe(0);
@@ -109,7 +112,9 @@ for (const size of SIZES) {
       expect(outside, 'header parts outside the window').toEqual([]);
       if (where === 'New run') {
         await expect(
-          page.getByRole('region', {name: 'Ready to start'}).getByRole('button', {name: 'Start run'}),
+          page
+            .getByRole('region', {name: 'Ready to start'})
+            .getByRole('button', {name: 'Start run'}),
         ).toBeInViewport({ratio: 1});
       }
     });
