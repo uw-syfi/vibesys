@@ -308,8 +308,8 @@ void app.whenReady().then(() => {
   appWindow = new AppWindow({
     log,
     surfaceUrl: WELCOME_URL,
-    connect: (port, runId) => runs.connect(port, runId),
-    closed: runId => runs.detach(runId),
+    connect: (port, run) => runs.connect(port, run),
+    closed: run => runs.detach(run),
     fatal: error => fatals.push(error.message),
   });
   const desktop = new Desktop({
@@ -341,7 +341,10 @@ void app.whenReady().then(() => {
     },
     log,
   });
-  appWindow.openRunPage(attached.runId, {hostLabel: attached.hostLabel, task: null});
+  appWindow.openRunPage(
+    {host: attached.host, runId: attached.runId},
+    {hostLabel: attached.hostLabel, task: null},
+  );
   collectingStartupLoads = false;
   const loads = Promise.all(startupLoads);
   loads.catch(() => {});

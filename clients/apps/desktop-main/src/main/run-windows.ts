@@ -5,7 +5,7 @@
  * detaches its live connection; the run itself goes on.
  */
 import {runWindowUrl, type WelcomeEvent} from '@vibesys/ipc';
-import type {RunRef} from '@vibesys/runs';
+import {type RunRef, runRefKey} from '@vibesys/runs';
 import type {WelcomeDocument} from './welcome-ipc.js';
 
 /** What the registry needs of one window. */
@@ -16,9 +16,8 @@ export interface RunWindow {
   sendWelcome<T>(channel: string, event: WelcomeEvent<T>): void;
 }
 
-/** A window the registry holds, with the run id its run's run-control binding is keyed by. */
+/** A window the registry holds for one composite run identity. */
 interface Shown<W> {
-  readonly runId: string;
   readonly window: W;
 }
 
@@ -32,10 +31,6 @@ export interface RunWindowsDeps<W extends RunWindow> {
   readonly shellUrl: string;
 }
 
-function key(run: RunRef): string {
-  return JSON.stringify([run.host, run.runId]);
-}
-
 export class RunWindows<W extends RunWindow = RunWindow> {
   readonly #deps: RunWindowsDeps<W>;
   readonly #windows = new Map<string, Shown<W>>();
@@ -46,21 +41,22 @@ export class RunWindows<W extends RunWindow = RunWindow> {
 
   /** Show `run` in its window: focus the one showing it, or open one (`created`). */
   open(run: RunRef, title: string): {readonly window: W; readonly created: boolean} {
-    const shown = this.#windows.get(key(run));
+    const key = runRefKey(run);
+    const shown = this.#windows.get(key);
     if (shown !== undefined) {
       shown.window.focus();
       return {window: shown.window, created: false};
     }
     const window = this.#deps.create(runWindowUrl(this.#deps.shellUrl, run), title, () => {
-      if (this.#windows.get(key(run))?.window === window) this.#windows.delete(key(run));
+      if (this.#windows.get(key)?.window === window) this.#windows.delete(key);
     });
-    this.#windows.set(key(run), {runId: run.runId, window});
+    this.#windows.set(key, {window});
     return {window, created: true};
   }
 
-  /** The window showing the run with `runId`, where that run is live; none for the main window. */
-  showing(runId: string): W | undefined {
-    return [...this.#windows.values()].find(shown => shown.runId === runId)?.window;
+  /** The window showing exactly `run`, where that run is live; none for the main window. */
+  showing(run: RunRef): W | undefined {
+    return this.#windows.get(runRefKey(run))?.window;
   }
 
   /** Send one ordered `event` to every run window's surface. */

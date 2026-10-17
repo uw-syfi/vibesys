@@ -19,7 +19,7 @@ export {
   resumeArguments,
   resumeDecision,
 } from './resume-run.js';
-export {parseRunRef, type RunRef, sameRun} from './run-ref.js';
+export {parseRunRef, type RunRef, runRefKey, sameRun} from './run-ref.js';
 export {
   type HarnessPick,
   parseRunStart,

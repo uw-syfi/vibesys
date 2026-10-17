@@ -56,17 +56,29 @@ test('each run has at most one window, which a second open focuses', () => {
 
 test('a run with its own window is live there until that window closes', () => {
   const {windows, made} = subject();
-  expect(windows.showing('run-alpha')).toBeUndefined();
+  expect(windows.showing(ALPHA)).toBeUndefined();
   windows.open(ALPHA, 'a');
   windows.open(BRAVO, 'b');
-  expect(windows.showing('run-alpha')).toBe(made[0]);
+  expect(windows.showing(ALPHA)).toBe(made[0]);
   windows.sendWelcome('vibesys:welcome:listing', {sequence: 1, value: null});
   expect(made.map(window => window.sent)).toEqual([
     ['vibesys:welcome:listing'],
     ['vibesys:welcome:listing'],
   ]);
   made[0]?.closed();
-  expect(windows.showing('run-alpha')).toBeUndefined();
-  expect(windows.showing('run-bravo')).toBe(made[1]);
+  expect(windows.showing(ALPHA)).toBeUndefined();
+  expect(windows.showing(BRAVO)).toBe(made[1]);
   expect(windows.open(ALPHA, 'a').created).toBe(true);
+});
+
+test('same run id on different hosts addresses each exact window', () => {
+  const {windows, made} = subject();
+  const alpha = {host: 'ssh:alpha', runId: 'shared-run'} as const;
+  const bravo = {host: 'ssh:bravo', runId: 'shared-run'} as const;
+
+  windows.open(alpha, 'a');
+  windows.open(bravo, 'b');
+
+  expect(windows.showing(alpha)).toBe(made[0]);
+  expect(windows.showing(bravo)).toBe(made[1]);
 });

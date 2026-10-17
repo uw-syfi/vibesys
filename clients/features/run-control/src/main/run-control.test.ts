@@ -10,7 +10,7 @@ import {FakeLink, phaseReached, record} from '@vibesys/connection/testing';
 import type {InstanceList} from '@vibesys/contracts/host-helper';
 import type {ConnectionStatus} from '@vibesys/hosts';
 import type {MainToPage} from '@vibesys/ipc';
-import {exactResumeRunId} from '@vibesys/runs';
+import {exactResumeRunId, type RunRef} from '@vibesys/runs';
 import type {StoredRecentRun} from '@vibesys/settings';
 import {FakeClock} from '@vibesys/transport/testing';
 import type {RelayPort} from './relay.js';
@@ -19,6 +19,10 @@ import {RunControl} from './run-control.js';
 const HOST = {kind: 'local'} as const;
 const RUN_A = '00000000000a';
 const RUN_B = '00000000000b';
+
+function runRef(runId: string): RunRef {
+  return {host: 'local', runId};
+}
 
 interface Gate {
   readonly received: Promise<void>;
@@ -555,6 +559,71 @@ describe('RunControl over the FakeHelper', () => {
     await w.connection[Symbol.asyncDispose]();
   });
 
+  test('same run id on different hosts keeps both bindings and routes independently', async () => {
+    const localLink = new FakeLink();
+    const remoteLink = new FakeLink();
+    localLink.helper.publish(record(RUN_A, 'shared-run', '/local'));
+    remoteLink.helper.publish(record(RUN_B, 'shared-run', '/remote'));
+    const makeConnection = (link: FakeLink): HostConnection =>
+      new HostConnection({
+        link,
+        checkout: '/src/vibesys',
+        appVersion: 'test',
+        config: DEFAULT_CONNECTION_CONFIG,
+        scheduleTimeout: new FakeClock().scheduleTimeout,
+        log: () => {},
+      });
+    const local = makeConnection(localLink);
+    const remote = makeConnection(remoteLink);
+    const localRun = {host: 'local', runId: 'shared-run'} as const;
+    const remoteRun = {host: 'ssh:bravo', runId: 'shared-run'} as const;
+    const pages = new Map<string, {closed: number}>();
+    const releases = {local: 0, remote: 0};
+    const runs = new RunControl({
+      connection: async id =>
+        id.kind === 'local'
+          ? lease(local, () => (releases.local += 1))
+          : lease(remote, () => (releases.remote += 1)),
+      openPage: run => {
+        const page = {closed: 0};
+        pages.set(run.host, page);
+        return {wake: () => {}, close: () => (page.closed += 1)};
+      },
+      confirm: async () => true,
+      remember: async () => {},
+      changed: () => {},
+      log: () => {},
+      now: () => 7,
+    });
+
+    await runs.attach(HOST, RUN_A);
+    await runs.attach({kind: 'ssh', alias: 'bravo'}, RUN_B);
+
+    expect([...pages.values()].map(page => page.closed)).toEqual([0, 0]);
+    expect(releases).toEqual({local: 0, remote: 0});
+    expect(await runs.logs(localRun, {kind: 'list'})).toMatchObject({
+      ok: true,
+      instanceId: RUN_A,
+    });
+    expect(await runs.logs(remoteRun, {kind: 'list'})).toMatchObject({
+      ok: true,
+      instanceId: RUN_B,
+    });
+
+    runs.detach(localRun);
+    expect(pages.get('local')?.closed).toBe(1);
+    expect(pages.get('ssh:bravo')?.closed).toBe(0);
+    expect(releases).toEqual({local: 1, remote: 0});
+    expect(await runs.logs(remoteRun, {kind: 'list'})).toMatchObject({
+      ok: true,
+      instanceId: RUN_B,
+    });
+
+    runs.detach(remoteRun);
+    await local[Symbol.asyncDispose]();
+    await remote[Symbol.asyncDispose]();
+  });
+
   test('an older attach proceeds unaffected when an attach to a different target fails', async () => {
     const w = world();
     w.link.helper.publish(record(RUN_A, 'run-a', '/p'));
@@ -788,7 +857,7 @@ describe('RunControl over the FakeHelper', () => {
     // The eventual run id is already known (the published record's), but nothing is bound to it
     // yet, so no page has opened for it to close. Detaching it here must not reach into the claim
     // still navigating toward it; the attach proceeds exactly as if this call had not happened.
-    w.runs.detach('run-a');
+    w.runs.detach(runRef('run-a'));
     delayed.release();
     await attaching;
 
@@ -824,7 +893,7 @@ describe('RunControl over the FakeHelper', () => {
     w.link.helper.publish(record('00000000000c', 'run-c', '/p'));
     await w.runs.attach({kind: 'local'}, '00000000000c');
     expect(w.connection.held).toBe(true);
-    w.runs.detach('run-c');
+    w.runs.detach(runRef('run-c'));
     expect(w.connection.held).toBe(false);
     await w.connection[Symbol.asyncDispose]();
   });
@@ -839,7 +908,7 @@ describe('RunControl over the FakeHelper', () => {
     const message =
       'could not retire run 00000000000a on This Mac: retirement remained unconfirmed';
 
-    expect(() => w.runs.detach('run-a')).not.toThrow();
+    expect(() => w.runs.detach(runRef('run-a'))).not.toThrow();
     expect(w.runs.attached()).toBeNull();
     expect(w.pages).toMatchObject({opened: 1, closed: 1});
     expect(w.calls.releases).toBe(1);
@@ -864,7 +933,7 @@ describe('RunControl over the FakeHelper', () => {
     await w.waitForLog(message);
     expect(w.logs).toEqual([message]);
 
-    w.runs.detach('run-a');
+    w.runs.detach(runRef('run-a'));
     expect(w.calls.releases).toBe(2);
     await w.connection[Symbol.asyncDispose]();
   });
@@ -953,7 +1022,7 @@ describe('RunControl over the FakeHelper', () => {
 
     const ports = Array.from({length: 4}, () => new FakeRelayPort());
     for (const port of ports) {
-      w.runs.connect(port, 'run-a');
+      w.runs.connect(port, runRef('run-a'));
       port.disconnect();
       port.disconnect();
     }
@@ -1006,7 +1075,7 @@ describe('RunControl over the FakeHelper', () => {
     await attaching;
     expect(runs.attached()).toMatchObject({instanceId: RUN_A, connection: {kind: 'connected'}});
     expect(first.held).toBe(true);
-    runs.detach('run-a');
+    runs.detach(runRef('run-a'));
     expect(first.phase.kind).toBe('closed');
     await secondLease[Symbol.asyncDispose]();
   });
@@ -1022,9 +1091,9 @@ describe('RunControl logs', () => {
     await w.runs.attach(HOST, RUN_A);
     const spawned = w.link.helper.spawned;
 
-    const listed = await w.runs.logs('run-a', {kind: 'list'});
+    const listed = await w.runs.logs(runRef('run-a'), {kind: 'list'});
     expect(listed).toMatchObject({ok: true, instanceId: RUN_A, streams: [{id: '000001'}]});
-    const read = await w.runs.logs('run-a', {
+    const read = await w.runs.logs(runRef('run-a'), {
       kind: 'read',
       token: 'r1',
       read: {
@@ -1039,7 +1108,7 @@ describe('RunControl logs', () => {
     expect(w.link.helper.spawned).toBe(spawned + 1);
 
     const logsChannel = w.link.helper.channels.at(-1);
-    w.runs.detach('run-a');
+    w.runs.detach(runRef('run-a'));
     await logsChannel?.process.exit;
     expect(logsChannel?.process.running).toBe(false);
     await w.connection[Symbol.asyncDispose]();
@@ -1057,11 +1126,11 @@ describe('RunControl logs', () => {
       wait_ms: 0,
     };
 
-    expect(await w.runs.logs('run-a', {kind: 'read', token: 'r1', read})).toMatchObject({
+    expect(await w.runs.logs(runRef('run-a'), {kind: 'read', token: 'r1', read})).toMatchObject({
       ok: false,
       failure: {code: 'unknown_instance'},
     });
-    expect(await w.runs.logs('run-z', {kind: 'list'})).toMatchObject({
+    expect(await w.runs.logs(runRef('run-z'), {kind: 'list'})).toMatchObject({
       ok: false,
       failure: {code: 'unknown_instance'},
     });
@@ -1087,26 +1156,26 @@ describe('RunControl logs', () => {
     };
     const heldFirst = w.link.helper.deferNext('logs.read');
     const heldSecond = w.link.helper.deferNext('logs.read');
-    const first = w.runs.logs('run-a', {kind: 'read', token: 'r1', read});
-    const second = w.runs.logs('run-a', {kind: 'read', token: 'r2', read});
+    const first = w.runs.logs(runRef('run-a'), {kind: 'read', token: 'r1', read});
+    const second = w.runs.logs(runRef('run-a'), {kind: 'read', token: 'r2', read});
     await heldFirst.received;
     await heldSecond.received;
 
-    expect(await w.runs.logs('run-a', {kind: 'withdraw', token: 'unknown'})).toBeNull();
-    expect(await w.runs.logs('run-a', {kind: 'withdraw', token: 'r1'})).toBeNull();
+    expect(await w.runs.logs(runRef('run-a'), {kind: 'withdraw', token: 'unknown'})).toBeNull();
+    expect(await w.runs.logs(runRef('run-a'), {kind: 'withdraw', token: 'r1'})).toBeNull();
     expect(await first).toMatchObject({ok: false, failure: {code: 'transport'}});
     heldSecond.release();
     expect(await second).toMatchObject({ok: true});
-    expect(await w.runs.logs('run-a', {kind: 'withdraw', token: 'r2'})).toBeNull();
-    expect(await w.runs.logs('run-z', {kind: 'withdraw', token: 'r1'})).toBeNull();
+    expect(await w.runs.logs(runRef('run-a'), {kind: 'withdraw', token: 'r2'})).toBeNull();
+    expect(await w.runs.logs(runRef('run-z'), {kind: 'withdraw', token: 'r1'})).toBeNull();
 
     // The logs channel keeps order: a withdrawal written before this listing reached the helper.
-    expect(await w.runs.logs('run-a', {kind: 'list'})).toMatchObject({ok: true});
+    expect(await w.runs.logs(runRef('run-a'), {kind: 'list'})).toMatchObject({ok: true});
     const [firstRead] = w.link.helper.requests.filter(request => request.type === 'logs.read');
     const cancels = w.link.helper.requests.filter(request => request.type === 'logs.cancel');
     expect(cancels).toMatchObject([{read_id: firstRead?.request_id}]);
     heldFirst.release();
-    w.runs.detach('run-a');
+    w.runs.detach(runRef('run-a'));
     await w.connection[Symbol.asyncDispose]();
   });
 });

@@ -28,6 +28,7 @@ import {
   WELCOME_EVENTS,
   type WelcomeEvent,
 } from '@vibesys/ipc';
+import type {RunRef} from '@vibesys/runs';
 import {remember, SettingsStore} from '@vibesys/settings';
 import {app, ipcMain, Menu, Notification, nativeTheme, net, powerMonitor} from 'electron';
 import {SHELL_URL, surfaceUrl} from './app-assets.js';
@@ -151,8 +152,7 @@ async function openWindow(
   const runs: RunControl = new RunControl({
     connection: id => hosts.connection(id),
     // A run shown in a window of its own is live there; any other run in the main window.
-    openPage: (runId, title) =>
-      (windows.runs.showing(runId) ?? windows.main).openRunPage(runId, title),
+    openPage: (run, title) => (windows.runs.showing(run) ?? windows.main).openRunPage(run, title),
     confirm: text => windows.main.confirmStop(text),
     remember: (run, current) => settings.updateRecent(recent => remember(recent, run), current),
     changed,
@@ -206,10 +206,10 @@ function appWindows(
 ) {
   const shared = {
     log,
-    connect: (port: RelayPort, runId: string) => runs.connect(port, runId),
-    logs: (runId: string, request: RunLogsRequest) => runs.logs(runId, request),
-    closed: (runId: string) => {
-      runs.detach(runId);
+    connect: (port: RelayPort, run: RunRef) => runs.connect(port, run),
+    logs: (run: RunRef, request: RunLogsRequest) => runs.logs(run, request),
+    closed: (run: RunRef) => {
+      runs.detach(run);
       changed();
     },
   };

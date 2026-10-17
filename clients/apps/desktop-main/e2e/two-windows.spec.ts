@@ -2,7 +2,7 @@
  * Two concurrent desktop windows, each attached to its own run, against the fixture backend built
  * in `two-windows-app.mjs` (a package-local `HostConnection` stand-in, never a real SSH host or
  * `vibesys-helper` subprocess). This is the regression spec for the `RunControl` fix that keyed
- * every binding by `run_id` instead of one shared `#run` slot
+ * every binding by `(host, run_id)` instead of one shared `#run` slot
  * (`clients/features/run-control/src/main/run-control.ts`): before that fix, a second window's
  * attach silently retired whatever the first window had bound, and either window's close detached
  * "the" attached run regardless of which page actually closed.
@@ -20,7 +20,7 @@
  * `session.store` the run page reads — reachable from the desktop shell's production build, not
  * dev-only. This spec still does not exercise it: neither window here clicks `#run-campaign-toggle`
  * or asserts on the campaign view's content, so cross-window isolation of that toggle is untested.
- * Given the window-independence property this spec guards (`RunControl`'s per-`run_id` binding),
+ * Given the window-independence property this spec guards (`RunControl`'s composite binding),
  * the toggle only switches local React state per `Live` instance and reads no shared mutable state,
  * so there is no mechanism for it to leak across windows — but that is reasoning about the code, not
  * a check this spec runs. Left as a follow-up rather than added here under this PR's deadline.
@@ -36,10 +36,28 @@ type WindowLabel = 'a' | 'b';
 /** Matches `RUNS` in `two-windows-app.mjs`: each window's run, and the content unique to it. */
 const RUNS: Record<
   WindowLabel,
-  {readonly instanceId: string; readonly runId: string; readonly transcriptEntries: number}
+  {
+    readonly host: string;
+    readonly instanceId: string;
+    readonly runId: string;
+    readonly content: string;
+    readonly transcriptEntries: number;
+  }
 > = {
-  a: {instanceId: '00000000000a', runId: 'run-alpha', transcriptEntries: 3},
-  b: {instanceId: '00000000000b', runId: 'run-bravo', transcriptEntries: 1},
+  a: {
+    host: 'local',
+    instanceId: '00000000000a',
+    runId: 'shared-run',
+    content: 'local-alpha',
+    transcriptEntries: 3,
+  },
+  b: {
+    host: 'ssh:bravo',
+    instanceId: '00000000000b',
+    runId: 'shared-run',
+    content: 'ssh-bravo',
+    transcriptEntries: 1,
+  },
 };
 
 interface RunInspection {
@@ -61,7 +79,7 @@ interface MainControl {
     readonly logs: readonly string[];
     readonly fatals: readonly string[];
   };
-  channelStates(): Readonly<Record<string, {readonly aborted: boolean}>>;
+  channelStates(): Readonly<Record<string, {readonly host: string; readonly aborted: boolean}>>;
 }
 
 /**
@@ -147,7 +165,9 @@ function control(app: ElectronApplication) {
         if (api === undefined) throw new Error('the two-windows E2E control is unavailable');
         return api.state();
       }),
-    channelStates: (): Promise<Readonly<Record<string, {readonly aborted: boolean}>>> =>
+    channelStates: (): Promise<
+      Readonly<Record<string, {readonly host: string; readonly aborted: boolean}>>
+    > =>
       app.evaluate(() => {
         const api = (globalThis as typeof globalThis & {vibesysTwoWindowsE2E?: MainControl})
           .vibesysTwoWindowsE2E;
@@ -170,8 +190,8 @@ test('two windows attached to two runs stay independent, and closing one leaves 
       .poll(() => bounded('reading the initial shell state', api.state()))
       .toMatchObject({ready: true});
 
-    await bounded('attaching window a to run-alpha', api.attach('a'));
-    await bounded('attaching window b to run-bravo', api.attach('b'));
+    await bounded('attaching window a to the local shared run id', api.attach('a'));
+    await bounded('attaching window b to the SSH shared run id', api.attach('b'));
 
     await expect
       .poll(() => bounded('reading window a mode', api.windowState('a')))
@@ -205,36 +225,35 @@ test('two windows attached to two runs stay independent, and closing one leaves 
       .poll(() =>
         bounded("inspecting window a's run", api.inspectRun('a')).then(result => result.bodyText),
       )
-      .toContain(`run-alpha-chunk-${RUNS.a.transcriptEntries - 1}`);
+      .toContain(`${RUNS.a.content}-chunk-${RUNS.a.transcriptEntries - 1}`);
     await expect
       .poll(() =>
         bounded("inspecting window b's run", api.inspectRun('b')).then(result => result.bodyText),
       )
-      .toContain(`run-bravo-chunk-${RUNS.b.transcriptEntries - 1}`);
+      .toContain(`${RUNS.b.content}-chunk-${RUNS.b.transcriptEntries - 1}`);
     const a = await bounded("inspecting window a's run", api.inspectRun('a'));
     const b = await bounded("inspecting window b's run", api.inspectRun('b'));
     for (let index = 0; index < RUNS.a.transcriptEntries; index += 1) {
-      expect(a.bodyText).toContain(`run-alpha-chunk-${index}`);
+      expect(a.bodyText).toContain(`${RUNS.a.content}-chunk-${index}`);
     }
     for (let index = 0; index < RUNS.b.transcriptEntries; index += 1) {
-      expect(b.bodyText).toContain(`run-bravo-chunk-${index}`);
+      expect(b.bodyText).toContain(`${RUNS.b.content}-chunk-${index}`);
     }
-    expect(a.bodyText).not.toContain('run-bravo');
-    expect(b.bodyText).not.toContain('run-alpha');
+    expect(a.bodyText).not.toContain(RUNS.b.content);
+    expect(b.bodyText).not.toContain(RUNS.a.content);
 
-    // Both windows share one fixture host connection (as production's `ConnectionManager` shares
-    // one connection per host); each run's own channel-dial signal is what a window's close may
-    // abort. Neither is aborted yet.
+    // Equal run ids must have dialed distinct host connections. This also proves the run reference
+    // retained by AppWindow and admitted from each page's sender still includes its host.
     const beforeClose = await bounded(
       'reading channel states before closing a',
       api.channelStates(),
     );
-    expect(beforeClose[RUNS.a.instanceId]).toMatchObject({aborted: false});
-    expect(beforeClose[RUNS.b.instanceId]).toMatchObject({aborted: false});
+    expect(beforeClose[RUNS.a.instanceId]).toEqual({host: RUNS.a.host, aborted: false});
+    expect(beforeClose[RUNS.b.instanceId]).toEqual({host: RUNS.b.host, aborted: false});
 
     // The regression this spec guards: closing one window must detach only its own run (keyed by
-    // `run_id`), never the other window's binding (`run-control.ts`'s old single `#run` slot would
-    // have let one window's lifecycle reach into the other's).
+    // `(host, run_id)`), never the same-id binding on the other host. This exercises AppWindow's
+    // retained RunRef, sender admission, and its window-close fencing through the real renderer.
     await bounded('closing window a', api.closeWindow('a'));
 
     await expect
@@ -249,7 +268,8 @@ test('two windows attached to two runs stay independent, and closing one leaves 
       })
       .toBe(true);
     const afterClose = await bounded('reading channel states after closing a', api.channelStates());
-    expect(afterClose[RUNS.b.instanceId]).toMatchObject({aborted: false});
+    expect(afterClose[RUNS.a.instanceId]).toEqual({host: RUNS.a.host, aborted: true});
+    expect(afterClose[RUNS.b.instanceId]).toEqual({host: RUNS.b.host, aborted: false});
 
     const remainingIds = await bounded(
       'listing run pages after closing a',
@@ -259,7 +279,7 @@ test('two windows attached to two runs stay independent, and closing one leaves 
 
     const bAfter = await bounded("inspecting window b's run after closing a", api.inspectRun('b'));
     expect(bAfter.bodyText).toEqual(b.bodyText);
-    expect(bAfter.bodyText).not.toContain('run-alpha');
+    expect(bAfter.bodyText).not.toContain(RUNS.a.content);
     await expect
       .poll(() => bounded('reading window b mode after closing a', api.windowState('b')))
       .toMatchObject({mode: 'run'});

@@ -7,6 +7,11 @@ export interface RunRef {
   readonly runId: string;
 }
 
+/** Stable, unambiguous key for one run across every host the desktop knows. */
+export function runRefKey(run: RunRef): string {
+  return JSON.stringify([run.host, run.runId]);
+}
+
 /** Whether `left` and `right` name the same run. */
 export function sameRun(left: RunRef, right: RunRef): boolean {
   return left.host === right.host && left.runId === right.runId;

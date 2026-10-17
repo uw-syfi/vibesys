@@ -5,7 +5,7 @@
  * unchanged. The host they talk to is a small local stand-in (`FixtureHostConnection` below), not
  * a real SSH host or `vibesys-helper` subprocess: it answers `RunControl`'s `HostConnection`
  * interface directly (`instances.list`, `openRun`), and each run's own channel answers the real
- * run protocol (`query.snapshot`, `query.iterations`, `subscribe`) with content unique to that run,
+ * run protocol (`query.snapshot`, `query.iterations`, `subscribe`) with content unique to that host,
  * the same way the TUI's demo backend stands in before a real session hooks up.
  *
  * This is package-local by design, not layered on `@vibesys/connection`'s `ConnectionManager`/
@@ -14,8 +14,8 @@
  * by that rule (it is scanned like the rest of the package). `RunControl` only needs a
  * `HostConnection`-shaped object (`instances.list`, `openRun`, `onPhase`/`watchInstances`/
  * `onRunUnreachable`), so this fixture implements just that, over a plain `node:stream` `Duplex`
- * for each run's channel. There is no genuine second host or SSH link here; this proves the
- * desktop shell's own multi-window wiring (`RunControl`'s per-`run_id` bindings, the
+ * for each run's channel. There is no genuine SSH link here; this proves the
+ * desktop shell's own multi-window wiring (`RunControl`'s per-`(host, run_id)` bindings, the
  * window-close-detach path, and `RunIpcRegistry`'s cross-window connect admission), not a live
  * backend or the connection manager's own reconnect/sharing behavior (covered by
  * `@vibesys/connection`'s own tests).
@@ -37,7 +37,6 @@ const [{confineContents, lockDownSession, registerAppScheme, serveBundledUi}, {A
   ]);
 
 const RUN_URL = 'app://vibesys/desktop.html';
-const HOST = {kind: 'local'};
 // The welcome preload asks for what the first paint needs before the page's scripts run.
 ipcMain.on('vibesys:welcome:first-paint', event => {
   event.returnValue = {theme: 'paper', chromeInset: {width: 84, height: 40}};
@@ -45,8 +44,24 @@ ipcMain.on('vibesys:welcome:first-paint', event => {
 
 /** One simulated run: its identity, and the distinguishing content its fixture server answers. */
 const RUNS = {
-  a: {instanceId: '00000000000a', runId: 'run-alpha', sequence: 11_017, transcriptEntries: 3},
-  b: {instanceId: '00000000000b', runId: 'run-bravo', sequence: 22_031, transcriptEntries: 1},
+  a: {
+    host: {kind: 'local'},
+    hostKey: 'local',
+    instanceId: '00000000000a',
+    runId: 'shared-run',
+    content: 'local-alpha',
+    sequence: 11_017,
+    transcriptEntries: 3,
+  },
+  b: {
+    host: {kind: 'ssh', alias: 'bravo'},
+    hostKey: 'ssh:bravo',
+    instanceId: '00000000000b',
+    runId: 'shared-run',
+    content: 'ssh-bravo',
+    sequence: 22_031,
+    transcriptEntries: 1,
+  },
 };
 
 const logs = [];
@@ -55,8 +70,18 @@ const fatals = [];
 const windows = {};
 /** Each window's current run page `webContents.id`, correlated when `openPage` creates it. */
 const runPageContentsId = new Map();
-/** Each run page's first load, by run id: settles on the page's own load events. */
+/** Each run page's first load, by window label: settles on the page's own load events. */
 const runPageLoads = new Map();
+
+function fixtureRunKey(run) {
+  const host =
+    typeof run.host === 'string'
+      ? run.host
+      : run.host.kind === 'local'
+        ? 'local'
+        : `ssh:${run.host.alias}`;
+  return `${host}\0${run.runId}`;
+}
 
 function log(message) {
   logs.push(message);
@@ -84,7 +109,7 @@ function liveRecord(instanceId, runId, project) {
 }
 
 /** A fixture "server" for one run: answers the run protocol with content unique to this run. */
-function runServerFor({runId, sequence, transcriptEntries}) {
+function runServerFor({runId, content, sequence, transcriptEntries}) {
   return stream => {
     stream.onLine(line => {
       let request;
@@ -121,14 +146,14 @@ function runServerFor({runId, sequence, transcriptEntries}) {
           timestamp: '2026-01-01T00:00:00Z',
           type: 'agent_output_chunk',
           sequence: sequence + index + 1,
-          data: {kind: 'agent_output_chunk', channel: 'assistant', content: `${runId}-chunk-${index}`},
+          data: {kind: 'agent_output_chunk', channel: 'assistant', content: `${content}-chunk-${index}`},
         }));
         stream.write(
           JSON.stringify({
             type: 'event_batch',
             events,
             through_sequence: sequence + transcriptEntries,
-            store_id: `store-${runId}`,
+            store_id: `store-${content}`,
             history_after_sequence: 0,
           }),
         );
@@ -170,8 +195,8 @@ function duplexRunChannel(serveLines) {
 
 /**
  * `RunControl`'s `HostConnection` dependency, answering `instances.list` from a fixed live listing
- * and opening each run's channel over a `duplexRunChannel`. One instance is shared by both windows
- * (the same `HOST`), matching production: `ConnectionManager` shares one connection per host too.
+ * and opening its run's channel over a `duplexRunChannel`. The fixture has one instance per host,
+ * matching production's connection ownership and making the selected host directly observable.
  */
 class FixtureHostConnection {
   phase = {kind: 'ready'};
@@ -181,7 +206,8 @@ class FixtureHostConnection {
   #listing;
   #servers;
 
-  constructor(records, servers) {
+  constructor(hostKey, records, servers) {
+    this.hostKey = hostKey;
     this.#listing = {version: 4, instances: records, ended: [], unreadable: [], unverified: []};
     this.#servers = servers;
   }
@@ -231,35 +257,40 @@ void app.whenReady().then(() => {
   lockDownSession(log);
   serveBundledUi();
 
-  const connection = new FixtureHostConnection(
-    [
-      liveRecord(RUNS.a.instanceId, RUNS.a.runId, '/projects/alpha'),
-      liveRecord(RUNS.b.instanceId, RUNS.b.runId, '/projects/bravo'),
-    ],
-    new Map([
-      [RUNS.a.instanceId, runServerFor(RUNS.a)],
-      [RUNS.b.instanceId, runServerFor(RUNS.b)],
+  const connections = new Map(
+    Object.entries(RUNS).map(([label, run]) => [
+      run.hostKey,
+      new FixtureHostConnection(
+        run.hostKey,
+        [liveRecord(run.instanceId, run.runId, `/projects/${label}`)],
+        new Map([[run.instanceId, runServerFor(run)]]),
+      ),
     ]),
   );
 
   /** Which window's `openRunPage` an attach's eventual `run_id` opens in, chosen before attaching. */
   const openPageTargets = new Map([
-    [RUNS.a.runId, 'a'],
-    [RUNS.b.runId, 'b'],
+    [fixtureRunKey(RUNS.a), 'a'],
+    [fixtureRunKey(RUNS.b), 'b'],
   ]);
 
   const runs = new RunControl({
-    connection: async () => ({connection, [Symbol.asyncDispose]: async () => {}}),
-    openPage: (runId, title) => {
-      const label = openPageTargets.get(runId);
-      if (label === undefined) throw new Error(`no window is assigned to run ${runId}`);
+    connection: async id => {
+      const key = id.kind === 'local' ? 'local' : `ssh:${id.alias}`;
+      const connection = connections.get(key);
+      if (connection === undefined) throw new Error(`no fixture connection for ${key}`);
+      return {connection, [Symbol.asyncDispose]: async () => {}};
+    },
+    openPage: (run, title) => {
+      const label = openPageTargets.get(fixtureRunKey(run));
+      if (label === undefined) throw new Error(`no window is assigned to ${fixtureRunKey(run)}`);
       const target = windows[label];
       const before = new Set(webContents.getAllWebContents().map(contents => contents.id));
-      const page = target.openRunPage(runId, title);
+      const page = target.openRunPage(run, title);
       const created = webContents.getAllWebContents().find(contents => !before.has(contents.id));
       if (created !== undefined) {
-        runPageContentsId.set(runId, created.id);
-        runPageLoads.set(runId, firstLoad(created));
+        runPageContentsId.set(label, created.id);
+        runPageLoads.set(label, firstLoad(created));
       }
       return page;
     },
@@ -274,21 +305,21 @@ void app.whenReady().then(() => {
     windows[label] = new AppWindow({
       log,
       surfaceUrl: 'app://vibesys/welcome.html',
-      connect: (port, runId) => runs.connect(port, runId),
-      closed: runId => runs.detach(runId),
+      connect: (port, run) => runs.connect(port, run),
+      closed: run => runs.detach(run),
       fatal: error => fatals.push(error.message),
     });
   }
 
   runsRef = runs;
-  connectionRef = connection;
+  connectionsRef = connections;
 });
 
 globalThis.vibesysTwoWindowsE2E = {
   async attach(label) {
     const target = RUNS[label];
     if (target === undefined) throw new Error(`no such run: ${label}`);
-    await runs_().attach(HOST, target.instanceId);
+    await runs_().attach(target.host, target.instanceId);
   },
   windowState(label) {
     const window = windows[label];
@@ -298,7 +329,7 @@ globalThis.vibesysTwoWindowsE2E = {
   async inspectRun(label) {
     const window = windows[label];
     if (window === undefined) throw new Error(`no such window: ${label}`);
-    const id = runPageContentsId.get(windowRunId(label));
+    const id = runPageContentsId.get(label);
     const contents = id === undefined ? null : (webContents.fromId(id) ?? null);
     return requiredContents(contents, `${label}'s run`).executeJavaScript(
       '(() => ({bodyText: document.body.textContent ?? \'\', title: document.title}))()',
@@ -313,13 +344,13 @@ globalThis.vibesysTwoWindowsE2E = {
   },
   /** Resolves once the run page `attach(label)` opened has loaded; rejects if it never will. */
   async runPageLoaded(label) {
-    const load = runPageLoads.get(windowRunId(label));
+    const load = runPageLoads.get(label);
     if (load === undefined) throw new Error(`window ${label} has opened no run page`);
     await load;
   },
   /** The run page `webContents.id` `attach(label)` opened, named rather than inferred by order. */
   contentsIdFor(label) {
-    return runPageContentsId.get(windowRunId(label)) ?? null;
+    return runPageContentsId.get(label) ?? null;
   },
   setMode(label, mode) {
     const window = windows[label];
@@ -339,7 +370,7 @@ globalThis.vibesysTwoWindowsE2E = {
     // (see the comment above `app.whenReady().then(...)`); `ready` lets the spec wait out that
     // startup race on a control method that never throws, instead of polling `attach` itself and
     // turning an ordinary startup race into a terminal evaluate error.
-    return {ready: runsRef !== null && connectionRef !== null, logs: [...logs], fatals: [...fatals]};
+    return {ready: runsRef !== null && connectionsRef !== null, logs: [...logs], fatals: [...fatals]};
   },
   /**
    * Whether each run's own channel (the dial `relay()` opened through `openRun`) has been told to
@@ -348,8 +379,10 @@ globalThis.vibesysTwoWindowsE2E = {
    */
   channelStates() {
     const states = {};
-    for (const [instanceId, signal] of connectionRef.openSignals) {
-      states[instanceId] = {aborted: signal.aborted};
+    for (const connection of connectionsRef.values()) {
+      for (const [instanceId, signal] of connection.openSignals) {
+        states[instanceId] = {host: connection.hostKey, aborted: signal.aborted};
+      }
     }
     return states;
   },
@@ -361,8 +394,4 @@ function runs_() {
   throw new Error('run control is not ready yet');
 }
 
-let connectionRef = null;
-
-function windowRunId(label) {
-  return RUNS[label]?.runId;
-}
+let connectionsRef = null;

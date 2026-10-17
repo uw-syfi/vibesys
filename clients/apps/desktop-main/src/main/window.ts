@@ -18,6 +18,7 @@ import {
   WAKE_CHANNEL,
   type WelcomeEvent,
 } from '@vibesys/ipc';
+import {type RunRef, sameRun} from '@vibesys/runs';
 import {BaseWindow, dialog, ipcMain, type MessagePortMain, type WebContentsView} from 'electron';
 import {APP_ENTRY_URL, isSameAppPage, SHELL_URL} from './app-assets.js';
 import {sandboxedView} from './app-security.js';
@@ -71,12 +72,12 @@ export interface AppWindowDeps {
   readonly log: (message: string) => void;
   /** The page the trusted surface loads: the welcome view or the app shell (`surfaceUrl`). */
   readonly surfaceUrl: string;
-  /** The run page opened one connection, for the run bound to it (`openRunPage`'s `runId`). */
-  readonly connect: (port: RelayPort, runId: string) => void;
-  /** The run page asked about its run's logs (`openRunPage`'s `runId`). */
-  readonly logs: (runId: string, request: RunLogsRequest) => Promise<RunLogsReply<RunLogsRequest>>;
+  /** The run page opened one connection, for the run bound to it (`openRunPage`'s `run`). */
+  readonly connect: (port: RelayPort, run: RunRef) => void;
+  /** The run page asked about its run's logs (`openRunPage`'s `run`). */
+  readonly logs: (run: RunRef, request: RunLogsRequest) => Promise<RunLogsReply<RunLogsRequest>>;
   /** The native window or its current run page disappeared: detach the run bound to it. */
-  readonly closed: (runId: string) => void;
+  readonly closed: (run: RunRef) => void;
   /** The welcome surface exhausted its bounded recovery; enter fatal app shutdown. */
   readonly fatal: (error: Error) => void;
   /** The native window's title before any run page names one; `VibeSys` by default. */
@@ -111,7 +112,7 @@ export class AppWindow {
    */
   readonly #runsInSurface: boolean;
   /** The run bound to the current run page, if any; null before one ever opened. */
-  #currentRunId: string | null = null;
+  #currentRun: RunRef | null = null;
   /** Withdraws this window's admission claim from the shared run-connect registry. */
   readonly #unregisterRunIpc: () => void;
 
@@ -162,19 +163,19 @@ export class AppWindow {
     this.#unregisterRunIpc = runIpcRegistry(deps.log).register({
       currentSenderId: () => this.#runSenderId(),
       // The registry only admits a port whose sender is this window's current run page, so
-      // `#currentRunId` names the same run this port's connection is for.
+      // `#currentRun` names the same run this port's connection is for.
       connect: port => {
-        const runId = this.#currentRunId;
-        if (runId === null) {
+        const run = this.#currentRun;
+        if (run === null) {
           port.close();
           return;
         }
-        this.#deps.connect(port, runId);
+        this.#deps.connect(port, run);
       },
       logs: request => {
-        const runId = this.#currentRunId;
-        if (runId === null) return Promise.reject(new Error('this window shows no run'));
-        return this.#deps.logs(runId, request);
+        const run = this.#currentRun;
+        if (run === null) return Promise.reject(new Error('this window shows no run'));
+        return this.#deps.logs(run, request);
       },
     });
   }
@@ -190,24 +191,24 @@ export class AppWindow {
   }
 
   /**
-   * Replace the run page with a new one for `runId`, and show it.
+   * Replace the run page with a new one for `run`, and show it.
    *
    * This app shows one run page at a time: opening a second run's page here always replaces the
-   * first, the same way it always has. `runId` lets this window tell IPC admission and the
+   * first, the same way it always has. `run` lets this window tell IPC admission and the
    * `closed`/`connect` callbacks which run its one page is for, so run-control's binding for a run
    * that is not the one currently shown is never reached by this window's events.
    */
   openRunPage(
-    runId: string,
+    run: RunRef,
     title: {readonly hostLabel: string; readonly task: string | null},
   ): {
     wake(): void;
     close(): void;
   } {
-    if (this.#runsInSurface) return this.#bindSurfaceRun(runId);
+    if (this.#runsInSurface) return this.#bindSurfaceRun(run);
     const view = sandboxedView('run.cjs');
     this.#runPages.replace(view);
-    this.#currentRunId = runId;
+    this.#currentRun = run;
     this.#window.contentView.addChildView(view);
     this.#window.setTitle(`VibeSys · ${title.hostLabel}`);
     void observeRunPage(
@@ -222,7 +223,7 @@ export class AppWindow {
         if (!view.webContents.isDestroyed()) view.webContents.send(WAKE_CHANNEL);
       },
       close: () => {
-        if (this.#currentRunId === runId) this.#currentRunId = null;
+        if (this.#currentRun !== null && sameRun(this.#currentRun, run)) this.#currentRun = null;
         this.#runPages.close(view);
       },
     };
@@ -237,13 +238,13 @@ export class AppWindow {
   }
 
   /**
-   * Bind `runId` to the surface itself: the app shell shows the run in its own document, so no run
+   * Bind `run` to the surface itself: the app shell shows the run in its own document, so no run
    * page opens and the layout stays. A different run bound before is detached first, as replacing a
    * run page detaches its run.
    */
-  #bindSurfaceRun(runId: string): {wake(): void; close(): void} {
-    if (this.#currentRunId !== runId) this.#detachCurrentRun();
-    this.#currentRunId = runId;
+  #bindSurfaceRun(run: RunRef): {wake(): void; close(): void} {
+    if (this.#currentRun === null || !sameRun(this.#currentRun, run)) this.#detachCurrentRun();
+    this.#currentRun = run;
     return {
       wake: () => {
         const surface = this.#welcomePages.current;
@@ -252,7 +253,7 @@ export class AppWindow {
         }
       },
       close: () => {
-        if (this.#currentRunId === runId) this.#currentRunId = null;
+        if (this.#currentRun !== null && sameRun(this.#currentRun, run)) this.#currentRun = null;
       },
     };
   }
@@ -260,9 +261,7 @@ export class AppWindow {
   /** The web contents whose run connections this window admits: its run page, or the surface. */
   #runSenderId(): number | null {
     if (!this.#runsInSurface) return this.#runPages.current?.webContents.id ?? null;
-    return this.#currentRunId === null
-      ? null
-      : (this.#welcomePages.current?.webContents.id ?? null);
+    return this.#currentRun === null ? null : (this.#welcomePages.current?.webContents.id ?? null);
   }
 
   /** Send one ordered `event` to the welcome view on `channel`. */
@@ -324,10 +323,10 @@ export class AppWindow {
 
   /** Report the current run page's loss, if it has one; safe before any run page ever opened. */
   #detachCurrentRun(): void {
-    const runId = this.#currentRunId;
-    if (runId === null) return;
-    this.#currentRunId = null;
-    this.#deps.closed(runId);
+    const run = this.#currentRun;
+    if (run === null) return;
+    this.#currentRun = null;
+    this.#deps.closed(run);
   }
 
   #showWelcome(): void {

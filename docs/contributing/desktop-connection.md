@@ -403,7 +403,9 @@ The id is then present everywhere from the first byte:
   socket directory is gone; a pre-ready event without a run id is not representable.
 - `run.connect`'s `connected` carries the run id, and the subscribe ack (`WP-SUBSCRIBE-ACK`) names
   the same run. Clients latch identity from the attach, never from data.
-- The app stores Recent rows by `(host, run_id)` at the moment `run.start` replies, never later.
+- The app stores Recent rows by `(host, project, run_id)` at the moment `run.start` replies, never
+  later. Live desktop bindings and window lookups use the run reference `(host, run_id)`, so equal
+  project-local run ids on different machines remain independent.
 
 The instance id remains the identity of one server process (one lock, one socket); a run resumed
 twice has one run id and two instance ids over time. Nothing in the app keys run state by instance
@@ -658,14 +660,16 @@ run alone, with no sidebar (`RunWindow` in `apps/desktop-shell`, chosen by the r
 query). Opening a run that already has a window focuses it. `RunWindows` (`run-windows.ts`) is the
 registry, keyed by run, and `openRunWindow` on the welcome bridge is its request.
 
-Each `AppWindow` holds one `#run` view and binds to at most one run at a time. `RunControl` and
-`RunIpcRegistry` key every binding, navigation claim, and IPC admission by `run_id` rather than by
-one shared slot (`clients/features/run-control/src/main/run-control.ts`,
-`clients/apps/desktop-main/src/main/run-ipc.ts`), so windows attached to different runs cannot
-cross-detach or cross-admit each other's connection. `RunControl`'s `openPage` binds a run to the
-window showing it (`RunWindows.showing`) and any other run to the main window, so a run with a
-window of its own is live there. Closing a run window forgets it and detaches only that run's live
-connection; the run itself goes on. A Playwright spec
+Each `AppWindow` holds one `#run` view and binds to at most one run at a time. `RunControl` keys
+bindings by the full `(host, run_id)` `RunRef`, and keys navigation claims separately by
+`(host, instance_id)` (`clients/features/run-control/src/main/run-control.ts`). `RunIpcRegistry`
+admits a request by its current main-process-owned window and sender; that `AppWindow` then supplies
+its retained `RunRef`, so a renderer never nominates a host. Windows attached to different hosts
+cannot cross-detach or cross-admit each other's connection even when their project-local run ids
+match. `RunControl`'s `openPage` binds a run to the exact composite-keyed window showing it
+(`RunWindows.showing`) and any other run to the main window, so a run with a window of its own is
+live there. Closing a run window forgets it and detaches only that run's live connection; the run
+itself goes on. A Playwright spec
 (`clients/apps/desktop-main/e2e/two-windows.spec.ts`) constructs two `AppWindow`s against a
 fixture host connection and asserts no cross-run bleed on attach, content, or close.
 
