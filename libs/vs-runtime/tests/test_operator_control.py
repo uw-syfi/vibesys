@@ -20,8 +20,10 @@ from vs_runtime.api.infrastructure import (
     PauseRequest,
     RefusalReason,
     ResumeRequest,
+    SteerMode,
     SteerRequest,
     StopRequest,
+    WithdrawRequest,
     create_run_control_channel,
 )
 from vs_runtime.api.testing import (
@@ -45,6 +47,8 @@ def _requests(ids: st.SearchStrategy[str]) -> st.SearchStrategy[ControlRequest]:
         st.builds(ResumeRequest, control_id=ids, fallback=st.booleans()),
         st.builds(ResumeRequest, control_id=ids, when=st.just("capacity_returns")),
         st.builds(StopRequest, control_id=ids, mode=st.sampled_from(StopMode)),
+        st.builds(SteerRequest, control_id=ids, text=_TEXT, mode=st.just(SteerMode.STANDING)),
+        st.builds(WithdrawRequest, control_id=ids, withdraws=ids),
     )
 
 
@@ -238,6 +242,7 @@ class _Expected:
     """What the channel should hold after a sequence of controls."""
 
     steers: list[str] = field(default_factory=list)
+    withdrawals: list[str] = field(default_factory=list)
     paused: bool = False
     stop: StopMode | None = None
     answered: dict[str, tuple[ControlRequest, ControlAck]] = field(default_factory=dict)
@@ -260,6 +265,10 @@ def _expected_status(request: ControlRequest, expected: _Expected) -> ControlSta
             return ControlStatus.CONSUMED
         case StopRequest(mode=mode):
             expected.stop = mode
+            return ControlStatus.PENDING
+        case WithdrawRequest(withdraws=withdraws):
+            # With no check installed, the run decides at take whether the guidance stands.
+            expected.withdrawals.append(withdraws)
             return ControlStatus.PENDING
 
 
@@ -285,5 +294,6 @@ def test_submit_applies_each_control_id_once_as_its_action_says(
             ack.status is ControlStatus.REFUSED
         )
     assert [steer.text for steer in channel.take_pending_steer()] == expected.steers
+    assert [w.withdraws for w in channel.take_pending_withdrawals()] == expected.withdrawals
     assert channel.pause_requested() == expected.paused
     assert channel.stop_mode() == expected.stop

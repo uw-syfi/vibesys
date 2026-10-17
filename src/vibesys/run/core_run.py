@@ -33,7 +33,7 @@ from vs_runtime.api.core import (
     reject_legacy_resume,
     start_core_awaiting_lease,
 )
-from vs_runtime.api.infrastructure import RunStopped
+from vs_runtime.api.infrastructure import RunStopped, SteerMode, SteerRequest
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -117,11 +117,16 @@ def ensure_not_legacy_resume(project_root: Path, run_id: str) -> None:
         ) from error
 
 
-async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> RunEnd:
+async def drive_core_run(
+    host: CoreHost, integration: LocalRunIntegration, *, standing_guidance: tuple[str, ...] = ()
+) -> RunEnd:
     """Run one core run to its terminal status over ``host.services``.
 
     The loop reads operator controls from ``integration.control`` and, when the services
     carry one, from the run's control inbox, where ``vibesys control`` writes.
+    ``standing_guidance`` (the operator's launch constraints) is submitted as standing steers
+    ``constraint-<n>`` before the loop's first poll, so every turn of the run receives it; a
+    resumed run already holds them, and the same steers again change nothing.
 
     Raises ``RunStopped`` when the operator's stop ended the run, so the session reports
     a stopped run, and ``CoreRunRefusedError`` when composition left an executor role
@@ -146,6 +151,10 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
         control=integration.run_control,
     )
     loop = CoreRunHost(shell, delivery, services.clock, controls, workspaces=host.workspaces)
+    for position, text in enumerate(standing_guidance, start=1):
+        integration.run_control.submit(
+            SteerRequest(control_id=f"constraint-{position}", text=text, mode=SteerMode.STANDING)
+        )
     config = _loop_config(services.run_id, host.timing.lease_seconds)
     await start_core_awaiting_lease(loop, config)
     if services.stop_requested:

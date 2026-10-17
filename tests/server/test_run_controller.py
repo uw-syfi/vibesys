@@ -584,7 +584,7 @@ def test_a_steer_the_run_refuses_answers_its_protocol_error(
     tmp_path: Path, reason: RefusalReason, code: str
 ) -> None:
     parts = build_server_parts(tmp_path)
-    parts.operator_control.check_targets(lambda _target: reason)
+    parts.operator_control.check_requests(lambda _request: reason)
     steer = SteerRequest(
         control_id="s1",
         text="look again",

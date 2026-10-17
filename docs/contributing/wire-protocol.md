@@ -187,7 +187,7 @@ server rejects it as an unknown field.
 
 `command.control` carries one `control`, a `ControlRequest` (`vibesys.api`): the schema every
 control ingress accepts, so a client and a headless run's inbox say the same things. Its
-`action` is `steer` (`text`, and a `target` of `kind` `run`, the default, or `role`, `attempt` or `item` with its `id`), `pause`, `resume` (`fallback`, `when`, as `command.resume`) or
+`action` is `steer` (`text`, a `target` of `kind` `run`, the default, or `role`, `attempt` or `item` with its `id`, and a `mode`: `next_turn`, the default, or `standing`, which every later turn of the target receives until withdrawn), `withdraw` (`withdraws`: the `control_id` of a standing steer), `pause`, `resume` (`fallback`, `when`, as `command.resume`) or
 `stop` (`mode`: `drain`, the default, or `cancel`, which also cancels the work in flight). Like
 every protocol model it forbids unknown keys, and it has no field that reaches evaluation,
 checkers, trust rules or resource partitions: `vs_runtime`'s `control_schema_fields` holds every
@@ -210,7 +210,12 @@ protocol error `steer_target_unknown`, and an attempt that has ended answers
 `steer_target_ended`. A resend gets the same answer. An attempt or item the run does not hold
 yet is accepted, and resolved again when the run takes the steer. An accepted steer that later reaches no turn (its target ended first, or core dropped
 it) is journaled as a `CONTROL` event with status `failed` and the text
-`/steer dropped: steer <id> reached no turn: <reason>`.
+`/steer dropped: steer <id> reached no turn: <reason>`. A withdrawal is refused only when its
+`withdraws` names a control that is not a steer, or a steer that is not, or is no longer,
+standing guidance (`withdraw_not_standing`); one naming a steer the run has not recorded yet is
+accepted and checked when the run takes it, and journaled as `/steer dropped: withdraw <id> ended
+nothing: ...` if it then names no guidance in force. An accepted withdrawal is journaled as
+`/withdraw: <withdraws>`.
 
 ## Framing and connection decisions
 

@@ -30,7 +30,6 @@ from vibesys.inputs._manifest import (
     load_task,
     render_input_manifest,
 )
-from vibesys.inputs._objective import with_operator_constraints
 from vibesys.inputs._objectives import (
     OBJECTIVES_NAME,
     ObjectiveAxisInput,
@@ -92,5 +91,4 @@ __all__ = [
     "outline_problems",
     "render_input_manifest",
     "synthesize_input_bundle",
-    "with_operator_constraints",
 ]

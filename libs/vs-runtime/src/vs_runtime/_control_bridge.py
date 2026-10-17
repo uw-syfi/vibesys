@@ -68,7 +68,7 @@ if TYPE_CHECKING:
     from vs_runtime._run_control import RunControlChannel
 
 
-type ControlAction = Literal["pause", "resume", "stop", "steer"]
+type ControlAction = Literal["pause", "resume", "stop", "steer", "withdraw"]
 
 
 _LOG = logging.getLogger(__name__)

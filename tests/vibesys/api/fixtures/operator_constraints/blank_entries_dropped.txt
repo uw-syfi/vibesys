@@ -1,5 +1,0 @@
-Maximize throughput.
-
-## Operator constraints
-
-- Keep bf16.

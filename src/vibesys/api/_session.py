@@ -13,7 +13,7 @@ from vibesys.api.contracts import RunResult, RunStatus
 from vibesys.api.store import open_run_store
 from vibesys.composition import resolve_agent_specs
 from vibesys.events import CoreEventType, EventStatus, RunFailedData, RunStartedData
-from vibesys.orchestration.agent_options import attribution_command_of
+from vibesys.orchestration.agent_options import attribution_command_of, standing_guidance_of
 from vibesys.plugin_catalog import project_run
 from vibesys.run.core_run import RunEnd, drive_core_run, ensure_not_legacy_resume
 from vibesys.run.host import open_product_core_host
@@ -125,7 +125,9 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
         network=network,
         invocation_store_factory=invocation_store_factory,
     ) as core_host:
-        return await drive_core_run(core_host, integration)
+        return await drive_core_run(
+            core_host, integration, standing_guidance=standing_guidance_of(options)
+        )
 
 
 class _LocalRunSession:

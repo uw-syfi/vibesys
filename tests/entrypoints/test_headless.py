@@ -22,7 +22,6 @@ from entrypoints.cli import (
     _parse_cli_objective,
     _prepare_experiment_repository,
     _render_configuration_error,
-    _with_operator_constraints,
     build_run_request,
     load_config_and_skills,
     parse_cli_invocation,
@@ -1019,18 +1018,6 @@ def test_agent_rejects_nonpositive_round_settings(
     project = _write_input_project(tmp_path)
     with pytest.raises(ConfigurationError):
         parse_cli_invocation(["--input", str(project), flag, value])
-
-
-def test_operator_constraints_are_repeatable_and_do_not_mutate_the_objective() -> None:
-    objective = "Maximize throughput.\n"
-
-    effective = _with_operator_constraints(
-        objective,
-        ["No quantization.", "  One H100 only.  "],
-    )
-
-    assert objective == "Maximize throughput.\n"
-    assert effective.endswith("## Operator constraints\n\n- No quantization.\n- One H100 only.\n")
 
 
 def test_omitted_config_uses_builtin_defaults(
