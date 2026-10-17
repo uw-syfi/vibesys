@@ -1,0 +1,7 @@
+Optimise the kernel.
+
+Standing guidance from the operator. It holds for this turn and every later one until the operator withdraws it:
+- keep the weights in bf16
+
+New steering from the operator since the last turn. Treat it as high-priority guidance for the work you do now:
+- (next-turn) profile the decode loop first
