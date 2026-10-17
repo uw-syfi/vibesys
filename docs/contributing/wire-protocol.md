@@ -214,7 +214,7 @@ it) is journaled as a `CONTROL` event with status `failed` and the text
 `withdraws` names a control that is not a steer, or a steer that is not, or is no longer,
 standing guidance (`withdraw_not_standing`); one naming a steer the run has not recorded yet is
 accepted and checked when the run takes it, and journaled as `/steer dropped: withdraw <id> ended
-nothing: ...` if it then names no guidance in force; a `vibesys control` withdrawal that ends nothing is also set aside in the run's inbox with that reason, so it never applies later. An interrupt-mode steer that a running turn accepted is journaled as a `CONTROL` event `/steer --interrupt` with status `consumed`. An accepted withdrawal is journaled as
+nothing: ...` if it then names no guidance in force; a `vibesys control` withdrawal that ends nothing is also set aside in the run's inbox with that reason, so it never applies later. An interrupt-mode steer that a running turn accepted is journaled as a `CONTROL` event `/steer --interrupt` with status `consumed`. One that only the next turn got is journaled as `/steer: <note>`, the note saying that no running turn kept it. An accepted withdrawal is journaled as
 `/withdraw: <withdraws>` with status `pending`. Accepted standing guidance is journaled with
 status `active` as `/steer --standing: <text>`, and its end, once, with status `completed` as
 `/guidance ended: standing guidance <id> ended: <reason>`, where the reason is `withdrawn`,
