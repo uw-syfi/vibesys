@@ -154,9 +154,13 @@ export function stripChartView(
 /** One thing running now. */
 export interface NowItem {
   readonly id: string;
-  readonly title: string;
-  /** `implementer · Agent turn`: who runs it and what. */
-  readonly summary: string;
+  /**
+   * What runs, kept whole on a narrow row: who runs it and what (`implementer · Agent turn`,
+   * `waiting after implementer`) for an idea, the role for an agent.
+   */
+  readonly doing: string;
+  /** What it belongs to, which gives way first: the idea's title, or what the agent works in. */
+  readonly context: string;
   readonly since: number;
   /** Where the row jumps to. */
   readonly open:
@@ -206,20 +210,20 @@ function ideaNow(item: Candidate, spans: ReadonlyMap<string, Span>): NowItem {
     if (attempt === undefined || last === undefined) {
       const open = {kind: 'idea', idea: item.id} as const;
       const since = attempt?.startedAt ?? item.startedAt;
-      return {id: item.id, title: item.title, summary: 'starting', since, open};
+      return {id: item.id, doing: 'starting', context: item.title, since, open};
     }
     return {
       id: attempt.span,
-      title: item.title,
-      summary: `waiting after ${last.role ?? last.title}`,
+      doing: `waiting after ${last.role ?? last.title}`,
+      context: item.title,
       since: waitingSince(spans.get(attempt.span)) ?? last.endedAt ?? attempt.startedAt,
       open: {kind: 'step', idea: item.id, step: last.span},
     };
   }
   return {
     id: step.span,
-    title: item.title,
-    summary: stepSummary(step),
+    doing: stepSummary(step),
+    context: item.title,
     since: step.startedAt,
     open: {kind: 'step', idea: item.id, step: step.span},
   };
@@ -229,8 +233,8 @@ function agentNow(agent: AgentNode): NowItem {
   const within = agent.activity.within;
   return {
     id: agent.activity.turn,
-    title: agent.role,
-    summary: within === null ? 'agent turn' : within.title,
+    doing: agent.role,
+    context: within === null ? 'agent turn' : within.title,
     since: agent.activity.startedAt,
     open: {kind: 'agent', agent: agent.id},
   };

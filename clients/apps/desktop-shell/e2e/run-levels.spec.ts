@@ -386,3 +386,26 @@ test('an idea’s Logs face shows its stream without a pick: the page follows wh
   await page.getByRole('radiogroup', {name: 'Show'}).getByText('Logs').click();
   await expect(page.getByRole('log', {name: /benchmark/})).toContainText('repetition 1: 41.2');
 });
+
+test('every face of the run level keeps the time bar and the hero in view', async ({page}) => {
+  await openRun(page);
+  const show = page.getByRole('radiogroup', {name: 'Show'});
+  for (const face of ['Ideas', 'Timeline', 'Agents', 'Logs']) {
+    await show.getByText(face, {exact: true}).click();
+    await expect(show.getByLabel(face, {exact: true})).toBeChecked();
+    await expect(page.getByRole('slider', {name: 'Run position'})).toBeInViewport();
+    await expect(page.getByText('1.18×').first()).toBeInViewport();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight),
+    ).toBe(true);
+  }
+  // Now keeps what runs whole (who and what), even in a narrow window; the idea's title gives way.
+  await page.setViewportSize({width: 1024, height: 800});
+  const rows = page.getByRole('listbox', {name: 'Running now'}).getByRole('option');
+  await expect(rows.first()).toBeVisible();
+  for (const row of await rows.all()) {
+    const doing = row.locator('.vs-pickrow-text > :first-child');
+    await expect(doing).toHaveText(/\S/);
+    expect(await doing.evaluate(each => each.scrollWidth <= each.clientWidth)).toBe(true);
+  }
+});

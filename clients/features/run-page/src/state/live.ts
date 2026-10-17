@@ -60,6 +60,8 @@ export interface TraceLog {
   readonly calls: AppendLog<number>;
   /** The latest run-clock time the head's spans carry, or null when they carry none. */
   readonly latest: number | null;
+  /** The latest run-clock time the base's spans carry: when the snapshot was taken, or null. */
+  readonly baseLatest: number | null;
 }
 
 const TRACE_SPAN_EVENTS: ReadonlySet<string> = new Set([
@@ -110,6 +112,7 @@ export function traceLog(
   baseOverview: RunOverview | null,
   events: readonly RunEvent[],
 ): TraceLog {
+  const baseLatest = latestTime(traceSpans(base));
   const empty: TraceLog = {
     base,
     baseOverview,
@@ -118,7 +121,8 @@ export function traceLog(
     headOverview: baseOverview,
     positions: AppendLog.of([base.sequence]),
     calls: AppendLog.of<number>([]),
-    latest: latestTime(traceSpans(base)),
+    latest: baseLatest,
+    baseLatest,
   };
   return events.length === 0 ? empty : extended(empty, events);
 }

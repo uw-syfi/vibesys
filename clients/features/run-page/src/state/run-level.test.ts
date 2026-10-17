@@ -267,8 +267,8 @@ describe('the run level', () => {
     expect(nowView(model)).toEqual([
       {
         id: 'flow:w4/turn/#1',
-        title: 'arena',
-        summary: 'implementer · implementer',
+        doing: 'implementer · implementer',
+        context: 'arena',
         since: 241,
         open: {kind: 'step', idea: 'flow:w4/#1', step: 'flow:w4/turn/#1'},
       },
@@ -295,21 +295,21 @@ describe('the run level', () => {
     const rows = (versions: readonly Span[]) =>
       nowView(
         createRunReader().read(logOf(events([ROOT, ...finished(A), ...versions])), null),
-      ).find(row => row.title === 'ring');
-    expect(rows([again])).toMatchObject({summary: 'starting', since: 600});
+      ).find(row => row.context === 'ring');
+    expect(rows([again])).toMatchObject({doing: 'starting', since: 600});
     expect(rows([again, implement])).toMatchObject({
-      summary: 'implementer · implementer',
+      doing: 'implementer · implementer',
       since: 601,
     });
     const done = {...implement, status: 'done' as const, ended_at: 639};
     expect(rows([again, implement, done, yielded])).toMatchObject({
-      summary: 'waiting after implementer',
+      doing: 'waiting after implementer',
       since: 640,
       open: {kind: 'step', idea: 'flow:w1/#1', step: 'flow:w1/#2/turn'},
     });
     // Without a wait it has said, it waits since its last step ended.
     expect(rows([again, implement, done])).toMatchObject({
-      summary: 'waiting after implementer',
+      doing: 'waiting after implementer',
       since: 639,
     });
   });

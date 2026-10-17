@@ -5,7 +5,7 @@
  */
 import type {AgentNode} from '@vibesys/run-state/agents';
 import {Button, EmptyState, KeyValue, PickList, PickRow, Stack, Text} from '@vibesys/ui';
-import {type JSX, useMemo, useState} from 'react';
+import {type JSX, useMemo} from 'react';
 import {type AgentRow, agentTree, type FoldRow} from '../../../../state/agent-tree.js';
 import {type AgentTurn, agentModel, agentTurns} from '../../../../state/agent-turns.js';
 import {duration} from '../../../../state/span-reading.js';
@@ -16,6 +16,13 @@ export interface AgentsViewProps extends ViewBase {
   readonly selected: string | null;
   /** Beside an opened agent: no header or activity column. */
   readonly compact: boolean;
+  /**
+   * The agents whose finished agents show rather than fold, by id. The page keeps them, so a
+   * group the user unfolded stays unfolded in the list beside an agent opened from anywhere.
+   */
+  readonly unfolded: ReadonlySet<string>;
+  /** Unfolds the finished agents under `parent`. */
+  readonly unfold: (parent: string) => void;
 }
 
 type Status = AgentNode['status'];
@@ -92,10 +99,10 @@ function FoldLine(props: {readonly row: FoldRow; readonly show: () => void}): JS
 export function AgentsView(props: AgentsViewProps): JSX.Element {
   const {agents} = props.model;
   const spans = props.model.trace.spans;
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const {unfolded, unfold} = props;
   const rows = useMemo(
-    () => agentTree(agents, spans, expanded, props.selected),
-    [agents, spans, expanded, props.selected],
+    () => agentTree(agents, spans, unfolded, props.selected),
+    [agents, spans, unfolded, props.selected],
   );
   if (agents.agents.length === 0) return <EmptyState title="No agents yet" />;
   return (
@@ -119,11 +126,7 @@ export function AgentsView(props: AgentsViewProps): JSX.Element {
         row.kind === 'agent' ? (
           <AgentLine key={row.agent.id} row={row} view={props} />
         ) : (
-          <FoldLine
-            key={`fold:${row.parent}`}
-            row={row}
-            show={() => setExpanded(new Set([...expanded, row.parent]))}
-          />
+          <FoldLine key={`fold:${row.parent}`} row={row} show={() => unfold(row.parent)} />
         ),
       )}
     </PickList>

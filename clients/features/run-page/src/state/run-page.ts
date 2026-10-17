@@ -163,6 +163,11 @@ export interface RunPageState {
   readonly ideas: IdeasFilter;
   /** The best path shows every name rather than folding its middle. */
   readonly pathOpen: boolean;
+  /**
+   * The agents whose finished agents the Agents list shows rather than folds, by the parent's id.
+   * The page keeps them, so a group stays open while the user opens agents elsewhere in the tree.
+   */
+  readonly agentsOpen: ReadonlySet<string>;
   /** The window's hold on the live run. */
   readonly link: RunLink;
   /** What the attached run's session reports; null while none runs. */
@@ -191,6 +196,7 @@ export type RunPageAction =
   | {readonly type: 'work-outcome'; readonly outcome: WorkOutcome}
   | {readonly type: 'ideas-filter'; readonly filter: IdeasFilter}
   | {readonly type: 'best-path-open'; readonly open: boolean}
+  | {readonly type: 'agents-open'; readonly id: string; readonly open: boolean}
   | {readonly type: 'map-filter'; readonly filter: MapFilter}
   | {readonly type: 'map-toggle'; readonly id: string; readonly open: boolean}
   | {readonly type: 'map-select'; readonly id: string}
@@ -272,6 +278,7 @@ export function runPageInitial(seed: RunPageSeed): RunPageState {
     work: WORK_FILTER_ALL,
     ideas: IDEAS_FILTER_DEFAULT,
     pathOpen: false,
+    agentsOpen: new Set(),
     link: {kind: 'none'},
     session: null,
     run: EMPTY_RUN_FOLD,
@@ -680,6 +687,8 @@ export function runPageStep(state: RunPageState, action: RunPageAction): RunPage
       return {state: {...state, ideas: action.filter}, requests: []};
     case 'best-path-open':
       return {state: {...state, pathOpen: action.open}, requests: []};
+    case 'agents-open':
+      return {state: {...state, agentsOpen: toggled(state.agentsOpen, action)}, requests: []};
     case 'view-logs':
       return {state: {...state, tab: 'logs', selected: narration(state)}, requests: []};
     case 'map-filter':

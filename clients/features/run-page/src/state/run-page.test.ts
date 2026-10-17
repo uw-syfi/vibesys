@@ -154,6 +154,8 @@ const USER_ACTIONS: readonly RunPageAction[] = [
   {type: 'select-stream', streamId: 's3'},
   {type: 'work-query', query: 'ring'},
   {type: 'work-outcome', outcome: 'accepted'},
+  {type: 'agents-open', id: 'boss', open: true},
+  {type: 'agents-open', id: 'boss', open: false},
 ];
 
 /** A span event at `sequence`, or another event the trace must skip. */
@@ -830,6 +832,24 @@ function round(status: Span['status']): Span {
   };
 }
 
+describe('the Agents list folds', () => {
+  test('the page keeps each unfolded group through every other action, and asks for nothing', () => {
+    let state = runPageStep(attached(), {type: 'agents-open', id: 'boss', open: true}).state;
+    const open = state.agentsOpen;
+    expect([...open]).toEqual(['boss']);
+    const others = USER_ACTIONS.filter(each => each.type !== 'agents-open');
+    for (const action of [...others, ...[...others].reverse()]) {
+      state = runPageStep(state, action).state;
+      expect(state.agentsOpen).toBe(open);
+    }
+    const again = runPageStep(state, {type: 'agents-open', id: 'boss', open: true});
+    expect(again.requests).toEqual([]);
+    expect(again.state.agentsOpen).toBe(open);
+    const lead = runPageStep(state, {type: 'agents-open', id: 'lead', open: true}).state;
+    expect([...lead.agentsOpen].sort()).toEqual(['boss', 'lead']);
+  });
+});
+
 describe('the live run clock', () => {
   // The chelan4 run: the last span changes at 01:23:36, then a pause, a resume and a control
   // change no span time until 01:27:43; the window hears them and ticks 17 s after the last.
@@ -866,6 +886,40 @@ describe('the live run clock', () => {
       const model = createRunReader().read(state.run.trace, null);
       const shown = scrubberView(state.run.trace, state.view, false, clockCarried(model, now));
       expect(shown?.position).toStartWith('01:28:00');
+    }
+  });
+
+  test('reads on a page opened on a snapshot before any span event follows it', () => {
+    // A window reopened on a live run gets a snapshot, then only events that change no span. The
+    // row still shows: one position, at the snapshot's time, carried on the window clock.
+    const opened: RunSnapshot = {
+      run_id: RUN.runId,
+      sequence: 40,
+      status: 'running',
+      spans: [round('running')],
+    };
+    for (const later of [[], [liveEvent(41, '01:24:00', 'run_status_changed')]]) {
+      const state = fold(attached(), [
+        {type: 'run-data', wallMs: 0, data: {kind: 'snapshot', snapshot: opened}},
+        ...(later.length === 0
+          ? []
+          : [
+              {
+                type: 'run-data' as const,
+                wallMs: 0,
+                data: {kind: 'events' as const, events: later},
+              },
+            ]),
+        {type: 'tick', wallMs: 17_000},
+      ]).state;
+      const now = runNow(state);
+      expect(now).toBe(AT_012331 + 17);
+      const model = createRunReader().read(state.run.trace, null);
+      const shown = scrubberView(state.run.trace, state.view, false, clockCarried(model, now));
+      expect(shown).toMatchObject({last: 0, value: 0, latest: true});
+      expect(shown?.position).toStartWith('01:23:48');
+      // Once the run has ended, the same position reads the snapshot's own time.
+      expect(scrubberView(state.run.trace, state.view, true, 0)?.position).toStartWith('01:23:31');
     }
   });
 

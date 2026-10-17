@@ -56,20 +56,31 @@ function clock(event: RunEvent | undefined, carried: number): string | null {
     : new Date(ms + carried * 1000).toISOString().slice(11, 19);
 }
 
+/** The run-clock time `seconds` (host epoch seconds), `carried` seconds later, as a time of day. */
+function timeOfDay(seconds: number | null, carried: number): string | null {
+  if (seconds === null) return null;
+  const ms = (seconds + carried) * 1000;
+  return Number.isFinite(ms) ? new Date(ms).toISOString().slice(11, 19) : null;
+}
+
 function positionWords(log: TraceLog, at: number, carried: number): string {
   const event = log.events.lastWhile(each => sequenceOf(each) <= at);
-  const time = at === log.base.sequence ? null : clock(event, carried);
+  // At the base the time is the snapshot's: the latest its spans carry.
+  const time =
+    at === log.base.sequence ? timeOfDay(log.baseLatest, carried) : clock(event, carried);
   const call = log.calls.countWhile(start => start <= at);
   const when = time ?? (log.base.sequence === 0 ? 'Start' : 'When the page connected');
   return call === 0 ? when : `${when} · planning call ${call}`;
 }
 
 /**
- * The scrubber at `view`, or null when the page has no event to scrub through yet. On an ended
- * run the newest position reads as the end rather than live. It reads the positions and planning
- * calls the log keeps, so its work is in the planning calls, not the run's events. While a live
- * run says nothing, its newest position reads its last event's time `carried` seconds later (the
- * run clock carried forward on this window's clock, `clockCarried`), so it follows real time.
+ * The scrubber at `view`, or null when the page has neither an event nor a snapshot time yet. A
+ * page opened on a snapshot with no event since still shows the row: one position, at the
+ * snapshot's time. On an ended run the newest position reads as the end rather than live. It
+ * reads the positions and planning calls the log keeps, so its work is in the planning calls, not
+ * the run's events. While a live run says nothing, its newest position reads its last event's (or
+ * the snapshot's) time `carried` seconds later (the run clock carried forward on this window's
+ * clock, `clockCarried`), so it follows real time.
  */
 export function scrubberView(
   log: TraceLog,
@@ -79,7 +90,8 @@ export function scrubberView(
 ): ScrubberView | null {
   const {positions} = log;
   const last = positions.length - 1;
-  if (last === 0) return null;
+  // With only the base to stand at, the row still reads the clock when the snapshot has a time.
+  if (last === 0 && log.baseLatest === null) return null;
   const value = view.at === 'live' ? last : indexOf(positions, view.at);
   return {
     last,

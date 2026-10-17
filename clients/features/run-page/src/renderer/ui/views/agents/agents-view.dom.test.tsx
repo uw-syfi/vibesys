@@ -108,6 +108,14 @@ function base(model: RunModel, sent: ZoomEvent[]): ViewBase {
   return {model, clock: {start: 0, now: 500}, zoom: event => void sent.push(event)};
 }
 
+/** The page's side of the list's folds: the groups it keeps unfolded, and where unfolds go. */
+function folds(
+  unfolded: ReadonlySet<string> = new Set(),
+  sent: string[] = [],
+): {readonly unfolded: ReadonlySet<string>; readonly unfold: (parent: string) => void} {
+  return {unfolded, unfold: parent => void sent.push(parent)};
+}
+
 async function mount(node: React.ReactNode): Promise<HTMLElement> {
   const container = document.createElement('div');
   document.body.append(container);
@@ -146,7 +154,7 @@ describe('AgentsView', () => {
   test('draws each agent once in tree order with its header, activity and fan-in badge', async () => {
     const sent: ZoomEvent[] = [];
     const view = await mount(
-      <AgentsView {...base(modelOf(FAN_IN), sent)} selected={null} compact={false} />,
+      <AgentsView {...base(modelOf(FAN_IN), sent)} {...folds()} selected={null} compact={false} />,
     );
     expect(view.textContent).toContain('agent · started by the row above · now');
     expect(options(view).map(each => each.textContent)).toEqual([
@@ -161,21 +169,23 @@ describe('AgentsView', () => {
   test('selecting an agent opens it', async () => {
     const sent: ZoomEvent[] = [];
     const view = await mount(
-      <AgentsView {...base(modelOf(FAN_IN), sent)} selected={null} compact={false} />,
+      <AgentsView {...base(modelOf(FAN_IN), sent)} {...folds()} selected={null} compact={false} />,
     );
     await click(option(view, 'judge'));
     expect(sent).toEqual([{type: 'open-agent', agent: 'judge'}]);
   });
 
   test('beside an opened agent the list is compact and marks the opened agent', async () => {
-    const view = await mount(<AgentsView {...base(modelOf(FAN_IN), [])} selected="impl" compact />);
+    const view = await mount(
+      <AgentsView {...base(modelOf(FAN_IN), [])} {...folds()} selected="impl" compact />,
+    );
     expect(view.textContent).not.toContain('started by the row above');
     expect(view.textContent).not.toContain('ring padding');
     expect(option(view, 'judge').textContent).toContain('+1 parent');
     expect(option(view, 'implementer').getAttribute('aria-selected')).toBe('true');
   });
 
-  test('finished subtrees fold, active agents stay, and a press shows the fold in place', async () => {
+  test('finished subtrees fold, active agents stay, and a press asks the page to unfold', async () => {
     const finished: TurnOf[] = Array.from({length: FOLD_FROM}, (_, n) => ({
       agent: `old-${n}`,
       at: 2 + n,
@@ -187,16 +197,53 @@ describe('AgentsView', () => {
       ...finished,
       {agent: 'live', at: 20, role: 'live', startedBy: ['boss'], status: 'running'},
     ]);
-    const view = await mount(<AgentsView {...base(model, [])} selected={null} compact={false} />);
+    const unfolds: string[] = [];
+    const view = await mount(
+      <AgentsView
+        {...base(model, [])}
+        {...folds(new Set(), unfolds)}
+        selected={null}
+        compact={false}
+      />,
+    );
     expect(options(view).map(each => each.textContent)).toEqual([
       expect.stringContaining('orchestrator'),
       expect.stringContaining('live'),
       expect.stringContaining(`+ ${FOLD_FROM} finished`),
     ]);
     await click(option(view, 'finished'));
-    expect(options(view)).toHaveLength(2 + FOLD_FROM);
-    expect(view.textContent).toContain('old0');
-    expect(view.textContent).not.toContain('finished');
+    expect(unfolds).toEqual(['boss']);
+  });
+
+  test('a group the page keeps unfolded shows in every list, whichever agent is open', async () => {
+    // Two parents, each with a folded group; the user unfolded the first, then opened an agent of
+    // the second: the compact list beside it still shows the first group whole.
+    const group = (parent: string, from: number): TurnOf[] =>
+      Array.from({length: FOLD_FROM}, (_, n) => ({
+        agent: `${parent}-${n}`,
+        at: from + n,
+        role: `${parent}${n}`,
+        startedBy: [parent],
+      }));
+    const model = modelOf([
+      {agent: 'boss', at: 1, role: 'orchestrator', status: 'running'},
+      {agent: 'lead', at: 2, role: 'lead', startedBy: ['boss'], status: 'running'},
+      ...group('boss', 10),
+      ...group('lead', 30),
+    ]);
+    const kept = new Set(['boss']);
+    for (const selected of [null, 'lead-1', 'lead']) {
+      const view = await mount(
+        <AgentsView
+          {...base(model, [])}
+          {...folds(kept)}
+          selected={selected}
+          compact={selected !== null}
+        />,
+      );
+      for (let n = 0; n < FOLD_FROM; n += 1) expect(view.textContent).toContain(`boss${n}`);
+      if (selected !== 'lead-1') expect(view.textContent).toContain(`+ ${FOLD_FROM} finished`);
+    }
   });
 
   test('the opened agent stays in the compact list when its group was folded', async () => {
@@ -210,7 +257,9 @@ describe('AgentsView', () => {
       {agent: 'boss', at: 1, role: 'orchestrator', status: 'running'},
       ...finished,
     ]);
-    const view = await mount(<AgentsView {...base(model, [])} selected="old-2" compact />);
+    const view = await mount(
+      <AgentsView {...base(model, [])} {...folds()} selected="old-2" compact />,
+    );
     expect(option(view, 'old2').getAttribute('aria-selected')).toBe('true');
     expect(view.textContent).not.toContain('finished');
   });
@@ -226,14 +275,18 @@ describe('AgentsView', () => {
         status: 'running' as const,
       })),
     ]);
-    const view = await mount(<AgentsView {...base(model, [])} selected={null} compact={false} />);
+    const view = await mount(
+      <AgentsView {...base(model, [])} {...folds()} selected={null} compact={false} />,
+    );
     expect(options(view).length).toBeGreaterThan(0);
     expect(options(view).length).toBeLessThan(100);
     expect(options(view)[0]?.getAttribute('aria-setsize')).toBe('301');
   });
 
   test('says so when the run has no agents', async () => {
-    const view = await mount(<AgentsView {...base(modelOf([]), [])} selected={null} compact />);
+    const view = await mount(
+      <AgentsView {...base(modelOf([]), [])} {...folds()} selected={null} compact />,
+    );
     expect(view.textContent).toContain('No agents yet');
   });
 });

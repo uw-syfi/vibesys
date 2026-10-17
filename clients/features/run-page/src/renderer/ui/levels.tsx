@@ -12,7 +12,7 @@ import {Button, Chip, Pane, Panes, Row, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {ResolvedZoom, RunMode, RunPageAction, RunPageState} from '../../state/index.js';
 import {FramedPane} from './framed-pane.js';
-import {IdeasList, ModeSwitch} from './run-level.js';
+import {agentFolds, IdeasList, ModeSwitch} from './run-level.js';
 import {
   AgentPane,
   type AgentPaneProps,
@@ -141,7 +141,7 @@ function AgentLevel(props: LevelProps & {readonly agent: AgentNode}): JSX.Elemen
   const view: AgentPaneProps = {...base, core, agent};
   return (
     <Panes>
-      <AgentsPane base={base} selected={agent.id} />
+      <AgentsPane {...props} selected={agent.id} />
       <FramedPane
         kicker={`agent · ${agent.role}`}
         title={agent.activity.within?.title ?? agent.role}
@@ -159,12 +159,14 @@ function AgentLevel(props: LevelProps & {readonly agent: AgentNode}): JSX.Elemen
 }
 
 /** The agents, compact, as the list beside an opened agent or an agent's turn. */
-function AgentsPane(props: {
-  readonly base: ViewBase;
-  readonly selected: string | null;
-}): JSX.Element {
+function AgentsPane(props: LevelProps & {readonly selected: string | null}): JSX.Element {
   const {base} = props;
-  const view: AgentsViewProps = {...base, selected: props.selected, compact: true};
+  const view: AgentsViewProps = {
+    ...base,
+    ...agentFolds(props.state, props.dispatch),
+    selected: props.selected,
+    compact: true,
+  };
   return (
     <FramedPane
       kicker="agents"
@@ -218,7 +220,7 @@ function StepLevel(
   return (
     <Panes>
       {zoomed.idea === null ? (
-        <AgentsPane base={base} selected={zoomed.agent?.id ?? null} />
+        <AgentsPane {...props} selected={zoomed.agent?.id ?? null} />
       ) : (
         <Pane kicker="steps" title={zoomed.idea.title} width="list">
           <StepList idea={zoomed.idea} selected={step.span} zoom={base.zoom} />

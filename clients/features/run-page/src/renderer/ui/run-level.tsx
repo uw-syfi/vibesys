@@ -301,9 +301,9 @@ function NowPane(props: {readonly base: ViewBase}): JSX.Element | null {
           <PickRow
             key={item.id}
             id={item.id}
-            title={item.title}
+            title={item.doing}
             mono
-            summary={item.summary}
+            summary={item.context}
             figure={ageWords(item.since, base.clock.now)}
             figureTone="muted"
             state={{tone: 'live', label: 'running'}}
@@ -313,6 +313,17 @@ function NowPane(props: {readonly base: ViewBase}): JSX.Element | null {
       </PickList>
     </Pane>
   );
+}
+
+/** The Agents list's unfolded groups, kept by the page so every list of agents shares them. */
+export function agentFolds(
+  state: RunPageState,
+  dispatch: Dispatch,
+): Pick<AgentsViewProps, 'unfolded' | 'unfold'> {
+  return {
+    unfolded: state.agentsOpen,
+    unfold: id => dispatch({type: 'agents-open', id, open: true}),
+  };
 }
 
 /** The run level's face for `mode`: its body and what its view adds to the pane's header. */
@@ -328,7 +339,12 @@ function runFace(
       return {header: timelineHeader(view), body: <TimelineView {...view} />};
     }
     case 'agents': {
-      const view: AgentsViewProps = {...base, selected: null, compact: false};
+      const view: AgentsViewProps = {
+        ...base,
+        ...agentFolds(state, dispatch),
+        selected: null,
+        compact: false,
+      };
       return {header: agentsHeader(view), body: <AgentsView {...view} />};
     }
     case 'logs': {
