@@ -46,11 +46,16 @@ class _Run:
     inbox: FakeControlInbox
     core: CoreState
 
-    def poll(self, *, commit: bool = True) -> None:
+    def poll(self, *, commit: bool = True) -> tuple[CoreEvent, ...]:
+        """Poll the bridge; ``commit=False`` leaves the events queued, as the shell may."""
         events: tuple[CoreEvent, ...] = self.bridge.poll(self.core, 1.0)
         if commit:
-            for event in events:
-                self.core = step(self.core, event).state
+            self.commit(events)
+        return events
+
+    def commit(self, events: tuple[CoreEvent, ...]) -> None:
+        for event in events:
+            self.core = step(self.core, event).state
 
 
 def _run() -> _Run:
@@ -103,10 +108,11 @@ def test_a_capacity_wait_from_the_inbox_settles_only_once_core_records_it() -> N
     request = ResumeRequest(control_id="w1", when="capacity_returns")
     run.inbox.post("w1", request.model_dump_json().encode())
 
-    run.poll(commit=False)  # the process died before core committed the poll
+    queued = run.poll(commit=False)  # applied, but core has not committed it yet
+    run.poll()
     assert [entry.request_id for entry in run.inbox.pending()] == ["w1"]
 
-    run.poll()
+    run.commit(queued)
     run.poll()
 
     assert run.inbox.pending() == ()
