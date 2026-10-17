@@ -39,6 +39,12 @@ from ._proofs import (
     submission_budget_for,
 )
 from ._registry import ContractError
+from ._submission_receipts import (
+    canonical_failure,
+    conclusive,
+    job_budget,
+    submission_receipt,
+)
 from ._values import digest
 from .types.attempts import (
     AttemptEvaluationHistoryUpdated,
@@ -699,7 +705,7 @@ def _submission_observed(
     change = _submission_receipted(state, context, event)
     proof = _source(context, event.observation)
     if (
-        not _conclusive(event.observation)
+        not conclusive(event.observation)
         or not isinstance(proof, Proven)
         or not isinstance(proof.value.request, SubmitMeasurement)
     ):
@@ -721,7 +727,7 @@ def _deferred_wake(
     a moment it can proceed. Each wake names one of the continuation's own jobs at its
     current observation, which the continuation handler accepts as its own job event.
     """
-    if not _conclusive(event.observation):
+    if not conclusive(event.observation):
         return ()
     wakes: list[ContinuationJobsChanged] = []
     for continuation in state.continuations:
@@ -771,7 +777,7 @@ def _submission_receipted(
     budget = submission_budget_for(request, state.submission_budgets, context.run.receipts)
     if not isinstance(budget, Proven):
         return AreaChange(state=state)
-    updated = _submission_receipt(budget.value, event, source)
+    updated = submission_receipt(budget.value, event, source)
     if not isinstance(updated, Proven):
         return AreaChange(state=state)
     state = state.model_copy(
@@ -797,82 +803,6 @@ def _resource_taken(state: EvaluationState, observation: Observation, owner: Req
     return observation.resource_id is not None and any(
         j.resource_id == observation.resource_id and _owner_request(j) != owner
         for j in (*state.jobs, *state.registered_jobs)
-    )
-
-
-def _canonical_failure(
-    observation: Observation,
-    claim: MeasurementFailure | None,
-    *,
-    has_facts: bool,
-    reuse_incomplete: bool = False,
-) -> MeasurementFailure | None:
-    """Restrict the caller's failure claim to what the committed facts allow.
-
-    A classification can only narrow what the canonical observation proves. It never
-    grants retry authority after execution succeeded, never contradicts committed
-    scientific facts, and never exists before a conclusive terminal observation.
-
-    The one claim of its own is a reusing job that ended without all of its source's records
-    (``reuse_incomplete``): the result says nothing about the candidate, so it is an
-    infrastructure failure whatever the observation's status, and a retry measures afresh.
-    """
-    if reuse_incomplete and _conclusive(observation):
-        return MeasurementFailure.INFRASTRUCTURE
-    if claim is None or not _conclusive(observation):
-        return None
-    if observation.accepted:
-        if observation.status == ObservationStatus.SUCCEEDED:
-            return None
-        if claim is not None and claim.retryable and has_facts:
-            return MeasurementFailure.UNKNOWN
-    return claim
-
-
-def _conclusive(observation: Observation | None) -> bool:
-    return (
-        observation is not None
-        and observation.terminal
-        and observation.status not in (ObservationStatus.UNKNOWN, ObservationStatus.PENDING)
-    )
-
-
-def _submission_receipt(
-    budget: SubmissionBudget,
-    event: MeasurementSubmissionObserved,
-    source: RequestRecord,
-    *,
-    reuse_incomplete: bool = False,
-) -> Verdict[SubmissionBudget]:
-    matches = tuple(
-        r
-        for r in budget.receipts
-        if isinstance(r, PreparedSubmissionReceipt) and r.request_id == event.observation.request_id
-    )
-    if len(matches) != 1:
-        return Missing(ProofReason.ABSENT_RECEIPT)
-    receipt = matches[0]
-    history = (receipt.observation,) if receipt.observation is not None else ()
-    proof = fresh_observation(history, event.observation, complete=True)
-    if not isinstance(proof, Proven):
-        return proof
-    if receipt.observation == event.observation or receipt.failure == MeasurementFailure.WORKLOAD:
-        return Missing(ProofReason.UNRESOLVED)
-    updated = receipt.model_copy(
-        update={
-            "observation": event.observation,
-            "failure": _canonical_failure(
-                event.observation,
-                event.failure,
-                has_facts=source.evaluation_result is not None,
-                reuse_incomplete=reuse_incomplete,
-            ),
-        }
-    )
-    return Proven(
-        budget.model_copy(
-            update={"receipts": tuple(updated if r == receipt else r for r in budget.receipts)}
-        )
     )
 
 
@@ -1309,12 +1239,12 @@ def _job_observed(
             "evidence": tuple(ledger),
         }
     )
-    claim = _canonical_failure(
+    claim = canonical_failure(
         observation,
         event.failure if isinstance(event, JobObserved) else None,
         has_facts=event.evaluation_result is not None,
     )
-    state = _job_budget(state, context, updated, claim, reuse_incomplete=incomplete)
+    state = job_budget(state, context, updated, claim, reuse_incomplete=incomplete)
     wake = ContinuationJobsChanged(
         resource_id=observation.resource_id, observation=observation, previous=previous
     )
@@ -1322,7 +1252,7 @@ def _job_observed(
     events: tuple[MeasurementResult | JobQueued, ...] = _queued_notice(updated, job, context)
     source_id = updated.submission_id if isinstance(updated, OwnedJob) else updated.request_id
     reported = _reported_to_strategy(context, job)
-    if _conclusive(observation):
+    if conclusive(observation):
         newly = tuple(e for e in accepted if e not in job.evidence)
         # A refused evidence id is reported as an unclassified failure, never hidden.
         # A reused result short of its source's records says nothing of the candidate, so it
@@ -1334,7 +1264,7 @@ def _job_observed(
             if incomplete
             else claim
         )
-        if reported and not _conclusive(job.observation):
+        if reported and not conclusive(job.observation):
             events = (
                 *events,
                 MeasurementResult(
@@ -1430,8 +1360,8 @@ def _ended(
     """
     if (
         not isinstance(job, OwnedJob)
-        or not _conclusive(event.observation)
-        or _conclusive(job.observation)
+        or not conclusive(event.observation)
+        or conclusive(job.observation)
     ):
         return ()
     record = context.records.record(job.submission_id)
@@ -1587,55 +1517,6 @@ def _open(record: RequestRecord) -> bool:
     )
 
 
-def _job_budget(
-    state: EvaluationState,
-    context: EvaluationContext,
-    job: OwnedJob | RegisteredOwnedJob,
-    claim: MeasurementFailure | None = None,
-    *,
-    reuse_incomplete: bool = False,
-) -> EvaluationState:
-    if job.observation is None:
-        return state
-    source_id = job.submission_id if isinstance(job, OwnedJob) else job.request_id
-    source = context.records.record(source_id)
-    if source is None or not isinstance(
-        source.request, SubmitMeasurement | ExecuteRegisteredOperation
-    ):
-        return state
-    proof = submission_budget_for(source.request, state.submission_budgets, context.run.receipts)
-    if not isinstance(proof, Proven):
-        return state
-    receipt = next(
-        (
-            r
-            for r in proof.value.receipts
-            if isinstance(r, PreparedSubmissionReceipt) and r.request_id == source_id
-        ),
-        None,
-    )
-    updated = _submission_receipt(
-        proof.value,
-        MeasurementSubmissionObserved(
-            observation=job.observation,
-            failure=(receipt.failure if receipt is not None else None) or claim,
-        ),
-        source,
-        reuse_incomplete=reuse_incomplete,
-    )
-    return (
-        state.model_copy(
-            update={
-                "submission_budgets": tuple(
-                    updated.value if b == proof.value else b for b in state.submission_budgets
-                )
-            }
-        )
-        if isinstance(updated, Proven)
-        else state
-    )
-
-
 def _history_unless_awaited(
     state: EvaluationState,
     context: EvaluationContext,
@@ -1645,7 +1526,7 @@ def _history_unless_awaited(
     """The history signal, unless the continuation this job's end wakes publishes it itself."""
     if (
         job.resource_id is not None
-        and _conclusive(event.observation)
+        and conclusive(event.observation)
         and _awaited(state, job.resource_id)
     ):
         return ()

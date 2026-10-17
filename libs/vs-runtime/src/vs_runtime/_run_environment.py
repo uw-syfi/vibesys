@@ -41,9 +41,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from vs_agent.api import (
-    CONTAINER_FRAMEWORK_ROOT,
-    AgentBackend,
-    auth_bind_mounts,
     auth_copy_paths,
     reap_orphaned_agents,
 )
@@ -53,6 +50,12 @@ from vs_project.api import RunResourceRequest  # noqa: TC001
 from vs_runtime import _boot_trace as boot_trace
 from vs_runtime._cli_container_env import cli_container_env, cli_provider_env_and_auth_files
 from vs_runtime._command_environment_session import command_environment_session
+from vs_runtime._container_mount_plan import (
+    container_mount_plan,
+    materialize_effective_objective,
+    reference_container_path,
+    sandbox_workspace_root,
+)
 from vs_runtime._container_runtime_policy import (
     DOCKER_IN_DOCKER_NOTICE,
     RefusesDockerInDocker,
@@ -73,7 +76,6 @@ from vs_runtime._environment_startup import (
 from vs_runtime._image_features import image_features
 from vs_runtime._model_artifacts import read_model_metadata
 from vs_runtime._objective_document import (
-    materialize_objective_document,
     outside_objective,
 )
 from vs_runtime._project_run import CaptureRecoverySource, NoCaptureRecovery
@@ -107,7 +109,6 @@ from vs_sandbox.api import (
     DeviceLease,
     EnvironmentBindMount,
     HostResource,
-    HostResourceAccess,
     ProjectPathPolicy,
     SandboxKind,
     SandboxLifecycleHooks,
@@ -117,15 +118,12 @@ from vs_sandbox.api import (
     deduplicate_host_resources,
     evaluator_helpers,
     host_resource_for_mount,
-    linked_worktree_git_paths,
     require_sysbox_runtime,
     start_sandbox,
     stop_sandbox,
-    workspace_container_root,
 )
 from vs_sandbox.api.docker_workspace import (
     DockerWorkspaceRepairError,
-    docker_project_path_resources,
     remove_docker_workspace_child,
     repair_docker_workspace,
 )
@@ -143,23 +141,11 @@ from vs_sandbox.api.skypilot import (
     stable_cluster_name,
 )
 from vs_sandbox.api.symlink_mounts import (
-    SymlinkMountScope,
-    collect_symlink_mounts,
-    find_mount_root,
     symlink_lifecycle_hooks,
 )
 from vs_sim.api import DISCARD, CloseOnce, ReleaseStack
 
-_RUNTIME_OBJECTIVE_CONTAINER_PATH = "/opt/vibesys-runtime/objective.md"
 _RUNTIME_DOCUMENT_NAME = "runtime-environment.md"
-"""The runtime resource declaration's ``agent_path`` for the effective objective.
-
-Used in exactly one place: the ``HostResource`` :func:`_container_mount_plan`
-declares for the materialized objective document. Every environment's
-:class:`AgentPaths` instead asks the started sandbox's own
-:meth:`~vs_sandbox.docker_sandbox.DockerSandbox.agent_path` for that document's
-container path, so this constant and the resource declaration are the single
-source of truth an environment consults."""
 if TYPE_CHECKING:
     from collections.abc import Callable
     from contextlib import AbstractContextManager
@@ -704,7 +690,7 @@ class HostEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
     ) -> RunEnvironmentSession:
         """Create a host sandbox and its agent path view."""
         del presentation
-        _materialize_effective_objective(request)
+        materialize_effective_objective(request)
         document, grants = outside_objective(request.objective, request.log_dir)
         sandbox = _make_host_sandbox(request)
         evaluation = _host_evaluation_plan(request)
@@ -1000,8 +986,8 @@ class DockerEnvironment(NoCaptureRecovery):
                 output=output,
                 clock=request.clock,
             )
-        workspace_root = _workspace_root(request, same_path=extras.same_path_workspace)
-        resources, docker_symlinks = _container_mount_plan(
+        workspace_root = sandbox_workspace_root(request, same_path=extras.same_path_workspace)
+        resources, docker_symlinks = container_mount_plan(
             request, same_path=extras.same_path_workspace
         )
         resources += list(extras.resources)
@@ -1293,7 +1279,7 @@ class SkyPilotEnvironment(RefusesDockerInDocker, DockerEnvironment):
                 backend_label="SkyPilot",
             )
 
-            resources, docker_symlinks = _container_mount_plan(request)
+            resources, docker_symlinks = container_mount_plan(request)
             cli_provider_env, auth_files = _cli_provider_env_and_auth_files(request)
             cli_provider_env.setdefault("UV_CACHE_DIR", "/workspace/.cache/uv")
             helper_source = evaluator_helpers.SKYPILOT_EVALUATOR_HELPER
@@ -1335,7 +1321,7 @@ class SkyPilotEnvironment(RefusesDockerInDocker, DockerEnvironment):
             raise
 
         agent_path_sandbox = cast("_AgentPathSandbox", sandbox)
-        objective_document = _materialize_effective_objective(request)
+        objective_document = materialize_effective_objective(request)
         prefix = f"python {helper_path} --socket {socket_path}"
         return _SkyPilotRunEnvironmentSession(
             sandbox=sandbox,
@@ -1410,7 +1396,7 @@ class ModalEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
         facts = ModalEnvironmentFacts(
             gpu=self.config.gpu,
             app_name=app_name,
-            reference_path=_reference_container_path(request).removeprefix("/workspace/"),
+            reference_path=reference_container_path(request).removeprefix("/workspace/"),
         )
         return _PreparedRunEnvironment(
             facts,
@@ -1467,7 +1453,7 @@ class ModalEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
             backend_label="Modal",
         )
 
-        resources, docker_symlinks = _container_mount_plan(request)
+        resources, docker_symlinks = container_mount_plan(request)
         cli_provider_env, auth_files = _cli_provider_env_and_auth_files(request)
         cli_provider_env.setdefault("UV_CACHE_DIR", "/workspace/.cache/uv")
         if request.git_history_root is not None:
@@ -1543,7 +1529,7 @@ class ModalEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
             )
         evaluator_prefix = f"{shlex.join(evaluator_arguments)} --"
         agent_path_sandbox = cast("_AgentPathSandbox", sandbox)
-        objective_document = _materialize_effective_objective(request)
+        objective_document = materialize_effective_objective(request)
         evaluation = _prepare_evaluation_plan(
             request,
             requirements,
@@ -1674,23 +1660,6 @@ def _modal_app_name(run_id: str, fallback: str) -> str:
     return name[:63].rstrip("-") or "vibesys"
 
 
-def _materialize_effective_objective(request: RunEnvironmentRequest) -> Path | None:
-    """Select and materialize the effective objective for this run.
-
-    Operator constraints are composed at the CLI boundary. VibeSys decides
-    whether an objective exists and which authored document it represents;
-    runtime infrastructure validates or writes the selected document.
-    """
-    if request.objective is None:
-        return None
-    return materialize_objective_document(
-        request.objective,
-        workspace=request.git_history_root or request.workspace,
-        authored_document=request.objective_document,
-        destination=request.log_dir / "effective-objective.md",
-    )
-
-
 def _isolated_paths(
     request: RunEnvironmentRequest,
     sandbox: _AgentPathSandbox,
@@ -1702,16 +1671,16 @@ def _isolated_paths(
     Every path the agent is told about is asked of *sandbox* rather than
     hardcoded: :meth:`~vs_sandbox.docker_sandbox.DockerSandbox.agent_path`
     is the one table mapping a host path to where the container sees it,
-    built from the same resource list :func:`_container_mount_plan` declared.
+    built from the same resource list :func:`container_mount_plan` declared.
     """
-    objective_document = _materialize_effective_objective(request)
+    objective_document = materialize_effective_objective(request)
     requirements = request.evaluator_requirements
     evaluation = _prepare_evaluation_plan(
         request,
         requirements,
         TrustedEvaluationCommandPaths(
             source_project_root=request.workspace,
-            runtime_project_root=_workspace_root(request),
+            runtime_project_root=sandbox_workspace_root(request),
             python_executable="python3",
             runtime_package_root=(
                 sandbox.agent_path(requirements.package_root)
@@ -1778,158 +1747,6 @@ def _prepare_evaluation_plan(
         requirements,
         paths,
     )
-
-
-def _container_mount_plan(
-    request: RunEnvironmentRequest,
-    *,
-    include_cli_provider_mounts: bool = True,
-    same_path: bool = False,
-) -> tuple[list[HostResource], list[tuple[str, str]]]:
-    """Build the host resources + setup symlinks for a sandbox.
-
-    Returns the resource list the sandbox enforces and exposes through
-    :meth:`~vs_sandbox.docker_sandbox.DockerSandbox.agent_path` (workspace
-    read-write mapping aside, which the sandbox itself always provides),
-    and the setup symlinks a lifecycle hook must create once the container is
-    up.
-
-    ``include_cli_provider_mounts`` controls whether CLI auth state and the
-    full project tree are added under ``/opt/vibesys-auth`` and
-    ``/opt/vibesys``. Defaults to True; both supported environments (local
-    Docker and the Modal-via-Docker mode) bind-mount these read-only and copy
-    auth state into the container's writable layer during setup.
-    """
-    bind_mounts: list[tuple[str, str, bool]] = []
-    symlinks: list[tuple[str, str]] = []
-    ref_dir = request.ref_dir
-    root = _workspace_root(request, same_path=same_path)
-
-    mount_scope = SymlinkMountScope(
-        workspace_root=root,
-        skip=frozenset(mount.host_path.name for mount in request.environment_bind_mounts),
-    )
-
-    if ref_dir is not None:
-        reference_container_path = _reference_container_path(request, same_path=same_path)
-        collect_symlink_mounts(
-            ref_dir,
-            reference_container_path,
-            bind_mounts=bind_mounts,
-            symlinks=symlinks,
-            scope=mount_scope,
-        )
-        if ref_dir.parent != ref_dir:
-            collect_symlink_mounts(
-                ref_dir.parent,
-                str(Path(reference_container_path).parent),
-                bind_mounts=bind_mounts,
-                symlinks=symlinks,
-                scope=mount_scope,
-            )
-
-    objective_document = _materialize_effective_objective(request)
-    if objective_document is not None:
-        bind_mounts.append((str(objective_document), _RUNTIME_OBJECTIVE_CONTAINER_PATH, True))
-    if request.git_history_root is not None:
-        bind_mounts.append((str(request.git_history_root), "/opt/vibesys-history", True))
-    for mount in request.environment_bind_mounts:
-        resolved = mount.host_path.resolve()
-        host_path = find_mount_root(resolved)
-        if host_path == resolved:
-            bind_mounts.append((str(host_path), mount.container_path, mount.read_only))
-        else:
-            rel = resolved.relative_to(host_path)
-            mount_name = mount.container_path.strip("/").replace("/", "_") or "environment_mount"
-            ancestor_mount = f"{root}/_mounts/{mount_name}"
-            bind_mounts.append((str(host_path), ancestor_mount, mount.read_only))
-            symlinks.append((mount.container_path, f"{ancestor_mount}/{rel}"))
-
-    if request.profiler_support_path and request.profiler_support_name:
-        bind_mounts.append(
-            (
-                request.profiler_support_path,
-                f"{root}/{request.profiler_support_name}",
-                True,
-            )
-        )
-        bind_mounts.extend(
-            (extra_path, f"{root}/{extra_name}", True)
-            for extra_path, extra_name in request.profiler_support_extra
-        )
-
-    if request.evaluator_requirements.package_root is not None:
-        bind_mounts.append(
-            (
-                str(request.evaluator_requirements.package_root),
-                "/opt/vibesys-evaluator-package",
-                True,
-            )
-        )
-
-    resources = [
-        host_resource_for_mount(host, container, read_only=read_only)
-        for host, container, read_only in bind_mounts
-    ]
-    resources.extend(
-        docker_project_path_resources(
-            request.project_path_policy,
-            request.workspace,
-            mask_root=request.log_dir / "sandbox-hidden",
-            container_root=root,
-        )
-    )
-
-    # A candidate workspace is a linked Git worktree whose ``.git`` file names its
-    # metadata by host path. Mounted at that same path, read-only, ``git status``
-    # and ``git diff`` work in the container while history and other candidates'
-    # refs and worktrees stay unwritable.
-    resources.extend(
-        HostResource(path, HostResourceAccess.READ_ONLY, "linked worktree Git metadata")
-        for path in linked_worktree_git_paths(request.workspace)
-    )
-
-    if (
-        include_cli_provider_mounts
-        and (request.agent_backend or AgentBackend.CLI) == AgentBackend.CLI
-        and request.cli_provider
-    ):
-        resources.extend(
-            host_resource_for_mount(host, container, read_only=read_only)
-            for host, container, read_only in auth_bind_mounts(request.cli_provider)
-        )
-        resources.append(
-            host_resource_for_mount(
-                str(request.framework_root), CONTAINER_FRAMEWORK_ROOT, read_only=True
-            )
-        )
-
-    return resources, symlinks
-
-
-def _workspace_root(request: RunEnvironmentRequest, *, same_path: bool = False) -> str:
-    """Return where the request's Docker sandbox mounts the workspace."""
-    return workspace_container_root(
-        str(request.workspace), same_path=request.docker_in_docker or same_path
-    )
-
-
-def _reference_container_path(request: RunEnvironmentRequest, *, same_path: bool = False) -> str:
-    """Return the reference path inside an isolated workspace.
-
-    Normal project references retain their repository-relative location. An
-    external reference directory uses the legacy ``reference`` location under
-    the workspace root while its external symlink targets are mounted
-    separately.
-    """
-    root = _workspace_root(request, same_path=same_path)
-    if request.ref_dir is None:
-        return f"{root}/reference"
-    try:
-        relative = request.ref_dir.resolve().relative_to(request.workspace.resolve())
-    except ValueError:
-        return f"{root}/reference"
-    return f"{root}/{relative.as_posix()}"
 
 
 def _cli_container_env(request: RunEnvironmentRequest) -> tuple[str, dict[str, str]] | None:
