@@ -225,6 +225,8 @@ class Invocation(Value):
     output_json: str | None = None
     reserved_inputs: tuple[ArtifactRef, ...] = ()
     input_ids: tuple[InputId, ...] = ()
+    guidance_ids: tuple[InputId, ...] = ()
+    """The standing inputs the turn was dispatched with, in the order it received them."""
     evaluation_prefix: EvaluationHistoryCursor | None = None
     pending_suspension: Continuation | None = None
     until: Until
@@ -674,6 +676,8 @@ class DispatchTurn(RequestBase):
     kind: Literal["dispatch_turn"] = "dispatch_turn"
     turn: TurnSpec
     inputs: tuple[SessionInput, ...] = ()
+    guidance: tuple[SessionInput, ...] = ()
+    """The standing inputs in force for this turn when it was dispatched; none is reserved."""
 
 
 class InspectTurn(RequestBase):
@@ -731,6 +735,8 @@ class ResumeSessionTurn(RequestBase):
     kind: Literal["resume_session_turn"] = "resume_session_turn"
     turn: TurnSpec
     inputs: tuple[SessionInput, ...] = ()
+    guidance: tuple[SessionInput, ...] = ()
+    """The standing inputs in force for this turn when it was dispatched; none is reserved."""
     continuation_id: ContinuationId
     publication: ResumeAuthorizationReceipt | None = None
     """The publication proof core held for this continuation when it issued the resume.
@@ -746,6 +752,16 @@ class SessionInputReceived(Value):
 
     kind: Literal["session_input_received"] = "session_input_received"
     input: SessionInput
+
+
+class InputWithdrawRequested(Value):
+    """End one standing input: the signal an operator's withdraw control raises.
+
+    Only core raises it, from a recorded withdraw control; it is not accepted as ingress.
+    """
+
+    kind: Literal["input_withdraw_requested"] = "input_withdraw_requested"
+    input_id: InputId
 
 
 class InputReservationRequested(Value):
@@ -940,6 +956,7 @@ type SessionsEvent = Annotated[
     | SteerReceived
     | InterruptRequested
     | SessionInputReceived
+    | InputWithdrawRequested
     | InputReservationRequested
     | TurnInputsReserved
     | InputAcceptanceObserved

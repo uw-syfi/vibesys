@@ -144,6 +144,7 @@ from .types.sessions import (
     AcquisitionStalled,
     CheckpointStalled,
     DispatchTurn,
+    InputWithdrawRequested,
     InterruptRequested,
     Invocation,
     ResumeSessionTurn,
@@ -1292,6 +1293,7 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
         "resume": RunStatus.RUNNING,
         "stop": RunStatus.CLOSING,
         "steer": state.run.status,
+        "withdraw": state.run.status,
     }
     run = state.run.model_copy(
         update={
@@ -1303,6 +1305,10 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
     updated = state.model_copy(update={"run": run})
     if event.control.action == "steer":
         result = Transition(state=updated)
+    elif event.control.withdraws is not None:
+        result = propagate(
+            updated, (InputWithdrawRequested(input_id=event.control.withdraws),), dispatch
+        )
     else:
         # A stop returned above; only pause and resume reach core's admission.
         action = "pause" if event.control.action == "pause" else "resume"
@@ -1594,8 +1600,10 @@ def consume(state: CoreState, event: CoreEvent, dispatch: Dispatch) -> Transitio
     given = state
     _validate_observation_ingress(state, event)
     _validate_authorization(state, event)
-    if isinstance(event, DecisionCompleted | RecoveryReady):
-        raise ContractError(("event",), "completion/readiness is an internal lifecycle signal")
+    if isinstance(event, DecisionCompleted | RecoveryReady | InputWithdrawRequested):
+        raise ContractError(
+            ("event",), "completion, readiness and withdrawal are internal lifecycle signals"
+        )
     if isinstance(event, ProposalSubmitted):
         result = _proposal(state, event, dispatch)
     elif isinstance(event, DecisionSubmitted):

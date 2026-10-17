@@ -832,24 +832,49 @@ type InputTarget = Annotated[
 ]
 
 
+class InputMode(StrEnum):
+    """How an input reaches the turns of its target; interrupt metadata grants no refund authority.
+
+    ``NEXT_TURN`` is reserved by the first matching turn and delivered to it once.
+    ``STANDING`` is never reserved: every matching session turn dispatched while it is in force
+    receives it, until it is withdrawn or its target ends.
+    """
+
+    NEXT_TURN = "next-turn"
+    INTERRUPT = "interrupt"
+    STANDING = "standing"
+
+
 class ControlInput(Value):
     """Control input lifecycle contract."""
 
     control_id: ControlId
-    action: Literal["pause", "resume", "stop", "steer"]
+    action: Literal["pause", "resume", "stop", "steer", "withdraw"]
     mode: StopMode | None = None
     """Drain or cancel what is in flight: the operator's choice, given with every stop."""
     artifact: ArtifactRef | None = None
     target: InputTarget | None = None
     """Whom a steer is for; None is the whole run. Only a steer has a target."""
+    input_mode: InputMode | None = None
+    """How a steer reaches its target's turns; None is the next turn. Only a steer has one."""
+    withdraws: InputId | None = None
+    """The standing input a withdraw ends. Exactly a withdraw names one."""
 
     @model_validator(mode="after")
     def mode_belongs_to_stop(self) -> ControlInput:
-        """A stop names how it ends in-flight work and a steer whom it is for; nothing else."""
+        """Each action carries its own fields: a stop's mode, a steer's target, a withdraw's input."""
         if (self.action == "stop") != (self.mode is not None):
             raise ContractValidationError("mode", "required for stop and only for stop")
         if self.target is not None and self.action != "steer":
             raise ContractValidationError("target", "only a steer has a target")
+        if self.input_mode is not None and self.action != "steer":
+            raise ContractValidationError("input_mode", "only a steer has an input mode")
+        if self.input_mode is InputMode.STANDING and isinstance(self.target, InvocationInputTarget):
+            raise ContractValidationError(
+                "input_mode", "standing guidance is for a run, role, attempt or item"
+            )
+        if (self.action == "withdraw") != (self.withdraws is not None):
+            raise ContractValidationError("withdraws", "required for withdraw and only for it")
         return self
 
 

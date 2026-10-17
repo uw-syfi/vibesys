@@ -12,6 +12,7 @@ from .common import (
     ContractValidationError,
     Count,
     InputId,
+    InputMode,
     InputTarget,
     InvocationInputTarget,
     InvocationRef,
@@ -19,13 +20,6 @@ from .common import (
     Seconds,
     Value,
 )
-
-
-class InputMode(StrEnum):
-    """Declared delivery mode; interrupt metadata grants no refund authority."""
-
-    NEXT_TURN = "next-turn"
-    INTERRUPT = "interrupt"
 
 
 class SessionInput(Value):
@@ -43,6 +37,15 @@ class SessionInput(Value):
     sequence: Count
     mode: InputMode = InputMode.NEXT_TURN
 
+    @model_validator(mode="after")
+    def standing_outlives_one_turn(self) -> SessionInput:
+        """Standing input is for every matching turn, so it cannot name one invocation."""
+        if self.mode is InputMode.STANDING and isinstance(self.target, InvocationInputTarget):
+            raise ContractValidationError(
+                "mode", "standing guidance is for a run, role, attempt or item"
+            )
+        return self
+
 
 class InputDropReason(StrEnum):
     """Closed reasons for terminal input disposal."""
@@ -51,6 +54,8 @@ class InputDropReason(StrEnum):
     OWNER_CANCELLED = "owner-cancelled"
     RUN_TERMINAL = "run-terminal"
     INVOCATION_TERMINAL = "invocation-terminal"
+    WITHDRAWN = "withdrawn"
+    """An operator withdrew standing guidance."""
 
 
 class InputDelivered(Value):

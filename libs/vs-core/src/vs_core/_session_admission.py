@@ -13,6 +13,7 @@ from ._proofs import (
     invocation_for,
     request_matches,
 )
+from ._session_inputs import standing_guidance
 from ._session_rows import awaiting as _awaiting
 from ._session_rows import invocation_row as _invocation
 from ._session_rows import replace_invocation as _replace_invocation
@@ -601,6 +602,7 @@ def _dispatch_reserved(
             "input_ids", "manifest differs from exact reserved occurrences"
         )
     inputs = tuple(row.input for row in records)
+    guidance = standing_guidance(state, context, invocation)
     request: Request
     if invocation.registered_operation is not None:
         request = _registered_dispatch(context, invocation)
@@ -624,6 +626,7 @@ def _dispatch_reserved(
             admission_id=_episode(context, invocation.scope),
             turn=invocation.turn,
             inputs=inputs,
+            guidance=guidance,
             continuation_id=invocation.turn.continuation_id,
             publication=_publication(context, invocation.turn.continuation_id),
         )
@@ -634,11 +637,13 @@ def _dispatch_reserved(
             admission_id=_episode(context, invocation.scope),
             turn=invocation.turn,
             inputs=inputs,
+            guidance=guidance,
         )
     invocation = invocation.model_copy(
         update={
             "phase": SessionPhase.EXECUTING,
             "input_ids": event.input_ids,
+            "guidance_ids": tuple(item.input_id for item in guidance),
             "reserved_inputs": tuple(item.artifact for item in inputs),
         }
     )

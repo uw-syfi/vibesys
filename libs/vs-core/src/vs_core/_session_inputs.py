@@ -6,7 +6,7 @@ interrupts, emitting canonical facts for the turn and attempt owners.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ._proofs import (
     Proven,
@@ -46,6 +46,7 @@ from .types.session_inputs import (
     InputDelivered,
     InputDropped,
     InputDropReason,
+    InputMode,
     InputRecord,
 )
 from .types.sessions import (
@@ -53,6 +54,7 @@ from .types.sessions import (
     InputAcceptanceObserved,
     InputReservationReleased,
     InputReservationRequested,
+    InputWithdrawRequested,
     InspectTurn,
     InterruptClaim,
     InterruptCompleted,
@@ -71,6 +73,8 @@ from .types.sessions import (
 from .types.strategy import Accepted, Interrupt, Operation, Withdraw
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from .types.attempts import AttemptView
     from .types.common import InputTarget, InvocationRef, RevisionRef
     from .types.kernel import SessionsContext, Signal
@@ -109,6 +113,51 @@ def _matches(item: SessionInput, invocation: Invocation, context: SessionsContex
         return target.scope == _run_scope(context) and invocation.registered_operation is None
     owner = attempt_for(context, invocation.scope)
     return owner is not None and owner.item_id == target.item_id
+
+
+def standing_guidance(
+    state: SessionsState, context: SessionsContext, invocation: Invocation
+) -> tuple[SessionInput, ...]:
+    """The standing inputs in force for ``invocation``'s turn, in the order they were received.
+
+    Standing input is never reserved: every matching session turn receives it while it is
+    in force. A registered operation is a mechanical turn the strategy decided on, so it
+    takes none.
+    """
+    if invocation.registered_operation is not None:
+        return ()
+    return tuple(
+        row.input
+        for row in sorted(
+            state.inputs, key=lambda row: (row.input.sequence, row.input.input_id.root)
+        )
+        if row.input.mode is InputMode.STANDING
+        and row.receipt is None
+        and _matches(row.input, invocation, context)
+    )
+
+
+def _withdraw(
+    state: SessionsState, context: SessionsContext, event: InputWithdrawRequested
+) -> AreaChange[SessionsState]:
+    """End a standing input with a WITHDRAWN receipt; one that already ended stays as it is."""
+    record = next((row for row in state.inputs if row.input.input_id == event.input_id), None)
+    if record is None or record.input.mode is not InputMode.STANDING:
+        raise ContractValidationError("withdraws", "names no standing input of this run")
+    if record.receipt is not None:
+        return AreaChange(state=state)
+    withdrawn, receipt = _drop(record, InputDropReason.WITHDRAWN, context.run.now_at)
+    return AreaChange(
+        state=state.model_copy(
+            update={
+                "inputs": tuple(
+                    withdrawn if row.input.input_id == event.input_id else row
+                    for row in state.inputs
+                )
+            }
+        ),
+        events=(receipt,),
+    )
 
 
 def check_declared_target(target: InputTarget | None, declaration: SearchDeclaration) -> None:
@@ -169,6 +218,7 @@ def _reserve(
         row.model_copy(update={"reserved_to": event.invocation})
         if row.receipt is None
         and row.reserved_to is None
+        and row.input.mode is not InputMode.STANDING
         and _matches(row.input, invocation, context)
         else row
         for row in state.inputs
@@ -702,35 +752,48 @@ def _drain(
     )
 
 
+def _received_input(
+    state: SessionsState, context: SessionsContext, event: SessionInputReceived
+) -> AreaChange[SessionsState]:
+    return _received(state, context, event.input)
+
+
+def _steers(
+    state: SessionsState, context: SessionsContext, event: SteerReceived
+) -> AreaChange[SessionsState]:
+    events = []
+    for item in event.inputs:
+        received = _received(state, context, item)
+        state = received.state
+        events.extend(received.events)
+    return AreaChange(state=state, events=tuple(events))
+
+
+_HANDLERS: dict[
+    type, Callable[[SessionsState, SessionsContext, Any], AreaChange[SessionsState]]
+] = {
+    SessionInputReceived: _received_input,
+    InputWithdrawRequested: _withdraw,
+    SteerReceived: _steers,
+    InputReservationRequested: _reserve,
+    InputAcceptanceObserved: _acceptance,
+    InputReservationReleased: _acceptance,
+    InterruptRequested: _interrupt,
+    InvocationCheckpointAvailable: _checkpoint,
+    InvocationChargeRefunded: _refunded,
+    SessionDrainRequested: _drain,
+}
+"""Per input-owned event type, the reducer that consumes it."""
+
+
 def advance(
     state: SessionsState, context: SessionsContext, event: SessionsEvent
 ) -> AreaChange[SessionsState]:
     """Consume input-owned ingress and committed sibling facts, preserving siblings."""
-    match event:
-        case SessionInputReceived():
-            change = _received(state, context, event.input)
-        case SteerReceived():
-            events = []
-            for item in event.inputs:
-                received = _received(state, context, item)
-                state = received.state
-                events.extend(received.events)
-            change = AreaChange(state=state, events=tuple(events))
-        case InputReservationRequested():
-            change = _reserve(state, context, event)
-        case InputAcceptanceObserved() | InputReservationReleased():
-            change = _acceptance(state, context, event)
-        case InterruptRequested():
-            change = _interrupt(state, context, event)
-        case InvocationCheckpointAvailable():
-            change = _checkpoint(state, context, event)
-        case InvocationChargeRefunded():
-            change = _refunded(state, context, event)
-        case SessionDrainRequested():
-            change = _drain(state, context, event)
-        case _:
-            raise ContractValidationError("event.kind", "event is owned by session turns")
-    return change
+    handler = _HANDLERS.get(type(event))
+    if handler is None:
+        raise ContractValidationError("event.kind", "event is owned by session turns")
+    return handler(state, context, event)
 
 
 def finish_run(state: SessionsState, context: SessionsContext) -> AreaChange[SessionsState]:
