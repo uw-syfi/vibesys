@@ -214,7 +214,7 @@ describe('newRunMachine', () => {
     checkMachine(
       {
         machine: newRunMachine,
-        input: {machine: 'local', recent: RECENT},
+        input: {machine: 'local', recent: RECENT, moreOpen: {}},
         event: (random, live, snapshot) =>
           random.pick([
             inputEvent(random, snapshot),
@@ -277,7 +277,7 @@ describe('newRunMachine', () => {
           ),
         },
       }),
-      {input: {machine: 'local', recent: RECENT}},
+      {input: {machine: 'local', recent: RECENT, moreOpen: {}}},
     );
     actor.start();
     actor.send({type: 'again', run: again});
@@ -346,7 +346,7 @@ describe('newRunMachine', () => {
           ),
         },
       }),
-      {input: {machine: 'local', recent: RECENT}},
+      {input: {machine: 'local', recent: RECENT, moreOpen: {}}},
     );
     actor.start();
     await new Promise<void>(resolve => {
@@ -398,7 +398,7 @@ describe('the run reports its roles', () => {
           }),
         },
       }),
-      {input: {machine: 'local', recent: RECENT}, clock},
+      {input: {machine: 'local', recent: RECENT, moreOpen: {}}, clock},
     );
   }
 

@@ -1,10 +1,14 @@
 import {
+  ActionPanel,
   Banner,
+  BRAND_MARK_NAMES,
+  BrandMark,
   Button,
   type ButtonVariant,
   Card,
   Checkbox,
   Chip,
+  ChoiceTiles,
   type Completion,
   Field,
   Grid,
@@ -71,6 +75,56 @@ function Segments(props: {readonly size: 'sm' | 'md'}): JSX.Element {
         {value: 'folder', label: 'Folder'},
         {value: 'example', label: 'Example'},
       ]}
+    />
+  );
+}
+
+function Tiles(): JSX.Element {
+  const [value, setValue] = useState<'claude' | 'codex' | 'other'>('claude');
+  return (
+    <ChoiceTiles
+      label="Agent"
+      value={value}
+      change={setValue}
+      options={[
+        {value: 'claude', label: 'Claude Code', leading: <BrandMark mark="claudecode" />},
+        {value: 'codex', label: 'Codex', leading: <BrandMark mark={null} />},
+        {value: 'other', label: 'OpenCode', leading: <BrandMark mark="opencode" />},
+      ]}
+    />
+  );
+}
+
+function ActionPanelDemo(props: {readonly open: boolean; readonly failing: boolean}): JSX.Element {
+  const [open, setOpen] = useState(props.open);
+  return (
+    <ActionPanel
+      label={props.failing ? 'Needs attention' : 'Ready'}
+      status={
+        props.failing
+          ? {state: 'fail', text: '1 check needs attention'}
+          : {state: 'ok', text: 'Ready · 7 checks passed'}
+      }
+      open={open}
+      toggle={setOpen}
+      summary="queue-rs · mpmc · This Mac · Claude Opus 5.5 · rounds as configured"
+      details={
+        <Text tone="muted">
+          {props.failing ? 'Docker is not reachable.' : 'Every check passed.'}
+        </Text>
+      }
+      action={
+        props.failing ? (
+          <Button
+            variant="primary"
+            text="Start run"
+            disabledReason="Fix the check above."
+            press={() => undefined}
+          />
+        ) : (
+          <Button variant="primary" text="Start run" press={() => undefined} />
+        )
+      }
     />
   );
 }
@@ -264,6 +318,25 @@ export const BASIC_ENTRIES = {
         <Segments size="md" />
         <Segments size="sm" />
       </Stack>
+    ),
+  },
+  ActionPanel: {
+    render: () => (
+      <Stack>
+        <ActionPanelDemo open={false} failing={false} />
+        <ActionPanelDemo open failing />
+      </Stack>
+    ),
+  },
+  ChoiceTiles: {render: () => <Tiles />},
+  BrandMark: {
+    render: () => (
+      <Row gap="space-5">
+        {BRAND_MARK_NAMES.map(mark => (
+          <BrandMark key={mark} mark={mark} />
+        ))}
+        <BrandMark mark={null} />
+      </Row>
     ),
   },
   Select: {

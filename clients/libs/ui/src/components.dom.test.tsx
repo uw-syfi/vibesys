@@ -5,12 +5,15 @@ import {Window} from 'happy-dom';
 import {act, type ReactNode, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {
+  ActionPanel,
   AppFrame,
+  BrandMark,
   Button,
   Chart,
   type ChartPoint,
   Checkbox,
   type ChoiceOption,
+  ChoiceTiles,
   type Completion,
   Fact,
   FactLine,
@@ -574,5 +577,65 @@ describe('ParetoChart values', () => {
     const root = await mount(<ParetoChart label="Trade-off" points={points} x={x} y={y} />);
     const titles = [...root.querySelectorAll('.vs-pareto-point title')].map(t => t.textContent);
     expect(titles).toEqual(['Big · 6,054,154 ops/s · 0.512', 'Small · 12.3 ops/s · 47.3']);
+
+function ControlledTiles() {
+  const [value, setValue] = useState('a');
+  return (
+    <ChoiceTiles
+      label="Agent"
+      value={value}
+      change={setValue}
+      options={[
+        {value: 'a', label: 'Alpha', leading: <BrandMark mark="claudecode" />},
+        {value: 'b', label: 'Beta', leading: <BrandMark mark={null} />},
+      ]}
+    />
+  );
+}
+
+describe('ChoiceTiles', () => {
+  test('is one named radio group; a press chooses exactly one tile, each with its mark and name', async () => {
+    const container = await mount(<ControlledTiles />);
+    expect(one(container, '[role="radiogroup"]').getAttribute('aria-label')).toBe('Agent');
+    const radios = [...container.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+    expect(new Set(radios.map(radio => radio.name)).size).toBe(1);
+    await click(radios[1] as HTMLInputElement);
+    expect(radios.map(radio => radio.checked)).toEqual([false, true]);
+    const tiles = [...container.querySelectorAll('.vs-tile')];
+    expect(tiles.map(tile => tile.textContent)).toEqual(['Alpha', 'Beta']);
+    // A mark is decoration beside its name: hidden from assistive technology.
+    expect(tiles.every(tile => tile.querySelector('svg[aria-hidden="true"]') !== null)).toBe(true);
+  });
+});
+
+function ControlledPanel(props: {readonly startOpen: boolean}) {
+  const [open, setOpen] = useState(props.startOpen);
+  return (
+    <ActionPanel
+      label="Ready to start"
+      status={{state: 'ok', text: 'Ready · 3 checks passed'}}
+      open={open}
+      toggle={setOpen}
+      summary="queue-rs · mpmc"
+      details={<p>Every check passed.</p>}
+      action={<Button variant="primary" text="Start run" press={() => undefined} />}
+    />
+  );
+}
+
+describe('ActionPanel', () => {
+  test('is a named region whose status opens and closes its details, with the action always there', async () => {
+    const container = await mount(<ControlledPanel startOpen={false} />);
+    expect(one(container, 'section').getAttribute('aria-label')).toBe('Ready to start');
+    const status = one(container, '.vs-action-panel-status');
+    expect(status.getAttribute('aria-expanded')).toBe('false');
+    expect(container.textContent).not.toContain('Every check passed.');
+    expect(container.textContent).toContain('Start run');
+    await click(status);
+    expect(status.getAttribute('aria-expanded')).toBe('true');
+    expect(container.textContent).toContain('Every check passed.');
+    expect(container.textContent).toContain('Start run');
+    await click(status);
+    expect(container.textContent).not.toContain('Every check passed.');
   });
 });

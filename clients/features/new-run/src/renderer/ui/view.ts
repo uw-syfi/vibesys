@@ -4,7 +4,7 @@
  */
 import {type HostKey, hostFromKey, hostLabel} from '@vibesys/hosts';
 import type {RecentRun} from '@vibesys/runs';
-import type {CheckState, KeyValueItem} from '@vibesys/ui';
+import type {BrandMarkName, CheckState, KeyValueItem} from '@vibesys/ui';
 import {
   advancedProblem,
   type Backend,
@@ -61,12 +61,100 @@ export function machineFacts(machine: MachineDescription): KeyValueItem[] {
   ];
 }
 
+/** The hardware in a line ("64 cores, MI300X"), for the Machine details while they are closed. */
+export function hardwareLine(machine: MachineDescription): string {
+  const {hardware} = machine;
+  const gpus = [...new Set(hardware.gpus.map(gpu => gpu.model))].join(', ');
+  return `${hardware.cpu_cores} cores${gpus === '' ? '' : `, ${gpus}`}`;
+}
+
 /** The projects of the runs opened on `machine`, newest first, each once. */
 export function recentProjects(recent: readonly RecentRun[], machine: HostKey): string[] {
   const runs = recent
     .filter(run => run.host === machine)
     .sort((left, right) => right.attachedAt - left.attachedAt);
   return [...new Set(runs.map(run => run.project))];
+}
+
+/**
+ * One label per project path, for a list a person picks from: the folder's name, and when two
+ * paths share it, enough of the folders above to tell them apart. A path is never shown whole
+ * unless it must be to differ from another.
+ */
+export function projectLabels(paths: readonly string[]): ReadonlyMap<string, string> {
+  const folders = (path: string): string[] => path.split('/').filter(Boolean);
+  const nameOf = (path: string): string => folders(path).at(-1) ?? path;
+  /** `path` with its last `depth` folders: the name, then the folders above it in parentheses. */
+  const labelAt = (path: string, depth: number): string => {
+    const parts = folders(path);
+    const parents = parts.slice(Math.max(0, parts.length - depth), -1);
+    return parents.length === 0 ? nameOf(path) : `${nameOf(path)} (${parents.join('/')})`;
+  };
+  const groups = new Map<string, string[]>();
+  for (const path of new Set(paths)) {
+    groups.set(nameOf(path), [...(groups.get(nameOf(path)) ?? []), path]);
+  }
+  const labels = new Map<string, string>();
+  for (const [name, group] of groups) {
+    const [only] = group;
+    if (group.length === 1 && only !== undefined) {
+      labels.set(only, name);
+      continue;
+    }
+    const deepest = Math.max(...group.map(path => folders(path).length));
+    let depth = 2;
+    while (
+      depth < deepest &&
+      new Set(group.map(path => labelAt(path, depth))).size < group.length
+    ) {
+      depth += 1;
+    }
+    const distinct = new Set(group.map(path => labelAt(path, depth))).size === group.length;
+    for (const path of group) labels.set(path, distinct ? labelAt(path, depth) : path);
+  }
+  return labels;
+}
+
+/**
+ * How a harness reads, the one place names for harnesses come from. The host sends only the
+ * provider id, so the shipped providers are named here until the host sends names.
+ */
+export function harnessName(provider: string): string {
+  switch (provider) {
+    case 'claude':
+      return 'Claude Code';
+    case 'codex':
+      return 'Codex';
+    case 'gemini':
+      return 'Gemini CLI';
+    case 'opencode':
+      return 'OpenCode';
+    default:
+      return provider;
+  }
+}
+
+/**
+ * The mark drawn beside a harness's name, or null for the generic glyph. The marks are
+ * `simple-icons`'s, shown only beside the product's name to say which product runs; a harness
+ * the package has no mark for (Codex today) has none.
+ */
+export function harnessMark(provider: string): BrandMarkName | null {
+  switch (provider) {
+    case 'claude':
+      return 'claudecode';
+    case 'gemini':
+      return 'googlegemini';
+    case 'opencode':
+      return 'opencode';
+    default:
+      return null;
+  }
+}
+
+/** How a model reads: the one place names for models come from; today the id the host sent. */
+export function modelName(model: string): string {
+  return model;
 }
 
 /**
@@ -253,7 +341,69 @@ export function summary(context: NewRunContext): string | null {
     task,
     machineLabel(machine),
     ...(backend === null ? [] : [backendLabel(backend)]),
-    agent.model,
+    modelName(agent.model),
     rounds,
   ].join(' · ');
+}
+
+/** The one-line state of "Ready to start", and whether its checks show by themselves. */
+export interface ReadinessStatus {
+  readonly state: CheckState;
+  readonly text: string;
+  /** A failed check shows its words and fix without being asked to. */
+  readonly open: boolean;
+}
+
+function count(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? '' : 's'}`;
+}
+
+/** What the one line says of `items`: ready with a count, what is being checked, or what failed. */
+export function readinessStatus(items: readonly Readiness[]): ReadinessStatus {
+  const of = (state: CheckState): Readiness[] => items.filter(item => item.state === state);
+  const failed = of('fail');
+  if (failed.length > 0) {
+    return {
+      state: 'fail',
+      text:
+        failed.length === 1 ? '1 check needs attention' : `${failed.length} checks need attention`,
+      open: true,
+    };
+  }
+  const pending = of('pending')[0];
+  if (pending !== undefined) {
+    return {state: 'pending', text: pending.detail ?? pending.label, open: false};
+  }
+  const passed = of('ok').length;
+  const warned = of('warn').length;
+  if (warned > 0) {
+    return {
+      state: 'warn',
+      text: `Ready · ${count(passed, 'check')} passed, ${warned} to review`,
+      open: false,
+    };
+  }
+  return {
+    state: 'ok',
+    text: passed === 0 ? 'Ready' : `Ready · ${count(passed, 'check')} passed`,
+    open: false,
+  };
+}
+
+/**
+ * What More options holds that is not the default, in a line: so a closed disclosure never hides a
+ * setting the run will use. "Defaults" when it holds none.
+ */
+export function moreOptionsSummary(context: NewRunContext): string {
+  const {form} = context;
+  const changedRoles = (form.agent?.roles ?? []).filter(
+    role => role.model !== null || role.effort !== 'default',
+  ).length;
+  const parts = [
+    ...(form.budget.results === 'publish_github' ? ['publishes to GitHub'] : []),
+    ...(changedRoles === 0 ? [] : [`${count(changedRoles, 'role')} changed`]),
+    ...(form.advanced.trim() === '' ? [] : ['extra arguments']),
+    ...(form.project?.source === 'example' ? ['example location'] : []),
+  ];
+  return parts.length === 0 ? 'Defaults' : parts.join(' · ');
 }

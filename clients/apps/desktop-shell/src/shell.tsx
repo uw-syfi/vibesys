@@ -17,7 +17,12 @@ import {
   sidebarShortcutLabel,
 } from '@vibesys/feature-app-shell/state';
 import {createMachinesStore, MachinesScreen} from '@vibesys/feature-machines/renderer';
-import {createNewRunStore, machineOptions, NewRunScreen} from '@vibesys/feature-new-run/renderer';
+import {
+  createNewRunStore,
+  type MoreOptionsMemory,
+  machineOptions,
+  NewRunScreen,
+} from '@vibesys/feature-new-run/renderer';
 import {
   type RunPageNavigation,
   type RunPagePage,
@@ -96,6 +101,13 @@ function runWindowPlace(stores: ShellStores): RunPlace {
   };
 }
 
+/** What the shell keeps between runs of the app, each in the viewer's own storage. */
+export interface ShellPreferences {
+  readonly sidebar: SidebarPreference;
+  /** What the user chose for New run's More options on each machine; none keeps it this run only. */
+  readonly moreOptions?: MoreOptionsMemory;
+}
+
 /**
  * Build the shell's stores over `bridge`, and keep the page's theme on what the Settings store
  * shows (the preload already painted the first frame in the stored theme). New run hears the runs
@@ -107,7 +119,7 @@ export function createShellStores(
   document: ThemeTarget,
   schedule: Schedule,
   page: RunPagePage,
-  sidebarPreference: SidebarPreference,
+  preferences: ShellPreferences,
 ): ShellStores {
   const settings = createSettingsStore(bridge, system);
   const follow = (): void => {
@@ -115,10 +127,11 @@ export function createShellStores(
     if (state.kind === 'ready') applyTheme(shownTheme(state, DEFAULT_APPEARANCE), document);
   };
   settings.subscribe(follow);
-  const sidebar = createSidebarStore(bridge, sidebarPreference);
+  const sidebar = createSidebarStore(bridge, preferences.sidebar);
   const newRun = createNewRunStore(bridge, {
     recent: sidebar.store.getState().recent,
     schedule,
+    ...(preferences.moreOptions === undefined ? {} : {moreOptions: preferences.moreOptions}),
     started: run => sidebar.store.dispatch({type: 'select', screen: {kind: 'run', run}}),
   });
   let {recent, selection} = sidebar.store.getState();

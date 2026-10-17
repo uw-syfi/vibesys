@@ -19,7 +19,12 @@ test('New run is prefilled from the last run on its machine and starts once the 
   await expect(page.getByLabel('Run on')).toHaveValue('ssh:host-b');
   await expect(page.getByLabel('Project', {exact: true})).toHaveValue(PROJECT);
   await expect(page.getByLabel('Task', {exact: true})).toHaveValue('mpmc');
+  await expect(page.getByRole('radio', {name: 'Claude Code'})).toBeChecked();
   await expect(page.getByLabel('Model', {exact: true})).toHaveValue('claude-opus-4-5');
+  // All is well: the checks fold into one line, which opens to show each of them.
+  await expect(ready(page)).toContainText(/Ready · \d+ checks passed/);
+  await expect(ready(page)).not.toContainText('Agent image');
+  await ready(page).getByRole('button', {name: /Ready/}).click();
   await expect(ready(page)).toContainText('Agent image');
   await expect(start(page)).not.toHaveAttribute('aria-disabled', 'true');
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
@@ -76,7 +81,7 @@ test('extra arguments may not repeat an option set above, and roles change the r
 }) => {
   await open(page);
   await expect(start(page)).not.toHaveAttribute('aria-disabled', 'true');
-  await page.getByRole('button', {name: 'Advanced'}).click();
+  await page.getByRole('button', {name: 'More options'}).click();
   await page.getByLabel('Extra arguments').fill('--max-rounds 3');
   await expect(page.getByText('--max-rounds is set above')).toHaveCount(2);
   await expect(start(page)).toHaveAttribute('aria-disabled', 'true');
@@ -132,6 +137,7 @@ test('a machine whose VibeSys does not report its roles says every role runs as 
     newRun: {...newRun, features: ['run_options', 'preflight', 'examples']},
   });
   await expect(start(page)).not.toHaveAttribute('aria-disabled', 'true');
+  await page.getByRole('button', {name: 'More options'}).click();
   await expect(page.getByText(/does not report its agent roles/)).toBeVisible();
   await expect(page.getByRole('button', {name: /^Roles:/})).toHaveCount(0);
 });
@@ -191,5 +197,62 @@ test('Run again prefills the model, rounds and extra arguments the run was start
   await expect(page.getByRole('heading', {name: 'New run'})).toBeVisible();
   await expect(page.getByLabel('Model', {exact: true})).toHaveValue('claude-sonnet-4-5');
   await expect(page.getByLabel('Rounds')).toHaveValue('4');
+  // Extra arguments are in More options, which says they are set while it is closed.
+  await expect(page.getByRole('button', {name: /More options/})).toContainText('extra arguments');
+  await page.getByRole('button', {name: 'More options'}).click();
   await expect(page.getByLabel('Extra arguments')).toHaveValue('--max-in-flight 3');
+});
+
+test('the harness is chosen from tiles with a mark and a name each', async ({page}) => {
+  await open(page);
+  const harness = page.getByRole('radiogroup', {name: 'Harness'});
+  await expect(harness.getByRole('radio')).toHaveCount(2);
+  // A harness with a mark in the package draws it; one without draws the generic glyph.
+  await expect(harness.locator('svg.vs-brand-mark')).toHaveCount(2);
+  await expect(harness.locator('svg.vs-brand-mark[data-generic]')).toHaveCount(1);
+  await page.getByRole('radio', {name: 'Codex'}).check();
+  await expect(page.getByLabel('Model', {exact: true})).toHaveValue('gpt-5-codex');
+  await start(page).click();
+  const {started} = await fakeNewRun(page);
+  expect(started).toMatchObject([{harness: {provider: 'codex', model: 'gpt-5-codex'}}]);
+});
+
+test('More options starts closed, says what it holds, and stays as left on each machine', async ({
+  page,
+}) => {
+  await open(page);
+  const more = page.getByRole('button', {name: /More options/});
+  await expect(more).toHaveAttribute('aria-expanded', 'false');
+  await expect(more).toContainText('Defaults');
+  await expect(page.getByLabel('Extra arguments')).toHaveCount(0);
+  await more.click();
+  await expect(page.getByLabel('Extra arguments')).toBeVisible();
+  // Left open on this machine, it is open on the next visit; another machine has its own choice.
+  await page.reload();
+  await expect(page.getByRole('button', {name: /More options/})).toHaveAttribute(
+    'aria-expanded',
+    'true',
+  );
+  await page.getByLabel('Run on').selectOption('local');
+  await expect(page.getByRole('button', {name: /More options/})).toHaveAttribute(
+    'aria-expanded',
+    'false',
+  );
+});
+
+test('a failing check opens the checks by itself, and the error stays when More options is closed', async ({
+  page,
+}) => {
+  await open(page);
+  await page.getByRole('button', {name: 'More options'}).click();
+  await page.getByLabel('Extra arguments').fill('--max-rounds 3');
+  await page.getByRole('button', {name: 'More options'}).click();
+  await expect(page.getByLabel('Extra arguments')).toHaveCount(0);
+  // Closed, it still shows the problem, and the pinned panel states and explains it.
+  await expect(page.getByRole('button', {name: /More options/})).toContainText(
+    '--max-rounds is set above',
+  );
+  await expect(ready(page)).toContainText('1 check needs attention');
+  await expect(ready(page)).toContainText('--max-rounds is set above');
+  await expect(start(page)).toHaveAttribute('aria-disabled', 'true');
 });

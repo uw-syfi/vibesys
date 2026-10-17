@@ -249,6 +249,7 @@ export function installFakeNewRun(seed: FakeBridgeSeed): void {
           },
         ],
         roles: features.includes('run_roles') ? roles : null,
+        backend: 'cpu',
       },
     });
   };

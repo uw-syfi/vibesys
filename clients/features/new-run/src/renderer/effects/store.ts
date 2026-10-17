@@ -68,8 +68,18 @@ export function initialMachine(recent: readonly RecentRun[]): HostKey {
   return last?.host ?? 'local';
 }
 
+/** Where what the user chose for More options on each machine is kept between runs of the app. */
+export interface MoreOptionsMemory {
+  /** The stored choices by machine; none when nothing is stored or it cannot be read. */
+  read(): Readonly<Record<string, boolean>>;
+  /** Keep `choices`; a failure to store them is not an error, they just last this run. */
+  write(choices: Readonly<Record<string, boolean>>): void;
+}
+
 export interface NewRunStoreOptions {
   readonly recent: readonly RecentRun[];
+  /** Remembers More options per machine; without one the choices last the store's life. */
+  readonly moreOptions?: MoreOptionsMemory;
   /** Where the machine's delays (the checks' debounce) are scheduled. */
   readonly schedule: ScheduleTimeout;
   /** Hears each run the screen started. */
@@ -96,8 +106,9 @@ export function createNewRunStore(
   // Until the user changes an input, the form follows the runs opened (the first of which may
   // arrive after the store was made), so it is prefilled from the last run, on its machine.
   let edited = false;
+  let moreOpen = options.moreOptions?.read() ?? {};
   const spawn = (machine: HostKey): Actor<typeof logic> => {
-    const actor = createActor(logic, {input: {machine, recent}, clock});
+    const actor = createActor(logic, {input: {machine, recent, moreOpen}, clock});
     actor.subscribe(snapshot => {
       const run = snapshot.context.started;
       if (snapshot.status === 'done' && run !== null) {
@@ -115,6 +126,14 @@ export function createNewRunStore(
     getState: () => current.getSnapshot(),
     subscribe: delivery.subscribe,
     dispatch: event => {
+      if (event.type === 'more_options') {
+        // A choice of the page, not an input of the run: it neither edits the form nor is lost
+        // when the form is replaced.
+        current.send(event);
+        moreOpen = current.getSnapshot().context.moreOpen;
+        options.moreOptions?.write(moreOpen);
+        return;
+      }
       if (event.type !== 'recent') {
         edited = true;
         current.send(event);

@@ -17,7 +17,9 @@ export interface CheckItem {
 }
 
 /** Each state's icon and the word that names it, so a state never reads by color alone. */
-const STATES: Readonly<Record<CheckState, {readonly icon: IconName; readonly word: string}>> = {
+export const STATES: Readonly<
+  Record<CheckState, {readonly icon: IconName; readonly word: string}>
+> = {
   ok: {icon: 'check', word: 'Passed'},
   warn: {icon: 'clock', word: 'Needs attention'},
   fail: {icon: 'cross', word: 'Failed'},

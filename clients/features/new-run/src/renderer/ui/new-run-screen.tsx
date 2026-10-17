@@ -1,23 +1,36 @@
 /**
- * New run: the machine, project and task, agent, and budget on the left; on the right, whether the
- * run is ready to start on that machine, each failed check with its fix, and Start. The wordmark
- * and title stay in view and the form scrolls under them; the start panel stays beside it.
+ * New run: the essentials in the order a run is decided (the machine, the project and task, the
+ * agent, the budget) and, below them, one closed disclosure for everything else. The wordmark and
+ * title stay in view above the form, which scrolls on its own; "Ready to start" is pinned below it
+ * as one line (ready, with a count, or what failed, open with its fix) and the Start button, so
+ * Start is never out of the window.
  */
 import {
+  ActionPanel,
   Banner,
   Button,
-  Card,
   type CheckItem,
   CheckList,
+  type CheckState,
   Page,
-  Split,
   Stack,
   Text,
 } from '@vibesys/ui';
-import type {JSX, ReactNode} from 'react';
+import {type JSX, type ReactNode, useState} from 'react';
 import type {NewRunEvent, NewRunSnapshot} from '../../state/index.js';
-import {AgentCard, BudgetCard, type FolderCompletion, MachineCard, ProjectCard} from './inputs.js';
-import {type MachineOption, type ReadinessFix, readiness, startBlocked, summary} from './view.js';
+import {AgentCard} from './agent-card.js';
+import {BudgetCard} from './budget-card.js';
+import {MachineCard} from './machine-card.js';
+import {MoreOptions} from './more-options.js';
+import {type FolderCompletion, ProjectCard} from './project-card.js';
+import {
+  type MachineOption,
+  type ReadinessFix,
+  readiness,
+  readinessStatus,
+  startBlocked,
+  summary,
+} from './view.js';
 
 type Dispatch = (event: NewRunEvent) => void;
 
@@ -46,36 +59,54 @@ function fixPress(fix: ReadinessFix, dispatch: Dispatch, chooseCheckout: () => v
   }
 }
 
-function ReadyCard(props: {
+const RANK: Readonly<Record<CheckState, number>> = {fail: 0, warn: 1, pending: 2, ok: 3};
+
+/**
+ * "Ready to start": one line while all is well, the failed checks and their fixes open as soon as
+ * one fails. The user's own opening or closing holds until the line's kind changes (ready, failing),
+ * which is what `key` restarts.
+ */
+function ReadyPanel(props: {
   readonly snapshot: NewRunSnapshot;
   readonly dispatch: Dispatch;
   readonly chooseCheckout: () => void;
 }): JSX.Element {
   const {snapshot, dispatch, chooseCheckout} = props;
-  const items: CheckItem[] = readiness(snapshot).map(({fix, ...item}) => ({
-    ...item,
-    ...(fix === undefined
-      ? {}
-      : {fix: {text: fixText(fix), press: fixPress(fix, dispatch, chooseCheckout)}}),
-  }));
+  const checks = readiness(snapshot);
+  // What needs the reader comes first: a failed check and its fix are never below the fold.
+  const items: CheckItem[] = [...checks]
+    .sort((left, right) => RANK[left.state] - RANK[right.state])
+    .map(({fix, ...item}) => ({
+      ...item,
+      ...(fix === undefined
+        ? {}
+        : {fix: {text: fixText(fix), press: fixPress(fix, dispatch, chooseCheckout)}}),
+    }));
+  const status = readinessStatus(checks);
+  const [chosen, setChosen] = useState<{readonly for: boolean; readonly open: boolean} | null>(
+    null,
+  );
+  // A choice is for the kind of line it was made on: a check that starts failing opens it again.
+  const open = chosen?.for === status.open ? chosen.open : status.open;
   const blocked = startBlocked(snapshot);
   const line = summary(snapshot.context);
   return (
-    <Card section="Ready to start">
-      <CheckList items={items} />
-      {line === null ? null : (
-        <Text variant="small" tone="muted">
-          {line}
-        </Text>
-      )}
-      <Button
-        variant="primary"
-        full
-        text="Start run"
-        press={() => dispatch({type: 'start'})}
-        {...(blocked === undefined ? {} : {disabledReason: blocked})}
-      />
-    </Card>
+    <ActionPanel
+      label="Ready to start"
+      status={{state: status.state, text: status.text}}
+      open={open}
+      toggle={next => setChosen({for: status.open, open: next})}
+      details={<CheckList items={items} />}
+      {...(line === null ? {} : {summary: line})}
+      action={
+        <Button
+          variant="primary"
+          text="Start run"
+          press={() => dispatch({type: 'start'})}
+          {...(blocked === undefined ? {} : {disabledReason: blocked})}
+        />
+      }
+    />
   );
 }
 
@@ -93,9 +124,10 @@ export function NewRunScreen(props: {
   const {snapshot, dispatch, chooseCheckout} = props;
   const {context} = snapshot;
   const cardProps = {context, dispatch};
+  const offers = context.harnesses?.for === context.form.machine ? context.harnesses.list : null;
   return (
     <Page
-      width="wide"
+      width="narrow"
       header={
         <>
           {/* The wordmark sizes to its container's width, so it is not in the centered stack. */}
@@ -111,21 +143,15 @@ export function NewRunScreen(props: {
           )}
         </>
       }
+      footer={
+        <ReadyPanel snapshot={snapshot} dispatch={dispatch} chooseCheckout={chooseCheckout} />
+      }
     >
-      <Split
-        stickyAside
-        main={
-          <Stack gap="space-4">
-            <MachineCard {...cardProps} machines={props.machines} chooseCheckout={chooseCheckout} />
-            <ProjectCard key={context.form.machine} {...cardProps} completion={props.completion} />
-            <AgentCard {...cardProps} />
-            <BudgetCard {...cardProps} />
-          </Stack>
-        }
-        aside={
-          <ReadyCard snapshot={snapshot} dispatch={dispatch} chooseCheckout={chooseCheckout} />
-        }
-      />
+      <MachineCard {...cardProps} machines={props.machines} chooseCheckout={chooseCheckout} />
+      <ProjectCard key={context.form.machine} {...cardProps} completion={props.completion} />
+      <AgentCard {...cardProps} />
+      <BudgetCard {...cardProps} />
+      <MoreOptions {...cardProps} offers={offers ?? []} />
     </Page>
   );
 }

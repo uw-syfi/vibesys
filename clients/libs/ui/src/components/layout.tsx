@@ -60,20 +60,23 @@ export function Reserve(props: {readonly children: ReactNode}): JSX.Element {
 }
 
 /**
- * The main area: the page gutter, and content centred at `width`. Without a `header` the page
- * scrolls as one document, which suits a short page. With one, the page never scrolls: the
- * `header` (a title, a logo, the page's actions) stays fully in view and the body below it
- * scrolls on its own, with a shade at the edge that has more behind it. A header is for a page
- * whose body can outgrow the window.
+ * The main area: the page gutter, and content centred at `width`. Without a `header` or `footer`
+ * the page scrolls as one document, which suits a short page. With either, the page never
+ * scrolls: the `header` (a title, a logo, the page's actions) and the `footer` (the page's primary
+ * action) stay fully in view and the body between them scrolls on its own, with a faint hint at
+ * its bottom edge while more lies below. A header or footer is for a page whose body can outgrow
+ * the window.
  */
 export function Page(props: {
   readonly width?: PageWidth;
   /** What stays in view above a body that scrolls. */
   readonly header?: ReactNode;
+  /** What stays in view below a body that scrolls: the page's primary action. */
+  readonly footer?: ReactNode;
   readonly children: ReactNode;
 }): JSX.Element {
   const width = props.width ?? 'content';
-  if (props.header === undefined) {
+  if (props.header === undefined && props.footer === undefined) {
     return (
       <main className="vs-page">
         <div className="vs-page-content" data-width={width}>
@@ -85,10 +88,11 @@ export function Page(props: {
   return (
     <main className="vs-page" data-fixed-header="">
       <div className="vs-page-content" data-width={width}>
-        <div className="vs-page-header">{props.header}</div>
+        {props.header === undefined ? null : <div className="vs-page-header">{props.header}</div>}
         <div className="vs-page-scroll">
           <div className="vs-page-body">{props.children}</div>
         </div>
+        {props.footer === undefined ? null : <div className="vs-page-footer">{props.footer}</div>}
       </div>
     </main>
   );
@@ -107,26 +111,18 @@ export function Row(props: FlexProps): JSX.Element {
 /**
  * A main column and an aside beside it; the aside moves under the main column when narrow.
  * `asideFirst` puts the aside before the main column, in reading order and on screen (a list
- * beside the detail of its selected row); when narrow it then sits above it. `stickyAside` keeps
- * the aside in view while a long main column scrolls past (the detail of a row picked far down a
- * list, or the start panel beside a long form); an aside taller than its scroll area
- * scrolls within itself.
+ * beside the detail of its selected row); when narrow it then sits above it.
  */
 export function Split(props: {
   readonly main: ReactNode;
   readonly aside: ReactNode;
   readonly gap?: SpaceToken;
   readonly asideFirst?: boolean;
-  readonly stickyAside?: boolean;
 }): JSX.Element {
   const main = <div className="vs-split-main">{props.main}</div>;
   const aside = <div className="vs-split-aside">{props.aside}</div>;
   return (
-    <div
-      className="vs-split"
-      {...(props.stickyAside === true ? {'data-sticky-aside': ''} : {})}
-      style={gapStyle(props.gap ?? 'space-5')}
-    >
+    <div className="vs-split" style={gapStyle(props.gap ?? 'space-5')}>
       {props.asideFirst === true ? aside : main}
       {props.asideFirst === true ? main : aside}
     </div>

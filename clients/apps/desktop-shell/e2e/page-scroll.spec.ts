@@ -1,15 +1,17 @@
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {expect, type Page, test} from '@playwright/test';
 import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
-import {open, sidebar} from './world.js';
+import {open, SEED, sidebar} from './world.js';
 
 /**
  * A top-level page's header never scrolls away. On New run, Machines and Settings the window
  * (the document) does not scroll at any size down to 1000 by 700; the header (the wordmark, the
  * title, the actions) stays fully inside the window after the page's body is scrolled to its
- * bottom; and on New run the Start run button stays in view too. The wordmark art is never cut
- * off by its own box. `SCREENS_DIR=<dir>` also writes each page's screenshot, scrolled to the
- * bottom of its body (the app window only), and a contact sheet of them.
+ * bottom; and on New run the Start run button is in the window without scrolling, with the form
+ * open at its longest. The wordmark art is never cut off by its own box. All of it holds in both
+ * the light and the dark theme, and a scroll shade is only ever drawn in theme colors: never a
+ * light gradient over a dark page. `SCREENS_DIR=<dir>` also writes each page's screenshot,
+ * scrolled to the bottom of its body (the app window only), and a contact sheet of them.
  */
 
 const shots = process.env['SCREENS_DIR'] || undefined;
@@ -21,6 +23,23 @@ const SIZES = [
   {width: 1440, height: 900},
   {width: 1920, height: 1080},
 ] as const;
+
+const THEMES = ['paper', 'ink'] as const;
+type ThemeName = (typeof THEMES)[number];
+
+/** The seed that opens the app in `theme`: the page follows the system scheme the test emulates. */
+function seedFor(theme: ThemeName): typeof SEED {
+  return {
+    ...SEED,
+    theme,
+    appearance: {mode: theme === 'ink' ? 'dark' : 'light', light: 'paper', dark: 'ink'},
+  };
+}
+
+async function openIn(page: Page, theme: ThemeName): Promise<void> {
+  await page.emulateMedia({colorScheme: theme === 'ink' ? 'dark' : 'light'});
+  await open(page, seedFor(theme));
+}
 
 type Where = 'New run' | 'Machines' | 'Settings';
 const PAGES: readonly Where[] = ['New run', 'Machines', 'Settings'];
@@ -79,46 +98,108 @@ async function goTo(page: Page, where: Where): Promise<void> {
     }),
   ).toBeVisible();
   if (where === 'New run') {
-    // The longest form: Advanced open.
-    await page.getByRole('button', {name: 'Advanced'}).click();
+    // The longest form: More options open.
+    await page.getByRole('button', {name: 'More options'}).click();
     await expect(page.getByLabel('Extra arguments')).toBeVisible();
+    // The checks have answered: the panel reads as it will for a user who waited a moment.
+    await expect(page.getByRole('region', {name: 'Ready to start'})).toContainText('Ready ·');
   }
 }
 
-for (const size of SIZES) {
-  for (const where of PAGES) {
-    test(`${where} keeps its header in view and the window still at ${size.width}x${size.height}`, async ({
-      page,
-    }) => {
-      await page.setViewportSize(size);
-      await open(page);
-      await goTo(page, where);
-      const g = await atBottom(page);
-      if (shots !== undefined) {
-        const name = `${where.replace(' ', '-').toLowerCase()}__${size.width}x${size.height}`;
-        await page.screenshot({path: `${shots}/page-scroll__${name}.png`});
-        sheet.push({
-          name: `${where} ${size.width}x${size.height}`,
-          file: `page-scroll__${name}.png`,
-        });
-      }
-      expect(g.documentOverflow, 'the window scrolls as a whole').toBeLessThanOrEqual(0);
-      expect(g.windowScrollY).toBe(0);
-      expect(g.artCut ?? 0, 'the wordmark is cut off').toBeLessThanOrEqual(0);
-      const outside = g.header.filter(
-        box =>
-          box.top < 0 || box.left < 0 || box.bottom > g.window.height || box.right > g.window.width,
-      );
-      expect(outside, 'header parts outside the window').toEqual([]);
-      if (where === 'New run') {
-        await expect(
-          page
-            .getByRole('region', {name: 'Ready to start'})
-            .getByRole('button', {name: 'Start run'}),
-        ).toBeInViewport({ratio: 1});
-      }
-    });
+for (const theme of THEMES) {
+  for (const size of SIZES) {
+    for (const where of PAGES) {
+      test(`${where} keeps its header in view and the window still at ${size.width}x${size.height} (${theme})`, async ({
+        page,
+      }) => {
+        await page.setViewportSize(size);
+        await openIn(page, theme);
+        await goTo(page, where);
+        if (where === 'New run') {
+          // Without scrolling the form, the primary action and what it will do are in the window.
+          const ready = page.getByRole('region', {name: 'Ready to start'});
+          await expect(ready.getByRole('button', {name: 'Start run'})).toBeInViewport({ratio: 1});
+          await expect(ready.getByRole('button', {name: /Ready|check/})).toBeInViewport({
+            ratio: 1,
+          });
+        }
+        const g = await atBottom(page);
+        if (shots !== undefined) {
+          const name = `${where.replace(' ', '-').toLowerCase()}__${size.width}x${size.height}__${theme}`;
+          await page.screenshot({path: `${shots}/page-scroll__${name}.png`});
+          sheet.push({
+            name: `${where} ${size.width}x${size.height} ${theme}`,
+            file: `page-scroll__${name}.png`,
+          });
+        }
+        expect(g.documentOverflow, 'the window scrolls as a whole').toBeLessThanOrEqual(0);
+        expect(g.windowScrollY).toBe(0);
+        expect(g.artCut ?? 0, 'the wordmark is cut off').toBeLessThanOrEqual(0);
+        const outside = g.header.filter(
+          box =>
+            box.top < 0 ||
+            box.left < 0 ||
+            box.bottom > g.window.height ||
+            box.right > g.window.width,
+        );
+        expect(outside, 'header parts outside the window').toEqual([]);
+        if (where === 'New run') {
+          await expect(
+            page
+              .getByRole('region', {name: 'Ready to start'})
+              .getByRole('button', {name: 'Start run'}),
+          ).toBeInViewport({ratio: 1});
+        }
+      });
+
+      test(`${where} draws its scroll shade in ${theme} theme colors at ${size.width}x${size.height}`, async ({
+        page,
+      }) => {
+        await page.setViewportSize(size);
+        await openIn(page, theme);
+        await goTo(page, where);
+        expect(await shadeProblems(page)).toEqual([]);
+      });
+    }
   }
+}
+
+/**
+ * What is wrong with the colors the page's scrolling body draws behind its content, if anything:
+ * every color in its gradients is a theme token (the page background or the line), and on a dark
+ * page none is light.
+ */
+async function shadeProblems(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const scroller = document.querySelector('.vs-page-scroll');
+    if (scroller === null) return ['the page has no scrolling body'];
+    const probe = document.createElement('span');
+    document.body.append(probe);
+    const resolve = (token: string): string => {
+      probe.style.color = `var(${token})`;
+      return getComputedStyle(probe).color;
+    };
+    const tokens = new Map([
+      [resolve('--bg'), '--bg'],
+      [resolve('--line'), '--line'],
+    ]);
+    const rgb = (text: string): number[] => (text.match(/[\d.]+/g) ?? []).map(Number);
+    const luminance = (text: string): number => {
+      const [r = 0, g = 0, b = 0] = rgb(text).map(v => v / 255);
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const dark = luminance(resolve('--bg')) < 0.2;
+    probe.remove();
+    const colors = getComputedStyle(scroller).backgroundImage.match(/rgba?\([^)]*\)/g) ?? [];
+    const problems: string[] = [];
+    for (const color of colors) {
+      const [, , , alpha = 1] = rgb(color);
+      if (alpha === 0) continue;
+      if (!tokens.has(color)) problems.push(`${color} is not a theme color`);
+      if (dark && luminance(color) > 0.25) problems.push(`${color} is light on a dark page`);
+    }
+    return problems;
+  });
 }
 
 test('at 1000x700 the New run form is longer than its window and scrolls on its own', async ({

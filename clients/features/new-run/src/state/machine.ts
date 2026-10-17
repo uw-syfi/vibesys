@@ -66,6 +66,11 @@ export interface NewRunContext {
   /** Why the last load, fix or start failed, until the next input. */
   readonly problem: string | null;
   readonly started: StartedRun | null;
+  /**
+   * Whether the user opened More options, by machine: absent until they chose. The screen keeps it
+   * across starts and, through the store, across runs of the app.
+   */
+  readonly moreOpen: Readonly<Record<string, boolean>>;
 }
 
 export type NewRunEvent =
@@ -79,6 +84,7 @@ export type NewRunEvent =
   | {readonly type: 'budget'; readonly budget: Budget}
   | {readonly type: 'advanced'; readonly advanced: string}
   | {readonly type: 'recent'; readonly recent: readonly RecentRun[]}
+  | {readonly type: 'more_options'; readonly machine: HostKey; readonly open: boolean}
   | {readonly type: 'recheck'}
   /** Check again: read the project's tasks and check the inputs once more. */
   | {readonly type: 'refresh'}
@@ -88,6 +94,8 @@ export type NewRunEvent =
 export interface NewRunInput {
   readonly machine: HostKey;
   readonly recent: readonly RecentRun[];
+  /** What the user chose for More options on each machine before this form. */
+  readonly moreOpen: Readonly<Record<string, boolean>>;
 }
 
 /** How long the inputs must stay still before they are checked, in milliseconds. */
@@ -223,6 +231,7 @@ export const newRunMachine = setup({
     rerun: lastRun(input.machine, input.recent)?.start ?? null,
     problem: null,
     started: null,
+    moreOpen: input.moreOpen,
   }),
   initial: 'editing',
   states: {
@@ -263,6 +272,11 @@ export const newRunMachine = setup({
           })),
         },
         recent: {actions: assign(({event}) => ({recent: event.recent}))},
+        more_options: {
+          actions: assign(({context, event}) => ({
+            moreOpen: {...context.moreOpen, [event.machine]: event.open},
+          })),
+        },
       },
       states: {
         helper: {

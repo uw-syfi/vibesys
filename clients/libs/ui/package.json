@@ -50,6 +50,7 @@
     "src/fonts.css",
     "src/components.css",
     "src/frame.css",
+    "src/controls.css",
     "src/fonts"
   ],
   "scripts": {
@@ -62,7 +63,8 @@
   "dependencies": {
     "react": "19.1.1",
     "react-markdown": "10.1.0",
-    "remark-gfm": "4.0.1"
+    "remark-gfm": "4.0.1",
+    "simple-icons": "16.35.0"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",

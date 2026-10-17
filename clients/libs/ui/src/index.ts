@@ -5,7 +5,9 @@
  * `./components.css` once.
  */
 export {applyTheme, type ThemeTarget} from './apply-theme.js';
+export {ActionPanel} from './components/action-panel.js';
 export {AppFrame, WindowFrame} from './components/app-frame.js';
+export {BRAND_MARK_NAMES, BrandMark, type BrandMarkName} from './components/brand-mark.js';
 export {
   Button,
   type ButtonAction,
@@ -23,6 +25,7 @@ export {
   type ChartTick,
 } from './components/chart.js';
 export {type CheckItem, CheckList, type CheckState} from './components/check-list.js';
+export {ChoiceTiles, type TileOption} from './components/choice-tiles.js';
 export {Collapsible} from './components/collapsible.js';
 export {Dialog} from './components/dialog.js';
 export {

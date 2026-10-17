@@ -1,4 +1,5 @@
 @import './frame.css';
+@import './controls.css';
 /*
  * The styles of the design system's components (the `.` entry). Every value is a token variable
  * from `tokens.css`; no color or length is written here. Import after `tokens.css` and `fonts.css`.
@@ -86,9 +87,11 @@ body > div:first-child {
 }
 
 /*
- * A page with a header never scrolls itself: the header is fixed and the body scrolls under it.
- * The shades are the usual scroll-shadow trick: two covers that scroll with the content and two
- * shadows fixed to the edges, so a shadow shows only on an edge with more content behind it.
+ * A page with a header or a footer never scrolls itself: they are fixed and the body scrolls
+ * between them. A hint at the bottom edge shows only while more lies below: a cover that scrolls
+ * with the content hides a shade fixed to the edge once the end is reached. Both colors are theme
+ * tokens, so the hint is right in every theme. There is none at the top: the header's own edge
+ * shows that the body continues under it.
  */
 .vs-page[data-fixed-header] {
   overflow: hidden;
@@ -114,10 +117,12 @@ body > div:first-child {
   margin: 0 calc(-1 * var(--space-2));
   padding: var(--space-2);
   background:
-    linear-gradient(var(--bg) 30%, transparent) top / 100% var(--space-6) no-repeat local,
     linear-gradient(transparent, var(--bg) 70%) bottom / 100% var(--space-6) no-repeat local,
-    linear-gradient(var(--scroll-shade), transparent) top / 100% var(--space-4) no-repeat scroll,
     linear-gradient(transparent, var(--scroll-shade)) bottom / 100% var(--space-4) no-repeat scroll;
+}
+.vs-page-footer {
+  flex: none;
+  min-width: 0;
 }
 .vs-page-body {
   display: flex;
@@ -199,22 +204,6 @@ body > div:first-child {
   flex-direction: column;
   gap: var(--space-4);
 }
-/*
- * A sticky aside stays in view: beside a long main column it holds the top of the scroll area, and
- * when the window is too narrow for two columns, so that it sits under the main column, it holds
- * the bottom instead. It scrolls within itself when taller than a share of the window.
- */
-.vs-split[data-sticky-aside] > .vs-split-aside {
-  position: sticky;
-  top: 0;
-  bottom: 0;
-  z-index: 1;
-  max-height: min(calc(100dvh - 2 * var(--space-4)), 40dvh);
-  overflow-y: auto;
-  border-radius: var(--radius-lg);
-  box-shadow: var(--elevation-raised);
-}
-
 .vs-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--grid-min)), 1fr));
@@ -275,12 +264,12 @@ body > div:first-child {
 /* On a short window the art takes less of it; it shrinks, it is never cut off. */
 @media (max-height: 880px) {
   .vs-wordmark-art {
-    font-size: min(calc(var(--text-display-size) * 0.6), calc(100cqi / var(--wordmark-columns)));
+    font-size: min(calc(var(--text-display-size) * 0.5), calc(100cqi / var(--wordmark-columns)));
   }
 }
 @media (max-height: 760px) {
   .vs-wordmark-art {
-    font-size: min(calc(var(--text-display-size) * 0.45), calc(100cqi / var(--wordmark-columns)));
+    font-size: min(calc(var(--text-display-size) * 0.32), calc(100cqi / var(--wordmark-columns)));
   }
 }
 .vs-wordmark[data-align="center"] .vs-wordmark-art {

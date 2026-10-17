@@ -553,3 +553,34 @@ test('a GitHub account the machine lacks is worded by the Results control, and o
   expect(item?.detail).toContain('set Results to keep them there');
   expect(item?.fix).toEqual({kind: 'recheck'});
 });
+
+test('More options is remembered per machine: read at the start, written on a choice, kept across a start', async () => {
+  const clock = manualSchedule();
+  let kept: Readonly<Record<string, boolean>> = {'ssh:gpu': true};
+  const writes: Readonly<Record<string, boolean>>[] = [];
+  const {store} = createNewRunStore(fakeBridge(), {
+    recent: [recentRun('ssh:gpu', '/p', 2)],
+    schedule: clock.schedule,
+    moreOptions: {
+      read: () => kept,
+      write: choices => {
+        kept = choices;
+        writes.push(choices);
+      },
+    },
+    started: () => undefined,
+  });
+  expect(store.getState().context.moreOpen).toEqual({'ssh:gpu': true});
+
+  store.dispatch({type: 'more_options', machine: 'local', open: true});
+  store.dispatch({type: 'more_options', machine: 'ssh:gpu', open: false});
+
+  expect(store.getState().context.moreOpen).toEqual({'ssh:gpu': false, local: true});
+  expect(kept).toEqual({'ssh:gpu': false, local: true});
+  expect(writes).toHaveLength(2);
+
+  // A choice of the page is not an edit of the run: the form still follows the runs opened.
+  store.dispatch({type: 'recent', recent: [recentRun('ssh:other', '/q', 3)]});
+  expect(store.getState().context.form.machine).toBe('ssh:other');
+  expect(store.getState().context.moreOpen).toEqual({'ssh:gpu': false, local: true});
+});
