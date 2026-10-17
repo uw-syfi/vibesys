@@ -20,13 +20,14 @@ import {MachinesMain} from '@vibesys/feature-machines/main';
 import {NewRunMain} from '@vibesys/feature-new-run/main';
 import {type RelayPort, RunControl} from '@vibesys/feature-run-control/main';
 import {PreferencesMain} from '@vibesys/feature-settings/main';
-import type {HostId} from '@vibesys/hosts';
+import {type HostId, hostFromKey} from '@vibesys/hosts';
 import {
   FIRST_PAINT_CHANNEL,
   type FirstPaint,
   WELCOME_EVENTS,
   type WelcomeEvent,
 } from '@vibesys/ipc';
+import {RunHistoryStore} from '@vibesys/run-history';
 import {remember, SettingsStore} from '@vibesys/settings';
 import {app, ipcMain, Menu, Notification, nativeTheme, net, powerMonitor, shell} from 'electron';
 import {SHELL_URL} from './app-assets.js';
@@ -156,6 +157,14 @@ async function openWindow(
       notification.show();
     },
   });
+  // The one copy of every ended run's recorded events, shared by all windows. It reads the host
+  // through `hosts` (below), and forgets a run the host lists as live again or a host that goes.
+  const history = new RunHistoryStore({
+    source: {
+      read: (run, from, max) =>
+        hosts.readEvents(hostFromKey(run.host), run.project, run.runId, from, max),
+    },
+  });
   const hosts = new Hosts({
     manager,
     settings,
@@ -164,9 +173,15 @@ async function openWindow(
     log,
     push: listing => {
       notifier.listing(listing);
+      if (listing.kind === 'listed') {
+        for (const run of listing.live) history.runsLive(listing.host, [run.runId]);
+      }
       windows.broadcast(WELCOME_EVENTS.listing, welcome.listing(listing));
     },
-    retire: host => welcome.retireHost(host),
+    retire: host => {
+      history.invalidateHost(host);
+      welcome.retireHost(host);
+    },
   });
   const runs: RunControl = new RunControl({
     connection: id => hosts.connection(id),
@@ -185,6 +200,7 @@ async function openWindow(
     window: windows.main,
     welcome,
     hosts,
+    history,
     machines: machinesOver(settings, hosts),
     runs,
     settings,

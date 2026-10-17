@@ -40,6 +40,7 @@
     "@vibesys/feature-settings": "workspace:*",
     "@vibesys/hosts": "workspace:*",
     "@vibesys/ipc": "workspace:*",
+    "@vibesys/run-history": "workspace:*",
     "@vibesys/runs": "workspace:*",
     "@vibesys/settings": "workspace:*",
     "@vibesys/transport": "workspace:*"

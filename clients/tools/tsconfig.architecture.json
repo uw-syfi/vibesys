@@ -44,6 +44,8 @@
       "@vibesys/machine": ["libs/machine/src/index.ts"],
       "@vibesys/machine/testing": ["libs/machine/src/testing/index.ts"],
       "@vibesys/run-fixtures": ["libs/run-fixtures/src/index.ts"],
+      "@vibesys/run-history": ["libs/run-history/src/index.ts"],
+      "@vibesys/run-history/testing": ["libs/run-history/src/testing/index.ts"],
       "@vibesys/run-session": ["libs/run-session/src/index.ts"],
       "@vibesys/run-session/testing": ["libs/run-session/src/testing/index.ts"],
       "@vibesys/run-state": ["libs/run-state/src/index.ts"],

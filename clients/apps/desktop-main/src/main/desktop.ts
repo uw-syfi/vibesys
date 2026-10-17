@@ -9,13 +9,14 @@ import type {MachinesMain} from '@vibesys/feature-machines/main';
 import type {NewRunMain} from '@vibesys/feature-new-run/main';
 import type {RunControl} from '@vibesys/feature-run-control/main';
 import type {PreferencesMain} from '@vibesys/feature-settings/main';
-import {hostFromKey, hostLabel} from '@vibesys/hosts';
+import {hostFromKey, hostKey, hostLabel} from '@vibesys/hosts';
 import {
   runWindowUrl,
   WELCOME_EVENTS,
   type WelcomeOverview,
   type WelcomeRequest,
 } from '@vibesys/ipc';
+import type {RunHistoryStore} from '@vibesys/run-history';
 import type {RecentRun, RunRef} from '@vibesys/runs';
 import type {RecentFile, SettingsStore} from '@vibesys/settings';
 import type {LaunchPlan} from './launch-args.js';
@@ -38,7 +39,6 @@ export interface DesktopDeps {
     | 'cancelCheckoutOwner'
     | 'complete'
     | 'harnesses'
-    | 'readEvents'
     | 'logs'
     | 'recent'
     | 'releaseLogs'
@@ -47,6 +47,8 @@ export interface DesktopDeps {
     | 'signIn'
     | 'tasks'
   >;
+  /** The ended runs' recorded events every window reads from (one copy, one read of the host). */
+  readonly history: Pick<RunHistoryStore, 'read'>;
   readonly machines: Pick<MachinesMain, 'machines' | 'report' | 'inspect' | 'remove'>;
   readonly runs: Pick<RunControl, 'attach' | 'attached' | 'detach' | 'resume' | 'start' | 'stop'>;
   readonly settings: Pick<SettingsStore, 'onRecentChanged' | 'recent'>;
@@ -237,7 +239,7 @@ export class Desktop {
         return null;
       case 'read-events': {
         const {host, project, runId, from, max} = request;
-        return hosts.readEvents(host, project, runId, from, max);
+        return this.#deps.history.read({host: hostKey(host), project, runId}, from, max);
       }
       case 'release-run':
         this.#deps.window.releaseSurfaceRun();

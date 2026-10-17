@@ -630,7 +630,16 @@ opens from its recorded history instead: the store reads `runs.read_events` (fea
 through the welcome bridge's `readEvents`) with up to three pages in flight under tokens (the first
 open-ended; its reply's totals cut the rest of the journal into spans, `history-pager.ts`), validates
 each event, and folds the pages in journal order, each event once, into the same `run` slice, so the tabs have one source; an older host answers
-`unsupported`. Its invariants (force offered only while stopping and only after its bound, no stop
+`unsupported`. While the pages are read the screen shows the read's progress, not the fold, since a
+prefix of the history is not the run (`historyLoading`). Every window's `readEvents` is answered by
+the main process's `RunHistoryStore` (`@vibesys/run-history`): the one copy of an ended run's pages,
+kept per (host, project, run) within a bound of 256 MiB (least recently read run dropped first, a
+run larger than the bound read through), shared by every window, and read from the host once for
+all windows that ask while it is in flight. A second window or a reopened run is answered from it
+without a request to the host. The store forgets a run the host lists as live again (a resume) and
+every run of a host that goes away; failures and `unsupported` are never kept. It holds the host's
+replies as typed raw data (never a fold or a view model), keyed by the request that produced them, so
+later tiers add reads of other ranges or executions as further methods of the same store. Its invariants (force offered only while stopping and only after its bound, no stop
 flow outliving the live run, the link holding exactly the live server, no session report without an
 attached run, trace events in increasing sequence, commands sent only when offered) are checked over
 seeded action sequences with stale replies. The theme is in the first paint: the welcome preload asks

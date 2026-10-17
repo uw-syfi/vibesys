@@ -30,6 +30,9 @@
       "path": "../../libs/hosts/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/run-history/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/runs/tsconfig.lib.json"
     },
     {
@@ -49,6 +52,9 @@
     },
     {
       "path": "../../features/new-run/tsconfig.main.json"
+    },
+    {
+      "path": "../../libs/run-history/tsconfig.testing.json"
     }
   ]
 }

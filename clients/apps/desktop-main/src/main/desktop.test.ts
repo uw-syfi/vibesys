@@ -1,5 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import {WELCOME_CHANNELS, type WelcomeEvent, type WelcomeResult} from '@vibesys/ipc';
+import {RunHistoryStore} from '@vibesys/run-history';
+import {FakeHistorySource} from '@vibesys/run-history/testing';
 import {DEFAULT_PREFERENCES, type RecentFile} from '@vibesys/settings';
 import {SHELL_URL} from './app-assets.js';
 import {Desktop, type DesktopDeps} from './desktop.js';
@@ -128,6 +130,7 @@ function desktopWorld(cleanups: RetirementCleanups = {}) {
   const cleanup = new Promise<void>(resolve => {
     releaseCleanup = resolve;
   });
+  const historySource = new FakeHistorySource();
   const document = new FakeWelcomeDocument();
   const ipc = new FakeWelcomeIpc();
   const runWindowList: FakeRunWindow[] = [];
@@ -192,7 +195,6 @@ function desktopWorld(cleanups: RetirementCleanups = {}) {
       truncated: false,
     }),
     harnesses: async () => ({kind: 'unsupported'}),
-    readEvents: async () => ({kind: 'unsupported'}),
     logs: async () => ({ok: true, instanceId: '000000000001', streams: []}),
     recent: async () => undefined,
     releaseLogs: () => undefined,
@@ -222,6 +224,7 @@ function desktopWorld(cleanups: RetirementCleanups = {}) {
     window,
     welcome: new WelcomeFeed(),
     hosts,
+    history: new RunHistoryStore({source: historySource}),
     machines: {
       machines: async () => [],
       report: async () => ({kind: 'ready', facts: null}),
@@ -253,6 +256,7 @@ function desktopWorld(cleanups: RetirementCleanups = {}) {
   });
   return {
     opened,
+    historySource,
     runWindowList,
     ipc,
     document,
@@ -308,6 +312,32 @@ describe('Desktop run windows', () => {
     await expect(fromRunWindow(21, '31:301', WELCOME_CHANNELS.releaseLogs)).resolves.toMatchObject({
       ok: true,
     });
+  });
+});
+
+describe('Desktop history reads', () => {
+  test('a second window reading the same run issues no request to the host', async () => {
+    const w = desktopWorld();
+    const run = {host: 'ssh:host-b', runId: '20261015-163047'};
+    const key = {host: run.host, project: '/p', runId: run.runId};
+    w.historySource.setJournal(
+      key,
+      Array.from({length: 7}, (_, index) => ({sequence: index + 1})),
+    );
+    await w.ipc.invoke('10:100', WELCOME_CHANNELS.openRunWindow, run);
+    const runWindowUrl = `${SHELL_URL}?host=ssh%3Ahost-b&run=20261015-163047`;
+    const read = (from: number) =>
+      [WELCOME_CHANNELS.readEvents, run.host, '/p', run.runId, from, 3] as const;
+
+    const first = await w.ipc.invoke('10:100', ...read(1));
+    expect(first).toMatchObject({ok: true, value: {kind: 'page', next: 4, complete: false}});
+    const asked = w.historySource.requests.length;
+    expect(asked).toBe(1);
+
+    // The run's own window asks for the same page and gets it without the host being asked.
+    const second = await w.ipc.invokeAs(20, runWindowUrl, '30:300', ...read(1));
+    expect(second).toEqual(first);
+    expect(w.historySource.requests).toHaveLength(asked);
   });
 });
 

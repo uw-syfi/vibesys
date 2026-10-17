@@ -57,6 +57,9 @@ importers:
       '@vibesys/ipc':
         specifier: workspace:*
         version: link:../../libs/ipc
+      '@vibesys/run-history':
+        specifier: workspace:*
+        version: link:../../libs/run-history
       '@vibesys/runs':
         specifier: workspace:*
         version: link:../../libs/runs
@@ -913,6 +916,21 @@ importers:
       '@vibesys/run-state':
         specifier: workspace:*
         version: link:../run-state
+      '@vibesys/store':
+        specifier: workspace:*
+        version: link:../store
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  libs/run-history:
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
       '@vibesys/store':
         specifier: workspace:*
         version: link:../store

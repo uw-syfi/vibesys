@@ -41,6 +41,9 @@
       "path": "../../libs/ipc/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/run-history/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/runs/tsconfig.lib.json"
     },
     {
