@@ -269,7 +269,7 @@ test('every level opens by click and walks back by Escape, the crumbs and Back',
   await page.goBack();
   await expect(turn).toBeVisible();
   expect(await page.evaluate(() => window.location.hash)).toBe(stepHash);
-  await crumbs.getByRole('button', {name: 'run'}).click();
+  await crumbs.getByRole('button', {name: 'Run'}).click();
   await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
   expect(await page.evaluate(() => window.location.hash)).toBe('');
   await page.goBack();

@@ -62,6 +62,9 @@
 .vs-crumb-sep {
   display: flex;
   color: var(--muted);
+  opacity: 0.5;
+  user-select: none;
+  pointer-events: none;
 }
 .vs-crumb {
   margin: 0;
@@ -78,8 +81,8 @@ button.vs-crumb {
   cursor: pointer;
 }
 button.vs-crumb:hover {
-  background: var(--panel-2);
   color: var(--text);
+  text-decoration: underline;
 }
 button.vs-crumb:focus-visible {
   outline: var(--focus-ring) solid var(--accent);

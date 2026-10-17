@@ -357,7 +357,7 @@ function ScreenDemo(): JSX.Element {
       <Breadcrumb
         label="Where in the screen"
         items={[
-          {id: 'run', label: 'run', press: noop},
+          {id: 'run', label: 'Run', press: noop},
           {id: 'candidate', label: 'padding'},
         ]}
       />
@@ -441,7 +441,7 @@ export const FRAME_ENTRIES = {
       <Breadcrumb
         label="Zoom"
         items={[
-          {id: 'run', label: 'run', press: noop},
+          {id: 'run', label: 'Run', press: noop},
           {id: 'candidate', label: 'padding', press: noop},
           {id: 'step', label: 'implementer', press: noop},
           {id: 'item', label: 'cargo test --locked'},

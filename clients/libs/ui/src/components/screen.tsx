@@ -1,5 +1,4 @@
 import type {JSX, ReactNode} from 'react';
-import {Icon} from './icon.js';
 
 /** How much a screen's parts are spaced: `comfortable` (default) or `compact` (dense rows, slim headers). */
 export type Density = 'comfortable' | 'compact';
@@ -50,7 +49,7 @@ export function Breadcrumb(props: {
           <li key={item.id}>
             {index === 0 ? null : (
               <span className="vs-crumb-sep" aria-hidden="true">
-                <Icon name="chevron-right" />
+                /
               </span>
             )}
             {item.press === undefined ? (

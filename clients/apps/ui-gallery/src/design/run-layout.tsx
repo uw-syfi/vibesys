@@ -1098,7 +1098,7 @@ function crumbs(zoom: Zoom, go: (zoom: Zoom) => void): Crumb[] {
   const c = candidate(zoom.c);
   const step = c?.steps.find(s => s.id === zoom.step) ?? null;
   const entry = TURN_ENTRIES.find(e => e.id === zoom.item) ?? null;
-  const items: {id: string; label: string; to: Zoom}[] = [{id: 'run', label: 'run', to: TOP}];
+  const items: {id: string; label: string; to: Zoom}[] = [{id: 'run', label: 'Run', to: TOP}];
   const agent = AGENTS.find(a => a.id === zoom.agent);
   if (agent !== undefined)
     items.push(
@@ -1134,18 +1134,7 @@ export function RunLayoutDesign(props: {
   return (
     <AppFrame label="Runs" nav={<Sidebar />}>
       <Screen density="compact" header={<Header flags={props.flags} compactHero={zoomed} />}>
-        {zoomed ? (
-          <Row gap="space-2">
-            <Button
-              size="sm"
-              variant="quiet"
-              icon="chevron-left"
-              label="Back (Esc)"
-              press={() => setZoom(up(zoom))}
-            />
-            <Breadcrumb label="Zoom" items={crumbs(zoom, setZoom)} />
-          </Row>
-        ) : null}
+        {zoomed ? <Breadcrumb label="Zoom" items={crumbs(zoom, setZoom)} /> : null}
         <Body zoom={zoom} flags={props.flags} go={setZoom} />
       </Screen>
     </AppFrame>

@@ -116,7 +116,7 @@ describe('Breadcrumb', () => {
     const {container} = await mount(
       <Breadcrumb
         label="Zoom"
-        items={['run', 'candidate', 'step'].map((id, index) => ({
+        items={['Run', 'candidate', 'step'].map((id, index) => ({
           id,
           label: id,
           ...(index === 2 ? {} : {press: () => visited.push(id)}),
@@ -125,10 +125,35 @@ describe('Breadcrumb', () => {
     );
     expect(one(container, 'nav').getAttribute('aria-label')).toBe('Zoom');
     const links = all(container, 'button');
-    expect(links.map(link => link.textContent)).toEqual(['run', 'candidate']);
+    expect(links.map(link => link.textContent)).toEqual(['Run', 'candidate']);
     await click(links[1] as HTMLElement);
     expect(visited).toEqual(['candidate']);
     expect(one(container, '[aria-current="location"]').textContent).toBe('step');
+  });
+
+  test('separates levels with quiet marks that are neither read nor focusable', async () => {
+    const {container} = await mount(
+      <Breadcrumb
+        label="Zoom"
+        items={['Run', 'candidate', 'step'].map((id, index) => ({
+          id,
+          label: id,
+          ...(index === 2 ? {} : {press: noop}),
+        }))}
+      />,
+    );
+    const separators = all(container, '.vs-crumb-sep');
+    expect(separators).toHaveLength(2);
+    for (const separator of separators) {
+      expect(separator.getAttribute('aria-hidden')).toBe('true');
+      expect(separator.querySelector('button, a, [tabindex]')).toBeNull();
+      expect(separator.textContent).toBe('/');
+    }
+    // Only the two earlier levels act; the current level is plain text, and no bare chevron
+    // button stands beside the crumbs.
+    expect(all(container, 'button')).toHaveLength(2);
+    expect(one(container, '[aria-current="location"]').tagName).toBe('SPAN');
+    expect(all(container, 'svg')).toHaveLength(0);
   });
 });
 

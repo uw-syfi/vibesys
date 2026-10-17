@@ -271,7 +271,7 @@ function crumbs(zoomed: ResolvedZoom, route: Route, zoom: Zoom): Crumb[] {
     step: null,
     item: null,
   };
-  const items: {id: string; label: string; to: Route}[] = [{id: 'run', label: 'run', to: top}];
+  const items: {id: string; label: string; to: Route}[] = [{id: 'run', label: 'Run', to: top}];
   const opened: Route = {...route, step: null, item: null};
   if (zoomed.idea !== null) items.push({id: 'idea', label: zoomed.idea.title, to: opened});
   if (zoomed.agent !== null) items.push({id: 'agent', label: zoomed.agent.role, to: opened});
@@ -284,25 +284,6 @@ function crumbs(zoomed: ResolvedZoom, route: Route, zoom: Zoom): Crumb[] {
     index === items.length - 1
       ? {id: item.id, label: item.label}
       : {id: item.id, label: item.label, press: () => zoom({type: 'jump', route: item.to})},
-  );
-}
-
-function ZoomBar(props: {
-  readonly zoomed: ResolvedZoom;
-  readonly route: Route;
-  readonly zoom: Zoom;
-}): JSX.Element {
-  return (
-    <Row gap="space-2" align="center">
-      <Button
-        size="sm"
-        variant="quiet"
-        icon="chevron-left"
-        label="Back (Esc)"
-        press={() => props.zoom({type: 'up'})}
-      />
-      <Breadcrumb label="Zoom" items={crumbs(props.zoomed, props.route, props.zoom)} />
-    </Row>
   );
 }
 
@@ -357,7 +338,7 @@ export function RunScreen(props: {
       )}
       <EndedBanner state={state} dispatch={dispatch} zoom={zoom} />
       <Startup state={state} />
-      {deep ? <ZoomBar zoomed={zoomed} route={route} zoom={zoom} /> : null}
+      {deep ? <Breadcrumb label="Zoom" items={crumbs(zoomed, route, zoom)} /> : null}
       {deep ? <DeepLevel {...level} zoomed={zoomed} /> : <RunLevel {...level} />}
     </Screen>
   );
