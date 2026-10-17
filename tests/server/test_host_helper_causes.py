@@ -13,7 +13,6 @@ from tests.server.host_helper_support import FakeRunPreflight, fake_host
 
 from server.host_api import (
     MAX_ROUNDS_FLAG,
-    DockerReachable,
     HelperFeature,
     RunPreflightReply,
     RunPreflightRequest,
@@ -26,6 +25,9 @@ from server.host_helper_preflight import (
     typed_arguments,
 )
 from server.host_helper_requests import answer
+from server.host_machine_facts import (
+    DockerReachable,
+)
 from server.host_preflight import (
     ArgumentsRejected,
     ArgumentsUnrecognized,

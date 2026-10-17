@@ -23,11 +23,13 @@ from typing import TYPE_CHECKING, Final
 
 from server.host_api import (
     MIN_CHECKOUT_VERSION,
-    Accelerator,
     CheckoutFound,
     CheckoutInspection,
     CheckoutNotFound,
     CheckoutTooOld,
+)
+from server.host_machine_facts import (
+    Accelerator,
     DockerReachable,
     DockerUnreachable,
     Gpu,

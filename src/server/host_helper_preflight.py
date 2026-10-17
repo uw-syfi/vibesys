@@ -26,10 +26,12 @@ from server.host_api import (
     REPO_FLAG,
     ROLE_MODEL_FLAG,
     ROLE_REASONING_EFFORT_FLAG,
-    DockerReachable,
-    DockerUnreachable,
     HarnessChoice,
     HarnessOption,
+)
+from server.host_machine_facts import (
+    DockerReachable,
+    DockerUnreachable,
     MachineCheckout,
 )
 from server.host_preflight import (

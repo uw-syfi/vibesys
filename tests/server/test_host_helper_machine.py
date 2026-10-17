@@ -21,22 +21,15 @@ from tests.server.host_helper_support import (
 
 from server.host_api import (
     MIN_CHECKOUT_VERSION,
-    Accelerator,
     Checkout,
     CheckoutFound,
     CheckoutInspectReply,
     CheckoutInspectRequest,
     CheckoutNotFound,
     CheckoutTooOld,
-    DockerReachable,
-    DockerUnreachable,
-    Gpu,
-    Hardware,
     InstanceList,
-    MachineCheckout,
     MachineDescribeReply,
     MachineDescribeRequest,
-    RunCounts,
     RunPhase,
     RunStatus,
 )
@@ -47,6 +40,15 @@ from server.host_helper_machine import (
     release_of,
 )
 from server.host_helper_requests import answer, run_counts
+from server.host_machine_facts import (
+    Accelerator,
+    DockerReachable,
+    DockerUnreachable,
+    Gpu,
+    Hardware,
+    MachineCheckout,
+    RunCounts,
+)
 from server.registry import FakeInstanceStore
 from vs_sim.api import ProbeResult
 from vs_sim.api.testing import ScriptedProbe, SimNetwork, SimThreads

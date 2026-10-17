@@ -44,11 +44,8 @@ from server.host_api import (
     CheckoutInspectReply,
     CheckoutInspectRequest,
     DetachedLaunchFailure,
-    DockerReachable,
-    DockerUnreachable,
     ExamplesListReply,
     ExamplesListRequest,
-    Hardware,
     HarnessesListReply,
     HarnessesListRequest,
     HarnessOption,
@@ -70,10 +67,8 @@ from server.host_api import (
     LogsCancelRequest,
     LogsListRequest,
     LogsReadRequest,
-    MachineCheckout,
     MachineDescribeReply,
     MachineDescribeRequest,
-    MachineDescription,
     PathEntry,
     PathsCompleteReply,
     PathsCompleteRequest,
@@ -87,7 +82,6 @@ from server.host_api import (
     ResumeRun,
     RunConnectReply,
     RunConnectRequest,
-    RunCounts,
     RunEventDocument,
     RunList,
     RunPreflightReply,
@@ -113,6 +107,14 @@ from server.host_helper_preflight import (
     preflight_checks,
     repeated_option,
     unvetted_role,
+)
+from server.host_machine_facts import (
+    DockerReachable,
+    DockerUnreachable,
+    Hardware,
+    MachineCheckout,
+    MachineDescription,
+    RunCounts,
 )
 from server.host_preflight import BackendUnavailable, CheckId
 from server.relay import (

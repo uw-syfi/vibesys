@@ -25,8 +25,6 @@ from server.host_api import (
     REPO_FLAG,
     ROLE_MODEL_FLAG,
     ROLE_REASONING_EFFORT_FLAG,
-    DockerReachable,
-    DockerUnreachable,
     HarnessChoice,
     HelperError,
     HelperErrorCode,
@@ -45,6 +43,10 @@ from server.host_helper_preflight import (
     repeated_option,
 )
 from server.host_helper_requests import answer, launch_arguments
+from server.host_machine_facts import (
+    DockerReachable,
+    DockerUnreachable,
+)
 from server.host_preflight import (
     Backend,
     BackendUnavailable,
