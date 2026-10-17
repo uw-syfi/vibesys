@@ -35,34 +35,34 @@ importers:
         version: link:../../libs/connection
       '@vibesys/feature-app-shell':
         specifier: workspace:*
-        version: link:../../features/app-shell
+        version: file:features/app-shell(@types/react@19.1.13)
       '@vibesys/feature-hosts':
         specifier: workspace:*
         version: link:../../features/hosts
       '@vibesys/feature-machines':
         specifier: workspace:*
-        version: link:../../features/machines
+        version: file:features/machines(@types/react@19.1.13)
       '@vibesys/feature-new-run':
         specifier: workspace:*
-        version: link:../../features/new-run
+        version: file:features/new-run(@types/react@19.1.13)
       '@vibesys/feature-run-control':
         specifier: workspace:*
         version: link:../../features/run-control
       '@vibesys/feature-settings':
         specifier: workspace:*
-        version: link:../../features/settings
+        version: file:features/settings(@types/react@19.1.13)
       '@vibesys/hosts':
         specifier: workspace:*
         version: link:../../libs/hosts
       '@vibesys/ipc':
         specifier: workspace:*
-        version: link:../../libs/ipc
+        version: file:libs/ipc(@types/react@19.1.13)
       '@vibesys/runs':
         specifier: workspace:*
         version: link:../../libs/runs
       '@vibesys/settings':
         specifier: workspace:*
-        version: link:../../libs/settings
+        version: file:libs/settings(@types/react@19.1.13)
       '@vibesys/transport':
         specifier: workspace:*
         version: link:../../libs/transport
@@ -445,13 +445,13 @@ importers:
         version: link:../../libs/hosts
       '@vibesys/ipc':
         specifier: workspace:*
-        version: link:../../libs/ipc
+        version: file:libs/ipc(@types/react@19.1.13)
       '@vibesys/logs':
         specifier: workspace:*
         version: link:../../libs/logs
       '@vibesys/settings':
         specifier: workspace:*
-        version: link:../../libs/settings
+        version: file:libs/settings(@types/react@19.1.13)
     devDependencies:
       '@types/bun':
         specifier: 1.4.2
@@ -571,13 +571,13 @@ importers:
         version: link:../../libs/hosts
       '@vibesys/ipc':
         specifier: workspace:*
-        version: link:../../libs/ipc
+        version: file:libs/ipc(@types/react@19.1.13)
       '@vibesys/runs':
         specifier: workspace:*
         version: link:../../libs/runs
       '@vibesys/settings':
         specifier: workspace:*
-        version: link:../../libs/settings
+        version: file:libs/settings(@types/react@19.1.13)
       '@vibesys/transport':
         specifier: workspace:*
         version: link:../../libs/transport
@@ -646,6 +646,9 @@ importers:
       '@types/react-dom':
         specifier: 19.1.9
         version: 19.1.9(@types/react@19.1.13)
+      '@vibesys/run-fixtures':
+        specifier: workspace:*
+        version: link:../../libs/run-fixtures
       happy-dom:
         specifier: 20.14.5
         version: 20.14.5
@@ -2293,6 +2296,52 @@ packages:
 
   '@ungap/structured-clone@1.4.0':
     resolution: {integrity: sha512-1mEZtMKPM09vDmQt5y7YvmN2+DFTP7Tg0EWXdic8/C6VRnpb33e4ghisCIE3WZjsE2N8mf+QV1Zqh7ZFYLWInQ==}
+
+  '@vibesys/connection@file:libs/connection':
+    resolution: {directory: libs/connection, type: directory}
+
+  '@vibesys/contracts@file:libs/contracts':
+    resolution: {directory: libs/contracts, type: directory}
+
+  '@vibesys/feature-app-shell@file:features/app-shell':
+    resolution: {directory: features/app-shell, type: directory}
+
+  '@vibesys/feature-machines@file:features/machines':
+    resolution: {directory: features/machines, type: directory}
+
+  '@vibesys/feature-new-run@file:features/new-run':
+    resolution: {directory: features/new-run, type: directory}
+
+  '@vibesys/feature-settings@file:features/settings':
+    resolution: {directory: features/settings, type: directory}
+
+  '@vibesys/hosts@file:libs/hosts':
+    resolution: {directory: libs/hosts, type: directory}
+
+  '@vibesys/ipc@file:libs/ipc':
+    resolution: {directory: libs/ipc, type: directory}
+
+  '@vibesys/logs@file:libs/logs':
+    resolution: {directory: libs/logs, type: directory}
+
+  '@vibesys/machine@file:libs/machine':
+    resolution: {directory: libs/machine, type: directory}
+
+  '@vibesys/runs@file:libs/runs':
+    resolution: {directory: libs/runs, type: directory}
+
+  '@vibesys/settings@file:libs/settings':
+    resolution: {directory: libs/settings, type: directory}
+
+  '@vibesys/store@file:libs/store':
+    resolution: {directory: libs/store, type: directory}
+
+  '@vibesys/transport@file:libs/transport':
+    resolution: {directory: libs/transport, type: directory}
+    engines: {node: '>=20'}
+
+  '@vibesys/ui@file:libs/ui':
+    resolution: {directory: libs/ui, type: directory}
 
   '@vitejs/plugin-react@5.0.4':
     resolution: {integrity: sha512-La0KD0vGkVkSk6K+piWDKRUyg8Rl5iAIKRMH0vMJI0Eg47bq1eOxmoObAaQG37WMW9MSyk7Cs8EIWwJC1PtzKA==}
@@ -4287,6 +4336,127 @@ snapshots:
       '@types/yargs-parser': 21.0.3
 
   '@ungap/structured-clone@1.4.0': {}
+
+  '@vibesys/connection@file:libs/connection':
+    dependencies:
+      '@vibesys/contracts': file:libs/contracts
+      '@vibesys/hosts': file:libs/hosts
+      '@vibesys/logs': file:libs/logs
+      '@vibesys/machine': file:libs/machine
+      '@vibesys/transport': file:libs/transport
+      xstate: 5.33.2
+
+  '@vibesys/contracts@file:libs/contracts': {}
+
+  '@vibesys/feature-app-shell@file:features/app-shell(@types/react@19.1.13)':
+    dependencies:
+      '@vibesys/hosts': file:libs/hosts
+      '@vibesys/ipc': file:libs/ipc(@types/react@19.1.13)
+      '@vibesys/runs': file:libs/runs
+      '@vibesys/store': file:libs/store
+      '@vibesys/ui': file:libs/ui(@types/react@19.1.13)
+      react: 19.1.1
+    transitivePeerDependencies:
+      - '@types/react'
+      - supports-color
+
+  '@vibesys/feature-machines@file:features/machines(@types/react@19.1.13)':
+    dependencies:
+      '@vibesys/connection': file:libs/connection
+      '@vibesys/hosts': file:libs/hosts
+      '@vibesys/ipc': file:libs/ipc(@types/react@19.1.13)
+      '@vibesys/settings': file:libs/settings(@types/react@19.1.13)
+      '@vibesys/store': file:libs/store
+      '@vibesys/ui': file:libs/ui(@types/react@19.1.13)
+      react: 19.1.1
+    transitivePeerDependencies:
+      - '@types/react'
+      - supports-color
+
+  '@vibesys/feature-new-run@file:features/new-run(@types/react@19.1.13)':
+    dependencies:
+      '@vibesys/connection': file:libs/connection
+      '@vibesys/contracts': file:libs/contracts
+      '@vibesys/hosts': file:libs/hosts
+      '@vibesys/ipc': file:libs/ipc(@types/react@19.1.13)
+      '@vibesys/machine': file:libs/machine
+      '@vibesys/runs': file:libs/runs
+      '@vibesys/settings': file:libs/settings(@types/react@19.1.13)
+      '@vibesys/store': file:libs/store
+      '@vibesys/ui': file:libs/ui(@types/react@19.1.13)
+      react: 19.1.1
+      xstate: 5.33.2
+    transitivePeerDependencies:
+      - '@types/react'
+      - supports-color
+
+  '@vibesys/feature-settings@file:features/settings(@types/react@19.1.13)':
+    dependencies:
+      '@vibesys/ipc': file:libs/ipc(@types/react@19.1.13)
+      '@vibesys/settings': file:libs/settings(@types/react@19.1.13)
+      '@vibesys/store': file:libs/store
+      '@vibesys/ui': file:libs/ui(@types/react@19.1.13)
+      react: 19.1.1
+    transitivePeerDependencies:
+      - '@types/react'
+      - supports-color
+
+  '@vibesys/hosts@file:libs/hosts':
+    dependencies:
+      '@vibesys/contracts': file:libs/contracts
+      '@vibesys/store': file:libs/store
+
+  '@vibesys/ipc@file:libs/ipc(@types/react@19.1.13)':
+    dependencies:
+      '@vibesys/contracts': file:libs/contracts
+      '@vibesys/hosts': file:libs/hosts
+      '@vibesys/logs': file:libs/logs
+      '@vibesys/runs': file:libs/runs
+      '@vibesys/ui': file:libs/ui(@types/react@19.1.13)
+    transitivePeerDependencies:
+      - '@types/react'
+      - supports-color
+
+  '@vibesys/logs@file:libs/logs':
+    dependencies:
+      '@vibesys/contracts': file:libs/contracts
+      '@vibesys/machine': file:libs/machine
+      '@vibesys/transport': file:libs/transport
+      xstate: 5.33.2
+
+  '@vibesys/machine@file:libs/machine':
+    dependencies:
+      '@vibesys/store': file:libs/store
+      xstate: 5.33.2
+
+  '@vibesys/runs@file:libs/runs':
+    dependencies:
+      '@vibesys/contracts': file:libs/contracts
+      '@vibesys/hosts': file:libs/hosts
+
+  '@vibesys/settings@file:libs/settings(@types/react@19.1.13)':
+    dependencies:
+      '@vibesys/hosts': file:libs/hosts
+      '@vibesys/runs': file:libs/runs
+      '@vibesys/ui': file:libs/ui(@types/react@19.1.13)
+    transitivePeerDependencies:
+      - '@types/react'
+      - supports-color
+
+  '@vibesys/store@file:libs/store': {}
+
+  '@vibesys/transport@file:libs/transport':
+    dependencies:
+      '@vibesys/contracts': file:libs/contracts
+
+  '@vibesys/ui@file:libs/ui(@types/react@19.1.13)':
+    dependencies:
+      react: 19.1.1
+      react-markdown: 10.1.0(@types/react@19.1.13)(react@19.1.1)
+      remark-gfm: 4.0.1
+    transitivePeerDependencies:
+      - '@types/react'
+      - supports-color
 
   '@vitejs/plugin-react@5.0.4(vite@7.1.5(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(yaml@2.9.1))':
     dependencies:

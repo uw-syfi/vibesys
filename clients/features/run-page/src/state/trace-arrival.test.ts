@@ -9,7 +9,7 @@ import {
   runPageInitial,
   runPageStep,
 } from './run-page.js';
-import {traceArrival} from './views.js';
+import {historyLoading, historyProblem, traceArrival} from './views.js';
 
 /**
  * Whether the run's spans have reached the window, as the page's actions arrive: awaited while a
@@ -118,9 +118,24 @@ describe('an ended run', () => {
     expect(traceArrival(fold([ENDED]))).toBe('awaited');
   });
 
-  test('has them once a page of history carried any', () => {
+  test('has them once the last page of history carried any', () => {
     const page = history({kind: 'page', events: [SPAN], next: 2, complete: true});
     expect(traceArrival(fold([ENDED, page]))).toBe('arrived');
+  });
+
+  test('still awaits them after a page that is not the last: a prefix is not the run', () => {
+    const page = history({kind: 'page', events: [SPAN], next: 2, complete: false});
+    expect(traceArrival(fold([ENDED, page]))).toBe('awaited');
+  });
+
+  test('drops the prefix it folded when a later page fails, rather than show it as the run', () => {
+    const first = history({kind: 'page', events: [SPAN], next: 2, complete: false});
+    const failed = history({kind: 'failed', message: 'channel closed'});
+    const state = fold([ENDED, first, failed]);
+    expect(traceArrival(state)).toBe('none');
+    expect(state.run.trace.events.length).toBe(0);
+    expect(historyProblem(state)).toContain('channel closed');
+    expect(historyLoading(state)).toBeNull();
   });
 
   test('awaits nothing once its history is read empty, refused or failed', () => {

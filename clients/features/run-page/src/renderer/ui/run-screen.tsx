@@ -23,6 +23,8 @@ import {
   clockStart,
   endedView,
   headerView,
+  historyLoading,
+  historyProblem,
   ideaAncestry,
   type Offer,
   quotaBannerView,
@@ -42,6 +44,7 @@ import {
   traceArrival,
 } from '../../state/index.js';
 import {Hero} from './hero.js';
+import {HistoryLoading} from './history-loading.js';
 import {DeepLevel} from './levels.js';
 import {RunLevel} from './run-level.js';
 import {RunScrubber} from './run-scrubber.js';
@@ -320,6 +323,17 @@ export function RunScreen(props: {
     tokens: props.core?.tokens ?? EMPTY_LEDGER,
     zoom,
   };
+  const loading = historyLoading(state);
+  if (loading !== null) {
+    // An ended run's history is not all in: the fold is a prefix of the run, so no pane draws it.
+    return (
+      <Screen density="compact" header={<Header state={state} dispatch={dispatch} />}>
+        <EndedBanner state={state} dispatch={dispatch} zoom={zoom} />
+        <HistoryLoading progress={loading} />
+      </Screen>
+    );
+  }
+  const problem = historyProblem(state);
   const zoomed = resolveZoom(model, route);
   // The chain lit on the chart and in the tree: what the pointer is on, else what was pinned or opened.
   const lit = ideaAncestry(
@@ -352,6 +366,9 @@ export function RunScreen(props: {
         <Banner tone="err" title="The run did not take the command" body={state.notice} />
       )}
       <EndedBanner state={state} dispatch={dispatch} zoom={zoom} />
+      {problem === null ? null : (
+        <Banner tone="warn" title="The run’s history is not available" body={problem} />
+      )}
       <Startup state={state} />
       <Hero
         {...base}
