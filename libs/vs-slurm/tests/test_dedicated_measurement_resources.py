@@ -13,7 +13,14 @@ from vs_slurm.api import SlurmConfig, SlurmConfigError, SlurmSshTransport, load_
 if TYPE_CHECKING:
     from pathlib import Path
 
-_SHARING = ("--exclusive", "--exclusive=user", "--exclusive=mcs", "--oversubscribe", "--share", "-s")
+_SHARING = (
+    "--exclusive",
+    "--exclusive=user",
+    "--exclusive=mcs",
+    "--oversubscribe",
+    "--share",
+    "-s",
+)
 _OTHER = ("--gres=gpu:1", "--partition=b200", "--nodes=1", "-N", "1")
 
 

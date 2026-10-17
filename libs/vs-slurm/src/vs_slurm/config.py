@@ -274,7 +274,8 @@ class SlurmConfig(BaseModel):
         sharing = [
             argument
             for argument in self.sbatch_arguments
-            if argument in {"--oversubscribe", "--share", "-s"} or argument.startswith("--exclusive")
+            if argument in {"--oversubscribe", "--share", "-s"}
+            or argument.startswith("--exclusive")
         ]
         return bool(sharing) and sharing[-1] == "--exclusive"
 

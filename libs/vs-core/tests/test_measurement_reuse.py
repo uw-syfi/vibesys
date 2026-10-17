@@ -356,9 +356,7 @@ def test_a_reusing_submission_takes_only_its_runs_own_records() -> None:
     ),
     target=st.tuples(st.integers(min_value=0, max_value=2), st.integers(min_value=0, max_value=2)),
     input_known=st.booleans(),
-    exclusive=st.booleans(),
-    opted_in=st.booleans(),
-    source_opted_in=st.booleans(),
+    conditions=st.tuples(st.booleans(), st.booleans(), st.booleans()),
     reload_at=st.integers(min_value=0, max_value=4),
 )
 def test_an_official_measurement_reuses_only_the_scopes_one_matching_conclusive_run(
@@ -366,9 +364,7 @@ def test_an_official_measurement_reuses_only_the_scopes_one_matching_conclusive_
     runs: list[tuple[int, int, Outcome, Variant]],
     target: tuple[int, int],
     input_known: bool,
-    exclusive: bool,
-    opted_in: bool,
-    source_opted_in: bool,
+    conditions: tuple[bool, bool, bool],
     reload_at: int,
 ) -> None:
     """Any sequence of agent runs of inputs (two commits each), with a reload anywhere.
@@ -383,6 +379,7 @@ def test_an_official_measurement_reuses_only_the_scopes_one_matching_conclusive_
     hold their hosts alone; a commit the agent never ran matches by measured input only when
     it is known.
     """
+    exclusive, opted_in, source_opted_in = conditions
     state = core.initial_state()
     jobs: list[tuple[int, int, Outcome, Variant, core.RequestId]] = []
     for number, (source_input, commit, outcome, variant) in enumerate(runs):
@@ -552,7 +549,6 @@ def _reusing_job(
 
 def _report(
     state: core.CoreState,
-    submission: core.SubmitMeasurement,
     started: core.Observation,
     finished: core.Observation,
     evidence: tuple[core.EvidenceRef, ...],
@@ -595,7 +591,7 @@ def test_a_reused_record_takes_only_the_kind_its_source_record_maps_to(
         ).model_copy(update={"kind": kind})
         for stage, kind in zip(_STAGES, kinds, strict=True)
     )
-    done = _report(state, submission, started, finished, evidence)
+    done = _report(state, started, finished, evidence)
     kept = {item.key for item in core.project(done.state).measurements}
     for stage, item in zip(_STAGES, evidence, strict=True):
         ok = item.kind in allowed if allowed is not None else item.kind is honest[stage]
@@ -611,10 +607,10 @@ def test_a_reusing_job_that_ends_without_all_its_sources_records_is_refused() ->
         )
         for stage in _STAGES
     )
-    short = _report(state, submission, started, finished, both[1:])
+    short = _report(state, started, finished, both[1:])
     (result,) = results(short)
     assert result.failure is core.MeasurementFailure.UNKNOWN
-    full = _report(state, submission, started, finished, both)
+    full = _report(state, started, finished, both)
     (result,) = results(full)
     assert result.failure is None
 
