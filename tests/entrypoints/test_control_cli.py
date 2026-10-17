@@ -17,7 +17,7 @@ from hypothesis import strategies as st
 
 from entrypoints.control import control_main, time_ordered_id
 from vibesys.api import CONTROL_REQUEST
-from vs_core.api import initial_state, step
+from vs_core.api import CoreState, RoleId, RoleInputTarget, initial_state, step
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
 from vs_runtime.api.core import OperatorInbox, RunControlBridge
@@ -63,6 +63,11 @@ class _Texts:
 
 _COMMANDS = st.one_of(
     st.builds(lambda text: ["steer", text], st.text(min_size=1, max_size=20).filter(str.strip)),
+    st.builds(
+        lambda text, role: ["steer", text, "--role", role],
+        st.text(min_size=1, max_size=20).filter(str.strip),
+        st.sampled_from(["dynamic-planner", "dynamic-worker"]),
+    ),
     st.just(["pause"]),
     st.just(["resume"]),
     st.just(["resume", "--fallback"]),
@@ -89,10 +94,24 @@ def test_a_posted_control_is_what_the_run_records(
         Project.open(root).state.control_inbox(run_id), ChannelRunControl(channel, SimThreads())
     )
     bridge = RunControlBridge(channel, _Texts(), inbox=inbox)
-    core = initial_state()
+    core = _declaring(("dynamic-planner", "dynamic-worker"))
     for event in bridge.poll(core, 1.0):
         core = step(core, event).state
     assert [(c.control_id.root, c.action) for c in core.run.controls] == [("op-r-1", command[0])]
+    if "--role" in command:
+        role = command[command.index("--role") + 1]
+        assert core.run.controls[0].target == RoleInputTarget(role_id=RoleId(root=role))
+        assert core.sessions.inputs[0].input.target == core.run.controls[0].target
+
+
+def _declaring(roles: tuple[str, ...]) -> CoreState:
+    state = initial_state()
+    declaration = state.run.declaration.model_copy(
+        update={"roles": tuple(RoleId(root=role) for role in roles)}
+    )
+    return state.model_copy(
+        update={"run": state.run.model_copy(update={"declaration": declaration})}
+    )
 
 
 @pytest.mark.parametrize(

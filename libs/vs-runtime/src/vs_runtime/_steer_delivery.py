@@ -110,6 +110,25 @@ def steer_target(core: CoreState, target: SteerTarget) -> InputTarget | TargetRe
     return _RESOLVERS[target.kind](core, target.id)
 
 
+def names_target(target: SteerTarget, held: InputTarget | None) -> bool:
+    """Whether ``held``, core's input target of a recorded steer, is the one ``target`` names.
+
+    The comparison is by id, so it holds after an attempt is reopened at a later generation.
+    """
+    match held:
+        case None:
+            named = (SteerTargetKind.RUN, None)
+        case RoleInputTarget(role_id=role):
+            named = (SteerTargetKind.ROLE, role.root)
+        case ScopeInputTarget(scope=scope):
+            named = (SteerTargetKind.ATTEMPT, scope.owner.root)
+        case ItemInputTarget(item_id=item):
+            named = (SteerTargetKind.ITEM, item.root)
+        case InvocationInputTarget(invocation=invocation):
+            named = (SteerTargetKind.INVOCATION, invocation.invocation_id.root)
+    return (target.kind, target.id) == named
+
+
 def steer_input_id(control: ControlInput) -> InputId:
     """The input occurrence one steer control becomes; the control's identity names it."""
     return InputId(root=f"steer-{control.control_id.root}")

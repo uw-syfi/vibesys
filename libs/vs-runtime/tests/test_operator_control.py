@@ -95,6 +95,9 @@ _REVIEWED_FIELDS = frozenset(
         ("steer", "control_id", "string"),
         ("steer", "action", "string"),
         ("steer", "text", "string"),
+        ("steer", "target", "model:SteerTarget"),
+        ("steer", "target.kind", "enum:SteerTargetKind"),
+        ("steer", "target.id", "string?"),
         ("pause", "control_id", "string"),
         ("pause", "action", "string"),
         ("resume", "control_id", "string"),
@@ -113,9 +116,13 @@ no field here carries an evaluation command, a checker, a trust rule or a resour
 A new field fails ``test_every_control_field_is_reviewed`` until it is added here.
 """
 
+_REVIEWED_MODELS = frozenset({"SteerTarget"})
+"""The structures a control may hold: a steer's target names a role, attempt, item or invocation."""
+
 
 def test_every_control_field_is_reviewed() -> None:
-    assert control_schema_fields(CONTROL_REQUEST.json_schema()) == _REVIEWED_FIELDS
+    schema = CONTROL_REQUEST.json_schema()
+    assert control_schema_fields(schema, models=_REVIEWED_MODELS) == _REVIEWED_FIELDS
 
 
 def test_the_tags_of_the_union_are_the_control_actions() -> None:

@@ -556,3 +556,16 @@ def test_every_refusal_reason_answers_with_a_protocol_error(reason: RefusalReaso
         slot.execute(PauseCommand(timestamp=REQUEST_TIME))
 
     assert isinstance(getattr(refused.value, "diagnostic_code", None), str)
+
+
+def test_a_refused_steer_is_journaled_as_a_failed_control(tmp_path: Path) -> None:
+    parts = build_server_parts(tmp_path)
+
+    parts.control.notify_steer_refused("role 'judge' is not declared")
+
+    (refused,) = [
+        event
+        for event in parts.journal.read()
+        if event.type is EventType.CONTROL and event.status is EventStatus.FAILED
+    ]
+    assert "role 'judge' is not declared" in refused.text

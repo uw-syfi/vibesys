@@ -46,6 +46,7 @@ from vs_runtime._operator_control import (
 from vs_runtime._steer_delivery import (
     SteerConsumption,
     TargetRefusal,
+    names_target,
     steer_input,
     steer_target,
     unrecorded_steers,
@@ -385,13 +386,17 @@ def _held_as(core: CoreState, request: ControlRequest) -> bool | None:
 def _records(control: ControlInput, request: ControlRequest) -> bool:
     """Whether ``control`` records ``request``.
 
-    Core records the action, a stop's mode and the digest of a steer's text; a request that
-    differs in any of them reuses the id for a different control.
+    Core records the action, a stop's mode, and the digest and target of a steer's text; a
+    request that differs in any of them reuses the id for a different control.
     """
     match request:
-        case SteerRequest(text=text):
+        case SteerRequest(text=text, target=target):
             digest = hashlib.sha256(text.encode()).hexdigest()
-            return control.artifact is not None and control.artifact.digest == digest
+            return (
+                control.artifact is not None
+                and control.artifact.digest == digest
+                and names_target(target, control.target)
+            )
         case StopRequest(mode=mode):
             return control.action == "stop" and control.mode == mode
         case _:

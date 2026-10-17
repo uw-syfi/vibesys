@@ -42,6 +42,7 @@ def test_control_transitions_keep_the_existing_persisted_event_format(
             round_label="round-1",
             execution_id="execution-1",
         )
+        integration.control.notify_steer_refused("role 'judge' is not declared")
         integration.control.request_pause()
         integration.control.wait_while_paused()
         integration.control.request_stop(StopMode.DRAIN)
@@ -57,6 +58,7 @@ def test_control_transitions_keep_the_existing_persisted_event_format(
     assert [event["type"] for event in persisted] == [
         "steer_queued",
         "steer_consumed",
+        "steer_refused",
         "pause_requested",
         "paused",
         "resumed",
@@ -67,4 +69,5 @@ def test_control_transitions_keep_the_existing_persisted_event_format(
     assert persisted[1]["agent_kind"] == "implementer"
     assert persisted[1]["round_label"] == "round-1"
     assert persisted[1]["execution_id"] == "execution-1"
+    assert persisted[2]["text"] == "role 'judge' is not declared"
     assert all(event["run_id"] == "run-1" for event in persisted)
