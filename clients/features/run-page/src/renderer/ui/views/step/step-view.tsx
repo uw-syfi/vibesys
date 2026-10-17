@@ -35,7 +35,7 @@ import {
   turnMeta,
   turnNarrative,
 } from '../../../../state/step-narrative.js';
-import type {ViewBase, WithCore} from '../props.js';
+import type {PaneHeader, ViewBase, WithCore} from '../props.js';
 
 export interface StepViewProps extends ViewBase, WithCore {
   /** The idea the step belongs to; null under an opened agent. */
@@ -117,13 +117,9 @@ function TurnBody(props: StepViewProps): JSX.Element {
     );
   }
   const live = LIVE.has(step.status);
-  const end = step.endedAt ?? props.clock.now;
   const holding = item === null ? null : toolOf(narrative, item)?.block;
   return (
     <>
-      <Text variant="small" tone="muted">
-        {turnMeta(end === null ? null : end - step.startedAt, narrative)}
-      </Text>
       <Narrative key={step.span} label="Agent turn" size="fill" start={live ? 'end' : 'top'}>
         {narrative.blocks.map(block => (
           <BlockView
@@ -168,6 +164,22 @@ function parentValue(props: StepViewProps): number | null {
   return found?.measurement?.metricValue ?? null;
 }
 
+/** The agent turn's facts for its pane header: how long, how many tools, how many failed. */
+export function stepHeader(props: StepViewProps): PaneHeader {
+  if (props.step.kind === 'gate') return {};
+  const narrative = turnNarrative(props.model.trace, props.core, props.step.span);
+  if (narrative === null) return {};
+  const end = props.step.endedAt ?? props.clock.now;
+  const seconds = end === null ? null : end - props.step.startedAt;
+  return {
+    meta: (
+      <Text variant="small" tone="muted">
+        {turnMeta(seconds, narrative)}
+      </Text>
+    ),
+  };
+}
+
 export function StepView(props: StepViewProps): JSX.Element {
   if (props.step.kind !== 'gate') return <TurnBody {...props} />;
   const gate = gateView(props.model.trace, props.core, props.step.span, parentValue(props));
@@ -207,4 +219,13 @@ export function ItemView(props: ItemViewProps): JSX.Element {
       <LogPane label={`${tool.name} call`} lines={itemLines(tool)} size="fill" />
     </>
   );
+}
+
+/** The item's pane header: the call's name and its subject, in place of its row id. */
+export function itemHeader(props: ItemViewProps): PaneHeader {
+  const narrative = turnNarrative(props.model.trace, props.core, props.step.span);
+  const found = narrative === null ? null : toolOf(narrative, props.item);
+  if (found === null) return {};
+  const {tool} = found;
+  return {kicker: `tool call · ${tool.name}`, title: tool.summary ?? tool.name};
 }

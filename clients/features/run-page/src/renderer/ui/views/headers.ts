@@ -7,7 +7,6 @@
 import type {AgentPaneProps, AgentsViewProps} from './agents/agents-view.js';
 import type {LogsViewProps} from './logs/logs-view.js';
 import type {PaneHeader, ViewHeader} from './props.js';
-import type {ItemViewProps, StepViewProps} from './step/step-view.js';
 import type {TimelineViewProps} from './timeline/timeline-view.js';
 
 const NONE = (): PaneHeader => ({});
@@ -16,6 +15,5 @@ export const timelineHeader: ViewHeader<TimelineViewProps> = NONE;
 export const agentsHeader: ViewHeader<AgentsViewProps> = NONE;
 export const agentHeader: ViewHeader<AgentPaneProps> = NONE;
 export const logsHeader: ViewHeader<LogsViewProps> = NONE;
-export const stepHeader: ViewHeader<StepViewProps> = NONE;
-export const itemHeader: ViewHeader<ItemViewProps> = NONE;
+export {itemHeader, stepHeader} from './step/step-view.js';
 export {ideaHeader} from './idea/idea-view.js';
