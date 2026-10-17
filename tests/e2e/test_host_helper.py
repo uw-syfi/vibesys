@@ -61,7 +61,9 @@ _SCENARIOS = tuple(
 # matcher and stream redactor instead of retaining a second implementation.
 # The reservable worker implementation adds the standard-library-only ``queue`` and ``_queue``
 # modules so a refused native worker start can be reported before relay I/O is committed.
-_MODULE_CEILING = 347
+# server.run_digest (the run digest fold, standard library, pydantic and vs_decode) and
+# server.host_machine_facts (the machine facts moved out of host_api) add 2.
+_MODULE_CEILING = 349
 """The most modules a helper may load to answer ``hello``; lower it as the helper sheds imports."""
 _HELLO = {
     "type": "hello",
