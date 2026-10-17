@@ -90,7 +90,12 @@ trace's order. A span that starts and ends within one commit gets a `span_starte
   `candidate` names; its `builds_on` link names the workstream it built on; and a gate's
   `failed` names the trusted check that rejected it with its progress (93 of 100 trials). A
   search that plays one path links each round to the round that kept its base, so its
-  candidates form a chain. Spans carry no agent-spawn relation. A gate span covers one measurement; each of its stages (`build`, `accuracy`, `benchmark`) has its own `gate_started`/`gate_finished` events (`GateKind`) and its own log stream, whose `GateStage` owner names the span. The
+  candidates form a chain. An `agent_turn` names its `agent` (its session's id, stable across
+  replay and restart), `role`, `model` and `started_by`: the agents whose work started it, none
+  when the search did, several for fan-in. Clients read the run's agents and who started whom
+  from these turns alone (`@vibesys/run-state/agents`, constant work per event): an agent's
+  status and activity are its latest turn's, which runs within its nearest labelled ancestor. A
+  gate span covers one measurement; each of its stages (`build`, `accuracy`, `benchmark`) has its own `gate_started`/`gate_finished` events (`GateKind`) and its own log stream, whose `GateStage` owner names the span. The
   kinds are additive within `PROTOCOL_VERSION` 1: a client that does not know one renders it
   from its name and label.
 - **Ids.** `flow:<path>#<n>` for a flow task, `op:<decision id>` for an operation, both plain

@@ -33,6 +33,9 @@
       "path": "./tsconfig.candidates.json"
     },
     {
+      "path": "./tsconfig.agents.json"
+    },
+    {
       "path": "../contracts/tsconfig.lib.json"
     },
     {

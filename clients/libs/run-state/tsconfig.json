@@ -23,6 +23,9 @@
       "path": "./tsconfig.candidates.json"
     },
     {
+      "path": "./tsconfig.agents.json"
+    },
+    {
       "path": "./tsconfig.test.json"
     }
   ]

@@ -19,7 +19,8 @@
     "src/transcript/**",
     "src/trace/**",
     "src/overview/**",
-    "src/candidates/**"
+    "src/candidates/**",
+    "src/agents/**"
   ],
   "references": [
     {

@@ -62,6 +62,7 @@
       "@vibesys/run-session/testing": ["libs/run-session/src/testing/index.ts"],
       "@vibesys/run-state": ["libs/run-state/src/index.ts"],
       "@vibesys/run-state/candidates": ["libs/run-state/src/candidates/index.ts"],
+      "@vibesys/run-state/agents": ["libs/run-state/src/agents/index.ts"],
       "@vibesys/run-state/overview": ["libs/run-state/src/overview/index.ts"],
       "@vibesys/run-state/performance": ["libs/run-state/src/performance/index.ts"],
       "@vibesys/run-state/rounds": ["libs/run-state/src/rounds/index.ts"],
