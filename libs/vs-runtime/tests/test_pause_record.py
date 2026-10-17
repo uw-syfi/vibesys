@@ -1,0 +1,127 @@
+"""Core records the run's pause as the channel holds it: who owns it and what ends it.
+
+The bridge turns the channel's pause into pause and resume controls. After every poll whose
+events core commits, ``run_pause`` over core's record equals the channel's ``pause_state``,
+and an inbox request that changes the pause settles only once core holds it.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Literal
+
+from hypothesis import given
+from hypothesis import strategies as st
+
+from vs_core.api import CoreState, PauseOwner, RunPause, initial_state, run_pause, step
+from vs_project.api.testing import FakeControlInbox
+from vs_runtime.api.core import OperatorInbox, RunControlBridge
+from vs_runtime.api.infrastructure import (
+    ChannelRunControl,
+    ResumeRequest,
+    create_run_control_channel,
+)
+from vs_runtime.api.testing import FakeRunControlEventSink
+from vs_sim.api.testing import SimThreads
+
+if TYPE_CHECKING:
+    from vs_core.api import ArtifactRef, CoreEvent
+    from vs_runtime.api.infrastructure import RunControlChannel
+
+
+@dataclass
+class _Texts:
+    held: dict[str, str] = field(default_factory=dict)
+
+    def put(self, ref: ArtifactRef, text: str) -> None:
+        self.held[ref.artifact_id.root] = text
+
+
+@dataclass
+class _Run:
+    channel: RunControlChannel
+    control: ChannelRunControl
+    bridge: RunControlBridge
+    inbox: FakeControlInbox
+    core: CoreState
+
+    def poll(self, *, commit: bool = True) -> None:
+        events: tuple[CoreEvent, ...] = self.bridge.poll(self.core, 1.0)
+        if commit:
+            for event in events:
+                self.core = step(self.core, event).state
+
+
+def _run() -> _Run:
+    threads = SimThreads()
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=threads)
+    control = ChannelRunControl(channel, threads)
+    inbox = FakeControlInbox()
+    bridge = RunControlBridge(channel, _Texts(), inbox=OperatorInbox(inbox, control))
+    return _Run(channel, control, bridge, inbox, initial_state())
+
+
+type _Op = Literal["quota", "operator", "resume", "fallback", "capacity", "poll"]
+_OPS: tuple[_Op, ...] = ("quota", "operator", "resume", "fallback", "capacity", "poll")
+
+
+@given(st.lists(st.sampled_from(_OPS), max_size=24))
+def test_after_each_committed_poll_core_holds_the_channels_pause(ops: list[_Op]) -> None:
+    run = _run()
+    # One turn waits on a capacity limit throughout, so a capacity wait can be asked for.
+    run.channel.enter_capacity()
+    for index, op in enumerate(ops):
+        control_id = f"c{index}"
+        match op:
+            case "quota":
+                run.channel.pause_for_quota()
+            case "operator":
+                run.channel.request_pause(control_id)
+            case "resume":
+                run.channel.resume(control_id)
+            case "fallback":
+                run.channel.resume_with_fallback(control_id)
+            case "capacity":
+                run.channel.resume_when_capacity_returns(control_id)
+            case "poll":
+                run.poll()
+                assert run_pause(run.core.run) == run.channel.pause_state()
+    run.poll()
+    assert run_pause(run.core.run) == run.channel.pause_state()
+
+
+def test_a_capacity_wait_from_the_inbox_settles_only_once_core_records_it() -> None:
+    run = _run()
+    run.channel.enter_capacity()
+    run.channel.pause_for_quota()
+    run.poll()
+    request = ResumeRequest(control_id="w1", when="capacity_returns")
+    run.inbox.post("w1", request.model_dump_json().encode())
+
+    run.poll(commit=False)  # the process died before core committed the poll
+    assert [entry.request_id for entry in run.inbox.pending()] == ["w1"]
+
+    run.poll()
+    run.poll()
+
+    assert run.inbox.pending() == ()
+    assert run.inbox.rejected() == ()
+    assert run_pause(run.core.run) == RunPause(owner=PauseOwner.QUOTA, capacity_wait=True)
+
+
+def test_a_fallback_resume_reusing_a_plain_resumes_id_is_rejected_not_settled() -> None:
+    run = _run()
+    run.channel.pause_for_quota()
+    run.poll()
+    run.control.submit(ResumeRequest(control_id="x"))
+    run.poll()
+    run.channel.pause_for_quota()
+    run.poll()
+
+    payload = {"control_id": "x", "action": "resume", "fallback": True}
+    run.inbox.post("x", json.dumps(payload).encode())
+    run.poll()
+
+    assert [entry.request_id for entry in run.inbox.rejected()] == ["x"]
+    assert run.channel.consume_fallback_request() is False

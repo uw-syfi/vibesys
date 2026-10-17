@@ -131,7 +131,7 @@ class RunControlBridge:
         self._consumption = SteerConsumption()
         self._started = False
         self._pause: RunPause | None = None
-        """The pause as this bridge has recorded it in core: what core's controls say."""
+        """Core's committed pause, folded with the pause controls this poll has emitted."""
         self._stopped = False
         self._landed = False
 
@@ -160,9 +160,10 @@ class RunControlBridge:
             self._started = True
             self._channel.set_run_deadline(core.run.deadline_at)
             self._count = len(core.run.controls)
-            self._pause = run_pause(core.run)
             self._stopped = any(c.action == "stop" for c in core.run.controls)
         self._position = len(core.run.controls)
+        # From committed state each poll: a poll whose events core never committed is redone.
+        self._pause = run_pause(core.run)
         if self._control is not None:
             self._control.recall(partial(_held_as, core))
             self._control.check_requests(partial(request_refusal, core))
