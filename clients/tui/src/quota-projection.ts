@@ -16,8 +16,7 @@ const QUOTA_WHY: Readonly<Record<QuotaPause['condition'], string>> = {
 /** What the banner says happened: the provider and why, in the operator's words. */
 export function quotaSummary(pause: QuotaPause): string {
   const why = QUOTA_WHY[pause.condition];
-  const until =
-    pause.condition === 'unavailable' ? 'it tries again by itself' : 'you decide';
+  const until = pause.condition === 'unavailable' ? 'it tries again by itself' : 'you decide';
   return `${pause.provider} ${why}. The run is paused until ${until}.`;
 }
 
