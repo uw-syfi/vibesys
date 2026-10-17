@@ -75,7 +75,7 @@ export const FIRST_HISTORY_SEQUENCE = 1;
 
 /**
  * How far an ended run's history read has come: the events and bytes folded so far, and the run's
- * total number of events once the host has said it (`HistoryReply.total`); null until then.
+ * total number of events once the host has said it (`HistoryReply.totalEvents`); null until then.
  */
 export interface HistoryProgress {
   readonly events: number;
@@ -113,7 +113,7 @@ export type HistoryReply =
       /** The page's size on the wire in bytes, when the app measured it. */
       readonly bytes?: number;
       /** How many events the run's history holds in all, when the host says. */
-      readonly total?: number;
+      readonly totalEvents?: number;
     }
   | {readonly kind: 'unsupported'}
   | {readonly kind: 'failed'; readonly message: string};
@@ -486,7 +486,7 @@ function withHistory(state: RunPageState, token: number, reply: HistoryReply): R
   return readingFrom(folded, reply.next, {
     events: before.events + reply.events.length,
     bytes: before.bytes + (reply.bytes ?? 0),
-    total: reply.total ?? before.total,
+    total: reply.totalEvents ?? before.total,
   });
 }
 

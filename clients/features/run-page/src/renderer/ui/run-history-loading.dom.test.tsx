@@ -80,7 +80,7 @@ function pageOf(
     next,
     complete: next > (FIXTURE.events.at(-1)?.sequence ?? 0),
     bytes: JSON.stringify(page).length,
-    ...(total === undefined ? {} : {total}),
+    ...(total === undefined ? {} : {totalEvents: total}),
   };
 }
 

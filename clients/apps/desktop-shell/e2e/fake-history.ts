@@ -32,7 +32,7 @@ export function installFakeHistory(seed: FakeHistorySeed): void {
       .filter(event => (event.sequence ?? 0) >= from)
       .slice(0, Math.min(max, seed.pageSize));
     const next = (page.at(-1)?.sequence ?? from - 1) + 1;
-    const known = seed.total ? {total: seed.events.length} : {};
+    const known = seed.total ? {totalEvents: seed.events.length} : {};
     return {ok: true, value: {kind: 'page', events: page, next, complete: next > last, ...known}};
   };
   const target = window as unknown as {vibesysWelcome: object; fakeHost: object};
