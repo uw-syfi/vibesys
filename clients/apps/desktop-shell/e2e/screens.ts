@@ -6,6 +6,7 @@
  */
 import {expect, type Page} from '@playwright/test';
 import type {Violation} from './checks/in-page.js';
+import {settled} from './checks/settle.js';
 import {type Anchor, anchorsOf, RUN_ANCHORS, stabilityViolations} from './checks/stability.js';
 
 /** A screen of the walk: a level, or a face of the run level, or the scrubbed run. */
@@ -48,6 +49,7 @@ class Walk {
   }
 
   async at(screen: Screen): Promise<void> {
+    await settled(this.#page);
     await this.#visit(screen, this.#page);
     this.moved.push(
       ...(await stabilityViolations(this.#page, screen, this.#before, this.#anchors)),
@@ -56,12 +58,14 @@ class Walk {
 }
 
 async function openIdea(page: Page, idea: string | null): Promise<void> {
+  await settled(page);
   const options = page.getByRole('listbox', {name: 'Ideas'}).getByRole('option');
   await (idea === null ? options.first() : options.filter({hasText: row(idea)}).first()).click();
   await expect(page.getByRole('listbox', {name: /steps$/})).toBeVisible();
 }
 
 async function openItem(page: Page, command: string): Promise<void> {
+  await settled(page);
   await page
     .getByRole('listbox', {name: /steps$/})
     .getByRole('option', {name: /implementer/})
@@ -79,6 +83,7 @@ async function openItem(page: Page, command: string): Promise<void> {
 
 /** The run level again, by its crumb, from wherever the walk is. */
 async function backToRun(page: Page): Promise<void> {
+  await settled(page);
   await page.getByRole('navigation', {name: 'Zoom'}).getByRole('button', {name: 'Run'}).click();
   await expect(page.getByRole('listbox', {name: 'Ideas'})).toBeVisible();
 }
@@ -92,6 +97,7 @@ export async function walkScreens(
 ): Promise<Violation[]> {
   const ideas = page.getByRole('listbox', {name: 'Ideas'});
   await expect(ideas.getByRole('option').first()).toBeVisible();
+  await settled(page);
   const walk = new Walk(page, visit, anchors, await anchorsOf(page, anchors));
   await walk.at('run');
   await openIdea(page, journey.idea);

@@ -39,7 +39,7 @@
         "kind": "run_configured",
         "run_log_path": "logs/20261015-180000",
         "project_root": "project",
-        "model": "claude-sonnet-5",
+        "model": "example-model",
         "objective": "Raise queue throughput",
         "search_policy": "beam",
         "benchmark_contract": true,
@@ -172,7 +172,7 @@
           "label": {
             "kind": "agent_turn",
             "title": "implementer",
-            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"impl-1\",\"started_by\":[\"planner-1\"]}"
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"example-model\",\"agent\":\"impl-1\",\"started_by\":[\"planner-1\"]}"
           }
         }
       }
@@ -210,7 +210,7 @@
           "label": {
             "kind": "agent_turn",
             "title": "implementer",
-            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"impl-1\",\"started_by\":[\"planner-1\"]}"
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"example-model\",\"agent\":\"impl-1\",\"started_by\":[\"planner-1\"]}"
           }
         }
       }
@@ -251,7 +251,7 @@
           "label": {
             "kind": "agent_turn",
             "title": "implementer",
-            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"impl-1\",\"started_by\":[\"planner-1\"]}"
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"example-model\",\"agent\":\"impl-1\",\"started_by\":[\"planner-1\"]}"
           }
         }
       }
@@ -397,7 +397,7 @@
           "label": {
             "kind": "agent_turn",
             "title": "implementer",
-            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"impl-2\",\"started_by\":[\"planner-1\"]}"
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"example-model\",\"agent\":\"impl-2\",\"started_by\":[\"planner-1\"]}"
           }
         }
       }
@@ -443,7 +443,7 @@
           "label": {
             "kind": "agent_turn",
             "title": "implementer",
-            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"impl-2\",\"started_by\":[\"planner-1\"]}"
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"example-model\",\"agent\":\"impl-2\",\"started_by\":[\"planner-1\"]}"
           }
         }
       }
@@ -492,7 +492,7 @@
           "label": {
             "kind": "agent_turn",
             "title": "implementer",
-            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"impl-2\",\"started_by\":[\"planner-1\"]}"
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"example-model\",\"agent\":\"impl-2\",\"started_by\":[\"planner-1\"]}"
           }
         }
       }
@@ -655,7 +655,7 @@
           "label": {
             "kind": "agent_turn",
             "title": "implementer",
-            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"impl-3\",\"started_by\":[\"planner-1\"]}"
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"example-model\",\"agent\":\"impl-3\",\"started_by\":[\"planner-1\"]}"
           }
         }
       }
@@ -717,7 +717,7 @@
           "label": {
             "kind": "agent_turn",
             "title": "implementer",
-            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"impl-3\",\"started_by\":[\"planner-1\"]}"
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"example-model\",\"agent\":\"impl-3\",\"started_by\":[\"planner-1\"]}"
           }
         }
       }
@@ -782,7 +782,7 @@
           "label": {
             "kind": "agent_turn",
             "title": "implementer",
-            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"impl-3\",\"started_by\":[\"planner-1\"]}"
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"example-model\",\"agent\":\"impl-3\",\"started_by\":[\"planner-1\"]}"
           }
         }
       }
@@ -883,7 +883,7 @@
           "label": {
             "kind": "agent_turn",
             "title": "implementer",
-            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"impl-4\",\"started_by\":[\"planner-1\"]}"
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"example-model\",\"agent\":\"impl-4\",\"started_by\":[\"planner-1\"]}"
           }
         }
       }
@@ -929,7 +929,7 @@
           "label": {
             "kind": "agent_turn",
             "title": "implementer",
-            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"impl-4\",\"started_by\":[\"planner-1\"]}"
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"example-model\",\"agent\":\"impl-4\",\"started_by\":[\"planner-1\"]}"
           }
         }
       }
@@ -1015,7 +1015,7 @@
           "label": {
             "kind": "agent_turn",
             "title": "implementer",
-            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"impl-5\",\"started_by\":[\"planner-1\"]}"
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"example-model\",\"agent\":\"impl-5\",\"started_by\":[\"planner-1\"]}"
           }
         }
       }
@@ -1077,7 +1077,7 @@
           "label": {
             "kind": "agent_turn",
             "title": "implementer",
-            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"impl-5\",\"started_by\":[\"planner-1\"]}"
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"example-model\",\"agent\":\"impl-5\",\"started_by\":[\"planner-1\"]}"
           }
         }
       }
@@ -1142,7 +1142,7 @@
           "label": {
             "kind": "agent_turn",
             "title": "implementer",
-            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"impl-5\",\"started_by\":[\"planner-1\"]}"
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"example-model\",\"agent\":\"impl-5\",\"started_by\":[\"planner-1\"]}"
           }
         }
       }

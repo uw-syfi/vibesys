@@ -2,7 +2,6 @@ import {mkdirSync, writeFileSync} from 'node:fs';
 import {expect, test} from '@playwright/test';
 import {fixtureNamed} from '@vibesys/run-fixtures';
 import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
-import type {Violation} from './checks/in-page.js';
 import {KNOWN_FAILURES} from './checks/known-failures.js';
 import {report, screenCheck} from './checks/screen-check.js';
 import {openFixture, playLive} from './fixture-world.js';
@@ -88,15 +87,15 @@ for (const cell of CELLS) {
     const fixture = fixtureNamed(cell.fixture);
     await openFixture(page, fixture, {sidebar: cell.sidebar, theme: cell.theme});
     await playLive(page, fixture);
-    const violations: Violation[] = [];
     const unexplained: string[] = [];
     const moved = await walkScreens(page, cell.journey, async (screen, current) => {
       const name = nameOf(cell, screen);
       const result = report(name, await screenCheck(current), KNOWN_FAILURES);
       for (const each of result.known) matched.add(each.failure.id);
-      violations.push(...result.unexplained);
       unexplained.push(
-        ...result.unexplained.map(each => `${name}: [${each.check}] ${each.message}`),
+        ...result.unexplained.map(
+          each => `${name}: [${each.check}] ${each.message} (${each.where})`,
+        ),
       );
       if (shots !== undefined) {
         const file = `${name.replaceAll('/', '__')}.png`;
@@ -109,7 +108,7 @@ for (const cell of CELLS) {
     const lines = [
       ...unexplained,
       ...walkReport.unexplained.map(
-        each => `${nameOf(cell, 'walk')}: [${each.check}] ${each.message}`,
+        each => `${nameOf(cell, 'walk')}: [${each.check}] ${each.message} (${each.where})`,
       ),
     ];
     walked += 1;

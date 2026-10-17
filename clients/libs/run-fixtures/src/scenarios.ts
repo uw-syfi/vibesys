@@ -40,7 +40,7 @@ export function runHeader(trace: Trace, runId: string): void {
     {
       run_log_path: `logs/${runId}`,
       project_root: 'project',
-      model: 'claude-sonnet-5',
+      model: 'example-model',
       objective: 'Raise queue throughput',
       search_policy: 'beam',
       benchmark_contract: true,

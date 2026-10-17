@@ -16,7 +16,7 @@ function journal(): string {
         kind: 'run_configured',
         run_log_path: '/home/alice/projects/queue-rs/.vibesys/logs/20261015-163047',
         project_root: '/home/alice/projects/queue-rs',
-        model: 'claude-sonnet-5',
+        model: 'example-model',
         objective: 'Run on ssh:build-host as alice@build-host (10.1.2.3)',
         search_policy: 'beam',
         benchmark_contract: true,

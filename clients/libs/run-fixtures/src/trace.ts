@@ -244,7 +244,7 @@ export function addIdea(trace: Trace, spec: IdeaSpec): void {
     ...(tries.length > 0 ? {attempts: tried(turnStart, tries, ended ? turnEnd : null)} : {}),
     label: label('agent_turn', 'implementer', {
       role: 'implementer',
-      model: 'claude-sonnet-5',
+      model: 'example-model',
       agent: `impl-${spec.n}`,
       started_by: ['planner-1'],
     }),
