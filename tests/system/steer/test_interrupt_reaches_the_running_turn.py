@@ -15,9 +15,13 @@ and the steer goes to the next turn. Wherever it dies, the provider is asked onl
 core has recorded, and the steer reaches the agent (delivery is at least once) with one
 receipt, and with a report that says whether the running turn took it.
 
-One order this harness cannot produce: the turn's acceptance committing between the offer
-and the ask within one host. The run loop does not yield between the two, and a simulated
-turn only ends while the loop waits. The core suite pins that order
+One order this harness does not produce: within one host, the turn's acceptance committing
+after core records the offer and before the provider is asked. In production it is ordinary:
+the loop commits the offer, then awaits while it publishes, and a turn whose provider thread
+ends meanwhile has its acceptance committed in the same settle, before the next poll asks.
+A simulated turn here ends only while the loop waits for it, so the order never arises. Core
+alone decides what that order does (the offer goes back to waiting, for the next turn), and
+the core suite pins it
 (``test_a_turn_that_ends_before_the_provider_takes_its_offer_leaves_it_for_the_next`` in
 ``libs/vs-core/tests/test_mid_turn_inputs.py``).
 """
