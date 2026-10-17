@@ -792,6 +792,7 @@ class TurnUsageData(EventPayload):
     cache_creation_input_tokens: int | None = None
     cache_read_input_tokens: int | None = None
     output_tokens: int | None = None
+    reasoning_output_tokens: int | None = None
     total_cost_usd: float | None = None
     duration_ms: int | None = None
     span_id: SpanId | None = None
