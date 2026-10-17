@@ -86,8 +86,9 @@ def test_modal_prompt_notes_snapshot() -> None:
 
 
 _DOCKER_PROMPT_NOTES_CASES = {
-    "no_history": {"history_root": None},
-    "with_history": {"history_root": Path("/opt/vibesys-history")},
+    "no_history": {"history_root": None, "git_writable": True},
+    "with_history": {"history_root": Path("/opt/vibesys-history"), "git_writable": True},
+    "git_read_only": {"history_root": None, "git_writable": False},
 }
 
 

@@ -1,0 +1,1 @@
+Commands run inside the active execution environment. Use normal shell commands to start, stop, and test the server. `.git` is read-only; submit_evaluation snapshots your working tree, including new files; do not commit.

@@ -250,9 +250,11 @@ def representative_context() -> dict[str, object]:
         "runtime_notes",
         "schema",
         "service_command",
+        "service_log",
         "session_state_dir",
         "signature",
         "stage_failure",
+        "stage_output",
         "status",
         "step",
         "summary",
@@ -282,6 +284,7 @@ def representative_context() -> dict[str, object]:
         context[name] = 2
     # True renders the optional evaluation section of the core-policy prompts.
     context["agent_evaluation"] = True
+    context["git_writable"] = True
     for name in [
         "baseline_pending",
         "framework_benchmark_enabled",
@@ -541,6 +544,7 @@ def core_policy_context() -> dict[str, object]:
         feedback_cut=True,
     )
     return {
+        "agent_git_writable": True,
         "domain_sections": dict.fromkeys(
             ("implementer", "judge", "single_agent", "orchestrator", "profiler"), ""
         ),
