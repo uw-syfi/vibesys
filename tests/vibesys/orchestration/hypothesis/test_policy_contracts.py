@@ -8,6 +8,7 @@ from typing import Literal
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from pydantic import ValidationError
 from tests.support import make_orchestrator_plan
 
 from vibesys.hypothesis import (
@@ -89,16 +90,6 @@ def terminal_workspace_notice(records: list[RoundRecord]) -> str | None:
     )
 
 
-def _official_evaluation_reason(
-    *,
-    records: list[RoundRecord],
-    evaluation_budget: int | None,
-    candidate_ready: bool,
-) -> str | None:
-    search = HypothesisSearch(HypothesisConfig(max_rounds=20, evaluation_budget=evaluation_budget))
-    return search.official_due(records=records, candidate_ready=candidate_ready)
-
-
 def _review_due(
     *,
     round_number: int,
@@ -132,7 +123,6 @@ def test_orchestration_descriptor_contains_only_policy_settings() -> None:
         max_rounds=7,
         max_retries_per_round=4,
         judge_every=2,
-        evaluation_budget=5,
         operator_constraints=("Preserve ordering",),
         metric_space=MetricSpace(),
     )
@@ -148,13 +138,19 @@ def test_orchestration_descriptor_contains_only_policy_settings() -> None:
         "max_rounds": 7,
         "max_retries_per_round": 4,
         "judge_every": 2,
-        "evaluation_budget": 5,
         "modality": "messages",
         "operator_constraints": ["Preserve ordering"],
         "metric_space": MetricSpace().model_dump(mode="json"),
         "profile_guided": None,
         "turn_drop_backoff_seconds": 5.0,
     }
+
+
+def test_the_removed_evaluation_budget_option_is_rejected_by_name() -> None:
+    with pytest.raises(ValidationError, match="evaluation_budget"):
+        AgentOrchestrationOptions.model_validate(
+            {"max_rounds": 3, "max_retries_per_round": 1, "judge_every": 1, "evaluation_budget": 2}
+        )
 
 
 def test_validation_recipe_rejects_non_workspace_inputs() -> None:
@@ -199,49 +195,12 @@ def test_orchestrator_plan_base_round_optional() -> None:
     assert make_orchestrator_plan(task="redo", criteria="x", reasoning="r").base_round is None
 
 
-@given(
-    spent=st.integers(0, 6),
-    unmeasured=st.integers(0, 4),
-    evaluation_budget=st.none() | st.integers(1, 6),
-    candidate_ready=st.booleans(),
-)
-def test_every_reviewed_candidate_is_measured_while_the_evaluation_budget_lasts(
-    spent: int,
-    unmeasured: int,
-    evaluation_budget: int | None,
-    *,
-    candidate_ready: bool,
-) -> None:
-    records = [
-        RoundRecord(
-            number + 1,
-            f"m{number}",
-            10.0,
-            "tok/s",
-            passed=True,
-            reviewed=True,
-            hypothesis_outcome="proven",
-            official_evaluation=True,
-        )
-        for number in range(spent)
-    ] + [
-        RoundRecord(
-            spent + number + 1,
-            f"u{number}",
-            None,
-            None,
-            passed=True,
-            reviewed=True,
-            hypothesis_outcome="proven",
-        )
-        for number in range(unmeasured)
-    ]
-    reason = _official_evaluation_reason(
-        records=records, evaluation_budget=evaluation_budget, candidate_ready=candidate_ready
-    )
+@given(candidate_ready=st.booleans())
+def test_every_reviewed_candidate_is_measured(*, candidate_ready: bool) -> None:
+    search = HypothesisSearch(HypothesisConfig(max_rounds=20))
+    reason = search.official_due(candidate_ready=candidate_ready)
 
-    due = candidate_ready and (evaluation_budget is None or spent < evaluation_budget)
-    assert (reason is not None) is due
+    assert (reason is not None) is candidate_ready
 
 
 def test_frontier_candidate_forces_review_outside_sparse_cadence() -> None:

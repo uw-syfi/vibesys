@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter
 
+from vibesys.hypothesis import cadence
 from vibesys.hypothesis.attempts import (
     AttemptState,
     CandidateReply,
@@ -132,13 +133,9 @@ def validate_plan(config: HypothesisConfig, ledger: Ledger, updates: list) -> No
     HypothesisSearch(config).validate_updates(ledger.search, updates)
 
 
-def official_reason(
-    config: HypothesisConfig, ledger: Ledger, *, candidate_ready: bool = True
-) -> str | None:
-    """Why the trusted gates measure the reviewed candidate, or None when the budget is spent."""
-    return HypothesisSearch(config).official_due(
-        records=ledger.records, candidate_ready=candidate_ready
-    )
+def official_reason(*, candidate_ready: bool = True) -> str | None:
+    """Why the trusted gates measure the reviewed candidate, or None when it is not ready."""
+    return cadence.official_due(candidate_ready=candidate_ready)
 
 
 def pareto_conflict(

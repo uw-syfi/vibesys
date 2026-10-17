@@ -102,8 +102,6 @@ class PlanEvidence(Value):
     round_number: int = Field(gt=0)
     max_rounds: int = Field(gt=0)
     plateau_warning: str | None = None
-    evaluation_budget: int | None = Field(default=None, gt=0)
-    evaluations_spent: int = Field(default=0, ge=0)
     passed: tuple[PassedIdea, ...] = ()
     """The ideas that passed, oldest first: each is a base a plan may name."""
     input_value: float | None = None
@@ -161,8 +159,6 @@ def plan_evidence(
         round_number=planning.round_number,
         max_rounds=config.max_rounds,
         plateau_warning=planning.plateau_warning,
-        evaluation_budget=config.evaluation_budget,
-        evaluations_spent=planning.evaluations_spent,
         history=tuple(_row(item) for item in records[-_HISTORY_ROWS:]),
         older_rounds=max(len(records) - _HISTORY_ROWS, 0),
         frontier=tuple(

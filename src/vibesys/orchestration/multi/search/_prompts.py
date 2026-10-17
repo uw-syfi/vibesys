@@ -159,7 +159,6 @@ class ImplementPrompt(RolePromptContext):
     validation_failure: ValidationFailure | None = None
     no_valid_reply: str | None = None
     pareto_archive_conflict: ArchiveConflictView | None = None
-    official_due: bool = False
     benchmark_enabled: bool = True
     active_component: str | None = None
 
@@ -179,7 +178,6 @@ class JudgePrompt(RolePromptContext):
     claims: ImplementerClaims
     framework: GateFacts
     pareto_archive_conflict: ArchiveConflictView | None = None
-    official_due: bool = False
     benchmark_enabled: bool = True
     # The trusted evaluations the candidate was measured by, stated at render time.
     cited_evidence: tuple[EvidenceRef, ...] = ()

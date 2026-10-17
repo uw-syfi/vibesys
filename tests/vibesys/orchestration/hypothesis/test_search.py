@@ -395,31 +395,11 @@ def test_review_due_override_skips_a_bounded_already_reviewed_continuation() -> 
     assert not due
 
 
-@settings(max_examples=examples(pr=8, nightly=100))
-@given(
-    evaluation_budget=st.none() | st.integers(min_value=1, max_value=5),
-    candidate_ready=st.booleans(),
-    measured=st.integers(min_value=0, max_value=5),
-)
-def test_official_due_measures_every_ready_candidate_while_the_budget_lasts(
-    evaluation_budget: int | None,
-    candidate_ready: bool,  # noqa: FBT001  # LW-040079 [FBT001]; the boolean is a flag in a parametrized test case, not a public call signature.
-    measured: int,
-) -> None:
-    records = [
-        _round(
-            n,
-            1.0,
-            hypothesis_id=f"H-{n}",
-            outcome="proven",
-            declared="nominated",
-            judge_verdict="pass",
-        )
-        for n in range(1, measured + 1)
-    ]
-    search = HypothesisSearch(HypothesisConfig(max_rounds=10, evaluation_budget=evaluation_budget))
-    reason = search.official_due(records=records, candidate_ready=candidate_ready)
-    if candidate_ready and (evaluation_budget is None or measured < evaluation_budget):
+@given(candidate_ready=st.booleans())
+def test_official_due_measures_every_ready_candidate(*, candidate_ready: bool) -> None:
+    search = HypothesisSearch(HypothesisConfig(max_rounds=10))
+    reason = search.official_due(candidate_ready=candidate_ready)
+    if candidate_ready:
         assert reason == hypothesis_cadence.MEASURED_AFTER_REVIEW
     else:
         assert reason is None

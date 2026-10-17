@@ -777,17 +777,6 @@ def _build_agent_parser() -> _RunArgumentParser:
             "nominated candidates and the final round are always reviewed (default: 3)."
         ),
     )
-    parser.add_argument(
-        "--evaluation-budget",
-        type=int,
-        default=None,
-        metavar="N",
-        help=(
-            "Measure at most N ideas with the configured framework-owned "
-            "accuracy/benchmark gates. Every idea that passes review is measured "
-            "while the budget lasts (default: unbounded)."
-        ),
-    )
     _add_modality_argument(parser)
     parser.add_argument(
         "--interface",

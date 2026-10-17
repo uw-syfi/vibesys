@@ -26,9 +26,6 @@ class SingleConfig(Value):
     """Rounds of agent work: each opens one candidate workspace."""
     max_retries_per_round: Positive = 1
     """Paid implementer turns of one round, which is also the workspace's paid-turn limit."""
-    evaluation_budget: Positive | None = None
-    """How many ideas the trusted gates measure: every idea that passes self-review is, while the
-    budget lasts; None leaves it unbounded."""
     max_continuation_rounds: NonNegative = 2
     """Times one hypothesis may be continued after its first round."""
     exclusive_root: bool = False
@@ -45,7 +42,6 @@ class SingleConfig(Value):
         """
         return HypothesisConfig(
             max_rounds=self.max_rounds,
-            evaluation_budget=self.evaluation_budget,
             max_retries_per_round=self.max_retries_per_round,
             max_continuation_rounds=self.max_continuation_rounds,
         )

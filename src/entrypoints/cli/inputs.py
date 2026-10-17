@@ -255,8 +255,6 @@ def _validate_agent(args: argparse.Namespace) -> None:
         _configuration_error("Error: --max-retries-per-round must be >= 1.")
     if args.judge_every < 1:
         _configuration_error("Error: --judge-every must be >= 1.")
-    if args.evaluation_budget is not None and args.evaluation_budget < 1:
-        _configuration_error("Error: --evaluation-budget must be >= 1.")
     if getattr(args, "outer_loop", "agent") == "dynamic" and args.max_in_flight < 1:
         _configuration_error("Error: --max-in-flight must be >= 1.")
     if (

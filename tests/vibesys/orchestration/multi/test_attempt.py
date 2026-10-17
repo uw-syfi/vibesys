@@ -67,7 +67,6 @@ def attempt(*, validation_offered: bool = False, **changes: object) -> MultiAtte
         "base": BASE,
         "ledger": ledger,
         "validation_offered": validation_offered,
-        "planned_official": True,
         "revalidation_required": False,
         **changes,
     }

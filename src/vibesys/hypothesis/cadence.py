@@ -1,8 +1,8 @@
-"""Review cadence and the evaluation budget, ported from ``loops/*/decisions.py``.
+"""Review cadence and the measurement trigger, ported from ``loops/*/decisions.py``.
 
 ``multi/decisions.py`` and ``profile_multi/decisions.py`` carried byte-for-byte
 identical copies of ``review_due``, ``candidate_evidence_is_fresh``, and
-``official_evaluation_reason`` (now the evaluation budget), plus two review-cadence overrides duplicated
+``official_evaluation_reason`` (now ``official_due``), plus two review-cadence overrides duplicated
 in ``multi/session.py`` and ``profile_multi/session.py`` (``review_started``
 forcing a review to completion, and a bounded-continuation retry deferring
 one). This module keeps that one copy.
@@ -108,28 +108,15 @@ def review_due(  # noqa: PLR0913  # LW-040039 [PLR0913]; the parameters are inde
 
 
 MEASURED_AFTER_REVIEW = "review_passed"
-"""Why the trusted gates measure an idea: it passed review and the budget has room."""
+"""Why the trusted gates measure an idea: it passed review."""
 
 
-def evaluations_spent(records: Sequence[RoundRecord]) -> int:
-    """How many rounds the trusted gates measured."""
-    return sum(1 for record in records if record.official_evaluation)
-
-
-def official_due(
-    config: HypothesisConfig, *, records: Sequence[RoundRecord], candidate_ready: bool
-) -> str | None:
+def official_due(*, candidate_ready: bool) -> str | None:
     """Why the trusted gates measure this round's reviewed candidate, or None.
 
-    Every idea that passes review is measured while the evaluation budget lasts; nothing else
-    schedules a measurement.
+    Every idea that passes review is measured; nothing else schedules a measurement.
     """
-    if not candidate_ready:
-        return None
-    budget = config.evaluation_budget
-    if budget is not None and evaluations_spent(records) >= budget:
-        return None
-    return MEASURED_AFTER_REVIEW
+    return MEASURED_AFTER_REVIEW if candidate_ready else None
 
 
 __all__ = [
@@ -137,7 +124,6 @@ __all__ = [
     "CandidateDisposition",
     "candidate_evidence_fresh",
     "continuation_requested",
-    "evaluations_spent",
     "keeps_hypothesis_active",
     "official_due",
     "review_due",

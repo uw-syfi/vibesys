@@ -108,7 +108,6 @@ _IMPLEMENT = st.builds(
     plan=_PLAN,
     base_revision=_REVISIONS,
     framework=_GATES,
-    official_due=st.booleans(),
     benchmark_enabled=st.booleans(),
     active_component=st.none() | _TEXT,
     continuation_step=st.none() | _TEXT,
@@ -133,7 +132,6 @@ _JUDGE = st.builds(
     claims=_CLAIMS,
     framework=_GATES,
     pareto_archive_conflict=_CONFLICT,
-    official_due=st.booleans(),
     benchmark_enabled=st.booleans(),
 )
 _PRE_ROUND = st.builds(

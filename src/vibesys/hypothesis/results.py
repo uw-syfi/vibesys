@@ -38,7 +38,6 @@ class PlanningContext:
     records: tuple[RoundRecord, ...]
     carry: CarryOver
     plateau_warning: str | None
-    evaluations_spent: int
 
 
 @dataclass(frozen=True, slots=True)

@@ -116,13 +116,6 @@ def test_a_passing_self_review_with_a_candidate_goes_to_the_gates_when_they_are_
     assert not taken.passed
 
 
-def test_a_passing_self_review_settles_as_passed_when_the_evaluation_budget_is_spent() -> None:
-    taken = attempt(measured=1, config=config(max_rounds=4, evaluation_budget=1))
-    assert taken.replied(implemented(), CANDIDATE) is Next.SETTLE
-    assert taken.passed
-    assert taken.official_reason is None
-
-
 def test_a_gate_that_rejects_asks_again_and_demands_the_gates_again() -> None:
     taken = attempt()
     taken.replied(implemented(), CANDIDATE)

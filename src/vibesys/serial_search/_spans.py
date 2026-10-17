@@ -76,8 +76,7 @@ def round_passed(settlement: Settlement | None, attempt: Settling) -> bool:
 
     It kept what it made, the trusted gates measured it, and its own checks did not turn it down.
 
-    An idea no gate measured (its review was deferred, the evaluation budget was spent, or the
-    gates could not run) has no result, so it did not pass. A winner-eligible idea is never turned
+    An idea no gate measured (its review was deferred or the gates could not run) has no result, so it did not pass. A winner-eligible idea is never turned
     down (the implementer's provisional advice to discard does not overrule the trusted gates).
     """
     if settlement is None or settlement.retention == "discard":

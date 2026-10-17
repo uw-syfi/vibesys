@@ -90,7 +90,6 @@ class SingleAttempt:
             feedback=self.feedback,
             no_valid_reply=self.no_valid_reply,
             dominated_by_rounds=self.dominated_by,
-            official_due=rounds.official_reason(self.config.hypotheses, self.ledger) is not None,
         )
 
     # -- what a turn came to -----------------------------------------------------------------
@@ -133,7 +132,7 @@ class SingleAttempt:
             self.no_valid_reply = "the implementer retained no changed candidate"
             self.feedback = "retained no changed candidate"
             return Next.AGAIN
-        reason = rounds.official_reason(hypotheses, self.ledger)
+        reason = rounds.official_reason()
         if reason is None or not self.terms.measured:
             self.passed = True
             self.official_reason = None

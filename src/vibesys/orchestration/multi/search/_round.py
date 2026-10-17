@@ -19,7 +19,7 @@ from typing import Self
 from vibesys.candidates.api import space_of, workspace_mode_for
 from vibesys.hypothesis import Continue, Finished, NewHypothesis, rounds
 from vibesys.orchestration.multi.models import ImplementerResponse, JudgeResponse, PreRoundDecision
-from vibesys.orchestration.multi.search._attempt import MultiAttempt, Next, official_planned
+from vibesys.orchestration.multi.search._attempt import MultiAttempt, Next
 from vibesys.orchestration.multi.search._config import MultiConfig
 from vibesys.orchestration.multi.search._operations import VALIDATE_LOCAL_KIND
 from vibesys.orchestration.multi.search._prompts import PreRoundPrompt, ProfilerPrompt
@@ -116,7 +116,6 @@ async def _play(ctx: Flow, start: MultiRound) -> RoundDone:
         validation_offered=any(
             item.kind == VALIDATE_LOCAL_KIND for item in ctx.capabilities.operations
         ),
-        planned_official=official_planned(config, ledger),
         revalidation_required=active is not None and active.gate_revalidation_pending,
         feedback=feedback,
     )

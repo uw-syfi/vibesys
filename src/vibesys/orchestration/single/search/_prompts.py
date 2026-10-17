@@ -45,7 +45,6 @@ class RoundPrompt(RolePromptContext):
     feedback: str | None = None
     no_valid_reply: str | None = None
     dominated_by_rounds: tuple[int, ...] = ()
-    official_due: bool = False
 
 
 type PromptContext = Annotated[

@@ -286,7 +286,6 @@ def _agent_policy_descriptor(
             **task,
             "max_rounds": args.max_rounds,
             "max_retries_per_round": args.max_retries_per_round,
-            "evaluation_budget": args.evaluation_budget,
             **({"judge_every": args.judge_every} if args.inner_loop == "multi-agent" else {}),
         }
     return OrchestrationDescriptor(id=orchestration_id, config_version=1, options=options)

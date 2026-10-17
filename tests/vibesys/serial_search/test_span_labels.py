@@ -55,17 +55,16 @@ def begin(
     *,
     rounds: int,
     restarting: bool,
-    budget: int | None = None,
     **world: object,
 ) -> SerialHost:
     if search == "single":
         return single_host.SingleHost.start(
-            single_host.config(max_rounds=rounds, evaluation_budget=budget),
+            single_host.config(max_rounds=rounds),
             restarting=restarting,
             **world,  # ty: ignore[invalid-argument-type]
         )
     return multi_host.MultiHost.start(
-        multi_host.config(max_rounds=rounds, evaluation_budget=budget),
+        multi_host.config(max_rounds=rounds),
         restarting=restarting,
         **world,  # ty: ignore[invalid-argument-type]
     )
@@ -231,32 +230,6 @@ def gates_under(host: SerialHost, owner: Span) -> list[Span]:
     return [s for s in labelled(host, "gate") if s.parent == owner.id]
 
 
-@SEARCHES
-@across_restarts
-def test_a_round_the_gates_did_not_measure_has_no_gate_whatever_its_implementer_measured(
-    *, search: str, restarting: bool
-) -> None:
-    # one measurement path: what an agent measures of its own work is never shown as a gate,
-    # so the run shows only numbers the framework took of the revision it retains
-    host = begin(search, rounds=2, restarting=restarting, budget=1, throughputs={"c1": 80.0})
-    design(host, "h1")
-    implement(host, search, "c1")
-    design(host, "h2")
-    implement(host, search, "c2", evaluations=[("c2", BOTH_PASS)])  # the budget is spent
-    host.drain()
-
-    assert host.measured == ["c1"]
-    first, second = labelled(host, "workstream")
-    assert [attrs(w)["revision"] for w in (first, second)] == ["c1", "c2"]
-    (official,) = gates_under(host, first)
-    assert attrs(official)["metric_value"] == 80.0
-    assert gates_under(host, second) == []
-    assert [(w.label.verdict, w.label.reason) for w in (first, second) if w.label] == [
-        ("passed", None),
-        ("failed", "not_measured"),
-    ]
-
-
 EVALUATIONS = {"both": BOTH_PASS, "benchmark": BENCHMARK_ONLY, "accuracy_fails": ACCURACY_FAILS}
 """The evaluations an implementer may take of its own work, which no gate ever reads."""
 
@@ -274,19 +247,15 @@ EVALUATIONS = {"both": BOTH_PASS, "benchmark": BENCHMARK_ONLY, "accuracy_fails":
         min_size=1,
         max_size=3,
     ),
-    budget=st.none() | st.integers(1, 3),
 )
 def test_every_gate_is_the_framework_s_measurement_of_the_revision_its_round_retains(
     *,
     search: str,
     restarting: bool,
     rounds: list[tuple[list[tuple[bool, str]], float]],
-    budget: int | None,
 ) -> None:
     throughputs = {f"c{n}": value for n, (_, value) in enumerate(rounds, start=1)}
-    host = begin(
-        search, rounds=len(rounds), restarting=restarting, budget=budget, throughputs=throughputs
-    )
+    host = begin(search, rounds=len(rounds), restarting=restarting, throughputs=throughputs)
     for n, (evaluations, _) in enumerate(rounds, start=1):
         design(host, f"h{n}")
         measured = [(f"c{n}" if kept else "other", EVALUATIONS[kind]) for kept, kind in evaluations]
@@ -294,11 +263,8 @@ def test_every_gate_is_the_framework_s_measurement_of_the_revision_its_round_ret
     host.drain()
 
     note(f"officially measured: {host.measured}")
-    # every idea that passes review is measured while the budget lasts, in order
-    expected = [f"c{n}" for n in range(1, len(rounds) + 1)][
-        : len(rounds) if budget is None else budget
-    ]
-    assert host.measured == expected
+    # every idea that passes review is measured, in order
+    assert host.measured == [f"c{n}" for n in range(1, len(rounds) + 1)]
     for n, workstream in enumerate(labelled(host, "workstream"), start=1):
         candidate, value = f"c{n}", throughputs[f"c{n}"]
         gates = gates_under(host, workstream)
@@ -405,14 +371,11 @@ def test_regression_a_round_that_gave_up_its_work_failed_and_so_did_one_nobody_m
         min_size=1,
         max_size=4,
     ),
-    budget=st.none() | st.integers(1, 3),
 )
 def test_a_multi_round_passed_when_the_gates_measured_it_and_nothing_turned_it_down(
-    *, restarting: bool, rounds: list[tuple[str, str, bool]], budget: int | None
+    *, restarting: bool, rounds: list[tuple[str, str, bool]]
 ) -> None:
-    config = multi_host.config(
-        max_rounds=len(rounds) + 1, judge_every=100, evaluation_budget=budget
-    )
+    config = multi_host.config(max_rounds=len(rounds) + 1, judge_every=100)
     host = multi_host.MultiHost.start(config, restarting=restarting)
     designed = 0
     reviewed: set[int] = set()

@@ -26,9 +26,6 @@ class MultiConfig(Value):
     """Rounds of agent work: each opens one candidate workspace."""
     max_retries_per_round: Positive = 1
     """Paid implementer turns of one round, which is also the workspace's paid-turn limit."""
-    evaluation_budget: Positive | None = None
-    """How many ideas the trusted gates measure: every idea that passes review is, while the
-    budget lasts; None leaves it unbounded."""
     judge_every: Positive = 1
     """Review every this many rounds; a nominated or fresh claim and the final round always are."""
     max_continuation_rounds: NonNegative = 2
@@ -47,7 +44,6 @@ class MultiConfig(Value):
         return HypothesisConfig(
             max_rounds=self.max_rounds,
             judge_every=self.judge_every,
-            evaluation_budget=self.evaluation_budget,
             max_retries_per_round=self.max_retries_per_round,
             max_continuation_rounds=self.max_continuation_rounds,
         )

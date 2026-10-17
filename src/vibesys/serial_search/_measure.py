@@ -5,7 +5,7 @@ evidence is read, with the candidate's headline value, its ratio to the input's 
 
 There is one measurement path. The framework, not the agent, picks the revision it scores (the
 one the round retains) and measures it with the official gates, serially, for every idea that
-passes review while the evaluation budget lasts. An agent's own evaluation (the evaluation tool)
+passes review. An agent's own evaluation (the evaluation tool)
 may run while other agent work shares its host, so its timing is not comparable; the judge may
 read it, but it is never a number the run shows or rests on. A round the gates did not measure
 has no gate and no result.

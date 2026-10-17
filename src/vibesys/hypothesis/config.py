@@ -7,10 +7,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class HypothesisConfig:
-    """Cadence and budget knobs shared by every hypothesis-driven strategy.
-
-    ``evaluation_budget`` is how many ideas the framework measures with the trusted gates (every
-    idea that passes review is, while the budget lasts); None leaves it unbounded.
+    """Cadence knobs shared by every hypothesis-driven strategy.
 
     ``judge_every`` and the review-cadence overrides only matter for a
     designer/implementer split (multi, profile_multi); a single combined
@@ -20,7 +17,6 @@ class HypothesisConfig:
 
     max_rounds: int
     judge_every: int = 1
-    evaluation_budget: int | None = None
     max_retries_per_round: int = 1
     max_continuation_rounds: int = 2
 
@@ -31,9 +27,6 @@ class HypothesisConfig:
             raise ValueError(message)
         if self.judge_every < 1:
             message = "judge_every must be positive"
-            raise ValueError(message)
-        if self.evaluation_budget is not None and self.evaluation_budget < 1:
-            message = "evaluation_budget must be positive"
             raise ValueError(message)
         if self.max_retries_per_round < 1:
             message = "max_retries_per_round must be positive"

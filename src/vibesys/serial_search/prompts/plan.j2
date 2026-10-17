@@ -201,8 +201,7 @@ No framework-parsable benchmark is declared. The implementer must retain raw,
 auditable performance evidence for claims that require measurement.
 {% endif %}
 
-Every idea that passes review is measured with the trusted gates{% if evaluation_budget is not none %},
-within an evaluation budget ({{ evaluations_spent }} of {{ evaluation_budget }} spent){% endif %}.
+Every idea that passes review is measured with the trusted gates.
 After changing the served process/listener/entrypoint, an internal controller cannot prove
 deployment: its production startup must select the retained arm. If an A/B candidate fails
 but its control is retained, do not leave the failed arm as an implicit default.

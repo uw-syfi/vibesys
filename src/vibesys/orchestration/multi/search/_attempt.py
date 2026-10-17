@@ -85,11 +85,6 @@ class Next(StrEnum):
     """The attempt is over; the workspace closes with what it established."""
 
 
-def official_planned(config: MultiConfig, ledger: rounds.Ledger) -> bool:
-    """Whether the trusted gates will measure this round's candidate once it passes review."""
-    return rounds.official_reason(config.hypotheses, ledger) is not None
-
-
 def conflict_view(conflict: ArchiveConflict) -> ArchiveConflictView:
     """The archive conflict as prompt data."""
     return ArchiveConflictView(
@@ -174,7 +169,6 @@ class MultiAttempt:
     ledger: rounds.Ledger
     validation_offered: bool
     """Whether the run offers the trusted run of validation recipes."""
-    planned_official: bool
     """Whether the trusted gates will measure the candidate once it passes review."""
     revalidation_required: bool
     feedback: str | None = None
@@ -212,7 +206,6 @@ class MultiAttempt:
             validation_failure=self.validation_failure,
             no_valid_reply=self.no_valid_reply,
             pareto_archive_conflict=self.conflict,
-            official_due=self.planned_official,
             benchmark_enabled="benchmark" in self.terms.measured,
             active_component=None if focus is None else (focus.active_component or None),
         )
@@ -229,7 +222,6 @@ class MultiAttempt:
             claims=claims_of(self.response),
             framework=gate_facts(self.ledger.search.active_hypothesis),
             pareto_archive_conflict=self.conflict,
-            official_due=self.planned_official,
             benchmark_enabled="benchmark" in self.terms.measured,
             cited_evidence=cited,
         )
@@ -358,9 +350,7 @@ class MultiAttempt:
             return Next.SETTLE
         hypotheses = self.config.hypotheses
         ledger = reviewed.approve_candidate(hypotheses, self.ledger, reply)
-        reason = rounds.official_reason(
-            hypotheses, ledger, candidate_ready=reviewed.candidate_ready(reply)
-        )
+        reason = rounds.official_reason(candidate_ready=reviewed.candidate_ready(reply))
         if reason is None or not self.terms.measured or self.candidate is None:
             self.ledger = ledger
             self.passed = True

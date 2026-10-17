@@ -47,7 +47,6 @@ _FEW = st.integers(1, 3)
 _SERIAL = {
     "max_rounds": _FEW,
     "max_retries_per_round": st.integers(1, 2),
-    "evaluation_budget": st.none() | st.integers(1, 2),
     "max_continuation_rounds": st.integers(0, 2),
     "exclusive_root": st.booleans(),
 }

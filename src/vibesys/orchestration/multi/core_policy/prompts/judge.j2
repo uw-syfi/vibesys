@@ -107,13 +107,8 @@ because fresh canonical fields are null. If behavior changed, reject stale
 metrics for that arm while preserving independently unchanged retained rows.
 {% endif %}
 
-{% if official_due %}
 The trusted gates measure this candidate after PASS. Do not duplicate
 framework-owned commands.
-{% else %}
-The trusted gates will not measure this round (the evaluation budget is spent). Do not fail a valid scoped result solely for
-lacking a ceremonial full sweep or immutable accuracy rerun.
-{% endif %}
 {% if not benchmark_enabled %}
 No framework-parsable benchmark is declared. Audit retained performance evidence
 and operating-point selection directly. A due canonical claim still requires a

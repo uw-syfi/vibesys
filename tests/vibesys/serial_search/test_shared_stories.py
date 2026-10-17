@@ -203,7 +203,7 @@ def test_a_failed_attribution_command_ends_the_run_naming_what_ran_and_why(
     assert f"exited with code {exit_code}" in reason
 
 
-# -- the base and the evaluation budget -----------------------------------------------------------
+# -- the base ---------------------------------------------------------------------------------------
 
 INPUT = FACTS.baseline
 SLOWER_THAN_INPUT = 30.0
@@ -332,32 +332,6 @@ def test_an_idea_that_continues_its_hypothesis_builds_on_its_own_work_in_progres
 
     # round 3 continues h2 (no designer turn), on the work in progress round 2 retained
     assert bases(host)[:3] == [INPUT, commit("c1"), commit("c2")]
-
-
-@SEARCHES
-@MODES
-def test_a_round_beyond_the_evaluation_budget_is_never_a_winner_and_never_the_next_base(
-    *, search: str, restarting: bool
-) -> None:
-    host = start(search, restarting=restarting, config={"max_rounds": 2, "evaluation_budget": 1})
-    design(host, "h1")
-    implement(host, search, "c1")
-    host.drain_until_turn(PLANNER)
-    host.run.reply_raw(host.run.expect_turn(role=PLANNER), plan_reply("h2"))
-    implement(host, search, "c2")
-    host.drain()
-
-    first, second = settlements(host)[:2]
-    assert (first.eligible, first.retention) == (True, "candidate")
-    assert (second.eligible, second.retention) == (False, "candidate")
-    assert host.measured == ["c1"]
-    finish = host.run.finished
-    assert isinstance(finish, Finish)
-    assert finish.result.selection is not None
-    assert finish.result.selection.kind != "retained_candidate" or (
-        finish.result.selection.revision == commit("c1")
-    )
-    assert_flow_closed(host)
 
 
 @SEARCHES

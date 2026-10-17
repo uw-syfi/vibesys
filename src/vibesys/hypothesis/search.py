@@ -91,7 +91,6 @@ class HypothesisSearch:
             records=tuple(records),
             carry=carry,
             plateau_warning=transitions.detect_plateau(records),
-            evaluations_spent=cadence.evaluations_spent(records),
         )
         active = state.active_hypothesis
         if active is not None:
@@ -151,9 +150,9 @@ class HypothesisSearch:
             revalidation_required=revalidation_required,
         )
 
-    def official_due(self, *, records: Sequence[RoundRecord], candidate_ready: bool) -> str | None:
+    def official_due(self, *, candidate_ready: bool) -> str | None:
         """Return why the trusted gates measure the reviewed candidate, or ``None``."""
-        return cadence.official_due(self.config, records=records, candidate_ready=candidate_ready)
+        return cadence.official_due(candidate_ready=candidate_ready)
 
     def close_round(  # noqa: PLR0913  # LW-040042 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
         self,

@@ -49,8 +49,6 @@ _PLAN = st.builds(
     round_number=st.integers(1, 5),
     max_rounds=st.integers(5, 9),
     plateau_warning=st.none() | _TEXT,
-    evaluation_budget=st.none() | st.integers(1, 3),
-    evaluations_spent=st.integers(0, 3),
     input_value=st.none() | st.floats(0, 1e6),
     passed=st.lists(
         st.builds(
@@ -139,7 +137,6 @@ _ROUND = st.builds(
     feedback=st.none() | _TEXT,
     no_valid_reply=st.none() | _TEXT,
     dominated_by_rounds=st.lists(st.integers(1, 5), max_size=2).map(tuple),
-    official_due=st.booleans(),
 )
 
 
@@ -181,7 +178,7 @@ def test_the_plan_prompt_renders_for_every_context(context: PlanPrompt) -> None:
         assert f"starts from the current best, idea {best[0].round_number}" in text
     else:
         assert "starts from the input" in text
-    assert ("evaluation budget" in text) == (context.evaluation_budget is not None)
+    assert "evaluation budget" not in text
 
 
 @settings(max_examples=examples(pr=8, nightly=100))
