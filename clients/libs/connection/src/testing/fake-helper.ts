@@ -277,6 +277,7 @@ export class FakeHelper {
     'run_backend',
     'run_causes',
     'project_clean',
+    'run_digest',
   ]);
   /** The run log streams `logs.list` and `logs.read` serve; replace it to seed a store. */
   logStore = new FakeLogStore();

@@ -225,9 +225,15 @@ path = "server.host_helper_machine"
 depends_on = ["server.host_api", "vs_sim.api"]
 
 [[modules]]
+# A run's digest (ideas, best ratio, duration, ending) folded from its journal in one pass.
+# Light: the record contracts and the decoder only.
+path = "server.run_digest"
+depends_on = ["vs_decode.api", "server.host_api"]
+
+[[modules]]
 # The host helper's interfaces on a real host: projects, directories, launches, the checkout.
 path = "server.host_helper_os"
-depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_preflight", "server.host_preflight", "server.host_helper_requests", "vs_logs", "vs_project", "vs_sim.api"]
+depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_preflight", "server.host_preflight", "server.host_helper_requests", "server.run_digest", "vs_logs", "vs_project", "vs_sim.api"]
 
 [[modules]]
 path = "vibesys"

@@ -57,6 +57,7 @@ export type RequestId6 = string;
 export type DeadlineMs6 = number;
 export type Type6 = "runs.list";
 export type Project1 = string;
+export type DigestRuns = string[] | null;
 export type RequestId7 = string;
 export type DeadlineMs7 = number;
 export type Type7 = "run.start";
@@ -212,7 +213,8 @@ export type HelperFeature =
   | "run_roles"
   | "project_clean"
   | "run_backend"
-  | "run_causes";
+  | "run_causes"
+  | "run_digest";
 export type Features1 = HelperFeature[];
 export type VibesysVersion = string;
 export type Root = string;
@@ -341,6 +343,20 @@ export type Task3 = string | null;
 export type DisplayName = string;
 export type CreatedAt = string;
 export type InstanceId5 = string | null;
+export type Digest = (RunDigest | RunDigestUnreadable) | null;
+export type Kind = "digest";
+export type Ideas = number;
+export type BestRatio = number | null;
+export type DurationS = number | null;
+export type Summary = string;
+export type Resumable1 = boolean;
+export type RoundsFinished = number;
+/**
+ * The journal's last word on a run: the terminal event it ends with, if it has one.
+ */
+export type RunClosing = "finished" | "failed" | "interrupted";
+export type Kind1 = "unreadable";
+export type Message2 = string;
 export type Runs = RunSummary[];
 export type RequestId30 = string;
 export type Type30 = "run.start";
@@ -349,7 +365,7 @@ export type Version6 = 1;
 export type Outcome = "failed";
 export type Code1 = string;
 export type Stage1 = string;
-export type Message2 = string;
+export type Message3 = string;
 export type ExitCode = number;
 export type LogPath1 = string | null;
 export type RequestId31 = string;
@@ -477,13 +493,13 @@ export type CheckId =
 export type CheckState = "ok" | "warn" | "fail";
 export type Detail = string;
 export type Fix = (ChooseCheckout | CopyOut | EditSetting | StartDocker | DeclareBuild) | null;
-export type Kind = "choose_checkout";
-export type Kind1 = "copy_out";
+export type Kind2 = "choose_checkout";
+export type Kind3 = "copy_out";
 export type SuggestedPath = string;
-export type Kind2 = "edit_setting";
+export type Kind4 = "edit_setting";
 export type Key = string;
-export type Kind3 = "start_docker";
-export type Kind4 = "declare_build";
+export type Kind5 = "start_docker";
+export type Kind6 = "declare_build";
 export type Manifest = string;
 export type Outputs = string[];
 export type Cause =
@@ -504,50 +520,50 @@ export type Cause =
       | GitHubUnavailable
     )
   | null;
-export type Kind5 = "backend_unavailable";
+export type Kind7 = "backend_unavailable";
 export type Task4 = string;
 /**
  * A compute backend a task targets (``vs_sandbox.ComputeBackend``'s values); closed.
  */
 export type Backend = "cpu" | "cuda" | "rocm" | "metal" | "trainium";
 export type Declared = Backend[];
-export type Kind6 = "project_dirty";
+export type Kind8 = "project_dirty";
 export type Project5 = string;
 export type Paths = string[];
-export type Kind7 = "task_not_found";
+export type Kind9 = "task_not_found";
 export type Task5 = string;
 export type Available = string[];
-export type Kind8 = "task_unusable";
+export type Kind10 = "task_unusable";
 export type Task6 = string | null;
 export type Problem = string;
-export type Kind9 = "task_needs_provisioning";
+export type Kind11 = "task_needs_provisioning";
 export type Task7 = string;
-export type Kind10 = "task_image_unsupported";
+export type Kind12 = "task_image_unsupported";
 export type Task8 = string | null;
 export type Problem1 = string;
-export type Kind11 = "sysbox_missing";
+export type Kind13 = "sysbox_missing";
 export type Task9 = string;
 export type Problem2 = string;
-export type Kind12 = "config_invalid";
+export type Kind14 = "config_invalid";
 export type Problem3 = string;
-export type Kind13 = "roles_not_declared";
+export type Kind15 = "roles_not_declared";
 export type Roles1 = string[];
-export type Kind14 = "model_not_vetted";
+export type Kind16 = "model_not_vetted";
 export type Provider2 = string;
 export type Model4 = string | null;
 export type Vetted = string[];
 export type Role1 = string | null;
 export type Fallback = boolean;
-export type Kind15 = "arguments_rejected";
+export type Kind17 = "arguments_rejected";
 export type Problem4 = string;
-export type Kind16 = "arguments_unrecognized";
+export type Kind18 = "arguments_unrecognized";
 export type Arguments = string[];
-export type Kind17 = "option_not_accepted";
+export type Kind19 = "option_not_accepted";
 /**
  * A typed New run option (``RunOptions``); closed.
  */
 export type RunOption = "rounds" | "time_limit" | "results" | "role_model" | "role_reasoning_effort";
-export type Kind18 = "github_unavailable";
+export type Kind20 = "github_unavailable";
 export type Problem5 = string;
 export type Checks = Check[];
 export type Roles2 = string[] | null;
@@ -603,7 +619,7 @@ export type HelperErrorCode =
   | "unknown_run"
   | "unvetted_harness"
   | "internal";
-export type Message3 = string;
+export type Message4 = string;
 export type Path2 = string | null;
 export type SupportedVersions = [unknown, unknown] | null;
 export type VibesysVersion3 = string | null;
@@ -640,19 +656,19 @@ export type Type48 = "run.start_compensation_failed";
 export type ExitStatus1 = 12;
 export type RequestId47 = string;
 export type Detail2 = string;
-export type Kind19 = "worker_start_refused";
+export type Kind21 = "worker_start_refused";
 export type InstanceId6 = string;
 export type Type49 = "run.start_compensation_failed";
 export type ExitStatus2 = 12;
 export type RequestId48 = string;
 export type Detail3 = string;
-export type Kind20 = "stop_failed";
+export type Kind22 = "stop_failed";
 export type InstanceId7 = string;
 export type Type50 = "run.start_compensation_failed";
 export type ExitStatus3 = 12;
 export type RequestId49 = string;
 export type Detail4 = string;
-export type Kind21 = "stop_unconfirmed";
+export type Kind23 = "stop_unconfirmed";
 export type Version13 = 1;
 export type Id6 = string;
 export type Outcome1 = "stopping" | "still_running" | "unsupported";
@@ -738,6 +754,7 @@ export interface RunsListRequest {
   deadline_ms: DeadlineMs6;
   type: Type6;
   project: Project1;
+  digest_runs?: DigestRuns;
 }
 /**
  * Start a detached run (``vibesys --detach``) in ``project``.
@@ -1198,6 +1215,45 @@ export interface RunSummary {
   created_at: CreatedAt;
   phase: RunPhase | null;
   instance_id: InstanceId5;
+  digest?: Digest;
+}
+/**
+ * What a run's journal says at a glance, for a list row; never a replay of the run.
+ *
+ * ``ideas`` counts the workstreams that ended (probes excluded) and ``best_ratio`` is the
+ * best measured candidate that passed its gate, as a multiple of the input's value, by the
+ * objective's direction; ``None`` when no gate passed. ``duration_s`` runs from the
+ * journal's first event to the last step it recorded; ``None`` for a run with no events.
+ * ``ending`` is the run's ending record and ``closing`` its terminal event: both ``None``
+ * for a run still going or one whose server died without a word, which is how a run's
+ * ending is known after its registry tombstone expired (a day).
+ */
+export interface RunDigest {
+  kind: Kind;
+  ideas: Ideas;
+  best_ratio: BestRatio;
+  duration_s: DurationS;
+  ending: RunEndingFact | null;
+  closing: RunClosing | null;
+}
+/**
+ * How a run's durable record stood as it ended, as its server reports it to the record.
+ *
+ * ``outcome`` is core's end reason when the run recorded a result, ``None`` when it ended
+ * without one; ``summary`` is core's account of that result.
+ */
+export interface RunEndingFact {
+  outcome: RunEndOutcome | null;
+  summary?: Summary;
+  resumable: Resumable1;
+  rounds_finished: RoundsFinished;
+}
+/**
+ * A run whose journal exists and could not be read; ``message`` says why, in one line.
+ */
+export interface RunDigestUnreadable {
+  kind: Kind1;
+  message: Message2;
 }
 /**
  * The started server's record, or why nothing started.
@@ -1221,7 +1277,7 @@ export interface DetachedLaunchFailure {
   outcome?: Outcome;
   code: Code1;
   stage: Stage1;
-  message: Message2;
+  message: Message3;
   exit_code: ExitCode;
   log_path?: LogPath1;
   live_instance?: LiveInstanceRecord | null;
@@ -1490,33 +1546,33 @@ export interface Check {
  * Pick another VibeSys checkout for this machine.
  */
 export interface ChooseCheckout {
-  kind: Kind;
+  kind: Kind2;
 }
 /**
  * Copy the project into its own repository (``project.copy_out``), at the suggested path.
  */
 export interface CopyOut {
-  kind: Kind1;
+  kind: Kind3;
   suggested_path: SuggestedPath;
 }
 /**
  * Edit the named setting.
  */
 export interface EditSetting {
-  kind: Kind2;
+  kind: Kind4;
   key: Key;
 }
 /**
  * Start Docker on the machine.
  */
 export interface StartDocker {
-  kind: Kind3;
+  kind: Kind5;
 }
 /**
  * Declare a ``[build]`` producing ``outputs`` in the task manifest at ``manifest``.
  */
 export interface DeclareBuild {
-  kind: Kind4;
+  kind: Kind6;
   manifest: Manifest;
   outputs: Outputs;
 }
@@ -1526,7 +1582,7 @@ export interface DeclareBuild {
  * A fact, not a sentence: the client words it for its own controls, the CLI for its flags.
  */
 export interface BackendUnavailable {
-  kind: Kind5;
+  kind: Kind7;
   task: Task4;
   backend: Backend;
   declared: Declared;
@@ -1537,7 +1593,7 @@ export interface BackendUnavailable {
  * A fact, not a sentence: the client words it. ``paths`` are relative to the project, sorted.
  */
 export interface ProjectDirty {
-  kind: Kind6;
+  kind: Kind8;
   project: Project5;
   paths: Paths;
 }
@@ -1545,7 +1601,7 @@ export interface ProjectDirty {
  * The project has no task of that name.
  */
 export interface TaskNotFound {
-  kind: Kind7;
+  kind: Kind9;
   task: Task5;
   available: Available;
 }
@@ -1553,7 +1609,7 @@ export interface TaskNotFound {
  * The task's files cannot be loaded; ``problem`` is the loader's own account (raw text).
  */
 export interface TaskUnusable {
-  kind: Kind8;
+  kind: Kind10;
   task: Task6;
   problem: Problem;
 }
@@ -1561,14 +1617,14 @@ export interface TaskUnusable {
  * The task needs inputs copied into a project of its own, which this run does not do.
  */
 export interface TaskNeedsProvisioning {
-  kind: Kind9;
+  kind: Kind11;
   task: Task7;
 }
 /**
  * The task's Dockerfile cannot be used the way this run would run; ``problem`` is raw text.
  */
 export interface TaskImageUnsupported {
-  kind: Kind10;
+  kind: Kind12;
   task: Task8;
   problem: Problem1;
 }
@@ -1576,7 +1632,7 @@ export interface TaskImageUnsupported {
  * The task runs Docker inside its sandbox, which needs a runtime this machine's Docker lacks.
  */
 export interface SysboxMissing {
-  kind: Kind11;
+  kind: Kind13;
   task: Task9;
   problem: Problem2;
 }
@@ -1584,21 +1640,21 @@ export interface SysboxMissing {
  * The run's configuration (``agent.toml`` and what overrides it) is not valid.
  */
 export interface ConfigInvalid {
-  kind: Kind12;
+  kind: Kind14;
   problem: Problem3;
 }
 /**
  * The configuration names agent roles the run's orchestration does not declare.
  */
 export interface RolesNotDeclared {
-  kind: Kind13;
+  kind: Kind15;
   roles: Roles1;
 }
 /**
  * A model, or none, outside the vetted models of its provider.
  */
 export interface ModelNotVetted {
-  kind: Kind14;
+  kind: Kind16;
   provider: Provider2;
   model: Model4;
   vetted: Vetted;
@@ -1609,28 +1665,28 @@ export interface ModelNotVetted {
  * The run's argument parser refused the extra arguments; ``problem`` is its message (raw).
  */
 export interface ArgumentsRejected {
-  kind: Kind15;
+  kind: Kind17;
   problem: Problem4;
 }
 /**
  * Extra arguments the run's search does not take, in the order given (raw).
  */
 export interface ArgumentsUnrecognized {
-  kind: Kind16;
+  kind: Kind18;
   arguments: Arguments;
 }
 /**
  * The run's search does not take a typed option the screen set (for instance rounds).
  */
 export interface OptionNotAccepted {
-  kind: Kind17;
+  kind: Kind19;
   option: RunOption;
 }
 /**
  * The run publishes to GitHub, and this machine has no signed-in account; ``problem`` is raw.
  */
 export interface GitHubUnavailable {
-  kind: Kind18;
+  kind: Kind20;
   problem: Problem5;
 }
 /**
@@ -1696,7 +1752,7 @@ export interface HelperError {
   type: Type47;
   request_id: RequestId46;
   code: HelperErrorCode;
-  message: Message3;
+  message: Message4;
   path?: Path2;
   supported_versions?: SupportedVersions;
   vibesys_version?: VibesysVersion3;
@@ -1717,7 +1773,7 @@ export interface WorkerStartRefusedCompensationFailure {
   exit_status: ExitStatus1;
   request_id: RequestId47;
   detail: Detail2;
-  kind: Kind19;
+  kind: Kind21;
   instance_id: InstanceId6;
 }
 /**
@@ -1728,7 +1784,7 @@ export interface StopFailedCompensationFailure {
   exit_status: ExitStatus2;
   request_id: RequestId48;
   detail: Detail3;
-  kind: Kind20;
+  kind: Kind22;
   instance_id: InstanceId7;
 }
 /**
@@ -1742,7 +1798,7 @@ export interface StopUnconfirmedCompensationFailure {
   exit_status: ExitStatus3;
   request_id: RequestId49;
   detail: Detail4;
-  kind: Kind21;
+  kind: Kind23;
   stop_result: UnconfirmedInstanceStopResult;
 }
 /**

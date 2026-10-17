@@ -1435,7 +1435,8 @@
         "run_roles",
         "project_clean",
         "run_backend",
-        "run_causes"
+        "run_causes",
+        "run_digest"
       ],
       "title": "HelperFeature",
       "type": "string"
@@ -3306,6 +3307,16 @@
       "title": "RolesNotDeclared",
       "type": "object"
     },
+    "RunClosing": {
+      "description": "The journal's last word on a run: the terminal event it ends with, if it has one.",
+      "enum": [
+        "finished",
+        "failed",
+        "interrupted"
+      ],
+      "title": "RunClosing",
+      "type": "string"
+    },
     "RunConnectReply": {
       "additionalProperties": false,
       "description": "The channel is now a byte relay carrying the run protocol to this run.",
@@ -3405,6 +3416,101 @@
       "title": "RunCounts",
       "type": "object"
     },
+    "RunDigest": {
+      "additionalProperties": false,
+      "description": "What a run's journal says at a glance, for a list row; never a replay of the run.\n\n``ideas`` counts the workstreams that ended (probes excluded) and ``best_ratio`` is the\nbest measured candidate that passed its gate, as a multiple of the input's value, by the\nobjective's direction; ``None`` when no gate passed. ``duration_s`` runs from the\njournal's first event to the last step it recorded; ``None`` for a run with no events.\n``ending`` is the run's ending record and ``closing`` its terminal event: both ``None``\nfor a run still going or one whose server died without a word, which is how a run's\nending is known after its registry tombstone expired (a day).",
+      "properties": {
+        "kind": {
+          "const": "digest",
+          "default": "digest",
+          "title": "Kind",
+          "type": "string"
+        },
+        "ideas": {
+          "minimum": 0,
+          "title": "Ideas",
+          "type": "integer"
+        },
+        "best_ratio": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Best Ratio"
+        },
+        "duration_s": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Duration S"
+        },
+        "ending": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunEndingFact"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "closing": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunClosing"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "ideas",
+        "best_ratio",
+        "duration_s",
+        "ending",
+        "closing"
+      ],
+      "title": "RunDigest",
+      "type": "object"
+    },
+    "RunDigestUnreadable": {
+      "additionalProperties": false,
+      "description": "A run whose journal exists and could not be read; ``message`` says why, in one line.",
+      "properties": {
+        "kind": {
+          "const": "unreadable",
+          "default": "unreadable",
+          "title": "Kind",
+          "type": "string"
+        },
+        "message": {
+          "maxLength": 200,
+          "minLength": 1,
+          "pattern": "^[^\\n\\r]*$",
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "title": "RunDigestUnreadable",
+      "type": "object"
+    },
     "RunEndOutcome": {
       "description": "Why a run ended, on its tombstone: vs-core's ``EndReason`` members and two of the shell's.\n\nThe first seven are ``vs_core``'s ``EndReason`` values, copied because this module\nmay not import the core (``tests/server/test_run_end_record.py`` keeps them equal).",
       "enum": [
@@ -3420,6 +3526,43 @@
       ],
       "title": "RunEndOutcome",
       "type": "string"
+    },
+    "RunEndingFact": {
+      "additionalProperties": false,
+      "description": "How a run's durable record stood as it ended, as its server reports it to the record.\n\n``outcome`` is core's end reason when the run recorded a result, ``None`` when it ended\nwithout one; ``summary`` is core's account of that result.",
+      "properties": {
+        "outcome": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunEndOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "summary": {
+          "default": "",
+          "title": "Summary",
+          "type": "string"
+        },
+        "resumable": {
+          "title": "Resumable",
+          "type": "boolean"
+        },
+        "rounds_finished": {
+          "minimum": 0,
+          "title": "Rounds Finished",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "outcome",
+        "resumable",
+        "rounds_finished"
+      ],
+      "title": "RunEndingFact",
+      "type": "object"
     },
     "RunList": {
       "additionalProperties": false,
@@ -4051,6 +4194,32 @@
             }
           ],
           "title": "Instance Id"
+        },
+        "digest": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "digest": "#/$defs/RunDigest",
+                  "unreadable": "#/$defs/RunDigestUnreadable"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/RunDigest"
+                },
+                {
+                  "$ref": "#/$defs/RunDigestUnreadable"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Digest"
         }
       },
       "required": [
@@ -4117,6 +4286,23 @@
         "project": {
           "title": "Project",
           "type": "string"
+        },
+        "digest_runs": {
+          "anyOf": [
+            {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 100,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Digest Runs"
         }
       },
       "required": [
@@ -5060,6 +5246,9 @@
     },
     "logs.list": {
       "span_id": "logs_by_span"
+    },
+    "runs.list": {
+      "digest_runs": "run_digest"
     }
   }
 }

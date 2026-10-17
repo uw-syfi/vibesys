@@ -17,7 +17,8 @@ registry.
 Public surface: ``PROTOCOL_VERSION``, ``RECORD_VERSION``,
 ``INSTANCE_ID_PATTERN``, ``InstanceId``, ``RunId``, ``RunStatus``,
 ``StartupStage``, ``StartupProgress``, ``StartupFact``, ``FailureReason``,
-``RunPhase``, ``InstanceStatus``, ``RunEndOutcome``, ``EndRecord``, ``RunEndingFact``, ``one_line``,
+``RunPhase``, ``InstanceStatus``, ``RunEndOutcome``, ``EndRecord``, ``RunEndingFact``, ``RunClosing``,
+``RunDigest``, ``RunDigestUnreadable``, ``one_line``,
 ``END_REASON_MAX_CHARACTERS``, ``PauseCause``,
 ``LiveInstanceRecord``, ``UnreadableRecord``, ``parse_record``,
 ``InstanceList``, ``StopOutcome``, ``StopRoute``, ``InstanceStopResult``,
@@ -61,6 +62,7 @@ from pydantic import (
     ConfigDict,
     Field,
     JsonValue,
+    NonNegativeFloat,
     NonNegativeInt,
     PositiveInt,
     RootModel,
@@ -779,6 +781,8 @@ class HelperFeature(StrEnum):
     RUN_CAUSES = "run_causes"
     """``run.preflight``'s ``with_causes``: the typed ``cause`` of a failed ``settings_valid``
     check beyond an unrunnable backend (the task, configuration, agent and argument failures)."""
+    RUN_DIGEST = "run_digest"
+    """``runs.list``'s ``digest_runs``: each named run's ``digest``, read from its journal."""
 
 
 CLI_PROVIDER_FLAG: Final = "--cli-provider"
@@ -874,11 +878,18 @@ class TasksListRequest(_HelperRequest):
     """The project directory on the host; ``~`` expands to the helper's home."""
 
 
+RUN_DIGEST_MAX_RUNS: Final = 100
+"""The most runs one ``runs.list`` may ask a digest of."""
+
+
 class RunsListRequest(_HelperRequest):
     """A project's runs, with the phase of any server on this host that drives one."""
 
     type: Literal["runs.list"] = "runs.list"
     project: str
+    digest_runs: Annotated[tuple[RunId, ...], Field(max_length=RUN_DIGEST_MAX_RUNS)] | None = None
+    """The runs to read a ``digest`` of, which costs a pass over each one's journal, so a
+    client names only the runs it shows. Sent only after ``hello`` returned ``run_digest``."""
 
 
 class ResumeRun(BaseModel):
@@ -1193,6 +1204,7 @@ HELPER_FIELD_FEATURES: Final[Mapping[type[_HelperRequest], Mapping[str, HelperFe
         "with_project_clean": HelperFeature.PROJECT_CLEAN,
     },
     LogsListRequest: {"span_id": HelperFeature.LOGS_BY_SPAN},
+    RunsListRequest: {"digest_runs": HelperFeature.RUN_DIGEST},
 }
 """The feature each gated optional field needs when it is set (not ``None``), exported too."""
 
@@ -1321,6 +1333,45 @@ class TasksListReply(_HelperReply):
     tasks: TaskList
 
 
+class RunClosing(StrEnum):
+    """The journal's last word on a run: the terminal event it ends with, if it has one."""
+
+    FINISHED = "finished"
+    FAILED = "failed"
+    INTERRUPTED = "interrupted"
+
+
+class RunDigest(BaseModel):
+    """What a run's journal says at a glance, for a list row; never a replay of the run.
+
+    ``ideas`` counts the workstreams that ended (probes excluded) and ``best_ratio`` is the
+    best measured candidate that passed its gate, as a multiple of the input's value, by the
+    objective's direction; ``None`` when no gate passed. ``duration_s`` runs from the
+    journal's first event to the last step it recorded; ``None`` for a run with no events.
+    ``ending`` is the run's ending record and ``closing`` its terminal event: both ``None``
+    for a run still going or one whose server died without a word, which is how a run's
+    ending is known after its registry tombstone expired (a day).
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["digest"] = "digest"
+    ideas: NonNegativeInt
+    best_ratio: float | None
+    duration_s: NonNegativeFloat | None
+    ending: RunEndingFact | None
+    closing: RunClosing | None
+
+
+class RunDigestUnreadable(BaseModel):
+    """A run whose journal exists and could not be read; ``message`` says why, in one line."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["unreadable"] = "unreadable"
+    message: OneLine
+
+
 class RunSummary(BaseModel):
     """One run of a project, from its durable manifest and this host's registry."""
 
@@ -1334,6 +1385,12 @@ class RunSummary(BaseModel):
     """The phase of the server on this host that drives or last drove the run, if one is listed."""
     instance_id: InstanceId | None
     """That server, while it is live: attach to it rather than resume."""
+    digest: Annotated[
+        Annotated[RunDigest | RunDigestUnreadable, Field(discriminator="kind")] | None,
+        Field(exclude_if=lambda digest: digest is None),
+    ] = None
+    """What the run's journal says, for each run the request named in ``digest_runs`` (feature
+    ``run_digest``); absent for the others, so a strict client that did not ask never sees it."""
 
 
 class RunList(BaseModel):

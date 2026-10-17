@@ -36,6 +36,8 @@ from server.host_api import (
     LogStream,
     LogStreamOutcome,
     LogTail,
+    RunDigest,
+    RunDigestUnreadable,
     TaskList,
     TaskSummary,
 )
@@ -58,6 +60,7 @@ from server.host_helper_requests import (
     event_page,
 )
 from server.host_preflight import PreflightReport
+from server.run_digest import digest_journal
 from vs_decode.api import Unreadable, decode_json
 from vs_project.api import GitRunHistory, NullGitTrackerEvents, Project, ProjectError
 from vs_sim.api import ProcessSpec
@@ -85,6 +88,7 @@ class FileProjects:
     def __init__(self, repositories: GitRepositoryFactory) -> None:
         """Read run branches through the repositories ``repositories`` opens."""
         self._repositories = repositories
+        self._digests: dict[Path, tuple[tuple[int, int], RunDigest]] = {}
 
     def tasks(self, project: Path) -> TaskList:
         """The project's tasks, ordered by name."""
@@ -119,6 +123,31 @@ class FileProjects:
             )
             for manifest in manifests
         )
+
+    def run_digest(self, project_root: Path, run_id: str) -> RunDigest | RunDigestUnreadable:
+        """What run ``run_id``'s journal says at a glance.
+
+        An ended run's journal never changes, so its digest is kept for as long as the journal
+        keeps its size and modification time; a run still going is read again.
+        """
+        journal = Project.log_directory_for(project_root, run_id) / RUN_EVENTS_FILE
+        try:
+            with journal.open("rb") as lines:
+                stamp = os.fstat(lines.fileno())
+                version = (stamp.st_size, stamp.st_mtime_ns)
+                kept = self._digests.get(journal)
+                if kept is not None and kept[0] == version:
+                    return kept[1]
+                digest = digest_journal(lines)
+        except FileNotFoundError:
+            return digest_journal(())
+        except OSError as exc:
+            return RunDigestUnreadable(
+                message=f"the run's journal could not be read: {exc.strerror}"
+            )
+        if digest.ending is not None or digest.closing is not None:
+            self._digests[journal] = (version, digest)
+        return digest
 
     def require_initialized(self, project: Path) -> Path:
         """The project's root, once it is known to define tasks."""

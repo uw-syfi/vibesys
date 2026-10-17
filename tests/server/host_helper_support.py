@@ -11,10 +11,11 @@ from __future__ import annotations
 import json
 import posixpath
 from dataclasses import dataclass, field, replace
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from tests.support.example_materializer import FakeExampleMaterializer
+from tests.support.task_project import write_task
 
 from entrypoints.examples import HelperExampleProjects
 from server.host_api import (
@@ -55,8 +56,10 @@ from server.registry import (
     LiveRegistry,
     StopEffects,
 )
+from vibesys.orchestration.dynamic.launch import DynamicLaunch
 from vs_decode.api import Unreadable
-from vs_project.api.testing import FakeGitRepositories
+from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
+from vs_project.api.testing import FakeGitRepositories, run_execution_record
 from vs_sim.api.testing import HANG_GUARD_S, FakeProcessSignaller, ScriptedProbe
 
 if TYPE_CHECKING:
@@ -69,6 +72,8 @@ if TYPE_CHECKING:
     from vs_sim.api import Network, ProbeResult, Threads, Worker
     from vs_sim.api.testing import SimThreads
 
+RUN_ID = "20261010-120000-11111111-dynamic"
+"""The run ``project_with_run`` records."""
 HOME = "/home/user"
 VIBESYS_VERSION = "0+test"
 HARNESSES = (
@@ -477,3 +482,29 @@ def serve_on(
         )
 
     return threads.spawn(run, name="helper")
+
+
+def project_with_run(root: Path) -> Path:
+    root.mkdir()
+    write_task(root, 'version = 1\n[agent]\ndomain = "generic"\n', objective="Faster.\n")
+    project = Project.open(root)
+    project.state.create_project(root.name, now=datetime(2026, 1, 1, tzinfo=UTC))
+    manifest = project.state.new_run_manifest(
+        root.name,
+        run_id=RUN_ID,
+        branch=f"vibesys-runs/{RUN_ID}",
+        vibesys_version="0.2.0-test",
+        run_environment=RunEnvironmentRecord(name="docker"),
+        execution=run_execution_record(),
+        orchestration=OrchestrationDescriptor(
+            id="dynamic",
+            config_version=1,
+            options=DynamicLaunch(interface="service", max_rounds=2, judge_every=2).model_dump(
+                mode="json", exclude={"profiling"}
+            ),
+        ),
+        trusted_input_baseline="0" * 40,
+        now=datetime(2026, 10, 10, 12, tzinfo=UTC),
+    )
+    project.state.create_run(manifest, make_current=True)
+    return root

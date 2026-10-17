@@ -126,6 +126,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
     from datetime import tzinfo
 
+    from server.host_api import RunDigest, RunDigestUnreadable
     from server.host_examples import CreatedProject, ExampleList
     from server.host_preflight import PreflightReport
     from server.registry import InstanceInspector, LiveRegistry, StopEffects
@@ -207,6 +208,14 @@ class Projects(Protocol):
 
     def runs(self, project: Path) -> tuple[Path, tuple[ProjectRun, ...]]:
         """The project's resolved root and its runs, oldest first."""
+        ...
+
+    def run_digest(self, project_root: Path, run_id: str) -> RunDigest | RunDigestUnreadable:
+        """What run ``run_id``'s journal says at a glance; empty for a run with no journal.
+
+        ``project_root`` is a root ``runs`` returned. Never raises: a journal that exists and
+        cannot be read is ``RunDigestUnreadable``.
+        """
         ...
 
     def require_initialized(self, project: Path) -> Path:
@@ -454,10 +463,16 @@ def _path_error(
     )
 
 
-def run_summaries(root: Path, runs: Iterable[ProjectRun], listing: InstanceList) -> RunList:
+def run_summaries(
+    root: Path,
+    runs: Iterable[ProjectRun],
+    listing: InstanceList,
+    digests: Mapping[str, RunDigest | RunDigestUnreadable] | None = None,
+) -> RunList:
     """Join a project's runs with this host's registry: each run's server and its phase.
 
-    A live server outranks a tombstone; among tombstones the latest ended wins.
+    A live server outranks a tombstone; among tombstones the latest ended wins. A run's
+    ``digest`` is the one ``digests`` holds for it, if any.
     """
     project_root = str(root)
     live = {
@@ -478,6 +493,7 @@ def run_summaries(root: Path, runs: Iterable[ProjectRun], listing: InstanceList)
                 created_at=run.created_at,
                 phase=None if server is None else server.phase,
                 instance_id=None if run.run_id not in live else live[run.run_id].id,
+                digest=None if digests is None else digests.get(run.run_id),
             )
         )
     return RunList(project_root=project_root, runs=tuple(summaries))
@@ -700,9 +716,15 @@ def _project_reply(
     match request:
         case TasksListRequest(request_id=request_id):
             return TasksListReply(request_id=request_id, tasks=host.projects.tasks(project))
-        case RunsListRequest(request_id=request_id):
+        case RunsListRequest(request_id=request_id, digest_runs=digest_runs):
             root, runs = host.projects.runs(project)
-            summaries = run_summaries(root, runs, host.registry.list())
+            known = {run.run_id for run in runs}
+            digests = {
+                run_id: host.projects.run_digest(root, run_id)
+                for run_id in dict.fromkeys(digest_runs or ())
+                if run_id in known
+            }
+            summaries = run_summaries(root, runs, host.registry.list(), digests)
             return RunsListReply(request_id=request_id, runs=summaries)
 
 

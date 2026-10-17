@@ -73,6 +73,7 @@ ALLOWED_FIRST_PARTY = (
     "server.instances",
     "server.registry",
     "server.relay",
+    "server.run_digest",
     "vs_sim",
     "vs_project",
     "vs_decode",
