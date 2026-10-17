@@ -1,0 +1,22 @@
+/**
+ * Each view's pane header (`ViewHeader`), the one place the frame reads them from. A view that adds
+ * to its header exports `<view>Header` from its own module and replaces its line here with a
+ * re-export, for example `export {stepHeader} from './step/step-view.js';`. Until then a view adds
+ * nothing and the frame's header stands.
+ */
+import type {AgentPaneProps, AgentsViewProps} from './agents/agents-view.js';
+import type {IdeaViewProps} from './idea/idea-view.js';
+import type {LogsViewProps} from './logs/logs-view.js';
+import type {PaneHeader, ViewHeader} from './props.js';
+import type {ItemViewProps, StepViewProps} from './step/step-view.js';
+import type {TimelineViewProps} from './timeline/timeline-view.js';
+
+const NONE = (): PaneHeader => ({});
+
+export const timelineHeader: ViewHeader<TimelineViewProps> = NONE;
+export const agentsHeader: ViewHeader<AgentsViewProps> = NONE;
+export const agentHeader: ViewHeader<AgentPaneProps> = NONE;
+export const logsHeader: ViewHeader<LogsViewProps> = NONE;
+export const stepHeader: ViewHeader<StepViewProps> = NONE;
+export const itemHeader: ViewHeader<ItemViewProps> = NONE;
+export const ideaHeader: ViewHeader<IdeaViewProps> = NONE;

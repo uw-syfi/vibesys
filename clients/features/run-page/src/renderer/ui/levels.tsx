@@ -11,12 +11,31 @@ import type {Candidate, CandidateStep} from '@vibesys/run-state/candidates';
 import {Button, Chip, Pane, Panes, Row, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {ResolvedZoom, RunMode, RunPageAction, RunPageState} from '../../state/index.js';
+import {FramedPane} from './framed-pane.js';
 import {IdeasList, ModeSwitch} from './run-level.js';
-import {AgentPane, AgentsView} from './views/agents/agents-view.js';
-import {IdeaView, StepList} from './views/idea/idea-view.js';
-import {LogsView} from './views/logs/logs-view.js';
+import {
+  AgentPane,
+  type AgentPaneProps,
+  AgentsView,
+  type AgentsViewProps,
+} from './views/agents/agents-view.js';
+import {
+  agentHeader,
+  agentsHeader,
+  ideaHeader,
+  itemHeader,
+  logsHeader,
+  stepHeader,
+} from './views/headers.js';
+import {IdeaView, type IdeaViewProps, StepList} from './views/idea/idea-view.js';
+import {LogsView, type LogsViewProps} from './views/logs/logs-view.js';
 import type {ViewBase} from './views/props.js';
-import {ItemView, StepView} from './views/step/step-view.js';
+import {
+  ItemView,
+  type ItemViewProps,
+  StepView,
+  type StepViewProps,
+} from './views/step/step-view.js';
 
 type Dispatch = (action: RunPageAction) => void;
 
@@ -89,6 +108,8 @@ function IdeaFacts(props: {readonly idea: Candidate; readonly base: ViewBase}): 
 
 function IdeaLevel(props: LevelProps & {readonly idea: Candidate}): JSX.Element {
   const {state, base, mode, idea, dispatch} = props;
+  const view: IdeaViewProps = {...base, idea};
+  const logs: LogsViewProps = {...base, state, scope: {kind: 'idea', idea}, dispatch};
   return (
     <Panes>
       <Pane kicker="ideas" title={`${base.model.candidates.candidates.length}`} width="list">
@@ -100,32 +121,28 @@ function IdeaLevel(props: LevelProps & {readonly idea: Candidate}): JSX.Element 
           dispatch={dispatch}
         />
       </Pane>
-      <Pane
+      <FramedPane
         kicker="idea"
         title={idea.title}
         width="fill"
         enterKey={`idea ${idea.id}`}
         meta={<IdeaFacts idea={idea} base={base} />}
         actions={<ModeSwitch mode={mode} options={logsOptions('Steps')} zoom={base.zoom} />}
+        header={mode === 'logs' ? logsHeader(logs) : ideaHeader(view)}
       >
-        {mode === 'logs' ? (
-          <LogsView {...base} state={state} scope={{kind: 'idea', idea}} dispatch={dispatch} />
-        ) : (
-          <IdeaView {...base} idea={idea} />
-        )}
-      </Pane>
+        {mode === 'logs' ? <LogsView {...logs} /> : <IdeaView {...view} />}
+      </FramedPane>
     </Panes>
   );
 }
 
 function AgentLevel(props: LevelProps & {readonly agent: AgentNode}): JSX.Element {
   const {base, agent, core} = props;
+  const view: AgentPaneProps = {...base, core, agent};
   return (
     <Panes>
-      <Pane kicker="agents" title={`${base.model.agents.agents.length}`} width="list">
-        <AgentsView {...base} selected={agent.id} compact />
-      </Pane>
-      <Pane
+      <AgentsPane base={base} selected={agent.id} />
+      <FramedPane
         kicker={`agent · ${agent.role}`}
         title={agent.activity.within?.title ?? agent.role}
         width="fill"
@@ -133,10 +150,30 @@ function AgentLevel(props: LevelProps & {readonly agent: AgentNode}): JSX.Elemen
         meta={
           <Chip label={agent.status} tone={agent.status === 'running' ? 'live' : 'neutral'} dot />
         }
+        header={agentHeader(view)}
       >
-        <AgentPane {...base} core={core} agent={agent} />
-      </Pane>
+        <AgentPane {...view} />
+      </FramedPane>
     </Panes>
+  );
+}
+
+/** The agents, compact, as the list beside an opened agent or an agent's turn. */
+function AgentsPane(props: {
+  readonly base: ViewBase;
+  readonly selected: string | null;
+}): JSX.Element {
+  const {base} = props;
+  const view: AgentsViewProps = {...base, selected: props.selected, compact: true};
+  return (
+    <FramedPane
+      kicker="agents"
+      title={`${base.model.agents.agents.length}`}
+      width="list"
+      header={agentsHeader(view)}
+    >
+      <AgentsView {...view} />
+    </FramedPane>
   );
 }
 
@@ -145,8 +182,18 @@ function StepPane(
 ): JSX.Element {
   const {state, base, core, mode, zoomed, step, dispatch} = props;
   const chip = stepChip(step);
+  const view: StepViewProps = {
+    ...base,
+    core,
+    idea: zoomed.idea,
+    agent: zoomed.agent,
+    step,
+    item: null,
+    compact: false,
+  };
+  const logs: LogsViewProps = {...base, state, scope: {kind: 'step', step}, dispatch};
   return (
-    <Pane
+    <FramedPane
       kicker={
         step.role === null
           ? step.kind.replaceAll('_', ' ')
@@ -157,21 +204,10 @@ function StepPane(
       enterKey={`step ${step.span}`}
       meta={<Chip label={chip.label} tone={chip.tone} dot />}
       actions={<ModeSwitch mode={mode} options={logsOptions('Step')} zoom={base.zoom} />}
+      header={mode === 'logs' ? logsHeader(logs) : stepHeader(view)}
     >
-      {mode === 'logs' ? (
-        <LogsView {...base} state={state} scope={{kind: 'step', step}} dispatch={dispatch} />
-      ) : (
-        <StepView
-          {...base}
-          core={core}
-          idea={zoomed.idea}
-          agent={zoomed.agent}
-          step={step}
-          item={null}
-          compact={false}
-        />
-      )}
-    </Pane>
+      {mode === 'logs' ? <LogsView {...logs} /> : <StepView {...view} />}
+    </FramedPane>
   );
 }
 
@@ -182,9 +218,7 @@ function StepLevel(
   return (
     <Panes>
       {zoomed.idea === null ? (
-        <Pane kicker="agents" title={`${base.model.agents.agents.length}`} width="list">
-          <AgentsView {...base} selected={zoomed.agent?.id ?? null} compact />
-        </Pane>
+        <AgentsPane base={base} selected={zoomed.agent?.id ?? null} />
       ) : (
         <Pane kicker="steps" title={zoomed.idea.title} width="list">
           <StepList idea={zoomed.idea} selected={step.span} zoom={base.zoom} />
@@ -203,22 +237,35 @@ function ItemLevel(
   },
 ): JSX.Element {
   const {base, core, zoomed, step, item} = props;
+  const view: StepViewProps = {
+    ...base,
+    core,
+    idea: zoomed.idea,
+    agent: zoomed.agent,
+    step,
+    item,
+    compact: true,
+  };
+  const opened: ItemViewProps = {...base, core, step, item};
   return (
     <Panes>
-      <Pane kicker={step.role ?? step.kind.replaceAll('_', ' ')} title={step.title} width="list">
-        <StepView
-          {...base}
-          core={core}
-          idea={zoomed.idea}
-          agent={zoomed.agent}
-          step={step}
-          item={item}
-          compact
-        />
-      </Pane>
-      <Pane kicker="item" title={item} width="inspector" enterKey={`item ${item}`}>
-        <ItemView {...base} core={core} step={step} item={item} />
-      </Pane>
+      <FramedPane
+        kicker={step.role ?? step.kind.replaceAll('_', ' ')}
+        title={step.title}
+        width="list"
+        header={stepHeader(view)}
+      >
+        <StepView {...view} />
+      </FramedPane>
+      <FramedPane
+        kicker="item"
+        title={item}
+        width="inspector"
+        enterKey={`item ${item}`}
+        header={itemHeader(opened)}
+      >
+        <ItemView {...opened} />
+      </FramedPane>
     </Panes>
   );
 }

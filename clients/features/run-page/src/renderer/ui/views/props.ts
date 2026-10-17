@@ -13,6 +13,7 @@
  * - `idea/`: an opened idea's body (attempts, step strip, steps) and its compact step list.
  */
 import type {CoreState} from '@vibesys/run-state';
+import type {ReactNode} from 'react';
 import type {RunModel, ZoomEvent} from '../../../state/index.js';
 
 /** Moves the screen: the route machine's events. */
@@ -35,3 +36,19 @@ export interface ViewBase {
 export interface WithCore {
   readonly core: CoreState | null;
 }
+
+/**
+ * What a view adds to the header of the pane the frame draws around it. `kicker` and `title`
+ * replace the frame's; `meta` follows the frame's facts (such as a status chip) on the header's
+ * line; `actions` come before the frame's own (such as the Logs switch). A view states its header
+ * as a pure function of its props (`ViewHeader`), registered in `headers.ts`.
+ */
+export interface PaneHeader {
+  readonly kicker?: string;
+  readonly title?: string;
+  readonly meta?: ReactNode;
+  readonly actions?: ReactNode;
+}
+
+/** A view's header, from the same props as its body. */
+export type ViewHeader<Props> = (props: Props) => PaneHeader;

@@ -6,7 +6,7 @@
  * the live end, or a past sequence the scrubber chose. History (an ended run's
  * recorded events, `runs.read_events`) folds into the same slice, so the tabs have one source.
  */
-import type {RunEvent, RunOverview, RunSnapshot} from '@vibesys/contracts';
+import type {RunEvent, RunOverview, RunSnapshot, Span} from '@vibesys/contracts';
 import type {CoreState} from '@vibesys/run-state';
 import {foldOverview, overviewFromSnapshot} from '@vibesys/run-state/overview';
 import {
@@ -17,6 +17,7 @@ import {
   traceSpans,
   type WorkMeter,
 } from '@vibesys/run-state/trace';
+import {AppendLog} from './append-log.js';
 import {latestTime} from './span-reading.js';
 
 /** The window's hold on the live run: none, being attached under a token, attached, or refused. */
@@ -39,33 +40,87 @@ export interface SessionView {
 
 /**
  * The trace as a base (a snapshot's spans, or nothing) plus the span events after it, in sequence
- * order, so it can be folded at any sequence from the base's on. The fold at the live end (`head`)
- * is kept as events arrive, each event folded once, so reading the live trace does no work.
+ * order, so it can be folded at any sequence from the base's on. What the live end needs is kept
+ * as events arrive, each event read once: the fold (`head`), the scrubber's positions and
+ * planning calls, and the latest run-clock time the spans carry. Appending a batch costs work in
+ * proportion to the batch, however long the run.
  */
 export interface TraceLog {
   readonly base: RunTrace;
   /** The overview at the base (a snapshot's), or null before one declared it. */
   readonly baseOverview: RunOverview | null;
-  readonly events: readonly RunEvent[];
+  readonly events: AppendLog<RunEvent>;
   /** The trace with every event folded: the base's fold extended by each appended event. */
   readonly head: RunTrace;
   /** The overview with every event folded. */
   readonly headOverview: RunOverview | null;
+  /** The sequences the scrubber can stand at, oldest first: the base's, then each span event's. */
+  readonly positions: AppendLog<number>;
+  /** The sequences where planning calls started, oldest first. */
+  readonly calls: AppendLog<number>;
+  /** The latest run-clock time the head's spans carry, or null when they carry none. */
+  readonly latest: number | null;
 }
 
-/** The log of `events` after `base`, its live end folded once. */
+const TRACE_SPAN_EVENTS: ReadonlySet<string> = new Set([
+  'span_started',
+  'span_updated',
+  'span_ended',
+]);
+
+function spanOf(event: RunEvent): Span | null {
+  const data = event.data;
+  if (!TRACE_SPAN_EVENTS.has(event.type) || data === null || data === undefined) return null;
+  return 'span' in data ? data.span : null;
+}
+
+function later(a: number | null, b: number | null): number | null {
+  return a === null ? b : b === null || b <= a ? a : b;
+}
+
+/** `log` with `added` (span events after it, in order) read into its live end. */
+function extended(log: TraceLog, added: readonly RunEvent[], meter?: WorkMeter): TraceLog {
+  const positions: number[] = [];
+  const calls: number[] = [];
+  let latest = log.latest;
+  for (const event of added) {
+    const span = spanOf(event);
+    if (span === null) continue;
+    positions.push(event.sequence ?? 0);
+    if (event.type === 'span_started' && span.label?.kind === 'planning_call') {
+      calls.push(event.sequence ?? 0);
+    }
+    latest = later(latest, latestTime([span]));
+  }
+  return {
+    ...log,
+    events: log.events.append(added),
+    // The head is the newest fold of its spans, so folding the new events costs one write each.
+    head: foldTrace(log.head, added, meter),
+    headOverview: foldOverview(log.headOverview, added),
+    positions: log.positions.append(positions),
+    calls: log.calls.append(calls),
+    latest,
+  };
+}
+
+/** The log of `events` after `base`, its live end read once. */
 export function traceLog(
   base: RunTrace,
   baseOverview: RunOverview | null,
   events: readonly RunEvent[],
 ): TraceLog {
-  return {
+  const empty: TraceLog = {
     base,
     baseOverview,
-    events,
-    head: foldTrace(base, events),
-    headOverview: foldOverview(baseOverview, events),
+    events: AppendLog.of<RunEvent>([]),
+    head: base,
+    headOverview: baseOverview,
+    positions: AppendLog.of([base.sequence]),
+    calls: AppendLog.of<number>([]),
+    latest: latestTime(traceSpans(base)),
   };
+  return events.length === 0 ? empty : extended(empty, events);
 }
 
 export const EMPTY_TRACE_LOG: TraceLog = traceLog(EMPTY_TRACE, null, []);
@@ -103,14 +158,7 @@ function appended(log: TraceLog, events: readonly RunEvent[], meter?: WorkMeter)
     last = at;
     if (SPAN_EVENTS.has(event.type)) added.push(event);
   }
-  if (added.length === 0) return log;
-  return {
-    ...log,
-    events: [...log.events, ...added],
-    // The head is the newest fold of its spans, so folding the new events costs one write each.
-    head: foldTrace(log.head, added, meter),
-    headOverview: foldOverview(log.headOverview, added),
-  };
+  return added.length === 0 ? log : extended(log, added, meter);
 }
 
 /** The trace slice after `data`; `meter` counts the spans the live fold writes and copies. */
@@ -118,7 +166,9 @@ export function traceStep(log: TraceLog, data: RunData, meter?: WorkMeter): Trac
   switch (data.kind) {
     case 'snapshot': {
       const base = traceFromSnapshot(data.snapshot);
-      const after = log.events.filter(event => (event.sequence ?? 0) > base.sequence);
+      const after = log.events.slice(
+        log.events.countWhile(event => (event.sequence ?? 0) <= base.sequence),
+      );
       return traceLog(base, overviewFromSnapshot(data.snapshot), after);
     }
     case 'events':
@@ -134,7 +184,10 @@ export function traceStep(log: TraceLog, data: RunData, meter?: WorkMeter): Trac
 
 /** The events up to sequence `at`. */
 function eventsAt(log: TraceLog, at: number): readonly RunEvent[] {
-  return log.events.filter(event => (event.sequence ?? 0) <= at);
+  return log.events.slice(
+    0,
+    log.events.countWhile(event => (event.sequence ?? 0) <= at),
+  );
 }
 
 /**

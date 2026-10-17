@@ -37,10 +37,12 @@ import {
   stripChartView,
   type ZoomEvent,
 } from '../../state/index.js';
-import {AgentsView} from './views/agents/agents-view.js';
-import {LogsView} from './views/logs/logs-view.js';
-import type {ViewBase, Zoom} from './views/props.js';
-import {TimelineView} from './views/timeline/timeline-view.js';
+import {FramedPane} from './framed-pane.js';
+import {AgentsView, type AgentsViewProps} from './views/agents/agents-view.js';
+import {agentsHeader, logsHeader, timelineHeader} from './views/headers.js';
+import {LogsView, type LogsViewProps} from './views/logs/logs-view.js';
+import type {PaneHeader, ViewBase, Zoom} from './views/props.js';
+import {TimelineView, type TimelineViewProps} from './views/timeline/timeline-view.js';
 
 type Dispatch = (action: RunPageAction) => void;
 
@@ -312,22 +314,28 @@ function NowPane(props: {readonly base: ViewBase}): JSX.Element | null {
   );
 }
 
-function RunFace(props: {
-  readonly state: RunPageState;
-  readonly base: ViewBase;
-  readonly mode: RunMode;
-  readonly dispatch: Dispatch;
-}): JSX.Element {
-  const {state, base, mode, dispatch} = props;
+/** The run level's face for `mode`: its body and what its view adds to the pane's header. */
+function runFace(
+  state: RunPageState,
+  base: ViewBase,
+  mode: RunMode,
+  dispatch: Dispatch,
+): {readonly header: PaneHeader; readonly body: JSX.Element} {
   switch (mode) {
-    case 'timeline':
-      return <TimelineView {...base} idea={null} />;
-    case 'agents':
-      return <AgentsView {...base} selected={null} compact={false} />;
-    case 'logs':
-      return <LogsView {...base} state={state} scope={{kind: 'run'}} dispatch={dispatch} />;
+    case 'timeline': {
+      const view: TimelineViewProps = {...base, idea: null};
+      return {header: timelineHeader(view), body: <TimelineView {...view} />};
+    }
+    case 'agents': {
+      const view: AgentsViewProps = {...base, selected: null, compact: false};
+      return {header: agentsHeader(view), body: <AgentsView {...view} />};
+    }
+    case 'logs': {
+      const view: LogsViewProps = {...base, state, scope: {kind: 'run'}, dispatch};
+      return {header: logsHeader(view), body: <LogsView {...view} />};
+    }
     case 'ideas':
-      return <IdeasFace state={state} base={base} dispatch={dispatch} />;
+      return {header: {}, body: <IdeasFace state={state} base={base} dispatch={dispatch} />};
   }
 }
 
@@ -348,11 +356,12 @@ export function RunLevel(props: {
   const {state, base, mode, dispatch} = props;
   const total =
     mode === 'agents' ? base.model.agents.agents.length : base.model.candidates.candidates.length;
+  const face = runFace(state, base, mode, dispatch);
   return (
     <>
       <Hero {...base} />
       <Panes>
-        <Pane
+        <FramedPane
           kicker={KICKERS[mode]}
           title={mode === 'logs' ? 'run' : `${total}`}
           width="fill"
@@ -360,9 +369,10 @@ export function RunLevel(props: {
             ? {meta: <IdeasLegend state={state} base={base} dispatch={dispatch} />}
             : {})}
           actions={<ModeSwitch mode={mode} options={MODES} zoom={base.zoom} />}
+          header={face.header}
         >
-          <RunFace state={state} base={base} mode={mode} dispatch={dispatch} />
-        </Pane>
+          {face.body}
+        </FramedPane>
         <NowPane base={base} />
       </Panes>
     </>

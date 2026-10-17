@@ -18,7 +18,9 @@ import type {RunEvent, RunOverview} from '@vibesys/contracts';
 import {AgentFold, type AgentGraph, agentGraph} from '@vibesys/run-state/agents';
 import {CandidateFold, type CandidateTree, candidateTree} from '@vibesys/run-state/candidates';
 import {type RunTrace, traceSpans} from '@vibesys/run-state/trace';
+import type {AppendLog} from './append-log.js';
 import {overviewAt, type TraceLog, traceAt} from './live.js';
+import {latestTime} from './span-reading.js';
 
 /** Counts the units of work a read does (spans folded, nodes built); tests bound it. */
 export interface ReadMeter {
@@ -37,6 +39,8 @@ export interface RunModel {
   readonly direction: Direction;
   readonly candidates: CandidateTree;
   readonly agents: AgentGraph;
+  /** The latest run-clock time the trace's spans carry, or null when they carry none. */
+  readonly latest: number | null;
 }
 
 /** A page's reader of its run. */
@@ -101,9 +105,10 @@ class LiveFollower {
       previous.trace === log.head &&
       previous.overview === overview &&
       previous.candidates === candidates &&
-      previous.agents === agents
+      previous.agents === agents &&
+      previous.latest === log.latest
         ? previous
-        : {at: null, trace: log.head, overview, direction, candidates, agents};
+        : {at: null, trace: log.head, overview, direction, candidates, agents, latest: log.latest};
     return this.#model;
   }
 
@@ -130,7 +135,7 @@ class LiveFollower {
   /** Whether `log` is the followed log with events appended (or the same). */
   #extends(log: TraceLog): boolean {
     if (log.base !== this.#base || log.events.length < this.#applied) return false;
-    return this.#applied === 0 || log.events[this.#applied - 1] === this.#last;
+    return this.#applied === 0 || log.events.at(this.#applied - 1) === this.#last;
   }
 }
 
@@ -150,15 +155,8 @@ function samePastKey(a: PastKey, b: PastKey): boolean {
 }
 
 /** The last of `events` (in sequence order) at or before `at`, found by halving. */
-function lastEventAt(events: readonly RunEvent[], at: number): RunEvent | null {
-  let low = 0;
-  let high = events.length;
-  while (low < high) {
-    const middle = (low + high) >> 1;
-    if ((events[middle]?.sequence ?? 0) <= at) low = middle + 1;
-    else high = middle;
-  }
-  return low === 0 ? null : (events[low - 1] ?? null);
+function lastEventAt(events: AppendLog<RunEvent>, at: number): RunEvent | null {
+  return events.lastWhile(event => (event.sequence ?? 0) <= at) ?? null;
 }
 
 function foldedAt(log: TraceLog, at: number, meter: ReadMeter): RunModel {
@@ -174,5 +172,6 @@ function foldedAt(log: TraceLog, at: number, meter: ReadMeter): RunModel {
     direction,
     candidates: candidateTree(spans, direction),
     agents: agentGraph(spans),
+    latest: latestTime(spans),
   };
 }

@@ -481,7 +481,7 @@ export function viewedRun(state: RunPageState): ViewedRun {
     trace,
     overview: overviewAt(state.run.trace, at),
     spans: traceSpans(trace),
-    spanEvents: state.run.trace.events,
+    spanEvents: state.run.trace.events.toArray(),
     at,
   };
 }

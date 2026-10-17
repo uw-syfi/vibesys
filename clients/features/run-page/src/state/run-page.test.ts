@@ -435,7 +435,7 @@ describe('the run page store', () => {
 
     expect(viewedRun(state).spans.map(span => span.id)).toEqual(['base', 'replayed-tail']);
     expect(state.run.trace.base.sequence).toBe(40);
-    expect(state.run.trace.events.map(item => item.sequence)).toEqual([42]);
+    expect(state.run.trace.events.toArray().map(item => item.sequence)).toEqual([42]);
   });
 
   test('retains snapshot-only history when an event publication races ahead of the snapshot', () => {
@@ -450,7 +450,7 @@ describe('the run page store', () => {
 
     expect(viewedRun(state).spans.map(span => span.id)).toEqual(['historical-base', 'live-tail']);
     expect(state.run.trace.base.sequence).toBe(1);
-    expect(state.run.trace.events.map(item => item.sequence)).toEqual([2]);
+    expect(state.run.trace.events.toArray().map(item => item.sequence)).toEqual([2]);
   });
 
   test('a proven replacement store resets both the trace base and replay suffix', () => {
@@ -470,7 +470,7 @@ describe('the run page store', () => {
 
     expect(viewedRun(state).spans.map(span => span.id)).toEqual(['new-store']);
     expect(state.run.trace.base.sequence).toBe(0);
-    expect(state.run.trace.events.map(item => item.sequence)).toEqual([1]);
+    expect(state.run.trace.events.toArray().map(item => item.sequence)).toEqual([1]);
   });
 
   test('a fenced snapshot restores snapshot-only spans after an identity-unproven reset', () => {
@@ -498,7 +498,7 @@ describe('the run page store', () => {
       'identity-unknown',
     ]);
     expect(restored.run.trace.base.sequence).toBe(2);
-    expect(restored.run.trace.events).toEqual([]);
+    expect(restored.run.trace.events.toArray()).toEqual([]);
   });
 
   test('offers force stop only after the bound elapses while stopping', () => {

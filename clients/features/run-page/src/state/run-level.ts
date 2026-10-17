@@ -8,7 +8,7 @@ import type {Span} from '@vibesys/contracts';
 import type {AgentNode} from '@vibesys/run-state/agents';
 import type {Candidate, CandidateStep} from '@vibesys/run-state/candidates';
 import type {Direction, RunModel} from './run-model.js';
-import {duration, formatValue, latestTime, ratio} from './span-reading.js';
+import {duration, formatValue, ratio} from './span-reading.js';
 import type {Route} from './zoom.js';
 
 export interface HeroView {
@@ -208,7 +208,7 @@ function agentNow(agent: AgentNode): NowItem {
 
 /** The run clock now: the live clock when the page carries one, else the latest the spans say. */
 export function clockAt(model: RunModel, live: number | null): number | null {
-  return live ?? latestTime([...model.trace.spans.values()]);
+  return live ?? model.latest;
 }
 
 /** The run clock's start: the first span's start. */
