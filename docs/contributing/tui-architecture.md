@@ -327,7 +327,7 @@ Pick the test layer by where the symptom lives, and require that the test fails 
 | String formatting or truncation arithmetic | Pure function test on the formatter |
 | Width, alignment, clipping, padding, or overlap (anything stated in columns or rows) | `createTestRenderer` from `@opentui/core/testing`: build the real view, render at a fixed size, and measure the emitted renderables (see `clients/tui/src/ui/app.test.ts` and `todo-strip.test.ts`) |
 | Theme contrast and legibility | Pure computation over theme tokens |
-| Wide characters, resize, streaming timing, keybindings through a PTY | The tmux harness in the `hunt-client-bugs` skill; not a CI regression test |
+| Wide characters, resize, streaming timing, keybindings through a PTY | A manual tmux session; not a CI regression test |
 
 The test renderer runs the real renderable tree and Yoga layout, so it reproduces layout-class bugs
 deterministically in CI. It does not run a terminal: text is measured in code units, and there is

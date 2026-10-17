@@ -110,4 +110,4 @@ borderless box omits both.
    test of the real view at a fixed size; see
    [tui-architecture.md](../../../../docs/contributing/tui-architecture.md),
    "Regression tests for rendering bugs". Keys through a real terminal are
-   exercised by the `hunt-client-bugs` skill, not by CI.
+   not exercised by CI.
