@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_core.api import StopMode
+    from vs_runtime._operator_control import SteerTarget
     from vs_sim.api import Threads
 
 
@@ -23,6 +24,7 @@ class RunControlTransitionKind(StrEnum):
     RESUMED = "resumed"
     STOP_REQUESTED = "stop_requested"
     STEER_CONSUMED = "steer_consumed"
+    STEER_REFUSED = "steer_refused"
     PAUSED = "paused"
     STOPPED = "stopped"
 
@@ -70,21 +72,28 @@ class RunControlEventSink(Protocol):
 
 @dataclass(frozen=True)
 class QueuedSteer:
-    """One queued steer: its text and the id of the control that sent it, if it had one."""
+    """One queued steer: its text, the id of the control that sent it and whom it is for.
+
+    A steer with no control id or no target is for the whole run.
+    """
 
     text: str
     control_id: str | None = None
+    target: SteerTarget | None = None
 
 
 class RunControlChannel(Protocol):
     """Cooperative control mailbox shared by callers and the run thread."""
 
-    def queue_steer(self, text: str, control_id: str | None = None) -> None:
-        """Queue steering for the next turn; ``control_id`` names the control that sent it.
+    def queue_steer(
+        self, text: str, control_id: str | None = None, target: SteerTarget | None = None
+    ) -> None:
+        """Queue steering for the next turn of ``target`` (the run when None).
 
-        The queue is the single source of truth. The run loop drains it
-        (:meth:`take_pending_steer`) and turns each message into a durable session input,
-        which the next turn of the run receives exactly once.
+        ``control_id`` names the control that sent it. The queue is the single source of
+        truth. The run loop drains it (:meth:`take_pending_steer`) and turns each message into
+        a durable session input, which the next matching turn receives exactly once, or
+        refuses it (:meth:`notify_steer_refused`) when the run cannot resolve its target.
         """
         ...
 
@@ -141,6 +150,10 @@ class RunControlChannel(Protocol):
         execution_id: str | None,
     ) -> None:
         """Record which invocation consumed queued steering."""
+        ...
+
+    def notify_steer_refused(self, reason: str) -> None:
+        """Record that a queued steer reached no one: the run could not resolve its target."""
         ...
 
     def wait_while_paused(self) -> None:
@@ -236,10 +249,12 @@ class RuntimeRunControlChannel:
         self._capacity_request: int | None = None
         self._capacity_requests = 0
 
-    def queue_steer(self, text: str, control_id: str | None = None) -> None:
+    def queue_steer(
+        self, text: str, control_id: str | None = None, target: SteerTarget | None = None
+    ) -> None:
         """Queue free-text steering for the run loop to take at its next control poll."""
         with self._lock:
-            self._pending_steer.append(QueuedSteer(text, control_id))
+            self._pending_steer.append(QueuedSteer(text, control_id, target))
         self._emit(RunControlTransitionKind.STEER_QUEUED, text=text)
 
     def request_pause(self, control_id: str | None = None) -> None:
@@ -359,6 +374,10 @@ class RuntimeRunControlChannel:
                 execution_id=execution_id,
             )
         )
+
+    def notify_steer_refused(self, reason: str) -> None:
+        """Record why a queued steer reached no one."""
+        self._events(RunControlTransition(kind=RunControlTransitionKind.STEER_REFUSED, text=reason))
 
     def wait_while_paused(self) -> None:
         """Park while paused, then land any stop that released the wait."""

@@ -43,12 +43,18 @@ from vs_runtime._operator_control import (
     SteerRequest,
     StopRequest,
 )
-from vs_runtime._steer_delivery import SteerConsumption, steer_input, unrecorded_steers
+from vs_runtime._steer_delivery import (
+    SteerConsumption,
+    TargetRefusal,
+    steer_input,
+    steer_target,
+    unrecorded_steers,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_core.api import CoreEvent
+    from vs_core.api import CoreEvent, InputTarget
     from vs_project.api import ControlInbox, InboxEntry
     from vs_runtime._operator_control import ControlRequest
     from vs_runtime._run_control import RunControlChannel
@@ -167,10 +173,19 @@ class RunControlBridge:
         return tuple(events)
 
     def _take_steers(self, core: CoreState, now_at: float, events: list[CoreEvent]) -> None:
-        """Emit the queued steers, each under its control's id if it had one."""
+        """Emit the queued steers, each under its control's id if it had one.
+
+        A steer whose target the run cannot resolve becomes no control: the channel hears why.
+        """
         for steer in self._channel.take_pending_steer():
+            target = None if steer.target is None else steer_target(core, steer.target)
+            if isinstance(target, TargetRefusal):
+                self._channel.notify_steer_refused(target.reason)
+                continue
             control = self._event(
-                core, now_at, _Change("steer", text=steer.text, control_id=steer.control_id)
+                core,
+                now_at,
+                _Change("steer", text=steer.text, control_id=steer.control_id, target=target),
             )
             if control is not None:
                 events += (control, steer_input(core, control.control, now_at, self._position))
@@ -319,12 +334,13 @@ def _identity(control_id: str) -> ControlId:
 
 @dataclass(frozen=True)
 class _Change:
-    """One control to record: its action, a steer's text, a stop's mode, the sender's id."""
+    """One control to record: its action, a steer's text and target, a stop's mode, its id."""
 
     action: ControlAction
     text: str | None = None
     mode: StopMode | None = None
     control_id: str | None = None
+    target: InputTarget | None = None
 
     def control(self, identity: ControlId) -> ControlInput:
         """The control core records; a steer carries its text's digest, not the text."""
@@ -335,7 +351,11 @@ class _Change:
                 digest=hashlib.sha256(self.text.encode()).hexdigest(),
             )
         return ControlInput(
-            control_id=identity, action=self.action, mode=self.mode, artifact=artifact
+            control_id=identity,
+            action=self.action,
+            mode=self.mode,
+            artifact=artifact,
+            target=self.target,
         )
 
 
@@ -382,6 +402,10 @@ def _refusal(request: ControlRequest, core: CoreState, *, stopped: bool) -> str 
     """Why core would refuse ``request`` now, or None; refused requests never reach core."""
     if core.run.status == RunStatus.TERMINAL:
         return "the run has ended"
+    if isinstance(request, SteerRequest):
+        target = steer_target(core, request.target)
+        if isinstance(target, TargetRefusal):
+            return target.reason
     if not isinstance(request, (PauseRequest, ResumeRequest)):
         return None
     if stopped:

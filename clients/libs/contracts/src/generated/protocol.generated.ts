@@ -141,6 +141,11 @@ export type ControlRequest = SteerRequest | PauseRequest | ResumeRequest | StopR
 export type ControlId = string;
 export type Action = "steer";
 export type Text2 = string;
+/**
+ * What a steer is addressed to.
+ */
+export type SteerTargetKind = "run" | "role" | "attempt" | "item" | "invocation";
+export type Id = string | null;
 export type ControlId1 = string;
 export type Action1 = "pause";
 export type ControlId2 = string;
@@ -159,7 +164,7 @@ export type ClientId18 = string;
 export type Timestamp18 = string;
 export type Ok = boolean;
 export type Error = string | null;
-export type Id = string;
+export type Id1 = string;
 export type Code = string;
 export type Summary = string;
 export type Detail = string | null;
@@ -806,7 +811,7 @@ export type RunId4 = string;
 export type ProjectionRevision = string;
 export type ParentId1 = string | null;
 export type FromCursor = string | null;
-export type Id1 = string;
+export type Id2 = string;
 export type ParentId2 = string | null;
 /**
  * Policy-neutral kinds a client may use to label navigation rows.
@@ -819,7 +824,7 @@ export type Ordinal = number;
  */
 export type IterationStatus = "pending" | "active" | "completed" | "failed" | "cancelled";
 export type ChildCount = number;
-export type Id2 = string;
+export type Id3 = string;
 export type Value4 = number | null;
 export type Unit3 = string | null;
 export type Direction1 = ("max" | "min") | null;
@@ -1200,12 +1205,24 @@ export interface ControlCommand {
   control: ControlRequest;
 }
 /**
- * Free-text guidance for the run's next agent turn.
+ * Free-text guidance for the next agent turn of its target, the whole run by default.
+ *
+ * The message reaches exactly one turn of the target, once. A target the run cannot resolve
+ * (a role the search does not declare, an attempt, item or invocation it does not hold, or
+ * one that has ended) is refused, and the message reaches no one.
  */
 export interface SteerRequest {
   control_id: ControlId;
   action: Action;
   text: Text2;
+  target?: SteerTarget;
+}
+/**
+ * Whom a steer is for: the whole run, or one role, attempt, item or invocation, by id.
+ */
+export interface SteerTarget {
+  kind?: SteerTargetKind;
+  id?: Id;
 }
 /**
  * Reach the next safe boundary and hold the run there.
@@ -1272,7 +1289,7 @@ export interface Response {
  * replayed events, which readers share rather than copy.
  */
 export interface Diagnostic {
-  id?: Id;
+  id?: Id1;
   code: Code;
   summary: Summary;
   detail?: Detail;
@@ -2256,7 +2273,7 @@ export interface IterationSlice {
  * One stable node in a policy's iteration hierarchy.
  */
 export interface IterationSummary {
-  id: Id1;
+  id: Id2;
   parent_id?: ParentId2;
   kind: IterationKind;
   label: Label2;
@@ -2269,7 +2286,7 @@ export interface IterationSummary {
  * One bounded headline measurement attached to an iteration row.
  */
 export interface IterationMetric {
-  id: Id2;
+  id: Id3;
   value?: Value4;
   unit?: Unit3;
   direction?: Direction1;

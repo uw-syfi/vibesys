@@ -52,11 +52,49 @@ class _Request(BaseModel):
     """The sender's id for this request; resending it is safe."""
 
 
+class SteerTargetKind(StrEnum):
+    """What a steer is addressed to."""
+
+    RUN = "run"
+    """The next session turn of any role."""
+    ROLE = "role"
+    """The next turn of the role with this role id; the search must declare it."""
+    ATTEMPT = "attempt"
+    """The next turn in this attempt."""
+    ITEM = "item"
+    """The next turn of any attempt at this work item."""
+    INVOCATION = "invocation"
+    """This one invocation, if it takes input again (a suspended turn that resumes)."""
+
+
+class SteerTarget(BaseModel):
+    """Whom a steer is for: the whole run, or one role, attempt, item or invocation, by id."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: SteerTargetKind = SteerTargetKind.RUN
+    id: str | None = Field(default=None, min_length=1, max_length=256)
+    """The role, attempt, item or invocation id; absent for the run."""
+
+    @model_validator(mode="after")
+    def _id_names_the_target(self) -> SteerTarget:
+        if (self.kind is SteerTargetKind.RUN) != (self.id is None):
+            message = "id names the role, attempt, item or invocation; the run takes none"
+            raise ValueError(message)
+        return self
+
+
 class SteerRequest(_Request):
-    """Free-text guidance for the run's next agent turn."""
+    """Free-text guidance for the next agent turn of its target, the whole run by default.
+
+    The message reaches exactly one turn of the target, once. A target the run cannot resolve
+    (a role the search does not declare, an attempt, item or invocation it does not hold, or
+    one that has ended) is refused, and the message reaches no one.
+    """
 
     action: Literal[ControlAction.STEER] = ControlAction.STEER
     text: str = Field(min_length=1)
+    target: SteerTarget = SteerTarget()
 
 
 class PauseRequest(_Request):
@@ -203,8 +241,8 @@ class ChannelRunControl:
     def _apply(self, request: ControlRequest) -> ControlAck:
         reason = None
         match request:
-            case SteerRequest(text=text, control_id=control_id):
-                self._channel.queue_steer(text, control_id)
+            case SteerRequest(text=text, control_id=control_id, target=target):
+                self._channel.queue_steer(text, control_id, target)
                 status = ControlStatus.PENDING
             case PauseRequest(control_id=control_id):
                 self._channel.request_pause(control_id)
@@ -276,6 +314,8 @@ __all__ = [
     "ResumeRequest",
     "ResumeWhen",
     "SteerRequest",
+    "SteerTarget",
+    "SteerTargetKind",
     "StopMode",
     "StopRequest",
     "check_one_way_to_resume",

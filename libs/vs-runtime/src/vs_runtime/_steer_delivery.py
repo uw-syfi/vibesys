@@ -1,9 +1,11 @@
 """Operator steering as durable session input.
 
 A steer control is the operator's free text, recorded by core as a ``steer`` control that
-carries only the digest of the text. This module turns each such control into one
-``SessionInputReceived`` for the whole run, which core reserves for the next turn of any
-session, delivers when that turn is accepted, and records as a receipt. Core's input
+carries only the digest of the text and whom it is for. ``steer_target`` resolves the
+operator's target (the run, a role, an attempt, an item or an invocation, by id) against core
+state into core's input target. This module turns each such control into one
+``SessionInputReceived`` for that target, which core reserves for the next matching turn,
+delivers when that turn is accepted, and records as a receipt. Core's input
 records are the one durable account of who has been told what, so a steer reaches a turn
 exactly once: a crash between the control and its input is repaired by the next poll,
 which derives the missing input from the control itself, and a replay finds the input
@@ -15,22 +17,97 @@ here builds prompt text.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vs_core.api import (
+    AttemptPhase,
     CoreState,
     InputDelivered,
     InputId,
+    InvocationInputTarget,
+    ItemInputTarget,
+    RoleId,
+    RoleInputTarget,
     Scope,
     ScopeInputTarget,
     SessionInput,
     SessionInputReceived,
+    SessionPhase,
 )
+from vs_runtime._operator_control import SteerTargetKind
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_core.api import ControlInput
+    from vs_core.api import ControlInput, InputTarget
+    from vs_runtime._operator_control import SteerTarget
+
+
+@dataclass(frozen=True)
+class TargetRefusal:
+    """Why the run cannot resolve a steer's target: no turn could take a message for it."""
+
+    reason: str
+
+
+_ENDED_ATTEMPT = frozenset({AttemptPhase.CLOSING, AttemptPhase.TERMINAL})
+
+
+def _role(core: CoreState, role: str) -> InputTarget | TargetRefusal:
+    declared = core.run.declaration.roles
+    if RoleId(root=role) not in declared:
+        names = ", ".join(row.root for row in declared) or "none"
+        return TargetRefusal(f"role {role!r} is not declared by the search (declared: {names})")
+    return RoleInputTarget(role_id=RoleId(root=role))
+
+
+def _attempt(core: CoreState, attempt: str) -> InputTarget | TargetRefusal:
+    rows = [row for row in core.attempts.attempts if row.attempt_id.root == attempt]
+    if not rows:
+        return TargetRefusal(f"the run holds no attempt {attempt!r}")
+    latest = max(rows, key=lambda row: row.generation)
+    if latest.phase in _ENDED_ATTEMPT:
+        return TargetRefusal(f"attempt {attempt!r} has ended")
+    return ScopeInputTarget(scope=Scope(owner=latest.attempt_id, generation=latest.generation))
+
+
+def _item(core: CoreState, item: str) -> InputTarget | TargetRefusal:
+    rows = [row for row in core.attempts.attempts if row.item_id.root == item]
+    if not rows:
+        return TargetRefusal(f"the run holds no item {item!r}")
+    return ItemInputTarget(item_id=rows[0].item_id)
+
+
+def _invocation(core: CoreState, invocation: str) -> InputTarget | TargetRefusal:
+    held = [
+        row for row in core.sessions.invocations if row.invocation.invocation_id.root == invocation
+    ]
+    if not held:
+        return TargetRefusal(f"the run holds no invocation {invocation!r}")
+    latest = max(held, key=lambda row: row.invocation.generation)
+    if latest.phase is SessionPhase.TERMINAL:
+        return TargetRefusal(f"invocation {invocation!r} has ended")
+    return InvocationInputTarget(invocation=latest.invocation)
+
+
+_RESOLVERS: dict[SteerTargetKind, Callable[[CoreState, str], InputTarget | TargetRefusal]] = {
+    SteerTargetKind.ROLE: _role,
+    SteerTargetKind.ATTEMPT: _attempt,
+    SteerTargetKind.ITEM: _item,
+    SteerTargetKind.INVOCATION: _invocation,
+}
+
+
+def steer_target(core: CoreState, target: SteerTarget) -> InputTarget | TargetRefusal | None:
+    """Core's input target for ``target``, None for the whole run, or why there is none.
+
+    A role the search does not declare is refused, as is an attempt, item or invocation core
+    does not hold or that has ended, since no turn could take a message for it.
+    """
+    if target.id is None:
+        return None
+    return _RESOLVERS[target.kind](core, target.id)
 
 
 def steer_input_id(control: ControlInput) -> InputId:
@@ -41,7 +118,9 @@ def steer_input_id(control: ControlInput) -> InputId:
 def steer_input(
     core: CoreState, control: ControlInput, now_at: float, position: int
 ) -> SessionInputReceived:
-    """The run-wide next-turn input for ``control``, which must be a steer with its text.
+    """The next-turn input for ``control``, which must be a steer with its text.
+
+    The input is for the control's target, or the whole run when it names none.
 
     ``position`` is the control's 1-based place among the run's controls; it orders the
     steers, whatever their identities.
@@ -53,9 +132,8 @@ def steer_input(
     return SessionInputReceived(
         input=SessionInput(
             input_id=steer_input_id(control),
-            target=ScopeInputTarget(
-                scope=Scope(owner=core.run.run_id, generation=core.run.generation)
-            ),
+            target=control.target
+            or ScopeInputTarget(scope=Scope(owner=core.run.run_id, generation=core.run.generation)),
             artifact=control.artifact,
             received_at=now_at,
             sequence=sequence,
