@@ -30,7 +30,7 @@ from .types.strategy import Accepted, Operation, StartAttempt
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptView
-    from .types.common import Scope
+    from .types.common import Observation, Scope
     from .types.evaluation import EvaluationState
     from .types.kernel import RunState
     from .types.records import RecordsState, RequestRecord
@@ -257,6 +257,33 @@ def _submission_identity(
     return _registered_identity(row, request, evaluation, run)
 
 
+def _same_conclusion(job: Observation | None, row: Observation | None) -> bool:
+    """Whether the job's view of its end is the one its submission's record holds.
+
+    The ledger takes a job's first conclusive observation as its submission's own and keeps it
+    (`vs_core._measurements._ended`), while the job takes every later one: a poll that was already in
+    flight when the job ended answers again with the same outcome. Such a re-observation is
+    the same conclusion read later (a newer sequence, event and time), not a conflict; any
+    other difference, or an older job view, still is.
+    """
+    if job is None or row is None:
+        return job == row
+    if job == row:
+        return True
+    if not (row.terminal and job.terminal) or job.sequence <= row.sequence:
+        return False
+    return (
+        job.model_copy(
+            update={
+                "event_id": row.event_id,
+                "sequence": row.sequence,
+                "observed_at": row.observed_at,
+            }
+        )
+        == row
+    )
+
+
 def _builtin_identity(
     row: RequestRecord, request: SubmitMeasurement, evaluation: EvaluationState
 ) -> Verdict[MeasurementIdentity]:
@@ -265,7 +292,7 @@ def _builtin_identity(
         len(jobs) != 1
         or jobs[0].scope != request.scope
         or jobs[0].plan != request.plan
-        or jobs[0].observation != row.observation
+        or not _same_conclusion(jobs[0].observation, row.observation)
         or (
             row.observation is not None
             and row.observation.accepted
@@ -302,7 +329,7 @@ def _registered_identity(
         len(jobs) != 1
         or jobs[0].operation_id != request.operation_id
         or jobs[0].scope != request.scope
-        or jobs[0].observation != row.observation
+        or not _same_conclusion(jobs[0].observation, row.observation)
         or (
             row.observation is not None
             and row.observation.accepted

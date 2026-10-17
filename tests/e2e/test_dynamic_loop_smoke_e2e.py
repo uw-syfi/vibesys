@@ -650,7 +650,12 @@ _REQUIRED_KINDS = frozenset(
 
 
 def _assert_headless_stream(
-    events: list[CoreEvent], *, run_id: str, committed: frozenset[str], rendered: str
+    events: list[CoreEvent],
+    *,
+    run_id: str,
+    committed: frozenset[str],
+    rendered: str,
+    base_runs: int,
 ) -> None:
     """What a headless frontend received from the core path is complete, legal and anchored.
 
@@ -687,7 +692,8 @@ def _assert_headless_stream(
         assert all(opened < i < closed for i, kind in mine if kind in _AGENT_CONTENT)
 
     jobs = {event.execution_id for event in events if event.type is CoreEventType.GATE_STARTED}
-    assert len(jobs) == 3, jobs  # the baseline, the implementer's own and the candidate's
+    # The baseline, the implementer's own, the candidate's, and the base runs core asked for.
+    assert len(jobs) == 3 + base_runs, jobs
     # The candidate's official measurement reused the implementer's own run of the same input
     # (#2949): its gates say so, and no other job's do.
     reused = {
@@ -866,8 +872,15 @@ def test_core_path_runs_the_fake_slurm_search(
     # The baseline and the implementer's own in-turn measurement through the tool were each
     # submitted exactly once; the trusted measurement of the one candidate reused the
     # implementer's run of the same input instead of submitting a third job (#2949).
-    assert sum("sbatch " in command for command in recorded_commands(loop_input.cluster)) == 2
     evaluation = envelope["core"]["evaluation"]
+    # The agent's evaluation may start while the baseline measurement still runs (whether the
+    # scripted agent outpaces the cluster decides it). Core then measures the base once more for
+    # the comparison, and records that run as its own; no other job is ever a second one.
+    base_runs = len(evaluation.get("base_runs", []))
+    assert base_runs <= 1, evaluation["base_runs"]
+    assert sum("sbatch " in command for command in recorded_commands(loop_input.cluster)) == (
+        2 + base_runs
+    )
     assert [call["rejection"] for call in evaluation["agent_calls"]] == [None]
     # The agent's own evaluation and the official one both sit in the ledger for the winner. A
     # framework run is trusted whoever asked for it, so the agent's records are correctness and
@@ -887,4 +900,5 @@ def test_core_path_runs_the_fake_slurm_search(
         run_id=result.run_id,
         committed=_strings_of(envelope["core"]),
         rendered=capsys.readouterr().out,
+        base_runs=base_runs,
     )
