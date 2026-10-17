@@ -8,6 +8,7 @@ import {Button, EmptyState, KeyValue, PickList, PickRow, Stack, Text} from '@vib
 import {type JSX, useMemo} from 'react';
 import {type AgentRow, agentTree, type FoldRow} from '../../../../state/agent-tree.js';
 import {type AgentTurn, agentModel, agentTurns} from '../../../../state/agent-turns.js';
+import {roleSeries} from '../../../../state/role-series.js';
 import {duration} from '../../../../state/span-reading.js';
 import type {ViewBase, WithCore} from '../props.js';
 
@@ -62,6 +63,7 @@ function AgentLine(props: {readonly row: AgentRow; readonly view: AgentsViewProp
     <PickRow
       id={agent.id}
       title={agent.role}
+      swatch={roleSeries(agent.role)}
       {...(view.compact || summary === '' ? {} : {summary})}
       guides={row.guides}
       state={{tone: tone(agent.status), label: agent.status}}

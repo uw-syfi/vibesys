@@ -135,6 +135,34 @@ function at(events: readonly RunEvent[], sequence = events.length): RunModel {
   return createRunReader().read(traceLog(EMPTY_TRACE, OVERVIEW, events.slice(0, sequence)), null);
 }
 
+describe('scrubbing a multi-agent run', () => {
+  test('the chart is the whole run at every scrub position: axis fixed, cursor moves, later points dim', () => {
+    const {events} = recorded();
+    const whole = at(events);
+    const start = clockStart(whole);
+    const fixed = stripChartView(whole, start, null);
+    expect(fixed).not.toBeNull();
+    for (let sequence = 1; sequence <= events.length; sequence += 1) {
+      const viewed = at(events, sequence);
+      const scrub = viewed.latest ?? start;
+      const chart = stripChartView(whole, start, null, scrub);
+      // Rendered (never null, even before the first measurement) with the same axes.
+      expect(chart).not.toBeNull();
+      expect(chart?.yDomain).toEqual(fixed?.yDomain as readonly [number, number]);
+      expect(chart?.yTicks).toEqual(fixed?.yTicks as never);
+      expect(chart?.xTicks).toEqual(fixed?.xTicks as never);
+      expect(chart?.points.map(point => point.id)).toEqual(
+        fixed?.points.map(point => point.id) as string[],
+      );
+      expect(chart?.playhead).toBe((scrub - start) / 60);
+      for (const point of chart?.points ?? [])
+        expect(point.faint).toBe(point.x * 60 + start > scrub);
+    }
+    expect(fixed?.yDomain[0]).toBe(0);
+    expect(fixed?.yDomain[1]).toBeGreaterThan(100);
+  });
+});
+
 describe('a multi-agent run', () => {
   test('regression: the run level shows the best idea, its chart and both rounds', () => {
     const model = at(recorded().events);

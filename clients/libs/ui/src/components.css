@@ -1373,6 +1373,18 @@ button.vs-stage-head {
 .vs-chart-point[data-filled] {
   fill: var(--accent);
 }
+.vs-chart-point[data-tone=muted] {
+  stroke: var(--muted);
+}
+.vs-chart-point[data-tone=muted][data-filled] {
+  fill: var(--muted);
+}
+.vs-chart-point[data-tone=err] {
+  stroke: var(--err);
+}
+.vs-chart-point[data-tone=err][data-filled] {
+  fill: var(--err);
+}
 .vs-chart-playhead {
   stroke: var(--muted);
   stroke-width: 1;

@@ -12,12 +12,14 @@ import {createRoot} from 'react-dom/client';
 import {
   createRunReader,
   type RunMode,
+  type RunModel,
   type RunPageAction,
   type RunPageRequest,
   type RunPageState,
   runPageInitial,
   runPageStep,
 } from '../../state/index.js';
+import {idea, modelOf} from '../../state/timeline-fixtures.js';
 import {RunLevel} from './run-level.js';
 
 const window = new Window();
@@ -86,7 +88,16 @@ async function face(state: RunPageState, mode: RunMode): Promise<string> {
   const model = createRunReader().read(state.run.trace, null);
   const base = {model, clock: {start: 0, now: null}, zoom: () => undefined};
   await act(async () =>
-    root.render(<RunLevel state={state} base={base} mode={mode} dispatch={() => undefined} />),
+    root.render(
+      <RunLevel
+        state={state}
+        base={base}
+        whole={model}
+        core={null}
+        mode={mode}
+        dispatch={() => undefined}
+      />,
+    ),
   );
   const text = container.textContent ?? '';
   await act(async () => root.unmount());
@@ -108,5 +119,70 @@ test('a face reads the run until the first snapshot, and only then says it is em
     const read = await face(after, mode);
     expect(read).toContain(empty);
     expect(read).not.toContain('Reading the run…');
+  }
+});
+
+/** The run's ideas as measured at 100, 200 and 300 seconds, read to their live end or as of `scrub`. */
+function measuredRun(scrub: number | null): RunModel {
+  const all = [10, 20, 30].map((value, at) => {
+    const item = idea(`i${at}`, 'kept', at * 100, 90);
+    const measured = item.measurement;
+    if (measured === null) throw new Error('fixture');
+    return {...item, measurement: {...measured, at: (at + 1) * 100, metricValue: value}};
+  });
+  const seen = scrub === null ? all : all.filter(item => (item.measurement?.at ?? 0) <= scrub);
+  return {
+    ...modelOf(seen),
+    at: scrub === null ? null : scrub + 1,
+    latest: scrub,
+    overview: null,
+    changed: new Set<string>(),
+    agents: {agents: []},
+    trace: {spans: new Map()},
+  } as unknown as RunModel;
+}
+
+async function chartAt(scrub: number | null): Promise<{yLabels: string[]; cursor: boolean} | null> {
+  const state = runPageStep(attaching(), SNAPSHOT).state;
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const model = measuredRun(scrub);
+  const base = {model, clock: {start: 0, now: null}, zoom: () => undefined};
+  await act(async () =>
+    root.render(
+      <RunLevel
+        state={state}
+        base={base}
+        whole={measuredRun(null)}
+        core={null}
+        mode="ideas"
+        dispatch={() => undefined}
+      />,
+    ),
+  );
+  const chart = container.querySelector('svg.vs-chart');
+  const seen =
+    chart === null
+      ? null
+      : {
+          yLabels: [...chart.querySelectorAll('text.vs-chart-label')].map(
+            each => each.textContent ?? '',
+          ),
+          cursor: chart.querySelector('.vs-chart-playhead') !== null,
+        };
+  await act(async () => root.unmount());
+  container.remove();
+  return seen;
+}
+
+test('regression: scrubbing keeps the chart drawn with the same axes, before and after every measurement', async () => {
+  const live = await chartAt(null);
+  expect(live).not.toBeNull();
+  for (const scrub of [0, 50, 100, 150, 200, 250, 300]) {
+    const seen = await chartAt(scrub);
+    // Rendered at every position, even before anything was measured, with the whole run's labels.
+    expect(seen?.yLabels).toEqual(live?.yLabels as string[]);
+    expect(seen?.cursor).toBe(true);
   }
 });

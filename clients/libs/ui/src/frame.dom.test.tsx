@@ -20,6 +20,7 @@ import {
   Said,
   Screen,
   SearchBox,
+  SwatchLegend,
   Thought,
   Thread,
   type ThreadItem,
@@ -994,5 +995,59 @@ describe('filter chips and search', () => {
     expect(input.getAttribute('aria-label')).toBe('Search ideas');
     expect(input.getAttribute('placeholder')).toBe('Search');
     expect(input.value).toBe('seqlock');
+  });
+});
+
+describe('series colors', () => {
+  test('Chart: a point carries its tone, and a fixed y range keeps a value where it is whatever else is drawn', async () => {
+    const a = {id: 'a', x: 1, y: 50, filled: true, tone: 'err' as const};
+    const b = {id: 'b', x: 2, y: 10, filled: true, tone: 'muted' as const};
+    const domain = [0, 100] as const;
+    const alone = await mount(<Chart label="One" points={[a]} yDomain={domain} />);
+    const both = await mount(<Chart label="Two" points={[a, b]} yDomain={domain} />);
+    expect(
+      all(both.container, '.vs-chart-point').map(dot => dot.getAttribute('data-tone')),
+    ).toEqual(['err', 'muted']);
+    expect(one(alone.container, 'circle').getAttribute('cy')).toBe(
+      one(both.container, 'circle').getAttribute('cy'),
+    );
+  });
+
+  test('Gantt: a segment with a series is drawn in that palette color, one without in none', async () => {
+    const rows = [
+      row('a', {
+        segments: [
+          {id: 's1', start: 0, end: 4, kind: 'solid', series: 3, label: 'one'},
+          {id: 's2', start: 4, end: 10, kind: 'hatched', label: 'two'},
+        ],
+      }),
+    ];
+    const {container} = await mount(<Gantt label="Over time" from={0} to={10} rows={rows} />);
+    const colors = all(container, '.vs-gantt-seg').map(seg =>
+      seg.style.getPropertyValue('--seg-color'),
+    );
+    expect(colors).toEqual(['var(--series-3)', '']);
+  });
+
+  test('SwatchLegend: names each entry, hatched or in its palette color', async () => {
+    const {container} = await mount(
+      <SwatchLegend
+        label="Bar colors"
+        items={[
+          {label: 'judge', series: 3},
+          {label: 'gate', hatched: true},
+        ]}
+      />,
+    );
+    const items = all(container, 'li');
+    expect(items.map(item => item.textContent)).toEqual(['judge', 'gate']);
+    expect(one(container, '[aria-label="Bar colors"]').tagName).toBe('UL');
+    expect(items.map(item => one(item, '.vs-swatch').hasAttribute('data-hatched'))).toEqual([
+      false,
+      true,
+    ]);
+    expect(one(items[0] as HTMLElement, '.vs-swatch').style.getPropertyValue('--seg-color')).toBe(
+      'var(--series-3)',
+    );
   });
 });

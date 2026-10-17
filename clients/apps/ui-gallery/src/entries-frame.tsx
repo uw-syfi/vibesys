@@ -20,6 +20,7 @@ import {
   Screen,
   SearchBox,
   Stack,
+  SwatchLegend,
   Text,
   Thought,
   ToolGroup,
@@ -241,6 +242,55 @@ const ROWS: readonly GanttRow[] = [
 
 const TICKS = [0, 5, 10].map(at => ({at, label: `${at}m`}));
 
+const SERIES_ROWS: readonly GanttRow[] = [
+  {
+    id: 'ring-v1',
+    label: 'ring-v1',
+    start: 0,
+    end: 9,
+    outcome: 'ok',
+    press: noop,
+    figure: '1.40×',
+    segments: [
+      {id: 'a', start: 0, end: 3, kind: 'solid', series: 1, label: 'implementer · 3m'},
+      {id: 'b', start: 3, end: 6, kind: 'hatched', label: 'gate · 3m'},
+      {id: 'c', start: 6, end: 9, kind: 'solid', series: 3, label: 'judge · 3m'},
+    ],
+  },
+  {
+    id: 'ring-v2',
+    label: 'ring-v2',
+    start: 4,
+    end: 12,
+    outcome: 'err',
+    press: noop,
+    figure: 'failed',
+    segments: [
+      {id: 'd', start: 4, end: 8, kind: 'solid', series: 1, label: 'implementer · 4m'},
+      {id: 'e', start: 8, end: 12, kind: 'hatched', label: 'gate · 4m'},
+    ],
+  },
+];
+
+/** Bars colored per role, with the legend that names each color. */
+function SeriesBarsDemo(): JSX.Element {
+  return (
+    <Card>
+      <Stack>
+        <SwatchLegend
+          label="Bar colors"
+          items={[
+            {label: 'implementer', series: 1},
+            {label: 'judge', series: 3},
+            {label: 'gate', hatched: true},
+          ]}
+        />
+        <Gantt label="Roles over time" from={0} to={12} ticks={TICKS} rows={SERIES_ROWS} />
+      </Stack>
+    </Card>
+  );
+}
+
 function GanttDemo(): JSX.Element {
   const [view, setView] = useState<GanttView>({from: 0, to: 14});
   return (
@@ -455,6 +505,7 @@ export const FRAME_ENTRIES = {
     ),
   },
   DotLegend: {render: () => <FilterDemo />},
+  SwatchLegend: {render: () => <SeriesBarsDemo />},
   SearchBox: {
     render: () => <Text tone="muted">The search field beside the legend filter chips above.</Text>,
   },

@@ -122,6 +122,14 @@
   --duration-fast: 120ms;
   --duration-base: 200ms;
   --easing: cubic-bezier(0.2, 0, 0, 1);
+  --series-0: #56b4e9;
+  --series-1: #e69f00;
+  --series-2: #3dbb8c;
+  --series-3: #cc79a7;
+  --series-4: #d9cf4a;
+  --series-5: #9b82e0;
+  --series-6: #5ec4c4;
+  --series-7: #c4a27c;
   --selection: color-mix(in srgb, var(--accent) 14%, var(--bg));
   --log-err: color-mix(in srgb, var(--err) 60%, var(--log-text));
   --chip-accent-bg: color-mix(in srgb, var(--accent) 12%, var(--panel));

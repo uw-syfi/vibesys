@@ -6,8 +6,9 @@
  * compact step list beside an opened step.
  */
 import type {Candidate, CandidateStep} from '@vibesys/run-state/candidates';
-import {EmptyState, PickList, PickRow, Stack, Text} from '@vibesys/ui';
+import {Chip, EmptyState, PickList, PickRow, Row, Stack, Text} from '@vibesys/ui';
 import {type JSX, useState} from 'react';
+import type {ImplementerOutcome} from '../../../../state/idea-outcomes.js';
 import {duration, formatValue, words} from '../../../../state/span-reading.js';
 import {
   type AttemptLine,
@@ -20,6 +21,8 @@ import {StepStrip} from '../timeline/step-strip.js';
 
 export interface IdeaViewProps extends ViewBase {
   readonly idea: Candidate;
+  /** What the idea's implementer reported (its outcome and summary); null when it reported none. */
+  readonly outcome: ImplementerOutcome | null;
 }
 
 function unitOf(model: ViewBase['model']): string {
@@ -54,6 +57,22 @@ function IdeaFacts(props: IdeaViewProps): JSX.Element | null {
 export const ideaHeader: ViewHeader<IdeaViewProps> = props => ({
   meta: <IdeaFacts {...props} />,
 });
+
+/** The implementer's outcome as a chip and its summary under it. */
+function Implemented(props: {readonly outcome: ImplementerOutcome}): JSX.Element {
+  const {outcome, summary} = props.outcome;
+  return (
+    <Stack gap="space-1">
+      <Row gap="space-2" align="center">
+        <Text variant="small" tone="muted">
+          implementer
+        </Text>
+        {outcome === null ? null : <Chip label={outcome.label} tone={outcome.tone} dot />}
+      </Row>
+      {summary === null ? null : <Text variant="body">{summary}</Text>}
+    </Stack>
+  );
+}
 
 function Attempts(props: {
   readonly lines: readonly AttemptLine[];
@@ -94,6 +113,7 @@ export function IdeaView(props: IdeaViewProps): JSX.Element {
   const number = idea.attempts.indexOf(attempt) + 1;
   return (
     <Stack gap="space-3">
+      {props.outcome === null ? null : <Implemented outcome={props.outcome} />}
       {lines.length > 1 ? (
         <Attempts lines={lines} selected={attempt.span} choose={setChosen} />
       ) : null}

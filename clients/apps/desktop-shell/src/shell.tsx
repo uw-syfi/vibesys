@@ -201,6 +201,7 @@ function RunRoute(props: {
     <RunScreen
       state={page.state}
       model={page.model}
+      whole={page.whole}
       core={page.core}
       route={page.route}
       zoom={page.zoom}

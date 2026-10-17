@@ -581,13 +581,13 @@ button.vs-crumb:focus-visible {
   cursor: pointer;
 }
 .vs-gantt-seg[data-kind="solid"] {
-  background: var(--accent);
+  background: var(--seg-color, var(--accent));
 }
 .vs-gantt-seg[data-kind="hatched"] {
   background: repeating-linear-gradient(
     135deg,
-    var(--accent) 0 var(--space-1),
-    var(--chip-accent-bg) var(--space-1) var(--space-3)
+    var(--seg-color, var(--muted)) 0 var(--space-1),
+    var(--panel-2) var(--space-1) var(--space-3)
   );
 }
 .vs-gantt-seg[data-kind="grey"] {
@@ -716,6 +716,26 @@ button.vs-crumb:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+}
+.vs-swatchlegend {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.vs-swatch {
+  display: inline-block;
+  flex: none;
+  width: var(--dot);
+  height: var(--dot);
+  border-radius: var(--radius-sm);
+  background: var(--seg-color, var(--accent));
+}
+.vs-swatch[data-hatched] {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--seg-color, var(--muted)) 0 var(--space-1),
+    var(--panel-2) var(--space-1) var(--space-3)
+  );
 }
 
 /* --- narrative: a turn as thinking, text and folded tool lines ----------------------------------- */

@@ -13,6 +13,7 @@ import {type Guide, Guides} from './guides.js';
 import {navigationKeys, pickKeys} from './listbox.js';
 import {Meter} from './meter.js';
 import {Chip, StatusDot, type StatusTone} from './status.js';
+import {Swatch} from './swatch-legend.js';
 import {Text} from './text.js';
 import {InSlot, useSlot, useWindowed} from './windowing.js';
 
@@ -196,6 +197,8 @@ export function PickRow(props: {
   readonly trail?: {readonly label: string; readonly press?: () => void};
   /** An accent stripe down the row's edge: it is on the chain the reader is led along (a winning path). */
   readonly stripe?: boolean;
+  /** A square of the palette's color number (`--series-N`) before the title: what the row is, by color. */
+  readonly swatch?: number;
   readonly badges?: readonly {readonly label: string; readonly tone: StatusTone}[];
   readonly select: () => void;
 }): JSX.Element {
@@ -234,6 +237,7 @@ export function PickRow(props: {
           </Text>
         </span>
       )}
+      {props.swatch === undefined ? null : <Swatch series={props.swatch} />}
       <span className="vs-pickrow-text">
         <Text variant={props.mono === true ? 'code' : 'body-strong'}>{props.title}</Text>
         {props.summary === undefined ? null : (

@@ -316,6 +316,8 @@ function ZoomBar(props: {
 export function RunScreen(props: {
   readonly state: RunPageState;
   readonly model: RunModel;
+  /** The run to its live end, whatever `model`'s sequence: the chart reads this one. */
+  readonly whole: RunModel;
   readonly core: CoreState | null;
   readonly route: Route;
   readonly zoom: Zoom;
@@ -329,7 +331,7 @@ export function RunScreen(props: {
   };
   const zoomed = resolveZoom(model, route);
   const deep = routeLevel(route) !== 'run' && (zoomed.idea !== null || zoomed.agent !== null);
-  const level = {state, base, core: props.core, mode: route.mode, dispatch};
+  const level = {state, base, whole: props.whole, core: props.core, mode: route.mode, dispatch};
   return (
     <Screen
       density="compact"

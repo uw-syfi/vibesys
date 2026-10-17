@@ -486,6 +486,27 @@ export const RICH_ENTRIES = {
         </Card>
         <Card>
           <Chart
+            label="Throughput from zero: new bests on the line, a slower pass grey, a failure red"
+            points={[
+              {id: 'a', x: 1, y: 100, filled: true, tone: 'accent'},
+              {id: 'b', x: 2, y: 90, filled: true, tone: 'muted'},
+              {id: 'c', x: 3, y: 130, filled: true, tone: 'accent'},
+              {id: 'd', x: 4, y: 40, filled: true, tone: 'err'},
+              {id: 'e', x: 5, y: 120, filled: true, tone: 'muted'},
+            ]}
+            steps={[
+              {x: 1, y: 100},
+              {x: 3, y: 130},
+              {x: 6, y: 130},
+            ]}
+            yDomain={[0, 143]}
+            yTicks={[0, 50, 100, 150].map(value => ({value, label: String(value)}))}
+            xTicks={[1, 2, 3, 4, 5, 6].map(value => ({value, label: String(value)}))}
+            playhead={4.5}
+          />
+        </Card>
+        <Card>
+          <Chart
             label="Throughput in operations per second, with large values"
             points={LARGE_POINTS}
             steps={[

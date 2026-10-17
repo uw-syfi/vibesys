@@ -84,6 +84,7 @@ export {Select, type SelectOption} from './components/select.js';
 export {SidebarItem, SidebarSection, type SidebarTarget} from './components/sidebar.js';
 export {Chip, StatusDot, type StatusTone} from './components/status.js';
 export {type ReplyField, StructuredReply} from './components/structured-reply.js';
+export {type SwatchItem, SwatchLegend} from './components/swatch-legend.js';
 export {Table, type TableColumn} from './components/table.js';
 export {Tabs} from './components/tabs.js';
 export {

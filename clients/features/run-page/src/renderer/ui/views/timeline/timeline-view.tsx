@@ -1,12 +1,22 @@
 /**
  * The Timeline face: a Gantt over the run clock with zoom. At the run level (`idea` null) one row
- * per idea in the Ideas list's order (rows open ideas, segments open steps; agent turn solid, gate
- * hatched, judge grey; the end of a bar coloured by outcome, the ratio or verdict at the right);
+ * per idea in the Ideas list's order (rows open ideas, segments open steps; an agent turn in its
+ * role's color, a gate hatched, both named by the legend; the end of a bar coloured by outcome,
+ * the ratio or verdict at the right);
  * the range is the last hour, the last day or all, and a dense run folds its rejected ideas into
  * one lane. For an opened idea, the strip of its latest attempt's steps.
  */
 import type {Candidate} from '@vibesys/run-state/candidates';
-import {Button, EmptyState, Gantt, Row, SegmentedControl, Stack, Text} from '@vibesys/ui';
+import {
+  Button,
+  EmptyState,
+  Gantt,
+  Row,
+  SegmentedControl,
+  Stack,
+  SwatchLegend,
+  Text,
+} from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import {
   TIMELINE_RANGES,
@@ -36,6 +46,10 @@ function RunTimeline(props: ViewBase): JSX.Element {
     if (row.lane) setExpanded(true);
     else zoom({type: 'open-idea', idea: row.id});
   };
+  const key = [
+    ...shown.legend.roles.map(({role, series}) => ({label: role, series})),
+    ...(shown.legend.gates ? [{label: 'gate', hatched: true}] : []),
+  ];
   const summary =
     shown.folded > 0
       ? `${shown.rows.length - 1} kept and running · rejected as one lane`
@@ -62,6 +76,7 @@ function RunTimeline(props: ViewBase): JSX.Element {
           />
         ) : null}
       </Row>
+      {key.length === 0 ? null : <SwatchLegend label="Bar colors" items={key} />}
       <Gantt
         label="Ideas on the timeline"
         size="fill"

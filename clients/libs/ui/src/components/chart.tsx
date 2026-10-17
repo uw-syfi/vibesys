@@ -13,6 +13,8 @@ export interface ChartPoint {
   readonly filled: boolean;
   /** A minor point (a rejected try): small and faint. Without it, hollow points turn faint when there are many. */
   readonly faint?: boolean;
+  /** The color: the accent (the default), muted grey, or the error red; not text, a mark's own color. */
+  readonly tone?: 'accent' | 'muted' | 'err';
 }
 
 /** A value on an axis and the text it is labelled with. */
@@ -68,9 +70,14 @@ function extent(values: readonly number[]): readonly [number, number] {
   return low === high ? [low - 1, high + 1] : [low, high];
 }
 
-function scale(plot: Plot, xs: readonly number[], ys: readonly number[]): Scale {
+function scale(
+  plot: Plot,
+  xs: readonly number[],
+  ys: readonly number[],
+  yDomain: readonly [number, number] | undefined,
+): Scale {
   const [x0, x1] = extent(xs);
-  const [y0, y1] = extent(ys);
+  const [y0, y1] = yDomain ?? extent(ys);
   return {
     x: value => plot.left + ((value - x0) / (x1 - x0)) * (plot.right - plot.left),
     y: value => plot.bottom - ((value - y0) / (y1 - y0)) * (plot.bottom - plot.top),
@@ -147,7 +154,7 @@ function Axes(props: {
 
 /**
  * A series over time or index in SVG: `points` (filled or hollow), a `steps` line, a dashed
- * `reference` line, a `playhead`, grid lines and labels at the ticks, and axis titles. Drawn in
+ * `reference` line, a `playhead` (or a cursor), grid lines and labels at the ticks, and axis titles. Drawn in
  * `accent`, `muted` and `grid` only. `label` describes the chart for assistive technology. `size`
  * `strip` is a short, wide chart. Points with an `id` are buttons that call `pick(id)`; the one
  * whose id is `selected` is drawn larger and ringed. The pickable points are one tab stop (the
@@ -164,6 +171,8 @@ export function Chart(props: {
   readonly xTicks?: readonly ChartTick[];
   readonly yTicks?: readonly ChartTick[];
   readonly xTitle?: string;
+  /** The y-axis range, fixed by the caller; without it the range fits the points and ticks. */
+  readonly yDomain?: readonly [number, number];
   readonly size?: ChartSize;
   readonly selected?: string;
   readonly pick?: (id: string) => void;
@@ -182,6 +191,7 @@ export function Chart(props: {
       ...yTicks.map(t => t.value),
       ...(props.reference === undefined ? [] : [props.reference.y]),
     ],
+    props.yDomain,
   );
   const pickable = props.points.filter(point => point.id !== undefined);
   const stop = pickable.some(point => point.id === props.selected)
@@ -297,6 +307,7 @@ function Point(props: {
       className="vs-chart-point"
       data-filled={point.filled || undefined}
       data-faint={faint || undefined}
+      data-tone={point.tone}
       cx={cx}
       cy={cy}
       r={faint ? FAINT_RADIUS : POINT_RADIUS}

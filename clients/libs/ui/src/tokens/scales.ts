@@ -191,3 +191,19 @@ export const MOTION: MotionSpec = {
   duration: {instant: 0, fast: 120, base: 200},
   easing: 'cubic-bezier(0.2, 0, 0, 1)',
 };
+
+/**
+ * The categorical palette: the colors a chart or a Gantt gives its series (`series` 0 to 7 is
+ * `--series-N`), distinct from one another, from the status colors (ok, warn, err) and from the
+ * muted grey. Tuned on the `ink` theme; the same on every theme.
+ */
+export const SERIES: readonly `#${string}`[] = [
+  '#56b4e9',
+  '#e69f00',
+  '#3dbb8c',
+  '#cc79a7',
+  '#d9cf4a',
+  '#9b82e0',
+  '#5ec4c4',
+  '#c4a27c',
+];

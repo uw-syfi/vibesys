@@ -2,7 +2,7 @@
  * What the Timeline and the idea body draw as bars: the run's ideas as Gantt rows (running first,
  * then the rest newest first, as the Ideas list orders them) over a range of the run clock, the
  * rejected folded into one density lane when there are many; an idea's attempts as lines; and an
- * attempt's steps as segments (agent turn solid, gate hatched, judge grey).
+ * attempt's steps as segments (an agent turn in its role's color, a gate hatched).
  *
  * Pure over the candidates the run folded and the run clock; the views add presses and layout.
  */
@@ -13,6 +13,7 @@ import type {
   CandidateStep,
 } from '@vibesys/run-state/candidates';
 import {figureOf} from './ideas-view.js';
+import {roleSeries} from './role-series.js';
 import type {Direction, RunModel} from './run-model.js';
 import {duration, formatValue, ratio, words} from './span-reading.js';
 
@@ -46,6 +47,10 @@ export interface StepSegment {
   readonly start: number;
   readonly end: number;
   readonly kind: SegmentKind;
+  /** The agent role of a turn; null for a gate or a step without one. */
+  readonly role: string | null;
+  /** The role's palette slot (`roleSeries`); absent without a role. */
+  readonly series?: number;
   /** `role · headline · took`. */
   readonly label: string;
 }
@@ -84,6 +89,14 @@ export interface TimelineRows {
   /** Rejected ideas in range, folded or not. */
   readonly rejectedInRange: number;
   readonly total: number;
+  /** What the bars in view are colored by, for the legend. */
+  readonly legend: TimelineLegend;
+}
+
+/** The roles whose turns are drawn on the rows in view (by name) and whether any gate is. */
+interface TimelineLegend {
+  readonly roles: readonly {readonly role: string; readonly series: number}[];
+  readonly gates: boolean;
 }
 
 const OUTCOME: Readonly<Record<CandidateOutcome, BarOutcome>> = {
@@ -98,8 +111,7 @@ export function endOf(start: number, endedAt: number | null, now: number | null)
 }
 
 function stepKind(step: CandidateStep): SegmentKind {
-  if (step.kind === 'gate') return 'hatched';
-  return step.role === 'judge' ? 'grey' : 'solid';
+  return step.kind === 'gate' ? 'hatched' : 'solid';
 }
 
 /** The steps as bar segments; a running step reaches `now`. */
@@ -115,6 +127,8 @@ export function stepSegments(
       start: step.startedAt,
       end,
       kind: stepKind(step),
+      role: step.role,
+      ...(step.role === null ? {} : {series: roleSeries(step.role)}),
       label: [step.role ?? words(step.kind), step.title, ...took].join(' · '),
     };
   });
@@ -182,6 +196,7 @@ function laneOf(rejected: readonly TimelineRow[]): TimelineRow {
       start: start + bin * width,
       end: start + (bin + 1) * width,
       kind: 'grey',
+      role: null,
       label: 'rejected ideas',
     }));
   return {
@@ -230,6 +245,22 @@ function ordered(candidates: readonly Candidate[]): Candidate[] {
   return [...running, ...rest];
 }
 
+function legendOf(rows: readonly TimelineRow[]): TimelineLegend {
+  const roles = new Set<string>();
+  let gates = false;
+  for (const row of rows) {
+    if (row.lane) continue;
+    for (const segment of row.segments) {
+      if (segment.role !== null) roles.add(segment.role);
+      else if (segment.kind === 'hatched') gates = true;
+    }
+  }
+  return {
+    roles: [...roles].sort().map(role => ({role, series: roleSeries(role)})),
+    gates,
+  };
+}
+
 /**
  * The Timeline's rows over `range`: ideas that overlap the range, in the Ideas list's order. When
  * more than `REJECTED_DENSE` rejected ideas are in range and `expanded` is false, they fold into
@@ -264,6 +295,7 @@ export function timelineRows(
     folded: fold ? rejected.length : 0,
     rejectedInRange: rejected.length,
     total: all.length,
+    legend: legendOf(rows),
   };
 }
 

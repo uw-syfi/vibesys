@@ -6,6 +6,7 @@ import type {
   CandidateStep,
 } from '@vibesys/run-state/candidates';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
+import {roleSeries} from './role-series.js';
 import {attempt, idea, modelOf, step} from './timeline-fixtures.js';
 import {
   attemptLines,
@@ -100,8 +101,51 @@ describe('timeline rows', () => {
   });
 });
 
+describe('the timeline legend', () => {
+  test('over any run names exactly the roles drawn on the rows in view, once each, in the colors the bars use', () => {
+    for (const seed of SEEDS) {
+      const ideas = randomIdeas(new Seeded(seed));
+      const clock = {start: 0, now: ideas.length * 600 + 1000};
+      for (const range of ['hour', 'all'] as const) {
+        const shown = timelineRows(modelOf(ideas), range, clock, false);
+        const drawn = new Set(
+          shown.rows
+            .filter(row => !row.lane)
+            .flatMap(row =>
+              row.segments.flatMap(segment => (segment.role === null ? [] : [segment.role])),
+            ),
+        );
+        expect(shown.legend.roles.map(entry => entry.role).sort()).toEqual([...drawn].sort());
+        for (const {role, series} of shown.legend.roles) expect(series).toBe(roleSeries(role));
+        const hatched = shown.rows.some(
+          row => !row.lane && row.segments.some(each => each.kind === 'hatched'),
+        );
+        expect(shown.legend.gates).toBe(hatched);
+      }
+    }
+  });
+
+  test('says nothing for an idea with no steps', () => {
+    const bare = idea('a', 'kept', 0, 100);
+    const none = {...bare, attempts: [{...(bare.attempts[0] as CandidateAttempt), steps: []}]};
+    const shown = timelineRows(modelOf([none]), 'all', {start: 0, now: 200}, false);
+    expect(shown.legend).toEqual({roles: [], gates: false});
+  });
+
+  test('names the roles a run used: implementer and judge here, and a gate', () => {
+    const shown = timelineRows(
+      modelOf([idea('a', 'kept', 0, 100)]),
+      'all',
+      {start: 0, now: 200},
+      false,
+    );
+    expect(shown.legend.roles.map(entry => entry.role)).toEqual(['implementer', 'judge']);
+    expect(shown.legend.gates).toBe(true);
+  });
+});
+
 describe('step segments', () => {
-  test('an agent turn is solid, a gate hatched, a judge grey, and a running step reaches now', () => {
+  test('an agent turn is solid in its role color, a gate hatched, and a running step reaches now', () => {
     const steps: CandidateStep[] = [
       step('t', 'agent_turn', 'implementer', 0, 10),
       step('g', 'gate', null, 10, 10),
@@ -109,7 +153,14 @@ describe('step segments', () => {
       {...step('r', 'agent_turn', 'implementer', 30, 0), endedAt: null, status: 'running'},
     ];
     const segments = stepSegments(steps, 50);
-    expect(segments.map(segment => segment.kind)).toEqual(['solid', 'hatched', 'grey', 'solid']);
+    expect(segments.map(segment => segment.kind)).toEqual(['solid', 'hatched', 'solid', 'solid']);
+    expect(segments.map(segment => segment.series)).toEqual([
+      roleSeries('implementer'),
+      undefined,
+      roleSeries('judge'),
+      roleSeries('implementer'),
+    ]);
+    expect(segments[0]?.series).not.toBe(segments[2]?.series);
     expect(segments[3]?.end).toBe(50);
     expect(segments[0]?.label).toBe('implementer · agent_turn t · 10s');
   });

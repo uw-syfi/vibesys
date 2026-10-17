@@ -1,0 +1,50 @@
+import type {JSX} from 'react';
+import type {StyleWithVars} from './css-vars.js';
+import {Text} from './text.js';
+
+/**
+ * A small square of the palette's color number `series` (`--series-N`), or, `hatched`, drawn with
+ * the hatching a Gantt gives such a piece (muted when it has no series). Decorative: a name always
+ * sits beside it.
+ */
+export function Swatch(props: {readonly series?: number; readonly hatched?: boolean}): JSX.Element {
+  const color: StyleWithVars =
+    props.series === undefined ? {} : {'--seg-color': `var(--series-${props.series})`};
+  return (
+    <span
+      className="vs-swatch"
+      data-hatched={props.hatched === true || undefined}
+      style={color}
+      aria-hidden="true"
+    />
+  );
+}
+
+/** One entry of a `SwatchLegend`. */
+export interface SwatchItem {
+  readonly label: string;
+  readonly series?: number;
+  readonly hatched?: boolean;
+}
+
+/** A one-line key to colored bars: each swatch and its name, named as a list by `label`. */
+export function SwatchLegend(props: {
+  readonly label: string;
+  readonly items: readonly SwatchItem[];
+}): JSX.Element {
+  return (
+    <ul className="vs-dotlegend vs-swatchlegend" aria-label={props.label}>
+      {props.items.map(item => (
+        <li key={item.label} className="vs-dotlegend-item">
+          <Swatch
+            {...(item.series === undefined ? {} : {series: item.series})}
+            {...(item.hatched === true ? {hatched: true} : {})}
+          />
+          <Text variant="small" tone="muted">
+            {item.label}
+          </Text>
+        </li>
+      ))}
+    </ul>
+  );
+}

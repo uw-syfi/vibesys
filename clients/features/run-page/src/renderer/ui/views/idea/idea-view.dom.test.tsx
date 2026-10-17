@@ -72,7 +72,7 @@ function tried(): Candidate {
 }
 
 function view(candidate: Candidate, zoom: (event: ZoomEvent) => void) {
-  return {model: modelOf([candidate]), clock: CLOCK, zoom, idea: candidate};
+  return {model: modelOf([candidate]), clock: CLOCK, zoom, idea: candidate, outcome: null};
 }
 
 test('a one-attempt idea shows its steps, role first, and a step opens', async () => {
@@ -120,7 +120,7 @@ test('a segment of the strip opens its step', async () => {
   expect(segments.map(each => each.getAttribute('data-kind'))).toEqual([
     'solid',
     'hatched',
-    'grey',
+    'solid',
   ]);
   await act(async () => segments[1]?.click());
   expect(events).toEqual([{type: 'open-step', step: 'a3-g'}]);
@@ -149,5 +149,17 @@ test('the header adds the value and how long it took', async () => {
   const meta = ideaHeader(view(candidate, () => undefined)).meta;
   const {container, unmount} = await mount(meta);
   expect(container.textContent).toBe('40 · 5m');
+  await unmount();
+});
+
+test('shows the implementer outcome as a chip and its summary in the idea view', async () => {
+  const candidate = idea('mpmc', 'kept', 100, 300);
+  const props = {
+    ...view(candidate, () => undefined),
+    outcome: {outcome: {label: 'blocked', tone: 'err' as const}, summary: 'Padded the counters.'},
+  };
+  const {container, unmount} = await mount(<IdeaView {...props} />);
+  expect(container.querySelector('.vs-chip')?.textContent).toBe('blocked');
+  expect(container.textContent).toContain('Padded the counters.');
   await unmount();
 });

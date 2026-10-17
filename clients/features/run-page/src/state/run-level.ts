@@ -7,6 +7,7 @@
 import type {Span} from '@vibesys/contracts';
 import type {AgentNode} from '@vibesys/run-state/agents';
 import type {Candidate, CandidateStep} from '@vibesys/run-state/candidates';
+import {type IdeaResult, type PerformancePoint, performanceFold} from './performance.js';
 import type {Direction, RunModel} from './run-model.js';
 import type {RunPageState} from './run-page.js';
 import {type LogScope, streamToFollow} from './scoped-logs.js';
@@ -77,14 +78,23 @@ export interface StripChartView {
     readonly x: number;
     readonly y: number;
     readonly filled: boolean;
+    readonly tone: 'accent' | 'muted' | 'err';
+    /** After the scrub position: drawn dimmed, not removed. */
     readonly faint: boolean;
   }[];
+  /** The best passed value so far, as a step line that reaches the end of the axis. */
   readonly steps: readonly {readonly x: number; readonly y: number}[];
   readonly reference: {readonly y: number; readonly label: string} | null;
   readonly xTicks: readonly {readonly value: number; readonly label: string}[];
   readonly yTicks: readonly {readonly value: number; readonly label: string}[];
+  /** The y-axis range: from 0 to the largest value of the whole run, with headroom. */
+  readonly yDomain: readonly [number, number];
+  /** The cursor: the live clock now, or the scrub position when the reader looks at the past. */
   readonly playhead: number | null;
 }
+
+/** The share of the largest value left above it, so the top dot is not on the frame. */
+const HEADROOM = 1.1;
 
 /** Round tick positions over [low, high]: at most a handful, at 1, 2, 2.5 or 5 times a power of ten. */
 function ticks(low: number, high: number, label: (value: number) => string) {
@@ -101,44 +111,53 @@ function ticks(low: number, high: number, label: (value: number) => string) {
   return found;
 }
 
-function better(a: number, b: number, direction: Direction): boolean {
-  return direction === 'min' ? a < b : a > b;
+const RESULT_WORDS: Readonly<Record<IdeaResult, string>> = {
+  passed: 'passed',
+  failed: 'failed',
+  pending: 'not measured yet',
+};
+
+function pointTone(point: PerformancePoint): 'accent' | 'muted' | 'err' {
+  if (point.best) return 'accent';
+  return point.result === 'failed' ? 'err' : 'muted';
 }
 
 /**
- * Every measured idea as a point on the run clock (minutes from the run's start), the winning
- * path's filled and the rejected faint, with the running best of the kept as a step line.
+ * Every measured idea as a point on the run clock (minutes from the run's start) over a y-axis
+ * that starts at 0: the ideas that set a new best sit on the step line of the best so far, ideas
+ * that passed without beating it are grey, ideas that failed are red (`performanceFold`).
+ *
+ * `model` is the whole run to its live end, never the run at a scrubbed sequence: what the chart
+ * shows and the range of both axes depend on the run alone. `scrub` is the run-clock time the
+ * reader scrubbed to (null at the live end); it is drawn as the cursor and dims the points after
+ * it. `now` is the live clock, else the run's latest time bounds the x-axis.
  */
 export function stripChartView(
   model: RunModel,
   start: number,
   now: number | null,
+  scrub: number | null = null,
 ): StripChartView | null {
-  const path = new Set(model.candidates.bestPath);
   const minutes = (at: number) => (at - start) / 60;
-  const measured = model.candidates.candidates
-    .filter(item => item.measurement?.metricValue != null)
-    .sort((a, b) => (a.measurement?.at ?? 0) - (b.measurement?.at ?? 0));
-  if (measured.length === 0) return null;
-  const points = measured.map(item => ({
-    id: item.id,
-    label: item.title,
-    x: minutes(item.measurement?.at ?? item.startedAt),
-    y: item.measurement?.metricValue as number,
-    filled: path.has(item.id),
-    faint: item.outcome === 'rejected',
+  const fold = performanceFold(model.candidates.candidates, model.direction);
+  if (fold.points.length === 0) return null;
+  const points = fold.points.map(point => ({
+    id: point.id,
+    label: `${point.title} · ${formatValue(point.value)} · ${point.best ? 'new best' : RESULT_WORDS[point.result]}`,
+    x: minutes(point.at),
+    y: point.value,
+    filled: point.result !== 'pending',
+    tone: pointTone(point),
+    faint: scrub !== null && point.at > scrub,
   }));
-  const steps: {x: number; y: number}[] = [];
-  for (const [index, item] of measured.entries()) {
-    const point = points[index];
-    if (item.outcome !== 'kept' || point === undefined) continue;
-    const last = steps.at(-1);
-    if (last === undefined || better(point.y, last.y, model.direction))
-      steps.push({x: point.x, y: point.y});
-  }
+  const reached = now ?? model.latest;
+  const end = Math.max(reached === null ? 0 : minutes(reached), ...points.map(point => point.x));
+  const steps = fold.best.map(step => ({x: minutes(step.at), y: step.value}));
+  const last = steps.at(-1);
+  if (last !== undefined && last.x < end) steps.push({x: end, y: last.y});
   const input = inputValue(model);
-  const ys = [...points.map(point => point.y), ...(input === null ? [] : [input])];
-  const end = Math.max(now === null ? 0 : minutes(now), ...points.map(point => point.x));
+  const ys = [0, ...points.map(point => point.y), ...(input === null ? [] : [input])];
+  const top = Math.max(...ys);
   const metric = model.overview?.objective.metric;
   return {
     label: `${typeof metric === 'string' ? metric : 'Metric'} of each measured idea over the run, with the best so far`,
@@ -146,8 +165,9 @@ export function stripChartView(
     steps,
     reference: input === null ? null : {y: input, label: 'input'},
     xTicks: ticks(0, end, value => duration(value * 60)),
-    yTicks: ticks(Math.min(...ys), Math.max(...ys), formatValue),
-    playhead: now === null ? null : minutes(now),
+    yTicks: ticks(Math.min(...ys), top, formatValue),
+    yDomain: [Math.min(...ys), top > 0 ? top * HEADROOM : 1],
+    playhead: scrub !== null ? minutes(scrub) : now === null ? null : minutes(now),
   };
 }
 

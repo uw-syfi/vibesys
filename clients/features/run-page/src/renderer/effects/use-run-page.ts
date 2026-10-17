@@ -48,6 +48,8 @@ export function useRunPage(options: RunPageOptions): {
   readonly dispatch: (action: RunPageAction) => void;
   /** The run at the view's sequence, read by the page's own reader (`createRunReader`). */
   readonly model: RunModel;
+  /** The run to its live end whatever the view's sequence: what the chart reads, so scrubbing never changes it. */
+  readonly whole: RunModel;
   /** The run fold (the transcript the turns read); null before the run reached the window. */
   readonly core: CoreState | null;
   /** Where the screen is zoomed, and the way to move it. */
@@ -93,6 +95,9 @@ export function useRunPage(options: RunPageOptions): {
     state === null
       ? null
       : reader.read(state.run.trace, state.view.at === 'live' ? null : state.view.at);
+  // Read after `model`: at the live end it is the same object, and at a past sequence it is the
+  // live fold the reader keeps (the past model it also keeps stays for the next scrub).
+  const whole = state === null ? null : reader.read(state.run.trace, null);
   // The page fetches lines only for its selected stream: while a Logs face is on screen, select
   // the stream it shows. Once selected the function returns null, so this dispatches once per
   // stream the face moves to.
@@ -102,5 +107,6 @@ export function useRunPage(options: RunPageOptions): {
       store.dispatch({type: 'select-stream', streamId: follow});
   }, [store, follow]);
   if (store === null || state === null || model === null) return null;
-  return {state, dispatch: store.dispatch, model, core: state.run.core, route, zoom};
+  if (whole === null) return null;
+  return {state, dispatch: store.dispatch, model, whole, core: state.run.core, route, zoom};
 }

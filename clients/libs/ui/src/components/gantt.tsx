@@ -7,12 +7,17 @@ import {navigationKeys, pickKeys} from './listbox.js';
 import {Text} from './text.js';
 import {useWindowed} from './windowing.js';
 
-/** One piece of a Gantt bar: its span on the axis and its `kind`, a shade (solid accent, hatched, or grey), not words. */
+/**
+ * One piece of a Gantt bar: its span on the axis and its `kind`, a shade (solid, hatched, or
+ * grey), not words. A solid or hatched piece is the accent, or the palette's color number
+ * `series` (`--series-N`) when it has one; a hatched piece with none is muted.
+ */
 export interface GanttSegment {
   readonly id: string;
   readonly start: number;
   readonly end: number;
   readonly kind: 'solid' | 'hatched' | 'grey';
+  readonly series?: number;
   /** The one-line tooltip. */
   readonly label: string;
   /** Opens this piece. Pointer only: the row's own key opens the row, whose pieces are a list. */
@@ -132,6 +137,9 @@ function GanttBar(props: {
             const seg: StyleWithVars = {
               '--seg-from': percent(within(segment.start)),
               '--seg-span': percent(Math.max(0, within(segment.end) - within(segment.start))),
+              ...(segment.series === undefined
+                ? {}
+                : {'--seg-color': `var(--series-${segment.series})`}),
             };
             const press = segment.press;
             return (

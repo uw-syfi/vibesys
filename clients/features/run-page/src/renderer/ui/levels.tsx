@@ -10,7 +10,14 @@ import type {AgentNode} from '@vibesys/run-state/agents';
 import type {Candidate, CandidateStep} from '@vibesys/run-state/candidates';
 import {Button, Chip, Pane, Panes, Row, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
-import type {ResolvedZoom, RunMode, RunPageAction, RunPageState} from '../../state/index.js';
+import {
+  implementerOutcomes,
+  type ResolvedZoom,
+  type RunMode,
+  type RunModel,
+  type RunPageAction,
+  type RunPageState,
+} from '../../state/index.js';
 import {FramedPane} from './framed-pane.js';
 import {agentFolds, IdeasList, ModeSwitch} from './run-level.js';
 import {
@@ -42,6 +49,8 @@ type Dispatch = (action: RunPageAction) => void;
 export interface LevelProps {
   readonly state: RunPageState;
   readonly base: ViewBase;
+  /** The run to its live end, for what must not change while the reader scrubs. */
+  readonly whole: RunModel;
   readonly core: CoreState | null;
   readonly mode: RunMode;
   readonly dispatch: Dispatch;
@@ -108,13 +117,15 @@ function IdeaFacts(props: {readonly idea: Candidate; readonly base: ViewBase}): 
 
 function IdeaLevel(props: LevelProps & {readonly idea: Candidate}): JSX.Element {
   const {state, base, mode, idea, dispatch} = props;
-  const view: IdeaViewProps = {...base, idea};
+  const outcomes = implementerOutcomes(props.core, base.model.candidates);
+  const view: IdeaViewProps = {...base, idea, outcome: outcomes.get(idea.id) ?? null};
   const logs: LogsViewProps = {...base, state, scope: {kind: 'idea', idea}, dispatch};
   return (
     <Panes>
       <Pane kicker="ideas" title={`${base.model.candidates.candidates.length}`} width="list">
         <IdeasList
           base={base}
+          outcomes={outcomes}
           filter={state.ideas}
           selected={idea.id}
           compact

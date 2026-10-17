@@ -6,6 +6,11 @@
  */
 
 export {
+  type ImplementerOutcome,
+  type ImplementerOutcomes,
+  implementerOutcomes,
+} from './idea-outcomes.js';
+export {
   ageWords,
   bestPathView,
   type IdeaRow,
@@ -14,6 +19,7 @@ export {
 } from './ideas-view.js';
 export {EMPTY_TRACE_LOG, type RunData, type SessionView, type TraceLog} from './live.js';
 export {runRecord, sameRecord} from './record.js';
+export {roleSeries} from './role-series.js';
 export {
   clockAt,
   clockCarried,

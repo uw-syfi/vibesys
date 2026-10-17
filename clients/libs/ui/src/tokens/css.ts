@@ -4,6 +4,7 @@ import {
   FONT_STACKS,
   MOTION,
   RADIUS,
+  SERIES,
   SIZE,
   SPACE,
   type TextStyle,
@@ -78,6 +79,7 @@ function scaleDeclarations(): string[] {
     ]),
     ...Object.entries(MOTION.duration).map(([token, ms]) => `--duration-${token}: ${ms}ms;`),
     `--easing: ${MOTION.easing};`,
+    ...SERIES.map((color, slot) => `--series-${slot}: ${color};`),
   ];
 }
 

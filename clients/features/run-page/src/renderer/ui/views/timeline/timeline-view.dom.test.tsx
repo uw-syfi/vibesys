@@ -85,7 +85,7 @@ test('a row opens its idea and a segment opens its step under that idea', async 
   expect(segments.map(each => each.getAttribute('data-kind'))).toEqual([
     'solid',
     'hatched',
-    'grey',
+    'solid',
   ]);
   await act(async () => segments[0]?.click());
   expect(events).toEqual([
@@ -177,5 +177,19 @@ test('a figure too long for its column is a short form, with the whole on hover'
     ['93/100', '93/100 trials'],
     ['slower', 'slower than input'],
   ]);
+  await unmount();
+});
+
+test('a legend names each role on the bars, in the color of its segments, and the gates', async () => {
+  const {container, unmount} = await mount(<TimelineView {...base(IDEAS, 3600)} />);
+  const legend = container.querySelector('[aria-label="Bar colors"]');
+  const entries = [...(legend?.querySelectorAll('li') ?? [])];
+  expect(entries.map(each => each.textContent ?? '')).toEqual(['implementer', 'judge', 'gate']);
+  const colors = entries.map(item =>
+    (item.querySelector('.vs-swatch') as HTMLElement).style.getPropertyValue('--seg-color'),
+  );
+  const bar = rows(container)[0]?.querySelectorAll('.vs-gantt-seg') ?? [];
+  const drawn = [...bar].map(each => (each as HTMLElement).style.getPropertyValue('--seg-color'));
+  expect(drawn.filter(color => color !== '').sort()).toEqual(colors.slice(0, 2).sort());
   await unmount();
 });

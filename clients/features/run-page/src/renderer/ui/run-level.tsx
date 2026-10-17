@@ -4,6 +4,8 @@
  * Timeline, Agents and Logs (`state.zoom` mode), the right one is Now, what runs at this moment,
  * each row a shortcut to its live step.
  */
+
+import type {CoreState} from '@vibesys/run-state';
 import {
   Breadcrumb,
   Button,
@@ -28,10 +30,13 @@ import {
   heroView,
   type IdeaRow,
   type IdeasFilter,
+  type ImplementerOutcomes,
   ideasView,
+  implementerOutcomes,
   type NowItem,
   nowView,
   type RunMode,
+  type RunModel,
   type RunPageAction,
   type RunPageState,
   stripChartView,
@@ -70,9 +75,15 @@ export function ModeSwitch(props: {
   );
 }
 
-function Hero(props: ViewBase): JSX.Element {
+/**
+ * The hero: the figures at the viewed sequence, and the chart of the whole run. The chart is
+ * drawn from `whole`, not from the viewed model, so scrubbing neither mounts nor unmounts it nor
+ * rescales its axes; the scrub position is its cursor.
+ */
+function Hero(props: ViewBase & {readonly whole: RunModel}): JSX.Element {
   const hero = heroView(props.model);
-  const chart = stripChartView(props.model, props.clock.start, props.clock.now);
+  const scrub = props.model.at === null ? null : (props.model.latest ?? props.clock.start);
+  const chart = stripChartView(props.whole, props.clock.start, props.clock.now, scrub);
   return (
     <Row gap="space-6" align="center">
       <Stack gap="space-1">
@@ -97,6 +108,7 @@ function Hero(props: ViewBase): JSX.Element {
             label={chart.label}
             size="strip"
             points={chart.points}
+            yDomain={chart.yDomain}
             steps={chart.steps}
             {...(chart.reference === null ? {} : {reference: chart.reference})}
             {...(chart.playhead === null ? {} : {playhead: chart.playhead})}
@@ -145,11 +157,13 @@ function BestPath(props: {
 
 function IdeaPickRow(props: {
   readonly row: IdeaRow;
+  readonly outcomes: ImplementerOutcomes;
   readonly compact: boolean;
   readonly now: number | null;
   readonly zoom: Zoom;
 }): JSX.Element {
   const {row, compact, zoom} = props;
+  const reported = props.outcomes.get(row.id)?.outcome ?? null;
   return (
     <PickRow
       id={row.id}
@@ -157,7 +171,7 @@ function IdeaPickRow(props: {
       mono
       {...(compact || row.summary === null ? {} : {summary: row.summary})}
       state={row.state}
-      badges={row.badges}
+      badges={compact || reported === null ? row.badges : [...row.badges, reported]}
       {...(compact || row.bar === null ? {} : {bar: row.bar})}
       figure={row.runningSince === null ? row.figure : ageWords(row.runningSince, props.now)}
       figureTone={row.figureTone}
@@ -172,6 +186,7 @@ function IdeaPickRow(props: {
 /** The ideas as a flat list: full at the run level, compact beside an opened idea. */
 export function IdeasList(props: {
   readonly base: ViewBase;
+  readonly outcomes: ImplementerOutcomes;
   readonly filter: IdeasFilter;
   readonly selected: string | null;
   readonly compact: boolean;
@@ -202,6 +217,7 @@ export function IdeasList(props: {
           <IdeaPickRow
             key={row.id}
             row={row}
+            outcomes={props.outcomes}
             compact={props.compact}
             now={base.clock.now}
             zoom={base.zoom}
@@ -253,9 +269,10 @@ function IdeasLegend(props: {
 function IdeasFace(props: {
   readonly state: RunPageState;
   readonly base: ViewBase;
+  readonly outcomes: ImplementerOutcomes;
   readonly dispatch: Dispatch;
 }): JSX.Element {
-  const {state, base, dispatch} = props;
+  const {state, base, outcomes, dispatch} = props;
   if (base.model.candidates.candidates.length === 0) {
     return <EmptyState title="No ideas yet" body="Each idea the run tries shows here." />;
   }
@@ -270,6 +287,7 @@ function IdeasFace(props: {
       />
       <IdeasList
         base={base}
+        outcomes={outcomes}
         filter={state.ideas}
         selected={null}
         compact={false}
@@ -331,6 +349,7 @@ export function agentFolds(
 function runFace(
   state: RunPageState,
   base: ViewBase,
+  outcomes: ImplementerOutcomes,
   mode: RunMode,
   dispatch: Dispatch,
 ): {readonly header: PaneHeader; readonly body: JSX.Element} {
@@ -357,7 +376,10 @@ function runFace(
       return {header: logsHeader(view), body: <LogsView {...view} />};
     }
     case 'ideas':
-      return {header: {}, body: <IdeasFace state={state} base={base} dispatch={dispatch} />};
+      return {
+        header: {},
+        body: <IdeasFace state={state} base={base} outcomes={outcomes} dispatch={dispatch} />,
+      };
   }
 }
 
@@ -372,16 +394,19 @@ const KICKERS: Readonly<Record<RunMode, string>> = {
 export function RunLevel(props: {
   readonly state: RunPageState;
   readonly base: ViewBase;
+  readonly whole: RunModel;
+  readonly core: CoreState | null;
   readonly mode: RunMode;
   readonly dispatch: Dispatch;
 }): JSX.Element {
   const {state, base, mode, dispatch} = props;
   const total =
     mode === 'agents' ? base.model.agents.agents.length : base.model.candidates.candidates.length;
-  const face = runFace(state, base, mode, dispatch);
+  const outcomes = implementerOutcomes(props.core, base.model.candidates);
+  const face = runFace(state, base, outcomes, mode, dispatch);
   return (
     <>
-      <Hero {...base} />
+      <Hero {...base} whole={props.whole} />
       <Panes>
         <FramedPane
           kicker={KICKERS[mode]}
