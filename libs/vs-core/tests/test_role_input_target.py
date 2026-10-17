@@ -154,3 +154,23 @@ def test_a_role_input_reaches_exactly_one_turn_of_that_role_once(
     assert [receipt.invocation.invocation_id.root for receipt in delivered] == [
         f"turn-{index}" for index in took[:1]
     ]
+
+
+@given(
+    roles=st.lists(st.sampled_from(["a", "b", "c"]), unique=True),
+    other=st.lists(st.sampled_from(["a", "b", "c"]), unique=True),
+    same_strategy=st.booleans(),
+)
+def test_a_declaration_resumes_under_any_roles_but_no_other_change(
+    roles: list[str], other: list[str], *, same_strategy: bool
+) -> None:
+    def declared(strategy: str, names: list[str]) -> core.SearchDeclaration:
+        return core.SearchDeclaration(
+            strategy_id=core.StrategyId(root=strategy),
+            roles=tuple(core.RoleId(root=name) for name in sorted(names)),
+        )
+
+    durable = declared("search", roles)
+    offered = declared("search" if same_strategy else "other", other)
+
+    assert durable.resumable_as(offered) == same_strategy

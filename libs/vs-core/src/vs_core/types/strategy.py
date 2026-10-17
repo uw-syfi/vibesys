@@ -295,7 +295,19 @@ class SearchDeclaration(Value):
     required: frozenset[LifecycleCapability] = frozenset()
     optional: frozenset[LifecycleCapability] = frozenset()
     roles: tuple[RoleId, ...] = ()
-    """The role ids of the sessions the search's turns run in, sorted; an input may name one."""
+    """The role ids of the sessions the search's turns run in, sorted; an input may name one.
+
+    Recorded when the run starts and kept for its life: a run resumed under code that adds,
+    renames or removes a role still accepts inputs for the roles it started with.
+    """
+
+    def resumable_as(self, offered: SearchDeclaration) -> bool:
+        """Whether a run that recorded this declaration may resume under ``offered``.
+
+        Every field must match except ``roles``, which follow the code's agents and may change
+        with it; the run keeps the roles it recorded.
+        """
+        return self.model_copy(update={"roles": ()}) == offered.model_copy(update={"roles": ()})
 
     @property
     def state_schema(self) -> SchemaRef:

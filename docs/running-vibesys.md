@@ -442,7 +442,8 @@ resume the run on another host, send them again there; resending under the same 
 
 A steer goes to the next agent turn of any role unless it names a target. `--role ID` gives it
 to the next turn of one role the run's search declares (role ids are the session role ids in the
-run's events, such as `dynamic-planner`); `--attempt ID`, `--item ID` and `--invocation ID` give
+run's events, such as `dynamic-planner`; a run keeps the roles it started with, even when it
+resumes under code that changed them); `--attempt ID`, `--item ID` and `--invocation ID` give
 it to the next turn in that attempt, of that work item, or of that one invocation. The message
 reaches exactly one matching turn, once. A target the run does not know, or one that has
 ended, is rejected with the reason, and the message reaches no one:

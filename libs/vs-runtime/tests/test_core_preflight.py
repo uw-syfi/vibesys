@@ -13,6 +13,7 @@ from vs_core.api import (
     FlowState,
     HostFence,
     HostId,
+    RoleId,
     RunEnvelope,
     RunId,
     RunResultProposal,
@@ -424,3 +425,39 @@ def test_an_open_run_still_resumes(tmp_path: Path) -> None:
     _commit(project, run_id, record(run_id))
 
     assert resolve_core_resume(project, driver(), run_id=run_id).run_id == run_id
+
+
+@pytest.mark.parametrize("recorded", [(), ("old-role",), ("judge", "worker")])
+def test_a_run_resumes_under_code_that_changed_its_roles(
+    tmp_path: Path, recorded: tuple[str, ...]
+) -> None:
+    """Regression: a code change that added or renamed a role made every run unresumable.
+
+    The run keeps the roles it recorded; every other part of the declaration must match.
+    """
+    project, run_id = project_run(tmp_path)
+    candidate = record(run_id)
+    run = candidate.envelope.core.run
+    declaration = run.declaration.model_copy(
+        update={"roles": tuple(RoleId(root=role) for role in recorded)}
+    )
+    core = candidate.envelope.core.model_copy(
+        update={"run": run.model_copy(update={"declaration": declaration})}
+    )
+    _commit(
+        project,
+        run_id,
+        RuntimeRecord[FlowState].fresh(candidate.envelope.model_copy(update={"core": core})),
+    )
+
+    resolved = resolve_core_resume(project, driver())
+    shell = CoreRuntime[FlowState].resume(
+        project,
+        driver(),
+        config=CounterConfig(),
+        bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions()),
+    )
+    shell.start("reader", now_at=1, lease_duration=10)
+
+    assert resolved.record.envelope.core.run.declaration.roles == declaration.roles
+    assert shell.record.envelope.core.run.declaration.roles == declaration.roles

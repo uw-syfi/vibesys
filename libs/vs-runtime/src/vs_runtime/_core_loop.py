@@ -454,7 +454,7 @@ class CoreRuntime[S: StrategyState]:
             and verified[1] is envelope.core.registry
         ):
             return
-        if envelope.core.run.declaration != self._search.declaration:
+        if not envelope.core.run.declaration.resumable_as(self._search.declaration):
             raise ContractError(
                 ("declaration",), "offered strategy differs from durable declaration"
             )
@@ -511,7 +511,7 @@ class CoreRuntime[S: StrategyState]:
             if self._record is None
             else self.record.envelope.core
         )
-        if core.run.declaration != self._search.declaration:
+        if not core.run.declaration.resumable_as(self._search.declaration):
             raise ContractError(("declaration",), "initial strategy declaration mismatch")
         selected = validate_startup(self._search.declaration, core.run.capabilities)
         if selected.operations != core.registry:
