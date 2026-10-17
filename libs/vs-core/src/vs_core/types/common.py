@@ -886,6 +886,11 @@ class ControlInput(Value):
     """When a resume takes effect: given with every resume, and only with a resume."""
     fallback: bool = False
     """A resume that switches the stopped turns to the quota fallback; only an immediate one."""
+    capacity_wait_stands: bool = False
+    """An immediate resume that keeps the operator's wait for capacity for the next quota stop.
+
+    A restart resumes a quota pause, since its turns did not survive, but the operator's
+    request to wait for capacity still holds for the next turn that stops on the limit."""
 
     @model_validator(mode="after")
     def mode_belongs_to_stop(self) -> ControlInput:
@@ -906,8 +911,12 @@ class ControlInput(Value):
             raise ContractValidationError("owner", "required for pause and only for pause")
         if (self.action == "resume") != (self.when is not None):
             raise ContractValidationError("when", "required for resume and only for resume")
-        if self.fallback and self.when != "now":
-            raise ContractValidationError("fallback", "only an immediate resume has a fallback")
+        if (self.fallback or self.capacity_wait_stands) and self.when != "now":
+            raise ContractValidationError("when", "only an immediate resume switches or keeps")
+        if self.fallback and self.capacity_wait_stands:
+            raise ContractValidationError(
+                "capacity_wait_stands", "a resume switching to the fallback ends the wait"
+            )
         return self
 
 

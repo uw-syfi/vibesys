@@ -53,7 +53,13 @@ from vs_core._registry import (
     operation_result,
     validate_startup,
 )
-from vs_core._run_pause import control_refusal, pause_after, run_pause
+from vs_core._run_pause import (
+    capacity_wait_stands,
+    control_refusal,
+    pause_after,
+    run_pause,
+    stands_after,
+)
 from vs_core._search_events import Translated, run_view, search_events, translate
 from vs_core._search_run import (
     Advanced,
@@ -1340,6 +1346,7 @@ __all__ = [
     "attempt_ref",
     "attempt_view",
     "begin",
+    "capacity_wait_stands",
     "check_decisions",
     "check_envelope_version",
     "component",
@@ -1381,6 +1388,7 @@ __all__ = [
     "settlement_view",
     "share_unchanged",
     "span_changes",
+    "stands_after",
     "step",
     "subjects",
     "suspension_refusal",
