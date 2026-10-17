@@ -240,7 +240,10 @@ test('every level opens by click and walks back by Escape, the crumbs and Back',
   await check(page, 'ink-step');
 
   // Level 3: the item in full, beside its step, whose group stays open with the call marked.
-  await turn.getByRole('button', {name: /cargo bench --bench queue/}).last().click();
+  await turn
+    .getByRole('button', {name: /cargo bench --bench queue/})
+    .last()
+    .click();
   await expect(turn.locator('[aria-current="true"]')).toBeVisible();
   await expect(page.getByText('queue/mpmc time: 41.2 ms')).toBeVisible();
   await check(page, 'ink-item');

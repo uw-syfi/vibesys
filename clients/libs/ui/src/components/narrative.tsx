@@ -1,7 +1,7 @@
 import {Children, type JSX, type ReactNode} from 'react';
 import {Icon} from './icon.js';
-import {NewBelow} from './new-below.js';
 import type {ToolState} from './message.js';
+import {NewBelow} from './new-below.js';
 import {InSlot, useSlot, useWindowed} from './windowing.js';
 
 /** The height a block is taken to have until it has been drawn and measured. */
