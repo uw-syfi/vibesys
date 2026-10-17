@@ -28,6 +28,7 @@ from vs_runtime._core_requests import ExecutionLease, OwnerEvent
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from vs_core.api import Comparison
     from vs_project.api import StoredEnvelope
 
 RUNTIME_SCHEMA_VERSION = 1
@@ -214,6 +215,19 @@ class WinnerSelection(BaseModel):
     selection: Literal["candidate", "baseline"]
     revision: str = Field(min_length=1)
     settlement_id: str | None = None
+
+
+def new_comparisons(
+    previous: RuntimeRecord[Any] | None, current: RuntimeRecord[Any]
+) -> tuple[Comparison, ...]:
+    """The comparisons of candidates with their bases that ``current`` logged beyond ``previous``.
+
+    Core's log of comparisons only grows, so the new ones are the tail past what ``previous``
+    held; with no previous record, all of them. Every strategy measures through core, so this
+    is the one place that sees all of them.
+    """
+    held = 0 if previous is None else len(previous.envelope.core.evaluation.comparisons)
+    return current.envelope.core.evaluation.comparisons[held:]
 
 
 def winner_selection(record: RuntimeRecord[Any] | None) -> WinnerSelection | None:
