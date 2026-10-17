@@ -9,7 +9,7 @@ interrupted it again.
 from __future__ import annotations
 
 import agentshim
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from vs_agent.api import CapacityStops
@@ -56,6 +56,9 @@ def test_a_cancelled_turn_is_interrupted_once(before: int, after: int) -> None:
     cancel_at=st.integers(min_value=0, max_value=12),
     seed=st.integers(0, 2**16),
 )
+# A schedule that lets the library's first event see the cancel's mark before the cancel
+# checks whether the turn runs: before, both stopped the turn.
+@example(gaps=[0], cancel_at=0, seed=474)
 def test_a_cancel_racing_the_turns_events_stops_the_running_turn_once(
     gaps: list[int], cancel_at: int, seed: int
 ) -> None:
