@@ -104,11 +104,36 @@ def attempt_settled(scope: Scope, evaluation: EvaluationState, records: RecordsS
     deferred, not refused: each submission's conclusive observation wakes the scope's
     waiting continuations again.
     """
+    rows = _submission_rows(scope, evaluation, records)
     return all(
         row.observation is not None
         and row.observation.terminal
         and row.observation.status not in (ObservationStatus.PENDING, ObservationStatus.UNKNOWN)
-        for row in _submission_rows(scope, evaluation, records)
+        for row in rows
+    ) and _none_pending(scope, evaluation, rows)
+
+
+def _none_pending(
+    scope: Scope, evaluation: EvaluationState, rows: tuple[RequestRecord, ...]
+) -> bool:
+    """Whether every submission core allocated in ``scope`` has been recorded or has a job.
+
+    A submission core allocates while it steps another event (a close call earns the base one
+    more run as a candidate's job ends) has its receipt at once; its request becomes a record
+    only when the step ends, and a job only once the executor accepts it. Until then it is
+    issued and unobserved, and no row speaks for it. A receipt whose job exists has been through
+    the records: its row may be gone (a legacy history), which leaves the history unavailable,
+    not the scope unsettled.
+    """
+    held = {row.request_id for row in rows} | {
+        job.submission_id for job in evaluation.jobs if job.scope == scope
+    }
+    return all(
+        receipt.request_id in held
+        for budget in evaluation.submission_budgets
+        if budget.scope == scope
+        for receipt in budget.receipts
+        if isinstance(receipt, PreparedSubmissionReceipt)
     )
 
 

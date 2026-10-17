@@ -23,6 +23,7 @@ from .common import (
 from .evaluation import EvidenceRef
 from .evaluation_history import RepeatedFailureGuidance
 from .job_observations import WaitEnd
+from .measurement import Comparison
 from .until import ReplyError
 
 
@@ -102,6 +103,9 @@ class ResumeFacts(Value):
     budget: it never ran."""
     evidence: tuple[EvidenceRef, ...] = ()
     repeated_failure: RepeatedFailureGuidance | None = None
+    comparisons: tuple[Comparison, ...] = ()
+    """What the awaited evaluations measured against their base: the ratio, the noise and the
+    verdict the framework reached, so the agent need not work them out from a lone number."""
 
     @model_validator(mode="after")
     def budget_end_names_a_spent_budget(self) -> ResumeFacts:

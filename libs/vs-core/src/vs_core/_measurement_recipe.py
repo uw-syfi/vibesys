@@ -50,8 +50,6 @@ class MeasurementRecipe(Value):
     """Evidence kinds that count only if the accuracy stage passed; the task's trust rule."""
     dedicated_measurement_resources: bool = Field(default=False, exclude_if=unset)
     """The run's executor gives each job its resources alone (``RunFacts``)."""
-    reuse_agent_run: bool = Field(default=False, exclude_if=unset)
-    """The task opts in to reusing the agent's run for the official measurement (``RunFacts``)."""
 
     @classmethod
     def of(cls, facts: RunFacts) -> MeasurementRecipe:
@@ -73,7 +71,6 @@ class MeasurementRecipe(Value):
             accuracy_stage=task.accuracy_stage,
             accuracy_gated=task.accuracy_gated,
             dedicated_measurement_resources=facts.dedicated_measurement_resources,
-            reuse_agent_run=facts.reuse_agent_run,
         )
 
     def requiring(self, stage_id: str, outputs: tuple[str, ...]) -> MeasurementRecipe:
@@ -150,7 +147,6 @@ class MeasurementRecipe(Value):
             submitted_at=now_at,
             queue_allowance=self.queue_allowance,
             dedicated_measurement_resources=self.dedicated_measurement_resources,
-            reuse_agent_run=self.reuse_agent_run,
         )
 
     def budget(self, stages: tuple[str, ...] | None = None) -> float:

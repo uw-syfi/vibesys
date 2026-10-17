@@ -1,40 +1,33 @@
-"""The reuse rule: when an official measurement is answered by a run the scope already made.
+"""The reuse rule: when an official measurement is answered by runs the scope already made.
 
 An agent measures its candidate through its evaluation tool, and the strategy then asks for
 the official measurement of the same candidate. Both run the task's one evaluation on the same
-input, so the second run would only repeat the first. Core answers the official measurement
-with the earlier run's result instead (`reused_run`) when all of these hold:
+input, and a framework run is trusted whoever asked for it, so the official measurement is
+answered from the scope's runs of that input instead of repeating them (`reused_run`) when all
+of these hold:
 
-- the task opted in (`MeasurementPlan.reuse_agent_run`, declared by the task author and read
-  from the project root): an agent that keeps a lucky run and re-measures an unlucky one would
-  bias the official score upward by the benchmark's noise, so reuse is off unless the task
-  author judges the noise small enough;
-- the run belongs to the same scope (owner and generation), so budgets stay per attempt;
-- it measured the same input with the same evaluation: its identity equals the requested one
-  except for the purpose (`MeasurementIdentity.measures_same_input`), and it ran the same
-  stages with the same execution budgets, queue allowance and stage policy;
-- both it and the requested measurement get their GPUs and CPU cores to themselves from the
-  executor (`MeasurementPlan.dedicated_measurement_resources`, the executor's declared
-  capability), so the earlier run was timed as an official run is; a run beside agent work
-  never counts;
-- it is the scope's only admitted measurement submission of any input, so the official
-  score never selects among several runs (the luckiest one, or the one whose input the agent
-  kept after measuring others);
-- it ended conclusively: terminal, released, accepted, every record trusted and accepted by
-  core, and any failure the candidate's own (a workload failure), never the machinery's.
+- the runs belong to the same scope (owner and generation), so budgets stay per attempt;
+- they measured the same input with the same evaluation: the identity equals the requested one
+  except for the purpose (`MeasurementIdentity.measures_same_input`), and the run kept the
+  same stages with the same execution budgets, queue allowance and stage policy;
+- they ended conclusively: terminal, released, accepted, every record trusted and accepted by
+  core, and any failure the candidate's own (a workload failure), never the machinery's;
+- the samples held do not leave a close call against the base: when they do, one more run
+  narrows the noise (`official_needs_samples`), and the official measurement runs afresh.
 
-The reused run is a framework-owned trusted job: core admitted it (`SubmitMeasurement`) and
-the trusted executor ran it outside agent confinement. Only the agent asked for it. Its own
-records stay advice (``local-validation``); the official records are new rows naming it.
-
-A failed run is reused as well as a passed one: reusing only passes would hand a flaky
-candidate a second chance that a fresh official run does not get.
+Every conclusive run of one measured input is a sample of one measurement
+(`vs_core._comparison`). The rule never picks the best of them, and it never refuses because
+there are several: the official measurement is answered by *all* of them. The one record that
+carries that answer through the ledger is a failed run if any run failed (a candidate that
+failed once did not pass), else the input's first run. The choice depends on no value a run
+measured, so re-running until a lucky sample gains nothing: the number a decision rests on is
+the aggregate the comparison states.
 
 The decision is a pure function of core state, taken when the Measure is admitted and recorded
 in the submission request (`SubmitMeasurement.reuses`), so a resume replays it. Only the first
 submission of an identity can reuse; a retry measures afresh. Records the runtime reports for
 a reusing submission must name the run they re-read (`EvidenceRef.reused_from`) and carry that
-run's own evidence ids, statuses and mapped kinds (`reused_record`), and once the job is
+run's own evidence ids, kinds, statuses and readings (`reused_record`), and once the job is
 terminal hold every one of that run's evidence ids (`reused_evidence_complete`), so no reused
 record is new evidence and none of the source's records is dropped.
 """
@@ -43,7 +36,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .types.common import EvidenceKind, ObservationStatus, RevisionRef
+from ._comparison import Measured, Moment, evaluation_of, official_needs_samples
+from .types.common import ObservationStatus, RevisionRef
 from .types.evaluation import MeasurementIdentity, OwnedJob, PreparedSubmissionReceipt
 from .types.job_observations import MeasurementFailure
 
@@ -60,17 +54,10 @@ if TYPE_CHECKING:
 __all__ = ["checkpoint_input", "reused_evidence_complete", "reused_record", "reused_run"]
 
 _RUN_PURPOSES = frozenset({"local-validation", "official"})
-"""Purposes of runs that measure the task's evaluation on a candidate (not a profile)."""
+"""Purposes of runs that measure the task's evaluation on a candidate (not a profile).
 
-
-def _official_kind(source: EvidenceRef) -> EvidenceKind | None:
-    """The kind an official record must take when it re-reads ``source``.
-
-    An agent's record is ``local-validation`` whatever stage it read and names the kind of its
-    stage (`EvidenceRef.proof_kind`); an official source's record keeps its kind.
-    """
-    return source.proof_kind if source.kind is EvidenceKind.LOCAL_VALIDATION else source.kind
-
+The purpose names who asked for the run, not how far it is trusted: every framework run is.
+"""
 
 _CONCLUSIVE = frozenset({ObservationStatus.SUCCEEDED, ObservationStatus.FAILED})
 
@@ -137,56 +124,46 @@ def _conclusive(state: EvaluationState, job: OwnedJob) -> bool:
 
 
 def reused_run(
-    state: EvaluationState, scope: Scope, plan: MeasurementPlan, identity: MeasurementIdentity
+    state: EvaluationState,
+    scope: Scope,
+    plan: MeasurementPlan,
+    identity: MeasurementIdentity,
+    moment: Moment,
 ) -> OwnedJob | None:
-    """The scope's run that answers the official measurement ``plan`` (of ``identity``), or None.
+    """The scope's run that carries the answer to the official measurement ``plan``, or None.
 
-    None for any other purpose, once the identity has a submission of its own, and whenever
-    the scope admitted any other measurement submission, of this input or another.
+    None for any other purpose, once the identity has a submission of its own, when the scope
+    holds no conclusive run of this input, and when the samples held leave a close call.
     """
-    if (
-        identity.purpose != "official"
-        or not plan.reuse_agent_run
-        or not plan.dedicated_measurement_resources
-        or any(
-            budget.scope == scope and budget.identity == identity
-            for budget in state.submission_budgets
-        )
+    if identity.purpose != "official" or any(
+        budget.scope == scope and budget.identity == identity for budget in state.submission_budgets
     ):
         return None
-    # Admitted submissions, not accepted jobs: one admitted but not yet accepted is a run too.
-    admitted = tuple(
-        receipt
-        for budget in state.submission_budgets
-        if budget.scope == scope and budget.identity.purpose in _RUN_PURPOSES
-        for receipt in budget.receipts
+    sources = tuple(
+        job
+        for job in state.jobs
+        if job.scope == scope
+        and job.reuses is None
+        and job.plan.purpose in _RUN_PURPOSES
+        and (measured := _identity(job)) is not None
+        and measured.measures_same_input(identity)
+        and _same_execution(job.plan, plan)
+        and _conclusive(state, job)
     )
-    if len(admitted) != 1 or not isinstance(admitted[0], PreparedSubmissionReceipt):
+    if not sources:
         return None
-    source = next(
-        (
-            job
-            for job in state.jobs
-            if job.scope == scope and job.submission_id == admitted[0].request_id
-        ),
-        None,
-    )
-    if (
-        source is None
-        or (measured := _identity(source)) is None
-        or not measured.measures_same_input(identity)
-        or not _same_execution(source.plan, plan)
+    if plan.measured_input is not None and official_needs_samples(
+        state, scope, Measured(evaluation_of(identity), plan.measured_input), moment
     ):
         return None
-    return source if _conclusive(state, source) else None
+    failed = next((job for job in sources if job.status != ObservationStatus.SUCCEEDED), None)
+    return failed if failed is not None else sources[0]
 
 
 def _same_execution(source: MeasurementPlan, requested: MeasurementPlan) -> bool:
-    """Whether ``source`` ran as ``requested`` would: same stages, budgets, queue and dedicated resources."""
+    """Whether ``source`` ran as ``requested`` would: same stages, budgets, queue and policy."""
     return (
-        source.reuse_agent_run
-        and source.dedicated_measurement_resources
-        and source.stages == requested.stages
+        source.stages == requested.stages
         and source.queue_allowance == requested.queue_allowance
         and source.policy == requested.policy
     )
@@ -198,9 +175,7 @@ def reused_record(
     """Whether ``evidence`` may enter the ledger as ``job``'s, as far as reuse is concerned.
 
     A new run's record names no earlier run. A reusing submission's record names the run it
-    re-reads and carries one of that run's evidence ids with its status and artifacts, and
-    its kind is exactly the one its source record maps to (an agent's ``local-validation``
-    record becomes the correctness or benchmark record its stage names).
+    re-reads and carries one of that run's evidence ids with its kind, status, artifacts and reading.
     """
     reuses = job.reuses if isinstance(job, OwnedJob) else None
     if evidence.reused_from != reuses:
@@ -213,7 +188,8 @@ def reused_record(
             item.evidence_id == evidence.evidence_id
             and item.status == evidence.status
             and item.artifacts == evidence.artifacts
-            and evidence.kind == _official_kind(item)
+            and item.kind == evidence.kind
+            and item.reading == evidence.reading
             for item in source.evidence
         )
         for source in state.jobs
