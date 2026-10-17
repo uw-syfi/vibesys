@@ -68,6 +68,42 @@ Owed submissions (#1868, #2021) are only the promise that a reply the agent neve
 returned on the retry; they hold the call and core says what it decided. They do not decide
 what a repeat is, so a repeat that was lost is owed like any other reply.
 
+## Samples and the comparison with the base (#3047)
+
+An agent's evaluation is one kind of measurement among others: it runs the framework's gates
+through the framework's executor on a committed revision, so its records are as trusted as the
+strategy's own check, whoever asked for the run. The `purpose` of a run says who asked
+(`local-validation` is the agent); it no longer decides what the run's records may prove.
+
+Every conclusive run of a measured input is a `Sample` in core's `EvaluationState.samples`: its
+commit, the measured-input digest, the evaluation (a digest of the evaluator, workload, host,
+recipe, gates and accuracy gating), the host, whether the executor held it alone, the headline
+reading and the base the candidate is compared with. A sample cannot be built without the
+commit and the input. All samples of one input under one evaluation are one measurement: they are
+aggregated, never picked among, and never refused for being several.
+
+Core compares a candidate with its own base, the revision the attempt's workspace was opened on
+(`WorkspacePlan.base`), whose measured input the bridge digests (`AgentMeasurementRequested.base_input`).
+`vs_core._comparison` holds the statistic, which its docstring states. The decisions that need
+state live in `vs_core._base_runs`:
+
+- the base is measured when no fresh sample of it is held or being taken, once per
+  (measured input, evaluation), so another attempt's run of the same base counts. The strategy's
+  own baseline measurement of the input counts too, bound to the base's input the first time an
+  agent names it. A base sample older than `TaskTerms.base_staleness` on the run clock does not
+  count;
+- a close call (within two noises of the bar) earns the base one more sample, and no more;
+- the run is core's own (`BaseRun`), in the candidate's scope, so the scope's resume waits for it
+  as it waits for every submission of the scope.
+
+The comparison reaches the agent twice: in the tool's reply for a finished evaluation
+(`SubmittedReply.comparison`, absent while the base has not ended) and in the resume prompt
+(`ResumeFacts.comparisons`, from `ResumeAuthorizationReceipt.comparisons`). It reaches the run's
+events as `measurement_compared`, emitted by the commit observer from core's append-only log.
+The strategy's official measurement of an input the scope already measured is answered from the
+samples held (`vs_core._measurement_reuse`), and runs afresh only when the comparison is a close
+call that one more sample would narrow.
+
 ## Reply: one continuation, never a poll
 
 The tool replies at once with the handle or a typed refusal naming the reason. The agent
@@ -82,6 +118,11 @@ When a job ends, the ledger first takes its end as its submission's own, then th
 evaluation history is derived and the continuation woken. A waiting continuation
 publishes the history itself when it authorizes, so the job's end emits it only when no
 continuation waits (one signal per round, or core reports a signal cycle).
+
+A resumed turn may wait again: the resume's observation carries the suspension its nested
+dispatch yielded, so an implementer that sees a measurement, changes its candidate and
+evaluates again holds that feedback loop inside one paid turn. Each continuation still owes
+exactly one resume, and the scope holds at most one open continuation at a time.
 
 There is no status, wait or cancel tool, so the profiler polling of r23late (585 s)
 cannot recur.

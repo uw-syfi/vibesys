@@ -105,7 +105,7 @@ def _record(
     )
     ref = EvidenceRef(
         evidence_id=EvidenceId(root=evidence.evidence_id),
-        kind=EvidenceKind.LOCAL_VALIDATION,
+        kind=EvidenceKind.BENCHMARK,
         purpose="local-validation",
         scope=SCOPE,
         source_request=RequestId(root="request"),

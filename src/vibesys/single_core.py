@@ -145,7 +145,6 @@ def _plan_for(launch_type: type[SingleRunLaunch]) -> Callable[[CoreRunContext], 
             workload_digest=evaluation.workload_digest,
             environment_digest=evaluation.environment_digest,
             dedicated_measurement_resources=evaluation.dedicated_measurement_resources,
-            reuse_agent_run=evaluation.reuse_agent_run,
             task=terms,
         )
         config = launch.search_config(
