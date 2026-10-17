@@ -717,12 +717,12 @@ button.vs-crumb:focus-visible {
   align-items: center;
   gap: var(--space-2);
 }
-.vs-swatchlegend {
+.vs-serieslegend {
   margin: 0;
   padding: 0;
   list-style: none;
 }
-.vs-swatch {
+.vs-series-swatch {
   display: inline-block;
   flex: none;
   width: var(--dot);
@@ -730,7 +730,7 @@ button.vs-crumb:focus-visible {
   border-radius: var(--radius-sm);
   background: var(--seg-color, var(--accent));
 }
-.vs-swatch[data-hatched] {
+.vs-series-swatch[data-hatched] {
   background: repeating-linear-gradient(
     135deg,
     var(--seg-color, var(--muted)) 0 var(--space-1),

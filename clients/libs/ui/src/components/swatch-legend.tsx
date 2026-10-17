@@ -12,7 +12,7 @@ export function Swatch(props: {readonly series?: number; readonly hatched?: bool
     props.series === undefined ? {} : {'--seg-color': `var(--series-${props.series})`};
   return (
     <span
-      className="vs-swatch"
+      className="vs-series-swatch"
       data-hatched={props.hatched === true || undefined}
       style={color}
       aria-hidden="true"
@@ -33,7 +33,7 @@ export function SwatchLegend(props: {
   readonly items: readonly SwatchItem[];
 }): JSX.Element {
   return (
-    <ul className="vs-dotlegend vs-swatchlegend" aria-label={props.label}>
+    <ul className="vs-dotlegend vs-serieslegend" aria-label={props.label}>
       {props.items.map(item => (
         <li key={item.label} className="vs-dotlegend-item">
           <Swatch

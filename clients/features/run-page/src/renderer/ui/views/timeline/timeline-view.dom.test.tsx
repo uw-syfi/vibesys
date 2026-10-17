@@ -186,7 +186,7 @@ test('a legend names each role on the bars, in the color of its segments, and th
   const entries = [...(legend?.querySelectorAll('li') ?? [])];
   expect(entries.map(each => each.textContent ?? '')).toEqual(['implementer', 'judge', 'gate']);
   const colors = entries.map(item =>
-    (item.querySelector('.vs-swatch') as HTMLElement).style.getPropertyValue('--seg-color'),
+    (item.querySelector('.vs-series-swatch') as HTMLElement).style.getPropertyValue('--seg-color'),
   );
   const bar = rows(container)[0]?.querySelectorAll('.vs-gantt-seg') ?? [];
   const drawn = [...bar].map(each => (each as HTMLElement).style.getPropertyValue('--seg-color'));

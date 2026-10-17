@@ -1042,11 +1042,11 @@ describe('series colors', () => {
     const items = all(container, 'li');
     expect(items.map(item => item.textContent)).toEqual(['judge', 'gate']);
     expect(one(container, '[aria-label="Bar colors"]').tagName).toBe('UL');
-    expect(items.map(item => one(item, '.vs-swatch').hasAttribute('data-hatched'))).toEqual([
+    expect(items.map(item => one(item, '.vs-series-swatch').hasAttribute('data-hatched'))).toEqual([
       false,
       true,
     ]);
-    expect(one(items[0] as HTMLElement, '.vs-swatch').style.getPropertyValue('--seg-color')).toBe(
+    expect(one(items[0] as HTMLElement, '.vs-series-swatch').style.getPropertyValue('--seg-color')).toBe(
       'var(--series-3)',
     );
   });
