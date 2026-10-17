@@ -118,6 +118,14 @@ trace's order. A span that starts and ends within one commit gets a `span_starte
   before the field existed carry none. Clients never join the two, so a transcript reaches a span
   by `span_id` and never by invocation, name or time. A log stream's owner names its span in `span_id` when the writer
   knows it, and `logs.list` filters by it (see [desktop-connection.md](desktop-connection.md)).
+- **Turn usage.** `turn_usage_recorded` is the settled spend of one agent turn, sent once when it
+  finishes and keyed by `data.span_id`: `input_tokens` (cached ones included), the
+  `cache_read_input_tokens` and `cache_creation_input_tokens` parts of it, `output_tokens` (reasoning
+  included) and its `reasoning_output_tokens` part, each the turn's own increment. A field the
+  provider did not report is absent (`null`), never zero, and a turn whose increment cannot be known
+  (a resume with no baseline) reports none. Summing the events over spans gives the run's spend. It
+  is not `usage_update`, whose `input_tokens` is the context window's current fill and is
+  overwritten, not accumulated. The turn's model is the span's `model` attribute.
 - **Typed replies.** A structured turn ends with the agent's raw JSON text, which stays in
   `agent_execution_finished.data.result`. When that text is a valid reply of the turn's role
   model, `data.reply` carries it as data: `kind` (the reply model's name; a role that may wait

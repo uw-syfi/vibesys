@@ -21,6 +21,7 @@ const PATHS = {
   stop: 'M7 7h10v10H7z',
   play: 'M8 5l11 7-11 7z',
   circle: 'M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16z',
+  sidebar: 'M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM9 4v16',
 } as const;
 
 /** The closed set of icons. */

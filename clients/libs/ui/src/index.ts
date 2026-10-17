@@ -15,7 +15,13 @@ export {
   type ButtonVariant,
 } from './components/button.js';
 export {Banner, type BannerTone, Card} from './components/card.js';
-export {Chart, type ChartPoint, type ChartSize, type ChartTick} from './components/chart.js';
+export {
+  Chart,
+  type ChartPoint,
+  type ChartSize,
+  type ChartSpan,
+  type ChartTick,
+} from './components/chart.js';
 export {type CheckItem, CheckList, type CheckState} from './components/check-list.js';
 export {Collapsible} from './components/collapsible.js';
 export {Dialog} from './components/dialog.js';
@@ -28,6 +34,7 @@ export {
   Stat,
 } from './components/display.js';
 export {DotLegend, type LegendItem} from './components/dot-legend.js';
+export {Fact, FactLine} from './components/facts.js';
 export {Field, TextInput} from './components/field.js';
 export {
   Gantt,
@@ -99,6 +106,7 @@ export {Thread, type ThreadItem} from './components/thread.js';
 export {type Stage, type StageState, Timeline} from './components/timeline.js';
 export {Checkbox, Switch} from './components/toggle.js';
 export {type RowChip, Tree, TreeRow} from './components/tree.js';
+export {TurnResult} from './components/turn-result.js';
 export type {
   ColorRole,
   ElevationLevel,

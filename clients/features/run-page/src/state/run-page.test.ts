@@ -154,6 +154,13 @@ const USER_ACTIONS: readonly RunPageAction[] = [
   {type: 'select-stream', streamId: 's3'},
   {type: 'agents-open', id: 'boss', open: true},
   {type: 'agents-open', id: 'boss', open: false},
+  {type: 'ideas-layout', layout: 'tree'},
+  {type: 'ideas-open', key: 'n1', open: true},
+  {type: 'ideas-open', key: 'n1', open: false},
+  {type: 'ideas-pin', idea: 'n2'},
+  {type: 'ideas-pin', idea: null},
+  {type: 'ideas-hover', idea: 'n3'},
+  {type: 'ideas-hover', idea: null},
 ];
 
 /** A span event at `sequence`, or another event the trace must skip. */

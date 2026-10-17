@@ -309,3 +309,83 @@ describe('a live multi run whose round 1 passed', () => {
     expect(heroView(model)).toMatchObject({ratio: '2.00×', standing: 'adopted'});
   });
 });
+
+/** A dynamic run's story: rounds pass one after another while no adoption span names the best. */
+function dynamicRun(adoption: 'none' | 'input'): {run: Recording; roundsEnd: number[]} {
+  const run = new Recording();
+  run.start('flow:#1', null, 'root');
+  run.start('op:measure.1', 'flow:#1', 'measure');
+  run.end('op:measure.1');
+  if (adoption === 'input') {
+    // the search labelled its adoption with the input, and has not named a leader since
+    run.start('op:adopt', 'flow:#1', 'adopt', {
+      kind: 'adoption',
+      title: 'the input',
+      attrs_json: JSON.stringify({candidate: null, metric_value: 50, vs_baseline: 1}),
+    });
+  }
+  const roundsEnd: number[] = [];
+  let first: string | undefined;
+  for (const [n, value] of [100, 80, 300].entries()) {
+    const id = round(run, n + 1, {value, vs: value / 50, verdict: 'passed'}, first);
+    first ??= id;
+    roundsEnd.push(run.events.length);
+  }
+  return {run, roundsEnd};
+}
+
+describe('the best idea while the run works', () => {
+  for (const adoption of ['none', 'input'] as const) {
+    test(`is the best passed idea so far at every event, with no leader named (${adoption})`, () => {
+      const {run, roundsEnd} = dynamicRun(adoption);
+      const values = [100, 80, 300];
+      for (let sequence = 1; sequence <= run.events.length; sequence += 1) {
+        const model = at(run.events, sequence);
+        const settled = roundsEnd.filter(end => end <= sequence).length;
+        const hero = heroView(model);
+        if (settled === 0) {
+          expect(hero).toMatchObject({ratio: null, value: null, standing: null});
+          continue;
+        }
+        const best = Math.max(...values.slice(0, settled));
+        expect(hero).toMatchObject({
+          ratio: `${(best / 50).toFixed(2)}×`,
+          value: `${best} ops/s`,
+          standing: 'best',
+        });
+        const badged = ideasView(model, IDEAS_FILTER_DEFAULT).rows.filter(each =>
+          each.badges.some(badge => badge.label === 'best'),
+        );
+        expect(badged.map(each => each.title)).toEqual([`title h${values.indexOf(best) + 1}`]);
+      }
+    });
+  }
+
+  test('becomes adopted when the run ends, and the adoption span names it once it opens', () => {
+    const {run} = dynamicRun('none');
+    run.start('op:adopt', 'flow:#1', 'adopt', {
+      kind: 'adoption',
+      title: 'c3',
+      attrs_json: JSON.stringify({candidate: 'c3', metric_value: 300, vs_baseline: 6}),
+    });
+    expect(heroView(at(run.events))).toMatchObject({ratio: '6.00×', standing: 'best'});
+    run.end('op:adopt', {verdict: 'adopted'});
+    const model = at(run.events);
+    expect(heroView(model)).toMatchObject({ratio: '6.00×', standing: 'adopted'});
+    const badges = ideasView(model, IDEAS_FILTER_DEFAULT).rows.flatMap(row =>
+      row.badges.map(badge => badge.label),
+    );
+    expect(badges).toEqual(['adopted']);
+  });
+
+  test('is nothing when the run could not adopt anything', () => {
+    const {run} = dynamicRun('none');
+    run.start('op:adopt', 'flow:#1', 'adopt', {
+      kind: 'adoption',
+      title: 'c3',
+      attrs_json: JSON.stringify({candidate: 'c3'}),
+    });
+    run.end('op:adopt', {verdict: 'not_adopted'});
+    expect(heroView(at(run.events))).toMatchObject({standing: null, ratio: null});
+  });
+});

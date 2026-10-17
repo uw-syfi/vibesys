@@ -165,6 +165,29 @@ function retried(start: number, failedAt: number, reason: string, doneAt?: numbe
   ];
 }
 
+/**
+ * W2 passed but did not beat W1; W4 was measured too, then turned down: a chart of several dots.
+ * W4's gate fails its check and reads a value below the input.
+ */
+function laterMeasurements(w2: FakeSpan, w4: FakeSpan): readonly Step[] {
+  const w2Gate = gate('op:w2-gate', w2.id, 950);
+  const w4Gate = gate('op:w4-gate', w4.id, 1100);
+  const slower = {stage: 'correctness,benchmark', metric_value: 44, vs_baseline: 1.07};
+  const worse = {stage: 'correctness,benchmark', metric_value: 31.5, vs_baseline: 0.76};
+  return [
+    ['span_started', w2Gate],
+    [
+      'span_ended',
+      ended(w2Gate, 1140, 'done', {label: verdict(w2Gate, 'passed', undefined, slower)}),
+    ],
+    ['span_started', w4Gate],
+    [
+      'span_ended',
+      ended(w4Gate, 1195, 'done', {label: verdict(w4Gate, 'failed', undefined, worse)}),
+    ],
+  ];
+}
+
 /** The input's measurement and the first planning call: four workstreams, all finished. */
 function firstCall(): readonly Step[] {
   const input: FakeSpan = {
@@ -183,7 +206,9 @@ function firstCall(): readonly Step[] {
     'Spin then park idle consumers',
     'Larger batch size',
   ];
-  const [w1, w2, w3, w4] = titles.map((title, index) => workstream(index + 1, title, 410 + index));
+  const [w1, w2, w3, w4] = titles.map((title, index) =>
+    workstream(index + 1, title, 410 + index, index === 1 ? [1] : []),
+  );
   if (w1 === undefined || w2 === undefined || w3 === undefined || w4 === undefined) return [];
   const w1Turn = turn('op:w1-turn', w1.id, 'implementer', 412, 'impl-w1', ['planner-1']);
   const w1Gate = gate('op:w1-gate', w1.id, 900);
@@ -219,6 +244,7 @@ function firstCall(): readonly Step[] {
       'span_ended',
       ended(w1Gate, 1100, 'done', {label: verdict(w1Gate, 'passed', undefined, measured)}),
     ],
+    ...laterMeasurements(w2, w4),
     ['span_started', adoption],
     [
       'span_ended',

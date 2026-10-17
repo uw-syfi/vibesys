@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Literal, Protocol, Self
 
 from pydantic import Field, model_validator
 
-from vs_core.api import Value
+from vs_core.api import Value, markdown_prose, plain_line
 from vs_decode.api import Unreadable, decode_json
 
 if TYPE_CHECKING:
@@ -63,7 +63,9 @@ class RoadmapItem(Value):
         description="`major` for a direction, `minor` for a blocker of one Major."
     )
     title: str = Field(
-        min_length=1, max_length=TITLE_MAX_LENGTH, description="What the item is, in a line."
+        min_length=1,
+        max_length=TITLE_MAX_LENGTH,
+        description=plain_line("What the item is, in a line."),
     )
     status: RoadmapStatus = Field(description="Where the item stands now.")
     major: str | None = Field(
@@ -74,7 +76,9 @@ class RoadmapItem(Value):
     note: str = Field(
         default="",
         max_length=NOTE_MAX_LENGTH,
-        description="Optional short rationale, such as why the item was parked or abandoned.",
+        description=markdown_prose(
+            "Optional short rationale, such as why the item was parked or abandoned."
+        ),
     )
 
     @model_validator(mode="after")

@@ -1,7 +1,8 @@
 import {describe, expect, test} from 'bun:test';
 import type {RunEvent, Span} from '@vibesys/contracts';
 import {EMPTY_TRACE} from '@vibesys/run-state/trace';
-import {bestPathView, IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
+import {bestLine} from './ideas-tree.js';
+import {IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
 import {EMPTY_TRACE_LOG, type TraceLog, traceAt, traceLog, traceStep} from './live.js';
 import {
   clockCarried,
@@ -280,10 +281,8 @@ describe('the run level', () => {
     expect(found.rows.map(row => row.title)).toEqual(['spin']);
   });
 
-  test('the best path names the winning chain, and the hero its ratio', () => {
-    expect(
-      bestPathView(model, false)?.crumbs.map(crumb => (crumb.kind === 'idea' ? crumb.label : '…')),
-    ).toEqual(['ring', 'ring-pad']);
+  test('the best line names the best idea and its steps from the input, and the hero its ratio', () => {
+    expect(bestLine(model)).toMatchObject({title: 'ring-pad', steps: 2});
     const hero = heroView(model);
     expect(hero.ratio).toBe('2.00×');
     expect(hero.input).toBe('input 100');

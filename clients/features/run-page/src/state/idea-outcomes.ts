@@ -13,6 +13,7 @@ import type {CoreState} from '@vibesys/run-state';
 import type {Candidate, CandidateTree} from '@vibesys/run-state/candidates';
 import {type TranscriptEntry, transcriptBySpan} from '@vibesys/run-state/transcript';
 import {replyFields} from './reply-fields.js';
+import {words} from './span-reading.js';
 import {replyOverview} from './step-narrative.js';
 import type {Tone} from './views.js';
 
@@ -48,7 +49,7 @@ function outcomeOf(entry: TranscriptEntry): ImplementerOutcome | null {
   const prose = fields.find(field => field.key === key);
   const outcome =
     choice?.kind === 'badge'
-      ? {label: choice.value, tone: choice.tone ?? ('neutral' as const)}
+      ? {label: words(choice.value), tone: choice.tone ?? ('neutral' as const)}
       : null;
   const summary = prose?.kind === 'prose' ? prose.text : null;
   return outcome === null && summary === null ? null : {outcome, summary};

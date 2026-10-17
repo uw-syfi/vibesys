@@ -4,6 +4,7 @@
 import '@vibesys/ui/tokens.css';
 import '@vibesys/ui/fonts.css';
 import '@vibesys/ui/components.css';
+import {bindSidebarShortcut, browserSidebarPreference} from '@vibesys/feature-app-shell/renderer';
 import {pageAppearance} from '@vibesys/feature-settings/renderer';
 import {runOfWindow, type WelcomeBridge} from '@vibesys/ipc';
 import {Card, EmptyState, Page} from '@vibesys/ui';
@@ -49,9 +50,13 @@ if (bridge === undefined) {
       now: () => Date.now(),
       session: run => shellSessionOptions(run, {document, window, navigator}),
     },
+    browserSidebarPreference(() => window.localStorage),
   );
   // A run window's page names its run in its query; the main window's has none.
   const run = runOfWindow(window.location.search);
+  if (run === null) {
+    bindSidebarShortcut(window, bridge.platform === 'darwin', stores.sidebar.store.dispatch);
+  }
   createRoot(root).render(
     <StrictMode>
       {run === null ? (

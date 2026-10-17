@@ -39,6 +39,7 @@ import {
   timelineView,
   traceArrival,
 } from '../../state/index.js';
+import {Hero} from './hero.js';
 import {DeepLevel} from './levels.js';
 import {RunLevel} from './run-level.js';
 import {RunScrubber} from './run-scrubber.js';
@@ -271,7 +272,7 @@ function crumbs(zoomed: ResolvedZoom, route: Route, zoom: Zoom): Crumb[] {
     step: null,
     item: null,
   };
-  const items: {id: string; label: string; to: Route}[] = [{id: 'run', label: 'run', to: top}];
+  const items: {id: string; label: string; to: Route}[] = [{id: 'run', label: 'Run', to: top}];
   const opened: Route = {...route, step: null, item: null};
   if (zoomed.idea !== null) items.push({id: 'idea', label: zoomed.idea.title, to: opened});
   if (zoomed.agent !== null) items.push({id: 'agent', label: zoomed.agent.role, to: opened});
@@ -287,30 +288,11 @@ function crumbs(zoomed: ResolvedZoom, route: Route, zoom: Zoom): Crumb[] {
   );
 }
 
-function ZoomBar(props: {
-  readonly zoomed: ResolvedZoom;
-  readonly route: Route;
-  readonly zoom: Zoom;
-}): JSX.Element {
-  return (
-    <Row gap="space-2" align="center">
-      <Button
-        size="sm"
-        variant="quiet"
-        icon="chevron-left"
-        label="Back (Esc)"
-        press={() => props.zoom({type: 'up'})}
-      />
-      <Breadcrumb label="Zoom" items={crumbs(props.zoomed, props.route, props.zoom)} />
-    </Row>
-  );
-}
-
 /**
  * The Run screen: a fixed page whose header holds the run's title, status, facts and controls and
- * the one-line time bar, then the banners and the level the route names: the run (the hero and
- * its chart, the Ideas, Timeline, Agents or Logs face, and Now) or a level below it, at most two
- * side by side. `model` is the run at the view's sequence (`createRunReader`); `route` is the zoom
+ * the one-line time bar, then the banners, the performance row (the hero and its chart: the same
+ * element at every level, singling out the open idea) and the level the route names: the run (the
+ * Ideas, Timeline, Agents or Logs face, and Now) or a level below it, at most two side by side. `model` is the run at the view's sequence (`createRunReader`); `route` is the zoom
  * (`zoomMachine`), which `zoom` moves.
  */
 export function RunScreen(props: {
@@ -331,7 +313,7 @@ export function RunScreen(props: {
   };
   const zoomed = resolveZoom(model, route);
   const deep = routeLevel(route) !== 'run' && (zoomed.idea !== null || zoomed.agent !== null);
-  const level = {state, base, whole: props.whole, core: props.core, mode: route.mode, dispatch};
+  const level = {state, base, core: props.core, mode: route.mode, dispatch};
   return (
     <Screen
       density="compact"
@@ -357,7 +339,8 @@ export function RunScreen(props: {
       )}
       <EndedBanner state={state} dispatch={dispatch} zoom={zoom} />
       <Startup state={state} />
-      {deep ? <ZoomBar zoomed={zoomed} route={route} zoom={zoom} /> : null}
+      <Hero {...base} whole={props.whole} idea={zoomed.idea?.id ?? null} />
+      {deep ? <Breadcrumb label="Zoom" items={crumbs(zoomed, route, zoom)} /> : null}
       {deep ? <DeepLevel {...level} zoomed={zoomed} /> : <RunLevel {...level} />}
     </Screen>
   );

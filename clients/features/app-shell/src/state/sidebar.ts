@@ -73,6 +73,8 @@ export interface SidebarState {
   readonly archived: readonly RunRef[];
   readonly machines: SidebarMachines;
   readonly selection: Screen;
+  /** Whether the sidebar is shown; the viewer may hide it completely. */
+  readonly shown: boolean;
 }
 
 export type SidebarAction =
@@ -85,6 +87,7 @@ export type SidebarAction =
   | {readonly type: 'recent'; readonly recent: readonly RecentRun[]}
   | {readonly type: 'archived'; readonly archived: readonly RunRef[]}
   | {readonly type: 'select'; readonly screen: Screen}
+  | {readonly type: 'toggle-sidebar'}
   /** The saved machines, or why they could not be read. */
   | {
       readonly type: 'machines-listed';
@@ -112,6 +115,7 @@ export const SIDEBAR_EMPTY: SidebarState = {
   archived: [],
   machines: {listing: null, saved: [], lastToken: 0},
   selection: {kind: 'new-run'},
+  shown: true,
 };
 
 function listMachines(state: SidebarState): SidebarStep {
@@ -122,9 +126,9 @@ function listMachines(state: SidebarState): SidebarStep {
   };
 }
 
-/** The sidebar before anything is heard: it asks for the saved machines. */
-export function initialSidebar(): SidebarStep {
-  return listMachines(SIDEBAR_EMPTY);
+/** The sidebar before anything is heard, shown or hidden as the viewer left it: it asks for the saved machines. */
+export function initialSidebar(shown = true): SidebarStep {
+  return listMachines({...SIDEBAR_EMPTY, shown});
 }
 
 function same(state: SidebarState): SidebarStep {
@@ -193,6 +197,8 @@ export function sidebarStep(state: SidebarState, action: SidebarAction): Sidebar
       return same({...state, archived: action.archived});
     case 'select':
       return selected(state, action.screen);
+    case 'toggle-sidebar':
+      return same({...state, shown: !state.shown});
     case 'machines-listed':
       return machinesListed(state, action);
     case 'machine-checked':

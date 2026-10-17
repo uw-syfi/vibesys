@@ -34,7 +34,7 @@ export type ReplyField =
       readonly fields: readonly ReplyField[];
     };
 
-interface Reading {
+export interface Reading {
   readonly opened: ReadonlySet<string>;
   readonly flip: (path: string) => void;
 }
@@ -89,13 +89,14 @@ function FieldView(props: {
           open={reading.opened.has(path)}
           toggle={() => reading.flip(path)}
         >
-          <Fields fields={field.fields} path={path} reading={reading} />
+          <ReplyFields fields={field.fields} path={path} reading={reading} />
         </Collapsible>
       );
   }
 }
 
-function Fields(props: {
+/** The fields of a reply, drawn in order; a group opens as the reader presses it. */
+export function ReplyFields(props: {
   readonly fields: readonly ReplyField[];
   readonly path: string;
   readonly reading: Reading;
@@ -170,7 +171,7 @@ export function StructuredReply(props: {
         {body.length === 0 && badges.length === 0 ? (
           <Text tone="muted">The reply has no fields.</Text>
         ) : (
-          <Fields fields={body} path="" reading={{opened, flip}} />
+          <ReplyFields fields={body} path="" reading={{opened, flip}} />
         )}
         {props.overview === undefined || (hidden === 0 && !all) ? null : (
           <span>

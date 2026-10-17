@@ -1,5 +1,6 @@
 {% from '_revision.j2' import rev %}
 {% from 'domain_section.j2' import domain_section %}
+{% from '_prose.j2' import item as prose_item %}
 You are the Orchestrator in an autonomous optimization loop. Design one causal
 experiment; do not edit candidate code, rebuild environments, run implementation
 tests, or launch benchmarks.
@@ -13,7 +14,7 @@ tests, or launch benchmarks.
 {% if roadmap %}
 - Roadmap ({{ roadmap | length }} item(s), in the order first added):
 {% for item in roadmap %}
-  - `{{ item.id }}` {{ item.kind.value }}{% if item.major %} blocking `{{ item.major }}`{% endif %}, {{ item.status.value }}: {{ item.title }}{% if item.note %} ({{ item.note }}){% endif %}
+  - `{{ item.id }}` {{ item.kind.value }}{% if item.major %} blocking `{{ item.major }}`{% endif %}, {{ item.status.value }}: {{ item.title }}{% if item.note %} ({{ item.note | indent(4) }}){% endif %}
 
 {% endfor %}
 {% else %}
@@ -22,7 +23,7 @@ tests, or launch benchmarks.
 {% if history %}
 - History of the last {{ history | length }} round(s){% if older_rounds %} ({{ older_rounds }} older not shown){% endif %}:
 {% for row in history %}
-  - round {{ row.round_number }}, `{{ row.hypothesis_id }}`: {{ 'passed' if row.passed else 'did not pass' }}, judge {{ row.judge_verdict }}{% if row.outcome %}, outcome {{ row.outcome }}{% endif %}{% if row.official and row.metric is not none %}, official {{ row.metric }}{% if row.unit %} {{ row.unit }}{% endif %}{% if row.delta_pct is not none %} ({{ '%+.1f'|format(row.delta_pct) }}% vs its parent){% endif %}{% elif not row.official %}, no official evaluation{% endif %}{% if row.retained is not none %}, checkpoint {{ 'retained' if row.retained else 'not retained' }}{% endif %}{% if row.commit %} at `{{ row.commit }}`{% endif %}{% if row.claim %}: {{ row.claim }}{% endif %}
+  - round {{ row.round_number }}, `{{ row.hypothesis_id }}`: {{ 'passed' if row.passed else 'did not pass' }}, judge {{ row.judge_verdict }}{% if row.outcome %}, outcome {{ row.outcome }}{% endif %}{% if row.official and row.metric is not none %}, official {{ row.metric }}{% if row.unit %} {{ row.unit }}{% endif %}{% if row.delta_pct is not none %} ({{ '%+.1f'|format(row.delta_pct) }}% vs its parent){% endif %}{% elif not row.official %}, no official evaluation{% endif %}{% if row.retained is not none %}, checkpoint {{ 'retained' if row.retained else 'not retained' }}{% endif %}{% if row.commit %} at `{{ row.commit }}`{% endif %}{% if row.claim %}: {{ row.claim | indent(4) }}{% endif %}
 
 {% endfor %}
 {% else %}
@@ -49,7 +50,7 @@ tests, or launch benchmarks.
 {% if pending_claims %}
 - Retained claims not yet trusted parents:
 {% for row in pending_claims %}
-  - round {{ row.round_number }} at `{{ row.commit }}`: {% for name, value in row.metrics %}{{ name }}={{ value }}{% if not loop.last %}, {% endif %}{% endfor %}{% if row.reason %} ({{ row.reason }}){% endif %}
+  - round {{ row.round_number }} at `{{ row.commit }}`: {% for name, value in row.metrics %}{{ name }}={{ value }}{% if not loop.last %}, {% endif %}{% endfor %}{% if row.reason %} ({{ row.reason | indent(4) }}){% endif %}
 
 {% endfor %}
 {% endif %}
@@ -123,9 +124,9 @@ roadmap or name the concrete change and measurement that can break the plateau.
 {% if last_profile %}
 {% if last_profile.source == 'profiler' %}A fresh profiler result for this plan:
 {% else %}The previous round's profile (reported by its implementer):
-{% endif %}{% if last_profile.bottlenecks %}- bottlenecks: {{ last_profile.bottlenecks }}
-{% endif %}{% if last_profile.suggestions %}- suggestions: {{ last_profile.suggestions }}
-{% endif %}{% if last_profile.analysis %}- analysis: {{ last_profile.analysis }}
+{% endif %}{% if last_profile.bottlenecks %}{{ prose_item('bottlenecks', last_profile.bottlenecks) }}
+{% endif %}{% if last_profile.suggestions %}{{ prose_item('suggestions', last_profile.suggestions) }}
+{% endif %}{% if last_profile.analysis %}{{ prose_item('analysis', last_profile.analysis) }}
 {% endif %}Use it quantitatively only when a comparable uninstrumented control shows acceptable
 observer effect; asynchronous CPU/CUDA scope totals are not additive without
 timeline evidence.
@@ -216,5 +217,6 @@ Correction required: your previous plan was not accepted. {{ problem }}
 Answer again with a corrected plan.
 
 {% endif %}
+{% include 'reply_markdown.j2' %}
 Return only the schema-valid JSON object. The framework records the plan and
 continues until the configured round budget ends.

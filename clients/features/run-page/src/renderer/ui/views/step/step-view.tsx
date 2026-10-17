@@ -1,8 +1,8 @@
 /**
- * An opened step's body (the frame draws its pane): an agent turn read as narrative (the
- * structured reply first and collapsible, then thinking and text in time order, tool calls folded
- * into one line between paragraphs that opens in place, a failed call always its own red line),
- * or a gate's verdict, numbers and log; and, at level 3, one item of the step in full (a tool
+ * An opened step's body (the frame draws its pane): an agent turn read as narrative (thinking and
+ * text in time order, tool calls folded into one line between paragraphs that opens in place, a
+ * failed call always its own red line, and the structured reply last as a card, with a one-line
+ * summary of it above the narrative that scrolls to it), or a gate's verdict, numbers and log; and, at level 3, one item of the step in full (a tool
  * call's outcome, input and result).
  *
  * A live turn opens at its end and offers "New below" when scrolled up; a finished one opens at
@@ -12,6 +12,7 @@
 import type {AgentNode} from '@vibesys/run-state/agents';
 import type {Candidate, CandidateStep} from '@vibesys/run-state/candidates';
 import {
+  Button,
   Chip,
   EmptyState,
   KeyValue,
@@ -19,11 +20,11 @@ import {
   Narrative,
   Row,
   Said,
-  StructuredReply,
   Text,
   Thought,
   ToolGroup,
   type ToolLine,
+  TurnResult,
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import {
@@ -31,10 +32,12 @@ import {
   gateView,
   itemLines,
   type NarrativeBlock,
+  type TurnNarrative,
   toolOf,
   turnMeta,
   turnNarrative,
 } from '../../../../state/step-narrative.js';
+import {type TurnResultView, turnResult} from '../../../../state/turn-result.js';
 import type {PaneHeader, ViewBase, WithCore} from '../props.js';
 
 export interface StepViewProps extends ViewBase, WithCore {
@@ -66,11 +69,38 @@ function lineOf(
   };
 }
 
+function ResultCard(args: {
+  readonly result: TurnResultView;
+  readonly props: StepViewProps;
+}): JSX.Element {
+  const {result, props} = args;
+  const base = result.builtOn;
+  const open = base?.idea ?? null;
+  return (
+    <TurnResult
+      label={result.label}
+      author={result.author}
+      {...(result.headline === null ? {} : {headline: result.headline})}
+      chips={result.chips}
+      {...(base === null
+        ? {}
+        : {
+            context: {
+              prefix: 'builds on',
+              label: base.label,
+              ...(open === null ? {} : {press: () => props.zoom({type: 'open-idea', idea: open})}),
+            },
+          })}
+      sections={result.sections}
+      more={result.more}
+      raw={result.raw}
+    />
+  );
+}
+
 function BlockView(args: {
   readonly block: NarrativeBlock;
   readonly props: StepViewProps;
-  readonly replyOpen: boolean;
-  readonly setReplyOpen: (open: boolean) => void;
   readonly open: boolean;
   readonly toggle: (open: boolean) => void;
 }): JSX.Element {
@@ -78,14 +108,12 @@ function BlockView(args: {
   switch (block.kind) {
     case 'reply':
       return (
-        <StructuredReply
-          author={block.reply.author}
-          title={block.reply.title}
-          fields={block.reply.fields}
-          raw={block.reply.raw}
-          overview={block.overview}
-          open={args.replyOpen}
-          toggle={args.setReplyOpen}
+        <ResultCard
+          result={turnResult(block.reply, {
+            candidates: args.props.model.candidates.candidates,
+            idea: args.props.idea,
+          })}
+          props={args.props}
         />
       );
     case 'thought':
@@ -103,9 +131,20 @@ function BlockView(args: {
   }
 }
 
+/** The one line that leads a turn with a reply: what it ended with; null while it has none. */
+function resultSummary(narrative: TurnNarrative, props: StepViewProps): string | null {
+  const last = narrative.blocks.at(-1);
+  if (last?.kind !== 'reply') return null;
+  return turnResult(last.reply, {
+    candidates: props.model.candidates.candidates,
+    idea: props.idea,
+  }).summary;
+}
+
 function TurnBody(props: StepViewProps): JSX.Element {
   const {step, item} = props;
-  const [replyOpen, setReplyOpen] = useState(!props.compact);
+  // Counts the presses of the summary line, which scrolls the narrative to the reply card.
+  const [toResult, setToResult] = useState(0);
   // A group the reader opened or closed; any other is open only when it holds the opened call.
   const [flipped, setFlipped] = useState<ReadonlyMap<string, boolean>>(new Map());
   const narrative = turnNarrative(props.model.trace, props.core, step.span);
@@ -119,20 +158,37 @@ function TurnBody(props: StepViewProps): JSX.Element {
   }
   const live = LIVE.has(step.status);
   const holding = item === null ? null : toolOf(narrative, item)?.block;
+  const summary = resultSummary(narrative, props);
   return (
-    <Narrative key={step.span} label="Agent turn" size="fill" start={live ? 'end' : 'top'}>
-      {narrative.blocks.map(block => (
-        <BlockView
-          key={block.id}
-          block={block}
-          props={props}
-          replyOpen={replyOpen}
-          setReplyOpen={setReplyOpen}
-          open={flipped.get(block.id) ?? block.id === holding}
-          toggle={open => setFlipped(new Map(flipped).set(block.id, open))}
-        />
-      ))}
-    </Narrative>
+    <>
+      {summary === null ? null : (
+        <Row gap="space-2">
+          <Button
+            size="sm"
+            variant="quiet"
+            text={summary}
+            press={() => setToResult(toResult + 1)}
+          />
+        </Row>
+      )}
+      <Narrative
+        key={step.span}
+        label="Agent turn"
+        size="fill"
+        start={live ? 'end' : 'top'}
+        toEnd={toResult}
+      >
+        {narrative.blocks.map(block => (
+          <BlockView
+            key={block.id}
+            block={block}
+            props={props}
+            open={flipped.get(block.id) ?? block.id === holding}
+            toggle={open => setFlipped(new Map(flipped).set(block.id, open))}
+          />
+        ))}
+      </Narrative>
+    </>
   );
 }
 

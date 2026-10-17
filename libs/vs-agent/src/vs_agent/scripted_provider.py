@@ -642,11 +642,25 @@ def todo_write(items: Sequence[tuple[str, str]]) -> agentshim.AgentEvent:
     return agentshim.ToolCall(tool_id=None, tool=_TODO_TOOL, args={"todos": todos})
 
 
-def usage(*, input_tokens: int, output_tokens: int) -> agentshim.AgentEvent:
+def usage(
+    *,
+    input_tokens: int,
+    output_tokens: int,
+    cache_read_input_tokens: int = 0,
+    cache_write_input_tokens: int = 0,
+    reasoning_output_tokens: int = 0,
+) -> agentshim.AgentEvent:
     """Return one usage-update event."""
     return agentshim.UsageReport(
         usage=agentshim.ProviderUsage(
-            tokens=agentshim.TokenUsage(input_tokens=input_tokens, output_tokens=output_tokens),
+            tokens=agentshim.TokenUsage(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cached_input_tokens=cache_read_input_tokens,
+                cache_read_input_tokens=cache_read_input_tokens,
+                cache_write_input_tokens=cache_write_input_tokens,
+                reasoning_output_tokens=reasoning_output_tokens,
+            ),
         ),
         cost_usd=0.0,
     )

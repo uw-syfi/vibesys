@@ -8,13 +8,12 @@
 import type {CoreState} from '@vibesys/run-state';
 import type {AgentNode} from '@vibesys/run-state/agents';
 import type {Candidate, CandidateStep} from '@vibesys/run-state/candidates';
-import {Button, Chip, Pane, Panes, Row, Text} from '@vibesys/ui';
+import {Chip, Pane, Panes} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
   implementerOutcomes,
   type ResolvedZoom,
   type RunMode,
-  type RunModel,
   type RunPageAction,
   type RunPageState,
 } from '../../state/index.js';
@@ -49,20 +48,10 @@ type Dispatch = (action: RunPageAction) => void;
 export interface LevelProps {
   readonly state: RunPageState;
   readonly base: ViewBase;
-  /** The run to its live end, for what must not change while the reader scrubs. */
-  readonly whole: RunModel;
   readonly core: CoreState | null;
   readonly mode: RunMode;
   readonly dispatch: Dispatch;
 }
-
-const OUTCOME: Readonly<
-  Record<Candidate['outcome'], {tone: 'live' | 'ok' | 'err'; label: string}>
-> = {
-  running: {tone: 'live', label: 'Running'},
-  passed: {tone: 'ok', label: 'Passed'},
-  failed: {tone: 'err', label: 'Failed'},
-};
 
 function stepChip(step: CandidateStep): {tone: 'live' | 'ok' | 'err' | 'neutral'; label: string} {
   if (step.status === 'running' || step.status === 'waiting' || step.status === 'pending') {
@@ -79,40 +68,6 @@ function logsOptions(main: string): {value: RunMode; label: string}[] {
     {value: 'ideas', label: main},
     {value: 'logs', label: 'Logs'},
   ];
-}
-
-function IdeaFacts(props: {readonly idea: Candidate; readonly base: ViewBase}): JSX.Element {
-  const {idea, base} = props;
-  const parent =
-    idea.parent === null
-      ? null
-      : (base.model.candidates.candidates.find(item => item.id === idea.parent) ?? null);
-  const vs = idea.measurement?.vsBaseline ?? null;
-  return (
-    <>
-      <Chip label={OUTCOME[idea.outcome].label} tone={OUTCOME[idea.outcome].tone} dot />
-      {vs === null ? null : (
-        <Text variant="metric" tone={idea.outcome === 'passed' ? 'ok' : 'err'}>
-          {`${vs.toFixed(2)}×`}
-        </Text>
-      )}
-      <Row gap="space-1" align="center">
-        <Text variant="small" tone="muted">
-          from
-        </Text>
-        {parent === null ? (
-          <Text variant="small">input</Text>
-        ) : (
-          <Button
-            size="sm"
-            variant="quiet"
-            text={parent.title}
-            press={() => base.zoom({type: 'open-idea', idea: parent.id})}
-          />
-        )}
-      </Row>
-    </>
-  );
 }
 
 function IdeaLevel(props: LevelProps & {readonly idea: Candidate}): JSX.Element {
@@ -137,9 +92,9 @@ function IdeaLevel(props: LevelProps & {readonly idea: Candidate}): JSX.Element 
         title={idea.title}
         width="fill"
         enterKey={`idea ${idea.id}`}
-        meta={<IdeaFacts idea={idea} base={base} />}
         actions={<ModeSwitch mode={mode} options={logsOptions('Steps')} zoom={base.zoom} />}
-        header={mode === 'logs' ? logsHeader(logs) : ideaHeader(view)}
+        meta={ideaHeader(view).meta}
+        header={mode === 'logs' ? logsHeader(logs) : {}}
       >
         {mode === 'logs' ? <LogsView {...logs} /> : <IdeaView {...view} />}
       </FramedPane>

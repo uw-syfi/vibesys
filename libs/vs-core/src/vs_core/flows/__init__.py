@@ -32,15 +32,19 @@ from ._owners import Owners
 from ._resource import resource
 from ._retry import Again, GaveUp, RetryPolicy, Tries
 from ._roles import (
+    MARKDOWN_PROSE_CONVENTION,
     MAX_CORRECTIONS,
     MAX_LOST_TURNS,
     MAX_RENDER_SECONDS,
     MAX_TURN_SECONDS,
+    PLAIN_LINE_CONVENTION,
     RevisionReply,
     Role,
     UnknownRoleError,
     hours,
+    markdown_prose,
     minutes,
+    plain_line,
     reply_errors,
 )
 from ._sources import (
@@ -88,11 +92,13 @@ from ._workspaces import Assessment, NotOpened, NotReopened, Workspace, Workspac
 __all__ = [
     "ADOPTED",
     "INPUT",
+    "MARKDOWN_PROSE_CONVENTION",
     "MAX_CORRECTIONS",
     "MAX_LOST_TURNS",
     "MAX_RENDER_SECONDS",
     "MAX_TURN_SECONDS",
     "NOT_ADOPTED",
+    "PLAIN_LINE_CONVENTION",
     "Again",
     "Agents",
     "Assessment",
@@ -161,8 +167,10 @@ __all__ = [
     "Workspaces",
     "flow",
     "hours",
+    "markdown_prose",
     "minutes",
     "operation_span",
+    "plain_line",
     "reply_errors",
     "resource",
     "search",

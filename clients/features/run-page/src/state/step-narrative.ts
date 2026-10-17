@@ -1,7 +1,7 @@
 /**
- * An opened step as the Run screen reads it. An agent turn reads as a narrative: its structured
- * reply first, then the agent's thinking and text in time order, with the tool calls between two
- * paragraphs folded into one group. A gate reads as a verdict, its numbers and its log. Both are
+ * An opened step as the Run screen reads it. An agent turn reads as a narrative: the agent's
+ * thinking and text in time order, with the tool calls between two paragraphs folded into one
+ * group, and its structured reply last, as what the turn ends with. A gate reads as a verdict, its numbers and its log. Both are
  * read from the rows `turnTranscript` already builds and from the trace span the step names; the
  * view only draws them.
  */
@@ -24,8 +24,6 @@ export type NarrativeBlock =
       readonly kind: 'reply';
       readonly id: string;
       readonly reply: ReplyRow;
-      /** The reply's fields shown at first (`replyOverview`); the rest are one press away. */
-      readonly overview: readonly string[];
     }
   | {readonly kind: 'thought'; readonly id: string; readonly text: string}
   | {readonly kind: 'said'; readonly id: string; readonly text: string}
@@ -78,9 +76,9 @@ function heardBlocks(row: MessageRow): NarrativeBlock[] {
 }
 
 /**
- * The narrative of `rows`: replies first, then thinking and text in order, each run of tool calls
- * (with nothing said between them) as one block. Prompts and notes are not the agent's account,
- * except a note that failed, which is said as it is.
+ * The narrative of `rows`: thinking and text in order, each run of tool calls (with nothing said
+ * between them) as one block, then the replies: the turn ends with what it produced. Prompts and
+ * notes are not the agent's account, except a note that failed, which is said as it is.
  */
 export function narrativeOf(rows: readonly TurnRow[]): TurnNarrative {
   const replies: NarrativeBlock[] = [];
@@ -95,7 +93,7 @@ export function narrativeOf(rows: readonly TurnRow[]): TurnNarrative {
     if (row.kind === 'tool') {
       run.push(row);
     } else if (row.kind === 'reply') {
-      replies.push({kind: 'reply', id: row.id, reply: row, overview: replyOverview(row.fields)});
+      replies.push({kind: 'reply', id: row.id, reply: row});
     } else if (row.kind === 'message') {
       const heard = heardBlocks(row);
       if (heard.length === 0) continue;
@@ -106,7 +104,7 @@ export function narrativeOf(rows: readonly TurnRow[]): TurnNarrative {
   flush();
   const tools = rows.filter((row): row is ToolRow => row.kind === 'tool');
   return {
-    blocks: [...replies, ...blocks],
+    blocks: [...blocks, ...replies],
     tools: tools.length,
     failed: tools.filter(row => row.state === 'failed').length,
   };
