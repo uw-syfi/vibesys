@@ -5,6 +5,7 @@
  * hero, chart, ideas and Now, the logs, and the scrubber (`scrubberView`) over the trace log.
  */
 
+export {type IdeaFocusView, ideaFocusView, openIdeaId} from './idea-focus.js';
 export {
   type ImplementerOutcome,
   type ImplementerOutcomes,

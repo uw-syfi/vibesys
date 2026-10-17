@@ -75,6 +75,11 @@ export function modelOf(
   candidates: readonly Candidate[],
   best: CandidateTree['best'] = null,
 ): RunModel {
-  const tree: CandidateTree = {candidates, best, bestPath: best?.candidate ? [best.candidate] : []};
+  const tree: CandidateTree = {
+    candidates,
+    best,
+    adoptionOpened: best !== null,
+    bestPath: best?.candidate ? [best.candidate] : [],
+  };
   return {candidates: tree, direction: 'max'} as unknown as RunModel;
 }

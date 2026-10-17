@@ -119,11 +119,11 @@ async function check(page: Page, name: string): Promise<void> {
   if (shots !== undefined) await page.getByRole('main').screenshot({path: `${shots}/${name}.png`});
 }
 
-async function openRun(page: Page, live = false): Promise<void> {
+async function openRun(page: Page, live = false, server: FakeServerSeed = SERVER): Promise<void> {
   await page.addInitScript(installFakeBridge, SEED);
   await page.addInitScript(installFakeMachines, SEED);
   await page.addInitScript(installFakeRun, LOGS);
-  await page.addInitScript(installFakeServer, SERVER);
+  await page.addInitScript(installFakeServer, server);
   if (live) await page.addInitScript(installFakeLive);
   await page.goto('./shell.html');
   await page
@@ -221,7 +221,9 @@ test('every level opens by click and walks back by Escape, the crumbs and Back',
   await ideas.getByRole('option', {name: /^running Combine W1 ring with W2 padding/}).click();
   await expect(page.getByRole('heading', {name: 'Combine W1 ring with W2 padding'})).toBeVisible();
   await expect(
-    page.getByRole('button', {name: 'Lock-free ring with per-slot sequence numbers'}),
+    page
+      .getByRole('region', {name: 'Combine W1 ring with W2 padding'})
+      .getByRole('button', {name: 'Lock-free ring with per-slot sequence numbers'}),
   ).toBeVisible();
   await check(page, 'ink-idea');
 
@@ -287,6 +289,233 @@ test('every level opens by click and walks back by Escape, the crumbs and Back',
   await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+});
+
+/** The performance chart of the run, which every level keeps on screen. */
+function perfChart(page: Page): Locator {
+  return page.getByRole('group', {name: /of each measured idea over the run/});
+}
+
+/** Where the performance row is and what its axes read: all of it must be the same at every level. */
+async function perfRow(page: Page) {
+  return perfChart(page).evaluate(chart => {
+    const box = (element: Element) => {
+      const {x, y, width, height} = element.getBoundingClientRect();
+      return {x, y, width, height};
+    };
+    const row = chart.closest('.vs-flex[data-direction="row"]');
+    return {
+      chart: box(chart),
+      row: row === null ? null : box(row),
+      axes: [...chart.querySelectorAll('text.vs-chart-label')].map(label => label.textContent),
+      probe: chart.getAttribute('data-probe'),
+    };
+  });
+}
+
+async function emphasized(page: Page) {
+  return perfChart(page).evaluate(chart => {
+    const kinds = ['focus', 'related', 'dim'] as const;
+    return Object.fromEntries(
+      kinds.map(kind => [
+        kind,
+        [...chart.querySelectorAll(`.vs-chart-pick[data-emphasis="${kind}"]`)].map(
+          point => point.getAttribute('aria-label')?.split(' · ')[0],
+        ),
+      ]),
+    );
+  });
+}
+
+test('the performance row is the same element, in the same place and size, at every level', async ({
+  page,
+}) => {
+  await openRun(page);
+  await expect(perfChart(page)).toBeVisible();
+  await perfChart(page).evaluate(chart => chart.setAttribute('data-probe', 'perf'));
+  const atRun = await perfRow(page);
+  expect(atRun.probe).toBe('perf');
+  expect(atRun.axes.length).toBeGreaterThan(0);
+  const unchanged = async () => {
+    await expect(perfChart(page)).toBeVisible();
+    // The same node (not remounted), at the same place, size and axes, whatever opened below it.
+    expect(await perfRow(page)).toEqual(atRun);
+  };
+
+  const ideas = page.getByRole('listbox', {name: 'Ideas'});
+  await ideas.getByRole('option', {name: /^running Combine W1 ring with W2 padding/}).click();
+  await expect(page.getByRole('heading', {name: 'Combine W1 ring with W2 padding'})).toBeVisible();
+  await unchanged();
+  await page
+    .getByRole('listbox', {name: /steps$/})
+    .getByRole('option', {name: /implementer/})
+    .first()
+    .click();
+  await expect(page.getByRole('region', {name: 'Agent turn'})).toBeVisible();
+  await unchanged();
+  await page
+    .getByRole('region', {name: 'Agent turn'})
+    .getByRole('button', {name: /1 tool/})
+    .click();
+  await page
+    .getByRole('region', {name: 'Agent turn'})
+    .getByRole('button', {name: /cargo bench --bench queue/})
+    .last()
+    .click();
+  await expect(page.getByText('queue/mpmc time: 41.2 ms')).toBeVisible();
+  await unchanged();
+  for (const _level of ['item', 'step', 'idea']) await page.keyboard.press('Escape');
+  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  await unchanged();
+  // The run's other faces and the idea's Logs face keep it too.
+  await page.getByRole('radiogroup', {name: 'Show'}).getByText('Logs').click();
+  await unchanged();
+});
+
+test('an open idea is singled out on the chart: its dot ringed, the rest dimmed, its base outlined', async ({
+  page,
+}) => {
+  await openRun(page);
+  const ideas = page.getByRole('listbox', {name: 'Ideas'});
+  expect(await emphasized(page)).toEqual({focus: [], related: [], dim: []});
+
+  // A measured idea: its own dot is the focus, the other dots stay (dimmed), its base is outlined.
+  await ideas.getByRole('option', {name: /^passed Cache-line padding/}).click();
+  expect(await emphasized(page)).toEqual({
+    focus: ['Cache-line padding and batched enqueue'],
+    related: ['Lock-free ring with per-slot sequence numbers'],
+    dim: ['Larger batch size'],
+  });
+  await expect(perfChart(page).locator('.vs-chart-span')).toHaveCount(1);
+  // The hero keeps the run's best and reads this idea's result on its own line.
+  await expect(page.getByText('1.18×').first()).toBeVisible();
+  await expect(page.getByText('1.07× vs input')).toBeVisible();
+
+  // An idea with no measurement singles nothing out, outlines its base, and says why in words.
+  await page.keyboard.press('Escape');
+  await ideas.getByRole('option', {name: /^running Combine W1 ring with W2 padding/}).click();
+  expect(await emphasized(page)).toEqual({
+    focus: [],
+    related: ['Lock-free ring with per-slot sequence numbers'],
+    dim: [],
+  });
+  await expect(page.getByText('this idea · running')).toBeVisible();
+
+  // Back at the run nothing is singled out, and the idea line is empty.
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  expect(await emphasized(page)).toEqual({focus: [], related: [], dim: []});
+  await expect(page.getByText(/this idea/)).toHaveCount(0);
+});
+
+test('clicking a dot of the chart opens its idea', async ({page}) => {
+  await openRun(page);
+  await perfChart(page)
+    .getByRole('button', {name: /^Cache-line padding and batched enqueue ·/})
+    .click();
+  await expect(
+    page.getByRole('heading', {name: 'Cache-line padding and batched enqueue'}),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/#idea=[^&]+$/);
+  // The chart stays; another dot opens another idea beside the same chart.
+  await perfChart(page)
+    .getByRole('button', {name: /^Larger batch size ·/})
+    .click();
+  await expect(page.getByRole('heading', {name: 'Larger batch size'})).toBeVisible();
+});
+
+/** Every box of an idea's pane header: its kicker, title, facts and buttons, pairwise apart. */
+async function headerBoxes(page: Page) {
+  return page
+    .getByRole('region', {name: 'Cache-line padding and batched enqueue'})
+    .evaluate(pane => {
+      const header = pane.querySelector('.vs-pane-header');
+      if (header === null) throw new Error('no pane header');
+      const leaves = [
+        ...header.querySelectorAll(
+          '.vs-pane-titles > .vs-text, .vs-pane-title, .vs-fact, .vs-pane-actions .vs-button',
+        ),
+      ];
+      const frame = header.getBoundingClientRect();
+      return leaves.map(leaf => {
+        const {x, y, width, height} = leaf.getBoundingClientRect();
+        return {
+          text: leaf.textContent ?? '',
+          fact: leaf.classList.contains('vs-fact'),
+          // What it draws (a cut line is wider inside than out), and the header it must stay in.
+          clipped: leaf.scrollWidth > leaf.clientWidth + 1,
+          inside: x >= frame.left - 0.5 && x + width <= frame.right + 0.5,
+          x,
+          y,
+          width,
+          height,
+        };
+      });
+    });
+}
+
+/** Nothing overlaps anything: every pair of boxes is apart horizontally or vertically. */
+function expectApart(boxes: Awaited<ReturnType<typeof headerBoxes>>, width: number): void {
+  for (const [index, one] of boxes.entries()) {
+    for (const other of boxes.slice(index + 1)) {
+      const apart =
+        one.x + one.width <= other.x + 0.5 ||
+        other.x + other.width <= one.x + 0.5 ||
+        one.y + one.height <= other.y + 0.5 ||
+        other.y + other.height <= one.y + 0.5;
+      expect(apart, `${one.text} overlaps ${other.text} at ${width}px`).toBe(true);
+    }
+  }
+}
+
+const LONG_BASE =
+  'Replace the per-slot sequence numbers of the lock-free ring with a contiguous payload arena and batched cursor publication';
+
+test('an idea’s header stays on clean lines at 900 and 1500 px, with a long base title', async ({
+  page,
+}) => {
+  const long = JSON.parse(
+    JSON.stringify(SERVER).replaceAll('Lock-free ring with per-slot sequence numbers', LONG_BASE),
+  ) as FakeServerSeed;
+  await openRun(page, false, long);
+  await page
+    .getByRole('listbox', {name: 'Ideas'})
+    .getByRole('option', {name: /^passed Cache-line padding/})
+    .click();
+  for (const width of [900, 1500]) {
+    await page.setViewportSize({width, height: 900});
+    await expect(page.getByText('0.91× vs base')).toBeVisible();
+    const boxes = await headerBoxes(page);
+    expect(boxes.length).toBeGreaterThan(4);
+    expectApart(boxes, width);
+    // Everything stays inside the header, and a fact that must be whole is not cut.
+    for (const box of boxes)
+      expect(box.inside, `${box.text} leaves the header at ${width}px`).toBe(true);
+    for (const box of boxes.filter(
+      each => each.fact && /^(Passed|0\.91× vs base|\d+m)$/.test(each.text),
+    )) {
+      expect(box.clipped, `${box.text} is cut at ${width}px`).toBe(false);
+    }
+    // The performance row keeps room for its chart whatever the title lengths.
+    expect((await perfRow(page)).chart.width).toBeGreaterThan(200);
+    // Every figure and label is one line high (a small button is 32px, a wrapped line pair 40+).
+    for (const box of boxes.filter(each =>
+      /^(Passed|0\.91× vs base|\d+m|from.*)$/.test(each.text),
+    )) {
+      expect(box.height, `${box.text} wraps at ${width}px`).toBeLessThanOrEqual(34);
+    }
+    // Wide enough, the facts share one line: the base title is cut, the rest is whole.
+    const facts = boxes.filter(each => each.fact);
+    expect(facts.length).toBe(4);
+    if (width >= 1500) {
+      expect(
+        Math.max(...facts.map(each => each.y)) - Math.min(...facts.map(each => each.y)),
+      ).toBeLessThan(12);
+    }
+    if (shots !== undefined) {
+      await page.getByRole('main').screenshot({path: `${shots}/ink-idea-${width}.png`});
+    }
+  }
 });
 
 test('the scrubber replays the run’s ideas at an earlier event and returns to live', async ({

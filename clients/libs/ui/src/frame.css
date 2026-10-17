@@ -166,6 +166,8 @@ button.vs-crumb:focus-visible {
   outline: none;
 }
 .vs-pane-meta {
+  min-width: 0;
+  max-width: 100%;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -872,6 +874,26 @@ button.vs-crumb:focus-visible {
 .vs-chart-point[data-faint] {
   opacity: 0.45;
 }
+/* A chart that singles points out: the others stay, dimmed. */
+.vs-chart-point[data-emphasis="dim"] {
+  opacity: 0.25;
+}
+.vs-chart-point[data-emphasis="focus"] {
+  stroke-width: 3;
+}
+.vs-chart-related {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+.vs-chart-span-band {
+  fill: var(--accent);
+  opacity: 0.08;
+}
+.vs-chart-span-bar {
+  fill: var(--accent);
+  opacity: 0.5;
+}
 
 /* --- flat lists: a trailing column ("from <parent>") -------------------------------------------- */
 
@@ -948,4 +970,58 @@ button.vs-dotlegend-item:focus-visible {
 }
 .vs-searchbox:focus-within {
   border-color: var(--accent);
+}
+
+/* --- facts: one line that never wraps or overlaps ---------------------------------------------- */
+
+.vs-factline {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+.vs-factline[data-wrap] {
+  flex-wrap: wrap;
+}
+/* Its facts add nothing to the width of what holds it: the line fills that width and clips. */
+.vs-factline[data-fit="parent"] {
+  contain: inline-size;
+  width: 100%;
+}
+.vs-fact {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+  white-space: nowrap;
+}
+/* It takes what the others leave, down to nothing; on a wrapping line it stays on the line while
+   a field's width is left and goes to a line of its own below that. */
+.vs-fact[data-shrink] {
+  flex: 1 1 var(--column-field);
+  min-width: 0;
+  max-width: 100%;
+}
+.vs-fact[data-shrink] > * {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A label before the shrinking part keeps its width. */
+.vs-fact[data-shrink] > .vs-text {
+  flex: none;
+}
+.vs-fact[data-shrink] > .vs-button {
+  flex: 0 1 auto;
+}
+.vs-fact[data-shrink] .vs-button > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

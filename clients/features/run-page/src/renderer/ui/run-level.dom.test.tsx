@@ -18,8 +18,10 @@ import {
   type RunPageState,
   runPageInitial,
   runPageStep,
+  type ZoomEvent,
 } from '../../state/index.js';
 import {idea, modelOf} from '../../state/timeline-fixtures.js';
+import {Hero} from './hero.js';
 import {RunLevel} from './run-level.js';
 
 const window = new Window();
@@ -89,14 +91,7 @@ async function face(state: RunPageState, mode: RunMode): Promise<string> {
   const base = {model, clock: {start: 0, now: null}, zoom: () => undefined};
   await act(async () =>
     root.render(
-      <RunLevel
-        state={state}
-        base={base}
-        whole={model}
-        core={null}
-        mode={mode}
-        dispatch={() => undefined}
-      />,
+      <RunLevel state={state} base={base} core={null} mode={mode} dispatch={() => undefined} />,
     ),
   );
   const text = container.textContent ?? '';
@@ -151,14 +146,10 @@ async function chartAt(scrub: number | null): Promise<{yLabels: string[]; cursor
   const base = {model, clock: {start: 0, now: null}, zoom: () => undefined};
   await act(async () =>
     root.render(
-      <RunLevel
-        state={state}
-        base={base}
-        whole={measuredRun(null)}
-        core={null}
-        mode="ideas"
-        dispatch={() => undefined}
-      />,
+      <>
+        <Hero {...base} whole={measuredRun(null)} idea={null} />
+        <RunLevel state={state} base={base} core={null} mode="ideas" dispatch={() => undefined} />
+      </>,
     ),
   );
   const chart = container.querySelector('svg.vs-chart');
@@ -209,14 +200,10 @@ async function textOf(model: RunModel, showFailed: boolean): Promise<string> {
   const base = {model, clock: {start: 0, now: null}, zoom: () => undefined};
   await act(async () =>
     root.render(
-      <RunLevel
-        state={shown}
-        base={base}
-        whole={model}
-        core={null}
-        mode="ideas"
-        dispatch={() => undefined}
-      />,
+      <>
+        <Hero {...base} whole={model} idea={null} />
+        <RunLevel state={shown} base={base} core={null} mode="ideas" dispatch={() => undefined} />
+      </>,
     ),
   );
   const text = container.textContent ?? '';
@@ -239,4 +226,51 @@ test('the run level says passed, failed, best and adopted, never accepted, kept 
     }
   }
   expect(await textOf(namedRun(false), false)).not.toContain('adopted');
+});
+
+test('the performance row is one element whatever idea is open: dots are singled out and a dot opens its idea', async () => {
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const model = measuredRun(null);
+  const opened: ZoomEvent[] = [];
+  const base = {
+    model,
+    clock: {start: 0, now: null},
+    zoom: (event: ZoomEvent) => {
+      opened.push(event);
+    },
+  };
+  const draw = (idea: string | null) =>
+    act(async () => root.render(<Hero {...base} whole={model} idea={idea} />));
+  const kinds = () =>
+    [...container.querySelectorAll('.vs-chart-pick')].map(
+      point => point.getAttribute('data-emphasis') ?? '-',
+    );
+  const chartNode = () => container.querySelector('svg.vs-chart');
+
+  await draw(null);
+  const chart = chartNode();
+  expect(chart).not.toBeNull();
+  expect(kinds()).toEqual(['-', '-', '-']);
+  for (const idea of ['i1', null, 'i0', 'ghost', 'i2']) {
+    await draw(idea);
+    // Never remounted: the very same node, every dot still drawn.
+    expect(chartNode()).toBe(chart);
+    expect(kinds()).toHaveLength(3);
+    const focused = kinds().filter(kind => kind === 'focus').length;
+    expect(focused).toBe(['i1', 'i0', 'i2'].includes(idea ?? '') ? 1 : 0);
+  }
+  await draw('i1');
+  expect(kinds()).toEqual(['dim', 'focus', 'dim']);
+  // The idea's own result reads under the hero's figure.
+  expect(container.textContent).toContain('this idea');
+
+  const third = container.querySelectorAll('.vs-chart-pick')[2];
+  await act(async () => {
+    third?.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+  });
+  expect(opened).toEqual([{type: 'open-idea', idea: 'i2'}]);
+  await act(async () => root.unmount());
+  container.remove();
 });

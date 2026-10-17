@@ -58,7 +58,6 @@ async function chipsOf(
       <DeepLevel
         state={state}
         base={{model, clock: {start: 0, now: 1000}, zoom: () => undefined}}
-        whole={model}
         core={null}
         mode="ideas"
         dispatch={() => undefined}

@@ -527,6 +527,29 @@ export const RICH_ENTRIES = {
         <Card>
           <PickChartDemo />
         </Card>
+        <Card>
+          <Chart
+            label="Throughput with one point singled out: the others dimmed, its base outlined, its span shaded"
+            size="strip"
+            points={[
+              {id: 'a', x: 1, y: 100, filled: true, emphasis: 'related'},
+              {id: 'b', x: 2, y: 90, filled: true, tone: 'muted', emphasis: 'dim'},
+              {id: 'c', x: 3, y: 130, filled: true, emphasis: 'focus'},
+              {id: 'd', x: 4, y: 40, filled: true, tone: 'err', emphasis: 'dim'},
+              {id: 'e', x: 5, y: 120, filled: true, tone: 'muted', emphasis: 'dim'},
+            ]}
+            spans={[{from: 2.2, to: 3.2, label: 'the open idea'}]}
+            steps={[
+              {x: 1, y: 100},
+              {x: 3, y: 130},
+              {x: 6, y: 130},
+            ]}
+            yDomain={[0, 143]}
+            yTicks={[0, 50, 100].map(value => ({value, label: String(value)}))}
+            xTicks={[1, 2, 3, 4, 5, 6].map(value => ({value, label: String(value)}))}
+            pick={noop}
+          />
+        </Card>
       </Stack>
     ),
   },

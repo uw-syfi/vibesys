@@ -1,16 +1,13 @@
 /**
- * The run level: the hero (the best ratio to the input, large, with its value, the input's and the
- * metric) sharing a row with the strip chart, then the panes: the left one switches between Ideas,
- * Timeline, Agents and Logs (`state.zoom` mode), the right one is Now, what runs at this moment,
- * each row a shortcut to its live step.
+ * The run level's panes (the performance row above them is `Hero`, drawn by the screen at every
+ * level): the left one switches between Ideas, Timeline, Agents and Logs (`state.zoom` mode), the
+ * right one is Now, what runs at this moment, each row a shortcut to its live step.
  */
 
 import type {CoreState} from '@vibesys/run-state';
 import {
   Breadcrumb,
   Button,
-  Chart,
-  Chip,
   type Crumb,
   DotLegend,
   EmptyState,
@@ -28,7 +25,6 @@ import type {JSX} from 'react';
 import {
   ageWords,
   bestPathView,
-  heroView,
   type IdeaRow,
   type IdeasFilter,
   type ImplementerOutcomes,
@@ -37,10 +33,8 @@ import {
   type NowItem,
   nowView,
   type RunMode,
-  type RunModel,
   type RunPageAction,
   type RunPageState,
-  stripChartView,
   traceArrival,
   type ZoomEvent,
 } from '../../state/index.js';
@@ -73,66 +67,6 @@ export function ModeSwitch(props: {
       value={props.mode}
       change={mode => props.zoom({type: 'mode', mode})}
     />
-  );
-}
-
-/**
- * The hero: the figures at the viewed sequence, and the chart of the whole run. The chart is
- * drawn from `whole`, not from the viewed model, so scrubbing neither mounts nor unmounts it nor
- * rescales its axes; the scrub position is its cursor.
- */
-function Hero(props: ViewBase & {readonly whole: RunModel}): JSX.Element {
-  const hero = heroView(props.model);
-  const scrub = props.model.at === null ? null : (props.model.latest ?? props.clock.start);
-  const chart = stripChartView(props.whole, props.clock.start, props.clock.now, scrub);
-  return (
-    <Row gap="space-6" align="center">
-      <Stack gap="space-1">
-        <Text variant="section">{hero.metric}</Text>
-        {hero.standing === null || hero.bestIdea === null ? null : (
-          <Row gap="space-2" align="center">
-            <Chip label={hero.standing} tone="ok" dot />
-            <Button
-              size="sm"
-              variant="quiet"
-              text={hero.bestIdea.title}
-              press={() => {
-                if (hero.bestIdea !== null) props.zoom({type: 'open-idea', idea: hero.bestIdea.id});
-              }}
-            />
-          </Row>
-        )}
-        <Row gap="space-3" align="baseline">
-          <Text variant="hero" tone={hero.ratio === null ? 'muted' : 'ok'}>
-            {hero.ratio ?? '–'}
-          </Text>
-          <Stack gap="space-0">
-            <Text variant="code">{hero.value ?? 'nothing measured yet'}</Text>
-            {hero.input === null ? null : (
-              <Text variant="code" tone="muted">
-                {hero.input}
-              </Text>
-            )}
-          </Stack>
-        </Row>
-      </Stack>
-      {chart === null ? null : (
-        <Stack gap="space-0" grow>
-          <Chart
-            label={chart.label}
-            size="strip"
-            points={chart.points}
-            yDomain={chart.yDomain}
-            steps={chart.steps}
-            {...(chart.reference === null ? {} : {reference: chart.reference})}
-            {...(chart.playhead === null ? {} : {playhead: chart.playhead})}
-            xTicks={chart.xTicks}
-            yTicks={chart.yTicks}
-            pick={id => props.zoom({type: 'open-idea', idea: id})}
-          />
-        </Stack>
-      )}
-    </Row>
   );
 }
 
@@ -409,11 +343,10 @@ const KICKERS: Readonly<Record<RunMode, string>> = {
   logs: 'logs',
 };
 
-/** The run level: the hero and the chart, then the chosen face and Now. */
+/** The run level: the chosen face and Now. */
 export function RunLevel(props: {
   readonly state: RunPageState;
   readonly base: ViewBase;
-  readonly whole: RunModel;
   readonly core: CoreState | null;
   readonly mode: RunMode;
   readonly dispatch: Dispatch;
@@ -424,23 +357,20 @@ export function RunLevel(props: {
   const outcomes = implementerOutcomes(props.core, base.model.candidates);
   const face = runFace(state, base, outcomes, mode, dispatch);
   return (
-    <>
-      <Hero {...base} whole={props.whole} />
-      <Panes>
-        <FramedPane
-          kicker={KICKERS[mode]}
-          title={mode === 'logs' ? 'run' : `${total}`}
-          width="fill"
-          {...(mode === 'ideas'
-            ? {meta: <IdeasLegend state={state} base={base} dispatch={dispatch} />}
-            : {})}
-          actions={<ModeSwitch mode={mode} options={MODES} zoom={base.zoom} />}
-          header={face.header}
-        >
-          {face.body}
-        </FramedPane>
-        <NowPane base={base} />
-      </Panes>
-    </>
+    <Panes>
+      <FramedPane
+        kicker={KICKERS[mode]}
+        title={mode === 'logs' ? 'run' : `${total}`}
+        width="fill"
+        {...(mode === 'ideas'
+          ? {meta: <IdeasLegend state={state} base={base} dispatch={dispatch} />}
+          : {})}
+        actions={<ModeSwitch mode={mode} options={MODES} zoom={base.zoom} />}
+        header={face.header}
+      >
+        {face.body}
+      </FramedPane>
+      <NowPane base={base} />
+    </Panes>
   );
 }

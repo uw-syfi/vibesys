@@ -15,6 +15,8 @@ interface FlexProps {
   readonly wrap?: boolean;
   /** Take the free space of the `Row` or `Stack` this sits in. */
   readonly grow?: boolean;
+  /** A fixed width, whatever the content: a figure's block (`figure`), so what shares its row never moves. */
+  readonly width?: 'figure';
   readonly children: ReactNode;
 }
 
@@ -32,6 +34,7 @@ function Flex(props: FlexProps & {readonly direction: 'row' | 'column'}): JSX.El
       data-justify={justify}
       data-wrap={wrap || undefined}
       data-grow={grow || undefined}
+      data-width={props.width}
       style={gapStyle(gap)}
     >
       {props.children}

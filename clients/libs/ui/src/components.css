@@ -98,6 +98,10 @@ body > div:first-child {
 .vs-flex[data-grow] {
   flex: 1 1 0;
 }
+.vs-flex[data-width="figure"] {
+  flex: none;
+  width: var(--column-figure);
+}
 .vs-flex[data-align="start"] {
   align-items: flex-start;
 }
