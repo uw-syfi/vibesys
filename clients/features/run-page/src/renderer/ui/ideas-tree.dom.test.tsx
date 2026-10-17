@@ -5,6 +5,7 @@
  */
 
 import {afterAll, beforeAll, expect, test} from 'bun:test';
+import {EMPTY_LEDGER} from '@vibesys/run-state';
 import {Window} from 'happy-dom';
 import {act, useState} from 'react';
 import {createRoot, type Root} from 'react-dom/client';
@@ -68,7 +69,7 @@ async function shown(shape: typeof SHAPE | {parents: readonly (number | null)[]}
   document.body.append(container);
   const root: Root = createRoot(container);
   const model = modelOfShape(shape);
-  const base = {model, clock: {start: 0, now: null}, zoom: () => undefined};
+  const base = {model, clock: {start: 0, now: null}, tokens: EMPTY_LEDGER, zoom: () => undefined};
   let send: (action: RunPageAction) => void = () => undefined;
   function Harness() {
     const [state, setState] = useState(initial());
