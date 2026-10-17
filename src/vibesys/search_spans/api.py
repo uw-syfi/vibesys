@@ -172,6 +172,12 @@ PASSED: Literal["passed"] = "passed"
 FAILED_CHECK: Literal["failed_check"] = "failed_check"
 SLOWER: Literal["slower"] = "slower"
 BUILDS_ON: Literal["builds_on"] = "builds_on"
+TURNED_DOWN: Literal["turned_down"] = "turned_down"
+"""Why a workstream whose own checks turned its work down is rejected though its code is kept.
+
+Its review or a trusted gate rejected it, or its implementer gave it up; the workspace may still
+keep the code as work in progress a later one builds on, so the workstream names the revision.
+"""
 
 PLANNING_CALL = SpanKind("planning_call", attrs=PlanningAttrs)
 WORKSTREAM = SpanKind(
@@ -215,6 +221,7 @@ __all__ = [
     "REJECTED",
     "SLOWER",
     "SPANS",
+    "TURNED_DOWN",
     "WORKSTREAM",
     "AdoptionAttrs",
     "AgentTurnAttrs",

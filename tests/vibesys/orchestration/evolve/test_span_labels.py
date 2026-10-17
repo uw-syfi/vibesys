@@ -137,3 +137,22 @@ def test_a_child_whose_mutator_gave_no_reply_is_rejected_for_it(*, restarting: b
     assert (cold.label.verdict, cold.label.reason) == ("rejected", "no-reply")
     assert roles_under(host, cold) == ["mutator"]
     assert labelled(host, "gate") == []
+
+
+@across_restarts
+def test_regression_a_cold_start_whose_accuracy_failed_is_rejected_though_its_work_is_kept(
+    *, restarting: bool
+) -> None:
+    # the next cold start repairs what it left, so its code is kept; but its own trusted check
+    # turned it down, and it used to read as an accepted workstream
+    host = begin(config(bootstrap_max_attempts=1), restarting=restarting, failing={"c1"})
+    host.drain()
+
+    (cold,) = labelled(host, "workstream")
+    assert cold.label is not None
+    assert (cold.label.verdict, cold.label.reason) == ("rejected", "turned_down")
+    assert attrs(cold)["revision"] == "c1", "it names the code the next cold start repairs"
+    (gate,) = labelled(host, "gate")
+    assert gate.label is not None
+    assert gate.label.verdict == "failed_check"
+    assert labelled(host, "adoption") == []

@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from vibesys.serial_search._measure import label_taken
-from vibesys.serial_search._spans import hypothesis_chosen, round_settled
+from vibesys.serial_search._spans import Settling, hypothesis_chosen, round_settled
 from vs_core.api.search import (
     Again,
     AttemptBudget,
@@ -36,18 +36,15 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from vibesys.candidates.api import Baseline
-    from vibesys.hypothesis import OrchestratorPlan
     from vibesys.metrics import AcceptedReading
     from vibesys.serial_search._run import RoundStart
     from vs_core.api.search import Assessment, RevisionRef, Session
 
 
-class Attempting(Protocol):
+class Attempting(Settling, Protocol):
     """What the shared work needs to know of a search's attempt."""
 
     number: int
-    plan: OrchestratorPlan
-    base: RevisionRef
     baseline: Baseline
     """The input's measurement, which a candidate's gate compares it with."""
     readings: tuple[AcceptedReading, ...]
@@ -90,7 +87,7 @@ async def work(
     """
     hypothesis_chosen(ctx, start, attempt.plan, attempt.base)
     settlement = await _work(ctx, attempt, room=room, turn=turn)
-    round_settled(ctx, start, attempt.plan, attempt.base, settlement)
+    round_settled(ctx, start, attempt, settlement)
     return settlement
 
 

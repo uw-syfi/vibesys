@@ -6,8 +6,8 @@ evidence is read, with the candidate's headline value, its ratio to the input's 
 The search runs its gates on a cadence, so a round may keep a candidate they never measured. Its
 agents may have measured it themselves through the evaluation tool, which core holds as trusted
 evidence of the attempt (``label_taken``): the round's gate is then the reading of the latest of
-those that ran the benchmark, labelled the same way, so every measured round says what its
-candidate measured.
+those that read a value or failed a check, labelled the same way, so every measured round says
+what its candidate measured.
 """
 
 from __future__ import annotations
@@ -109,14 +109,15 @@ def _verdict(ctx: Flow, readings: tuple[AcceptedReading, ...], baseline: Baselin
 
 
 async def label_taken(ctx: Flow, ws: Workspace, revision: RevisionRef, baseline: Baseline) -> None:
-    """Label the reading of the agents' latest benchmark of ``revision`` as its gate.
+    """Label what the agents' latest telling evaluation of ``revision`` read as its gate.
 
     For a round whose trusted gates did not measure the candidate it keeps: its agents' own
     trusted evaluations of that exact revision (``ctx.evaluation.taken``) are what is known of
     it. They are read in one operation, whose span is labelled a gate with what the latest
-    evaluation that ran the benchmark read: its stages, the value, the ratio to the input's and
-    the verdict, as the trusted gates' own are. Nothing is labelled when no evaluation ran the
-    benchmark or the evidence cannot be read: the round's outcome does not depend on it.
+    evaluation that tells something read (`_latest_telling`): its stages, the value, the ratio to
+    the input's and the verdict, as the trusted gates' own are. Nothing is labelled when no
+    evaluation tells anything or the evidence cannot be read: the round's outcome does not
+    depend on it.
     """
     refs = ctx.evaluation.taken(ws, revision)
     if not refs:
@@ -125,7 +126,7 @@ async def label_taken(ctx: Flow, ws: Workspace, revision: RevisionRef, baseline:
     gate = ctx.operation_span
     if gate is None or not isinstance(read, Gated):
         return
-    readings = _latest_benchmark(_as_gates(read.readings, ctx.task.terms), refs)
+    readings = _latest_telling(_as_gates(read.readings, ctx.task.terms), refs)
     if not readings:
         return
     names = tuple(dict.fromkeys(item.stage for item in readings))
@@ -156,14 +157,19 @@ def _as_gates(
     )
 
 
-def _latest_benchmark(
+def _latest_telling(
     readings: tuple[AcceptedReading, ...], refs: tuple[EvidenceRef, ...]
 ) -> tuple[AcceptedReading, ...]:
-    """The readings of the latest evaluation (``refs`` are oldest first) with a benchmark value."""
+    """The readings of the latest evaluation (``refs`` are oldest first) that tells something.
+
+    An evaluation tells something when it read a benchmark value or a check rejected the
+    candidate; one whose only stage was an accuracy check that passed says neither.
+    """
     for request in reversed(tuple(dict.fromkeys(item.source_request for item in refs))):
         taken = tuple(item for item in readings if item.source_request == request)
         benchmark = reading_of(taken, EvidenceKind.BENCHMARK)
-        if benchmark is not None and benchmark.headline() is not None:
+        valued = benchmark is not None and benchmark.headline() is not None
+        if valued or failed_gate(taken) is not None:
             return taken
     return ()
 

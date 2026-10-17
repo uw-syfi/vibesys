@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from vibesys.hypothesis import AgentAttribution, HypothesisOutcome, rounds
+from vibesys.hypothesis import AgentAttribution, CandidateDisposition, HypothesisOutcome, rounds
 from vibesys.metrics import MetricRow, reading_of
 from vibesys.orchestration.review import Verdict
 from vibesys.orchestration.single.search._prompts import RoundPrompt
@@ -187,7 +187,14 @@ class SingleAttempt:
             review_passed=self.verdict_pass,
             failure=self.failure,
             passed=self.passed,
+            disposition=CandidateDisposition.UNASSESSED
+            if self.response is None
+            else self.response.candidate_disposition,
         )
+
+    def turned_down(self) -> bool:
+        """Whether the round's own checks turned its work down (`serial_search.turned_down`)."""
+        return serial.turned_down(self.finished(), unsettled=UNSETTLED)
 
     def asserted(self) -> tuple[RevisionRef | None, Assessment]:
         """What the workspace settles with."""

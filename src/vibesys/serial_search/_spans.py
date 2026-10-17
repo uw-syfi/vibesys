@@ -10,12 +10,13 @@ turns are agent turns (``turn_label``) and the trusted measurements it takes are
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from vibesys.search_spans.api import (
     ACCEPTED,
     BUILDS_ON,
     REJECTED,
+    TURNED_DOWN,
     WORKSTREAM,
     WorkstreamAttrs,
 )
@@ -50,17 +51,27 @@ def hypothesis_chosen(
     )
 
 
+class Settling(Protocol):
+    """What a round's settled workstream is labelled from, besides its settlement."""
+
+    plan: OrchestratorPlan
+    base: RevisionRef
+
+    def turned_down(self) -> bool:
+        """Whether the round's own checks turned its work down (`serial_search.turned_down`)."""
+        ...
+
+
 def round_settled(
-    ctx: Flow,
-    start: RoundStart,
-    plan: OrchestratorPlan,
-    base: RevisionRef,
-    settlement: Settlement | None,
+    ctx: Flow, start: RoundStart, attempt: Settling, settlement: Settlement | None
 ) -> None:
-    """Accept the round's workstream when its workspace kept what it made, else reject it.
+    """Accept the round's workstream when it kept what it made and succeeded, else reject it.
 
     A workspace keeps a candidate or work in progress later rounds build on (the revision the
-    workstream names as kept); one that discards, or never opened, rejects the workstream.
+    workstream names as kept); one that discards, or never opened, rejects the workstream. So
+    does a round its own checks turned down, even when its code is kept for the next round and
+    the workstream still names it; a winner-eligible round is never one (the implementer's
+    provisional advice to discard does not overrule the trusted gates).
     """
     if settlement is None:
         ctx.label(WORKSTREAM, verdict=REJECTED, reason=NOT_OPENED)
@@ -68,7 +79,10 @@ def round_settled(
     kept = settlement.retention != "discard"
     found = settlement.candidate if kept else None
     revision = None if found is None else found.revision_id.root
-    attrs = _chosen(start, plan, base).model_copy(update={"revision": revision})
+    attrs = _chosen(start, attempt.plan, attempt.base).model_copy(update={"revision": revision})
+    if kept and not settlement.eligible and attempt.turned_down():
+        ctx.label(WORKSTREAM, attrs=attrs, verdict=REJECTED, reason=TURNED_DOWN)
+        return
     ctx.label(WORKSTREAM, attrs=attrs, verdict=ACCEPTED if kept else REJECTED)
 
 

@@ -5,7 +5,9 @@ provider turn is an agent turn and a workstream's trusted measurement is its gat
 goes through ``ctx.label`` or ``label=``; nothing here builds a projection of its own.
 """
 
+from vibesys.candidates.api import turned_down
 from vibesys.orchestration.dynamic.search._outcomes import (
+    UNSETTLED,
     Closing,
     Work,
     WorkstreamDone,
@@ -22,6 +24,7 @@ from vibesys.search_spans.api import (
     PASSED,
     REJECTED,
     SLOWER,
+    TURNED_DOWN,
     WORKSTREAM,
     GateAttrs,
     WorkstreamAttrs,
@@ -75,7 +78,10 @@ def label_outcome(
     """Label how the workstream ended, and what its gate measured, once its settlement is asked.
 
     A workstream is accepted when its workspace keeps what it made (a candidate, or work in
-    progress later steps build on); a profile only looks, so it reaches no verdict. Its gate
+    progress later steps build on) and its own checks did not turn it down (`turned_down`): a
+    kept candidate its review rejected, or whose implementer could not implement it, is a
+    rejected workstream that names the revision kept. A profile only looks, so it reaches no
+    verdict. Its gate
     passed when the candidate is eligible; else it is slower when it does not beat the input,
     and failed a check otherwise.
     """
@@ -86,7 +92,11 @@ def label_outcome(
         found = closing.candidate if kept else None
         revision = None if found is None else found.revision_id.root
         ours = workstream_attrs(w).model_copy(update={"revision": revision})
-        ctx.label(WORKSTREAM, attrs=ours, verdict=ACCEPTED if kept else REJECTED, reason=reason)
+        if kept and turned_down(closing, unsettled=UNSETTLED):
+            ctx.label(WORKSTREAM, attrs=ours, verdict=REJECTED, reason=TURNED_DOWN)
+        else:
+            verdict = ACCEPTED if kept else REJECTED
+            ctx.label(WORKSTREAM, attrs=ours, verdict=verdict, reason=reason)
     if work.gate is None:
         return
     span, stage = work.gate

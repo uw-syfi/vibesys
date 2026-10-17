@@ -36,6 +36,7 @@ from vibesys.candidates._settlement import (
     measurement,
     outcome_of,
     settle_for,
+    turned_down,
 )
 from vibesys.candidates._task import (
     ACCURACY,
@@ -95,5 +96,6 @@ __all__ = [
     "terms_of",
     "trusted",
     "turn_chain",
+    "turned_down",
     "workspace_mode_for",
 ]

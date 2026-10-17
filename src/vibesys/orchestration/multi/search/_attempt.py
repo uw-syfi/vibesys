@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 from vibesys.hypothesis import (
     AgentAttribution,
     ArchiveConflict,
+    CandidateDisposition,
     Hypothesis,
     HypothesisOutcome,
     JudgeOutcome,
@@ -431,7 +432,14 @@ class MultiAttempt:
             passed=self.passed,
             judge_invocation=self.judge_invocation,
             outcome=None if self.response is None else self.response.hypothesis_outcome,
+            disposition=CandidateDisposition.UNASSESSED
+            if self.response is None
+            else self.response.candidate_disposition,
         )
+
+    def turned_down(self) -> bool:
+        """Whether the round's own checks turned its work down (`serial_search.turned_down`)."""
+        return serial.turned_down(self.finished(), unsettled=UNSETTLED)
 
     def asserted(self) -> tuple[RevisionRef | None, Assessment]:
         """What the workspace settles with.

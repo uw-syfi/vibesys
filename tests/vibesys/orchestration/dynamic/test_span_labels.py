@@ -2,7 +2,8 @@
 
 The run is played from generated schedules, as `test_root_properties.py` plays it. After every
 step and at the end: every workstream span says what it works on (its kind, title, hypothesis
-and parent revision), an accepted one names the revision it kept, a profile is a probe that
+and parent revision), an accepted one names the revision it kept (as does one turned down
+though its code is kept), a profile is a probe that
 reaches no verdict, a workstream links to the latest workstream of the hypothesis it descends
 from, every agent turn names its role, a gate that reached a verdict carries the value it
 measured (and the ratio to the input's, when the input was measured), and a gate that passed
@@ -17,8 +18,15 @@ from typing import Literal
 from hypothesis import event, given, note, settings
 from hypothesis import strategies as st
 from tests.vibesys.agent_spawns import spawns
-from tests.vibesys.orchestration.dynamic._host import Host, begin, config, plan_config
-from tests.vibesys.orchestration.dynamic._replies import step
+from tests.vibesys.orchestration.dynamic._host import (
+    Host,
+    begin,
+    config,
+    plan_config,
+)
+from tests.vibesys.orchestration.dynamic._replies import (
+    step,
+)
 from tests.vibesys.search_faults import Step, Stop, play, steps, stops
 from tests.vibesys.vibesys_flows import across_restarts
 
@@ -65,7 +73,9 @@ def _check_workstreams(host: Host) -> None:
         if attrs["probe"]:
             assert span.label.verdict is None, f"{span.id} only looks, yet reached a verdict"
         kept = attrs["revision"]
-        assert (kept is not None) == (span.label.verdict == "accepted"), f"{span.id} kept {kept}"
+        # so does one its own checks turned down, whose code is kept all the same
+        keeps = span.label.verdict == "accepted" or span.label.reason == "turned_down"
+        assert (kept is not None) == keeps, f"{span.id} kept {kept}"
         links = [link.to for link in span.label.links if link.rel == "builds_on"]
         allowed = {latest[p] for p in parents.get(hypothesis, set()) if p in latest}
         assert set(links) <= allowed, f"{span.id} builds on {links}, not one of {allowed}"
@@ -183,3 +193,18 @@ def test_the_outliner_starts_the_steps_it_outlined_and_a_declared_step_names_no_
 
     assert spawns(outlined.run.trace().spans)["implementer"] == {("outliner",)}
     assert spawns(declared.run.trace().spans)["implementer"] == {()}
+
+
+@across_restarts
+def test_regression_a_kept_candidate_a_trusted_check_failed_is_a_rejected_workstream(
+    *, restarting: bool
+) -> None:
+    # its accuracy passed, so the workspace keeps its code for later work to build on; yet its
+    # benchmark check failed, and the workstream read as accepted: kept work nobody vouched for
+    host = begin(config(), restarting=restarting, failing_benchmarks={"c1"})
+    host.drain()
+
+    (workstream,) = [s for s in _labelled(host, "workstream") if s.label and s.label.verdict]
+    assert workstream.label is not None
+    assert (workstream.label.verdict, workstream.label.reason) == ("rejected", "turned_down")
+    assert _attrs(workstream)["revision"] == "c1", "it names the code the workspace kept"

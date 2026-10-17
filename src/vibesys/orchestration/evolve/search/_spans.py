@@ -8,8 +8,16 @@ turns are agent turns (``turn_label``) and its trusted measurement is its gate (
 Every label goes through ``ctx.label``; nothing here builds a projection.
 """
 
+from vibesys.candidates.api import turned_down
 from vibesys.orchestration.evolve.search._values import ChildStart, Closing, Failure
-from vibesys.search_spans.api import ACCEPTED, BUILDS_ON, REJECTED, WORKSTREAM, WorkstreamAttrs
+from vibesys.search_spans.api import (
+    ACCEPTED,
+    BUILDS_ON,
+    REJECTED,
+    TURNED_DOWN,
+    WORKSTREAM,
+    WorkstreamAttrs,
+)
 from vs_core.api.search import Flow, RevisionRef, SpanId, SpanLink
 
 NOT_PASSED = "not_passed"
@@ -50,12 +58,17 @@ def child_refused(ctx: Flow, failure: Failure) -> None:
 
 
 def child_settled(ctx: Flow, start: ChildStart, closing: Closing, *, retained: bool) -> None:
-    """Accept the child's workstream when its workspace kept what it made, else reject it.
+    """Accept the child's workstream when it kept what it made and succeeded, else reject it.
 
-    A workspace keeps a candidate, or a cold start's work in progress the next one repairs.
+    A workspace keeps a candidate, or a cold start's work in progress the next one repairs. A
+    child its own checks turned down (`turned_down`: its review or a trusted gate rejected it)
+    is rejected even when its code is kept, and then names the revision kept.
     """
     if retained:
         attrs = _attrs(start, closing.summary, closing.candidate)
+        if turned_down(closing, unsettled=frozenset()):
+            ctx.label(WORKSTREAM, attrs=attrs, verdict=REJECTED, reason=TURNED_DOWN)
+            return
         ctx.label(WORKSTREAM, attrs=attrs, verdict=ACCEPTED)
         return
     reason = NOT_PASSED if closing.cause is None else closing.cause.kind.value

@@ -28,6 +28,7 @@ from vibesys.serial_search._closing import (
     benchmark_outcome,
     failed_gate,
     settle,
+    turned_down,
 )
 from vibesys.serial_search._design import (
     PLAN_CORRECTIONS,
@@ -134,5 +135,6 @@ __all__ = [
     "revision_of",
     "round_done",
     "settle",
+    "turned_down",
     "work",
 ]

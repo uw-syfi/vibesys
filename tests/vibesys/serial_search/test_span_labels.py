@@ -71,18 +71,25 @@ def design(host: SerialHost, hypothesis: str) -> None:
     host.run.reply_raw(host.run.expect_turn(role=PLANNER), plan_reply(hypothesis))
 
 
-def measure_itself(host: SerialHost, evaluations: list[tuple[str, bool]]) -> None:
-    """The implementer evaluates each ``(candidate, with the accuracy stage)`` itself.
+type Evaluation = tuple[str, dict[str, bool]]
+"""An evaluation the implementer took itself: of which candidate, and each stage's pass."""
+BOTH_PASS = {"accuracy": True, "benchmark": True}
+BENCHMARK_ONLY = {"benchmark": True}
+ACCURACY_FAILS = {"accuracy": False}
 
-    Core records each evaluation as one trusted ``local-validation`` record per stage, of the
-    open attempt, after the evaluations taken before.
+
+def measure_itself(host: SerialHost, evaluations: list[Evaluation]) -> None:
+    """The implementer evaluates each ``(candidate, stages)`` itself.
+
+    Core records each evaluation as one trusted ``local-validation`` record per stage it ran, of
+    the open attempt, after the evaluations taken before; a stage that did not pass failed.
     """
     attempt = host.opened[-1]
     scope = Scope(owner=attempt.attempt_id, generation=attempt.generation)
     taken = list(host.run.view.current().measurements)
-    for candidate, accuracy in evaluations:
+    for candidate, stages in evaluations:
         request = RequestId(root=f"agent-evaluation-{len(taken)}")
-        for stage in ("accuracy", "benchmark") if accuracy else ("benchmark",):
+        for stage, passed in stages.items():
             taken.append(
                 EvidenceRef(
                     evidence_id=EvidenceId(root=f"{stage}:{len(taken)}"),
@@ -96,7 +103,7 @@ def measure_itself(host: SerialHost, evaluations: list[tuple[str, bool]]) -> Non
                     workload_digest="workload",
                     environment_digest="environment",
                     provenance="trusted",
-                    status=ObservationStatus.SUCCEEDED,
+                    status=ObservationStatus.SUCCEEDED if passed else ObservationStatus.FAILED,
                 )
             )
     host.run.view.changes["measurements"] = tuple(taken)
@@ -107,7 +114,7 @@ def implement(
     search: str,
     candidate: str,
     *,
-    evaluations: list[tuple[str, bool]] | None = None,
+    evaluations: list[Evaluation] | None = None,
 ) -> None:
     """The implementer retains ``candidate``; in multi the judge then passes it.
 
@@ -224,7 +231,7 @@ def test_regression_a_round_the_gates_skip_has_what_its_implementer_measured_as_
         search, rounds=2, restarting=restarting, official_every=3, throughputs={"c1": 80.0}
     )
     design(host, "h1")
-    implement(host, search, "c1", evaluations=[("c0", True), ("c1", True)])
+    implement(host, search, "c1", evaluations=[("c0", BOTH_PASS), ("c1", BOTH_PASS)])
     design(host, "h2")
     implement(host, search, "c2")  # the final round: the trusted gates measure it
     host.drain()
@@ -245,14 +252,23 @@ def test_regression_a_round_the_gates_skip_has_what_its_implementer_measured_as_
     assert attrs(official)["metric_value"] == CANDIDATE_THROUGHPUT
 
 
+EVALUATIONS = {
+    "both": BOTH_PASS,
+    "benchmark": BENCHMARK_ONLY,
+    "accuracy_fails": ACCURACY_FAILS,
+    "accuracy_passes": {"accuracy": True},
+}
+"""The evaluations an implementer may take: all but a passing accuracy check alone tell something."""
+
+
 @SEARCHES
 @across_restarts
 @settings(max_examples=examples(pr=8, nightly=40), deadline=None, derandomize=True, database=None)
 @given(
     rounds=st.lists(
         st.tuples(
-            # what the implementer evaluated itself: (the candidate it keeps?, with accuracy?)
-            st.lists(st.tuples(st.booleans(), st.booleans()), max_size=3),
+            # what the implementer evaluated itself: (of the candidate it keeps?, which stages)
+            st.lists(st.tuples(st.booleans(), st.sampled_from(sorted(EVALUATIONS))), max_size=3),
             st.sampled_from([10.0, 50.0, 80.0]),  # the kept candidate's throughput
         ),
         min_size=1,
@@ -264,7 +280,7 @@ def test_every_measured_round_has_a_gate_with_what_its_latest_measurement_read(
     *,
     search: str,
     restarting: bool,
-    rounds: list[tuple[list[tuple[bool, bool]], float]],
+    rounds: list[tuple[list[tuple[bool, str]], float]],
     official_every: int,
 ) -> None:
     throughputs = {f"c{n}": value for n, (_, value) in enumerate(rounds, start=1)}
@@ -277,26 +293,181 @@ def test_every_measured_round_has_a_gate_with_what_its_latest_measurement_read(
     )
     for n, (evaluations, _) in enumerate(rounds, start=1):
         design(host, f"h{n}")
-        measured = [(f"c{n}" if kept else "other", accuracy) for kept, accuracy in evaluations]
+        measured = [(f"c{n}" if kept else "other", EVALUATIONS[kind]) for kept, kind in evaluations]
         implement(host, search, f"c{n}", evaluations=measured)
     host.drain()
 
     note(f"officially measured: {host.measured}")
     for n, workstream in enumerate(labelled(host, "workstream"), start=1):
         candidate, value = f"c{n}", throughputs[f"c{n}"]
-        own = [accuracy for kept, accuracy in rounds[n - 1][0] if kept]
+        telling = [k for kept, k in rounds[n - 1][0] if kept and k != "accuracy_passes"]
         gates = gates_under(host, workstream)
-        if candidate not in host.measured and not own:
-            assert gates == [], f"round {n} measured nothing, yet has a gate"
+        if candidate not in host.measured and not telling:
+            assert gates == [], f"round {n} measured nothing telling, yet has a gate"
             continue
         assert len(gates) == 1, f"round {n} has {len(gates)} gates"
         (gate,) = gates
         assert gate.label is not None
-        assert attrs(gate)["metric_value"] == value
-        assert attrs(gate)["vs_baseline"] == value / INPUT_THROUGHPUT
-        checked = candidate in host.measured or own[-1]
         beats = value > INPUT_THROUGHPUT
-        assert gate.label.verdict == (None if not checked else "passed" if beats else "slower")
+        if candidate in host.measured or telling[-1] == "both":
+            expected = (value, value / INPUT_THROUGHPUT, "passed" if beats else "slower")
+        elif telling[-1] == "benchmark":  # no accuracy check: no verdict it could pass
+            expected = (value, value / INPUT_THROUGHPUT, None)
+        else:
+            expected = (None, None, "failed_check")
+        found = (attrs(gate)["metric_value"], attrs(gate)["vs_baseline"], gate.label.verdict)
+        assert found == expected, f"round {n}"
+
+
+RUN_3 = [
+    # (the implementer's outcome, its advice for the checkpoint, what it evaluated itself)
+    ("inconclusive", "unassessed", []),
+    ("inconclusive", "unassessed", []),
+    ("nominated", "unassessed", []),
+    ("disproven", "discard", [ACCURACY_FAILS]),
+    ("implementation_failed", "discard", [ACCURACY_FAILS]),
+    ("continue", "unassessed", []),
+    ("implementation_failed", "discard", [ACCURACY_FAILS]),
+]
+"""The rounds of a live multi run whose every workstream was accepted and none had a gate."""
+
+
+def play_multi_round(
+    host: SerialHost, n: int, outcome: str, disposition: str, evaluations: list[dict[str, bool]]
+) -> None:
+    """One multi round: its design, the implementer's reply, and the judge when it is due."""
+    design(host, f"h{n}")
+    host.drain_until_turn(IMPLEMENTER)
+    measure_itself(host, [(f"c{n}", stages) for stages in evaluations])
+    host.run.reply(
+        host.run.expect_turn(role=IMPLEMENTER),
+        multi_host.implemented(outcome, candidate_disposition=disposition),
+        checkpoint=Retained(revision=RevisionRef.of_git_commit(f"c{n}")),
+    )
+    if outcome == "nominated":  # the only reply the sparse review cadence reviews here
+        host.drain_until_turn(JUDGE)
+        host.run.reply(host.run.expect_turn(role=JUDGE), multi_host.reviewed(passed=True))
+
+
+def next_turn(host: SerialHost) -> str | None:
+    """Answer everything else the ordinary way until a planner, implementer or judge turn opens."""
+    for _ in range(100):
+        open_roles = [item.label for item in host.run.open]
+        for role in (JUDGE, IMPLEMENTER, PLANNER):
+            if role in open_roles:
+                return role
+        if not host.step(0):
+            return None
+    message = f"no turn opened: {host.run.timeline()}"
+    raise AssertionError(message)
+
+
+def settled_workstreams(host: SerialHost) -> list[Span]:
+    return [w for w in labelled(host, "workstream") if w.label and w.label.verdict is not None]
+
+
+@across_restarts
+def test_regression_a_round_that_gave_up_its_work_is_rejected_and_shows_the_check_it_failed(
+    *, restarting: bool
+) -> None:
+    # the live run showed all seven rounds as kept and none measured: three implementers asked
+    # to discard code whose accuracy check failed, and the gates never ran (sparse cadence)
+    config = multi_host.config(max_rounds=10, judge_every=100, official_eval_every=100)
+    host = multi_host.MultiHost.start(config, restarting=restarting)
+    for n, (outcome, disposition, evaluations) in enumerate(RUN_3, start=1):
+        play_multi_round(host, n, outcome, disposition, evaluations)
+    host.drain_until_turn(PLANNER)
+
+    assert host.measured == []
+    rounds = settled_workstreams(host)
+    assert [(w.label.verdict, w.label.reason) for w in rounds if w.label] == [
+        ("accepted", None),
+        ("accepted", None),
+        ("accepted", None),
+        ("rejected", "turned_down"),
+        ("rejected", "turned_down"),
+        ("accepted", None),
+        ("rejected", "turned_down"),
+    ]
+    # its code is still kept, and the next round builds on it unless its designer reverts
+    assert [attrs(w)["revision"] for w in rounds] == [f"c{n}" for n in range(1, 8)]
+    for n, workstream in enumerate(rounds, start=1):
+        gates = gates_under(host, workstream)
+        if not RUN_3[n - 1][2]:
+            assert gates == [], f"round {n} measured nothing, yet has a gate"
+            continue
+        (gate,) = gates
+        assert gate.label is not None
+        assert gate.label.verdict == "failed_check"
+        assert attrs(gate)["metric_value"] is None
+        assert attrs(gate)["failed"] == {
+            "check": "correctness",
+            "completed": None,
+            "required": None,
+            "unit": None,
+        }
+
+
+@across_restarts
+@settings(max_examples=examples(pr=10, nightly=50), deadline=None, derandomize=True, database=None)
+@given(
+    rounds=st.lists(
+        st.tuples(
+            st.sampled_from(["nominated", "inconclusive", "disproven", "implementation_failed"]),
+            st.sampled_from(["unassessed", "discard"]),
+            st.booleans(),  # the judge passes it, when it reviews it
+        ),
+        min_size=1,
+        max_size=4,
+    ),
+    official_every=st.integers(1, 3),
+)
+def test_a_multi_round_is_accepted_when_it_kept_its_work_and_nothing_turned_it_down(
+    *, restarting: bool, rounds: list[tuple[str, str, bool]], official_every: int
+) -> None:
+    config = multi_host.config(
+        max_rounds=len(rounds) + 1, judge_every=100, official_eval_every=official_every
+    )
+    host = multi_host.MultiHost.start(config, restarting=restarting)
+    designed = 0
+    reviewed: set[int] = set()
+    implemented = 0  # one paid turn a round: the nth implementer reply is the nth round's
+    while (role := next_turn(host)) is not None:
+        if role == PLANNER:
+            if implemented == len(rounds):
+                break
+            designed += 1
+            design(host, f"h{designed}")
+        elif role == IMPLEMENTER:
+            if implemented == len(rounds):
+                break
+            outcome, disposition, _ = rounds[implemented]
+            implemented += 1
+            host.run.reply(
+                host.run.expect_turn(role=IMPLEMENTER),
+                multi_host.implemented(outcome, candidate_disposition=disposition),
+                checkpoint=Retained(revision=RevisionRef.of_git_commit(f"c{implemented}")),
+            )
+        else:
+            passes = rounds[implemented - 1][2]
+            reviewed.add(implemented)
+            host.run.reply(host.run.expect_turn(role=JUDGE), multi_host.reviewed(passed=passes))
+    assert implemented == len(rounds)
+
+    settled = settled_workstreams(host)
+    assert len(settled) == len(rounds)
+    note(f"reviewed rounds: {sorted(reviewed)}; officially measured: {host.measured}")
+    for n, workstream in enumerate(settled, start=1):
+        outcome, disposition, passes = rounds[n - 1]
+        assert workstream.label is not None
+        rejected_review = n in reviewed and not passes
+        turned_down = (
+            disposition == "discard" or outcome == "implementation_failed" or rejected_review
+        )
+        eligible = f"c{n}" in host.measured and outcome == "nominated" and passes
+        accepted = not turned_down or eligible
+        assert workstream.label.verdict == ("accepted" if accepted else "rejected"), n
+        assert attrs(workstream)["revision"] == f"c{n}", "its code is kept either way"
 
 
 # who starts whom: the orchestrator that designs a round's hypothesis starts its implementer (a
@@ -336,9 +507,11 @@ def _check(host: SerialHost) -> None:
             assert chosen, f"{span.id} was accepted without a hypothesis"
         if not chosen and span.ended_at is not None and span.label.verdict is not None:
             assert span.label.reason == "no_design"
-        # an accepted round names the revision it kept: what the next round builds on
+        # an accepted round names the revision it kept: what the next round builds on; so does
+        # one its own checks turned down, whose code is kept all the same
         kept = found.get("revision")
-        assert (kept is not None) == (span.label.verdict == "accepted"), f"{span.id} kept {kept}"
+        keeps = span.label.verdict == "accepted" or span.label.reason == "turned_down"
+        assert (kept is not None) == keeps, f"{span.id} kept {kept}"
         assert found.get("probe") is False
         links = [link.to for link in span.label.links]
         assert len(links) <= 1
