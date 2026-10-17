@@ -370,6 +370,11 @@ may increase. Other recorded settings cannot change during a resume, including
 the runtime environment: a run launched with `--modal` resumes on Modal without
 repeating the flag.
 
+A run resumes only with a VibeSys whose persisted state has the same version.
+A change to that state's shape raises the version and has no migration, so a
+run written by an older version is refused with an error naming both versions;
+start a new run instead.
+
 For a SkyPilot run, the portable environment choice is recorded, while the
 operator profile and local profiles-file path must be supplied on the resuming
 host. Nonterminal evaluator identity and replayable results live in the run's
