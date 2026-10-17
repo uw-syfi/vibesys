@@ -25,6 +25,7 @@ from vs_core.api import (
     CoreState,
     InputDropped,
     InputId,
+    InputMode,
     InvocationInputTarget,
     ItemInputTarget,
     RoleId,
@@ -34,13 +35,19 @@ from vs_core.api import (
     SessionInput,
     SessionInputReceived,
 )
-from vs_runtime._operator_control import RefusalReason, SteerTargetKind
+from vs_runtime._operator_control import (
+    RefusalReason,
+    SteerMode,
+    SteerRequest,
+    SteerTargetKind,
+    WithdrawRequest,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_core.api import ControlInput, InputTarget
-    from vs_runtime._operator_control import SteerTarget
+    from vs_runtime._operator_control import ControlRequest, SteerTarget
 
 
 @dataclass(frozen=True)
@@ -116,6 +123,62 @@ def target_refusal(core: CoreState, target: SteerTarget) -> RefusalReason | None
     return None
 
 
+def standing_input_id(control_id: str) -> InputId:
+    """The input of the steer an operator sent under ``control_id``."""
+    return InputId(root=f"steer-op-{control_id}")
+
+
+def standing_in_force(core: CoreState, control_id: str) -> bool:
+    """Whether the steer sent under ``control_id`` is standing guidance core holds in force."""
+    input_id = standing_input_id(control_id)
+    return any(
+        row.input.input_id == input_id
+        and row.input.mode is InputMode.STANDING
+        and row.receipt is None
+        for row in core.sessions.inputs
+    )
+
+
+def _never_standing(core: CoreState, control_id: str) -> bool:
+    """Whether no later state could hold the steer sent under ``control_id`` in force.
+
+    So when core holds a control under that id that is not a steer, or the steer's input
+    that is not standing guidance or has ended. An id core does not hold yet may be a standing
+    steer the run has not taken; the run checks it again when it takes the withdrawal.
+    """
+    held = {control.control_id.root: control for control in core.run.controls}
+    control = held.get(f"op-{control_id}")
+    if control is not None and control.action != "steer":
+        return True
+    input_id = standing_input_id(control_id)
+    return any(
+        row.input.input_id == input_id
+        and (row.input.mode is not InputMode.STANDING or row.receipt is not None)
+        for row in core.sessions.inputs
+    )
+
+
+def request_refusal(core: CoreState, request: ControlRequest) -> RefusalReason | None:
+    """Why no later state of ``core`` could accept ``request``, or None.
+
+    ``core`` may be a poll behind the run and a refusal is the id's answer for good, so a
+    steer is refused only for a target no later state could take, and a withdrawal only for
+    a steer that is not, or is no longer, standing guidance; nothing else is refused here.
+    """
+    match request:
+        case SteerRequest(target=target):
+            return target_refusal(core, target)
+        case WithdrawRequest(withdraws=withdraws) if _never_standing(core, withdraws):
+            return RefusalReason.NOT_STANDING
+        case _:
+            return None
+
+
+def input_mode(mode: SteerMode) -> InputMode | None:
+    """The input mode core records for a steer sent in ``mode``; None is the next turn."""
+    return InputMode.STANDING if mode is SteerMode.STANDING else None
+
+
 def names_target(target: SteerTarget, held: InputTarget | None) -> bool:
     """Whether ``held``, core's input target of a recorded steer, is the one ``target`` names.
 
@@ -162,6 +225,7 @@ def steer_input(
             artifact=control.artifact,
             received_at=now_at,
             sequence=sequence,
+            mode=control.input_mode or InputMode.NEXT_TURN,
         )
     )
 
@@ -211,10 +275,14 @@ class SteerConsumption:
         Receipts recorded before the first call are not reported: a resumed run must not
         announce again what its previous process already announced.
         """
+        # Standing guidance is never delivered once and ends by withdrawal or with its target,
+        # not by reaching no turn: its end is the withdrawal's own record.
         settled = {
             row.input.input_id: row.receipt
             for row in core.sessions.inputs
-            if row.receipt is not None and row.input.input_id.root.startswith("steer-")
+            if row.receipt is not None
+            and row.input.input_id.root.startswith("steer-")
+            and row.input.mode is not InputMode.STANDING
         }
         if self._reported is None:
             self._reported = set(settled)

@@ -43,6 +43,7 @@ class ControlAction(StrEnum):
     PAUSE = "pause"
     RESUME = "resume"
     STOP = "stop"
+    WITHDRAW = "withdraw"
 
 
 class _Request(BaseModel):
@@ -82,17 +83,41 @@ class SteerTarget(BaseModel):
         return self
 
 
-class SteerRequest(_Request):
-    """Free-text guidance for the next agent turn of its target, the whole run by default.
+class SteerMode(StrEnum):
+    """How a steer reaches the turns of its target."""
 
-    The message reaches exactly one turn of the target, once. A target the run cannot resolve
-    (a role the search does not declare, an attempt or item it does not hold, or an attempt
-    that has ended) is refused, and the message reaches no one.
+    NEXT_TURN = "next_turn"
+    """The next turn of the target takes it, once."""
+    STANDING = "standing"
+    """Every turn of the target dispatched from now on takes it, until it is withdrawn
+    (``WithdrawRequest``) or the target ends."""
+
+
+class SteerRequest(_Request):
+    """Free-text guidance for the agent turns of its target, the whole run by default.
+
+    With ``mode`` ``next_turn`` the message reaches exactly one turn of the target, once; with
+    ``standing`` it reaches every turn of the target until withdrawn. A target the run cannot
+    resolve (a role the search does not declare, an attempt or item it does not hold, or an
+    attempt that has ended) is refused, and the message reaches no one.
     """
 
     action: Literal[ControlAction.STEER] = ControlAction.STEER
     text: str = Field(min_length=1)
     target: SteerTarget = SteerTarget()
+    mode: SteerMode = SteerMode.NEXT_TURN
+
+
+class WithdrawRequest(_Request):
+    """End standing guidance: the standing steer sent under ``withdraws``.
+
+    Turns dispatched after the run takes the withdrawal no longer receive the guidance. A
+    withdrawal of a steer the run does not hold as standing guidance in force is refused.
+    """
+
+    action: Literal[ControlAction.WITHDRAW] = ControlAction.WITHDRAW
+    withdraws: str = Field(pattern=CONTROL_ID_PATTERN)
+    """The ``control_id`` of the standing steer to end."""
 
 
 class PauseRequest(_Request):
@@ -142,7 +167,8 @@ class StopRequest(_Request):
 
 
 type ControlRequest = Annotated[
-    SteerRequest | PauseRequest | ResumeRequest | StopRequest, Field(discriminator="action")
+    SteerRequest | PauseRequest | ResumeRequest | StopRequest | WithdrawRequest,
+    Field(discriminator="action"),
 ]
 """One operator control, discriminated by ``action``."""
 
@@ -176,6 +202,8 @@ class RefusalReason(StrEnum):
     """
     ENDED_TARGET = "ended_target"
     """A steer to an attempt that has ended: no turn of it could take the message."""
+    NOT_STANDING = "not_standing"
+    """A withdrawal naming no standing steer of the run that is still in force."""
 
 
 class ControlAck(_Request):
@@ -206,7 +234,7 @@ class ChannelRunControl:
         self._lock = threads.lock()
         self._answered: dict[str, tuple[ControlRequest, ControlAck]] = {}
         self._recorded: Callable[[ControlRequest], bool | None] = _nothing_recorded
-        self._target_check: Callable[[SteerTarget], RefusalReason | None] | None = None
+        self._check: Callable[[ControlRequest], RefusalReason | None] | None = None
 
     def recall(self, recorded: Callable[[ControlRequest], bool | None]) -> None:
         """Answer ids the run recorded before this process, as ``recorded`` says.
@@ -220,17 +248,18 @@ class ChannelRunControl:
         with self._lock:
             self._recorded = recorded
 
-    def check_targets(self, check: Callable[[SteerTarget], RefusalReason | None]) -> None:
-        """Refuse each later steer whose target ``check`` refuses, when it is submitted.
+    def check_requests(self, check: Callable[[ControlRequest], RefusalReason | None]) -> None:
+        """Refuse each later steer or withdrawal that ``check`` refuses, when it is submitted.
 
         The run loop installs a check over its latest state at each control poll. That state
         may be a poll behind, and a refusal is the id's answer for good, so the check refuses
-        only a target no later state could take (an undeclared role, an ended attempt). The
-        run resolves an accepted steer's target again when it takes it, and reports one it
-        cannot resolve then as dropped.
+        only what no later state could accept: a steer to an undeclared role or an ended
+        attempt, or a withdrawal of a steer that is not, or is no longer, standing guidance.
+        The run resolves an accepted steer's target, and an accepted withdrawal's guidance,
+        again when it takes them, and reports one it cannot resolve then as dropped.
         """
         with self._lock:
-            self._target_check = check
+            self._check = check
 
     def submit(self, request: ControlRequest) -> ControlAck:
         """Apply one control request once per ``control_id`` and say what became of it."""
@@ -260,13 +289,15 @@ class ChannelRunControl:
     def _apply(self, request: ControlRequest) -> ControlAck:
         reason = None
         match request:
-            case SteerRequest(target=target) if (
-                self._target_check is not None
-                and (refusal := self._target_check(target)) is not None
-            ):
+            case SteerRequest() | WithdrawRequest() if (
+                refusal := self._refusal(request)
+            ) is not None:
                 status, reason = ControlStatus.REFUSED, refusal
-            case SteerRequest(text=text, control_id=control_id, target=target):
-                self._channel.queue_steer(text, control_id, target)
+            case SteerRequest(text=text, control_id=control_id, target=target, mode=mode):
+                self._channel.queue_steer(text, control_id, target, mode)
+                status = ControlStatus.PENDING
+            case WithdrawRequest(withdraws=withdraws, control_id=control_id):
+                self._channel.queue_withdraw(withdraws, control_id)
                 status = ControlStatus.PENDING
             case PauseRequest(control_id=control_id):
                 self._channel.request_pause(control_id)
@@ -285,6 +316,9 @@ class ChannelRunControl:
                 self._channel.request_stop(mode, control_id)
                 status = ControlStatus.PENDING
         return self._ack(request, status, reason)
+
+    def _refusal(self, request: SteerRequest | WithdrawRequest) -> RefusalReason | None:
+        return None if self._check is None else self._check(request)
 
     @staticmethod
     def _ack(
@@ -337,10 +371,12 @@ __all__ = [
     "RefusalReason",
     "ResumeRequest",
     "ResumeWhen",
+    "SteerMode",
     "SteerRequest",
     "SteerTarget",
     "SteerTargetKind",
     "StopMode",
     "StopRequest",
+    "WithdrawRequest",
     "check_one_way_to_resume",
 ]

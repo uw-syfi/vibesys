@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
+from vs_runtime._operator_control import SteerMode
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -25,6 +27,7 @@ class RunControlTransitionKind(StrEnum):
     STOP_REQUESTED = "stop_requested"
     STEER_CONSUMED = "steer_consumed"
     STEER_DROPPED = "steer_dropped"
+    WITHDRAW_QUEUED = "withdraw_queued"
     PAUSED = "paused"
     STOPPED = "stopped"
 
@@ -90,28 +93,50 @@ class RunControlEventSink(Protocol):
 
 @dataclass(frozen=True)
 class QueuedSteer:
-    """One queued steer: its text, the id of the control that sent it and whom it is for.
+    """One queued steer: its text, the id of the control that sent it, whom it is for and how.
 
-    A steer with no control id or no target is for the whole run.
+    A steer with no target is for the whole run.
     """
 
     text: str
     control_id: str | None = None
     target: SteerTarget | None = None
+    mode: SteerMode = SteerMode.NEXT_TURN
+
+
+@dataclass(frozen=True)
+class QueuedWithdraw:
+    """One queued withdrawal: the standing steer it ends and the id of the control that sent it."""
+
+    withdraws: str
+    control_id: str
 
 
 class RunControlChannel(Protocol):
     """Cooperative control mailbox shared by callers and the run thread."""
 
     def queue_steer(
-        self, text: str, control_id: str | None = None, target: SteerTarget | None = None
+        self,
+        text: str,
+        control_id: str | None = None,
+        target: SteerTarget | None = None,
+        mode: SteerMode = SteerMode.NEXT_TURN,
     ) -> None:
-        """Queue steering for the next turn of ``target`` (the run when None).
+        """Queue steering for the turns of ``target`` (the run when None), as ``mode`` says.
 
         ``control_id`` names the control that sent it. The queue is the single source of
         truth. The run loop drains it (:meth:`take_pending_steer`) and turns each message into
-        a durable session input, which the next matching turn receives exactly once; one that
-        reaches no turn is reported (:meth:`notify_steer_dropped`).
+        a durable session input, which the next matching turn receives exactly once, or every
+        matching turn while it stands; one that reaches no turn is reported
+        (:meth:`notify_steer_dropped`).
+        """
+        ...
+
+    def queue_withdraw(self, withdraws: str, control_id: str) -> None:
+        """Queue the end of the standing steer sent under ``withdraws``.
+
+        The run loop drains withdrawals (:meth:`take_pending_withdrawals`) after the steers
+        queued with them, so a steer and its withdrawal taken in one poll apply in that order.
         """
         ...
 
@@ -158,6 +183,10 @@ class RunControlChannel(Protocol):
 
     def take_pending_steer(self) -> list[QueuedSteer]:
         """Drain queued steering exactly once."""
+        ...
+
+    def take_pending_withdrawals(self) -> list[QueuedWithdraw]:
+        """Drain queued withdrawals exactly once."""
         ...
 
     def notify_steer_consumed(
@@ -306,6 +335,7 @@ class RuntimeRunControlChannel:
         self._events = events
         self._lock = threads.condition(threads.lock())
         self._pending_steer: list[QueuedSteer] = []
+        self._pending_withdrawals: list[QueuedWithdraw] = []
         self._paused = False
         self._stop_requested = False
         self._stop_mode: StopMode | None = None
@@ -322,12 +352,22 @@ class RuntimeRunControlChannel:
         self._resumed_by = PauseWake.RESUMED
 
     def queue_steer(
-        self, text: str, control_id: str | None = None, target: SteerTarget | None = None
+        self,
+        text: str,
+        control_id: str | None = None,
+        target: SteerTarget | None = None,
+        mode: SteerMode = SteerMode.NEXT_TURN,
     ) -> None:
         """Queue free-text steering for the run loop to take at its next control poll."""
         with self._lock:
-            self._pending_steer.append(QueuedSteer(text, control_id, target))
+            self._pending_steer.append(QueuedSteer(text, control_id, target, mode))
         self._emit(RunControlTransitionKind.STEER_QUEUED, text=text)
+
+    def queue_withdraw(self, withdraws: str, control_id: str) -> None:
+        """Queue a withdrawal for the run loop to take at its next control poll."""
+        with self._lock:
+            self._pending_withdrawals.append(QueuedWithdraw(withdraws, control_id))
+        self._emit(RunControlTransitionKind.WITHDRAW_QUEUED, text=withdraws)
 
     def request_pause(self, control_id: str | None = None) -> None:
         """Request that the run park at its next cooperative boundary.
@@ -473,6 +513,12 @@ class RuntimeRunControlChannel:
         """Drain steering queued since the previous invocation boundary."""
         with self._lock:
             pending, self._pending_steer = self._pending_steer, []
+        return pending
+
+    def take_pending_withdrawals(self) -> list[QueuedWithdraw]:
+        """Drain withdrawals queued since the previous control poll."""
+        with self._lock:
+            pending, self._pending_withdrawals = self._pending_withdrawals, []
         return pending
 
     def notify_steer_consumed(
@@ -658,6 +704,7 @@ __all__ = [
     "CapacityWake",
     "PauseWake",
     "QueuedSteer",
+    "QueuedWithdraw",
     "RunControlChannel",
     "RunControlEventSink",
     "RunControlTransition",
