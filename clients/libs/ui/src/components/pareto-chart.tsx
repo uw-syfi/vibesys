@@ -262,7 +262,12 @@ export function ParetoChart(props: {
       <ul className="vs-dotlegend vs-serieslegend" aria-label="Points">
         {KEY_ORDER.filter(role => roles.has(role)).map(role => (
           <li key={role} className="vs-dotlegend-item">
-            <svg className="vs-pareto-key" viewBox="-10 -10 20 20" aria-hidden="true">
+            <svg
+              className="vs-pareto-key"
+              data-role={role}
+              viewBox="-10 -10 20 20"
+              aria-hidden="true"
+            >
               <g className="vs-pareto-point" data-role={role}>
                 <Shape role={role} cx={0} cy={0} />
               </g>

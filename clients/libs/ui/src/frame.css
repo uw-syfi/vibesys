@@ -758,6 +758,17 @@ button.vs-crumb:focus-visible {
   flex: none;
   width: var(--space-5);
   height: var(--space-5);
+  /* The key's own fill is its mark's color, so the color a legend names is readable from it. */
+  fill: var(--muted);
+}
+.vs-pareto-key[data-role="frontier"] {
+  fill: var(--accent);
+}
+.vs-pareto-key[data-role="input"] {
+  fill: var(--text);
+}
+.vs-pareto-key[data-role="rejected"] {
+  fill: var(--panel);
 }
 .vs-pareto-hover-box {
   fill: var(--panel);
