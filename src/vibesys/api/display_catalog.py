@@ -12,6 +12,8 @@ screen draws as text.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Protocol
+
 from pydantic import BaseModel, ConfigDict
 
 from vibesys.orchestration.dynamic.search.api import dynamic
@@ -20,6 +22,37 @@ from vibesys.orchestration.issue_queue.search.api import issue_queue
 from vibesys.orchestration.multi.search.api import multi
 from vibesys.orchestration.single.search.api import single
 from vs_agent.api import SHIPPED_PROVIDERS, vetted_models
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+
+class _RoleOwner(Protocol):
+    """What the catalog reads of a search: the roles it declares and how it names their ids."""
+
+    @property
+    def roles(self) -> Sequence[_Titled]: ...
+
+    @property
+    def ids(self) -> _RoleIds: ...
+
+
+class _Titled(Protocol):
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def title(self) -> str: ...
+
+
+class _RoleIds(Protocol):
+    def role_id(self, role: str) -> _Rooted: ...
+
+
+class _Rooted(Protocol):
+    @property
+    def root(self) -> str: ...
+
 
 _SEARCHES = (single, dynamic, multi, evolve, issue_queue)
 
@@ -51,10 +84,10 @@ class ConflictingNamesError(ValueError):
         super().__init__(f"role {key!r} is titled both {names[0]!r} and {names[1]!r}")
 
 
-def display_names() -> DisplayNames:
-    """The title of every built-in role, by its bare name and by its id in each search."""
+def display_names(searches: Sequence[_RoleOwner] = _SEARCHES) -> DisplayNames:
+    """The title of every role of ``searches`` (the built-in ones), by bare name and by id."""
     roles: dict[str, str] = {}
-    for search in _SEARCHES:
+    for search in searches:
         for role in search.roles:
             for key in (role.name, search.ids.role_id(role.name).root):
                 known = roles.setdefault(key, role.title)

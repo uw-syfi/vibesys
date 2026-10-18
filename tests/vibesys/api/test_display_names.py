@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 import re
+import sys
+from dataclasses import replace
+from pathlib import Path
 
-from vibesys.api.display_catalog import code_ids, display_names
+import pytest
+
+from server.api.schema import display_names_typescript, main
+from vibesys.api.display_catalog import ConflictingNamesError, code_ids, display_names
 from vibesys.orchestration.dynamic.search.api import dynamic
 from vibesys.orchestration.issue_queue.search.api import issue_queue
 from vs_agent.api import SHIPPED_PROVIDERS, harnesses
@@ -38,3 +44,30 @@ def test_the_code_ids_are_every_shipped_harness_vetted_model_and_role() -> None:
     assert set(ids.harnesses) == set(SHIPPED_PROVIDERS)
     assert {harness.model for harness in harnesses()} <= set(ids.models)
     assert set(ids.roles) == set(display_names().roles)
+
+
+def test_two_searches_that_title_one_role_differently_are_refused() -> None:
+    retitled = replace(
+        issue_queue,
+        roles=tuple(role.model_copy(update={"title": "Other"}) for role in issue_queue.roles),
+    )
+    with pytest.raises(ConflictingNamesError, match=r"is titled both"):
+        display_names((dynamic, retitled))
+
+
+_GENERATED = (
+    Path(__file__).resolve().parents[3]
+    / "clients/libs/contracts/src/generated/display-names.generated.ts"
+)
+
+
+def test_the_generated_module_is_what_the_registry_says(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    written = tmp_path / "out" / "names.ts"
+    monkeypatch.setattr(sys, "argv", ["schema", "--display-names-module", str(written)])
+    main()
+    assert written.read_text() == display_names_typescript()
+    assert written.read_text() == _GENERATED.read_text()
+    assert '"perf-evaluator": "Perf evaluator"' in written.read_text()
+    assert "export const CODE_IDS" in written.read_text()
