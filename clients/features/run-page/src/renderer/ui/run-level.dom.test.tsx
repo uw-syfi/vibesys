@@ -194,7 +194,7 @@ function namedRun(adopted: boolean): RunModel {
 
 async function textOf(model: RunModel, showFailed: boolean): Promise<string> {
   const state = runPageStep(attaching(), SNAPSHOT).state;
-  const shown = showFailed ? {...state, ideas: {...state.ideas, failed: true}} : state;
+  const shown = showFailed ? state : {...state, ideas: {...state.ideas, failed: false}};
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);

@@ -54,7 +54,9 @@ export function IdeaPickRow(props: {
             fold: place.fold,
             path: place.lit,
             hover: place.hover,
-            ...(place.depth === null ? {} : {lead: String(place.depth)}),
+            ...(place.depth === null
+              ? {}
+              : {lead: String(place.depth), leadTitle: `${place.depth} steps from input`}),
           })}
       stripe={row.stripe}
       fresh={row.fresh}

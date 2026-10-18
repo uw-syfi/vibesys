@@ -12,6 +12,8 @@ import {
   type GanttRow,
   LogPane,
   Meter,
+  MetricTile,
+  MetricTiles,
   Narrative,
   NewBelow,
   Pane,
@@ -20,6 +22,7 @@ import {
   Said,
   Screen,
   SearchBox,
+  Sparkline,
   SwatchLegend,
   Thought,
   Thread,
@@ -744,58 +747,35 @@ describe('PickRow extras', () => {
   });
 });
 
-describe('Chart connectors', () => {
+describe('Chart lit chain', () => {
   const points = [
     {id: 'a', x: 1, y: 2, filled: true},
     {id: 'b', x: 2, y: 3, filled: true},
     {id: 'c', x: 3, y: 1, filled: true},
   ];
 
-  test('draws a line from a point or a place to the point it ends at, and skips ends that are no point', async () => {
+  test('rings the dots on the chain and draws no line between points', async () => {
     const {container} = await mount(
       <Chart
         label="Series"
-        points={points}
-        edges={[
-          {from: {x: 0, y: 1}, to: 'a'},
-          {from: 'a', to: 'b'},
-          {from: 'b', to: 'missing'},
-          {from: 'missing', to: 'c'},
+        steps={[
+          {x: 1, y: 2},
+          {x: 2, y: 3},
         ]}
+        points={points.map(point => ({...point, lit: point.id !== 'c'}))}
       />,
     );
-    expect(all(container, '.vs-chart-edge')).toHaveLength(2);
-    expect(container.querySelector('.vs-chart-edges')?.hasAttribute('data-dense')).toBe(false);
-  });
-
-  test('draws the emphasized ones last, over the rest, and says which are faint', async () => {
-    const {container} = await mount(
-      <Chart
-        label="Series"
-        points={points}
-        edges={[
-          {from: 'a', to: 'b', emphasis: 'lit'},
-          {from: {x: 0, y: 1}, to: 'a', emphasis: 'strong', faint: true},
-          {from: 'b', to: 'c'},
-        ]}
-      />,
-    );
-    const lines = all(container, '.vs-chart-edge');
-    expect(lines.map(line => line.getAttribute('data-emphasis'))).toEqual([null, 'strong', 'lit']);
-    expect(lines.map(line => line.hasAttribute('data-faint'))).toEqual([false, true, false]);
-  });
-
-  test('marks a crowd of connectors dense, so all but the emphasized ones fade', async () => {
-    const many = Array.from({length: 80}, (_, at) => ({id: `p${at}`, x: at, y: at, filled: true}));
-    const edges = many.slice(1).map((point, at) => ({from: `p${at}`, to: point.id}));
-    const {container} = await mount(<Chart label="Series" points={many} edges={edges} />);
-    expect(container.querySelector('.vs-chart-edges')?.hasAttribute('data-dense')).toBe(true);
+    expect(all(container, '.vs-chart-lit')).toHaveLength(2);
+    // The only drawn path is the best-so-far step line: nothing joins one dot to another.
+    expect(all(container, 'path')).toHaveLength(1);
+    expect(all(container, 'line:not([class])')).toHaveLength(0);
+    expect(all(container, '.vs-chart-edge')).toHaveLength(0);
   });
 
   test('adds no point and moves no axis', async () => {
     const plain = await mount(<Chart label="Series" points={points} />);
     const drawn = await mount(
-      <Chart label="Series" points={points} edges={[{from: 'a', to: 'b', emphasis: 'lit'}]} />,
+      <Chart label="Series" points={points.map(point => ({...point, lit: true}))} />,
     );
     const where = (container: HTMLElement) =>
       all(container, '.vs-chart-point').map(each => [
@@ -1228,5 +1208,62 @@ describe('series colors', () => {
     expect(
       one(items[0] as HTMLElement, '.vs-series-swatch').style.getPropertyValue('--seg-color'),
     ).toBe('var(--series-3)');
+  });
+});
+
+describe('metric tiles', () => {
+  test('a tile names its measure, its figure and what it means, and its quiet values with a title', async () => {
+    const {container} = await mount(
+      <MetricTiles label="Performance" count={2}>
+        <MetricTile
+          name="Throughput"
+          figure="3.83×"
+          note="faster than input"
+          tone="ok"
+          detail="6,054,154 ops/s · input 1,581,539 ops/s"
+          trend={
+            <Sparkline
+              label="Best so far"
+              steps={[
+                {x: 0, y: 1},
+                {x: 5, y: 3},
+              ]}
+              from={0}
+              to={10}
+              reference={1}
+            />
+          }
+        />
+        <MetricTile name="Latency" figure="–" />
+      </MetricTiles>,
+    );
+    expect(all(container, '.vs-tile')).toHaveLength(2);
+    expect(one(container, '.vs-tiles').getAttribute('aria-label')).toBe('Performance');
+    expect(one(container, '.vs-tile-detail').getAttribute('title')).toBe(
+      '6,054,154 ops/s · input 1,581,539 ops/s',
+    );
+    expect(one(container, '.vs-tile').textContent).toContain('faster than input');
+    // The sparkline is one step line and a dashed reference, both inside its box.
+    expect(all(container, 'svg.vs-spark path.vs-spark-line')).toHaveLength(1);
+    expect(all(container, 'svg.vs-spark .vs-spark-reference')).toHaveLength(1);
+  });
+
+  test('a row of measures shows each column of a list row beside the figure', async () => {
+    const {container} = await mount(
+      <PickList label="Rows">
+        <PickRow
+          id="a"
+          title="A"
+          measure={[
+            {label: '7.1M', note: '6.2M cached', size: 'note'},
+            {label: '0.5M', size: 'plain'},
+          ]}
+          select={() => undefined}
+        />
+      </PickList>,
+    );
+    const cells = all(container, '.vs-pickrow-measure');
+    expect(cells.map(cell => cell.textContent)).toEqual(['7.1M 6.2M cached', '0.5M']);
+    expect(cells.map(cell => cell.getAttribute('data-size'))).toEqual(['note', 'plain']);
   });
 });

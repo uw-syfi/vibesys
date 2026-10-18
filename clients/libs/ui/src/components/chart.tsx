@@ -20,21 +20,11 @@ export interface ChartPoint {
    * `related` has a thin outline ring, `dim` is faded. Without it the point is drawn as usual.
    */
   readonly emphasis?: 'focus' | 'related' | 'dim';
-}
-
-/** Where a connector ends: a point of the chart by its `id`, or a place in the x and y values' units. */
-export type ChartEnd = string | {readonly x: number; readonly y: number};
-
-/**
- * A thin connector from one point to another (a derived idea to the one it builds on). A `to` or
- * `from` naming no point is not drawn. `emphasis` `strong` is a path the reader should follow;
- * `lit` is the path to the point the reader points at. `faint` fades it with its points.
- */
-export interface ChartEdge {
-  readonly from: ChartEnd;
-  readonly to: string;
-  readonly emphasis?: 'strong' | 'lit';
-  readonly faint?: boolean;
+  /**
+   * On the chain the reader points at: ringed in the accent, over any emphasis. The chart draws no
+   * line between points; a chain is read from its ringed dots.
+   */
+  readonly lit?: boolean;
 }
 
 /** A stretch of the x-axis to mark, in the x values' units: a faint band over the plot. */
@@ -204,8 +194,6 @@ export function Chart(props: {
   readonly selected?: string;
   /** Stretches of the x-axis marked by a faint band; they never change the axis' range. */
   readonly spans?: readonly ChartSpan[];
-  /** Connectors between points, drawn under them: faint by default, bolder when emphasized. */
-  readonly edges?: readonly ChartEdge[];
   readonly pick?: (id: string) => void;
   /** Called with a point's id when the pointer or the focus enters it, and null when it leaves. */
   readonly hover?: (id: string | null) => void;
@@ -256,7 +244,6 @@ export function Chart(props: {
         </g>
       )}
       {steps.length === 0 ? null : <path className="vs-chart-step" d={stepPath(steps, at)} />}
-      <Edges edges={props.edges ?? []} points={props.points} at={at} />
       {drawnPoints(props.points).map(point => (
         <Point
           key={point.id ?? `${point.x}:${point.y}`}
@@ -286,47 +273,6 @@ export function Chart(props: {
         </text>
       )}
     </svg>
-  );
-}
-
-/** With more connectors than this, the ones not emphasized are nearly invisible. */
-const DENSE_EDGES = 60;
-
-/** The connectors, each from where its ends are; the emphasized last, so they lie over the rest. */
-function Edges(props: {
-  readonly edges: readonly ChartEdge[];
-  readonly points: readonly ChartPoint[];
-  readonly at: Scale;
-}): JSX.Element | null {
-  const {edges, points, at} = props;
-  if (edges.length === 0) return null;
-  const placed = new Map(points.flatMap(p => (p.id === undefined ? [] : [[p.id, p] as const])));
-  const end = (value: ChartEnd): {x: number; y: number} | undefined =>
-    typeof value === 'string' ? placed.get(value) : value;
-  const rank = (edge: ChartEdge): number =>
-    edge.emphasis === 'lit' ? 2 : edge.emphasis === 'strong' ? 1 : 0;
-  const drawn = edges
-    .flatMap(edge => {
-      const from = end(edge.from);
-      const to = placed.get(edge.to);
-      return from === undefined || to === undefined ? [] : [{edge, from, to}];
-    })
-    .sort((a, b) => rank(a.edge) - rank(b.edge));
-  return (
-    <g className="vs-chart-edges" data-dense={edges.length > DENSE_EDGES || undefined}>
-      {drawn.map(({edge, from, to}) => (
-        <line
-          key={`${typeof edge.from === 'string' ? edge.from : 'input'}>${edge.to}`}
-          className="vs-chart-edge"
-          data-emphasis={edge.emphasis}
-          data-faint={edge.faint || undefined}
-          x1={at.x(from.x)}
-          y1={at.y(from.y)}
-          x2={at.x(to.x)}
-          y2={at.y(to.y)}
-        />
-      ))}
-    </g>
   );
 }
 
@@ -364,6 +310,7 @@ function Span(props: {
 const SPAN_BAR = 4;
 const POINT_RADIUS = 5.5;
 const SELECTED_RADIUS = 8;
+const LIT_RADIUS = 9.5;
 /** With more points than this, the hollow ones are small and faint, so the kept ones lead. */
 const DENSE_ABOVE = 60;
 const FAINT_RADIUS = 3;
@@ -431,7 +378,13 @@ function Point(props: {
   if (id === undefined || pick === undefined) {
     return (
       <g data-emphasis={point.emphasis}>
-        <Rings cx={cx} cy={cy} selected={selected} related={point.emphasis === 'related'} />
+        <Rings
+          cx={cx}
+          cy={cy}
+          selected={selected}
+          related={point.emphasis === 'related'}
+          lit={point.lit === true}
+        />
         {dot}
       </g>
     );
@@ -460,7 +413,13 @@ function Point(props: {
       }}
     >
       <title>{point.label ?? id}</title>
-      <Rings cx={cx} cy={cy} selected={selected} related={point.emphasis === 'related'} />
+      <Rings
+        cx={cx}
+        cy={cy}
+        selected={selected}
+        related={point.emphasis === 'related'}
+        lit={point.lit === true}
+      />
       {dot}
     </g>
   );
@@ -486,15 +445,19 @@ function moveAmong(current: SVGGElement, key: string): boolean {
   return true;
 }
 
-/** The ring of the selected point, or the thin outline of a related one. */
+/** The ring of the selected point, the thin outline of a related one, or the accent ring of a lit one. */
 function Rings(props: {
   readonly cx: number;
   readonly cy: number;
   readonly selected: boolean;
   readonly related: boolean;
+  readonly lit: boolean;
 }): JSX.Element {
   return (
     <>
+      {props.lit ? (
+        <circle className="vs-chart-lit" cx={props.cx} cy={props.cy} r={LIT_RADIUS} />
+      ) : null}
       {props.selected ? (
         <circle className="vs-chart-ring" cx={props.cx} cy={props.cy} r={SELECTED_RADIUS} />
       ) : null}

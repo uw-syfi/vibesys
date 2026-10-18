@@ -83,7 +83,9 @@ async function push(page: Page, listing: unknown): Promise<void> {
 
 test.use({colorScheme: 'dark'});
 
-test('a live run folds its trace into the ideas, the failed behind their row', async ({page}) => {
+test('a live run folds its trace into the ideas, the failed listed and hideable', async ({
+  page,
+}) => {
   await page.addInitScript(installFakeBridge, SEED);
   await page.addInitScript(installFakeMachines, SEED);
   await page.addInitScript(installFakeRun, {streams: [], text: {}});
@@ -100,8 +102,12 @@ test('a live run folds its trace into the ideas, the failed behind their row', a
   if (shots !== undefined)
     await page.getByRole('main').screenshot({path: `${shots}/ink-live-ideas.png`});
   const shown = await ideas.getByRole('option').count();
+  await expect(page.getByRole('button', {name: /^\+ \d+ failed$/})).toHaveCount(0);
+  // Hiding the failed leaves a row that says how many, which brings them back.
+  await page.locator('button.vs-dotlegend-item', {hasText: /\d+ failed/}).click();
+  await expect.poll(() => ideas.getByRole('option').count()).toBeLessThan(shown);
   await page.getByRole('button', {name: /^\+ \d+ failed$/}).click();
-  await expect.poll(() => ideas.getByRole('option').count()).toBeGreaterThan(shown);
+  await expect.poll(() => ideas.getByRole('option').count()).toBe(shown);
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
 });
 

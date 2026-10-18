@@ -143,7 +143,7 @@ export function ratio(value: number): string {
   return `${value.toFixed(2)}×`;
 }
 
-/** Snake-case words as the screen writes them: `failed_check` reads `failed check`. */
+/** Snake- and kebab-case words as the screen writes them: `failed_check` reads `failed check`. */
 export function words(value: string): string {
-  return value.replaceAll('_', ' ');
+  return value.replaceAll(/[_-]/g, ' ');
 }

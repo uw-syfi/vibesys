@@ -45,6 +45,7 @@ export type SizeToken =
   | 'column-tile'
   | 'column-swatch'
   | 'column-figure'
+  | 'column-metric'
   | 'column-chart'
   | 'pane-list'
   | 'pane-outline'
@@ -78,6 +79,7 @@ export const SIZE: Readonly<Record<SizeToken, number>> = {
   'column-tile': 200,
   'column-swatch': 160,
   'column-figure': 320,
+  'column-metric': 360,
   'column-chart': 520,
   'pane-list': 380,
   'pane-outline': 340,

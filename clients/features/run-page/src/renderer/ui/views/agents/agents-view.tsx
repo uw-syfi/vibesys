@@ -18,10 +18,12 @@ import {type JSX, useMemo} from 'react';
 import {type AgentRow, agentTree, type FoldRow} from '../../../../state/agent-tree.js';
 import {type AgentTurn, agentModel, agentTurns} from '../../../../state/agent-turns.js';
 import {
-  type TokensReading,
+  spendOf,
+  type TokensCells,
   tokensByAgent,
+  tokensCells,
   tokensColumn,
-  tokensFigure,
+  tokensLine,
   tokensTitle,
   turnTokens,
 } from '../../../../state/index.js';
@@ -71,8 +73,8 @@ function took(agent: AgentNode, now: number | null): string | undefined {
 function AgentLine(props: {
   readonly row: AgentRow;
   readonly view: AgentsViewProps;
-  /** The agent's cell of the tokens column; null when the list has no such column. */
-  readonly measure: TokensReading | null;
+  /** The agent's cells of the in and out columns; null when the list has no such columns. */
+  readonly measure: TokensCells | null;
 }): JSX.Element {
   const {row, view} = props;
   const {agent} = row;
@@ -93,7 +95,14 @@ function AgentLine(props: {
       badges={also}
       figure={agent.turns.toLocaleString('en-US')}
       figureTone="muted"
-      {...(measure === null ? {} : {measure})}
+      {...(measure === null
+        ? {}
+        : {
+            measure: [
+              {...measure.input, size: 'note' as const},
+              {...measure.output, size: 'plain' as const},
+            ],
+          })}
       {...(time === undefined || view.compact ? {} : {trail: {label: time, short: true}})}
       select={() => view.zoom({type: 'open-agent', agent: agent.id})}
     />
@@ -130,8 +139,10 @@ export function AgentsView(props: AgentsViewProps): JSX.Element {
   );
   // The tokens column is for the full list: beside an opened agent there is no room for it.
   const agentRows = rows.filter(row => row.kind === 'agent');
-  const cells = tokensColumn(
-    props.compact ? agentRows.map(() => null) : agentRows.map(row => spent.get(row.agent.id)),
+  const cells = tokensCells(
+    props.compact
+      ? agentRows.map(() => undefined)
+      : agentRows.map(row => spendOf(spent.get(row.agent.id), row.agent.status)),
   );
   const cellOf = new Map(agentRows.map((row, index) => [row.agent.id, cells[index] ?? null]));
   const hasTokens = cells.some(cell => cell !== null);
@@ -148,7 +159,12 @@ export function AgentsView(props: AgentsViewProps): JSX.Element {
               start: 'agent · started by the row above · now',
               end: [
                 {label: 'turns', fixed: 'figure' as const},
-                ...(hasTokens ? [{label: 'tokens', fixed: 'measure' as const}] : []),
+                ...(hasTokens
+                  ? [
+                      {label: 'in (cached)', fixed: 'measure-note' as const},
+                      {label: 'out', fixed: 'measure' as const},
+                    ]
+                  : []),
                 {label: 'took', fixed: 'time' as const},
               ],
             },
@@ -181,7 +197,7 @@ export function AgentPane(props: AgentPaneProps): JSX.Element {
   const turns = useMemo(() => agentTurns(spans, agent.id), [spans, agent.id]);
   const modelName = agentModel(agent, props.core);
   const spent = tokensByAgent(spans, props.tokens).get(agent.id);
-  const spentFigure = spent === undefined ? null : tokensFigure(spent);
+  const spentLine = spent === undefined ? null : tokensLine(spent);
   const parents = agent.startedBy
     .map(id => model.agents.agents.find(item => item.id === id))
     .filter((item): item is AgentNode => item !== undefined);
@@ -207,12 +223,12 @@ export function AgentPane(props: AgentPaneProps): JSX.Element {
                   )),
           },
           {key: 'turns', value: String(agent.turns)},
-          ...(spent === undefined || spentFigure === null
+          ...(spent === undefined || spentLine === null
             ? []
             : [
                 {
                   key: 'tokens',
-                  value: <span title={tokensTitle(spent)}>{spentFigure}</span>,
+                  value: <span title={tokensTitle(spent)}>{spentLine}</span>,
                 },
               ]),
           {key: 'status', value: agent.status},
@@ -236,7 +252,9 @@ function TurnList(props: {
       </Text>
     );
   }
-  const cells = tokensColumn(props.turns.map(turn => turnTokens(props.tokens, turn.span)));
+  const cells = tokensColumn(
+    props.turns.map(turn => spendOf(turnTokens(props.tokens, turn.span), turn.status)),
+  );
   return (
     <PickList label="Turns" size="fill">
       {props.turns.map((turn, index) => {
@@ -251,7 +269,7 @@ function TurnList(props: {
             state={{tone: tone(turn.status), label: turn.status}}
             {...(end === null ? {} : {figure: duration(end - turn.startedAt)})}
             figureTone="muted"
-            {...(measure === null ? {} : {measure})}
+            {...(measure === null ? {} : {measure: {...measure, size: 'line' as const}})}
             select={() => props.zoom({type: 'open-step', step: turn.span})}
           />
         );

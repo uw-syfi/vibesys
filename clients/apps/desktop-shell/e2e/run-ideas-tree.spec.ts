@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import {expect, type Page, test} from '@playwright/test';
+import {expect, type Locator, type Page, test} from '@playwright/test';
 import {type FakeBridgeSeed, installFakeBridge, installFakeMachines} from './fake-bridge.js';
 import {lineageRun} from './fake-lineage.js';
 import {installFakeRun} from './fake-run.js';
@@ -9,9 +9,9 @@ import {installFakeServer} from './fake-server.js';
  * The Ideas pane as a lineage tree against the Fake bridge: a small live-like run (10 ideas) and
  * one of weeks (600 ideas over 14 days). The best idea's chain is open with the accent rail and its
  * `best` badge, every other branch is one folded row that opens in place, the list scrolls windowed,
- * and the header line replaces the old best-path row. On the performance chart, connectors join
- * each passed idea to its base (the best chain emphasized), and pointing at an idea lights its
- * chain there and in the tree. `LEVEL_SHOTS` names a directory to save the app window in, at 1440
+ * and the header line replaces the old best-path row. The performance chart joins no dots (only
+ * its step line is drawn), and pointing at an idea rings the dots of its chain there and lights
+ * it in the tree. `LEVEL_SHOTS` names a directory to save the app window in, at 1440
  * and at 1000 px wide.
  */
 
@@ -100,6 +100,13 @@ async function shot(page: Page, name: string): Promise<void> {
   if (shots !== undefined) await page.screenshot({path: `${shots}/${name}.png`});
 }
 
+/** The chart draws one path (the best-so-far step line) and no line from one dot to another. */
+async function expectNoConnectors(chart: Locator): Promise<void> {
+  await expect(chart.locator('.vs-chart-edge, .vs-chart-edges')).toHaveCount(0);
+  await expect(chart.locator('path')).toHaveCount(1);
+  await expect(chart.locator('path.vs-chart-step')).toHaveCount(1);
+}
+
 test.use({colorScheme: 'dark', viewport: {width: 1440, height: 900}});
 
 test('a small run opens as a tree: the best chain open, other branches folded, one row to open each', async ({
@@ -118,13 +125,14 @@ test('a small run opens as a tree: the best chain open, other branches folded, o
   await shot(page, 'ideas-tree-10-1920');
   await page.setViewportSize({width: 1440, height: 900});
 
-  // The chart joins each passed idea to its base; pointing at a row lights its chain.
+  // The chart joins no dots (only the best-so-far step line is drawn); pointing at a row rings
+  // the dots of its chain.
   const chart = page.getByRole('group', {name: /of each measured idea/});
-  expect(await chart.locator('.vs-chart-edge').count()).toBeGreaterThan(3);
-  expect(await chart.locator('.vs-chart-edge[data-emphasis="strong"]').count()).toBeGreaterThan(0);
-  await expect(chart.locator('.vs-chart-edge[data-emphasis="lit"]')).toHaveCount(0);
+  await expectNoConnectors(chart);
+  await expect(chart.locator('.vs-chart-lit')).toHaveCount(0);
   await ideas.getByRole('option').nth(3).hover();
-  expect(await chart.locator('.vs-chart-edge[data-emphasis="lit"]').count()).toBeGreaterThan(0);
+  expect(await chart.locator('.vs-chart-lit').count()).toBeGreaterThan(0);
+  await expectNoConnectors(chart);
   await shot(page, 'ideas-tree-10-lit-1440');
   await page.mouse.move(0, 0);
 
@@ -154,9 +162,9 @@ test('a run of weeks draws only the rows near the view, and the best line shows 
   await shot(page, 'ideas-tree-600-1920');
   await page.setViewportSize({width: 1440, height: 900});
   const chart = page.getByRole('group', {name: /of each measured idea/});
-  expect(await chart.locator('.vs-chart-edge').count()).toBeGreaterThan(100);
+  await expectNoConnectors(chart);
   await ideas.getByRole('option').nth(5).hover();
-  expect(await chart.locator('.vs-chart-edge[data-emphasis="lit"]').count()).toBeGreaterThan(1);
+  expect(await chart.locator('.vs-chart-lit').count()).toBeGreaterThan(1);
   await shot(page, 'ideas-tree-600-lit-1440');
   await page.mouse.move(0, 0);
 

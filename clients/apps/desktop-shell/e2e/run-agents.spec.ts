@@ -154,20 +154,23 @@ test('the agents tree shows who started whom, and an agent opens beside it with 
 
 test('the run, each agent and each turn name the tokens they spent', async ({page}) => {
   await openRun(page);
-  // The run: every turn's input and output, 1,517,700 in all, exact on hover.
-  const total = page.getByText('1.5M tokens');
+  // The run: every turn's input (with its cached share) and output, exact on hover.
+  const total = page.getByText('in 1.5M (1.3M cached) · out 51.1k');
   await expect(total).toBeVisible();
   await expect(total).toHaveAttribute(
     'title',
-    'Input 1,466,600 (1,299,500 cached)\nOutput 51,100 (17,100 reasoning)\nTotal 1,517,700',
+    'Input 1,466,600 (1,299,500 cached, 167,100 uncached)\nOutput 51,100 (17,100 reasoning)\nTotal 1,517,700',
   );
 
   await page.getByRole('radiogroup', {name: 'Show'}).getByText('Agents').click();
   const agents = page.getByRole('listbox', {name: 'Agents'});
-  await expect(page.getByText('tokens', {exact: true})).toBeVisible();
-  // Each agent's turns summed: the first implementer's one turn, the planner's one measured turn.
-  await expect(agents.getByRole('option', {name: /implementer/}).nth(0)).toContainText('1.2M');
-  await expect(agents.getByRole('option', {name: /planner/}).nth(0)).toContainText('191.6k');
+  await expect(page.getByText('in (cached)', {exact: true})).toBeVisible();
+  // Each agent's turns summed: the first implementer's one turn, the planner's one measured turn,
+  // input with its cached share beside it, then output.
+  await expect(agents.getByRole('option', {name: /implementer/}).nth(0)).toContainText(
+    '1.2M 1.1M cached',
+  );
+  await expect(agents.getByRole('option', {name: /planner/}).nth(0)).toContainText('182.4k');
   await check(page, 'ink-agents-tokens');
 
   // W5's implementer: its pane totals it, and its turn opens with its tokens in the header.
@@ -175,9 +178,9 @@ test('the run, each agent and each turn name the tokens they spent', async ({pag
     .getByRole('option', {name: /implementer/})
     .nth(1)
     .click();
-  await expect(page.getByText('50.9k', {exact: true}).first()).toBeVisible();
+  await expect(page.getByText('in 48.3k (31k cached) · out 2.6k').first()).toBeVisible();
   await page.getByRole('listbox', {name: 'Turns'}).getByRole('option').first().click();
-  await expect(page.getByText(/· 50\.9k tokens$/)).toBeVisible();
+  await expect(page.getByText(/· in 48\.3k \(31k cached\) · out 2\.6k$/)).toBeVisible();
   await check(page, 'ink-turn-tokens');
 });
 
@@ -186,7 +189,7 @@ test.describe('at 1000px', () => {
 
   test('the token figures fit beside the run’s other facts', async ({page}) => {
     await openRun(page);
-    await expect(page.getByText('1.5M tokens')).toBeVisible();
+    await expect(page.getByText('in 1.5M (1.3M cached) · out 51.1k')).toBeVisible();
     await page.getByRole('radiogroup', {name: 'Show'}).getByText('Agents').click();
     const agents = page.getByRole('listbox', {name: 'Agents'});
     await expect(agents.getByRole('option', {name: /implementer/}).nth(0)).toContainText('1.2M');
@@ -197,7 +200,7 @@ test.describe('at 1000px', () => {
       .click();
     await check(page, 'ink-agent-tokens-1000');
     await page.getByRole('listbox', {name: 'Turns'}).getByRole('option').first().click();
-    await expect(page.getByText(/· 50\.9k tokens$/)).toBeVisible();
+    await expect(page.getByText(/· in 48\.3k \(31k cached\) · out 2\.6k$/)).toBeVisible();
     await check(page, 'ink-turn-tokens-1000');
   });
 });

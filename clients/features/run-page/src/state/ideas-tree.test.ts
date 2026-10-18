@@ -297,3 +297,45 @@ describe('the ideas tree', () => {
     expect(ideaTree(model, shape()).rows).toEqual(ideaTree(model, shape()).rows);
   });
 });
+
+describe('failed ideas', () => {
+  test('are in the tree by default, each under its base like any other idea', () => {
+    for (const seed of SEEDS) {
+      const plan = shaped(seed);
+      const model = modelOfShape(plan);
+      const failed = model.candidates.candidates.filter(item => item.outcome === 'failed');
+      const tree = expandedAll(model, IDEAS_FILTER_DEFAULT);
+      const shown = new Set(
+        tree.rows.flatMap(entry => (entry.kind === 'idea' ? [entry.row.id] : [])),
+      );
+      for (const item of failed) expect(shown.has(item.id), `seed ${seed}`).toBe(true);
+      expect(tree.hiddenFailed).toBe(0);
+    }
+  });
+
+  test('can be hidden by the filter, and the folded summaries still count them', () => {
+    for (const seed of SEEDS) {
+      const model = modelOfShape(shaped(seed));
+      const hidden = ideaTree(model, shape({...IDEAS_FILTER_DEFAULT, failed: false}));
+      const failed = model.candidates.candidates.filter(item => item.outcome === 'failed');
+      expect(hidden.hiddenFailed).toBe(failed.length);
+      expect(hidden.counts.failed).toBe(failed.length);
+    }
+  });
+});
+
+describe('a deep row', () => {
+  test('keeps one dotted cell for the levels it leaves out, and its true depth', () => {
+    const deep = modelOfShape({
+      parents: Array.from({length: INDENT_CAP + 4}, (_, at) => (at === 0 ? null : at - 1)),
+      outcomes: Array.from({length: INDENT_CAP + 4}, () => 'passed' as CandidateOutcome),
+    });
+    const tree = expandedAll(deep, ALL);
+    const capped = tree.rows.filter(entry => entry.kind === 'idea' && entry.depth !== null);
+    expect(capped.length).toBeGreaterThan(0);
+    for (const entry of capped) {
+      expect(entry.guides[0]).toBe('gap');
+      expect(entry.kind === 'idea' ? (entry.depth ?? 0) : 0).toBeGreaterThan(INDENT_CAP);
+    }
+  });
+});

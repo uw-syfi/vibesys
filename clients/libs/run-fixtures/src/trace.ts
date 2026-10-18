@@ -28,6 +28,15 @@ type IdeaEnd =
     }
   | {readonly kind: 'failed'; readonly reason: string; readonly message?: string};
 
+/** The counts of one finished turn, as `turn_usage_recorded` names them; a missing one is not reported. */
+export interface TurnUsage {
+  readonly input_tokens?: number;
+  readonly cache_read_input_tokens?: number;
+  readonly cache_creation_input_tokens?: number;
+  readonly output_tokens?: number;
+  readonly reasoning_output_tokens?: number;
+}
+
 export interface IdeaSpec {
   readonly n: number;
   readonly title: string;
@@ -51,6 +60,8 @@ export interface IdeaSpec {
   readonly summary?: string;
   /** How long the idea runs, in seconds; defaults to 600. */
   readonly took?: number;
+  /** What the implementer's turn spent, reported when the turn ends; none when omitted. */
+  readonly usage?: TurnUsage;
 }
 
 export class Trace {
@@ -253,8 +264,17 @@ export function addIdea(trace: Trace, spec: IdeaSpec): void {
   if (tries.length > 0)
     trace.span('span_updated', turn('running', false), turnStart + 30 * tries.length);
   if (running) return;
+  const spent = (): void => {
+    if (spec.usage === undefined) return;
+    trace.event('turn_usage_recorded', {span_id: turnId, ...spec.usage}, turnEnd, {
+      invocation_id: `inv-w${spec.n}`,
+      agent_kind: 'implementer',
+      span_id: turnId,
+    });
+  };
   if (end.kind === 'failed') {
     trace.span('span_ended', turn('failed', true), turnEnd);
+    spent();
     trace.span(
       'span_ended',
       {
@@ -266,6 +286,7 @@ export function addIdea(trace: Trace, spec: IdeaSpec): void {
     return;
   }
   trace.span('span_ended', turn('done', true), turnEnd);
+  spent();
   const verdict = gateVerdict(end);
   const gate: Span = {
     id: `op:w${spec.n}-gate`,

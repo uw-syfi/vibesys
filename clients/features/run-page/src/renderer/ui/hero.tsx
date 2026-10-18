@@ -1,21 +1,23 @@
 /**
- * The performance row: the hero (the run's best ratio to the input, large, with its value, the
- * input's and the metric) sharing a row with the strip chart. The Run screen draws it above the
- * level, so it is the same element at every level and navigating moves nothing in it: the panes
- * below change, this row does not. The figures' block has a fixed width, so a long title never
- * pushes the chart. With an idea open, the chart singles the idea's point out (the
- * others dimmed, none removed) and the block gains one line, reserved at every level so the block
- * never changes its size, that reads the idea's result.
+ * The performance row: a tile per performance measure (its best ratio to the input, large, with
+ * what it means, the value and the input's, and a small trend) sharing a row with the strip chart.
+ * The Run screen draws it above the level, so it is the same element at every level and navigating
+ * moves nothing in it: the panes below change, this row does not. The tiles' block has the width of
+ * its tiles, so a long title never pushes the chart. With an idea open, the chart singles the
+ * idea's point out (the others dimmed, none removed) and the block gains one line, reserved at
+ * every level so the block never changes its size, that reads the idea's result.
  */
 import {
   Button,
   Chart,
-  Chip,
   Fact,
   FactLine,
+  MetricTile,
+  MetricTiles,
   markdownToPlain,
   Reserve,
   Row,
+  Sparkline,
   Stack,
   Text,
 } from '@vibesys/ui';
@@ -24,6 +26,7 @@ import {
   heroView,
   type IdeaFocusView,
   ideaFocusView,
+  type MetricTileView,
   type RunModel,
   stripChartView,
 } from '../../state/index.js';
@@ -70,9 +73,10 @@ function IdeaLine(props: {readonly view: IdeaFocusView | null}): JSX.Element {
 }
 
 /**
- * The line that names which idea the figure belongs to: `best` or `adopted` and the idea. Before
- * there is one the line is drawn empty and kept (`Reserve`), so the figure under it, and the chart
- * beside or below, stay where they are when the first idea passes or the run is scrubbed to the start.
+ * The line under the tiles that names which idea the figures belong to: `Adopted: <idea>` once the
+ * run ended, `Best so far: <idea>` while it works; the idea's name opens it. Before there is one
+ * the line is drawn empty and kept (`Reserve`), so the tiles above it, and the chart beside or
+ * below, stay where they are when the first idea passes or the run is scrubbed to the start.
  */
 function StandingLine(props: {
   readonly standing: 'best' | 'adopted' | null;
@@ -85,7 +89,9 @@ function StandingLine(props: {
   const line = (
     <FactLine fit="parent" wrap={false}>
       <Fact>
-        <Chip label={shown ? standing : 'best'} tone="ok" dot />
+        <Text variant="small" tone="muted">
+          {standing === 'adopted' ? 'Adopted:' : 'Best so far:'}
+        </Text>
       </Fact>
       <Fact shrink title={title}>
         <Button
@@ -102,6 +108,31 @@ function StandingLine(props: {
   return shown ? line : <Reserve>{line}</Reserve>;
 }
 
+/** One tile: the measure's name, its ratio to the input and what it means, its values, its trend. */
+function Tile(props: {readonly tile: MetricTileView}): JSX.Element {
+  const {tile} = props;
+  return (
+    <MetricTile
+      name={tile.name}
+      figure={tile.ratio ?? '–'}
+      {...(tile.note === null ? {} : {note: tile.note})}
+      tone={tile.tone}
+      detail={tile.detail}
+      trend={
+        tile.trend === null ? null : (
+          <Sparkline
+            label={tile.trend.label}
+            steps={tile.trend.steps}
+            from={tile.trend.from}
+            to={tile.trend.to}
+            {...(tile.trend.reference === null ? {} : {reference: tile.trend.reference})}
+          />
+        )
+      }
+    />
+  );
+}
+
 /**
  * The figures at the viewed sequence, and the chart of the whole run. The chart is drawn from
  * `whole`, not from the viewed model, so scrubbing neither mounts nor unmounts it nor rescales its
@@ -111,7 +142,7 @@ export function Hero(
   props: ViewBase & {
     readonly whole: RunModel;
     readonly idea: string | null;
-    /** The ideas on the chain the reader points at, lit on the chart; none when omitted. */
+    /** The ideas on the chain the reader points at, ringed on the chart; none when omitted. */
     readonly lit?: ReadonlySet<string>;
     /** Called with an idea's id as the pointer enters its point, and null as it leaves. */
     readonly hover?: (idea: string | null) => void;
@@ -129,30 +160,17 @@ export function Hero(
   );
   return (
     <Row gap="space-6" align="center" wrap>
-      <Stack gap="space-1" width="figure">
-        <Text variant="section">{hero.metric}</Text>
+      <Stack gap="space-2">
+        <MetricTiles label="Performance" count={hero.tiles.length}>
+          {hero.tiles.map(tile => (
+            <Tile key={tile.id} tile={tile} />
+          ))}
+        </MetricTiles>
         <StandingLine
           standing={hero.standing}
           idea={hero.bestIdea}
           open={id => props.zoom({type: 'open-idea', idea: id})}
         />
-        <Row gap="space-3" align="baseline">
-          <Text variant="hero" tone={hero.ratio === null ? 'muted' : 'ok'}>
-            {hero.ratio ?? '–'}
-          </Text>
-          <Stack gap="space-0">
-            <Text variant="code">{hero.value ?? 'nothing measured yet'}</Text>
-            {hero.input === null ? (
-              <Reserve>
-                <Text variant="code">input –</Text>
-              </Reserve>
-            ) : (
-              <Text variant="code" tone="muted">
-                {hero.input}
-              </Text>
-            )}
-          </Stack>
-        </Row>
         <IdeaLine view={ideaFocusView(props.model, props.idea)} />
       </Stack>
       {chart === null ? null : (
@@ -162,7 +180,6 @@ export function Hero(
             size="strip"
             points={chart.points}
             spans={chart.spans}
-            edges={chart.edges}
             yDomain={chart.yDomain}
             steps={chart.steps}
             {...(chart.reference === null ? {} : {reference: chart.reference})}

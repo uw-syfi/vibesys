@@ -937,13 +937,15 @@ describe('the header’s token figure', () => {
 
   test('sums every turn, with the exact counts for the hover, and follows each new turn', () => {
     const first = withCore(live(), [usage(1, {input_tokens: 1_000_000, output_tokens: 20_000})]);
-    expect(headerView(first).spent?.label).toBe('1M');
+    expect(headerView(first).spent?.label).toBe('in 1M (cached unknown) · out 20k');
     const second = withCore(live(), [
       usage(1, {input_tokens: 1_000_000, output_tokens: 20_000}),
       usage(2, {input_tokens: 150_000, cache_read_input_tokens: 100_000, output_tokens: 30_000}),
     ]);
     const spent = headerView(second).spent;
-    expect(spent?.label).toBe('1.2M');
-    expect(spent?.title).toBe('Input 1,150,000 (100,000 cached)\nOutput 50,000\nTotal 1,200,000');
+    expect(spent?.label).toBe('in 1.2M (100k cached) · out 50k');
+    expect(spent?.title).toBe(
+      'Input 1,150,000 (100,000 cached, 1,050,000 uncached)\nOutput 50,000\nTotal 1,200,000',
+    );
   });
 });

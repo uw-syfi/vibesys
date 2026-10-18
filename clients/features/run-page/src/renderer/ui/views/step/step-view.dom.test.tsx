@@ -293,9 +293,9 @@ describe('an agent turn', () => {
     ]);
     const header = stepHeader({...viewProps(fx, fx.turn, null), tokens});
     const meta = await mount(header.meta);
-    expect(meta.textContent).toMatch(/ · 48k tokens$/);
+    expect(meta.textContent).toMatch(/ · in 40k \(30k cached\) · out 8k$/);
     expect(meta.querySelector('[title]')?.getAttribute('title')).toBe(
-      'Input 40,000 (30,000 cached)\nOutput 8,000 (3,000 reasoning)\nTotal 48,000',
+      'Input 40,000 (30,000 cached, 10,000 uncached)\nOutput 8,000 (3,000 reasoning)\nTotal 48,000',
     );
   });
 
@@ -303,7 +303,7 @@ describe('an agent turn', () => {
     const fx = fixture(TURN);
     const header = stepHeader(viewProps(fx, fx.turn, null));
     const meta = await mount(header.meta);
-    expect(meta.textContent).not.toContain('tokens');
+    expect(meta.textContent).not.toMatch(/\bin \d|\bout \d|unknown/);
     expect(meta.querySelector('[title]')).toBeNull();
   });
 });

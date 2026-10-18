@@ -260,37 +260,67 @@ describe('fresh ideas', () => {
 describe('the run level', () => {
   const model = createRunReader().read(logOf(run()), null);
 
-  test('ideas show running first, then newest first, the failed folded away', () => {
+  test('ideas show running first, then newest first, the failed with the rest', () => {
     const view = ideasView(model, IDEAS_FILTER_DEFAULT);
-    expect(view.rows.map(row => row.title)).toEqual(['arena', 'ring-pad', 'ring']);
-    expect(view.hiddenFailed).toBe(1);
+    expect(view.rows.map(row => row.title)).toEqual(['arena', 'spin', 'ring-pad', 'ring']);
+    expect(view.hiddenFailed).toBe(0);
     expect(view.counts).toEqual({running: 1, passed: 2, failed: 1});
-    const ringPad = view.rows[1];
+    const ringPad = view.rows[2];
     expect(ringPad?.badges).toEqual([{label: 'best', tone: 'ok'}]);
     expect(ringPad?.trail).toEqual({label: 'ring', parent: 'flow:w1/#1'});
-    expect(view.rows[2]?.trail).toEqual({label: 'input', parent: null});
-    expect(view.rows.map(row => row.stripe)).toEqual([false, true, true]);
+    expect(view.rows[3]?.trail).toEqual({label: 'input', parent: null});
+    expect(view.rows.map(row => row.stripe)).toEqual([false, false, true, true]);
     expect(ideasView(model, IDEAS_FILTER_DEFAULT)).toBe(view);
   });
 
-  test('the filter shows the failed and searches titles and ideas', () => {
-    const all = ideasView(model, {...IDEAS_FILTER_DEFAULT, failed: true});
-    expect(all.rows.map(row => row.title)).toEqual(['arena', 'spin', 'ring-pad', 'ring']);
+  test('the filter hides the failed, still counting them, and searches titles and ideas', () => {
+    const hidden = ideasView(model, {...IDEAS_FILTER_DEFAULT, failed: false});
+    expect(hidden.rows.map(row => row.title)).toEqual(['arena', 'ring-pad', 'ring']);
+    expect(hidden.hiddenFailed).toBe(1);
+    expect(hidden.counts.failed).toBe(1);
+    const all = ideasView(model, IDEAS_FILTER_DEFAULT);
     expect(all.rows[1]?.figure).toBe('1.20×');
-    const found = ideasView(model, {...IDEAS_FILTER_DEFAULT, failed: true, query: 'try spin'});
+    const found = ideasView(model, {...IDEAS_FILTER_DEFAULT, query: 'try spin'});
     expect(found.rows.map(row => row.title)).toEqual(['spin']);
   });
 
   test('the best line names the best idea and its steps from the input, and the hero its ratio', () => {
     expect(bestLine(model)).toMatchObject({title: 'ring-pad', steps: 2});
-    const hero = heroView(model);
-    expect(hero.ratio).toBe('2.00×');
-    expect(hero.input).toBe('input 100');
+    const tile = heroView(model).tiles[0];
+    expect(tile?.ratio).toBe('2.00×');
+    expect(tile?.detail).toContain('input 100');
+  });
+
+  test('the tile says what its ratio means, by the direction that is better', () => {
+    const higher = heroView(model).tiles[0];
+    expect(higher).toMatchObject({ratio: '2.00×', note: 'faster than input', tone: 'ok'});
+    // Where lower is better, the same measurements are a regression: the ratio is the improvement.
+    const lower = heroView({...model, direction: 'min'}).tiles[0];
+    expect(lower).toMatchObject({ratio: '0.50×', note: 'slower than input', tone: 'err'});
+  });
+
+  test('the tile writes both values with the unit, or with the metric’s name when there is no unit', () => {
+    const named = heroView({
+      ...model,
+      overview: {objective: {text: 'goal', metric: 'p99_latency_ms'}},
+    }).tiles[0];
+    expect(named?.detail).toBe('200 p99 latency ms · input 100 p99 latency ms');
+    expect(heroView(model).tiles[0]?.detail).toMatch(/^\S+ \S+ · input \S+ \S+$/);
+  });
+
+  test('there is one tile today, with the best so far as a step line from the input', () => {
+    const view = heroView(model);
+    expect(view.tiles).toHaveLength(1);
+    const trend = view.tiles[0]?.trend;
+    expect(trend?.reference).toBe(100);
+    const ys = trend?.steps.map(step => step.y) ?? [];
+    expect(ys[0]).toBe(100);
+    expect(ys).toEqual([...ys].sort((a, b) => a - b));
   });
 
   test('the hero names the metric in words, never by its id', () => {
     const named = (metric: string): string =>
-      heroView({...model, overview: {objective: {text: 'goal', metric}}}).metric;
+      heroView({...model, overview: {objective: {text: 'goal', metric}}}).tiles[0]?.name ?? '';
     expect(named('TOTAL_OPS_PER_SEC')).toBe('Total ops/sec');
     expect(named('p99_latency_ms')).toBe('P99 latency ms');
     expect(named('throughput')).toBe('Throughput');

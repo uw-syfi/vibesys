@@ -263,7 +263,7 @@ test('a step row names its role once, in its strip color, with status only when 
   await unmount();
 });
 
-test('an agent turn’s step shows its tokens beside its duration; a gate and a quiet turn show none', async () => {
+test('an agent turn’s step shows its tokens beside its duration; a gate shows none and a quiet turn says unknown', async () => {
   const candidate = idea('mpmc', 'passed', 100, 300);
   const tokens = ledgerOf([
     {span: 'mpmc-a-t', input: 40_000, cached: 30_000, output: 8_000, reasoning: 3_000},
@@ -274,13 +274,14 @@ test('an agent turn’s step shows its tokens beside its duration; a gate and a 
   );
   const steps = options(container, 'mpmc steps');
   const figure = (row: HTMLElement | undefined) => row?.querySelector('.vs-pickrow-measure');
-  expect(figure(steps[0])?.textContent).toBe('48k');
+  expect(figure(steps[0])?.textContent).toBe('in 40k (30k cached) · out 8k');
   expect(figure(steps[0])?.getAttribute('title')).toBe(
-    'Input 40,000 (30,000 cached)\nOutput 8,000 (3,000 reasoning)\nTotal 48,000',
+    'Input 40,000 (30,000 cached, 10,000 uncached)\nOutput 8,000 (3,000 reasoning)\nTotal 48,000',
   );
   expect(steps[0]?.textContent).toContain('1m');
-  // A gate and a turn with no reading keep a blank cell, so the figures line up.
+  // A gate keeps a blank cell, so the figures line up.
   expect(figure(steps[1])?.textContent).toBe('');
-  expect(figure(steps[2])?.textContent).toBe('');
+  // A turn that reported nothing says so, never a zero.
+  expect(figure(steps[2])?.textContent).toBe('unknown');
   await unmount();
 });

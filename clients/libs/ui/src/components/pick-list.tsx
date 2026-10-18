@@ -28,8 +28,11 @@ export interface HeaderColumn {
   readonly label: string;
   /** As wide as a row's bar. */
   readonly bar?: boolean;
-  /** As wide as a row's figure, its measure, its trail, or its short trail (a duration). */
-  readonly fixed?: 'figure' | 'measure' | 'trail' | 'time';
+  /**
+   * As wide as a row's figure, its measure (`measure`, or `measure-note` / `measure-line` for the
+   * wider ones, `MeasureSize`), its trail, or its short trail (a duration).
+   */
+  readonly fixed?: 'figure' | 'measure' | 'measure-note' | 'measure-line' | 'trail' | 'time';
 }
 
 /** The one-line caption of a list's columns: `start` over the names, `end` over the trailing columns. */
@@ -144,9 +147,16 @@ export interface RowBar {
   readonly label: string;
 }
 
+/** How wide a measure's column is: a count, a count with a quiet second value, or a whole line. */
+type MeasureSize = 'plain' | 'note' | 'line';
+
 /** A row's muted figure in a column of its own, with the exact reading in a hover title. */
 export interface Measure {
   readonly label: string;
+  /** A quieter value after the label (a share of it), in the same column. */
+  readonly note?: string;
+  /** The column's width; `plain` (a count) by default. */
+  readonly size?: MeasureSize;
   /** What the pointer shows over the figure: the reading in full. */
   readonly title?: string;
 }
@@ -169,16 +179,55 @@ export interface RowBadge {
   readonly short?: string;
 }
 
+/** A row's lead (a number before its name), with what it means on hover; nothing without one. */
+function Lead(props: {
+  readonly lead: string | undefined;
+  readonly title: string | undefined;
+}): JSX.Element | null {
+  if (props.lead === undefined) return null;
+  return (
+    <span className="vs-pickrow-lead" title={props.title}>
+      <Text variant="code" tone="muted">
+        {props.lead}
+      </Text>
+    </span>
+  );
+}
+
+/** A row's muted columns after its figure. */
+function Measures(props: {readonly measures: readonly Measure[]}): JSX.Element {
+  return (
+    <>
+      {props.measures.map((measure, at) => (
+        <span
+          // biome-ignore lint/suspicious/noArrayIndexKey: the columns are fixed by position.
+          key={at}
+          className="vs-pickrow-measure"
+          data-size={measure.size ?? 'plain'}
+          title={measure.title}
+        >
+          {measure.label}
+          {measure.note === undefined || measure.note === '' ? null : (
+            <span className="vs-pickrow-measure-note">{` ${measure.note}`}</span>
+          )}
+        </span>
+      ))}
+    </>
+  );
+}
+
 /** What follows a row's text: its badges, its bar, its figure and its trail. */
 function Trail(props: {
   readonly badges?: readonly RowBadge[];
   readonly bar?: RowBar;
   readonly figure?: string;
   readonly figureTone?: 'default' | 'ok' | 'err' | 'muted';
-  readonly measure?: Measure;
+  readonly measure?: Measure | readonly Measure[];
   readonly trail?: RowTrail;
 }): JSX.Element {
   const trail = props.trail;
+  const measures =
+    props.measure === undefined ? [] : 'label' in props.measure ? [props.measure] : props.measure;
   return (
     <>
       {(props.badges ?? []).map(badge =>
@@ -201,15 +250,15 @@ function Trail(props: {
         </span>
       )}
       {props.figure === undefined ? null : (
-        <span className="vs-pickrow-figure" data-tone={props.figureTone ?? 'default'}>
+        <span
+          className="vs-pickrow-figure"
+          data-tone={props.figureTone ?? 'default'}
+          title={props.figure}
+        >
           {props.figure}
         </span>
       )}
-      {props.measure === undefined ? null : (
-        <span className="vs-pickrow-measure" title={props.measure.title}>
-          {props.measure.label}
-        </span>
-      )}
+      <Measures measures={measures} />
       {trail === undefined ? null : trail.press === undefined ? (
         <span
           className="vs-pickrow-trail"
@@ -306,6 +355,8 @@ export function PickRow(props: {
   readonly figure?: string;
   readonly figureTone?: 'default' | 'ok' | 'err' | 'muted';
   readonly lead?: string;
+  /** What the lead means, on hover (`6 steps from input`). */
+  readonly leadTitle?: string;
   readonly state?: {readonly tone: StatusTone; readonly label: string};
   readonly fresh?: boolean;
   readonly mono?: boolean;
@@ -317,8 +368,8 @@ export function PickRow(props: {
   /** Called when the pointer or the focus enters (true) or leaves (false) the row. */
   readonly hover?: (on: boolean) => void;
   readonly bar?: RowBar;
-  /** A muted column after the figure (a count of tokens), one width for every row. */
-  readonly measure?: Measure;
+  /** Muted columns after the figure (counts of tokens), one width for every row. */
+  readonly measure?: Measure | readonly Measure[];
   /** A muted last column after the figure, such as "from <parent>"; with `press` it is a link. */
   readonly trail?: RowTrail;
   /** An accent stripe down the row's edge: it is on the chain the reader is led along (a winning path). */
@@ -370,13 +421,7 @@ export function PickRow(props: {
           <StatusDot tone={props.state.tone} label={props.state.label} />
         </span>
       )}
-      {props.lead === undefined ? null : (
-        <span className="vs-pickrow-lead">
-          <Text variant="code" tone="muted">
-            {props.lead}
-          </Text>
-        </span>
-      )}
+      <Lead lead={props.lead} title={props.leadTitle} />
       <RowSwatch series={props.swatch} hatched={props.hatched === true} />
       <span className="vs-pickrow-text" title={tooltipOf(props.title, props.summary)}>
         <Text variant={props.mono === true ? 'code' : 'body-strong'}>{props.title}</Text>

@@ -14,6 +14,7 @@ import {
   planningSpan,
   rootSpan,
   Trace,
+  type TurnUsage,
   toolCall,
   turnTranscript,
 } from './trace.js';
@@ -33,6 +34,8 @@ export function runHeader(trace: Trace, runId: string): void {
       input: 'objectives/queue.md',
       max_rounds: 6,
       expected_roles: ['planner', 'implementer', 'judge'],
+      // The run declares what it optimizes, as a real run's first event does.
+      overview: {objective: {...OBJECTIVE, correctness_check: []}},
     },
     0,
   );
@@ -537,6 +540,124 @@ function finishedRun(): RunFixture {
   });
 }
 
+/** The input's measured value in the ten-idea run, in the objective's unit. */
+const TEN_INPUT = 1_581_539;
+
+/** What a turn reports: input with its cached share, and output with a quarter of it reasoning. */
+function usage(input: number, cached: number, output: number): TurnUsage {
+  return {
+    input_tokens: input,
+    cache_read_input_tokens: cached,
+    output_tokens: output,
+    reasoning_output_tokens: Math.round(output / 4),
+  };
+}
+
+/** The ten ideas, each with its base (an earlier idea's number, or none for the input). */
+const TEN: readonly Omit<IdeaSpec, 'at'>[] = (() => {
+  const value = (ratio: number): number => Math.round(TEN_INPUT * ratio);
+  const passed = (ratio: number) => ({kind: 'passed', value: value(ratio), ratio}) as const;
+  return [
+    {
+      n: 1,
+      title: 'Preallocate the arena',
+      end: passed(1.31),
+      usage: usage(812_000, 701_000, 41_000),
+    },
+    {
+      n: 2,
+      title: 'Isolate payload slices',
+      on: 1,
+      end: passed(1.8),
+      usage: usage(905_000, 790_000, 52_000),
+    },
+    {
+      n: 3,
+      title: 'Replace the mutex with a ticket lock',
+      on: 1,
+      end: {kind: 'failed', reason: 'review-rejected'},
+      usage: usage(655_000, 540_000, 30_000),
+    },
+    {
+      n: 4,
+      title: 'Separate the producer cursor',
+      on: 2,
+      end: passed(2.4),
+      usage: usage(1_040_000, 930_000, 61_000),
+    },
+    {
+      n: 5,
+      title: 'Batch the enqueue',
+      on: 4,
+      end: passed(3.1),
+      usage: usage(1_120_000, 1_010_000, 70_000),
+    },
+    {
+      n: 6,
+      title: 'Park idle consumers',
+      on: 4,
+      tries: ['build failed: missing Send bound'],
+      end: {kind: 'failed', reason: 'implementation-failed'},
+      // The provider reported no cache counts for this turn.
+      usage: {input_tokens: 720_000, output_tokens: 38_000},
+    },
+    {
+      n: 7,
+      title: 'Pad the slot headers',
+      on: 5,
+      end: {kind: 'passed', value: 6_054_154, ratio: 6_054_154 / TEN_INPUT},
+      usage: {...usage(1_330_000, 1_190_000, 83_000), cache_creation_input_tokens: 18_000},
+    },
+    {
+      n: 8,
+      title: 'Prefetch the next slot',
+      on: 5,
+      end: passed(2.9),
+      usage: usage(940_000, 850_000, 55_000),
+    },
+    {
+      n: 9,
+      title: 'Widen the batch to sixty-four',
+      on: 5,
+      end: {
+        kind: 'failed_check',
+        check: 'correctness',
+        completed: 93,
+        required: 100,
+        unit: 'trials',
+      },
+      usage: usage(610_000, 500_000, 29_000),
+    },
+    // This turn reported nothing.
+    {n: 10, title: 'Spin before parking', on: 7, end: {kind: 'failed', reason: 'turned_down'}},
+  ];
+})();
+
+/**
+ * A run that has ended with ten ideas, six passed and four failed, the best five steps from the
+ * input: the shape of a real small run. Turns report their tokens, one without the cached part and
+ * one with nothing at all.
+ */
+function tenIdeas(): RunFixture {
+  const best = TEN.find(idea => idea.n === 7);
+  if (best?.end.kind !== 'passed') throw new Error('the ten-idea run has no best idea');
+  const adopted = {n: best.n, ratio: best.end.ratio, value: best.end.value};
+  return fixture({
+    name: 'finished-ten-ideas',
+    description:
+      'A finished run of ten ideas: six passed and four failed, the best five steps from the input, with token counts that are partly unknown.',
+    runId: '20261016-120000',
+    state: 'finished',
+    build: trace => {
+      plan(trace, 1, 10);
+      for (const idea of TEN) addIdea(trace, {...idea, at: 100 + idea.n * 60});
+      trace.span('span_started', adoptionSpan(adopted, 900, false), 900);
+      trace.span('span_ended', adoptionSpan(adopted, 900, true), 901);
+      trace.span('span_ended', rootSpan('done', 905), 905);
+    },
+  });
+}
+
 /** Every committed synthetic scenario, by name. */
 export function scenarios(): readonly RunFixture[] {
   return [
@@ -547,5 +668,6 @@ export function scenarios(): readonly RunFixture[] {
     nonInputBases(),
     liveReconnect(),
     finishedRun(),
+    tenIdeas(),
   ];
 }

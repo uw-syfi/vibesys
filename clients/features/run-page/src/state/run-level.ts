@@ -1,13 +1,12 @@
 /**
- * The run level's hero (the best ratio to the input, its value, the input's, and the strip chart
- * of every measured idea with the running best), its Now pane (what runs now, each a shortcut to
+ * The run level's performance row (a tile per measure: the best ratio to the input, its value and
+ * the input's, and a small trend; and the strip chart of every measured idea with the running best), its Now pane (what runs now, each a shortcut to
  * its live step), and what a route resolves to in the run (`resolveZoom`): an id the run does not
  * hold resolves a level up, so a stale address still opens.
  */
 import type {Span} from '@vibesys/contracts';
 import type {AgentNode} from '@vibesys/run-state/agents';
-import type {Candidate, CandidateStep} from '@vibesys/run-state/candidates';
-import {type ChartEdgeView, chartEdges} from './chart-lineage.js';
+import type {Candidate, CandidateMeasurement, CandidateStep} from '@vibesys/run-state/candidates';
 import {
   type IdeaResult,
   inputValueOf,
@@ -21,28 +20,44 @@ import {duration, formatValue, ratio} from './span-reading.js';
 import {openWaits} from './span-words.js';
 import {type Route, routeLevel} from './zoom.js';
 
-export interface HeroView {
-  /** The metric in words and which way is better: `Throughput ↑`. */
-  readonly metric: string;
-  /** The best's ratio to the input (`1.42×`); null before anything passed. */
+/** What a tile's small trend line draws: the best so far over the run, from the input's value. */
+interface TileTrend {
+  readonly label: string;
+  /** The best value so far, one step per new best, starting at the input's value when known. */
+  readonly steps: readonly {readonly x: number; readonly y: number}[];
+  /** The run-clock stretch the line covers. */
+  readonly from: number;
+  readonly to: number;
+  /** The input's value, drawn as a dashed line; null when unknown. */
+  readonly reference: number | null;
+}
+
+/** One performance measure of the run as a tile of the performance row. */
+export interface MetricTileView {
+  readonly id: string;
+  /** The measure in words, sentence case: `Total ops/sec`. */
+  readonly name: string;
+  /** The best's ratio to the input as an improvement (`3.83×`); null before anything passed. */
   readonly ratio: string | null;
-  /** The best's value with its unit. */
-  readonly value: string | null;
-  /** The input's value: `input 9,380,000`. */
-  readonly input: string | null;
+  /** What the ratio says: `faster than input`, `slower than input`, `same as input`; null with no ratio. */
+  readonly note: string | null;
+  readonly tone: 'ok' | 'err' | 'muted';
+  /** The best's value and the input's, with the unit: `6,054,154 ops/s · input 1,581,539 ops/s`. */
+  readonly detail: string;
+  readonly trend: TileTrend | null;
+}
+
+export interface HeroView {
+  /** One tile per performance measure; today the run's one objective metric. */
+  readonly tiles: readonly MetricTileView[];
   readonly measured: number;
   /**
-   * What the figure is, by the run's adoption span: `adopted` once the run ended, `best` while it
+   * What the figures are, by the run's adoption span: `adopted` once the run ended, `best` while it
    * works; null when the run has no best (no adoption yet, or the input stands).
    */
   readonly standing: 'best' | 'adopted' | null;
-  /** The idea the figure belongs to, to open it; null when `standing` is null. */
+  /** The idea the figures belong to, to open it; null when `standing` is null. */
   readonly bestIdea: {readonly id: string; readonly title: string} | null;
-}
-
-function unitSuffix(model: RunModel): string {
-  const unit = model.overview?.objective.unit;
-  return typeof unit === 'string' && unit !== '' ? ` ${unit}` : '';
 }
 
 /**
@@ -71,11 +86,6 @@ function metricLabel(metric: string): string {
   return text === '' ? text : `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 }
 
-function arrow(direction: Direction): string {
-  if (direction === 'max') return ' ↑';
-  return direction === 'min' ? ' ↓' : '';
-}
-
 function bestCandidate(model: RunModel): Candidate | null {
   const id = model.candidates.best?.candidate ?? null;
   return model.candidates.candidates.find(item => item.id === id) ?? null;
@@ -85,20 +95,73 @@ function inputValue(model: RunModel): number | null {
   return inputValueOf(model.candidates.candidates);
 }
 
-export function heroView(model: RunModel): HeroView {
-  const metric = model.overview?.objective.metric;
-  const leader = bestCandidate(model);
-  const best = leader?.measurement ?? null;
-  const input = inputValue(model);
-  const unit = unitSuffix(model);
+/** The ratio as an improvement over the input, where `direction` says which way is better. */
+function improvement(ratioToInput: number, direction: Direction): number {
+  return direction === 'min' && ratioToInput !== 0 ? 1 / ratioToInput : ratioToInput;
+}
+
+/** Within this of 1 the best reads as the same as the input. */
+const SAME = 0.0005;
+
+function verdictOf(better: number): {note: string; tone: MetricTileView['tone']} {
+  if (better > 1 + SAME) return {note: 'faster than input', tone: 'ok'};
+  if (better < 1 - SAME) return {note: 'slower than input', tone: 'err'};
+  return {note: 'same as input', tone: 'muted'};
+}
+
+/** The unit as a suffix (` ops/s`); the metric's name in lower case when the run names no unit. */
+function unitWords(model: RunModel, name: string): string {
+  const unit = model.overview?.objective.unit;
+  return ` ${typeof unit === 'string' && unit !== '' ? unit : name.toLowerCase()}`;
+}
+
+function trendOf(model: RunModel, name: string, input: number | null): TileTrend | null {
+  const fold = performanceFold(model.candidates.candidates, model.direction, input);
+  const last = fold.best.at(-1);
+  if (last === undefined) return null;
+  const from = Math.min(...model.candidates.candidates.map(item => item.startedAt));
+  const to = Math.max(from + 1, last.at, model.latest ?? 0);
+  const start = input === null ? [] : [{x: from, y: input}];
   return {
-    metric: `${typeof metric === 'string' && metric !== '' ? metricLabel(metric) : 'Metric'}${arrow(model.direction)}`,
-    ratio: best?.vsBaseline === null || best === null ? null : ratio(best.vsBaseline),
-    value:
-      best?.metricValue === null || best === null
-        ? null
-        : `${formatValue(best.metricValue)}${unit}`,
-    input: input === null ? null : `input ${formatValue(input)}`,
+    label: `${name}: best so far over the run`,
+    steps: [...start, ...fold.best.map(step => ({x: step.at, y: step.value}))],
+    from,
+    to,
+    reference: input,
+  };
+}
+
+/** The tile of the run's objective metric. */
+function objectiveTile(model: RunModel, best: CandidateMeasurement | null): MetricTileView {
+  const metric = model.overview?.objective.metric;
+  const name = typeof metric === 'string' && metric !== '' ? metricLabel(metric) : 'Metric';
+  const input = inputValue(model);
+  const words = unitWords(model, name);
+  const vs = best?.vsBaseline ?? null;
+  const better = vs === null ? null : improvement(vs, model.direction);
+  const verdict = better === null ? null : verdictOf(better);
+  const value = best?.metricValue ?? null;
+  const parts = [
+    value === null ? 'nothing measured yet' : `${formatValue(value)}${words}`,
+    ...(input === null ? [] : [`input ${formatValue(input)}${words}`]),
+  ];
+  return {
+    id: typeof metric === 'string' && metric !== '' ? metric : 'metric',
+    name,
+    ratio: better === null ? null : ratio(better),
+    note: verdict?.note ?? null,
+    tone: verdict?.tone ?? 'muted',
+    detail: parts.join(' · '),
+    trend: trendOf(model, name, input),
+  };
+}
+
+export function heroView(model: RunModel): HeroView {
+  const leader = bestCandidate(model);
+  return {
+    // The protocol carries one measure per idea (its gate's `metric_value`), so there is one tile;
+    // a run with several objectives adds a tile per objective here once the events carry them.
+    tiles: [objectiveTile(model, leader?.measurement ?? null)],
     measured: model.candidates.candidates.filter(item => item.measurement?.metricValue != null)
       .length,
     standing: leader === null ? null : model.candidates.best?.adopted === true ? 'adopted' : 'best',
@@ -122,15 +185,11 @@ export interface StripChartView {
      * stay drawn); without one, or when the open idea has no point, the points are not singled out.
      */
     readonly emphasis?: 'focus' | 'related' | 'dim';
+    /** On the chain the reader points at: ringed (the chart draws no line between points). */
+    readonly lit: boolean;
   }[];
   /** With an idea open: the stretch of the run clock it took, in minutes, as a band on the x-axis. */
   readonly spans: readonly {readonly from: number; readonly to: number; readonly label: string}[];
-  /**
-   * Connectors from each passed idea's point to its base's point (the input: the baseline at the
-   * start); the best idea's chain is `strong`, the pointed-at idea's chain `lit`. They add no point
-   * and move no axis.
-   */
-  readonly edges: readonly ChartEdgeView[];
   /** The best passed value so far (the input's until an idea beats it), as a step line that reaches the end of the axis. */
   readonly steps: readonly {readonly x: number; readonly y: number}[];
   readonly reference: {readonly y: number; readonly label: string} | null;
@@ -221,15 +280,15 @@ function emphasisField(emphasis: 'focus' | 'related' | 'dim' | undefined): {
 /**
  * Every measured idea as a point on the run clock (minutes from the run's start) over a y-axis
  * that starts at 0: the ideas that set a new best sit on the step line of the best so far, ideas
- * that passed without beating it are grey, ideas that failed are red (`performanceFold`).
+ * that passed without beating it are grey, ideas that failed are red (`performanceFold`). Nothing
+ * joins the dots: the step line of the best so far is the only line.
  *
  * `model` is the whole run to its live end, never the run at a scrubbed sequence: what the chart
  * shows and the range of both axes depend on the run alone. `scrub` is the run-clock time the
  * reader scrubbed to (null at the live end); it is drawn as the cursor and dims the points after
  * it. `now` is the live clock, else the run's latest time bounds the x-axis.
  *
- * `lit` is the set of ideas on the chain the reader points at (`ideaAncestry`); its connectors are
- * drawn lit. `focus` is the id of the idea the reader has open, or null. It only changes how the same points
+ * `lit` is the set of ideas on the chain the reader points at (`ideaAncestry`); their dots are ringed. `focus` is the id of the idea the reader has open, or null. It only changes how the same points
  * are drawn (`emphasis`) and adds the idea's time span; the points, steps, ticks and both axes'
  * ranges are the same with or without it, so opening an idea never moves the chart.
  */
@@ -253,6 +312,7 @@ export function stripChartView(
     filled: point.result !== 'pending',
     tone: pointTone(point),
     faint: scrub !== null && point.at > scrub,
+    lit: lit.has(point.id),
     ...emphasisField(open.emphasisOf(point.id)),
   }));
   const reached = now ?? model.latest;
@@ -267,17 +327,6 @@ export function stripChartView(
   return {
     label: `${typeof metric === 'string' && metric !== '' ? metricLabel(metric) : 'Metric'} of each measured idea over the run, with the best so far`,
     points,
-    edges: chartEdges(
-      model.candidates.candidates,
-      fold.points.map((point, at) => ({
-        id: point.id,
-        passed: point.result === 'passed',
-        faint: points[at]?.faint ?? false,
-      })),
-      input === null ? null : {x: 0, y: input},
-      new Set(model.candidates.bestPath),
-      lit,
-    ),
     spans: open.spans(minutes, reached),
     steps,
     reference: input === null ? null : {y: input, label: 'input'},

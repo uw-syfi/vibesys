@@ -11,6 +11,8 @@ import {
   type Guide,
   LogPane,
   Meter,
+  MetricTile,
+  MetricTiles,
   Narrative,
   NewBelow,
   Pane,
@@ -22,6 +24,7 @@ import {
   Said,
   Screen,
   SearchBox,
+  Sparkline,
   Stack,
   SwatchLegend,
   Text,
@@ -31,6 +34,13 @@ import {
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import type {ComponentName, GalleryEntry} from './gallery-entry.js';
+
+const SPARK = [
+  {x: 0, y: 1.58},
+  {x: 3, y: 2.4},
+  {x: 6, y: 3.1},
+  {x: 8, y: 6.05},
+];
 
 const noop = (): void => undefined;
 
@@ -521,6 +531,49 @@ export const FRAME_ENTRIES = {
         <Meter label="Muted, all of it" value={1} tone="muted" />
       </Stack>
     ),
+  },
+  MetricTiles: {
+    render: () => (
+      <MetricTiles label="Performance" count={2}>
+        <MetricTile
+          name="Throughput"
+          figure="3.83×"
+          note="faster than input"
+          tone="ok"
+          detail="6,054,154 ops/s · input 1,581,539 ops/s"
+          trend={
+            <Sparkline
+              label="Throughput, best so far"
+              steps={SPARK}
+              from={0}
+              to={10}
+              reference={1.58}
+            />
+          }
+        />
+        <MetricTile
+          name="p99 latency"
+          figure="0.80×"
+          note="slower than input"
+          tone="err"
+          detail="12.4 ms · input 9.9 ms"
+        />
+      </MetricTiles>
+    ),
+  },
+  MetricTile: {
+    render: () => (
+      <MetricTile
+        name="Throughput"
+        figure="1.18×"
+        note="faster than input"
+        tone="ok"
+        detail="48.6 ops/s · input 41.2 ops/s"
+      />
+    ),
+  },
+  Sparkline: {
+    render: () => <Sparkline label="Best so far" steps={SPARK} from={0} to={10} reference={1.58} />,
   },
   NewBelow: {render: () => <NewBelow text="3 new" press={noop} />},
   Gantt: {render: () => <GanttDemo />},
