@@ -64,13 +64,11 @@ clients/
   libs/connection/  @vibesys/connection       host connection manager            -> contracts, transport, hosts,
                                                                                     machine
   libs/settings/    @vibesys/settings         settings store, atomic files       -> hosts, runs
-  features/<x>/     @vibesys/feature-<x>      run-view, gateway-connect (web only), hosts and
-                                              run-control (main process only); strict:
-                                              app-shell, settings, machines, new-run, run-page
+  features/<x>/     @vibesys/feature-<x>      hosts, run-control (main process only), app-shell,
+                                              settings, machines, new-run, run-page
   apps/desktop-main      @vibesys/app-desktop-main      composition only (Electron main), and the
                                                         sandboxed preloads
-  apps/web               @vibesys/app-web               composition only (browser)
-  apps/desktop-shell     @vibesys/app-desktop-shell     composition only, strict: the desktop
+  apps/desktop-shell     @vibesys/app-desktop-shell     composition only: the desktop
                                                         window (`shell.html`), the only renderer
   apps/ui-gallery        @vibesys/app-ui-gallery        development only, never shipped: every
                                                         component in every theme, screenshot-tested
@@ -141,8 +139,7 @@ and `@vibesys/entities` were split for this reason: the first held both the gene
 and the run fold, the second every domain model the views shared, and each name invited the next
 unrelated addition. The split gave `store` (generic, domain-free like `ui`), `run-state` (the run
 fold, its round, performance, and transcript projections as separate entries), `hosts`, `runs`, and
-`run-session` (the live session below the UI, out of `feature-run-view`, which keeps only its
-interaction state, banner copy, and UI). A helper used by one feature lives in that feature
+`run-session` (the live session below the UI). A helper used by one feature lives in that feature
 (task-argument parsing was `@vibesys/feature-start-run/state`'s). The `bucket-names` rule keeps foundation,
 core, and domain packages from being named `entities`, `core`, `common`, `utils`, `shared`,
 `helpers`, or `misc`.
@@ -176,17 +173,13 @@ runtime. A feature package has up to three entries:
   `@vibesys/connection` and `@vibesys/settings` (`Hosts`, `RunControl`). `apps/desktop-main` routes
   each request `@vibesys/ipc` parsed to the controller of the feature that owns it.
 
-A feature may also publish `./styles.css`, the stylesheet of the views it renders (a `dom` asset,
-like `@vibesys/ui`'s `./tokens.css`); an app imports the stylesheets of the features it composes and
-keeps only its own layout in its stylesheet, so a feature's look moves with the feature.
+Features and apps ship no stylesheets. They build their views from `@vibesys/ui` components and
+tokens; the desktop shell imports the design system's stylesheets once.
 
 A feature publishes only the entries it has. Its pure core is `./state` when it needs nothing
-beyond `ES2022`; a core that needs a DOM global (`@vibesys/feature-gateway-connect` parses with
-the WHATWG `URL`) stays pure but lives in `renderer/state/`, and the feature publishes `./renderer`
-alone. Effects reach the platform only through the interfaces `./state` declares, which the app
-implements. A domain package that owns effects declares its ports the same way:
-`@vibesys/run-session` declares `RunConnection`'s control transport and `BrowserLifecycle`, and
-`apps/web` implements them with its backend adapter and lifecycle.
+beyond `ES2022`. Effects reach the platform only through the interfaces `./state` declares, which
+the app implements. A domain package that owns effects declares its ports the same way:
+`@vibesys/run-session` declares its run connection's control transport and page lifecycle.
 
 Node-only packages (`transport-node`, `connection`, `settings`) therefore reach the renderer
 through no path: only `node` entries may import them, and only `desktop-main` and features'
@@ -206,7 +199,7 @@ through no path: only `node` entries may import them, and only `desktop-main` an
 | 8 | A sandboxed preload loads only Electron at run time; every workspace import in it is erased | `preload-sandbox` (what the entry's emitted CommonJS still requires); `.dependency-cruiser.mjs` keeps a preload's imports to `@vibesys/ipc` and Electron |
 | 9 | Control state is an XState machine; data folds are plain reducers (see [State](#state)) | `external-dependencies` (`xstate` only in features' `./state` and `./renderer` and `MACHINE_PACKAGES`); `tools/lint-rules/features-no-hand-rolled-control.grit`, `tools/lint-rules/control-state-no-store-kernel.grit` |
 | 10 | A package's folder matches the layer its manifest declares: `libs/*` is foundation, core, domain, or service; `features/*` is feature; `apps/*` is app; nothing else, except the deprecated `tui` (`DEPRECATED_OUTSIDE_FOLDERS`) | `layer-matches-folder` |
-| 11 | A package marked `"design": "strict"` builds UI only from `@vibesys/ui`; old UI packages are frozen to fixes only (see [Design system enforcement](#design-system-enforcement)) | `strict-no-stylesheets`, `strict-imports`, `strict-lint-coverage`; `tools/lint-rules/strict-*.grit`; `check_frozen_ui.mjs` |
+| 11 | Every feature and app builds UI only from `@vibesys/ui` (see [Design system enforcement](#design-system-enforcement)) | `strict-no-stylesheets`, `strict-imports`; `tools/lint-rules/strict-*.grit` through `biome.json` |
 
 All package-graph rules, and the tables they read, live in one module,
 [`clients/tools/scripts/check_package_graph.mjs`](https://github.com/uw-syfi/vibesys/blob/main/clients/tools/scripts/check_package_graph.mjs),
@@ -228,8 +221,9 @@ policy, and this document all read that block. An export whose source is a style
 (`@vibesys/ui`'s `./tokens.css`) is a `dom` asset: it has no tsconfig project, and Vite resolves
 it through the same source condition. Unknown keys, layers, and runtimes are rejected by
 name (`declarations`), and the entries must be exactly the `exports` keys
-(`entries-match-exports`). The block may also carry `"design": "strict"`, the only value the closed
-`design` key takes, which opts the package into the [design system rules](#design-system-enforcement).
+(`entries-match-exports`). Feature and app packages are always subject to the
+[design system rules](#design-system-enforcement). The obsolete `design` marker is an unknown key
+and fails `declarations`.
 
 **Workspace dependencies** are declared as `workspace:*` in the section the code needs
 (`dependencies` for production code; test code may also use `devDependencies`), point to a lower
@@ -266,7 +260,7 @@ truth for each fact; everything else is derived from it.
 | Entry | Runtime | Contents |
 | --- | --- | --- |
 | `.` | `dom` | The components (see [Components](#components)), `applyTheme`, and the token types (`ThemeName`, `ColorRole`, `SpaceToken`, `TextStyle`, ...). |
-| `./legacy` | `dom` | Today's `Button`, `Combobox`, `Dialog` and `StatusChip`, which take `className` and raw HTML attributes. Frozen: only the frozen web views (`gateway-connect`, `run-view`, `conversation`) import it, and it is deleted with them. |
+| `./legacy` | `dom` | Unused older primitives retained temporarily as library migration debt; feature and app imports of this entry fail `strict-imports`. |
 | `./tokens` | `neutral` | `THEMES`, `DEFAULT_THEMES`, `SPACE`, `TYPE`, `SIZE`, `RADIUS`, `ELEVATION`, `MOTION`, `CONTRAST_PAIRS`, `contrastRatio`, and `renderTokensCss`. No DOM, so tests and tools import it. |
 | `./tokens.css` | `dom` asset | Generated from `./tokens`; never edited by hand. |
 | `./components.css` | `dom` asset | The components' styles, hand-written from token variables only. |
@@ -291,29 +285,17 @@ test can pass a fake. The selectors name `:root`, so `target` only works as the 
 
 ## Design system enforcement
 
-Desktop screens are built only from `@vibesys/ui`'s public components and tokens. The rule is rolled
-out without touching existing code: new screens go in new, strict packages, and the old UI packages
-are frozen until they are deleted. There is no baseline file; strict or frozen is a property of the
-package.
-
-### Strict packages
-
-A package opts in with a marker in its manifest, which stays the one source of truth for its place
-in the graph:
-
-```json
-"vibesys": {"layer": "feature", "design": "strict", "entries": {"./state": "neutral", "./renderer": "dom"}}
-```
-
-`design` is a closed set (`strict` or absent); `declarations` rejects any other value by name.
+Every package under `features/` or `apps/` builds UI only from `@vibesys/ui`'s public
+components and tokens. The package graph checker applies S2 and S6 by folder. Biome applies S3
+and S4 to all feature and app source with `features/**` and `apps/**` globs, excluding tests.
+There is no per-package opt-in or frozen-package list.
 
 | # | Rule | Enforced by |
 | --- | --- | --- |
-| S2 | A strict package ships no stylesheet: no `*.css` export and no `.css`, `.scss`, `.sass`, `.less`, `.styl` or `.pcss` file in the package | `check_package_graph.mjs` rule `strict-no-stylesheets` |
-| S3 | Strict code renders no raw interactive or styled elements: JSX `button`, `a`, `input`, `select`, `textarea`, `label`, `dialog`, `details`, `summary`, `form`, `table`, `svg` and `pre`, and the `style`, `className` and `dangerouslySetInnerHTML` props on any element, are errors. Plain `div` and `span` stay for grouping text inside slots | Grit rule `tools/lint-rules/strict-no-raw-elements.grit` |
-| S4 | Strict code contains no raw colors or lengths: a string or template literal with a hex color, `rgb(`, `rgba(`, `hsl(`, `hsla(`, `oklch(`, `color-mix(`, or a `px`, `rem`, `em`, `vh` or `vw` length is an error | Grit rule `tools/lint-rules/strict-no-raw-values.grit` |
-| S5 | The strict lint rules cover exactly the strict packages: the `includes` of `biome.json`'s strict override (the one loading both rules above) are each strict package's `src/**/*.ts` and `src/**/*.tsx` plus the two test exclusions, so a new strict package cannot escape S3 and S4, and a package cannot be listed without the marker. The override has no `includes` until the first strict package exists | `check_package_graph.mjs` rule `strict-lint-coverage` (the expected globs come from `strictOverrideIncludes`) |
-| S6 | A strict package imports UI only from `@vibesys/ui`'s `.` and `./tokens`, and no old feature package. Its workspace imports are the non-UI libraries in `STRICT_WORKSPACE_IMPORTS` and other strict packages (a strict app composes strict features' screens), and its third-party ones are `react`, `react-dom` and `xstate` (`STRICT_THIRD_PARTY`; Electron and Node builtins stay confined by `external-dependencies`), in production source and in the manifest's `dependencies`. Test code is exempt. A strict app may also import `@vibesys/ui/tokens.css`, `@vibesys/ui/fonts.css` and `@vibesys/ui/components.css` once, in its entry wiring. Deep imports are already refused by `imports-use-exports` and `.dependency-cruiser.mjs`, feature-to-feature imports by `layer-direction` | `check_package_graph.mjs` rule `strict-imports` |
+| S2 | A feature or app ships no stylesheet: no `*.css` export and no `.css`, `.scss`, `.sass`, `.less`, `.styl` or `.pcss` file in the package | `check_package_graph.mjs` rule `strict-no-stylesheets` |
+| S3 | Feature and app code renders no raw interactive or styled elements: JSX `button`, `a`, `input`, `select`, `textarea`, `label`, `dialog`, `details`, `summary`, `form`, `table`, `svg` and `pre`, and the `style`, `className` and `dangerouslySetInnerHTML` props on any element, are errors. Plain `div` and `span` stay for grouping text inside slots | Grit rule `tools/lint-rules/strict-no-raw-elements.grit` |
+| S4 | Feature and app code contains no raw colors or lengths: a string or template literal with a hex color, `rgb(`, `rgba(`, `hsl(`, `hsla(`, `oklch(`, `color-mix(`, or a `px`, `rem`, `em`, `vh` or `vw` length is an error | Grit rule `tools/lint-rules/strict-no-raw-values.grit` |
+| S6 | Feature and app packages import UI only from `@vibesys/ui`'s `.` and `./tokens`. Their other workspace imports are the non-UI libraries in `STRICT_WORKSPACE_IMPORTS` and feature packages composed by apps; third-party imports are `react`, `react-dom` and `xstate` (`STRICT_THIRD_PARTY`; Electron and Node builtins stay confined by `external-dependencies`). Test code is exempt. An app may also import `@vibesys/ui/tokens.css`, `@vibesys/ui/fonts.css` and `@vibesys/ui/components.css` in its entry wiring. Deep imports are refused by `imports-use-exports` and `.dependency-cruiser.mjs`, feature-to-feature imports by `layer-direction` | `check_package_graph.mjs` rule `strict-imports` |
 | S8 | `@vibesys/ui` itself uses tokens: `strict-no-raw-values.grit` also runs on `libs/ui/src` except the token table (`src/tokens/`) and tests, and `tools/lint-rules/ui-no-raw-css-values.grit` bans raw colors and lengths in the declarations of `libs/ui/src/*.css` except the generated `tokens.css`. Lengths in `@media` conditions are not declarations and stay | the two Grit rules, wired by `biome.json` |
 
 `biome.json` excludes `libs/ui/src/primitives.css` from the stylesheet rule: the old primitives'
@@ -399,8 +381,8 @@ pane's dark background; a token test checks it in every theme.
 with fixed content: no clock, randomness or network, and the bundled fonts. Its registry is typed
 over the entry's component exports, and `test_gallery_covers_every_public_component` fails a
 component with no gallery entry. Run it with `pnpm --filter @vibesys/app-ui-gallery dev`.
-The gallery is a strict package (`"design": "strict"`), so it also shows that a page built
-only from `@vibesys/ui` passes the strict rules.
+The gallery is an app package, so it shows that a page built only from `@vibesys/ui` passes the
+strict rules.
 
 Its Playwright suite (in the `tui_e2e` group) runs in one theme, Ink: it fails on any axe
 violation and compares each component's screenshot against `e2e/__screenshots__/ink-<Component>.png`
@@ -530,19 +512,14 @@ two GritQL rules (wired in `biome.json`) keep features' `state/` and `effects/` 
 `connection`'s `state/`) free of `setTimeout`, `setInterval`, and `AbortController`, and keep
 migrated control-state packages (`run-control`, `connection`, `run-session`) off `createStore`
 (except their fold modules, such as `run-session`'s `run.ts`). The features still on the reducer
-kernel are migrated one per change. Until then the two effects modules that hand-roll a timer or
-an abort controller (`hosts`' path completion, `gateway-connect`'s attempt) are listed as
-exclusions in `biome.json`, a list that only shrinks; the remaining migrations and those
-exclusions are tracked in #1969.
+kernel are migrated one per change. The remaining exception for `hosts`' path completion is listed in `biome.json`; its migration
+is tracked in #1969.
 
 | Control state | Form | Status |
 | --- | --- | --- |
 | `run-session`'s session lifecycle (`sessionMachine`, `WebSession`) | machine | migrated (#2071) |
 | `feature-run-control`'s commands and banner | machine | migrated (#1950) |
 | `@vibesys/connection`'s `HostConnection` | machine | migrated (phase 8) |
-| `feature-web-theme`'s current host-default request | machine | native (#2168) |
-| `feature-run-view`'s startup log panel (`startupLogMachine`) | machine | native |
-| `feature-gateway-connect` screen store | reducer with reply tokens | deleted with `apps/web` |
 
 ## Build model
 
@@ -624,7 +601,7 @@ names a missing or extra one.
 | Package | Layer | Status | Item that creates or moves it |
 | --- | --- | --- | --- |
 | `@vibesys/contracts` | foundation | exists (pilot: generated run-protocol and host-helper types, the one schema walker, error taxonomy, `./host-helper` validation, `./testing` fixtures) | foundation item (#1869) |
-| `@vibesys/ui` | foundation | exists: the batch 1 components (`.`, `dom`; see [Components](#components)), today's primitives (`./legacy`) and the design tokens (`./tokens`, `./tokens.css`, `./fonts.css`, and the components' `./components.css`; see [Design tokens and themes](#design-tokens-and-themes)); the desktop and web features render the legacy primitives | domain packages (phase 5 of #1878) |
+| `@vibesys/ui` | foundation | exists: the batch 1 components (`.`, `dom`; see [Components](#components)), the legacy primitives (`./legacy`, unused) and the design tokens (`./tokens`, `./tokens.css`, `./fonts.css`, and the components' `./components.css`; see [Design tokens and themes](#design-tokens-and-themes)); desktop features use the public components | domain packages (phase 5 of #1878) |
 | `@vibesys/store` | foundation | exists: `Step`, `Reducer`, `only`, `createStore` (`.`) and the fold model-test kit (`./testing`: `checkModel`, `Seeded`, `SEEDS`); domain-free | domain split (#1949) |
 | `@vibesys/run-state` | core | exists: the run event fold (`.`), with `./rounds`, `./performance`, and `./transcript` projections (the run's transcript, and `transcriptBySpan`, which reads it by the span id the server stamped on each event); depends on `contracts` only | domain split (#1949) |
 | `@vibesys/core-state` | core | deleted: split into `store` and `run-state` | domain split (#1949) |
@@ -638,21 +615,18 @@ names a missing or extra one.
 | `@vibesys/ipc` | service | exists: the run connection's port messages and their validation, and the shell's channels, events, and payloads, with each feature's requests (channels, bridge slice, and the parser the main process runs) in `welcome/<feature>.ts` (the surface's historical name); depends on `hosts`, `runs` | domain packages (phase 5 of #1878); per-feature parsers with phase 8 |
 | `@vibesys/connection` | service | exists (`.`, `node`): the connection manager (`ConnectionManager`, `HostConnection`: an XState machine in `state/` and a `shell/` owning the links, channels, and the machine's clock), the ssh and local links, the bootstrap, and `connectionStatus`, with `./testing` (`FakeHelper`, `FakeLink`, and the `HostConnection` contract suite); depends on `contracts`, `transport`, `hosts` | desktop main process (phase 8 of #1878) |
 | `@vibesys/settings` | service | exists (`.`, `node`): the settings store (`hosts.json`, `recent.json`, `preferences.json` with the appearance, notifications and archived runs; one writer, atomic replace), with `./testing` (`FakeSettingsFilesystem`); depends on `hosts`, `runs` | desktop main process (phase 8 of #1878) |
-| `@vibesys/feature-run-view`, `@vibesys/feature-gateway-connect` | feature | exist, for `apps/web` only (frozen, deleted with it): the run page's transcript, rounds, status, and banners (`./state`, `./renderer`; the live session is `@vibesys/run-session`); the browser's gateway connect form (`./renderer`). `@vibesys/feature-replay` is deleted: nothing imported it | feature packages (phase 6 of #1878); desktop cutover (#2850) |
-| `@vibesys/feature-web-theme` | feature | exists: the exhaustive Web palette and its runtime names (checked against the generated theme union), plus the XState lifecycle for resolving the current live host's default; the app injects its session operation and owns DOM application and persistence | Web theme picker (#2168) |
 | `@vibesys/feature-hosts`, `@vibesys/feature-run-control` | feature | exist, main process only (`./main`): `Hosts` (the host connections' leases, checkout changes, sign-in, path completion, a run's logs and recorded history) and `RunControl` (attach, start, resume, stop, with its relay and stop flow). Their renderers (the host panel, the Start sheet, the title strip, Recent) and `@vibesys/feature-start-run` and `@vibesys/feature-recent-runs` were deleted with the welcome view at the cutover (#2850) | desktop renderer (phase 7 of #1878); `./main` with the main-process split (phase 8) |
-| `apps/web` | app | exists: composition only, on the per-entry layout (one `dom` entry, no exports): the browser entry and boot decision, the one backend adapter, storage and lifecycle. Its run connection (`connectRun`) is `@vibesys/run-session`'s and the run page's styles are the features' own (`./styles.css`). It has no desktop build: the desktop app shows runs on the Run screen of `apps/desktop-shell`. Frozen; deleted with the web deprecation | feature packages (phase 6 of #1878); desktop cutover (#2850) |
 | `apps/desktop-renderer` | app | deleted at the cutover (#2850): the welcome view. `apps/desktop-shell` is the one desktop renderer | desktop renderer (phase 7 of #1878) |
-| `@vibesys/feature-app-shell` | feature (strict) | exists: the sidebar store (Live, Recent with the last 20 and Show all, Machines, the selected screen) over the hosts' listings, Recent and archived runs, with seeded-sequence invariant tests; the shell layout and placeholder screens (`./renderer`); the run notices a listing calls for, raised by `./main` when Settings enables them | redesign (#2842) |
-| `@vibesys/feature-settings` | feature (strict) | exists: the Settings store (appearance and notifications, saved under tokens) and screen; `./main` answers the preference requests and keeps Electron's `nativeTheme` on the appearance's mode | redesign (#2842) |
-| `@vibesys/feature-machines` | feature (strict) | exists: the Machines store (the saved machines, each one's status a selector over its last report: Ready, Checkout not found, Sign in, or Can't connect; the Add form and the checkout form, whose path suggestions carry each checkout's version), with seeded-sequence invariant tests, and the screen (`./renderer`); `./main` lists the machines from `hosts.json`, reports a machine's facts from its connection's state and `machine.describe`, inspects paths (`checkout.inspect`) and removes a machine. Adding a machine or changing its checkout is `feature-hosts`' checked `setCheckout` | redesign (#2843) |
-| `@vibesys/feature-new-run` | feature (strict) | exists: the New run form and its rules (`./state`: the inputs a run starts with and their key, the extra arguments that may not repeat a typed option, the prefill from the last run on a machine) and its machine (parallel regions loading what the machine offers, the project's tasks and the debounced "Ready to start" checks, with model tests); the screen and its store (`./renderer`); `./main` answers its requests with one host helper method each and records a started run in Recent | redesign (#2844) |
-| `apps/desktop-shell` | app (strict) | exists: the desktop window's composition (`shell.html`), the one page every window loads (a run window adds its run to the query); its Playwright journeys run against a Fake of the bridge | redesign (#2842); the only renderer since the cutover (#2850) |
+| `@vibesys/feature-app-shell` | feature | exists: the sidebar store (Live, Recent with the last 20 and Show all, Machines, the selected screen) over the hosts' listings, Recent and archived runs, with seeded-sequence invariant tests; the shell layout and placeholder screens (`./renderer`); the run notices a listing calls for, raised by `./main` when Settings enables them | redesign (#2842) |
+| `@vibesys/feature-settings` | feature | exists: the Settings store (appearance and notifications, saved under tokens) and screen; `./main` answers the preference requests and keeps Electron's `nativeTheme` on the appearance's mode | redesign (#2842) |
+| `@vibesys/feature-machines` | feature | exists: the Machines store (the saved machines, each one's status a selector over its last report: Ready, Checkout not found, Sign in, or Can't connect; the Add form and the checkout form, whose path suggestions carry each checkout's version), with seeded-sequence invariant tests, and the screen (`./renderer`); `./main` lists the machines from `hosts.json`, reports a machine's facts from its connection's state and `machine.describe`, inspects paths (`checkout.inspect`) and removes a machine. Adding a machine or changing its checkout is `feature-hosts`' checked `setCheckout` | redesign (#2843) |
+| `@vibesys/feature-new-run` | feature | exists: the New run form and its rules (`./state`: the inputs a run starts with and their key, the extra arguments that may not repeat a typed option, the prefill from the last run on a machine) and its machine (parallel regions loading what the machine offers, the project's tasks and the debounced "Ready to start" checks, with model tests); the screen and its store (`./renderer`); `./main` answers its requests with one host helper method each and records a started run in Recent | redesign (#2844) |
+| `apps/desktop-shell` | app | exists: the desktop window's composition (`shell.html`), the one page every window loads (a run window adds its run to the query); its Playwright journeys run against a Fake of the bridge | redesign (#2842); the only renderer since the cutover (#2850) |
 | `apps/ui-gallery` | app | exists: development only, never shipped (one `dom` entry, no exports): the component gallery and its screenshot and axe suite (see [The gallery and its screenshots](#the-gallery-and-its-screenshots)) | none |
 | `apps/desktop-main` | app | exists: composition only (Electron main, `.`, `node`): the lifecycle, page confinement, the windows, launch arguments, and the shell's requests routed to the features' `./main` controllers; and the sandboxed preload (`./preload-welcome`, `preload`; the name is the surface's historical one). Its build copies the shell's bundle into `dist/ui` | desktop main process (phase 8 of #1878) |
 | `@vibesys/backend-client` | core | deleted: split into `transport` and `transport-node` | backend-client split (#1910) |
 | `@vibesys/desktop` | app | deleted: emptied into `connection`, `settings`, the features' `./main`, and `apps/desktop-main` | desktop main process (phase 8 of #1878) |
-| `@vibesys/web` | app | moved: features into `features/*`, the composition into `apps/web` | feature packages (phase 6 of #1878) |
+| `@vibesys/web` | app | deleted with the browser client; desktop shell is the renderer | desktop cutover (#2850) |
 | `@vibesys/tui` | app | deprecated; kept building, not migrated | none |
 
 Roadmap [#1878](https://github.com/uw-syfi/vibesys/issues/1878) tracks this migration; each item gets

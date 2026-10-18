@@ -6,7 +6,6 @@
   "type": "module",
   "vibesys": {
     "layer": "app",
-    "design": "strict",
     "entries": {
       ".": "dom"
     }

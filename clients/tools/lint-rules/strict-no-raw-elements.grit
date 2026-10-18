@@ -1,10 +1,10 @@
 // Rule S3 of the desktop design system (docs/contributing/clients-architecture.md, "Design
-// system enforcement"). A strict package (`"design": "strict"` in its manifest) builds its UI only
-// from `@vibesys/ui`, so it renders no interactive or styled intrinsic element and styles nothing
+// system enforcement"). Every feature and app builds its UI only from `@vibesys/ui`, so it renders
+// no interactive or styled intrinsic element and styles nothing
 // itself: no `style`, `className` or `dangerouslySetInnerHTML` prop on any element, and no
 // `button`, `a`, `input`, `select`, `textarea`, `label`, `dialog`, `details`, `summary`, `form`,
 // `table`, `svg` or `pre`. A plain `div` or `span` groups text inside a slot and stays allowed.
-// `strict-lint-coverage` keeps biome.json's strict override equal to the strict packages.
+// biome.json applies this rule to every feature and app source.
 language js;
 
 or {

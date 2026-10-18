@@ -65,20 +65,10 @@
   "overrides": [
     {
       "includes": [
-        "apps/ui-gallery/src/**/*.ts",
-        "apps/ui-gallery/src/**/*.tsx",
-        "apps/desktop-shell/src/**/*.ts",
-        "apps/desktop-shell/src/**/*.tsx",
-        "features/app-shell/src/**/*.ts",
-        "features/app-shell/src/**/*.tsx",
-        "features/machines/src/**/*.ts",
-        "features/machines/src/**/*.tsx",
-        "features/settings/src/**/*.ts",
-        "features/settings/src/**/*.tsx",
-        "features/run-page/src/**/*.ts",
-        "features/run-page/src/**/*.tsx",
-        "features/new-run/src/**/*.ts",
-        "features/new-run/src/**/*.tsx",
+        "features/**/src/**/*.ts",
+        "features/**/src/**/*.tsx",
+        "apps/**/src/**/*.ts",
+        "apps/**/src/**/*.tsx",
         "!**/*.test.ts",
         "!**/*.test.tsx"
       ],

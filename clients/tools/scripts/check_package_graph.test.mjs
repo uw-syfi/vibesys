@@ -10,7 +10,6 @@ import {
   packageGraphErrors,
   RULES,
   STRICT_LINT_PLUGINS,
-  strictOverrideIncludes,
   workspaceSpecifiers,
 } from './check_package_graph.mjs';
 
@@ -119,7 +118,6 @@ function strictScreenPackage() {
       name: '@vibesys/feature-screen',
       vibesys: {
         layer: 'feature',
-        design: 'strict',
         entries: {'./state': 'neutral', './renderer': 'dom'},
       },
       exports: {'./state': source('state/index'), './renderer': source('renderer/index')},
@@ -250,15 +248,6 @@ function directoryOf(label, {manifest, directory}) {
   return directory ?? `${LAYER_FOLDERS[manifest.vibesys?.layer] ?? 'libs'}/${label}`;
 }
 
-/** Set on a workspace to pin the strict override's `includes`, instead of deriving them. */
-const BIOME_INCLUDES = Symbol('biome includes');
-
-function strictDirectories(directories) {
-  return directories
-    .filter(([, {manifest}]) => manifest.vibesys?.design === 'strict')
-    .map(([directory]) => directory);
-}
-
 async function materialize(t, workspace) {
   const root = await mkdtemp(join(tmpdir(), 'vibesys-package-graph-'));
   t.after(() => rm(root, {recursive: true, force: true}));
@@ -273,8 +262,14 @@ async function materialize(t, workspace) {
     join(root, 'pnpm-workspace.yaml'),
     `packages:\n${patterns.map(pattern => `  - "${pattern}"\n`).join('')}`,
   );
-  const includes =
-    workspace[BIOME_INCLUDES] ?? strictOverrideIncludes(strictDirectories(directories));
+  const includes = [
+    'features/**/src/**/*.ts',
+    'features/**/src/**/*.tsx',
+    'apps/**/src/**/*.ts',
+    'apps/**/src/**/*.tsx',
+    '!**/*.test.ts',
+    '!**/*.test.tsx',
+  ];
   await writeFile(
     join(root, 'biome.json'),
     JSON.stringify({overrides: [{includes, plugins: STRICT_LINT_PLUGINS}]}),
@@ -372,10 +367,6 @@ const RULE_CASES = {
   },
   'strict-imports': workspace => {
     workspace.screen.files['src/renderer/index.ts'] += "import '@radix-ui/react-dialog';\n";
-  },
-  'strict-lint-coverage': workspace => {
-    // A strict package the Biome override does not list escapes the element and value rules.
-    workspace[BIOME_INCLUDES] = strictOverrideIncludes([]);
   },
 };
 
@@ -567,7 +558,7 @@ test('a bucket name is allowed above the domain layer and as part of a longer wo
   assert.deepEqual(packageGraphErrors(await materialize(t, workspace)), []);
 });
 
-test('a feature may publish its views stylesheet, as a dom asset only', async t => {
+test('a feature stylesheet is a dom asset but violates the design rule', async t => {
   const workspace = validWorkspace();
   const feature = workspace['stop-run'];
   feature.manifest.vibesys.entries['./styles.css'] = 'dom';
@@ -576,7 +567,10 @@ test('a feature may publish its views stylesheet, as a dom asset only', async t 
     default: './src/renderer/styles.css',
   };
   feature.files['src/renderer/styles.css'] = '.stop-button { color: red; }\n';
-  assert.deepEqual(packageGraphErrors(await materialize(t, workspace)), []);
+  assert.deepEqual(
+    packageGraphErrors(await materialize(t, workspace)).map(error => error.split(':')[0]),
+    ['strict-no-stylesheets', 'strict-no-stylesheets'],
+  );
   feature.manifest.vibesys.entries['./styles.css'] = 'neutral';
   const errors = packageGraphErrors(await materialize(t, workspace));
   assert.deepEqual(
@@ -670,8 +664,8 @@ test('the deprecated allowlist is by directory, so another top-level package is 
   );
 });
 
-// Strict design packages (rules S2, S5, S6): every case is one change to the valid workspace,
-// whose strict package passes, and must be reported by the named rule with its location and fix.
+// Design rules S2 and S6 apply to every feature and app. Each case changes one valid workspace
+// and must be reported by the named rule with its location and fix.
 
 const strictRules = errors => errors.filter(error => error.startsWith('strict-'));
 
@@ -681,18 +675,13 @@ async function strictErrorsOf(t, mutate) {
   return strictRules(packageGraphErrors(await materialize(t, workspace)));
 }
 
-test('declarations accepts design strict and rejects any other value by name', async t => {
-  for (const design of ['loose', 'Strict', true, null, 1]) {
-    const workspace = validWorkspace();
-    workspace.screen.manifest.vibesys.design = design;
-    const errors = packageGraphErrors(await materialize(t, workspace));
-    assert.equal(errors.length, 1, errors.join('\n'));
-    assert.match(
-      errors[0],
-      /^declarations: features\/screen\/package\.json: vibesys\.design must be strict/,
-    );
-    assert.ok(errors[0].includes(JSON.stringify(design)), errors[0]);
-  }
+test('declarations rejects the obsolete design marker', async t => {
+  const workspace = validWorkspace();
+  workspace.screen.manifest.vibesys.design = 'strict';
+  const errors = packageGraphErrors(await materialize(t, workspace));
+  assert.deepEqual(errors, [
+    'declarations: features/screen/package.json: unknown key vibesys.design',
+  ]);
 });
 
 test('declarations still rejects an unknown vibesys key', async t => {
@@ -741,16 +730,21 @@ for (const [name, mutate] of Object.entries(STYLESHEET_CASES)) {
   });
 }
 
-test('a package that is not strict may ship a stylesheet', async t => {
+test('an unmarked feature still cannot ship a stylesheet', async t => {
   const workspace = validWorkspace();
-  delete workspace.screen.manifest.vibesys.design;
   workspace.screen.files['src/renderer/screen.css'] = '.a { color: red; }\n';
-  workspace[BIOME_INCLUDES] = strictOverrideIncludes([]);
-  assert.deepEqual(packageGraphErrors(await materialize(t, workspace)), []);
+  const errors = packageGraphErrors(await materialize(t, workspace));
+  assert.ok(errors.some(error => error.startsWith('strict-no-stylesheets: features/screen/')));
+});
+
+test('an unmarked app cannot import a component kit', async t => {
+  const workspace = validWorkspace();
+  workspace['web-app'].files['src/index.ts'] += "import 'lucide-react';\n";
+  const errors = packageGraphErrors(await materialize(t, workspace));
+  assert.ok(errors.some(error => error.startsWith('strict-imports: apps/web-app/src/index.ts:')));
 });
 
 const RENDERER = 'features/screen/src/renderer/index.ts';
-const STATE = 'features/screen/src/state/index.ts';
 
 /** A strict import of `specifier` appended to a file: it lands on line 5. */
 function importing(file, specifier) {
@@ -770,8 +764,6 @@ const IMPORT_CASES = {
   'CSS-in-JS': importing(RENDERER, 'styled-components'),
   'an icon package': importing(RENDERER, 'lucide-react'),
   'the stylesheet entry of @vibesys/ui': importing(RENDERER, '@vibesys/ui/tokens.css'),
-  'an old feature package': importing(STATE, '@vibesys/feature-stop-run/state'),
-  'an app package': importing(STATE, '@vibesys/app-web'),
 };
 
 for (const [name, {mutate, where, names}] of Object.entries(IMPORT_CASES)) {
@@ -812,107 +804,26 @@ test('strict-imports allows the listed libraries, react-dom and tests', async t 
 test('a strict app imports the generated stylesheets of @vibesys/ui', async t => {
   const workspace = validWorkspace();
   const app = workspace['web-app'];
-  app.manifest.vibesys.design = 'strict';
   app.manifest.dependencies = {'@vibesys/ui': 'workspace:*'};
   app.files['tsconfig.lib.json'].references = [{path: '../../libs/ui/tsconfig.lib.json'}];
   app.files['src/index.ts'] =
     "import {button} from '@vibesys/ui';\nimport '@vibesys/ui/tokens.css';\nexport const a = button;\n";
   app.files['src/index.test.ts'] = "import '@radix-ui/react-dialog';\n";
-  workspace[BIOME_INCLUDES] = strictOverrideIncludes(['apps/web-app', 'features/screen']);
   assert.deepEqual(strictRules(packageGraphErrors(await materialize(t, workspace))), []);
 });
 
-test('a strict app composes strict features, and still not an old feature', async t => {
+test('an app composes feature screens without marker declarations', async t => {
   const workspace = validWorkspace();
   const app = workspace['web-app'];
-  app.manifest.vibesys.design = 'strict';
   app.manifest.dependencies = {'@vibesys/feature-screen': 'workspace:*'};
   app.files['tsconfig.lib.json'].references = [
     {path: '../../features/screen/tsconfig.renderer.json'},
   ];
   app.files['src/index.ts'] =
     "import {r} from '@vibesys/feature-screen/renderer';\nexport const a = r;\n";
-  workspace[BIOME_INCLUDES] = strictOverrideIncludes(['apps/web-app', 'features/screen']);
   assert.deepEqual(strictRules(packageGraphErrors(await materialize(t, workspace))), []);
 
   app.manifest.dependencies['@vibesys/feature-stop-run'] = 'workspace:*';
   app.files['src/index.ts'] += "import '@vibesys/feature-stop-run/renderer';\n";
-  const errors = strictRules(packageGraphErrors(await materialize(t, workspace)));
-  assert.ok(errors.some(error => error.includes('dependencies["@vibesys/feature-stop-run"]')));
-  assert.ok(errors.some(error => error.includes('imports @vibesys/feature-stop-run/renderer')));
-});
-
-const COVERAGE_CASES = {
-  'a package missing from the includes': {
-    mutate: workspace => {
-      workspace[BIOME_INCLUDES] = strictOverrideIncludes(['features/other']);
-    },
-    matches: [
-      /lack "features\/screen\/src\/\*\*\/\*\.ts"/,
-      /lack "features\/screen\/src\/\*\*\/\*\.tsx"/,
-      /list "features\/other\/src\/\*\*\/\*\.ts"/,
-      /list "features\/other\/src\/\*\*\/\*\.tsx"/,
-    ],
-  },
-  'an unmarked package listed in the includes': {
-    mutate: workspace => {
-      workspace[BIOME_INCLUDES] = strictOverrideIncludes(['features/screen', 'features/stop-run']);
-    },
-    matches: [
-      /list "features\/stop-run\/src\/\*\*\/\*\.ts"/,
-      /list "features\/stop-run\/src\/\*\*\/\*\.tsx"/,
-    ],
-  },
-  'a test exclusion dropped': {
-    mutate: workspace => {
-      workspace[BIOME_INCLUDES] = strictOverrideIncludes(['features/screen']).slice(0, -1);
-    },
-    matches: [/lack "!\*\*\/\*\.test\.tsx"/],
-  },
-  'a file excluded from the rules': {
-    mutate: workspace => {
-      workspace[BIOME_INCLUDES] = [
-        ...strictOverrideIncludes(['features/screen']),
-        '!features/screen/src/renderer/index.ts',
-      ];
-    },
-    matches: [/list "!features\/screen\/src\/renderer\/index\.ts"/],
-  },
-};
-
-for (const [name, {mutate, matches}] of Object.entries(COVERAGE_CASES)) {
-  test(`strict-lint-coverage rejects ${name}`, async t => {
-    const errors = await strictErrorsOf(t, mutate);
-    assert.equal(errors.length, matches.length, errors.join('\n'));
-    for (const [index, pattern] of matches.entries()) {
-      assert.match(errors[index], /^strict-lint-coverage: biome\.json: .*\(S5\)/);
-      assert.match(errors[index], pattern);
-    }
-  });
-}
-
-test('strict-lint-coverage requires the strict override to load both strict rules', async t => {
-  const root = await materialize(t, validWorkspace());
-  const includes = strictOverrideIncludes(['features/screen']);
-  const overrides = [{includes, plugins: [STRICT_LINT_PLUGINS[0]]}];
-  await writeFile(join(root, 'biome.json'), JSON.stringify({overrides}));
-  const errors = strictRules(packageGraphErrors(root));
-  assert.equal(errors.length, 1, errors.join('\n'));
-  assert.ok(errors[0].includes(STRICT_LINT_PLUGINS[1]), errors[0]);
-});
-
-test('strict-lint-coverage reports a Biome configuration with no strict override', async t => {
-  const root = await materialize(t, validWorkspace());
-  await writeFile(join(root, 'biome.json'), JSON.stringify({overrides: []}));
-  const errors = strictRules(packageGraphErrors(root));
-  assert.equal(errors.length, 1, errors.join('\n'));
-  assert.match(errors[0], /^strict-lint-coverage: biome\.json: has no override loading /);
-});
-
-test('a strict package with no Biome configuration is reported', async t => {
-  const root = await materialize(t, validWorkspace());
-  await rm(join(root, 'biome.json'));
-  assert.deepEqual(strictRules(packageGraphErrors(root)), [
-    'strict-lint-coverage: biome.json: is missing; it holds the strict override',
-  ]);
+  assert.deepEqual(strictRules(packageGraphErrors(await materialize(t, workspace))), []);
 });

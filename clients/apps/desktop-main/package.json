@@ -43,7 +43,8 @@
     "@vibesys/run-history": "workspace:*",
     "@vibesys/runs": "workspace:*",
     "@vibesys/settings": "workspace:*",
-    "@vibesys/transport": "workspace:*"
+    "@vibesys/transport": "workspace:*",
+    "@vibesys/ui": "workspace:*"
   },
   "devDependencies": {
     "@playwright/test": "1.55.0",

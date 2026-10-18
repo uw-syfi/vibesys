@@ -5,10 +5,12 @@
  * controls remain, floating over that strip.
  */
 
-/** Background behind the shell while its document loads. */
-const PAGE_BACKGROUND = '#0c1018';
+import {DEFAULT_THEMES, THEMES} from '@vibesys/ui/tokens';
+
+/** Match the shell's default dark theme while its document loads. */
+const PAGE_BACKGROUND = THEMES[DEFAULT_THEMES.dark].colors.bg;
 /** Foreground for the Windows/Linux control glyphs. */
-const PAGE_FOREGROUND = '#e9edf5';
+const PAGE_FOREGROUND = THEMES[DEFAULT_THEMES.dark].colors.text;
 /** Height of the shell's title bar. */
 export const TITLEBAR_HEIGHT = 40;
 

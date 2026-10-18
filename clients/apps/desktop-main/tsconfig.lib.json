@@ -57,6 +57,9 @@
     },
     {
       "path": "../../features/new-run/tsconfig.main.json"
+    },
+    {
+      "path": "../../libs/ui/tsconfig.lib.json"
     }
   ]
 }

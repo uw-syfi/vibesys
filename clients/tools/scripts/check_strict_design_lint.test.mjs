@@ -5,14 +5,13 @@ import {tmpdir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
 import test from 'node:test';
 import {fileURLToPath} from 'node:url';
-import {STRICT_LINT_PLUGINS, strictOverrideIncludes} from './check_package_graph.mjs';
+import {STRICT_LINT_PLUGINS} from './check_package_graph.mjs';
 
 // The Grit rules of the design system (docs/contributing/clients-architecture.md, "Design system
 // enforcement"): S3 `strict-no-raw-elements`, S4 `strict-no-raw-values`, and S8 for `@vibesys/ui`
-// (`strict-no-raw-values` on its TypeScript, `ui-no-raw-css-values` on its stylesheets). No strict
-// package exists yet, so the strict rules run on a fixture package under a Biome configuration
-// built from the real strict override, with its `includes` for that package; the S8 rules run
-// through the real configuration on fixtures inside `libs/ui/src`.
+// (`strict-no-raw-values` on its TypeScript, `ui-no-raw-css-values` on its stylesheets). The strict
+// rules run on a fixture package under a Biome configuration built from the real override; the S8
+// rules run through the real configuration on fixtures inside `libs/ui/src`.
 
 const WORKSPACE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const BIOME = join(WORKSPACE_ROOT, 'node_modules', '.bin', 'biome');
@@ -30,7 +29,12 @@ async function strictConfig(directory) {
       linter: {enabled: true, rules: {recommended: false}},
       overrides: [
         {
-          includes: strictOverrideIncludes(['strict-package']),
+          includes: [
+            'strict-package/src/**/*.ts',
+            'strict-package/src/**/*.tsx',
+            '!**/*.test.ts',
+            '!**/*.test.tsx',
+          ],
           plugins: override.plugins.map(plugin => join(WORKSPACE_ROOT, plugin)),
         },
       ],
@@ -46,7 +50,7 @@ function pluginDiagnostics(args, cwd) {
   );
 }
 
-/** The diagnostics for `source` as the file `path` of a fresh strict fixture package. */
+/** The diagnostics for `source` as the file `path` of a fresh fixture package. */
 async function lintStrict(t, source, path = 'strict-package/src/screen.tsx') {
   // The real path: Biome matches `includes` against paths with symlinks resolved.
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'vibesys-strict-lint-')));
@@ -62,6 +66,7 @@ async function lintInWorkspace(t, parent, name, source) {
   const fixture = await mkdtemp(join(WORKSPACE_ROOT, parent, 'strict-fixture-'));
   t.after(() => rm(fixture, {recursive: true, force: true}));
   const path = join(fixture, name);
+  await mkdir(dirname(path), {recursive: true});
   await writeFile(path, source);
   return pluginDiagnostics([path], WORKSPACE_ROOT);
 }
@@ -136,11 +141,19 @@ test('strict-no-raw-elements leaves grouping elements, components and data attri
   assert.deepEqual(await lintStrict(t, source), []);
 });
 
-test('the S3 and S4 rules do not apply to tests or to packages that are not strict', async t => {
+test('the S3 and S4 rules do not apply to tests or paths outside the override', async t => {
   const raw = 'export const a = <button style={{color: "#fff"}} />;\n';
   assert.deepEqual(await lintStrict(t, raw, 'strict-package/src/screen.test.tsx'), []);
   assert.deepEqual(await lintStrict(t, raw, 'other-package/src/screen.tsx'), []);
   assert.notEqual((await lintStrict(t, raw)).length, 0);
+});
+
+test('the workspace override covers new feature and app packages without a marker', async t => {
+  const raw = 'export const a = <button style={{color: "#fff"}} />;\n';
+  for (const folder of ['features', 'apps']) {
+    const diagnostics = await lintInWorkspace(t, folder, 'src/screen.tsx', raw);
+    assert.equal(diagnostics.length, 3);
+  }
 });
 
 // S4: raw colors and lengths in strings.
