@@ -24,7 +24,7 @@ name: `domain` (`llm-serving`, `data-structures`, `databases` or
 `[catalogue.model]` (`name`, `maker`; required for `llm-serving`) and
 `[catalogue.workload]` (`name`, `description`; required for `data-structures`).
 The compute backend is the first of the file's `backends`. The objectives come
-from the task's `objectives.toml` (none when it has none) and the goal from its
+from the task's `objectives.toml` (every in-tree task declares at least one) and the goal from its
 `OBJECTIVE.md`, cut at 32,000 characters. `vibesys example list --json` and the
 helper's `examples.list` (with `with_catalogue`, feature `example_catalogue`)
 carry them as each example's `task_details`. A task of an `external_repo`
