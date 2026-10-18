@@ -58,16 +58,28 @@ from server.host_helper_requests import (
     ProjectRun,
     Scan,
     ScannedEntry,
+    SpanEventPage,
+    TailPage,
     event_page,
 )
 from server.host_preflight import PreflightReport
 from server.run_digest import digest_journal
+from server.span_index import (
+    Entry,
+    JournalIndex,
+    StaleIndexError,
+    load_journal_index,
+    read_documents,
+    span_page,
+)
 from vs_decode.api import Unreadable, decode_json
 from vs_project.api import GitRunHistory, NullGitTrackerEvents, Project, ProjectError
 from vs_sim.api import ProcessSpec
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+
+    from pydantic import JsonValue
 
     from server.run_summary import Summarized
     from vs_logs.read import LogReader as StoreReader
@@ -77,6 +89,7 @@ if TYPE_CHECKING:
 _PYPROJECT_LIMIT_BYTES = 1 << 20
 _LAUNCH_OUTPUT_TAIL = 2000
 _LAUNCH_RECORD_LIMIT = 1 << 20
+_KEPT_INDEXES = 4
 
 
 _TALLY_CHUNK_BYTES = 1 << 20
@@ -127,6 +140,7 @@ class FileProjects:
         self._journals: dict[tuple[Path, str], Path] = {}
         self._tallies: dict[Path, JournalTally] = {}
         self._digests: dict[Path, tuple[tuple[int, int], RunDigest]] = {}
+        self._indexes: dict[Path, JournalIndex] = {}
 
     def tasks(self, project: Path) -> TaskList:
         """The project's tasks, ordered by name."""
@@ -240,6 +254,35 @@ class FileProjects:
         self._tallies[journal] = tally
         return tally
 
+    def run_span_events(
+        self, project: Path, run_id: str, span_id: str, from_sequence: int, limit: int
+    ) -> SpanEventPage:
+        """A page of the journal events of ``span_id`` and the spans beneath it, from the span index."""
+
+        def ask(index: JournalIndex) -> tuple[list[Entry], tuple[int, int, bool]]:
+            entries, total, complete = span_page(
+                index, span_id, from_sequence, limit, RUN_EVENTS_READ_MAX_BYTES
+            )
+            next_sequence = entries[-1].sequence + 1 if entries else from_sequence
+            return entries, (next_sequence, total, complete)
+
+        (next_sequence, total, complete), documents = self._indexed_read(
+            self._journal(project, run_id), ask
+        )
+        return SpanEventPage(tuple(documents), next_sequence, complete=complete, total=total)
+
+    def run_tail(
+        self, project: Path, run_id: str, before_sequence: int | None, limit: int
+    ) -> TailPage:
+        """The newest events before ``before_sequence`` that one page carries, from the span index."""
+
+        def ask(index: JournalIndex) -> tuple[list[Entry], tuple[int, bool]]:
+            entries, older = index.tail(before_sequence, limit, RUN_EVENTS_READ_MAX_BYTES)
+            return entries, (index.last_sequence, older)
+
+        (last_sequence, older), documents = self._indexed_read(self._journal(project, run_id), ask)
+        return TailPage(tuple(documents), complete=not older, last_sequence=last_sequence)
+
     def run_summary(self, project: Path, run_id: str) -> Summarized:
         """The fold of run ``run_id``'s journal, from the cache beside it and what it gained since."""
         # lint-waiver: LW-640283 [PLC0415]; the summary fold costs the helper nothing until asked.
@@ -248,6 +291,31 @@ class FileProjects:
         from server.run_summary_cache import summarize_journal  # noqa: PLC0415
 
         return summarize_journal(self._journal(project, run_id))
+
+    def _indexed_read[Facts](
+        self, journal: Path, ask: Callable[[JournalIndex], tuple[list[Entry], Facts]]
+    ) -> tuple[Facts, list[dict[str, JsonValue]]]:
+        """What ``ask`` says of ``journal``'s span index, with the events of the entries it picks.
+
+        The index of each recently read journal is kept, and checked against the journal on
+        every use (``load_journal_index``), so an answer never depends on what was kept. A
+        journal rewritten between reading the index and its events (``StaleIndexError``) is
+        read again from a fresh index; a second change in a row is the caller's failure.
+        """
+        index = self._index_of(journal, self._indexes.get(journal))
+        entries, facts = ask(index)
+        try:
+            return facts, read_documents(journal, entries)
+        except StaleIndexError:
+            entries, facts = ask(self._index_of(journal, None))
+            return facts, read_documents(journal, entries)
+
+    def _index_of(self, journal: Path, previous: JournalIndex | None) -> JournalIndex:
+        index = load_journal_index(journal, previous)
+        self._indexes[journal] = index
+        for forgotten in list(self._indexes)[:-_KEPT_INDEXES]:
+            self._indexes.pop(forgotten, None)
+        return index
 
     def _open(self, project: Path) -> Project:
         try:

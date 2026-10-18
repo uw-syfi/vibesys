@@ -41,6 +41,7 @@ from server.event_index import (
 )
 from server.host_api import StartupProgress, StartupStage
 from server.run_lifecycle import RunStatus
+from server.span_index import SpanIndexLog
 from vibesys.api import (
     AgentOutputChannel,
     AgentReply,
@@ -1220,6 +1221,8 @@ class EventStore:
         )
         self._sequences = [record.header.sequence for record in self._records]
         self._next_sequence = self._sequences[-1] + 1 if self._sequences else 1
+        # The span index beside the journal: a writable store keeps it level with every append.
+        self._span_index = None if read_only else SpanIndexLog(path)
 
     def append(self, event: RunEvent) -> RunEvent:  # noqa: D102  # lint-waiver: LW-101045 [D102]; the append contract is documented by the surrounding event-store protocol
         if self.read_only:
@@ -1243,8 +1246,12 @@ class EventStore:
                 update={"sequence": self._next_sequence, "run_id": self.run_id}
             )
             event = _bounded_recorded_event(event)
-            with self.path.open("a", encoding="utf-8") as stream:
-                stream.write(event.model_dump_json() + "\n")
+            line = event.model_dump_json().encode()
+            offset = self.path.stat().st_size if self.path.exists() else 0
+            with self.path.open("ab") as stream:
+                stream.write(line + b"\n")
+            if self._span_index is not None:
+                self._span_index.append(offset, line)
             self._next_sequence += 1
             self._records.append(
                 _StoredRecord(

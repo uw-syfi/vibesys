@@ -1464,6 +1464,7 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
     "src/entrypoints/protocol_schema.py": (EdgeKind.GENERATOR, "the protocol schema file"),
     "src/server/chat/transcript.py": (EdgeKind.STORE, "chat transcripts"),
     "src/server/event_index.py": (EdgeKind.STORE, "the event index"),
+    "src/server/span_index.py": (EdgeKind.STORE, "the journal's span index"),
     "src/server/events.py": (EdgeKind.STORE, "the run's wire event log"),
     "src/server/host_helper_machine.py": (
         EdgeKind.OS_ADAPTER,

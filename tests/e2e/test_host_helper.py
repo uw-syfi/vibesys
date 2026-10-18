@@ -66,10 +66,12 @@ _SCENARIOS = tuple(
 # the first runs.summary, never for hello (asserted below).
 # server.host_harness (the harness choice and its display names, split from host_api to hold its
 # file-length ceiling) adds 1.
-
 # server.run_digest (the run digest fold) and server.host_machine_facts (the machine facts
 # moved out of host_api) add 2 more; the summary's fold and cache load on the first request.
-_MODULE_CEILING = 352
+# server.host_run_events (the run history's messages, split out of host_api) and
+# server.span_index (the journal's span index, read by the span and tail requests) add 2 light
+# modules: the standard library and Pydantic only.
+_MODULE_CEILING = 354
 """The most modules a helper may load to answer ``hello``; lower it as the helper sheds imports."""
 _HELLO = {
     "type": "hello",

@@ -30,8 +30,8 @@ the log streams' ``LogStream``, ``LogStreamOutcome``, ``LogChunk``, ``LogPipeSpa
 ``HELPER_PROTOCOL_VERSIONS``, ``HELPER_REQUEST_FEATURES``,
 ``HELPER_FIELD_FEATURES``, ``request_features``, ``HelperFeature``,
 ``HelperRequest`` (``parse_helper_request``) and its members, the run history
-read's limits (``RUN_EVENTS_READ_MAX``, ``RUN_EVENTS_LEGACY_READ_MAX``, ``RUN_EVENTS_READ_MAX_BYTES``), ``RUN_EVENTS_FILE`` and
-``RunEventDocument``, the run summary's messages (``server.host_run_summary``), the
+read's limit (``RUN_EVENTS_READ_MAX_BYTES``), ``RUN_EVENTS_FILE``, the run history's messages
+(``server.host_run_events``), the run summary's messages (``server.host_run_summary``), the
 machine facts (``server.host_machine_facts``: ``Accelerator``, ``Gpu``, ``Hardware``,
 ``DockerReachable``, ``DockerUnreachable``, ``MachineCheckout``, ``RunCounts``,
 ``MachineDescription``) and checkout inspection (``MIN_CHECKOUT_VERSION``,
@@ -79,11 +79,20 @@ from server.host_envelope import (
     HelperRequestBase,
     RequestId,
     RunId,
+    SpanId,
 )
 from server.host_examples import CreatedProject, ExampleList
 from server.host_harness import HarnessChoice, HarnessOption
 from server.host_machine_facts import MachineDescription
 from server.host_preflight import Backend, Check, RoleName, RunOptions
+from server.host_run_events import (
+    RunsEventsForSpanReply,
+    RunsEventsForSpanRequest,
+    RunsReadEventsReply,
+    RunsReadEventsRequest,
+    RunsReadTailReply,
+    RunsReadTailRequest,
+)
 from server.host_run_summary import RunsSummaryReply, RunsSummaryRequest
 from vs_decode.api import Unreadable, decode_json
 
@@ -771,6 +780,10 @@ class HelperFeature(StrEnum):
     """``runs.summary``: everything the run level shows, from a read model kept beside the journal."""
     RUN_HISTORY_PAGES = "run_history_pages"
     """``runs.read_events``'s pages of up to ``RUN_EVENTS_READ_MAX`` events, and its ``with_totals``."""
+    RUN_SPAN_EVENTS = "run_span_events"
+    """``runs.events_for_span``: the recorded events of one span and the spans beneath it."""
+    RUN_TAIL = "run_tail"
+    """``runs.read_tail``: the newest recorded events before a sequence, in bounded pages."""
     MACHINE_DESCRIBE = "machine_describe"
     """``machine.describe``: the host's checkout, hardware, Docker, harness CLIs and run counts."""
     CHECKOUT_INSPECT = "checkout_inspect"
@@ -1052,7 +1065,7 @@ class LogsListRequest(HelperRequestBase):
 
     type: Literal["logs.list"] = "logs.list"
     instance_id: InstanceId
-    span_id: Annotated[str, StringConstraints(pattern=r"^(flow|op):\S*$")] | None = None
+    span_id: SpanId | None = None
     """Only the streams whose owner names this run-trace span (feature ``logs_by_span``)."""
 
 
@@ -1084,10 +1097,6 @@ class LogsCancelRequest(HelperRequestBase):
     read_id: RequestId
 
 
-RUN_EVENTS_READ_MAX: Final = 2000
-"""The most events one ``runs.read_events`` may ask for; more than the legacy bound needs ``run_history_pages``."""
-RUN_EVENTS_LEGACY_READ_MAX: Final = 500
-"""The most events a helper without ``run_history_pages`` serves in one page."""
 RUN_EVENTS_READ_MAX_BYTES: Final = 2 * 1024 * 1024
 """The most journal bytes one ``runs.read_events`` reply carries, so it stays a helper line.
 
@@ -1096,24 +1105,6 @@ returned alone, so every read makes progress."""
 
 RUN_EVENTS_FILE: Final = "run-events.jsonl"
 """The run's event journal, one ``RunEvent`` per line, in the run's log directory."""
-
-RunEventDocument = dict[str, JsonValue]
-"""One recorded run event as JSON: the run protocol's ``RunEvent``, which a client narrows
-with its generated type. The helper passes it through so it never imports the protocol."""
-
-
-class RunsReadEventsRequest(HelperRequestBase):
-    """A page of one run's recorded events, from its journal on disk, live or ended."""
-
-    type: Literal["runs.read_events"] = "runs.read_events"
-    project: str
-    """The project directory on the host; ``~`` expands to the helper's home."""
-    run_id: RunId
-    from_sequence: PositiveInt
-    """The first sequence to return; a run's first event is sequence 1."""
-    max: Annotated[int, Field(ge=1, le=RUN_EVENTS_READ_MAX)]
-    with_totals: bool | None = None
-    """Ask for ``total_events`` and ``total_bytes``. Sent only after ``run_history_pages``."""
 
 
 class MachineDescribeRequest(HelperRequestBase):
@@ -1165,6 +1156,8 @@ HELPER_REQUEST_FEATURES: Final[Mapping[type[HelperRequestBase], HelperFeature]] 
     LogsCancelRequest: HelperFeature.LOGS_CANCEL,
     HarnessesListRequest: HelperFeature.HARNESSES,
     RunsReadEventsRequest: HelperFeature.RUN_HISTORY,
+    RunsEventsForSpanRequest: HelperFeature.RUN_SPAN_EVENTS,
+    RunsReadTailRequest: HelperFeature.RUN_TAIL,
     RunsSummaryRequest: HelperFeature.RUN_SUMMARY,
     MachineDescribeRequest: HelperFeature.MACHINE_DESCRIBE,
     CheckoutInspectRequest: HelperFeature.CHECKOUT_INSPECT,
@@ -1220,6 +1213,8 @@ HelperRequest = Annotated[
     | LogsCancelRequest
     | HarnessesListRequest
     | RunsReadEventsRequest
+    | RunsEventsForSpanRequest
+    | RunsReadTailRequest
     | RunsSummaryRequest
     | MachineDescribeRequest
     | CheckoutInspectRequest
@@ -1385,21 +1380,6 @@ class RunsListReply(HelperReplyBase):
 
     type: Literal["runs.list"] = "runs.list"
     runs: RunList
-
-
-class RunsReadEventsReply(HelperReplyBase):
-    """One page of a run's recorded events, oldest first."""
-
-    type: Literal["runs.read_events"] = "runs.read_events"
-    events: tuple[RunEventDocument, ...]
-    next_sequence: PositiveInt
-    """The ``from_sequence`` of the next page."""
-    complete: bool
-    """The page reached the end of what the journal holds now."""
-    total_events: Annotated[int | None, Field(exclude_if=lambda total: total is None)] = None
-    """The journal's complete lines when the reply was made; only with ``with_totals``."""
-    total_bytes: Annotated[int | None, Field(exclude_if=lambda total: total is None)] = None
-    """The bytes of those lines. Present with ``total_events``."""
 
 
 class RunStartReply(HelperReplyBase):
@@ -1765,6 +1745,8 @@ HelperReply = (
     | LogsCancelReply
     | HarnessesListReply
     | RunsReadEventsReply
+    | RunsEventsForSpanReply
+    | RunsReadTailReply
     | RunsSummaryReply
     | MachineDescribeReply
     | CheckoutInspectReply

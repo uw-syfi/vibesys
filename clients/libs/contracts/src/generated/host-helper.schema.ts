@@ -1506,6 +1506,8 @@ const hostHelperSchema: Record<string, unknown> = {
         "run_history",
         "run_summary",
         "run_history_pages",
+        "run_span_events",
+        "run_tail",
         "machine_describe",
         "checkout_inspect",
         "preflight",
@@ -4319,6 +4321,119 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "RunSummary",
       "type": "object"
     },
+    "RunsEventsForSpanReply": {
+      "additionalProperties": false,
+      "description": "One page of a span's recorded events, oldest first.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "runs.events_for_span",
+          "default": "runs.events_for_span",
+          "title": "Type",
+          "type": "string"
+        },
+        "events": {
+          "items": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          "title": "Events",
+          "type": "array"
+        },
+        "next_sequence": {
+          "exclusiveMinimum": 0,
+          "title": "Next Sequence",
+          "type": "integer"
+        },
+        "complete": {
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "total": {
+          "minimum": 0,
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "events",
+        "next_sequence",
+        "complete",
+        "total"
+      ],
+      "title": "RunsEventsForSpanReply",
+      "type": "object"
+    },
+    "RunsEventsForSpanRequest": {
+      "additionalProperties": false,
+      "description": "A page of the recorded events of one run-trace span, from its journal on disk.\n\nThe events of ``span_id`` and of every span beneath it, oldest first: an event belongs\nto the span it names in ``span_id`` and, when it names none, to the span whose\n``invocation`` is its ``execution_id``. For an agent turn that is the turn's output, tool\ncalls and results, activity and usage; for a flow, those of every turn under it. Span\nevents themselves are not included: the trace already carries them.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "runs.events_for_span",
+          "default": "runs.events_for_span",
+          "title": "Type",
+          "type": "string"
+        },
+        "project": {
+          "title": "Project",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "span_id": {
+          "pattern": "^(flow|op):\\S*$",
+          "title": "Span Id",
+          "type": "string"
+        },
+        "from_sequence": {
+          "default": 1,
+          "exclusiveMinimum": 0,
+          "title": "From Sequence",
+          "type": "integer"
+        },
+        "max": {
+          "maximum": 2000,
+          "minimum": 1,
+          "title": "Max",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "project",
+        "run_id",
+        "span_id",
+        "max"
+      ],
+      "title": "RunsEventsForSpanRequest",
+      "type": "object"
+    },
     "RunsListReply": {
       "additionalProperties": false,
       "description": "The project's runs.",
@@ -4535,6 +4650,114 @@ const hostHelperSchema: Record<string, unknown> = {
         "max"
       ],
       "title": "RunsReadEventsRequest",
+      "type": "object"
+    },
+    "RunsReadTailReply": {
+      "additionalProperties": false,
+      "description": "The newest events before the request's ``before_sequence``, oldest first.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "runs.read_tail",
+          "default": "runs.read_tail",
+          "title": "Type",
+          "type": "string"
+        },
+        "events": {
+          "items": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          "title": "Events",
+          "type": "array"
+        },
+        "complete": {
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "last_sequence": {
+          "minimum": 0,
+          "title": "Last Sequence",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "events",
+        "complete",
+        "last_sequence"
+      ],
+      "title": "RunsReadTailReply",
+      "type": "object"
+    },
+    "RunsReadTailRequest": {
+      "additionalProperties": false,
+      "description": "The newest recorded events of one run before a sequence, from its journal on disk.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "runs.read_tail",
+          "default": "runs.read_tail",
+          "title": "Type",
+          "type": "string"
+        },
+        "project": {
+          "title": "Project",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "before_sequence": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Before Sequence"
+        },
+        "tail": {
+          "maximum": 2000,
+          "minimum": 1,
+          "title": "Tail",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "project",
+        "run_id",
+        "tail"
+      ],
+      "title": "RunsReadTailRequest",
       "type": "object"
     },
     "RunsSummaryReply": {
@@ -5438,8 +5661,10 @@ const hostHelperSchema: Record<string, unknown> = {
           "run.preflight": "#/$defs/RunPreflightRequest",
           "run.start": "#/$defs/RunStartRequest",
           "run.stop": "#/$defs/RunStopRequest",
+          "runs.events_for_span": "#/$defs/RunsEventsForSpanRequest",
           "runs.list": "#/$defs/RunsListRequest",
           "runs.read_events": "#/$defs/RunsReadEventsRequest",
+          "runs.read_tail": "#/$defs/RunsReadTailRequest",
           "runs.summary": "#/$defs/RunsSummaryRequest",
           "tasks.list": "#/$defs/TasksListRequest"
         },
@@ -5498,6 +5723,12 @@ const hostHelperSchema: Record<string, unknown> = {
           "$ref": "#/$defs/RunsReadEventsRequest"
         },
         {
+          "$ref": "#/$defs/RunsEventsForSpanRequest"
+        },
+        {
+          "$ref": "#/$defs/RunsReadTailRequest"
+        },
+        {
           "$ref": "#/$defs/RunsSummaryRequest"
         },
         {
@@ -5546,8 +5777,10 @@ const hostHelperSchema: Record<string, unknown> = {
           "run.preflight": "#/$defs/RunPreflightReply",
           "run.start": "#/$defs/RunStartReply",
           "run.stop": "#/$defs/RunStopReply",
+          "runs.events_for_span": "#/$defs/RunsEventsForSpanReply",
           "runs.list": "#/$defs/RunsListReply",
           "runs.read_events": "#/$defs/RunsReadEventsReply",
+          "runs.read_tail": "#/$defs/RunsReadTailReply",
           "runs.summary": "#/$defs/RunsSummaryReply",
           "tasks.list": "#/$defs/TasksListReply"
         },
@@ -5606,6 +5839,12 @@ const hostHelperSchema: Record<string, unknown> = {
           "$ref": "#/$defs/RunsReadEventsReply"
         },
         {
+          "$ref": "#/$defs/RunsEventsForSpanReply"
+        },
+        {
+          "$ref": "#/$defs/RunsReadTailReply"
+        },
+        {
           "$ref": "#/$defs/RunsSummaryReply"
         },
         {
@@ -5660,6 +5899,8 @@ const hostHelperSchema: Record<string, unknown> = {
     "logs.cancel": "logs_cancel",
     "harnesses.list": "harnesses",
     "runs.read_events": "run_history",
+    "runs.events_for_span": "run_span_events",
+    "runs.read_tail": "run_tail",
     "runs.summary": "run_summary",
     "machine.describe": "machine_describe",
     "checkout.inspect": "checkout_inspect",

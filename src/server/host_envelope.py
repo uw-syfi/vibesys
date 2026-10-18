@@ -7,7 +7,7 @@ feature's messages can live in a module of their own without reaching into ``hos
 
 Light: Pydantic and the standard library only.
 
-Public surface: ``RequestId``, ``RunId``, ``MAX_DEADLINE_MS``, ``HelperRequestBase`` and
+Public surface: ``RequestId``, ``RunId``, ``SpanId``, ``MAX_DEADLINE_MS``, ``HelperRequestBase`` and
 ``HelperReplyBase``.
 """
 
@@ -22,6 +22,9 @@ RequestId = Annotated[str, StringConstraints(min_length=1, max_length=128)]
 
 RunId = Annotated[str, StringConstraints(min_length=1)]
 """The durable run a server drives; ``vs_project`` owns its full syntax."""
+
+SpanId = Annotated[str, StringConstraints(pattern=r"^(flow|op):\S*$")]
+"""A run-trace span's identity, as the run protocol's ``SpanId``."""
 
 MAX_DEADLINE_MS = 3_600_000
 

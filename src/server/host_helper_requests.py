@@ -16,7 +16,7 @@ Public surface: ``answer``, ``connect``, ``negotiate``, ``Negotiated``,
 ``CheckoutProbe`` with the values they exchange (``ProjectRun``,
 ``ProjectLookupError``, ``ScannedEntry``, ``Scan``, ``PathHints``);
 ``complete_path``, ``select_completions``, ``split_prefix``, ``run_summaries``,
-``event_page``, ``EventPage``,
+``event_page``, ``EventPage``, ``SpanEventPage``, ``TailPage``,
 ``launch_arguments``, ``refused_argument``, ``unvetted_harness``; and the limit
 ``SCAN_LIMIT``.
 """
@@ -82,14 +82,11 @@ from server.host_api import (
     ResumeRun,
     RunConnectReply,
     RunConnectRequest,
-    RunEventDocument,
     RunList,
     RunPreflightReply,
     RunPreflightRequest,
     RunsListReply,
     RunsListRequest,
-    RunsReadEventsReply,
-    RunsReadEventsRequest,
     RunsSummaryReply,
     RunsSummaryRequest,
     RunStartReply,
@@ -119,6 +116,15 @@ from server.host_machine_facts import (
     RunCounts,
 )
 from server.host_preflight import BackendUnavailable, CheckId
+from server.host_run_events import (
+    RunEventDocument,
+    RunsEventsForSpanReply,
+    RunsEventsForSpanRequest,
+    RunsReadEventsReply,
+    RunsReadEventsRequest,
+    RunsReadTailReply,
+    RunsReadTailRequest,
+)
 from server.relay import (
     BridgeResult,
     ChannelEndOutcome,
@@ -236,6 +242,24 @@ class Projects(Protocol):
         page names the journal's complete lines and their bytes. Raises
         ``ProjectLookupError`` with ``unknown_run`` when the project has no such run; a run
         found once is not looked up again while this helper serves.
+        """
+        ...
+
+    def run_span_events(
+        self, project: Path, run_id: str, span_id: str, from_sequence: int, limit: int
+    ) -> SpanEventPage:
+        """A page of the journal events of ``span_id`` and the spans beneath it (``span_index``).
+
+        Contract as ``run_events``; a span the journal never names has an empty, complete page.
+        """
+        ...
+
+    def run_tail(
+        self, project: Path, run_id: str, before_sequence: int | None, limit: int
+    ) -> TailPage:
+        """The newest at most ``limit`` journal events with a sequence below ``before_sequence``.
+
+        Contract as ``run_events``; a run that journaled nothing has an empty, complete page.
         """
         ...
 
@@ -529,6 +553,25 @@ class EventPage:
     """The bytes of those lines; ``None`` with ``total_events``."""
 
 
+@dataclass(frozen=True)
+class SpanEventPage:
+    """One page of a span's recorded events, and where the next page starts."""
+
+    events: tuple[RunEventDocument, ...]
+    next_sequence: int
+    complete: bool
+    total: int
+
+
+@dataclass(frozen=True)
+class TailPage:
+    """The newest recorded events before a sequence, oldest first."""
+
+    events: tuple[RunEventDocument, ...]
+    complete: bool
+    last_sequence: int
+
+
 _EVENT_DOCUMENT: TypeAdapter[RunEventDocument] = TypeAdapter(RunEventDocument)
 _SEQUENCE_PREFIX = re.compile(rb'"sequence":(\d+)[,}]')
 _SEQUENCE_PREFIX_BYTES = 96
@@ -689,7 +732,12 @@ def _answer(
             reply = _instances_reply(request, host)
         case TasksListRequest() | RunsListRequest():
             reply = _project_reply(request, host)
-        case RunsReadEventsRequest() | RunsSummaryRequest():
+        case (
+            RunsReadEventsRequest()
+            | RunsEventsForSpanRequest()
+            | RunsReadTailRequest()
+            | RunsSummaryRequest()
+        ):
             reply = _run_history_reply(request, host)
         case (
             MachineDescribeRequest()
@@ -851,12 +899,41 @@ def run_counts(listing: InstanceList, now: float, timezone: tzinfo) -> RunCounts
 
 
 def _run_history_reply(
-    request: RunsReadEventsRequest | RunsSummaryRequest, host: HelperHost
-) -> RunsReadEventsReply | RunsSummaryReply:
-    """Answer one read of a run's recorded history: a page of its events, or of its summary."""
-    if isinstance(request, RunsReadEventsRequest):
-        return _run_events_reply(request, host)
-    return _run_summary_reply(request, host)
+    request: RunsReadEventsRequest
+    | RunsEventsForSpanRequest
+    | RunsReadTailRequest
+    | RunsSummaryRequest,
+    host: HelperHost,
+) -> RunsReadEventsReply | RunsEventsForSpanReply | RunsReadTailReply | RunsSummaryReply:
+    """Answer one read of a run's recorded history.
+
+    Its events (from a sequence, of a span, or the newest) or its summary.
+    """
+    if isinstance(request, RunsSummaryRequest):
+        return _run_summary_reply(request, host)
+    project = Path(_host_path(request.project, host.directories))
+    if isinstance(request, RunsEventsForSpanRequest):
+        span_page = host.projects.run_span_events(
+            project, request.run_id, request.span_id, request.from_sequence, request.max
+        )
+        return RunsEventsForSpanReply(
+            request_id=request.request_id,
+            events=span_page.events,
+            next_sequence=span_page.next_sequence,
+            complete=span_page.complete,
+            total=span_page.total,
+        )
+    if isinstance(request, RunsReadTailRequest):
+        tail = host.projects.run_tail(
+            project, request.run_id, request.before_sequence, request.tail
+        )
+        return RunsReadTailReply(
+            request_id=request.request_id,
+            events=tail.events,
+            complete=tail.complete,
+            last_sequence=tail.last_sequence,
+        )
+    return _run_events_reply(request, host)
 
 
 def _run_summary_reply(request: RunsSummaryRequest, host: HelperHost) -> RunsSummaryReply:

@@ -26,7 +26,8 @@
       "helper-paths-missing",
       "helper-machine",
       "helper-preflight-project-missing",
-      "helper-run-summary-project-missing"
+      "helper-run-summary-project-missing",
+      "helper-run-history-skips"
     ],
     "examples": [
       "helper-examples-unavailable"
