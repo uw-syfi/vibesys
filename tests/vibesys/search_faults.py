@@ -5,10 +5,11 @@ opens the ordinary way and in the ways that are particular to it (a plan with no
 checkpoint core declined). What core does to *any* wait is the same for every search: it refuses
 the decision with any `RejectionCode`, loses it, lets it time out; a turn's transport drops, the
 provider fails it, the reply is not JSON or breaks its model, the prompt does not render, the
-agent suspends it to wait for an evaluation (where the view offers that), or replies with its
-reply model filled with odd values drawn from the model's schema; an operation's owner reports a
-failure; a measurement leaves no evidence; the adoption of the winner fails. `FAULTS` lists those
-once, so a new search is held to all of them by registering its host, not by copying a menu.
+agent suspends it to wait for an evaluation (where the view offers that) and core resumes it or
+refuses its resume for good, or replies with its reply model filled with odd values drawn from
+the model's schema; an operation's owner reports a failure; a measurement leaves no evidence;
+the adoption of the winner fails. `FAULTS` lists those once, so a new search is held to all of
+them by registering its host, not by copying a menu.
 
 `play` runs one generated story: each step picks an open wait and answers it the host's way
 (``variant``) or with a fault, the operator may stop (draining or cancelling) before any step, and
@@ -43,6 +44,7 @@ from vs_core.api import (
     ReplyError,
     ReplyErrorCode,
     RequestTurn,
+    ResumeRefusal,
     Retained,
     RetainedCandidate,
     RevisionRef,
@@ -114,6 +116,15 @@ def _suspendable(run: FlowRun[Any], asked: Asked) -> bool:
 
 def _suspended(run: FlowRun[Any], asked: Asked) -> None:
     run.resume_ready(run.suspend(asked))
+
+
+def _resume_refused(reason: ResumeRefusal) -> Fault:
+    """The turn suspended, and the history its evaluations left can never back its resume."""
+    return Fault(
+        f"resume-refused({reason.value})",
+        _suspendable,
+        lambda run, asked: run.resume_refused(run.suspend(asked), reason),
+    )
 
 
 def _refused(code: RejectionCode) -> Fault:
@@ -320,6 +331,7 @@ FAULTS: tuple[Fault, ...] = (
     ),
     Fault("render-failed", _turn, lambda run, asked: run.fail(asked, FailureReason.RENDER_FAILED)),
     Fault("suspended", _suspendable, _suspended),
+    *(_resume_refused(reason) for reason in ResumeRefusal),
     Fault("odd-reply", _turn, _odd),
     Fault("odd-reply", _turn, _odd),
     Fault("odd-reply", _turn, _odd),

@@ -28,19 +28,21 @@ from tests.vibesys.orchestration.multi._host import MultiHost
 from tests.vibesys.orchestration.multi._host import config as multi_config
 from tests.vibesys.orchestration.single._host import SingleHost
 from tests.vibesys.orchestration.single._host import config as single_config
-from tests.vibesys.search_faults import play, steps, stops
+from tests.vibesys.search_faults import FAULTS, MAX_STEPS, Step, play, steps, stops
 from tests.vibesys.serial_search._replies import attribution
 from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.api.catalog import BUILT_INS
+from vibesys.orchestration.single.search.api import single
 from vibesys.plugin_registration import RuntimeRecordProjector
 from vibesys.run.contracts import IterationTree
+from vs_core.api import ResumeRefusal
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from tests.vibesys.search_faults import SearchHost, Step, Stop
+    from tests.vibesys.search_faults import SearchHost, Stop
 
 PROFILE_GUIDED = {"command": ("bash", "attribute.sh"), "timeout_seconds": 10}
 _FEW = st.integers(1, 3)
@@ -158,3 +160,46 @@ def test_a_search_ends_cleanly_whatever_core_does_to_its_waits_and_however_it_st
         play(host, story, stop, check=projects)
     finally:
         note(host.run.timeline())
+
+
+_FRESH = False
+"""Started afresh, not restarted from a saved record."""
+
+SUSPENDING: dict[str, Callable[[dict[str, Any]], SearchHost]] = {
+    "dynamic": lambda shape: dynamic_begin(
+        dynamic_config(**shape), restarting=False, view=suspending_view()
+    ),
+    "evolve": lambda shape: evolve_begin(
+        evolve_config(**shape), restarting=False, view=suspending_view()
+    ),
+    "plain": lambda shape: SEARCHES["plain"].start(shape, _FRESH),
+    "single-agent": lambda shape: SingleHost.begin(
+        single, single_config(**shape), restarting=False, view=suspending_view()
+    ),
+    "multi-agent": lambda shape: SEARCHES["multi-agent"].start(shape, _FRESH),
+}
+"""How each built-in search that lets an agent wait for its evaluations starts, offering that."""
+
+
+@pytest.mark.parametrize("reason", list(ResumeRefusal))
+@pytest.mark.parametrize("plugin_id", sorted(SUSPENDING))
+@settings(max_examples=examples(pr=2, nightly=20), deadline=None, derandomize=True, database=None)
+@given(data=st.data())
+def test_a_search_ends_cleanly_when_core_refuses_every_resume_it_waits_for(
+    *, plugin_id: str, reason: ResumeRefusal, data: st.DataObject
+) -> None:
+    """A suspended turn whose evaluations can never back a resume ends its work, never the run.
+
+    Core refuses such a resume (``ResumeRefused``) and the ask ends as a refused wait; every
+    search must end that work and go on, never ask the suspended session again or wait forever.
+    """
+    shape = data.draw(st.fixed_dictionaries(SEARCHES[plugin_id].shapes), label="config")
+    host = SUSPENDING[plugin_id](shape)
+    host.run.adopting = False
+    name = f"resume-refused({reason.value})"
+    refused = next(index for index, fault in enumerate(FAULTS) if fault.name == name)
+    try:
+        play(host, [Step(0, 0, refused)] * MAX_STEPS)
+    finally:
+        note(host.run.timeline())
+    assert "resume-refused" in host.run.timeline(), host.run.timeline()
