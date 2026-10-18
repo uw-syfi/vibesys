@@ -1,6 +1,6 @@
-"""Withdrawing ledger requests: by an operator, or when no run has leased them for the grace period.
+"""Withdrawing ledger requests: by an operator, by the run that stops wanting them, or when no run has leased them for the grace period.
 
-Both paths go through :func:`withdraw`, so a removed request and an abandoned one
+Every path goes through :func:`withdraw`, so a removed request and an abandoned one
 end the same way: the job is cancelled if it is still queued or running, and the
 attempt is recorded as withdrawn, by compare-and-swap, so a racing writer is
 never overwritten. The cancel comes first, so a crash between the
@@ -21,6 +21,7 @@ from .ledger import (
     LedgerRecord,
     LedgerState,
     Unleased,
+    held_by_others,
     lease_verdict,
     settlement,
     transitioned,
@@ -294,6 +295,49 @@ def sweep_unleased(
     return tuple(outcomes)
 
 
+def relinquish(
+    ledger: EvaluationLedger,
+    cluster: Cluster,
+    key: str,
+    *,
+    holder: str,
+    since: float,
+) -> WithdrawOutcome:
+    """Drop ``holder``'s lease on the request, and withdraw it unless another run still wants it.
+
+    ``since`` is now less the grace period: a run whose lease lapsed after it
+    may still come back for the request (``held_by_others``).
+
+    A run that stops wanting a request (it cancelled the evaluation, or it is
+    stopping) calls this, so no job is left queued for nobody. The request
+    stays, and so does its job, while another run wants it (``held_by_others``)
+    or once its job has settled: ``Kept``. Otherwise its job is cancelled and
+    the attempt withdrawn as the sweep does (``_sweep_one``): a job that already
+    ended is settled instead, and that too is ``Kept``. The condition is tested
+    again on every read the withdrawal makes, so a run that leases the request
+    meanwhile keeps its job.
+    """
+
+    def unwanted(entry: LedgerEntry) -> bool:
+        if entry.record.state.settled:
+            return False
+        return not held_by_others(entry, holder=holder, since=since)
+
+    try:
+        ledger.release(key, holder)
+        entry = ledger.read(key)
+    except LedgerError as error:
+        return WithdrawUnknown(key, str(error))
+    if entry is None:
+        return NotInLedger(key)
+    if not unwanted(entry):
+        return Kept(key, entry.record.operation_id)
+    outcome = _sweep_one(
+        ledger, cluster, entry, reason=f"its run {holder} stopped wanting it", still=unwanted
+    )
+    return Kept(key, entry.record.operation_id) if outcome is None else outcome
+
+
 def _warn_unreadable(entry: LedgerEntry) -> None:
     """Say that a lease this build cannot read holds a request, and how to free it now."""
     entry_name = entry_id(entry.record.key)
@@ -340,6 +384,7 @@ __all__ = [
     "WithdrawOutcome",
     "WithdrawUnknown",
     "Withdrawn",
+    "relinquish",
     "settle",
     "sweep_unleased",
     "withdraw",

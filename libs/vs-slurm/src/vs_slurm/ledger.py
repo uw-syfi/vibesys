@@ -690,7 +690,8 @@ class LedgerPolicy(_Document):
     """Operator policy for the ledger: how long a lease lasts and how long an unleased job lives.
 
     A run renews its lease about every third of ``lease_seconds``. A job whose
-    newest lease expired more than ``grace_seconds`` ago is cancelled.
+    newest lease expired more than ``grace_seconds`` ago is cancelled, and so is
+    one whose last run stopped wanting it, unless ``keep_jobs_on_stop`` is set.
     """
 
     lease_seconds: Annotated[float, Field(gt=0)] = 300.0
@@ -700,10 +701,18 @@ class LedgerPolicy(_Document):
     # the next asker, so a submitter that died before sbatch blocks no one longer.
     claim_seconds: Annotated[float, Field(gt=0)] = 900.0
     # Whether submitted evaluations keep running while no VibeSys process is attached.
-    # Submit-bound jobs (Phase 1) always do: a stop or a crash cancels nothing, and the
-    # grace period bounds how long an unleased job lives. Phase 2 slot jobs read it: a
-    # slot that starts while no run holds a live lease exits without claiming when false.
+    # Submit-bound jobs (Phase 1) keep running only after a crash, or after a stop when
+    # ``keep_jobs_on_stop`` is set: the grace period then bounds how long an unleased
+    # job lives. Phase 2 slot jobs read it: a slot that starts while no run holds a
+    # live lease exits without claiming when false.
     run_while_detached: bool = True
+    # Whether a run that stops, or cancels an evaluation, leaves the job for a later
+    # resume to reattach to. False: it drops its lease and withdraws, cancelling its
+    # job, every request no other run has leased within the grace period
+    # (``relinquish``), so no job outlives the runs that want it; only a crash leaves
+    # jobs behind, for the grace sweep. True: it only drops its lease (a stop leaves
+    # even that to lapse), and the grace sweep cancels the job.
+    keep_jobs_on_stop: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -740,6 +749,31 @@ def lease_verdict(entry: LedgerEntry, *, now: float, grace_seconds: float) -> Le
     )
     until = expired_at + grace_seconds
     return Leased(until) if now <= until else Unleased(expired_at)
+
+
+def held_by_others(entry: LedgerEntry, *, holder: str, since: float) -> bool:
+    """Whether a run other than ``holder`` has wanted the request at any time since ``since``. Pure.
+
+    ``since`` is now less the grace period: another run wants the request
+    while its lease holds, and for the grace period after it lapsed, since it
+    may resume and reattach. Another run's claim still being submitted counts
+    until it expires, so a submitter that has not written its lease yet counts
+    too; a run that released its lease (it relinquished the request) does not.
+    A lease this build cannot read counts as another run's unless it names
+    ``holder``, and expires one claim window after its file was last written.
+    """
+    record = entry.record
+    expiries = [
+        *(lease.expires_at for lease in entry.leases if lease.holder != holder),
+        *(
+            lease.written_at + entry.claim_window
+            for lease in entry.unreadable_leases
+            if lease.holder != holder
+        ),
+    ]
+    if record.owner != holder and record.state is LedgerState.SUBMITTING:
+        expiries.append(record.claim_expires_at)
+    return any(expiry >= since for expiry in expiries)
 
 
 @dataclass(frozen=True, slots=True)

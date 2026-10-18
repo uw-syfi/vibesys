@@ -41,6 +41,7 @@ from vs_slurm.api import (
     handle_of_job,
     job_of_handle,
     ledger_operation_id,
+    relinquish,
     settle,
     settlement,
     submit_step,
@@ -127,6 +128,9 @@ class SlurmLedgerAttachment:
     clock: Clock
     _renewed: dict[str, float] = field(default_factory=dict)
     _swept_at: float | None = None
+    # Which of this run's evaluations use each request, and the request of each.
+    _users: dict[str, set[str]] = field(default_factory=dict)
+    _used: dict[str, str] = field(default_factory=dict)
     _orphans: OrphanChecks = field(init=False)
 
     def __post_init__(self) -> None:
@@ -199,6 +203,44 @@ class SlurmLedgerAttachment:
         """Drop this run's lease: the job lives on for the grace period, or for other holders."""
         self.ledger.release(key, self.holder)
         self._renewed.pop(key, None)
+
+    def use(self, key: str, user: str) -> None:
+        """Note that this run's evaluation ``user`` attaches to the request ``key``."""
+        self._used[user] = key
+        self._users.setdefault(key, set()).add(user)
+
+    def stop_using(self, user: str, key: str | None = None) -> str | None:
+        """Forget that ``user`` uses its request; the request, if no other evaluation here uses it.
+
+        ``key`` names the request when ``use`` was never called for it in this
+        process (a run that resumed an attached evaluation). Two evaluations of
+        one run with the same content share a request and its job: only the
+        last to stop using it may relinquish it.
+        """
+        key = self._used.pop(user, key)
+        if key is None:
+            return None
+        users = self._users.get(key, set())
+        users.discard(user)
+        if users:
+            return None
+        self._users.pop(key, None)
+        return key
+
+    def relinquish(self, cluster: Cluster, key: str) -> WithdrawOutcome:
+        """Stop wanting ``key``: drop this run's lease, and withdraw it if no other run wants it.
+
+        The request's job is cancelled unless another run has leased the request
+        within the grace period, or the job has already ended (``relinquish``).
+        """
+        self._renewed.pop(key, None)
+        return relinquish(
+            self.ledger,
+            cluster,
+            key,
+            holder=self.holder,
+            since=self.clock.now() - self.policy.grace_seconds,
+        )
 
     def heartbeat(self, cluster: Cluster, key: str, operation_id: str) -> None:
         """Keep an attached request leased, and sweep the project when a sweep is due.

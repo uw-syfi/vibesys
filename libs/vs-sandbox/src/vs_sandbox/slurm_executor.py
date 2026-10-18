@@ -64,6 +64,7 @@ from vs_slurm.api import (
     JobLife,
     LedgerError,
     LedgerLabels,
+    NotInLedger,
     Queued,
     Running,
     SlurmBatchHandle,
@@ -75,6 +76,8 @@ from vs_slurm.api import (
     SlurmSubmissionRejectedError,
     SlurmTreeArtifact,
     Unknown,
+    Withdrawn,
+    WithdrawUnknown,
     advance_with_notice,
     recorded_job_ids,
     validate_cluster_operation_id,
@@ -464,7 +467,9 @@ class SlurmEvaluationExecutor:
         self._poll_wakeups: dict[str, asyncio.Event] = {}
         self._ledger = ledger
         self._ledger_candidate = ledger_candidate
-        # Set by ``close`` in ledger mode: stopping leaves every job to the ledger.
+        # Set by ``close``: no submission is taken after it.
+        self._closing = False
+        # Set by ``close`` when the ledger keeps jobs on a stop: they are left to it.
         self._detaching = False
 
     async def availability(self, requirements: ResourceRequirements) -> AvailabilitySnapshot:
@@ -497,6 +502,10 @@ class SlurmEvaluationExecutor:
         if handle_id in self._tasks:
             self._validate_durable_request(handle_id, request, self._read_evaluation(handle_id))
             return
+        if self._closing:
+            # Refused before anything is written or sent; ambiguous, not rejected, so
+            # a later run under the same handle may still submit it.
+            raise ExecutorSubmissionError(_SlurmExecutionError.closing(handle_id))
         try:
             stages = self._parse_stages(request)
         except ValueError as exc:
@@ -813,12 +822,15 @@ class SlurmEvaluationExecutor:
         # acknowledged, so a later inspect or cancel reconciles it to CANCELED.
 
     async def close(self) -> None:
-        """Cancel and drain every background execution owned by this executor.
+        """Refuse new submissions, then cancel and drain every execution this executor owns.
 
-        With the evaluation ledger, closing detaches instead: every job keeps
-        running, its record keeps it resumable, and its lease lapses.
+        With the evaluation ledger, a cancel withdraws a request no other run wants
+        (``_release``). When the ledger keeps jobs on a stop, closing detaches
+        instead: every job keeps running, its record keeps it resumable, and its
+        lease lapses.
         """
-        if self._ledger is not None:
+        self._closing = True
+        if self._ledger is not None and self._ledger.policy.keep_jobs_on_stop:
             self._detaching = True
             await self._drain()
             return
@@ -1044,6 +1056,7 @@ class SlurmEvaluationExecutor:
         labels = LedgerLabels(candidate=self._ledger_candidate, workstream=request.owner_scope)
         deadline = self._clock.now() + self._job_timeout_seconds
         key = await self._in_thread(ledger.key, batch)
+        ledger.use(key, handle_id)
         while True:
             step = asyncio.ensure_future(
                 self._in_thread(ledger.attach, self._cluster, batch, labels=labels, key=key)
@@ -1597,24 +1610,38 @@ class SlurmEvaluationExecutor:
     async def _release(
         self, ledger: SlurmLedgerAttachment, handle_id: str
     ) -> _CancelOutcome | None:
-        """Let go of a ledger job instead of cancelling it; None for a job outside the ledger.
+        """Let go of a ledger job; None when the job is still to be cancelled here.
 
-        Stopping (``close``) leaves even the lease. Otherwise this run drops its
-        lease, and the ledger cancels the job once no run has leased it for the
-        grace period. A job this run attached to before the operator enabled the
-        ledger is cancelled as before.
+        This run stops wanting the request (``SlurmLedgerAttachment.relinquish``):
+        unless another run wants it, the ledger cancels its job, which is then
+        confirmed ended here like any other. When the ledger keeps jobs on a stop,
+        this run only drops its lease, and a stop (``close``) leaves even that. A
+        job this run attached to before the operator enabled the ledger is
+        cancelled as before.
         """
         if self._detaching:
             return _CancelRequested(None)
         durable = self._read_evaluation(handle_id)
-        if durable is None or durable.handle is None:
-            # No job is attached: a submission this run started is the ledger's,
-            # held by this run's lease until it lapses.
-            return _CancelConfirmed()
-        if durable.ledger_key is None:
+        attached = durable is not None and durable.handle is not None
+        known = durable.ledger_key if durable is not None and attached else None
+        if attached and known is None:
             return None
-        await self._finish_in_thread(ledger.release, durable.ledger_key)
-        return _CancelConfirmed()
+        if ledger.policy.keep_jobs_on_stop:
+            # Without a job attached, a submission this run started is held by its lease.
+            if known is not None:
+                await self._finish_in_thread(ledger.release, known)
+            return _CancelConfirmed()
+        key = ledger.stop_using(handle_id, known)
+        if key is None:
+            return _CancelConfirmed()  # never claimed, or another evaluation here still uses it
+        outcome = await self._finish_in_thread(ledger.relinquish, self._cluster, key)
+        if isinstance(outcome, WithdrawUnknown):
+            raise ExecutorCancellationUnknownError(handle_id)
+        return (
+            None
+            if attached and isinstance(outcome, Withdrawn | NotInLedger)
+            else _CancelConfirmed()
+        )
 
     async def _cancel_scheduler_job(
         self, handle_id: str, *, resend: bool = False
@@ -1956,3 +1983,7 @@ class _SlurmExecutionError(RuntimeError):
     @classmethod
     def deadline_exceeded(cls, timeout_seconds: int) -> _SlurmExecutionError:
         return cls(f"Slurm evaluation exceeded its {timeout_seconds}-second deadline")
+
+    @classmethod
+    def closing(cls, handle_id: str) -> _SlurmExecutionError:
+        return cls(f"Slurm evaluation {handle_id!r} arrived while its executor was closing")

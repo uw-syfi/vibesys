@@ -1,4 +1,10 @@
-"""The Slurm executor with the evaluation ledger (#2757): restarts reattach, nothing is cancelled.
+"""The Slurm executor with the evaluation ledger (#2757): runs share jobs, and stopped runs leave none.
+
+A run that stops, or cancels an evaluation, withdraws each request no other run
+wants, cancelling its job. With ``keep_jobs_on_stop`` it cancels nothing: a
+restart reattaches to the same job, and the grace sweep ends one nobody comes
+back for. A crash leaves jobs as that policy does; the tests that stand for a
+crash close a run under it.
 
 Each test runs one or two "runs" (executors with their own run directory and
 lease holder) against one Fake scheduler and one Fake ledger. The scheduler's
@@ -65,6 +71,9 @@ pytestmark = pytest.mark.asyncio
 PROJECT = "demo-0123456789ab"
 LEASE_S = 300.0
 GRACE_S = 1800.0
+DEFAULT_POLICY = LedgerPolicy(lease_seconds=LEASE_S, grace_seconds=GRACE_S)
+# A run that stops keeping its jobs, for a later restart, leaves them as a crash does.
+KEEPING = DEFAULT_POLICY.model_copy(update={"keep_jobs_on_stop": True})
 # Only guards a hang: every wait below ends on an event the test already caused.
 _BOUND_S = 60.0
 CONFIG = SlurmConfig(
@@ -237,7 +246,7 @@ class _World:
         *,
         content: str = "print('bench')",
         sleeper: _ParkingSleeper | _ClockSleeper | None = None,
-        claim_seconds: float = 900.0,
+        policy: LedgerPolicy = DEFAULT_POLICY,
     ) -> _Run:
         workspace = root / "workspace"
         workspace.mkdir(parents=True, exist_ok=True)
@@ -258,9 +267,7 @@ class _World:
                 config=CONFIG,
                 project=PROJECT,
                 holder=holder,
-                policy=LedgerPolicy(
-                    lease_seconds=LEASE_S, grace_seconds=GRACE_S, claim_seconds=claim_seconds
-                ),
+                policy=policy,
                 clock=self.clock,
             ),
             ledger_candidate="0f3c9e1",
@@ -312,7 +319,7 @@ async def test_a_job_submitted_before_a_stop_is_the_same_job_after_a_restart(
     tmp_path: Path, restart: str
 ) -> None:
     world = _World()
-    first = world.run(tmp_path / "run-1", "run-1")
+    first = world.run(tmp_path / "run-1", "run-1", policy=KEEPING)
     await _attached(first, "eval-1")
     (operation,) = world.scheduler.jobs
 
@@ -321,12 +328,12 @@ async def test_a_job_submitted_before_a_stop_is_the_same_job_after_a_restart(
     assert world.entry_state() is LedgerState.SUBMITTED
 
     if restart == "resume":
-        second = world.run(tmp_path / "run-1", "run-1")
+        second = world.run(tmp_path / "run-1", "run-1", policy=KEEPING)
         handle_id = "eval-1"
         assert await second.executor.inspect(handle_id) is not None
     else:
         # A fresh relaunch: a new run directory, a new worktree path, the same content.
-        second = world.run(tmp_path / "run-2" / "elsewhere", "run-2")
+        second = world.run(tmp_path / "run-2" / "elsewhere", "run-2", policy=KEEPING)
         handle_id = "eval-2"
         await second.executor.submit(_request(), handle_id=handle_id)
     await second.parked(handle_id)
@@ -340,7 +347,7 @@ async def test_a_job_that_finished_while_vibesys_was_down_is_collected_not_rerun
     tmp_path: Path,
 ) -> None:
     world = _World()
-    first = world.run(tmp_path / "run-1", "run-1")
+    first = world.run(tmp_path / "run-1", "run-1", policy=KEEPING)
     await _attached(first, "eval-1")
     await first.executor.close()
     world.clock.advance(10 * (world.scheduler.queue_s + world.scheduler.run_s))
@@ -368,23 +375,58 @@ async def test_two_runs_asking_for_one_request_share_one_job(tmp_path: Path) -> 
     assert {lease.holder for lease in entry.leases} == {"run-0", "run-1"}
 
 
+@pytest.mark.parametrize("policy", [DEFAULT_POLICY, KEEPING], ids=["default", "keeping"])
 async def test_cancel_lets_go_of_the_job_and_ends_the_evaluation_for_this_run(
-    tmp_path: Path,
+    tmp_path: Path, policy: LedgerPolicy
 ) -> None:
+    keep_jobs_on_stop = policy.keep_jobs_on_stop
     world = _World()
-    run = world.run(tmp_path / "run-1", "run-1")
+    run = world.run(tmp_path / "run-1", "run-1", policy=policy)
     await _attached(run, "eval-1")
     (operation,) = world.scheduler.jobs
 
     await run.executor.cancel("eval-1")
 
-    assert world.scheduler.status(operation) is SlurmJobStatus.PENDING
+    # No other run wants the request: by default its job is cancelled with it.
+    expected = SlurmJobStatus.PENDING if keep_jobs_on_stop else SlurmJobStatus.CANCELLED
+    assert world.scheduler.status(operation) is expected
     entry = world.ledger.read(world.only_key())
     assert entry is not None
     assert entry.leases == ()
-    restarted = world.run(tmp_path / "run-1", "run-1")
-    assert (await restarted.terminal("eval-1")).state is EvaluationState.CANCELED
+    assert (entry.record.state is LedgerState.WITHDRAWN) is not keep_jobs_on_stop
     await run.executor.close()
+    restarted = world.run(tmp_path / "run-1", "run-1", policy=policy)
+    assert (await restarted.terminal("eval-1")).state is EvaluationState.CANCELED
+    await restarted.executor.close()
+
+
+async def test_a_stop_cancels_the_job_of_a_request_no_other_run_wants(tmp_path: Path) -> None:
+    world = _World()
+    run = world.run(tmp_path / "run-1", "run-1")
+    await _attached(run, "eval-1")
+    (operation,) = world.scheduler.jobs
+
+    await run.executor.close()
+
+    assert world.scheduler.status(operation) is SlurmJobStatus.CANCELLED
+    assert world.entry_state() is LedgerState.WITHDRAWN
+
+
+async def test_a_job_another_run_still_wants_outlives_a_stop_until_that_run_stops(
+    tmp_path: Path,
+) -> None:
+    world = _World()
+    runs = [world.run(tmp_path / f"run-{index}", f"run-{index}") for index in range(2)]
+    for index, run in enumerate(runs):
+        await _attached(run, f"eval-{index}")
+    (operation,) = world.scheduler.jobs
+
+    await runs[0].executor.close()
+    assert world.scheduler.status(operation) is SlurmJobStatus.PENDING
+    assert world.entry_state() is LedgerState.SUBMITTED
+
+    await runs[1].executor.close()
+    assert world.scheduler.status(operation) is SlurmJobStatus.CANCELLED
 
 
 async def test_an_attached_run_observes_a_withdrawal_as_cancelled(tmp_path: Path) -> None:
@@ -418,7 +460,8 @@ async def test_a_job_no_run_leases_is_cancelled_by_another_runs_sweep_after_its_
 ) -> None:
     world = _World()
     world.scheduler.queue_s = math.inf
-    stopped = world.run(tmp_path / "run-1", "run-1")
+    # A run that stops keeping its job, as a crashed one leaves it.
+    stopped = world.run(tmp_path / "run-1", "run-1", policy=KEEPING)
     await _attached(stopped, "eval-1")
     (abandoned,) = world.scheduler.jobs
     await stopped.executor.close()
@@ -449,7 +492,12 @@ async def test_a_claim_whose_submitter_died_before_sbatch_is_taken_over_once_it_
     """
     world = _World()
     claim_s = 120.0
-    dead = world.run(tmp_path / "run-1", "run-1", claim_seconds=claim_s)
+    # A crash leaves the claim behind, as a stop that keeps its jobs does.
+    dead = world.run(
+        tmp_path / "run-1",
+        "run-1",
+        policy=KEEPING.model_copy(update={"claim_seconds": claim_s}),
+    )
     world.scheduler.crash_submits = 1
     await dead.executor.submit(_request(), handle_id="eval-1")
     await dead.parked("eval-1")
@@ -459,7 +507,10 @@ async def test_a_claim_whose_submitter_died_before_sbatch_is_taken_over_once_it_
 
     start = world.clock.now()
     run = world.run(
-        tmp_path / "run-2", "run-2", sleeper=_ClockSleeper(world.clock), claim_seconds=claim_s
+        tmp_path / "run-2",
+        "run-2",
+        sleeper=_ClockSleeper(world.clock),
+        policy=DEFAULT_POLICY.model_copy(update={"claim_seconds": claim_s}),
     )
     await run.executor.submit(_request(), handle_id="eval-2")
     finished = await _finished(run.executor, "eval-2")
@@ -572,7 +623,12 @@ async def test_a_slow_submission_keeps_its_claim_by_renewing_it(tmp_path: Path) 
     world = _World()
     claim_s = 120.0
     sleeper = _SteppedKeeperSleeper()
-    run = world.run(tmp_path / "run-1", "run-1", sleeper=sleeper, claim_seconds=claim_s)
+    run = world.run(
+        tmp_path / "run-1",
+        "run-1",
+        sleeper=sleeper,
+        policy=DEFAULT_POLICY.model_copy(update={"claim_seconds": claim_s}),
+    )
     loop = asyncio.get_running_loop()
     waited: list[object] = []
 
