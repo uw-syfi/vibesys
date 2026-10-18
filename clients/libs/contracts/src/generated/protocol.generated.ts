@@ -312,8 +312,11 @@ export type Text3 = string;
 export type Metric = string | null;
 export type Unit = string | null;
 export type Direction = ("max" | "min") | null;
-export type CorrectnessCheck = string[];
 export type Name1 = string;
+export type Direction1 = "max" | "min";
+export type Objectives = TaskObjective[];
+export type CorrectnessCheck = string[];
+export type Name2 = string;
 export type Version = string;
 export type ProtocolVersion20 = 1;
 export type Sequence1 = number;
@@ -680,7 +683,7 @@ export type SettlementId = string | null;
 export type Kind45 = "measurement_compared";
 export type Metric3 = string;
 export type Unit3 = string | null;
-export type Direction1 = "max" | "min";
+export type Direction2 = "max" | "min";
 export type CandidateCommit = string;
 export type BaseCommit = string;
 export type CandidateValue = number;
@@ -859,7 +862,7 @@ export type ChildCount = number;
 export type Id3 = string;
 export type Value4 = number | null;
 export type Unit4 = string | null;
-export type Direction2 = ("max" | "min") | null;
+export type Direction3 = ("max" | "min") | null;
 export type HeadlineMetrics = IterationMetric[];
 export type Items = IterationSummary[];
 export type NextCursor = string | null;
@@ -935,7 +938,7 @@ export type Kind54 = "gate_stage";
 export type ExecutionId2 = string;
 export type Attempt4 = number;
 export type Kind55 = "tool_build";
-export type Name2 = string;
+export type Name3 = string;
 export type Kind56 = "run_narration";
 export type At = string;
 /**
@@ -956,13 +959,19 @@ export type StartedBy = string[];
 export type Stage3 = string;
 export type MetricValue1 = number | null;
 export type VsBaseline1 = number | null;
+export type Name4 = string;
+export type Finite = number;
+export type Direction4 = "max" | "min";
+export type Unit5 = string | null;
+export type InputMetrics = MetricRow[];
+export type Metrics = MetricRow[];
 /**
  * Closed measurement kinds used for eligibility requirements.
  */
 export type EvidenceKind = "correctness" | "benchmark" | "profiling";
 export type Completed = number | null;
 export type Required = number | null;
-export type Unit5 = string | null;
+export type Unit6 = string | null;
 export type Call = number;
 export type HypothesisId1 = string | null;
 export type ParentRevision = string | null;
@@ -1543,7 +1552,15 @@ export interface ObjectiveOverview {
   metric?: Metric;
   unit?: Unit;
   direction?: Direction;
+  objectives?: Objectives;
   correctness_check?: CorrectnessCheck;
+}
+/**
+ * One axis the task compares candidates on, and which way is better.
+ */
+export interface TaskObjective {
+  name: Name1;
+  direction: Direction1;
 }
 /**
  * What measured the run.
@@ -1558,7 +1575,7 @@ export interface BenchmarkVersions {
  * The evaluator package a run measures with, as the task's manifest pins it.
  */
 export interface EvaluatorIdentity {
-  name: Name1;
+  name: Name2;
   version: Version;
 }
 /**
@@ -2161,7 +2178,7 @@ export interface MeasurementComparedData {
   kind: Kind45;
   metric: Metric3;
   unit?: Unit3;
-  direction: Direction1;
+  direction: Direction2;
   candidate_commit: CandidateCommit;
   base_commit: BaseCommit;
   candidate_value: CandidateValue;
@@ -2367,7 +2384,7 @@ export interface IterationMetric {
   id: Id3;
   value?: Value4;
   unit?: Unit4;
-  direction?: Direction2;
+  direction?: Direction3;
 }
 /**
  * Typed absence, kept distinct from a supported empty tree.
@@ -2524,7 +2541,7 @@ export interface GateStage {
 export interface ToolBuild {
   span_id?: SpanId | null;
   kind: Kind55;
-  name: Name2;
+  name: Name3;
 }
 /**
  * The run's own narration for humans: what it is doing, warnings, tracebacks.
@@ -2599,7 +2616,18 @@ export interface GateAttrs {
   stage: Stage3;
   metric_value?: MetricValue1;
   vs_baseline?: VsBaseline1;
+  input_metrics?: InputMetrics;
+  metrics?: Metrics;
   failed?: FailedCheck | null;
+}
+/**
+ * One measured quantity on a declared axis.
+ */
+export interface MetricRow {
+  name: Name4;
+  value: Finite;
+  direction: Direction4;
+  unit?: Unit5;
 }
 /**
  * The trusted check that rejected a candidate, and how far it came when it reported that.
@@ -2611,7 +2639,7 @@ export interface FailedCheck {
   check: EvidenceKind;
   completed?: Completed;
   required?: Required;
-  unit?: Unit5;
+  unit?: Unit6;
 }
 /**
  * A planning call: which call of the run it is.

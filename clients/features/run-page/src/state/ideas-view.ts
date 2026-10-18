@@ -1,6 +1,7 @@
 /**
  * The run level's Ideas face: one row per candidate, running first and then the rest newest
- * first, the failed collapsed behind a `+ N failed` row unless the filter shows them. The tree
+ * first, the failed shown with the rest unless the filter hides them (`+ N failed` then stands
+ * for them). The tree
  * layout (`ideas-tree.ts`) draws the same rows nested under what each built on.
  *
  * Rows are memoized on the candidate tree and the filter, so a render with neither changed builds
@@ -22,7 +23,7 @@ export const IDEAS_FILTER_DEFAULT: IdeasFilter = {
   query: '',
   passed: true,
   running: true,
-  failed: false,
+  failed: true,
 };
 
 export type IdeaTone = 'ok' | 'err' | 'muted';

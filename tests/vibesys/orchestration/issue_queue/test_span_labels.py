@@ -103,6 +103,8 @@ def test_the_accuracy_proof_is_a_gate_and_the_adopted_tip_is_the_adoption(
         "stage": "accuracy",
         "metric_value": None,
         "vs_baseline": None,
+        "input_metrics": [],
+        "metrics": [],
         "failed": None,
     }
     (adoption,) = labelled(host, "adoption")

@@ -375,7 +375,7 @@ describe('token usage', () => {
     {span: 'turn:impl:100', input: 18_000, output: 1_000},
   ]);
 
-  test('the list gives each agent its total in a tokens column, exact on hover', async () => {
+  test('the list gives each agent an in and an out column, with the cached share beside the input', async () => {
     const view = await mount(
       <AgentsView
         {...base(MODEL, [])}
@@ -385,16 +385,18 @@ describe('token usage', () => {
         compact={false}
       />,
     );
-    expect(view.textContent).toContain('tokens');
-    expect(option(view, 'implementer').textContent).toContain('51k');
-    expect(option(view, 'orchestrator').textContent).not.toMatch(/\d+(\.\d)?k/);
-    const figure = option(view, 'implementer').querySelector('.vs-pickrow-measure');
-    expect(figure?.getAttribute('title')).toBe(
-      'Input 48,000 (24,000 cached)\nOutput 3,000 (500 reasoning)\nTotal 51,000',
+    expect(view.textContent).toContain('in (cached)');
+    expect(view.textContent).toContain('out');
+    const row = option(view, 'implementer');
+    const [input, output] = [...row.querySelectorAll('.vs-pickrow-measure')];
+    expect(input?.textContent).toBe('48k 24k cached');
+    expect(output?.textContent).toBe('3k');
+    expect(input?.getAttribute('title')).toBe(
+      'Input 48,000 (24,000 cached, 24,000 uncached)\nOutput 3,000 (500 reasoning)\nTotal 51,000',
     );
   });
 
-  test('a row without a reading keeps the column’s cell, so every row’s figures line up', async () => {
+  test('an agent whose turns are still running says running, one that reported nothing says unknown', async () => {
     const view = await mount(
       <AgentsView
         {...base(MODEL, [])}
@@ -404,8 +406,13 @@ describe('token usage', () => {
         compact={false}
       />,
     );
-    const cells = options(view).map(each => each.querySelector('.vs-pickrow-measure')?.textContent);
-    expect(cells).toEqual(['', '51k']);
+    const cells = options(view).map(each =>
+      [...each.querySelectorAll('.vs-pickrow-measure')].map(cell => cell.textContent),
+    );
+    expect(cells).toEqual([
+      ['running', ''],
+      ['48k 24k cached', '3k'],
+    ]);
   });
 
   test('a run that reports no tokens has no column at all', async () => {
@@ -429,14 +436,14 @@ describe('token usage', () => {
     const view = await mount(
       <AgentPane {...base(MODEL, [])} tokens={LEDGER} core={null} agent={agent} />,
     );
-    expect(view.textContent).toMatch(/tokens\s*51k/);
+    expect(view.textContent).toMatch(/tokens\s*in 48k \(24k cached\) · out 3k/);
     expect(options(view).map(each => each.textContent)).toEqual([
-      expect.stringMatching(/Pad the ring.*32k/),
-      expect.stringMatching(/Measure it.*19k/),
+      expect.stringMatching(/Pad the ring.*in 30k \(24k cached\) · out 2k/),
+      expect.stringMatching(/Measure it.*in 18k \(cached unknown\) · out 1k/),
     ]);
   });
 
-  test('a turn whose provider reported no counts shows none, not a zero', async () => {
+  test('a turn whose provider reported no counts says unknown, not a zero', async () => {
     const quiet = ledgerOf([{span: 'turn:impl:2'}]);
     const agent = MODEL.agents.agents.find(each => each.id === 'impl');
     if (agent === undefined) throw new Error('no agent');

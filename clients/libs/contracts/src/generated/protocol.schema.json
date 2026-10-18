@@ -1583,6 +1583,13 @@
       "title": "DiagnosticSeverity",
       "type": "string"
     },
+    "Direction": {
+      "enum": [
+        "max",
+        "min"
+      ],
+      "type": "string"
+    },
     "DynamicSpanAttributes": {
       "additionalProperties": false,
       "properties": {
@@ -2342,6 +2349,9 @@
       "title": "FailureKind",
       "type": "string"
     },
+    "Finite": {
+      "type": "number"
+    },
     "FrameworkSource": {
       "description": "Closed set of framework subsystems that emit framework events.",
       "enum": [
@@ -2436,6 +2446,22 @@
           ],
           "default": null,
           "title": "Vs Baseline"
+        },
+        "input_metrics": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/MetricRow"
+          },
+          "title": "Input Metrics",
+          "type": "array"
+        },
+        "metrics": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/MetricRow"
+          },
+          "title": "Metrics",
+          "type": "array"
         },
         "failed": {
           "anyOf": [
@@ -3845,6 +3871,42 @@
       "title": "MeasurementVerdict",
       "type": "string"
     },
+    "MetricRow": {
+      "additionalProperties": false,
+      "description": "One measured quantity on a declared axis.",
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/Finite"
+        },
+        "direction": {
+          "$ref": "#/$defs/Direction"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        }
+      },
+      "required": [
+        "name",
+        "value",
+        "direction"
+      ],
+      "title": "MetricRow",
+      "type": "object"
+    },
     "MultiAgentSpanAttributes": {
       "additionalProperties": false,
       "properties": {
@@ -4013,6 +4075,14 @@
           ],
           "default": null,
           "title": "Direction"
+        },
+        "objectives": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TaskObjective"
+          },
+          "title": "Objectives",
+          "type": "array"
         },
         "correctness_check": {
           "default": [],
@@ -7342,6 +7412,31 @@
         "latest_sequence"
       ],
       "title": "SubscribedMessage",
+      "type": "object"
+    },
+    "TaskObjective": {
+      "additionalProperties": false,
+      "description": "One axis the task compares candidates on, and which way is better.",
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "direction": {
+          "enum": [
+            "max",
+            "min"
+          ],
+          "title": "Direction",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "direction"
+      ],
+      "title": "TaskObjective",
       "type": "object"
     },
     "TodoItemData": {

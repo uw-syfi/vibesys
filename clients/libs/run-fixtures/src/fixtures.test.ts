@@ -111,6 +111,21 @@ describe('each scenario shows its case', () => {
     expect(tree.best?.adopted).toBe(true);
   });
 
+  it('ten ideas: six passed and four failed, the best five steps from the input, tokens partly unknown', () => {
+    const fixture = fixtureNamed('finished-ten-ideas');
+    const tree = treeOf(fixture);
+    expect(fixture.state).toBe('finished');
+    expect(tree.candidates.filter(c => c.outcome === 'passed')).toHaveLength(6);
+    expect(tree.candidates.filter(c => c.outcome === 'failed')).toHaveLength(4);
+    expect(tree.bestPath).toHaveLength(5);
+    const usage = fixture.events
+      .filter(event => event.type === 'turn_usage_recorded')
+      .map(event => event.data ?? {});
+    // One turn reported no cache counts and one reported nothing.
+    expect(usage).toHaveLength(9);
+    expect(usage.some(each => !('cache_read_input_tokens' in each))).toBe(true);
+  });
+
   it('14 days: 600 ideas, about 40 passed, three running, a long winning path', () => {
     const tree = treeOf(weeksRun());
     const passed = tree.candidates.filter(candidate => candidate.outcome === 'passed').length;

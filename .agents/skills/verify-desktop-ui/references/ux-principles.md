@@ -70,6 +70,26 @@ can decide it.
     `pane-fill` check: the column holding wrapped text covers at least 85% of
     its pane's inner width.
 
+## Show failures, keep figures calm
+
+14. **Failures are shown with the rest.** A failed idea is listed, in the tree and
+    the list, with its reason in words; a filter may hide failures, never the
+    default. Enforced by the ten-idea journey of the desktop shell's end-to-end suite.
+15. **One figure per tile, in one voice.** A measure is a tile: its name in
+    words, one large ratio with what it means ("faster than input"), a quiet line
+    with its value and the reference, both with the unit, in one font. No chip
+    competes with the figure. Enforced for the unit and the words by the same
+    journey and the `number-label` check; whether the hierarchy is calm is
+    Unenforced (judgment).
+16. **A chart draws the measure, not the lineage.** The performance chart has
+    its dots and one step line of the best so far; no line joins dots, and a
+    chain the reader points at is ringed, not drawn. Enforced by the chart
+    assertions of the ten-idea journey.
+17. **Tokens are split, and unknown is never zero.** Input (with its cached
+    share) and output are written apart; a part nobody reported reads
+    `unknown`, a running turn `running`. Enforced by the token-words tests and
+    the ten-idea journey.
+
 ## Sizes the checks cover
 
 Windows of 1000, 1440 and 1920 px wide with the sidebar shown and hidden, live

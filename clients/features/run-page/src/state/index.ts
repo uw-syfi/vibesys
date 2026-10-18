@@ -38,6 +38,7 @@ export {
   clockStart,
   heroView,
   logStreamToFollow,
+  type MetricTileView,
   type NowItem,
   nowView,
   type ResolvedZoom,
@@ -61,12 +62,15 @@ export {
   runPhase,
 } from './run-page.js';
 export {scrubberView, viewAtPosition} from './scrub.js';
-export {tokensByAgent, turnTokens} from './token-usage.js';
+export {spendOf, tokensByAgent, turnTokens} from './token-usage.js';
 export {
+  type TokensCell,
+  type TokensCells,
   type TokensReading,
+  type TurnSpend,
+  tokensCells,
   tokensColumn,
-  tokensFigure,
-  tokensLabel,
+  tokensLine,
   tokensReading,
   tokensTitle,
 } from './token-words.js';

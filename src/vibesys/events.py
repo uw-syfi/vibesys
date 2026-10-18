@@ -29,7 +29,7 @@ from vs_agent.api import (
     TodoItemData,
     ToolResultPayload,
 )
-from vs_core.api import ComparisonVerdict, EndReason, SpanId, WireSpan
+from vs_core.api import ComparisonVerdict, EndReason, SpanId, TaskObjective, WireSpan
 from vs_redaction.api import redact_diagnostic_text
 from vs_runtime.api.infrastructure import AgentReply, EnvironmentStartupStage
 
@@ -248,6 +248,10 @@ class ObjectiveOverview(BaseModel):
     metric: str | None = None
     unit: str | None = None
     direction: Literal["max", "min"] | None = None
+    objectives: tuple[TaskObjective, ...] = ()
+    """Every axis candidates are ranked on, headline first, as the run's metric space declares
+    them (empty when it declares none). Each candidate's gate span carries a reading per axis,
+    with its unit."""
     correctness_check: tuple[str, ...] = ()
 
 

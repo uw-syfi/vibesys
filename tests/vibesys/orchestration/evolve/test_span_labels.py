@@ -78,7 +78,16 @@ def test_a_cold_start_and_the_child_built_on_it_are_workstreams_with_turns_gates
     gates = labelled(host, "gate")
     assert [g.parent for g in gates] == [first.id, second.id]
     assert [attrs(g) for g in gates] == [
-        {"stage": "accuracy,benchmark", "metric_value": value, "vs_baseline": None, "failed": None}
+        {
+            "stage": "accuracy,benchmark",
+            "metric_value": value,
+            "vs_baseline": None,
+            "input_metrics": [],
+            "metrics": [
+                {"name": "throughput", "value": value, "direction": "max", "unit": "tokens/s"}
+            ],
+            "failed": None,
+        }
         for value in (100.0, 150.0)
     ]
     assert [g.label.verdict for g in gates if g.label is not None] == ["passed", "passed"]

@@ -338,7 +338,7 @@ depends_on = []
 [[modules]]
 path = "vibesys.orchestration.agent_options"
 layer = "roles_search"
-depends_on = ["vibesys.inputs", "vibesys.metrics"]
+depends_on = ["vibesys.inputs", "vibesys.metrics", "vs_core"]
 
 [[modules]]
 path = "vibesys.hypothesis.readmodel"

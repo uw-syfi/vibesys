@@ -29,7 +29,7 @@ import {
   TurnResult,
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
-import {tokensLabel, tokensTitle, turnTokens} from '../../../../state/index.js';
+import {tokensLine, tokensTitle, turnTokens} from '../../../../state/index.js';
 import {
   type GateView,
   gateView,
@@ -239,7 +239,7 @@ export function stepHeader(props: StepViewProps): PaneHeader {
   const end = props.step.endedAt ?? props.clock.now;
   const seconds = end === null ? null : end - props.step.startedAt;
   const spent = turnTokens(props.tokens, props.step.span);
-  const tokens = spent === null ? null : tokensLabel(spent);
+  const tokens = spent === null ? null : tokensLine(spent);
   return {
     meta: (
       <Text

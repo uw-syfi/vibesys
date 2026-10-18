@@ -1451,6 +1451,14 @@ const runEventSchema: Record<string, unknown> = {
           "default": null,
           "title": "Direction"
         },
+        "objectives": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TaskObjective"
+          },
+          "title": "Objectives",
+          "type": "array"
+        },
         "correctness_check": {
           "default": [],
           "items": {
@@ -2932,6 +2940,31 @@ const runEventSchema: Record<string, unknown> = {
         "content"
       ],
       "title": "SubprocessOutputData",
+      "type": "object"
+    },
+    "TaskObjective": {
+      "additionalProperties": false,
+      "description": "One axis the task compares candidates on, and which way is better.",
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "direction": {
+          "enum": [
+            "max",
+            "min"
+          ],
+          "title": "Direction",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "direction"
+      ],
+      "title": "TaskObjective",
       "type": "object"
     },
     "TodoItemData": {

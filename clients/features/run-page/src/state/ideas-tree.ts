@@ -29,13 +29,13 @@ export const CHAIN_TAIL = 5;
 /** How many ideas a one-child run must hold between its ends to fold into `… N ideas …`. */
 export const COMPRESS_FROM = 3;
 /** The levels of guides drawn; deeper rows write their depth instead. */
-export const INDENT_CAP = 4;
-/** The cells a capped row keeps: its own branch and its parent's, beside the depth number. */
+export const INDENT_CAP = 8;
+/** The cells a capped row keeps after the dotted one: its own branch and its parent's, beside the depth number. */
 const CAPPED_CELLS = 2;
 /** The key in `open` of the best chain's `… N earlier` row. */
 export const EARLIER = 'earlier';
 
-type TreeGuide = 'pipe' | 'tee' | 'elbow' | 'blank';
+type TreeGuide = 'pipe' | 'tee' | 'elbow' | 'gap' | 'blank';
 
 interface IdeaTreeRow {
   readonly kind: 'idea';
@@ -185,7 +185,8 @@ function below(more: readonly boolean[], last: boolean | null): TreeGuide[] {
 
 function drawn(guides: readonly TreeGuide[]): {guides: TreeGuide[]; capped: boolean} {
   const capped = guides.length > INDENT_CAP;
-  return {guides: capped ? guides.slice(-CAPPED_CELLS) : [...guides], capped};
+  // The levels left out are one dotted cell, so a deep row still sits visibly deep.
+  return {guides: capped ? ['gap', ...guides.slice(-CAPPED_CELLS)] : [...guides], capped};
 }
 
 function pushFold(walk: Walk, key: string, label: string, guides: readonly TreeGuide[]): void {

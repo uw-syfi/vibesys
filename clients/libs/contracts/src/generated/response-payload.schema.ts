@@ -1347,6 +1347,14 @@ const responsePayloadSchema: Record<string, unknown> = {
           "default": null,
           "title": "Direction"
         },
+        "objectives": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TaskObjective"
+          },
+          "title": "Objectives",
+          "type": "array"
+        },
         "correctness_check": {
           "default": [],
           "items": {
@@ -1989,6 +1997,31 @@ const responsePayloadSchema: Record<string, unknown> = {
       ],
       "title": "SpanWaitKind",
       "type": "string"
+    },
+    "TaskObjective": {
+      "additionalProperties": false,
+      "description": "One axis the task compares candidates on, and which way is better.",
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "direction": {
+          "enum": [
+            "max",
+            "min"
+          ],
+          "title": "Direction",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "direction"
+      ],
+      "title": "TaskObjective",
+      "type": "object"
     },
     "TuiTheme": {
       "description": "Selectable terminal UI themes.",

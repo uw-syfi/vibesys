@@ -81,7 +81,7 @@ function Header(props: {readonly state: RunPageState; readonly dispatch: Dispatc
           </Text>
           {header.spent === null ? null : (
             <Text variant="code" tone="muted" title={header.spent.title}>
-              {`· ${header.spent.label} tokens`}
+              {`· ${header.spent.label}`}
             </Text>
           )}
         </Row>

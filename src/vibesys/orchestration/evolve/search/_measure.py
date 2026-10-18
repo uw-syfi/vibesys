@@ -59,7 +59,7 @@ def label_reading(ctx: Flow, gate: SpanId, stage: str, measured: Closing) -> Non
 
     Evolve does not measure the input, so there is no ratio to it and no gate is slower.
     """
-    attrs = GateAttrs.read(stage, measured.readings, None)
+    attrs = GateAttrs.read(stage, measured.readings)
     ctx.label(GATE, span=gate, attrs=attrs, verdict=PASSED if measured.passed else FAILED_CHECK)
 
 

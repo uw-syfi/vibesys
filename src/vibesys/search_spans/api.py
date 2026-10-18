@@ -24,7 +24,7 @@ searches' ``serial_search``).
 from collections.abc import Sequence
 from typing import Literal, Self
 
-from vibesys.metrics import EvidenceReading, reading_of
+from vibesys.metrics import EvidenceReading, MetricRow, reading_of
 from vs_core.api.search import (
     ADOPTED,
     NOT_ADOPTED,
@@ -137,22 +137,41 @@ class GateAttrs(Value):
     metric_value: float | None = None
     vs_baseline: float | None = None
     """The candidate's headline value divided by the input's; None while either is unknown."""
+    input_metrics: tuple[MetricRow, ...] = ()
+    """Every reading of the input's own measurement, headline first: where the input stands on each
+    axis, for a client that marks it beside the candidates; empty while it is unmeasured."""
+    metrics: tuple[MetricRow, ...] = ()
+    """Every reading the benchmark reported, headline first, each with its unit and direction.
+
+    ``metric_value`` is the first of them. A task with several objectives is measured on one row
+    each, so a client plots a candidate on every axis from this and never from the headline alone.
+    """
     failed: FailedCheck | None = None
 
     @classmethod
     def read(
-        cls, stage: str, readings: Sequence[EvidenceReading], input_value: float | None
+        cls,
+        stage: str,
+        readings: Sequence[EvidenceReading],
+        input_metrics: Sequence[MetricRow] = (),
     ) -> Self:
-        """The gate of ``stage`` that read ``readings``, against the input's ``input_value``.
+        """The gate of ``stage`` that read ``readings``, against the input's ``input_metrics``.
 
-        Its value is the benchmark's headline; ``failed`` the first check that rejected.
+        Its value is the benchmark's headline and ``metrics`` all its readings; ``failed`` the first
+        check that rejected.
         """
         benchmark = reading_of(tuple(readings), EvidenceKind.BENCHMARK)
         headline = None if benchmark is None else benchmark.headline()
         value = None if headline is None else headline.value
+        input_value = input_metrics[0].value if input_metrics else None
         ratio = None if value is None or not input_value else value / input_value
         return cls(
-            stage=stage, metric_value=value, vs_baseline=ratio, failed=FailedCheck.of(readings)
+            stage=stage,
+            metric_value=value,
+            vs_baseline=ratio,
+            input_metrics=tuple(input_metrics),
+            metrics=() if benchmark is None else benchmark.metrics,
+            failed=FailedCheck.of(readings),
         )
 
 

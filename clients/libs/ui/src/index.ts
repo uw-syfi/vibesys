@@ -17,8 +17,6 @@ export {
 export {Banner, type BannerTone, Card} from './components/card.js';
 export {
   Chart,
-  type ChartEdge,
-  type ChartEnd,
   type ChartPoint,
   type ChartSize,
   type ChartSpan,
@@ -72,6 +70,7 @@ export {
   type ToolState,
 } from './components/message.js';
 export {Meter} from './components/meter.js';
+export {MetricTile, MetricTiles} from './components/metric-tile.js';
 export {
   Narrative,
   Said,
@@ -112,6 +111,7 @@ export {SearchBox} from './components/search-box.js';
 export {type ChoiceOption, SegmentedControl} from './components/segmented-control.js';
 export {Select, type SelectOption} from './components/select.js';
 export {SidebarItem, SidebarSection, type SidebarTarget} from './components/sidebar.js';
+export {Sparkline, type SparkStep} from './components/sparkline.js';
 export {Chip, StatusDot, type StatusTone} from './components/status.js';
 export {type ReplyField, StructuredReply} from './components/structured-reply.js';
 export {type SwatchItem, SwatchLegend} from './components/swatch-legend.js';

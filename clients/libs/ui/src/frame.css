@@ -219,6 +219,13 @@ button.vs-crumb:focus-visible {
     display: none;
   }
 }
+/* A whole line of tokens is the first column a narrow list gives up: the pane says it again. */
+@container (max-width: 560px) {
+  .vs-pickrow-measure[data-size="line"],
+  .vs-listheader-col[data-fixed="measure-line"] {
+    display: none;
+  }
+}
 /* A chip with a short form shows it in a narrow list; its tooltip keeps the whole. */
 .vs-pickrow-badge {
   display: inline-flex;
@@ -323,6 +330,15 @@ button.vs-crumb:focus-visible {
 .vs-guide[data-guide="elbow"]::before {
   bottom: 50%;
 }
+/* Levels left out of a deep row: a dotted line, so the row still reads as deep. */
+.vs-guide[data-guide="gap"]::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  border-left: var(--hairline) dotted var(--muted);
+}
 .vs-guide[data-guide="tee"]::after,
 .vs-guide[data-guide="elbow"]::after {
   content: "";
@@ -359,7 +375,13 @@ button.vs-crumb:focus-visible {
   border-left-color: var(--accent);
 }
 .vs-pickrow-figure {
-  flex: none;
+  /* A long reading (a failure's reason) gives way at half the row, cut with its full text on hover. */
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--text-code-family);
   font-size: var(--text-code-size);
   line-height: var(--text-code-line);
@@ -1016,28 +1038,11 @@ button.vs-crumb:focus-visible {
   stroke: var(--muted);
   stroke-width: 1;
 }
-/* Connectors between a point and the one it builds on: thin and faint, bolder along a chain. */
-.vs-chart-edge {
-  stroke: var(--muted);
-  stroke-width: 1;
-  opacity: 0.4;
-}
-.vs-chart-edges[data-dense] .vs-chart-edge {
-  opacity: 0.07;
-}
-.vs-chart-edge[data-faint],
-.vs-chart-edges[data-dense] .vs-chart-edge[data-faint] {
-  opacity: 0.04;
-}
-.vs-chart-edge[data-emphasis="strong"] {
+/* The chain the reader points at: its dots are ringed in the accent, and no line joins them. */
+.vs-chart-lit {
+  fill: none;
   stroke: var(--accent);
-  stroke-width: 1.6;
-  opacity: 0.7;
-}
-.vs-chart-edge[data-emphasis="lit"] {
-  stroke: var(--accent);
-  stroke-width: 2.6;
-  opacity: 1;
+  stroke-width: 2;
 }
 .vs-chart-span-band {
   fill: var(--accent);
@@ -1060,13 +1065,25 @@ button.vs-crumb:focus-visible {
   white-space: nowrap;
 }
 .vs-pickrow-measure,
-.vs-listheader-col[data-fixed="measure"] {
+.vs-listheader-col[data-fixed^="measure"] {
   flex: none;
   width: calc(var(--space-8) + var(--space-3));
   overflow: hidden;
   text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.vs-pickrow-measure[data-size="note"],
+.vs-listheader-col[data-fixed="measure-note"] {
+  width: calc(var(--space-8) * 3);
+}
+.vs-pickrow-measure[data-size="line"],
+.vs-listheader-col[data-fixed="measure-line"] {
+  width: calc(var(--space-8) * 6);
+}
+/* The quiet second value sits after the figure in the same muted color, which already meets contrast. */
+.vs-pickrow-measure-note {
+  font-weight: 400;
 }
 .vs-pickrow-measure {
   color: var(--muted);
@@ -1160,6 +1177,8 @@ button.vs-dotlegend-item:focus-visible {
 /* --- facts: one line that never wraps or overlaps ---------------------------------------------- */
 
 .vs-factline {
+  /* One line high in a column that runs out of height: the list below gives way, never this line. */
+  flex-shrink: 0;
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
@@ -1190,6 +1209,10 @@ button.vs-dotlegend-item:focus-visible {
   min-width: 0;
   max-width: 100%;
 }
+/* On a line that never wraps, what follows it stays next to it instead of going to the far edge. */
+.vs-factline:not([data-wrap]) > .vs-fact[data-shrink] {
+  flex: 0 1 auto;
+}
 .vs-fact[data-shrink] > * {
   min-width: 0;
   max-width: 100%;
@@ -1209,4 +1232,64 @@ button.vs-dotlegend-item:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* --- metric tiles -------------------------------------------------------------------------------- */
+
+/* A dashboard row: tiles of one size on one grid, as wide as the tiles up to the container. The
+   width is a size, never a share of the parent, so what sits beside the row never moves. */
+.vs-tiles {
+  --tile-width: var(--column-metric);
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--column-field)), 1fr));
+  gap: var(--space-4);
+  width: calc(var(--tile-count) * var(--tile-width) + (var(--tile-count) - 1) * var(--space-4));
+  max-width: 100%;
+}
+.vs-tile {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-4) var(--space-5);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+.vs-tile-figure {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.vs-tile-detail {
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-tile-trend {
+  height: var(--space-7);
+  margin-top: auto;
+}
+.vs-spark {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.vs-spark-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+.vs-spark-reference {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0.6;
+  vector-effect: non-scaling-stroke;
 }

@@ -123,7 +123,15 @@ def test_the_protocol_exports_the_span_kinds_attribute_schema_of_every_built_in_
         "probe",
     }
     gate = set(defs["GateAttrs"]["properties"])
-    assert gate == {"stage", "metric_value", "vs_baseline", "failed"}
+    assert gate == {
+        "stage",
+        "metric_value",
+        "vs_baseline",
+        "input_metrics",
+        "metrics",
+        "failed",
+    }
+    assert set(defs["MetricRow"]["properties"]) == {"name", "value", "direction", "unit"}
     assert set(defs["FailedCheck"]["properties"]) == {"check", "completed", "required", "unit"}
     assert set(defs["AdoptionAttrs"]["properties"]) == {"candidate", "metric_value", "vs_baseline"}
     turn = set(defs["AgentTurnAttrs"]["properties"])

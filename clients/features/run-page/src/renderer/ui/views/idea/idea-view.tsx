@@ -24,7 +24,7 @@ import {
 import {type JSX, useState} from 'react';
 import type {ImplementerOutcome} from '../../../../state/idea-outcomes.js';
 import {outcomeWords} from '../../../../state/ideas-view.js';
-import {tokensColumn, turnTokens} from '../../../../state/index.js';
+import {spendOf, tokensColumn, turnTokens} from '../../../../state/index.js';
 import {roleSeries} from '../../../../state/role-series.js';
 import {duration, words} from '../../../../state/span-reading.js';
 import {
@@ -236,7 +236,9 @@ function StepRows(props: {
   if (props.steps.length === 0) return <EmptyState title="No steps yet" />;
   const cells = tokensColumn(
     props.steps.map(step =>
-      step.kind === 'agent_turn' ? turnTokens(props.tokens, step.span) : null,
+      step.kind === 'agent_turn'
+        ? spendOf(turnTokens(props.tokens, step.span), step.status)
+        : undefined,
     ),
   );
   return (
@@ -264,7 +266,7 @@ function StepRows(props: {
               : {swatch: roleSeries(step.role)})}
             badges={badges}
             {...(took === undefined ? {} : {figure: took})}
-            {...(measure === null ? {} : {measure})}
+            {...(measure === null ? {} : {measure: {...measure, size: 'line' as const}})}
             select={() => props.zoom({type: 'open-step', step: step.span})}
           />
         );

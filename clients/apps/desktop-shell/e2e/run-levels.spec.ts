@@ -203,11 +203,13 @@ test('the run level shows the best ratio, the ideas running first, and what runs
   await openRun(page);
   await showList(page);
   const ideas = page.getByRole('listbox', {name: 'Ideas'});
-  // Running first, then the passed newest first; the failed wait behind their row.
+  // Running first, then the rest newest first, the failed among them.
   await expect(ideas.getByRole('option')).toHaveText([
     /Per-core queues with stealing/,
     /Wait-free consumer path/,
     /Combine W1 ring with W2 padding/,
+    /Larger batch size/,
+    /Spin then park idle consumers/,
     /Cache-line padding and batched enqueue/,
     /Lock-free ring with per-slot sequence numbers/,
   ]);
@@ -216,7 +218,10 @@ test('the run level shows the best ratio, the ideas running first, and what runs
   await expect(now.getByRole('option', {name: /Combine W1 ring/}).first()).toBeVisible();
   await check(page, 'ink-run');
 
-  // The failed join the list from their row, and the search narrows it.
+  // The failed are listed; the filter hides them behind their row, which brings them back, and
+  // the search narrows the list.
+  await page.locator('button.vs-dotlegend-item', {hasText: '2 failed'}).click();
+  await expect(ideas.getByRole('option', {name: /Spin then park/})).toHaveCount(0);
   await page.getByRole('button', {name: '+ 2 failed'}).click();
   await expect(ideas.getByRole('option', {name: /Spin then park/})).toBeVisible();
   await page.getByLabel('Search ideas').fill('spin');
@@ -540,12 +545,12 @@ test('the scrubber replays the run’s ideas at an earlier event and returns to 
   await openRun(page);
   await showList(page);
   const ideas = page.getByRole('listbox', {name: 'Ideas'});
-  await expect(ideas.getByRole('option')).toHaveCount(5);
+  await expect(ideas.getByRole('option')).toHaveCount(7);
   await page.getByRole('slider', {name: 'Run position'}).focus();
   await page.keyboard.press('Home');
   await expect(page.getByText('No ideas yet')).toBeVisible();
   await page.getByRole('button', {name: 'Back to live'}).click();
-  await expect(ideas.getByRole('option')).toHaveCount(5);
+  await expect(ideas.getByRole('option')).toHaveCount(7);
   await page.evaluate(
     ([value]) => (window as unknown as FakeHostWindow).fakeHost.listing(value),
     [

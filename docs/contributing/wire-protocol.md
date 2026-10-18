@@ -154,6 +154,14 @@ carries it, built from the task's input bundle (`vibesys.run.overview`):
 
 - `objective.text` is the task's `OBJECTIVE.md` (Markdown) and `objective.metric` the
   task's headline metric (its `metric`, else the scalar benchmark result's metric).
+- `objective.objectives` lists every axis candidates are ranked on, headline first (`name`,
+  `direction` of `max` or `min`), as the run's metric space declares them (`objectives.toml`, or
+  the operator's override); it is empty when the run declares none. A task with exactly two is
+  one a client can plot as a trade-off. Units are the measurements': each gate span's `metrics`
+  carries a row per reading the benchmark reported (`name`, `value`, `unit`, `direction`),
+  headline first, beside the headline's `metric_value`; its `input_metrics` are the same rows for
+  the input's own measurement (empty while it is unmeasured), so a client marks the input on every
+  axis.
 - `objective.correctness_check` is the argv of the accuracy check a candidate must pass.
 - `benchmarks.evaluator` is the evaluator package the manifest pins (`name`, `version`). It is
   null for a source-tree evaluator, which has no version.

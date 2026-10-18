@@ -86,8 +86,8 @@ async function hover(element: Element, on: boolean): Promise<void> {
   });
 }
 
-const edges = (container: HTMLElement, emphasis: string): number =>
-  container.querySelectorAll(`.vs-chart-edge[data-emphasis="${emphasis}"]`).length;
+const ringed = (container: HTMLElement): number =>
+  container.querySelectorAll('.vs-chart-lit').length;
 
 function row(container: HTMLElement, title: string): Element {
   const found = [...container.querySelectorAll('[role="option"]')].find(
@@ -102,12 +102,11 @@ const litRows = (container: HTMLElement): string[] =>
     each => each.querySelector('.vs-pickrow-text > .vs-text')?.textContent ?? '',
   );
 
-test('the chart draws a connector for each passed idea, the best chain emphasized', async () => {
+test('the chart joins no dots, and rings none until the reader points at something', async () => {
   const container = await shown();
-  expect(container.querySelectorAll('.vs-chart-edge')).toHaveLength(6);
-  // 0, 1 and 2 are the best chain; nothing is lit until the reader points at something.
-  expect(edges(container, 'strong')).toBe(3);
-  expect(edges(container, 'lit')).toBe(0);
+  expect(container.querySelectorAll('.vs-chart-edge')).toHaveLength(0);
+  expect(container.querySelectorAll('.vs-chart svg path, path.vs-chart-step').length).toBe(1);
+  expect(ringed(container)).toBe(0);
   expect(litRows(container)).toEqual([]);
 });
 
@@ -118,10 +117,10 @@ test('pointing at a row lights its chain on the chart and in the tree, and leavi
     (container.querySelector('.vs-pickrow-fold[data-fold="closed"]') as HTMLElement).click();
   });
   await hover(row(container, 'idea 5'), true);
-  expect(edges(container, 'lit')).toBe(4);
+  expect(ringed(container)).toBe(4);
   expect(litRows(container).sort()).toEqual(['idea 0', 'idea 3', 'idea 4', 'idea 5']);
   await hover(row(container, 'idea 5'), false);
-  expect(edges(container, 'lit')).toBe(0);
+  expect(ringed(container)).toBe(0);
   expect(litRows(container)).toEqual([]);
 });
 
@@ -129,10 +128,10 @@ test('pointing at a point lights its chain the same way', async () => {
   const container = await shown();
   const point = container.querySelector('[role="button"][aria-label^="idea 1"]') as Element;
   await hover(point, true);
-  expect(edges(container, 'lit')).toBe(2);
+  expect(ringed(container)).toBe(2);
   expect(litRows(container).sort()).toEqual(['idea 0', 'idea 1']);
   await hover(point, false);
-  expect(edges(container, 'lit')).toBe(0);
+  expect(ringed(container)).toBe(0);
 });
 
 test('the best line pins the best idea: its chain stays lit, and nothing on the chart moves', async () => {
@@ -144,7 +143,7 @@ test('the best line pins the best idea: its chain stays lit, and nothing on the 
   await act(async () => {
     (container.querySelector('button[title^="Show the best idea"]') as HTMLElement).click();
   });
-  expect(edges(container, 'lit')).toBe(3);
+  expect(ringed(container)).toBe(3);
   expect(litRows(container).sort()).toEqual(['idea 0', 'idea 1', 'idea 2']);
   const after = [...container.querySelectorAll('.vs-chart-point')].map(each => [
     each.getAttribute('cx'),
