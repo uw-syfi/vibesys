@@ -656,7 +656,7 @@ def _assert_headless_stream(
     run_id: str,
     committed: frozenset[str],
     rendered: str,
-    job_count: int,
+    job_counts: range,
 ) -> None:
     """What a headless frontend received from the core path is complete, legal and anchored.
 
@@ -694,8 +694,9 @@ def _assert_headless_stream(
 
     jobs = {event.execution_id for event in events if event.type is CoreEventType.GATE_STARTED}
     # The baseline, the implementer's own, the runs core asked for, and the candidate's
-    # official measurement (a re-read of the samples held runs its gates too).
-    assert len(jobs) == job_count, jobs
+    # official measurement (a re-read of the samples held runs its gates too). A run of core's
+    # that the run's end cancelled before it started ran no gate.
+    assert len(jobs) in job_counts, jobs
     for job in jobs:
         # A job runs the gates its kind needs: a validation run has fewer than a trusted one.
         gates = {
@@ -868,10 +869,10 @@ def test_core_path_runs_the_fake_slurm_search(
     # the same value on every run, so the comparison is a close call with no estimate of its
     # noise (`vs_core._comparison`): core runs the base and the candidate's input again itself,
     # each up to `MIN_SAMPLES_WITHOUT_FLOOR` runs, and once both sides hold that many identical
-    # runs no verdict can ever be reached, so nothing more is run. Core admits each of its runs
-    # as the previous one ends, so the implementer's scope never settles in between and its turn
-    # resumes only after the last; the official check comes later still, and is answered by the
-    # samples held instead of a run that would read the same (#2949).
+    # runs no verdict can ever be reached, so nothing more is run. The implementer's turn does not
+    # wait for core's runs (they are not its attempt's history), so the strategy's official check
+    # may come while they are still under way: then it runs afresh and its run is the candidate's
+    # last sample, in place of core's; otherwise it is answered by the samples held (#2949).
     evaluation = envelope["core"]["evaluation"]
     core_runs = {run["request_id"]["root"] for run in evaluation.get("core_runs", [])}
     purposes = [
@@ -879,14 +880,17 @@ def test_core_path_runs_the_fake_slurm_search(
         for job in evaluation["jobs"]
         if job["submission_id"]["root"] in core_runs
     ]
-    assert sorted(purposes) == ["baseline"] * (MIN_SAMPLES_WITHOUT_FLOOR - 1) + [
-        "local-validation"
-    ] * (MIN_SAMPLES_WITHOUT_FLOOR - 1), evaluation["core_runs"]
     (official,) = (job for job in evaluation["jobs"] if job["plan"]["purpose"] == "official")
-    assert official.get("reuses") is not None, official
-    assert sum("sbatch " in command for command in recorded_commands(loop_input.cluster)) == (
-        2 + len(core_runs)
+    fresh_official = official.get("reuses") is None
+    assert purposes.count("baseline") == MIN_SAMPLES_WITHOUT_FLOOR - 1, evaluation["core_runs"]
+    # The agent's run, core's runs of its input, and a fresh official run: the fewest for a verdict.
+    assert 1 + purposes.count("local-validation") + fresh_official == MIN_SAMPLES_WITHOUT_FLOOR, (
+        evaluation["core_runs"]
     )
+    assert sum("sbatch " in command for command in recorded_commands(loop_input.cluster)) == (
+        2 + len(core_runs) + fresh_official
+    )
+    cancelled = sum(job["status"] == "cancelled" for job in evaluation["jobs"])
     assert [call["rejection"] for call in evaluation["agent_calls"]] == [None]
     # The agent's own evaluation and the official one both sit in the ledger for the winner. A
     # framework run is trusted whoever asked for it, so the agent's records are correctness and
@@ -906,5 +910,5 @@ def test_core_path_runs_the_fake_slurm_search(
         run_id=result.run_id,
         committed=_strings_of(envelope["core"]),
         rendered=capsys.readouterr().out,
-        job_count=3 + len(core_runs),
+        job_counts=range(3 + len(core_runs) - cancelled, 3 + len(core_runs) + 1),
     )
