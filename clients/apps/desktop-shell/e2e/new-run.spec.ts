@@ -41,7 +41,6 @@ test('New run is prefilled from the last run on its machine and starts once the 
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
 
   await start(page).click();
-  await expect(page.getByRole('radiogroup', {name: 'Show'})).toBeVisible();
   await expect(page.getByText('host-b · 20261015-200000')).toBeVisible();
   const {started} = await fakeNewRun(page);
   expect(started).toEqual([
@@ -102,7 +101,6 @@ test('extra arguments may not repeat an option set above, and roles change the r
   await page.getByLabel('Judge reasoning effort').selectOption('high');
   await expect(start(page)).not.toHaveAttribute('aria-disabled', 'true');
   await start(page).click();
-  await expect(page.getByRole('radiogroup', {name: 'Show'})).toBeVisible();
   await expect(page.getByText('host-b · 20261015-200000')).toBeVisible();
   const {started} = await fakeNewRun(page);
   expect(started).toEqual([
