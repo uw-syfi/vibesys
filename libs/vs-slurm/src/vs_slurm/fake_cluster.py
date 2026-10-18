@@ -29,8 +29,8 @@ from .cluster_types import (
     ClusterTarget,
     ClusterUnknown,
     collection_problem,
+    live_observation,
     observation_names,
-    observed_live,
     validate_operation_id,
 )
 from .errors import SlurmError, SlurmSubmissionRejectedError
@@ -563,7 +563,7 @@ class FakeCluster:
             )
         try:
             with self._lock:
-                if observed_live(observed):
+                if live_observation(observed) is not None:
                     self._scancel(self._find(target, by_job_id=by_job_id))
                 return self._cancel(target, by_job_id=by_job_id)
         except SlurmError as error:

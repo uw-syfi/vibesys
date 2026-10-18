@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from enum import StrEnum
-from typing import Final, Literal, TypeAlias, TypeIs
+from typing import Final, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -214,6 +214,8 @@ def observation_names(
     return observed.job_id == handle.job_id
 
 
-def observed_live(observed: ClusterObservation | None) -> TypeIs[ClusterObservation]:
-    """Whether ``observed`` shows a job a scancel still stops: queued or running. Pure."""
-    return observed is not None and observed.phase in {SlurmPhase.PENDING, SlurmPhase.RUNNING}
+def live_observation(observed: ClusterObservation | None) -> ClusterObservation | None:
+    """``observed`` when it shows a job a scancel still stops, queued or running; else None. Pure."""
+    if observed is None or observed.phase not in {SlurmPhase.PENDING, SlurmPhase.RUNNING}:
+        return None
+    return observed

@@ -30,8 +30,8 @@ from .cluster_types import (
     ClusterTarget,
     ClusterUnknown,
     collection_problem,
+    live_observation,
     observation_names,
-    observed_live,
     validate_operation_id,
 )
 from .errors import SlurmError, SlurmSubmissionRejectedError
@@ -475,8 +475,9 @@ class SlurmCluster:
         self, target: ClusterTarget, *, by_job_id: bool, observed: ClusterObservation | None
     ) -> ClusterCancelOutcome:
         with self._store.lock():
-            if observed_live(observed):
-                self._runner.cancel_job(observed.job_id)
+            live = live_observation(observed)
+            if live is not None:
+                self._runner.cancel_job(live.job_id)
             record, evidence = self._record(target, by_job_id=by_job_id)
             if record is None:
                 if isinstance(target, str) and not by_job_id:

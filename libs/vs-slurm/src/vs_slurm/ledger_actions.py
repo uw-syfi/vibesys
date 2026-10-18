@@ -35,7 +35,7 @@ from .cluster_types import (
     OBSERVED_CANCEL_CALLS,
     ClusterObservation,
     ClusterUnknown,
-    observed_live,
+    live_observation,
 )
 from .ledger import (
     LedgerEntry,
@@ -344,12 +344,12 @@ def _cancel_while_marked(
             if record.state is LedgerState.SUBMITTING:
                 return _withdraw_unseen(ledger, cluster, entry, mark)
             reason = observed.reason
-        elif not observed_live(observed):
+        elif (live := live_observation(observed)) is None:
             return _Cancelled(None)  # its job ended, or is ending: nothing to stop
         elif timing.holds(mark, calls=_CALLS_AT_CANCEL):
-            outcome = cluster.cancel(record.operation_id, observed=observed)
+            outcome = cluster.cancel(record.operation_id, observed=live)
             if not isinstance(outcome, ClusterUnknown):
-                return _Cancelled(outcome.job_id or observed.job_id)
+                return _Cancelled(outcome.job_id or live.job_id)
             reason = outcome.reason
     _undo(ledger, entry)
     return WithdrawUnknown(record.key, reason)
