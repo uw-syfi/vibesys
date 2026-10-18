@@ -260,7 +260,12 @@ def _handle(workspace: Path) -> SlurmBatchHandle:
 def _mark(attempt: int = 0, *, since: float = 0.0) -> WithdrawalMark:
     """A withdrawal by another run under way on ``attempt``, holding until ``_WITHDRAWAL_UNTIL``."""
     return WithdrawalMark(
-        attempt=attempt, by="run-b", since=since, until=_WITHDRAWAL_UNTIL, reason="gone"
+        attempt=attempt,
+        by="run-b",
+        writer="0f3c9e1",
+        since=since,
+        until=_WITHDRAWAL_UNTIL,
+        reason="gone",
     )
 
 
@@ -629,7 +634,12 @@ def test_a_request_being_withdrawn_lists_as_its_job_and_the_sweep_leaves_it_to_i
     assert entry is not None
     now = 1e9
     mark = WithdrawalMark(
-        attempt=0, by="run-b", since=now, until=now + 600.0, reason="its run run-b stopped"
+        attempt=0,
+        by="run-b",
+        writer="0f3c9e1",
+        since=now,
+        until=now + 600.0,
+        reason="its run run-b stopped",
     )
     assert world.ledger.write_withdrawal(entry, mark)
 
@@ -763,7 +773,12 @@ def test_the_sweep_cancels_every_live_job_named_for_a_failed_or_withdrawn_attemp
             if end is LedgerState.WITHDRAWN:
                 # A withdrawal marks the attempt first (``withdraw``).
                 mark = WithdrawalMark(
-                    attempt=attempt, by="run-b", since=0.0, until=600.0, reason="x"
+                    attempt=attempt,
+                    by="run-b",
+                    writer="0f3c9e1",
+                    since=0.0,
+                    until=600.0,
+                    reason="x",
                 )
                 assert ledger.write_withdrawal(entry, mark)
                 entry = ledger.read(key)

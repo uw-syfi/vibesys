@@ -19,6 +19,7 @@ from vs_slurm.api import (
     FakeEvaluationLedger,
     Kept,
     LedgerEntry,
+    LedgerError,
     LedgerLease,
     LedgerRecord,
     LedgerState,
@@ -159,6 +160,7 @@ def _mark(ledger: FakeEvaluationLedger, key: str, by: str, *, since: float) -> W
     mark = WithdrawalMark(
         attempt=entry.record.attempt,
         by=by,
+        writer="0f3c9e1",
         since=since,
         until=since + _timing(since).window_seconds,
         reason="gone",
@@ -325,3 +327,56 @@ def test_a_withdrawer_left_too_little_of_its_window_cancels_nothing_and_undoes_i
             assert not observed.status.terminal
             assert entry.record.state is LedgerState.SUBMITTED
             assert entry.withdrawal is None  # undone: a run may attach at once
+
+
+class _MarkAnswerLost(FakeEvaluationLedger):
+    """The Fake ledger, where the answer to the first mark write is lost after it landed."""
+
+    lost: bool = False
+
+    def write_withdrawal(
+        self, current: LedgerEntry, document: WithdrawalMark | WithdrawalUndone
+    ) -> bool:
+        won = super().write_withdrawal(current, document)
+        if isinstance(document, WithdrawalMark) and not self.lost:
+            self.lost = True
+            raise LedgerError.transport(ConnectionResetError("ssh: connection reset"))
+        return won
+
+
+def test_a_withdrawer_whose_mark_answer_was_lost_knows_the_mark_for_its_own() -> None:
+    """r3173 LOW-5: a lost answer left the withdrawer waiting on its own mark until it expired.
+
+    The mark names its writer, so the withdrawer's next read finds its own
+    mark and goes on. Another withdrawer of the same name, a sibling process,
+    still waits on it.
+    """
+    with TemporaryDirectory() as directory:
+        ledger = _MarkAnswerLost(project=PROJECT)
+        _, cluster, key, operation = _submitted(Path(directory), SELF, ledger)
+        stopping = _withdrawer(SELF)
+
+        outcome = withdraw(ledger, cluster, key, stopping)
+
+        assert isinstance(outcome, Withdrawn)
+        observed = cluster.inspect(operation)
+        assert isinstance(observed, ClusterObservation)
+        assert observed.status is SlurmJobStatus.CANCELLED
+
+
+def test_a_mark_left_by_a_withdrawers_earlier_call_is_its_own_and_no_one_elses() -> None:
+    """A relinquish tried again with the same withdrawer finishes the mark its earlier try left."""
+    with TemporaryDirectory() as directory:
+        ledger, cluster, key, operation = _submitted(Path(directory), SELF)
+        earlier = _withdrawer(SELF)
+        entry = ledger.read(key)
+        assert entry is not None
+        assert ledger.write_withdrawal(entry, earlier.stamped(entry.record.attempt))
+
+        namesake = withdraw(ledger, cluster, key, _withdrawer(SELF))
+        assert isinstance(namesake, WithdrawUnknown)
+        again = withdraw(ledger, cluster, key, earlier)
+        assert isinstance(again, Withdrawn)
+        observed = cluster.inspect(operation)
+        assert isinstance(observed, ClusterObservation)
+        assert observed.status is SlurmJobStatus.CANCELLED

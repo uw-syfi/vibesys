@@ -225,7 +225,9 @@ def test_of_many_swaps_from_one_revision_exactly_the_first_is_stored(
 
 
 def _mark(attempt: int = 0, *, by: str = "run-b") -> WithdrawalMark:
-    return WithdrawalMark(attempt=attempt, by=by, since=100.0, until=700.0, reason="gone")
+    return WithdrawalMark(
+        attempt=attempt, by=by, writer="0f3c9e1", since=100.0, until=700.0, reason="gone"
+    )
 
 
 _LIVE = (LedgerState.SUBMITTING, LedgerState.SUBMITTED, LedgerState.COMPLETED)

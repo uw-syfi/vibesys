@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -149,12 +150,21 @@ class WithdrawalTiming:
 class Withdrawer:
     """Who withdraws a request, and why, by which timing: what its mark and its end say.
 
-    ``by`` is a holder name (a run's, or the operator command's).
+    ``by`` is a holder name (a run's, or the operator command's). ``writer``
+    tells this withdrawer's marks from every other's, even one with the same
+    name at the same instant: a mark that names it is this withdrawer's own,
+    whether its write's answer was lost or an earlier call left it standing.
+    A run keeps one for all its withdrawals.
     """
 
     by: str
     reason: str
     timing: WithdrawalTiming
+    writer: str = field(default_factory=lambda: uuid.uuid4().hex)
+
+    def wrote(self, mark: WithdrawalMark | None) -> bool:
+        """Whether ``mark`` is this withdrawer's own."""
+        return mark is not None and (mark.by, mark.writer) == (self.by, self.writer)
 
     def stamped(self, attempt: int) -> WithdrawalMark:
         """A mark on ``attempt``, holding for one window from now."""
@@ -162,6 +172,7 @@ class Withdrawer:
         return WithdrawalMark(
             attempt=attempt,
             by=self.by,
+            writer=self.writer,
             since=now,
             until=now + self.timing.window_seconds,
             reason=self.reason,
@@ -186,7 +197,9 @@ def withdraw(
     starts again from what it recorded. A failed or withdrawn attempt is final.
     An attempt another withdrawal is under way on is ``WithdrawUnknown`` until
     that one ends, or outlives its window and is undone. A mark write whose
-    answer was lost is decided by the next read, which shows the mark or not.
+    answer was lost is decided by the next read, which shows the mark or not;
+    a mark that names this withdrawer as its writer is its own (``Withdrawer.wrote``),
+    even one an earlier call of it left standing.
 
     ``still`` is the condition the withdrawal holds under (the sweep's: no run
     leases the request and its job has not settled; a relinquish's: no other
@@ -196,11 +209,12 @@ def withdraw(
     that leased the request, or a collector that settled it, keeps its job and
     its result.
     """
-    mine: WithdrawalMark | None = None
-    for _ in range(_ROUNDS):
+    for round_ in range(_ROUNDS):
         try:
             entry = ledger.read(key)
         except LedgerError as error:
+            if round_ > 0:
+                _undo_quietly(ledger, key, withdrawer)  # a mark this call wrote, if any
             return WithdrawUnknown(key, str(error))
         if entry is None:
             return NotInLedger(key)
@@ -208,14 +222,13 @@ def withdraw(
         if record.state.final:
             # A mark left on a final attempt is never read: no run waits on it.
             return Withdrawn(key, record.operation_id, None, already=True)
-        if entry.withdrawal is not None and entry.withdrawal == mine:
-            outcome = _withdraw_marked(ledger, cluster, entry, withdrawer.timing, still=still)
+        if withdrawer.wrote(entry.withdrawal):
+            outcome = _withdraw_marked(ledger, cluster, entry, withdrawer, still=still)
         else:
-            outcome, mine = _mark(ledger, entry, withdrawer, still=still)
+            outcome = _mark(ledger, entry, withdrawer, still=still)
         if outcome is not None:
             return outcome
-    if mine is not None:
-        _undo_quietly(ledger, key, mine)
+    _undo_quietly(ledger, key, withdrawer)
     return WithdrawUnknown(key, "the request kept changing while it was withdrawn")
 
 
@@ -225,8 +238,8 @@ def _mark(
     withdrawer: Withdrawer,
     *,
     still: Callable[[LedgerEntry], bool] | None,
-) -> tuple[WithdrawOutcome | None, WithdrawalMark | None]:
-    """Write this withdrawal's mark, or end; the outcome, if it ended, and the mark tried.
+) -> WithdrawOutcome | None:
+    """Write this withdrawal's mark, or end; None when the next round's read decides.
 
     A mark write that fails, or whose answer is lost, is decided by the next
     round's read; one that loses its swap is too.
@@ -235,29 +248,29 @@ def _mark(
     standing = entry.withdrawal
     if standing is not None:
         if not withdrawal_expired(standing, now=withdrawer.timing.clock.now()):
-            return WithdrawUnknown(record.key, f"{standing.by} is withdrawing it"), None
+            return WithdrawUnknown(record.key, f"{standing.by} is withdrawing it")
         # Its withdrawer died part way: undo its mark, then decide afresh.
         try:
             undo_expired_withdrawal(ledger, entry, now=withdrawer.timing.clock.now())
         except LedgerError as error:
-            return WithdrawUnknown(record.key, str(error)), None
-        return None, None
+            return WithdrawUnknown(record.key, str(error))
+        return None
     if still is not None and not still(entry):
-        return Kept(record.key, record.operation_id), None
+        return Kept(record.key, record.operation_id)
     # Stamped now, not when the withdrawal began: its window starts at this write.
     mark = withdrawer.stamped(record.attempt)
     try:
         ledger.write_withdrawal(entry, mark)
     except LedgerError:
         _LOG.info("the mark on %s may not be written; reading it back", entry_id(record.key))
-    return None, mark
+    return None
 
 
 def _withdraw_marked(
     ledger: EvaluationLedger,
     cluster: Cluster,
     entry: LedgerEntry,
-    timing: WithdrawalTiming,
+    withdrawer: Withdrawer,
     *,
     still: Callable[[LedgerEntry], bool] | None,
 ) -> WithdrawOutcome | None:
@@ -275,6 +288,7 @@ def _withdraw_marked(
     if mark is None:
         return None  # not this withdrawal's: the next round decides
     key = record.key
+    timing = withdrawer.timing
     try:
         # ``still`` is the condition as it was before this withdrawal's own mark.
         if still is not None and not still(dataclasses.replace(entry, withdrawal=None)):
@@ -292,7 +306,7 @@ def _withdraw_marked(
             return cancelled
         won = ledger.replace(entry, transitioned(record, LedgerState.WITHDRAWN, reason=mark.reason))
     except LedgerError as error:
-        _undo_quietly(ledger, key, mark)
+        _undo_quietly(ledger, key, withdrawer)
         return WithdrawUnknown(key, str(error))
     return Withdrawn(key, record.operation_id, cancelled) if won else None
 
@@ -315,17 +329,18 @@ def _undo(ledger: EvaluationLedger, entry: LedgerEntry) -> bool:
     return ledger.write_withdrawal(entry, WithdrawalUndone(attempt=entry.record.attempt))
 
 
-def _undo_quietly(ledger: EvaluationLedger, key: str, mark: WithdrawalMark) -> None:
-    """Undo this withdrawal's mark if it still stands; one that cannot be undone expires."""
+def _undo_quietly(ledger: EvaluationLedger, key: str, withdrawer: Withdrawer) -> None:
+    """Undo this withdrawer's mark if one stands; one that cannot be undone expires."""
     try:
         entry = ledger.read(key)
-        if entry is not None and entry.withdrawal == mark:
+        if entry is not None and withdrawer.wrote(entry.withdrawal):
             _undo(ledger, entry)
     except LedgerError:
         _LOG.warning(
-            "evaluation ledger request %s stays marked withdrawing until epoch %.0f",
+            "evaluation ledger request %s may stay marked by %s for up to %.0f s",
             entry_id(key),
-            mark.until,
+            withdrawer.by,
+            withdrawer.timing.window_seconds,
         )
 
 
@@ -548,6 +563,13 @@ def relinquish(
     if entry is None:
         return NotInLedger(key)
     if not unwanted(entry):
+        if holder.wrote(entry.withdrawal):
+            # An earlier try of this relinquish left its mark: another run wants the
+            # request now, so the mark goes, or that run waits until it expires.
+            try:
+                _undo(ledger, entry)
+            except LedgerError as error:
+                return WithdrawUnknown(key, str(error))
         return Kept(key, entry.record.operation_id)
     outcome = _sweep_one(ledger, cluster, entry, holder, still=unwanted)
     return Kept(key, entry.record.operation_id) if outcome is None else outcome

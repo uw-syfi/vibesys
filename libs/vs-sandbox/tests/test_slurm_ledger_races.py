@@ -38,6 +38,7 @@ from vs_slurm.api import (
     SlurmConfig,
     SlurmSshTransport,
     SlurmTimingProfile,
+    WithdrawalTiming,
     WithdrawUnknown,
     ledger_operation_id,
 )
@@ -74,6 +75,11 @@ POLICY = LedgerPolicy()
 _QUEUED_FOREVER = SlurmTimingProfile(queue_wait_s=SecondsRange.exactly(10**9))
 # How often a caller tries again after an unknown outcome, as the executor does.
 _TRIES = 4
+# The pause before each try of an attach: the last one outlasts a withdrawal's window.
+_WINDOW = WithdrawalTiming(
+    clock=ManualClock(), call_seconds=CONFIG.transport_timeout_seconds
+).window_seconds
+_ATTACH_PAUSES = (0.0, 0.0, 0.0, _WINDOW + 1.0)
 
 Fault = Literal["fails", "answer_lost"]
 
@@ -276,8 +282,14 @@ class _World:
 def _attach_until_attached(
     run: SlurmLedgerAttachment, cluster: FakeCluster | _SteppedCluster, request: SlurmBatchRequest
 ) -> Attached:
-    """Attach, asking again while another process holds the request, as the executor does."""
-    for _ in range(_TRIES):
+    """Attach, asking again while another process holds the request, as the executor does.
+
+    The executor asks again after a pause, for as long as the evaluation may
+    take: the last try here comes after a withdrawal's whole window, which a
+    mark left by a withdrawer that failed part way holds the request for.
+    """
+    for pause in _ATTACH_PAUSES:
+        run.clock.advance(pause)
         outcome = run.attach(cluster, request, labels=LedgerLabels())
         if isinstance(outcome, Attached):
             return outcome
@@ -427,11 +439,6 @@ _CALL_SECONDS = st.sampled_from([0.0, 37.0, 110.0])
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(
-    strict=True,
-    reason="#3173 re-review MED-2 and LOW-5: a slow withdrawer's mark expires before its "
-    "cancel, and a withdrawer whose mark answer was lost waits on its own mark",
-)
 @settings(max_examples=examples(pr=150, nightly=1500), deadline=None)
 @given(
     race=st.sampled_from(_RACES),

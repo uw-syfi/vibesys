@@ -447,8 +447,9 @@ class LedgerLease(_Document):
 class WithdrawalMark(_Document):
     """A withdrawal under way on one attempt: who decided it, until when it holds, and why.
 
-    ``by`` names the withdrawer (a run's holder, or the operator's command).
-    It holds from ``since`` until ``until``, in epoch seconds; one still under
+    ``by`` names the withdrawer (a run's holder, or the operator's command),
+    and ``writer`` the one withdrawer process that wrote it, so a withdrawer
+    whose write's answer was lost still knows the mark for its own. It holds from ``since`` until ``until``, in epoch seconds; one still under
     way after ``until`` is taken to have died, and anyone may undo it
     (``vs_slurm.ledger_actions.undo_expired_withdrawal``). ``reason`` is what
     the withdrawn record will say.
@@ -458,6 +459,7 @@ class WithdrawalMark(_Document):
     kind: Literal["mark"] = "mark"
     attempt: int = Field(ge=0)
     by: str
+    writer: Annotated[str, Field(min_length=1, max_length=64)]
     since: float
     until: float
     reason: str

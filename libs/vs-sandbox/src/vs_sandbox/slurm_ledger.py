@@ -150,6 +150,9 @@ class SlurmLedgerAttachment:
     _guards: dict[str, asyncio.Lock] = field(default_factory=dict)
     _orphans: OrphanChecks = field(init=False)
     _timing: WithdrawalTiming = field(init=False)
+    # One withdrawer, and so one writer id, for all this process's relinquishes: a
+    # relinquish tried again knows a mark an earlier try left as its own.
+    _withdrawer: Withdrawer = field(init=False)
 
     def __post_init__(self) -> None:
         """Reject a project or holder that cannot name a ledger path."""
@@ -158,6 +161,11 @@ class SlurmLedgerAttachment:
         self._orphans = OrphanChecks(window_seconds=self.policy.claim_seconds)
         self._timing = WithdrawalTiming(
             clock=self.clock, call_seconds=self.config.transport_timeout_seconds
+        )
+        self._withdrawer = Withdrawer(
+            by=self.holder,
+            reason=f"its run {self.holder} stopped wanting it",
+            timing=self._timing,
         )
 
     def key(self, request: SlurmBatchRequest) -> str:
@@ -295,11 +303,7 @@ class SlurmLedgerAttachment:
             self.ledger,
             cluster,
             key,
-            Withdrawer(
-                by=self.holder,
-                reason=f"its run {self.holder} stopped wanting it",
-                timing=self._timing,
-            ),
+            self._withdrawer,
             since=now - self.policy.grace_seconds,
         )
 
