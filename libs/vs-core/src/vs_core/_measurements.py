@@ -1130,7 +1130,8 @@ def _job_observed(
         has_facts=event.evaluation_result is not None,
     )
     state = job_budget(state, context, updated, claim, reuse_incomplete=incomplete)
-    state, requests = record_samples(state, context, updated, measured, observation.observed_at)
+    ran = record_samples(state, context, updated, measured, observation.observed_at)
+    state, requests = ran.state, ran.requests
     wake = ContinuationJobsChanged(
         resource_id=observation.resource_id, observation=observation, previous=previous
     )
@@ -1186,7 +1187,8 @@ def _job_observed(
         # history in which this submission is not closed.
         signals=closing or (*_history_unless_awaited(state, context, job, event), wake),
         requests=requests if context.run.status != RunStatus.TERMINAL else (),
-        events=events,
+        # A comparison the run's end settled is told after the run's own result.
+        events=(*events, *ran.events),
     )
 
 

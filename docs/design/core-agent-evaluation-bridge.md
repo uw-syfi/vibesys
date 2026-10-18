@@ -111,8 +111,9 @@ state live in `vs_core._base_runs`:
   evaluation history, so the agent's resume never waits for it: the turn resumes when its own
   jobs end, and the comparison it reads next grows as core's runs land. The strategy's verdict
   does wait: `ctx.evaluation.measure_compared` hands back the comparison once no run that feeds
-  it is under way (`StatedComparison.settling` in the run's view), or as it stands when three
-  times the measurement's limit is spent.
+  it is under way (`StatedComparison.settling` in the run's view). Core reports the end of the
+  last such run (`ComparisonSettled`), and the flow waits for that report, not on a poll; three
+  times the measurement's limit only bounds the wait against a report that never comes.
 
 The comparison reaches the agent twice: in the tool's reply for a finished evaluation
 (`SubmittedReply.comparison`, absent while the base has not ended) and in the resume prompt
@@ -123,9 +124,11 @@ events as `measurement_compared`, emitted by the commit observer from core's app
 The strategy's official measurement of an input the scope already measured is answered from the
 samples held (`vs_core._measurement_reuse`), and runs afresh only when the comparison is a close
 call that one more sample would narrow (not one that no run can settle). Its benchmark record enters the ledger stating the mean
-of the samples held then (`vs_core._comparison.as_answer`; a failed record keeps its own
-reading), and the reading a strategy decodes from a record takes its headline from the ledger's
-reading, so a candidate's headline in ranking is the value the comparison states; its other
+of the scope's samples of the input (`vs_core._comparison.as_answer`; a failed record keeps its
+own reading), and each later sample of the input in the scope restates it
+(`restated_answers`). `measure_compared` hands back the records as the ledger states them once
+the comparison settled, and the reading a strategy decodes from a record takes its headline from
+the ledger's reading, so a candidate's headline in ranking is the value the comparison states; its other
 objectives are the answering run's own, and each run's own reading stays in its `Sample`.
 
 ## Reply: one continuation, never a poll

@@ -19,6 +19,7 @@ from vs_core.types.common import (
     WorkspaceMode,
 )
 from vs_core.types.kinds import EventKind
+from vs_core.types.measurement import ComparisonSettled
 from vs_core.types.search import (
     AdoptionFinished,
     CheckpointKnown,
@@ -85,6 +86,7 @@ type JournaledEvent = Annotated[
     | ResumeReady
     | ResumeFailed
     | CheckpointKnown
+    | ComparisonSettled
     | Failed,
     Field(discriminator="kind"),
 ]

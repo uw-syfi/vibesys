@@ -41,7 +41,7 @@ from .evaluation import (
 )
 from .evaluation_history import AttemptEvaluationHistory, AttemptTerminalReason
 from .kinds import EventKind
-from .measurement import Comparison, StatedComparison
+from .measurement import Comparison, ComparisonSettled, StatedComparison
 from .records import OperationResult
 from .session_inputs import InputDelivered, InputDropped
 from .sessions import InterruptCompleted, InterruptFailed, TurnResult, YieldPublicationFailed
@@ -206,6 +206,7 @@ type Event = Annotated[
     | ResumeReady
     | ResumeFailed
     | CheckpointKnown
+    | ComparisonSettled
     | Failed,
     Field(discriminator="kind"),
 ]

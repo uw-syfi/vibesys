@@ -2,10 +2,11 @@
 
 A close call earns core more runs of either side, and they end after the measurement that asked
 for the comparison. ``ctx.evaluation.measure_compared`` therefore hands back the comparison once
-no run that feeds it is under way, or the latest one when its bound is spent. These stories play
-the host of a one-measurement flow: the measurement ends with a comparison that is still settling,
-and the run's view then shows the comparison growing until it settles. Each story runs live and
-with a restart after every step.
+no run that feeds it is under way, or the latest one when its bound is spent. Core reports the end
+of the last run that feeds it (``ComparisonSettled``), and the flow waits for that report, not on
+a poll. These stories play the host of a one-measurement flow: the measurement ends with a
+comparison that is still settling, and the run's view then shows the comparison growing until it
+settles. Each story runs live and with a restart after every step.
 """
 
 from __future__ import annotations
@@ -99,11 +100,13 @@ def finish_measurement(run: FlowRun[Config], samples: int, *, settling: bool) ->
     )
 
 
-def poll(run: FlowRun[Config]) -> float:
-    """Move the clock to the flow's next look at the comparison; the time it looked at."""
-    (at,) = run.sleeping_until
-    run.advance_to(at)
-    return at
+def settle(run: FlowRun[Config]) -> None:
+    """Core reports that no run feeding the comparison is under way any more."""
+    run.send(
+        core.ComparisonSettled(
+            scope=SCOPE, candidate_input="candidate-input", base_input="base-input"
+        )
+    )
 
 
 @RESTARTS
@@ -124,13 +127,39 @@ def test_a_settling_comparison_is_awaited_until_core_s_runs_have_landed(
     assert run.published(Settled) is None, "the first comparison is not the one a verdict rests on"
 
     show(run, 2, settling=True)
-    poll(run)
     assert run.published(Settled) is None
     show(run, 3, settling=False)
-    poll(run)
+    settle(run)
 
     assert run.published(Settled) == Settled(candidate_samples=3, base_samples=3)
     assert run.finished is not None
+    assert run.view.now_at == 0.0, "handed back when it settled, at no later look"
+
+
+@RESTARTS
+@pytest.mark.parametrize(
+    "other",
+    [
+        {"candidate_input": "other-input"},
+        {"base_input": "other-base"},
+        {"scope": core.Scope(owner=core.AttemptId(root="b"), generation=0)},
+        {"scope": core.Scope(owner=core.AttemptId(root="a"), generation=1)},
+    ],
+    ids=["another-input", "another-base", "another-attempt", "another-generation"],
+)
+def test_another_comparison_settling_does_not_end_the_wait(
+    *, restarting: bool, other: dict[str, object]
+) -> None:
+    run = FlowRun.start(measuring, Config(), restarting=restarting)
+    finish_measurement(run, 1, settling=True)
+    show(run, 2, settling=True)
+    told = {"scope": SCOPE, "candidate_input": "candidate-input", "base_input": "base-input"}
+    run.send(core.ComparisonSettled.model_validate({**told, **other}))
+
+    assert run.published(Settled) is None
+    show(run, 3, settling=False)
+    settle(run)
+    assert run.published(Settled) == Settled(candidate_samples=3, base_samples=3)
 
 
 @RESTARTS
@@ -154,7 +183,7 @@ def test_a_comparison_whose_base_samples_went_stale_is_the_last_one_seen(
     run = FlowRun.start(measuring, Config(), restarting=restarting)
     finish_measurement(run, 1, settling=True)
     run.view.changes["comparisons"] = ()
-    poll(run)
+    settle(run)
 
     assert run.published(Settled) == Settled(candidate_samples=1, base_samples=1)
 
@@ -162,15 +191,18 @@ def test_a_comparison_whose_base_samples_went_stale_is_the_last_one_seen(
 @RESTARTS
 @settings(max_examples=examples(pr=8, nightly=60), deadline=None, derandomize=True, database=None)
 @given(waits=st.integers(0, 6))
-def test_the_flow_looks_again_for_each_run_that_lands_and_hands_back_the_settled_comparison(
+def test_the_flow_waits_through_every_run_that_lands_and_hands_back_the_settled_comparison(
     *, restarting: bool, waits: int
 ) -> None:
+    """Each run that lands grows the comparison; core reports only the last one's end."""
     run = FlowRun.start(measuring, Config(), restarting=restarting)
     finish_measurement(run, 1, settling=waits > 0)
     for landed in range(1, waits + 1):
         assert run.published(Settled) is None
+        assert run.sleeping_until == (LIMIT * 3,), "it sleeps only until its bound"
         show(run, 1 + landed, settling=landed < waits)
-        poll(run)
+    if waits:
+        settle(run)
 
     assert run.published(Settled) == Settled(candidate_samples=1 + waits, base_samples=1 + waits)
 
@@ -209,7 +241,6 @@ def journaled_while_settling(limit: float) -> int:
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="#3185: the settle wait polls every 5 s (MED-4)")
 @pytest.mark.parametrize("limit", [300.0, 1800.0])
 def test_a_settling_comparison_journals_no_more_steps_for_a_longer_bound(limit: float) -> None:
     """A wait's journal does not grow with how long the comparison may settle.
@@ -257,7 +288,6 @@ def benchmark(value: float) -> core.EvidenceRef:
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="#3187: the result keeps the earlier mean (LOW-5)")
 @RESTARTS
 def test_the_result_handed_back_states_what_the_ledger_states_once_settled(
     *, restarting: bool

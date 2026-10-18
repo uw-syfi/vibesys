@@ -128,7 +128,7 @@ from .types.measurement import (
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from .types.common import RequestId, RunFacts, Scope, Seconds, TaskTerms
+    from .types.common import EvidenceKey, RequestId, RunFacts, Scope, Seconds, TaskTerms
     from .types.evaluation import EvaluationState
     from .types.kernel import RunState
 
@@ -155,6 +155,7 @@ __all__ = [
     "effect_resolution",
     "effect_verdict",
     "evaluation_of",
+    "feeding_run_under_way",
     "fresh",
     "latest_comparisons",
     "moment_of",
@@ -162,6 +163,7 @@ __all__ = [
     "policy_of",
     "remeasures_base",
     "remeasures_candidate",
+    "restated_answers",
     "run_reading",
     "running_baseline",
     "sample_of",
@@ -357,11 +359,11 @@ def as_answer(state: EvaluationState, job: OwnedJob, evidence: EvidenceRef) -> E
     The official measurement of an input is answered by every sample the scope holds of it, the
     run that answers included when it is a new one (`vs_core._measurement_reuse`). The
     benchmark record that carries the answer through the ledger, and so to every reader that
-    ranks candidates, states the mean of those samples: exactly the candidate value the
-    comparison with the base states (`comparison_of`) at the moment the answer is stored, never
-    one run's reading. A later sample of the same input in the same scope (another run of it
-    after the official check) moves the comparison but not the stored answer. The run's own
-    reading stays in its ``Sample``.
+    ranks candidates, states the mean of those samples (`scope_samples`): exactly the candidate
+    value the comparison with the base states (`comparison_of`), never one run's reading. A
+    later sample of the same input in the same scope (a close call's run after the official
+    check) restates the record (`restated_answers`), so the record and the settled comparison
+    are one figure. The run's own reading stays in its ``Sample``.
 
     Only a measurement record states an answer (`_measures`): a failed or untrusted record
     keeps the reading its run reported, so a failed run never reads as the mean of runs that
@@ -390,6 +392,48 @@ def as_answer(state: EvaluationState, job: OwnedJob, evidence: EvidenceRef) -> E
         return evidence
     mean = _mean(tuple(s.reading.value for s in held))
     return evidence.model_copy(update={"reading": reading.model_copy(update={"value": mean})})
+
+
+def restated_answers(state: EvaluationState, sample: Sample) -> EvaluationState:
+    """``state`` with the official answers of ``sample``'s input in its scope stating their mean.
+
+    The official measurement's ledger record states the mean of every sample its scope holds
+    of its input (`as_answer`), so a sample that lands after the answer was stored restates it:
+    in the ledger and in the job that carries it, which a later report of the same record is
+    checked against. The record keeps its identity; only its headline reading moves.
+    """
+    restated: dict[EvidenceKey, EvidenceRef] = {}
+    for job in state.jobs:
+        plan = job.plan
+        if (
+            job.scope == sample.scope
+            and plan.purpose == "official"
+            and plan.measured_input == sample.measured_input
+            and isinstance(plan.candidate, RevisionRef)
+            and evaluation_of(MeasurementIdentity.from_plan(plan, plan.candidate))
+            == sample.evaluation
+        ):
+            for record in job.evidence:
+                answer = as_answer(state, job, record)
+                if answer != record:
+                    restated[record.key] = answer
+    if not restated:
+        return state
+
+    def now(records: tuple[EvidenceRef, ...]) -> tuple[EvidenceRef, ...]:
+        return tuple(restated.get(record.key, record) for record in records)
+
+    return state.model_copy(
+        update={
+            "evidence": now(state.evidence),
+            "jobs": tuple(
+                job.model_copy(update={"evidence": now(job.evidence)})
+                if any(record.key in restated for record in job.evidence)
+                else job
+                for job in state.jobs
+            ),
+        }
+    )
 
 
 def run_reading(state: EvaluationState, job: OwnedJob, evidence: EvidenceRef) -> Reading | None:
@@ -682,11 +726,23 @@ def comparison_settling(state: EvaluationState, comparison: Comparison) -> bool:
     )
     if evaluation is None:
         return False
-    base = Measured(evaluation, comparison.base_input)
-    candidate = Measured(evaluation, comparison.candidate_input)
-    return _base_under_way(state, comparison, base) or base_in_flight(
-        state, candidate, comparison.scope
+    base = BaseRef(commit=comparison.base, measured_input=comparison.base_input)
+    return feeding_run_under_way(
+        state, comparison.scope, Measured(evaluation, comparison.candidate_input), base
     )
+
+
+def feeding_run_under_way(
+    state: EvaluationState, scope: Scope, candidate: Measured, base: BaseRef
+) -> bool:
+    """Whether a run that feeds the scope's comparison of ``candidate`` with ``base`` is under way.
+
+    A run of the base in any scope (core's, another candidate's, or the strategy's run core
+    claimed, `_base_under_way`), since a base's samples are shared by every candidate compared
+    with it, and a run of the candidate's input in its own scope (`base_in_flight`).
+    """
+    measured_base = Measured(candidate.evaluation, base.measured_input)
+    return _base_under_way(state, base, measured_base) or base_in_flight(state, candidate, scope)
 
 
 def stated_comparisons(state: EvaluationState, moment: Moment) -> tuple[StatedComparison, ...]:
@@ -945,17 +1001,17 @@ def remeasures_base(
         close_call(comparison)
         and not verdict_unreachable(comparison, moment.policy)
         and len(held) < _base_max_samples(moment.policy)
-        and not _base_under_way(state, comparison, base)
+        and not _base_under_way(
+            state, BaseRef(commit=comparison.base, measured_input=comparison.base_input), base
+        )
         and not base_run_stalled(state, comparison, evaluation, moment)
     )
 
 
-def _base_under_way(state: EvaluationState, comparison: Comparison, base: Measured) -> bool:
+def _base_under_way(state: EvaluationState, ref: BaseRef, base: Measured) -> bool:
     """Whether a run of the base has not ended: core's own, or the strategy's run it claimed."""
     claimed = {claim.request_id for claim in state.base_claims}
-    running = running_baseline(
-        state, BaseRef(commit=comparison.base, measured_input=comparison.base_input)
-    )
+    running = running_baseline(state, ref)
     return base_in_flight(state, base) or (running is not None and running in claimed)
 
 

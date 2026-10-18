@@ -175,3 +175,18 @@ class StatedComparison(Value):
 
     comparison: Comparison
     settling: bool
+
+
+class ComparisonSettled(Value):
+    """A run that fed a comparison ended, and no run that feeds it is under way any more.
+
+    Core reports it at the end of the run, so a flow that waits for the comparison to settle
+    (``ctx.evaluation.measure_compared``) wakes when the comparison it would read is final, and
+    not at a poll. It names the comparison only: the run's view states it
+    (``RunView.comparisons``), or no longer does when its base went stale meanwhile.
+    """
+
+    kind: Literal["comparison_settled"] = "comparison_settled"
+    scope: Scope
+    candidate_input: str = Field(min_length=1)
+    base_input: str = Field(min_length=1)

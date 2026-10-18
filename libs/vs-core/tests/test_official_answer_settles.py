@@ -38,7 +38,6 @@ def end_run(lab: Lab, run: core.SubmitMeasurement, bench: Bench) -> None:
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="#3187: the ledger keeps the earlier mean (LOW-5)")
 @settings(max_examples=examples(pr=40, nightly=400))
 @given(
     spread=st.sampled_from((0.0, 0.01, 0.05)),
@@ -72,9 +71,10 @@ def test_the_official_record_states_the_settled_comparison_s_value(
     settled = [c for c in lab.comparisons() if c.candidate_input == INPUT][-1]
     stated = official_reading(lab, check)
     assert stated.value == settled.candidate_value
-    (ranked,) = (
-        item
+    ranked = [
+        item.reading
         for item in lab.state.evaluation.measurements_of(revision("c1"))
         if item.purpose == "official" and item.kind is core.EvidenceKind.BENCHMARK
-    )
-    assert ranked.reading == stated
+    ]
+    assert ranked
+    assert all(reading == stated for reading in ranked), "core's re-runs state the same answer"

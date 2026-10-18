@@ -39,10 +39,12 @@ from ._comparison import (
     comparison_of,
     comparisons_of,
     evaluation_of,
+    feeding_run_under_way,
     fresh,
     moment_of,
     remeasures_base,
     remeasures_candidate,
+    restated_answers,
     running_baseline,
     sample_of,
     samples_of,
@@ -68,7 +70,14 @@ from .types.evaluation import (
 )
 from .types.job_observations import MeasurementFailure
 from .types.kernel import AreaChange
-from .types.measurement import BaseClaim, BaseRef, Comparison, CoreRun, Sample
+from .types.measurement import (
+    BaseClaim,
+    BaseRef,
+    Comparison,
+    ComparisonSettled,
+    CoreRun,
+    Sample,
+)
 from .types.until import FailureReason, Within
 
 if TYPE_CHECKING:
@@ -80,7 +89,6 @@ if TYPE_CHECKING:
         MeasurementPlan,
     )
     from .types.kernel import EvaluationContext
-    from .types.records import Outbound
 
 __all__ = ["after_run", "base_of", "base_plan", "record_samples", "with_base"]
 
@@ -424,16 +432,17 @@ def record_samples(
     job: OwnedJob | RegisteredOwnedJob,
     newly: tuple[EvidenceRef, ...],
     observed_at: Seconds,
-) -> tuple[EvaluationState, tuple[Outbound, ...]]:
+) -> AreaChange[EvaluationState]:
     """Record the sample a finished framework run gives, and what its end changes.
 
     One run is one sample, however many records it carries, and a sample cannot be built
-    without the commit and the measured input of its plan (`sample_of`). Every new or changed
-    comparison is logged. Once the run has ended, with a sample or without, the comparisons
+    without the commit and the measured input of its plan (`sample_of`). The official answer
+    of its input in its scope is restated to the mean it now makes (`restated_answers`), and
+    every new or changed comparison is logged. Once the run has ended, with a sample or without, the comparisons
     waiting on its input take the runs they still need (`after_run`).
     """
     if not isinstance(job, OwnedJob):
-        return state, ()
+        return AreaChange(state=state)
     sample = next(
         (
             made
@@ -444,14 +453,14 @@ def record_samples(
         None,
     )
     if sample is not None:
-        state = state.model_copy(
-            update={"samples": (*state.samples, _with_known_base(state, sample))}
+        sample = _with_known_base(state, sample)
+        state = restated_answers(
+            state.model_copy(update={"samples": (*state.samples, sample)}), sample
         )
         state = state.model_copy(update={"comparisons": _logged(state, context)})
     if not job.terminal:
-        return state, ()
-    change = after_run(AreaChange(state=state), context, job.submission_id)
-    return change.state, change.requests
+        return AreaChange(state=state)
+    return after_run(AreaChange(state=state), context, job.submission_id)
 
 
 def _logged(state: EvaluationState, context: EvaluationContext) -> tuple[Comparison, ...]:
@@ -521,9 +530,62 @@ def after_run(
         return change
     measured_input = _measured_input(state, context, run)
     own = next((core_run.scope for core_run in state.core_runs if core_run.request_id == run), None)
-    for candidate in _candidates_of(state, context, measured_input, own):
+    candidates = _candidates_of(state, context, measured_input, own)
+    for candidate in candidates:
         change = _advance(change, context, candidate)
-    return change
+    return _settled(change, _scope_of(state, context, run), measured_input, candidates)
+
+
+def _scope_of(state: EvaluationState, context: EvaluationContext, run: RequestId) -> Scope | None:
+    """The scope ``run`` was submitted in."""
+    job = next((j for j in state.jobs if j.submission_id == run), None)
+    if job is not None:
+        return job.scope
+    row = context.records.record(run)
+    return (
+        row.request.scope
+        if row is not None and isinstance(row.request, SubmitMeasurement)
+        else None
+    )
+
+
+def _settled(
+    change: AreaChange[EvaluationState],
+    scope: Scope | None,
+    measured_input: str | None,
+    candidates: tuple[_Candidate, ...],
+) -> AreaChange[EvaluationState]:
+    """``change`` telling of each comparison the ended run fed that no run feeds any more.
+
+    The run fed a candidate's comparison when it measured the candidate's base (in any scope)
+    or the candidate's own input in its scope. Once no run that feeds the comparison is under
+    way, after the runs this end started (`feeding_run_under_way`), the comparison is final until
+    another run is asked for, and a flow that waits for it is told (``ComparisonSettled``). A
+    candidate with no sample in its scope has no comparison to settle.
+    """
+    if measured_input is None:
+        return change
+    state = change.state
+    told: list[ComparisonSettled] = []
+    for candidate in candidates:
+        own = candidate.plan.measured_input
+        identity = identity_of(candidate.plan)
+        fed = measured_input == candidate.base.measured_input or (
+            measured_input == own and scope == candidate.scope
+        )
+        if own is None or not fed or not isinstance(identity, Proven):
+            continue
+        mine = Measured(evaluation_of(identity.value), own)
+        settled = ComparisonSettled(
+            scope=candidate.scope, candidate_input=own, base_input=candidate.base.measured_input
+        )
+        if (
+            settled not in told
+            and scope_samples(state, candidate.scope, mine)
+            and not feeding_run_under_way(state, candidate.scope, mine, candidate.base)
+        ):
+            told.append(settled)
+    return change.model_copy(update={"events": (*change.events, *told)}) if told else change
 
 
 def _measured_input(
