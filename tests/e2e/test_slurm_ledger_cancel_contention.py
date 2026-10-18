@@ -132,6 +132,10 @@ class _World:
             return
         self.other_holds.set()
         deadline = time.monotonic() + HANG_GUARD_S
+        # The loop ends on an event: the scancel sent, or the withdrawer queued on the
+        # flock in /proc/locks. A correct cancel sends its scancel first, so expiry never
+        # decides a pass.
+        # test-isolation: HANG_GUARD_S only bounds a hang; the verdict rests on events.
         while time.monotonic() < deadline:
             if self.scancel_sent.wait(0.01) or self._withdrawer_waits_for_the_lock():
                 break

@@ -167,14 +167,11 @@ def _ledger_file(
 
 @given(
     transport_timeout_seconds=st.integers(min_value=1, max_value=400),
-    ledger=st.one_of(
-        st.just({}),
-        st.fixed_dictionaries({"claim_seconds": st.floats(min_value=1.0, max_value=5000.0)}),
-    ),
+    claim_seconds=st.one_of(st.none(), st.floats(min_value=1.0, max_value=5000.0)),
 )
 @settings(max_examples=examples(pr=40, nightly=400), deadline=None)
 def test_a_ledger_whose_withdrawal_window_exceeds_a_claim_window_is_rejected_naming_the_keys(
-    transport_timeout_seconds: int, ledger: dict[str, float]
+    transport_timeout_seconds: int, claim_seconds: float | None
 ) -> None:
     """A withdrawal's mark holds ``7 x transport_timeout_seconds + 60`` s.
 
@@ -184,7 +181,8 @@ def test_a_ledger_whose_withdrawal_window_exceeds_a_claim_window_is_rejected_nam
     about to cancel the job.
     """
     window = 7 * transport_timeout_seconds + 60
-    policy = LedgerPolicy(**ledger)
+    ledger = {} if claim_seconds is None else {"claim_seconds": claim_seconds}
+    policy = LedgerPolicy() if claim_seconds is None else LedgerPolicy(claim_seconds=claim_seconds)
     with tempfile.TemporaryDirectory() as directory:
         path = _ledger_file(Path(directory), transport_timeout_seconds, ledger)
         if window <= min(900.0, policy.claim_seconds):
