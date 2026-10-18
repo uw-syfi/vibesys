@@ -135,6 +135,7 @@ __all__ = [
     "comparison_of",
     "comparison_of_result",
     "comparisons_of",
+    "comparisons_to_publish",
     "effect_verdict",
     "evaluation_of",
     "fresh",
@@ -146,6 +147,7 @@ __all__ = [
     "remeasures_candidate",
     "run_reading",
     "running_baseline",
+    "runs_under_way",
     "sample_of",
     "samples_of",
     "terms_policy",
@@ -617,6 +619,65 @@ def latest_comparisons(
         if now is not None and now.base_input == base_input and now not in found:
             found.append(now)
     return tuple(found)
+
+
+def runs_under_way(state: EvaluationState, scope: Scope, candidate_input: str) -> bool:
+    """Whether core has a run under way for the scope's comparison of ``candidate_input``.
+
+    A run of either side core asked for that comparison (``CoreRun.candidate_input``) that has
+    not ended: the comparison changes when it lands.
+    """
+    asked = {
+        run.request_id
+        for run in state.core_runs
+        if run.scope == scope and run.candidate_input == candidate_input
+    }
+    return any(
+        isinstance(receipt, PreparedSubmissionReceipt)
+        and receipt.request_id in asked
+        and (receipt.observation is None or not receipt.observation.terminal)
+        for budget in state.submission_budgets
+        if budget.scope == scope
+        for receipt in budget.receipts
+    )
+
+
+def comparisons_to_publish(
+    state: EvaluationState,
+    scope: Scope,
+    covered: Iterable[str],
+    told: Iterable[tuple[Comparison, bool]],
+    moment: Moment,
+) -> tuple[tuple[Comparison, ...], tuple[str, ...]]:
+    """The comparisons a resume tells the scope's agent of, and the inputs of those still settling.
+
+    ``covered`` are the candidate inputs the wait's jobs measured; ``told`` is every comparison
+    the scope's earlier resumes told of, oldest first, each with whether it was still settling
+    then. Of the comparisons the scope holds now (`latest_comparisons`), one is told when its
+    input is covered, or when its verdict or whether it is settling differs from what the last
+    resume that told of it said (one no resume told of differs). Core's runs land after the
+    resume that waited for the candidate, so an agent that resumed on a provisional comparison
+    learns where it ended at its next resume, whatever that resume waited for. A comparison is
+    settling while core still has a run under way for it (`runs_under_way`).
+    """
+    last: dict[tuple[str, str], tuple[ComparisonVerdict, bool]] = {}
+    for comparison, settling in told:
+        last[comparison.candidate_input, comparison.base_input] = (comparison.verdict, settling)
+    wanted = frozenset(covered)
+    held = (c.candidate_input for c in state.comparisons if c.scope == scope)
+    found: list[Comparison] = []
+    settling_now: list[str] = []
+    for comparison in latest_comparisons(state, scope, held, moment):
+        settling = runs_under_way(state, scope, comparison.candidate_input)
+        subject = (comparison.candidate_input, comparison.base_input)
+        if comparison.candidate_input in wanted or last.get(subject) != (
+            comparison.verdict,
+            settling,
+        ):
+            found.append(comparison)
+            if settling and comparison.candidate_input not in settling_now:
+                settling_now.append(comparison.candidate_input)
+    return tuple(found), tuple(settling_now)
 
 
 def effect_verdict(

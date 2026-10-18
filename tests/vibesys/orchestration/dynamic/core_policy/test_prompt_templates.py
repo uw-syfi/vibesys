@@ -397,7 +397,7 @@ _COMPARISONS = st.builds(
     unit=st.sampled_from([None, "tokens/s", "ms"]),
     direction=st.sampled_from(["max", "min"]),
     candidate=st.text("0123456789abcdef", min_size=7, max_size=12).map(RevisionRef.of_git_commit),
-    candidate_input=st.just("sha256:candidate"),
+    candidate_input=st.sampled_from(["sha256:one", "sha256:two", "sha256:three"]),
     base=st.text("0123456789abcdef", min_size=7, max_size=12).map(RevisionRef.of_git_commit),
     base_input=st.just("sha256:base"),
     candidate_value=st.floats(0.5, 1e4, allow_nan=False).map(lambda x: round(x, 3)),
@@ -432,34 +432,40 @@ _PINNED_COMPARISON = Comparison(
 @settings(max_examples=examples(pr=8, nightly=100))
 @given(
     context=CONTEXTS[CoreProtocolTemplate.RESUME],
-    comparisons=st.lists(_COMPARISONS, max_size=3),
+    comparisons=st.lists(_COMPARISONS, max_size=3, unique_by=lambda c: c.candidate_input),
+    settling=st.sets(st.sampled_from(["sha256:one", "sha256:two", "sha256:three"])),
     noise_declared=st.booleans(),
 )
 @example(
     context=ResumeFacts(agent="implementer", retained=None, ended_by=None),
     comparisons=[_PINNED_COMPARISON],
+    settling=set(),
     noise_declared=False,
 )
 @example(
     context=ResumeFacts(agent="implementer", retained=None, ended_by=None),
     comparisons=[_PINNED_COMPARISON],
+    settling={_PINNED_COMPARISON.candidate_input},
     noise_declared=True,
 )
 def test_a_resumed_turn_states_each_comparison_the_framework_made_and_none_it_did_not(
-    context: BaseModel, comparisons: list[Comparison], *, noise_declared: bool
+    context: BaseModel, comparisons: list[Comparison], settling: set[str], *, noise_declared: bool
 ) -> None:
     """Each comparison, and the rule its verdict was reached by, as core applies it.
 
     Before, the resume said a verdict meant "two noises" for every task, although a task that
     declares no per-run noise gets no verdict before ``MIN_SAMPLES_WITHOUT_FLOOR`` runs a side
     and is then judged by Welch's t test. The rule now comes from the run's comparison policy.
+    A comparison core still runs is marked provisional, and the agent is told a repeat call
+    reads the comparison as held then (before, it was told only not to repeat the call, so it
+    never learned where a provisional comparison ended).
     """
     assert isinstance(context, ResumeFacts)
-    text = render(
-        CoreProtocolTemplate.RESUME,
-        context.model_copy(update={"comparisons": tuple(comparisons)}),
-        noise_declared=noise_declared,
+    pending = tuple(c.candidate_input for c in comparisons if c.candidate_input in settling)
+    facts = ResumeFacts.model_validate(
+        context.model_dump() | {"comparisons": tuple(comparisons), "settling": pending}
     )
+    text = render(CoreProtocolTemplate.RESUME, facts, noise_declared=noise_declared)
 
     assert ("compared each measured candidate with its base" in text) is bool(comparisons)
     prose = " ".join(text.split())
@@ -468,6 +474,9 @@ def test_a_resumed_turn_states_each_comparison_the_framework_made_and_none_it_di
         assert (f"at least {MIN_SAMPLES_WITHOUT_FLOOR} runs" in prose) is not noise_declared
         assert "two noises" not in prose
         assert "the value stored then is the one it is ranked by" in prose
+        assert "returns the evaluation already made with its comparison as held now" in prose
+        assert "Do not duplicate" not in prose
+    assert prose.count("(provisional:") == len(pending)
     for item in comparisons:
         assert f"**{item.verdict.value.replace('_', ' ')}**" in text
         assert item.candidate.revision_id.root[:7] in text

@@ -588,6 +588,7 @@ class _Ask:
             evidence=authorization.evidence,
             repeated_failure=authorization.repeated_failure,
             comparisons=authorization.comparisons,
+            settling=authorization.settling,
         )
         template = self.role.exchanges.resume
         if template is None:

@@ -20,7 +20,7 @@ from .common import (
     Seconds,
     Value,
 )
-from .evaluation import EvidenceRef
+from .evaluation import EvidenceRef, settling_named
 from .evaluation_history import RepeatedFailureGuidance
 from .job_observations import WaitEnd
 from .measurement import Comparison
@@ -104,8 +104,13 @@ class ResumeFacts(Value):
     evidence: tuple[EvidenceRef, ...] = ()
     repeated_failure: RepeatedFailureGuidance | None = None
     comparisons: tuple[Comparison, ...] = ()
-    """What the awaited evaluations measured against their base: the ratio, the noise and the
-    verdict the framework reached, so the agent need not work them out from a lone number."""
+    """What the attempt's candidates measured against their base: the ratio, the noise and the
+    verdict the framework reached, so the agent need not work them out from a lone number.
+    Those the awaited evaluations measured, and any other whose verdict changed since the
+    attempt's last resume."""
+    settling: tuple[str, ...] = ()
+    """The candidate inputs of ``comparisons`` the framework still has runs under way for: their
+    verdicts are provisional."""
 
     @model_validator(mode="after")
     def budget_end_names_a_spent_budget(self) -> ResumeFacts:
@@ -116,6 +121,7 @@ class ResumeFacts(Value):
             raise ContractValidationError(
                 "queue_budget_spent", "must agree with what ended the wait"
             )
+        settling_named(self.comparisons, self.settling)
         return self
 
 

@@ -30,9 +30,10 @@ workspace edits. These are the trusted results; report them as measured:
 {% if comparisons %}
 
 The framework compared each measured candidate with its base, from every run it holds of
-each. These are its numbers, not claims; report them as measured:
+each. Listed are the candidates you awaited and any earlier candidate of yours whose verdict
+changed since your last resume. These are its numbers, not claims; report them as measured:
 {% for c in comparisons %}
-- `{{ rev(c.candidate) }}` against base `{{ rev(c.base) }}`: **{{ c.verdict.value | replace('_', ' ') }}**. {{ c.metric }} {{ '%.6g' | format(c.candidate_value) }}{% if c.unit %} {{ c.unit }}{% endif %} over {{ c.candidate_samples }} run{{ '' if c.candidate_samples == 1 else 's' }}, base {{ '%.6g' | format(c.base_value) }}{% if c.unit %} {{ c.unit }}{% endif %} over {{ c.base_samples }} run{{ '' if c.base_samples == 1 else 's' }}; ratio {{ '%.4f' | format(c.ratio) }} with noise {{ '%.4f' | format(c.noise) }} (one standard error), where {{ 'higher' if c.direction == 'max' else 'lower' }} is better.
+- `{{ rev(c.candidate) }}` against base `{{ rev(c.base) }}`: **{{ c.verdict.value | replace('_', ' ') }}**{% if c.candidate_input in settling %} (provisional: the framework is still running this comparison, so it may change){% endif %}. {{ c.metric }} {{ '%.6g' | format(c.candidate_value) }}{% if c.unit %} {{ c.unit }}{% endif %} over {{ c.candidate_samples }} run{{ '' if c.candidate_samples == 1 else 's' }}, base {{ '%.6g' | format(c.base_value) }}{% if c.unit %} {{ c.unit }}{% endif %} over {{ c.base_samples }} run{{ '' if c.base_samples == 1 else 's' }}; ratio {{ '%.4f' | format(c.ratio) }} with noise {{ '%.4f' | format(c.noise) }} (one standard error), where {{ 'higher' if c.direction == 'max' else 'lower' }} is better.
 {%- endfor %}
 
 {% if comparison_rule.noise_declared %}
@@ -48,8 +49,10 @@ base. While a result is within noise, the framework runs the candidate and its b
 itself, up to {{ comparison_rule.min_runs }} runs each. If every run on both sides reads
 alike, no verdict is possible and no more runs are taken.
 {% endif %}
-Evaluating unchanged candidate content again returns the evaluation already made (a new
-run only after the machinery failed it), so it adds no sample. A comparison describes the runs held now; once a candidate's
+Evaluating unchanged candidate content again starts no new run (only one the machinery
+failed is run again) and adds no sample: it returns the evaluation already made with its
+comparison as held now, so call it again to read a provisional comparison once the
+framework's runs have landed. A comparison describes the runs held now; once a candidate's
 official measurement is stored, the value stored then is the one it is ranked by, and later
 runs move the comparison, not that value.
 {% endif %}
@@ -58,6 +61,6 @@ runs move the comparison, not that value.
 Repeated failure: {% if repeated_failure.reason.value == 'repeated-traceback' %}the last {{ repeated_failure.consecutive_failures }} trusted evaluations of your submissions (limit {{ repeated_failure.limit }}) failed with the same traceback{% if repeated_failure.traceback_signature %} ({{ repeated_failure.traceback_signature }}){% endif %}{% else %}the last {{ repeated_failure.consecutive_failures }} trusted benchmarks of your submissions (limit {{ repeated_failure.limit }}) failed to reach the required result{% if repeated_failure.failed_benchmark %}; the latest measured partial rate {{ repeated_failure.failed_benchmark.partial_rate }}, within the comparison interval {{ repeated_failure.failed_benchmark.rate_lower }} to {{ repeated_failure.failed_benchmark.rate_upper }}{% endif %}{% endif %}.
 {% endif %}
 
-A failed or cancelled evaluation is an ordinary terminal outcome. Do not duplicate a
-trusted measurement for an unchanged candidate. Continue the original stage and return
+A failed or cancelled evaluation is an ordinary terminal outcome; evaluating its unchanged
+content again measures nothing new. Continue the original stage and return
 its schema-valid {% if agent == 'judge' %}review{% else %}implementation{% endif %} JSON.

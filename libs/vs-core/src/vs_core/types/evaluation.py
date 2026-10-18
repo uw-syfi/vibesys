@@ -354,6 +354,13 @@ class ContinuationPhase(StrEnum):
     BLOCKED = "blocked"
 
 
+def settling_named(comparisons: tuple[Comparison, ...], settling: tuple[str, ...]) -> None:
+    """Every settling input is the candidate input of one of ``comparisons``, named once."""
+    known = {comparison.candidate_input for comparison in comparisons}
+    if len(set(settling)) != len(settling) or not set(settling) <= known:
+        raise ContractValidationError("settling", "names an input of no comparison, or twice")
+
+
 class ResumeAuthorizationReceipt(Value):
     """Immutable publication proof, independent of the current continuation phase.
 
@@ -370,12 +377,17 @@ class ResumeAuthorizationReceipt(Value):
     timeout: TimedOut | None = None
     repeated_failure: RepeatedFailureGuidance | None = None
     comparisons: tuple[Comparison, ...] = Field(default=(), exclude_if=unset)
-    """The comparisons with a base of the candidates the wait's jobs measured, as held now.
+    """The attempt's comparisons with a base the resume tells its agent of, as held now.
 
-    Each is recomputed over the samples fresh now, so a base whose samples partly went stale is
+    Those of the candidates the wait's jobs measured, and every other one of the attempt whose
+    verdict changed since the attempt's last resume told it (`comparisons_to_publish`). Each is
+    recomputed over the samples fresh now, so a base whose samples partly went stale is
     compared over the rest, and an input none of whose base samples is fresh is left out
     (`latest_comparisons`).
     """
+    settling: tuple[str, ...] = Field(default=(), exclude_if=unset)
+    """The candidate inputs of ``comparisons`` core still has runs under way for: each such
+    comparison is provisional, and changes when they land."""
 
     @model_validator(mode="after")
     def guidance_cursor(self) -> ResumeAuthorizationReceipt:
@@ -387,6 +399,7 @@ class ResumeAuthorizationReceipt(Value):
             raise ContractValidationError(
                 "repeated_failure.cursor", "differs from publication cursor"
             )
+        settling_named(self.comparisons, self.settling)
         return self
 
 
@@ -918,7 +931,10 @@ class ResumeAuthorized(Value):
     history_cursor: EvaluationHistoryCursor | None = None
     repeated_failure: RepeatedFailureGuidance | None = None
     comparisons: tuple[Comparison, ...] = Field(default=(), exclude_if=unset)
-    """The comparisons with a base of what the awaited jobs measured, frozen at authorization."""
+    """The comparisons the resume tells its agent of, frozen at authorization
+    (``ResumeAuthorizationReceipt.comparisons``)."""
+    settling: tuple[str, ...] = Field(default=(), exclude_if=unset)
+    """The candidate inputs of ``comparisons`` core still had runs under way for."""
 
     @model_validator(mode="after")
     def guidance_cursor(self) -> ResumeAuthorized:
@@ -930,6 +946,7 @@ class ResumeAuthorized(Value):
             raise ContractValidationError(
                 "repeated_failure.cursor", "differs from publication cursor"
             )
+        settling_named(self.comparisons, self.settling)
         return self
 
 

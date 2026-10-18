@@ -541,4 +541,42 @@ async def test_the_agent_is_told_only_the_comparison_its_fresh_base_samples_make
             if wait.authorization_receipt is not None and wait.authorization_receipt.comparisons
         ]
         assert receipts, "a resume published the comparison"
-        assert receipts[-1] == (last,)
+        # The first candidate, re-compared over the fresh base run, may be told again beside it.
+        assert last in receipts[-1]
+        assert all(c.base_samples == 1 for c in receipts[-1]), "only the fresh base run counts"
+
+
+SLOW = Pace(runtime=10.0, base_staleness=100_000.0)
+"""Jobs that take ten seconds; the base never goes stale."""
+
+
+@pytest.mark.regression
+async def test_an_agent_that_resumed_on_a_provisional_comparison_is_told_where_it_ended(
+    tmp_path: Path,
+) -> None:
+    """A later resume tells of an earlier candidate's comparison once core's runs changed it.
+
+    With no declared noise a verdict needs three runs a side, which core takes after the agent
+    resumed. The resume that waited for the first candidate marks its comparison provisional.
+    Before, a later resume told only of the candidates it waited for, so the agent never learned
+    the first candidate's verdict unless it evaluated it again, which the resume told it not to.
+    """
+    task = TERMS.model_copy(update={"relative_noise": 0.0})
+    script = (Turn(speed=130.0), Turn(speed=131.0), Turn(speed=132.0), Turn(speed=133.0))
+    async with play(tmp_path, script, task=task, pace=SLOW) as played:
+        state = played.process.shell.record.envelope.core
+        receipts = [
+            wait.authorization_receipt
+            for wait in state.evaluation.continuations
+            if wait.authorization_receipt is not None
+        ]
+        first = played.comparisons[0].candidate_input
+        told = [
+            (c.verdict, c.candidate_input in receipt.settling)
+            for receipt in receipts
+            for c in receipt.comparisons
+            if c.candidate_input == first
+        ]
+        assert told[0] == (ComparisonVerdict.WITHIN_NOISE, True), "first told as provisional"
+        assert told[-1] == (ComparisonVerdict.BETTER, False), "later told where it ended"
+        assert len(told) == len(set(told)), "each change is told once"
