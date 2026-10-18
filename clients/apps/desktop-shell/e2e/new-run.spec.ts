@@ -530,7 +530,7 @@ test('the harness is chosen from tiles with a mark and a name each', async ({pag
   await expect(
     main(page).getByRole('radiogroup', {name: 'Model line'}).getByRole('radio'),
   ).toHaveCount(2);
-  await choose(page, 'Model line', 'Codex');
+  await choose(page, 'Model line', 'OpenAI');
   await expect(main(page).getByLabel('Model', {exact: true})).toHaveValue('gpt-5-codex');
   await expect(main(page).getByLabel('Model', {exact: true}).locator('option:checked')).toHaveText(
     'GPT-5 Codex',
