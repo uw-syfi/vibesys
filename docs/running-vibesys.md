@@ -481,6 +481,18 @@ reason. Each control is applied once, even across a crash or when the same contr
 over a client's socket: pass `--control-id ID` to resend the same control safely. An id, once
 used, keeps its control: sending a different control under it is refused.
 
+A stop only escalates. `stop` drains the run: work already in flight finishes, and nothing new
+starts. `stop --mode cancel` cancels the work in flight at once, such as evaluations and
+cluster jobs, and also turns a drain already under way into a cancel. A later drain never
+weakens a cancel. While a stop is pending, `resume` is rejected with the reason
+`the run is stopping`.
+
+In the terminal that started the run, with or without `--web`, Ctrl-C asks for a cancelling
+stop, and a second Ctrl-C ends the run at once, through its teardown. Ctrl-Z suspends only the
+`vibesys` command; the run keeps going and keeps writing to the terminal. If the `vibesys`
+command itself dies, for example by `kill -9`, the run reacts as it would to its terminal
+closing: it cancels its work and ends.
+
 `vibesys control <run-id> status ID` prints what became of a control: `pending`, `applied`, or
 `rejected: <reason>`. A run has ended when its core record says so, which is final. It then
 takes no more controls: `vibesys control` refuses a new one before writing anything and exits

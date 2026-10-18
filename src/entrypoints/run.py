@@ -84,8 +84,9 @@ async def supervise(
     before the cancellation propagates. With a *signals* source, SIGINT requests a
     stop in ``StopMode.CANCEL`` (the run cancels its evaluations and jobs at once,
     and the host bounds how long its agents' turns may take to end) and returns the
-    typed stopped result, even after cancelling this coroutine asked for a draining
-    stop; a repeated SIGINT changes nothing. SIGTERM or SIGHUP,
+    typed stopped result. If cancelling this coroutine already asked for a draining
+    stop, a SIGINT escalates it to ``StopMode.CANCEL`` and the cancellation still
+    propagates once the run has ended. A repeated SIGINT changes nothing. SIGTERM or SIGHUP,
     first or after a SIGINT, cancel the run and end in ``SystemExit(128 + n)``,
     where n is the first signal received.
     The handlers run on the event loop, so no signal raises inside a teardown step.
