@@ -6,7 +6,7 @@ import {Text} from './text.js';
 
 /**
  * How a measured point ended: the `input` is the starting point; a `passed` point competes for
- * the frontier; a `failed` point was measured but turned down, so it is drawn and never competes.
+ * the frontier; a `failed` point was measured but failed, so it is drawn and never competes.
  */
 export type ParetoState = 'input' | 'passed' | 'failed';
 
@@ -170,7 +170,7 @@ const ROLE_WORD: Record<Role, string> = {
   input: 'Input',
   frontier: 'On the frontier',
   dominated: 'Dominated',
-  failed: 'Turned down',
+  failed: 'Failed',
 };
 
 /** The words a hover shows: the point's name and both of its values. */

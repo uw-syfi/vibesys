@@ -20,6 +20,8 @@ import {
   Text,
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
+import {ideaBases} from '../../../../state/idea-bases.js';
+import type {IdeaEffect} from '../../../../state/idea-effects.js';
 import type {ImplementerOutcome} from '../../../../state/idea-outcomes.js';
 import {outcomeWords} from '../../../../state/ideas-view.js';
 import {spendOf, stepLabel, stepTitle, tokensColumn, turnTokens} from '../../../../state/index.js';
@@ -34,6 +36,8 @@ export interface IdeaViewProps extends ViewBase {
   readonly idea: Candidate;
   /** What the idea's implementer reported (its outcome and summary); null when it reported none. */
   readonly outcome: ImplementerOutcome | null;
+  /** The framework's verdict on the idea's effect; null when it has none. */
+  readonly effect: IdeaEffect | null;
 }
 
 function unitOf(model: ViewBase['model']): string {
@@ -47,10 +51,17 @@ const OUTCOME_TONE: Readonly<Record<Candidate['outcome'], 'live' | 'ok' | 'err'>
   failed: 'err',
 };
 
-/** `Failed · turned down`: the outcome capitalized, with its reason when the idea failed. */
+/** `Failed · not measured`: the outcome capitalized, with its reason when the idea failed. */
 function outcomeLabel(idea: Candidate): string {
   const text = outcomeWords(idea);
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+}
+
+/** The idea's outcome, or `Best`/`Adopted` when it is the run's leader. */
+function standingLabel(props: IdeaViewProps): string {
+  const best = props.model.candidates.best;
+  if (best === null || best.candidate !== props.idea.id) return outcomeLabel(props.idea);
+  return best.adopted ? 'Adopted' : 'Best';
 }
 
 /**
@@ -62,7 +73,7 @@ function IdeaFacts(props: IdeaViewProps): JSX.Element {
   return (
     <FactLine>
       <Fact>
-        <Chip label={outcomeLabel(idea)} tone={OUTCOME_TONE[idea.outcome]} dot />
+        <Chip label={standingLabel(props)} tone={OUTCOME_TONE[idea.outcome]} dot />
       </Fact>
       {known ? (
         <Fact>
@@ -80,8 +91,12 @@ export const ideaHeader: ViewHeader<IdeaViewProps> = props => ({
   meta: <IdeaFacts {...props} />,
 });
 
-/** The implementer's outcome as a chip and its summary under it. */
-function Implemented(props: {readonly outcome: ImplementerOutcome}): JSX.Element {
+/** The implementer's outcome as a chip (else the idea's own) and its summary under it. */
+function Implemented(props: {
+  readonly outcome: ImplementerOutcome;
+  /** The idea's own outcome, said when the implementer reported none. */
+  readonly idea: Candidate;
+}): JSX.Element {
   const {outcome, summary} = props.outcome;
   return (
     <Stack gap="space-1">
@@ -89,10 +104,28 @@ function Implemented(props: {readonly outcome: ImplementerOutcome}): JSX.Element
         <Text variant="small" tone="muted">
           implementer
         </Text>
-        {outcome === null ? null : <Chip label={outcome.label} tone={outcome.tone} dot />}
+        {outcome === null ? (
+          <Chip label={outcomeLabel(props.idea)} tone={OUTCOME_TONE[props.idea.outcome]} dot />
+        ) : (
+          <Chip label={outcome.label} tone={outcome.tone} dot />
+        )}
       </Row>
       {summary === null ? null : <Markdown text={summary} />}
     </Stack>
+  );
+}
+
+/**
+ * What the idea built on and the framework's verdict on its effect, in a line every idea has so
+ * the content below never moves between ideas (a header that wrapped would shift it).
+ */
+function BaseAndEffect(props: IdeaViewProps): JSX.Element {
+  const base = ideaBases(props.model.candidates, props.model.direction).get(props.idea.id);
+  const from = base?.kind === 'own work' ? 'from its own work' : `from ${base?.label ?? 'input'}`;
+  return (
+    <Text variant="small" tone="muted">
+      {[from, props.effect].filter(part => part !== null).join(' · ')}
+    </Text>
   );
 }
 
@@ -135,7 +168,8 @@ export function IdeaView(props: IdeaViewProps): JSX.Element {
   const number = idea.attempts.indexOf(attempt) + 1;
   return (
     <Stack gap="space-3">
-      {props.outcome === null ? null : <Implemented outcome={props.outcome} />}
+      <BaseAndEffect {...props} />
+      {props.outcome === null ? null : <Implemented outcome={props.outcome} idea={idea} />}
       {lines.length > 1 ? (
         <Attempts lines={lines} selected={attempt.span} choose={setChosen} />
       ) : null}

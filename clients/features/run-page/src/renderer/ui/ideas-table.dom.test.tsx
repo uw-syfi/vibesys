@@ -5,7 +5,7 @@ import {act, useState} from 'react';
 import {createRoot, type Root} from 'react-dom/client';
 import {modelOfShape} from '../../state/ideas-tree-fixtures.js';
 import {ideasView, type RunPageAction, runPageInitial, runPageStep} from '../../state/index.js';
-import {outcomeOf} from './ideas-table.js';
+import {subtitleOf} from './ideas-table.js';
 import {RunLevel} from './run-level.js';
 
 const window = new Window();
@@ -33,14 +33,30 @@ const SHAPE = {
   best: 2,
 } as const;
 
-test('a capitalized failed state leaves only the reason beside the Failed pill', () => {
+test('a failed idea turned down by its checks says only Failed; another reason is named', () => {
   const model = modelOfShape(SHAPE);
   const row = ideasView(model, {query: '', passed: true, running: true, failed: true}).rows.find(
     item => item.outcome === 'failed',
   );
   if (row === undefined) throw new Error('fixture needs a failed idea');
-  expect(outcomeOf({...row, state: {...row.state, label: 'Failed · turned down'}}, new Map())).toBe(
-    'Turned down',
+  const said = (label: string) =>
+    subtitleOf({...row, state: {...row.state, label}}, new Map(), new Map());
+  const from = subtitleOf(row, new Map(), new Map());
+  expect(from).toMatch(/^From /);
+  expect(said('Failed')).toBe(from);
+  expect(said('Failed · no design')).toBe(`${from} · no design`);
+});
+
+test('the line under an idea carries its effect verdict, never its status again', () => {
+  const model = modelOfShape(SHAPE);
+  const rows = ideasView(model, {query: '', passed: true, running: true, failed: true}).rows;
+  const passed = rows.find(item => item.outcome === 'passed');
+  if (passed === undefined) throw new Error('fixture needs a passed idea');
+  const from = subtitleOf(passed, new Map(), new Map());
+  expect(from).toMatch(/^From /);
+  expect(from.toLowerCase()).not.toContain('passed');
+  expect(subtitleOf(passed, new Map(), new Map([[passed.id, 'within noise']]))).toBe(
+    `${from} · within noise`,
   );
 });
 

@@ -10,12 +10,12 @@ import {createRunReader} from './run-model.js';
  * The Run screen's words over generated multi runs, read from their span events: every idea starts
  * from the input or an earlier idea (its `base_round`), the run has exactly one best (the idea the
  * adoption span names, adopted once the run ended) and the chart's last new best is that idea; and
- * nothing the screen words says accepted, kept or rejected.
+ * nothing the screen words says accepted, kept, rejected or turned down.
  */
 
 const ROOT = 'flow:search/#1';
 const REASONS = ['turned_down', 'not_measured', 'no_design', 'not_opened'] as const;
-const OLD_WORDS = /accepted|kept|rejected/i;
+const OLD_WORDS = /accepted|kept|rejected|turned down/i;
 const INPUT = 100;
 
 interface Round {
@@ -157,20 +157,29 @@ function expectedTone(round: Round, onLine: boolean): 'accent' | 'muted' | 'err'
 const EVERYTHING = {...IDEAS_FILTER_DEFAULT, failed: true};
 
 describe('the Run screen words over generated runs', () => {
-  test('every idea starts from the input or an earlier idea, as its base round says', () => {
+  test('every idea starts from the input or an earlier idea, and says best when that idea led', () => {
     for (const seed of SEEDS) {
       const rounds = roundsOf(new Seeded(seed));
       const {rows} = ideasView(modelOf(spansOf(rounds, false)), EVERYTHING);
       for (const row of rows) {
         const round = rounds.find(each => row.title === `idea ${each.n}`) as Round;
-        if (round.base === null) expect(row.trail).toEqual({label: 'input', parent: null});
-        else {
-          expect(row.trail).toEqual({
-            label: `idea ${round.base}`,
-            parent: `flow:r${round.base}/#1`,
-          });
-          expect(round.base).toBeLessThan(round.n);
+        if (round.base === null) {
+          expect(row.trail).toEqual({kind: 'input', label: 'input', parent: null});
+          continue;
         }
+        const leading = rounds
+          .filter(each => each.n < round.n && each.passed && each.value !== null)
+          .reduce<Round | null>(
+            (top, each) => (top === null || (each.value ?? 0) > (top.value ?? 0) ? each : top),
+            null,
+          );
+        const parent = `flow:r${round.base}/#1`;
+        expect(row.trail).toEqual(
+          leading?.n === round.base
+            ? {kind: 'best', label: 'best', parent}
+            : {kind: 'idea', label: 'a passed idea', parent},
+        );
+        expect(round.base).toBeLessThan(round.n);
       }
     }
   });
@@ -213,7 +222,7 @@ describe('the Run screen words over generated runs', () => {
     }
   });
 
-  test('no word on the idea rows, the hero or the chart says accepted, kept or rejected', () => {
+  test('no word on the idea rows, the hero or the chart says accepted, kept, rejected or turned down', () => {
     for (const seed of SEEDS) {
       const rounds = roundsOf(new Seeded(seed));
       for (const adopted of [false, true]) {

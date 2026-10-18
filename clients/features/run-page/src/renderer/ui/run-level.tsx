@@ -24,8 +24,10 @@ import {
 import {type JSX, useState} from 'react';
 import {
   ageWords,
+  type IdeaEffects,
   type IdeasFilter,
   type ImplementerOutcomes,
+  ideaEffects,
   ideasView,
   implementerOutcomes,
   type NowItem,
@@ -164,6 +166,7 @@ function IdeasFace(props: {
   readonly state: RunPageState;
   readonly base: ViewBase;
   readonly outcomes: ImplementerOutcomes;
+  readonly effects: IdeaEffects;
   readonly selected: string | null;
   readonly modeControls: boolean;
   readonly dispatch: Dispatch;
@@ -209,6 +212,7 @@ function IdeasFace(props: {
         sort={sort}
         selected={props.selected}
         outcomes={props.outcomes}
+        effects={props.effects}
         dispatch={dispatch}
       />
     </>
@@ -224,6 +228,7 @@ export function IdeasPane(props: {
   readonly dispatch: Dispatch;
 }): JSX.Element {
   const outcomes = implementerOutcomes(props.core, props.base.model.candidates);
+  const effects = ideaEffects(props.core, props.base.model.candidates);
   return (
     <FramedPane
       kicker="ideas"
@@ -231,7 +236,7 @@ export function IdeasPane(props: {
       width="master"
       header={{}}
     >
-      <IdeasFace {...props} outcomes={outcomes} modeControls />
+      <IdeasFace {...props} outcomes={outcomes} effects={effects} modeControls />
     </FramedPane>
   );
 }
@@ -290,6 +295,7 @@ function runFace(
   state: RunPageState,
   base: ViewBase,
   outcomes: ImplementerOutcomes,
+  effects: IdeaEffects,
   mode: RunMode,
   dispatch: Dispatch,
 ): {readonly header: PaneHeader; readonly body: JSX.Element} {
@@ -328,6 +334,7 @@ function runFace(
             state={state}
             base={base}
             outcomes={outcomes}
+            effects={effects}
             selected={null}
             modeControls={false}
             dispatch={dispatch}
@@ -356,7 +363,8 @@ export function RunLevel(props: {
   const total =
     mode === 'agents' ? base.model.agents.agents.length : base.model.candidates.candidates.length;
   const outcomes = implementerOutcomes(props.core, base.model.candidates);
-  const face = runFace(state, base, outcomes, mode, dispatch);
+  const effects = ideaEffects(props.core, base.model.candidates);
+  const face = runFace(state, base, outcomes, effects, mode, dispatch);
   return (
     <Panes>
       <FramedPane

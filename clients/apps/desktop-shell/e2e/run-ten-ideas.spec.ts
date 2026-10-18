@@ -36,7 +36,7 @@ test('failed ideas are listed in the flat table and a filter hides them', async 
   await expect(failedChip(page)).toHaveAttribute('aria-pressed', 'true');
   // A failed idea keeps its reason visible beside a compact status pill.
   await expect(ideas(page).getByRole('option', {name: /Replace the mutex/})).toContainText(
-    'Review rejected',
+    /review rejected/i,
   );
   await expect(failedRows(page).first().locator('.vs-chip')).toHaveText('Failed');
   for (const width of [1440, 1000]) {

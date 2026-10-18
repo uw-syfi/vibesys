@@ -67,6 +67,7 @@ const STRESS: readonly Cell[] = [
   'retries',
   'continuation-rounds',
   'non-input-bases',
+  'bases-and-effects',
   'live-reconnect',
   'weeks-600-ideas',
 ].flatMap(fixture =>

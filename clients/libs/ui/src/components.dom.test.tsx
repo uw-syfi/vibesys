@@ -494,7 +494,7 @@ describe('ParetoChart', () => {
       ]),
     );
 
-  test('marks the input, the frontier, the dominated and the turned down', async () => {
+  test('marks the input, the frontier, the dominated and the failed', async () => {
     const root = await mount(<ParetoChart label="Trade-off" points={points} x={x} y={y} />);
     expect(roles(root)).toEqual({
       Input: 'input',
@@ -507,7 +507,7 @@ describe('ParetoChart', () => {
       'Input',
       'On the frontier',
       'Dominated',
-      'Turned down',
+      'Failed',
     ]);
     expect(root.querySelector('svg')?.textContent).toContain('lower is better');
   });

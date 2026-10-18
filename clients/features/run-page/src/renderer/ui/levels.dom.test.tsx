@@ -75,7 +75,7 @@ async function chipsOf(
 
 test('a failed idea names why in its header, as the Ideas list does', async () => {
   for (const [reason, said] of [
-    ['turned_down', 'Failed · turned down'],
+    ['turned_down', 'Failed'],
     ['not_measured', 'Failed · not measured'],
     ['no_design', 'Failed · no design'],
     ['not_opened', 'Failed · not opened'],

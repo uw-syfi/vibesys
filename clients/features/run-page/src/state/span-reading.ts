@@ -143,6 +143,12 @@ export function ratio(value: number): string {
   return `${value.toFixed(2)}×`;
 }
 
+/**
+ * The reason a failed idea's span gives when its own trusted checks rejected it. It is the
+ * idea's result, which `failed` already says, so no screen words it as a reason.
+ */
+export const TURNED_DOWN = 'turned_down';
+
 /** Snake- and kebab-case words as the screen writes them: `failed_check` reads `failed check`. */
 export function words(value: string): string {
   return value.replaceAll(/[_-]/g, ' ');

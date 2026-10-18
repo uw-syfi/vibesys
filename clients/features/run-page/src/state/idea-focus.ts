@@ -24,7 +24,7 @@ export interface IdeaFocusView {
   readonly ratio: string | null;
   /** Its measured value with the unit; null when unmeasured. */
   readonly value: string | null;
-  /** Its outcome in words (`failed · turned down`, `running`), read when nothing was measured. */
+  /** Its outcome in words (`failed · not measured`, `running`), read when nothing was measured. */
   readonly outcome: string;
   readonly tone: 'ok' | 'err' | 'muted';
 }

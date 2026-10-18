@@ -125,6 +125,17 @@ export interface WinnerSelection {
   readonly settlementId: string | null;
 }
 
+/**
+ * How a candidate's measurement compared with its base's, folded from `measurement_compared`:
+ * `better`, `within_noise` or `worse` once the noise is allowed for. This is the framework's own
+ * reading of whether an idea's effect held, whatever its ratio to the input says.
+ */
+export interface MeasurementComparison {
+  readonly verdict: 'better' | 'within_noise' | 'worse';
+  /** The candidate's value over its base's. */
+  readonly ratio: number;
+}
+
 type RunStartupProgressData = Extract<
   NonNullable<RunEvent['data']>,
   {kind: 'run_startup_progress'}
@@ -301,6 +312,11 @@ export interface CoreState {
   readonly usage: UsageMeter | null;
   readonly quota: QuotaState;
   readonly winner: WinnerSelection | null;
+  /**
+   * The latest comparison with its base of each candidate commit, keyed by `candidate_commit`.
+   * Folded from events, so a snapshot read does not carry it.
+   */
+  readonly comparisons: Readonly<Record<string, MeasurementComparison>>;
   readonly benchmarks: readonly BenchmarkRecord[];
   /**
    * Per-workstream (round) terminal facts folded from `workstream_finished` and
@@ -365,6 +381,7 @@ export function initialCoreState(): CoreState {
     usage: null,
     quota: {sequence: 0, pause: null, lastSwitch: null},
     winner: null,
+    comparisons: {},
     benchmarks: [],
     workstreams: {},
     tokens: EMPTY_LEDGER,

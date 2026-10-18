@@ -165,14 +165,14 @@ describe('step segments', () => {
 });
 
 describe('attempts', () => {
-  test('lines read turned down, the ratio or running, in the order the attempts began', () => {
+  test('lines read failed, the ratio or running, in the order the attempts began', () => {
     const base = idea('x', 'passed', 0, 300);
     const failed = attempt('f', 'failed', 0, 60);
     const kept = attempt('k', 'passed', 60, 120);
     const live = attempt('l', 'running', 200, 0);
     const lines = attemptLines({...base, attempts: [failed, kept, live]}, 260, 'ops/s');
     expect(lines.map(line => [line.title, line.result, line.tone])).toEqual([
-      ['attempt 1', 'Turned down', 'err'],
+      ['attempt 1', 'Failed', 'err'],
       ['attempt 2', '1.50×', 'ok'],
       ['attempt 3', 'Running', 'live'],
     ]);

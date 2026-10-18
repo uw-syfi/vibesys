@@ -341,6 +341,82 @@ function continuationRounds(): RunFixture {
   });
 }
 
+/**
+ * A live run that shows where each idea started from and how the framework judged its effect:
+ * one built on the best, one on a passed idea that is no longer the best, one from the input that
+ * passed within noise, a continuation of its own work, a failed one and one still running.
+ */
+function basesAndEffects(): RunFixture {
+  const ideas: readonly Omit<IdeaSpec, 'at'>[] = [
+    {
+      n: 1,
+      title: 'Padded counters',
+      round: 1,
+      baseRound: null,
+      end: {kind: 'passed', value: 1.2e7, ratio: 1.2},
+      effect: 'better',
+    },
+    {
+      n: 2,
+      title: 'Batched enqueue on the padded counters',
+      round: 2,
+      baseRound: 1,
+      on: 1,
+      end: {kind: 'passed', value: 1.5e7, ratio: 1.5},
+      effect: 'better',
+    },
+    {
+      n: 3,
+      title: 'Spin before parking',
+      round: 3,
+      baseRound: null,
+      end: {kind: 'passed', value: 1.07e7, ratio: 1.07},
+      effect: 'within_noise',
+    },
+    {
+      n: 4,
+      title: 'Per-core free lists',
+      round: 4,
+      baseRound: 1,
+      on: 1,
+      end: {kind: 'passed', value: 1.3e7, ratio: 1.3},
+      effect: 'worse',
+    },
+    {
+      n: 5,
+      title: 'Widen the batch to sixty-four',
+      round: 5,
+      baseRound: 2,
+      on: 2,
+      end: {kind: 'failed', reason: 'turned_down'},
+    },
+    {
+      n: 6,
+      title: 'Prefetch the next slot',
+      round: 6,
+      baseRound: 6,
+      on: 2,
+      end: {kind: 'passed', value: 1.9e7, ratio: 1.9},
+      effect: 'better',
+    },
+    {n: 7, title: 'Combine adjacent slots', round: 7, baseRound: 6, on: 6, end: {kind: 'running'}},
+  ];
+  return fixture({
+    name: 'bases-and-effects',
+    description:
+      'A live run whose ideas start from the best, from a passed idea, from the input and from their own work, with the framework verdict on each effect and the best named while the run works.',
+    runId: '20261018-100000',
+    state: 'live',
+    build: trace => {
+      plan(trace, 1, 10);
+      ideas.forEach((idea, index) => {
+        addIdea(trace, {...idea, at: 100 + index * 700});
+      });
+      trace.span('span_started', adoptionSpan({n: 6, ratio: 1.9, value: 1.9e7}, 5000, false), 5000);
+    },
+  });
+}
+
 /** Ideas that build on other ideas: chains, a merge of two, a base that itself failed. */
 function nonInputBases(): RunFixture {
   return fixture({
@@ -768,6 +844,7 @@ export function scenarios(): readonly RunFixture[] {
     retries(),
     continuationRounds(),
     nonInputBases(),
+    basesAndEffects(),
     liveReconnect(),
     finishedRun(),
     tenIdeas(),

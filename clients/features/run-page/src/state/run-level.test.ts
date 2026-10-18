@@ -267,8 +267,8 @@ describe('the run level', () => {
     expect(view.counts).toEqual({running: 1, passed: 2, failed: 1});
     const ringPad = view.rows[2];
     expect(ringPad?.badges).toEqual([{label: 'best', tone: 'ok'}]);
-    expect(ringPad?.trail).toEqual({label: 'ring', parent: 'flow:w1/#1'});
-    expect(view.rows[3]?.trail).toEqual({label: 'input', parent: null});
+    expect(ringPad?.trail).toEqual({kind: 'best', label: 'best', parent: 'flow:w1/#1'});
+    expect(view.rows[3]?.trail).toEqual({kind: 'input', label: 'input', parent: null});
     expect(view.rows.map(row => row.stripe)).toEqual([false, false, true, true]);
     expect(ideasView(model, IDEAS_FILTER_DEFAULT)).toBe(view);
   });

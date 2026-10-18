@@ -3,6 +3,7 @@ import {markdownToPlain, PickList, PickRow, type RowBadge, Stack} from '@vibesys
 import {type JSX, useMemo} from 'react';
 import {
   ageWords,
+  type IdeaEffects,
   type IdeaRow,
   type IdeasFilter,
   type ImplementerOutcomes,
@@ -14,16 +15,39 @@ import type {ViewBase} from './views/props.js';
 
 export type IdeasSort = 'newest' | 'oldest' | 'result';
 
-export function outcomeOf(row: IdeaRow, outcomes: ImplementerOutcomes): string {
-  const label =
-    row.outcome === 'failed'
-      ? row.state.label.replace(/^failed(?:\s*·\s*)?/i, '').trim() || 'not measured'
-      : (outcomes.get(row.id)?.outcome?.label ?? row.outcome);
-  return label.charAt(0).toUpperCase() + label.slice(1);
+const capitalized = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
+
+/** What an idea built on, as the line under its title words it; empty while it is planned. */
+function fromWords(row: IdeaRow): string {
+  const {kind, label} = row.trail;
+  if (kind === 'own work') return 'from its own work';
+  return label === '…' ? '' : `from ${label}`;
 }
 
-function badgeOf(row: IdeaRow, adopted: boolean): readonly RowBadge[] {
-  if (adopted) return [{label: 'Adopted', tone: 'ok'}];
+/**
+ * The line under an idea's title: what its status badge does not say. What it built on (`from
+ * best`), the framework's verdict on its effect (`within noise`), why it failed when the span
+ * says, and what the implementer reported.
+ */
+export function subtitleOf(
+  row: IdeaRow,
+  outcomes: ImplementerOutcomes,
+  effects: IdeaEffects,
+): string {
+  const why = row.state.label.replace(/^failed(?:\s*·\s*)?/i, '').trim();
+  const reported = outcomes.get(row.id)?.outcome?.label ?? '';
+  const parts = [
+    fromWords(row),
+    effects.get(row.id) ?? '',
+    row.outcome === 'failed' ? why : '',
+    reported,
+  ];
+  return capitalized(parts.filter(part => part !== '').join(' · '));
+}
+
+function badgeOf(row: IdeaRow): readonly RowBadge[] {
+  if (row.badges.some(badge => badge.label === 'adopted')) return [{label: 'Adopted', tone: 'ok'}];
+  if (row.badges.some(badge => badge.label === 'best')) return [{label: 'Best', tone: 'ok'}];
   if (row.outcome === 'failed') return [{label: 'Failed', tone: 'err'}];
   if (row.outcome === 'running') return [{label: 'Running', tone: 'live'}];
   return [{label: 'Passed', tone: 'ok'}];
@@ -63,6 +87,7 @@ export function IdeasTable(props: {
   readonly sort: IdeasSort;
   readonly selected: string | null;
   readonly outcomes: ImplementerOutcomes;
+  readonly effects: IdeaEffects;
   readonly dispatch: (action: RunPageAction) => void;
 }): JSX.Element {
   const {base, filter, sort} = props;
@@ -79,18 +104,17 @@ export function IdeasTable(props: {
         }}
       >
         {rows.map(row => {
-          const adopted = row.badges.some(badge => badge.label === 'adopted');
-          const outcome = outcomeOf(row, props.outcomes);
+          const subtitle = subtitleOf(row, props.outcomes, props.effects);
           const measured = row.figure.endsWith('×');
           return (
             <PickRow
               key={row.id}
               id={row.id}
               title={markdownToPlain(row.title)}
-              summary={outcome}
+              {...(subtitle === '' ? {} : {summary: subtitle})}
               stacked
               mono
-              badges={badgeOf(row, adopted)}
+              badges={badgeOf(row)}
               figure={
                 row.runningSince === null
                   ? measured
