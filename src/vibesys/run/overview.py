@@ -4,19 +4,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.events import (
-    BenchmarkVersions,
-    EvaluatorIdentity,
-    ObjectiveAxis,
-    ObjectiveOverview,
-    RunOverview,
-)
+from vibesys.events import BenchmarkVersions, EvaluatorIdentity, ObjectiveOverview, RunOverview
 
 if TYPE_CHECKING:
     from vibesys.inputs import InputBundle
+    from vs_core.api import TaskObjective
 
 
-def overview_of(bundle: InputBundle, objectives: tuple[ObjectiveAxis, ...] = ()) -> RunOverview:
+def overview_of(bundle: InputBundle, objectives: tuple[TaskObjective, ...] = ()) -> RunOverview:
     """The objective text, the benchmark's metric, the correctness check and the pinned evaluator.
 
     ``objectives`` are the axes the run ranks candidates on: the run's metric space, which the

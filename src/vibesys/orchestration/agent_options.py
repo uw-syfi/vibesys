@@ -6,9 +6,9 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from vibesys.events import ObjectiveAxis
 from vibesys.inputs import ProfileGuidedInput
 from vibesys.metrics import MetricSpace
+from vs_core.api import TaskObjective
 
 PortableText = Annotated[str, Field(min_length=1, max_length=256)]
 
@@ -40,12 +40,12 @@ class AgentOrchestrationOptions(TaskInputs):
     turn_drop_backoff_seconds: Annotated[float, Field(gt=0, le=600)] = 5.0
 
 
-def objective_axes_of(options: BaseModel) -> tuple[ObjectiveAxis, ...]:
+def objective_axes_of(options: BaseModel) -> tuple[TaskObjective, ...]:
     """The axes the run ranks candidates on, as its options' metric space declares them."""
     if not isinstance(options, TaskInputs):
         return ()
     return tuple(
-        ObjectiveAxis(name=axis.name, direction=axis.direction)
+        TaskObjective(name=axis.name, direction=axis.direction)
         for axis in options.metric_space.objectives
     )
 

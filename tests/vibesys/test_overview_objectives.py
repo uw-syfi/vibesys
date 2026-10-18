@@ -9,7 +9,7 @@ from __future__ import annotations
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from vibesys.events import ObjectiveAxis, ObjectiveOverview, RunOverview
+from vibesys.events import ObjectiveOverview, RunOverview
 from vibesys.metrics import MetricSpace, Objective
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions, objective_axes_of
 from vs_sim.api.testing import examples
@@ -52,4 +52,3 @@ def test_the_overview_carries_the_options_axes_in_order_and_survives_the_wire(
 def test_options_that_hold_no_metric_space_declare_no_axes() -> None:
     assert objective_axes_of(ObjectiveOverview(text="x")) == ()
     assert ObjectiveOverview(text="x").objectives == ()
-    assert ObjectiveAxis(name="a", direction="min").direction == "min"
