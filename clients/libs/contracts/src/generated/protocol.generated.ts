@@ -314,7 +314,7 @@ export type Unit = string | null;
 export type Direction = ("max" | "min") | null;
 export type Name1 = string;
 export type Direction1 = "max" | "min";
-export type Objectives = ObjectiveAxis[];
+export type Objectives = TaskObjective[];
 export type CorrectnessCheck = string[];
 export type Name2 = string;
 export type Version = string;
@@ -1556,9 +1556,9 @@ export interface ObjectiveOverview {
   correctness_check?: CorrectnessCheck;
 }
 /**
- * One axis the task ranks candidates on, and which way is better.
+ * One axis the task compares candidates on, and which way is better.
  */
-export interface ObjectiveAxis {
+export interface TaskObjective {
   name: Name1;
   direction: Direction1;
 }
