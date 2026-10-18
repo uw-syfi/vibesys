@@ -11,9 +11,11 @@ event's questions about each running job are counted the same way, as the calls 
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass, field
 from functools import cache
 from typing import TYPE_CHECKING
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import BaseModel
@@ -25,7 +27,9 @@ from .test_measurements import observation
 from .toy_agent_search import Config, ToyHost, run_toy
 
 if TYPE_CHECKING:
-    from types import FrameType
+    from types import CodeType, FrameType
+
+    from vs_core.api.testing import Answer
 
 _EQUALITY = BaseModel.__eq__.__code__
 
@@ -200,3 +204,150 @@ def test_the_resource_index_finds_what_a_scan_finds(named: list[str | None], wan
     resource = core.ResourceId(root=wanted)
     scanned = tuple(row for row in rows if getattr(row.request, "resource_id", None) == resource)
     assert ledger.about_resource(resource) == scanned
+
+
+_CORE_SOURCE = core.__file__.rsplit("/api/", 1)[0]
+
+
+def _iterations(state: core.CoreState, event: core.CoreEvent) -> int:
+    """How many loop iterations in core's own code ``core.step(state, event)`` runs.
+
+    Calls miss a scan written as a generator, which runs a whole ledger in one call; each
+    iteration of any loop is a backward jump, which ``sys.monitoring`` reports. The tool id is
+    one no debugger, coverage tool or profiler claims, so measuring never disturbs them.
+    """
+    monitoring = sys.monitoring
+    tool = next(t for t in (3, 4) if monitoring.get_tool(t) is None)
+    counted = [0]
+
+    def jumped(code: CodeType, _source: int, _destination: int) -> None:
+        if code.co_filename.startswith(_CORE_SOURCE):
+            counted[0] += 1
+
+    monitoring.use_tool_id(tool, "step-iterations")
+    try:
+        monitoring.register_callback(tool, monitoring.events.JUMP, jumped)
+        monitoring.set_events(tool, monitoring.events.JUMP)
+        core.step(state, event)
+    finally:
+        monitoring.set_events(tool, 0)
+        monitoring.register_callback(tool, monitoring.events.JUMP, None)
+        monitoring.free_tool_id(tool)
+    return counted[0]
+
+
+def _answered(row: core.RequestRecord, rows: int) -> tuple[core.RequestRecord, ...]:
+    """``rows`` finished copies of ``row``, each answered under its own identity, as in a real ledger."""
+    answer = row.observation
+    assert answer is not None
+    copies = []
+    for index in range(rows):
+        identity = core.RequestId(root=f"earlier-{index}")
+        copies.append(
+            row.model_copy(
+                update={
+                    "request_id": identity,
+                    "request": row.request.model_copy(update={"request_id": identity}),
+                    "observation": answer.model_copy(
+                        update={
+                            "request_id": identity,
+                            "event_id": core.EventId(root=f"earlier-{index}:0"),
+                        }
+                    ),
+                }
+            )
+        )
+    return tuple(copies)
+
+
+def _finished(state: core.CoreState) -> core.RequestRecord:
+    return next(row for row in state.records.records if row.observation is not None)
+
+
+def _behind(state: core.CoreState, finished: core.RequestRecord, rows: int) -> core.CoreState:
+    """``state`` with ``rows`` more finished, answered copies of ``finished`` ahead of its own."""
+    records = state.records.model_copy(
+        update={"records": (*_answered(finished, rows), *state.records.records)}
+    )
+    return state.model_copy(update={"records": records})
+
+
+# A step whose work is linear in the ledger costs at most four times as much on four times the
+# rows (less, for its fixed part); one that is quadratic costs up to sixteen.
+_LINEAR = 6
+
+
+def _grows_linearly(
+    state: core.CoreState, event: core.CoreEvent, finished: core.RequestRecord
+) -> tuple[int, int] | None:
+    """None when ``event`` costs linearly more behind more ``finished`` rows, else both costs."""
+    short = _iterations(_behind(state, finished, _ROWS), event)
+    long = _iterations(_behind(state, finished, 4 * _ROWS), event)
+    return None if long < _LINEAR * short else (short, long)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="a restart re-reads every answer and each re-read rebuilds the ledger index",
+)
+def test_a_restart_costs_in_proportion_to_the_ledger() -> None:
+    """Opening a new host epoch over ``n`` and ``4 * n`` finished requests.
+
+    A restart re-reads the answer every finished record holds. Each re-read copied the ledger
+    state, and the copy rebuilt the ledger's index on its next lookup, so a restart cost the
+    square of the run's length: on a 10-hour run (7,700 records) it held the run loop for
+    20 to 40 s while the run held its lease.
+    """
+    state = started(running_polls=5, ending=core.ObservationStatus.SUCCEEDED).state
+    restart = core.RecoveryStarted(epoch=state.records.recovery.epoch + 1, now_at=state.run.now_at)
+    assert _grows_linearly(state, restart, _finished(state)) is None
+
+
+@dataclass
+class _Witness(ToyHost):
+    """The toy host, remembering the core state each request was answered in."""
+
+    answered: dict[core.RequestId, tuple[core.Request, core.CoreState]] = field(
+        default_factory=dict
+    )
+
+    def __call__(self, request: core.Request, state: core.CoreState) -> Answer:
+        """Remember the request and state, then answer as the toy host does."""
+        if request.request_id is not None:
+            self.answered[request.request_id] = (request, state)
+        return super().__call__(request, state)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="closing an attempt looks each ledger row up by scanning the whole ledger",
+)
+def test_every_answer_costs_in_proportion_to_the_ledger() -> None:
+    """Every executor answer of a whole toy run, on ``n`` and ``4 * n`` more finished requests.
+
+    The answers cover a run's life: operations, sessions, turns, measurements, an attempt's
+    closing and adoption. Closing an attempt asked, for every row, whether the ledger held
+    that row, and answered by scanning the ledger: on the 10-hour run, closing one attempt
+    after its judge's session closed held the run loop for 90 s, past its 60 s lease.
+    """
+    host = _Witness(waits=(True,), polls=(2,))
+    trace = run_toy(host, Config())
+    finished = _finished(trace.core)
+    answers = {
+        event.observation.request_id: event
+        for event in trace.log
+        if isinstance(event, core.RequestObserved)
+    }
+    quadratic = {
+        f"{type(request).__name__} {identity.root}": costs
+        for identity, (request, state) in host.answered.items()
+        if identity in answers
+        and (costs := _grows_linearly(state, answers[identity], finished)) is not None
+    }
+    assert {type(request) for request, _ in host.answered.values()} >= {
+        core.CloseSession,
+        core.CloseAttemptScope,
+        core.DispatchTurn,
+        core.ObserveOwnedJob,
+    }
+    assert not quadratic, quadratic
