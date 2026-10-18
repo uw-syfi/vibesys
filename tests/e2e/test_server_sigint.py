@@ -37,14 +37,18 @@ if TYPE_CHECKING:
 
 
 class _SelfInterruptingRun:
-    """A run that sends its process the given signals, then ends once a stop reaches it.
+    """A run that sends its process the given signals, then ends once each SIGINT's stop reaches it.
 
     Stops arrive on the event loop (``stop``) or from the server's signal or transport
-    threads (``submit``); either wakes the run through the loop, thread-safely.
+    threads (``submit``); either wakes the run through the loop, thread-safely. The run
+    waits for every SIGINT's stop, not only the first: a run that ended at the first would
+    release its control, and a later SIGINT, finding no run to stop, would end the server
+    as SIGTERM does, depending on how the signal threads were scheduled.
     """
 
     def __init__(self, signals: tuple[signal.Signals, ...]) -> None:
         self._signals = signals
+        self._awaited = signals.count(signal.SIGINT)
         self.stops: list[str] = []
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stopped: asyncio.Event | None = None
@@ -74,6 +78,8 @@ class _SelfInterruptingRun:
 
     def _stop(self, mode: StopMode) -> None:
         self.stops.append(mode.value)
+        if len(self.stops) < self._awaited:
+            return
         if self._loop is not None and self._stopped is not None:
             self._loop.call_soon_threadsafe(self._stopped.set)
 
