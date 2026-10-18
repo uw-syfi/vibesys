@@ -604,12 +604,13 @@ class _RefusingControl(ChannelRunControl):
 @pytest.mark.regression
 @example(before=[StopMode.CANCEL, StopMode.DRAIN], after=[])
 @example(before=[StopMode.DRAIN], after=[StopMode.CANCEL, StopMode.DRAIN])
+@example(before=[], after=[StopMode.CANCEL, "resume"])
 @given(
     before=st.lists(st.sampled_from(StopMode), max_size=3),
-    after=st.lists(st.sampled_from(StopMode), max_size=3),
+    after=st.lists(st.one_of(st.sampled_from(StopMode), st.just("resume")), max_size=4),
 )
 def test_a_runs_stop_is_the_strongest_asked_before_or_after_its_control_is_installed(
-    before: list[StopMode], after: list[StopMode]
+    before: list[StopMode], after: list[StopMode | Literal["resume"]]
 ) -> None:
     """periodic-1330 MED-2: the slot kept the last stop sent before the run started, so a
     drain after a cancel weakened it; and a Ctrl-C reached the run by no single path.
@@ -626,10 +627,18 @@ def test_a_runs_stop_is_the_strongest_asked_before_or_after_its_control_is_insta
         stop = StopRequest(control_id=f"before-{index}", mode=mode)
         slot.execute(ControlCommand(timestamp=REQUEST_TIME, control=stop))
     slot.install(ChannelRunControl(channel, threads))
-    for mode in after:
-        assert slot.stop(mode)
+    for item in after:
+        if item == "resume":
+            # PR #3209 MED-3: a resume never weakens a pending stop; it is refused.
+            if channel.stop_mode() is None:
+                slot.execute(ResumeCommand(timestamp=REQUEST_TIME))
+            else:
+                with pytest.raises(RunStoppingError):
+                    slot.execute(ResumeCommand(timestamp=REQUEST_TIME))
+        else:
+            assert slot.stop(item)
 
-    asked = [*before, *after]
+    asked = [*before, *(item for item in after if item != "resume")]
     expected = (
         None if not asked else StopMode.CANCEL if StopMode.CANCEL in asked else StopMode.DRAIN
     )
