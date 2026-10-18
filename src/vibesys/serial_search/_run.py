@@ -72,9 +72,12 @@ class RoundStart(Value):
     """The noise the latest comparison of a candidate with its base stated; None while none has."""
 
     def retained_as(self, revision: RevisionRef) -> Retained | None:
-        """The latest round that retained ``revision``; None for the input."""
-        found = (item for item in reversed(self.retained) if item.revision == revision)
-        return next(found, None)
+        """The round that made ``revision``; None for the input.
+
+        That is the first round to retain it: a later round holding the same revision unchanged
+        (an idea that failed before it edited anything) made nothing.
+        """
+        return next((item for item in self.retained if item.revision == revision), None)
 
     def passed_ideas(self) -> tuple[Retained, ...]:
         """The ideas that passed, oldest first: the bases a plan may name besides the input."""
@@ -194,7 +197,7 @@ class SerialRun:
         if done.closed is not None:
             self.closed.append(done.closed)
         self.work_in_progress = done.checkpoint
-        if done.checkpoint is not None and span is not None:
+        if done.checkpoint is not None and done.checkpoint != self.input and span is not None:
             closed = done.closed
             headline = None if closed is None or not closed.metrics else closed.metrics[0]
             self.retained.append(

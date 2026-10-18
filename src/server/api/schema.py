@@ -1039,7 +1039,7 @@ def fully_populated_response() -> Response:
                     "perf_baseline_round": 0,
                     "perf_baseline_commit": "baseline",
                     "perf_delta_reason": "no_baseline_yet",
-                    "kept": True,
+                    "best": True,
                     "strategy_disposition": "available",
                     "strategy_reason": "reason",
                     "active": True,

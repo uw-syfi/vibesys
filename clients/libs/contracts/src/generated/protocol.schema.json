@@ -3021,7 +3021,7 @@
           ],
           "default": null
         },
-        "kept": {
+        "best": {
           "anyOf": [
             {
               "type": "boolean"
@@ -3031,7 +3031,7 @@
             }
           ],
           "default": null,
-          "title": "Kept"
+          "title": "Best"
         },
         "strategy_disposition": {
           "anyOf": [

@@ -252,7 +252,7 @@ def test_unmeasured_retention_stays_false_across_resume_and_read_model_projectio
     hypothesis = resumed.by_id(data.hypothesis.hypothesis_id)
     assert hypothesis is not None
     assert hypothesis.candidate_retained is False
-    assert projected.hypotheses[0].kept is False
+    assert projected.hypotheses[0].best is False
 
 
 def test_single_and_multi_replies_share_unmeasured_retention_policy() -> None:
