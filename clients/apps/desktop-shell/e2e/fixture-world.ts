@@ -119,7 +119,7 @@ function projectRuns(
   const runs = new Map<string, unknown>();
   for (const each of servers) {
     const {runId, startedAt} = each as {runId: string; startedAt: number};
-    runs.set(runId, {runId, task: TASK, createdAt: startedAt});
+    runs.set(runId, {runId, task: TASK, createdAt: startedAt * 1000});
   }
   for (const each of recent) {
     const {runId, task, attachedAt} = each as {runId: string; task: string; attachedAt: number};
