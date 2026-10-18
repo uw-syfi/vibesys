@@ -18,6 +18,7 @@
  * one target), but navigation toward a *different* target never touches it.
  */
 
+import type {Duplex} from 'node:stream';
 import {
   type ConnectionLease,
   connectionStatus,
@@ -41,6 +42,7 @@ import {
 import type {HarnessChoice} from '@vibesys/ipc';
 import type {ResumeRunId} from '@vibesys/runs';
 import type {StoredRecentRun} from '@vibesys/settings';
+import {LiveFanout} from './live-fanout.js';
 import {type RelayPort, relay} from './relay.js';
 import {StopController} from './stop-controller.js';
 
@@ -152,6 +154,7 @@ interface Launch {
 }
 
 export class RunControl {
+  readonly #liveFanout = new LiveFanout();
   readonly #deps: RunControlDeps;
   readonly #stops: StopController;
   /** Every run bound to a window, by `run_id`. */
@@ -318,17 +321,26 @@ export class RunControl {
       port.close();
       return;
     }
-    void relay(port, async signal => {
-      try {
-        return (await run.connection.openRun(run.instanceId, signal)).stream;
-      } catch (error) {
-        if (error instanceof Error && 'reason' in error) {
-          if (error.reason === 'run-gone') this.#ended(run);
-          else if (error.reason === 'capacity') this.#capacityRefused(run, error.message);
-        }
-        throw error;
+    const streamKey = `${hostKey(run.id)}\u0000${run.instanceId}`;
+    void relay(port, signal =>
+      this.#liveFanout.open(
+        streamKey,
+        upstreamSignal => this.#dialRun(run, upstreamSignal),
+        signal,
+      ),
+    );
+  }
+
+  async #dialRun(run: Binding, signal: AbortSignal): Promise<Duplex> {
+    try {
+      return (await run.connection.openRun(run.instanceId, signal)).stream;
+    } catch (error) {
+      if (error instanceof Error && 'reason' in error) {
+        if (error.reason === 'run-gone') this.#ended(run);
+        else if (error.reason === 'capacity') this.#capacityRefused(run, error.message);
       }
-    });
+      throw error;
+    }
   }
 
   /** End `runId`'s page; the run itself keeps going on its host. Safe when `runId` is not bound. */
