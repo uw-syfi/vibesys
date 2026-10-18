@@ -27,6 +27,43 @@ export const IDEAS_FILTER_DEFAULT: IdeasFilter = {
   failed: true,
 };
 
+const GROUPS: readonly CandidateOutcome[] = ['passed', 'running', 'failed'];
+
+/** Whether the chips narrow the list: with every group on, nothing is chosen. */
+function narrowed(filter: IdeasFilter): boolean {
+  return !GROUPS.every(group => filter[group]);
+}
+
+/** Whether the chip of `group` is the chosen one: pressed only while the list is narrowed to it. */
+export function chipPressed(filter: IdeasFilter, group: CandidateOutcome): boolean {
+  return narrowed(filter) && filter[group];
+}
+
+/**
+ * The filter after a press on the chip of `group`: the list shows that group alone; a press on
+ * the chosen chip shows every group again. The query is kept.
+ */
+export function pressChip(filter: IdeasFilter, group: CandidateOutcome): IdeasFilter {
+  const chosen =
+    chipPressed(filter, group) && GROUPS.every(each => filter[each] === (each === group));
+  const all = {passed: true, running: true, failed: true};
+  return {
+    ...filter,
+    ...(chosen ? all : {passed: false, running: false, failed: false, [group]: true}),
+  };
+}
+
+/** What the list says when `filter` leaves it with no ideas. */
+export function noIdeasWords(filter: IdeasFilter): {title: string; body: string} {
+  const query = filter.query.trim();
+  const group = GROUPS.find(each => chipPressed(filter, each));
+  const title =
+    query === '' ? `No ${group ?? ''} ideas`.replace('  ', ' ') : `No ideas match “${query}”`;
+  const body =
+    query === '' ? 'Press the chip again to show every idea.' : 'Clear the search to see them all.';
+  return {title, body};
+}
+
 export type IdeaTone = 'ok' | 'err' | 'muted';
 
 /** One idea's row. */

@@ -1,5 +1,5 @@
 /** A flat, windowed list of ideas. Ordering and filtering are presentation-only. */
-import {markdownToPlain, PickList, PickRow, type RowBadge, Stack} from '@vibesys/ui';
+import {EmptyState, markdownToPlain, PickList, PickRow, type RowBadge, Stack} from '@vibesys/ui';
 import {type JSX, useMemo} from 'react';
 import {
   ageWords,
@@ -9,6 +9,7 @@ import {
   type IdeasFilter,
   type ImplementerOutcomes,
   ideasView,
+  noIdeasWords,
   type RunModel,
   type RunPageAction,
 } from '../../state/index.js';
@@ -98,6 +99,10 @@ export function IdeasTable(props: {
 }): JSX.Element {
   const {base, filter, sort} = props;
   const rows = useMemo(() => sortedIdeas(base.model, filter, sort), [base.model, filter, sort]);
+  if (rows.length === 0) {
+    const words = noIdeasWords(filter);
+    return <EmptyState title={words.title} body={words.body} />;
+  }
   return (
     <Stack grow>
       <PickList

@@ -177,3 +177,51 @@ test('sort control changes the flat order', async () => {
   ]);
   await screen.done();
 });
+
+function chips(
+  container: HTMLElement,
+): {label: string; pressed: string | null; disabled: boolean}[] {
+  return [...container.querySelectorAll('button.vs-dotlegend-item')].map(each => ({
+    label: each.textContent ?? '',
+    pressed: each.getAttribute('aria-pressed'),
+    disabled: (each as HTMLButtonElement).disabled,
+  }));
+}
+
+function click(container: HTMLElement, label: string): Promise<void> {
+  const chip = [...container.querySelectorAll('button.vs-dotlegend-item')].find(each =>
+    (each.textContent ?? '').includes(label),
+  );
+  if (chip === undefined) throw new Error(`no chip ${label}`);
+  return act(async () => {
+    (chip as HTMLElement).click();
+  });
+}
+
+test('a chip lists its own group, shows it pressed, and a chip with nothing behind it is disabled', async () => {
+  const screen = await shown();
+  expect(chips(screen.container)).toEqual([
+    {label: '6 passed', pressed: 'false', disabled: false},
+    {label: '0 running', pressed: 'false', disabled: true},
+    {label: '1 failed', pressed: 'false', disabled: false},
+  ]);
+  await click(screen.container, '1 failed');
+  expect(titles(screen.container)).toEqual(['idea 4']);
+  expect(chips(screen.container).map(each => each.pressed)).toEqual(['false', 'false', 'true']);
+  await click(screen.container, '6 passed');
+  expect(titles(screen.container)).toHaveLength(6);
+  await click(screen.container, '6 passed');
+  expect(titles(screen.container)).toHaveLength(7);
+  await screen.done();
+});
+
+test('a search that matches nothing says so instead of leaving the list blank', async () => {
+  const screen = await shown();
+  await screen.press({
+    type: 'ideas-filter',
+    filter: {query: 'zzzz', passed: true, running: true, failed: true},
+  });
+  expect(titles(screen.container)).toEqual([]);
+  expect(screen.container.textContent).toContain('No ideas match “zzzz”');
+  await screen.done();
+});

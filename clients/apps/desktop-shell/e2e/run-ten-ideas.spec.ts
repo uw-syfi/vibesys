@@ -27,13 +27,13 @@ const failedRows = (page: Page) =>
     .getByRole('option')
     .filter({has: page.locator('.vs-chip[data-tone="err"]')});
 
-test('failed ideas are listed in the flat table and a filter hides them', async ({page}) => {
+test('failed ideas are listed in the flat table and a chip lists only them', async ({page}) => {
   await openFixture(page, fixtureNamed('finished-ten-ideas'));
   await expect(page.getByRole('combobox', {name: 'Sort ideas'})).toHaveValue('newest');
   await expect(ideas(page).locator('.vs-guide, .vs-pickrow-fold')).toHaveCount(0);
   await expect(ideas(page).getByRole('option')).not.toHaveCount(0);
   await expect(failedRows(page)).toHaveCount(4);
-  await expect(failedChip(page)).toHaveAttribute('aria-pressed', 'true');
+  await expect(failedChip(page)).toHaveAttribute('aria-pressed', 'false');
   // A failed idea keeps its reason visible beside a compact status pill.
   await expect(ideas(page).getByRole('option', {name: /Replace the mutex/})).toContainText(
     /review rejected/i,
@@ -58,8 +58,11 @@ test('failed ideas are listed in the flat table and a filter hides them', async 
   await shot(page, 'ten-ideas-table');
 
   await failedChip(page).click();
-  await expect(failedRows(page)).toHaveCount(0);
-  await expect(failedChip(page)).toHaveAttribute('aria-pressed', 'false');
+  await expect(failedRows(page)).toHaveCount(4);
+  await expect(ideas(page).getByRole('option')).toHaveCount(4);
+  await expect(failedChip(page)).toHaveAttribute('aria-pressed', 'true');
+  await failedChip(page).click();
+  await expect(ideas(page).getByRole('option')).toHaveCount(10);
 });
 
 test('the performance row is a tile with a ratio, what it means, and values that carry a unit', async ({

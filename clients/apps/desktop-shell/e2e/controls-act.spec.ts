@@ -51,11 +51,6 @@ const INERT_BY_DESIGN: readonly {
   readonly why: string;
 }[] = [
   {
-    start: /./,
-    name: /^0 running/,
-    why: 'the run has ended, so hiding its running ideas hides none',
-  },
-  {
     start: /opened idea/,
     name: /^Per-core queues with stealing/,
     why: 'the chart mark of the idea that is already open',
