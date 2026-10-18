@@ -384,6 +384,10 @@ A baseline update rewrites only the screens whose rendering changed: the suite l
 Chromium with the flags in `DETERMINISTIC_RENDERING` (`playwright.config.ts`), which fix the
 rasterizer's per-run choices (LCD text, hinting, SIMD variants, raster threads) that otherwise
 made two consecutive runs differ in a few pixels per screen.
+The suite shoots each entry with every other entry hidden: Chromium's antialiasing of a few shapes
+depends on where an element sits on the page, so a change to the height of one entry used to
+shift later baselines. The comparison is exact (`threshold` and `maxDiffPixels` are 0), so a
+baseline that is stale fails the job instead of passing within the default tolerance.
 `pnpm --filter @vibesys/app-ui-gallery check:deterministic` runs the update twice and fails on
 any difference; `scripts/check_clients.sh` runs it (see "Client checks before a push" in
 [development.md](development.md)).

@@ -42,7 +42,17 @@ export default defineConfig({
   // x86-64 emulation that writes the baselines on an Arm Mac.
   timeout: 360_000,
   snapshotPathTemplate: '{testDir}/__screenshots__/{arg}{ext}',
-  expect: {toHaveScreenshot: {animations: 'disabled', caret: 'hide', scale: 'css'}},
+  // Exact comparison: the rendering is deterministic (see DETERMINISTIC_RENDERING), so a baseline
+  // that differs at all is stale, and the default per-pixel tolerance would let it pass unseen.
+  expect: {
+    toHaveScreenshot: {
+      animations: 'disabled',
+      caret: 'hide',
+      scale: 'css',
+      threshold: 0,
+      maxDiffPixels: 0,
+    },
+  },
   webServer: {
     command: `node e2e/serve-dist.mjs ${port}`,
     port,
