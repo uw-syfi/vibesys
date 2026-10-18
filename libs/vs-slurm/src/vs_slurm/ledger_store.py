@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import os
 import re
 import shlex
@@ -86,20 +88,21 @@ class RemoteEvaluationLedger:
 
         A document that vanishes between the listing and the read (a released
         lease) is absent, never malformed: each file is read in one ``cat`` whose
-        failure skips it. A lease that is there but cannot be decoded is reported
-        in ``unreadable_leases``, with its file's modification time; it never
-        fails the read. A withdrawal revision that cannot be decoded is a
-        withdrawal under way until one claim window after that time
+        failure skips it. Each file's bytes travel base64-encoded, so a document
+        with newlines or any other bytes is one line of the reply. A lease that
+        is there but cannot be decoded is reported in ``unreadable_leases``,
+        with its file's modification time; it never fails the read. A
+        withdrawal revision that cannot be decoded is a withdrawal under way
         (``read_withdrawal_revision``). A time ``date -r`` cannot read is
-        infinite: the lease, or the withdrawal, holds.
+        infinite: the lease holds, and the withdrawal is expired.
         """
         directory = self._key_directory(key)
         quoted = shlex.quote(directory.as_posix())
         listing = (
             f"for f in {quoted}/attempt-*.json {quoted}/withdrawal-*.json {quoted}/leases/*.json; do "
-            f'if d=$(cat -- "$f" 2>/dev/null); then '
+            f'if b=$(base64 < "$f" 2>/dev/null); then '
             f'm=$(date -r "$f" +%s 2>/dev/null) || m=inf; '
-            f'printf "%s %s %s\\n" "$m" "$f" "$d"; fi; done; '
+            f'printf "%s %s %s\\n" "$m" "$f" "$(printf %s "$b" | tr -d "\\n")"; fi; done; '
             f"printf '%s\\n' {_END}"
         )
         lines = self._exec(listing).splitlines()
@@ -111,7 +114,8 @@ class RemoteEvaluationLedger:
         unreadable: list[UnreadableLease] = []
         for line in lines[:-1]:
             written, _, rest = line.partition(" ")
-            path, _, document = rest.partition(" ")
+            path, _, encoded = rest.partition(" ")
+            document = _document(encoded)
             name = PurePosixPath(path)
             if name.parent.name == "leases":
                 try:
@@ -241,6 +245,15 @@ class RemoteEvaluationLedger:
             return self._transport.exec(command).stdout
         except (OSError, SlurmError, ProcessTimeoutError, UnicodeError) as error:
             raise LedgerError.transport(error) from error
+
+
+def _document(field: str) -> str:
+    """A file's text from its base64 bytes; bytes that are not UTF-8 decode to a damaged document."""
+    try:
+        data = base64.b64decode(field, validate=True)
+    except binascii.Error:
+        raise LedgerError.malformed_reply("read") from None
+    return data.decode("utf-8", errors="replace")
 
 
 def _written_at(field: str) -> float:

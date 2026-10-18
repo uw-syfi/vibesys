@@ -38,6 +38,7 @@ from .cluster_types import (
     live_observation,
 )
 from .ledger import (
+    MAX_WITHDRAWAL_WINDOW_SECONDS,
     LedgerEntry,
     LedgerError,
     LedgerState,
@@ -128,6 +129,11 @@ _CALLS_AT_INSPECT = 1 + _CALLS_AT_CANCEL
 _CALLS_TO_CANCEL = 4 + _CALLS_AT_INSPECT
 
 
+def withdrawal_window_seconds(call_seconds: float) -> float:
+    """How long a withdrawal mark holds, from its stamp, when one transport call may take ``call_seconds``. Pure."""
+    return (_CALLS_TO_CANCEL + 1) * call_seconds + CLOCK_SKEW_SECONDS
+
+
 @dataclass(frozen=True, slots=True)
 class WithdrawalTiming:
     """The clock a withdrawal is stamped by, and how long one transport call may take.
@@ -137,16 +143,29 @@ class WithdrawalTiming:
     call to the cluster (``SlurmConfig.transport_timeout_seconds``). A mark
     holds long enough for the calls from its stamp to its cancel, each that
     long, plus ``CLOCK_SKEW_SECONDS``; the withdrawer cancels nothing once too
-    little of it is left (``holds``).
+    little of it is left (``holds``). A timing whose mark would hold longer
+    than ``MAX_WITHDRAWAL_WINDOW_SECONDS`` is refused: a build that cannot read
+    the mark undoes it after that long.
     """
 
     clock: Clock
     call_seconds: float
 
+    def __post_init__(self) -> None:
+        """Refuse a call bound whose mark would outlast ``MAX_WITHDRAWAL_WINDOW_SECONDS``."""
+        if self.window_seconds > MAX_WITHDRAWAL_WINDOW_SECONDS:
+            message = (
+                f"a withdrawal mark at transport_timeout_seconds={self.call_seconds:g} holds "
+                f"{self.window_seconds:g} s ({_CALLS_TO_CANCEL + 1} calls plus "
+                f"{CLOCK_SKEW_SECONDS:g} s), more than the {MAX_WITHDRAWAL_WINDOW_SECONDS:g} s "
+                "any withdrawal may hold; lower transport_timeout_seconds"
+            )
+            raise LedgerError(message)
+
     @property
     def window_seconds(self) -> float:
         """How long a mark holds, from its stamp."""
-        return (_CALLS_TO_CANCEL + 1) * self.call_seconds + CLOCK_SKEW_SECONDS
+        return withdrawal_window_seconds(self.call_seconds)
 
     def holds(self, mark: WithdrawalMark, *, calls: int) -> bool:
         """Whether ``mark`` holds, on every process's clock, for ``calls`` more transport calls."""
@@ -685,4 +704,5 @@ __all__ = [
     "sweep_withdrawer",
     "undo_expired_withdrawal",
     "withdraw",
+    "withdrawal_window_seconds",
 ]

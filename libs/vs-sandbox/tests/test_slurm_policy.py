@@ -165,9 +165,6 @@ def _ledger_file(
     return path
 
 
-@pytest.mark.xfail(
-    strict=True, reason="r3206 LOW-B: nothing checks the withdrawal window against the claim window"
-)
 @given(
     transport_timeout_seconds=st.integers(min_value=1, max_value=400),
     ledger=st.one_of(

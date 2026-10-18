@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import stat
@@ -539,6 +540,14 @@ class UnreadableWithdrawal:
 WithdrawalRevision = WithdrawalMark | WithdrawalUndone | UnreadableWithdrawal
 """One withdrawal revision as read: a document this build decodes, or one it cannot."""
 
+MAX_WITHDRAWAL_WINDOW_SECONDS = 900.0
+"""The longest any build's withdrawal mark may hold, from its stamp.
+
+A withdrawer refuses a timing whose mark would hold longer
+(``WithdrawalTiming``), so a mark this build cannot read is never undone while
+its writer may still cancel (``_unreadable_withdrawal_mark``).
+"""
+
 UNREADABLE_WITHDRAWER = "unreadable-withdrawal"
 """The withdrawer, and writer, of the mark that stands for a withdrawal revision this build cannot read."""
 
@@ -549,19 +558,26 @@ def _unreadable_withdrawal_mark(
     """The withdrawal under way that an unreadable newest withdrawal revision of ``record`` counts as. Pure.
 
     It may be a newer build's mark of a withdrawal still cancelling the job, so
-    no run attaches while it may hold: it holds for one claim window of the
-    attempt after its file was written, as an unreadable lease does, and then
-    anyone may undo it as an expired mark. Ignoring it instead could attach a
-    run to a job that newer build is about to cancel, and would hand the next
-    withdrawal revision's number to a file that already exists. A newer build
-    must keep its marks' windows within the claim window for this to hold.
+    no run attaches while it may hold: it holds after its file was written for
+    the attempt's claim window, as an unreadable lease does, and at least
+    ``MAX_WITHDRAWAL_WINDOW_SECONDS``, the longest any withdrawer's mark holds;
+    then anyone may undo it as an expired mark. Ignoring it instead could
+    attach a run to a job that newer build is about to cancel, and would hand
+    the next withdrawal revision's number to a file that already exists. A
+    file whose time cannot be read (``written_at`` not finite) is expired at
+    once: it would otherwise block the request for ever.
     """
+    if math.isfinite(revision.written_at):
+        since = revision.written_at
+        window = max(record.claim_expires_at - record.created_at, MAX_WITHDRAWAL_WINDOW_SECONDS)
+    else:
+        since, window = 0.0, 0.0
     return WithdrawalMark(
         attempt=record.attempt,
         by=UNREADABLE_WITHDRAWER,
         writer=UNREADABLE_WITHDRAWER,
-        since=revision.written_at,
-        until=revision.written_at + (record.claim_expires_at - record.created_at),
+        since=since,
+        until=since + window,
         reason="a withdrawal revision this build cannot read",
     )
 
@@ -1108,6 +1124,7 @@ def submit_step(entry: LedgerEntry | None, *, now: float) -> SubmitStep:
 __all__ = [
     "BATCH_RESULT_LAYOUT",
     "LEDGER_FORMAT_VERSION",
+    "MAX_WITHDRAWAL_WINDOW_SECONDS",
     "UNREADABLE_WITHDRAWER",
     "AttachJob",
     "AwaitWithdrawal",

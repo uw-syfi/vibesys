@@ -19,12 +19,14 @@ from pydantic import (
 
 from vs_sandbox.agent_gpu import AgentGpuConfig
 from vs_slurm.api import (
+    MAX_WITHDRAWAL_WINDOW_SECONDS,
     PORT_PLACEHOLDER,
     LedgerPolicy,
     SlurmConfig,
     SlurmLocalTransport,
     SlurmService,
     load_slurm_config,
+    withdrawal_window_seconds,
 )
 
 if TYPE_CHECKING:
@@ -178,7 +180,8 @@ class SlurmOperatorSettings:
 
     The cluster (``[slurm]``), the VibeSys policy (``[vibesys]``), and, through
     the policy, the agent GPU limits. Construction rejects a combination the
-    run could not honor (agent GPU commands without the local transport), so
+    run could not honor (agent GPU commands without the local transport, or a
+    transport timeout whose withdrawal mark outlasts the ledger's windows), so
     holding a value means the file is usable and no later read can differ.
     """
 
@@ -186,8 +189,9 @@ class SlurmOperatorSettings:
     policy: SlurmExecutionPolicy
 
     def __post_init__(self) -> None:
-        """Reject agent GPU limits that the cluster transport cannot serve."""
+        """Reject agent GPU limits the cluster transport cannot serve, and a ledger its timeout breaks."""
         agent_gpu_capability(self.config, self.policy)
+        _check_withdrawal_window(self.config, self.policy)
 
     @property
     def agent_gpu(self) -> AgentGpuConfig | None:
@@ -205,6 +209,29 @@ class SlurmOperatorSettings:
         if self.policy.agent_gpu is None or not isinstance(transport, SlurmLocalTransport):
             return None
         return transport.shell_command
+
+
+def _check_withdrawal_window(config: SlurmConfig, policy: SlurmExecutionPolicy) -> None:
+    """Refuse a transport timeout whose withdrawal mark outlasts a window that must cover it.
+
+    A run's withdrawal mark holds ``withdrawal_window_seconds`` of the
+    transport timeout. A reader that cannot decode the mark undoes it after
+    ``MAX_WITHDRAWAL_WINDOW_SECONDS``, and an attempt's claim, which the mark
+    must outlast no longer than, holds ``claim_seconds``.
+    """
+    if policy.ledger is None:
+        return
+    window = withdrawal_window_seconds(config.transport_timeout_seconds)
+    bounds = {"the longest any withdrawal may hold": MAX_WITHDRAWAL_WINDOW_SECONDS}
+    bounds["vibesys.ledger.claim_seconds"] = policy.ledger.claim_seconds
+    exceeded = [f"{name} ({bound:g} s)" for name, bound in bounds.items() if window > bound]
+    if exceeded:
+        message = (
+            f"slurm.transport_timeout_seconds={config.transport_timeout_seconds:g} makes a "
+            f"withdrawal mark hold {window:g} s, more than {' and '.join(exceeded)}; "
+            "lower slurm.transport_timeout_seconds or raise vibesys.ledger.claim_seconds"
+        )
+        raise SlurmPolicyError(message)
 
 
 def load_slurm_operator_settings(path: Path) -> SlurmOperatorSettings:

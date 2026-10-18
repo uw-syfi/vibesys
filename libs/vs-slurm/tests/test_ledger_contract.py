@@ -580,22 +580,9 @@ _MULTI_LINE_WITHDRAWALS = (
 
 
 @pytest.mark.parametrize("document", _MULTI_LINE_WITHDRAWALS)
-@pytest.mark.parametrize(
-    "implementation",
-    [
-        "fake",
-        pytest.param(
-            "remote",
-            marks=pytest.mark.xfail(
-                strict=True, reason="r3206 LOW-A: the remote read prints one line per file"
-            ),
-        ),
-    ],
-)
 def test_a_multi_line_withdrawal_revision_or_lease_never_fails_the_read(
-    tmp_path: Path, implementation: str, document: str
+    case: _Case, document: str
 ) -> None:
-    case = _make(implementation, tmp_path)
     planted = _record(state=LedgerState.SUBMITTED)
     case.plant(KEY, 0, encode_ledger_document(planted))
     case.plant_withdrawal(KEY, 0, 0, document, _WRITTEN_AT)
@@ -615,10 +602,6 @@ def _record_with_claim_window(seconds: float) -> LedgerRecord:
     return record.model_copy(update={"claim_expires_at": record.created_at + seconds})
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="r3206 LOW-B: an unreadable mark holds for the record's claim window, however short",
-)
 @pytest.mark.parametrize("claim_seconds", [60.0, 300.0, 829.0])
 def test_an_unreadable_withdrawal_holds_for_at_least_any_withdrawers_window(
     case: _Case, claim_seconds: float
@@ -639,9 +622,6 @@ def test_an_unreadable_withdrawal_holds_for_at_least_any_withdrawers_window(
     assert not undo_expired_withdrawal(case.reopen(), entry, now=_WRITTEN_AT + window)
 
 
-@pytest.mark.xfail(
-    strict=True, reason="r3206 LOW-B: an unreadable file time held the request for ever"
-)
 def test_an_unreadable_withdrawal_whose_file_time_is_unknown_is_expired_at_once() -> None:
     """``date -r`` failed: it never blocks the request, so the first asker undoes it.
 
