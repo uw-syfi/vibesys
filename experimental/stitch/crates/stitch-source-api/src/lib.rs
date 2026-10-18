@@ -1,4 +1,5 @@
 //! Source attribution interfaces, separate from profiler formats.
+#![forbid(unsafe_code)]
 
 use std::path::PathBuf;
 use stitch_core::{Activity, CpuSample, SourceAttribution};
@@ -29,6 +30,11 @@ pub enum MappingError {
 /// locations from debug-info or generated-source mappings.
 pub trait SourceMapper {
     fn name(&self) -> &'static str;
+    /// Map an observation to source claims.
+    ///
+    /// # Errors
+    ///
+    /// Returns a mapper error when source resolution fails.
     fn map(&self, target: SourceTarget<'_>) -> Result<Vec<SourceAttribution>, MappingError>;
 }
 
@@ -44,6 +50,11 @@ pub struct MappingRegistry {
 }
 
 impl MappingRegistry {
+    /// Register a source mapper.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for a duplicate mapper name.
     pub fn register(&mut self, mapper: impl SourceMapper + 'static) -> Result<(), MappingError> {
         if self.mappers.iter().any(|item| item.name() == mapper.name()) {
             return Err(MappingError::DuplicateMapper(mapper.name().into()));
@@ -52,6 +63,11 @@ impl MappingRegistry {
         Ok(())
     }
 
+    /// Gather claims from registered source mappers.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first mapper error.
     pub fn map(&self, target: SourceTarget<'_>) -> Result<Vec<SourceAttribution>, MappingError> {
         let mut claims = Vec::new();
         for mapper in &self.mappers {

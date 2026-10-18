@@ -75,7 +75,7 @@ func TestLocalTestSelectionNarrowsHeavyGroups(t *testing.T) {
 		{
 			name:        "repoctl only (f39d7eb8c)",
 			paths:       []string{"support/repoctl/test.go", "support/repoctl/test_test.go"},
-			wantCI:      []string{"agent_image", "evaluators", "examples", "impact", "python", "real_tiers", "tui"},
+			wantCI:      []string{"agent_image", "evaluators", "examples", "impact", "python", "real_tiers", "stitch", "tui"},
 			wantGroups:  []string{"repoctl_tests"},
 			wantSkipped: []string{},
 			wantTargets: 0,
@@ -127,6 +127,28 @@ func TestLocalTestSelectionNarrowsHeavyGroups(t *testing.T) {
 			}
 			if tc.wantTargets >= 0 && len(targets) != tc.wantTargets {
 				t.Errorf("native targets = %v, want %d", targets, tc.wantTargets)
+			}
+		})
+	}
+}
+
+func TestStitchWorkspaceChangesSelectItsChecks(t *testing.T) {
+	for _, path := range []string{
+		"experimental/stitch/Cargo.toml",
+		"experimental/stitch/crates/stitch-core/src/lib.rs",
+		"experimental/stitch/plugins/profilers/dial9/src/lib.rs",
+		"experimental/stitch/plugins/source/declared-workspace/src/lib.rs",
+	} {
+		t.Run(path, func(t *testing.T) {
+			if got, want := ciJobs(t, []string{path}), []string{"stitch"}; !reflect.DeepEqual(got, want) {
+				t.Fatalf("CI jobs = %v, want %v", got, want)
+			}
+			groups, skipped, targets := localPlan(t, []string{path})
+			if want := []string{"stitch_checks"}; !reflect.DeepEqual(groups, want) {
+				t.Fatalf("local checks = %v, want %v", groups, want)
+			}
+			if len(skipped) != 0 || len(targets) != 0 {
+				t.Fatalf("unexpected skipped checks %v or native targets %v", skipped, targets)
 			}
 		})
 	}

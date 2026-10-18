@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 use stitch_core::Graph;

@@ -1,4 +1,5 @@
 //! OpenTelemetry OTLP JSON and JSONL importers.
+#![forbid(unsafe_code)]
 use std::path::Path;
 use stitch_core::{Activity, ActivityKind, Interval, Observation, Origin};
 use stitch_importer_api::{ImportError, Importer, InputSpec};

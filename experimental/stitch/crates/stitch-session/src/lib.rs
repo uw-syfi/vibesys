@@ -1,4 +1,5 @@
 //! Manifest validation and import orchestration through supplied plugins.
+#![forbid(unsafe_code)]
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -19,6 +20,11 @@ pub struct RunManifest {
 }
 
 impl RunManifest {
+    /// Validate the manifest's schema and required fields.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for unsupported schemas or empty required fields.
     pub fn validate(&self) -> Result<(), SessionError> {
         if self.schema_version != 1 {
             return Err(SessionError::Invalid(format!(
@@ -61,6 +67,11 @@ pub enum SessionError {
     Mapping(#[from] MappingError),
 }
 
+/// Read, resolve paths in, and validate a session manifest.
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be read, parsed, or validated.
 pub fn load_manifest(path: &Path) -> Result<RunManifest, SessionError> {
     let contents = fs::read_to_string(path).map_err(|source| SessionError::Io {
         path: path.to_owned(),
@@ -83,6 +94,11 @@ pub fn load_manifest(path: &Path) -> Result<RunManifest, SessionError> {
     Ok(manifest)
 }
 
+/// Correlate imported observations and resolve available source locations.
+///
+/// # Errors
+///
+/// Returns an error for invalid input, importer or mapper failures, or invalid graph evidence.
 pub fn ingest_with(
     manifest: &RunManifest,
     importers: &ImporterRegistry,

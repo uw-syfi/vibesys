@@ -1,4 +1,5 @@
 //! Linux perf script importer.
+#![forbid(unsafe_code)]
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::fs::File;
@@ -24,7 +25,7 @@ fn perf_time_ns(raw: &str) -> Option<u64> {
     let nanos: u64 = fraction.parse().ok()?;
     seconds
         .checked_mul(1_000_000_000)?
-        .checked_add(nanos * 10_u64.pow((9 - fraction.len()) as u32))
+        .checked_add(nanos * 10_u64.pow(u32::try_from(9 - fraction.len()).ok()?))
 }
 
 fn finish_perf_sample(
@@ -178,6 +179,11 @@ pub enum CaptureError {
 /// The process boundary needed by capture; callers can supply an implementation
 /// that enforces their own execution policy.
 pub trait CommandRunner {
+    /// Run one profiler command and return its output.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the command fails or exits unsuccessfully.
     fn run(&self, program: &str, args: &[String]) -> Result<Output, CaptureError>;
 }
 
@@ -204,7 +210,11 @@ impl CommandRunner for SystemCommandRunner {
 }
 
 /// Capture one process with perf and convert its samples to an importable
-/// script. Applications may emit OTel or dial9 artifacts in parallel.
+/// script. Applications may emit `OTel` or dial9 artifacts in parallel.
+///
+/// # Errors
+///
+/// Returns an error for invalid capture parameters, I/O failures, or profiler failures.
 pub fn capture_perf(
     request: &CaptureRequest,
     runner: &dyn CommandRunner,
@@ -263,7 +273,7 @@ pub fn capture_perf(
     })?;
     let captured = PerfScriptImporter.import(&InputSpec {
         format: "perf_script".into(),
-        path: script.clone(),
+        path: script,
         clock: "monotonic".into(),
     })?;
     if captured.is_empty() {

@@ -1,4 +1,5 @@
 //! Pure, source-independent profiling evidence and correlation.
+#![forbid(unsafe_code)]
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -23,6 +24,7 @@ pub struct Interval {
 }
 
 impl Interval {
+    #[must_use]
     pub fn contains(&self, instant_ns: u64, clock: &str) -> bool {
         self.clock == clock && self.start_ns <= instant_ns && instant_ns < self.end_ns
     }
@@ -194,6 +196,7 @@ pub enum GraphError {
 impl Graph {
     /// Build a stack tree from all CPU samples. Every sample contributes one
     /// count along its observed stack, with roots nearest the caller.
+    #[must_use]
     pub fn sample_cost_tree(&self) -> SampleCostTree {
         let mut roots = BTreeMap::<String, CostNodeAccumulator>::new();
         for sample in &self.cpu_samples {
@@ -205,6 +208,11 @@ impl Graph {
         }
     }
 
+    /// Build a graph from observations.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for duplicate IDs or invalid activity intervals.
     pub fn build(observations: impl IntoIterator<Item = Observation>) -> Result<Self, GraphError> {
         let mut ids = BTreeSet::new();
         let mut activities = Vec::new();
@@ -283,6 +291,11 @@ impl Graph {
         })
     }
 
+    /// Add a source claim for an existing observation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the target ID is absent from the graph.
     pub fn add_source_attribution(
         &mut self,
         attribution: SourceAttribution,
@@ -302,6 +315,7 @@ impl Graph {
         Ok(())
     }
 
+    #[must_use]
     pub fn trace(&self, trace_id: &str) -> TraceSummary {
         let mut ids: BTreeSet<&str> = self
             .activities

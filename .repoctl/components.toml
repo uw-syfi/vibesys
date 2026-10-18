@@ -1,6 +1,6 @@
 # Repository component ownership, discovery, and change impact policy.
 default_base = "main"
-jobs = ["python", "tui", "examples", "agent_image", "real_tiers", "evaluators", "impact"]
+jobs = ["python", "tui", "examples", "agent_image", "real_tiers", "evaluators", "impact", "stitch"]
 
 ignored_roots = ["website", "third_party", ".agents", ".claude", ".github/ISSUE_TEMPLATE", ".github/DISCUSSION_TEMPLATE"]
 ignored_files = ["AGENTS.md", "CLAUDE.md", "LICENSE", "agent.toml.example", ".env.example", ".gitattributes", ".gitignore", ".github/CODEOWNERS", ".github/pull_request_template.md", ".github/delegated-merge.md"]
@@ -137,6 +137,14 @@ class = "manual"
 job = "tui"
 root = "clients"
 depends_on = ["server_protocol", "server_transport", "bun_fetcher"]
+
+[[components]]
+id = "stitch"
+class = "manual"
+job = "stitch"
+# Stitch is one Cargo workspace with nested crate manifests. Check it once at
+# its workspace root rather than registering each nested manifest as a target.
+root = "experimental/stitch"
 
 [[components]]
 id = "test_isolation_policy"

@@ -1,4 +1,5 @@
 //! Profiler artifact importer contract and registry. Implementations live in plugin crates.
+#![forbid(unsafe_code)]
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -37,6 +38,11 @@ pub enum ImportError {
 /// not control the capture lifecycle.
 pub trait Importer {
     fn format(&self) -> &'static str;
+    /// Import observations from one profiler artifact.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the artifact cannot be read or parsed.
     fn import(&self, input: &InputSpec) -> Result<Vec<Observation>, ImportError>;
 }
 
@@ -46,6 +52,11 @@ pub struct ImporterRegistry {
 }
 
 impl ImporterRegistry {
+    /// Register one importer for its advertised format.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if that format is already registered.
     pub fn register(&mut self, importer: impl Importer + 'static) -> Result<(), ImportError> {
         let format = importer.format();
         if self.importers.contains_key(format) {
@@ -55,6 +66,11 @@ impl ImporterRegistry {
         Ok(())
     }
 
+    /// Dispatch an artifact to its registered importer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an unknown format or an importer failure.
     pub fn import(&self, input: &InputSpec) -> Result<Vec<Observation>, ImportError> {
         let importer = self
             .importers

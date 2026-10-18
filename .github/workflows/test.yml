@@ -42,6 +42,7 @@ jobs:
       agent_image: ${{ steps.filter.outputs.agent_image }}
       real_tiers: ${{ steps.filter.outputs.real_tiers }}
       evaluators: ${{ steps.filter.outputs.evaluators }}
+      stitch: ${{ steps.filter.outputs.stitch }}
       native_targets: ${{ steps.filter.outputs.native_targets }}
       native_languages: ${{ steps.filter.outputs.native_languages }}
       pnpm_packages: ${{ steps.filter.outputs.pnpm_packages }}
@@ -129,6 +130,29 @@ jobs:
       # so a skills-only change selects no Python job. Stdlib only, about a second.
       - name: Check agent skills
         run: python3 -m scripts.check_skills
+
+  stitch:
+    needs: changes
+    if: needs.changes.outputs.stitch == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@1.92.0
+        with:
+          components: clippy, rustfmt
+
+      - name: Install cargo-strata
+        run: cargo install cargo-strata --version 0.4.0 --locked
+
+      - name: Set up repoctl
+        uses: ./.github/actions/setup-repoctl
+
+      - name: Check Stitch workspace
+        run: ./support/repoctl/repoctl run-checks --group stitch_checks
 
   # One environment setup for the Python quality group. repoctl prints each
   # command before running it and names the failing command in its error.
@@ -1078,6 +1102,7 @@ jobs:
       - tui-build
       - tui-e2e
       - queue-native
+      - stitch
       - impact-tool
       - validate-examples
       - validate-examples-cpu-check

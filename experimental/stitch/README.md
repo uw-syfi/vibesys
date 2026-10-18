@@ -2,8 +2,8 @@
 
 Stitch is an installable Rust CLI for assembling profiling evidence from
 different sources into a source-linked execution graph. It is independent of
-VibeSys's current profiler and MCP paths. This is an early draft implementation,
-intended to support iterative work against Masa's Hotel application.
+VibeSys's current profiler and MCP paths. This is an early draft implementation
+for heterogeneous application profiling.
 
 ## Build and run
 
@@ -47,13 +47,13 @@ plugins/
 
 Each profiler integration and each source mapping implementation has its own
 crate. Format variants from the same profiler share a crate. Plugins depend on
-the small importer or source mapper contract and on `stitch-core`; the core and
+the small importer or source mapper contract and on `stitch-core`; the perf
+plugin also uses the session manifest contract for capture output. The core and
 session never depend on a concrete plugin. The CLI registers the built-in
 plugins and passes their registries to the session. A new built-in plugin adds
 one crate and one CLI registration; this is compile-time Rust registration, not
 dynamic library loading. Importers translate artifacts into typed observations.
-The core
-joins OTel spans by trace and parent span IDs. A dial9 CPU region or task poll
+The core joins OTel spans by trace and parent span IDs. A dial9 CPU region or task poll
 links to a span only when its record carries the matching trace and parent span
 IDs. A perf sample links to a CPU region or poll only with the same process, thread, and declared
 clock domain, and only when exactly one poll contains the sample timestamp.
@@ -95,6 +95,24 @@ revision supplied in a manifest is not independently verified. Full Tokio task
 event decoding, GPU vendor capture, distributed capture coordination, binary debug
 symbol resolution, and VibeSys trusted-evidence acceptance are follow-up work.
 
-The [Hotel integration guide](examples/hotel/README.md) records the application
-changes needed for each source, a seven-service frontend profile, and a
-separate recommendation endpoint profile.
+The [small example](examples/small/manifest.json) demonstrates a manifest with
+OpenTelemetry, dial9 bridge, and perf inputs. A captured native dial9 artifact
+under `crates/stitch-cli/tests/fixtures/` exercises the binary importer.
+
+## Checks
+
+Changes anywhere under `experimental/stitch/` select the `stitch` CI job through
+repoctl. The job checks formatting, Clippy's default and pedantic lints plus
+`redundant_clone` with warnings denied, cargo-strata's crate dependency policy,
+and the workspace tests. The policy in [`strata.toml`](strata.toml) assigns every
+crate a layer, limits each crate's direct dependencies including test-only
+dependencies, and requires every crate root to forbid unsafe Rust code.
+
+Run the same checks locally with:
+
+```sh
+cargo install cargo-strata --version 0.4.0 --locked
+./support/repoctl/repoctl run-checks --group stitch_checks
+```
+
+Run the repoctl command from the repository root.

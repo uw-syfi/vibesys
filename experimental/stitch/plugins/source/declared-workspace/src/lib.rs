@@ -1,4 +1,5 @@
 //! Validates source file and line hints declared by instrumentation.
+#![forbid(unsafe_code)]
 use std::path::{Path, PathBuf};
 use stitch_core::{SourceAttribution, SourceBasis, SourceLocation};
 use stitch_source_api::{DeclaredLocation, MappingError, SourceMapper, SourceTarget};
@@ -6,6 +7,11 @@ use stitch_source_api::{DeclaredLocation, MappingError, SourceMapper, SourceTarg
 /// Resolves file and line hints explicitly emitted by instrumentation.
 /// An unresolved hint returns None; it never becomes a verified attribution.
 pub trait DeclaredLocationResolver {
+    /// Resolve a declared source hint within the configured source root.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if canonicalization fails or the file escapes the root.
     fn resolve(
         &self,
         hint: DeclaredLocation<'_>,
@@ -18,6 +24,11 @@ pub struct WorkspaceLocationResolver {
 }
 
 impl WorkspaceLocationResolver {
+    /// Open a source root for declared location checks.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the root cannot be canonicalized.
     pub fn new(root: impl AsRef<Path>, revision: Option<String>) -> Result<Self, MappingError> {
         let path = root.as_ref().to_owned();
         let root = path

@@ -46,9 +46,9 @@ fn otlp_and_perf_import_preserve_identities_and_precise_timestamps() {
 }
 
 #[test]
-fn real_hotel_otel_and_dial9_artifacts_join_by_span_identity() {
+fn captured_otel_and_native_dial9_artifacts_join_by_span_identity() {
     let fixtures =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hotel/fixtures");
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/captured-request");
     let registry = builtin_importers();
     let spans = registry
         .import(&InputSpec {

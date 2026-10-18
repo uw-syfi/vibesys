@@ -10,6 +10,20 @@ rust = [
 ]
 
 [[check_groups]]
+name = "stitch_checks"
+trigger_job = "stitch"
+include_in_test = true
+language = "rust"
+directory = "experimental/stitch"
+timeout_seconds = 600
+commands = [
+  ["cargo", "fmt", "--all", "--check"],
+  ["cargo", "clippy", "--locked", "--workspace", "--all-targets", "--", "-W", "clippy::pedantic", "-W", "clippy::redundant_clone", "-D", "warnings"],
+  ["cargo", "strata", "check", "--strict"],
+  ["cargo", "test", "--locked", "--workspace"],
+]
+
+[[check_groups]]
 name = "python_tests"
 trigger_job = "python"
 include_in_test = true

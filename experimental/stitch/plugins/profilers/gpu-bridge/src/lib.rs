@@ -1,4 +1,5 @@
 //! Provisional GPU bridge importer.
+#![forbid(unsafe_code)]
 use serde::Deserialize;
 use std::path::Path;
 use stitch_core::{Activity, ActivityKind, Interval, Observation, Origin};
