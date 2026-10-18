@@ -232,6 +232,30 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
 }
 
 /**
+ * The Fake's guard against request loops, as the last init script: no page asks the bridge for the
+ * same thing (a method with the same arguments) more than `limit` times, however long it is open.
+ * A request past the bound is recorded in `fakeHost.requestLoops` and never answered, so a loop
+ * stops there instead of freezing the page, and `expectNoRequestLoops` fails the test that hit it.
+ */
+export function installRequestBound(limit: number): void {
+  const bridge = (window as unknown as {vibesysWelcome: Record<string, unknown>}).vibesysWelcome;
+  const loops: string[] = [];
+  const counts = new Map<string, number>();
+  for (const [name, method] of Object.entries(bridge)) {
+    if (typeof method !== 'function' || name.startsWith('on')) continue;
+    bridge[name] = (...args: unknown[]) => {
+      const request = `${name} ${JSON.stringify(args)}`;
+      const count = (counts.get(request) ?? 0) + 1;
+      counts.set(request, count);
+      if (count <= limit) return method(...args);
+      if (count === limit + 1) loops.push(request);
+      return new Promise(() => {});
+    };
+  }
+  Object.assign((window as unknown as {fakeHost: object}).fakeHost, {requestLoops: loops});
+}
+
+/**
  * The run digests part of the Fake, as a further init script after `installFakeBridge`: the
  * host's answer to what a run's journal says (`seed.digests`), or that it offers none.
  */

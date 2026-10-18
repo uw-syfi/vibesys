@@ -31,11 +31,16 @@ function dayNumber(date: Civil): number {
   return Math.round(Date.UTC(date.year, date.month - 1, date.day) / 86_400_000);
 }
 
+/** The first moment a run could have begun: the product's first commit (2026-05-07). */
+const FIRST_RUN_MS = Date.UTC(2026, 4, 7);
+
 /**
  * When a run began: `07:32` today, `Yesterday 21:10`, `Oct 15` earlier this year, `Oct 15, 2025`
- * before that.
+ * before that; null when `at` is no moment a run could have begun (NaN, 0, a near-zero epoch from
+ * a clock or field that was never set), which is never worded as a date.
  */
-export function formatWhen(at: number, clock: Clock): string {
+export function formatWhen(at: number, clock: Clock): string | null {
+  if (!Number.isFinite(at) || at < FIRST_RUN_MS) return null;
   const {timeZone} = clock;
   const zone = timeZone === undefined ? {} : {timeZone};
   const then = civil(at, timeZone);

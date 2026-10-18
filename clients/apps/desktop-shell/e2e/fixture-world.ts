@@ -15,6 +15,7 @@ import {
   installFakeNewRun,
   installFakeProjectRuns,
   installFakeWindows,
+  installRequestBound,
   type MachinesMethods,
   type NewRunMethods,
   type WindowsMethods,
@@ -31,6 +32,8 @@ const TASK = 'mpmc';
 const INSTANCE = '00000000000a';
 const HOST = 'ssh:remote-host';
 const CHECKOUT = '~/vibesys';
+/** How often a page may ask the bridge for the same thing; far above any screen's own reads. */
+const REQUEST_LIMIT = 100;
 
 /**
  * Whether the Fake bridge the fixture world installs has every method of the real one: the
@@ -56,6 +59,7 @@ interface FixtureWindow extends Window {
     emit(events: readonly unknown[]): void;
     drop(): void;
     releaseHistory(): void;
+    requestLoops?: string[];
   };
 }
 
@@ -211,6 +215,8 @@ export async function openFixture(
   options: OpenOptions = {},
 ): Promise<void> {
   for (const content of fixtureScripts(fixture, options)) await page.addInitScript({content});
+  // Only a test is bounded: the fixture dev app is open for as long as someone looks at it.
+  await page.addInitScript({content: script(installRequestBound, REQUEST_LIMIT)});
   await page.goto('./shell.html');
   await page
     .getByRole('navigation', {name: 'VibeSys'})
@@ -236,6 +242,14 @@ export async function playLive(page: Page, fixture: RunFixture): Promise<void> {
     events => (window as unknown as FixtureWindow).fakeHost.emit(events),
     afterDrop,
   );
+}
+
+/** Fails the test when the page asked the bridge for the same thing over and over. */
+export async function expectNoRequestLoops(page: Page): Promise<void> {
+  const loops = await page.evaluate(
+    () => (window as unknown as FixtureWindow).fakeHost.requestLoops ?? [],
+  );
+  expect(loops, 'requests the page repeated without end').toEqual([]);
 }
 
 /** Lets a held history read finish, so the run's screen settles. */

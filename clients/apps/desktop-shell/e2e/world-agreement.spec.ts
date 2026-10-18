@@ -1,6 +1,6 @@
 import {expect, type Page, test} from '@playwright/test';
 import {FIXTURE_NAMES, fixtureNamed} from '@vibesys/run-fixtures';
-import {openFixture} from './fixture-world.js';
+import {expectNoRequestLoops, openFixture} from './fixture-world.js';
 
 /**
  * One world, one set of counts: for every fixture, the machines and runs that Recent, All runs,
@@ -61,9 +61,6 @@ for (const name of FIXTURE_NAMES) {
       .allInnerTexts();
     expect([...offered].sort()).toEqual([...machines].sort());
 
-    // A live run's digest is read again as soon as it is, which the All runs screen cannot
-    // yet settle under (the sidebar state asks for it in a loop), so a live fixture stops here.
-    if (fixture.state === 'live') return;
     await nav(page).getByRole('button', {name: 'Show all'}).click();
     await expect(page.getByRole('heading', {name: 'All runs'})).toBeVisible();
     await expect(page.getByText('Listing runs…')).toHaveCount(0);
@@ -78,5 +75,6 @@ for (const name of FIXTURE_NAMES) {
       expect(all.get(machine) ?? 0, `${machine} in All runs`).toBeGreaterThanOrEqual(runs);
     }
     await expect(page.getByText('No runs yet.')).toHaveCount(0);
+    await expectNoRequestLoops(page);
   });
 }
