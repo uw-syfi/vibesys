@@ -51,7 +51,7 @@ from server.runtime import (
     browser_origin,
 )
 from vibesys.api import ConfigurationError
-from vs_project.api import Project, create_operator_key
+from vs_project.api import Project, create_operator_key, user_runtime_root
 from vs_sim.api import (
     OsThreads,
     Platform,
@@ -120,6 +120,26 @@ def _control_socket_from_argv(argv: list[str]) -> Path | None:
     """Read the transport bootstrap flag without parsing run configuration."""
     value = cli.option_from_argv(argv, "--control-socket")
     return Path(value) if value else None
+
+
+def _refuse_control_socket_outside_runtime_root(path: Path) -> None:
+    """Exit with a configuration error unless ``path``'s directory is in the runtime root.
+
+    Every operator client presents the key only to a socket there (``OperatorDialer``),
+    and a confined agent can write elsewhere, so a socket outside it is one the operator
+    could not reach and an agent could take over.
+    """
+    root = user_runtime_root(os.environ, os.getuid())
+    directory = path.absolute().parent.resolve()
+    resolved_root = root.resolve()
+    if directory != resolved_root and resolved_root not in directory.parents:
+        cli.configuration_error(
+            f"--control-socket {path} is not inside the operator's runtime root {root}: "
+            "operator clients present the control key only to a socket there, where no "
+            "confined agent can write. Choose a path inside it, or set XDG_RUNTIME_DIR",
+            code="invalid_arguments",
+            stage="argument_parsing",
+        )
 
 
 def _web_requested(argv: list[str]) -> bool:
@@ -949,6 +969,8 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
             code="invalid_arguments",
             stage="argument_parsing",
         )
+    if control_socket is not None:
+        _refuse_control_socket_outside_runtime_root(control_socket)
     temp_socket_dir: tempfile.TemporaryDirectory[str] | None = None
     if control_socket is None:
         # In the operator's runtime root, where no confined agent can write: in a shared

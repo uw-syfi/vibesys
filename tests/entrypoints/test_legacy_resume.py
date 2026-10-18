@@ -109,12 +109,13 @@ def test_the_server_entrypoint_exits_with_the_diagnostic(
 ) -> None:
     root = _legacy_run(_project(tmp_path / "project"), state=b'{"schema_version": 6}')
     monkeypatch.chdir(root)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "runtime"))
 
     with pytest.raises(SystemExit) as raised:
         server_main(
             [
                 "--control-socket",
-                str(tmp_path / "control.sock"),
+                str(tmp_path / "runtime" / "vibesys" / "control.sock"),
                 "--outer-loop",
                 "dynamic",
                 "--resume",

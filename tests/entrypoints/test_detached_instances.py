@@ -817,7 +817,7 @@ def test_detached_start_retains_resolved_identity_for_later_inspection(
     monkeypatch.setenv("VIBESYS_DETACHED_CHILD", "1")
     root = instance_root(os.environ, os.getuid())
     (root / "runs" / INSTANCE).mkdir(parents=True, mode=0o700)
-    socket = tmp_path / "control.sock"
+    socket = root / "control.sock"
 
     detached_run_main(
         [

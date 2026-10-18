@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, ClassVar
 import server.runtime as runtime_module
 from entrypoints import cli
 from entrypoints.server import main
+from vs_project.api import user_runtime_root
 from vs_sim.api.testing import send_to_thread
 
 if TYPE_CHECKING:
@@ -83,7 +84,9 @@ def _serve(transports: int) -> None:
         resolved_run_id="run-1",
         resolved_project_root=Path("/unused/project"),
     )
-    main(["--control-socket", "/unused/control.sock", "--local"])
+    # Inside the runtime root: the server refuses a control socket anywhere else.
+    socket = user_runtime_root(os.environ, os.getuid()) / "unused" / "control.sock"
+    main(["--control-socket", str(socket), "--local"])
 
 
 def interrupted_run(transports: int, target: int) -> tuple[list[bool], str]:
