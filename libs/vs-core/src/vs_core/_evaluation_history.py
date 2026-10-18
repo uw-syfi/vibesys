@@ -81,11 +81,19 @@ _UNACCEPTED_ENDS = frozenset(
 def _submission_rows(
     scope: Scope, evaluation: EvaluationState, records: RecordsState
 ) -> tuple[RequestRecord, ...]:
-    """The scope's measurement submissions in canonical outbox order."""
+    """The scope's measurement submissions in canonical outbox order, core's own runs left out.
+
+    Core runs the base, or a candidate's input again, in an attempt's scope only to make a
+    comparison it can trust (``EvaluationState.core_runs``). No decision of the attempt asked
+    for such a run, so it is not the attempt's history: its sample reaches the agent through the
+    comparisons core publishes, and the agent never waits for it (``attempt_settled``).
+    """
+    core = {run.request_id for run in evaluation.core_runs if run.scope == scope}
     return tuple(
         row
         for row in records.records
         if row.request.scope == scope
+        and row.request_id not in core
         and (
             isinstance(row.request, SubmitMeasurement)
             or (
@@ -101,7 +109,10 @@ def _submission_rows(
 
 
 def attempt_settled(scope: Scope, evaluation: EvaluationState, records: RecordsState) -> bool:
-    """Whether every measurement submission issued in ``scope`` has a terminal observation.
+    """Whether every measurement submission the attempt issued in ``scope`` has ended.
+
+    Core's own runs in the scope are not the attempt's (``_submission_rows``): the agent's resume
+    never waits for them, and the comparison they serve grows when they land.
 
     Core decides no resume for a scope while this is False: a submission that is still
     running (or whose request has not run) may yet complete the history, so the decision is
@@ -131,9 +142,11 @@ def _none_pending(
     the records: its row may be gone (a legacy history), which leaves the history unavailable,
     not the scope unsettled.
     """
-    held = {row.request_id for row in rows} | {
-        job.submission_id for job in evaluation.jobs if job.scope == scope
-    }
+    held = (
+        {row.request_id for row in rows}
+        | {job.submission_id for job in evaluation.jobs if job.scope == scope}
+        | {run.request_id for run in evaluation.core_runs if run.scope == scope}
+    )
     return all(
         receipt.request_id in held
         for budget in evaluation.submission_budgets
@@ -153,6 +166,7 @@ def produce_history(
     """Certify exact submission coverage, retaining unavailable partial history."""
     submissions = _submission_rows(scope, evaluation, records)
     ids = tuple(row.request_id for row in submissions)
+    core = {run.request_id for run in evaluation.core_runs if run.scope == scope}
     expected = {job.submission_id for job in evaluation.jobs if job.scope == scope} | {
         job.request_id
         for job in evaluation.registered_jobs
@@ -163,10 +177,12 @@ def produce_history(
         for budget in evaluation.submission_budgets
         if budget.scope == scope
         for receipt in budget.receipts
+        if not (isinstance(receipt, PreparedSubmissionReceipt) and receipt.request_id in core)
     )
     expected.update(
         receipt.request_id for receipt in receipts if isinstance(receipt, PreparedSubmissionReceipt)
     )
+    expected -= core
     produced = []
     for ordinal, row in enumerate(submissions, 1):
         observation = row.observation

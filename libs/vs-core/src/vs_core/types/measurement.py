@@ -80,6 +80,12 @@ class CoreRun(Value):
     request_id: RequestId
     scope: Scope
     candidate: RequestId
+    fresh_when_asked: Count
+    """How many fresh samples of the input it measures were held when core asked for it.
+
+    A base run that lands without leaving more than this replaced a sample that went stale
+    while it ran, and earns its close call no further base run (`vs_core._comparison`).
+    """
 
 
 class BaseClaim(Value):

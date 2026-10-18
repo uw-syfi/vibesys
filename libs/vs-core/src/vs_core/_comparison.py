@@ -63,7 +63,14 @@ candidate's result is a close call (``within_noise``, `close_call`), because one
 sample narrows the noise. A close call never takes a base past `_base_max_samples` fresh
 samples: ``BASE_MAX_SAMPLES`` (2, so at most one extra base run) under a declared floor, and
 ``MIN_SAMPLES_WITHOUT_FLOOR`` (3, so at most two extra base runs) without one, the fewest that
-can give a verdict.
+can give a verdict. Nor does it chase staleness: when base samples go stale faster than a base
+run takes, the run a close call earned can land without growing the base's fresh samples (the
+sample it was meant to join expired meanwhile), and that run is the last one a close call earns
+either side in its scope (`base_run_stalled`).
+
+Core's runs serve the comparison only. The agent's turn never waits for them (they are not its
+attempt's history, `vs_core._evaluation_history`); the comparison it reads next grows as they
+land.
 
 Without a declared floor the candidate needs those three runs too, and nobody else gives them:
 an agent's call for content it already measured is answered with that evaluation, and the
@@ -119,6 +126,7 @@ __all__ = [
     "as_answer",
     "base_in_flight",
     "base_missing",
+    "base_run_stalled",
     "claimed_base",
     "close_call",
     "compare",
@@ -148,8 +156,8 @@ BASE_MAX_SAMPLES = 2
 """The most fresh samples a close call earns a base under a declared floor: one run, then one
 more, never a chase.
 
-A base run costs as much as a candidate's, and an agent's turn waits for every run of its scope,
-so a close call narrows the noise with one more base sample and stops there."""
+A base run costs as much as a candidate's, so a close call narrows the noise with one more base
+sample and stops there."""
 MIN_SAMPLES_WITHOUT_FLOOR = 3
 """The runs each side needs before a comparison under no declared floor gives a verdict.
 
@@ -754,13 +762,38 @@ def base_missing(state: EvaluationState, measured: Measured, moment: Moment) -> 
     return not held and not base_in_flight(state, measured)
 
 
+def base_run_stalled(
+    state: EvaluationState, comparison: Comparison, evaluation: str, moment: Moment
+) -> bool:
+    """Whether a close call's base run in the comparison's scope landed without growing the base.
+
+    Core records how many fresh samples of the base were held when it asked for a run
+    (``CoreRun.fresh_when_asked``); a close call asks only while one is held. A run that landed
+    with a sample, yet left no more fresh samples than that, replaced one that went stale while
+    it ran, so the base goes stale faster than it runs and a verdict that needs more fresh base
+    samples cannot be reached in this scope: another run of either side would do the same.
+    """
+    base = Measured(evaluation, comparison.base_input)
+    taken = samples_of(state, base)
+    landed = {sample.run for sample in taken}
+    held = len(fresh(taken, moment))
+    return any(
+        run.scope == comparison.scope
+        and run.request_id in landed
+        and run.fresh_when_asked >= max(held, 1)
+        for run in state.core_runs
+    )
+
+
 def remeasures_base(
     state: EvaluationState, comparison: Comparison, evaluation: str, moment: Moment
 ) -> bool:
     """Whether a close call is worth one more run of the base: it narrows the noise.
 
-    Only while the base holds fewer than `_base_max_samples` fresh samples and none is running,
-    so a close call is never chased with base run after base run.
+    Only while the base holds fewer than `_base_max_samples` fresh samples, no run of it is under
+    way (core's in any scope, or the strategy's own run core claimed), and core's last base run
+    in the scope grew its fresh samples (`base_run_stalled`), so a close call is never chased
+    with base run after base run.
     """
     base = Measured(evaluation, comparison.base_input)
     held = fresh(samples_of(state, base), moment)
@@ -768,8 +801,18 @@ def remeasures_base(
         close_call(comparison)
         and not verdict_unreachable(comparison, moment.policy)
         and len(held) < _base_max_samples(moment.policy)
-        and not base_in_flight(state, base)
+        and not _base_under_way(state, comparison, base)
+        and not base_run_stalled(state, comparison, evaluation, moment)
     )
+
+
+def _base_under_way(state: EvaluationState, comparison: Comparison, base: Measured) -> bool:
+    """Whether a run of the base has not ended: core's own, or the strategy's run it claimed."""
+    claimed = {claim.request_id for claim in state.base_claims}
+    running = running_baseline(
+        state, BaseRef(commit=comparison.base, measured_input=comparison.base_input)
+    )
+    return base_in_flight(state, base) or (running is not None and running in claimed)
 
 
 def remeasures_candidate(
@@ -780,7 +823,8 @@ def remeasures_candidate(
     Only under no declared floor, while the candidate holds fewer than
     ``MIN_SAMPLES_WITHOUT_FLOOR`` runs and none of its input is running in the scope: its side
     needs that many before any verdict (module docstring), and only core can take them, since a
-    repeat of the same content is answered with the evaluation already made.
+    repeat of the same content is answered with the evaluation already made. Not once the base
+    is known to go stale faster than it runs (`base_run_stalled`): its side cannot get there.
     """
     candidate = Measured(evaluation, comparison.candidate_input)
     return (
@@ -788,6 +832,7 @@ def remeasures_candidate(
         and close_call(comparison)
         and comparison.candidate_samples < MIN_SAMPLES_WITHOUT_FLOOR
         and not base_in_flight(state, candidate, comparison.scope)
+        and not base_run_stalled(state, comparison, evaluation, moment)
     )
 
 

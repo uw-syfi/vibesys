@@ -28,6 +28,7 @@ from ._comparison import (
     comparison_of,
     comparisons_of,
     evaluation_of,
+    fresh,
     moment_of,
     remeasures_base,
     remeasures_candidate,
@@ -61,7 +62,12 @@ from .types.until import Within
 
 if TYPE_CHECKING:
     from .types.common import RequestId, Seconds
-    from .types.evaluation import EvaluationState, EvidenceRef, MeasurementPlan
+    from .types.evaluation import (
+        EvaluationState,
+        EvidenceRef,
+        MeasurementIdentity,
+        MeasurementPlan,
+    )
     from .types.kernel import EvaluationContext
     from .types.records import Outbound
 
@@ -229,7 +235,12 @@ def _core_run(
         update={
             "core_runs": (
                 *added.state.core_runs,
-                CoreRun(request_id=request_id, scope=scope, candidate=candidate),
+                CoreRun(
+                    request_id=request_id,
+                    scope=scope,
+                    candidate=candidate,
+                    fresh_when_asked=_fresh_count(state, context, plan, identity.value),
+                ),
             )
         }
     )
@@ -273,6 +284,19 @@ def _sample_ready(
         submission_released(state, context, latest), Proven
     )
     return released and len(budget.receipts) < min(budget.limit, MAX_SUBMISSIONS_PER_MEASUREMENT)
+
+
+def _fresh_count(
+    state: EvaluationState,
+    context: EvaluationContext,
+    plan: MeasurementPlan,
+    identity: MeasurementIdentity,
+) -> int:
+    """How many fresh samples of the input ``plan`` measures are held now, in any scope."""
+    if plan.measured_input is None:
+        return 0
+    measured = Measured(evaluation_of(identity), plan.measured_input)
+    return len(fresh(samples_of(state, measured), moment_of(context.run)))
 
 
 def record_samples(

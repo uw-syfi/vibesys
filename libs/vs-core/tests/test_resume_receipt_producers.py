@@ -939,8 +939,8 @@ def _authorized_before_a_late_submission(
 
     Core itself can submit in an attempt's scope after it authorized the resume: a close call
     found in evidence that arrives after its job ended earns the base one more run
-    (``_base_runs``). That submission's first observation recomputes the stored history, which
-    is not complete again until the new run ends with its facts.
+    (``_base_runs``). That run is core's, not the attempt's, so its observation leaves the
+    stored history as it was.
     """
     state, wait = publication_state()
     late_job = state.evaluation.jobs[2]
@@ -1001,6 +1001,7 @@ def _authorized_before_a_late_submission(
                             request_id=late_job.submission_id,
                             scope=late_job.scope,
                             candidate=state.evaluation.jobs[0].submission_id,
+                            fresh_when_asked=0,
                         ),
                     ),
                 }
@@ -1035,10 +1036,11 @@ def test_a_submission_made_after_authorization_never_refuses_the_authorized_resu
 
     Core used to require the attempt's whole stored history to be complete at dispatch, so a
     submission core made in the scope between authorization and dispatch left it unavailable
-    and the dispatch raised, halting the run.
+    and the dispatch raised, halting the run. Core's own runs are now no part of the attempt's
+    history at all, so the history the dispatch reads is the one published.
     """
     state, wait = _authorized_before_a_late_submission(late)
     history = state.attempts.attempts[0].evaluation_history
-    assert history.availability == core.EvaluationHistoryAvailability.UNAVAILABLE
-    assert len(history.covered_submissions) == 3
+    assert history.availability == core.EvaluationHistoryAvailability.COMPLETE
+    assert len(history.covered_submissions) == 2
     assert dispatch_publication(state, wait).events == ()

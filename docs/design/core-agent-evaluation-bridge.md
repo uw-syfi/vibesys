@@ -97,12 +97,15 @@ state live in `vs_core._base_runs`:
   `relative_noise`, up to three without one, and no more. Without a declared `relative_noise`
   it also earns the candidate's own input runs in its scope, up to three in all, since a
   repeated call for unchanged content is answered with the evaluation already made. Three runs
-  a side that all read alike can never give a verdict, so nothing more is run for them;
+  a side that all read alike can never give a verdict, so nothing more is run for them. A base
+  run that lands without growing the base's fresh samples (one went stale while it ran) is the
+  last run a close call earns either side in that scope (`base_run_stalled`);
 - these decisions are re-taken from state whenever any run of either side ends, with a sample
   or without, so a base run that dies (drained with its attempt, out of queue allowance, failed
   or refused) is replaced for every candidate that waited on it;
-- the run is core's own (`CoreRun`), in the candidate's scope, so the scope's resume waits for it
-  as it waits for every submission of the scope.
+- the run is core's own (`CoreRun`), in the candidate's scope. It is not the attempt's
+  evaluation history, so the agent's resume never waits for it: the turn resumes when its own
+  jobs end, and the comparison it reads next grows as core's runs land.
 
 The comparison reaches the agent twice: in the tool's reply for a finished evaluation
 (`SubmittedReply.comparison`, absent while the base has not ended) and in the resume prompt
