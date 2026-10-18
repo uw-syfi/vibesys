@@ -10,6 +10,7 @@ import {type FakeBridgeSeed, installFakeBridge, installFakeMachines} from './fak
 import {installFakeFixtureServer} from './fake-fixture-server.js';
 import {type FakeHistorySeed, installFakeHistory} from './fake-history.js';
 import {installFakeRun} from './fake-run.js';
+import {type FakeSummarySpanSeed, installFakeSummarySpan} from './fake-summary-span.js';
 
 const PROJECT = '/work/queue-rs';
 const INSTANCE = '00000000000a';
@@ -31,6 +32,7 @@ export interface OpenOptions {
   readonly sidebar?: boolean;
   /** A finished run's history served in small pages, held part-way: see `fake-history.ts`. */
   readonly historyServing?: Omit<FakeHistorySeed, 'events'>;
+  readonly summaryServing?: Omit<FakeSummarySpanSeed, 'events'>;
 }
 
 /** The registry phase a run that ended with `outcome` stays in. */
@@ -120,6 +122,12 @@ export async function openFixture(
   if (options.historyServing !== undefined) {
     await page.addInitScript(installFakeHistory, {
       ...options.historyServing,
+      events: fixture.events,
+    });
+  }
+  if (options.summaryServing !== undefined) {
+    await page.addInitScript(installFakeSummarySpan, {
+      ...options.summaryServing,
       events: fixture.events,
     });
   }
