@@ -22,9 +22,9 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import TYPE_CHECKING, Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, TypeAdapter, model_validator
 
-from vs_core.api import ResumeWhen, StopMode
+from vs_core.api import ACTION_REFUSAL_TEXT, IDENTITY_PATTERN, ActionRefusal, ResumeWhen, StopMode
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -35,6 +35,12 @@ if TYPE_CHECKING:
 CONTROL_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 """One to 128 letters, digits, ``.``, ``_`` and ``-``, starting with a letter or digit."""
 
+type SubjectId = Annotated[str, Field(min_length=1, max_length=256, pattern=IDENTITY_PATTERN)]
+"""A role, attempt or item a control names: an id core could hold, so no whitespace.
+
+Every request field that names one is this type, so a request naming an id core's types
+refuse is itself refused when it is read, with the key named, at every ingress."""
+
 
 class ControlAction(StrEnum):
     """What a control request asks for; the tag of the ``ControlRequest`` union."""
@@ -44,6 +50,9 @@ class ControlAction(StrEnum):
     RESUME = "resume"
     STOP = "stop"
     WITHDRAW = "withdraw"
+    CANCEL_ATTEMPT = "cancel_attempt"
+    CANCEL_ITEM = "cancel_item"
+    SET_MAX_PARALLEL = "set_max_parallel"
 
 
 class _Request(BaseModel):
@@ -72,7 +81,7 @@ class SteerTarget(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     kind: SteerTargetKind = SteerTargetKind.RUN
-    id: str | None = Field(default=None, min_length=1, max_length=256)
+    id: SubjectId | None = None
     """The role, attempt or item id; absent for the run."""
 
     @model_validator(mode="after")
@@ -166,8 +175,73 @@ class StopRequest(_Request):
     mode: StopMode = StopMode.DRAIN
 
 
+class CancelAttemptRequest(_Request):
+    """Cancel one attempt: it stops, closes cancelled, and is never judged.
+
+    The search hears it close as if it had withdrawn the attempt itself, and the run's agents
+    are told at their next turn. An attempt that has ended is refused; one the run does not
+    hold when it takes the request is reported dropped.
+    """
+
+    action: Literal[ControlAction.CANCEL_ATTEMPT] = ControlAction.CANCEL_ATTEMPT
+    attempt: SubjectId
+    """The attempt id."""
+
+
+class CancelItemRequest(_Request):
+    """Cancel one work item: every attempt at it that has not ended, and any later one.
+
+    The run starts no attempt at the item afterwards; the search hears each refused start. An
+    item already cancelled is refused; one the run does not hold when it takes the request is
+    reported dropped.
+    """
+
+    action: Literal[ControlAction.CANCEL_ITEM] = ControlAction.CANCEL_ITEM
+    item: SubjectId
+    """The work item id."""
+
+
+class SetMaxParallelRequest(_Request):
+    """Change how many attempts the run admits at once.
+
+    A lower limit stops no attempt that runs: the run admits nothing new until enough of them
+    end. A higher one admits what now fits at once.
+    """
+
+    action: Literal[ControlAction.SET_MAX_PARALLEL] = ControlAction.SET_MAX_PARALLEL
+    max_parallel: StrictInt = Field(ge=1)
+    """At least 1, and at most the run's launch limit, which sized its host; an integer only."""
+
+
+type ActionRequest = CancelAttemptRequest | CancelItemRequest | SetMaxParallelRequest
+"""An operator action on the run's attempts, items or admission."""
+
+
+def action_subject(request: ActionRequest) -> str:
+    """What ``request`` acts on: the attempt or item id, or the new limit."""
+    match request:
+        case CancelAttemptRequest(attempt=attempt):
+            return attempt
+        case CancelItemRequest(item=item):
+            return item
+        case SetMaxParallelRequest(max_parallel=limit):
+            return str(limit)
+
+
+def action_summary(request: ActionRequest) -> str:
+    """The action and its subject, as one event text: ``cancel_attempt A-1``."""
+    return f"{request.action.value} {action_subject(request)}"
+
+
 type ControlRequest = Annotated[
-    SteerRequest | PauseRequest | ResumeRequest | StopRequest | WithdrawRequest,
+    SteerRequest
+    | PauseRequest
+    | ResumeRequest
+    | StopRequest
+    | WithdrawRequest
+    | CancelAttemptRequest
+    | CancelItemRequest
+    | SetMaxParallelRequest,
     Field(discriminator="action"),
 ]
 """One operator control, discriminated by ``action``."""
@@ -209,6 +283,26 @@ class RefusalReason(StrEnum):
     """A withdrawal naming no standing steer of the run that is still in force."""
     RUN_ENDED = "run_ended"
     """Any control sent after the run ended: no turn, pause or stop of the run is left to take it."""
+    ATTEMPT_ENDED = "attempt_ended"
+    """A cancel of an attempt that has ended: there is nothing left to stop."""
+    ALREADY_CANCELLED = "already_cancelled"
+    """A cancel of a work item the run already cancelled."""
+    ABOVE_LAUNCH_LIMIT = "above_launch_limit"
+    """A parallel limit above the run's launch limit."""
+
+
+REFUSAL_TEXT: dict[RefusalReason, str] = {
+    RefusalReason.NOT_PAUSED_ON_CAPACITY: "the run is not paused on a provider capacity limit",
+    RefusalReason.STOPPING: "the run is stopping",
+    RefusalReason.UNKNOWN_TARGET: "the run has no such steer target",
+    RefusalReason.ENDED_TARGET: "the steer's target can no longer take a message",
+    RefusalReason.NOT_STANDING: "the withdrawal names no standing guidance in force",
+    RefusalReason.RUN_ENDED: "the run has ended",
+    RefusalReason.ATTEMPT_ENDED: ACTION_REFUSAL_TEXT[ActionRefusal.ENDED],
+    RefusalReason.ALREADY_CANCELLED: ACTION_REFUSAL_TEXT[ActionRefusal.ALREADY_CANCELLED],
+    RefusalReason.ABOVE_LAUNCH_LIMIT: ACTION_REFUSAL_TEXT[ActionRefusal.ABOVE_LAUNCH_LIMIT],
+}
+"""How each refusal reads to an operator, at every ingress; an action's is core's wording."""
 
 
 class ControlAck(_Request):
@@ -255,14 +349,15 @@ class ChannelRunControl:
             self._recorded = recorded
 
     def check_requests(self, check: Callable[[ControlRequest], RefusalReason | None]) -> None:
-        """Refuse each later steer or withdrawal that ``check`` refuses, when it is submitted.
+        """Refuse each later steer, withdrawal or action that ``check`` refuses, when submitted.
 
         The run loop installs a check over its latest state at each control poll. That state
         may be a poll behind, and a refusal is the id's answer for good, so the check refuses
         only what no later state could accept: a steer to an undeclared role or an ended
-        attempt, or a withdrawal of a steer that is not, or is no longer, standing guidance.
-        The run resolves an accepted steer's target, and an accepted withdrawal's guidance,
-        again when it takes them, and reports one it cannot resolve then as dropped.
+        attempt, a withdrawal of a steer that is not, or is no longer, standing guidance, a
+        cancel of an ended attempt or of an item already cancelled. The run resolves an
+        accepted steer's target, an accepted withdrawal's guidance and an accepted action's
+        subject again when it takes them, and reports one it cannot resolve then as dropped.
         """
         with self._lock:
             self._check = check
@@ -307,9 +402,13 @@ class ChannelRunControl:
     def _apply(self, request: ControlRequest) -> ControlAck:
         reason = None
         match request:
-            case SteerRequest() | WithdrawRequest() if (
-                refusal := self._refusal(request)
-            ) is not None:
+            case (
+                SteerRequest()
+                | WithdrawRequest()
+                | CancelAttemptRequest()
+                | CancelItemRequest()
+                | SetMaxParallelRequest()
+            ) if (refusal := self._refusal(request)) is not None:
                 status, reason = ControlStatus.REFUSED, refusal
             case SteerRequest(text=text, control_id=control_id, target=target, mode=mode):
                 self._channel.queue_steer(text, control_id, target, mode)
@@ -325,9 +424,12 @@ class ChannelRunControl:
             case StopRequest(mode=mode, control_id=control_id):
                 self._channel.request_stop(mode, control_id)
                 status = ControlStatus.PENDING
+            case CancelAttemptRequest() | CancelItemRequest() | SetMaxParallelRequest():
+                self._channel.queue_action(request)
+                status = ControlStatus.PENDING
         return self._ack(request, status, reason)
 
-    def _refusal(self, request: SteerRequest | WithdrawRequest) -> RefusalReason | None:
+    def _refusal(self, request: ControlRequest) -> RefusalReason | None:
         return None if self._check is None else self._check(request)
 
     def _resume(self, request: ResumeRequest) -> tuple[ControlStatus, RefusalReason | None]:
@@ -391,6 +493,10 @@ def _nothing_recorded(request: ControlRequest) -> bool | None:
 __all__ = [
     "CONTROL_ID_PATTERN",
     "CONTROL_REQUEST",
+    "REFUSAL_TEXT",
+    "ActionRequest",
+    "CancelAttemptRequest",
+    "CancelItemRequest",
     "ChannelRunControl",
     "ControlAck",
     "ControlAction",
@@ -400,12 +506,16 @@ __all__ = [
     "RefusalReason",
     "ResumeRequest",
     "ResumeWhen",
+    "SetMaxParallelRequest",
     "SteerMode",
     "SteerRequest",
     "SteerTarget",
     "SteerTargetKind",
     "StopMode",
     "StopRequest",
+    "SubjectId",
     "WithdrawRequest",
+    "action_subject",
+    "action_summary",
     "check_one_way_to_resume",
 ]

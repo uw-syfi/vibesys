@@ -55,9 +55,9 @@ def test_the_pause_follows_its_controls_and_a_capacity_wait_needs_a_paused_run(
         if kind == "capacity" and pause is None:
             with pytest.raises(core.ContractError, match="capacity"):
                 core.step(state, event)
-            assert core.control_refusal(state.run, event.control) is not None
+            assert core.control_refusal(state, event.control) is not None
             continue
-        assert core.control_refusal(state.run, event.control) is None
+        assert core.control_refusal(state, event.control) is None
         state = core.step(state, event).state
         pause = _expected(pause, kind)
         assert core.run_pause(state.run) == pause

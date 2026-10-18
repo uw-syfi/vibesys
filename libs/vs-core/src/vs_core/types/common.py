@@ -118,10 +118,14 @@ type LifecycleCapability = Literal["park", "interrupt", "steer", "suspend", "pro
 """Host-offered lifecycle abilities. "profile-capture" admits profile measurements."""
 
 
+IDENTITY_PATTERN = r"^\S+$"
+"""What every core identity's text matches: no whitespace. Requests that name one check it."""
+
+
 class Identity(Value):
     """Canonical tagged identity; domains survive JSON union round trips."""
 
-    root: Annotated[str, Field(min_length=1, pattern=r"^\S+$")]
+    root: Annotated[str, Field(min_length=1, pattern=IDENTITY_PATTERN)]
 
     @model_validator(mode="before")
     @classmethod
@@ -882,14 +886,35 @@ class InputMode(StrEnum):
     STANDING = "standing"
 
 
+type ControlAction = Literal[
+    "pause",
+    "resume",
+    "stop",
+    "steer",
+    "withdraw",
+    "cancel_attempt",
+    "cancel_item",
+    "set_max_parallel",
+]
+"""What a control does: run controls, steering, and the operator actions on core entities."""
+
+OPERATOR_ACTIONS: frozenset[ControlAction] = frozenset(
+    {"cancel_attempt", "cancel_item", "set_max_parallel"}
+)
+"""The typed operator actions on core entities, which core applies alike in every search."""
+
+
 class ControlInput(Value):
     """Control input lifecycle contract."""
 
     control_id: ControlId
-    action: Literal["pause", "resume", "stop", "steer", "withdraw"]
+    action: ControlAction
     mode: StopMode | None = None
     """Drain or cancel what is in flight: the operator's choice, given with every stop."""
     artifact: ArtifactRef | None = None
+    """A steer's text, or the notice an operator action leaves for the run's agents.
+
+    Given with every steer and every operator action, and only with them."""
     target: InputTarget | None = None
     """Whom a steer is for; None is the whole run. Only a steer has a target."""
     input_mode: InputMode | None = None
@@ -907,6 +932,30 @@ class ControlInput(Value):
 
     A restart resumes a quota pause, since its turns did not survive, but the operator's
     request to wait for capacity still holds for the next turn that stops on the limit."""
+    attempt: AttemptId | None = None
+    """The attempt a ``cancel_attempt`` cancels: given with it, and only with it."""
+    item: ItemId | None = None
+    """The work item a ``cancel_item`` cancels: given with it, and only with it."""
+    max_parallel: int | None = Field(default=None, ge=1)
+    """The parallel limit a ``set_max_parallel`` sets: given with it, and only with it."""
+
+    @model_validator(mode="after")
+    def action_fields(self) -> ControlInput:
+        """Each operator action names exactly its subject, and leaves a notice."""
+        named = {
+            "cancel_attempt": ("attempt", self.attempt),
+            "cancel_item": ("item", self.item),
+            "set_max_parallel": ("max_parallel", self.max_parallel),
+        }
+        for action, (key, value) in named.items():
+            if (self.action == action) != (value is not None):
+                raise ContractValidationError(key, f"required for {action} and only for it")
+        tells = self.action == "steer" or self.action in OPERATOR_ACTIONS
+        if self.action in OPERATOR_ACTIONS and self.artifact is None:
+            raise ContractValidationError("artifact", "an operator action leaves a notice")
+        if self.artifact is not None and not tells:
+            raise ContractValidationError("artifact", "only a steer or an operator action has one")
+        return self
 
     @model_validator(mode="after")
     def mode_belongs_to_stop(self) -> ControlInput:

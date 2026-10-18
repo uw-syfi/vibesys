@@ -36,8 +36,12 @@ from vs_core.api import (
     SessionInput,
     SessionInputReceived,
 )
+from vs_runtime._action_controls import submit_refusal
 from vs_runtime._operator_control import (
+    CancelAttemptRequest,
+    CancelItemRequest,
     RefusalReason,
+    SetMaxParallelRequest,
     SteerMode,
     SteerRequest,
     SteerTargetKind,
@@ -164,13 +168,16 @@ def request_refusal(core: CoreState, request: ControlRequest) -> RefusalReason |
 
     ``core`` may be a poll behind the run and a refusal is the id's answer for good, so a
     steer is refused only for a target no later state could take, and a withdrawal only for
-    a steer that is not, or is no longer, standing guidance; nothing else is refused here.
+    a steer that is not, or is no longer, standing guidance, and an action only as
+    ``submit_refusal`` says; nothing else is refused here.
     """
     match request:
         case SteerRequest(target=target):
             return target_refusal(core, target)
         case WithdrawRequest(withdraws=withdraws) if _never_standing(core, withdraws):
             return RefusalReason.NOT_STANDING
+        case CancelAttemptRequest() | CancelItemRequest() | SetMaxParallelRequest():
+            return submit_refusal(core, request)
         case _:
             return None
 

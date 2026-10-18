@@ -75,13 +75,20 @@ def _kind(
             return f"enum:{name}"
         if name in models:
             return f"model:{name}"
+        if _scalar(target):
+            # A named constrained scalar, such as an id type: still one string or number.
+            return str(target["type"])
         message = f"{path}: {name} is a structure no one allowed"
         raise UnsafeControlSchemaError(message)
-    kind = spec.get("type")
-    if kind not in _SCALARS or any(key in spec for key in ("oneOf", "allOf", "items")):
+    if not _scalar(spec):
         message = f"{path}: {spec} is not a string, boolean or integer"
         raise UnsafeControlSchemaError(message)
-    return str(kind)
+    return str(spec["type"])
+
+
+def _scalar(spec: dict[str, Any]) -> bool:
+    nested = ("oneOf", "allOf", "anyOf", "items", "properties", "$ref")
+    return spec.get("type") in _SCALARS and not any(key in spec for key in nested)
 
 
 __all__ = ["UnsafeControlSchemaError", "control_schema_fields"]

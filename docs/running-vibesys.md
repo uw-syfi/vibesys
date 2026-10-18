@@ -508,6 +508,29 @@ was withdrawn, its target or the run ended, or the attempt it names was reopened
 attempt is a new generation, which the guidance does not reach). A launch `--constraint` is
 not standing guidance: it holds for the whole run and cannot be withdrawn.
 
+Three actions change the run's work directly, the same way in every search:
+
+```bash
+vibesys control <run-id> cancel-attempt <attempt-id>
+vibesys control <run-id> cancel-item <item-id>
+vibesys control <run-id> set-max-parallel 2
+```
+
+`cancel-attempt` stops one attempt: it closes cancelled and is never evaluated or judged.
+`cancel-item` does that for every attempt at a work item that has not ended, and no new attempt
+at the item starts. `set-max-parallel N` changes how many attempts the run admits at once, from
+1 up to the limit the run was launched with; a lower limit starts nothing new until enough
+attempts end, and stops none that runs. Actions apply in the order they were posted, among the
+other requests. When the run takes an action, its agents are told what changed at their next
+turn, and `vibesys control <run-id> status <id>` reads `applied`.
+
+The run refuses an action that could change nothing, with the reason: an attempt that has
+ended, or that is parked or blocked; an attempt or item the run does not hold; an item already
+cancelled; a limit above the launch limit. An attempt or item the run does not hold yet is
+judged when the run takes the action, since the run may start it first, so cancelling a work
+item before any attempt at it has started is refused. A refused request is set aside in the
+inbox's `rejected/` directory with the reason, so it never applies later.
+
 ## Supply an Input with CLI Flags
 
 Automation can supply the task contract without first writing a project.

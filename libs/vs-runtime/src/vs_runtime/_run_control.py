@@ -9,13 +9,13 @@ from typing import TYPE_CHECKING, Literal, Protocol
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from vs_core.api import PauseOwner, RunPause
-from vs_runtime._operator_control import SteerMode
+from vs_runtime._operator_control import SteerMode, action_summary
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_core.api import StopMode
-    from vs_runtime._operator_control import SteerTarget
+    from vs_runtime._operator_control import ActionRequest, SteerTarget
     from vs_sim.api import Threads
 
 
@@ -41,6 +41,10 @@ class RunControlTransitionKind(StrEnum):
     """The run set aside a request from its control inbox: ``request_id``, and ``text`` why."""
     PAUSED = "paused"
     STOPPED = "stopped"
+    ACTION_QUEUED = "action_queued"
+    """An operator action (a cancel, a new parallel limit) was queued for the run to take."""
+    ACTION_APPLIED = "action_applied"
+    """Core recorded an operator action, so it applied; ``text`` names it."""
 
 
 class RunControlTransition(BaseModel):
@@ -283,6 +287,25 @@ class RunControlChannel(Protocol):
         """Drain queued withdrawals exactly once."""
         ...
 
+    def queue_action(self, request: ActionRequest) -> None:
+        """Queue an operator action for the run loop to take at its next control poll.
+
+        The run loop drains actions (:meth:`take_pending_actions`) in the order they were
+        queued; core refuses one that can change nothing then (``control_refusal``), and the
+        refusal reaches the operator as any refused control's does
+        (:meth:`notify_control_refused`, or the inbox's rejection). One core records is
+        reported applied (:meth:`notify_action_applied`).
+        """
+        ...
+
+    def take_pending_actions(self) -> list[ActionRequest]:
+        """Drain queued operator actions exactly once."""
+        ...
+
+    def notify_action_applied(self, summary: str) -> None:
+        """Record that core recorded an operator action, so it applied; ``summary`` names it."""
+        ...
+
     def notify_steer_consumed(
         self,
         *,
@@ -486,6 +509,7 @@ class RuntimeRunControlChannel:
         self._lock = threads.condition(threads.rlock())
         self._pending_steer: list[QueuedSteer] = []
         self._pending_withdrawals: list[QueuedWithdraw] = []
+        self._pending_actions: list[ActionRequest] = []
         self._held = False
         self._quota_paused = False
         self._stop_requested = False
@@ -735,6 +759,23 @@ class RuntimeRunControlChannel:
         with self._lock:
             pending, self._pending_withdrawals = self._pending_withdrawals, []
         return pending
+
+    def queue_action(self, request: ActionRequest) -> None:
+        """Queue an operator action for the run loop to take at its next control poll."""
+        with self._lock:
+            self._pending_actions.append(request)
+            self._emit(RunControlTransitionKind.ACTION_QUEUED, text=action_summary(request))
+
+    def take_pending_actions(self) -> list[ActionRequest]:
+        """Drain operator actions queued since the previous control poll."""
+        with self._lock:
+            pending, self._pending_actions = self._pending_actions, []
+        return pending
+
+    def notify_action_applied(self, summary: str) -> None:
+        """Record that core recorded an operator action, so it applied."""
+        with self._lock:
+            self._emit(RunControlTransitionKind.ACTION_APPLIED, text=summary)
 
     def notify_steer_consumed(
         self,

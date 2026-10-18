@@ -137,7 +137,15 @@ export type RequestId17 = string;
 export type ClientId17 = string;
 export type Timestamp17 = string;
 export type Type17 = "command.control";
-export type ControlRequest = SteerRequest | PauseRequest | ResumeRequest | StopRequest | WithdrawRequest;
+export type ControlRequest =
+  | SteerRequest
+  | PauseRequest
+  | ResumeRequest
+  | StopRequest
+  | WithdrawRequest
+  | CancelAttemptRequest
+  | CancelItemRequest
+  | SetMaxParallelRequest;
 export type ControlId = string;
 export type Action = "steer";
 export type Text2 = string;
@@ -145,7 +153,7 @@ export type Text2 = string;
  * What a steer is addressed to.
  */
 export type SteerTargetKind = "run" | "role" | "attempt" | "item";
-export type Id = string | null;
+export type SubjectId = string;
 /**
  * How a steer reaches the turns of its target.
  */
@@ -165,13 +173,20 @@ export type StopMode = "drain" | "cancel";
 export type ControlId4 = string;
 export type Action4 = "withdraw";
 export type Withdraws = string;
+export type ControlId5 = string;
+export type Action5 = "cancel_attempt";
+export type ControlId6 = string;
+export type Action6 = "cancel_item";
+export type ControlId7 = string;
+export type Action7 = "set_max_parallel";
+export type MaxParallel = number;
 export type ProtocolVersion18 = 1;
 export type RequestId18 = string;
 export type ClientId18 = string;
 export type Timestamp18 = string;
 export type Ok = boolean;
 export type Error = string | null;
-export type Id1 = string;
+export type Id = string;
 export type Code = string;
 export type Summary = string;
 export type Detail = string | null;
@@ -195,7 +210,8 @@ export type ValidationPaths = (string | number)[][] | null;
 /**
  * What a control request asks for; the tag of the ``ControlRequest`` union.
  */
-export type ControlAction = "steer" | "pause" | "resume" | "stop" | "withdraw";
+export type ControlAction =
+  "steer" | "pause" | "resume" | "stop" | "withdraw" | "cancel_attempt" | "cancel_item" | "set_max_parallel";
 export type Status = "pending" | "consumed";
 export type Question = string;
 export type Answer = string;
@@ -767,7 +783,7 @@ export type HypothesisId = string;
 export type Identified = boolean;
 export type Title4 = string | null;
 export type Claim = string | null;
-export type Action5 = string | null;
+export type Action8 = string | null;
 export type FirstRound = number;
 export type LastRound = number;
 export type Round1 = number;
@@ -846,7 +862,7 @@ export type RunId4 = string;
 export type ProjectionRevision = string;
 export type ParentId1 = string | null;
 export type FromCursor = string | null;
-export type Id2 = string;
+export type Id1 = string;
 export type ParentId2 = string | null;
 /**
  * Policy-neutral kinds a client may use to label navigation rows.
@@ -859,7 +875,7 @@ export type Ordinal = number;
  */
 export type IterationStatus = "pending" | "active" | "completed" | "failed" | "cancelled";
 export type ChildCount = number;
-export type Id3 = string;
+export type Id2 = string;
 export type Value4 = number | null;
 export type Unit4 = string | null;
 export type Direction3 = ("max" | "min") | null;
@@ -1266,7 +1282,7 @@ export interface SteerRequest {
  */
 export interface SteerTarget {
   kind?: SteerTargetKind;
-  id?: Id;
+  id?: SubjectId | null;
 }
 /**
  * Reach the next safe boundary and hold the run there.
@@ -1309,6 +1325,41 @@ export interface WithdrawRequest {
   withdraws: Withdraws;
 }
 /**
+ * Cancel one attempt: it stops, closes cancelled, and is never judged.
+ *
+ * The search hears it close as if it had withdrawn the attempt itself, and the run's agents
+ * are told at their next turn. An attempt that has ended is refused; one the run does not
+ * hold when it takes the request is reported dropped.
+ */
+export interface CancelAttemptRequest {
+  control_id: ControlId5;
+  action: Action5;
+  attempt: SubjectId;
+}
+/**
+ * Cancel one work item: every attempt at it that has not ended, and any later one.
+ *
+ * The run starts no attempt at the item afterwards; the search hears each refused start. An
+ * item already cancelled is refused; one the run does not hold when it takes the request is
+ * reported dropped.
+ */
+export interface CancelItemRequest {
+  control_id: ControlId6;
+  action: Action6;
+  item: SubjectId;
+}
+/**
+ * Change how many attempts the run admits at once.
+ *
+ * A lower limit stops no attempt that runs: the run admits nothing new until enough of them
+ * end. A higher one admits what now fits at once.
+ */
+export interface SetMaxParallelRequest {
+  control_id: ControlId7;
+  action: Action7;
+  max_parallel: MaxParallel;
+}
+/**
  * Response envelope for all protocol requests.
  */
 export interface Response {
@@ -1344,7 +1395,7 @@ export interface Response {
  * replayed events, which readers share rather than copy.
  */
 export interface Diagnostic {
-  id?: Id1;
+  id?: Id;
   code: Code;
   summary: Summary;
   detail?: Detail;
@@ -2290,7 +2341,7 @@ export interface HypothesisEntry {
   identified?: Identified;
   title?: Title4;
   claim?: Claim;
-  action?: Action5;
+  action?: Action8;
   first_round: FirstRound;
   last_round: LastRound;
   rounds?: Rounds;
@@ -2368,7 +2419,7 @@ export interface IterationSlice {
  * One stable node in a policy's iteration hierarchy.
  */
 export interface IterationSummary {
-  id: Id2;
+  id: Id1;
   parent_id?: ParentId2;
   kind: IterationKind;
   label: Label2;
@@ -2381,7 +2432,7 @@ export interface IterationSummary {
  * One bounded headline measurement attached to an iteration row.
  */
 export interface IterationMetric {
-  id: Id3;
+  id: Id2;
   value?: Value4;
   unit?: Unit4;
   direction?: Direction3;

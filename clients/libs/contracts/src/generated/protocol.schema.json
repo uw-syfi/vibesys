@@ -580,6 +580,60 @@
       "title": "BenchmarkVersions",
       "type": "object"
     },
+    "CancelAttemptRequest": {
+      "additionalProperties": false,
+      "description": "Cancel one attempt: it stops, closes cancelled, and is never judged.\n\nThe search hears it close as if it had withdrawn the attempt itself, and the run's agents\nare told at their next turn. An attempt that has ended is refused; one the run does not\nhold when it takes the request is reported dropped.",
+      "properties": {
+        "control_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Control Id",
+          "type": "string"
+        },
+        "action": {
+          "const": "cancel_attempt",
+          "default": "cancel_attempt",
+          "title": "Action",
+          "type": "string"
+        },
+        "attempt": {
+          "$ref": "#/$defs/SubjectId"
+        }
+      },
+      "required": [
+        "control_id",
+        "action",
+        "attempt"
+      ],
+      "title": "CancelAttemptRequest",
+      "type": "object"
+    },
+    "CancelItemRequest": {
+      "additionalProperties": false,
+      "description": "Cancel one work item: every attempt at it that has not ended, and any later one.\n\nThe run starts no attempt at the item afterwards; the search hears each refused start. An\nitem already cancelled is refused; one the run does not hold when it takes the request is\nreported dropped.",
+      "properties": {
+        "control_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Control Id",
+          "type": "string"
+        },
+        "action": {
+          "const": "cancel_item",
+          "default": "cancel_item",
+          "title": "Action",
+          "type": "string"
+        },
+        "item": {
+          "$ref": "#/$defs/SubjectId"
+        }
+      },
+      "required": [
+        "control_id",
+        "action",
+        "item"
+      ],
+      "title": "CancelItemRequest",
+      "type": "object"
+    },
     "CandidateDisposition": {
       "description": "How a measured candidate should be retained independently of its hypothesis.\n\nHypothesis truth and checkpoint utility are different questions. A causal\nforecast can be disproven while its implementation still establishes a\nuseful throughput/latency tradeoff. These values keep that distinction\nexplicit without promoting provisional evidence to an official result.",
       "enum": [
@@ -1114,7 +1168,10 @@
         "pause",
         "resume",
         "stop",
-        "withdraw"
+        "withdraw",
+        "cancel_attempt",
+        "cancel_item",
+        "set_max_parallel"
       ],
       "title": "ControlAction",
       "type": "string"
@@ -1164,8 +1221,11 @@
     "ControlRequest": {
       "discriminator": {
         "mapping": {
+          "cancel_attempt": "#/$defs/CancelAttemptRequest",
+          "cancel_item": "#/$defs/CancelItemRequest",
           "pause": "#/$defs/PauseRequest",
           "resume": "#/$defs/ResumeRequest",
+          "set_max_parallel": "#/$defs/SetMaxParallelRequest",
           "steer": "#/$defs/SteerRequest",
           "stop": "#/$defs/StopRequest",
           "withdraw": "#/$defs/WithdrawRequest"
@@ -1187,6 +1247,15 @@
         },
         {
           "$ref": "#/$defs/WithdrawRequest"
+        },
+        {
+          "$ref": "#/$defs/CancelAttemptRequest"
+        },
+        {
+          "$ref": "#/$defs/CancelItemRequest"
+        },
+        {
+          "$ref": "#/$defs/SetMaxParallelRequest"
         }
       ]
     },
@@ -6391,6 +6460,35 @@
         "kind"
       ]
     },
+    "SetMaxParallelRequest": {
+      "additionalProperties": false,
+      "description": "Change how many attempts the run admits at once.\n\nA lower limit stops no attempt that runs: the run admits nothing new until enough of them\nend. A higher one admits what now fits at once.",
+      "properties": {
+        "control_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Control Id",
+          "type": "string"
+        },
+        "action": {
+          "const": "set_max_parallel",
+          "default": "set_max_parallel",
+          "title": "Action",
+          "type": "string"
+        },
+        "max_parallel": {
+          "minimum": 1,
+          "title": "Max Parallel",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "control_id",
+        "action",
+        "max_parallel"
+      ],
+      "title": "SetMaxParallelRequest",
+      "type": "object"
+    },
     "SingleAgentSpanAttributes": {
       "additionalProperties": false,
       "properties": {
@@ -7168,16 +7266,13 @@
         "id": {
           "anyOf": [
             {
-              "maxLength": 256,
-              "minLength": 1,
-              "type": "string"
+              "$ref": "#/$defs/SubjectId"
             },
             {
               "type": "null"
             }
           ],
-          "default": null,
-          "title": "Id"
+          "default": null
         }
       },
       "title": "SteerTarget",
@@ -7273,6 +7368,12 @@
       ],
       "title": "StopRequest",
       "type": "object"
+    },
+    "SubjectId": {
+      "maxLength": 256,
+      "minLength": 1,
+      "pattern": "^\\S+$",
+      "type": "string"
     },
     "SubprocessOutputData": {
       "additionalProperties": false,

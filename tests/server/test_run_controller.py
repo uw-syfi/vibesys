@@ -40,12 +40,15 @@ from server.events import (
 )
 from server.run_lifecycle import RunStatus
 from vibesys.api import (
+    CancelAttemptRequest,
+    CancelItemRequest,
     ControlAck,
     ControlRequest,
     ControlStatus,
     PauseRequest,
     RefusalReason,
     RunStopped,
+    SetMaxParallelRequest,
     SteerMode,
     SteerRequest,
     SteerTarget,
@@ -689,6 +692,60 @@ def test_a_control_sent_after_the_run_ended_answers_that_run_control_is_unavaila
     assert getattr(refused.value, "diagnostic_code", None) == "run_control_unavailable"
     assert str(refused.value) == "Run control is unavailable after the run session ends"
     assert not parts.control.pause_requested()
+
+
+@pytest.mark.parametrize(
+    ("request_", "reason", "code"),
+    [
+        (
+            CancelAttemptRequest(control_id="c1", attempt="A-1"),
+            RefusalReason.ATTEMPT_ENDED,
+            "action_attempt_ended",
+        ),
+        (
+            CancelItemRequest(control_id="c1", item="I-1"),
+            RefusalReason.ALREADY_CANCELLED,
+            "action_already_cancelled",
+        ),
+    ],
+)
+def test_an_action_the_run_refuses_answers_its_protocol_error(
+    tmp_path: Path,
+    request_: CancelAttemptRequest | CancelItemRequest,
+    reason: RefusalReason,
+    code: str,
+) -> None:
+    parts = build_server_parts(tmp_path)
+    parts.operator_control.check_requests(lambda _request: reason)
+
+    with pytest.raises(RuntimeError) as refused:
+        parts.api.execute(ControlCommand(timestamp=REQUEST_TIME, control=request_))
+
+    assert getattr(refused.value, "diagnostic_code", None) == code
+    assert parts.control.take_pending_actions() == []
+
+
+def test_an_action_is_journaled_pending_then_applied(tmp_path: Path) -> None:
+    """An accepted action is journaled pending; once core records it, applied, for good.
+
+    A socket action whose run died before taking it keeps only its pending entry, so the
+    journal tells it from one the run applied.
+    """
+    parts = build_server_parts(tmp_path)
+    limit = SetMaxParallelRequest(control_id="l1", max_parallel=2)
+    parts.api.execute(ControlCommand(timestamp=REQUEST_TIME, control=limit))
+    parts.control.notify_action_applied("set_max_parallel 2")
+
+    controls = [
+        (event.text, event.status)
+        for event in parts.journal.read()
+        if event.type is EventType.CONTROL
+    ]
+    assert controls == [
+        ("/set_max_parallel 2", EventStatus.PENDING),
+        ("/set_max_parallel 2 applied", EventStatus.COMPLETED),
+    ]
+    assert parts.control.take_pending_actions() == [limit]
 
 
 def test_standing_guidance_is_journaled_in_force_then_ended(tmp_path: Path) -> None:

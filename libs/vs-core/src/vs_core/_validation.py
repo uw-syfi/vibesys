@@ -6,6 +6,7 @@ from math import isfinite
 from typing import TYPE_CHECKING
 
 from ._adoption import fences_root_mutation
+from ._operator_actions import cancelled_items
 from ._proofs import Proven, descriptor_matches
 from ._values import canonical_json, deeply_immutable
 from .types.attempts import AttemptPhase
@@ -75,7 +76,11 @@ def validate_decision(
         return _reject(
             decision, RejectionCode.CLOSED_SCOPE, ("scope",), "run not accepting decisions"
         )
-    rejection = validate_scope(state, decision) or _validate_root_fence(state, decision)
+    rejection = (
+        validate_scope(state, decision)
+        or _validate_root_fence(state, decision)
+        or _cancelled_item(state, decision)
+    )
     if rejection is not None:
         return rejection
     if isinstance(decision, Finish):
@@ -83,6 +88,15 @@ def validate_decision(
         if rejection is not None:
             return rejection
     return _validate_until(state, submission, decision) or validate_offer(state, decision)
+
+
+def _cancelled_item(state: CoreState, decision: Command) -> Rejected | None:
+    """No attempt starts at a work item the operator cancelled (``cancel_item``)."""
+    if not isinstance(decision, StartAttempt) or decision.item_id not in cancelled_items(state.run):
+        return None
+    return _reject(
+        decision, RejectionCode.CLOSED_SCOPE, ("item_id",), "the operator cancelled the item"
+    )
 
 
 def _validate_until(state: CoreState, submission: Submission, decision: Command) -> Rejected | None:

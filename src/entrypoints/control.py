@@ -109,6 +109,18 @@ def _parser() -> argparse.ArgumentParser:
         "status", help="say whether a request is pending, applied or rejected, and why"
     )
     status.add_argument("request_id", metavar="CONTROL_ID", help="the id the request was sent with")
+    cancel_attempt = actions.add_parser(
+        "cancel-attempt", help="stop one attempt; it closes cancelled and is never judged"
+    )
+    cancel_attempt.add_argument("attempt", metavar="ATTEMPT_ID", help="the attempt to cancel")
+    cancel_item = actions.add_parser(
+        "cancel-item", help="stop every attempt at one work item and start no new one at it"
+    )
+    cancel_item.add_argument("item", metavar="ITEM_ID", help="the work item to cancel")
+    limit = actions.add_parser(
+        "set-max-parallel", help="change how many attempts the run admits at once"
+    )
+    limit.add_argument("max_parallel", metavar="N", type=int, help="the new limit, at least 1")
     stop = actions.add_parser("stop", help="end the run")
     stop.add_argument(
         "--mode",
@@ -120,22 +132,25 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _payload(arguments: argparse.Namespace, control_id: str) -> dict[str, object]:
-    common = {"control_id": control_id, "action": arguments.action}
-    match arguments.action:
-        case "steer":
-            kinds = ("role", "attempt", "item")
-            named = [(kind, getattr(arguments, kind)) for kind in kinds]
-            target = next(({"kind": k, "id": i} for k, i in named if i is not None), None)
-            targeted = {"target": target} if target else {}
-            return {**common, "text": arguments.text, "mode": arguments.mode.value, **targeted}
-        case "withdraw":
-            return {**common, "withdraws": arguments.withdraws}
-        case "resume":
-            return {**common, "fallback": arguments.fallback, "when": arguments.when}
-        case "stop":
-            return {**common, "mode": arguments.mode}
-        case _:
-            return common
+    # A subcommand is the action's name with dashes: ``cancel-attempt`` is ``cancel_attempt``.
+    action = arguments.action.replace("-", "_")
+    common = {"control_id": control_id, "action": action}
+    if action == "steer":
+        kinds = ("role", "attempt", "item")
+        named = [(kind, getattr(arguments, kind)) for kind in kinds]
+        target = next(({"kind": k, "id": i} for k, i in named if i is not None), None)
+        targeted = {"target": target} if target else {}
+        return {**common, "text": arguments.text, "mode": arguments.mode.value, **targeted}
+    # Every other action's options are its request's fields, under the same names.
+    fields = {
+        "withdraw": ("withdraws",),
+        "resume": ("fallback", "when"),
+        "stop": ("mode",),
+        "cancel_attempt": ("attempt",),
+        "cancel_item": ("item",),
+        "set_max_parallel": ("max_parallel",),
+    }.get(action, ())
+    return {**common, **{name: getattr(arguments, name) for name in fields}}
 
 
 def control_main(

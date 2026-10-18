@@ -142,7 +142,10 @@ class RunLoopConfig:
     recovery_poll_interval: float = 1.0
     max_dispatches: int = 100_000
     max_concurrent: int | None = None
-    """Requests the shell executes at once; None takes the run's ``Limits.max_parallel``."""
+    """Requests the shell executes at once; None takes the run's ``Limits.max_parallel``.
+
+    An operator's limit (``set_max_parallel``) is never above it, so the shell keeps its
+    width: a lower limit admits nothing new and does not slow the attempts already running."""
 
     def __post_init__(self) -> None:
         """Reject intervals that would let the loop spin or lose its lease."""

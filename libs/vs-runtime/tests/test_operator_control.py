@@ -13,6 +13,8 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 from vs_core.api import StopMode
 from vs_runtime.api.infrastructure import (
     CONTROL_REQUEST,
+    CancelAttemptRequest,
+    CancelItemRequest,
     ChannelRunControl,
     ControlAck,
     ControlAction,
@@ -20,6 +22,7 @@ from vs_runtime.api.infrastructure import (
     PauseRequest,
     RefusalReason,
     ResumeRequest,
+    SetMaxParallelRequest,
     SteerMode,
     SteerRequest,
     StopRequest,
@@ -49,6 +52,13 @@ def _requests(ids: st.SearchStrategy[str]) -> st.SearchStrategy[ControlRequest]:
         st.builds(StopRequest, control_id=ids, mode=st.sampled_from(StopMode)),
         st.builds(SteerRequest, control_id=ids, text=_TEXT, mode=st.just(SteerMode.STANDING)),
         st.builds(WithdrawRequest, control_id=ids, withdraws=ids),
+        st.builds(CancelAttemptRequest, control_id=ids, attempt=ids),
+        st.builds(CancelItemRequest, control_id=ids, item=ids),
+        st.builds(
+            SetMaxParallelRequest,
+            control_id=ids,
+            max_parallel=st.integers(min_value=1, max_value=8),
+        ),
     )
 
 
@@ -115,13 +125,26 @@ _REVIEWED_FIELDS = frozenset(
         ("stop", "control_id", "string"),
         ("stop", "action", "string"),
         ("stop", "mode", "enum:StopMode"),
+        ("cancel_attempt", "control_id", "string"),
+        ("cancel_attempt", "action", "string"),
+        ("cancel_attempt", "attempt", "string"),
+        ("cancel_item", "control_id", "string"),
+        ("cancel_item", "action", "string"),
+        ("cancel_item", "item", "string"),
+        ("set_max_parallel", "control_id", "string"),
+        ("set_max_parallel", "action", "string"),
+        ("set_max_parallel", "max_parallel", "integer"),
     }
 )
 """Every field a sender can fill, by action, name and JSON type, as reviewed.
 
-Steering changes what agents are told and what work runs, never how a candidate is judged:
-no field here carries an evaluation command, a checker, a trust rule or a resource partition.
-A new field fails ``test_every_control_field_is_reviewed`` until it is added here.
+A steer changes what agents are told. ``cancel_attempt`` and ``cancel_item`` change
+selection: a cancelled attempt is never judged, so it can win nothing, and whoever can reach
+a control ingress can aim one at a rival (``docs/contributing/sandboxing.md`` says which
+agent confinement leaves the control socket reachable). ``set_max_parallel`` only lowers how
+much runs at once. No field here carries an evaluation command, a checker, a trust rule or a
+resource partition. A new field fails ``test_every_control_field_is_reviewed`` until it is
+added here.
 """
 
 _REVIEWED_MODELS = frozenset({"SteerTarget"})
@@ -243,6 +266,7 @@ class _Expected:
 
     steers: list[str] = field(default_factory=list)
     withdrawals: list[str] = field(default_factory=list)
+    actions: list[ControlRequest] = field(default_factory=list)
     paused: bool = False
     quota_paused: bool = False
     stop: StopMode | None = None
@@ -250,11 +274,28 @@ class _Expected:
     answered: dict[str, tuple[ControlRequest, ControlAck]] = field(default_factory=dict)
 
 
-def _expected_status(request: ControlRequest, expected: _Expected) -> ControlStatus:
+def _queued(request: ControlRequest, expected: _Expected) -> bool:
+    """Record a request the channel only queues for the run to take; False for any other.
+
+    With no check installed, the run decides at take whether a withdrawal's guidance stands
+    and whether an action's subject is there.
+    """
     match request:
         case SteerRequest(text=text):
             expected.steers.append(text)
-            return ControlStatus.PENDING
+        case WithdrawRequest(withdraws=withdraws):
+            expected.withdrawals.append(withdraws)
+        case CancelAttemptRequest() | CancelItemRequest() | SetMaxParallelRequest():
+            expected.actions.append(request)
+        case _:
+            return False
+    return True
+
+
+def _expected_status(request: ControlRequest, expected: _Expected) -> ControlStatus:
+    if _queued(request, expected):
+        return ControlStatus.PENDING
+    match request:
         case PauseRequest():
             expected.paused = True
             return ControlStatus.PENDING
@@ -269,12 +310,9 @@ def _expected_status(request: ControlRequest, expected: _Expected) -> ControlSta
             expected.stop = None
             expected.fallback = fallback
             return ControlStatus.CONSUMED
-        case StopRequest(mode=mode):
-            expected.stop = mode
-            return ControlStatus.PENDING
-        case WithdrawRequest(withdraws=withdraws):
-            # With no check installed, the run decides at take whether the guidance stands.
-            expected.withdrawals.append(withdraws)
+        case _:
+            assert isinstance(request, StopRequest)
+            expected.stop = request.mode
             return ControlStatus.PENDING
 
 
@@ -307,6 +345,7 @@ def test_submit_applies_each_control_id_once_as_its_action_says(
             )
     assert [steer.text for steer in channel.take_pending_steer()] == expected.steers
     assert [w.withdraws for w in channel.take_pending_withdrawals()] == expected.withdrawals
+    assert channel.take_pending_actions() == expected.actions
     assert channel.pause_requested() == expected.paused
     assert channel.stop_mode() == expected.stop
     assert channel.consume_fallback_request() == expected.fallback

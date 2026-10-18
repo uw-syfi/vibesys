@@ -112,6 +112,8 @@ _CONTROL_EVENT_TYPES = frozenset(
         CoreEventType.REQUEST_REJECTED,
         CoreEventType.PAUSED,
         CoreEventType.STOPPED,
+        CoreEventType.ACTION_QUEUED,
+        CoreEventType.ACTION_APPLIED,
     }
 )
 """Run-control events from `RunControlChannel`, projected onto the controller.
@@ -460,6 +462,8 @@ class RunIntegrationAdapter:
             CoreEventType.REQUEST_REJECTED: lambda: self.controller.record_request_rejected(
                 event.text
             ),
+            CoreEventType.ACTION_QUEUED: lambda: self.controller.action(event.text),
+            CoreEventType.ACTION_APPLIED: lambda: self.controller.record_action_applied(event.text),
             CoreEventType.PAUSED: self.controller.land_pause_at_boundary,
             CoreEventType.STOPPED: self.controller.land_stop_at_boundary,
         }.get(event.type)

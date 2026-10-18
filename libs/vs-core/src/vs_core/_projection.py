@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ._adoption import view as adoption_view
+from ._operator_actions import parallel_limit
 from ._request_ledger import next_retry_at
 from ._request_recovery import next_reconciliation_at
 from .types.common import ChargeKind
@@ -21,16 +22,17 @@ from .types.sessions import SessionProjection
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptsState, AttemptView
-    from .types.common import Limits
     from .types.evaluation import EvaluationState, EvidenceRef
+    from .types.kernel import RunState
     from .types.sessions import SessionsState
     from .types.settlement import Settlement, SettlementState
 
 
 def scheduling_view(
-    state: SchedulingState, limits: Limits, attempts: AttemptsState, now_at: float
+    state: SchedulingState, run: RunState, attempts: AttemptsState
 ) -> SchedulingView:
-    """Derive admission capacity from authoritative slots and paid bounds."""
+    """Derive admission capacity from authoritative slots, paid bounds and the parallel limit."""
+    limits, now_at = run.limits, run.now_at
     receipts = tuple(
         receipt
         for attempt in attempts.attempts
@@ -40,7 +42,7 @@ def scheduling_view(
     charged = sum(receipt.charged for receipt in receipts)
     refunded = sum(receipt.refunded for receipt in receipts)
     remaining = max(0, limits.max_attempts - charged + refunded)
-    available = min(max(0, limits.max_parallel - len(state.slots)), remaining)
+    available = min(max(0, parallel_limit(run) - len(state.slots)), remaining)
     return SchedulingView(
         queue=state.queue,
         slots=state.slots,
@@ -149,7 +151,7 @@ def project(state: CoreState) -> CoreView:
         facts=run.facts,
         capabilities=run.capabilities,
         limits=run.limits,
-        scheduling=scheduling_view(state.scheduling, run.limits, state.attempts, run.now_at),
+        scheduling=scheduling_view(state.scheduling, run, state.attempts),
         attempts=attempt_view(state.attempts),
         sessions=session_view(state.sessions),
         inputs=state.sessions.inputs,

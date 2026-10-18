@@ -1,0 +1,8 @@
+{# Context: `action` (str: cancel_attempt, cancel_item or set_max_parallel) and `subject` (str: the attempt id, the item id, or the new limit) of an operator action the run took. No trailing newline. #}
+{% if action == "cancel_attempt" -%}
+The operator cancelled attempt {{ subject }}. It has stopped and will not be evaluated; do not continue its work.
+{%- elif action == "cancel_item" -%}
+The operator cancelled work item {{ subject }}. Its attempts have stopped and no new attempt at it will start; do not start or continue work on it.
+{%- else -%}
+The operator set the number of attempts that run at once to {{ subject }}.
+{%- endif %}

@@ -6,6 +6,11 @@ new bridge and channel over the same inbox and core state). Whatever the history
 run settles every request is either recorded by core under ``op-<control id>`` exactly once
 or set aside with a reason, never both, and nothing stays pending. Requests apply in the
 order they were posted, and the operator is told of each one set aside, once.
+
+The run holds a parked attempt and an ended one, so an operator action (a cancel, a new
+parallel limit) may apply or be refused (a cancel that would stop a running attempt is the
+orchestration tests' business: it needs a run that started one), and a request naming an id core's types refuse (whitespace)
+is set aside like any request the run cannot apply: it never ends the run.
 """
 
 from __future__ import annotations
@@ -23,11 +28,18 @@ from hypothesis import strategies as st
 
 from vs_core.api import (
     ArtifactRef,
+    AttemptBudget,
+    AttemptId,
+    AttemptPhase,
+    AttemptView,
     CoreState,
+    ItemId,
     RunControlEvent,
     RunStatus,
     SessionInputReceived,
     StopMode,
+    WorkspaceMode,
+    WorkspacePlan,
     initial_state,
     step,
 )
@@ -99,6 +111,18 @@ _PAYLOADS: st.SearchStrategy[dict[str, object] | bytes] = st.one_of(
     st.just({"action": "resume", "fallback": True}),
     st.just({"action": "resume", "when": "capacity_returns"}),
     st.builds(lambda mode: {"action": "stop", "mode": mode.value}, st.sampled_from(StopMode)),
+    st.builds(
+        lambda attempt: {"action": "cancel_attempt", "attempt": attempt},
+        st.sampled_from(["A-parked", "A-done", "A-none"]),
+    ),
+    st.builds(
+        lambda item: {"action": "cancel_item", "item": item},
+        st.sampled_from(["I-done", "I-none"]),
+    ),
+    st.builds(
+        lambda limit: {"action": "set_max_parallel", "max_parallel": limit},
+        st.integers(min_value=1, max_value=6),
+    ),
     st.sampled_from(
         [
             b"",
@@ -110,6 +134,16 @@ _PAYLOADS: st.SearchStrategy[dict[str, object] | bytes] = st.one_of(
     ),
 )
 
+_SUBJECTS_CORE_REFUSES = st.sampled_from(
+    [
+        {"action": "cancel_attempt", "attempt": "A done"},
+        {"action": "cancel_item", "item": "I\ndone"},
+        {"action": "steer", "text": "t", "target": {"kind": "role", "id": "a b"}},
+        {"action": "set_max_parallel", "max_parallel": "2"},
+    ]
+)
+"""Requests a sender may write that name an id core's types refuse, or a lax number."""
+
 _IDS = st.sampled_from(["k0", "k1", "k2"])
 """Ids shared by both ingresses, so a resend through the socket, the inbox or both collides."""
 
@@ -117,6 +151,7 @@ _STEPS = st.lists(
     st.one_of(
         st.tuples(st.just("post"), _IDS, _PAYLOADS),
         st.tuples(st.just("post"), st.none(), _PAYLOADS),
+        st.tuples(st.just("post"), st.none(), _SUBJECTS_CORE_REFUSES),
         st.tuples(st.just("socket"), _IDS, _PAYLOADS.filter(lambda p: isinstance(p, dict))),
         st.tuples(st.just("poll")),
         st.tuples(st.just("lost poll")),
@@ -136,6 +171,29 @@ _LIVE = _live
 
 def _json(request: BaseModel) -> bytes:
     return request.model_dump_json().encode()
+
+
+def _with_attempts() -> CoreState:
+    """A run holding a parked attempt, ``A-parked``, and an ended one, ``A-done`` at ``I-done``."""
+    base = initial_state()
+
+    def attempt(name: str, item: str, phase: AttemptPhase) -> AttemptView:
+        return AttemptView(
+            attempt_id=AttemptId(root=name),
+            generation=1,
+            item_id=ItemId(root=item),
+            phase=phase,
+            workspace=WorkspacePlan(
+                mode=WorkspaceMode.EXCLUSIVE_ROOT, base=base.run.facts.baseline
+            ),
+            budget=AttemptBudget(),
+        )
+
+    rows = (
+        attempt("A-parked", "I-parked", AttemptPhase.PARKED),
+        attempt("A-done", "I-done", AttemptPhase.TERMINAL),
+    )
+    return base.model_copy(update={"attempts": base.attempts.model_copy(update={"attempts": rows})})
 
 
 def _commit(core: CoreState, events: tuple[CoreEvent, ...]) -> CoreState:
@@ -174,6 +232,25 @@ _POSTED_IN_REVERSE_ID_ORDER = [
     ("poll",),
 ]
 """The pause gets the larger id; posting order, not id order, must apply it first."""
+_ACTIONS_IN_POSTING_ORDER = [
+    ("post", None, {"action": "cancel_item", "item": "I-done"}),
+    ("post", None, {"action": "steer", "text": "I-done is cancelled; move on"}),
+    ("post", None, {"action": "cancel_item", "item": "I-done"}),
+    ("post", None, {"action": "cancel_attempt", "attempt": "A-parked"}),
+    ("post", None, {"action": "set_max_parallel", "max_parallel": 1}),
+    ("lost poll",),
+    ("poll",),
+]
+"""The cancel applies before the steer posted after it; the same cancel again, and a cancel of
+a parked attempt, are set aside with core's reason; a lost poll applies none of them twice."""
+_A_SUBJECT_CORE_REFUSES_IS_SET_ASIDE = [
+    ("post", None, {"action": "cancel_attempt", "attempt": "A done"}),
+    ("poll",),
+    ("restart",),
+    ("post", None, {"action": "pause"}),
+    ("poll",),
+]
+"""Regression (#3123): a whitespace id ended the run at every restart; now it is set aside."""
 _REJECTED_AND_POLLED_AGAIN_AFTER_RESTART = [
     ("post", None, {"action": "stop", "mode": "drain"}),
     ("poll",),
@@ -187,6 +264,8 @@ _REJECTED_AND_POLLED_AGAIN_AFTER_RESTART = [
 
 @given(_STEPS)
 @example(_POSTED_IN_REVERSE_ID_ORDER)
+@example(_ACTIONS_IN_POSTING_ORDER)
+@example(_A_SUBJECT_CORE_REFUSES_IS_SET_ASIDE)
 @example(_REJECTED_AND_POLLED_AGAIN_AFTER_RESTART)
 @example(_STEER_AGAIN_AFTER_RESTART)
 @example(_PAUSE_AGAIN_AFTER_RESUME_AND_RESTART)
@@ -205,7 +284,7 @@ def test_every_control_is_recorded_once_whichever_way_it_was_sent(
     inbox = FakeControlInbox()
     texts = _Texts()
     sink = FakeRunControlEventSink()
-    core = initial_state()
+    core = _with_attempts()
     bridge, control = _wired(inbox, texts, sink)
     posted: set[str] = set()
     first_posts: list[str] = []
@@ -252,12 +331,24 @@ def test_every_control_is_recorded_once_whichever_way_it_was_sent(
     assert len(recorded) - len(operator_ids) <= unrecalled
     for request_id in posted - rejected:
         assert f"op-{request_id}" in recorded, request_id
+    _check_inputs(core)
+    _check_posting_order_and_reports(core, inbox, sink, first_posts)
+
+
+def _check_inputs(core: CoreState) -> None:
+    """Each recorded steer has its delivery, and each recorded action its notice; no other."""
     steer_controls = {
         control.control_id.root for control in core.run.controls if control.action == "steer"
     }
-    steer_inputs = {row.input.input_id.root for row in core.sessions.inputs}
-    assert {f"steer-{identity}" for identity in steer_controls} == steer_inputs
-    _check_posting_order_and_reports(core, inbox, sink, first_posts)
+    notices = {
+        control.control_id.root
+        for control in core.run.controls
+        if control.action in ("cancel_attempt", "cancel_item", "set_max_parallel")
+    }
+    inputs = {row.input.input_id.root for row in core.sessions.inputs}
+    assert {f"steer-{identity}" for identity in steer_controls} | {
+        f"notice-{identity}" for identity in notices
+    } == inputs
 
 
 def _check_posting_order_and_reports(

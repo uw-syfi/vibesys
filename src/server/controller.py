@@ -333,6 +333,18 @@ class RunController:
                 execution_id=execution_id,
             )
 
+    def action(self, summary: str) -> None:
+        """Journal an operator action queued for the run; ``summary`` is the action and its subject."""
+        with self._condition:
+            self._journal.record(EventType.CONTROL, f"/{summary}", status=EventStatus.PENDING)
+
+    def record_action_applied(self, summary: str) -> None:
+        """Journal that the run applied an operator action; ``summary`` is the action and its subject."""
+        with self._condition:
+            self._journal.record(
+                EventType.CONTROL, f"/{summary} applied", status=EventStatus.COMPLETED
+            )
+
     def record_steer_dropped(self, reason: str) -> None:
         """Journal that an accepted steer reached no one; ``reason`` names the steer and why."""
         with self._condition:

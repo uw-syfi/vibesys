@@ -83,6 +83,7 @@ from .types.scheduling import (
     AttemptRequested,
     ClockAdvanced,
     CloseAdmission,
+    ParallelLimitChanged,
     QueueEntryRetired,
     RegisterAttempt,
     RunDrained,
@@ -151,6 +152,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | ClockAdvanced()
             | AdmissionControl()
             | AdoptionFenceLifted()
+            | ParallelLimitChanged()
             | AdmitAttempt()
             | CloseAdmission()
             | RunDrained()

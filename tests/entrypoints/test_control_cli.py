@@ -28,6 +28,7 @@ from vs_core.api import (
     RunResultProposal,
     RunStatus,
     initial_state,
+    parallel_limit,
     step,
 )
 from vs_project.api import (
@@ -261,6 +262,44 @@ def test_a_withdrawal_that_ended_nothing_never_ends_guidance_sent_after_it(
     (guidance,) = core.sessions.inputs
     assert (guidance.input.mode, guidance.receipt) == (InputMode.STANDING, None)
     assert all(control.action != "withdraw" for control in core.run.controls)
+
+
+def test_an_action_posted_by_vibesys_control_applies_or_is_set_aside(tmp_path: Path) -> None:
+    """A new parallel limit is recorded as the run's control and reported applied; a cancel of
+    an attempt the run does not hold changes nothing, so core's rule refuses it, its request is
+    set aside with core's reason, reported once, and a restarted run never reads it again."""
+    run_id = _project_with_run(tmp_path)
+    bridge, requests, sink = _production_bridge(tmp_path, run_id)
+    core = _declaring(("dynamic-planner",))
+    for event in bridge.poll(core, 0.5):
+        core = step(core, event).state
+
+    assert _control(tmp_path, [run_id, "set-max-parallel", "1"], "l-1")[0] == 0
+    assert _control(tmp_path, [run_id, "cancel-attempt", "A-9"], "c-1")[0] == 0
+    for event in bridge.poll(core, 1.0):
+        core = step(core, event).state
+    bridge.settled(core, running=False)
+
+    assert [(c.control_id.root, c.action, c.max_parallel) for c in core.run.controls] == [
+        ("op-l-1", "set_max_parallel", 1)
+    ]
+    assert parallel_limit(core.run) == 1
+    reason = "refused by the run: the run holds no such attempt or item"
+    assert [(entry.request_id, entry.reason) for entry in requests.rejected()] == [("c-1", reason)]
+    told = [
+        (t.kind, t.request_id, t.text)
+        for t in sink.transitions
+        if t.kind
+        in (RunControlTransitionKind.REQUEST_REJECTED, RunControlTransitionKind.ACTION_APPLIED)
+    ]
+    assert told == [
+        (RunControlTransitionKind.REQUEST_REJECTED, "c-1", reason),
+        (RunControlTransitionKind.ACTION_APPLIED, None, "set_max_parallel 1"),
+    ]
+    assert _control(tmp_path, [run_id, "status", "l-1"], "s-1")[1].strip() == "applied"
+    restarted, _, _ = _production_bridge(tmp_path, run_id)
+    assert restarted.poll(core, 2.0) == ()
+    assert requests.pending() == ()
 
 
 def _declaring(roles: tuple[str, ...]) -> CoreState:

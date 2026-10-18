@@ -11,12 +11,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._operator_actions import ACTION_REFUSAL_TEXT, action_refusal_kind
 from ._registry import ContractError
-from .types.common import PauseOwner, RunPause, RunStatus
+from .types.common import OPERATOR_ACTIONS, PauseOwner, RunPause, RunStatus
 
 if TYPE_CHECKING:
+    from ._operator_actions import ActionRefusal
     from .types.common import ControlInput
-    from .types.kernel import RunState
+    from .types.kernel import CoreState, RunState
 
 
 class ControlRefusedError(ContractError):
@@ -27,9 +29,18 @@ class ControlRefusedError(ContractError):
     steer target), which is a defect in whatever built the control.
     """
 
-    def __init__(self, control: ControlInput, path: tuple[str | int, ...], detail: str) -> None:
-        """Name the refused control, and where and why core refuses it."""
+    def __init__(
+        self,
+        control: ControlInput,
+        path: tuple[str | int, ...],
+        detail: str,
+        *,
+        action_refusal: ActionRefusal | None = None,
+    ) -> None:
+        """Name the refused control, where and why core refuses it, and an action's reason."""
         self.control = control
+        self.action_refusal = action_refusal
+        """Why an operator action is refused, as a closed set; None for any other control."""
         super().__init__(path, detail)
 
 
@@ -85,18 +96,37 @@ def stands_after(control: ControlInput, *, stood: bool) -> bool:
             return stood
 
 
-def control_refusal(run: RunState, control: ControlInput) -> ControlRefusedError | None:
-    """Why core refuses a new ``control`` for ``run`` as it stands, or None if it takes it.
+def control_refusal(state: CoreState, control: ControlInput) -> ControlRefusedError | None:
+    """Why core refuses a new ``control`` in ``state`` as it stands, or None if it takes it.
 
     The one statement of the rule: core raises the error when the control arrives, and a
     shell that must answer an operator before core commits asks the same question. A
-    terminal run refuses every control; any other run takes a stop, a steer and a
-    withdrawal, and a run that recorded a stop takes no pause or resume.
+    terminal run refuses every control. Any other run takes a stop, a steer and a
+    withdrawal; it takes an operator action that can change something
+    (``action_refusal_kind``), also while it stops or cleans up; and a run that recorded a
+    stop takes no pause or resume.
     """
+    run = state.run
     if run.status == RunStatus.TERMINAL:
         return ControlRefusedError(control, ("run", "status"), "terminal run rejects controls")
+    if control.action in OPERATOR_ACTIONS:
+        return _action_refusal(state, control)
     if control.action in ("stop", "steer", "withdraw"):
         return None
+    return _pause_refusal(run, control)
+
+
+def _action_refusal(state: CoreState, control: ControlInput) -> ControlRefusedError | None:
+    kind = action_refusal_kind(state, control)
+    if kind is None:
+        return None
+    field = {"cancel_attempt": "attempt", "cancel_item": "item"}.get(control.action, "max_parallel")
+    return ControlRefusedError(
+        control, ("control", field), ACTION_REFUSAL_TEXT[kind], action_refusal=kind
+    )
+
+
+def _pause_refusal(run: RunState, control: ControlInput) -> ControlRefusedError | None:
     if any(recorded.action == "stop" for recorded in run.controls):
         # The stop is final: the search ends the run, and a pause or resume would change
         # nothing an operator could see before it does.

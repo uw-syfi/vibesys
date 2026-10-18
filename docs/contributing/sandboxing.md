@@ -171,17 +171,21 @@ macOS when full read confinement matters.
   both at startup. The operator's control inbox (`vibesys control`) is machine-local
   state outside the project, so the project's write grant does not reach it. A project under
   a tree Landlock must grant, such as `/tmp`, is refused.
-- **Steer targets are predictable.** Role ids are the session role ids in a run's events
-  (for example `dynamic-judge`), so whoever can submit a control can aim a steer at one role,
-  including the one that judges an agent's work. A steer is guidance only: no control schema
-  has a field that reaches measurement or acceptance. Whether an agent can send one depends on
-  whether it can reach a control ingress. The inbox is outside the project's write grant
-  (above). The server's control socket (`control.sock` in the user's runtime directory) is
-  not reachable under Docker or bubblewrap, where that directory does not exist in the
-  sandbox. Under Landlock, which has no right for connecting to a pathname socket, and under
-  Seatbelt, whose profile allows `network*`, an agent can connect to it and send any control.
-  #3133 tracks closing this; `tests/e2e/test_control_socket_reachability_e2e.py` pins each
-  backend's current behavior, with the Landlock and Seatbelt cases as strict `xfail`.
+- **Control targets are predictable.** Role ids are the session role ids in a run's events
+  (for example `dynamic-judge`), and attempt and item ids appear in the run's events too, so
+  whoever can submit a control can aim it at one role, attempt or item. A steer is guidance
+  only. The operator actions `cancel_attempt` and `cancel_item` do change selection: a
+  cancelled attempt is never judged, so it cannot win. `set_max_parallel` only lowers how
+  much runs at once. No control field carries a measurement command, a checker or a trust
+  rule. Whether an agent can send a control depends on whether it can reach a control
+  ingress. The inbox is outside the project's write grant (above). The server's control
+  socket (`control.sock` in the user's runtime directory) is not reachable under Docker or
+  bubblewrap, where that directory does not exist in the sandbox. Under Landlock, which has
+  no right for connecting to a pathname socket, and under Seatbelt, whose profile allows
+  `network*`, an agent can connect to it and send any control, including a cancel of a
+  rival's attempt. #3133 tracks authenticating the connection;
+  `tests/e2e/test_control_socket_reachability_e2e.py` pins each backend's current behavior,
+  with the Landlock and Seatbelt cases as strict `xfail`.
 - **Seatbelt** reads are broader than bubblewrap (above).
 - **Hidden-path design.** The planning issue for prebuilt agent images (#674,
   closed) proposed "no explicit hidden access: deny what is not listed". The

@@ -343,7 +343,10 @@ const responsePayloadSchema: Record<string, unknown> = {
         "pause",
         "resume",
         "stop",
-        "withdraw"
+        "withdraw",
+        "cancel_attempt",
+        "cancel_item",
+        "set_max_parallel"
       ],
       "title": "ControlAction",
       "type": "string"

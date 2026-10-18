@@ -54,6 +54,7 @@ from server.api.protocol import (
 from server.chat.options import ChatOptions, build_chat_options
 from server.events import EventType, RunEvent, RunOverview, RunStartedData
 from vibesys.api import (
+    REFUSAL_TEXT,
     ControlStatus,
     IterationUnavailable,
     PauseRequest,
@@ -205,6 +206,36 @@ class WithdrawNotStandingError(RuntimeError):
         super().__init__("The withdrawal names no standing guidance in force")
 
 
+class ActionAttemptEndedError(RuntimeError):
+    """A cancel of an attempt that has ended."""
+
+    diagnostic_code = "action_attempt_ended"
+
+    def __init__(self) -> None:
+        """Say why nothing could be cancelled."""
+        super().__init__(REFUSAL_TEXT[RefusalReason.ATTEMPT_ENDED])
+
+
+class ActionAlreadyCancelledError(RuntimeError):
+    """A cancel of a work item the run already cancelled."""
+
+    diagnostic_code = "action_already_cancelled"
+
+    def __init__(self) -> None:
+        """Say why nothing could be cancelled."""
+        super().__init__(REFUSAL_TEXT[RefusalReason.ALREADY_CANCELLED])
+
+
+class ActionAboveLaunchLimitError(RuntimeError):
+    """A parallel limit above the one the run was launched with."""
+
+    diagnostic_code = "action_above_launch_limit"
+
+    def __init__(self) -> None:
+        """Say why the limit cannot be set."""
+        super().__init__(REFUSAL_TEXT[RefusalReason.ABOVE_LAUNCH_LIMIT])
+
+
 class ControlIdConflictError(RuntimeError):
     """A control whose ``control_id`` already named a different control."""
 
@@ -223,6 +254,9 @@ _REFUSALS: dict[RefusalReason, Callable[[], Exception]] = {
     RefusalReason.NOT_STANDING: WithdrawNotStandingError,
     # The run ended before its session did: the same answer as a control after the session.
     RefusalReason.RUN_ENDED: partial(RunControlUnavailableError, _RunControlState.ENDED),
+    RefusalReason.ATTEMPT_ENDED: ActionAttemptEndedError,
+    RefusalReason.ALREADY_CANCELLED: ActionAlreadyCancelledError,
+    RefusalReason.ABOVE_LAUNCH_LIMIT: ActionAboveLaunchLimitError,
 }
 """The protocol error each refusal answers with."""
 

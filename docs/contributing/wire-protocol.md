@@ -218,7 +218,7 @@ server rejects it as an unknown field.
 
 `command.control` carries one `control`, a `ControlRequest` (`vibesys.api`): the schema every
 control ingress accepts, so a client and a headless run's inbox say the same things. Its
-`action` is `steer` (`text`, a `target` of `kind` `run`, the default, or `role`, `attempt` or `item` with its `id`, and a `mode`: `next_turn`, the default, `standing`, which every later turn of the target receives until withdrawn, or `interrupt`, offered to a running turn of the target now and otherwise given to its next turn), `withdraw` (`withdraws`: the `control_id` of a standing steer), `pause`, `resume` (`fallback`, `when`, as `command.resume`) or
+`action` is `steer` (`text`, a `target` of `kind` `run`, the default, or `role`, `attempt` or `item` with its `id`, and a `mode`: `next_turn`, the default, `standing`, which every later turn of the target receives until withdrawn, or `interrupt`, offered to a running turn of the target now and otherwise given to its next turn), `withdraw` (`withdraws`: the `control_id` of a standing steer), `pause`, `resume` (`fallback`, `when`, as `command.resume`), `cancel_attempt` (`attempt`: an attempt id), `cancel_item` (`item`: a work item id), `set_max_parallel` (`max_parallel`: an integer from 1 to the run's launch limit) or
 `stop` (`mode`: `drain`, the default, or `cancel`, which also cancels the work in flight). Like
 every protocol model it forbids unknown keys, and it has no field that reaches evaluation,
 checkers, trust rules or resource partitions: `vs_runtime`'s `control_schema_fields` holds every
@@ -259,6 +259,19 @@ did to the run's pause is undone: a refused pause is lifted, a refused `capacity
 status `active` as `/steer --standing: <text>`, and its end, once, with status `completed` as
 `/guidance ended: standing guidance <id> ended: <reason>`, where the reason is `withdrawn`,
 `owner-terminal` or `owner-cancelled` (its target ended), `run-terminal`, or `its attempt was reopened`.
+
+The three operator actions apply the same way in every search, in the order they were sent
+among the other controls. Core's rule decides whether the run takes one; it refuses an action
+that could change nothing, or a `set_max_parallel` above the run's launch limit. When an action
+is submitted, the run refuses only one no later state could take, with the protocol error
+`action_attempt_ended` (the attempt has ended), `action_already_cancelled` (the item is already
+cancelled) or `action_above_launch_limit`. Anything else is checked again when the run takes the
+action. An accepted action is journaled as a `CONTROL` event with status `pending` and the text
+`/<action> <subject>` (for example `/set_max_parallel 2`). Once the run has recorded it, it is
+journaled again with status `completed` as `/<action> <subject> applied`. An action the run
+refuses when it takes it is journaled as any refused control is:
+`/control refused: <action> <id>: <reason>`. Every ingress words a refusal the same way, as
+core does.
 
 ## Framing and connection decisions
 

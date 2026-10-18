@@ -175,6 +175,7 @@ EXPECTED_TARGET = {
                 "clock_advanced",
                 "admission_control",
                 "adoption_fence_lifted",
+                "parallel_limit_changed",
             ),
         ),
     )

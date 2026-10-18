@@ -47,6 +47,13 @@ from vs_core._measurement_recipe import (
     MeasurementRecipe,
     StageBudget,
 )
+from vs_core._operator_actions import (
+    ACTION_REFUSAL_TEXT,
+    ActionRefusal,
+    cancelled_items,
+    notice_input_id,
+    parallel_limit,
+)
 from vs_core._ownership import unreleased_records
 from vs_core._projection import (
     attempt_view,
@@ -300,9 +307,11 @@ from vs_core.types.attempts import (
     WorkspaceRequest,
 )
 from vs_core.types.common import (
+    IDENTITY_PATTERN,
     MAX_REASK_CHAIN,
     MAX_REQUEST_RETRIES,
     MAX_SUBMISSIONS_PER_MEASUREMENT,
+    OPERATOR_ACTIONS,
     THIS_RUN,
     Area,
     ArtifactId,
@@ -318,6 +327,7 @@ from vs_core.types.common import (
     CompletionStatus,
     ContinuationId,
     ContractValidationError,
+    ControlAction,
     ControlId,
     ControlInput,
     Count,
@@ -554,6 +564,7 @@ from vs_core.types.scheduling import (
     AttemptRequested,
     ClockAdvanced,
     CloseAdmission,
+    ParallelLimitChanged,
     QueueEntryRetired,
     RegisterAttempt,
     RunDrained,
@@ -786,6 +797,7 @@ def __getattr__(name: str) -> object:
 
 
 __all__ = [
+    "ACTION_REFUSAL_TEXT",
     "ADOPTED",
     "BASE_MAX_SAMPLES",
     "CAPTURE_SUFFIX",
@@ -793,6 +805,7 @@ __all__ = [
     "ENVELOPE_SCHEMA_VERSION",
     "EVENT_ROUTES",
     "EXPORT_PATCH_SUFFIX",
+    "IDENTITY_PATTERN",
     "INPUT",
     "INTERPRET_SUFFIX",
     "MARKDOWN_PROSE_CONVENTION",
@@ -806,6 +819,7 @@ __all__ = [
     "MAY_WAIT_ON",
     "MEASUREMENT_DIAGNOSTIC_LIMIT",
     "NOT_ADOPTED",
+    "OPERATOR_ACTIONS",
     "PLAIN_LINE_CONVENTION",
     "RENDER_SUFFIX",
     "REPLY_ERROR_MESSAGE_LIMIT",
@@ -819,6 +833,7 @@ __all__ = [
     "Accepted",
     "Access",
     "AcquisitionStalled",
+    "ActionRefusal",
     "AdmissionControl",
     "AdmissionRequest",
     "AdmitAttempt",
@@ -930,6 +945,7 @@ __all__ = [
     "ContinuationScopeReopened",
     "ContractError",
     "ContractValidationError",
+    "ControlAction",
     "ControlChanged",
     "ControlId",
     "ControlInput",
@@ -1121,6 +1137,7 @@ __all__ = [
     "Outcome",
     "OwnedJob",
     "OwnershipSettled",
+    "ParallelLimitChanged",
     "ParentVerification",
     "Park",
     "PatchExport",
@@ -1398,6 +1415,7 @@ __all__ = [
     "attempt_ref",
     "attempt_view",
     "begin",
+    "cancelled_items",
     "capacity_wait_stands",
     "check_decisions",
     "check_envelope_version",
@@ -1424,11 +1442,13 @@ __all__ = [
     "mid_turn_offers",
     "minutes",
     "moment_of",
+    "notice_input_id",
     "operation_result",
     "operation_span",
     "operation_trace",
     "orphan_waits",
     "owned_job_subject",
+    "parallel_limit",
     "pause_after",
     "pending_requests",
     "phase_waits",
