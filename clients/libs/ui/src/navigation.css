@@ -133,7 +133,6 @@
   --titlebar-row: max(var(--chrome-inset-height, var(--space-0)), var(--control));
   position: relative;
   display: flex;
-  flex-wrap: wrap;
   height: 100%;
   background: var(--bg);
 }
@@ -174,7 +173,7 @@
 .vs-app-rail {
   --rail-start: max(var(--chrome-inset-width, var(--space-0)), var(--space-4));
   box-sizing: border-box;
-  display: flex;
+  display: none;
   flex: none;
   flex-direction: column;
   align-items: flex-start;
@@ -186,6 +185,9 @@
   -webkit-app-region: drag;
   border-right: var(--hairline) solid var(--line);
   background: var(--panel-2);
+}
+.vs-app-frame[data-nav-hidden] .vs-app-rail {
+  display: flex;
 }
 .vs-app-rail :is(a, button, [tabindex]) {
   -webkit-app-region: no-drag;
@@ -262,7 +264,7 @@
 }
 .vs-app-main {
   display: flex;
-  flex: 999 1 var(--column-main);
+  flex: 1 1 0;
   flex-direction: column;
   min-width: 0;
   max-height: 100%;
@@ -287,6 +289,30 @@
 }
 .vs-app-titlebar-control * {
   -webkit-app-region: no-drag;
+}
+/*
+ * A narrow window never stacks the column above the page: the rail always stays beside the page
+ * (what the column is hidden to, at any width), and a shown column floats over the rail and the
+ * page's start instead of taking width from it. The page is first on screen at every width.
+ */
+@media (max-width: 799px) {
+  .vs-app-rail {
+    display: flex;
+  }
+  .vs-app-frame:not([data-nav-hidden]) .vs-app-rail {
+    visibility: hidden;
+  }
+  .vs-app-nav {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 10;
+    box-shadow: var(--elevation-overlay);
+  }
+  .vs-app-nav[data-hidden] {
+    box-shadow: none;
+  }
 }
 /* A window without a navigation column: the title-bar row, then the page filling the rest. */
 .vs-window-frame {

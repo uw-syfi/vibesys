@@ -8,6 +8,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
 from tests.server.host_helper_support import RUN_ID, fake_host, project_with_run
@@ -187,6 +188,98 @@ def test_a_run_that_adopted_nothing_has_no_ratio_however_well_a_gate_measured(
     )
 
 
+@dataclass(frozen=True)
+class _Measured:
+    """An idea that was measured at ``value`` against an input of 100, and passed or failed."""
+
+    passed: bool
+    value: float
+
+
+_MEASURED = st.builds(_Measured, st.booleans(), st.floats(20, 500, allow_nan=False))
+
+
+def _measured_journal(
+    ideas: list[_Measured], noise: list[str], direction: str, adoption: _Adoption | None = None
+) -> list[bytes]:
+    """A journal in which idea ``n`` is a workstream with a gate under it that read its value."""
+    lines = [_event(1, "run_started", 0, {"overview": {"objective": {"direction": direction}}})]
+    for index, idea in enumerate(ideas):
+        attrs: dict[str, JsonValue] = {"hypothesis_id": f"h{index}", "revision": f"rev-{index}"}
+        started = {"id": f"flow:{index}", "label": _label("workstream", None, attrs)}
+        lines.append(_event(len(lines) + 1, "span_started", 1 + index, {"span": started}))
+        gate: dict[str, JsonValue] = {"metric_value": idea.value, "vs_baseline": idea.value / 100}
+        span = {
+            "id": f"op:{index}",
+            "parent": f"flow:{index}",
+            "label": _label("gate", "passed", gate),
+        }
+        lines.append(_event(len(lines) + 1, "span_ended", 1 + index, {"span": span}))
+        verdict = "passed" if idea.passed else "failed"
+        ended = _label("workstream", verdict, attrs)
+        lines.append(_span(len(lines) + 1, 1 + index, f"flow:{index}", ended))
+    if adoption is not None:
+        attrs = {"candidate": adoption.revision, "vs_baseline": adoption.ratio}
+        label = _label("adoption", adoption.verdict, attrs)
+        lines.append(_span(len(lines) + 1, 50, "op:adopt", label))
+    for index, kind in enumerate(noise):
+        lines.insert(1 + index % len(lines), _event(99, kind, 2, {"text": "span_ended"}))
+    return lines
+
+
+@given(
+    ideas=st.lists(_MEASURED, max_size=6),
+    direction=st.sampled_from(["max", "min"]),
+    noise=_NOISE,
+)
+def test_a_run_that_is_still_working_headlines_its_best_passed_idea_that_beat_the_input(
+    ideas: list[_Measured], direction: str, noise: list[str]
+) -> None:
+    digest = digest_journal(_measured_journal(ideas, noise, direction))
+
+    beating = [
+        idea.value
+        for idea in ideas
+        if idea.passed and (idea.value > 100 if direction == "max" else idea.value < 100)
+    ]
+    best = (
+        None if not beating else (max(beating) / 100 if direction == "max" else 100 / min(beating))
+    )
+    assert digest.best_so_far_ratio == pytest.approx(best)
+    assert digest.adopted_ratio is None
+
+
+@given(
+    ideas=st.lists(_MEASURED, min_size=1, max_size=4),
+    verdict=st.sampled_from(["adopted", "not_adopted", None]),
+)
+def test_a_run_that_has_opened_its_adoption_has_no_best_so_far(
+    ideas: list[_Measured], verdict: str | None
+) -> None:
+    adoption = _Adoption(verdict, "rev-0", 1.5)
+
+    digest = digest_journal(_measured_journal(ideas, [], "max", adoption))
+
+    assert digest.best_so_far_ratio is None
+
+
+def test_an_idea_still_running_or_whose_gate_reads_for_a_failed_attempt_is_not_the_best() -> None:
+    def workstream(sequence: int, kind: str, verdict: str | None) -> bytes:
+        label = _label("workstream", verdict, {"hypothesis_id": "h"})
+        return _event(sequence, kind, sequence, {"span": {"id": "flow:1", "label": label}})
+
+    gate_label = _label("gate", "passed", {"metric_value": 150.0, "vs_baseline": 1.5})
+    gate: dict[str, JsonValue] = {"id": "op:1", "parent": "flow:1", "label": gate_label}
+    measured = _event(3, "span_ended", 3, {"span": gate})
+    running = [_event(1, "run_started", 0), workstream(2, "span_started", None), measured]
+
+    assert digest_journal(running).best_so_far_ratio is None
+    failed = [*running, workstream(4, "span_ended", "failed")]
+    assert digest_journal(failed).best_so_far_ratio is None
+    passed = [*running, workstream(4, "span_ended", "passed")]
+    assert digest_journal(passed).best_so_far_ratio == 1.5
+
+
 @given(rounds=st.integers(1, 6), ideas=st.lists(_IDEAS, max_size=4), noise=_NOISE)
 def test_rounds_without_a_trace_have_no_ideas_to_count_and_with_one_they_do(
     rounds: int, ideas: list[_Idea], noise: list[str]
@@ -215,6 +308,7 @@ def test_a_digest_reads_when_and_how_the_run_ended() -> None:
     assert digest == RunDigest(
         ideas=0,
         adopted_ratio=None,
+        best_so_far_ratio=None,
         duration_s=62,
         ending=RunEndingFact(
             outcome=RunEndOutcome.ADOPTED, summary="s", resumable=False, rounds_finished=3
@@ -233,7 +327,12 @@ def test_a_run_whose_server_died_has_no_ending_and_a_torn_last_line_is_skipped()
 
 def test_a_journal_with_no_events_has_no_duration() -> None:
     assert digest_journal(()) == RunDigest(
-        ideas=0, adopted_ratio=None, duration_s=None, ending=None, closing=None
+        ideas=0,
+        adopted_ratio=None,
+        best_so_far_ratio=None,
+        duration_s=None,
+        ending=None,
+        closing=None,
     )
 
 

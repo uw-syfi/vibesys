@@ -3506,7 +3506,7 @@ const hostHelperSchema: Record<string, unknown> = {
     },
     "RunDigest": {
       "additionalProperties": false,
-      "description": "What a run's journal says at a glance, for a list row; never a replay of the run.\n\n``ideas`` counts the ideas the run page counts (one per hypothesis, probes excluded) and\n``adopted_ratio`` is the result the run's adoption span names, as the run page headlines it:\nan improvement over the input (for a ``min`` objective, the input's value over the result's);\n``None`` when the run adopted nothing. The best raw reading of a gate is not it: that may be\nan idea that later failed. ``ideas`` is ``None`` for a journal\nthat predates the run trace (``TraceFormat.PREDATES_TRACE``): it records rounds, not ideas,\nso no count is true. ``duration_s`` runs from the\njournal's first event to the last step it recorded; ``None`` for a run with no events.\n``ending`` is the run's ending record and ``closing`` its terminal event: both ``None``\nfor a run still going or one whose server died without a word, which is how a run's\nending is known after its registry tombstone expired (a day).",
+      "description": "What a run's journal says at a glance, for a list row; never a replay of the run.\n\n``ideas`` counts the ideas the run page counts (one per hypothesis, probes excluded) and\n``adopted_ratio`` is the result the run's adoption span names, as the run page headlines it:\nan improvement over the input (for a ``min`` objective, the input's value over the result's);\n``None`` when the run adopted nothing. The best raw reading of a gate is not it: that may be\nan idea that later failed. ``best_so_far_ratio`` is what the page headlines before the run has\nopened an adoption (while it works): the best idea that passed and beat the input, worded as an\nimprovement the same way; ``None`` before one does and once an adoption exists. ``ideas`` is ``None`` for a journal\nthat predates the run trace (``TraceFormat.PREDATES_TRACE``): it records rounds, not ideas,\nso no count is true. ``duration_s`` runs from the\njournal's first event to the last step it recorded; ``None`` for a run with no events.\n``ending`` is the run's ending record and ``closing`` its terminal event: both ``None``\nfor a run still going or one whose server died without a word, which is how a run's\nending is known after its registry tombstone expired (a day).",
       "properties": {
         "kind": {
           "const": "digest",
@@ -3536,6 +3536,17 @@ const hostHelperSchema: Record<string, unknown> = {
             }
           ],
           "title": "Adopted Ratio"
+        },
+        "best_so_far_ratio": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Best So Far Ratio"
         },
         "duration_s": {
           "anyOf": [
@@ -3574,6 +3585,7 @@ const hostHelperSchema: Record<string, unknown> = {
         "kind",
         "ideas",
         "adopted_ratio",
+        "best_so_far_ratio",
         "duration_s",
         "ending",
         "closing"
