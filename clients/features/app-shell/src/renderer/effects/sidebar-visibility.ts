@@ -3,6 +3,7 @@
  * shortcut that toggles it.
  */
 import {
+  isSettingsShortcut,
   isSidebarShortcut,
   parseSidebarShown,
   type ShortcutKey,
@@ -56,6 +57,11 @@ export function bindSidebarShortcut(
   dispatch: (action: SidebarAction) => void,
 ): () => void {
   const listener = (event: ShortcutKey & {preventDefault(): void}): void => {
+    if (isSettingsShortcut(event, mac)) {
+      event.preventDefault();
+      dispatch({type: 'select', screen: {kind: 'settings'}});
+      return;
+    }
     if (!isSidebarShortcut(event, mac)) return;
     event.preventDefault();
     dispatch({type: 'toggle-sidebar'});

@@ -267,12 +267,20 @@ export function MachinesScreen(props: {
   readonly state: MachinesState;
   readonly dispatch: Dispatch;
   readonly newRun: (host: HostKey) => void;
+  readonly back: () => void;
 }): JSX.Element {
   const {state, dispatch, newRun} = props;
   return (
     <Page
       header={
         <Row gap="space-3" align="end" wrap>
+          <Button
+            variant="quiet"
+            size="sm"
+            icon="chevron-left"
+            label="Back to Settings"
+            press={props.back}
+          />
           <Stack gap="space-1" grow>
             <Text variant="section">Machines</Text>
             <Text as="h1" variant="title">

@@ -1,5 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import {
+  isSettingsShortcut,
   isSidebarShortcut,
   parseSidebarShown,
   type ShortcutKey,
@@ -22,7 +23,7 @@ const NONE = {metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, re
 function* presses(): Generator<ShortcutKey> {
   for (const bits of Array.from({length: 32}, (_, bit) => bit)) {
     const flag = (index: number): boolean => (bits >> index) % 2 === 1;
-    for (const key of ['\\', '|', 'b', 'Backslash', 's']) {
+    for (const key of ['\\', ',', '|', 'b', 'Backslash', 's']) {
       yield {
         key,
         metaKey: flag(0),
@@ -36,6 +37,19 @@ function* presses(): Generator<ShortcutKey> {
 }
 
 describe('the toggle shortcut', () => {
+  test('property: Settings opens only on the platform modifier and comma', () => {
+    for (const mac of [true, false]) {
+      for (const event of presses()) {
+        const expected =
+          event.key === ',' &&
+          !event.altKey &&
+          !event.shiftKey &&
+          !event.repeat &&
+          (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey);
+        expect(isSettingsShortcut(event, mac)).toBe(expected);
+      }
+    }
+  });
   test('property: it is the platform modifier and backslash, alone and not held', () => {
     for (const mac of [true, false]) {
       for (const event of presses()) {
@@ -71,8 +85,15 @@ describe('the toggle shortcut', () => {
     };
     expect(press('\\', {metaKey: true})).toBe(true);
     expect(press('b', {metaKey: true})).toBe(false);
+    expect(press(',', {metaKey: true})).toBe(true);
+    expect(press(',', {metaKey: true})).toBe(true);
+    expect(press(',', {metaKey: true, repeat: true})).toBe(false);
     expect(press('\\', {ctrlKey: true})).toBe(false);
-    expect(dispatched).toEqual([{type: 'toggle-sidebar'}]);
+    expect(dispatched).toEqual([
+      {type: 'toggle-sidebar'},
+      {type: 'select', screen: {kind: 'settings'}},
+      {type: 'select', screen: {kind: 'settings'}},
+    ]);
     stop();
     expect(listeners.size).toBe(0);
   });

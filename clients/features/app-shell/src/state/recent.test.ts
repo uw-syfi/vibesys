@@ -282,16 +282,18 @@ describe('Recent groups', () => {
     ['/p/queue-rs', 'mpmc'],
   ];
 
-  test('consecutive runs of one project and task share a header, in recency order', () => {
+  test('runs share one machine header and retain their project and task, in recency order', () => {
     const runs = TITLES.map(([project, task], index) =>
       recent(`r${index}`, project, task, 100 - index),
     );
     const {state} = open(runs);
     const {groups} = recentGroups(state, CLOCK);
-    expect(groups.map(group => [group.title, group.rows.map(row => row.run.runId)])).toEqual([
-      ['queue-rs · mpmc', ['r0', 'r1']],
-      ['kv-store · get-put', ['r2']],
-      ['queue-rs · mpmc', ['r3']],
+    expect(groups[0]?.title).toBe('host-a');
+    expect(groups[0]?.rows.map(row => [row.title, row.run.runId])).toEqual([
+      ['queue-rs · mpmc', 'r0'],
+      ['queue-rs · mpmc', 'r1'],
+      ['kv-store · get-put', 'r2'],
+      ['queue-rs · mpmc', 'r3'],
     ]);
   });
 
@@ -312,18 +314,52 @@ describe('Recent groups', () => {
       );
       const {state} = open(runs);
       const {groups} = recentGroups(state, CLOCK);
-      const flat = groups.flatMap(group => group.rows.map(row => row.run.runId));
+      const flat = groups.flatMap(machine => machine.rows.map(row => row.run.runId));
       expect(flat).toEqual(recentRows(state, CLOCK).rows.map(row => row.run.runId));
-      groups.forEach((group, index) => {
-        expect(group.rows.every(row => row.title === group.title)).toBe(true);
-        if (index > 0) expect(group.title).not.toBe(groups[index - 1]?.title);
-      });
+      for (const machine of groups) {
+        expect(machine.rows.every(row => row.run.host === machine.host)).toBe(true);
+      }
     }
+  });
+
+  test('runs from different machines have distinct headers', () => {
+    const runs = [
+      recent('a1', '/p/queue-rs', 'mpmc', 4),
+      {...recent('b1', '/p/queue-rs', 'mpmc', 3), host: 'ssh:host-b', hostLabel: 'host-b'},
+      recent('a2', '/p/queue-rs', 'mpmc', 2),
+    ];
+    const {groups} = recentGroups(open(runs).state, CLOCK);
+    expect(groups.map(machine => [machine.title, machine.rows.map(row => row.run.runId)])).toEqual([
+      ['host-a', ['a1', 'a2']],
+      ['host-b', ['b1']],
+    ]);
   });
 
   test('the first start asks for the saved machines and nothing else', () => {
     const action: SidebarAction = {type: 'toggle-sidebar'};
     expect(initialSidebar().requests.map(each => each.kind)).toEqual(['list-machines']);
     expect(sidebarStep(SIDEBAR_EMPTY, action).requests).toEqual([]);
+  });
+
+  test('Settings back restores the exact previous screen after repeated opens, even with the sidebar hidden', () => {
+    const previous = {kind: 'run', run: {host: 'ssh:host-a', runId: 'r1'}} as const;
+    let state = sidebarStep(SIDEBAR_EMPTY, {type: 'select', screen: previous}).state;
+    state = sidebarStep(state, {type: 'toggle-sidebar'}).state;
+    state = sidebarStep(state, {type: 'select', screen: {kind: 'settings'}}).state;
+    state = sidebarStep(state, {type: 'select', screen: {kind: 'settings'}}).state;
+    state = sidebarStep(state, {type: 'select', screen: {kind: 'machines'}}).state;
+    state = sidebarStep(state, {type: 'select', screen: {kind: 'settings'}}).state;
+    state = sidebarStep(state, {type: 'back-from-settings'}).state;
+    expect(state.selection).toEqual(previous);
+    expect(state.shown).toBe(false);
+  });
+
+  test('opening Machines directly also remembers its exact caller for the Settings exit', () => {
+    const previous = {kind: 'new-run', machine: 'ssh:host-b'} as const;
+    let state = sidebarStep(SIDEBAR_EMPTY, {type: 'select', screen: previous}).state;
+    state = sidebarStep(state, {type: 'select', screen: {kind: 'machines'}}).state;
+    state = sidebarStep(state, {type: 'select', screen: {kind: 'settings'}}).state;
+    state = sidebarStep(state, {type: 'back-from-settings'}).state;
+    expect(state.selection).toEqual(previous);
   });
 });

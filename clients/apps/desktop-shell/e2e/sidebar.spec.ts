@@ -138,6 +138,43 @@ test('the shortcut and the menu item toggle it, from any focus', async ({page}) 
   await expect(sidebar(page)).toBeVisible();
 });
 
+test('Command-comma opens Settings repeatedly and Back restores the run with the sidebar shown or hidden', async ({
+  page,
+}) => {
+  await openRun(page);
+  for (const collapsed of [false, true]) {
+    if (collapsed) await page.keyboard.press('Meta+Backslash');
+    await page.keyboard.press('Meta+,');
+    await expect(page.getByRole('heading', {name: 'Appearance'})).toBeVisible();
+    await page.keyboard.press('Meta+,');
+    await page.getByRole('button', {name: 'Back', exact: true}).click();
+    await expect(page.getByRole('heading', {name: 'Appearance'})).toHaveCount(0);
+    await expect(page.getByRole('button', {name: 'New run'})).toHaveCount(collapsed ? 0 : 1);
+  }
+});
+
+test('Machines is reached from Settings and its back arrow returns there', async ({page}) => {
+  await openRun(page);
+  const nav = sidebar(page);
+  await nav.getByRole('button', {name: 'Settings'}).click();
+  await expect(page.getByRole('button', {name: 'Manage machines'})).toBeVisible();
+  await expect(nav.getByRole('button', {name: 'Machines'})).toHaveCount(0);
+  await page.getByRole('button', {name: 'Manage machines'}).click();
+  await expect(page.getByRole('heading', {name: 'Where runs can go'})).toBeVisible();
+  await page.getByRole('button', {name: 'Add a machine'}).click();
+  const host = page.getByRole('textbox', {name: 'SSH host'});
+  await host.fill('host');
+  await host.press(',');
+  await expect(host).toHaveValue('host,');
+  await host.press('Meta+,');
+  await expect(page.getByRole('heading', {name: 'Appearance'})).toBeVisible();
+  await page.getByRole('button', {name: 'Manage machines'}).click();
+  await page.getByRole('button', {name: 'Back to Settings'}).click();
+  await expect(page.getByRole('heading', {name: 'Appearance'})).toBeVisible();
+  await page.getByRole('button', {name: 'Back', exact: true}).click();
+  await expect(page.getByRole('heading', {name: 'Appearance'})).toHaveCount(0);
+});
+
 test('hidden, no sidebar control can be focused, and the run still opens from the shortcut', async ({
   page,
 }) => {

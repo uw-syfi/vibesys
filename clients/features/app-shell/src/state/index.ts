@@ -9,11 +9,12 @@ export {
   type DigestSlot,
   digestKey,
   initialSidebar,
+  liveMachineGroups,
   liveRows,
+  type MachineRunGroup,
   machineCounts,
   RECENT_ROWS,
   type RowProblem,
-  type RunGroup,
   type RunRow,
   recentGroups,
   recentRows,
@@ -30,6 +31,7 @@ export {
   sidebarStep,
 } from './sidebar.js';
 export {
+  isSettingsShortcut,
   isSidebarShortcut,
   parseSidebarShown,
   type ShortcutKey,

@@ -8,7 +8,7 @@ import {type FakeHostWindow, listed, SEED, sidebar} from './world.js';
 /**
  * Recent runs that can be told apart: fourteen runs of one task, another project's runs among
  * them, runs that failed, stopped, were never recorded as ended and one whose state cannot be read.
- * Each row says when the run began and how it came out, runs of one title sit under one header,
+ * Each row says when the run began and how it came out, runs of one machine sit under one header,
  * no two neighbours read the same, and a run whose state cannot be read says so and offers a retry.
  * `SIDEBAR_RECENT_DIR` names a directory for the window's screenshots and a contact sheet.
  */
@@ -132,19 +132,15 @@ for (const width of [1000, 1440, 1920]) {
         expect(text, `row ${index} repeats row ${index - 1}`).not.toBe(texts[index - 1]);
     });
     expect(texts.join('\n')).not.toContain('status unknown');
-    expect(texts[0]).toMatch(/^\d\d:\d\d · 1\.\d\d× 4 ideas · 20m$/);
+    expect(texts[0]).toMatch(/^queue-rs · mpmc \d\d:\d\d · 1\.\d\d×/);
     expect(texts.some(text => /Yesterday \d\d:\d\d/.test(text))).toBe(true);
-    expect(texts.some(text => /^Oct \d+ · /.test(text))).toBe(true);
+    expect(texts.some(text => /Oct \d+ · /.test(text))).toBe(true);
     expect(texts.some(text => /stopped · 2 ideas/.test(text))).toBe(true);
     expect(texts.some(text => text.includes('stopped unexpectedly'))).toBe(true);
     expect(texts.some(text => text.includes('failed to start'))).toBe(true);
 
     const headers = await sidebar(page).locator('.vs-sidebar-group-title').allInnerTexts();
-    expect(headers.map(text => text.split('\n')[0])).toEqual([
-      'queue-rs · mpmc',
-      'kv-store · get-put',
-      'queue-rs · mpmc',
-    ]);
+    expect(headers.map(text => text.split('\n')[0])).toEqual(['host-b']);
 
     const problems = sidebar(page).getByText("can't read run state");
     await expect(problems).toHaveCount(2);
@@ -159,6 +155,59 @@ for (const width of [1000, 1440, 1920]) {
     }
   });
 }
+
+test('sidebar controls remain clickable and New run stays pinned while runs scroll', async ({
+  page,
+}) => {
+  await page.setViewportSize({width: 1000, height: 650});
+  await open(page);
+  const nav = sidebar(page);
+  const newRun = nav.getByRole('button', {name: 'New run'});
+  const settings = nav.getByRole('button', {name: 'Settings'});
+  const before = await newRun.boundingBox();
+  const settingsBefore = await settings.boundingBox();
+  expect(before).not.toBeNull();
+  await nav.locator('.vs-app-nav-top').evaluate(element => {
+    element.scrollTop = element.scrollHeight;
+  });
+  const after = await newRun.boundingBox();
+  expect(after?.y).toBe(before?.y);
+  expect((await settings.boundingBox())?.y).toBe(settingsBefore?.y);
+  await nav
+    .getByRole('button', {name: /More for/})
+    .first()
+    .click();
+  await expect(page.getByRole('menuitem', {name: 'Archive'})).toBeVisible();
+  await page.getByRole('button', {name: 'Hide sidebar'}).click();
+  await expect(nav).toBeHidden();
+  await page.getByRole('button', {name: 'Show sidebar'}).click();
+  await expect(nav).toBeVisible();
+});
+
+test('dragging the sidebar resizes it and a narrow drag collapses it', async ({page}) => {
+  await page.setViewportSize({width: 1000, height: 650});
+  await open(page);
+  const nav = sidebar(page);
+  const grip = nav.getByRole('separator', {name: 'Resize sidebar'});
+  const box = await grip.boundingBox();
+  expect(box).not.toBeNull();
+  if (box === null) return;
+  await page.mouse.move(box.x + box.width / 2, box.y + 20);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 80, box.y + 20);
+  await page.mouse.up();
+  await expect
+    .poll(() => nav.evaluate(element => Math.round(element.getBoundingClientRect().width)))
+    .toBeGreaterThan(300);
+  const wider = await grip.boundingBox();
+  expect(wider).not.toBeNull();
+  if (wider === null) return;
+  await page.mouse.move(wider.x + wider.width / 2, wider.y + 20);
+  await page.mouse.down();
+  await page.mouse.move(60, wider.y + 20);
+  await page.mouse.up();
+  await expect(nav).toBeHidden();
+});
 
 test('retry asks again for the run, and a run read the second time shows its figures', async ({
   page,

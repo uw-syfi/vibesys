@@ -776,6 +776,7 @@ body > div:first-child {
 .vs-menu {
   position: relative;
   display: inline-flex;
+  -webkit-app-region: no-drag;
 }
 .vs-menu-list {
   position: absolute;
@@ -790,6 +791,7 @@ body > div:first-child {
   border-radius: var(--radius-lg);
   background: var(--panel);
   box-shadow: var(--elevation-raised);
+  -webkit-app-region: no-drag;
 }
 .vs-menu-list[data-align="start"] {
   right: auto;
@@ -1784,14 +1786,14 @@ button.vs-stage-head {
 }
 .vs-app-nav {
   box-sizing: border-box;
+  position: relative;
   display: flex;
-  flex: 1 1 var(--sidebar);
+  flex: 0 0 var(--sidebar-width, var(--sidebar));
   flex-direction: column;
-  justify-content: space-between;
   gap: var(--space-5);
-  max-width: var(--sidebar);
+  width: var(--sidebar-width, var(--sidebar));
   max-height: 100%;
-  overflow-y: auto;
+  overflow: hidden;
   /* The title-bar row (the window's own controls and the toggle) sits over the column's top: start below it. */
   padding: calc(var(--titlebar-row) + var(--space-2)) var(--space-4) var(--space-5);
   /* The column's background moves the window; its controls stay controls. */
@@ -1806,6 +1808,39 @@ button.vs-stage-head {
 .vs-app-nav :is(a, button, input, select, textarea, [tabindex]) {
   -webkit-app-region: no-drag;
 }
+.vs-app-nav .vs-sidebar-item,
+.vs-app-nav .vs-sidebar-group,
+.vs-app-nav .vs-sidebar-section {
+  -webkit-app-region: no-drag;
+}
+.vs-app-nav-pinned {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.vs-app-nav-top {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.vs-app-nav-resize {
+  position: absolute;
+  top: var(--titlebar-row);
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  width: var(--space-2);
+  margin: 0;
+  border: 0;
+  cursor: col-resize;
+  touch-action: none;
+  -webkit-app-region: no-drag;
+}
+.vs-app-nav-resize:hover,
+.vs-app-nav-resize:focus-visible {
+  background: var(--line);
+}
 /*
  * Hidden, the column has no width, border or padding, and is not visible: `visibility` goes last,
  * after the size has changed, and takes the column out of the accessibility tree and the tab order.
@@ -1813,14 +1848,14 @@ button.vs-stage-head {
 .vs-app-nav {
   transition:
     flex-basis var(--duration-fast) var(--easing),
-    max-width var(--duration-fast) var(--easing),
+    width var(--duration-fast) var(--easing),
     padding var(--duration-fast) var(--easing),
     border-width var(--duration-fast) var(--easing),
     visibility 0s linear;
 }
 .vs-app-nav[data-hidden] {
   flex-basis: 0;
-  max-width: 0;
+  width: 0;
   padding-right: 0;
   padding-left: 0;
   border-right-width: 0;
@@ -1828,7 +1863,7 @@ button.vs-stage-head {
   visibility: hidden;
   transition:
     flex-basis var(--duration-fast) var(--easing),
-    max-width var(--duration-fast) var(--easing),
+    width var(--duration-fast) var(--easing),
     padding var(--duration-fast) var(--easing),
     border-width var(--duration-fast) var(--easing),
     visibility 0s linear var(--duration-fast);
@@ -1840,6 +1875,7 @@ button.vs-stage-head {
   gap: var(--space-5);
 }
 .vs-app-nav-footer {
+  flex: none;
   gap: var(--space-1);
   padding-top: var(--space-4);
   border-top: var(--hairline) solid var(--line);
@@ -1863,10 +1899,13 @@ button.vs-stage-head {
   position: absolute;
   top: 0;
   left: max(var(--chrome-inset-width, var(--space-0)), var(--space-4));
-  z-index: 1;
+  z-index: 20;
   display: flex;
   align-items: center;
   height: var(--titlebar-row);
+  -webkit-app-region: no-drag;
+}
+.vs-app-titlebar-control * {
   -webkit-app-region: no-drag;
 }
 /* A window without a navigation column: the title-bar row, then the page filling the rest. */

@@ -1,8 +1,10 @@
 import {
   Banner,
+  Button,
   Card,
   Grid,
   Page,
+  Row,
   SegmentedControl,
   Stack,
   Switch,
@@ -55,11 +57,15 @@ function ThemeChoice(props: {
 export function SettingsScreen(props: {
   readonly state: SettingsState;
   readonly dispatch: (action: SettingsAction) => void;
+  readonly back: () => void;
+  readonly openMachines: () => void;
+  readonly machines: {readonly count: number; readonly attention: number};
 }): JSX.Element {
   const {state, dispatch} = props;
   if (state.kind === 'loading') {
     return (
       <Page width="narrow">
+        <Button variant="quiet" size="sm" icon="chevron-left" label="Back" press={props.back} />
         <Text variant="section">Settings</Text>
       </Page>
     );
@@ -72,13 +78,25 @@ export function SettingsScreen(props: {
       width="narrow"
       header={
         <Stack gap="space-1">
-          <Text variant="section">Settings</Text>
+          <Row gap="space-2">
+            <Button variant="quiet" size="sm" icon="chevron-left" label="Back" press={props.back} />
+            <Text variant="section">Settings</Text>
+          </Row>
           <Text as="h1" variant="title">
             Appearance
           </Text>
         </Stack>
       }
     >
+      <Card section="Machines">
+        <Row justify="between" align="center">
+          <Text variant="body">
+            {props.machines.count} saved
+            {props.machines.attention === 0 ? '' : ` · ${props.machines.attention} need attention`}
+          </Text>
+          <Button text="Manage machines" press={props.openMachines} />
+        </Row>
+      </Card>
       {state.problem === null ? null : (
         <Banner tone="err" title="Could not save the change." body={state.problem} />
       )}

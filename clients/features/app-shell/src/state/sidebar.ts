@@ -69,8 +69,9 @@ export interface RunRow {
   readonly problem: RowProblem | null;
 }
 
-/** Consecutive Recent rows of one title, under one header. */
-export interface RunGroup {
+/** Runs from one machine, in recency order. */
+export interface MachineRunGroup {
+  readonly host: HostKey;
   readonly title: string;
   readonly rows: readonly RunRow[];
 }
@@ -121,6 +122,8 @@ export interface SidebarState {
   /** The last token a digest request used, so each is new. */
   readonly lastDigestToken: number;
   readonly selection: Screen;
+  /** Screen to return to when Settings is opened, including its run or New run context. */
+  readonly beforeSettings: Screen;
   /** Whether the sidebar is shown; the viewer may hide it completely. */
   readonly shown: boolean;
 }
@@ -135,6 +138,7 @@ export type SidebarAction =
   | {readonly type: 'recent'; readonly recent: readonly RecentRun[]}
   | {readonly type: 'archived'; readonly archived: readonly RunRef[]}
   | {readonly type: 'select'; readonly screen: Screen}
+  | {readonly type: 'back-from-settings'}
   | {readonly type: 'toggle-sidebar'}
   /** What the host said of the digests asked under `token`; null when it could not be asked. */
   | {readonly type: 'digests-read'; readonly token: number; readonly reply: RunDigestsReply | null}
@@ -177,6 +181,7 @@ export const SIDEBAR_EMPTY: SidebarState = {
   digests: {},
   lastDigestToken: 0,
   selection: {kind: 'new-run'},
+  beforeSettings: {kind: 'new-run'},
   shown: true,
 };
 
@@ -230,7 +235,13 @@ function machineChecked(
 
 /** The selection, and a fresh listing when the user leaves the Machines screen. */
 function selected(state: SidebarState, screen: Screen): SidebarStep {
-  const next = {...state, selection: screen};
+  const beforeSettings =
+    (screen.kind === 'settings' || screen.kind === 'machines') &&
+    state.selection.kind !== 'settings' &&
+    state.selection.kind !== 'machines'
+      ? state.selection
+      : state.beforeSettings;
+  const next = {...state, selection: screen, beforeSettings};
   const leaving = state.selection.kind === 'machines' && screen.kind !== 'machines';
   return leaving ? listMachines(next) : same(next);
 }
@@ -356,6 +367,8 @@ function baseStep(state: SidebarState, action: SidebarAction): SidebarStep {
       return same({...state, archived: action.archived});
     case 'select':
       return selected(state, action.screen);
+    case 'back-from-settings':
+      return selected(state, state.beforeSettings);
     case 'toggle-sidebar':
       return same({...state, shown: !state.shown});
     case 'machines-listed':
@@ -524,19 +537,38 @@ export function recentRows(
   };
 }
 
-/** Recent's rows with consecutive runs of one title under one header; recency order holds. */
+/** Recent's rows grouped by machine; recency order holds within each machine. */
 export function recentGroups(
   state: SidebarState,
   clock: Clock,
-): {readonly groups: readonly RunGroup[]; readonly more: number} {
+): {readonly groups: readonly MachineRunGroup[]; readonly more: number} {
   const {rows, more} = recentRows(state, clock);
-  const groups: {title: string; rows: RunRow[]}[] = [];
+  const groups: {host: HostKey; title: string; rows: RunRow[]}[] = [];
   for (const row of rows) {
-    const last = groups.at(-1);
-    if (last !== undefined && last.title === row.title) last.rows.push(row);
-    else groups.push({title: row.title, rows: [row]});
+    let machine = groups.find(group => group.host === row.run.host);
+    if (machine === undefined) {
+      machine = {host: row.run.host, title: label(row.run.host), rows: []};
+      groups.push(machine);
+    }
+    machine.rows.push(row);
   }
   return {groups, more};
+}
+
+/** Live rows grouped by their machine, preserving listing and run order. */
+export function liveMachineGroups(
+  state: SidebarState,
+): readonly {title: string; rows: readonly RunRow[]}[] {
+  const groups: {host: HostKey; title: string; rows: RunRow[]}[] = [];
+  for (const row of liveRows(state)) {
+    let group = groups.find(each => each.host === row.run.host);
+    if (group === undefined) {
+      group = {host: row.run.host, title: label(row.run.host), rows: []};
+      groups.push(group);
+    }
+    group.rows.push(row);
+  }
+  return groups;
 }
 
 /**

@@ -1,4 +1,16 @@
-import type {JSX, ReactNode} from 'react';
+import {
+  type CSSProperties,
+  type JSX,
+  type PointerEvent,
+  type ReactNode,
+  useRef,
+  useState,
+} from 'react';
+
+const DEFAULT_WIDTH = 264;
+const MIN_WIDTH = 180;
+const MAX_WIDTH = 480;
+const COLLAPSE_WIDTH = 120;
 
 /**
  * The app window's layout, filling its container: a navigation column at the sidebar width (`nav`
@@ -19,16 +31,33 @@ export function AppFrame(props: {
   /** The navigation column's accessible name. */
   readonly label: string;
   readonly nav: ReactNode;
+  /** Controls that remain visible while the navigation list scrolls. */
+  readonly navPinned?: ReactNode;
   readonly footer?: ReactNode;
   /** Hide the navigation column completely. */
   readonly navHidden?: boolean;
   /** The title-bar row's control (the sidebar toggle), shown whether the column is hidden or not. */
   readonly control?: ReactNode;
+  readonly onCollapse?: () => void;
   readonly children: ReactNode;
 }): JSX.Element {
   const hidden = props.navHidden === true;
+  const [width, setWidth] = useState(DEFAULT_WIDTH);
+  const drag = useRef<{x: number; width: number} | null>(null);
+  const move = (event: PointerEvent<HTMLDivElement>): void => {
+    if (drag.current === null) return;
+    const next = drag.current.width + event.clientX - drag.current.x;
+    setWidth(Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, next)));
+  };
+  const end = (event: PointerEvent<HTMLDivElement>): void => {
+    const start = drag.current;
+    if (start === null) return;
+    drag.current = null;
+    const next = start.width + event.clientX - start.x;
+    if (next < COLLAPSE_WIDTH) props.onCollapse?.();
+  };
   return (
-    <div className="vs-app-frame">
+    <div className="vs-app-frame" style={{'--sidebar-width': `${width}px`} as CSSProperties}>
       {props.control === undefined ? null : (
         <div className="vs-app-titlebar-control">{props.control}</div>
       )}
@@ -39,10 +68,43 @@ export function AppFrame(props: {
         aria-hidden={hidden || undefined}
         inert={hidden}
       >
+        {props.navPinned === undefined ? null : (
+          <div className="vs-app-nav-pinned">{props.navPinned}</div>
+        )}
         <div className="vs-app-nav-top">{props.nav}</div>
         {props.footer === undefined ? null : (
           <div className="vs-app-nav-footer">{props.footer}</div>
         )}
+        <hr
+          className="vs-app-nav-resize"
+          aria-label="Resize sidebar"
+          aria-orientation="vertical"
+          aria-valuemin={MIN_WIDTH}
+          aria-valuemax={MAX_WIDTH}
+          aria-valuenow={width}
+          tabIndex={hidden ? -1 : 0}
+          onPointerDown={event => {
+            drag.current = {x: event.clientX, width};
+            event.currentTarget.setPointerCapture(event.pointerId);
+          }}
+          onPointerMove={move}
+          onPointerUp={end}
+          onPointerCancel={() => {
+            drag.current = null;
+          }}
+          onKeyDown={event => {
+            if (event.key === 'Home') props.onCollapse?.();
+            else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+              setWidth(
+                Math.max(
+                  MIN_WIDTH,
+                  Math.min(MAX_WIDTH, width + (event.key === 'ArrowRight' ? 16 : -16)),
+                ),
+              );
+            } else return;
+            event.preventDefault();
+          }}
+        />
       </nav>
       <div className="vs-app-main">
         {hidden ? <div className="vs-app-strip" /> : null}

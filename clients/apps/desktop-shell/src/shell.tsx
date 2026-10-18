@@ -13,6 +13,7 @@ import {
 } from '@vibesys/feature-app-shell/renderer';
 import {
   type Clock,
+  machineCounts,
   type Screen,
   type SidebarState,
   sidebarShortcutLabel,
@@ -267,13 +268,22 @@ export function Shell(props: {
           />
         );
       case 'settings':
-        return <SettingsScreen state={settingsState} dispatch={settings.dispatch} />;
+        return (
+          <SettingsScreen
+            state={settingsState}
+            dispatch={settings.dispatch}
+            back={() => sidebar.store.dispatch({type: 'back-from-settings'})}
+            openMachines={() => select({kind: 'machines'})}
+            machines={machineCounts(sidebarState)}
+          />
+        );
       case 'machines':
         return (
           <MachinesScreen
             state={machinesState}
             dispatch={machines.dispatch}
             newRun={host => select({kind: 'new-run', machine: host})}
+            back={() => select({kind: 'settings'})}
           />
         );
       case 'run':
