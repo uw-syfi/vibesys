@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
+from vs_runtime.api.infrastructure import StopMode
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
@@ -36,8 +38,12 @@ class RunHandle(Protocol):
         """Replay from the first event and follow until the run settles."""
         ...
 
-    def stop(self) -> None:
-        """Request cooperative termination through the existing run control."""
+    def stop(self, mode: StopMode = StopMode.DRAIN) -> None:
+        """Request cooperative termination in ``mode`` through the run's control.
+
+        The run's control keeps the strongest stop asked for: a cancel after a drain
+        escalates it, and a drain never weakens a cancel.
+        """
         ...
 
     def cancel(self) -> None:
