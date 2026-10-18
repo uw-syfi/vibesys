@@ -912,8 +912,9 @@ function waitingForQuota(state: RunPageState): boolean {
 function commandStep(state: RunPageState, action: RunPageAction): RunPageStep | null {
   const phase = runPhase(state);
   const byQuota = phase.kind === 'paused' && phase.by === 'quota';
+  // A command sent is a new attempt: what the last one reported no longer stands.
   const offered = (when: boolean, request: RunPageRequest): RunPageStep => ({
-    state,
+    state: when ? {...state, notice: null} : state,
     requests: when ? [request] : [],
   });
   switch (action.type) {

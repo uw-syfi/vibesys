@@ -14,6 +14,7 @@ export {
   type ImplementerOutcomes,
   implementerOutcomes,
 } from './idea-outcomes.js';
+export {outcomeWords} from './idea-words.js';
 export {
   type BestLine,
   bestLine,
@@ -31,7 +32,6 @@ export {
   type IdeasFilter,
   ideasView,
   noIdeasWords,
-  outcomeWords,
   pressChip,
 } from './ideas-view.js';
 export {EMPTY_TRACE_LOG, type RunData, type SessionView, type TraceLog} from './live.js';

@@ -108,6 +108,7 @@ export function IdeasTable(props: {
     <Stack grow>
       <PickList
         wrapSummary
+        size="fill"
         label="Ideas"
         {...(props.selected === null ? {} : {selected: props.selected})}
         header={{

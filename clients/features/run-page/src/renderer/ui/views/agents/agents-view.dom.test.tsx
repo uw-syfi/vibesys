@@ -162,12 +162,12 @@ describe('AgentsView', () => {
     const view = await mount(
       <AgentsView {...base(modelOf(FAN_IN), sent)} {...folds()} selected={null} compact={false} />,
     );
-    expect(view.textContent).toContain('agent · started by the row above · now');
+    expect(view.textContent).toContain('agent · what it is doing');
     expect(options(view).map(each => each.textContent)).toEqual([
       expect.stringMatching(/^Planner/),
       expect.stringMatching(/Implementer.*ring padding/),
       expect.stringMatching(
-        /Judge.*ring padding · Padding keeps its gain.*\+ also under Implementer/,
+        /Judge.*ring padding · Padding keeps its gain.*also started by Implementer/,
       ),
     ]);
   });
@@ -185,7 +185,7 @@ describe('AgentsView', () => {
     const view = await mount(
       <AgentsView {...base(modelOf(FAN_IN), [])} {...folds()} selected="impl" compact />,
     );
-    expect(view.textContent).not.toContain('started by the row above');
+    expect(view.textContent).not.toContain('what it is doing');
     expect(view.textContent).not.toContain('ring padding');
     expect(option(view, 'Judge').textContent).toContain('+1 parent');
     expect(option(view, 'Implementer').getAttribute('aria-selected')).toBe('true');

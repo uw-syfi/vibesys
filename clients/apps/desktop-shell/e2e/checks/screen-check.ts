@@ -13,6 +13,7 @@ import {
   chartSizeCheck,
   columnTopsCheck,
   controlRowCheck,
+  focusRingCheck,
   HELPERS,
   legendCheck,
   numberLabelCheck,
@@ -24,6 +25,7 @@ import {
   scrollRoomCheck,
   strikeCheck,
   truncationCheck,
+  truncationRoomCheck,
   type Violation,
   wrapCheck,
 } from './in-page.js';
@@ -47,6 +49,8 @@ const CHECKS: Readonly<Record<PageCheckId, (input: CheckInput) => Violation[]>> 
   'scroll-room': scrollRoomCheck,
   'control-row': controlRowCheck,
   'column-tops': columnTopsCheck,
+  'truncation-room': truncationRoomCheck,
+  'focus-ring': focusRingCheck,
 };
 
 /** Enum values that never read as words: the failure reasons spelled with a hyphen or underscore. */

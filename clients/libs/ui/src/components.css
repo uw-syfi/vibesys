@@ -206,6 +206,7 @@ body > div:first-child {
 }
 .vs-flex[data-grow] {
   flex: 1 1 0;
+  min-height: 0;
 }
 .vs-flex[data-width="figure"] {
   flex: none;
@@ -533,6 +534,9 @@ body > div:first-child {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-3);
+  /* As wide as its segments wherever it sits, so it is the same box in a wide pane and a narrow one. */
+  width: fit-content;
+  max-width: 100%;
 }
 .vs-segment {
   display: inline-flex;
@@ -1712,8 +1716,11 @@ button.vs-stage-head {
   transform: none;
 }
 
-/* --- chart: drawn in the SVG's own units ------------------------------------------------------- */
+/* --- chart: drawn in pixels, as wide as its box ------------------------------------------------------- */
 
+.vs-chart-box {
+  min-width: 0;
+}
 .vs-chart {
   display: block;
   width: 100%;

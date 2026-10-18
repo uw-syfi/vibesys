@@ -148,7 +148,12 @@ function Header(props: {readonly state: RunPageState; readonly dispatch: Dispatc
           />
         ) : null}
         {header.stop.shown ? (
-          <Button variant="danger" text="Stop" press={() => dispatch({type: 'ask-stop'})} />
+          <Button
+            variant="danger"
+            text="Stop"
+            press={() => dispatch({type: 'ask-stop'})}
+            {...reason(header.stop)}
+          />
         ) : null}
         <Menu icon="more" label="More actions" variant="quiet" align="end" items={items} />
       </Row>
@@ -327,10 +332,12 @@ function crumbs(zoomed: ResolvedZoom, route: Route, zoom: Zoom): Crumb[] {
     step: null,
     item: null,
   };
-  const items: {id: string; label: string; to: Route}[] = [{id: 'run', label: 'Run', to: top}];
+  const items: {id: string; label: string; mono?: boolean; to: Route}[] = [
+    {id: 'run', label: 'Run', to: top},
+  ];
   const opened: Route = {...route, step: null, item: null};
   if (zoomed.idea !== null)
-    items.push({id: 'idea', label: markdownToPlain(zoomed.idea.title), to: opened});
+    items.push({id: 'idea', label: markdownToPlain(zoomed.idea.title), mono: true, to: opened});
   if (zoomed.agent !== null) {
     items.push({id: 'agent', label: roleLabel(zoomed.agent.role), to: opened});
   }
@@ -339,10 +346,8 @@ function crumbs(zoomed: ResolvedZoom, route: Route, zoom: Zoom): Crumb[] {
     items.push({id: 'step', label, to: {...route, item: null}});
   }
   if (zoomed.item !== null) items.push({id: 'item', label: zoomed.item, to: route});
-  return items.map((item, index) =>
-    index === items.length - 1
-      ? {id: item.id, label: item.label}
-      : {id: item.id, label: item.label, press: () => zoom({type: 'jump', route: item.to})},
+  return items.map(({to, ...item}, index) =>
+    index === items.length - 1 ? item : {...item, press: () => zoom({type: 'jump', route: to})},
   );
 }
 

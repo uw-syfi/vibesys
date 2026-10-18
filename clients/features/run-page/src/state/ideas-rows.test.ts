@@ -1,6 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import type {Candidate} from '@vibesys/run-state/candidates';
-import {figureOf, IDEAS_FILTER_DEFAULT, ideasView, outcomeWords} from './ideas-view.js';
+import {figureOf, outcomeWords} from './idea-words.js';
+import {IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
 import type {RunModel} from './run-model.js';
 import {idea, modelOf as treeOf} from './timeline-fixtures.js';
 

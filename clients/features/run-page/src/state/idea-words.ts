@@ -6,7 +6,7 @@
  * that was measured says why it failed despite its number.
  */
 import type {Candidate, CandidateTree} from '@vibesys/run-state/candidates';
-import {TURNED_DOWN, words} from './span-reading.js';
+import {ratio, TURNED_DOWN, words} from './span-reading.js';
 
 /** `text` with its first letter capitalized. */
 function capitalized(text: string): string {
@@ -32,6 +32,34 @@ function failureReason(item: Candidate): string | null {
   if (item.outcome !== 'failed') return null;
   const why = item.reason ?? item.measurement?.failed?.check ?? null;
   return why === null || why === TURNED_DOWN ? null : words(why);
+}
+
+/** An idea's outcome in words: `running`, `passed`, or `failed`, then why when the run says. */
+export function outcomeWords(item: Candidate): string {
+  const reason = failureReason(item);
+  return reason === null ? item.outcome : `failed · ${reason}`;
+}
+
+/** The tone of a figure: a good result, a bad one, or a quiet one. */
+export type IdeaTone = 'ok' | 'err' | 'muted';
+
+/** The figure at the right of an idea's row: its ratio, its failed check's progress, or why not. */
+export function figureOf(item: Candidate): {figure: string; tone: IdeaTone} {
+  if (item.outcome === 'running') return {figure: '', tone: 'muted'};
+  const measured = item.measurement;
+  const failed = measured?.failed ?? null;
+  if (failed !== null) {
+    const progress =
+      failed.completed !== null && failed.required !== null
+        ? `${failed.completed}/${failed.required}${failed.unit === null ? '' : ` ${failed.unit}`}`
+        : words(failed.check);
+    return {figure: `Failed · ${progress}`, tone: 'err'};
+  }
+  if (measured?.vsBaseline !== null && measured?.vsBaseline !== undefined) {
+    return {figure: ratio(measured.vsBaseline), tone: item.outcome === 'passed' ? 'ok' : 'err'};
+  }
+  if (item.outcome === 'failed') return {figure: capitalized(outcomeWords(item)), tone: 'err'};
+  return {figure: '–', tone: 'muted'};
 }
 
 /** What an idea measured, against the input; null when it measured nothing. */
@@ -94,12 +122,9 @@ export function selectedWords(item: Candidate, measured: boolean): string {
  * the same on every face that has the column (a failed check's progress or reason is not a
  * comparison with the input).
  */
-export function vsInputCell(figure: {
+export function vsInputCell(figure: {readonly figure: string; readonly tone: IdeaTone}): {
   readonly figure: string;
-  readonly tone: 'ok' | 'err' | 'muted';
-}): {
-  readonly figure: string;
-  readonly tone: 'ok' | 'err' | 'muted';
+  readonly tone: IdeaTone;
 } {
   return figure.figure.endsWith('×') ? figure : {figure: '–', tone: 'muted'};
 }

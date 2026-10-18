@@ -9,8 +9,9 @@
  */
 import type {Candidate, CandidateOutcome, CandidateTree} from '@vibesys/run-state/candidates';
 import {type IdeaBase, type IdeaBases, ideaBases} from './idea-bases.js';
+import {figureOf, type IdeaTone, outcomeWords} from './idea-words.js';
 import type {Direction, RunModel} from './run-model.js';
-import {duration, formatValue, ratio, TURNED_DOWN, words} from './span-reading.js';
+import {duration, formatValue} from './span-reading.js';
 
 /** Which ideas the Ideas face shows. */
 export interface IdeasFilter {
@@ -64,8 +65,6 @@ export function noIdeasWords(filter: IdeasFilter): {title: string; body: string}
   return {title, body};
 }
 
-export type IdeaTone = 'ok' | 'err' | 'muted';
-
 /** One idea's row. */
 export interface IdeaRow {
   readonly id: string;
@@ -118,42 +117,10 @@ function share(value: number, best: number, direction: Direction): number {
   return Math.min(1, direction === 'min' ? best / value : value / best);
 }
 
-/**
- * An idea's outcome in words: `running`, `passed`, or `failed`, then why when it is known. A
- * measured idea the trusted checks turned down is only `failed`: that is its result, not a reason.
- */
-export function outcomeWords(item: Candidate): string {
-  if (item.outcome !== 'failed') return item.outcome;
-  const why = item.reason ?? item.measurement?.failed?.check ?? null;
-  return why === null || why === TURNED_DOWN ? 'failed' : `failed · ${words(why)}`;
-}
-
 function stateOf(item: Candidate): IdeaRow['state'] {
   const tone = {running: 'live', passed: 'ok', failed: 'err'} as const;
   const label = outcomeWords(item);
   return {tone: tone[item.outcome], label: label.charAt(0).toUpperCase() + label.slice(1)};
-}
-
-/** The figure at the right of an idea's row: its ratio, its failed check's progress, or why not. */
-export function figureOf(item: Candidate): {figure: string; tone: IdeaTone} {
-  if (item.outcome === 'running') return {figure: '', tone: 'muted'};
-  const measured = item.measurement;
-  const failed = measured?.failed ?? null;
-  if (failed !== null) {
-    const progress =
-      failed.completed !== null && failed.required !== null
-        ? `${failed.completed}/${failed.required}${failed.unit === null ? '' : ` ${failed.unit}`}`
-        : words(failed.check);
-    return {figure: `Failed · ${progress}`, tone: 'err'};
-  }
-  if (measured?.vsBaseline !== null && measured?.vsBaseline !== undefined) {
-    return {figure: ratio(measured.vsBaseline), tone: item.outcome === 'passed' ? 'ok' : 'err'};
-  }
-  if (item.outcome === 'failed') {
-    const label = outcomeWords(item);
-    return {figure: label.charAt(0).toUpperCase() + label.slice(1), tone: 'err'};
-  }
-  return {figure: '–', tone: 'muted'};
 }
 
 /**

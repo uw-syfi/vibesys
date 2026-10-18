@@ -131,9 +131,9 @@ test('the agents tree shows who started whom, and an agent opens beside it with 
   await expect(agents.getByRole('option')).toHaveCount(6);
   await expect(agents.getByRole('option').nth(0)).toContainText('Planner');
   await expect(agents.getByRole('option', {name: /judge/i})).toContainText(
-    '+ also under Implementer',
+    'also started by Implementer',
   );
-  await expect(page.getByText('agent · started by the row above · now')).toBeVisible();
+  await expect(page.getByText('agent · what it is doing')).toBeVisible();
   await check(page, 'ink-agents');
 
   await agents

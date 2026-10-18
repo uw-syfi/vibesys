@@ -63,6 +63,8 @@ class FakeApp {
   readonly asked: string[] = [];
   observer: SessionObserver | null = null;
   refuse: string | null = null;
+  /** When set, a command fails to reach the run (its promise rejects) with this message. */
+  fail: string | null = null;
   /** This window's clock, which the test advances by hand. */
   wallMs = 0;
 
@@ -75,7 +77,9 @@ class FakeApp {
             ? `resume:${command.when}`
             : command.kind,
         );
-        return Promise.resolve(this.refuse);
+        return this.fail === null
+          ? Promise.resolve(this.refuse)
+          : Promise.reject(new Error(this.fail));
       },
       close: () => {
         this.asked.push('close');
@@ -245,6 +249,35 @@ test('a live run is attached, its session opened, and Pause and Resume go throug
     record: {kind: 'ended', run: {...running(), phase: 'completed'}},
   });
   expect(app.asked.slice(4)).toEqual(['close', 'release']);
+  store.dispose();
+});
+
+test('a command that fails to reach the run is shown as a notice, and the next command clears it', async () => {
+  const app = new FakeApp();
+  const store = createRunPageStore(SEED, fakePorts([], app), new FakeClock().schedule);
+  store.dispatch({type: 'record', record: {kind: 'live', run: running()}});
+  await Promise.resolve();
+  app.observer?.session(LIVE_VIEW);
+  app.fail = 'the run does not answer command.pause';
+  store.dispatch({type: 'pause'});
+  await settled();
+  expect(store.getState().notice).toBe('the run does not answer command.pause');
+  app.fail = null;
+  store.dispatch({type: 'pause'});
+  expect(store.getState().notice).toBeNull();
+  store.dispose();
+});
+
+test('Stop stays in the header, unavailable, while its confirmation is open', () => {
+  const store = createRunPageStore(SEED, fakePorts([]), new FakeClock().schedule);
+  store.dispatch({type: 'record', record: {kind: 'live', run: running()}});
+  expect(headerView(store.getState()).stop).toEqual({shown: true, disabledReason: null});
+  store.dispatch({type: 'ask-stop'});
+  expect(stopBannerView(store.getState()).kind).toBe('confirm');
+  expect(headerView(store.getState()).stop.shown).toBe(true);
+  expect(headerView(store.getState()).stop.disabledReason).not.toBeNull();
+  store.dispatch({type: 'cancel-stop'});
+  expect(headerView(store.getState()).stop.disabledReason).toBeNull();
   store.dispose();
 });
 

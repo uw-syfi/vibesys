@@ -28,6 +28,7 @@ export function RunScrubber(props: {
       backLabel={shown.backLabel}
       position={shown.position}
       ticks={shown.ticks}
+      tickWord="Call"
       change={index => change(viewAtPosition(log, index))}
       backToLive={() => change({at: 'live'})}
     />

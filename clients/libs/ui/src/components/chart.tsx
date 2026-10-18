@@ -1,5 +1,6 @@
 import type {JSX} from 'react';
 import {MONO_ADVANCE, TYPE} from '../tokens/index.js';
+import {useInlineSize} from './label-fit.js';
 
 /**
  * A measured point; `filled` points are drawn solid, the rest hollow. A point with an `id` can be
@@ -40,15 +41,19 @@ export interface ChartTick {
   readonly label: string;
 }
 
-/** The drawing's own coordinates: the SVG scales to its container's width. */
-const WIDTH = 1000;
-/** A chart's height in those coordinates: `default`, or a `strip` that shares a row with a figure. */
-const HEIGHT = {default: 300, strip: 170} as const;
+/**
+ * The drawing is in pixels: its width is its container's, measured, so its text keeps its size
+ * whatever the width (`FALLBACK_WIDTH` until measured, never under `MIN_WIDTH`), and its height is
+ * fixed: a `strip` shares a row with a figure.
+ */
+const FALLBACK_WIDTH = 1000;
+const MIN_WIDTH = 240;
+const HEIGHT = {default: 260, strip: 150} as const;
 export type ChartSize = keyof typeof HEIGHT;
 /** The x labels sit in the band below the plot. */
 const X_BAND = 34;
 const PLOT_TOP = 12;
-const PLOT_RIGHT = 990;
+const MARGIN_RIGHT = 10;
 /** The gap between a y label and the axis, and the margin left of the longest label. */
 const LABEL_GAP = 8;
 const EDGE = 4;
@@ -65,11 +70,11 @@ interface Plot {
  * the drawing's edge whatever its length. The labels are drawn in the mono `section` style, each
  * glyph `MONO_ADVANCE` em wide.
  */
-function plotFor(yTicks: readonly ChartTick[], size: ChartSize): Plot {
+function plotFor(yTicks: readonly ChartTick[], size: ChartSize, width: number): Plot {
   const longest = Math.max(0, ...yTicks.map(tick => tick.label.length));
   const glyph = TYPE.section.size * MONO_ADVANCE;
   return {
-    right: PLOT_RIGHT,
+    right: width - MARGIN_RIGHT,
     top: PLOT_TOP,
     bottom: HEIGHT[size] - X_BAND,
     left: EDGE + Math.ceil(longest * glyph) + LABEL_GAP,
@@ -121,9 +126,10 @@ const BEARING = 1;
 function xLabelAt(
   x: number,
   text: string,
+  width: number,
 ): {readonly x: number; readonly anchor: 'start' | 'middle' | 'end'} {
   const half = (text.length * TYPE.section.size * MONO_ADVANCE) / 2;
-  if (x + half > WIDTH + BEARING) return {x: WIDTH, anchor: 'end'};
+  if (x + half > width + BEARING) return {x: width, anchor: 'end'};
   if (x - half < -BEARING) return {x: 0, anchor: 'start'};
   return {x, anchor: 'middle'};
 }
@@ -132,6 +138,7 @@ function xLabelAt(
 function Axes(props: {
   readonly plot: Plot;
   readonly at: Scale;
+  readonly width: number;
   readonly xTicks: readonly ChartTick[];
   readonly yTicks: readonly ChartTick[];
 }): JSX.Element {
@@ -159,7 +166,7 @@ function Axes(props: {
         </g>
       ))}
       {xTicks.map(tick => {
-        const label = xLabelAt(at.x(tick.value), tick.label);
+        const label = xLabelAt(at.x(tick.value), tick.label, props.width);
         return (
           <text
             key={`x${tick.value}`}
@@ -223,7 +230,9 @@ export function Chart(props: {
   const steps = props.steps ?? [];
   const xTicks = props.xTicks ?? [];
   const yTicks = props.yTicks ?? [];
-  const plot = plotFor(yTicks, size);
+  const [measure, measured] = useInlineSize();
+  const width = Math.max(MIN_WIDTH, measured ?? FALLBACK_WIDTH);
+  const plot = plotFor(yTicks, size, width);
   const at = scale(
     plot,
     [...props.points.map(p => p.x), ...steps.map(p => p.x), ...xTicks.map(t => t.value)],
@@ -240,60 +249,64 @@ export function Chart(props: {
     ? props.selected
     : pickable[0]?.id;
   return (
-    <svg
-      className="vs-chart"
-      viewBox={`0 0 ${WIDTH} ${HEIGHT[size]}`}
-      role={props.pick === undefined ? 'img' : 'group'}
-      aria-label={props.label}
-    >
-      {(props.spans ?? []).map(span => (
-        <Span key={`${span.from}:${span.to}`} span={span} plot={plot} at={at} />
-      ))}
-      <Axes plot={plot} at={at} xTicks={xTicks} yTicks={yTicks} />
-      {props.reference === undefined ? null : (
-        <g>
-          <line
-            className="vs-chart-reference"
-            x1={plot.left}
-            x2={plot.right}
-            y1={at.y(props.reference.y)}
-            y2={at.y(props.reference.y)}
+    <div className="vs-chart-box" ref={measure}>
+      <svg
+        className="vs-chart"
+        width={width}
+        height={HEIGHT[size]}
+        viewBox={`0 0 ${width} ${HEIGHT[size]}`}
+        role={props.pick === undefined ? 'img' : 'group'}
+        aria-label={props.label}
+      >
+        {(props.spans ?? []).map(span => (
+          <Span key={`${span.from}:${span.to}`} span={span} plot={plot} at={at} />
+        ))}
+        <Axes plot={plot} at={at} width={width} xTicks={xTicks} yTicks={yTicks} />
+        {props.reference === undefined ? null : (
+          <g>
+            <line
+              className="vs-chart-reference"
+              x1={plot.left}
+              x2={plot.right}
+              y1={at.y(props.reference.y)}
+              y2={at.y(props.reference.y)}
+            />
+            <text className="vs-chart-label" x={plot.left + 6} y={at.y(props.reference.y) - 6}>
+              {props.reference.label}
+            </text>
+          </g>
+        )}
+        {steps.length === 0 ? null : <path className="vs-chart-step" d={stepPath(steps, at)} />}
+        {drawnPoints(props.points).map(point => (
+          <Point
+            key={point.id ?? `${point.x}:${point.y}`}
+            point={point}
+            at={at}
+            selected={
+              point.emphasis === 'focus' || (point.id !== undefined && point.id === props.selected)
+            }
+            stop={point.id !== undefined && point.id === stop}
+            dense={props.points.length > DENSE_ABOVE}
+            pick={props.pick}
+            hover={props.hover}
           />
-          <text className="vs-chart-label" x={plot.left + 6} y={at.y(props.reference.y) - 6}>
-            {props.reference.label}
+        ))}
+        {props.playhead === undefined ? null : (
+          <line
+            className="vs-chart-playhead"
+            x1={at.x(props.playhead)}
+            x2={at.x(props.playhead)}
+            y1={plot.top}
+            y2={plot.bottom}
+          />
+        )}
+        {props.xTitle === undefined ? null : (
+          <text className="vs-chart-label" x={plot.right} y={HEIGHT[size] - 2} textAnchor="end">
+            {props.xTitle}
           </text>
-        </g>
-      )}
-      {steps.length === 0 ? null : <path className="vs-chart-step" d={stepPath(steps, at)} />}
-      {drawnPoints(props.points).map(point => (
-        <Point
-          key={point.id ?? `${point.x}:${point.y}`}
-          point={point}
-          at={at}
-          selected={
-            point.emphasis === 'focus' || (point.id !== undefined && point.id === props.selected)
-          }
-          stop={point.id !== undefined && point.id === stop}
-          dense={props.points.length > DENSE_ABOVE}
-          pick={props.pick}
-          hover={props.hover}
-        />
-      ))}
-      {props.playhead === undefined ? null : (
-        <line
-          className="vs-chart-playhead"
-          x1={at.x(props.playhead)}
-          x2={at.x(props.playhead)}
-          y1={plot.top}
-          y2={plot.bottom}
-        />
-      )}
-      {props.xTitle === undefined ? null : (
-        <text className="vs-chart-label" x={plot.right} y={HEIGHT[size] - 2} textAnchor="end">
-          {props.xTitle}
-        </text>
-      )}
-    </svg>
+        )}
+      </svg>
+    </div>
   );
 }
 
@@ -329,12 +342,12 @@ function Span(props: {
 }
 
 const SPAN_BAR = 4;
-const POINT_RADIUS = 5.5;
-const SELECTED_RADIUS = 8;
-const LIT_RADIUS = 9.5;
+const POINT_RADIUS = 4.5;
+const SELECTED_RADIUS = 7;
+const LIT_RADIUS = 8.5;
 /** With more points than this, the hollow ones are small and faint, so the kept ones lead. */
 const DENSE_ABOVE = 60;
-const FAINT_RADIUS = 3;
+const FAINT_RADIUS = 2.5;
 /** With more points than this, minor points without an id are binned, one dot per cell of a grid. */
 const BIN_ABOVE = 1000;
 const BIN_COLUMNS = 100;
