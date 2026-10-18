@@ -335,6 +335,11 @@ class _ProductHostFactory:
         if policy is None:
             message = "core services require a plugin with a core policy"
             raise ValueError(message)
+        factory = self.agent_client_factory
+        if factory is None:
+            raise CoreCompositionError(
+                "agent_client_factory", "a core run needs a factory for its agent client"
+            )
         if self.invocation_store_factory is None:
             raise CoreCompositionError(
                 "invocation_store_factory", "a core run needs a durable invocation journal"
@@ -353,7 +358,7 @@ class _ProductHostFactory:
         agents: dict[str, _ProviderAgents] = {}
         for provider, spec in _provider_specs(base, specs).items():
             agents[provider] = self._open_provider_agents(
-                spec, scope, session_store, agent_runtime, events, ownership
+                factory, spec, scope, session_store, agent_runtime, events, ownership
             )
         turns = ProviderRoutedExecutor(
             {provider: turn_executor(agent.client) for provider, agent in agents.items()}
@@ -449,6 +454,7 @@ class _ProductHostFactory:
 
     def _open_provider_agents(  # noqa: PLR0913  # lint-waiver: LW-948091 [PLR0913]; each argument is an independently owned resource the host already opened, and this reads them once per provider.
         self,
+        factory: Callable[..., AgentClientProtocol],
         spec: AgentSpec,
         scope: AgentExecutionScope,
         session_store: DurableSessionStore,
@@ -461,17 +467,13 @@ class _ProductHostFactory:
         The client is bound to ``spec.provider``, so each role's own model and effort ride
         ``spec`` for the roles that run on it.
         """
-        if self.agent_client_factory is None:
-            raise CoreCompositionError(
-                "agent_client_factory", "a core run needs a factory for its agent client"
-            )
         environment = scope.open_environment(
             AgentExecutionConfiguration(
                 agent_id="core", spec=spec, reasoning_effort=spec.reasoning_effort
             )
         )
         ownership.callback(environment.close)
-        client = self.agent_client_factory(
+        client = factory(
             spec=spec,
             clock=self.timing.clock,
             session_store=session_store,
