@@ -93,44 +93,57 @@ function seedOf(fixture: RunFixture, theme: 'ink' | 'paper'): FakeBridgeSeed {
   };
 }
 
+/** A self-contained installer called with its seed, as a script a page runs. */
+function script<A>(install: (seed: A) => void, seed: A): string {
+  return `(${install.toString()})(${JSON.stringify(seed)});`;
+}
+
+/**
+ * The scripts that make a page the app opened on `fixture`, in the order they must run before the
+ * page's own scripts: the Fake bridge, its machines, the fake run, and the fixture server
+ * replaying the run. Playwright adds them as init scripts (`openFixture`); the fixture dev app
+ * serves them to the page (`e2e/tools/dev-fixture.ts`).
+ */
+export function fixtureScripts(fixture: RunFixture, options: OpenOptions = {}): readonly string[] {
+  const seed = seedOf(fixture, options.theme ?? 'ink');
+  const live = fixture.state === 'live';
+  const scripts = [
+    script(installFakeBridge, seed),
+    script(installFakeMachines, seed),
+    script(installFakeRun, {streams: [], text: {}}),
+    script(installFakeFixtureServer, {
+      runId: fixture.runId,
+      first: live ? splitLive(fixture).first : fixture.events,
+      ...(live ? {} : {history: fixture.events}),
+      overview: {
+        objective: {
+          text: fixture.objective.text,
+          metric: fixture.objective.metric,
+          unit: fixture.objective.unit,
+          direction: fixture.objective.direction,
+          correctness_check: [],
+        },
+      },
+    }),
+  ];
+  if (options.historyServing !== undefined) {
+    scripts.push(script(installFakeHistory, {...options.historyServing, events: fixture.events}));
+  }
+  if (options.summaryServing !== undefined) {
+    scripts.push(
+      script(installFakeSummarySpan, {...options.summaryServing, events: fixture.events}),
+    );
+  }
+  return scripts;
+}
+
 /** Opens the app on `fixture` and its run: the first batch is in, the rest waits for `playLive`. */
 export async function openFixture(
   page: Page,
   fixture: RunFixture,
   options: OpenOptions = {},
 ): Promise<void> {
-  const theme = options.theme ?? 'ink';
-  const seed = seedOf(fixture, theme);
-  const live = fixture.state === 'live';
-  await page.addInitScript(installFakeBridge, seed);
-  await page.addInitScript(installFakeMachines, seed);
-  await page.addInitScript(installFakeRun, {streams: [], text: {}});
-  await page.addInitScript(installFakeFixtureServer, {
-    runId: fixture.runId,
-    first: live ? splitLive(fixture).first : fixture.events,
-    ...(live ? {} : {history: fixture.events}),
-    overview: {
-      objective: {
-        text: fixture.objective.text,
-        metric: fixture.objective.metric,
-        unit: fixture.objective.unit,
-        direction: fixture.objective.direction,
-        correctness_check: [],
-      },
-    },
-  });
-  if (options.historyServing !== undefined) {
-    await page.addInitScript(installFakeHistory, {
-      ...options.historyServing,
-      events: fixture.events,
-    });
-  }
-  if (options.summaryServing !== undefined) {
-    await page.addInitScript(installFakeSummarySpan, {
-      ...options.summaryServing,
-      events: fixture.events,
-    });
-  }
+  for (const content of fixtureScripts(fixture, options)) await page.addInitScript({content});
   await page.goto('./shell.html');
   await page
     .getByRole('navigation', {name: 'VibeSys'})

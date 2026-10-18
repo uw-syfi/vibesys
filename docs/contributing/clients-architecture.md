@@ -391,6 +391,56 @@ any difference; `scripts/check_clients.sh` runs it (see "Client checks before a 
 When the job fails on a screenshot, it uploads the actual and the diff as the
 `ui-gallery-test-results` artifact.
 
+## Where a Run screen change goes
+
+The Run screen is `clients/features/run-page`. Paths below are relative to its `src/`; a
+quality test (`test_run_page_ownership_map`) fails when a listed path does not exist. Pick the
+row by what the change is about, and edit only that module and its tests, because several agents
+change this screen at the same time.
+
+| Change | Owner |
+| --- | --- |
+| What a number, word or row says (data folds and selectors) | `state/`, one module per concern, below |
+| How the screen is laid out and what sits where | `renderer/ui/run-screen.tsx` (the frame), `renderer/ui/levels.tsx`, `renderer/ui/run-level.tsx`, `renderer/ui/hero.tsx` |
+| What one face or level draws inside its pane | one folder of `renderer/ui/views/` |
+| The run's summary read model and its seeding | `state/run-summary.ts` |
+| Talking to the app, the host or the live session | `renderer/effects/` |
+
+Data folds and selectors, all pure and under `state/`:
+
+- `state/run-page.ts`: the store, a reducer over the host's record of the run and the user's
+  actions. `state/views.ts` holds the selectors the header, banners and logs read.
+- `state/run-model.ts`: the run at one sequence (trace, overview, candidates, agents). Every
+  view reads the run through it. `state/live.ts` holds the data slice it reads, and
+  `state/scrub.ts` the scrubber's positions over it.
+- `state/run-level.ts` (the performance row, Now, `resolveZoom`), `state/performance.ts` (the
+  chart's fold), `state/ideas-view.ts` and `state/ideas-tree.ts` (the Ideas list and tree),
+  `state/timeline-rows.ts` (the Gantt rows), `state/agent-tree.ts` (the Agents rows).
+- `state/step-narrative.ts`, `state/turn-transcript.ts` and `state/turn-result.ts`: an opened
+  step and the card its turn ends with.
+- `state/zoom.ts`: the route machine (run, idea or agent, step, item).
+- Words: `state/end-words.ts`, `state/history-words.ts`, `state/span-words.ts`,
+  `state/token-words.ts`, `state/metric-words.ts` and `state/names.ts`. User-visible wording is
+  written in these, not in a component.
+- History and summary: `state/history-pager.ts` reads an ended run's journal in pages;
+  `state/run-summary.ts` takes the host's `runs.summary` fold in its place.
+
+Components, under `renderer/ui/`:
+
+- The frame (`renderer/ui/run-screen.tsx`) decides which view shows where; views never read the
+  route. `renderer/ui/hero.tsx` is drawn at every level, so navigating moves
+  nothing in it.
+- `renderer/ui/views/timeline/`, `renderer/ui/views/agents/`, `renderer/ui/views/logs/`,
+  `renderer/ui/views/step/` and `renderer/ui/views/idea/`: one folder per view, each owned on its
+  own. A view gets its props from `renderer/ui/views/props.ts` and reads the run only through
+  them and the selectors in `state/`. Its pane header goes through
+  `renderer/ui/views/headers.ts`.
+- Layout that must hold is checked by the desktop screen checks
+  (`clients/apps/desktop-shell/e2e/checks/`), not by a component test.
+
+To see a change on a recorded run with hot reload, use the fixture dev app
+(`pnpm --filter @vibesys/app-desktop-shell dev:fixture`, see the `verify-desktop-ui` skill).
+
 ## Display names
 
 A screen never shows an id a program matches on (`judge`, `perf-evaluator`, `claude`, a model's

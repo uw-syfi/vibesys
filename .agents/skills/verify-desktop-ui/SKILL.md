@@ -59,6 +59,21 @@ From the clients workspace root:
   `pnpm --filter @vibesys/app-desktop-shell e2e:linux`. Run it when a check
   passes here and you suspect a font or rendering difference.
 
+## Iterate on a fixture with hot reload
+
+To edit a screen and watch it change, serve the shell in a browser over a fixture instead of
+rebuilding and rerunning the suite:
+
+`pnpm --filter @vibesys/app-desktop-shell dev:fixture [NAME] [--port N] [--theme paper]`
+
+It starts Vite's dev server (printing the URL) with the same Fake bridge and fixture replay the
+e2e journeys use, opens the fixture's run from Recent, and plays a live fixture's later events.
+Edits to feature or shell source update the page in place, with no reload. `NAME` is a fixture of
+`@vibesys/run-fixtures` (default `weeks-600-ideas`; `--list` prints them). Visit
+`/fixture/NAME[?theme=paper]` to switch fixture or theme without a restart. It is a browser page,
+not Electron: drive it with Playwright or any browser, and never launch the desktop app for it.
+Finish with the checks above, which this does not replace.
+
 ## Produce the contact sheet
 
 `SCREENS_DIR=<dir> pnpm --filter @vibesys/app-desktop-shell e2e screens` writes
