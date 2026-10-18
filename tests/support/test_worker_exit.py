@@ -45,6 +45,8 @@ import pytest
 
 @pytest.mark.xdist_group("owed")
 def test_dies():
+    os.closerange(3, 1024)  # the connection to the controller: it ends before the process
+    sum(range(3_000_000))  # the process is still exiting when the controller sees the end
     os.kill(os.getpid(), {_KILLED})
 
 @pytest.mark.xdist_group("owed")
@@ -71,6 +73,6 @@ def test_ungrouped(index):
     )
 
     result.stdout.fnmatch_lines(
-        [f"*worker gw* killed by signal {_KILLED} *", "*crashed and worker restarting disabled*"]
+        ["*crashed and worker restarting disabled*", f"*worker gw* killed by signal {_KILLED} *"]
     )
     assert result.ret != 0
