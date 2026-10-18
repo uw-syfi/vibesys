@@ -9,12 +9,20 @@ job (``relinquish``), unless the policy keeps jobs on a stop
 (``keep_jobs_on_stop``). A crash cancels nothing; a request no run leases for
 the grace period is withdrawn by the sweep, which any attached run performs.
 
+A run leases a request before it reads the request's record to attach to
+it, so a withdrawal that marked the attempt ``withdrawing`` before that read
+sees the lease when it reads the leases again, and goes back; one that marks
+it after sees the attempt attached to only through that lease, too
+(``vs_slurm.api.withdraw``). Within one run, ``guard`` orders an evaluation's
+attach after its sibling's withdrawal of the same request, and the other way.
+
 The calls here are blocking (they reach the cluster); the executor runs them on
-its worker threads.
+its worker threads, and holds ``guard`` around them on its event loop.
 """
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, assert_never
 
@@ -22,6 +30,7 @@ from vs_sandbox.slurm_wiring import make_evaluation_ledger
 from vs_slurm.api import (
     BATCH_RESULT_LAYOUT,
     AttachJob,
+    AwaitWithdrawal,
     CheckJob,
     ClaimAttempt,
     ClusterConflict,
@@ -39,6 +48,7 @@ from vs_slurm.api import (
     ResolveSubmission,
     SlurmBatchHandle,
     SlurmSubmissionRejectedError,
+    Withdrawer,
     evaluation_key,
     handle_of_job,
     job_of_handle,
@@ -49,6 +59,7 @@ from vs_slurm.api import (
     submit_step,
     sweep_unleased,
     transitioned,
+    undone_withdrawal,
     validate_holder,
     validate_project,
 )
@@ -133,6 +144,9 @@ class SlurmLedgerAttachment:
     # Which of this run's evaluations use each request, and the request of each.
     _users: dict[str, set[str]] = field(default_factory=dict)
     _used: dict[str, str] = field(default_factory=dict)
+    # The requests this process is submitting a claimed attempt of right now.
+    _submitting: set[str] = field(default_factory=set)
+    _guards: dict[str, asyncio.Lock] = field(default_factory=dict)
     _orphans: OrphanChecks = field(init=False)
 
     def __post_init__(self) -> None:
@@ -171,6 +185,9 @@ class SlurmLedgerAttachment:
         refused it.
         """
         key = key if key is not None else self.key(request)
+        # Leased before any read: a withdrawal that misses this lease marked the
+        # attempt before the read below, which then waits for it.
+        self.renew(key)
         for _ in range(_ATTACH_ROUNDS):
             step = submit_step(self.ledger.read(key), now=self.clock.now())
             outcome: AttachOutcome | None
@@ -180,7 +197,12 @@ class SlurmLedgerAttachment:
                 case CheckJob(entry=current):
                     outcome = self._check(cluster, current, request)
                 case ResolveSubmission(entry=current, expired=expired):
-                    outcome = self._resolve(cluster, current, request, expired=expired)
+                    # This run's own claim that it is not submitting is a dead
+                    # process's (its renewals above keep it from expiring).
+                    orphaned = current.record.owner == self.holder and key not in self._submitting
+                    outcome = self._resolve(cluster, current, request, expired=expired or orphaned)
+                case AwaitWithdrawal(entry=current, expired=expired):
+                    outcome = self._await_withdrawal(current, expired=expired)
                 case ClaimAttempt(attempt=attempt):
                     outcome = self._claim(cluster, request, key, attempt, labels)
                 case _:
@@ -206,28 +228,55 @@ class SlurmLedgerAttachment:
         self.ledger.release(key, self.holder)
         self._renewed.pop(key, None)
 
+    def guard(self, key: str) -> asyncio.Lock:
+        """The lock this run holds around each attach to, and each withdrawal of, ``key``.
+
+        Without it, one evaluation's withdrawal could read the leases before a
+        sibling evaluation of the same content leases the request, and cancel
+        the job the sibling then attaches to: the run's single lease cannot tell
+        the two apart.
+        """
+        return self._guards.setdefault(key, asyncio.Lock())
+
     def use(self, key: str, user: str) -> None:
-        """Note that this run's evaluation ``user`` attaches to the request ``key``."""
+        """Note that this run's evaluation ``user`` uses the request ``key``.
+
+        An evaluation attaches to it, or resumes one attached to it; every one
+        that uses it stops using it however it ends (``stop_using``).
+        """
+        before = self._used.get(user)
+        if before is not None and before != key:
+            self.stop_using(user)
         self._used[user] = key
         self._users.setdefault(key, set()).add(user)
 
-    def stop_using(self, user: str, key: str | None = None) -> str | None:
-        """Forget that ``user`` uses its request; the request, if no other evaluation here uses it.
+    def request_of(self, user: str) -> str | None:
+        """The request this run's evaluation ``user`` uses, if it uses one."""
+        return self._used.get(user)
 
-        ``key`` names the request when ``use`` was never called for it in this
-        process (a run that resumed an attached evaluation). Two evaluations of
-        one run with the same content share a request and its job: only the
-        last to stop using it may relinquish it.
+    def last_user(self, user: str, key: str | None = None) -> str | None:
+        """The request ``user`` uses, if no other evaluation of this run uses it; nothing changes.
+
+        ``key`` names the request when ``use`` was not called for it in this
+        process. Two evaluations of one run with the same content share a
+        request and its job: only the last to stop using it may relinquish it,
+        and it stops using it (``stop_using``) only once the relinquish ended
+        either way, so one whose outcome is unknown is tried again.
         """
-        key = self._used.pop(user, key)
-        if key is None:
+        key = self._used.get(user, key)
+        if key is None or self._users.get(key, set()) - {user}:
             return None
+        return key
+
+    def stop_using(self, user: str) -> None:
+        """Forget that ``user`` uses its request."""
+        key = self._used.pop(user, None)
+        if key is None:
+            return
         users = self._users.get(key, set())
         users.discard(user)
-        if users:
-            return None
-        self._users.pop(key, None)
-        return key
+        if not users:
+            self._users.pop(key, None)
 
     def relinquish(self, cluster: Cluster, key: str) -> WithdrawOutcome:
         """Stop wanting ``key``: drop this run's lease, and withdraw it if no other run wants it.
@@ -236,12 +285,13 @@ class SlurmLedgerAttachment:
         within the grace period, or the job has already ended (``relinquish``).
         """
         self._renewed.pop(key, None)
+        now = self.clock.now()
         return relinquish(
             self.ledger,
             cluster,
             key,
-            holder=self.holder,
-            since=self.clock.now() - self.policy.grace_seconds,
+            Withdrawer(by=self.holder, now=now, reason=f"its run {self.holder} stopped wanting it"),
+            since=now - self.policy.grace_seconds,
         )
 
     def heartbeat(self, cluster: Cluster, key: str, operation_id: str) -> None:
@@ -249,7 +299,8 @@ class SlurmLedgerAttachment:
 
         Every third of a lease period it reads the request: if the attempt this run
         attached to (``operation_id``) is no longer the current one, or is
-        withdrawn, it raises ``LedgerWithdrawnError``; otherwise it renews the lease.
+        withdrawn, it raises ``LedgerWithdrawnError``; otherwise it renews the
+        lease, which also sends back a withdrawal under way on the attempt.
         """
         now = self.clock.now()
         last = self._renewed.get(key)
@@ -311,7 +362,6 @@ class SlurmLedgerAttachment:
             raise LedgerError.unreadable(record.key, "submitted record without a job")
         if job.result_layout != BATCH_RESULT_LAYOUT:
             raise LedgerAttachError.unknown_layout(record.key, job.result_layout)
-        self.renew(record.key)
         handle = handle_of_job(job, operation_id=record.operation_id, request=request)
         return Attached(record.key, record.operation_id, handle)
 
@@ -333,6 +383,15 @@ class SlurmLedgerAttachment:
             settle(self.ledger, entry, observed.status)
             return None  # read again: the failed attempt is replaced
         return self._attached(entry.record, request)
+
+    def _await_withdrawal(self, entry: LedgerEntry, *, expired: bool) -> AttachPending | None:
+        """Wait on a withdrawal under way; undo one whose withdrawer died (``AwaitWithdrawal``)."""
+        record = entry.record
+        if not expired:
+            by = record.withdrawal.by if record.withdrawal is not None else "another process"
+            return AttachPending(record.key, f"{by} is withdrawing the request")
+        self.ledger.replace(entry, undone_withdrawal(record))
+        return None  # read again: the attempt as it was, or what another process made of it
 
     def _resolve(
         self,
@@ -388,8 +447,12 @@ class SlurmLedgerAttachment:
         )
         if self.ledger.claim(claimed) != claimed:
             return None  # another process claimed this attempt first: read what it recorded
-        self.renew(key)
-        return self._submit(cluster, request, LedgerEntry(claimed))
+        self._submitting.add(key)
+        try:
+            self.renew(key)
+            return self._submit(cluster, request, LedgerEntry(claimed))
+        finally:
+            self._submitting.discard(key)
 
     def _submit(
         self, cluster: Cluster, request: SlurmBatchRequest, entry: LedgerEntry

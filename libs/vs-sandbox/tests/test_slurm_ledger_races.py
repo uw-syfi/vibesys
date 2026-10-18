@@ -18,7 +18,6 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Literal
 
-import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
@@ -31,10 +30,12 @@ from vs_slurm.api import (
     FakeEvaluationLedger,
     LedgerLabels,
     LedgerPolicy,
+    SecondsRange,
     SlurmBatchRequest,
     SlurmBatchStage,
     SlurmConfig,
     SlurmSshTransport,
+    SlurmTimingProfile,
     WithdrawUnknown,
     ledger_operation_id,
 )
@@ -66,6 +67,7 @@ CONFIG = SlurmConfig(
     transport=SlurmSshTransport(host="fake-cluster"),
 )
 POLICY = LedgerPolicy()
+_QUEUED_FOREVER = SlurmTimingProfile(queue_wait_s=SecondsRange.exactly(10**9))
 # How often a caller tries again after an unknown outcome, as the executor does.
 _TRIES = 4
 
@@ -198,7 +200,8 @@ class _World:
     def __init__(self, root: Path, steps: _Steps) -> None:
         self.root = root
         self.clock = ManualClock(1000.0)
-        self.cluster = FakeCluster(clock=self.clock)
+        # Every job queues until it is cancelled: a job that ends on its own wants nothing.
+        self.cluster = FakeCluster(clock=self.clock, timing=_QUEUED_FOREVER)
         self.ledger = FakeEvaluationLedger(project=PROJECT)
         self.steps = steps
         self.stepped_cluster = _SteppedCluster(self.cluster, steps)
@@ -279,9 +282,6 @@ _FAULTS = st.dictionaries(
 )
 
 
-@pytest.mark.xfail(
-    strict=True, reason="#3173 review finding 1: a cross-run attach races a withdrawal"
-)
 @settings(max_examples=examples(pr=150, nightly=1500), deadline=None)
 @given(
     race=st.sampled_from(

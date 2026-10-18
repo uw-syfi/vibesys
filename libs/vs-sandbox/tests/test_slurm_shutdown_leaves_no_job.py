@@ -698,9 +698,6 @@ def test_a_stopped_run_leaves_no_job_only_it_wanted_and_takes_none_a_live_run_ne
     run_virtual(world.clock, main(), schedule_seed=schedule_seed, driver=world.sim)
 
 
-@pytest.mark.xfail(
-    strict=True, reason="#3173 review finding 4: one run's attach races its own withdrawal"
-)
 def test_a_run_never_leases_a_request_it_is_withdrawing(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> None:

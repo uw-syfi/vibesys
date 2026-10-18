@@ -25,7 +25,7 @@ from vs_slurm.api import LedgerError, NotInLedger, Withdrawn, WithdrawUnknown
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_sandbox.slurm_ledger import SlurmLedgerAttachment
+    from vs_sandbox.slurm_ledger import AttachOutcome, SlurmLedgerAttachment
     from vs_sim.api import Clock, Sleeper
     from vs_slurm.api import (
         Cluster,
@@ -33,6 +33,7 @@ if TYPE_CHECKING:
         LedgerLabels,
         SlurmBatchRequest,
         SlurmJobStatus,
+        WithdrawOutcome,
     )
 
 _LOG = logging.getLogger(__name__)
@@ -97,30 +98,12 @@ class LedgerEvaluations:
         ledger = self.ledger
         deadline = self.clock.now() + self.job_timeout_seconds
         key = await self.in_thread(ledger.key, batch)
-        ledger.use(key, handle_id)
         while True:
-            step = asyncio.ensure_future(
-                self.in_thread(ledger.attach, self.cluster, batch, labels=labels, key=key)
-            )
-            # A step may stage and submit the job for a long time: renewing this run's
-            # lease meanwhile keeps its claim from being taken over (``claim_expired``).
-            keeper = asyncio.create_task(self._keep_leased(key))
-            try:
-                outcome = await asyncio.shield(step)
-            except asyncio.CancelledError:
-                # A submission this step started finishes and is recorded, so a
-                # restart reattaches to its job instead of submitting another.
-                with contextlib.suppress(Exception):
-                    attached = await step
-                    if isinstance(attached, Attached):
-                        save(attached)
-                raise
-            except LedgerWithdrawnError as error:
-                raise ExecutorRejectedError(str(error)) from error
-            finally:
-                keeper.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await keeper
+            # A sibling evaluation's withdrawal of this request runs wholly before
+            # this step or wholly after it (``SlurmLedgerAttachment.guard``).
+            async with ledger.guard(key):
+                ledger.use(key, handle_id)
+                outcome = await self._attach_step(key, batch, labels, save)
             if isinstance(outcome, Attached):
                 return outcome
             remaining = deadline - self.clock.now()
@@ -128,6 +111,42 @@ class LedgerEvaluations:
                 return None
             _LOG.info("evaluation %s waits on the ledger: %s", handle_id, outcome.reason)
             await self.sleeper.sleep(min(self.poll_interval, remaining))
+
+    async def _attach_step(
+        self,
+        key: str,
+        batch: SlurmBatchRequest,
+        labels: LedgerLabels,
+        save: Callable[[Attached], None],
+    ) -> AttachOutcome:
+        """One attach call, which finishes, and records its job, even when cancelled."""
+        step = asyncio.ensure_future(
+            self.in_thread(self.ledger.attach, self.cluster, batch, labels=labels, key=key)
+        )
+        # A step may stage and submit the job for a long time: renewing this run's
+        # lease meanwhile keeps its claim from being taken over (``claim_expired``).
+        keeper = asyncio.create_task(self._keep_leased(key))
+        try:
+            return await asyncio.shield(step)
+        except asyncio.CancelledError:
+            # A submission this step started finishes and is recorded, so a
+            # restart reattaches to its job instead of submitting another.
+            with contextlib.suppress(Exception):
+                attached = await step
+                if isinstance(attached, Attached):
+                    save(attached)
+            raise
+        except LedgerWithdrawnError as error:
+            raise ExecutorRejectedError(str(error)) from error
+        finally:
+            keeper.cancel()
+            # Not ``suppress(CancelledError)``: that would also swallow a cancel of
+            # this task that lands while it waits for the keeper to end.
+            await asyncio.gather(keeper, return_exceptions=True)
+
+    def resumed(self, handle_id: str, key: str) -> None:
+        """Count an evaluation this process resumed as a user of its request ``key``."""
+        self.ledger.use(key, handle_id)
 
     async def _keep_leased(self, key: str) -> None:
         """Renew this run's lease on ``key`` every third of a lease period, until cancelled.
@@ -152,7 +171,8 @@ class LedgerEvaluations:
         its streams and ledger, while an ownerless observer has no such debt.
         """
         try:
-            await self.in_thread(self.ledger.heartbeat, self.cluster, key, operation_id)
+            async with self.ledger.guard(key):
+                await self.in_thread(self.ledger.heartbeat, self.cluster, key, operation_id)
         except LedgerWithdrawnError:
             _LOG.warning("evaluation %s was withdrawn from the evaluation ledger", handle_id)
             return False
@@ -199,20 +219,37 @@ class LedgerEvaluations:
         if attached and known is None:
             return Released.CANCEL_HERE
         ledger = self.ledger
-        if ledger.policy.keep_jobs_on_stop:
-            # Without a job attached, a submission this run started is held by its lease.
-            if known is not None:
-                await self.finish_in_thread(ledger.release, known)
-            return Released.DONE
-        key = ledger.stop_using(handle_id, known)
+        key = known if known is not None else ledger.request_of(handle_id)
         if key is None:
-            return Released.DONE  # never claimed, or another evaluation here still uses it
-        outcome = await self.finish_in_thread(ledger.relinquish, self.cluster, key)
-        if isinstance(outcome, WithdrawUnknown):
-            raise ExecutorCancellationUnknownError(handle_id)
+            return Released.DONE  # it never claimed a request
+        async with ledger.guard(key):
+            sole = ledger.last_user(handle_id, key) is not None
+            outcome: WithdrawOutcome | None = None
+            if sole and ledger.policy.keep_jobs_on_stop:
+                # Without a job attached, a submission this run started is held by its lease.
+                if known is not None:
+                    await self.finish_in_thread(ledger.release, known)
+            elif sole:
+                outcome = await self.finish_in_thread(ledger.relinquish, self.cluster, key)
+                if isinstance(outcome, WithdrawUnknown):
+                    # Still used: a later cancel, or the stop, withdraws it again.
+                    raise ExecutorCancellationUnknownError(handle_id)
+            ledger.stop_using(handle_id)
         if attached and isinstance(outcome, Withdrawn | NotInLedger):
             return Released.CANCEL_HERE
         return Released.DONE
+
+    async def let_go_of_ended(self, handle_id: str, known: str | None) -> None:
+        """Stop using the request of an evaluation that ended, relinquishing it if last.
+
+        Its job ended, or never started: the relinquish only drops this run's
+        lease. One whose outcome is unknown keeps the use and the lease, which
+        lapses, for a later stop or the grace sweep.
+        """
+        try:
+            await self.release(handle_id, known, attached=known is not None, detaching=False)
+        except ExecutorCancellationUnknownError:
+            _LOG.warning("could not let go of the ledger request of evaluation %s", handle_id)
 
 
 __all__ = ["BlockingCalls", "LedgerEvaluations", "Released"]

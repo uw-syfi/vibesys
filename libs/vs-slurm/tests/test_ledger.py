@@ -16,12 +16,14 @@ from hypothesis import strategies as st
 from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
     AttachJob,
+    AwaitWithdrawal,
     CheckJob,
     ClaimAttempt,
     ClusterCollected,
     ClusterObservation,
     ClusterSubmitted,
     ClusterUnknown,
+    EntryPhase,
     FakeCluster,
     FakeEvaluationLedger,
     Leased,
@@ -47,6 +49,7 @@ from vs_slurm.api import (
     SubmitBoundJob,
     Unleased,
     UnreadableLease,
+    Withdrawer,
     Withdrawn,
     claim_expired,
     evaluation_key,
@@ -55,9 +58,11 @@ from vs_slurm.api import (
     lease_verdict,
     ledger_operation_id,
     list_entries,
+    marked_withdrawing,
     settlement,
     submit_step,
     sweep_unleased,
+    transitioned,
     withdraw,
 )
 
@@ -193,6 +198,12 @@ _JOB = SubmitBoundJob(
 )
 
 
+# How ``vibesys evals remove`` names itself when it withdraws a request.
+_OPERATOR = Withdrawer(by="vibesys-evals", now=0.0, reason="removed by operator")
+# Until when a withdrawal ``_record`` marks a record with holds.
+_WITHDRAWAL_UNTIL = 600.0
+
+
 def _record(
     state: LedgerState,
     *,
@@ -201,6 +212,17 @@ def _record(
     claim_expires_at: float = 900.0,
     key: str = "c" * 64,
 ) -> LedgerRecord:
+    if state is LedgerState.WITHDRAWING:
+        before = _record(
+            LedgerState.SUBMITTED,
+            attempt=attempt,
+            created_at=created_at,
+            claim_expires_at=claim_expires_at,
+            key=key,
+        )
+        return marked_withdrawing(
+            before, by="run-b", since=created_at, until=_WITHDRAWAL_UNTIL, reason="gone"
+        )
     return LedgerRecord(
         key=key,
         project=PROJECT,
@@ -254,6 +276,9 @@ def test_only_an_absent_failed_or_withdrawn_request_is_submitted_again(
             assert step == CheckJob(entry)
         case LedgerState.SUBMITTING:
             assert step == ResolveSubmission(entry, expired=now > 900.0)
+        case LedgerState.WITHDRAWING:
+            # Never a new attempt while the old one may still go back: wait, or undo.
+            assert step == AwaitWithdrawal(entry, expired=now > _WITHDRAWAL_UNTIL)
         case LedgerState.FAILED | LedgerState.WITHDRAWN:
             assert step == ClaimAttempt(attempt + 1)
     assert submit_step(None, now=now) == ClaimAttempt(0)
@@ -482,17 +507,17 @@ class _World:
 @pytest.mark.parametrize("status", [SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING])
 def test_withdrawing_a_live_request_cancels_its_job(tmp_path: Path, status: SlurmJobStatus) -> None:
     world = _World(tmp_path, status=status)
-    outcome = withdraw(world.ledger, world.cluster, world.key, reason="removed by operator")
+    outcome = withdraw(world.ledger, world.cluster, world.key, _OPERATOR)
     assert outcome == Withdrawn(world.key, ledger_operation_id(world.key, 0), world.job_id)
     assert world.state() is LedgerState.WITHDRAWN
-    again = withdraw(world.ledger, world.cluster, world.key, reason="again")
+    again = withdraw(world.ledger, world.cluster, world.key, _OPERATOR)
     assert isinstance(again, Withdrawn)
     assert again.already
 
 
 def test_withdrawing_an_unknown_request_says_so(tmp_path: Path) -> None:
     world = _World(tmp_path, status=SlurmJobStatus.PENDING)
-    assert withdraw(world.ledger, world.cluster, "d" * 64, reason="x") == NotInLedger("d" * 64)
+    assert withdraw(world.ledger, world.cluster, "d" * 64, _OPERATOR) == NotInLedger("d" * 64)
 
 
 @given(
@@ -562,9 +587,31 @@ def test_a_lease_this_build_cannot_read_holds_the_request_and_blocks_no_removal(
     assert row.unreadable_leases == ("run-new",)
     assert row.lease_holders == ("run-a",)
 
-    outcome = withdraw(world.ledger, world.cluster, world.key, reason="removed by operator")
+    outcome = withdraw(world.ledger, world.cluster, world.key, _OPERATOR)
     assert outcome == Withdrawn(world.key, ledger_operation_id(world.key, 0), world.job_id)
     assert world.state() is LedgerState.WITHDRAWN
+
+
+def test_a_request_being_withdrawn_lists_as_its_job_and_the_sweep_leaves_it_to_its_withdrawer(
+    tmp_path: Path,
+) -> None:
+    world = _World(tmp_path, status=SlurmJobStatus.RUNNING)
+    entry = world.ledger.read(world.key)
+    assert entry is not None
+    now = 1e9
+    marked = marked_withdrawing(
+        entry.record, by="run-b", since=now, until=now + 600.0, reason="its run run-b stopped"
+    )
+    assert world.ledger.replace(entry, marked)
+
+    (row,) = list_entries(world.ledger, world.cluster, project=PROJECT, now=now).rows
+    assert row.phase is EntryPhase.RUNNING
+    assert row.detail == "being withdrawn by run-b: its run run-b stopped"
+    swept = sweep_unleased(
+        world.ledger, world.cluster, now=now + 1.0, grace_seconds=0.0, orphans=OrphanChecks(900.0)
+    )
+    assert swept == ()
+    assert world.state() is LedgerState.WITHDRAWING
 
 
 def test_a_lease_left_unreadable_by_a_crashed_build_is_swept_and_named_in_a_warning(
@@ -665,7 +712,13 @@ def test_the_sweep_cancels_every_live_job_named_for_a_failed_or_withdrawn_attemp
                 job = job_of_handle(submitted.handle)
                 assert ledger.replace(entry, claimed.model_copy(update={"state": end, "job": job}))
                 continue
-            assert ledger.replace(entry, claimed.model_copy(update={"state": end, "reason": "x"}))
+            if end is LedgerState.WITHDRAWN:
+                # A withdrawal marks the attempt first (``withdraw``).
+                marked = marked_withdrawing(claimed, by="run-b", since=0.0, until=600.0, reason="x")
+                assert ledger.replace(entry, marked)
+                entry = ledger.read(key)
+                assert entry is not None
+            assert ledger.replace(entry, transitioned(entry.record, end, reason="x"))
             if orphan is not None:
                 cluster.script(operation, states=(orphan,))
                 assert isinstance(cluster.submit(request, operation_id=operation), ClusterSubmitted)

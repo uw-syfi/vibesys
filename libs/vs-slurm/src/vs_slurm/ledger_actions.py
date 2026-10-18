@@ -3,13 +3,24 @@
 Every path goes through :func:`withdraw`, so a removed request and an abandoned one
 end the same way: the job is cancelled if it is still queued or running, and the
 attempt is recorded as withdrawn, by compare-and-swap, so a racing writer is
-never overwritten. The cancel comes first, so a crash between the
-two leaves a cancelled job under a live record, which the next withdrawal or a
-run attaching to it settles, never a withdrawn record over a live job.
+never overwritten.
+
+A withdrawal takes two swaps. The first marks the attempt ``withdrawing``; from
+then on no run attaches to it (``AwaitWithdrawal``). The withdrawer then reads
+the leases again, and a run that leased the request before that read, which
+every run does before it reads the record to attach, sends the attempt back to
+its state: the withdrawal ends ``Kept`` and the run keeps its job. Only then is
+the job cancelled, and the second swap records the attempt withdrawn. A cancel
+whose outcome is unknown also sends it back, so the attempt is never left
+marked by a live withdrawer. A crash leaves the mark, or a cancelled job under
+a live record, which the next withdrawal or a run attaching to it undoes or
+settles once the mark outlived ``WITHDRAWAL_WINDOW_SECONDS``: never a withdrawn
+record over a live job.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -23,8 +34,11 @@ from .ledger import (
     Unleased,
     held_by_others,
     lease_verdict,
+    marked_withdrawing,
     settlement,
     transitioned,
+    undone_withdrawal,
+    withdrawal_expired,
 )
 from .ledger_listing import entry_id
 
@@ -50,8 +64,9 @@ class Withdrawn:
 class Kept:
     """The request no longer met the withdrawal's condition when it was read; nothing changed.
 
-    Only a conditional withdrawal (the sweep's) ends this way: a run leased the
-    request, or its job settled, after the caller decided to withdraw it.
+    Only a conditional withdrawal (the sweep's, or a run's relinquish) ends this
+    way: a run leased the request, or its job settled, after the caller decided
+    to withdraw it, even after the attempt was marked ``withdrawing``.
     """
 
     key: str
@@ -67,7 +82,11 @@ class NotInLedger:
 
 @dataclass(frozen=True, slots=True)
 class WithdrawUnknown:
-    """The job's state or the cancel could not be established; nothing was recorded."""
+    """The job's state or the cancel could not be established, or another withdrawal is under way.
+
+    Nothing was recorded: the attempt is in the state it was read in. Trying
+    again later finds the job's state, or the other withdrawal's end.
+    """
 
     key: str
     reason: str
@@ -77,32 +96,58 @@ WithdrawOutcome = Withdrawn | Kept | NotInLedger | WithdrawUnknown
 
 
 # Each lost compare-and-swap costs one more read; a race is lost only to a writer
-# that moved the attempt forward, and an attempt has at most three states ahead.
+# that moved the attempt forward, and an attempt has at most four states ahead.
 _ROUNDS = 8
+
+WITHDRAWAL_WINDOW_SECONDS = 600.0
+"""How long a withdrawal may take before it is taken to have died, and is undone.
+
+A withdrawal is two ledger swaps, a lease read and two cluster calls (inspect
+and cancel), each bounded by its transport's timeout; a run waits this long, at
+most, on one whose withdrawer crashed.
+"""
+
+
+@dataclass(frozen=True, slots=True)
+class Withdrawer:
+    """Who withdraws a request, at what time, and why: what its mark and its end say.
+
+    ``by`` is a holder name (a run's, or the operator command's); ``now`` is the
+    withdrawer's wall clock, in epoch seconds, which the mark's window starts at.
+    """
+
+    by: str
+    now: float
+    reason: str
 
 
 def withdraw(
     ledger: EvaluationLedger,
     cluster: Cluster,
     key: str,
+    withdrawer: Withdrawer,
     *,
-    reason: str,
     still: Callable[[LedgerEntry], bool] | None = None,
 ) -> WithdrawOutcome:
     """Cancel the request's job if it is live, then record its attempt as withdrawn.
 
+    ``withdrawer`` is named in the ``withdrawing`` mark and the withdrawn record.
     The record changes by compare-and-swap: when a submitter records its job
     between this read and this write, the write loses, and the next round
-    cancels the job it recorded. A failed or withdrawn attempt is final.
+    starts again from what it recorded. A failed or withdrawn attempt is final.
+    An attempt another withdrawal is under way on is ``WithdrawUnknown`` until
+    that one ends, or outlives its window and is undone.
 
     ``still`` is the condition the withdrawal holds under (the sweep's: no run
-    leases the request and its job has not settled). Every round tests it on
-    its own fresh read, before it cancels anything, and ends with ``Kept`` once
-    it fails, so a run that leased the request, or a collector that settled it,
-    after the caller decided keeps its job and its result.
+    leases the request and its job has not settled; a relinquish's: no other
+    run wants it). It is tested on the read the mark is decided on, and again
+    on the leases read after the mark, before anything is cancelled; once it
+    fails the mark is undone and the withdrawal ends ``Kept``, so a run that
+    leased the request, or a collector that settled it, keeps its job and its
+    result.
     """
     for _ in range(_ROUNDS):
-        outcome = _withdraw_once(ledger, cluster, key, reason=reason, still=still)
+        outcome = _withdraw_once(ledger, cluster, key, withdrawer, still=still)
         if outcome is not None:
             return outcome
     return WithdrawUnknown(key, "the request kept changing while it was withdrawn")
@@ -112,27 +157,94 @@ def _withdraw_once(
     ledger: EvaluationLedger,
     cluster: Cluster,
     key: str,
+    withdrawer: Withdrawer,
     *,
-    reason: str,
     still: Callable[[LedgerEntry], bool] | None,
 ) -> WithdrawOutcome | None:
-    """One read, check, cancel and swap; None when another writer won the swap."""
+    """One read, check and mark, then the second phase; None when another writer won a swap."""
     try:
         entry = ledger.read(key)
         if entry is None:
             return NotInLedger(key)
-        record = entry.record
-        if still is not None and not still(entry):
-            return Kept(key, record.operation_id)
-        if record.state.final:
-            return Withdrawn(key, record.operation_id, None, already=True)
-        cancelled = _cancel_live(cluster, record)
-        if isinstance(cancelled, WithdrawUnknown):
-            return cancelled
-        won = ledger.replace(entry, transitioned(record, LedgerState.WITHDRAWN, reason=reason))
+        marked = _mark(ledger, entry, withdrawer, still=still)
     except LedgerError as error:
         return WithdrawUnknown(key, str(error))
-    return Withdrawn(key, record.operation_id, cancelled) if won else None
+    if not isinstance(marked, LedgerRecord):
+        return marked
+    return _withdraw_marked(ledger, cluster, marked, still=still)
+
+
+def _mark(
+    ledger: EvaluationLedger,
+    entry: LedgerEntry,
+    withdrawer: Withdrawer,
+    *,
+    still: Callable[[LedgerEntry], bool] | None,
+) -> LedgerRecord | WithdrawOutcome | None:
+    """Mark the attempt withdrawing: the mark written, or how the round ended without one."""
+    record = entry.record
+    if record.state.final:
+        return Withdrawn(record.key, record.operation_id, None, already=True)
+    if record.withdrawal is not None:
+        if not withdrawal_expired(record, now=withdrawer.now):
+            return WithdrawUnknown(record.key, f"{record.withdrawal.by} is withdrawing it")
+        # Its withdrawer died part way: undo its mark, then decide afresh.
+        ledger.replace(entry, undone_withdrawal(record))
+        return None
+    if still is not None and not still(entry):
+        return Kept(record.key, record.operation_id)
+    marked = marked_withdrawing(
+        record,
+        by=withdrawer.by,
+        since=withdrawer.now,
+        until=withdrawer.now + WITHDRAWAL_WINDOW_SECONDS,
+        reason=withdrawer.reason,
+    )
+    return marked if ledger.replace(entry, marked) else None
+
+
+def _withdraw_marked(
+    ledger: EvaluationLedger,
+    cluster: Cluster,
+    marked: LedgerRecord,
+    *,
+    still: Callable[[LedgerEntry], bool] | None,
+) -> WithdrawOutcome | None:
+    """Read the leases again, then undo the mark or cancel the job and record it withdrawn."""
+    key = marked.key
+    before = undone_withdrawal(marked)
+    try:
+        entry = ledger.read(key)
+        if entry is None or entry.record != marked:
+            return None  # undone as expired by another process: decide afresh
+        if still is not None and not still(dataclasses.replace(entry, record=before)):
+            ledger.replace(entry, before)
+            return Kept(key, marked.operation_id)
+        cancelled = _cancel_live(cluster, before)
+        if isinstance(cancelled, WithdrawUnknown):
+            ledger.replace(entry, before)
+            return cancelled
+        withdrawal = marked.withdrawal
+        reason = withdrawal.reason if withdrawal is not None else "withdrawn"
+        won = ledger.replace(entry, transitioned(marked, LedgerState.WITHDRAWN, reason=reason))
+    except LedgerError as error:
+        _undo_quietly(ledger, marked)
+        return WithdrawUnknown(key, str(error))
+    return Withdrawn(key, marked.operation_id, cancelled) if won else None
+
+
+def _undo_quietly(ledger: EvaluationLedger, marked: LedgerRecord) -> None:
+    """Undo this withdrawal's mark if it still stands; one that cannot be undone expires."""
+    try:
+        entry = ledger.read(marked.key)
+        if entry is not None and entry.record == marked:
+            ledger.replace(entry, undone_withdrawal(marked))
+    except LedgerError:
+        _LOG.warning(
+            "evaluation ledger request %s stays marked withdrawing for up to %.0f s",
+            entry_id(marked.key),
+            WITHDRAWAL_WINDOW_SECONDS,
+        )
 
 
 def settle(
@@ -179,6 +291,9 @@ def _cancel_live(cluster: Cluster, record: LedgerRecord) -> str | None | Withdra
 
 
 _LOG = logging.getLogger(__name__)
+
+SWEEP_WITHDRAWER = "vibesys-sweep"
+"""How a sweep's withdrawal names its withdrawer: any attached run sweeps."""
 
 _ORPHANING_STATES = frozenset({LedgerState.FAILED, LedgerState.WITHDRAWN})
 
@@ -271,8 +386,11 @@ def sweep_unleased(
     """
 
     def sweepable(entry: LedgerEntry) -> bool:
-        if entry.record.state.settled:
+        record = entry.record
+        if record.state.settled:
             return False
+        if record.withdrawal is not None and not withdrawal_expired(record, now=now):
+            return False  # another withdrawal is under way; an expired one is undone
         return isinstance(lease_verdict(entry, now=now, grace_seconds=grace_seconds), Unleased)
 
     outcomes: list[WithdrawOutcome] = []
@@ -288,8 +406,10 @@ def sweep_unleased(
         if entry.unreadable_leases and not entry.record.state.settled:
             _warn_unreadable(entry)
         if sweepable(entry):
-            reason = f"no run leased it for {grace_seconds:.0f} s"
-            outcome = _sweep_one(ledger, cluster, entry, reason=reason, still=sweepable)
+            withdrawer = Withdrawer(
+                by=SWEEP_WITHDRAWER, now=now, reason=f"no run leased it for {grace_seconds:.0f} s"
+            )
+            outcome = _sweep_one(ledger, cluster, entry, withdrawer, still=sweepable)
             if outcome is not None:
                 outcomes.append(outcome)
     return tuple(outcomes)
@@ -299,12 +419,13 @@ def relinquish(
     ledger: EvaluationLedger,
     cluster: Cluster,
     key: str,
+    holder: Withdrawer,
     *,
-    holder: str,
     since: float,
 ) -> WithdrawOutcome:
     """Drop ``holder``'s lease on the request, and withdraw it unless another run still wants it.
 
+    ``holder.by`` is the run, whose lease is dropped and who withdraws.
     ``since`` is now less the grace period: a run whose lease lapsed after it
     may still come back for the request (``held_by_others``).
 
@@ -321,10 +442,10 @@ def relinquish(
     def unwanted(entry: LedgerEntry) -> bool:
         if entry.record.state.settled:
             return False
-        return not held_by_others(entry, holder=holder, since=since)
+        return not held_by_others(entry, holder=holder.by, since=since)
 
     try:
-        ledger.release(key, holder)
+        ledger.release(key, holder.by)
         entry = ledger.read(key)
     except LedgerError as error:
         return WithdrawUnknown(key, str(error))
@@ -332,9 +453,7 @@ def relinquish(
         return NotInLedger(key)
     if not unwanted(entry):
         return Kept(key, entry.record.operation_id)
-    outcome = _sweep_one(
-        ledger, cluster, entry, reason=f"its run {holder} stopped wanting it", still=unwanted
-    )
+    outcome = _sweep_one(ledger, cluster, entry, holder, still=unwanted)
     return Kept(key, entry.record.operation_id) if outcome is None else outcome
 
 
@@ -358,8 +477,8 @@ def _sweep_one(
     ledger: EvaluationLedger,
     cluster: Cluster,
     entry: LedgerEntry,
+    withdrawer: Withdrawer,
     *,
-    reason: str,
     still: Callable[[LedgerEntry], bool],
 ) -> WithdrawOutcome | None:
     """Settle an unleased request whose job ended, or withdraw it; None when nothing changed."""
@@ -373,16 +492,19 @@ def _sweep_one(
                 return WithdrawUnknown(key, str(error))
             return None  # settled failed, or completed and waiting for a run to collect it
     # Decided on ``entry``; ``withdraw`` tests ``still`` again on each of its own reads.
-    outcome = withdraw(ledger, cluster, key, reason=reason, still=still)
+    outcome = withdraw(ledger, cluster, key, withdrawer, still=still)
     return None if isinstance(outcome, Kept) else outcome
 
 
 __all__ = [
+    "SWEEP_WITHDRAWER",
+    "WITHDRAWAL_WINDOW_SECONDS",
     "Kept",
     "NotInLedger",
     "OrphanChecks",
     "WithdrawOutcome",
     "WithdrawUnknown",
+    "Withdrawer",
     "Withdrawn",
     "relinquish",
     "settle",

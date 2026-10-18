@@ -61,6 +61,7 @@ from vs_slurm.api import (
     SlurmJobRequest,
     SlurmJobStatus,
     SlurmSshTransport,
+    Withdrawer,
     Withdrawn,
     ledger_operation_id,
     withdraw,
@@ -397,7 +398,9 @@ async def test_two_runs_asking_for_one_request_share_one_job(tmp_path: Path) -> 
     assert len(world.scheduler.jobs) == 1
     entry = world.ledger.read(world.only_key())
     assert entry is not None
-    assert {lease.holder for lease in entry.leases} == {"run-0", "run-1"}
+    # Each run collected the shared job, then stopped using the request it completed.
+    assert entry.record.state is LedgerState.COMPLETED
+    assert entry.leases == ()
 
 
 @pytest.mark.parametrize("policy", [DEFAULT_POLICY, KEEPING], ids=["default", "keeping"])
@@ -454,9 +457,14 @@ async def test_a_job_another_run_still_wants_outlives_a_stop_until_that_run_stop
     assert world.scheduler.status(operation) is SlurmJobStatus.CANCELLED
 
 
-@pytest.mark.xfail(
-    strict=True, reason="#3173 review finding 1: an unasked withdrawal submits again"
-)
+def _submitted_attempt(world: _World) -> int | None:
+    """The attempt of the request whose job the ledger names, if it names one."""
+    entry = world.ledger.read(world.only_key())
+    if entry is None or entry.record.state is not LedgerState.SUBMITTED:
+        return None
+    return entry.record.attempt
+
+
 async def test_an_attached_run_submits_again_a_request_withdrawn_without_its_asking(
     tmp_path: Path,
 ) -> None:
@@ -474,9 +482,7 @@ async def test_an_attached_run_submits_again_a_request_withdrawn_without_its_ask
         world.ledger,
         world.scheduler,
         world.only_key(),
-        reason="removed",
-        by="vibesys-evals",
-        now=world.clock.now(),
+        Withdrawer(by="vibesys-evals", now=world.clock.now(), reason="removed"),
     )
 
     assert isinstance(outcome, Withdrawn)
@@ -485,7 +491,7 @@ async def test_an_attached_run_submits_again_a_request_withdrawn_without_its_ask
     world.clock.advance(LEASE_S / 3)
     polled = await yield_until(
         lambda: run.executor.poll("eval-1"),
-        lambda seen: len(world.scheduler.jobs) == 2 or seen.phase is PollPhase.ENDED,
+        lambda seen: _submitted_attempt(world) == 1 or seen.phase is PollPhase.ENDED,
         "the evaluation to submit its request again",
     )
     assert polled.phase is not PollPhase.ENDED
@@ -710,15 +716,18 @@ async def test_a_slow_submission_keeps_its_claim_by_renewing_it(tmp_path: Path) 
 
 
 async def _queued(run: _Run, handle_id: str) -> None:
-    """Return once the evaluation's job is queued, as the core's poll reads it."""
+    """Return once the evaluation's job is queued on the cluster, as the core's poll reads it.
+
+    A poll before the job exists reads QUEUED too, with a detail saying why
+    (awaiting admission); one of a queued job says nothing more.
+    """
     await yield_until(
         lambda: run.executor.poll(handle_id),
-        lambda seen: seen.phase is PollPhase.QUEUED,
+        lambda seen: seen.phase is PollPhase.QUEUED and not seen.detail,
         "the evaluation's job to queue",
     )
 
 
-@pytest.mark.xfail(strict=True, reason="#3173 review finding 2: an ended evaluation keeps its use")
 @pytest.mark.parametrize("ending", ["rejected", "timed_out", "succeeded"])
 async def test_an_evaluation_that_ended_stops_using_its_request(
     tmp_path: Path, ending: str
@@ -753,7 +762,6 @@ async def test_an_evaluation_that_ended_stops_using_its_request(
     assert world.scheduler.status(operation) is SlurmJobStatus.CANCELLED
 
 
-@pytest.mark.xfail(strict=True, reason="#3173 review finding 3: a resume never registers its use")
 async def test_cancelling_one_of_two_resumed_evaluations_of_one_content_keeps_their_job(
     tmp_path: Path,
 ) -> None:
@@ -778,9 +786,6 @@ async def test_cancelling_one_of_two_resumed_evaluations_of_one_content_keeps_th
     assert world.scheduler.status(operation) is SlurmJobStatus.CANCELLED
 
 
-@pytest.mark.xfail(
-    strict=True, reason="#3173 review finding 5: an unknown withdrawal loses its key"
-)
 async def test_a_cancel_whose_withdrawal_ended_unknown_withdraws_it_when_tried_again(
     tmp_path: Path,
 ) -> None:

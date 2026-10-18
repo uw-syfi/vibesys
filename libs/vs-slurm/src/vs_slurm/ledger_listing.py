@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, assert_never
 from pydantic import BaseModel, ConfigDict
 
 from .cluster_types import ClusterObservation, ClusterUnknown
-from .ledger import LedgerEntry, LedgerError, LedgerState
+from .ledger import LedgerEntry, LedgerError, LedgerRecord, LedgerState
 from .scheduler_states import SlurmJobStatus
 
 if TYPE_CHECKING:
@@ -161,29 +161,39 @@ def _row(entry: LedgerEntry, cluster: Cluster, *, now: float) -> LedgerRow:
         result_location=(
             None if job is None else PurePosixPath(job.remote_workspace).parent.as_posix()
         ),
-        detail=detail if detail is not None else record.reason,
+        detail=detail if detail is not None else _stated_reason(record),
     )
+
+
+def _stated_reason(record: LedgerRecord) -> str | None:
+    """Why the attempt ended, or the withdrawal under way on it."""
+    if record.withdrawal is not None:
+        return f"being withdrawn by {record.withdrawal.by}: {record.withdrawal.reason}"
+    return record.reason
 
 
 def _phase(
     entry: LedgerEntry, cluster: Cluster
 ) -> tuple[EntryPhase, ClusterObservation | None, str | None]:
     record = entry.record
-    match record.state:
+    # A withdrawal under way reads as the state it would go back to, until it ends.
+    state = record.withdrawal.prior if record.withdrawal is not None else record.state
+    match state:
         case LedgerState.WITHDRAWN:
             return EntryPhase.WITHDRAWN, None, None
         case LedgerState.COMPLETED:
             return EntryPhase.DONE, None, None
         case LedgerState.FAILED:
             return EntryPhase.FAILED, None, None
-        case LedgerState.SUBMITTING | LedgerState.SUBMITTED:
+        # A withdrawal's prior state is never withdrawing (``LedgerWithdrawal``).
+        case LedgerState.SUBMITTING | LedgerState.SUBMITTED | LedgerState.WITHDRAWING:
             pass
         case _:
-            assert_never(record.state)
+            assert_never(state)
     observed = cluster.inspect(record.operation_id)
     match observed:
         case ClusterUnknown(reason=reason):
-            if record.state is LedgerState.SUBMITTING:
+            if state is LedgerState.SUBMITTING:
                 return EntryPhase.CLAIMED, None, None
             return EntryPhase.UNKNOWN, None, reason
         case ClusterObservation(status=status):
