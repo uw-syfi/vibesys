@@ -33,8 +33,9 @@ from vs_slurm.api import ClusterObservation, SlurmJobStatus
 if TYPE_CHECKING:
     from pathlib import Path
 
-# Loop turns after the steps for a task left behind to reach the scheduler.
+# Loop turns, then virtual seconds, after the steps for work left behind to reach the scheduler.
 _SETTLE_TURNS = 20
+_SETTLE_S = 10.0
 
 
 def _request(snapshot: str) -> EvaluationRequest:
@@ -56,7 +57,9 @@ def _request(snapshot: str) -> EvaluationRequest:
     )
 
 
-async def _queued_after_close(root: Path, turns_before_close: int) -> list[str]:
+async def _queued_after_close(
+    clock: VirtualClock, root: Path, turns_before_close: int
+) -> list[str]:
     """Submit, close ``turns_before_close`` loop turns later, and read what is still queued."""
     cluster = ScenarioCluster()
     cluster.states = (SlurmJobStatus.PENDING,)  # only a cancel ends a job
@@ -74,6 +77,7 @@ async def _queued_after_close(root: Path, turns_before_close: int) -> list[str]:
     await submitting
     for _ in range(_SETTLE_TURNS):
         await yield_now()
+    await clock.sleep(_SETTLE_S)
     queued = []
     for operation in cluster.submissions:
         observed = cluster.inspect(operation)
@@ -95,9 +99,10 @@ def test_no_job_is_left_queued_by_a_submission_that_raced_the_close(
 ) -> None:
     root = tmp_path_factory.mktemp("stack")
 
+    clock = VirtualClock()
     queued = run_virtual(
-        VirtualClock(),
-        _queued_after_close(root, turns_before_close),
+        clock,
+        _queued_after_close(clock, root, turns_before_close),
         schedule_seed=schedule_seed,
     )
 
