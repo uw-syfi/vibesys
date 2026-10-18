@@ -18,7 +18,7 @@
  * longer offers it for this run instance (`waitRefused`).
  */
 
-import type {RunStatus} from '@vibesys/contracts';
+import type {RunEvent, RunStatus} from '@vibesys/contracts';
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun, RunEnd} from '@vibesys/hosts';
 import type {LogListOutcome, LogView} from '@vibesys/logs';
@@ -119,6 +119,31 @@ export type HistoryReply =
   | {readonly kind: 'unsupported'}
   | {readonly kind: 'failed'; readonly message: string};
 
+/** A bounded read of the opened step's transcript, separate from the run-level summary. */
+export type SpanDetail =
+  | {readonly kind: 'idle'}
+  | {
+      readonly kind: 'reading';
+      readonly spanId: string;
+      readonly token: number;
+      readonly from: number;
+      readonly events: readonly RunEvent[];
+      readonly total: number;
+    }
+  | {readonly kind: 'ready'; readonly spanId: string; readonly core: CoreState}
+  | {readonly kind: 'failed'; readonly spanId: string; readonly message: string};
+
+export type SpanDetailReply =
+  | {
+      readonly kind: 'page';
+      readonly events: readonly RunEvent[];
+      readonly next: number;
+      readonly complete: boolean;
+      readonly total: number;
+    }
+  | {readonly kind: 'unsupported'}
+  | {readonly kind: 'failed'; readonly message: string};
+
 /** The page's own stop flow: confirming, or a stop sent and waiting for the run to end. */
 export type StopFlow =
   | {readonly kind: 'idle'}
@@ -196,6 +221,7 @@ export interface RunPageState {
   readonly wantsHistory: boolean;
   /** An ended run's recorded events, read into `run` for its transcript. */
   readonly history: RunHistory;
+  readonly detail: SpanDetail;
   /** Why the attached run refused to wait for its quota; the wait is not offered again for it. */
   readonly waitRefused: string | null;
   readonly next: number;
@@ -249,7 +275,9 @@ export type RunPageAction =
       readonly wallMs: number;
     }
   /** A pane needs the run's transcript, which only its history holds: read it. */
-  | {readonly type: 'need-history'};
+  | {readonly type: 'need-history'}
+  | {readonly type: 'need-span'; readonly spanId: string}
+  | {readonly type: 'span'; readonly token: number; readonly reply: SpanDetailReply};
 
 export type RunPageRequest =
   | {readonly kind: 'stop'; readonly force: boolean}
@@ -271,6 +299,13 @@ export type RunPageRequest =
   | {
       readonly kind: 'read-history';
       readonly token: number;
+      readonly from: number;
+      readonly max: number;
+    }
+  | {
+      readonly kind: 'read-span';
+      readonly token: number;
+      readonly spanId: string;
       readonly from: number;
       readonly max: number;
     };
@@ -311,6 +346,7 @@ export function runPageInitial(seed: RunPageSeed): RunPageState {
     summary: {kind: 'idle'},
     wantsHistory: false,
     history: {kind: 'idle'},
+    detail: {kind: 'idle'},
     waitRefused: null,
     next: 1,
   };
@@ -510,8 +546,10 @@ function endedHistoryFor(state: RunPageState, status: RunStatus): RunPageStep {
 function withRecord(state: RunPageState, record: RunRecord): RunPageStep {
   const instanceChanged = recordInstance(state.record) !== recordInstance(record);
   const fenced: RunPageState = instanceChanged
-    ? {...state, record, logs: {kind: 'idle'}, views: {}, selected: null}
-    : {...state, record};
+    ? {...state, record, logs: {kind: 'idle'}, views: {}, selected: null, detail: {kind: 'idle'}}
+    : record.kind === 'live'
+      ? {...state, record, detail: {kind: 'idle'}}
+      : {...state, record};
   const link = linked(fenced);
   const step = recordStep(link.state, record);
   const history = historyFor(step.state);
@@ -616,6 +654,90 @@ function withNeedHistory(state: RunPageState): RunPageStep {
     return {state: wanted, requests: []};
   }
   return wanted.history.kind === 'idle' ? startReading(wanted) : {state: wanted, requests: []};
+}
+
+/** Read only the opened step's transcript. A legacy host takes the full-history path. */
+function withNeedSpan(state: RunPageState, spanId: string): RunPageStep {
+  if (state.record.kind !== 'ended' || state.summary.kind !== 'ready') {
+    return {state, requests: []};
+  }
+  if (state.history.kind !== 'idle') return {state, requests: []};
+  if (
+    state.detail.kind !== 'idle' &&
+    state.detail.kind !== 'failed' &&
+    state.detail.spanId === spanId
+  ) {
+    return {state, requests: []};
+  }
+  const token = state.next;
+  return {
+    state: {
+      ...state,
+      next: token + 1,
+      detail: {kind: 'reading', spanId, token, from: FIRST_HISTORY_SEQUENCE, events: [], total: 0},
+    },
+    requests: [
+      {kind: 'read-span', token, spanId, from: FIRST_HISTORY_SEQUENCE, max: HISTORY_PAGE_EVENTS},
+    ],
+  };
+}
+
+function withSpan(state: RunPageState, token: number, reply: SpanDetailReply): RunPageStep {
+  const {detail} = state;
+  if (detail.kind !== 'reading' || detail.token !== token) return {state, requests: []};
+  if (reply.kind === 'unsupported') return withNeedHistory({...state, detail: {kind: 'idle'}});
+  if (reply.kind === 'failed') {
+    return {
+      state: {...state, detail: {kind: 'failed', spanId: detail.spanId, message: reply.message}},
+      requests: [],
+    };
+  }
+  const events = [...detail.events, ...reply.events];
+  if (reply.complete) {
+    return {
+      state: {
+        ...state,
+        detail: {
+          kind: 'ready',
+          spanId: detail.spanId,
+          core: reduceEventBatch(initialCoreState(), events),
+        },
+      },
+      requests: [],
+    };
+  }
+  if (reply.next <= detail.from || reply.events.length === 0) {
+    return {
+      state: {
+        ...state,
+        detail: {kind: 'failed', spanId: detail.spanId, message: 'the span page made no progress'},
+      },
+      requests: [],
+    };
+  }
+  const nextToken = state.next;
+  return {
+    state: {
+      ...state,
+      next: nextToken + 1,
+      detail: {
+        ...detail,
+        token: nextToken,
+        from: reply.next,
+        events,
+        total: reply.total,
+      },
+    },
+    requests: [
+      {
+        kind: 'read-span',
+        token: nextToken,
+        spanId: detail.spanId,
+        from: reply.next,
+        max: HISTORY_PAGE_EVENTS,
+      },
+    ],
+  };
 }
 
 function recordStep(next: RunPageState, record: RunRecord): RunPageStep {
@@ -911,6 +1033,10 @@ function liveStep(state: RunPageState, action: RunPageAction): RunPageStep | nul
       return withSummary(state, action.token, action.reply, action.wallMs);
     case 'need-history':
       return withNeedHistory(state);
+    case 'need-span':
+      return withNeedSpan(state, action.spanId);
+    case 'span':
+      return withSpan(state, action.token, action.reply);
     default:
       return null;
   }

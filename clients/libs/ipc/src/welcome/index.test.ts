@@ -52,6 +52,7 @@ const VALID_ARGUMENTS: Readonly<
   [WELCOME_CHANNELS.releaseRun]: [],
   [WELCOME_CHANNELS.readEvents]: ['local', '/srv/project', 'run-1', 0, 100],
   [WELCOME_CHANNELS.readSummary]: ['local', '/srv/project', 'run-1'],
+  [WELCOME_CHANNELS.readSpan]: ['local', '/srv/project', 'run-1', 'op:turn', 1, 100],
   [WELCOME_CHANNELS.preferences]: [],
   [WELCOME_CHANNELS.setAppearance]: [{mode: 'dark', light: 'mist', dark: 'midnight'}],
   [WELCOME_CHANNELS.setNotifications]: [false],
@@ -118,6 +119,22 @@ describe('parseWelcomeRequest', () => {
     expect(() =>
       parseWelcomeRequest(WELCOME_CHANNELS.resume, ['local', '/p', '-oProxyCommand']),
     ).toThrow('a run id is 1-128 lowercase');
+  });
+
+  test('a span read names one trace span and starts at a positive sequence', () => {
+    expect(() =>
+      parseWelcomeRequest(WELCOME_CHANNELS.readSpan, [
+        'local',
+        '/p',
+        'run-1',
+        'other:turn',
+        1,
+        100,
+      ]),
+    ).toThrow('the span id');
+    expect(() =>
+      parseWelcomeRequest(WELCOME_CHANNELS.readSpan, ['local', '/p', 'run-1', 'op:turn', 0, 100]),
+    ).toThrow('positive');
   });
 
   test('checkout changes and cancellations carry the same validated operation token', () => {

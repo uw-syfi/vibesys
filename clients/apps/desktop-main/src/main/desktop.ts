@@ -40,6 +40,7 @@ export interface DesktopDeps {
     | 'complete'
     | 'harnesses'
     | 'readSummary'
+    | 'readSpan'
     | 'logs'
     | 'recent'
     | 'releaseLogs'
@@ -244,6 +245,15 @@ export class Desktop {
       }
       case 'read-summary':
         return hosts.readSummary(request.host, request.project, request.runId);
+      case 'read-span':
+        return hosts.readSpan(
+          request.host,
+          request.project,
+          request.runId,
+          request.spanId,
+          request.from,
+          request.max,
+        );
       case 'release-run':
         this.#deps.window.releaseSurfaceRun();
         return null;

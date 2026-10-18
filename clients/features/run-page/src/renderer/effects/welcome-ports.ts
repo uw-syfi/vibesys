@@ -11,6 +11,7 @@ import {type RunStatus, validateRunEvent} from '@vibesys/contracts';
 import {
   type DesktopBridge,
   type RunHistoryPage,
+  type RunSpanPage,
   type RunSummaryResult,
   settled,
   type WelcomeBridge,
@@ -20,7 +21,12 @@ import type {LogListOutcome, LogReadInput, LogReadOutcome, LogTransport} from '@
 import {WebSession, type WebSessionOptions} from '@vibesys/run-session';
 import {exactResumeRunId, type RunRef} from '@vibesys/runs';
 import type {AbortSignalLike} from '@vibesys/transport';
-import {type HistoryReply, type SummaryReply, summaryFacts} from '../../state/index.js';
+import {
+  type HistoryReply,
+  type SpanDetailReply,
+  type SummaryReply,
+  summaryFacts,
+} from '../../state/index.js';
 import type {LiveSession, SessionObserver} from './live-session.js';
 import {type PortMessages, welcomeRunBridge} from './run-connection.js';
 import type {RunPagePorts} from './store.js';
@@ -40,6 +46,7 @@ export type RunPageBridge = Pick<
   | 'onWake'
   | 'readEvents'
   | 'readSummary'
+  | 'readSpan'
 >;
 
 /** The page the session runs in: where the preload's ports arrive, and the app's session wiring. */
@@ -79,6 +86,15 @@ function historyReply(page: RunHistoryPage): HistoryReply {
       kind: 'failed',
       message: `the run's history holds an unreadable event: ${String(error)}`,
     };
+  }
+}
+
+function spanReply(page: RunSpanPage): SpanDetailReply {
+  if (page.kind === 'unsupported') return page;
+  try {
+    return {...page, events: page.events.map(validateRunEvent)};
+  } catch (error) {
+    return {kind: 'failed', message: `the span holds an unreadable event: ${String(error)}`};
   }
 }
 
@@ -211,6 +227,12 @@ export function welcomeRunPorts(
     readSummary: async status => {
       const result = await settled(bridge.readSummary(host, target.project, target.run.runId));
       return summaryReply(result, target.run.runId, status);
+    },
+    readSpan: async (spanId, from, max) => {
+      const result = await settled(
+        bridge.readSpan(host, target.project, target.run.runId, spanId, from, max),
+      );
+      return result.ok ? spanReply(result.value) : {kind: 'failed', message: result.error};
     },
     resumeEnded: () =>
       void settled(bridge.resume(host, target.project, exactResumeRunId(target.run.runId))),

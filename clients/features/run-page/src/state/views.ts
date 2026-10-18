@@ -496,8 +496,8 @@ export function historyLoading(state: RunPageState): HistoryProgress | null {
 
 /**
  * How far the transcript of a run opened from its summary has been read while it is read, else
- * null. The run level is final, but the transcript, the agents' models and the turns' tool output
- * are in the history, so the panes that show them wait with this progress (`HistoryLoading`).
+ * null. This is the fallback for a host without span reads: an opened step waits for the whole
+ * transcript, while the run level remains final and usable.
  */
 export function transcriptLoading(state: RunPageState): HistoryProgress | null {
   if (state.record.kind !== 'ended' || state.history.kind !== 'reading') return null;

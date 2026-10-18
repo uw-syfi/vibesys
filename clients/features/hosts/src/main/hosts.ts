@@ -31,6 +31,7 @@ import type {
   PathCompletion,
   RunHistoryPage,
   RunLogsRequest,
+  RunSpanPage,
   RunSummary,
   RunSummaryResult,
   SummaryTokens,
@@ -405,6 +406,44 @@ export class Hosts {
         return {kind: 'unsupported'};
       }
       throw plain(error, `Could not read the history of run ${runId}`);
+    }
+  }
+
+  /** One bounded page of an opened span's recorded events; older helpers may not serve it. */
+  async readSpan(
+    id: HostId,
+    project: string,
+    runId: string,
+    spanId: string,
+    from: number,
+    max: number,
+  ): Promise<RunSpanPage> {
+    await using lease = await this.connection(id);
+    try {
+      await lease.connection.ready();
+      if (lease.connection.features?.includes('run_span_events') !== true) {
+        return {kind: 'unsupported'};
+      }
+      const reply = await lease.connection.request({
+        type: 'runs.events_for_span',
+        project,
+        run_id: runId,
+        span_id: spanId,
+        from_sequence: from,
+        max,
+      });
+      return {
+        kind: 'page',
+        events: reply.events,
+        next: reply.next_sequence,
+        complete: reply.complete,
+        total: reply.total,
+      };
+    } catch (error) {
+      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
+        return {kind: 'unsupported'};
+      }
+      throw plain(error, `Could not read span ${spanId} of run ${runId}`);
     }
   }
 

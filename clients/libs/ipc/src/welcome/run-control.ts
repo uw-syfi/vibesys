@@ -14,6 +14,7 @@ export const RUN_CONTROL_CHANNELS = {
   releaseRun: 'vibesys:welcome:release-run',
   readEvents: 'vibesys:welcome:read-events',
   readSummary: 'vibesys:welcome:read-summary',
+  readSpan: 'vibesys:welcome:read-span',
 } as const;
 
 /** The most events one history page may ask for. */
@@ -78,6 +79,17 @@ export type RunSummaryResult =
   | {readonly kind: 'summary'; readonly summary: RunSummary}
   | {readonly kind: 'unsupported'};
 
+/** One bounded page of a span's recorded, non-trace events. */
+export type RunSpanPage =
+  | {
+      readonly kind: 'page';
+      readonly events: readonly unknown[];
+      readonly next: number;
+      readonly complete: boolean;
+      readonly total: number;
+    }
+  | {readonly kind: 'unsupported'};
+
 /**
  * The window message type that hands the shell page one run connection's port: `connectRun(id)`
  * makes the preload post `{type: RUN_PORT_MESSAGE, id}` to the page with the port as its transfer,
@@ -115,6 +127,14 @@ export interface RunControlWelcomeBridge {
     project: string,
     runId: string,
   ): Promise<WelcomeResult<RunSummaryResult>>;
+  readSpan(
+    host: HostKey,
+    project: string,
+    runId: string,
+    spanId: string,
+    fromSequence: number,
+    max: number,
+  ): Promise<WelcomeResult<RunSpanPage>>;
 }
 
 export type RunControlRequest =
@@ -146,6 +166,15 @@ export type RunControlRequest =
       readonly host: HostId;
       readonly project: string;
       readonly runId: string;
+    }
+  | {
+      readonly kind: 'read-span';
+      readonly host: HostId;
+      readonly project: string;
+      readonly runId: string;
+      readonly spanId: string;
+      readonly from: number;
+      readonly max: number;
     };
 
 function forceStop(value: unknown): boolean {
@@ -156,6 +185,19 @@ function forceStop(value: unknown): boolean {
 function sequence(value: unknown): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
     throw new Error('the first sequence to read must be a non-negative integer');
+  }
+  return value;
+}
+
+function positiveSequence(value: unknown): number {
+  const parsed = sequence(value);
+  if (parsed === 0) throw new Error('the first span sequence must be positive');
+  return parsed;
+}
+
+function spanId(value: unknown): string {
+  if (typeof value !== 'string' || !/^(flow|op):\S+$/.test(value)) {
+    throw new Error('the span id must name a flow or operation span');
   }
   return value;
 }
@@ -173,7 +215,7 @@ export function parseRunControlRequest(
   channel: ChannelOf<typeof RUN_CONTROL_CHANNELS>,
   args: readonly unknown[],
 ): RunControlRequest {
-  const [first, second, third, fourth, fifth] = args;
+  const [first, second, third, fourth, fifth, sixth] = args;
   switch (channel) {
     case RUN_CONTROL_CHANNELS.attach:
       return {kind: 'attach', host: hostFromKey(first), instance: instance(second, 'attach to')};
@@ -208,6 +250,16 @@ export function parseRunControlRequest(
         host: hostFromKey(first),
         project: project(second),
         runId: exactResumeRunId(third),
+      };
+    case RUN_CONTROL_CHANNELS.readSpan:
+      return {
+        kind: 'read-span',
+        host: hostFromKey(first),
+        project: project(second),
+        runId: exactResumeRunId(third),
+        spanId: spanId(fourth),
+        from: positiveSequence(fifth),
+        max: pageSize(sixth),
       };
   }
 }

@@ -2,6 +2,7 @@ import {describe, expect, test} from 'bun:test';
 import {readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import type {RunEvent, RunOverview, Span} from '@vibesys/contracts';
+import {fixtureNamed} from '@vibesys/run-fixtures';
 import {initialCoreState, reduceEventBatch} from '@vibesys/run-state';
 import {CandidateFold} from '@vibesys/run-state/candidates';
 import {EMPTY_TRACE, foldTrace, traceSpans} from '@vibesys/run-state/trace';
@@ -10,6 +11,7 @@ import {implementerOutcomes} from './idea-outcomes.js';
 import {EMPTY_TRACE_LOG, traceAt, traceStep} from './live.js';
 import {type RunPageState, runPageInitial, runPageStep} from './run-page.js';
 import {summaryFacts, type WireSummary, type WireTokens} from './run-summary.js';
+import {turnTranscript} from './turn-transcript.js';
 import {historyLoading, historyProblem, traceArrival, transcriptLoading} from './views.js';
 
 /** The shared fixture: a journal and the summary the helper folds from it (`runs.summary`). */
@@ -124,6 +126,17 @@ describe('a run seeded from its summary holds what the whole journal holds for t
   });
 });
 
+test('one span read reconstructs its tool transcript without reading the other 60 run events', () => {
+  const events = fixtureNamed('finished-run').events;
+  const spanId = 'op:w5-turn';
+  const trace = foldTrace(EMPTY_TRACE, events);
+  const whole = reduceEventBatch(initialCoreState(), events);
+  const selected = events.filter(event => event.span_id === spanId);
+  const detail = reduceEventBatch(initialCoreState(), selected);
+  expect(selected.length).toBeLessThan(events.length);
+  expect(turnTranscript(trace, detail, spanId)).toEqual(turnTranscript(trace, whole, spanId));
+});
+
 function initial(): RunPageState {
   return runPageInitial({
     identity: {host: 'ssh:host-b', runId: RUN_ID},
@@ -193,6 +206,75 @@ describe('an ended run opened from its summary', () => {
     expect(traceArrival(needed.state)).toBe('arrived');
     // Asking again while it reads, or once it is read, asks for nothing more.
     expect(runPageStep(needed.state, {type: 'need-history'}).requests).toEqual([]);
+  });
+
+  test('reads only an opened step span and keeps the summary unchanged', () => {
+    const {state} = opened();
+    const spanId = 'op:000001/implementer.1';
+    const wanted = runPageStep(state.state, {type: 'need-span', spanId});
+    expect(wanted.requests).toMatchObject([{kind: 'read-span', spanId, from: 1, max: 2000}]);
+    expect(wanted.state.history).toEqual({kind: 'idle'});
+    expect(wanted.state.run).toBe(state.state.run);
+    const first = wanted.requests[0];
+    if (first?.kind !== 'read-span') throw new Error('no span read');
+    const page = runPageStep(wanted.state, {
+      type: 'span',
+      token: first.token,
+      reply: {
+        kind: 'page',
+        events: [fixture.events[5] as RunEvent],
+        next: 7,
+        complete: false,
+        total: 2,
+      },
+    });
+    expect(page.requests).toMatchObject([{kind: 'read-span', spanId, from: 7}]);
+    const last = page.requests[0];
+    if (last?.kind !== 'read-span') throw new Error('no next page');
+    const complete = runPageStep(page.state, {
+      type: 'span',
+      token: last.token,
+      reply: {
+        kind: 'page',
+        events: [fixture.events[18] as RunEvent],
+        next: 20,
+        complete: true,
+        total: 2,
+      },
+    });
+    expect(complete.state.detail).toMatchObject({kind: 'ready', spanId});
+    expect(complete.state.history).toEqual({kind: 'idle'});
+    expect(complete.state.run).toBe(state.state.run);
+  });
+
+  test('an older helper falls back to the full history when a span is opened', () => {
+    const {state} = opened();
+    const needed = runPageStep(state.state, {type: 'need-span', spanId: 'op:turn'});
+    const request = needed.requests[0];
+    if (request?.kind !== 'read-span') throw new Error('no span read');
+    const unsupported = runPageStep(needed.state, {
+      type: 'span',
+      token: request.token,
+      reply: {kind: 'unsupported'},
+    });
+    expect(unsupported.requests.map(each => each.kind)).toContain('read-history');
+    expect(unsupported.state.history.kind).toBe('reading');
+    expect(unsupported.state.run).toBe(state.state.run);
+  });
+
+  test('a late page for a previously opened step cannot replace the selected detail', () => {
+    const {state} = opened();
+    const first = runPageStep(state.state, {type: 'need-span', spanId: 'op:first'});
+    const firstRequest = first.requests[0];
+    if (firstRequest?.kind !== 'read-span') throw new Error('no first span read');
+    const second = runPageStep(first.state, {type: 'need-span', spanId: 'op:second'});
+    const late = runPageStep(second.state, {
+      type: 'span',
+      token: firstRequest.token,
+      reply: {kind: 'page', events: [], next: 1, complete: true, total: 0},
+    });
+    expect(late.state).toBe(second.state);
+    expect(late.state.detail).toMatchObject({kind: 'reading', spanId: 'op:second'});
   });
 
   test('remembers a transcript request made before the summary arrives', () => {

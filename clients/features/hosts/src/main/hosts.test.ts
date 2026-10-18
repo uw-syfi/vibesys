@@ -472,6 +472,38 @@ describe('Hosts.readEvents page size', () => {
   });
 });
 
+describe('Hosts.readSpan', () => {
+  test('does not send a span request to a helper without run_span_events', async () => {
+    const link = new FakeLink();
+    link.helper.features.delete('run_span_events');
+    const subject = completionSubject(link);
+    await using _manager = subject.manager;
+
+    await expect(
+      subject.hosts.readSpan(LOCAL, '/srv/project', 'run-1', 'op:turn', 1, 100),
+    ).resolves.toEqual({kind: 'unsupported'});
+    expect(link.helper.requests.filter(request => request.type === 'runs.events_for_span')).toEqual(
+      [],
+    );
+  });
+
+  test('requests only the selected span with a bounded page', async () => {
+    const link = new FakeLink();
+    link.helper.host.projects.set('/srv/project', ['mpmc']);
+    const subject = completionSubject(link);
+    await using _manager = subject.manager;
+
+    await subject.hosts
+      .readSpan(LOCAL, '/srv/project', 'run-1', 'op:turn', 13, 100)
+      .catch(() => undefined);
+    expect(
+      link.helper.requests.filter(request => request.type === 'runs.events_for_span'),
+    ).toMatchObject([
+      {project: '/srv/project', run_id: 'run-1', span_id: 'op:turn', from_sequence: 13, max: 100},
+    ]);
+  });
+});
+
 describe('Hosts.readSummary', () => {
   const tally = (input: number | null) => ({
     input,

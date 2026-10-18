@@ -104,6 +104,7 @@ function fakePorts(stops: boolean[], app = new FakeApp()): RunPagePorts {
     },
     readHistory: () => Promise.resolve({kind: 'unsupported'}),
     readSummary: () => Promise.resolve({kind: 'unsupported'}),
+    readSpan: () => Promise.resolve({kind: 'unsupported'}),
     resumeEnded: ignore,
     openWindow: ignore,
     now: () => app.wallMs,

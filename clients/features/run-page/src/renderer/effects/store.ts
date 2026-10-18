@@ -21,6 +21,7 @@ import {
   type RunPageState,
   runPageInitial,
   runPageStep,
+  type SpanDetailReply,
   type SummaryReply,
 } from '../../state/index.js';
 import {type OpenSession, SessionHolder} from './live-session.js';
@@ -45,6 +46,7 @@ export interface RunPagePorts {
   readHistory(from: number, max: number): Promise<HistoryReply>;
   /** The run's summary: its run level without its history. */
   readSummary(status: RunStatus): Promise<SummaryReply>;
+  readSpan(spanId: string, from: number, max: number): Promise<SpanDetailReply>;
   /** Resume an ended run that its end record says can resume. */
   resumeEnded(fromRound: number | null): void;
   openWindow(): void;
@@ -168,6 +170,18 @@ function readSummary(
     .then(settle, (error: unknown) => settle({kind: 'failed', message: String(error)}));
 }
 
+function readSpan(
+  ports: RunPagePorts,
+  request: Extract<RunPageRequest, {readonly kind: 'read-span'}>,
+  dispatch: Dispatch,
+): void {
+  const settle = (reply: SpanDetailReply): void =>
+    dispatch({type: 'span', token: request.token, reply});
+  void ports
+    .readSpan(request.spanId, request.from, request.max)
+    .then(settle, (error: unknown) => settle({kind: 'failed', message: String(error)}));
+}
+
 /** List the run's log streams; a listing that throws settles as a transport failure. */
 function listLogs(
   ports: RunPagePorts,
@@ -183,8 +197,11 @@ function listLogs(
     );
 }
 
-function performCommand(ports: RunPagePorts, request: RunPageRequest): void {
+function performCommand(ports: RunPagePorts, request: RunPageRequest, dispatch: Dispatch): void {
   switch (request.kind) {
+    case 'read-span':
+      readSpan(ports, request, dispatch);
+      return;
     case 'resume-ended':
       ports.resumeEnded(request.fromRound);
       return;
@@ -267,7 +284,7 @@ export function createRunPageStore(
         });
         return;
       default:
-        performCommand(ports, request);
+        performCommand(ports, request, dispatch);
     }
   };
   const store = createStore<RunPageState, RunPageAction, RunPageRequest>(

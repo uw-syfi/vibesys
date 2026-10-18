@@ -49,6 +49,7 @@ export {
   type RunHistoryPage,
   type RunInputs,
   type RunOptions,
+  type RunSpanPage,
   type RunSummary,
   type RunSummaryResult,
   runOfWindow,

@@ -22,6 +22,7 @@ import {
   clockCarried,
   clockStart,
   endedView,
+  type HistoryProgress,
   headerView,
   historyLoading,
   historyProblem,
@@ -35,11 +36,9 @@ import {
   type RunPageAction,
   type RunPageState,
   resolveZoom,
-  roleLabel,
   routeLevel,
   runNow,
   runPhase,
-  stepLabel,
   stopBannerView,
   streamLines,
   timelineView,
@@ -56,15 +55,11 @@ import type {ViewBase, Zoom} from './views/props.js';
 type Dispatch = (action: RunPageAction) => void;
 
 function LevelBody(props: {
-  readonly transcript: ReturnType<typeof transcriptLoading>;
   readonly deep: boolean;
   readonly route: Route;
   readonly zoomed: ResolvedZoom;
   readonly level: LevelProps;
 }): JSX.Element | null {
-  if (props.transcript !== null && (props.deep || props.route.mode === 'agents')) {
-    return <HistoryLoading progress={props.transcript} />;
-  }
   if (
     props.zoomed.step === null &&
     props.zoomed.agent === null &&
@@ -319,11 +314,9 @@ function crumbs(zoomed: ResolvedZoom, route: Route, zoom: Zoom): Crumb[] {
   const opened: Route = {...route, step: null, item: null};
   if (zoomed.idea !== null)
     items.push({id: 'idea', label: markdownToPlain(zoomed.idea.title), to: opened});
-  if (zoomed.agent !== null) {
-    items.push({id: 'agent', label: roleLabel(zoomed.agent.role), to: opened});
-  }
+  if (zoomed.agent !== null) items.push({id: 'agent', label: zoomed.agent.role, to: opened});
   if (zoomed.step !== null) {
-    const label = stepLabel(zoomed.step);
+    const label = zoomed.step.role ?? zoomed.step.title;
     items.push({id: 'step', label, to: {...route, item: null}});
   }
   if (zoomed.item !== null) items.push({id: 'item', label: zoomed.item, to: route});
@@ -334,13 +327,35 @@ function crumbs(zoomed: ResolvedZoom, route: Route, zoom: Zoom): Crumb[] {
   );
 }
 
-/**
- * The Run screen: a fixed page whose header holds the run's title, status, facts and controls and
- * the one-line time bar, then the banners, the performance row (the hero and its chart: the same
- * element at every level, singling out the open idea) and the level the route names: the run (the
- * Ideas, Timeline, Agents or Logs face, and Now) or a level below it, at most two side by side. `model` is the run at the view's sequence (`createRunReader`); `route` is the zoom
- * (`zoomMachine`), which `zoom` moves.
- */
+/** The core for an opened step, or the loading/error state of its on-demand read. */
+function openedDetail(
+  state: RunPageState,
+  route: Route,
+  core: CoreState | null,
+): {core: CoreState | null; loading: HistoryProgress | null; problem: string | null} {
+  if (
+    state.record.kind !== 'ended' ||
+    state.summary.kind !== 'ready' ||
+    state.history.kind !== 'idle' ||
+    route.step === null
+  ) {
+    return {core, loading: null, problem: null};
+  }
+  const detail = state.detail;
+  if (detail.kind === 'ready' && detail.spanId === route.step) {
+    return {core: detail.core, loading: null, problem: null};
+  }
+  if (detail.kind === 'failed' && detail.spanId === route.step) {
+    return {core, loading: null, problem: detail.message};
+  }
+  const loading: HistoryProgress =
+    detail.kind === 'reading' && detail.spanId === route.step
+      ? {events: detail.events.length, bytes: 0, total: detail.total || null}
+      : {events: 0, bytes: 0, total: null};
+  return {core, loading, problem: null};
+}
+
+/** The run's header, overview, and current level over its summary and selected detail. */
 export function RunScreen(props: {
   readonly state: RunPageState;
   readonly model: RunModel;
@@ -371,13 +386,21 @@ export function RunScreen(props: {
   const problem = historyProblem(state);
   const transcript = transcriptLoading(state);
   const zoomed = resolveZoom(model, route);
+  const detail = openedDetail(state, route, props.core);
   // The chain lit on the chart and in the tree: what the pointer is on, else what was pinned or opened.
   const lit = ideaAncestry(
     model,
     state.ideasHovered ?? state.ideasPinned ?? zoomed.idea?.id ?? null,
   );
   const deep = routeLevel(route) !== 'run' && (zoomed.idea !== null || zoomed.agent !== null);
-  const level = {state, base, core: props.core, mode: route.mode, dispatch};
+  const level = {
+    state,
+    base,
+    core: detail.core,
+    mode: route.mode,
+    dispatch,
+    loading: detail.loading ?? transcript,
+  };
   return (
     <Screen
       density="compact"
@@ -416,7 +439,10 @@ export function RunScreen(props: {
       {showsBreadcrumb(route, zoomed) ? (
         <Breadcrumb label="Zoom" items={crumbs(zoomed, route, zoom)} />
       ) : null}
-      <LevelBody transcript={transcript} deep={deep} route={route} zoomed={zoomed} level={level} />
+      {detail.problem === null ? null : (
+        <Banner tone="warn" title="The step’s transcript is not available" body={detail.problem} />
+      )}
+      <LevelBody deep={deep} route={route} zoomed={zoomed} level={level} />
     </Screen>
   );
 }

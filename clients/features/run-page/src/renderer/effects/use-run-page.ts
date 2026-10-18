@@ -106,13 +106,13 @@ export function useRunPage(options: RunPageOptions): {
     if (store !== null && follow !== null)
       store.dispatch({type: 'select-stream', streamId: follow});
   }, [store, follow]);
-  // The transcript, the agents' models and a turn's tool output are in the history, which a run
-  // opened from its summary reads when a pane first needs them: an agent or a step is open, or
-  // the Agents face is shown.
-  const needsHistory = route.mode === 'agents' || route.agent !== null || route.step !== null;
+  // The summary already holds the agent and round lists. Only an opened step needs its journal
+  // transcript; on a modern helper the span index reads that step alone.
+  const detailSpan = state?.summary.kind === 'ready' ? route.step : null;
   useEffect(() => {
-    if (store !== null && needsHistory) store.dispatch({type: 'need-history'});
-  }, [store, needsHistory]);
+    if (store !== null && detailSpan !== null)
+      store.dispatch({type: 'need-span', spanId: detailSpan});
+  }, [store, detailSpan]);
   if (store === null || state === null || model === null) return null;
   if (whole === null) return null;
   return {state, dispatch: store.dispatch, model, whole, core: state.run.core, route, zoom};

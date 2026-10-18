@@ -68,6 +68,7 @@ export {
   runPageInitial,
   runPageStep,
   runPhase,
+  type SpanDetailReply,
 } from './run-page.js';
 export {type SummaryReply, summaryFacts, type WireSummary} from './run-summary.js';
 export {scrubberView, viewAtPosition} from './scrub.js';
