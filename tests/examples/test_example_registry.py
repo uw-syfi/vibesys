@@ -218,6 +218,23 @@ def test_every_task_describes_itself_to_the_catalogue(entry: ExampleEntry) -> No
     assert not wrong, "\n".join(wrong)
 
 
+@pytest.mark.parametrize(
+    "entry", [pytest.param(e, id=e.path) for e in ENTRIES if not e.external_repo]
+)
+def test_every_task_declares_which_way_its_objective_improves(entry: ExampleEntry) -> None:
+    """New run's Goal page shows each objective with its direction; a task with no
+    `objectives.toml` axis shows none, and the run engine then ranks by its implicit maximum.
+    A task whose intent is ambiguous would be allowlisted here with a comment; none is."""
+    [summary] = [each for each in list_examples(REPO_ROOT).examples if each.name == entry.name]
+    listed = {detail.task: detail for detail in summary.task_details or ()}
+    undeclared = [
+        f"{entry.path} task={task}: declare an `[[objective]]` (name, direction) in objectives.toml"
+        for task in _tasks(entry)
+        if task not in listed or not listed[task].objectives
+    ]
+    assert not undeclared, "\n".join(undeclared)
+
+
 @pytest.mark.parametrize("entry", [_param(e, Check.PATH_REFS) for e in ENTRIES])
 def test_command_path_references_exist(entry: ExampleEntry) -> None:
     _require_present(entry)
