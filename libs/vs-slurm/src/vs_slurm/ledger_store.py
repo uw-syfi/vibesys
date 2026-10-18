@@ -17,10 +17,15 @@ from .ledger import (
     LedgerLease,
     LedgerRecord,
     UnreadableLease,
+    WithdrawalMark,
+    WithdrawalUndone,
     check_transition,
+    check_withdrawal,
     decode_lease,
     decode_record,
+    decode_withdrawal,
     encode,
+    entry_of,
     validate_holder,
     validate_key,
     validate_project,
@@ -37,7 +42,9 @@ if TYPE_CHECKING:
 _LEDGER_DIRECTORY = "ledger"
 _END = "VS-LEDGER-END"
 _SHA256 = re.compile(r"[0-9a-f]{64}")
-_REVISION = re.compile(r"attempt-(?P<attempt>[0-9]+)\.(?P<revision>[0-9]+)\.json")
+_REVISION = re.compile(
+    r"(?P<kind>attempt|withdrawal)-(?P<attempt>[0-9]+)\.(?P<revision>[0-9]+)\.json"
+)
 
 
 class RemoteEvaluationLedger:
@@ -46,8 +53,8 @@ class RemoteEvaluationLedger:
     It reaches the cluster through the same transport as the jobs (the operator's
     configuration and ``processes``) and lives under the operator's staging root,
     outside any agent's mounts. Every write is an atomic rename (a lease) or
-    create-only link (a record revision) of a complete file, so a reader never
-    sees a partial document and a record revision is never overwritten.
+    create-only link (a record or withdrawal revision) of a complete file, so a
+    reader never sees a partial document and a revision is never overwritten.
     """
 
     def __init__(
@@ -85,7 +92,7 @@ class RemoteEvaluationLedger:
         directory = self._key_directory(key)
         quoted = shlex.quote(directory.as_posix())
         listing = (
-            f"for f in {quoted}/attempt-*.json {quoted}/leases/*.json; do "
+            f"for f in {quoted}/attempt-*.json {quoted}/withdrawal-*.json {quoted}/leases/*.json; do "
             f'if d=$(cat -- "$f" 2>/dev/null); then '
             f'm=$(date -r "$f" +%s 2>/dev/null) || m=inf; '
             f'printf "%s %s %s\\n" "$m" "$f" "$d"; fi; done; '
@@ -95,6 +102,7 @@ class RemoteEvaluationLedger:
         if not lines or lines[-1] != _END:
             raise LedgerError.malformed_reply("read")
         revisions: list[tuple[int, int, LedgerRecord]] = []
+        withdrawals: list[tuple[int, int, WithdrawalMark | WithdrawalUndone]] = []
         leases: list[LedgerLease] = []
         unreadable: list[UnreadableLease] = []
         for line in lines[:-1]:
@@ -110,25 +118,18 @@ class RemoteEvaluationLedger:
             numbered = _REVISION.fullmatch(name.name)
             if numbered is None:
                 raise LedgerError.malformed_reply("read")
-            record = decode_record(document, path=path)
             attempt, revision = int(numbered["attempt"]), int(numbered["revision"])
+            if numbered["kind"] == "withdrawal":
+                withdrawal = decode_withdrawal(document, path=path)
+                if withdrawal.attempt != attempt:
+                    raise LedgerError.unreadable(path, "the withdrawal names another attempt")
+                withdrawals.append((attempt, revision, withdrawal))
+                continue
+            record = decode_record(document, path=path)
             if record.key != key or record.attempt != attempt:
                 raise LedgerError.unreadable(path, "the record names another key or attempt")
             revisions.append((attempt, revision, record))
-        if not revisions:
-            return None
-        latest: dict[int, tuple[int, LedgerRecord]] = {}
-        for attempt, revision, record in revisions:
-            if attempt not in latest or revision > latest[attempt][0]:
-                latest[attempt] = (revision, record)
-        *earlier, (revision, current) = (latest[attempt] for attempt in sorted(latest))
-        return LedgerEntry(
-            current,
-            tuple(sorted(leases, key=lambda lease: lease.holder)),
-            revision,
-            tuple(sorted(unreadable, key=lambda lease: lease.holder)),
-            tuple(record for _, record in earlier),
-        )
+        return entry_of(revisions, withdrawals, leases, unreadable)
 
     def claim(self, record: LedgerRecord) -> LedgerRecord:
         """Create the record's attempt unless one exists; return the stored attempt."""
@@ -147,6 +148,15 @@ class RemoteEvaluationLedger:
         check_transition(current.record, record)
         path = self._revision_path(record, current.revision + 1)
         return self._publish(path, encode(record), create_only=True) == "CREATED"
+
+    def write_withdrawal(
+        self, current: LedgerEntry, document: WithdrawalMark | WithdrawalUndone
+    ) -> bool:
+        """Write ``document`` as the withdrawal revision after ``current``'s; False if another won."""
+        check_withdrawal(current, document)
+        name = f"withdrawal-{document.attempt}.{current.withdrawal_revision + 1}.json"
+        path = self._key_directory(current.record.key) / name
+        return self._publish(path, encode(document), create_only=True) == "CREATED"
 
     def renew(self, key: str, lease: LedgerLease) -> None:
         """Write this holder's lease; only this holder ever writes its file."""

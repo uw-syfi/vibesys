@@ -67,6 +67,8 @@ if TYPE_CHECKING:
         LedgerEntry,
         LedgerLease,
         LedgerRecord,
+        WithdrawalMark,
+        WithdrawalUndone,
     )
 
 PROJECT = "demo-0123456789ab"
@@ -377,6 +379,12 @@ class _SwitchingLedger:
     def replace(self, current: LedgerEntry, record: LedgerRecord) -> bool:
         self.sim.sleep(0)
         return self.inner.replace(current, record)
+
+    def write_withdrawal(
+        self, current: LedgerEntry, document: WithdrawalMark | WithdrawalUndone
+    ) -> bool:
+        self.sim.sleep(0)
+        return self.inner.write_withdrawal(current, document)
 
     def renew(self, key: str, lease: LedgerLease) -> None:
         self.sim.sleep(0)

@@ -15,7 +15,6 @@ from hypothesis import strategies as st
 
 from vs_sim.api.testing import examples
 from vs_slurm.api import (
-    WITHDRAWING_FORMAT_VERSION,
     EvaluationLedger,
     FakeEvaluationLedger,
     LedgerError,
@@ -29,10 +28,10 @@ from vs_slurm.api import (
     SlurmConnectorTransport,
     SubmitBoundJob,
     UnreadableLease,
+    WithdrawalMark,
+    WithdrawalUndone,
     encode_ledger_document,
     ledger_operation_id,
-    marked_withdrawing,
-    undone_withdrawal,
 )
 
 # test-isolation: the public executable transport Fake gives the remote ledger a real filesystem.
@@ -140,19 +139,6 @@ def _record(
     )
 
 
-def _withdrawing(prior: LedgerState) -> LedgerRecord:
-    """A withdrawal in progress, marking the live attempt in ``prior`` it may go back to."""
-    before = _record(state=prior)
-    return marked_withdrawing(before, by="run-b", since=100.0, until=700.0, reason="gone")
-
-
-def _in_state(state: LedgerState, *, prior: LedgerState, with_job: bool) -> LedgerRecord:
-    """The attempt in ``state``; a withdrawing one marks it from ``prior``."""
-    if state is LedgerState.WITHDRAWING:
-        return _withdrawing(prior)
-    return _record(state=state, with_job=with_job)
-
-
 _JOB = SubmitBoundJob(
     job_id="7",
     config_identity="0" * 64,
@@ -201,11 +187,7 @@ def test_the_highest_attempt_is_the_current_one_and_earlier_ones_are_listed(case
     case.ledger.claim(_record(state=LedgerState.SUBMITTING))
     claimed = case.ledger.read(KEY)
     assert claimed is not None
-    marked = _withdrawing(LedgerState.SUBMITTING)
-    assert case.ledger.replace(claimed, marked)
-    withdrawing = case.ledger.read(KEY)
-    assert withdrawing is not None
-    assert case.ledger.replace(withdrawing, _record(state=LedgerState.WITHDRAWN))
+    assert case.ledger.replace(claimed, _record(state=LedgerState.WITHDRAWN))
     case.ledger.claim(_record(attempt=1, owner="run-b"))
     entry = case.reopen().read(KEY)
     assert entry is not None
@@ -219,7 +201,7 @@ _STATES = st.sampled_from(LedgerState)
 
 
 @given(
-    writers=st.lists(st.sampled_from((LedgerState.SUBMITTED, LedgerState.WITHDRAWING)), min_size=2)
+    writers=st.lists(st.sampled_from((LedgerState.SUBMITTED, LedgerState.WITHDRAWN)), min_size=2)
 )
 @settings(max_examples=examples(pr=10, nightly=100), deadline=None)
 def test_of_many_swaps_from_one_revision_exactly_the_first_is_stored(
@@ -232,12 +214,7 @@ def test_of_many_swaps_from_one_revision_exactly_the_first_is_stored(
             case.ledger.claim(_record())
             read = [case.reopen().read(KEY) for _ in writers]
             won = [
-                case.reopen().replace(
-                    entry,
-                    _in_state(
-                        state, prior=LedgerState.SUBMITTING, with_job=state is LedgerState.SUBMITTED
-                    ),
-                )
+                case.reopen().replace(entry, _record(state=state))
                 for entry, state in zip(read, writers, strict=True)
                 if entry is not None
             ]
@@ -247,49 +224,140 @@ def test_of_many_swaps_from_one_revision_exactly_the_first_is_stored(
             assert (entry.record.state, entry.revision) == (writers[0], 1)
 
 
-# The states whose attempt names its job.
-_NAMED = frozenset({LedgerState.SUBMITTED, LedgerState.COMPLETED})
-_LIVE = st.sampled_from((LedgerState.SUBMITTING, LedgerState.SUBMITTED, LedgerState.COMPLETED))
+def _mark(attempt: int = 0, *, by: str = "run-b") -> WithdrawalMark:
+    return WithdrawalMark(attempt=attempt, by=by, since=100.0, until=700.0, reason="gone")
 
 
-@given(before=_STATES, after=_STATES, prior=_LIVE)
-@settings(max_examples=examples(pr=25, nightly=200), deadline=None)
-def test_a_store_writes_only_the_transitions_the_state_machine_allows(
-    before: LedgerState, after: LedgerState, prior: LedgerState
+_LIVE = (LedgerState.SUBMITTING, LedgerState.SUBMITTED, LedgerState.COMPLETED)
+
+
+@pytest.mark.parametrize("state", _LIVE)
+def test_a_withdrawal_mark_and_its_undoing_are_read_back_beside_an_unchanged_record(
+    case: _Case, state: LedgerState
 ) -> None:
-    """Withdrawn and failed are final; nothing goes back to submitting.
+    """A mark is a document of its own: the record, and its revision, stay as they were."""
+    planted = _record(state=state)
+    case.plant(KEY, 0, encode_ledger_document(planted))
+    live = case.reopen().read(KEY)
+    assert live is not None
+    assert (live.withdrawal, live.withdrawal_revision) == (None, -1)
 
-    A withdrawal first marks a live attempt (withdrawing), then either ends
-    it (withdrawn) or goes back to exactly the state it left (``prior``).
-    """
+    assert case.reopen().write_withdrawal(live, _mark())
+    marked = case.reopen().read(KEY)
+    assert marked is not None
+    assert (marked.record, marked.revision) == (planted, 0)
+    assert (marked.withdrawal, marked.withdrawal_revision) == (_mark(), 0)
+
+    assert case.reopen().write_withdrawal(marked, WithdrawalUndone(attempt=0))
+    undone = case.reopen().read(KEY)
+    assert undone is not None
+    assert (undone.record, undone.revision) == (planted, 0)
+    assert (undone.withdrawal, undone.withdrawal_revision) == (None, 1)
+
+
+def test_a_mark_on_an_earlier_attempt_is_not_the_current_attempts(case: _Case) -> None:
+    case.ledger.claim(_record())
+    claimed = case.ledger.read(KEY)
+    assert claimed is not None
+    assert case.ledger.write_withdrawal(claimed, _mark())
+    marked = case.ledger.read(KEY)
+    assert marked is not None
+    assert case.ledger.replace(marked, _record(state=LedgerState.WITHDRAWN))
+    case.ledger.claim(_record(attempt=1, owner="run-b"))
+    entry = case.reopen().read(KEY)
+    assert entry is not None
+    assert entry.record.attempt == 1
+    assert (entry.withdrawal, entry.withdrawal_revision) == (None, -1)
+
+
+@given(withdrawers=st.lists(st.sampled_from(("run-b", "run-c", "vibesys-sweep")), min_size=2))
+@settings(max_examples=examples(pr=10, nightly=100), deadline=None)
+def test_of_many_marks_from_one_revision_exactly_the_first_is_stored(
+    withdrawers: list[str],
+) -> None:
+    """Two withdrawers deciding on one read never both believe they hold the mark."""
+    for implementation in IMPLEMENTATIONS:
+        with TemporaryDirectory() as directory:
+            case = _make(implementation, Path(directory))
+            case.ledger.claim(_record())
+            read = [case.reopen().read(KEY) for _ in withdrawers]
+            won = [
+                case.reopen().write_withdrawal(entry, _mark(by=by))
+                for entry, by in zip(read, withdrawers, strict=True)
+                if entry is not None
+            ]
+            assert won == [True] + [False] * (len(withdrawers) - 1)
+            entry = case.reopen().read(KEY)
+            assert entry is not None
+            assert entry.withdrawal == _mark(by=withdrawers[0])
+
+
+@given(
+    state=_STATES,
+    marked=st.booleans(),
+    kind=st.sampled_from(("mark", "undone")),
+    attempt=st.sampled_from((0, 1)),
+)
+@settings(max_examples=examples(pr=25, nightly=100), deadline=None)
+def test_a_store_writes_only_the_withdrawal_revisions_that_follow_the_entry(
+    state: LedgerState, *, marked: bool, kind: str, attempt: int
+) -> None:
+    """A mark goes on the live current attempt with none standing; an undoing follows a mark."""
+    for implementation in IMPLEMENTATIONS:
+        with TemporaryDirectory() as directory:
+            case = _make(implementation, Path(directory))
+            case.plant(KEY, 0, encode_ledger_document(_record(state=state)))
+            entry = case.reopen().read(KEY)
+            assert entry is not None
+            if marked and not state.final:
+                assert case.ledger.write_withdrawal(entry, _mark())
+                entry = case.reopen().read(KEY)
+                assert entry is not None
+            standing = entry.withdrawal is not None
+            document = _mark(attempt) if kind == "mark" else WithdrawalUndone(attempt=attempt)
+            allowed = attempt == 0 and (
+                (kind == "mark" and not state.final and not standing)
+                or (kind == "undone" and standing)
+            )
+            if allowed:
+                assert case.ledger.write_withdrawal(entry, document)
+            else:
+                with pytest.raises(LedgerError):
+                    case.ledger.write_withdrawal(entry, document)
+
+
+@given(before=_STATES, after=_STATES)
+@settings(max_examples=examples(pr=25, nightly=100), deadline=None)
+def test_a_store_writes_only_the_transitions_the_state_machine_allows(
+    before: LedgerState, after: LedgerState
+) -> None:
+    """Withdrawn and failed are final; nothing goes back to submitting."""
     allowed = {
         LedgerState.SUBMITTING: {
             LedgerState.SUBMITTED,
             LedgerState.FAILED,
-            LedgerState.WITHDRAWING,
+            LedgerState.WITHDRAWN,
         },
         LedgerState.SUBMITTED: {
             LedgerState.COMPLETED,
             LedgerState.FAILED,
-            LedgerState.WITHDRAWING,
+            LedgerState.WITHDRAWN,
         },
-        LedgerState.COMPLETED: {LedgerState.WITHDRAWING},
-        LedgerState.WITHDRAWING: {LedgerState.WITHDRAWN, prior},
+        LedgerState.COMPLETED: {LedgerState.WITHDRAWN},
         LedgerState.FAILED: set(),
         LedgerState.WITHDRAWN: set(),
     }
     for implementation in IMPLEMENTATIONS:
         with TemporaryDirectory() as directory:
             case = _make(implementation, Path(directory))
-            planted = _in_state(before, prior=prior, with_job=before in _NAMED)
-            case.plant(KEY, 0, encode_ledger_document(planted))
+            case.plant(KEY, 0, encode_ledger_document(_record(state=before)))
             entry = case.reopen().read(KEY)
             assert entry is not None
-            had_job = planted.job is not None
-            moved = _in_state(
-                after,
-                prior=before if before in _NAMED | {LedgerState.SUBMITTING} else prior,
-                with_job=after in _NAMED or (had_job and after is not LedgerState.SUBMITTING),
+            named = {LedgerState.SUBMITTED, LedgerState.COMPLETED}
+            moved = _record(
+                state=after,
+                with_job=after in named
+                or (before in named and after is not LedgerState.SUBMITTING),
             )
             if after in allowed[before]:
                 assert case.ledger.replace(entry, moved)
@@ -382,43 +450,10 @@ def test_a_record_written_in_format_1_is_readable(case: _Case) -> None:
     assert entry.record.labels == LedgerLabels(candidate="0f3c9e1", workstream="baseline")
 
 
-@given(prior=_LIVE)
-@settings(max_examples=examples(pr=3, nightly=12), deadline=None)
-def test_a_withdrawal_in_progress_is_written_in_format_2_and_read_back(
-    prior: LedgerState,
-) -> None:
-    """Only a withdrawing record is written in format 2; every other record stays in format 1."""
-    for implementation in IMPLEMENTATIONS:
-        with TemporaryDirectory() as directory:
-            case = _make(implementation, Path(directory))
-            case.ledger.claim(_record(state=LedgerState.SUBMITTING))
-            if prior is not LedgerState.SUBMITTING:
-                claimed = case.ledger.read(KEY)
-                assert claimed is not None
-                assert case.ledger.replace(claimed, _record(state=LedgerState.SUBMITTED))
-            if prior is LedgerState.COMPLETED:
-                submitted = case.ledger.read(KEY)
-                assert submitted is not None
-                assert case.ledger.replace(submitted, _record(state=LedgerState.COMPLETED))
-            live = case.ledger.read(KEY)
-            assert live is not None
-            marked = _withdrawing(prior)
-            assert case.ledger.replace(live, marked)
-            entry = case.reopen().read(KEY)
-            assert entry is not None
-            assert entry.record == marked
-            assert entry.record.format_version == WITHDRAWING_FORMAT_VERSION
-            assert case.ledger.replace(entry, undone_withdrawal(entry.record))
-            back = case.reopen().read(KEY)
-            assert back is not None
-            assert back.record == live.record
-            assert back.record.format_version == 1
-
-
 @pytest.mark.parametrize(
     "document",
     [
-        '{"format_version": 3, "key": "' + KEY + '"}\n',
+        '{"format_version": 2, "key": "' + KEY + '"}\n',
         '{"key": "' + KEY + '"}\n',
         "not json\n",
         '{"format_version": 1, "key": "' + KEY + '", "unexpected": true}\n',

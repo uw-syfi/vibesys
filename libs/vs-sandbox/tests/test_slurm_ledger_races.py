@@ -57,6 +57,8 @@ if TYPE_CHECKING:
         LedgerRecord,
         SlurmBatchHandle,
         SlurmJobRequest,
+        WithdrawalMark,
+        WithdrawalUndone,
     )
     from vs_slurm.api import (
         ClusterObservation as Observation,
@@ -141,6 +143,11 @@ class _SteppedLedger:
 
     def replace(self, current: LedgerEntry, record: LedgerRecord) -> bool:
         return self._call(lambda: self.inner.replace(current, record))
+
+    def write_withdrawal(
+        self, current: LedgerEntry, document: WithdrawalMark | WithdrawalUndone
+    ) -> bool:
+        return self._call(lambda: self.inner.write_withdrawal(current, document))
 
     def renew(self, key: str, lease: LedgerLease) -> None:
         self._call(lambda: self.inner.renew(key, lease))

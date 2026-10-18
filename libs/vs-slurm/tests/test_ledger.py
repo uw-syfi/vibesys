@@ -49,6 +49,7 @@ from vs_slurm.api import (
     SubmitBoundJob,
     Unleased,
     UnreadableLease,
+    WithdrawalMark,
     Withdrawer,
     Withdrawn,
     claim_expired,
@@ -58,7 +59,6 @@ from vs_slurm.api import (
     lease_verdict,
     ledger_operation_id,
     list_entries,
-    marked_withdrawing,
     settlement,
     submit_step,
     sweep_unleased,
@@ -212,17 +212,6 @@ def _record(
     claim_expires_at: float = 900.0,
     key: str = "c" * 64,
 ) -> LedgerRecord:
-    if state is LedgerState.WITHDRAWING:
-        before = _record(
-            LedgerState.SUBMITTED,
-            attempt=attempt,
-            created_at=created_at,
-            claim_expires_at=claim_expires_at,
-            key=key,
-        )
-        return marked_withdrawing(
-            before, by="run-b", since=created_at, until=_WITHDRAWAL_UNTIL, reason="gone"
-        )
     return LedgerRecord(
         key=key,
         project=PROJECT,
@@ -258,17 +247,34 @@ def _handle(workspace: Path) -> SlurmBatchHandle:
     return submitted.handle
 
 
+def _mark(attempt: int = 0, *, since: float = 0.0) -> WithdrawalMark:
+    """A withdrawal by another run under way on ``attempt``, holding until ``_WITHDRAWAL_UNTIL``."""
+    return WithdrawalMark(
+        attempt=attempt, by="run-b", since=since, until=_WITHDRAWAL_UNTIL, reason="gone"
+    )
+
+
 @given(
     state=st.sampled_from(LedgerState),
     attempt=st.integers(min_value=0, max_value=5),
     now=st.floats(min_value=0, max_value=2000),
+    marked=st.booleans(),
 )
 @settings(max_examples=examples(pr=30, nightly=200), deadline=None)
 def test_only_an_absent_failed_or_withdrawn_request_is_submitted_again(
-    state: LedgerState, attempt: int, now: float
+    state: LedgerState, attempt: int, now: float, *, marked: bool
 ) -> None:
-    entry = LedgerEntry(_record(state, attempt=attempt, claim_expires_at=900.0))
+    mark = _mark(attempt) if marked else None
+    entry = LedgerEntry(
+        _record(state, attempt=attempt, claim_expires_at=900.0),
+        withdrawal=mark,
+        withdrawal_revision=0 if marked else -1,
+    )
     step = submit_step(entry, now=now)
+    if mark is not None and not state.final:
+        # Never a new attempt while the old one may still be kept: wait, or undo.
+        assert step == AwaitWithdrawal(entry, expired=now > _WITHDRAWAL_UNTIL)
+        return
     match state:
         case LedgerState.COMPLETED:
             assert step == AttachJob(entry.record)
@@ -276,9 +282,6 @@ def test_only_an_absent_failed_or_withdrawn_request_is_submitted_again(
             assert step == CheckJob(entry)
         case LedgerState.SUBMITTING:
             assert step == ResolveSubmission(entry, expired=now > 900.0)
-        case LedgerState.WITHDRAWING:
-            # Never a new attempt while the old one may still go back: wait, or undo.
-            assert step == AwaitWithdrawal(entry, expired=now > _WITHDRAWAL_UNTIL)
         case LedgerState.FAILED | LedgerState.WITHDRAWN:
             assert step == ClaimAttempt(attempt + 1)
     assert submit_step(None, now=now) == ClaimAttempt(0)
@@ -599,10 +602,10 @@ def test_a_request_being_withdrawn_lists_as_its_job_and_the_sweep_leaves_it_to_i
     entry = world.ledger.read(world.key)
     assert entry is not None
     now = 1e9
-    marked = marked_withdrawing(
-        entry.record, by="run-b", since=now, until=now + 600.0, reason="its run run-b stopped"
+    mark = WithdrawalMark(
+        attempt=0, by="run-b", since=now, until=now + 600.0, reason="its run run-b stopped"
     )
-    assert world.ledger.replace(entry, marked)
+    assert world.ledger.write_withdrawal(entry, mark)
 
     (row,) = list_entries(world.ledger, world.cluster, project=PROJECT, now=now).rows
     assert row.phase is EntryPhase.RUNNING
@@ -611,7 +614,10 @@ def test_a_request_being_withdrawn_lists_as_its_job_and_the_sweep_leaves_it_to_i
         world.ledger, world.cluster, now=now + 1.0, grace_seconds=0.0, orphans=OrphanChecks(900.0)
     )
     assert swept == ()
-    assert world.state() is LedgerState.WITHDRAWING
+    marked = world.ledger.read(world.key)
+    assert marked is not None
+    assert marked.record.state is LedgerState.SUBMITTED
+    assert marked.withdrawal == mark
 
 
 def test_a_lease_left_unreadable_by_a_crashed_build_is_swept_and_named_in_a_warning(
@@ -714,8 +720,10 @@ def test_the_sweep_cancels_every_live_job_named_for_a_failed_or_withdrawn_attemp
                 continue
             if end is LedgerState.WITHDRAWN:
                 # A withdrawal marks the attempt first (``withdraw``).
-                marked = marked_withdrawing(claimed, by="run-b", since=0.0, until=600.0, reason="x")
-                assert ledger.replace(entry, marked)
+                mark = WithdrawalMark(
+                    attempt=attempt, by="run-b", since=0.0, until=600.0, reason="x"
+                )
+                assert ledger.write_withdrawal(entry, mark)
                 entry = ledger.read(key)
                 assert entry is not None
             assert ledger.replace(entry, transitioned(entry.record, end, reason="x"))

@@ -28,13 +28,14 @@ from vs_slurm.api import (
     SlurmConfig,
     SlurmJobStatus,
     SlurmSshTransport,
+    WithdrawalMark,
+    WithdrawalUndone,
     Withdrawer,
     Withdrawn,
     WithdrawUnknown,
     evaluation_key,
     job_of_handle,
     ledger_operation_id,
-    marked_withdrawing,
     relinquish,
     withdraw,
 )
@@ -139,18 +140,22 @@ def _withdrawer(by: str, *, now: float = NOW) -> Withdrawer:
     return Withdrawer(by=by, now=now, reason=f"{by} withdrew it")
 
 
-def _mark(ledger: FakeEvaluationLedger, key: str, by: str, *, since: float) -> LedgerRecord:
-    """Mark the request withdrawing by ``by`` from ``since``, as a withdrawer that then died."""
+def _mark(ledger: FakeEvaluationLedger, key: str, by: str, *, since: float) -> WithdrawalMark:
+    """Mark the request's attempt by ``by`` from ``since``, as a withdrawer that then died."""
     entry = ledger.read(key)
     assert entry is not None
-    marked = marked_withdrawing(
-        entry.record, by=by, since=since, until=since + WITHDRAWAL_WINDOW_SECONDS, reason="gone"
+    mark = WithdrawalMark(
+        attempt=entry.record.attempt,
+        by=by,
+        since=since,
+        until=since + WITHDRAWAL_WINDOW_SECONDS,
+        reason="gone",
     )
-    assert ledger.replace(entry, marked)
-    return marked
+    assert ledger.write_withdrawal(entry, mark)
+    return mark
 
 
-def test_a_withdrawal_whose_scancel_is_unknown_puts_the_attempt_back_as_it_was() -> None:
+def test_a_withdrawal_whose_scancel_is_unknown_undoes_its_mark() -> None:
     with TemporaryDirectory() as directory:
         ledger, _cluster, key, operation = _submitted(Path(directory), SELF)
         before = ledger.read(key)
@@ -162,8 +167,9 @@ def test_a_withdrawal_whose_scancel_is_unknown_puts_the_attempt_back_as_it_was()
         assert isinstance(outcome, WithdrawUnknown)
         after = ledger.read(key)
         assert after is not None
-        assert after.record == before.record  # SUBMITTED, in format 1, with its job
-        assert after.record.format_version == 1
+        assert after.record == before.record  # SUBMITTED, with its job
+        assert after.revision == before.revision
+        assert after.withdrawal is None  # undone: a run may attach again
         assert after.record.operation_id == operation
 
 
@@ -171,14 +177,14 @@ def test_another_withdrawal_under_way_is_waited_for_until_its_window_ends() -> N
     """A live mark is another withdrawer's to finish; a lapsed one is undone and decided afresh."""
     with TemporaryDirectory() as directory:
         ledger, cluster, key, operation = _submitted(Path(directory), SELF)
-        marked = _mark(ledger, key, "run-dead", since=NOW)
+        mark = _mark(ledger, key, "run-dead", since=NOW)
 
         during = withdraw(ledger, cluster, key, _withdrawer(SELF, now=NOW + 1.0))
         assert isinstance(during, WithdrawUnknown)
         assert "run-dead" in during.reason
         entry = ledger.read(key)
         assert entry is not None
-        assert entry.record == marked
+        assert entry.withdrawal == mark
         observed = cluster.inspect(operation)
         assert isinstance(observed, ClusterObservation)
         assert not observed.status.terminal
@@ -197,10 +203,12 @@ class _LeasedOnceMarked(FakeEvaluationLedger):
 
     lease: LedgerLease | None = None
 
-    def replace(self, current: LedgerEntry, record: LedgerRecord) -> bool:
-        won = super().replace(current, record)
-        if won and record.state is LedgerState.WITHDRAWING and self.lease is not None:
-            self.renew(record.key, self.lease)
+    def write_withdrawal(
+        self, current: LedgerEntry, document: WithdrawalMark | WithdrawalUndone
+    ) -> bool:
+        won = super().write_withdrawal(current, document)
+        if won and isinstance(document, WithdrawalMark) and self.lease is not None:
+            self.renew(current.record.key, self.lease)
             self.lease = None
         return won
 
@@ -209,7 +217,7 @@ def test_a_lease_written_just_after_the_withdrawal_mark_keeps_the_job() -> None:
     """The withdrawal reads the leases again after its mark, before it cancels anything.
 
     An attacher writes its lease before it reads the record: so either the
-    withdrawal sees that lease and puts the attempt back, or the attacher sees
+    withdrawal sees that lease and undoes its mark, or the attacher sees
     the mark (or the withdrawn record) and waits, then submits again.
     """
     with TemporaryDirectory() as directory:
@@ -226,6 +234,7 @@ def test_a_lease_written_just_after_the_withdrawal_mark_keeps_the_job() -> None:
         entry = ledger.read(key)
         assert entry is not None
         assert entry.record == before.record
+        assert entry.withdrawal is None
         assert [lease.holder for lease in entry.leases] == ["run-a"]
         observed = cluster.inspect(operation)
         assert isinstance(observed, ClusterObservation)

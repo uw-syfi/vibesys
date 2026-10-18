@@ -245,8 +245,9 @@ class LedgerEvaluations:
     async def _relinquish(self, key: str) -> WithdrawOutcome:
         """Relinquish ``key``, trying again at once while its outcome is unknown.
 
-        A scancel or ledger call lost over a broken connection puts the attempt
-        back as it was (``withdraw``), so trying again is safe; a stop that gave
+        A scancel or ledger call lost over a broken connection undoes the
+        withdrawal's mark, or leaves it to expire (``withdraw``), so trying
+        again is safe; a stop that gave
         up after one lost call would leave the job queued for nobody. The tries
         do not pause: each is several remote calls, and the caller holds the
         request's guard, which a pause would hold too.
@@ -263,8 +264,9 @@ class LedgerEvaluations:
         """Stop using the request of an evaluation that ended, relinquishing it if last.
 
         Its job ended, or never started: the relinquish only drops this run's
-        lease. One whose outcome is unknown keeps the use and the lease, which
-        lapses, for a later stop or the grace sweep.
+        lease. One whose outcome is unknown keeps the use, for a later stop,
+        but its lease is already dropped: unless another run wants the request,
+        the grace sweep withdraws it.
         """
         try:
             await self.release(handle_id, known, attached=known is not None, detaching=False)

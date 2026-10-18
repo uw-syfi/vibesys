@@ -38,7 +38,12 @@ from vs_slurm.api import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_slurm.api import ClusterInspectOutcome, ClusterTarget
+    from vs_slurm.api import (
+        ClusterInspectOutcome,
+        ClusterTarget,
+        WithdrawalMark,
+        WithdrawalUndone,
+    )
 
 PROJECT = "demo-0123456789ab"
 CONFIG = SlurmConfig(
@@ -75,6 +80,11 @@ class _Interleaved:
 
     def replace(self, current: LedgerEntry, record: LedgerRecord) -> bool:
         return self._inner.replace(current, record)
+
+    def write_withdrawal(
+        self, current: LedgerEntry, document: WithdrawalMark | WithdrawalUndone
+    ) -> bool:
+        return self._inner.write_withdrawal(current, document)
 
     def renew(self, key: str, lease: LedgerLease) -> None:
         self._inner.renew(key, lease)

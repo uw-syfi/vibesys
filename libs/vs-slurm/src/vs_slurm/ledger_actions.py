@@ -5,17 +5,18 @@ end the same way: the job is cancelled if it is still queued or running, and the
 attempt is recorded as withdrawn, by compare-and-swap, so a racing writer is
 never overwritten.
 
-A withdrawal takes two swaps. The first marks the attempt ``withdrawing``; from
-then on no run attaches to it (``AwaitWithdrawal``). The withdrawer then reads
-the leases again, and a run that leased the request before that read, which
-every run does before it reads the record to attach, sends the attempt back to
-its state: the withdrawal ends ``Kept`` and the run keeps its job. Only then is
-the job cancelled, and the second swap records the attempt withdrawn. A cancel
-whose outcome is unknown also sends it back, so the attempt is never left
-marked by a live withdrawer. A crash leaves the mark, or a cancelled job under
-a live record, which the next withdrawal or a run attaching to it undoes or
-settles once the mark outlived ``WITHDRAWAL_WINDOW_SECONDS``: never a withdrawn
-record over a live job.
+A withdrawal takes two swaps. The first writes a withdrawal mark on the attempt
+(``WithdrawalMark``, beside the record); from then on no run attaches to it
+(``AwaitWithdrawal``). The withdrawer then reads the request again, and a run
+that leased the request before that read, which every run does before it reads
+the request to attach, makes it undo the mark: the withdrawal ends ``Kept`` and
+the run keeps its job. Only then is the job cancelled, and the second swap
+records the attempt withdrawn. A cancel whose outcome is unknown also undoes
+the mark, so the attempt is never left marked by a live withdrawer. A crash
+leaves the mark, or a cancelled job under a live record, which the next
+withdrawal or a run attaching to it undoes or settles once the mark outlived
+its window (``undo_expired_withdrawal``): never a withdrawn record over a live
+job.
 """
 
 from __future__ import annotations
@@ -32,12 +33,12 @@ from .ledger import (
     LedgerRecord,
     LedgerState,
     Unleased,
+    WithdrawalMark,
+    WithdrawalUndone,
     held_by_others,
     lease_verdict,
-    marked_withdrawing,
     settlement,
     transitioned,
-    undone_withdrawal,
     withdrawal_expired,
 )
 from .ledger_listing import entry_id
@@ -66,7 +67,7 @@ class Kept:
 
     Only a conditional withdrawal (the sweep's, or a run's relinquish) ends this
     way: a run leased the request, or its job settled, after the caller decided
-    to withdraw it, even after the attempt was marked ``withdrawing``.
+    to withdraw it, even after it marked the attempt (``WithdrawalMark``).
     """
 
     key: str
@@ -131,47 +132,45 @@ def withdraw(
 ) -> WithdrawOutcome:
     """Cancel the request's job if it is live, then record its attempt as withdrawn.
 
-    ``withdrawer`` is named in the ``withdrawing`` mark and the withdrawn record.
-    The record changes by compare-and-swap: when a submitter records its job
-    between this read and this write, the write loses, and the next round
+    ``withdrawer`` is named in the mark and the withdrawn record. Each round
+    reads the request and moves it one step: it writes this withdrawal's mark,
+    or, once a read shows the mark standing, cancels the job and records the
+    attempt withdrawn by compare-and-swap. When a submitter records its job
+    between that read and that write, the write loses, and the next round
     starts again from what it recorded. A failed or withdrawn attempt is final.
     An attempt another withdrawal is under way on is ``WithdrawUnknown`` until
-    that one ends, or outlives its window and is undone.
+    that one ends, or outlives its window and is undone. A mark write whose
+    answer was lost is decided by the next read, which shows the mark or not.
 
     ``still`` is the condition the withdrawal holds under (the sweep's: no run
     leases the request and its job has not settled; a relinquish's: no other
     run wants it). It is tested on the read the mark is decided on, and again
-    on the leases read after the mark, before anything is cancelled; once it
-    fails the mark is undone and the withdrawal ends ``Kept``, so a run that
-    leased the request, or a collector that settled it, keeps its job and its
-    result.
+    on the read that shows the mark standing, before anything is cancelled;
+    once it fails the mark is undone and the withdrawal ends ``Kept``, so a run
+    that leased the request, or a collector that settled it, keeps its job and
+    its result.
     """
+    mine: WithdrawalMark | None = None
     for _ in range(_ROUNDS):
-        outcome = _withdraw_once(ledger, cluster, key, withdrawer, still=still)
-        if outcome is not None:
-            return outcome
-    return WithdrawUnknown(key, "the request kept changing while it was withdrawn")
-
-
-def _withdraw_once(
-    ledger: EvaluationLedger,
-    cluster: Cluster,
-    key: str,
-    withdrawer: Withdrawer,
-    *,
-    still: Callable[[LedgerEntry], bool] | None,
-) -> WithdrawOutcome | None:
-    """One read, check and mark, then the second phase; None when another writer won a swap."""
-    try:
-        entry = ledger.read(key)
+        try:
+            entry = ledger.read(key)
+        except LedgerError as error:
+            return WithdrawUnknown(key, str(error))
         if entry is None:
             return NotInLedger(key)
-        marked = _mark(ledger, entry, withdrawer, still=still)
-    except LedgerError as error:
-        return WithdrawUnknown(key, str(error))
-    if not isinstance(marked, LedgerRecord):
-        return marked
-    return _withdraw_marked(ledger, cluster, marked, still=still)
+        record = entry.record
+        if record.state.final:
+            # A mark left on a final attempt is never read: no run waits on it.
+            return Withdrawn(key, record.operation_id, None, already=True)
+        if entry.withdrawal is not None and entry.withdrawal == mine:
+            outcome = _withdraw_marked(ledger, cluster, entry, entry.withdrawal, still=still)
+        else:
+            outcome, mine = _mark(ledger, entry, withdrawer, still=still)
+        if outcome is not None:
+            return outcome
+    if mine is not None:
+        _undo_quietly(ledger, key, mine)
+    return WithdrawUnknown(key, "the request kept changing while it was withdrawn")
 
 
 def _mark(
@@ -180,70 +179,99 @@ def _mark(
     withdrawer: Withdrawer,
     *,
     still: Callable[[LedgerEntry], bool] | None,
-) -> LedgerRecord | WithdrawOutcome | None:
-    """Mark the attempt withdrawing: the mark written, or how the round ended without one."""
+) -> tuple[WithdrawOutcome | None, WithdrawalMark | None]:
+    """Write this withdrawal's mark, or end; the outcome, if it ended, and the mark tried.
+
+    A mark write that fails, or whose answer is lost, is decided by the next
+    round's read; one that loses its swap is too.
+    """
     record = entry.record
-    if record.state.final:
-        return Withdrawn(record.key, record.operation_id, None, already=True)
-    if record.withdrawal is not None:
-        if not withdrawal_expired(record, now=withdrawer.now):
-            return WithdrawUnknown(record.key, f"{record.withdrawal.by} is withdrawing it")
+    standing = entry.withdrawal
+    if standing is not None:
+        if not withdrawal_expired(standing, now=withdrawer.now):
+            return WithdrawUnknown(record.key, f"{standing.by} is withdrawing it"), None
         # Its withdrawer died part way: undo its mark, then decide afresh.
-        ledger.replace(entry, undone_withdrawal(record))
-        return None
+        try:
+            undo_expired_withdrawal(ledger, entry, now=withdrawer.now)
+        except LedgerError as error:
+            return WithdrawUnknown(record.key, str(error)), None
+        return None, None
     if still is not None and not still(entry):
-        return Kept(record.key, record.operation_id)
-    marked = marked_withdrawing(
-        record,
+        return Kept(record.key, record.operation_id), None
+    mark = WithdrawalMark(
+        attempt=record.attempt,
         by=withdrawer.by,
         since=withdrawer.now,
         until=withdrawer.now + WITHDRAWAL_WINDOW_SECONDS,
         reason=withdrawer.reason,
     )
-    return marked if ledger.replace(entry, marked) else None
+    try:
+        ledger.write_withdrawal(entry, mark)
+    except LedgerError:
+        _LOG.info("the mark on %s may not be written; reading it back", entry_id(record.key))
+    return None, mark
 
 
 def _withdraw_marked(
     ledger: EvaluationLedger,
     cluster: Cluster,
-    marked: LedgerRecord,
+    entry: LedgerEntry,
+    mark: WithdrawalMark,
     *,
     still: Callable[[LedgerEntry], bool] | None,
 ) -> WithdrawOutcome | None:
-    """Read the leases again, then undo the mark or cancel the job and record it withdrawn."""
-    key = marked.key
-    before = undone_withdrawal(marked)
+    """On a read that shows this withdrawal's mark: undo it, or cancel the job and record it withdrawn.
+
+    A run that leased the request before ``entry`` was read is in it, and
+    keeps its job; one that leases it later reads the mark, and waits.
+    """
+    record = entry.record
+    key = record.key
     try:
-        entry = ledger.read(key)
-        if entry is None or entry.record != marked:
-            return None  # undone as expired by another process: decide afresh
-        if still is not None and not still(dataclasses.replace(entry, record=before)):
-            ledger.replace(entry, before)
-            return Kept(key, marked.operation_id)
-        cancelled = _cancel_live(cluster, before)
+        # ``still`` is the condition as it was before this withdrawal's own mark.
+        if still is not None and not still(dataclasses.replace(entry, withdrawal=None)):
+            _undo(ledger, entry)
+            return Kept(key, record.operation_id)
+        cancelled = _cancel_live(cluster, record)
         if isinstance(cancelled, WithdrawUnknown):
-            ledger.replace(entry, before)
+            _undo(ledger, entry)
             return cancelled
-        withdrawal = marked.withdrawal
-        reason = withdrawal.reason if withdrawal is not None else "withdrawn"
-        won = ledger.replace(entry, transitioned(marked, LedgerState.WITHDRAWN, reason=reason))
+        won = ledger.replace(entry, transitioned(record, LedgerState.WITHDRAWN, reason=mark.reason))
     except LedgerError as error:
-        _undo_quietly(ledger, marked)
+        _undo_quietly(ledger, key, mark)
         return WithdrawUnknown(key, str(error))
-    return Withdrawn(key, marked.operation_id, cancelled) if won else None
+    return Withdrawn(key, record.operation_id, cancelled) if won else None
 
 
-def _undo_quietly(ledger: EvaluationLedger, marked: LedgerRecord) -> None:
+def undo_expired_withdrawal(ledger: EvaluationLedger, entry: LedgerEntry, *, now: float) -> bool:
+    """Undo the withdrawal under way on ``entry``'s attempt if it outlived its window, so its withdrawer died.
+
+    True when this call undid it; False when there is none, it still holds, or
+    another writer moved the withdrawal on since ``entry`` was read. A run
+    waiting on the withdrawal and a withdrawer that finds it both call this.
+    """
+    mark = entry.withdrawal
+    if mark is None or not withdrawal_expired(mark, now=now):
+        return False
+    return _undo(ledger, entry)
+
+
+def _undo(ledger: EvaluationLedger, entry: LedgerEntry) -> bool:
+    """Undo the withdrawal mark ``entry`` shows standing; False if another writer moved it on."""
+    return ledger.write_withdrawal(entry, WithdrawalUndone(attempt=entry.record.attempt))
+
+
+def _undo_quietly(ledger: EvaluationLedger, key: str, mark: WithdrawalMark) -> None:
     """Undo this withdrawal's mark if it still stands; one that cannot be undone expires."""
     try:
-        entry = ledger.read(marked.key)
-        if entry is not None and entry.record == marked:
-            ledger.replace(entry, undone_withdrawal(marked))
+        entry = ledger.read(key)
+        if entry is not None and entry.withdrawal == mark:
+            _undo(ledger, entry)
     except LedgerError:
         _LOG.warning(
-            "evaluation ledger request %s stays marked withdrawing for up to %.0f s",
-            entry_id(marked.key),
-            WITHDRAWAL_WINDOW_SECONDS,
+            "evaluation ledger request %s stays marked withdrawing until epoch %.0f",
+            entry_id(key),
+            mark.until,
         )
 
 
@@ -389,7 +417,8 @@ def sweep_unleased(
         record = entry.record
         if record.state.settled:
             return False
-        if record.withdrawal is not None and not withdrawal_expired(record, now=now):
+        mark = entry.withdrawal
+        if mark is not None and not withdrawal_expired(mark, now=now):
             return False  # another withdrawal is under way; an expired one is undone
         return isinstance(lease_verdict(entry, now=now, grace_seconds=grace_seconds), Unleased)
 
@@ -509,5 +538,6 @@ __all__ = [
     "relinquish",
     "settle",
     "sweep_unleased",
+    "undo_expired_withdrawal",
     "withdraw",
 ]

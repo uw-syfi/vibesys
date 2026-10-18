@@ -10,9 +10,9 @@ job (``relinquish``), unless the policy keeps jobs on a stop
 the grace period is withdrawn by the sweep, which any attached run performs.
 
 A run leases a request before it reads the request's record to attach to
-it, so a withdrawal that marked the attempt ``withdrawing`` before that read
-sees the lease when it reads the leases again, and goes back; one that marks
-it after sees the attempt attached to only through that lease, too
+it, so a withdrawal that marked the attempt before that read sees the lease
+when it reads the request again, and undoes its mark; one that marks it after
+sees the attempt attached to only through that lease, too
 (``vs_slurm.api.withdraw``). Within one run, ``guard`` orders an evaluation's
 attach after its sibling's withdrawal of the same request, and the other way.
 
@@ -59,7 +59,7 @@ from vs_slurm.api import (
     submit_step,
     sweep_unleased,
     transitioned,
-    undone_withdrawal,
+    undo_expired_withdrawal,
     validate_holder,
     validate_project,
 )
@@ -388,9 +388,9 @@ class SlurmLedgerAttachment:
         """Wait on a withdrawal under way; undo one whose withdrawer died (``AwaitWithdrawal``)."""
         record = entry.record
         if not expired:
-            by = record.withdrawal.by if record.withdrawal is not None else "another process"
+            by = entry.withdrawal.by if entry.withdrawal is not None else "another process"
             return AttachPending(record.key, f"{by} is withdrawing the request")
-        self.ledger.replace(entry, undone_withdrawal(record))
+        undo_expired_withdrawal(self.ledger, entry, now=self.clock.now())
         return None  # read again: the attempt as it was, or what another process made of it
 
     def _resolve(

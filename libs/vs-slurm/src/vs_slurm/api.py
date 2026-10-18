@@ -72,7 +72,6 @@ from .job_teardown import PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE
 from .ledger import (
     BATCH_RESULT_LAYOUT,
     LEDGER_FORMAT_VERSION,
-    WITHDRAWING_FORMAT_VERSION,
     AttachJob,
     AwaitWithdrawal,
     CheckJob,
@@ -88,13 +87,14 @@ from .ledger import (
     LedgerRecord,
     LedgerStage,
     LedgerState,
-    LedgerWithdrawal,
     ResolveSubmission,
     Settlement,
     SubmitBoundJob,
     SubmitStep,
     Unleased,
     UnreadableLease,
+    WithdrawalMark,
+    WithdrawalUndone,
     check_transition,
     claim_expired,
     decode_lease,
@@ -105,11 +105,9 @@ from .ledger import (
     job_of_handle,
     lease_verdict,
     ledger_operation_id,
-    marked_withdrawing,
     settlement,
     submit_step,
     transitioned,
-    undone_withdrawal,
     validate_holder,
     validate_project,
 )
@@ -126,6 +124,7 @@ from .ledger_actions import (
     relinquish,
     settle,
     sweep_unleased,
+    undo_expired_withdrawal,
     withdraw,
 )
 from .ledger_listing import (
@@ -242,7 +241,6 @@ __all__ = [
     "SLURM_CONNECTOR_REQUEST",
     "STAGE_TIMEOUT_EXIT_CODES",
     "WITHDRAWAL_WINDOW_SECONDS",
-    "WITHDRAWING_FORMAT_VERSION",
     "AccountingRow",
     "AttachJob",
     "AwaitWithdrawal",
@@ -287,7 +285,6 @@ __all__ = [
     "LedgerRow",
     "LedgerStage",
     "LedgerState",
-    "LedgerWithdrawal",
     "MinimalJob",
     "NoAccountingRow",
     "NodeGpus",
@@ -365,6 +362,8 @@ __all__ = [
     "Unresolved",
     "WithdrawOutcome",
     "WithdrawUnknown",
+    "WithdrawalMark",
+    "WithdrawalUndone",
     "Withdrawer",
     "Withdrawn",
     "advance",
@@ -385,7 +384,6 @@ __all__ = [
     "life_for_status",
     "list_entries",
     "load_slurm_config",
-    "marked_withdrawing",
     "minimal_job",
     "needs_accounting",
     "observe",
@@ -412,7 +410,7 @@ __all__ = [
     "sweep_unleased",
     "transitioned",
     "tree_content_identity",
-    "undone_withdrawal",
+    "undo_expired_withdrawal",
     "unframed_output",
     "validate_cluster_operation_id",
     "validate_holder",
@@ -501,6 +499,17 @@ class EvaluationLedger(Protocol):
         True when it was written. False when another writer already moved the
         attempt past ``current``: the caller reads the request again and decides
         anew. Raises ``LedgerError`` for a change ``check_transition`` refuses.
+        """
+        ...
+
+    def write_withdrawal(
+        self, current: LedgerEntry, document: WithdrawalMark | WithdrawalUndone
+    ) -> bool:
+        """Compare-and-swap: write ``document`` as the withdrawal revision after ``current``'s.
+
+        True when it was written; False when another withdrawal revision of the
+        attempt was written since ``current`` was read. Raises ``LedgerError``
+        for a revision ``check_withdrawal`` refuses. Never touches the record.
         """
         ...
 

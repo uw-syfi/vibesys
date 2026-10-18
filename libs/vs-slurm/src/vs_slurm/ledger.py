@@ -20,10 +20,17 @@ Layout under ``<remote_workspace_root>/<config.name>/ledger/<project>/<key>/``:
   ``r``, and of two writers from one revision exactly one wins. The highest
   revision of the highest attempt is the current record. Only the transitions
   in ``check_transition`` are written; a withdrawn or failed attempt is final,
-  and the next ask for the request claims attempt ``n + 1``. An attempt is
-  withdrawn in two swaps, through ``withdrawing`` (``LedgerWithdrawal``), so a
-  run that leases the request between the withdrawer's decision and its cancel
-  keeps the job (``vs_slurm.ledger_actions.withdraw``).
+  and the next ask for the request claims attempt ``n + 1``.
+- ``withdrawal-<n>.<w>.json``: revision ``w`` of the withdrawal marks of
+  attempt ``n``, created the same create-only way: a withdrawal under way
+  (``WithdrawalMark``), or the undoing of the one before it
+  (``WithdrawalUndone``). The highest revision of the current attempt says
+  whether a withdrawal is under way on it: until it ends, no run attaches to
+  the attempt, so a run that leases the request between the withdrawer's
+  decision and its cancel keeps the job (``vs_slurm.ledger_actions.withdraw``).
+  The marks live beside the record, not in it: a build before #3173 reads every
+  ``attempt-*.json`` revision in format 1 and fails the request on one it
+  cannot decode, and it never lists these files.
 - ``leases/<holder>.json``: one lease per attached run, written only by that
   run, so renewals never contend.
 
@@ -61,23 +68,18 @@ from .runner import (
 from .scheduler_states import SlurmJobStatus
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from pathlib import Path
 
     from .cluster_types import ClusterCollectOutcome
     from .config import SlurmConfig
 
 LEDGER_FORMAT_VERSION = 1
-"""The version of every lease, and of every record but a withdrawing one, this build writes."""
+"""The version of every ledger document this build writes.
 
-WITHDRAWING_FORMAT_VERSION = 2
-"""The version of a record in state ``withdrawing``, which format 1 has no words for.
-
-Only a withdrawal in progress, a few cluster round trips, is written in it: a
-build that reads only format 1 meanwhile reports the request unreadable, and
-reads it again once the withdrawal finished or was undone.
+Records and leases are exactly the format 1 that builds before #3173 read, so
+those builds can still read every request this build touches.
 """
-
-_RECORD_FORMAT_VERSIONS = frozenset({LEDGER_FORMAT_VERSION, WITHDRAWING_FORMAT_VERSION})
 
 BATCH_RESULT_LAYOUT = 1
 """The layout of the result files a batch job writes, which collection reads.
@@ -336,18 +338,16 @@ class LedgerState(StrEnum):
     results and every stage left its own (``settlement``), so later asks reuse
     it; ``failed`` means the job ended any other way, its results could not be
     collected, a stage timed out or was killed, or the submission never
-    produced a job, so the next ask starts a new attempt; ``withdrawing`` means a
-    withdrawal decided on it and is cancelling its job: it ends ``withdrawn``,
-    or goes back to the state it left (``LedgerWithdrawal.prior``) when a run
-    leased the request meanwhile; ``withdrawn`` means an operator removed it,
-    its last run stopped wanting it, or no run leased it for its grace period.
-    ``failed`` and ``withdrawn`` are final. Phase 2 adds the slot states.
+    produced a job, so the next ask starts a new attempt; ``withdrawn`` means an
+    operator removed it, its last run stopped wanting it, or no run leased it
+    for its grace period. ``failed`` and ``withdrawn`` are final. A withdrawal
+    under way is no state of the record (``WithdrawalMark``). Phase 2 adds the
+    slot states.
     """
 
     SUBMITTING = "submitting"
     SUBMITTED = "submitted"
     COMPLETED = "completed"
-    WITHDRAWING = "withdrawing"
     FAILED = "failed"
     WITHDRAWN = "withdrawn"
 
@@ -362,48 +362,20 @@ class LedgerState(StrEnum):
         return self in {LedgerState.COMPLETED, LedgerState.FAILED, LedgerState.WITHDRAWN}
 
 
-_WITHDRAWABLE = frozenset({LedgerState.SUBMITTING, LedgerState.SUBMITTED, LedgerState.COMPLETED})
 _NEXT_STATES: dict[LedgerState, frozenset[LedgerState]] = {
     LedgerState.SUBMITTING: frozenset(
-        {LedgerState.SUBMITTED, LedgerState.FAILED, LedgerState.WITHDRAWING}
+        {LedgerState.SUBMITTED, LedgerState.FAILED, LedgerState.WITHDRAWN}
     ),
     LedgerState.SUBMITTED: frozenset(
-        {LedgerState.COMPLETED, LedgerState.FAILED, LedgerState.WITHDRAWING}
+        {LedgerState.COMPLETED, LedgerState.FAILED, LedgerState.WITHDRAWN}
     ),
     # An operator may remove a finished entry, so that the next ask runs it again.
-    LedgerState.COMPLETED: frozenset({LedgerState.WITHDRAWING}),
-    # Back only to the state it left (``check_transition``).
-    LedgerState.WITHDRAWING: frozenset({LedgerState.WITHDRAWN, *_WITHDRAWABLE}),
+    LedgerState.COMPLETED: frozenset({LedgerState.WITHDRAWN}),
     LedgerState.FAILED: frozenset(),
     LedgerState.WITHDRAWN: frozenset(),
 }
 _ENDED_WITH_REASON = frozenset({LedgerState.FAILED, LedgerState.WITHDRAWN})
 _NAMES_A_JOB = frozenset({LedgerState.SUBMITTED, LedgerState.COMPLETED})
-
-
-class LedgerWithdrawal(_Document):
-    """A withdrawal in progress: who decided it, when, and the state it would go back to.
-
-    ``by`` names the withdrawer (a run's holder, or the operator's command).
-    It holds from ``since`` until ``until``, in epoch seconds; a withdrawal
-    still in progress after ``until`` is taken to have died, and anyone may
-    undo it (``undone_withdrawal``). ``reason`` is what the withdrawn record
-    will say. ``prior`` is the state the attempt was in.
-    """
-
-    by: str
-    since: float
-    until: float
-    reason: str
-    prior: LedgerState
-
-    @model_validator(mode="after")
-    def _consistent(self) -> LedgerWithdrawal:
-        validate_holder(self.by)
-        if self.prior not in _WITHDRAWABLE:
-            message = "only a submitting, submitted or completed attempt is withdrawn"
-            raise ValueError(message)
-        return self
 
 
 class LedgerLabels(_Document):
@@ -420,8 +392,7 @@ class LedgerRecord(_Document):
     when, in epoch seconds, and counts as its first lease.
     """
 
-    # 2 exactly while ``withdrawing`` (``WITHDRAWING_FORMAT_VERSION``), 1 otherwise.
-    format_version: Literal[1, 2] = 1
+    format_version: Literal[1] = 1
     key: str
     project: str
     attempt: int = Field(ge=0)
@@ -435,8 +406,6 @@ class LedgerRecord(_Document):
     job: SubmitBoundJob | None = None
     # Why a failed or withdrawn attempt ended; only those, and every one of them, say.
     reason: str | None = None
-    # The withdrawal in progress; only a withdrawing record, and every one, has one.
-    withdrawal: LedgerWithdrawal | None = None
 
     @model_validator(mode="after")
     def _consistent(self) -> LedgerRecord:
@@ -446,32 +415,16 @@ class LedgerRecord(_Document):
         if self.operation_id != ledger_operation_id(self.key, self.attempt):
             message = "operation_id must derive from the key and attempt"
             raise ValueError(message)
+        if self.state is LedgerState.SUBMITTING and self.job is not None:
+            message = "a submitting record names no job yet"
+            raise ValueError(message)
+        if self.state in _NAMES_A_JOB and self.job is None:
+            message = "a submitted or completed record must name its job"
+            raise ValueError(message)
         if (self.state in _ENDED_WITH_REASON) != (self.reason is not None):
             message = "a failed or withdrawn record, and only one, states why"
             raise ValueError(message)
-        withdrawing = self.state is LedgerState.WITHDRAWING
-        if withdrawing != (self.withdrawal is not None):
-            message = "a withdrawing record, and only one, names its withdrawal"
-            raise ValueError(message)
-        if self.format_version != _record_format(self.state):
-            message = f"a {self.state.value} record has format_version {_record_format(self.state)}"
-            raise ValueError(message)
-        # A withdrawing record keeps the job, or the lack of one, of the state it left.
-        prior = self.withdrawal.prior if self.withdrawal is not None else self.state
-        if prior is LedgerState.SUBMITTING and self.job is not None:
-            message = "a submitting record names no job yet"
-            raise ValueError(message)
-        if prior in _NAMES_A_JOB and self.job is None:
-            message = "a submitted or completed record must name its job"
-            raise ValueError(message)
         return self
-
-
-def _record_format(state: LedgerState) -> int:
-    """The format a record in ``state`` is written in."""
-    if state is LedgerState.WITHDRAWING:
-        return WITHDRAWING_FORMAT_VERSION
-    return LEDGER_FORMAT_VERSION
 
 
 class LedgerLease(_Document):
@@ -489,6 +442,45 @@ class LedgerLease(_Document):
     def _safe_holder(self) -> LedgerLease:
         validate_holder(self.holder)
         return self
+
+
+class WithdrawalMark(_Document):
+    """A withdrawal under way on one attempt: who decided it, until when it holds, and why.
+
+    ``by`` names the withdrawer (a run's holder, or the operator's command).
+    It holds from ``since`` until ``until``, in epoch seconds; one still under
+    way after ``until`` is taken to have died, and anyone may undo it
+    (``vs_slurm.ledger_actions.undo_expired_withdrawal``). ``reason`` is what
+    the withdrawn record will say.
+    """
+
+    format_version: Literal[1] = 1
+    kind: Literal["mark"] = "mark"
+    attempt: int = Field(ge=0)
+    by: str
+    since: float
+    until: float
+    reason: str
+
+    @model_validator(mode="after")
+    def _consistent(self) -> WithdrawalMark:
+        validate_holder(self.by)
+        if self.until < self.since:
+            message = "a withdrawal holds until after it started"
+            raise ValueError(message)
+        return self
+
+
+class WithdrawalUndone(_Document):
+    """The withdrawal before this revision ended without withdrawing the attempt."""
+
+    format_version: Literal[1] = 1
+    kind: Literal["undone"] = "undone"
+    attempt: int = Field(ge=0)
+
+
+WithdrawalDocument = Annotated[WithdrawalMark | WithdrawalUndone, Field(discriminator="kind")]
+_WITHDRAWAL = TypeAdapter[WithdrawalMark | WithdrawalUndone](WithdrawalDocument)
 
 
 @dataclass(frozen=True, slots=True)
@@ -516,6 +508,10 @@ class LedgerEntry:
     claim window after its last write (``lease_verdict``, ``claim_expired``).
     ``earlier`` holds the current record of every earlier attempt, oldest first;
     each is final, since a new attempt is claimed only after the last one ended.
+    ``withdrawal`` is the withdrawal under way on the current attempt, if its
+    newest withdrawal revision is a mark; ``withdrawal_revision`` is that
+    newest revision, which a withdrawal swap (``EvaluationLedger.write_withdrawal``)
+    is against, -1 when there is none.
     """
 
     record: LedgerRecord
@@ -523,6 +519,8 @@ class LedgerEntry:
     revision: int = 0
     unreadable_leases: tuple[UnreadableLease, ...] = ()
     earlier: tuple[LedgerRecord, ...] = ()
+    withdrawal: WithdrawalMark | None = None
+    withdrawal_revision: int = -1
 
     @property
     def claim_window(self) -> float:
@@ -533,9 +531,8 @@ class LedgerEntry:
 def check_transition(before: LedgerRecord, after: LedgerRecord) -> None:
     """Refuse a record change outside the attempt's state machine. Pure.
 
-    Only the state, the job (once, when it is first named), the reason and
-    the withdrawal change; a final state never changes. A withdrawal records
-    the state it leaves, and an undone one goes back to exactly that state.
+    Only the state, the job (once, when it is first named) and the reason
+    change; a final state never changes.
     """
     fixed = ("key", "project", "attempt", "operation_id", "owner", "created_at", "labels")
     if any(getattr(before, name) != getattr(after, name) for name in fixed):
@@ -547,14 +544,6 @@ def check_transition(before: LedgerRecord, after: LedgerRecord) -> None:
         raise LedgerError.illegal_transition(before, after, "the state machine does not allow it")
     if before.job is not None and after.job != before.job:
         raise LedgerError.illegal_transition(before, after, "it changes the attempt's job")
-    if after.withdrawal is not None and after.withdrawal.prior is not before.state:
-        raise LedgerError.illegal_transition(before, after, "its withdrawal names another state")
-    if (
-        before.withdrawal is not None
-        and after.state is not LedgerState.WITHDRAWN
-        and (after.state is not before.withdrawal.prior or after.job != before.job)
-    ):
-        raise LedgerError.illegal_transition(before, after, "it goes back to another state")
 
 
 def transitioned(
@@ -566,50 +555,70 @@ def transitioned(
 ) -> LedgerRecord:
     """The record moved to ``state``, keeping its job unless it names one now. Pure."""
     after = record.model_copy(
-        update={
-            "state": state,
-            "job": job if job is not None else record.job,
-            "reason": reason,
-            "withdrawal": None,
-            "format_version": _record_format(state),
-        }
+        update={"state": state, "job": job if job is not None else record.job, "reason": reason}
     )
     after = LedgerRecord.model_validate(after.model_dump())
     check_transition(record, after)
     return after
 
 
-def marked_withdrawing(
-    record: LedgerRecord, *, by: str, since: float, until: float, reason: str
-) -> LedgerRecord:
-    """The record marked as being withdrawn by ``by`` from ``since`` until ``until``. Pure."""
-    if record.state not in _WITHDRAWABLE:
-        raise LedgerError.illegal_transition(record, record, "only a live attempt is withdrawn")
-    withdrawal = LedgerWithdrawal(
-        by=by, since=since, until=until, reason=reason, prior=record.state
+def entry_of(
+    records: Iterable[tuple[int, int, LedgerRecord]],
+    withdrawals: Iterable[tuple[int, int, WithdrawalMark | WithdrawalUndone]],
+    leases: Iterable[LedgerLease],
+    unreadable_leases: Iterable[UnreadableLease],
+) -> LedgerEntry | None:
+    """The request's entry from every document read under its key; None when it has no record. Pure.
+
+    ``records`` and ``withdrawals`` are ``(attempt, revision, document)``, as
+    their file names say. The current record is the highest revision of the
+    highest attempt; the withdrawal is the highest revision of that attempt's
+    withdrawal documents, when it is a mark.
+    """
+    latest: dict[int, tuple[int, LedgerRecord]] = {}
+    for attempt, revision, record in records:
+        if attempt not in latest or revision > latest[attempt][0]:
+            latest[attempt] = (revision, record)
+    if not latest:
+        return None
+    *earlier, (revision, current) = (latest[attempt] for attempt in sorted(latest))
+    newest: tuple[int, WithdrawalMark | WithdrawalUndone] | None = None
+    for attempt, sequence, document in withdrawals:
+        if attempt == current.attempt and (newest is None or sequence > newest[0]):
+            newest = (sequence, document)
+    withdrawal_revision, document = newest if newest is not None else (-1, None)
+    return LedgerEntry(
+        current,
+        tuple(sorted(leases, key=lambda lease: lease.holder)),
+        revision,
+        tuple(sorted(unreadable_leases, key=lambda lease: lease.holder)),
+        tuple(record for _, record in earlier),
+        withdrawal=document if isinstance(document, WithdrawalMark) else None,
+        withdrawal_revision=withdrawal_revision,
     )
-    after = record.model_copy(
-        update={
-            "state": LedgerState.WITHDRAWING,
-            "withdrawal": withdrawal,
-            "format_version": WITHDRAWING_FORMAT_VERSION,
-        }
-    )
-    after = LedgerRecord.model_validate(after.model_dump())
-    check_transition(record, after)
-    return after
 
 
-def undone_withdrawal(record: LedgerRecord) -> LedgerRecord:
-    """A withdrawing record back in the state it left, as it was before. Pure."""
-    if record.withdrawal is None:
-        raise LedgerError.illegal_transition(record, record, "no withdrawal is in progress")
-    return transitioned(record, record.withdrawal.prior)
+def check_withdrawal(current: LedgerEntry, document: WithdrawalMark | WithdrawalUndone) -> None:
+    """Refuse a withdrawal revision that does not follow ``current``. Pure.
+
+    A mark goes only on the current attempt, while it is live and no other
+    withdrawal is under way on it; an undoing only follows a mark.
+    """
+    record = current.record
+    if document.attempt != record.attempt:
+        raise LedgerError.illegal_transition(record, record, "a withdrawal names another attempt")
+    if isinstance(document, WithdrawalMark):
+        if record.state.final:
+            raise LedgerError.illegal_transition(record, record, "only a live attempt is withdrawn")
+        if current.withdrawal is not None:
+            raise LedgerError.illegal_transition(record, record, "a withdrawal is under way")
+    elif current.withdrawal is None:
+        raise LedgerError.illegal_transition(record, record, "no withdrawal is under way")
 
 
-def withdrawal_expired(record: LedgerRecord, *, now: float) -> bool:
-    """Whether a withdrawal in progress outlived its window, so its withdrawer died. Pure."""
-    return record.withdrawal is not None and now > record.withdrawal.until
+def withdrawal_expired(mark: WithdrawalMark, *, now: float) -> bool:
+    """Whether a withdrawal under way outlived its window, so its withdrawer died. Pure."""
+    return now > mark.until
 
 
 # A stage stopped from outside rather than by its own command: by its time limit
@@ -693,12 +702,17 @@ def _stage_problem(name: str, item: SlurmBatchStageResult | None) -> str | None:
 
 def decode_record(text: str, *, path: str) -> LedgerRecord:
     """Read a record of any format this build knows; a newer one is an error, never a guess."""
-    return _decode(text, path=path, model=LedgerRecord, versions=_RECORD_FORMAT_VERSIONS)
+    return _decode(text, path=path, model=LedgerRecord)
 
 
 def decode_lease(text: str, *, path: str) -> LedgerLease:
     """Read a lease of any format this build knows."""
-    return _decode(text, path=path, model=LedgerLease, versions=frozenset({LEDGER_FORMAT_VERSION}))
+    return _decode(text, path=path, model=LedgerLease)
+
+
+def decode_withdrawal(text: str, *, path: str) -> WithdrawalMark | WithdrawalUndone:
+    """Read a withdrawal revision of any format this build knows."""
+    return _decode(text, path=path, model=_WITHDRAWAL)
 
 
 # A record or lease is a few hundred bytes; anything near this bound is not one.
@@ -706,21 +720,22 @@ _MAX_DOCUMENT_BYTES = 1 << 20
 _DOCUMENT = TypeAdapter(dict[str, object])
 
 
-def _decode[T: BaseModel](text: str, *, path: str, model: type[T], versions: frozenset[int]) -> T:
+def _decode[T](text: str, *, path: str, model: type[T] | TypeAdapter[T]) -> T:
     document = decode_json(text, _DOCUMENT, source=path, max_bytes=_MAX_DOCUMENT_BYTES)
     if isinstance(document, Unreadable):
         raise LedgerError.unreadable(path, f"not a JSON object ({document.kind.value})")
     version = document.get("format_version")
-    if not isinstance(version, int) or isinstance(version, bool) or version not in versions:
+    if version != LEDGER_FORMAT_VERSION:
         raise LedgerError.unsupported_version(path, version)
+    adapter = model if isinstance(model, TypeAdapter) else TypeAdapter(model)
     try:
-        return model.model_validate(document, strict=False)
+        return adapter.validate_python(document, strict=False)
     except ValidationError as error:
         fields = sorted({".".join(str(part) for part in item["loc"]) for item in error.errors()})
         raise LedgerError.unreadable(path, f"invalid fields {', '.join(fields)}") from error
 
 
-def encode(document: LedgerRecord | LedgerLease) -> str:
+def encode(document: LedgerRecord | LedgerLease | WithdrawalMark | WithdrawalUndone) -> str:
     """The stored form of a ledger document: one line of JSON."""
     return document.model_dump_json() + "\n"
 
@@ -952,14 +967,13 @@ def claim_expired(entry: LedgerEntry, *, now: float) -> bool:
 class AwaitWithdrawal:
     """A withdrawal is cancelling the attempt's job: wait for it to end or be undone.
 
-    The asker's lease, written before it read the record, makes a withdrawal
-    that has not cancelled yet go back (``ledger_actions.withdraw``); one that
-    did ends ``withdrawn``, and the next read claims a new attempt. A new
-    attempt is never claimed while the old one may still go back, which would
+    The asker's lease, written before it read the request, makes a withdrawal
+    that has not cancelled yet undo its mark (``ledger_actions.withdraw``); one
+    that did ends ``withdrawn``, and the next read claims a new attempt. A new
+    attempt is never claimed while the old one may still be kept, which would
     leave two live jobs for one request. Once the withdrawal outlived its
-    window (``expired``, ``withdrawal_expired``), its withdrawer died: the
-    asker undoes it (``undone_withdrawal``, a swap against ``entry``) and
-    reads again.
+    window (``expired``), its withdrawer died: the asker undoes it
+    (``ledger_actions.undo_expired_withdrawal``) and reads again.
     """
 
     entry: LedgerEntry
@@ -980,11 +994,14 @@ def submit_step(entry: LedgerEntry | None, *, now: float) -> SubmitStep:
     """What a submission of a request does, given its ledger entry, at ``now``. Pure.
 
     Only an absent request, or one whose current attempt failed or was
-    withdrawn, is submitted; every other state attaches or waits.
+    withdrawn, is submitted; every other state attaches or waits, and so does
+    every attempt a withdrawal is under way on.
     """
     if entry is None:
         return ClaimAttempt(0)
     record = entry.record
+    if entry.withdrawal is not None and not record.state.final:
+        return AwaitWithdrawal(entry, expired=withdrawal_expired(entry.withdrawal, now=now))
     match record.state:
         case LedgerState.COMPLETED:
             return AttachJob(record)
@@ -992,8 +1009,6 @@ def submit_step(entry: LedgerEntry | None, *, now: float) -> SubmitStep:
             return CheckJob(entry)
         case LedgerState.SUBMITTING:
             return ResolveSubmission(entry, expired=claim_expired(entry, now=now))
-        case LedgerState.WITHDRAWING:
-            return AwaitWithdrawal(entry, expired=withdrawal_expired(record, now=now))
         case LedgerState.FAILED | LedgerState.WITHDRAWN:
             return ClaimAttempt(record.attempt + 1)
         case _:
@@ -1003,7 +1018,6 @@ def submit_step(entry: LedgerEntry | None, *, now: float) -> SubmitStep:
 __all__ = [
     "BATCH_RESULT_LAYOUT",
     "LEDGER_FORMAT_VERSION",
-    "WITHDRAWING_FORMAT_VERSION",
     "AttachJob",
     "AwaitWithdrawal",
     "CheckJob",
@@ -1019,29 +1033,32 @@ __all__ = [
     "LedgerRecord",
     "LedgerStage",
     "LedgerState",
-    "LedgerWithdrawal",
     "ResolveSubmission",
     "Settlement",
     "SubmitBoundJob",
     "SubmitStep",
     "Unleased",
     "UnreadableLease",
+    "WithdrawalDocument",
+    "WithdrawalMark",
+    "WithdrawalUndone",
     "check_transition",
+    "check_withdrawal",
     "claim_expired",
     "content_digest",
     "decode_lease",
     "decode_record",
+    "decode_withdrawal",
     "encode",
+    "entry_of",
     "evaluation_key",
     "handle_of_job",
     "job_of_handle",
     "lease_verdict",
     "ledger_operation_id",
-    "marked_withdrawing",
     "settlement",
     "submit_step",
     "transitioned",
-    "undone_withdrawal",
     "validate_holder",
     "validate_key",
     "validate_project",

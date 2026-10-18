@@ -141,11 +141,6 @@ def _collected(operation_id: str) -> ClusterCollected:
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(
-    strict=True,
-    reason="#3173 re-review HIGH-1: every record carries a withdrawal field, and a "
-    "withdrawal writes a format-2 revision, which an older build cannot read",
-)
 def test_every_record_and_lease_this_build_writes_reads_in_format_1() -> None:
     """r3173 HIGH-1: one record an older build cannot decode failed its evaluations of the request.
 
@@ -194,3 +189,5 @@ def test_every_record_and_lease_this_build_writes_reads_in_format_1() -> None:
             Withdrawer(by="vibesys-evals", now=world.clock.now(), reason="removed by operator"),
         )
         world.assert_an_older_build_reads_everything("a removal of a completed entry")
+        # The withdrawals did mark their attempts, where an older build never looks.
+        assert list(world.ledger_root.glob("*/withdrawal-*.json"))
