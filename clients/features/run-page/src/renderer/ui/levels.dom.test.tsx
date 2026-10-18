@@ -62,6 +62,7 @@ async function chipsOf(
         core={null}
         mode="ideas"
         dispatch={() => undefined}
+        loading={null}
         zoomed={{idea: opened, agent: null, step: null, item: null}}
       />,
     ),
