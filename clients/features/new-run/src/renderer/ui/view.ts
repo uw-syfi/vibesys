@@ -201,6 +201,7 @@ const CHECK_LABELS: Readonly<Record<Check['id'], string>> = {
   docker_reachable: 'Docker',
   agent_image: 'Agent image',
   evaluator_available: 'Evaluator',
+  measurement_target: 'Where results are measured',
 };
 
 /** One "Ready to start" item, with the fix it offers named but not yet bound to an action. */

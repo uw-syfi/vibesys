@@ -41,6 +41,16 @@ const CAUSES: Readonly<{[K in Cause['kind']]: Extract<Cause, {kind: K}>}> = {
   arguments_unrecognized: {kind: 'arguments_unrecognized', arguments: ['--max-rounds', '3']},
   option_not_accepted: {kind: 'option_not_accepted', option: 'rounds'},
   github_unavailable: {kind: 'github_unavailable', problem: RAW},
+  measurement_target_not_configured: {
+    kind: 'measurement_target_not_configured',
+    target: {kind: 'slurm', cluster: 'lab'},
+  },
+  measurement_target_misfit: {
+    kind: 'measurement_target_misfit',
+    target: {kind: 'modal'},
+    backend: 'rocm',
+    offered: 'cuda',
+  },
 };
 
 function failed(cause: Cause | null, id: Check['id'] = 'settings_valid'): Check {
