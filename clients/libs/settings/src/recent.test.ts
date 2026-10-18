@@ -6,6 +6,7 @@ import {
   EMPTY_RECENT,
   parseRecent,
   type RecentFile,
+  recentDocument,
   remember,
   rememberInstance,
   type StoredRecentRun,
@@ -68,7 +69,11 @@ describe('recent runs', () => {
         expect(new Set(keys).size).toBe(keys.length);
         expect(file.runs.length).toBeLessThanOrEqual(4);
       }
-      expect(parseRecent(JSON.parse(JSON.stringify(file)))).toEqual({file, skipped: []});
+      expect(parseRecent(JSON.parse(JSON.stringify(file)))).toEqual({
+        file,
+        skipped: [],
+        invalid: [],
+      });
     }
   });
 
@@ -214,7 +219,24 @@ describe('recent runs', () => {
         ],
       },
       skipped: [],
+      invalid: [],
     });
+  });
+
+  test('a document with invalid entries keeps each after the same valid entries it followed', () => {
+    for (const seed of SEEDS) {
+      const random = new Seeded(seed);
+      const entries: unknown[] = [];
+      for (let index = 0; index < random.int(10); index++) {
+        entries.push(random.bool() ? arbitraryRun(random, index) : {bad: index});
+      }
+      const first = parseRecent({version: 4, runs: entries});
+      const document = recentDocument(first.file, first.invalid);
+      expect(document.runs).toEqual(entries);
+      const again = parseRecent(document);
+      expect(again.file).toEqual(first.file);
+      expect(again.invalid).toEqual(first.invalid);
+    }
   });
 
   test('version 2 migrates without guessing an instance, then inspection preserves its locator', () => {
@@ -223,7 +245,11 @@ describe('recent runs', () => {
       runs: [{host: 'local', project: '/p', task: null, runId: 'run-1', attachedAt: 1}],
     });
     expect(parsed.runs[0]?.instanceId).toBeNull();
-    expect(parseRecent(JSON.parse(JSON.stringify(parsed)))).toEqual({file: parsed, skipped: []});
+    expect(parseRecent(JSON.parse(JSON.stringify(parsed)))).toEqual({
+      file: parsed,
+      skipped: [],
+      invalid: [],
+    });
 
     const located = rememberInstance(parsed, {
       host: 'local',

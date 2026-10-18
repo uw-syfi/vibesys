@@ -112,11 +112,21 @@ function parseStart(value: unknown, path: string): RunStart | null {
   }
 }
 
+/** An entry of `recent.json` that could not be read, kept as the file holds it. */
+export interface InvalidRecentEntry {
+  /** The entry's JSON value, exactly as parsed; written back unchanged. */
+  readonly raw: unknown;
+  /** How many valid entries precede it in the file. */
+  readonly after: number;
+}
+
 /** What `recent.json` holds: the runs it lists validly, and the entries it could not read. */
 export interface ParsedRecent {
   readonly file: RecentFile;
   /** Every entry left out, in file order; none is ever repaired or guessed. */
   readonly skipped: readonly SkippedRecent[];
+  /** The same entries with their values, so a write can keep them. */
+  readonly invalid: readonly InvalidRecentEntry[];
 }
 
 /**
@@ -138,6 +148,7 @@ export function parseRecent(value: unknown): ParsedRecent {
   if (!Array.isArray(runs)) throw new SettingsError('recent.json: runs must be a list');
   const kept: StoredRecentRun[] = [];
   const skipped: SkippedRecent[] = [];
+  const invalid: InvalidRecentEntry[] = [];
   for (const [index, entry] of runs.entries()) {
     const path = `recent.json: runs[${index}]`;
     try {
@@ -146,9 +157,35 @@ export function parseRecent(value: unknown): ParsedRecent {
     } catch (error) {
       if (!(error instanceof SettingsError)) throw error;
       skipped.push({index, reason: error.message});
+      invalid.push({raw: entry, after: kept.length});
     }
   }
-  return {file: {version: 4, runs: kept}, skipped};
+  return {file: {version: 4, runs: kept}, skipped, invalid};
+}
+
+/**
+ * The document to write for `file` while `invalid` entries stay in it: each keeps its value and its
+ * place after the same number of valid entries (or at the end when fewer remain), so a write never
+ * drops or repairs an entry the user has to fix.
+ */
+export function recentDocument(
+  file: RecentFile,
+  invalid: readonly InvalidRecentEntry[],
+): {readonly version: 4; readonly runs: readonly unknown[]} {
+  const runs: unknown[] = [];
+  let next = 0;
+  for (let placed = 0; placed <= file.runs.length; placed++) {
+    while (
+      next < invalid.length &&
+      Math.min(invalid[next]?.after ?? 0, file.runs.length) <= placed
+    ) {
+      runs.push(invalid[next]?.raw);
+      next++;
+    }
+    const run = file.runs[placed];
+    if (run !== undefined) runs.push(run);
+  }
+  return {version: 4, runs};
 }
 
 function sameRun(a: StoredRecentRun, b: StoredRecentRun): boolean {

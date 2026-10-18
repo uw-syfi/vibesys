@@ -708,7 +708,8 @@ rather than the window of the run it names.
 - **Settings store.** `hosts.json` and `recent.json` have one writer, the store, which serializes
   updates and replaces files atomically. With the single-instance lock, no other process writes
   them. A `recent.json` with unreadable entries is read for the others and reports each entry
-  skipped; updates reject such a file, so the user's entries are never dropped silently.
+  skipped; updates write each unreadable entry back as it was, beside the valid runs, so the
+  user's entries are never dropped or rewritten silently and new runs still reach Recent.
 
 ## Guards
 

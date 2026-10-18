@@ -18,9 +18,10 @@
  *   update that already committed.
  * - **Invalid files are ignored by reads and reported** in the same host-settings snapshot; updates
  *   reject them before writing, so the bytes remain available for repair.
- * - **A recent-runs file with invalid entries is read for the rest.** Each unreadable entry is
- *   skipped and reported with its reason in the same snapshot as the runs kept; updates reject such
- *   a file like an invalid one, so no entry is dropped from the user's file without their repair.
+ * - **A recent-runs file with invalid entries is read and updated for the rest.** Each unreadable
+ *   entry is skipped and reported with its reason in the same snapshot as the runs kept. Updates
+ *   write it back unchanged beside the valid runs, so no entry is dropped or rewritten without the
+ *   user's repair.
  *
  * Electron-free: the main process supplies the paths.
  */
@@ -30,7 +31,13 @@ import {dirname} from 'node:path';
 import type {SkippedRecent} from '@vibesys/runs';
 import {EMPTY_SETTINGS, parseSettings, type SettingsFile} from './host-settings.js';
 import {DEFAULT_PREFERENCES, type Preferences, parsePreferences} from './preferences.js';
-import {EMPTY_RECENT, parseRecent, type RecentFile} from './recent.js';
+import {
+  EMPTY_RECENT,
+  type InvalidRecentEntry,
+  parseRecent,
+  type RecentFile,
+  recentDocument,
+} from './recent.js';
 
 export interface SettingsStoreOptions {
   readonly settingsPath: string;
@@ -74,6 +81,8 @@ interface ReadResult<T> {
 
 interface RecentRead extends ReadResult<RecentFile> {
   readonly skipped: readonly SkippedRecent[];
+  /** The unreadable entries, which a write keeps as they are. */
+  readonly invalid: readonly InvalidRecentEntry[];
 }
 
 /** One coherent observation of `hosts.json`. */
@@ -145,25 +154,24 @@ export class SettingsStore {
 
   async #readRecent(): Promise<RecentRead> {
     const read = await readText(this.#filesystem, this.#options.recentPath);
-    if (read.kind === 'missing') return {value: EMPTY_RECENT, failure: null, skipped: []};
+    if (read.kind === 'missing')
+      return {value: EMPTY_RECENT, failure: null, skipped: [], invalid: []};
     if (read.kind === 'failed') {
       const failure = readFailure(this.#options.recentPath, read.error);
       this.#log(failure.message);
-      return {value: EMPTY_RECENT, failure, skipped: []};
+      return {value: EMPTY_RECENT, failure, skipped: [], invalid: []};
     }
     try {
-      const {file, skipped} = parseRecent(JSON.parse(read.text) as unknown);
-      if (skipped.length === 0) return {value: file, failure: null, skipped};
-      const reasons = skipped.map(entry => entry.reason).join('; ');
-      this.#log(`skipping ${skipped.length} entries of ${this.#options.recentPath}: ${reasons}`);
-      const failure = new Error(
-        `${this.#options.recentPath} has ${skipped.length} unreadable entries and is left as it is: ${reasons}`,
-      );
-      return {value: file, failure, skipped};
+      const {file, skipped, invalid} = parseRecent(JSON.parse(read.text) as unknown);
+      if (skipped.length > 0) {
+        const reasons = skipped.map(entry => entry.reason).join('; ');
+        this.#log(`skipping ${skipped.length} entries of ${this.#options.recentPath}: ${reasons}`);
+      }
+      return {value: file, failure: null, skipped, invalid};
     } catch (error) {
       const failure = invalidFile(this.#options.recentPath, error);
       this.#log(`ignoring ${failure.message}`);
-      return {value: EMPTY_RECENT, failure, skipped: []};
+      return {value: EMPTY_RECENT, failure, skipped: [], invalid: []};
     }
   }
 
@@ -238,8 +246,10 @@ export class SettingsStore {
       const recent = await this.#readRecent();
       if (recent.failure !== null) throw recent.failure;
       const next = update(recent.value);
+      const document = recentDocument(next, recent.invalid);
       if (
-        (await writeJson(this.#filesystem, this.#options.recentPath, next, current)) === 'cancelled'
+        (await writeJson(this.#filesystem, this.#options.recentPath, document, current)) ===
+        'cancelled'
       )
         return;
       this.#notify(this.#recentListeners, next, 'recent-runs');
