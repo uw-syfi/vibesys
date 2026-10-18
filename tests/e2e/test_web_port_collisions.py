@@ -50,7 +50,7 @@ def test_server_main_prints_the_bind_authority_and_reason_on_its_first_line(
     first_line = stderr.getvalue().splitlines()[0]
     assert first_line.startswith(f"WebSocket gateway could not bind 127.0.0.1:{port}:")
     assert "address already in use" in first_line.lower()
-    assert f"vibesys web stop --port {port}" in stderr.getvalue()
+    assert f"Inspect or stop the listener on port {port}" in stderr.getvalue()
 
 
 def test_inspector_maps_a_real_same_user_non_gateway_listener() -> None:

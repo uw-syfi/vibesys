@@ -442,8 +442,11 @@ def _spawn_detached(
             ),
             effects,
         )
-        print(f"VibeSys web UI: {record.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101036 [T201]; expose the detached capability URL to the launcher user
-        webbrowser.open(record.url, new=2)
+        if _web_assets_from_argv(arguments) is not None:
+            print(f"VibeSys web UI: {record.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101036 [T201]; expose the detached capability URL to the launcher user
+            webbrowser.open(record.url, new=2)
+        else:
+            print(f"VibeSys gateway: {record.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101036 [T201]; expose the detached capability URL to the launcher user
 
 
 @dataclass(frozen=True)
@@ -1018,8 +1021,11 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
                     code="invalid_arguments",
                     stage="argument_parsing",
                 )
-            print(f"VibeSys web UI: {existing.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101039 [T201]; expose the reused capability URL to the launcher user
-            webbrowser.open(existing.url, new=2)
+            if web_bundle is not None:
+                print(f"VibeSys web UI: {existing.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101039 [T201]; expose the reused capability URL to the launcher user
+                webbrowser.open(existing.url, new=2)
+            else:
+                print(f"VibeSys gateway: {existing.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101039 [T201]; expose the reused capability URL to the launcher user
             return
         if detach:
             try:

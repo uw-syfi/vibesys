@@ -498,8 +498,8 @@ def test_detached_startup_reports_a_published_record(
 
     _spawn_detached(["--web", "--detach"], tmp_path / "web-gateway.json", effects)
 
-    assert capsys.readouterr().out == f"VibeSys web UI: {record.url}\n"
-    assert opened == [record.url]
+    assert capsys.readouterr().out == f"VibeSys gateway: {record.url}\n"
+    assert opened == []
     assert process.terminated is False
 
 
