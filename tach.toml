@@ -252,12 +252,17 @@ depends_on = ["server.host_api", "server.host_compute", "server.host_machine_fac
 # A machine's compute settings: Slurm clusters in one file, the Modal token, connection tests.
 # Files and commands come through seams; Pydantic, the standard library and vs_slurm otherwise.
 path = "server.host_helper_compute"
-depends_on = ["server.host_api", "server.host_compute", "server.host_machine_facts", "vs_slurm", "vs_sim.api"]
+depends_on = ["server.host_api", "server.host_compute", "server.host_helper_slurm", "server.host_machine_facts", "vs_sim.api"]
 
 [[modules]]
 # The optional capabilities `hello` negotiates. Standard library only.
 path = "server.host_features"
 depends_on = []
+
+[[modules]]
+# What vs_slurm says about a cluster of the compute settings; loaded only by a compute request.
+path = "server.host_helper_slurm"
+depends_on = ["server.host_compute", "vs_slurm"]
 
 [[modules]]
 # Where results are measured and a machine's compute settings, as helper messages. Pydantic only.

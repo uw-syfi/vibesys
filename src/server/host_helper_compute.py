@@ -14,7 +14,8 @@ Files go through ``ConfigFiles`` and commands (``ssh``, ``sinfo``) through ``vs_
 ``CommandProbe``, so tests drive it with in-memory files and a ``ScriptedProbe``. A Modal
 token is only ever tested for, never read into a reply. Light like the helper
 (``tests/architecture/test_light_entrypoints.py``): the standard library, Pydantic,
-``vs_slurm`` and light ``server`` modules.
+``vs_slurm`` (through ``server.host_helper_slurm``, loaded on first use) and light ``server``
+modules.
 
 Public surface: ``MachineCompute``, ``ConfigFiles``, ``ComputeError``, ``COMPUTE_FILE``,
 ``SLURM_FILE``, ``parse_sinfo``, ``accelerator_of_gpu_model``, ``render_toml``.
@@ -42,21 +43,16 @@ from server.host_compute import (
     ClusterTestStage,
     ComputeSettings,
     ListedCluster,
-    LoginNodeReach,
     ModalStatus,
     ModalTokenSource,
     SlurmClusterSettings,
     SshReach,
 )
 from server.host_machine_facts import Accelerator
-from vs_slurm.api import (
-    SlurmConfig,
-    SlurmLocalTransport,
-    SlurmSshTransport,
-)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+    from types import ModuleType
 
     from vs_sim.api import CommandProbe, ProbeResult
 
@@ -226,36 +222,6 @@ def _stored(cluster: SlurmClusterSettings) -> dict[str, object]:
     return cluster.model_dump(mode="json", exclude={"name"}, exclude_none=True)
 
 
-def slurm_config_of(cluster: SlurmClusterSettings) -> SlurmConfig:
-    """The ``vs_slurm`` configuration ``cluster`` stands for; ``ValueError`` names an invalid key.
-
-    The cluster's partition, node count, time limit and further options become its ``sbatch``
-    arguments, in that order.
-    """
-    arguments: list[str] = []
-    if cluster.partition is not None:
-        arguments.append(f"--partition={cluster.partition}")
-    if cluster.nodes is not None:
-        arguments.append(f"--nodes={cluster.nodes}")
-    if cluster.time_limit is not None:
-        arguments.append(f"--time={cluster.time_limit}")
-    arguments.extend(cluster.sbatch_options)
-    transport: dict[str, object] = (
-        {"kind": "ssh", "host": cluster.reach.host}
-        if isinstance(cluster.reach, SshReach)
-        else {"kind": "local"}
-    )
-    return SlurmConfig.model_validate(
-        {
-            "name": cluster.name,
-            "remote_workspace_root": cluster.workspace,
-            "transport": transport,
-            "sbatch_arguments": arguments,
-        },
-        strict=True,
-    )
-
-
 _SETTING_OF: Final = {
     "remote_workspace_root": "workspace",
     "transport": "reach",
@@ -273,25 +239,15 @@ def _invalid_keys(error: ValidationError | ValueError) -> str:
     return str(error)
 
 
-def _cluster_of_operator_file(config: SlurmConfig) -> SlurmClusterSettings | None:
-    """The cluster an operator ``slurm.toml`` describes, its ``sbatch`` arguments kept as written.
+def _slurm() -> ModuleType:
+    """The ``vs_slurm`` translation, imported on first use."""
+    # lint-waiver: LW-271611 [PLC0415]; the helper answers hello without loading vs_slurm.
+    # > `vs_slurm` is about thirty modules the helper's start-up budget
+    # > (`tests/e2e/test_host_helper.py`) has no room for, and only a compute request needs it;
+    # > a copy of its validation here would be a second source of truth for what a cluster is.
+    from server import host_helper_slurm  # noqa: PLC0415
 
-    ``None`` for a connector transport, which is reached by a program of the operator's and is
-    neither an ssh alias nor a login node.
-    """
-    transport = config.transport
-    if isinstance(transport, SlurmSshTransport):
-        reach: SshReach | LoginNodeReach = SshReach(host=transport.host)
-    elif isinstance(transport, SlurmLocalTransport):
-        reach = LoginNodeReach()
-    else:
-        return None
-    return SlurmClusterSettings(
-        name=config.name,
-        reach=reach,
-        workspace=config.remote_workspace_root,
-        sbatch_options=config.sbatch_arguments,
-    )
+    return host_helper_slurm
 
 
 class _ComputeFile(BaseModel):
@@ -385,7 +341,7 @@ class MachineCompute:
         stored = self._stored_clusters().get(name)
         if stored is not None:
             try:
-                config = slurm_config_of(stored)
+                config = _slurm().slurm_config_of(stored)
             except (ValidationError, ValueError) as error:
                 raise ComputeError(
                     HelperErrorCode.CLUSTER_INVALID,
@@ -393,7 +349,7 @@ class MachineCompute:
                     self.config_path,
                 ) from error
             path = self._rendered_path(name)
-            text = render_toml({"slurm": config.model_dump(mode="json", exclude_none=True)})
+            text = render_toml(_slurm().operator_document(config))
             if self._files.read(path) != text:
                 self._files.write(path, text)
             return path
@@ -484,7 +440,7 @@ class MachineCompute:
 
     def _validated(self, cluster: SlurmClusterSettings) -> None:
         try:
-            slurm_config_of(cluster)
+            _slurm().slurm_config_of(cluster)
         except (ValidationError, ValueError) as error:
             raise ComputeError(
                 HelperErrorCode.CLUSTER_INVALID,
@@ -536,7 +492,7 @@ class MachineCompute:
             table = None if text is None else tomllib.loads(text).get("slurm")
             if not isinstance(table, dict):
                 return None
-            return _cluster_of_operator_file(SlurmConfig.model_validate(table, strict=True))
+            return _slurm().operator_cluster(table)
         except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError, ValidationError, ValueError):
             return None
 
@@ -562,5 +518,4 @@ __all__ = [
     "accelerator_of_gpu_model",
     "parse_sinfo",
     "render_toml",
-    "slurm_config_of",
 ]

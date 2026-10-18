@@ -70,10 +70,10 @@ from server.host_helper_compute import (
     accelerator_of_gpu_model,
     parse_sinfo,
     render_toml,
-    slurm_config_of,
 )
 from server.host_helper_preflight import measurement_check, measurement_fits
 from server.host_helper_requests import answer, launch_arguments, run_arguments
+from server.host_helper_slurm import slurm_config_of
 from server.host_machine_facts import Accelerator
 from server.host_preflight import (
     Backend,

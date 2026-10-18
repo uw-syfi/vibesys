@@ -39,6 +39,9 @@ _ALLOWED: dict[tuple[str, str], str] = {
     ("src/server/host_helper_machine.py", "vibesys_version"): (
         "recognizes a VibeSys checkout by its pyproject name and reads its version"
     ),
+    ("src/server/host_helper_compute.py", "_operator_cluster"): (
+        "reads the operator slurm.toml's [slurm] table, which vs_slurm's SlurmConfig validates strictly"
+    ),
     ("src/server/host_helper_compute.py", "modal"): (
         "reads Modal's own config file, whose schema VibeSys does not own, for whether a token is held"
     ),
