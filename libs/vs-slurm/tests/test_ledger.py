@@ -50,6 +50,7 @@ from vs_slurm.api import (
     Unleased,
     UnreadableLease,
     WithdrawalMark,
+    WithdrawalTiming,
     Withdrawer,
     Withdrawn,
     claim_expired,
@@ -70,6 +71,15 @@ PROJECT = "demo-0123456789ab"
 CONFIG = SlurmConfig(
     name="test", remote_workspace_root="/runs", transport=SlurmSshTransport(host="h")
 )
+
+
+# One transport call to the cluster may take this long (``transport_timeout_seconds``).
+_CALL_SECONDS = 110.0
+
+
+def _timing(now: float) -> WithdrawalTiming:
+    """A withdrawer's timing, its clock standing at ``now``."""
+    return WithdrawalTiming(clock=ManualClock(now), call_seconds=_CALL_SECONDS)
 
 
 def _request(workspace: Path, command: str = "true") -> SlurmBatchRequest:
@@ -199,7 +209,7 @@ _JOB = SubmitBoundJob(
 
 
 # How ``vibesys evals remove`` names itself when it withdraws a request.
-_OPERATOR = Withdrawer(by="vibesys-evals", now=0.0, reason="removed by operator")
+_OPERATOR = Withdrawer(by="vibesys-evals", reason="removed by operator", timing=_timing(0.0))
 # Until when a withdrawal ``_record`` marks a record with holds.
 _WITHDRAWAL_UNTIL = 600.0
 
@@ -534,7 +544,11 @@ def test_an_unleased_job_is_cancelled_only_after_its_grace_period(
         world = _World(Path(directory), status=SlurmJobStatus.RUNNING)
         now = 300.0 + grace + offset
         outcomes = sweep_unleased(
-            world.ledger, world.cluster, now=now, grace_seconds=grace, orphans=OrphanChecks(900.0)
+            world.ledger,
+            world.cluster,
+            timing=_timing(now),
+            grace_seconds=grace,
+            orphans=OrphanChecks(900.0),
         )
         if offset <= 0:
             assert outcomes == ()
@@ -553,7 +567,11 @@ def test_the_sweep_settles_an_unsuccessful_job_and_never_asks_the_cluster_about_
     world = _World(tmp_path, status=status)
     assert (
         sweep_unleased(
-            world.ledger, world.cluster, now=1e9, grace_seconds=0.0, orphans=OrphanChecks(900.0)
+            world.ledger,
+            world.cluster,
+            timing=_timing(1e9),
+            grace_seconds=0.0,
+            orphans=OrphanChecks(900.0),
         )
         == ()
     )
@@ -564,7 +582,11 @@ def test_the_sweep_settles_an_unsuccessful_job_and_never_asks_the_cluster_about_
     forgetful = FakeCluster(clock=ManualClock())
     assert (
         sweep_unleased(
-            world.ledger, forgetful, now=2e9, grace_seconds=0.0, orphans=OrphanChecks(900.0)
+            world.ledger,
+            forgetful,
+            timing=_timing(2e9),
+            grace_seconds=0.0,
+            orphans=OrphanChecks(900.0),
         )
         == ()
     )
@@ -581,7 +603,11 @@ def test_a_lease_this_build_cannot_read_holds_the_request_and_blocks_no_removal(
 
     assert (
         sweep_unleased(
-            world.ledger, world.cluster, now=1e9, grace_seconds=0.0, orphans=OrphanChecks(900.0)
+            world.ledger,
+            world.cluster,
+            timing=_timing(1e9),
+            grace_seconds=0.0,
+            orphans=OrphanChecks(900.0),
         )
         == ()
     )
@@ -611,7 +637,11 @@ def test_a_request_being_withdrawn_lists_as_its_job_and_the_sweep_leaves_it_to_i
     assert row.phase is EntryPhase.RUNNING
     assert row.detail == "being withdrawn by run-b: its run run-b stopped"
     swept = sweep_unleased(
-        world.ledger, world.cluster, now=now + 1.0, grace_seconds=0.0, orphans=OrphanChecks(900.0)
+        world.ledger,
+        world.cluster,
+        timing=_timing(now + 1.0),
+        grace_seconds=0.0,
+        orphans=OrphanChecks(900.0),
     )
     assert swept == ()
     marked = world.ledger.read(world.key)
@@ -629,7 +659,11 @@ def test_a_lease_left_unreadable_by_a_crashed_build_is_swept_and_named_in_a_warn
 
     with caplog.at_level("WARNING"):
         outcomes = sweep_unleased(
-            world.ledger, world.cluster, now=1e9, grace_seconds=0.0, orphans=OrphanChecks(900.0)
+            world.ledger,
+            world.cluster,
+            timing=_timing(1e9),
+            grace_seconds=0.0,
+            orphans=OrphanChecks(900.0),
         )
 
     assert outcomes == (Withdrawn(world.key, ledger_operation_id(world.key, 0), world.job_id),)
@@ -645,7 +679,11 @@ def test_the_sweep_leaves_a_completed_job_for_a_run_to_collect(tmp_path: Path) -
     world = _World(tmp_path, status=SlurmJobStatus.COMPLETED)
     assert (
         sweep_unleased(
-            world.ledger, world.cluster, now=1e9, grace_seconds=0.0, orphans=OrphanChecks(900.0)
+            world.ledger,
+            world.cluster,
+            timing=_timing(1e9),
+            grace_seconds=0.0,
+            orphans=OrphanChecks(900.0),
         )
         == ()
     )
@@ -660,7 +698,11 @@ def test_the_sweep_never_touches_a_job_outside_the_ledger(tmp_path: Path) -> Non
     foreign = world.cluster.submit(_request(workspace, "foreign"), operation_id="foreign")
     assert isinstance(foreign, ClusterSubmitted)
     sweep_unleased(
-        world.ledger, world.cluster, now=1e9, grace_seconds=0.0, orphans=OrphanChecks(900.0)
+        world.ledger,
+        world.cluster,
+        timing=_timing(1e9),
+        grace_seconds=0.0,
+        orphans=OrphanChecks(900.0),
     )
     observed = world.cluster.inspect("foreign")
     assert isinstance(observed, ClusterObservation)
@@ -735,7 +777,7 @@ def test_the_sweep_cancels_every_live_job_named_for_a_failed_or_withdrawn_attemp
         ledger.renew(key, LedgerLease(holder="run-a", renewed_at=0.0, expires_at=1e12))
 
         outcomes = sweep_unleased(
-            ledger, cluster, now=1.0, grace_seconds=0.0, orphans=OrphanChecks(900.0)
+            ledger, cluster, timing=_timing(1.0), grace_seconds=0.0, orphans=OrphanChecks(900.0)
         )
 
         assert {o.operation_id for o in outcomes if isinstance(o, Withdrawn)} == live
@@ -748,6 +790,8 @@ def test_the_sweep_cancels_every_live_job_named_for_a_failed_or_withdrawn_attemp
             elif isinstance(observed, ClusterObservation):
                 assert observed.status.terminal
         assert (
-            sweep_unleased(ledger, cluster, now=2.0, grace_seconds=0.0, orphans=OrphanChecks(900.0))
+            sweep_unleased(
+                ledger, cluster, timing=_timing(2.0), grace_seconds=0.0, orphans=OrphanChecks(900.0)
+            )
             == ()
         )

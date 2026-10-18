@@ -46,6 +46,8 @@ from .ledger_listing import entry_id
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from vs_sim.api import Clock
+
     from .api import Cluster, EvaluationLedger
     from .cluster_types import ClusterCollectOutcome
     from .scheduler_states import SlurmJobStatus
@@ -100,26 +102,70 @@ WithdrawOutcome = Withdrawn | Kept | NotInLedger | WithdrawUnknown
 # that moved the attempt forward, and an attempt has at most four states ahead.
 _ROUNDS = 8
 
-WITHDRAWAL_WINDOW_SECONDS = 600.0
-"""How long a withdrawal may take before it is taken to have died, and is undone.
+CLOCK_SKEW_SECONDS = 60.0
+"""How far apart the wall clocks of two processes sharing a ledger may be.
 
-A withdrawal is two ledger swaps, a lease read and two cluster calls (inspect
-and cancel), each bounded by its transport's timeout; a run waits this long, at
-most, on one whose withdrawer crashed.
+A withdrawal's window is stamped by its withdrawer's clock and read by any
+other process's; a withdrawer acts only while its own window holds this much
+longer, so no other clock already reads it expired.
 """
+
+# The transport calls from a mark's stamp to its cancel: the mark's publish
+# (mkdir, put, link), the read that shows it, the job's inspect and its cancel.
+_CALLS_TO_CANCEL = 6
+# The calls a withdrawer must still have time for when it inspects the job, and
+# when it cancels it.
+_CALLS_AT_INSPECT = 2
+_CALLS_AT_CANCEL = 1
+
+
+@dataclass(frozen=True, slots=True)
+class WithdrawalTiming:
+    """The clock a withdrawal is stamped by, and how long one transport call may take.
+
+    ``clock`` is the withdrawer's wall clock, in epoch seconds: each mark is
+    stamped from a fresh reading of it. ``call_seconds`` bounds one transport
+    call to the cluster (``SlurmConfig.transport_timeout_seconds``). A mark
+    holds long enough for the calls from its stamp to its cancel, each that
+    long, plus ``CLOCK_SKEW_SECONDS``; the withdrawer cancels nothing once too
+    little of it is left (``holds``).
+    """
+
+    clock: Clock
+    call_seconds: float
+
+    @property
+    def window_seconds(self) -> float:
+        """How long a mark holds, from its stamp."""
+        return (_CALLS_TO_CANCEL + 1) * self.call_seconds + CLOCK_SKEW_SECONDS
+
+    def holds(self, mark: WithdrawalMark, *, calls: int) -> bool:
+        """Whether ``mark`` holds, on every process's clock, for ``calls`` more transport calls."""
+        needed = calls * self.call_seconds + CLOCK_SKEW_SECONDS
+        return mark.until - self.clock.now() >= needed
 
 
 @dataclass(frozen=True, slots=True)
 class Withdrawer:
-    """Who withdraws a request, at what time, and why: what its mark and its end say.
+    """Who withdraws a request, and why, by which timing: what its mark and its end say.
 
-    ``by`` is a holder name (a run's, or the operator command's); ``now`` is the
-    withdrawer's wall clock, in epoch seconds, which the mark's window starts at.
+    ``by`` is a holder name (a run's, or the operator command's).
     """
 
     by: str
-    now: float
     reason: str
+    timing: WithdrawalTiming
+
+    def stamped(self, attempt: int) -> WithdrawalMark:
+        """A mark on ``attempt``, holding for one window from now."""
+        now = self.timing.clock.now()
+        return WithdrawalMark(
+            attempt=attempt,
+            by=self.by,
+            since=now,
+            until=now + self.timing.window_seconds,
+            reason=self.reason,
+        )
 
 
 def withdraw(
@@ -163,7 +209,7 @@ def withdraw(
             # A mark left on a final attempt is never read: no run waits on it.
             return Withdrawn(key, record.operation_id, None, already=True)
         if entry.withdrawal is not None and entry.withdrawal == mine:
-            outcome = _withdraw_marked(ledger, cluster, entry, entry.withdrawal, still=still)
+            outcome = _withdraw_marked(ledger, cluster, entry, withdrawer.timing, still=still)
         else:
             outcome, mine = _mark(ledger, entry, withdrawer, still=still)
         if outcome is not None:
@@ -188,23 +234,18 @@ def _mark(
     record = entry.record
     standing = entry.withdrawal
     if standing is not None:
-        if not withdrawal_expired(standing, now=withdrawer.now):
+        if not withdrawal_expired(standing, now=withdrawer.timing.clock.now()):
             return WithdrawUnknown(record.key, f"{standing.by} is withdrawing it"), None
         # Its withdrawer died part way: undo its mark, then decide afresh.
         try:
-            undo_expired_withdrawal(ledger, entry, now=withdrawer.now)
+            undo_expired_withdrawal(ledger, entry, now=withdrawer.timing.clock.now())
         except LedgerError as error:
             return WithdrawUnknown(record.key, str(error)), None
         return None, None
     if still is not None and not still(entry):
         return Kept(record.key, record.operation_id), None
-    mark = WithdrawalMark(
-        attempt=record.attempt,
-        by=withdrawer.by,
-        since=withdrawer.now,
-        until=withdrawer.now + WITHDRAWAL_WINDOW_SECONDS,
-        reason=withdrawer.reason,
-    )
+    # Stamped now, not when the withdrawal began: its window starts at this write.
+    mark = withdrawer.stamped(record.attempt)
     try:
         ledger.write_withdrawal(entry, mark)
     except LedgerError:
@@ -216,23 +257,36 @@ def _withdraw_marked(
     ledger: EvaluationLedger,
     cluster: Cluster,
     entry: LedgerEntry,
-    mark: WithdrawalMark,
+    timing: WithdrawalTiming,
     *,
     still: Callable[[LedgerEntry], bool] | None,
 ) -> WithdrawOutcome | None:
     """On a read that shows this withdrawal's mark: undo it, or cancel the job and record it withdrawn.
 
     A run that leased the request before ``entry`` was read is in it, and
-    keeps its job; one that leases it later reads the mark, and waits.
+    keeps its job; one that leases it later reads the mark, and waits, but
+    only while the mark holds: past its window another process undoes it, and
+    a run may attach. So the job is inspected, and then cancelled, only while
+    the mark still holds for the calls left (``WithdrawalTiming.holds``);
+    otherwise the mark is undone and nothing is cancelled.
     """
     record = entry.record
+    mark = entry.withdrawal
+    if mark is None:
+        return None  # not this withdrawal's: the next round decides
     key = record.key
     try:
         # ``still`` is the condition as it was before this withdrawal's own mark.
         if still is not None and not still(dataclasses.replace(entry, withdrawal=None)):
             _undo(ledger, entry)
             return Kept(key, record.operation_id)
-        cancelled = _cancel_live(cluster, record)
+        late = WithdrawUnknown(key, "too little of the withdrawal's window was left to cancel")
+        if not timing.holds(mark, calls=_CALLS_AT_INSPECT):
+            _undo(ledger, entry)
+            return late
+        cancelled = _cancel_live(
+            cluster, record, ready=lambda: timing.holds(mark, calls=_CALLS_AT_CANCEL)
+        )
         if isinstance(cancelled, WithdrawUnknown):
             _undo(ledger, entry)
             return cancelled
@@ -297,8 +351,14 @@ def settle(
     return ledger.replace(entry, transitioned(record, settled.state, reason=settled.reason))
 
 
-def _cancel_live(cluster: Cluster, record: LedgerRecord) -> str | None | WithdrawUnknown:
-    """Cancel the attempt's job if it may still run; the job cancelled, if known."""
+def _cancel_live(
+    cluster: Cluster, record: LedgerRecord, *, ready: Callable[[], bool]
+) -> str | None | WithdrawUnknown:
+    """Cancel the attempt's job if it may still run; the job cancelled, if known.
+
+    ``ready`` is asked just before the cancel: when it says no, nothing is
+    cancelled and the outcome is unknown.
+    """
     if record.state.settled:
         return None  # its job ended; the cluster may no longer even know it
     observed = cluster.inspect(record.operation_id)
@@ -312,6 +372,8 @@ def _cancel_live(cluster: Cluster, record: LedgerRecord) -> str | None | Withdra
         known = None
     else:
         return WithdrawUnknown(record.key, observed.reason)
+    if not ready():
+        return WithdrawUnknown(record.key, "too little of the withdrawal's window was left")
     cancelled = cluster.cancel(record.operation_id)
     if isinstance(cancelled, ClusterUnknown):
         return WithdrawUnknown(record.key, cancelled.reason)
@@ -395,7 +457,7 @@ def sweep_unleased(
     ledger: EvaluationLedger,
     cluster: Cluster,
     *,
-    now: float,
+    timing: WithdrawalTiming,
     grace_seconds: float,
     orphans: OrphanChecks,
 ) -> tuple[WithdrawOutcome, ...]:
@@ -411,9 +473,12 @@ def sweep_unleased(
     ended unsuccessfully settles ``failed``, and one that COMPLETED is left for
     the next ask, which collects it (only a collected result settles
     ``completed``; it costs one cluster call per sweep until then).
+    ``timing`` is the sweep's clock and transport bound (``Withdrawer``).
     """
+    now = timing.clock.now()
 
     def sweepable(entry: LedgerEntry) -> bool:
+        now = timing.clock.now()
         record = entry.record
         if record.state.settled:
             return False
@@ -436,7 +501,9 @@ def sweep_unleased(
             _warn_unreadable(entry)
         if sweepable(entry):
             withdrawer = Withdrawer(
-                by=SWEEP_WITHDRAWER, now=now, reason=f"no run leased it for {grace_seconds:.0f} s"
+                by=SWEEP_WITHDRAWER,
+                reason=f"no run leased it for {grace_seconds:.0f} s",
+                timing=timing,
             )
             outcome = _sweep_one(ledger, cluster, entry, withdrawer, still=sweepable)
             if outcome is not None:
@@ -526,13 +593,14 @@ def _sweep_one(
 
 
 __all__ = [
+    "CLOCK_SKEW_SECONDS",
     "SWEEP_WITHDRAWER",
-    "WITHDRAWAL_WINDOW_SECONDS",
     "Kept",
     "NotInLedger",
     "OrphanChecks",
     "WithdrawOutcome",
     "WithdrawUnknown",
+    "WithdrawalTiming",
     "Withdrawer",
     "Withdrawn",
     "relinquish",

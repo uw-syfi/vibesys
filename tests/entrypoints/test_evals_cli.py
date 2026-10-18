@@ -98,6 +98,7 @@ class _World:
             ),
             cluster=self.cluster,
             clock=self.clock,
+            call_seconds=CONFIG.transport_timeout_seconds,
             current_project=lambda: PROJECT,
             confirm=self.confirm,
         )

@@ -61,6 +61,7 @@ from vs_slurm.api import (
     SlurmJobRequest,
     SlurmJobStatus,
     SlurmSshTransport,
+    WithdrawalTiming,
     Withdrawer,
     Withdrawn,
     ledger_operation_id,
@@ -482,7 +483,13 @@ async def test_an_attached_run_submits_again_a_request_withdrawn_without_its_ask
         world.ledger,
         world.scheduler,
         world.only_key(),
-        Withdrawer(by="vibesys-evals", now=world.clock.now(), reason="removed"),
+        Withdrawer(
+            by="vibesys-evals",
+            reason="removed",
+            timing=WithdrawalTiming(
+                clock=world.clock, call_seconds=CONFIG.transport_timeout_seconds
+            ),
+        ),
     )
 
     assert isinstance(outcome, Withdrawn)

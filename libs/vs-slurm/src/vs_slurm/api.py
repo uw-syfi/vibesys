@@ -113,10 +113,11 @@ from .ledger import (
 )
 from .ledger import encode as encode_ledger_document
 from .ledger_actions import (
-    WITHDRAWAL_WINDOW_SECONDS,
+    CLOCK_SKEW_SECONDS,
     Kept,
     NotInLedger,
     OrphanChecks,
+    WithdrawalTiming,
     Withdrawer,
     Withdrawn,
     WithdrawOutcome,
@@ -224,6 +225,7 @@ from .workspace_probe import probe_workspace_root
 __all__ = [
     "BATCH_RESULT_LAYOUT",
     "CANCEL_REACTIONS",
+    "CLOCK_SKEW_SECONDS",
     "DEFAULT_COMMAND_SECONDS",
     "ENTRY_ID_LENGTH",
     "INITIAL_LIFE",
@@ -240,7 +242,6 @@ __all__ = [
     "SERVICE_NOT_READY_EXIT_CODE",
     "SLURM_CONNECTOR_REQUEST",
     "STAGE_TIMEOUT_EXIT_CODES",
-    "WITHDRAWAL_WINDOW_SECONDS",
     "AccountingRow",
     "AttachJob",
     "AwaitWithdrawal",
@@ -363,6 +364,7 @@ __all__ = [
     "WithdrawOutcome",
     "WithdrawUnknown",
     "WithdrawalMark",
+    "WithdrawalTiming",
     "WithdrawalUndone",
     "Withdrawer",
     "Withdrawn",

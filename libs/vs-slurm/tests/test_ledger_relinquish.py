@@ -11,7 +11,7 @@ from hypothesis import strategies as st
 
 from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
-    WITHDRAWAL_WINDOW_SECONDS,
+    CLOCK_SKEW_SECONDS,
     ClusterObservation,
     ClusterSubmitted,
     ClusterUnknown,
@@ -29,6 +29,7 @@ from vs_slurm.api import (
     SlurmJobStatus,
     SlurmSshTransport,
     WithdrawalMark,
+    WithdrawalTiming,
     WithdrawalUndone,
     Withdrawer,
     Withdrawn,
@@ -54,6 +55,15 @@ OTHERS = ("run-a", "run-b")
 
 # When each other run's lease expires, relative to now; None: it holds no lease.
 _expiry = st.none() | st.sampled_from([-GRACE_S - 1.0, -GRACE_S, -1.0, 0.0, 300.0])
+
+
+# One transport call to the cluster may take this long (``transport_timeout_seconds``).
+_CALL_SECONDS = 110.0
+
+
+def _timing(now: float) -> WithdrawalTiming:
+    """A withdrawer's timing, its clock standing at ``now``."""
+    return WithdrawalTiming(clock=ManualClock(now), call_seconds=_CALL_SECONDS)
 
 
 def _submitted(
@@ -110,7 +120,9 @@ def test_relinquish_cancels_the_job_iff_no_other_run_leased_it_within_the_grace(
                 ledger.renew(key, lease)
         wanted = any(expiry is not None and expiry >= -GRACE_S for expiry in expiries)
 
-        stopping = Withdrawer(by=SELF, now=NOW, reason=f"its run {SELF} stopped wanting it")
+        stopping = Withdrawer(
+            by=SELF, reason=f"its run {SELF} stopped wanting it", timing=_timing(NOW)
+        )
         outcome = relinquish(ledger, cluster, key, stopping, since=NOW - GRACE_S)
 
         entry = ledger.read(key)
@@ -137,7 +149,7 @@ class _CancelUnreachable(FakeCluster):
 
 
 def _withdrawer(by: str, *, now: float = NOW) -> Withdrawer:
-    return Withdrawer(by=by, now=now, reason=f"{by} withdrew it")
+    return Withdrawer(by=by, reason=f"{by} withdrew it", timing=_timing(now))
 
 
 def _mark(ledger: FakeEvaluationLedger, key: str, by: str, *, since: float) -> WithdrawalMark:
@@ -148,7 +160,7 @@ def _mark(ledger: FakeEvaluationLedger, key: str, by: str, *, since: float) -> W
         attempt=entry.record.attempt,
         by=by,
         since=since,
-        until=since + WITHDRAWAL_WINDOW_SECONDS,
+        until=since + _timing(since).window_seconds,
         reason="gone",
     )
     assert ledger.write_withdrawal(entry, mark)
@@ -189,7 +201,7 @@ def test_another_withdrawal_under_way_is_waited_for_until_its_window_ends() -> N
         assert isinstance(observed, ClusterObservation)
         assert not observed.status.terminal
 
-        late = NOW + WITHDRAWAL_WINDOW_SECONDS + 1.0
+        late = NOW + _timing(NOW).window_seconds + 1.0
         after = withdraw(ledger, cluster, key, _withdrawer(SELF, now=late))
         assert isinstance(after, Withdrawn)
         entry = ledger.read(key)
@@ -227,7 +239,9 @@ def test_a_lease_written_just_after_the_withdrawal_mark_keeps_the_job() -> None:
         assert before is not None
         ledger.lease = LedgerLease(holder="run-a", renewed_at=NOW, expires_at=NOW + 300.0)
 
-        stopping = Withdrawer(by=SELF, now=NOW, reason=f"its run {SELF} stopped wanting it")
+        stopping = Withdrawer(
+            by=SELF, reason=f"its run {SELF} stopped wanting it", timing=_timing(NOW)
+        )
         outcome = relinquish(ledger, cluster, key, stopping, since=NOW - GRACE_S)
 
         assert isinstance(outcome, Kept)
@@ -239,3 +253,75 @@ def test_a_lease_written_just_after_the_withdrawal_mark_keeps_the_job() -> None:
         observed = cluster.inspect(operation)
         assert isinstance(observed, ClusterObservation)
         assert not observed.status.terminal
+
+
+def test_a_withdrawal_window_covers_its_calls_at_the_transport_timeout_and_the_clock_skew() -> None:
+    """Derived from the transport timeout: six calls from the stamp to the cancel, one spare."""
+    for call_seconds in (1.0, 30.0, 110.0, 600.0):
+        timing = WithdrawalTiming(clock=ManualClock(NOW), call_seconds=call_seconds)
+        assert timing.window_seconds == 7 * call_seconds + CLOCK_SKEW_SECONDS
+
+
+class _SlowAfterMark(FakeEvaluationLedger):
+    """The Fake ledger, where every read after a mark takes ``seconds`` of the withdrawer's clock."""
+
+    clock: ManualClock
+    seconds: float = 0.0
+    marked: bool = False
+
+    def read(self, key: str) -> LedgerEntry | None:
+        if self.marked:
+            self.clock.advance(self.seconds)
+        return super().read(key)
+
+    def write_withdrawal(
+        self, current: LedgerEntry, document: WithdrawalMark | WithdrawalUndone
+    ) -> bool:
+        won = super().write_withdrawal(current, document)
+        self.marked = self.marked or (won and isinstance(document, WithdrawalMark))
+        return won
+
+
+@settings(max_examples=examples(pr=20, nightly=200), deadline=None)
+@given(
+    call_seconds=st.sampled_from((30.0, 110.0)),
+    slowness=st.floats(min_value=0.0, max_value=1.5),
+)
+# Just too slow: one call short of the margin the inspect and the cancel need.
+@example(call_seconds=110.0, slowness=(7 * 110.0 - 2 * 110.0) / (7 * 110.0 + 60.0) + 1e-6)
+def test_a_withdrawer_left_too_little_of_its_window_cancels_nothing_and_undoes_its_mark(
+    call_seconds: float, slowness: float
+) -> None:
+    """r3173 MED-2: a mark stamped early, or read back late, must never cancel past its window.
+
+    Past the window another process undoes the mark and a run may attach to the
+    job. So the job is cancelled only while the mark holds, on every clock, for
+    the inspect and the cancel still to come; a slower withdrawal undoes its
+    mark and leaves the job running.
+    """
+    with TemporaryDirectory() as directory:
+        clock = ManualClock(NOW)
+        ledger = _SlowAfterMark(project=PROJECT)
+        ledger.clock = clock
+        _, cluster, key, operation = _submitted(Path(directory), SELF, ledger)
+        timing = WithdrawalTiming(clock=clock, call_seconds=call_seconds)
+        ledger.seconds = slowness * timing.window_seconds
+        remaining = timing.window_seconds - ledger.seconds
+        in_time = remaining >= 2 * call_seconds + CLOCK_SKEW_SECONDS
+
+        outcome = withdraw(
+            ledger, cluster, key, Withdrawer(by=SELF, reason="stopped", timing=timing)
+        )
+
+        observed = cluster.inspect(operation)
+        assert isinstance(observed, ClusterObservation)
+        entry = ledger.read(key)
+        assert entry is not None
+        if in_time:
+            assert isinstance(outcome, Withdrawn)
+            assert observed.status is SlurmJobStatus.CANCELLED
+        else:
+            assert isinstance(outcome, WithdrawUnknown)
+            assert not observed.status.terminal
+            assert entry.record.state is LedgerState.SUBMITTED
+            assert entry.withdrawal is None  # undone: a run may attach at once

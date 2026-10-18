@@ -34,6 +34,7 @@ from vs_slurm.api import (
     SlurmCluster,
     SlurmConfigError,
     SlurmJobRunner,
+    WithdrawalTiming,
     Withdrawer,
     Withdrawn,
     WithdrawOutcome,
@@ -64,12 +65,14 @@ class EvalsHost:
 
     ``ledger`` opens the ledger of a project id. ``current_project`` names the
     project of the working directory, for a command without ``--project``.
-    ``confirm`` asks the operator a yes-or-no question.
+    ``confirm`` asks the operator a yes-or-no question. ``call_seconds``
+    bounds one transport call to the cluster (``transport_timeout_seconds``).
     """
 
     ledger: Callable[[str], EvaluationLedger]
     cluster: Cluster
     clock: Clock
+    call_seconds: float
     current_project: Callable[[], str]
     confirm: Callable[[str], bool]
 
@@ -154,7 +157,11 @@ def _remove(
             ledger,
             host.cluster,
             key,
-            Withdrawer(by=_WITHDRAWER, now=host.clock.now(), reason=_REMOVED_REASON),
+            Withdrawer(
+                by=_WITHDRAWER,
+                reason=_REMOVED_REASON,
+                timing=WithdrawalTiming(clock=host.clock, call_seconds=host.call_seconds),
+            ),
         )
         for key in keys
     ]
@@ -266,6 +273,7 @@ def main(argv: list[str] | None = None) -> int:
             ),
             cluster=cluster,
             clock=clock,
+            call_seconds=config.transport_timeout_seconds,
             current_project=_current_project,
             confirm=_ask,
         )

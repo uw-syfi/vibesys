@@ -35,6 +35,7 @@ from vs_slurm.api import (
     SlurmConnectorTransport,
     SlurmJobStatus,
     SlurmTimingProfile,
+    WithdrawalTiming,
     Withdrawer,
     withdraw,
 )
@@ -186,7 +187,13 @@ def test_every_record_and_lease_this_build_writes_reads_in_format_1() -> None:
             world.run("vibesys-evals").ledger,
             world.cluster,
             key,
-            Withdrawer(by="vibesys-evals", now=world.clock.now(), reason="removed by operator"),
+            Withdrawer(
+                by="vibesys-evals",
+                reason="removed by operator",
+                timing=WithdrawalTiming(
+                    clock=world.clock, call_seconds=world.config.transport_timeout_seconds
+                ),
+            ),
         )
         world.assert_an_older_build_reads_everything("a removal of a completed entry")
         # The withdrawals did mark their attempts, where an older build never looks.
