@@ -43,7 +43,7 @@ class CodeIds(BaseModel):
     roles: tuple[str, ...]
 
 
-class ConflictingNames(ValueError):  # noqa: N818  # a name for what the catalog refuses, not an error family
+class ConflictingNamesError(ValueError):
     """Two roles name one id differently, so no screen could know which to show."""
 
     def __init__(self, key: str, names: tuple[str, str]) -> None:
@@ -59,7 +59,7 @@ def display_names() -> DisplayNames:
             for key in (role.name, search.ids.role_id(role.name).root):
                 known = roles.setdefault(key, role.title)
                 if known != role.title:
-                    raise ConflictingNames(key, (known, role.title))
+                    raise ConflictingNamesError(key, (known, role.title))
     return DisplayNames(roles=roles)
 
 
