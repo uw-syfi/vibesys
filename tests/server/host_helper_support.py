@@ -37,6 +37,7 @@ from server.host_api import (
 )
 from server.host_harness import HarnessDisplay
 from server.host_helper import serve_channel
+from server.host_helper_compute import MachineCompute
 from server.host_helper_logs import (
     HelperLogs,
     StoredBytes,
@@ -164,6 +165,43 @@ class FakeRunPreflight:
     def report(self, project: Path, arguments: tuple[str, ...]) -> PreflightReport:
         self.calls.append((project, arguments))
         return self.report_
+
+
+@dataclass
+class FakeConfigFiles:
+    """The machine's configuration files in memory, with the ``ConfigFiles`` contract."""
+
+    files: dict[str, str] = field(default_factory=dict)
+    unreadable: set[str] = field(default_factory=set)
+    """Paths whose read fails the way a permission error does."""
+    writes: list[str] = field(default_factory=list)
+    """Each path written, in order."""
+
+    def read(self, path: str) -> str | None:
+        if path in self.unreadable:
+            raise PermissionError(13, "Permission denied", path)
+        return self.files.get(path)
+
+    def write(self, path: str, text: str) -> None:
+        self.writes.append(path)
+        self.files[path] = text
+
+
+def no_cluster(_argv: tuple[str, ...]) -> ProbeResult | None:
+    """A probe script for a machine that cannot run any command."""
+    return None
+
+
+def fake_compute(
+    files: FakeConfigFiles | None = None,
+    script: Callable[[tuple[str, ...]], ProbeResult | None] = no_cluster,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> MachineCompute:
+    """A machine's compute settings over in-memory files and a scripted command probe."""
+    return MachineCompute(
+        files or FakeConfigFiles(), ScriptedProbe(script), home=HOME, environ=environ or {}
+    )
 
 
 @dataclass(frozen=True)
@@ -393,6 +431,7 @@ def fake_host(
         logs=None,
         harnesses=lambda: HARNESSES,
         machine=quiet_machine(),
+        compute=fake_compute(),
         clock=threads,
         timezone=UTC,
     )

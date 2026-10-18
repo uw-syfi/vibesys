@@ -18,6 +18,7 @@ from server.host_api import (
     RunPreflightRequest,
     request_features,
 )
+from server.host_compute import ModalTarget, SameMachine, SlurmTarget
 from server.host_helper_preflight import (
     PreflightFacts,
     preflight_checks,
@@ -26,6 +27,7 @@ from server.host_helper_preflight import (
 )
 from server.host_helper_requests import answer
 from server.host_machine_facts import (
+    Accelerator,
     DockerReachable,
 )
 from server.host_preflight import (
@@ -39,6 +41,8 @@ from server.host_preflight import (
     CheckState,
     ConfigInvalid,
     GitHubUnavailable,
+    MeasurementTargetMisfit,
+    MeasurementTargetNotConfigured,
     ModelNotVetted,
     OptionNotAccepted,
     PreflightReport,
@@ -106,6 +110,18 @@ _CAUSES: dict[type[Any], st.SearchStrategy[Cause]] = {
     ),
     OptionNotAccepted: st.builds(OptionNotAccepted, option=st.sampled_from(RunOption)),
     GitHubUnavailable: st.builds(GitHubUnavailable, problem=_RAW),
+    MeasurementTargetNotConfigured: st.builds(
+        MeasurementTargetNotConfigured,
+        target=st.builds(SlurmTarget, cluster=_NAME) | st.just(ModalTarget()),
+    ),
+    MeasurementTargetMisfit: st.builds(
+        MeasurementTargetMisfit,
+        target=st.just(SameMachine())
+        | st.builds(SlurmTarget, cluster=_NAME)
+        | st.just(ModalTarget()),
+        backend=st.sampled_from(Backend),
+        offered=st.sampled_from(Accelerator),
+    ),
 }
 _ANY_CAUSE = st.one_of(*_CAUSES.values())
 

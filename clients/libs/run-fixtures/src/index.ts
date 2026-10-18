@@ -10,6 +10,17 @@ export {
   FIXTURE_NAMES,
   fixtureNamed,
 } from './catalog.js';
+export {
+  clusterTestPassed,
+  clusterTestPassedUntyped,
+  clusterTestsFailed,
+  computeSettings,
+  computeSettingsEmpty,
+  loginNodeCluster,
+  measurementChecks,
+  operatorCluster,
+  sshCluster,
+} from './compute.js';
 export {exampleCatalogue, exampleCatalogueWithoutDetails} from './examples.js';
 export {
   END_OUTCOMES,

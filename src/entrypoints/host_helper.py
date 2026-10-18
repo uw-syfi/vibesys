@@ -19,17 +19,20 @@ import shutil
 import sys
 from datetime import UTC, datetime, tzinfo
 from functools import cache
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from entrypoints.launcher import headless_command, source_checkout_root
 from server.host_api import HarnessOption
 from server.host_harness import HarnessDisplay, Maker
 from server.host_helper import serve_channel
+from server.host_helper_compute import MachineCompute
 from server.host_helper_logs import HelperLogs, run_location
 from server.host_helper_machine import HostMachineProbe
 from server.host_helper_os import (
     FileProjects,
     GitCheckoutProbe,
+    OsConfigFiles,
     OsDirectories,
     ProjectStopIntents,
     StoreLogReader,
@@ -63,7 +66,6 @@ from vs_sim.api import (
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-    from pathlib import Path
 
     from server.host_examples import CreatedProject, ExampleList
     from server.host_helper_requests import ExampleProjects
@@ -217,6 +219,9 @@ def real_host(environ: Mapping[str, str], uid: int, threads: Threads) -> HelperH
             which=lambda program, path: shutil.which(program, path=path),
             harness_binaries=harness_binaries,
             launch_environment=launch_environment,
+        ),
+        compute=MachineCompute(
+            OsConfigFiles(), SubprocessProbe(), home=str(Path.home()), environ=environ
         ),
         clock=epoch,
         timezone=local_timezone(epoch.now()),

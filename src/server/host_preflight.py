@@ -20,6 +20,9 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt, StringConstraints, model_validator
 
+from server.host_compute import MeasurementTarget, ModalTarget, SlurmTarget
+from server.host_machine_facts import Accelerator
+
 DETAIL_MAX_CHARACTERS = 300
 """The longest ``Check.detail``."""
 
@@ -47,6 +50,8 @@ class CheckId(StrEnum):
     DOCKER_REACHABLE = "docker_reachable"
     AGENT_IMAGE = "agent_image"
     EVALUATOR_AVAILABLE = "evaluator_available"
+    MEASUREMENT_TARGET = "measurement_target"
+    """Where results are measured is set up and fits the task; only with ``measure_on``."""
 
 
 class Backend(StrEnum):
@@ -300,6 +305,44 @@ class GitHubUnavailable(BaseModel):
         return "publishing to GitHub needs a signed-in GitHub account, which this machine lacks"
 
 
+class MeasurementTargetNotConfigured(BaseModel):
+    """The cluster is not set up on the machine, or Modal has no token there."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["measurement_target_not_configured"] = "measurement_target_not_configured"
+    target: SlurmTarget | ModalTarget
+
+    def plain(self) -> str:
+        """The fact as one plain line."""
+        if isinstance(self.target, SlurmTarget):
+            return f"no Slurm cluster named {self.target.cluster!r} is set up on this machine"
+        return "Modal has no token on this machine"
+
+
+class MeasurementTargetMisfit(BaseModel):
+    """The target's hardware cannot run the compute backend the task targets."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["measurement_target_misfit"] = "measurement_target_misfit"
+    target: MeasurementTarget
+    backend: Backend
+    """The backend the task targets."""
+    offered: Accelerator
+    """How the target's GPUs run work (``cpu`` when it has none)."""
+
+    def plain(self) -> str:
+        """The fact as one plain line."""
+        return (
+            f"the task targets the {self.backend.value!r} backend, "
+            f"which this {_TARGET_WORDS[self.target.kind]} does not offer"
+        )
+
+
+_TARGET_WORDS = {"same_machine": "machine", "slurm": "cluster", "modal": "cloud"}
+
+
 Cause = Annotated[
     BackendUnavailable
     | ProjectDirty
@@ -314,7 +357,9 @@ Cause = Annotated[
     | ArgumentsRejected
     | ArgumentsUnrecognized
     | OptionNotAccepted
-    | GitHubUnavailable,
+    | GitHubUnavailable
+    | MeasurementTargetNotConfigured
+    | MeasurementTargetMisfit,
     Field(discriminator="kind"),
 ]
 """Why a check failed, as data; ``kind`` discriminates.
@@ -398,8 +443,17 @@ class DeclareBuild(BaseModel):
     outputs: tuple[str, ...]
 
 
+class ConfigureCompute(BaseModel):
+    """Set up the cluster or Modal on the machine, in that machine's compute settings."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["configure_compute"] = "configure_compute"
+    target: SlurmTarget | ModalTarget
+
+
 Fix = Annotated[
-    ChooseCheckout | CopyOut | EditSetting | StartDocker | DeclareBuild,
+    ChooseCheckout | CopyOut | EditSetting | StartDocker | DeclareBuild | ConfigureCompute,
     Field(discriminator="kind"),
 ]
 
@@ -525,11 +579,14 @@ __all__ = [
     "CheckState",
     "ChooseCheckout",
     "ConfigInvalid",
+    "ConfigureCompute",
     "CopyOut",
     "DeclareBuild",
     "EditSetting",
     "Fix",
     "GitHubUnavailable",
+    "MeasurementTargetMisfit",
+    "MeasurementTargetNotConfigured",
     "ModelNotVetted",
     "OptionNotAccepted",
     "PreflightReport",

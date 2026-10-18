@@ -9,7 +9,7 @@ is light (``tests/architecture/test_light_entrypoints.py``).
 Public surface: ``FileProjects``, ``ProjectStopIntents``, ``OsDirectories``,
 ``SubprocessRunLauncher``,
 ``SubprocessRunPreflight``,
-``GitCheckoutProbe``, and ``StoreLogReader`` with ``run_streams_directory``.
+``GitCheckoutProbe``, ``OsConfigFiles``, and ``StoreLogReader`` with ``run_streams_directory``.
 """
 
 from __future__ import annotations
@@ -390,6 +390,28 @@ class FileProjects:
                 HelperErrorCode.PROJECT_UNINITIALIZED, str(opened.root), message
             )
         return opened
+
+
+class OsConfigFiles:
+    """The machine's configuration files on this filesystem (``ConfigFiles``)."""
+
+    def read(self, path: str) -> str | None:
+        """The file's text, or ``None`` when it does not exist."""
+        try:
+            return Path(path).read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return None
+
+    def write(self, path: str, text: str) -> None:
+        """Replace the file whole: write a sibling, then rename it over the file."""
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        staged = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+        try:
+            staged.write_text(text, encoding="utf-8")
+            staged.replace(target)
+        finally:
+            staged.unlink(missing_ok=True)
 
 
 class ProjectStopIntents:

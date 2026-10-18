@@ -36,13 +36,25 @@ from server.host_api import (
     CLI_PROVIDER_FLAG,
     HELPER_LINE_MAX_BYTES,
     HELPER_PROTOCOL_VERSIONS,
+    MODAL_FLAG,
     MODEL_FLAG,
     PATHS_COMPLETE_CAP,
+    RUN_ENVIRONMENT_FLAG,
+    SKYPILOT_FLAG,
+    SLURM_CONFIG_FLAG,
     UNVETTED_MODEL_FLAG,
     Checkout,
     CheckoutInspection,
     CheckoutInspectReply,
     CheckoutInspectRequest,
+    ComputeAddClusterReply,
+    ComputeAddClusterRequest,
+    ComputeListReply,
+    ComputeListRequest,
+    ComputeRemoveClusterReply,
+    ComputeRemoveClusterRequest,
+    ComputeTestClusterReply,
+    ComputeTestClusterRequest,
     DetachedLaunchFailure,
     ExamplesListReply,
     ExamplesListRequest,
@@ -98,11 +110,14 @@ from server.host_api import (
     TasksListReply,
     TasksListRequest,
 )
+from server.host_compute import MeasurementTarget, ModalTarget, SameMachine, SlurmTarget
+from server.host_helper_compute import ComputeError, MachineCompute
 from server.host_helper_logs import HelperLogs, ReadWithdrawal, list_logs, read_log
 from server.host_helper_preflight import (
     PreflightFacts,
     abbreviates,
     conflicting_agent,
+    measurement_check,
     option_arguments,
     preflight_checks,
     repeated_option,
@@ -432,6 +447,8 @@ class HelperHost:
     logs: HelperLogs | None
     """The run log store; ``None`` on a host that has none, which then does not offer ``logs``."""
     machine: MachineProbe
+    compute: MachineCompute
+    """The machine's Slurm clusters and Modal token: where a run can measure besides here."""
     preflight: RunPreflight
     examples: ExampleProjects
     clock: Clock
@@ -631,7 +648,8 @@ def refused_argument(request: RunStartRequest | RunPreflightRequest) -> str | No
 
     A run started through the helper never opts out of the vetted harness list,
     with ``harness`` its provider and model come from nowhere else, and with
-    ``options`` no typed option is repeated as a flag.
+    ``options`` no typed option is repeated as a flag, and with ``measure_on`` no run-environment
+    flag either.
     """
     refused: tuple[str, ...] = (UNVETTED_MODEL_FLAG,)
     if request.harness is not None:
@@ -642,7 +660,42 @@ def refused_argument(request: RunStartRequest | RunPreflightRequest) -> str | No
                 if flag == UNVETTED_MODEL_FLAG:
                     return f"{token} selects {flag}; runs started here use only vetted harnesses"
                 return f"{token} selects {flag}, which the chosen harness already sets"
+        if request.measure_on is not None:
+            for flag in _ENVIRONMENT_FLAGS:
+                if abbreviates(token, flag):
+                    return f"{token} selects {flag}, which measure_on already sets"
     return repeated_option(request.args, request.options, request.agents)
+
+
+_ENVIRONMENT_FLAGS: Final = (RUN_ENVIRONMENT_FLAG, SLURM_CONFIG_FLAG, MODAL_FLAG, SKYPILOT_FLAG)
+"""The flags that choose where a run measures; ``measure_on`` is their only source."""
+
+
+def environment_arguments(
+    target: MeasurementTarget | None, compute: MachineCompute
+) -> tuple[tuple[str, ...], SlurmTarget | ModalTarget | None]:
+    """The run flags that measure on ``target``, and the target when it is not set up here.
+
+    The same machine adds none: the run's own environment choice stands (Docker, or the host
+    environment where a machine has no Docker). A cluster is the existing Slurm environment
+    over that cluster's operator file, and Modal the existing Modal environment. A target not
+    set up gives no flags and is returned, so ``run.start`` refuses it and ``run.preflight``
+    reports it.
+    """
+    match target:
+        case None | SameMachine():
+            return (), None
+        case SlurmTarget(cluster=name):
+            path = compute.slurm_config_path(name)
+            if path is None:
+                return (), target
+            return (RUN_ENVIRONMENT_FLAG, "slurm", SLURM_CONFIG_FLAG, path), None
+        case ModalTarget():
+            if not compute.modal().token_present:
+                return (), target
+            return (RUN_ENVIRONMENT_FLAG, "modal"), None
+        case _:
+            assert_never(target)
 
 
 def unvetted_harness(
@@ -671,18 +724,28 @@ def unvetted_harness(
     return _error(request.request_id, HelperErrorCode.UNVETTED_HARNESS, message)
 
 
-def run_arguments(request: RunStartRequest | RunPreflightRequest) -> tuple[str, ...]:
-    """The ``vibesys`` run arguments ``request`` names: task, harness, typed options, then ``args``."""
+def run_arguments(
+    request: RunStartRequest | RunPreflightRequest, environment: tuple[str, ...] = ()
+) -> tuple[str, ...]:
+    """The ``vibesys`` run arguments ``request`` names: task, harness, ``environment``, typed options, then ``args``."""
     task = ("--task", request.task) if request.task is not None else ()
     harness = (
         ()
         if request.harness is None
         else (CLI_PROVIDER_FLAG, request.harness.provider, MODEL_FLAG, request.harness.model)
     )
-    return (*task, *harness, *option_arguments(request.options, request.agents), *request.args)
+    return (
+        *task,
+        *harness,
+        *environment,
+        *option_arguments(request.options, request.agents),
+        *request.args,
+    )
 
 
-def launch_arguments(request: RunStartRequest) -> tuple[str, ...]:
+def launch_arguments(
+    request: RunStartRequest, environment: tuple[str, ...] = ()
+) -> tuple[str, ...]:
     """The ``vibesys`` arguments that start ``request`` detached; the resume target comes last."""
     match request.resume:
         case None:
@@ -693,7 +756,7 @@ def launch_arguments(request: RunStartRequest) -> tuple[str, ...]:
             resume = ("--resume",)
         case _:
             assert_never(request.resume)
-    return ("--detach", *run_arguments(request), *resume)
+    return ("--detach", *run_arguments(request, environment), *resume)
 
 
 def _host_path(text: str, directories: Directories) -> str:
@@ -711,7 +774,7 @@ def answer(
     request_id = request.request_id
     try:
         return _answer(request, host, withdrawal)
-    except ProjectLookupError as error:
+    except (ProjectLookupError, ComputeError) as error:
         return HelperError(
             request_id=request_id, code=error.code, message=str(error), path=error.path
         )
@@ -753,6 +816,10 @@ def _answer(
             | ExamplesListRequest()
             | ProjectCreateFromExampleRequest()
             | ProjectCopyOutRequest()
+            | ComputeListRequest()
+            | ComputeTestClusterRequest()
+            | ComputeAddClusterRequest()
+            | ComputeRemoveClusterRequest()
         ):
             reply = _machine_reply(request, host)
         case RunStartRequest() | RunPreflightRequest():
@@ -806,6 +873,26 @@ def _project_reply(
             return RunsListReply(request_id=request_id, runs=summaries)
 
 
+def _compute_reply(
+    request: ComputeListRequest
+    | ComputeTestClusterRequest
+    | ComputeAddClusterRequest
+    | ComputeRemoveClusterRequest,
+    compute: MachineCompute,
+) -> HelperReply:
+    """Answer one read or change of this machine's compute settings."""
+    request_id = request.request_id
+    match request:
+        case ComputeListRequest():
+            return ComputeListReply(request_id=request_id, settings=compute.settings())
+        case ComputeTestClusterRequest(cluster=cluster):
+            return ComputeTestClusterReply(request_id=request_id, result=compute.test(cluster))
+        case ComputeAddClusterRequest(cluster=cluster):
+            return ComputeAddClusterReply(request_id=request_id, settings=compute.add(cluster))
+        case ComputeRemoveClusterRequest(name=name):
+            return ComputeRemoveClusterReply(request_id=request_id, settings=compute.remove(name))
+
+
 def _examples_reply(
     request: ExamplesListRequest | ProjectCreateFromExampleRequest | ProjectCopyOutRequest,
     host: HelperHost,
@@ -833,11 +920,22 @@ def _machine_reply(
     | CheckoutInspectRequest
     | ExamplesListRequest
     | ProjectCreateFromExampleRequest
-    | ProjectCopyOutRequest,
+    | ProjectCopyOutRequest
+    | ComputeListRequest
+    | ComputeTestClusterRequest
+    | ComputeAddClusterRequest
+    | ComputeRemoveClusterRequest,
     host: HelperHost,
 ) -> HelperReply:
     """Answer what this machine offers, what a path on it holds, or make a project on it."""
     match request:
+        case (
+            ComputeListRequest()
+            | ComputeTestClusterRequest()
+            | ComputeAddClusterRequest()
+            | ComputeRemoveClusterRequest()
+        ):
+            return _compute_reply(request, host.compute)
         case ExamplesListRequest() | ProjectCreateFromExampleRequest() | ProjectCopyOutRequest():
             return _examples_reply(request, host)
         case MachineDescribeRequest(request_id=request_id):
@@ -1000,15 +1098,27 @@ def _start(request: RunStartRequest, host: HelperHost) -> RunStartReply | Helper
     if refusal is not None:
         return refusal
     root = host.projects.require_initialized(Path(_host_path(request.project, host.directories)))
+    environment, missing = environment_arguments(request.measure_on, host.compute)
+    if missing is not None:
+        return _unconfigured_target(request.request_id, missing)
     if request.agents:
         # Only the run's own validation knows which roles its orchestration declares.
         undeclared = undeclared_agent(
-            request.agents, host.preflight.report(root, run_arguments(request))
+            request.agents, host.preflight.report(root, run_arguments(request, environment))
         )
         if undeclared is not None:
             return _error(request.request_id, HelperErrorCode.INVALID_REQUEST, undeclared)
-    launch = host.launcher.start(root, launch_arguments(request))
+    launch = host.launcher.start(root, launch_arguments(request, environment))
     return RunStartReply(request_id=request.request_id, launch=launch)
+
+
+def _unconfigured_target(request_id: str | None, target: SlurmTarget | ModalTarget) -> HelperError:
+    if isinstance(target, SlurmTarget):
+        message = f"no Slurm cluster named {target.cluster!r} is set up on this machine"
+        return _error(request_id, HelperErrorCode.UNKNOWN_CLUSTER, message)
+    return _error(
+        request_id, HelperErrorCode.MODAL_NOT_CONFIGURED, "Modal has no token on this machine"
+    )
 
 
 def _preflight(request: RunPreflightRequest, host: HelperHost) -> RunPreflightReply | HelperError:
@@ -1024,7 +1134,8 @@ def _preflight(request: RunPreflightRequest, host: HelperHost) -> RunPreflightRe
         vibesys_version=host.vibesys_version,
         docker=host.machine.docker(),
     )
-    report = host.preflight.report(root, run_arguments(request))
+    environment, _missing = environment_arguments(request.measure_on, host.compute)
+    report = host.preflight.report(root, run_arguments(request, environment))
     undeclared = undeclared_agent(request.agents, report)
     if undeclared is not None:
         return _error(request.request_id, HelperErrorCode.INVALID_REQUEST, undeclared)
@@ -1039,6 +1150,9 @@ def _preflight(request: RunPreflightRequest, host: HelperHost) -> RunPreflightRe
         )
         if request.with_project_clean or check.id is not CheckId.PROJECT_CLEAN
     )
+    if request.measure_on is not None:
+        measured = measurement_check(request.measure_on, host.compute.settings(), report.backend)
+        checks = (*checks, measured)
     return RunPreflightReply(
         request_id=request.request_id,
         checks=tuple(

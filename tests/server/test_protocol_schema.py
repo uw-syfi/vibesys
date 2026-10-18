@@ -216,6 +216,10 @@ def test_host_helper_schema_exports_the_authoritative_request_feature_gates() ->
         "examples.list": "examples",
         "project.create_from_example": "examples",
         "project.copy_out": "examples",
+        "compute.list": "machine_compute",
+        "compute.test_cluster": "machine_compute",
+        "compute.add_cluster": "machine_compute",
+        "compute.remove_cluster": "machine_compute",
     }
     request_tags = document["properties"]["request"]["discriminator"]["mapping"]
     assert gates.keys() <= request_tags.keys()
@@ -235,11 +239,13 @@ def test_host_helper_schema_exports_the_authoritative_field_feature_gates() -> N
             "harness": "harnesses",
             "options": "run_options",
             "agents": "run_role_agents",
+            "measure_on": "measurement_target",
         },
         "run.preflight": {
             "harness": "harnesses",
             "options": "run_options",
             "agents": "run_role_agents",
+            "measure_on": "measurement_target",
             "with_roles": "run_roles",
             "with_backend": "run_backend",
             "with_causes": "run_causes",

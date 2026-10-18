@@ -26,7 +26,11 @@ export type Request =
   | RunPreflightRequest
   | ExamplesListRequest
   | ProjectCreateFromExampleRequest
-  | ProjectCopyOutRequest;
+  | ProjectCopyOutRequest
+  | ComputeListRequest
+  | ComputeTestClusterRequest
+  | ComputeAddClusterRequest
+  | ComputeRemoveClusterRequest;
 export type RequestId = string;
 export type DeadlineMs = number;
 export type Type = "hello";
@@ -88,6 +92,11 @@ export type Roles = RoleOption[];
 export type Agents = {
   [k: string]: HarnessChoice;
 } | null;
+export type MeasureOn = (SameMachine | SlurmTarget | ModalTarget) | null;
+export type Kind = "same_machine";
+export type Kind1 = "slurm";
+export type Cluster = string;
+export type Kind2 = "modal";
 export type RequestId8 = string;
 export type DeadlineMs8 = number;
 export type Type8 = "run.stop";
@@ -176,6 +185,7 @@ export type Args1 = string[];
 export type Agents1 = {
   [k: string]: HarnessChoice;
 } | null;
+export type MeasureOn1 = (SameMachine | SlurmTarget | ModalTarget) | null;
 export type WithRoles = boolean | null;
 export type WithProjectClean = boolean | null;
 export type WithBackend = boolean | null;
@@ -194,6 +204,38 @@ export type DeadlineMs25 = number;
 export type Type25 = "project.copy_out";
 export type Source = string;
 export type Destination1 = string;
+export type RequestId26 = string;
+export type DeadlineMs26 = number;
+export type Type26 = "compute.list";
+export type RequestId27 = string;
+export type DeadlineMs27 = number;
+export type Type27 = "compute.test_cluster";
+export type Name = string;
+export type Reach = SshReach | LoginNodeReach;
+export type Kind3 = "ssh";
+export type Host = string;
+export type Kind4 = "login_node";
+export type Workspace = string;
+export type Partition = string | null;
+export type Nodes = number | null;
+export type TimeLimit = string | null;
+/**
+ * @maxItems 64
+ */
+export type SbatchOptions = string[];
+/**
+ * How a machine's GPUs run work; a closed set, ``cpu`` when it has none.
+ */
+export type Accelerator = "cpu" | "cuda" | "rocm" | "metal";
+export type GpuModels = string[];
+export type GpusPerNode = number;
+export type RequestId28 = string;
+export type DeadlineMs28 = number;
+export type Type28 = "compute.add_cluster";
+export type RequestId29 = string;
+export type DeadlineMs29 = number;
+export type Type29 = "compute.remove_cluster";
+export type Name1 = string;
 export type Message =
   | HelloReply
   | InstancesListReply
@@ -221,10 +263,14 @@ export type Message =
   | ExamplesListReply
   | ProjectCreateFromExampleReply
   | ProjectCopyOutReply
+  | ComputeListReply
+  | ComputeTestClusterReply
+  | ComputeAddClusterReply
+  | ComputeRemoveClusterReply
   | InstancesChanged
   | HelperError;
-export type RequestId26 = string;
-export type Type26 = "hello";
+export type RequestId30 = string;
+export type Type30 = "hello";
 export type ProtocolVersion = number;
 /**
  * Optional capabilities negotiated by ``hello``; a closed set per protocol version.
@@ -257,14 +303,16 @@ export type HelperFeature =
   | "example_catalogue"
   | "run_digest"
   | "harness_generations"
-  | "run_role_agents";
+  | "run_role_agents"
+  | "measurement_target"
+  | "machine_compute";
 export type Features1 = HelperFeature[];
 export type VibesysVersion = string;
 export type Root = string;
 export type Commit = string | null;
 export type Dirty = boolean | null;
-export type RequestId27 = string;
-export type Type27 = "instances.list";
+export type RequestId31 = string;
+export type Type31 = "instances.list";
 export type Version = 5;
 export type Version1 = 5;
 export type Id = string;
@@ -338,8 +386,8 @@ export type Id1 = string;
 export type Version2 = number | null;
 export type Unreadable = UnreadableRecord[];
 export type Unverified = string[];
-export type RequestId28 = string;
-export type Type28 = "instances.inspect";
+export type RequestId32 = string;
+export type Type32 = "instances.inspect";
 export type Version3 = 1;
 export type Id2 = string;
 /**
@@ -366,20 +414,20 @@ export type State = "available";
 export type Text = string;
 export type Truncated = boolean;
 export type State1 = "missing";
-export type RequestId29 = string;
-export type Type29 = "instances.watch";
+export type RequestId33 = string;
+export type Type33 = "instances.watch";
 export type WatchId1 = string;
-export type RequestId30 = string;
-export type Type30 = "instances.unwatch";
+export type RequestId34 = string;
+export type Type34 = "instances.unwatch";
 export type WatchId2 = string;
-export type RequestId31 = string;
-export type Type31 = "tasks.list";
+export type RequestId35 = string;
+export type Type35 = "tasks.list";
 export type Version5 = 1;
 export type ProjectRoot2 = string;
-export type Name = string;
+export type Name2 = string;
 export type Tasks = TaskSummary[];
-export type RequestId32 = string;
-export type Type32 = "runs.list";
+export type RequestId36 = string;
+export type Type36 = "runs.list";
 export type ProjectRoot3 = string;
 export type RunId7 = string;
 export type Task3 = string | null;
@@ -387,7 +435,7 @@ export type DisplayName = string;
 export type CreatedAt = string;
 export type InstanceId5 = string | null;
 export type Digest = (RunDigest | RunDigestUnreadable) | null;
-export type Kind = "digest";
+export type Kind5 = "digest";
 export type Ideas = number | null;
 export type AdoptedRatio = number | null;
 export type BestSoFarRatio = number | null;
@@ -399,11 +447,11 @@ export type RoundsFinished = number;
  * The journal's last word on a run: the terminal event it ends with, if it has one.
  */
 export type RunClosing = "finished" | "failed" | "interrupted";
-export type Kind1 = "unreadable";
+export type Kind6 = "unreadable";
 export type Message2 = string;
 export type Runs = RunSummary[];
-export type RequestId33 = string;
-export type Type33 = "run.start";
+export type RequestId37 = string;
+export type Type37 = "run.start";
 export type Launch = LiveInstanceRecord | DetachedLaunchFailure;
 export type Version6 = 1;
 export type Outcome = "failed";
@@ -412,8 +460,8 @@ export type Stage1 = string;
 export type Message3 = string;
 export type ExitCode = number;
 export type LogPath1 = string | null;
-export type RequestId34 = string;
-export type Type34 = "run.stop";
+export type RequestId38 = string;
+export type Type38 = "run.stop";
 export type Version7 = 1;
 export type Id4 = string;
 /**
@@ -424,24 +472,24 @@ export type StopOutcome = "stopped" | "stopping" | "not_running" | "still_runnin
  * How ``vibesys instances stop`` reached the server.
  */
 export type StopRoute = "control_socket" | "signal";
-export type RequestId35 = string;
-export type Type35 = "run.connect";
+export type RequestId39 = string;
+export type Type39 = "run.connect";
 export type RunId8 = string;
 export type ProtocolVersion3 = number;
-export type RequestId36 = string;
-export type Type36 = "ping";
-export type RequestId37 = string;
-export type Type37 = "paths.complete";
+export type RequestId40 = string;
+export type Type40 = "ping";
+export type RequestId41 = string;
+export type Type41 = "paths.complete";
 export type Directory = string;
-export type Name1 = string;
+export type Name3 = string;
 export type Path1 = string;
 export type VibesysCheckout = boolean;
 export type VibesysProject = boolean;
 export type GitRepository = boolean;
 export type Entries = PathEntry[];
 export type Truncated1 = boolean;
-export type RequestId38 = string;
-export type Type38 = "logs.list";
+export type RequestId42 = string;
+export type Type42 = "logs.list";
 export type Id5 = string;
 export type JsonValue = unknown;
 export type Command = string;
@@ -452,8 +500,8 @@ export type Size = number;
  */
 export type LogStreamOutcome = "ended" | "failed" | "abandoned";
 export type Streams = LogStream[];
-export type RequestId39 = string;
-export type Type39 = "logs.read";
+export type RequestId43 = string;
+export type Type43 = "logs.read";
 export type Offset2 = number;
 export type Data = string;
 export type NextOffset = number;
@@ -467,11 +515,11 @@ export type Length = number;
  */
 export type LogPipe = "stdout" | "stderr";
 export type Pipes = LogPipeSpan[];
-export type RequestId40 = string;
-export type Type40 = "logs.cancel";
+export type RequestId44 = string;
+export type Type44 = "logs.cancel";
 export type ReadId1 = string;
-export type RequestId41 = string;
-export type Type41 = "harnesses.list";
+export type RequestId45 = string;
+export type Type45 = "harnesses.list";
 export type Provider1 = string;
 export type Model2 = string;
 export type Default = boolean;
@@ -485,11 +533,11 @@ export type TierName = string | null;
  */
 export type Maker = "anthropic" | "openai" | "google";
 export type Id6 = string;
-export type Name2 = string;
+export type Name4 = string;
 export type Order = number;
 export type Harnesses = HarnessOption[];
-export type RequestId42 = string;
-export type Type42 = "runs.read_events";
+export type RequestId46 = string;
+export type Type46 = "runs.read_events";
 export type Events = {
   [k: string]: JsonValue;
 }[];
@@ -497,23 +545,23 @@ export type NextSequence = number;
 export type Complete = boolean;
 export type TotalEvents = number | null;
 export type TotalBytes = number | null;
-export type RequestId43 = string;
-export type Type43 = "runs.events_for_span";
+export type RequestId47 = string;
+export type Type47 = "runs.events_for_span";
 export type Events1 = {
   [k: string]: JsonValue;
 }[];
 export type NextSequence1 = number;
 export type Complete1 = boolean;
 export type Total1 = number;
-export type RequestId44 = string;
-export type Type44 = "runs.read_tail";
+export type RequestId48 = string;
+export type Type48 = "runs.read_tail";
 export type Events2 = {
   [k: string]: JsonValue;
 }[];
 export type Complete2 = boolean;
 export type LastSequence = number;
-export type RequestId45 = string;
-export type Type45 = "runs.summary";
+export type RequestId49 = string;
+export type Type49 = "runs.summary";
 export type ThroughSequence = number;
 export type EventCount = number;
 export type JournalBytes = number;
@@ -538,7 +586,7 @@ export type Spans = {
   [k: string]: JsonValue;
 }[];
 export type SpanId1 = string;
-export type Kind2 = string;
+export type Kind7 = string;
 export type SchemaId = string;
 export type Replies = TurnReply[];
 export type SpanId2 = string;
@@ -558,8 +606,8 @@ export type CostUsd = number | null;
 export type DurationMs = number | null;
 export type Records = UsageRecord[];
 export type NextOffset1 = number | null;
-export type RequestId46 = string;
-export type Type46 = "machine.describe";
+export type RequestId50 = string;
+export type Type50 = "machine.describe";
 export type Root1 = string;
 export type Version8 = string;
 export type Commit1 = string | null;
@@ -568,10 +616,6 @@ export type CpuCores = number;
 export type Vendor = string;
 export type Model4 = string;
 export type Gpus = Gpu[];
-/**
- * How a machine's GPUs run work; a closed set, ``cpu`` when it has none.
- */
-export type Accelerator = "cpu" | "cuda" | "rocm" | "metal";
 export type Docker = DockerReachable | DockerUnreachable;
 export type Reachable = true;
 export type Version9 = string;
@@ -580,8 +624,8 @@ export type Reason1 = string;
 export type HarnessClis = string[];
 export type Live = number;
 export type EndedToday = number;
-export type RequestId47 = string;
-export type Type47 = "checkout.inspect";
+export type RequestId51 = string;
+export type Type51 = "checkout.inspect";
 export type Inspection = CheckoutFound | CheckoutNotFound | CheckoutTooOld;
 export type State2 = "found";
 export type Root2 = string;
@@ -593,8 +637,8 @@ export type State3 = "not_found";
 export type State4 = "too_old";
 export type Version11 = string;
 export type Min = string;
-export type RequestId48 = string;
-export type Type48 = "run.preflight";
+export type RequestId52 = string;
+export type Type52 = "run.preflight";
 /**
  * What a preflight check is about; closed.
  */
@@ -605,22 +649,25 @@ export type CheckId =
   | "settings_valid"
   | "docker_reachable"
   | "agent_image"
-  | "evaluator_available";
+  | "evaluator_available"
+  | "measurement_target";
 /**
  * How a check came out; Start is enabled exactly when none is ``fail``.
  */
 export type CheckState = "ok" | "warn" | "fail";
 export type Detail = string;
-export type Fix = (ChooseCheckout | CopyOut | EditSetting | StartDocker | DeclareBuild) | null;
-export type Kind3 = "choose_checkout";
-export type Kind4 = "copy_out";
+export type Fix = (ChooseCheckout | CopyOut | EditSetting | StartDocker | DeclareBuild | ConfigureCompute) | null;
+export type Kind8 = "choose_checkout";
+export type Kind9 = "copy_out";
 export type SuggestedPath = string;
-export type Kind5 = "edit_setting";
+export type Kind10 = "edit_setting";
 export type Key = string;
-export type Kind6 = "start_docker";
-export type Kind7 = "declare_build";
+export type Kind11 = "start_docker";
+export type Kind12 = "declare_build";
 export type Manifest = string;
 export type Outputs = string[];
+export type Kind13 = "configure_compute";
+export type Target = SlurmTarget | ModalTarget;
 export type Cause =
   | (
       | BackendUnavailable
@@ -637,60 +684,66 @@ export type Cause =
       | ArgumentsUnrecognized
       | OptionNotAccepted
       | GitHubUnavailable
+      | MeasurementTargetNotConfigured
+      | MeasurementTargetMisfit
     )
   | null;
-export type Kind8 = "backend_unavailable";
+export type Kind14 = "backend_unavailable";
 export type Task4 = string;
 /**
  * A compute backend a task targets (``vs_sandbox.ComputeBackend``'s values); closed.
  */
 export type Backend = "cpu" | "cuda" | "rocm" | "metal" | "trainium";
 export type Declared = Backend[];
-export type Kind9 = "project_dirty";
+export type Kind15 = "project_dirty";
 export type Project8 = string;
 export type Paths = string[];
-export type Kind10 = "task_not_found";
+export type Kind16 = "task_not_found";
 export type Task5 = string;
 export type Available = string[];
-export type Kind11 = "task_unusable";
+export type Kind17 = "task_unusable";
 export type Task6 = string | null;
 export type Problem = string;
-export type Kind12 = "task_needs_provisioning";
+export type Kind18 = "task_needs_provisioning";
 export type Task7 = string;
-export type Kind13 = "task_image_unsupported";
+export type Kind19 = "task_image_unsupported";
 export type Task8 = string | null;
 export type Problem1 = string;
-export type Kind14 = "sysbox_missing";
+export type Kind20 = "sysbox_missing";
 export type Task9 = string;
 export type Problem2 = string;
-export type Kind15 = "config_invalid";
+export type Kind21 = "config_invalid";
 export type Problem3 = string;
-export type Kind16 = "roles_not_declared";
+export type Kind22 = "roles_not_declared";
 export type Roles1 = string[];
-export type Kind17 = "model_not_vetted";
+export type Kind23 = "model_not_vetted";
 export type Provider2 = string;
 export type Model5 = string | null;
 export type Vetted = string[];
 export type Role2 = string | null;
 export type Fallback = boolean;
-export type Kind18 = "arguments_rejected";
+export type Kind24 = "arguments_rejected";
 export type Problem4 = string;
-export type Kind19 = "arguments_unrecognized";
+export type Kind25 = "arguments_unrecognized";
 export type Arguments = string[];
-export type Kind20 = "option_not_accepted";
+export type Kind26 = "option_not_accepted";
 /**
  * A typed New run option (``RunOptions``); closed.
  */
 export type RunOption = "rounds" | "time_limit" | "results" | "role_model" | "role_reasoning_effort" | "role_agent";
-export type Kind21 = "github_unavailable";
+export type Kind27 = "github_unavailable";
 export type Problem5 = string;
+export type Kind28 = "measurement_target_not_configured";
+export type Target1 = SlurmTarget | ModalTarget;
+export type Kind29 = "measurement_target_misfit";
+export type Target2 = SameMachine | SlurmTarget | ModalTarget;
 export type Checks = Check[];
 export type Roles2 = string[] | null;
-export type RequestId49 = string;
-export type Type49 = "examples.list";
+export type RequestId53 = string;
+export type Type53 = "examples.list";
 export type Version12 = 1;
 export type Checkout1 = string;
-export type Name3 = string;
+export type Name5 = string;
 export type Category = string;
 export type Tasks1 = string[];
 export type ExternalRepo = boolean;
@@ -706,12 +759,12 @@ export type Count = number;
  * Who makes the hardware a task targets.
  */
 export type AcceleratorVendor = "nvidia" | "amd" | "aws" | "apple" | "cpu";
-export type Name4 = string;
+export type Name6 = string;
 /**
  * Who made a served model; ``OTHER`` for a maker with no entry yet.
  */
 export type ModelMaker = "meta" | "qwen" | "deepseek" | "zhipu" | "moonshot" | "ai2" | "openai" | "other";
-export type Name5 = string;
+export type Name7 = string;
 export type Description = string;
 export type Metric = string;
 export type Direction = "max" | "min";
@@ -719,16 +772,44 @@ export type Objectives = ExampleObjective[];
 export type Goal = string;
 export type GoalTruncated = boolean;
 export type Examples = ExampleSummary[];
-export type RequestId50 = string;
-export type Type50 = "project.create_from_example";
+export type RequestId54 = string;
+export type Type54 = "project.create_from_example";
 export type Project9 = string;
 export type Tasks2 = string[];
-export type RequestId51 = string;
-export type Type51 = "project.copy_out";
-export type Type52 = "instances.changed";
+export type RequestId55 = string;
+export type Type55 = "project.copy_out";
+export type RequestId56 = string;
+export type Type56 = "compute.list";
+export type ConfigPath = string;
+/**
+ * Which file of the machine a listed cluster lives in.
+ */
+export type ClusterSource = "vibesys" | "slurm_toml";
+export type Clusters = ListedCluster[];
+export type TokenPresent = boolean;
+/**
+ * Where the machine holds its Modal token.
+ */
+export type ModalTokenSource = "environment" | "profile";
+export type RequestId57 = string;
+export type Type57 = "compute.test_cluster";
+export type Result = ClusterTestPassed | ClusterTestFailed;
+export type Outcome1 = "passed";
+export type Partitions = string[];
+export type Outcome2 = "failed";
+/**
+ * Which step of a connection test failed.
+ */
+export type ClusterTestStage = "reach" | "scheduler" | "workspace";
+export type Detail1 = string;
+export type RequestId58 = string;
+export type Type58 = "compute.add_cluster";
+export type RequestId59 = string;
+export type Type59 = "compute.remove_cluster";
+export type Type60 = "instances.changed";
 export type WatchId3 = string;
-export type Type53 = "error";
-export type RequestId52 = string | null;
+export type Type61 = "error";
+export type RequestId60 = string | null;
 /**
  * Why a request failed; a closed set.
  */
@@ -761,6 +842,13 @@ export type HelperErrorCode =
   | "project_create_failed"
   | "unknown_run"
   | "unvetted_harness"
+  | "unknown_cluster"
+  | "cluster_exists"
+  | "cluster_read_only"
+  | "cluster_test_failed"
+  | "cluster_invalid"
+  | "compute_config_unreadable"
+  | "modal_not_configured"
   | "internal";
 export type Message4 = string;
 export type Path2 = string | null;
@@ -784,7 +872,7 @@ export type ChannelEndOutcome =
   | "client_failed"
   | "server_unresponsive";
 export type ExitStatus = number;
-export type Detail1 = string;
+export type Detail2 = string;
 /**
  * One strict stderr line preserving an undisclosed instance cleanup failure.
  *
@@ -795,26 +883,26 @@ export type Detail1 = string;
  */
 export type RunStartCompensationFailure =
   WorkerStartRefusedCompensationFailure | StopFailedCompensationFailure | StopUnconfirmedCompensationFailure;
-export type Type54 = "run.start_compensation_failed";
+export type Type62 = "run.start_compensation_failed";
 export type ExitStatus1 = 12;
-export type RequestId53 = string;
-export type Detail2 = string;
-export type Kind22 = "worker_start_refused";
-export type InstanceId6 = string;
-export type Type55 = "run.start_compensation_failed";
-export type ExitStatus2 = 12;
-export type RequestId54 = string;
+export type RequestId61 = string;
 export type Detail3 = string;
-export type Kind23 = "stop_failed";
-export type InstanceId7 = string;
-export type Type56 = "run.start_compensation_failed";
-export type ExitStatus3 = 12;
-export type RequestId55 = string;
+export type Kind30 = "worker_start_refused";
+export type InstanceId6 = string;
+export type Type63 = "run.start_compensation_failed";
+export type ExitStatus2 = 12;
+export type RequestId62 = string;
 export type Detail4 = string;
-export type Kind24 = "stop_unconfirmed";
+export type Kind31 = "stop_failed";
+export type InstanceId7 = string;
+export type Type64 = "run.start_compensation_failed";
+export type ExitStatus3 = 12;
+export type RequestId63 = string;
+export type Detail5 = string;
+export type Kind32 = "stop_unconfirmed";
 export type Version13 = 1;
 export type Id7 = string;
-export type Outcome1 = "stopping" | "still_running" | "unsupported";
+export type Outcome3 = "stopping" | "still_running" | "unsupported";
 
 /**
  * Root schema document for the host helper: what a client sends and what it receives.
@@ -917,6 +1005,7 @@ export interface RunStartRequest {
   harness?: HarnessChoice | null;
   options?: RunOptions | null;
   agents?: Agents;
+  measure_on?: MeasureOn;
 }
 /**
  * Resume this run.
@@ -953,6 +1042,25 @@ export interface RoleOption {
   role: Role;
   model?: Model1;
   reasoning_effort?: ReasoningEffort;
+}
+/**
+ * Measure on the machine the agent works on.
+ */
+export interface SameMachine {
+  kind: Kind;
+}
+/**
+ * Measure on the Slurm cluster ``compute.list`` names ``cluster``.
+ */
+export interface SlurmTarget {
+  kind: Kind1;
+  cluster: Cluster;
+}
+/**
+ * Measure on Modal, with the token present on the machine.
+ */
+export interface ModalTarget {
+  kind: Kind2;
 }
 /**
  * Stop a live detached server (``vibesys instances stop``).
@@ -1142,6 +1250,7 @@ export interface RunPreflightRequest {
   harness?: HarnessChoice | null;
   options?: RunOptions | null;
   agents?: Agents1;
+  measure_on?: MeasureOn1;
   with_roles?: WithRoles;
   with_project_clean?: WithProjectClean;
   with_backend?: WithBackend;
@@ -1177,11 +1286,80 @@ export interface ProjectCopyOutRequest {
   destination: Destination1;
 }
 /**
+ * The machine's compute settings.
+ */
+export interface ComputeListRequest {
+  request_id: RequestId26;
+  deadline_ms: DeadlineMs26;
+  type: Type26;
+}
+/**
+ * Test whether ``cluster`` can be reached from the machine, and read its hardware.
+ */
+export interface ComputeTestClusterRequest {
+  request_id: RequestId27;
+  deadline_ms: DeadlineMs27;
+  type: Type27;
+  cluster: SlurmClusterSettings;
+}
+/**
+ * One Slurm cluster as its machine reaches and uses it.
+ */
+export interface SlurmClusterSettings {
+  name: Name;
+  reach: Reach;
+  workspace: Workspace;
+  partition?: Partition;
+  nodes?: Nodes;
+  time_limit?: TimeLimit;
+  sbatch_options?: SbatchOptions;
+  hardware?: ClusterHardware | null;
+}
+/**
+ * The cluster is reached from the machine over SSH, by a host alias in its ``~/.ssh/config``.
+ */
+export interface SshReach {
+  kind: Kind3;
+  host: Host;
+}
+/**
+ * The machine is a login node of the cluster: its own scheduler commands reach it.
+ */
+export interface LoginNodeReach {
+  kind: Kind4;
+}
+/**
+ * What a cluster's nodes offer, as ``sinfo`` lists it or as its operator states it.
+ */
+export interface ClusterHardware {
+  accelerator?: Accelerator | null;
+  gpu_models?: GpuModels;
+  gpus_per_node?: GpusPerNode;
+}
+/**
+ * Save ``cluster``, once it passes the test again; a name already set up is refused.
+ */
+export interface ComputeAddClusterRequest {
+  request_id: RequestId28;
+  deadline_ms: DeadlineMs28;
+  type: Type28;
+  cluster: SlurmClusterSettings;
+}
+/**
+ * Remove the cluster ``name`` from the settings file this helper edits.
+ */
+export interface ComputeRemoveClusterRequest {
+  request_id: RequestId29;
+  deadline_ms: DeadlineMs29;
+  type: Type29;
+  name: Name1;
+}
+/**
  * The negotiated version and features, and what will start runs on this host.
  */
 export interface HelloReply {
-  request_id: RequestId26;
-  type: Type26;
+  request_id: RequestId30;
+  type: Type30;
   protocol_version: ProtocolVersion;
   features: Features1;
   vibesys_version: VibesysVersion;
@@ -1199,8 +1377,8 @@ export interface Checkout {
  * The registry's listing.
  */
 export interface InstancesListReply {
-  request_id: RequestId27;
-  type: Type27;
+  request_id: RequestId31;
+  type: Type31;
   listing: InstanceList;
 }
 /**
@@ -1298,8 +1476,8 @@ export interface UnreadableRecord {
  * One coherent inspection of a detached server and its retained artifacts.
  */
 export interface InstancesInspectReply {
-  request_id: RequestId28;
-  type: Type28;
+  request_id: RequestId32;
+  type: Type32;
   inspection: InstanceInspection;
 }
 /**
@@ -1351,24 +1529,24 @@ export interface MissingLogTail {
  * The watch started; ``instances.changed`` for ``watch_id`` follows at once and on change.
  */
 export interface InstancesWatchReply {
-  request_id: RequestId29;
-  type: Type29;
+  request_id: RequestId33;
+  type: Type33;
   watch_id: WatchId1;
 }
 /**
  * The watch ended; no ``instances.changed`` for ``watch_id`` follows.
  */
 export interface InstancesUnwatchReply {
-  request_id: RequestId30;
-  type: Type30;
+  request_id: RequestId34;
+  type: Type34;
   watch_id: WatchId2;
 }
 /**
  * The project's tasks.
  */
 export interface TasksListReply {
-  request_id: RequestId31;
-  type: Type31;
+  request_id: RequestId35;
+  type: Type35;
   tasks: TaskList;
 }
 /**
@@ -1383,14 +1561,14 @@ export interface TaskList {
  * One task of a project.
  */
 export interface TaskSummary {
-  name: Name;
+  name: Name2;
 }
 /**
  * The project's runs.
  */
 export interface RunsListReply {
-  request_id: RequestId32;
-  type: Type32;
+  request_id: RequestId36;
+  type: Type36;
   runs: RunList;
 }
 /**
@@ -1430,7 +1608,7 @@ export interface RunSummary {
  * ending is known after its registry tombstone expired (a day).
  */
 export interface RunDigest {
-  kind: Kind;
+  kind: Kind5;
   ideas: Ideas;
   adopted_ratio: AdoptedRatio;
   best_so_far_ratio: BestSoFarRatio;
@@ -1454,15 +1632,15 @@ export interface RunEndingFact {
  * A run whose journal exists and could not be read; ``message`` says why, in one line.
  */
 export interface RunDigestUnreadable {
-  kind: Kind1;
+  kind: Kind6;
   message: Message2;
 }
 /**
  * The started server's record, or why nothing started.
  */
 export interface RunStartReply {
-  request_id: RequestId33;
-  type: Type33;
+  request_id: RequestId37;
+  type: Type37;
   launch: Launch;
 }
 /**
@@ -1488,8 +1666,8 @@ export interface DetachedLaunchFailure {
  * What the stop observed.
  */
 export interface RunStopReply {
-  request_id: RequestId34;
-  type: Type34;
+  request_id: RequestId38;
+  type: Type38;
   result: InstanceStopResult;
 }
 /**
@@ -1505,8 +1683,8 @@ export interface InstanceStopResult {
  * The channel is now a byte relay carrying the run protocol to this run.
  */
 export interface RunConnectReply {
-  request_id: RequestId35;
-  type: Type35;
+  request_id: RequestId39;
+  type: Type39;
   run_id: RunId8;
   protocol_version: ProtocolVersion3;
 }
@@ -1514,15 +1692,15 @@ export interface RunConnectReply {
  * The channel is alive.
  */
 export interface PingReply {
-  request_id: RequestId36;
-  type: Type36;
+  request_id: RequestId40;
+  type: Type40;
 }
 /**
  * Matching directories of ``directory``, sorted by name, at most ``PATHS_COMPLETE_CAP``.
  */
 export interface PathsCompleteReply {
-  request_id: RequestId37;
-  type: Type37;
+  request_id: RequestId41;
+  type: Type41;
   directory: Directory;
   entries: Entries;
   truncated: Truncated1;
@@ -1531,7 +1709,7 @@ export interface PathsCompleteReply {
  * One directory that completes the typed path, with what it looks like.
  */
 export interface PathEntry {
-  name: Name1;
+  name: Name3;
   path: Path1;
   vibesys_checkout: VibesysCheckout;
   vibesys_project: VibesysProject;
@@ -1541,8 +1719,8 @@ export interface PathEntry {
  * The instance's streams, oldest first.
  */
 export interface LogsListReply {
-  request_id: RequestId38;
-  type: Type38;
+  request_id: RequestId42;
+  type: Type42;
   streams: Streams;
 }
 /**
@@ -1563,8 +1741,8 @@ export interface Owner {
  * One chunk of the stream.
  */
 export interface LogsReadReply {
-  request_id: RequestId39;
-  type: Type39;
+  request_id: RequestId43;
+  type: Type43;
   chunk: LogChunk;
 }
 /**
@@ -1596,16 +1774,16 @@ export interface LogPipeSpan {
  * The withdrawal was taken: a read ``read_id`` named that was still waiting stops waiting.
  */
 export interface LogsCancelReply {
-  request_id: RequestId40;
-  type: Type40;
+  request_id: RequestId44;
+  type: Type44;
   read_id: ReadId1;
 }
 /**
  * The vetted pairs, grouped by provider with each provider's default first.
  */
 export interface HarnessesListReply {
-  request_id: RequestId41;
-  type: Type41;
+  request_id: RequestId45;
+  type: Type45;
   harnesses: Harnesses;
 }
 /**
@@ -1634,15 +1812,15 @@ export interface HarnessDisplay {
  */
 export interface ModelGeneration {
   id: Id6;
-  name: Name2;
+  name: Name4;
   order: Order;
 }
 /**
  * One page of a run's recorded events, oldest first.
  */
 export interface RunsReadEventsReply {
-  request_id: RequestId42;
-  type: Type42;
+  request_id: RequestId46;
+  type: Type46;
   events: Events;
   next_sequence: NextSequence;
   complete: Complete;
@@ -1653,8 +1831,8 @@ export interface RunsReadEventsReply {
  * One page of a span's recorded events, oldest first.
  */
 export interface RunsEventsForSpanReply {
-  request_id: RequestId43;
-  type: Type43;
+  request_id: RequestId47;
+  type: Type47;
   events: Events1;
   next_sequence: NextSequence1;
   complete: Complete1;
@@ -1664,8 +1842,8 @@ export interface RunsEventsForSpanReply {
  * The newest events before the request's ``before_sequence``, oldest first.
  */
 export interface RunsReadTailReply {
-  request_id: RequestId44;
-  type: Type44;
+  request_id: RequestId48;
+  type: Type48;
   events: Events2;
   complete: Complete2;
   last_sequence: LastSequence;
@@ -1697,8 +1875,8 @@ export interface RunsReadTailReply {
  * ``through_sequence``, and a read whose pages disagree starts again.
  */
 export interface RunsSummaryReply {
-  request_id: RequestId45;
-  type: Type45;
+  request_id: RequestId49;
+  type: Type49;
   through_sequence: ThroughSequence;
   event_count: EventCount;
   journal_bytes: JournalBytes;
@@ -1739,7 +1917,7 @@ export interface TokenTally {
  */
 export interface TurnReply {
   span_id: SpanId1;
-  kind: Kind2;
+  kind: Kind7;
   schema_id: SchemaId;
   value: Value;
 }
@@ -1788,8 +1966,8 @@ export interface UsageRecord {
  * The machine's description.
  */
 export interface MachineDescribeReply {
-  request_id: RequestId46;
-  type: Type46;
+  request_id: RequestId50;
+  type: Type50;
   machine: MachineDescription;
 }
 /**
@@ -1855,8 +2033,8 @@ export interface RunCounts {
  * What the path holds.
  */
 export interface CheckoutInspectReply {
-  request_id: RequestId47;
-  type: Type47;
+  request_id: RequestId51;
+  type: Type51;
   inspection: Inspection;
 }
 /**
@@ -1890,8 +2068,8 @@ export interface CheckoutTooOld {
  * Every check, in ``CheckId`` order; Start is enabled exactly when none is ``fail``.
  */
 export interface RunPreflightReply {
-  request_id: RequestId48;
-  type: Type48;
+  request_id: RequestId52;
+  type: Type52;
   checks: Checks;
   roles?: Roles2;
   backend?: Backend | null;
@@ -1910,35 +2088,42 @@ export interface Check {
  * Pick another VibeSys checkout for this machine.
  */
 export interface ChooseCheckout {
-  kind: Kind3;
+  kind: Kind8;
 }
 /**
  * Copy the project into its own repository (``project.copy_out``), at the suggested path.
  */
 export interface CopyOut {
-  kind: Kind4;
+  kind: Kind9;
   suggested_path: SuggestedPath;
 }
 /**
  * Edit the named setting.
  */
 export interface EditSetting {
-  kind: Kind5;
+  kind: Kind10;
   key: Key;
 }
 /**
  * Start Docker on the machine.
  */
 export interface StartDocker {
-  kind: Kind6;
+  kind: Kind11;
 }
 /**
  * Declare a ``[build]`` producing ``outputs`` in the task manifest at ``manifest``.
  */
 export interface DeclareBuild {
-  kind: Kind7;
+  kind: Kind12;
   manifest: Manifest;
   outputs: Outputs;
+}
+/**
+ * Set up the cluster or Modal on the machine, in that machine's compute settings.
+ */
+export interface ConfigureCompute {
+  kind: Kind13;
+  target: Target;
 }
 /**
  * The machine cannot run the compute backend the task targets.
@@ -1946,7 +2131,7 @@ export interface DeclareBuild {
  * A fact, not a sentence: the client words it for its own controls, the CLI for its flags.
  */
 export interface BackendUnavailable {
-  kind: Kind8;
+  kind: Kind14;
   task: Task4;
   backend: Backend;
   declared: Declared;
@@ -1957,7 +2142,7 @@ export interface BackendUnavailable {
  * A fact, not a sentence: the client words it. ``paths`` are relative to the project, sorted.
  */
 export interface ProjectDirty {
-  kind: Kind9;
+  kind: Kind15;
   project: Project8;
   paths: Paths;
 }
@@ -1965,7 +2150,7 @@ export interface ProjectDirty {
  * The project has no task of that name.
  */
 export interface TaskNotFound {
-  kind: Kind10;
+  kind: Kind16;
   task: Task5;
   available: Available;
 }
@@ -1973,7 +2158,7 @@ export interface TaskNotFound {
  * The task's files cannot be loaded; ``problem`` is the loader's own account (raw text).
  */
 export interface TaskUnusable {
-  kind: Kind11;
+  kind: Kind17;
   task: Task6;
   problem: Problem;
 }
@@ -1981,14 +2166,14 @@ export interface TaskUnusable {
  * The task needs inputs copied into a project of its own, which this run does not do.
  */
 export interface TaskNeedsProvisioning {
-  kind: Kind12;
+  kind: Kind18;
   task: Task7;
 }
 /**
  * The task's Dockerfile cannot be used the way this run would run; ``problem`` is raw text.
  */
 export interface TaskImageUnsupported {
-  kind: Kind13;
+  kind: Kind19;
   task: Task8;
   problem: Problem1;
 }
@@ -1996,7 +2181,7 @@ export interface TaskImageUnsupported {
  * The task runs Docker inside its sandbox, which needs a runtime this machine's Docker lacks.
  */
 export interface SysboxMissing {
-  kind: Kind14;
+  kind: Kind20;
   task: Task9;
   problem: Problem2;
 }
@@ -2004,21 +2189,21 @@ export interface SysboxMissing {
  * The run's configuration (``agent.toml`` and what overrides it) is not valid.
  */
 export interface ConfigInvalid {
-  kind: Kind15;
+  kind: Kind21;
   problem: Problem3;
 }
 /**
  * The configuration names agent roles the run's orchestration does not declare.
  */
 export interface RolesNotDeclared {
-  kind: Kind16;
+  kind: Kind22;
   roles: Roles1;
 }
 /**
  * A model, or none, outside the vetted models of its provider.
  */
 export interface ModelNotVetted {
-  kind: Kind17;
+  kind: Kind23;
   provider: Provider2;
   model: Model5;
   vetted: Vetted;
@@ -2029,36 +2214,52 @@ export interface ModelNotVetted {
  * The run's argument parser refused the extra arguments; ``problem`` is its message (raw).
  */
 export interface ArgumentsRejected {
-  kind: Kind18;
+  kind: Kind24;
   problem: Problem4;
 }
 /**
  * Extra arguments the run's search does not take, in the order given (raw).
  */
 export interface ArgumentsUnrecognized {
-  kind: Kind19;
+  kind: Kind25;
   arguments: Arguments;
 }
 /**
  * The run's search does not take a typed option the screen set (for instance rounds).
  */
 export interface OptionNotAccepted {
-  kind: Kind20;
+  kind: Kind26;
   option: RunOption;
 }
 /**
  * The run publishes to GitHub, and this machine has no signed-in account; ``problem`` is raw.
  */
 export interface GitHubUnavailable {
-  kind: Kind21;
+  kind: Kind27;
   problem: Problem5;
+}
+/**
+ * The cluster is not set up on the machine, or Modal has no token there.
+ */
+export interface MeasurementTargetNotConfigured {
+  kind: Kind28;
+  target: Target1;
+}
+/**
+ * The target's hardware cannot run the compute backend the task targets.
+ */
+export interface MeasurementTargetMisfit {
+  kind: Kind29;
+  target: Target2;
+  backend: Backend;
+  offered: Accelerator;
 }
 /**
  * The checkout's example catalog.
  */
 export interface ExamplesListReply {
-  request_id: RequestId49;
-  type: Type49;
+  request_id: RequestId53;
+  type: Type53;
   listing: ExampleList;
 }
 /**
@@ -2073,7 +2274,7 @@ export interface ExampleList {
  * One example in ``vibesys example list --json``.
  */
 export interface ExampleSummary {
-  name: Name3;
+  name: Name5;
   category: Category;
   tasks: Tasks1;
   external_repo: ExternalRepo;
@@ -2105,14 +2306,14 @@ export interface ExampleHardware {
  * The model an LLM-serving task serves.
  */
 export interface ExampleModel {
-  name: Name4;
+  name: Name6;
   maker: ModelMaker;
 }
 /**
  * The workload a data-structure task drives.
  */
 export interface ExampleWorkload {
-  name: Name5;
+  name: Name7;
   description: Description;
 }
 /**
@@ -2126,8 +2327,8 @@ export interface ExampleObjective {
  * The project made from the example.
  */
 export interface ProjectCreateFromExampleReply {
-  request_id: RequestId50;
-  type: Type50;
+  request_id: RequestId54;
+  type: Type54;
   created: CreatedProject;
 }
 /**
@@ -2141,15 +2342,85 @@ export interface CreatedProject {
  * The project copied out into its own repository.
  */
 export interface ProjectCopyOutReply {
-  request_id: RequestId51;
-  type: Type51;
+  request_id: RequestId55;
+  type: Type55;
   created: CreatedProject;
+}
+/**
+ * The machine's compute settings.
+ */
+export interface ComputeListReply {
+  request_id: RequestId56;
+  type: Type56;
+  settings: ComputeSettings;
+}
+/**
+ * What the machine offers as places to measure: its clusters and its Modal token.
+ */
+export interface ComputeSettings {
+  config_path: ConfigPath;
+  clusters: Clusters;
+  modal: ModalStatus;
+}
+/**
+ * A cluster set up on the machine, and the file it comes from.
+ */
+export interface ListedCluster {
+  cluster: SlurmClusterSettings;
+  source: ClusterSource;
+}
+/**
+ * Whether Modal is set up on the machine; the token itself is never sent.
+ */
+export interface ModalStatus {
+  token_present: TokenPresent;
+  source?: ModalTokenSource | null;
+}
+/**
+ * What testing the cluster found.
+ */
+export interface ComputeTestClusterReply {
+  request_id: RequestId57;
+  type: Type57;
+  result: Result;
+}
+/**
+ * The cluster answered: what its scheduler lists, and the hardware read from it.
+ */
+export interface ClusterTestPassed {
+  outcome: Outcome1;
+  hardware: ClusterHardware;
+  partitions: Partitions;
+}
+/**
+ * The cluster did not pass; ``detail`` is one line saying how.
+ */
+export interface ClusterTestFailed {
+  outcome: Outcome2;
+  stage: ClusterTestStage;
+  detail: Detail1;
+}
+/**
+ * The settings after the cluster was saved.
+ */
+export interface ComputeAddClusterReply {
+  request_id: RequestId58;
+  type: Type58;
+  settings: ComputeSettings;
+}
+/**
+ * The settings after the cluster was removed.
+ */
+export interface ComputeRemoveClusterReply {
+  request_id: RequestId59;
+  type: Type59;
+  settings: ComputeSettings;
 }
 /**
  * A push on a watch: the listing as it is now, sent first and then on each change.
  */
 export interface InstancesChanged {
-  type: Type52;
+  type: Type60;
   watch_id: WatchId3;
   listing: InstanceList;
 }
@@ -2157,8 +2428,8 @@ export interface InstancesChanged {
  * A failed request, or a line that was not one (``request_id`` is ``None`` then).
  */
 export interface HelperError {
-  type: Type53;
-  request_id: RequestId52;
+  type: Type61;
+  request_id: RequestId60;
   code: HelperErrorCode;
   message: Message4;
   path?: Path2;
@@ -2171,28 +2442,28 @@ export interface HelperError {
 export interface ChannelEnd {
   outcome: ChannelEndOutcome;
   exit_status: ExitStatus;
-  detail: Detail1;
+  detail: Detail2;
 }
 /**
  * The helper could not start the worker that owns the compensating stop.
  */
 export interface WorkerStartRefusedCompensationFailure {
-  type: Type54;
+  type: Type62;
   exit_status: ExitStatus1;
-  request_id: RequestId53;
-  detail: Detail2;
-  kind: Kind22;
+  request_id: RequestId61;
+  detail: Detail3;
+  kind: Kind30;
   instance_id: InstanceId6;
 }
 /**
  * The registry stop raised before returning typed evidence.
  */
 export interface StopFailedCompensationFailure {
-  type: Type55;
+  type: Type63;
   exit_status: ExitStatus2;
-  request_id: RequestId54;
-  detail: Detail3;
-  kind: Kind23;
+  request_id: RequestId62;
+  detail: Detail4;
+  kind: Kind31;
   instance_id: InstanceId7;
 }
 /**
@@ -2202,11 +2473,11 @@ export interface StopFailedCompensationFailure {
  * so a serialized report cannot carry two identities that disagree.
  */
 export interface StopUnconfirmedCompensationFailure {
-  type: Type56;
+  type: Type64;
   exit_status: ExitStatus3;
-  request_id: RequestId55;
-  detail: Detail4;
-  kind: Kind24;
+  request_id: RequestId63;
+  detail: Detail5;
+  kind: Kind32;
   stop_result: UnconfirmedInstanceStopResult;
 }
 /**
@@ -2215,6 +2486,6 @@ export interface StopUnconfirmedCompensationFailure {
 export interface UnconfirmedInstanceStopResult {
   version?: Version13;
   id: Id7;
-  outcome: Outcome1;
+  outcome: Outcome3;
   route?: StopRoute | null;
 }

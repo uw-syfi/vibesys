@@ -13,7 +13,7 @@ rest of the helper.
 
 Public surface: ``option_arguments``, ``option_flags``, ``repeated_option``,
 ``unvetted_role``, ``unvetted_agent``, ``conflicting_agent``, ``undeclared_agent``,
-``preflight_checks``, ``typed_arguments``, ``refined_cause``, ``PreflightFacts``,
+``preflight_checks``, ``measurement_check``, ``measurement_fits``, ``typed_arguments``, ``refined_cause``, ``PreflightFacts``,
 ``preflight_unavailable``.
 """
 
@@ -35,19 +35,31 @@ from server.host_api import (
     HarnessOption,
     RoleAgents,
 )
+from server.host_compute import (
+    ComputeSettings,
+    MeasurementTarget,
+    ModalTarget,
+    SameMachine,
+    SlurmTarget,
+)
 from server.host_machine_facts import (
+    Accelerator,
     DockerReachable,
     DockerUnreachable,
     MachineCheckout,
 )
 from server.host_preflight import (
     ArgumentsUnrecognized,
+    Backend,
     BackendUnavailable,
     Cause,
     Check,
     CheckId,
     CheckState,
+    ConfigureCompute,
     CopyOut,
+    MeasurementTargetMisfit,
+    MeasurementTargetNotConfigured,
     OptionNotAccepted,
     PreflightReport,
     ProjectDirty,
@@ -264,6 +276,85 @@ def preflight_checks(
         _docker_check(facts.docker) if report.uses_docker is not False else _NO_DOCKER,
         report.agent_image,
         report.evaluator,
+    )
+
+
+_REQUIRED_ACCELERATOR = {
+    Backend.CUDA: Accelerator.CUDA,
+    Backend.ROCM: Accelerator.ROCM,
+    Backend.METAL: Accelerator.METAL,
+}
+"""The accelerator each GPU backend needs; ``cpu`` runs anywhere and ``trainium`` on none here."""
+
+
+def measurement_fits(backend: Backend, offered: Accelerator) -> bool:
+    """Whether a place whose GPUs run work as ``offered`` can run a task targeting ``backend``."""
+    if backend is Backend.CPU:
+        return True
+    return _REQUIRED_ACCELERATOR.get(backend) is offered
+
+
+def measurement_check(
+    target: MeasurementTarget,
+    settings: ComputeSettings,
+    backend: Backend | None,
+) -> Check:
+    """The ``measurement_target`` check: ``target`` is set up on the machine and fits the task.
+
+    ``backend`` is the compute backend the run resolved to (``None`` when the settings
+    resolved none). The same machine is checked by the run's own validation, so it passes here.
+    A place whose hardware is not stated passes with a warning; one set up and known not to fit
+    fails.
+    """
+    if isinstance(target, SameMachine):
+        return Check(
+            id=CheckId.MEASUREMENT_TARGET,
+            state=CheckState.OK,
+            detail="results are measured on this machine",
+        )
+    if isinstance(target, SlurmTarget):
+        listed = next(
+            (each for each in settings.clusters if each.cluster.name == target.cluster), None
+        )
+        if listed is None:
+            return _not_configured(target)
+        hardware = listed.cluster.hardware
+        offered = None if hardware is None else hardware.accelerator
+        place = f"cluster {target.cluster!r}"
+    else:
+        if not settings.modal.token_present:
+            return _not_configured(target)
+        offered, place = Accelerator.CUDA, "Modal"
+    if backend is None or offered is None:
+        why = "the task's backend is not known" if backend is None else "its hardware is not stated"
+        return Check(
+            id=CheckId.MEASUREMENT_TARGET,
+            state=CheckState.WARN,
+            detail=one_line(f"{place} is set up; fit not checked: {why}", "not checked"),
+        )
+    if not measurement_fits(backend, offered):
+        cause = MeasurementTargetMisfit(target=target, backend=backend, offered=offered)
+        return Check(
+            id=CheckId.MEASUREMENT_TARGET,
+            state=CheckState.FAIL,
+            detail=one_line(f"{place}: {cause.plain()}", "does not fit"),
+            cause=cause,
+        )
+    return Check(
+        id=CheckId.MEASUREMENT_TARGET,
+        state=CheckState.OK,
+        detail=one_line(f"{place} offers the task's {backend.value} backend", "fits"),
+    )
+
+
+def _not_configured(target: SlurmTarget | ModalTarget) -> Check:
+    cause = MeasurementTargetNotConfigured(target=target)
+    return Check(
+        id=CheckId.MEASUREMENT_TARGET,
+        state=CheckState.FAIL,
+        detail=one_line(cause.plain(), "not set up"),
+        fix=ConfigureCompute(target=target),
+        cause=cause,
     )
 
 
