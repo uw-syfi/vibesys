@@ -1144,7 +1144,7 @@ export function runPageInvariants(state: RunPageState): string[] {
     problems.push('logs are read although the app cannot read them');
   }
   if (state.summary.kind === 'gone' && !isEndedRecord(state.record)) {
-    problems.push('a run that is not past is called gone');
+    problems.push('a run that is not over is called gone');
   }
   return problems;
 }
