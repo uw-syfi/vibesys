@@ -1,15 +1,37 @@
 import type {JSX} from 'react';
-import {siClaudecode, siGooglegemini, siOpencode} from 'simple-icons';
+import {
+  siAmd,
+  siAnthropic,
+  siApple,
+  siClaudecode,
+  siDeepseek,
+  siGoogle,
+  siGooglegemini,
+  siMeta,
+  siMoonshotai,
+  siNvidia,
+  siOpencode,
+} from 'simple-icons';
 
 /**
  * The marks the app draws, from the `simple-icons` package (CC0-1.0, pinned to an exact version).
  * The package's license covers its files, not the brands: a mark here is a trademark of its owner
  * and appears only beside the product's name, to say which product a choice is, never as a sign
- * that the owner endorses VibeSys. A product with no mark in the package draws the generic glyph.
+ * that the owner endorses VibeSys. Every path is the package's own, never redrawn or approximated:
+ * a maker, vendor or product the package has no mark for is shown by name alone (a harness, by the
+ * generic glyph).
  */
 const MARKS = {
+  amd: siAmd.path,
+  anthropic: siAnthropic.path,
+  apple: siApple.path,
   claudecode: siClaudecode.path,
+  deepseek: siDeepseek.path,
+  google: siGoogle.path,
   googlegemini: siGooglegemini.path,
+  meta: siMeta.path,
+  moonshotai: siMoonshotai.path,
+  nvidia: siNvidia.path,
   opencode: siOpencode.path,
 } as const;
 

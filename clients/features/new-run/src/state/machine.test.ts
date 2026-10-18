@@ -74,8 +74,9 @@ const RECENT: readonly RecentRun[] = [
         rounds: 4,
         time_limit_s: 7200,
         results: 'publish_github',
-        roles: [{role: 'judge', model: 'claude-a', reasoning_effort: 'high'}],
+        roles: [{role: 'judge', model: null, reasoning_effort: 'high'}],
       },
+      agents: {judge: {provider: 'claude', model: 'claude-a'}},
       args: ['--max-in-flight', '3', '--note', 'two words'],
     },
   },
@@ -180,7 +181,7 @@ function inputEvent(random: Seeded, snapshot: SnapshotFrom<typeof newRunMachine>
     agentEvent(random),
     {
       type: 'role',
-      role: {role: random.pick(ROLE_IDS), model: null, effort: random.pick(['default', 'high'])},
+      role: {role: random.pick(ROLE_IDS), agent: null, effort: random.pick(['default', 'high'])},
     },
     {type: 'budget', budget: {rounds: random.pick([1, 2, 5]), timeLimitS: null, results: 'keep'}},
     {type: 'advanced', advanced: random.pick(['', '--max-in-flight 3', '--max-rounds 4', '"open'])},
@@ -387,7 +388,7 @@ describe('newRunMachine', () => {
     expect(form.agent).toMatchObject({provider: 'claude', model: 'claude-b'});
     expect(form.agent?.roles.find(role => role.role === 'judge')).toEqual({
       role: 'judge',
-      model: 'claude-a',
+      agent: {provider: 'claude', model: 'claude-a'},
       effort: 'high',
     });
     expect(form.budget).toEqual({rounds: 4, timeLimitS: 7200, results: 'publish_github'});
@@ -403,7 +404,12 @@ describe('newRunMachine', () => {
   test('running a run again whose harness is no longer offered falls back to the default', async () => {
     const stale: RecentRun = {
       ...(RECENT[2] as RecentRun),
-      start: {harness: {provider: 'claude', model: 'claude-gone'}, options: {}, args: []},
+      start: {
+        harness: {provider: 'claude', model: 'claude-gone'},
+        options: {},
+        agents: {},
+        args: [],
+      },
     };
     expect(recordedAgent(stale.start ?? null, OFFERS)).toMatchObject({
       provider: 'claude',
@@ -701,16 +707,18 @@ describe('the run reports its roles', () => {
     const {context} = actor.getSnapshot();
     expect(context.roles).toEqual(['multi-orchestrator', 'multi-implementer']);
     expect(context.form.agent?.roles).toEqual([
-      {role: 'multi-orchestrator', model: null, effort: 'default'},
-      {role: 'multi-implementer', model: null, effort: 'default'},
+      {role: 'multi-orchestrator', agent: null, effort: 'default'},
+      {role: 'multi-implementer', agent: null, effort: 'default'},
     ]);
     // The dropped setting changed the inputs: they are checked again, without it.
     clock.increment(CHECK_DEBOUNCE_MS);
     await until(actor, () => asked.length === 2);
     expect(asked[0]?.options.roles).toEqual([
-      {role: 'judge', model: 'claude-a', reasoning_effort: 'high'},
+      {role: 'judge', model: null, reasoning_effort: 'high'},
     ]);
+    expect(asked[0]?.agents).toEqual({judge: {provider: 'claude', model: 'claude-a'}});
     expect(asked[1]?.options.roles).toEqual([]);
+    expect(asked[1]?.agents).toEqual({});
     actor.stop();
   });
 
@@ -741,15 +749,15 @@ describe('roles', () => {
       provider: 'claude',
       model: 'claude-a',
       roles: [
-        {role: 'a', model: 'claude-b', effort: 'high'},
-        {role: 'gone', model: null, effort: 'low'},
+        {role: 'a', agent: {provider: 'claude', model: 'claude-b'}, effort: 'high'},
+        {role: 'gone', agent: null, effort: 'low'},
       ],
     } as const;
     const form = {...prefill('local', []), agent};
     const followed = formWithRoles(form, ['b', 'a']);
     expect(followed.agent?.roles).toEqual([
-      {role: 'b', model: null, effort: 'default'},
-      {role: 'a', model: 'claude-b', effort: 'high'},
+      {role: 'b', agent: null, effort: 'default'},
+      {role: 'a', agent: {provider: 'claude', model: 'claude-b'}, effort: 'high'},
     ]);
     expect(formWithRoles(followed, ['b', 'a'])).toBe(followed);
     expect(formWithRoles(form, null)).toBe(form);

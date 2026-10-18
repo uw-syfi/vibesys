@@ -16,15 +16,21 @@ const HOSTS = ['local', 'ssh:gpu-box', 'ssh:me@node-1'];
 const RUN_IDS = ['run-1', 'run-2', 'run-3'];
 const STARTS: readonly (RunStart | null)[] = [
   null,
-  {harness: null, options: {rounds: null, time_limit_s: null, results: null, roles: []}, args: []},
+  {
+    harness: null,
+    options: {rounds: null, time_limit_s: null, results: null, roles: []},
+    agents: {},
+    args: [],
+  },
   {
     harness: {provider: 'claude', model: 'claude-opus-4-5'},
     options: {
       rounds: 3,
       time_limit_s: 3600,
       results: 'keep',
-      roles: [{role: 'judge', model: 'claude-sonnet-4-5', reasoning_effort: 'high'}],
+      roles: [{role: 'judge', model: null, reasoning_effort: 'high'}],
     },
+    agents: {judge: {provider: 'claude', model: 'claude-sonnet-4-5'}},
     args: ['--max-in-flight', '3'],
   },
 ];

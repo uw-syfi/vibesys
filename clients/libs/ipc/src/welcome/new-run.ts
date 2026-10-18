@@ -125,13 +125,21 @@ function text(value: unknown, what: string): string {
 
 /** `value` as `RunInputs`, or an `Error` naming the first offending key. */
 function parseRunInputs(value: unknown): RunInputs {
-  const fields = record(value, 'inputs', ['project', 'task', 'harness', 'options', 'args']);
+  const fields = record(value, 'inputs', [
+    'project',
+    'task',
+    'harness',
+    'options',
+    'agents',
+    'args',
+  ]);
   return {
     project: project(fields['project']),
     task: text(fields['task'], 'inputs.task'),
     ...parseRunStart({
       harness: fields['harness'],
       options: fields['options'],
+      agents: fields['agents'],
       args: fields['args'],
     }),
   };

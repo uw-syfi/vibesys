@@ -197,7 +197,7 @@ export function failureWords(check: Check, machine: string): FailureWords | null
       );
     case 'config_invalid':
       return words(
-        "The run's configuration (the project's agent configuration, and the settings chosen here) is not valid. Fix it in the project, then check again.",
+        "The run's configuration (the project's agent configuration, and the settings chosen here, such as a different agent for a role) is not valid. Change the setting the detail names, or fix it in the project, then check again.",
         cause.problem,
         true,
       );

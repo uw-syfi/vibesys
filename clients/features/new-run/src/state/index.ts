@@ -8,6 +8,7 @@ export type {
 } from '@vibesys/contracts/host-helper';
 export {
   type AgentGroup,
+  type AgentMaker,
   agentGroups,
   familiesIn,
   type Generation,
@@ -18,6 +19,10 @@ export {
   offersIn,
   pickGroup,
   pickHarness,
+  type RoleModel,
+  roleHarnesses,
+  roleModels,
+  roleProviders,
   type Scope,
   scopeOf,
   tierOf,
@@ -54,11 +59,13 @@ export {
   hardwareLabel,
   hasDetails,
   MAKER_NAMES,
+  type Maker,
   type MakerGroup,
   type ModelOption,
   modelGroups,
   tasksOfExample,
   VENDOR_NAMES,
+  type Vendor,
   type VendorGroup,
 } from './catalogue.js';
 export {DRAFT_KEY, type Draft, draftOf, flowOfDraft, parseDraft, storeDraft} from './draft.js';
@@ -75,7 +82,10 @@ export {
   startFlow,
 } from './flow.js';
 export {
+  AGENT_ENVIRONMENT,
   type AgentChoice,
+  type AgentEnvironment,
+  type AgentPick,
   advancedProblem,
   againForm,
   type Budget,
@@ -119,7 +129,10 @@ export {type Problem, problemOf, type Step, StepFailure} from './problem.js';
 export {
   agentWithRoles,
   formWithRoles,
+  pickedRoleAgent,
+  roleAgent,
   roleLabel,
   roleSummary,
   rolesAfter,
+  rolesWithin,
 } from './roles.js';

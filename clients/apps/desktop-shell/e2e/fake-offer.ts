@@ -32,6 +32,7 @@ export const FAKE_OFFER: Pick<Offer, 'machine' | 'harnesses' | 'examples'> = {
         family: 'Claude',
         tier: 3,
         tierName: 'Opus',
+        maker: 'anthropic',
       },
     },
     {
@@ -44,13 +45,14 @@ export const FAKE_OFFER: Pick<Offer, 'machine' | 'harnesses' | 'examples'> = {
         family: 'Claude',
         tier: 2,
         tierName: 'Sonnet',
+        maker: 'anthropic',
       },
     },
     {
       provider: 'codex',
       model: 'gpt-5-codex',
       default: true,
-      display: {providerName: 'Codex', modelName: 'GPT-5 Codex'},
+      display: {providerName: 'Codex', modelName: 'GPT-5 Codex', maker: 'openai'},
     },
   ],
   examples: exampleCatalogue,

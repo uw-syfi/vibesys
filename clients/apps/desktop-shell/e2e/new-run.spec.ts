@@ -72,7 +72,7 @@ test('an example of LLM serving: its model, its hardware, its goal, then the run
   await proceed(page);
 
   await expect(question(page, 'Which agent does the work?')).toBeVisible();
-  await expect(main(page).getByRole('radio', {name: 'Claude', exact: true})).toBeChecked();
+  await expect(main(page).getByRole('radio', {name: 'Anthropic', exact: true})).toBeChecked();
   await expect(main(page).getByRole('slider', {name: 'Model'})).toHaveAttribute(
     'aria-valuetext',
     'Opus',
@@ -98,6 +98,7 @@ test('an example of LLM serving: its model, its hardware, its goal, then the run
       task: 'default',
       harness: {provider: 'claude', model: 'claude-sonnet-4-5'},
       options: {rounds: 3, results: 'keep', roles: []},
+      agents: {},
       args: [],
     },
   ]);
@@ -171,6 +172,7 @@ test('your own project: a recent one, its task, the agent on its machine, and th
       task: 'mpmc',
       harness: {provider: 'claude', model: 'claude-opus-4-5'},
       options: {results: 'keep', roles: []},
+      agents: {},
       args: [],
     },
   ]);
@@ -312,6 +314,7 @@ test('Run again opens Review with the run as it was started', async ({page}) => 
   const run = {
     harness: {provider: 'claude', model: 'claude-sonnet-4-5'},
     options: {rounds: 4, time_limit_s: null, results: 'keep', roles: []},
+    agents: {},
     args: ['--max-in-flight', '3'],
   };
   const recent = (SEED.recent ?? []).map(each =>
@@ -398,7 +401,7 @@ test('extra arguments may not repeat an option set above, and roles change the r
   await main(page).getByLabel('Extra arguments').fill('--max-in-flight 3');
   await main(page).getByLabel('Time limit').selectOption('3600');
   await main(page)
-    .getByRole('button', {name: /^Roles:/})
+    .getByRole('button', {name: /^Reasoning effort:/})
     .click();
   await main(page).getByLabel('Judge reasoning effort').selectOption('high');
   await expect(start(page)).not.toHaveAttribute('aria-disabled', 'true');
@@ -444,7 +447,62 @@ test('a machine whose VibeSys does not report its roles says every role runs as 
   });
   await main(page).getByRole('button', {name: 'More options'}).click();
   await expect(page.getByText(/does not report its agent roles/)).toBeVisible();
-  await expect(main(page).getByRole('button', {name: /^Roles:/})).toHaveCount(0);
+  await expect(main(page).getByRole('button', {name: /^Reasoning effort:/})).toHaveCount(0);
+});
+
+test('an agent for a role: closed until opened, chosen from the run harness, listed on Review, sent as agents', async ({
+  page,
+}) => {
+  await openAt(page, pageNamed('agent project'));
+  const toggle = main(page).getByRole('button', {name: /Use a different agent for a role/});
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(toggle).toContainText("Every role uses the run's agent");
+  await toggle.click();
+  const judge = main(page).getByLabel('Judge model');
+  await expect(judge).toHaveValue('');
+  // Models sit under their maker and family; the run's own harness is the only one a role may use.
+  await expect(judge.locator('optgroup')).toHaveAttribute('label', 'Anthropic \u00b7 Claude');
+  await expect(main(page).getByLabel('Judge harness')).toHaveCount(0);
+  await expect(main(page)).toContainText("every role uses the run's harness");
+  await judge.selectOption({label: 'Sonnet 4.5'});
+  await expect(judge).not.toHaveValue('');
+  // The run's own model is the same as no choice: the role follows the run again.
+  await judge.selectOption({label: 'Opus 4.5'});
+  await expect(judge).toHaveValue('');
+  await judge.selectOption({label: 'Sonnet 4.5'});
+  await main(page).getByRole('button', {name: 'Continue'}).click();
+  await expect(main(page)).toContainText('Judge agent');
+  await expect(main(page)).toContainText('Sonnet 4.5 \u00b7 Claude Code');
+  await main(page)
+    .getByText('Judge agent', {exact: true})
+    .locator('xpath=ancestor::*[.//button][1]')
+    .getByRole('button', {name: 'Change'})
+    .click();
+  await expect(main(page).getByLabel('Judge model')).toBeVisible();
+  await main(page).getByRole('button', {name: 'Continue'}).click();
+  await expect(start(page)).not.toHaveAttribute('aria-disabled', 'true');
+  await start(page).click();
+  await expect(page.getByRole('radiogroup', {name: 'Show'})).toBeVisible();
+  const {started} = await fakeNewRun(page);
+  expect(started).toMatchObject([
+    {
+      agents: {'multi-judge': {provider: 'claude', model: 'claude-sonnet-4-5'}},
+      options: {roles: []},
+    },
+  ]);
+});
+
+test('a machine whose VibeSys cannot run an agent per role says so on the Agent page', async ({
+  page,
+}) => {
+  const newRun = SEED.newRun;
+  if (newRun === undefined) throw new Error('the seed has no New run helper');
+  await openAt(page, pageNamed('agent project'), {
+    ...SEED,
+    newRun: {...newRun, features: ['run_options', 'preflight', 'examples', 'run_roles']},
+  });
+  await expect(main(page).getByText(/cannot run a different agent for a role/)).toBeVisible();
+  await expect(main(page).getByRole('button', {name: /different agent for a role/})).toHaveCount(0);
 });
 
 test('More options starts closed, says what it holds, and stays as left on each machine', async ({

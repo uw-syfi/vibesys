@@ -6,6 +6,8 @@ import {acceleratorName, type HostKey, hostFromKey, hostLabel} from '@vibesys/ho
 import type {RecentRun} from '@vibesys/runs';
 import type {BrandMarkName, CheckState, KeyValueItem} from '@vibesys/ui';
 import {
+  type AgentMaker,
+  type AgentPick,
   advancedProblem,
   type Backend,
   type CatalogueEntry,
@@ -17,11 +19,13 @@ import {
   harnessLabel,
   inputsKey,
   type MachineDescription,
+  type Maker,
   missingFeatures,
   type NewRunContext,
   type NewRunSnapshot,
   offers,
   projectPath,
+  type Vendor,
 } from '../../state/index.js';
 import {type FailureWords, failureWords} from './cause-words.js';
 
@@ -164,6 +168,48 @@ export function harnessMark(provider: string): BrandMarkName | null {
     default:
       return null;
   }
+}
+
+/** The mark of a maker of served models, or null: `simple-icons` has none for the rest, which show their name alone. */
+const MODEL_MAKER_MARKS: Readonly<Record<Maker, BrandMarkName | null>> = {
+  meta: 'meta',
+  qwen: null,
+  deepseek: 'deepseek',
+  zhipu: null,
+  moonshot: 'moonshotai',
+  ai2: null,
+  openai: null,
+  other: null,
+};
+
+export function modelMakerMark(maker: Maker): BrandMarkName | null {
+  return MODEL_MAKER_MARKS[maker];
+}
+
+/** The mark of a maker of the agent's own models, or null for one `simple-icons` has none for. */
+export function agentMakerMark(maker: AgentMaker | null): BrandMarkName | null {
+  switch (maker) {
+    case 'anthropic':
+      return 'anthropic';
+    case 'google':
+      return 'google';
+    case 'openai':
+    case null:
+      return null;
+  }
+}
+
+const VENDOR_MARKS: Readonly<Record<Vendor, BrandMarkName | null>> = {
+  nvidia: 'nvidia',
+  amd: 'amd',
+  aws: null,
+  apple: 'apple',
+  cpu: null,
+};
+
+/** The mark of a hardware vendor, or null: AWS and a plain CPU have none to draw. */
+export function vendorMark(vendor: Vendor): BrandMarkName | null {
+  return VENDOR_MARKS[vendor];
 }
 
 /**
@@ -426,15 +472,22 @@ export function readinessStatus(items: readonly Readiness[]): ReadinessStatus {
  */
 export function moreOptionsSummary(context: NewRunContext): string {
   const {form} = context;
-  const changedRoles = (form.agent?.roles ?? []).filter(
-    role => role.model !== null || role.effort !== 'default',
-  ).length;
+  const changedRoles = (form.agent?.roles ?? []).filter(role => role.effort !== 'default').length;
   const parts = [
     ...(form.budget.timeLimitS === null ? [] : ['time limit']),
     ...(form.budget.results === 'publish_github' ? ['publishes to GitHub'] : []),
-    ...(changedRoles === 0 ? [] : [`${count(changedRoles, 'role')} changed`]),
+    ...(changedRoles === 0 ? [] : [`reasoning effort of ${count(changedRoles, 'role')}`]),
     ...(form.advanced.trim() === '' ? [] : ['extra arguments']),
     ...(form.project?.source === 'example' ? ['example location'] : []),
   ];
   return parts.length === 0 ? 'Defaults' : parts.join(' · ');
+}
+
+/** The agent of each role that does not use the run's, in the order of the run's roles. */
+export function roleAgentsChanged(
+  context: NewRunContext,
+): {readonly role: string; readonly agent: AgentPick}[] {
+  return (context.form.agent?.roles ?? []).flatMap(role =>
+    role.agent === null ? [] : [{role: role.role, agent: role.agent}],
+  );
 }

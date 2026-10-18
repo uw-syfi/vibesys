@@ -3,7 +3,15 @@
  * an example, its domain and the questions that domain asks (a model and its hardware; a data
  * structure and its workload; an example) and, when several remain, which task.
  */
-import {ChoiceTiles, Stack, Text, type TileOption} from '@vibesys/ui';
+import {
+  BrandMark,
+  type BrandMarkName,
+  ChoiceTiles,
+  Row,
+  Stack,
+  Text,
+  type TileOption,
+} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
   type AnswerChange,
@@ -23,7 +31,7 @@ import {
 } from '../../state/index.js';
 import type {CardProps} from './card-props.js';
 import {backendLabel} from './cause-words.js';
-import {entriesIn, machineLabel, recentChoices} from './view.js';
+import {entriesIn, machineLabel, modelMakerMark, recentChoices, vendorMark} from './view.js';
 
 function answer(props: CardProps, change: AnswerChange): void {
   props.dispatch({type: 'answer', change});
@@ -45,8 +53,17 @@ function waitingForExamples(props: CardProps): boolean {
   return entriesIn(props.context).length === 0;
 }
 
-function GroupLabel(props: {readonly text: string}): JSX.Element {
-  return <Text variant="section">{props.text}</Text>;
+/** A group's name, with its official mark when `simple-icons` has one (else the name alone). */
+function GroupLabel(props: {
+  readonly text: string;
+  readonly mark: BrandMarkName | null;
+}): JSX.Element {
+  return (
+    <Row gap="space-2">
+      {props.mark === null ? null : <BrandMark mark={props.mark} />}
+      <Text variant="section">{props.text}</Text>
+    </Row>
+  );
 }
 
 export function StartPage(props: CardProps): JSX.Element {
@@ -108,7 +125,7 @@ export function ModelPage(props: CardProps): JSX.Element {
     <Stack gap="space-5">
       {groups.map(group => (
         <Stack key={group.maker} gap="space-3">
-          <GroupLabel text={MAKER_NAMES[group.maker]} />
+          <GroupLabel text={MAKER_NAMES[group.maker]} mark={modelMakerMark(group.maker)} />
           <ChoiceTiles
             label={MAKER_NAMES[group.maker]}
             layout="cards"
@@ -138,7 +155,7 @@ export function HardwarePage(props: CardProps): JSX.Element {
     <Stack gap="space-5">
       {hardwareGroups(entries).map(group => (
         <Stack key={group.vendor} gap="space-3">
-          <GroupLabel text={VENDOR_NAMES[group.vendor]} />
+          <GroupLabel text={VENDOR_NAMES[group.vendor]} mark={vendorMark(group.vendor)} />
           <ChoiceTiles
             label={VENDOR_NAMES[group.vendor]}
             layout="cards"

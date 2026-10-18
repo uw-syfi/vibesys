@@ -8,7 +8,7 @@ import {type HostKey, hostFromKey} from '@vibesys/hosts';
 import {type Answers, NO_ANSWERS, type StepId} from './answers.js';
 import type {CatalogueEntry} from './catalogue.js';
 import {type Flow, formFor} from './flow.js';
-import type {AgentChoice, Budget, Effort, Form} from './form.js';
+import type {AgentChoice, AgentPick, Budget, Effort, Form} from './form.js';
 
 /** The key a window's storage keeps its draft under. */
 export const DRAFT_KEY = 'vibesys.new-run.draft';
@@ -143,6 +143,14 @@ function parseAnswers(value: unknown): Answers | null {
   };
 }
 
+function parsePick(value: unknown): AgentPick | null | undefined {
+  if (value === null) return null;
+  const fields = exact(value, ['provider', 'model']);
+  const provider = text(fields?.['provider']);
+  const model = text(fields?.['model']);
+  return provider === null || model === null ? undefined : {provider, model};
+}
+
 function parseAgent(value: unknown): AgentChoice | null | undefined {
   if (value === null) return null;
   const fields = exact(value, ['provider', 'model', 'roles']);
@@ -151,13 +159,13 @@ function parseAgent(value: unknown): AgentChoice | null | undefined {
   const roles = fields?.['roles'];
   if (provider === null || model === null || !Array.isArray(roles)) return undefined;
   const parsed = roles.map(role => {
-    const each = exact(role, ['role', 'model', 'effort']);
+    const each = exact(role, ['role', 'agent', 'effort']);
     const name = text(each?.['role']);
-    const roleModel = nullableText(each?.['model']);
+    const roleAgent = parsePick(each?.['agent']);
     const effort = EFFORTS.find(known => known === each?.['effort']);
-    return name === null || roleModel === undefined || effort === undefined
+    return name === null || roleAgent === undefined || effort === undefined
       ? null
-      : {role: name, model: roleModel, effort};
+      : {role: name, agent: roleAgent, effort};
   });
   return parsed.every(each => each !== null)
     ? {provider, model, roles: parsed as AgentChoice['roles']}

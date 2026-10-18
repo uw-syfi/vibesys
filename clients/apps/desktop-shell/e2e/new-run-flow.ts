@@ -6,6 +6,7 @@
  */
 import {expect, type Page} from '@playwright/test';
 import {
+  type AgentChoice,
   type Answers,
   DRAFT_KEY,
   type Draft,
@@ -21,6 +22,8 @@ export interface NewRunPage {
   readonly name: string;
   readonly step: StepId;
   readonly answers: Answers;
+  /** The run's agent, when the page is shown with one chosen (else the machine's first). */
+  readonly agent?: AgentChoice;
 }
 
 const EXAMPLE = {...NO_ANSWERS, from: 'example' as const};
@@ -50,6 +53,18 @@ const OWN = {
   task: 'mpmc',
 };
 
+/** The run's agent with the judge on another model of the run's harness. */
+const JUDGE_ON_SONNET: AgentChoice = {
+  provider: 'claude',
+  model: 'claude-opus-4-5',
+  roles: [
+    {role: 'multi-orchestrator', agent: null, effort: 'default'},
+    {role: 'multi-profiler', agent: null, effort: 'default'},
+    {role: 'multi-implementer', agent: null, effort: 'default'},
+    {role: 'multi-judge', agent: {provider: 'claude', model: 'claude-sonnet-4-5'}, effort: 'high'},
+  ],
+};
+
 export const NEW_RUN_PAGES: readonly NewRunPage[] = [
   {name: 'start', step: 'start', answers: NO_ANSWERS},
   {name: 'domain', step: 'domain', answers: EXAMPLE},
@@ -64,7 +79,20 @@ export const NEW_RUN_PAGES: readonly NewRunPage[] = [
   {name: 'goal database', step: 'goal', answers: DATABASE},
   {name: 'where', step: 'where', answers: {...LLM, goalSeen: true}},
   {name: 'agent', step: 'agent', answers: {...LLM, goalSeen: true}},
+  {name: 'agent project', step: 'agent', answers: {...OWN, goalSeen: true}},
+  {
+    name: 'agent roles',
+    step: 'agent',
+    answers: {...OWN, goalSeen: true},
+    agent: JUDGE_ON_SONNET,
+  },
   {name: 'review', step: 'review', answers: {...LLM, goalSeen: true}},
+  {
+    name: 'review roles',
+    step: 'review',
+    answers: {...OWN, goalSeen: true},
+    agent: JUDGE_ON_SONNET,
+  },
   {name: 'project', step: 'project', answers: {...NO_ANSWERS, from: 'project'}},
   {name: 'task', step: 'task', answers: {...OWN, task: null}},
   {name: 'goal project', step: 'goal', answers: OWN},
@@ -77,7 +105,7 @@ function draftAt(page: NewRunPage, machine = 'ssh:host-b'): Draft {
     machine,
     answers: page.answers,
     at: page.step,
-    agent: null,
+    agent: page.agent ?? null,
     budget: {rounds: null, timeLimitS: null, results: 'keep'},
     advanced: '',
     destination: null,

@@ -54,14 +54,25 @@ function plain(error: unknown, doing: string): Error {
   return new Error(`${doing}: ${detail}`);
 }
 
-/** The `run.start` and `run.preflight` fields for `inputs`, sending only what is set. */
-function runFields(inputs: RunInputs) {
+/**
+ * The `run.start` and `run.preflight` fields for `inputs`, sending only what is set. An agent per
+ * role goes only to a helper that agreed to `run_role_agents`; for any other the request is
+ * refused here, since dropping it would start the run on agents the user did not choose.
+ */
+function runFields(inputs: RunInputs, features: readonly HelperFeature[]) {
+  const roleAgents = Object.keys(inputs.agents).length > 0;
+  if (roleAgents && !features.includes('run_role_agents')) {
+    throw new Error(
+      "This machine's VibeSys cannot run a different agent for a role. Update it, or use the run's agent for every role.",
+    );
+  }
   return {
     project: inputs.project,
     task: inputs.task,
     args: [...inputs.args],
     options: inputs.options,
     ...(inputs.harness === null ? {} : {harness: inputs.harness}),
+    ...(roleAgents ? {agents: inputs.agents} : {}),
   };
 }
 
@@ -149,7 +160,7 @@ export class NewRunMain {
       const causesToo = lease.connection.features?.includes('run_causes') === true;
       const reply = (await lease.connection.request({
         type: 'run.preflight',
-        ...runFields(inputs),
+        ...runFields(inputs, lease.connection.features ?? []),
         ...(rolesToo ? {with_roles: true} : {}),
         ...(backendToo ? {with_backend: true} : {}),
         ...(cleanToo ? {with_project_clean: true} : {}),
@@ -220,7 +231,10 @@ export class NewRunMain {
   async #start(host: HostId, inputs: RunInputs): Promise<StartedRun> {
     let launch: LiveInstanceRecord | DetachedLaunchFailure;
     try {
-      ({launch} = (await this.#request(host, {type: 'run.start', ...runFields(inputs)})) as {
+      await using lease = await this.#deps.connect(host);
+      await lease.connection.ready();
+      const fields = runFields(inputs, lease.connection.features ?? []);
+      ({launch} = (await lease.connection.request({type: 'run.start', ...fields})) as {
         launch: LiveInstanceRecord | DetachedLaunchFailure;
       });
     } catch (error) {
@@ -237,7 +251,12 @@ export class NewRunMain {
       runId: launch.run_id,
       instanceId: launch.id,
       attachedAt: this.#deps.now(),
-      start: {harness: inputs.harness, options: inputs.options, args: inputs.args},
+      start: {
+        harness: inputs.harness,
+        options: inputs.options,
+        agents: inputs.agents,
+        args: inputs.args,
+      },
     });
     return {runId: launch.run_id, instanceId: launch.id};
   }

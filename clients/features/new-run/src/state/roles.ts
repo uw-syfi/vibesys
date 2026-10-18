@@ -5,7 +5,7 @@
  * settings follow a new list.
  */
 import {roleName} from '@vibesys/contracts';
-import {type AgentChoice, defaultRole, type Form} from './form.js';
+import {type AgentChoice, type AgentPick, defaultRole, type Form, type RoleChoice} from './form.js';
 
 /** A role a person reads ("Judge"): the backend's name for it, else the words of its id. */
 export function roleLabel(role: string): string {
@@ -57,4 +57,27 @@ export function formWithRoles(form: Form, roles: readonly string[] | null): Form
     agent.roles.length === form.agent.roles.length &&
     agent.roles.every((role, index) => role === form.agent?.roles[index]);
   return same ? form : {...form, agent};
+}
+
+/** The agent `role` runs: its own, else the run's. */
+export function roleAgent(agent: AgentChoice, role: RoleChoice): AgentPick {
+  return role.agent ?? {provider: agent.provider, model: agent.model};
+}
+
+/**
+ * The agent to record for a role that was given `picked` while the run's is `run`: none when they
+ * are the same, so a role that was not changed keeps following the run.
+ */
+export function pickedRoleAgent(run: AgentPick, picked: AgentPick): AgentPick | null {
+  return picked.provider === run.provider && picked.model === run.model ? null : picked;
+}
+
+/** `roles` with each agent on a harness outside `allowed` put back to the run's. */
+export function rolesWithin(
+  roles: readonly RoleChoice[],
+  allowed: readonly string[],
+): RoleChoice[] {
+  return roles.map(role =>
+    role.agent !== null && !allowed.includes(role.agent.provider) ? {...role, agent: null} : role,
+  );
 }

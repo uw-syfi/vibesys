@@ -4,7 +4,6 @@
  * holds that is not the default, and opens by itself while something in it is wrong.
  */
 
-import type {HarnessOffer} from '@vibesys/ipc';
 import {
   Button,
   Collapsible,
@@ -23,17 +22,13 @@ import {
   type Budget,
   defaultRole,
   type Effort,
-  modelLabel,
   type NewRunContext,
   roleLabel,
   roleSummary,
-  vettedModels,
 } from '../../state/index.js';
 import {TimeLimitField} from './budget-fields.js';
 import type {CardProps} from './card-props.js';
 import {moreOptionsSummary, type RolesView, rolesView} from './view.js';
-
-const NONE = '';
 
 const RESULTS: readonly {readonly value: Budget['results']; readonly label: string}[] = [
   {value: 'keep', label: 'Keep on the machine'},
@@ -47,13 +42,10 @@ const EFFORTS: readonly {readonly value: Effort; readonly label: string}[] = [
   {value: 'high', label: 'High'},
 ];
 
-function RoleRows(
-  props: CardProps & {readonly offers: readonly HarnessOffer[]; readonly roles: readonly string[]},
-): JSX.Element | null {
-  const {context, dispatch, offers, roles} = props;
+function RoleRows(props: CardProps & {readonly roles: readonly string[]}): JSX.Element | null {
+  const {context, dispatch, roles} = props;
   const agent = context.form.agent;
   if (agent === null) return null;
-  const models = vettedModels(offers, agent.provider);
   return (
     <Stack gap="space-3">
       {roles.map(role => {
@@ -70,18 +62,6 @@ function RoleRows(
                 </Text>
               )}
             </Stack>
-            <Field label={`${label} model`}>
-              <Select
-                value={choice.model ?? NONE}
-                options={[
-                  {value: NONE, label: 'Same as run'},
-                  ...models.map(m => ({value: m, label: modelLabel(offers, agent.provider, m)})),
-                ]}
-                change={model =>
-                  dispatch({type: 'role', role: {...choice, model: model === NONE ? null : model}})
-                }
-              />
-            </Field>
             <Field label={`${label} reasoning effort`}>
               <Select
                 value={choice.effort}
@@ -98,13 +78,15 @@ function RoleRows(
 
 function rolesLabel(context: NewRunContext): string {
   const changed = (context.form.agent?.roles ?? []).filter(
-    role => role.model !== null || role.effort !== 'default',
+    role => role.effort !== 'default',
   ).length;
-  return changed === 0 ? 'Roles: every role as the run' : `Roles: ${changed} changed`;
+  return changed === 0
+    ? 'Reasoning effort: every role default'
+    : `Reasoning effort: ${changed} changed`;
 }
 
 /** The role table's toggle and rows, or why the run's roles are not listed. */
-function RolesSection(props: CardProps & {readonly offers: readonly HarnessOffer[]}): JSX.Element {
+function RolesSection(props: CardProps): JSX.Element {
   const {context} = props;
   const [shown, setShown] = useState(false);
   const view: RolesView = rolesView(context);
@@ -112,7 +94,7 @@ function RolesSection(props: CardProps & {readonly offers: readonly HarnessOffer
     return (
       <Text variant="small" tone="muted">
         This machine's VibeSys does not report its agent roles, so every role runs as the run.
-        Update VibeSys on it to set a model per role.
+        Update VibeSys on it to set a reasoning effort per role.
       </Text>
     );
   }
@@ -154,10 +136,8 @@ function ExampleDestination(props: CardProps): JSX.Element | null {
   );
 }
 
-/** More options: results, roles, extra arguments and where an example is copied to. */
-export function MoreOptions(
-  props: CardProps & {readonly offers: readonly HarnessOffer[]},
-): JSX.Element {
+/** More options: results, the reasoning effort of each role, extra arguments and where an example is copied to. */
+export function MoreOptions(props: CardProps): JSX.Element {
   const {context, dispatch} = props;
   const {machine, advanced, budget} = context.form;
   const problem = advancedProblem(advanced);

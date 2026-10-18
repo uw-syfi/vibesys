@@ -30,12 +30,27 @@ export type ProjectChoice =
 
 export type Effort = RoleOption['reasoning_effort'] & string;
 
-/** One role's model (`null`: the run's) and reasoning effort; every role runs on the run's harness. */
+/** A harness and one of the models it runs. */
+export interface AgentPick {
+  readonly provider: string;
+  readonly model: string;
+}
+
+/** One role's agent (`null`: the run's, whatever it is chosen to be) and reasoning effort. */
 export interface RoleChoice {
   readonly role: string;
-  readonly model: string | null;
+  readonly agent: AgentPick | null;
   readonly effort: Effort;
 }
+
+/** Where a run's agents execute: the helper refuses roles on mixed providers in containers. */
+export type AgentEnvironment = 'container' | 'host';
+
+/**
+ * Every run New run starts runs its agents in containers (the host environment is not selectable
+ * here yet); the measurement-target choice replaces this with the form's own.
+ */
+export const AGENT_ENVIRONMENT: AgentEnvironment = 'container';
 
 export interface AgentChoice {
   readonly provider: string;
@@ -66,9 +81,9 @@ export interface Form {
 
 export const DEFAULT_BUDGET: Budget = {rounds: null, timeLimitS: null, results: 'keep'};
 
-/** A role left at the run's model and the default effort. */
+/** A role left at the run's agent and the default effort. */
 export function defaultRole(role: string): RoleChoice {
-  return {role, model: null, effort: 'default'};
+  return {role, agent: null, effort: 'default'};
 }
 
 /**
@@ -169,12 +184,17 @@ export function againForm(run: RecentRun): Form {
   };
 }
 
-function roleChoice(option: RoleOption): RoleChoice {
-  return {
-    role: option.role,
-    model: option.model ?? null,
-    effort: option.reasoning_effort ?? 'default',
-  };
+/** The roles a run was started with a setting for: the agent each had and its reasoning effort. */
+function recordedRoles(start: RunStart | null): RoleChoice[] {
+  const efforts = new Map<string, Effort>(
+    (start?.options.roles ?? []).map(option => [option.role, option.reasoning_effort ?? 'default']),
+  );
+  const names = [...new Set([...efforts.keys(), ...Object.keys(start?.agents ?? {})])];
+  return names.map(role => ({
+    role,
+    agent: start?.agents[role] ?? null,
+    effort: efforts.get(role) ?? 'default',
+  }));
 }
 
 /**
@@ -194,7 +214,7 @@ export function recordedAgent(
   const base = defaultAgent(offers, [], offered ? harness.provider : undefined);
   if (base === null) return null;
   const agent = offered ? {...base, model: harness.model} : base;
-  return {...agent, roles: (start?.options.roles ?? []).map(roleChoice)};
+  return {...agent, roles: recordedRoles(start)};
 }
 
 /** The flags a typed option sets, which Advanced may not repeat (as `run.start` refuses them). */
@@ -205,6 +225,7 @@ const TYPED_FLAGS = [
   '--publish',
   '--repo',
   '--role-model',
+  '--role-provider',
   '--role-reasoning-effort',
   '--cli-provider',
   '--model',
@@ -272,9 +293,12 @@ export function runInputs(form: Form): RunInputs | null {
       ...(budget.timeLimitS === null ? {} : {time_limit_s: budget.timeLimitS}),
       results: budget.results,
       roles: agent.roles
-        .filter(role => role.model !== null || role.effort !== 'default')
-        .map(role => ({role: role.role, model: role.model, reasoning_effort: role.effort})),
+        .filter(role => role.effort !== 'default')
+        .map(role => ({role: role.role, model: null, reasoning_effort: role.effort})),
     },
+    agents: Object.fromEntries(
+      agent.roles.flatMap(role => (role.agent === null ? [] : [[role.role, role.agent] as const])),
+    ),
     args: splitWords(form.advanced),
   };
 }

@@ -5,6 +5,7 @@
  */
 import type {HarnessOffer} from '@vibesys/ipc';
 import {
+  type AgentPick,
   DOMAIN_WORDS,
   exampleLabel,
   hardwareGroups,
@@ -49,12 +50,17 @@ function offersIn(context: NewRunContext): readonly HarnessOffer[] | null {
   return context.harnesses?.for === context.form.machine ? context.harnesses.list : null;
 }
 
-/** The agent in words ("Opus 4.5 · Claude Code"), or null before one is chosen. */
+/** An agent in words ("Opus 4.5 · Claude Code"), or null before the machine's harnesses are known. */
+export function pickWords(context: NewRunContext, pick: AgentPick): string | null {
+  const offers = offersIn(context);
+  if (offers === null) return null;
+  return `${modelLabel(offers, pick.provider, pick.model)} \u00b7 ${harnessLabel(offers, pick.provider)}`;
+}
+
+/** The run's agent in words, or null before one is chosen. */
 export function agentWords(context: NewRunContext): string | null {
   const {agent} = context.form;
-  const offers = offersIn(context);
-  if (agent === null || offers === null) return null;
-  return `${modelLabel(offers, agent.provider, agent.model)} \u00b7 ${harnessLabel(offers, agent.provider)}`;
+  return agent === null ? null : pickWords(context, agent);
 }
 
 /** A step's answer in words, from the form; null while it has none. */

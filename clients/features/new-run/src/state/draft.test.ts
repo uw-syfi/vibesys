@@ -14,7 +14,7 @@ const FORM: Form = {
   agent: {
     provider: 'claude',
     model: 'opus',
-    roles: [{role: 'judge', model: null, effort: 'high'}],
+    roles: [{role: 'judge', agent: {provider: 'claude', model: 'sonnet'}, effort: 'high'}],
   },
   budget: {rounds: 4, timeLimitS: 3600, results: 'publish_github'},
   advanced: '--note "two words"',

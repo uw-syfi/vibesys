@@ -35,7 +35,14 @@ describe('NewRunMain', () => {
     link.helper.host.projects.set('/p', ['mpmc']);
     const machine = await main.answer({kind: 'describe-machine', host: LOCAL});
     expect(machine).toMatchObject({kind: 'offered', value: {hardware: {}}});
-    const inputs: RunInputs = {project: '/p', task: 'mpmc', harness: null, options: {}, args: []};
+    const inputs: RunInputs = {
+      project: '/p',
+      task: 'mpmc',
+      harness: null,
+      options: {},
+      agents: {},
+      args: [],
+    };
     const answer = (await main.answer({kind: 'preflight', host: LOCAL, inputs})) as {
       kind: 'offered';
       value: {checks: {id: string; state: string}[]; roles: string[] | null};
@@ -51,7 +58,14 @@ describe('NewRunMain', () => {
     const {link, main} = subject();
     link.helper.host.projects.set('/p', ['mpmc']);
     link.helper.features.delete('run_roles');
-    const inputs: RunInputs = {project: '/p', task: 'mpmc', harness: null, options: {}, args: []};
+    const inputs: RunInputs = {
+      project: '/p',
+      task: 'mpmc',
+      harness: null,
+      options: {},
+      agents: {},
+      args: [],
+    };
     const answer = (await main.answer({kind: 'preflight', host: LOCAL, inputs})) as {
       kind: 'offered';
       value: {roles: string[] | null};
@@ -65,7 +79,14 @@ describe('NewRunMain', () => {
     const {link, main} = subject();
     link.helper.host.projects.set('/p', ['mpmc']);
     link.helper.host.backend = 'cpu';
-    const inputs: RunInputs = {project: '/p', task: 'mpmc', harness: null, options: {}, args: []};
+    const inputs: RunInputs = {
+      project: '/p',
+      task: 'mpmc',
+      harness: null,
+      options: {},
+      agents: {},
+      args: [],
+    };
     const answer = (await main.answer({kind: 'preflight', host: LOCAL, inputs})) as {
       value: {backend: string | null};
     };
@@ -76,7 +97,14 @@ describe('NewRunMain', () => {
     const {link, main} = subject();
     link.helper.host.projects.set('/p', ['mpmc']);
     link.helper.features.delete('run_backend');
-    const inputs: RunInputs = {project: '/p', task: 'mpmc', harness: null, options: {}, args: []};
+    const inputs: RunInputs = {
+      project: '/p',
+      task: 'mpmc',
+      harness: null,
+      options: {},
+      agents: {},
+      args: [],
+    };
     const answer = (await main.answer({kind: 'preflight', host: LOCAL, inputs})) as {
       value: {backend: string | null};
     };
@@ -88,7 +116,14 @@ describe('NewRunMain', () => {
   test('asks for the project_clean check only from a helper that has it', async () => {
     const {link, main} = subject();
     link.helper.host.projects.set('/p', ['mpmc']);
-    const inputs: RunInputs = {project: '/p', task: 'mpmc', harness: null, options: {}, args: []};
+    const inputs: RunInputs = {
+      project: '/p',
+      task: 'mpmc',
+      harness: null,
+      options: {},
+      agents: {},
+      args: [],
+    };
     const ids = async () =>
       (
         (await main.answer({kind: 'preflight', host: LOCAL, inputs})) as {
@@ -113,7 +148,14 @@ describe('NewRunMain', () => {
           }
         : check,
     );
-    const inputs: RunInputs = {project: '/p', task: 'mpmc', harness: null, options: {}, args: []};
+    const inputs: RunInputs = {
+      project: '/p',
+      task: 'mpmc',
+      harness: null,
+      options: {},
+      agents: {},
+      args: [],
+    };
     const settings = async () =>
       (
         (await main.answer({kind: 'preflight', host: LOCAL, inputs})) as {
@@ -133,7 +175,14 @@ describe('NewRunMain', () => {
     const started = (await main.answer({
       kind: 'start-run',
       host: LOCAL,
-      inputs: {project: '/p', task: 'mpmc', harness: null, options: {rounds: 2}, args: []},
+      inputs: {
+        project: '/p',
+        task: 'mpmc',
+        harness: null,
+        options: {rounds: 2},
+        agents: {},
+        args: [],
+      },
     })) as {runId: string; instanceId: string};
     expect(started.runId).not.toBe('');
     expect(remembered).toEqual([
@@ -144,9 +193,55 @@ describe('NewRunMain', () => {
         runId: started.runId,
         instanceId: started.instanceId,
         attachedAt: 42,
-        start: {harness: null, options: {rounds: 2}, args: []},
+        start: {harness: null, options: {rounds: 2}, agents: {}, args: []},
       },
     ]);
+  });
+
+  test('sends an agent per role to a helper that has run_role_agents, on the check and on the start', async () => {
+    const {link, main, remembered} = subject();
+    link.helper.host.projects.set('/p', ['mpmc']);
+    const role = link.helper.host.roles[0] ?? '';
+    const inputs: RunInputs = {
+      project: '/p',
+      task: 'mpmc',
+      harness: {provider: 'codex', model: 'gpt-a'},
+      options: {},
+      agents: {[role]: {provider: 'codex', model: 'gpt-b'}},
+      args: [],
+    };
+    await main.answer({kind: 'preflight', host: LOCAL, inputs});
+    await main.answer({kind: 'start-run', host: LOCAL, inputs});
+    const asked = link.helper.requests.filter(
+      request => request.type === 'run.preflight' || request.type === 'run.start',
+    );
+    expect(asked.map(request => 'agents' in request && request.agents)).toEqual([
+      inputs.agents,
+      inputs.agents,
+    ]);
+    expect(remembered[0]?.start?.agents).toEqual(inputs.agents);
+  });
+
+  test('a helper without run_role_agents is never sent agents: the request is refused, nothing starts', async () => {
+    const {link, main, remembered} = subject();
+    link.helper.host.projects.set('/p', ['mpmc']);
+    link.helper.features.delete('run_role_agents');
+    const inputs: RunInputs = {
+      project: '/p',
+      task: 'mpmc',
+      harness: null,
+      options: {},
+      agents: {judge: {provider: 'claude', model: 'claude-sonnet-4-5'}},
+      args: [],
+    };
+    await expect(main.answer({kind: 'start-run', host: LOCAL, inputs})).rejects.toThrow(
+      'different agent for a role',
+    );
+    await expect(main.answer({kind: 'preflight', host: LOCAL, inputs})).rejects.toThrow(
+      'different agent for a role',
+    );
+    expect(link.helper.requests.some(request => request.type === 'run.start')).toBe(false);
+    expect(remembered).toEqual([]);
   });
 
   test("answers the features the machine's helper agreed to in hello", async () => {

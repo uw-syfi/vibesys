@@ -89,6 +89,7 @@ function cases(random: Seeded): Case[] {
         roles: [{role: 'judge', model: null, reasoning_effort: 'high' as const}],
       },
     ]),
+    agents: random.pick([{}, {judge: {provider: 'claude', model: 'claude-b'}}]),
     args: random.pick([[], ['--max-in-flight', '3']]),
   };
   const appearance = {

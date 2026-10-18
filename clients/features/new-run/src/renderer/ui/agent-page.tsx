@@ -1,8 +1,8 @@
 /**
  * The Agent page: which maker's models (a card each), which family and generation of them when the
  * host names them (the latest generation shown, older ones behind "Older (n)"), which model of it
- * (a slider from faster and cheaper to stronger), which harness runs it on the machine, and how
- * many ideas to try. A different agent for a role is set on Review, under More options.
+ * (a slider from faster and cheaper to stronger), which harness runs it on the machine, a different
+ * agent for a role (closed until opened), and how many ideas to try.
  */
 import type {HarnessOffer} from '@vibesys/ipc';
 import {
@@ -38,7 +38,8 @@ import {
 } from '../../state/index.js';
 import {IdeasField} from './budget-fields.js';
 import type {CardProps} from './card-props.js';
-import {harnessMark, machineLabel} from './view.js';
+import {RoleAgents} from './role-agents.js';
+import {agentMakerMark, harnessMark, machineLabel} from './view.js';
 
 type Pick = (provider: string, model: string) => void;
 
@@ -173,7 +174,14 @@ export function AgentPage(props: CardProps): JSX.Element {
         <ChoiceTiles
           label="Model line"
           layout="cards"
-          options={groups.map(each => ({value: each.id, label: each.name}))}
+          options={groups.map(each => {
+            const mark = agentMakerMark(each.maker);
+            return {
+              value: each.id,
+              label: each.name,
+              ...(mark === null ? {} : {leading: <BrandMark mark={mark} />}),
+            };
+          })}
           value={group.id}
           change={id => {
             const next = groups.find(each => each.id === id);
@@ -207,6 +215,7 @@ export function AgentPage(props: CardProps): JSX.Element {
           }}
         />
       </Stack>
+      <RoleAgents {...props} offers={offers} agent={agent} />
       <IdeasField {...props} />
     </Stack>
   );

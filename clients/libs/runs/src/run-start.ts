@@ -17,6 +17,8 @@ export type HarnessPick = NonNullable<Extract<HelperRequest, {type: 'run.start'}
 export interface RunStart {
   readonly harness: HarnessPick | null;
   readonly options: RunOptions;
+  /** The agent of each role that does not use the run's, by role id (`run.start`'s `agents`). */
+  readonly agents: Readonly<Record<string, HarnessPick>>;
   /** Advanced arguments, split into words. */
   readonly args: readonly string[];
 }
@@ -93,6 +95,18 @@ function harness(value: unknown): HarnessPick | null {
   };
 }
 
+function agents(value: unknown): Readonly<Record<string, HarnessPick>> {
+  if (value === null || value === undefined) return {};
+  const fields = record(value, 'agents', Object.keys(value as object));
+  return Object.fromEntries(
+    Object.entries(fields).map(([name, each]) => {
+      const pick = harness(each);
+      if (pick === null) throw new Error(`agents.${name} must be an object`);
+      return [name, pick];
+    }),
+  );
+}
+
 function words(value: unknown): readonly string[] {
   if (
     !Array.isArray(value) ||
@@ -105,26 +119,29 @@ function words(value: unknown): readonly string[] {
 
 /**
  * The start inputs in `fields` (`harness`, `options`, `args`) as a `RunStart`, or an `Error` naming
- * the first offending key (`options.roles[0].model`, `args`).
+ * the first offending key (`options.roles[0].model`, `agents.judge.model`, `args`).
  */
 export function parseRunStart(fields: {
   readonly harness: unknown;
   readonly options: unknown;
+  readonly agents?: unknown;
   readonly args: unknown;
 }): RunStart {
   return {
     harness: harness(fields.harness),
     options: options(fields.options),
+    agents: agents(fields.agents),
     args: words(fields.args),
   };
 }
 
-/** `value` as a `RunStart` (an object with exactly `harness`, `options` and `args`). */
+/** `value` as a `RunStart` (an object with `harness`, `options`, `args`, and `agents` when it has any). */
 export function parseStoredRunStart(value: unknown): RunStart {
-  const fields = record(value, 'start', ['harness', 'options', 'args']);
+  const fields = record(value, 'start', ['harness', 'options', 'agents', 'args']);
   return parseRunStart({
     harness: fields['harness'] ?? null,
     options: fields['options'] ?? {},
+    agents: fields['agents'] ?? null,
     args: fields['args'] ?? [],
   });
 }

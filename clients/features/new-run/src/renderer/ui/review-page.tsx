@@ -21,13 +21,14 @@ import {
   type NewRunContext,
   type NewRunEvent,
   type NewRunSnapshot,
+  roleLabel,
   type StepId,
   stepIds,
 } from '../../state/index.js';
 import {backendLabel} from './cause-words.js';
 import {MoreOptions} from './more-options.js';
 import {problemWords} from './problem-words.js';
-import {agentWords, STEP_TITLES} from './steps.js';
+import {agentWords, pickWords, STEP_TITLES} from './steps.js';
 import {
   backendOf,
   entriesIn,
@@ -35,6 +36,7 @@ import {
   type ReadinessFix,
   readiness,
   readinessStatus,
+  roleAgentsChanged,
   startBlocked,
 } from './view.js';
 
@@ -111,6 +113,11 @@ function answers(context: NewRunContext): Answer[] {
       step: 'where',
     },
     {label: 'Agent', value: agentWords(context) ?? 'Not chosen', step: 'agent'},
+    ...roleAgentsChanged(context).map(({role, agent}) => ({
+      label: `${roleLabel(role)} agent`,
+      value: pickWords(context, agent) ?? `${agent.model} · ${agent.provider}`,
+      step: 'agent' as const,
+    })),
     {
       label: 'Ideas to try',
       value: rounds === null ? 'As the task is configured' : String(rounds),
@@ -202,12 +209,11 @@ export function ReviewPage(props: {
   const {snapshot, dispatch} = props;
   const {context} = snapshot;
   const cardProps = {context, dispatch};
-  const offers = context.harnesses?.for === context.form.machine ? context.harnesses.list : null;
   return (
     <Stack gap="space-5">
       <Summary {...cardProps} />
       <Checks {...props} />
-      <MoreOptions {...cardProps} offers={offers ?? []} />
+      <MoreOptions {...cardProps} />
     </Stack>
   );
 }

@@ -19,6 +19,7 @@ import type {HarnessOffer, Offered, PreflightResult, RunInputs, StartedRun} from
 import {unprovided} from '@vibesys/machine';
 import type {RecentRun, RunStart} from '@vibesys/runs';
 import {and, assign, raise, type SnapshotFrom, setup} from 'xstate';
+import {roleProviders} from './agents.js';
 import type {AnswerChange, Answers, StepId} from './answers.js';
 import type {CatalogueEntry} from './catalogue.js';
 import {type Draft, flowOfDraft} from './draft.js';
@@ -35,6 +36,7 @@ import {
   startFlow,
 } from './flow.js';
 import {
+  AGENT_ENVIRONMENT,
   type AgentChoice,
   againForm,
   type Budget,
@@ -55,7 +57,7 @@ import {
   runInputs,
 } from './form.js';
 import {type Problem, problemOf, type Step} from './problem.js';
-import {formWithRoles, rolesAfter} from './roles.js';
+import {formWithRoles, rolesAfter, rolesWithin} from './roles.js';
 
 /** The fixes the screen performs itself; the rest are the shell's (Machines) or the user's. */
 export type ProjectFix =
@@ -153,13 +155,19 @@ function withInput(context: NewRunContext, event: InputEvent): Form {
   const {form} = context;
   switch (event.type) {
     case 'agent': {
-      const kept = form.agent?.provider === event.provider ? form.agent.roles : null;
+      // A role keeps its effort, and its own agent while the new run harness still allows it.
+      const allowed = roleProviders(
+        context.harnesses?.list ?? [],
+        event.provider,
+        AGENT_ENVIRONMENT,
+      );
+      const roles = form.agent?.roles ?? (context.roles ?? []).map(defaultRole);
       return {
         ...form,
         agent: {
           provider: event.provider,
           model: event.model,
-          roles: kept ?? (context.roles ?? []).map(defaultRole),
+          roles: rolesWithin(roles, allowed),
         },
       };
     }

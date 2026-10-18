@@ -354,7 +354,8 @@ export function installFakeNewRun(seed: FakeBridgeSeed): void {
   };
   const insideRepository = (project: string) => project.includes('/vibesys/');
   const features =
-    catalog?.features ?? 'run_options preflight examples run_roles example_catalogue'.split(' ');
+    catalog?.features ??
+    'run_options preflight examples run_roles example_catalogue run_role_agents'.split(' ');
   const roles =
     catalog?.roles ?? 'multi-orchestrator multi-profiler multi-implementer multi-judge'.split(' ');
   const preflight = (_host: string, inputs: {project: string}) => {
