@@ -37,8 +37,8 @@ machine facts (``server.host_machine_facts``: ``Accelerator``, ``Gpu``, ``Hardwa
 ``MachineDescription``) and checkout inspection (``MIN_CHECKOUT_VERSION``,
 ``CheckoutFound``, ``CheckoutNotFound``, ``CheckoutTooOld``, ``CheckoutInspection``), ``HelperMessage``
 and its members, ``HelperErrorCode``, the harness choice (``HarnessOption``,
-``HarnessChoice``, and the run flags ``CLI_PROVIDER_FLAG``, ``MODEL_FLAG``,
-``UNVETTED_MODEL_FLAG``), and a relayed channel's end: ``ChannelEndOutcome``,
+``HarnessChoice``, ``RoleAgents``, and the run flags ``CLI_PROVIDER_FLAG``, ``MODEL_FLAG``,
+``ROLE_PROVIDER_FLAG``, ``UNVETTED_MODEL_FLAG``), and a relayed channel's end: ``ChannelEndOutcome``,
 ``ChannelEnd``. An undeliverable successful start whose compensating stop cannot
 be proved terminal reports ``RunStartCompensationFailure`` on the helper's
 diagnostic stream.
@@ -59,6 +59,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
@@ -82,7 +83,7 @@ from server.host_envelope import (
     SpanId,
 )
 from server.host_examples import CreatedProject, ExampleList
-from server.host_harness import HarnessChoice, HarnessOption
+from server.host_harness import HarnessChoice, HarnessOption, generation_conflict
 from server.host_machine_facts import MachineDescription
 from server.host_preflight import Backend, Check, RoleName, RunOptions
 from server.host_run_events import (
@@ -810,6 +811,10 @@ class HelperFeature(StrEnum):
     workload, objectives and goal text, in ``task_details``."""
     RUN_DIGEST = "run_digest"
     """``runs.list``'s ``digest_runs``: each named run's ``digest``, read from its journal."""
+    HARNESS_GENERATIONS = "harness_generations"
+    """``harnesses.list``'s ``with_generations``: each pair's maker and the generation it belongs to."""
+    RUN_ROLE_AGENTS = "run_role_agents"
+    """``run.start``'s and ``run.preflight``'s ``agents``: a vetted provider and model per role."""
 
 
 CLI_PROVIDER_FLAG: Final = "--cli-provider"
@@ -822,6 +827,8 @@ MAX_ROUNDS_FLAG: Final = "--max-rounds"
 """The run option that bounds its rounds; ``run.start`` emits it for ``options.rounds``."""
 MAX_RUN_SECONDS_FLAG: Final = "--max-run-seconds"
 """Overrides ``[run].max_run_seconds``; ``run.start`` emits it for ``options.time_limit_s``."""
+ROLE_PROVIDER_FLAG: Final = "--role-provider"
+"""``ROLE=PROVIDER``, overriding ``agent.roles.ROLE.provider``; emitted per ``agents`` entry."""
 ROLE_MODEL_FLAG: Final = "--role-model"
 """``ROLE=MODEL``, overriding ``agent.roles.ROLE.model``; emitted per ``options.roles`` model."""
 ROLE_REASONING_EFFORT_FLAG: Final = "--role-reasoning-effort"
@@ -921,10 +928,37 @@ class ResumeLatest(BaseModel):
     latest: Literal[True]
 
 
+_ROLE_NAME: Final = TypeAdapter(RoleName)
+
+
+def _role_ids(agents: dict[str, HarnessChoice]) -> dict[str, HarnessChoice]:
+    """Refuse a key that is not a role id, naming it.
+
+    The keys are checked here and not typed as ``RoleName`` because the helper's generated schema
+    says a key's shape with ``patternProperties``, which the desktop's schema walker does not walk.
+    """
+    for role in agents:
+        try:
+            _ROLE_NAME.validate_python(role)
+        except ValidationError as error:
+            message = f"agents.{role}: not a role id ({error.errors()[0]['msg']})"
+            raise ValueError(message) from error
+    return agents
+
+
+RoleAgents = Annotated[dict[str, HarnessChoice], AfterValidator(_role_ids)]
+"""An agent per role: each key a role id ``run.preflight`` returns with ``with_roles``, each value a
+pair ``harnesses.list`` offers. ``run.start`` and ``run.preflight`` refuse an id the run does not
+declare and a pair not offered, naming the key."""
+
+
 class HarnessesListRequest(HelperRequestBase):
     """The vetted provider and model pairs ``run.start``'s ``harness`` accepts."""
 
     type: Literal["harnesses.list"] = "harnesses.list"
+    with_generations: bool | None = None
+    """Ask for each pair's ``display.maker`` and ``display.generation``. Sent only after ``hello``
+    returned ``harness_generations``."""
 
 
 class RunStartRequest(HelperRequestBase):
@@ -947,6 +981,9 @@ class RunStartRequest(HelperRequestBase):
     options: RunOptions | None = None
     """Typed run options; ``args`` may then not repeat any option set here.
     Sent only after ``hello`` returned ``run_options``."""
+    agents: RoleAgents | None = None
+    """The agent each named role runs; a role without an entry runs ``harness``. Sent only after
+    ``hello`` returned ``run_role_agents``."""
 
 
 class RunPreflightRequest(HelperRequestBase):
@@ -958,6 +995,7 @@ class RunPreflightRequest(HelperRequestBase):
     args: tuple[str, ...] = ()
     harness: HarnessChoice | None = None
     options: RunOptions | None = None
+    agents: RoleAgents | None = None
     with_roles: bool | None = None
     """Ask for ``roles`` in the reply. Sent only after ``hello`` returned ``run_roles``."""
     with_project_clean: bool | None = None
@@ -1175,15 +1213,21 @@ HELPER_REQUEST_FEATURES: Final[Mapping[type[HelperRequestBase], HelperFeature]] 
 """The feature each gated request needs, exported with the generated wire contract."""
 
 HELPER_FIELD_FEATURES: Final[Mapping[type[HelperRequestBase], Mapping[str, HelperFeature]]] = {
-    RunStartRequest: {"harness": HelperFeature.HARNESSES, "options": HelperFeature.RUN_OPTIONS},
+    RunStartRequest: {
+        "harness": HelperFeature.HARNESSES,
+        "options": HelperFeature.RUN_OPTIONS,
+        "agents": HelperFeature.RUN_ROLE_AGENTS,
+    },
     RunPreflightRequest: {
         "harness": HelperFeature.HARNESSES,
         "options": HelperFeature.RUN_OPTIONS,
+        "agents": HelperFeature.RUN_ROLE_AGENTS,
         "with_roles": HelperFeature.RUN_ROLES,
         "with_backend": HelperFeature.RUN_BACKEND,
         "with_causes": HelperFeature.RUN_CAUSES,
         "with_project_clean": HelperFeature.PROJECT_CLEAN,
     },
+    HarnessesListRequest: {"with_generations": HelperFeature.HARNESS_GENERATIONS},
     LogsListRequest: {"span_id": HelperFeature.LOGS_BY_SPAN},
     RunsReadEventsRequest: {"with_totals": HelperFeature.RUN_HISTORY_PAGES},
     RunsListRequest: {"digest_runs": HelperFeature.RUN_DIGEST},
@@ -1563,6 +1607,13 @@ class HarnessesListReply(HelperReplyBase):
 
     type: Literal["harnesses.list"] = "harnesses.list"
     harnesses: tuple[HarnessOption, ...]
+
+    @model_validator(mode="after")
+    def _generations_group_without_contradiction(self) -> HarnessesListReply:
+        conflict = generation_conflict(self.harnesses)
+        if conflict is not None:
+            raise ValueError(conflict)
+        return self
 
 
 class MachineDescribeReply(HelperReplyBase):

@@ -99,8 +99,10 @@ class OrchestrationDescriptor(_CommittedManifest):
 
 
 class AgentRoleExecutionRecord(_CommittedManifest):
-    """Resolved model policy for one plugin-declared agent role."""
+    """Resolved provider and model policy for one plugin-declared agent role."""
 
+    provider: PortableText | None = None
+    """The role's CLI provider when it is not the run's (``cli_provider``); none otherwise."""
     model: PortableText
     reasoning_effort: PortableText | None = None
 

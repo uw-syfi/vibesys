@@ -85,6 +85,9 @@ export type Model1 = string | null;
  */
 export type ReasoningEffort = "default" | "low" | "medium" | "high";
 export type Roles = RoleOption[];
+export type Agents = {
+  [k: string]: HarnessChoice;
+} | null;
 export type RequestId8 = string;
 export type DeadlineMs8 = number;
 export type Type8 = "run.stop";
@@ -127,6 +130,7 @@ export type ReadId = string;
 export type RequestId15 = string;
 export type DeadlineMs15 = number;
 export type Type15 = "harnesses.list";
+export type WithGenerations = boolean | null;
 export type RequestId16 = string;
 export type DeadlineMs16 = number;
 export type Type16 = "runs.read_events";
@@ -169,6 +173,9 @@ export type Type22 = "run.preflight";
 export type Project7 = string;
 export type Task1 = string | null;
 export type Args1 = string[];
+export type Agents1 = {
+  [k: string]: HarnessChoice;
+} | null;
 export type WithRoles = boolean | null;
 export type WithProjectClean = boolean | null;
 export type WithBackend = boolean | null;
@@ -248,7 +255,9 @@ export type HelperFeature =
   | "run_backend"
   | "run_causes"
   | "example_catalogue"
-  | "run_digest";
+  | "run_digest"
+  | "harness_generations"
+  | "run_role_agents";
 export type Features1 = HelperFeature[];
 export type VibesysVersion = string;
 export type Root = string;
@@ -471,6 +480,13 @@ export type ModelName = string | null;
 export type Family = string | null;
 export type Tier = number | null;
 export type TierName = string | null;
+/**
+ * Who made a model: the closed set of makers whose models a provider's CLI runs.
+ */
+export type Maker = "anthropic" | "openai" | "google";
+export type Id6 = string;
+export type Name2 = string;
+export type Order = number;
 export type Harnesses = HarnessOption[];
 export type RequestId42 = string;
 export type Type42 = "runs.read_events";
@@ -665,7 +681,7 @@ export type Kind20 = "option_not_accepted";
 /**
  * A typed New run option (``RunOptions``); closed.
  */
-export type RunOption = "rounds" | "time_limit" | "results" | "role_model" | "role_reasoning_effort";
+export type RunOption = "rounds" | "time_limit" | "results" | "role_model" | "role_reasoning_effort" | "role_agent";
 export type Kind21 = "github_unavailable";
 export type Problem5 = string;
 export type Checks = Check[];
@@ -674,7 +690,7 @@ export type RequestId49 = string;
 export type Type49 = "examples.list";
 export type Version12 = 1;
 export type Checkout1 = string;
-export type Name2 = string;
+export type Name3 = string;
 export type Category = string;
 export type Tasks1 = string[];
 export type ExternalRepo = boolean;
@@ -690,12 +706,12 @@ export type Count = number;
  * Who makes the hardware a task targets.
  */
 export type AcceleratorVendor = "nvidia" | "amd" | "aws" | "apple" | "cpu";
-export type Name3 = string;
+export type Name4 = string;
 /**
  * Who made a served model; ``OTHER`` for a maker with no entry yet.
  */
 export type ModelMaker = "meta" | "qwen" | "deepseek" | "zhipu" | "moonshot" | "ai2" | "openai" | "other";
-export type Name4 = string;
+export type Name5 = string;
 export type Description = string;
 export type Metric = string;
 export type Direction = "max" | "min";
@@ -797,7 +813,7 @@ export type RequestId55 = string;
 export type Detail4 = string;
 export type Kind24 = "stop_unconfirmed";
 export type Version13 = 1;
-export type Id6 = string;
+export type Id7 = string;
 export type Outcome1 = "stopping" | "still_running" | "unsupported";
 
 /**
@@ -900,6 +916,7 @@ export interface RunStartRequest {
   resume?: Resume;
   harness?: HarnessChoice | null;
   options?: RunOptions | null;
+  agents?: Agents;
 }
 /**
  * Resume this run.
@@ -1033,6 +1050,7 @@ export interface HarnessesListRequest {
   request_id: RequestId15;
   deadline_ms: DeadlineMs15;
   type: Type15;
+  with_generations?: WithGenerations;
 }
 /**
  * A page of one run's recorded events, from its journal on disk, live or ended.
@@ -1123,6 +1141,7 @@ export interface RunPreflightRequest {
   args?: Args1;
   harness?: HarnessChoice | null;
   options?: RunOptions | null;
+  agents?: Agents1;
   with_roles?: WithRoles;
   with_project_clean?: WithProjectClean;
   with_backend?: WithBackend;
@@ -1607,6 +1626,16 @@ export interface HarnessDisplay {
   family?: Family;
   tier?: Tier;
   tier_name?: TierName;
+  maker?: Maker | null;
+  generation?: ModelGeneration | null;
+}
+/**
+ * One generation of a maker's models, and where it ranks among the maker's.
+ */
+export interface ModelGeneration {
+  id: Id6;
+  name: Name2;
+  order: Order;
 }
 /**
  * One page of a run's recorded events, oldest first.
@@ -2044,7 +2073,7 @@ export interface ExampleList {
  * One example in ``vibesys example list --json``.
  */
 export interface ExampleSummary {
-  name: Name2;
+  name: Name3;
   category: Category;
   tasks: Tasks1;
   external_repo: ExternalRepo;
@@ -2076,14 +2105,14 @@ export interface ExampleHardware {
  * The model an LLM-serving task serves.
  */
 export interface ExampleModel {
-  name: Name3;
+  name: Name4;
   maker: ModelMaker;
 }
 /**
  * The workload a data-structure task drives.
  */
 export interface ExampleWorkload {
-  name: Name4;
+  name: Name5;
   description: Description;
 }
 /**
@@ -2185,7 +2214,7 @@ export interface StopUnconfirmedCompensationFailure {
  */
 export interface UnconfirmedInstanceStopResult {
   version?: Version13;
-  id: Id6;
+  id: Id7;
   outcome: Outcome1;
   route?: StopRoute | null;
 }

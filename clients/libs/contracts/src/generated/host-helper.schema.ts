@@ -1359,6 +1359,28 @@ const hostHelperSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "Tier Name"
+        },
+        "maker": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Maker"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "generation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelGeneration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -1456,6 +1478,18 @@ const hostHelperSchema: Record<string, unknown> = {
           "default": "harnesses.list",
           "title": "Type",
           "type": "string"
+        },
+        "with_generations": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "With Generations"
         }
       },
       "required": [
@@ -1730,7 +1764,9 @@ const hostHelperSchema: Record<string, unknown> = {
         "run_backend",
         "run_causes",
         "example_catalogue",
-        "run_digest"
+        "run_digest",
+        "harness_generations",
+        "run_role_agents"
       ],
       "title": "HelperFeature",
       "type": "string"
@@ -3040,6 +3076,16 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "MachineDescription",
       "type": "object"
     },
+    "Maker": {
+      "description": "Who made a model: the closed set of makers whose models a provider's CLI runs.",
+      "enum": [
+        "anthropic",
+        "openai",
+        "google"
+      ],
+      "title": "Maker",
+      "type": "string"
+    },
     "MissingLogTail": {
       "additionalProperties": false,
       "description": "The instance has no retained ``server.log`` file.",
@@ -3056,6 +3102,36 @@ const hostHelperSchema: Record<string, unknown> = {
       "required": [
         "state"
       ]
+    },
+    "ModelGeneration": {
+      "additionalProperties": false,
+      "description": "One generation of a maker's models, and where it ranks among the maker's.",
+      "properties": {
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "order": {
+          "minimum": 1,
+          "title": "Order",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "order"
+      ],
+      "title": "ModelGeneration",
+      "type": "object"
     },
     "ModelMaker": {
       "description": "Who made a served model; ``OTHER`` for a maker with no entry yet.",
@@ -3929,7 +4005,8 @@ const hostHelperSchema: Record<string, unknown> = {
         "time_limit",
         "results",
         "role_model",
-        "role_reasoning_effort"
+        "role_reasoning_effort",
+        "role_agent"
       ],
       "title": "RunOption",
       "type": "string"
@@ -4162,6 +4239,21 @@ const hostHelperSchema: Record<string, unknown> = {
           ],
           "default": null
         },
+        "agents": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/HarnessChoice"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agents"
+        },
         "with_roles": {
           "anyOf": [
             {
@@ -4383,6 +4475,21 @@ const hostHelperSchema: Record<string, unknown> = {
             }
           ],
           "default": null
+        },
+        "agents": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/HarnessChoice"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agents"
         }
       },
       "required": [
@@ -6366,15 +6473,20 @@ const hostHelperSchema: Record<string, unknown> = {
   "x-vibesys-feature-by-field": {
     "run.start": {
       "harness": "harnesses",
-      "options": "run_options"
+      "options": "run_options",
+      "agents": "run_role_agents"
     },
     "run.preflight": {
       "harness": "harnesses",
       "options": "run_options",
+      "agents": "run_role_agents",
       "with_roles": "run_roles",
       "with_backend": "run_backend",
       "with_causes": "run_causes",
       "with_project_clean": "project_clean"
+    },
+    "harnesses.list": {
+      "with_generations": "harness_generations"
     },
     "logs.list": {
       "span_id": "logs_by_span"

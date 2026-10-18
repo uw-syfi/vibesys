@@ -271,6 +271,7 @@ class RunOption(StrEnum):
     RESULTS = "results"
     ROLE_MODEL = "role_model"
     ROLE_REASONING_EFFORT = "role_reasoning_effort"
+    ROLE_AGENT = "role_agent"
 
 
 class OptionNotAccepted(BaseModel):

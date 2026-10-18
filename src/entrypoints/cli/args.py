@@ -16,6 +16,7 @@ from server.host_api import (
     PUBLISH_FLAG,
     REPO_FLAG,
     ROLE_MODEL_FLAG,
+    ROLE_PROVIDER_FLAG,
     ROLE_REASONING_EFFORT_FLAG,
     UNVETTED_MODEL_FLAG,
 )
@@ -488,6 +489,18 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         metavar="SECONDS",
         help="Wall-clock budget for the run. Overrides [run].max_run_seconds in agent.toml.",
+    )
+    parser.add_argument(
+        ROLE_PROVIDER_FLAG,
+        type=_role_setting,
+        action="append",
+        default=[],
+        metavar="ROLE=PROVIDER",
+        help=(
+            "CLI provider for one agent role. Overrides agent.roles.ROLE.provider; repeatable. "
+            "A role that names a provider other than the run's and no model runs that "
+            "provider's default model."
+        ),
     )
     parser.add_argument(
         ROLE_MODEL_FLAG,

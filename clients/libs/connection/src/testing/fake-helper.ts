@@ -190,11 +190,104 @@ export const FAKE_HARNESSES: readonly HarnessOption[] = [
 ];
 
 /**
+ * The pairs of a helper whose agent library names each model's maker and generation: two makers,
+ * the newer generation of one with two tiers, an older generation still vetted, and a model
+ * agentshim places in no generation. A strict client sees the maker and generation only when it
+ * asks (`with_generations`), so use `FakeHelper.host.harnesses` to seed it.
+ */
+export const FAKE_MODEL_CATALOGUE: readonly HarnessOption[] = [
+  {
+    provider: 'codex',
+    model: 'gpt-6-sol',
+    default: true,
+    display: {
+      provider_name: 'Codex',
+      model_name: 'GPT-6 Sol',
+      family: 'GPT',
+      tier: 3,
+      tier_name: 'Sol',
+      maker: 'openai',
+      generation: {id: 'gpt-6', name: 'GPT-6', order: 1},
+    },
+  },
+  {
+    provider: 'codex',
+    model: 'gpt-6-luna',
+    default: false,
+    display: {
+      provider_name: 'Codex',
+      model_name: 'GPT-6 Luna',
+      family: 'GPT',
+      tier: 1,
+      tier_name: 'Luna',
+      maker: 'openai',
+      generation: {id: 'gpt-6', name: 'GPT-6', order: 1},
+    },
+  },
+  {
+    provider: 'codex',
+    model: 'gpt-5.6-sol',
+    default: false,
+    display: {
+      provider_name: 'Codex',
+      model_name: 'GPT-5.6 Sol',
+      family: 'GPT',
+      tier: 3,
+      tier_name: 'Sol',
+      maker: 'openai',
+      generation: {id: 'gpt-5.6', name: 'GPT-5.6', order: 2},
+    },
+  },
+  {
+    provider: 'codex',
+    model: 'gpt-5.5',
+    default: false,
+    display: {provider_name: 'Codex', model_name: 'GPT-5.5', family: 'GPT', maker: 'openai'},
+  },
+  {
+    provider: 'claude',
+    model: 'claude-opus-5-5',
+    default: true,
+    display: {
+      provider_name: 'Claude Code',
+      model_name: 'Opus 5.5',
+      family: 'Claude',
+      tier: 3,
+      tier_name: 'Opus',
+      maker: 'anthropic',
+      generation: {id: 'claude-5.5', name: 'Claude 5.5', order: 1},
+    },
+  },
+  {
+    provider: 'claude',
+    model: 'claude-sonnet-5',
+    default: false,
+    display: {
+      provider_name: 'Claude Code',
+      model_name: 'Sonnet 5',
+      family: 'Claude',
+      tier: 2,
+      tier_name: 'Sonnet',
+      maker: 'anthropic',
+      generation: {id: 'claude-5', name: 'Claude 5', order: 2},
+    },
+  },
+];
+
+/** The same pairs as a client that did not ask for generations reads them. */
+function withoutGenerations(option: HarnessOption): HarnessOption {
+  if (option.display == null) return option;
+  const {maker: _maker, generation: _generation, ...display} = option.display;
+  return {...option, display};
+}
+
+/**
  * The run options `server.host_api` names (`UNVETTED_MODEL_FLAG`, `CLI_PROVIDER_FLAG`,
  * `MODEL_FLAG`): the wire contract carries no constants, so this Fake repeats them.
  */
 const UNVETTED_MODEL_FLAG = '--allow-unvetted-model';
 const HARNESS_FLAGS = ['--cli-provider', '--model'] as const;
+const ROLE_AGENT_FLAGS = ['--role-provider', '--role-model'] as const;
 
 /** Whether argparse reads `token` (`--name` or `--name=value`) as `flag`, as the helper decides. */
 function abbreviates(token: string, flag: string): boolean {
@@ -203,9 +296,14 @@ function abbreviates(token: string, flag: string): boolean {
 }
 
 /** Why the helper refuses `start`'s arguments, or null when it accepts them. */
-function refusedArgument(start: Extract<HelperRequest, {type: 'run.start'}>): string | null {
-  const refused =
-    start.harness == null ? [UNVETTED_MODEL_FLAG] : [UNVETTED_MODEL_FLAG, ...HARNESS_FLAGS];
+function refusedArgument(
+  start: Extract<HelperRequest, {type: 'run.start' | 'run.preflight'}>,
+): string | null {
+  const refused = [
+    UNVETTED_MODEL_FLAG,
+    ...(start.harness == null ? [] : HARNESS_FLAGS),
+    ...(start.agents == null || Object.keys(start.agents).length === 0 ? [] : ROLE_AGENT_FLAGS),
+  ];
   for (const token of start.args ?? []) {
     const flag = refused.find(candidate => abbreviates(token, candidate));
     if (flag !== undefined) return `${token} selects ${flag}`;
@@ -302,6 +400,8 @@ export class FakeHelper {
     'project_clean',
     'run_digest',
     'example_catalogue',
+    'harness_generations',
+    'run_role_agents',
   ]);
   /** The run log streams `logs.list` and `logs.read` serve; replace it to seed a store. */
   logStore = new FakeLogStore();
@@ -634,7 +734,10 @@ class HelperSession {
         this.#send({
           type: 'harnesses.list',
           request_id: id,
-          harnesses: [...this.#helper.host.harnesses],
+          harnesses:
+            request.with_generations === true
+              ? [...this.#helper.host.harnesses]
+              : this.#helper.host.harnesses.map(withoutGenerations),
         });
         return;
       case 'run.stop':
@@ -805,22 +908,70 @@ class HelperSession {
       this.#send(this.#error(id, 'invalid_request', refused));
       return;
     }
-    const harness = request.harness;
-    if (harness != null) {
-      const offered = this.#helper.host.harnesses;
-      const vetted = offered.some(
-        option => option.provider === harness.provider && option.model === harness.model,
-      );
-      if (!vetted) {
-        const allowed = offered
-          .filter(option => option.provider === harness.provider)
-          .map(option => option.model);
-        const models = allowed.length === 0 ? 'none' : allowed.join(', ');
-        this.#send(this.#error(id, 'unvetted_harness', `vetted models: ${models}`));
-        return;
-      }
+    const refusal = this.#refusedHarness(request);
+    if (refusal !== null) {
+      this.#send(refusal);
+      return;
+    }
+    if (!this.#helper.host.projects.has(request.project)) {
+      this.#project(request);
+      return;
+    }
+    const undeclared = this.#undeclaredAgent(request);
+    if (undeclared !== null) {
+      this.#send(this.#error(id, 'invalid_request', undeclared));
+      return;
     }
     this.#project(request);
+  }
+
+  /**
+   * Why the helper refuses the request's harness, its roles' agents or their models, or null:
+   * a role's typed model and its agent both choose its model, and every pair must be offered.
+   */
+  #refusedHarness(
+    request: Extract<HelperRequest, {type: 'run.start' | 'run.preflight'}>,
+  ): Reply | null {
+    const id = request.request_id;
+    const offered = this.#helper.host.harnesses;
+    const agents = Object.entries(request.agents ?? {});
+    const modelled = request.options?.roles?.find(
+      role => role.model != null && request.agents?.[role.role] !== undefined,
+    );
+    if (modelled !== undefined) {
+      const message = `agents.${modelled.role} sets the model of role '${modelled.role}', which options.roles also sets; set it in one place`;
+      return this.#error(id, 'invalid_request', message);
+    }
+    const choices = [
+      ...(request.harness == null ? [] : [['harness', request.harness] as const]),
+      ...agents.map(([role, choice]) => [`agents.${role}`, choice] as const),
+    ];
+    for (const [key, choice] of choices) {
+      const vetted = offered.some(
+        option => option.provider === choice.provider && option.model === choice.model,
+      );
+      if (vetted) continue;
+      const allowed = offered
+        .filter(option => option.provider === choice.provider)
+        .map(option => option.model);
+      const models = allowed.length === 0 ? 'none' : allowed.join(', ');
+      return this.#error(
+        id,
+        'unvetted_harness',
+        `${key}: model '${choice.model}' is not vetted for provider '${choice.provider}'; vetted models: ${models}`,
+      );
+    }
+    return null;
+  }
+
+  /** The first `agents` key naming a role the run's orchestration does not declare, worded. */
+  #undeclaredAgent(
+    request: Extract<HelperRequest, {type: 'run.start' | 'run.preflight'}>,
+  ): string | null {
+    const declared = this.#helper.host.roles;
+    const unknown = Object.keys(request.agents ?? {}).filter(role => !declared.includes(role));
+    if (unknown.length === 0) return null;
+    return `${unknown.map(role => `agents.${role}`).join(', ')}: the run's orchestration declares no such role`;
   }
 
   /**
@@ -874,8 +1025,19 @@ class HelperSession {
 
   #preflight(request: Extract<HelperRequest, {type: 'run.preflight'}>): void {
     const id = request.request_id;
+    const argument = refusedArgument(request);
+    const refusal = argument === null ? this.#refusedHarness(request) : null;
+    if (argument !== null || refusal !== null) {
+      this.#send(refusal ?? this.#error(id, 'invalid_request', argument ?? ''));
+      return;
+    }
     if (!this.#helper.host.projects.has(request.project)) {
       this.#send({...this.#error(id, 'project_missing', 'no such project'), path: request.project});
+      return;
+    }
+    const undeclared = this.#undeclaredAgent(request);
+    if (undeclared !== null) {
+      this.#send(this.#error(id, 'invalid_request', undeclared));
       return;
     }
     const {host} = this.#helper;

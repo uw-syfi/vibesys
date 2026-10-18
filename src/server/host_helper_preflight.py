@@ -3,14 +3,18 @@
 ``option_arguments`` turns ``RunOptions`` into the run's own flags (the ones
 ``server.host_api`` names, which the CLI parses), so the screen's choices and a terminal's
 flags have one meaning. ``repeated_option`` refuses ``args`` that repeat a typed option,
-and ``unvetted_role`` a role model the run's harness does not vet. ``preflight_checks``
+and ``unvetted_role`` a role model the run's harness does not vet. ``agents`` (a vetted pair per
+role) becomes the run's per-role provider and model flags the same way; ``unvetted_agent``,
+``conflicting_agent`` and ``undeclared_agent`` refuse a pair that is not vetted, a role model
+that ``options`` also sets, and a role the run does not declare. ``preflight_checks``
 assembles the closed ``Check`` list from what the helper reads (its checkout, the project's
 repository, Docker) and the ``PreflightReport`` the run's own code printed. Light like the
 rest of the helper.
 
 Public surface: ``option_arguments``, ``option_flags``, ``repeated_option``,
-``unvetted_role``, ``preflight_checks``, ``typed_arguments``, ``refined_cause``,
-``PreflightFacts``, ``preflight_unavailable``.
+``unvetted_role``, ``unvetted_agent``, ``conflicting_agent``, ``undeclared_agent``,
+``preflight_checks``, ``typed_arguments``, ``refined_cause``, ``PreflightFacts``,
+``preflight_unavailable``.
 """
 
 from __future__ import annotations
@@ -25,9 +29,11 @@ from server.host_api import (
     PUBLISH_FLAG,
     REPO_FLAG,
     ROLE_MODEL_FLAG,
+    ROLE_PROVIDER_FLAG,
     ROLE_REASONING_EFFORT_FLAG,
     HarnessChoice,
     HarnessOption,
+    RoleAgents,
 )
 from server.host_machine_facts import (
     DockerReachable,
@@ -46,6 +52,7 @@ from server.host_preflight import (
     PreflightReport,
     ProjectDirty,
     ReasoningEffort,
+    RolesNotDeclared,
     RunOption,
     RunOptions,
     RunResults,
@@ -61,15 +68,20 @@ if TYPE_CHECKING:
 _RESULTS_FLAGS = {RunResults.KEEP: LOCAL_FLAG, RunResults.PUBLISH_GITHUB: PUBLISH_FLAG}
 
 
-def typed_arguments(options: RunOptions | None) -> tuple[tuple[RunOption, tuple[str, ...]], ...]:
-    """Each typed option set in ``options`` with the run arguments that carry it, in order.
+def typed_arguments(
+    options: RunOptions | None, agents: RoleAgents | None = None
+) -> tuple[tuple[RunOption, tuple[str, ...]], ...]:
+    """Each option set in ``options`` and role agent in ``agents`` with the run arguments that carry it.
 
     The one place an option becomes flags: ``option_arguments`` flattens it, and a failure the
     run reports about an argument is traced back to the option that produced it.
     """
-    if options is None:
-        return ()
     pairs: list[tuple[RunOption, tuple[str, ...]]] = []
+    for role, choice in (agents or {}).items():
+        pairs.append((RunOption.ROLE_AGENT, (ROLE_PROVIDER_FLAG, f"{role}={choice.provider}")))
+        pairs.append((RunOption.ROLE_AGENT, (ROLE_MODEL_FLAG, f"{role}={choice.model}")))
+    if options is None:
+        return tuple(pairs)
     if options.rounds is not None:
         pairs.append((RunOption.ROUNDS, (MAX_ROUNDS_FLAG, str(options.rounds))))
     if options.time_limit_s is not None:
@@ -89,31 +101,37 @@ def typed_arguments(options: RunOptions | None) -> tuple[tuple[RunOption, tuple[
     return tuple(pairs)
 
 
-def option_arguments(options: RunOptions | None) -> tuple[str, ...]:
-    """The run flags that carry ``options``; none for an option left unset."""
+def option_arguments(
+    options: RunOptions | None, agents: RoleAgents | None = None
+) -> tuple[str, ...]:
+    """The run flags that carry ``options`` and ``agents``; none for an option left unset."""
     return tuple(
-        argument for _option, arguments in typed_arguments(options) for argument in arguments
+        argument
+        for _option, arguments in typed_arguments(options, agents)
+        for argument in arguments
     )
 
 
-def refined_cause(cause: Cause, options: RunOptions | None) -> Cause:
+def refined_cause(
+    cause: Cause, options: RunOptions | None, agents: RoleAgents | None = None
+) -> Cause:
     """``cause``, naming the typed option when the run rejected the arguments that carry it.
 
     The run reports arguments its search does not take; only the helper knows which of them it
     wrote for a typed option, so the screen can point at that control instead of Extra arguments.
     """
     if isinstance(cause, ArgumentsUnrecognized):
-        for option, arguments in typed_arguments(options):
+        for option, arguments in typed_arguments(options, agents):
             if arguments[0] in cause.arguments:
                 return OptionNotAccepted(option=option)
     return cause
 
 
-def option_flags(options: RunOptions | None) -> tuple[str, ...]:
-    """The run flags ``args`` may not hold next to ``options``: those of each option set."""
+def option_flags(options: RunOptions | None, agents: RoleAgents | None = None) -> tuple[str, ...]:
+    """The run flags ``args`` may not hold next to ``options`` and ``agents``: those of each set."""
+    flags: list[str] = [ROLE_PROVIDER_FLAG, ROLE_MODEL_FLAG] if agents else []
     if options is None:
-        return ()
-    flags: list[str] = []
+        return tuple(flags)
     if options.rounds is not None:
         flags.append(MAX_ROUNDS_FLAG)
     if options.time_limit_s is not None:
@@ -122,13 +140,15 @@ def option_flags(options: RunOptions | None) -> tuple[str, ...]:
         flags += [LOCAL_FLAG, PUBLISH_FLAG, REPO_FLAG]
     if options.roles:
         flags += [ROLE_MODEL_FLAG, ROLE_REASONING_EFFORT_FLAG]
-    return tuple(flags)
+    return tuple(dict.fromkeys(flags))
 
 
-def repeated_option(args: tuple[str, ...], options: RunOptions | None) -> str | None:
+def repeated_option(
+    args: tuple[str, ...], options: RunOptions | None, agents: RoleAgents | None = None
+) -> str | None:
     """Why ``args`` repeat a typed option, naming the argument and its flag, or ``None``."""
     for token in args:
-        for flag in option_flags(options):
+        for flag in option_flags(options, agents):
             if abbreviates(token, flag):
                 return f"{token} selects {flag}, which the typed options already set"
     return None
@@ -166,6 +186,50 @@ def unvetted_role(
     return None
 
 
+def unvetted_agent(agents: RoleAgents | None, harnesses: tuple[HarnessOption, ...]) -> str | None:
+    """Why a role's agent is not a pair ``harnesses`` offers, naming its key, or ``None``."""
+    for role, choice in (agents or {}).items():
+        if any((h.provider, h.model) == (choice.provider, choice.model) for h in harnesses):
+            continue
+        vetted = [option.model for option in harnesses if option.provider == choice.provider]
+        return (
+            f"agents.{role}: model {choice.model!r} is not vetted for provider "
+            f"{choice.provider!r}; vetted models: {', '.join(vetted) or 'none'}"
+        )
+    return None
+
+
+def undeclared_agent(agents: RoleAgents | None, report: PreflightReport) -> str | None:
+    """Why ``agents`` name a role the run does not declare, naming its key, or ``None``.
+
+    The run's own validation reports the undeclared roles of its configuration, and the helper
+    wrote the ``agents`` roles into that configuration, so a role both name is the helper's.
+    """
+    settings = report.settings
+    if not agents or not isinstance(settings, SettingsInvalid):
+        return None
+    if not isinstance(settings.cause, RolesNotDeclared):
+        return None
+    unknown = [role for role in agents if role in settings.cause.roles]
+    if not unknown:
+        return None
+    keys = ", ".join(f"agents.{role}" for role in unknown)
+    return f"{keys}: the run's orchestration declares no such role"
+
+
+def conflicting_agent(options: RunOptions | None, agents: RoleAgents | None) -> str | None:
+    """Why a role's agent and its typed model both choose its model, naming both keys, or ``None``."""
+    if options is None or not agents:
+        return None
+    for role in options.roles:
+        if role.model is not None and role.role in agents:
+            return (
+                f"agents.{role.role} sets the model of role {role.role!r}, which "
+                "options.roles also sets; set it in one place"
+            )
+    return None
+
+
 @dataclass(frozen=True)
 class PreflightFacts:
     """What the helper read for one preflight, besides the run's own report."""
@@ -183,6 +247,7 @@ def preflight_checks(
     report: PreflightReport,
     *,
     options: RunOptions | None = None,
+    agents: RoleAgents | None = None,
     with_causes: bool = False,
 ) -> tuple[Check, ...]:
     """Every check, in ``CheckId`` order.
@@ -195,7 +260,7 @@ def preflight_checks(
         _checkout_check(facts),
         _repository_check(facts),
         _clean_check(facts, report),
-        _settings_check(report, options, with_causes=with_causes),
+        _settings_check(report, options, agents, with_causes=with_causes),
         _docker_check(facts.docker) if report.uses_docker is not False else _NO_DOCKER,
         report.agent_image,
         report.evaluator,
@@ -275,7 +340,11 @@ def _clean_check(facts: PreflightFacts, report: PreflightReport) -> Check:
 
 
 def _settings_check(
-    report: PreflightReport, options: RunOptions | None, *, with_causes: bool
+    report: PreflightReport,
+    options: RunOptions | None,
+    agents: RoleAgents | None,
+    *,
+    with_causes: bool,
 ) -> Check:
     settings = report.settings
     if not isinstance(settings, SettingsInvalid):
@@ -288,7 +357,7 @@ def _settings_check(
     if isinstance(cause, BackendUnavailable) or (cause is not None and with_causes):
         # A typed cause is worded here without flags (the CLI's message names them); the app
         # words the cause itself for its own controls.
-        cause = refined_cause(cause, options)
+        cause = refined_cause(cause, options, agents)
         return Check(
             id=CheckId.SETTINGS_VALID,
             state=CheckState.FAIL,

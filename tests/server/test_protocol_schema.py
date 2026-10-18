@@ -231,15 +231,21 @@ def test_host_helper_schema_exports_the_authoritative_field_feature_gates() -> N
     gates = document["x-vibesys-feature-by-field"]
 
     assert gates == {
-        "run.start": {"harness": "harnesses", "options": "run_options"},
+        "run.start": {
+            "harness": "harnesses",
+            "options": "run_options",
+            "agents": "run_role_agents",
+        },
         "run.preflight": {
             "harness": "harnesses",
             "options": "run_options",
+            "agents": "run_role_agents",
             "with_roles": "run_roles",
             "with_backend": "run_backend",
             "with_causes": "run_causes",
             "with_project_clean": "project_clean",
         },
+        "harnesses.list": {"with_generations": "harness_generations"},
         "logs.list": {"span_id": "logs_by_span"},
         "runs.read_events": {"with_totals": "run_history_pages"},
         "runs.list": {"digest_runs": "run_digest"},

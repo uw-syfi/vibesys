@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 
 from entrypoints.launcher import headless_command, source_checkout_root
 from server.host_api import HarnessOption
-from server.host_harness import HarnessDisplay
+from server.host_harness import HarnessDisplay, Maker
 from server.host_helper import serve_channel
 from server.host_helper_logs import HelperLogs, run_location
 from server.host_helper_machine import HostMachineProbe
@@ -74,6 +74,11 @@ _STDOUT_FD = 1
 _STDERR_FD = 2
 
 
+def _maker(vendor: str) -> Maker | None:
+    """The maker agentshim's ``vendor`` names, or ``None`` for a vendor this contract lacks."""
+    return next((maker for maker in Maker if maker.value == vendor), None)
+
+
 @cache
 def vetted_harnesses() -> tuple[HarnessOption, ...]:
     """The agent library's vetted harnesses, each provider's default marked; loaded on first use."""
@@ -103,6 +108,10 @@ def vetted_harnesses() -> tuple[HarnessOption, ...]:
                     family=None if shown is None else shown.family,
                     tier=None if shown is None else shown.tier,
                     tier_name=None if shown is None else shown.tier_name,
+                    maker=None if shown is None else _maker(shown.vendor),
+                    # agentshim (ModelSpec) names no generation yet, so none is sent: the screen
+                    # then groups a model by its family alone. It needs the generation's id, name
+                    # and rank among its vendor's, as data beside `tier`.
                 ),
             )
         )

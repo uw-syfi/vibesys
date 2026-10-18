@@ -11,9 +11,10 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from vibesys.constants import DomainName
-from vibesys.errors import ModelNotVetted, RolesNotDeclared, configuration_error
+from vibesys.errors import ConfigInvalid, ModelNotVetted, RolesNotDeclared, configuration_error
 from vs_agent.api import (
     DEFAULT_CLI_PROVIDER,
+    SHIPPED_PROVIDERS,
     AgentBackend,
     AgentSpec,
     UnvettedHarnessError,
@@ -31,7 +32,7 @@ from vs_sandbox.api import HostResource, HostResourceAccess
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
-    from vibesys.config import Config
+    from vibesys.config import AgentRoleCfg, Config
     from vs_runtime.api import AgentRole
 
 _DISTRIBUTION = "vibesys"
@@ -173,13 +174,24 @@ def resolve_agent_specs(
     for role in roles:
         override = config.agent.roles.get(role.id)
         with _unvetted_harness_named(role=role.id):
+            provider_name = (
+                override.provider
+                if override is not None and override.provider is not None
+                else default_spec.provider
+            )
+            if provider_name not in SHIPPED_PROVIDERS:
+                raise configuration_error(
+                    ConfigInvalid(
+                        problem=(
+                            f"agent.roles.{role.id}.provider {provider_name!r} is not supported; "
+                            f"supported providers: {', '.join(sorted(SHIPPED_PROVIDERS))}"
+                        )
+                    )
+                )
             resolved[role.id] = replace(
                 default_spec,
-                model=(
-                    override.model
-                    if override is not None and override.model is not None
-                    else default_spec.model
-                ),
+                provider=provider_name,
+                model=_role_model(override, default_spec, provider_name),
                 reasoning_effort=(
                     override.reasoning_effort
                     if override is not None and override.reasoning_effort is not None
@@ -187,6 +199,42 @@ def resolve_agent_specs(
                 ),
             )
     return MappingProxyType(resolved)
+
+
+def _role_model(override: AgentRoleCfg | None, default: AgentSpec, provider: str) -> str | None:
+    """A role's model: its own, else the run's, else the default of the provider it names.
+
+    The run's model belongs to the run's provider, so a role on another provider never inherits
+    it. Raises :class:`UnvettedHarnessError` for a provider with no vetted model.
+    """
+    if override is not None and override.model is not None:
+        return override.model
+    if provider == default.provider:
+        return default.model
+    model = default_model(provider)
+    if model is None:
+        raise UnvettedHarnessError(provider, None)
+    return model
+
+
+def require_one_login_per_container(specs: Mapping[str, AgentSpec], *, containerized: bool) -> None:
+    """Refuse roles on more than one provider where a container carries one provider's login.
+
+    A run environment that starts containers gives each container the login of the run's
+    provider only, so a role on another provider could not authenticate in it. Agent-less
+    runs carry no login, so only the CLI backend's roles count.
+    """
+    providers = sorted({s.provider for s in specs.values() if s.backend is AgentBackend.CLI})
+    if containerized and len(providers) > 1:
+        raise configuration_error(
+            ConfigInvalid(
+                problem=(
+                    f"agent.roles name more than one provider ({', '.join(providers)}), which "
+                    "a run environment that starts containers does not support: its containers "
+                    "carry the login of the run's provider only"
+                )
+            )
+        )
 
 
 @contextmanager

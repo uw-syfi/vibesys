@@ -101,6 +101,7 @@ from vs_agent.provider_profiles import (
     provider_binary,
     provider_display_name,
 )
+from vs_agent.provider_routing import ProviderRoutedExecutor
 from vs_agent.reply_limits import (
     MAX_REPLY_BYTES,
     MAX_WHITESPACE_RUN,
@@ -242,6 +243,7 @@ __all__ = [
     "Pending",
     "ProviderNotReadyError",
     "ProviderReadiness",
+    "ProviderRoutedExecutor",
     "ProviderSwitch",
     "ProviderSwitchReason",
     "QuotaCondition",

@@ -81,6 +81,31 @@ def test_the_real_host_offers_the_vetted_harnesses_with_one_default_per_provider
     assert HarnessesListReply.model_validate_json(reply.model_dump_json()) == reply
 
 
+def test_the_real_host_names_each_vetted_pairs_maker_to_a_client_that_asks(tmp_path: Path) -> None:
+    runtime = tmp_path / "runtime"
+    runtime.mkdir(mode=0o700)
+    threads = SimThreads()
+    host = real_host({"XDG_RUNTIME_DIR": str(runtime)}, os.getuid(), threads)
+
+    asked = answer(
+        HarnessesListRequest(request_id="h", deadline_ms=1, with_generations=True),
+        host,
+        threads.event(),
+    )
+    plain = answer(HarnessesListRequest(request_id="h", deadline_ms=1), host, threads.event())
+
+    assert isinstance(asked, HarnessesListReply)
+    assert isinstance(plain, HarnessesListReply)
+    # A vendor outside the closed set of makers would read as no maker: say so here.
+    assert all(
+        option.display is not None and option.display.maker is not None
+        for option in asked.harnesses
+    )
+    # A client that did not ask sees neither field on the wire.
+    assert "maker" not in plain.model_dump_json()
+    assert "generation" not in plain.model_dump_json()
+
+
 def test_an_unsafe_registry_root_is_refused(tmp_path: Path) -> None:
     runtime = tmp_path / "runtime"
     runtime.mkdir(mode=0o777)

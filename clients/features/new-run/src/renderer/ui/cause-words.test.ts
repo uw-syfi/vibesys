@@ -62,9 +62,16 @@ function everyCause(): Cause[] {
     {...CAUSES.backend_unavailable, declared: ['cuda', 'rocm']},
     {...CAUSES.task_unusable, task: null},
     {...CAUSES.task_image_unsupported, task: null},
-    ...(['rounds', 'time_limit', 'results', 'role_model', 'role_reasoning_effort'] as const).map(
-      option => ({kind: 'option_not_accepted' as const, option}),
-    ),
+    ...(
+      [
+        'rounds',
+        'time_limit',
+        'results',
+        'role_model',
+        'role_reasoning_effort',
+        'role_agent',
+      ] as const
+    ).map(option => ({kind: 'option_not_accepted' as const, option})),
   ];
 }
 

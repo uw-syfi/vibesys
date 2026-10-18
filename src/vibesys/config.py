@@ -98,13 +98,25 @@ class BackendCfg(_Strict):
 
 
 class AgentRoleCfg(_Strict):
-    """Optional model controls for one conceptual agent-loop role."""
+    """Optional provider and model controls for one conceptual agent-loop role."""
 
+    provider: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=256,
+        description=(
+            "CLI provider for this role. None uses [agent].cli_provider. A role that names "
+            "a provider other than the run's and no model runs that provider's default model."
+        ),
+    )
     model: str | None = Field(
         default=None,
         min_length=1,
         max_length=256,
-        description="CLI model override for this role. None uses [model].name.",
+        description=(
+            "CLI model override for this role. None uses [model].name, or the role's provider's "
+            "default model when the role names another provider."
+        ),
     )
     reasoning_effort: str | None = Field(
         default=None,

@@ -143,6 +143,19 @@ describe('parseHelperMessage', () => {
     expect(helperFeaturesForRequest(unset)).toEqual([]);
     expect(helperFeaturesForRequest(chosen)).toEqual(['harnesses']);
     expect(helperFeaturesForRequest({type: 'harnesses.list'})).toEqual(['harnesses']);
+    const generations = {type: 'harnesses.list', with_generations: true};
+    expect(helperFeaturesForRequest(generations)).toEqual(['harnesses', 'harness_generations']);
+    const agents = {'multi-judge': {provider: 'codex', model: 'gpt-a'}};
+    const withAgents = {...start, agents};
+    const withNone = {...start, agents: null};
+    expect(helperFeaturesForRequest(withAgents)).toEqual(['run_role_agents']);
+    expect(helperFeaturesForRequest(withNone)).toEqual([]);
+    const preflight = {type: 'run.preflight', project: '/p', harness: chosen.harness, agents};
+    expect(helperFeaturesForRequest(preflight)).toEqual([
+      'preflight',
+      'harnesses',
+      'run_role_agents',
+    ]);
     expect(helperFeaturesForRequest({type: 'ping'})).toEqual([]);
   });
 

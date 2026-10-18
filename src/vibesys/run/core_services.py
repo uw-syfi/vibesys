@@ -148,7 +148,8 @@ class CoreResources:
     roles: tuple[AgentRole, ...]
     role_models: Mapping[str, str]
     """The model the operator chose per role id where it differs from the run's default."""
-    agent_client: AgentClientProtocol
+    agent_turns: AgentTurnExecutor
+    """Runs each role's keyed turns, on the provider that role's spec names."""
     invocation_slot: AgentInvocationStore
     configuration: AgentConfigurationResolver
     session_spec: SessionSpecFactory
@@ -461,25 +462,31 @@ def _catalog(
     )
 
 
-def _agent_sessions(resources: CoreResources) -> ClientAgentSessions:
-    client = resources.agent_client
+def turn_executor(client: AgentClientProtocol) -> AgentTurnExecutor:
+    """``client`` as the keyed-turn executor a durable core session needs.
+
+    Raises :class:`CoreCompositionError` for a client that is not one.
+    """
     if not isinstance(client, AgentTurnExecutor):
         detail = "a durable core session needs a client that implements AgentTurnExecutor"
         resource = "agent client"
         raise CoreCompositionError(resource, detail)
-    reported = report_turns(client, resources.agent_lifecycle)
+    return client
+
+
+def _agent_sessions(resources: CoreResources) -> ClientAgentSessions:
+    reported = report_turns(resources.agent_turns, resources.agent_lifecycle)
     return ClientAgentSessions(reported, resources.invocation_slot, threads=resources.threads)
 
 
 def agent_session_spec(
     *,
-    client: AgentClientProtocol,
-    environment: AgentExecutionEnvironment,
+    environments: Mapping[str, AgentExecutionEnvironment],
     specs: Mapping[str, AgentSpec],
     variables: Callable[[], Mapping[str, str]],
     configuration: AgentConfigurationResolver,
 ) -> SessionSpecFactory:
-    """Provider session configuration for each role, from the run's one agent environment.
+    """Provider session configuration for each role, from the agent environment of its provider.
 
     A role's own mounts (the evaluation tool socket, profiler files) come from its
     `configuration`; without them a confined agent cannot reach the tools it is offered.
@@ -487,10 +494,11 @@ def agent_session_spec(
 
     def spec_for(role: AgentRole, workspace: Path) -> AgentSessionSpec:
         spec = specs[role.id]
+        environment = environments[spec.provider]
         env = {} if environment.use_docker else dict(variables())
         return AgentSessionSpec(
             role=role.id,
-            provider=client.provider or spec.provider,
+            provider=spec.provider,
             workspace=workspace,
             policy=AgentExecutionPolicy(
                 project_paths=environment.project_path_policy,
@@ -498,7 +506,7 @@ def agent_session_spec(
                 require_enforcement=not environment.use_docker,
                 containerized=environment.use_docker,
             ),
-            model=client.model_for_kind(role.id),
+            model=spec.model,
             mcp_servers=(),
             skills=environment.skill_source_dirs,
             environment=tuple(sorted(env.items())),
@@ -515,4 +523,5 @@ __all__ = [
     "CoreServices",
     "agent_session_spec",
     "build_core_services",
+    "turn_executor",
 ]

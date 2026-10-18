@@ -19,6 +19,13 @@ def test_every_vetted_harness_is_named() -> None:
         assert provider_display_name(harness.provider) != ""
 
 
+def test_every_vetted_harness_names_its_vendor() -> None:
+    for harness in _VETTED:
+        shown = model_display(harness.provider, harness.model)
+        assert shown is not None
+        assert shown.vendor.strip() == shown.vendor != ""
+
+
 def test_a_tier_comes_with_its_name() -> None:
     for harness in _VETTED:
         shown = model_display(harness.provider, harness.model)
