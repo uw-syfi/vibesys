@@ -1,7 +1,7 @@
 """Composed history, publication and dispatch regressions through the public API."""
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -733,6 +733,8 @@ def test_published_receipt_survives_valid_parking_and_confirmed_reopen_without_r
     assert resumed.state.evaluation.continuations[0].authorization_receipt == receipt
 
 
+@pytest.mark.regression
+@example(index=0, later=1, delay=0.001)
 @given(
     index=st.integers(min_value=0, max_value=2),
     later=st.integers(min_value=1, max_value=5),

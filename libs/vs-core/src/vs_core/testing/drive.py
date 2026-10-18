@@ -158,6 +158,16 @@ class _InvalidReply:
 
 
 type Answer = Succeeded | Running | Unknown | Retryable | Failed
+
+
+def _ends(observation: Observation) -> bool:
+    """Whether ``observation`` reports that its job has ended (terminal, with a known status)."""
+    return observation.terminal and observation.status not in (
+        ObservationStatus.PENDING,
+        ObservationStatus.UNKNOWN,
+    )
+
+
 """One executor observation; a tuple of answers is a sequence of observations."""
 
 type Script = Callable[[Request, CoreState], Answer | tuple[Answer, ...]]
@@ -192,6 +202,10 @@ class Faults:
     first. ``reload`` round-trips the whole envelope through the registered codec
     after every step, as a restart would.
 
+    ``reobserve_after`` lists commit numbers (counted as for ``crash_after``) after which the
+    executor answers again for every job that has ended: a poll that was in flight when the job
+    ended reports the same end, at a newer sequence, event and time.
+
     ``crash_after`` lists commit numbers (counted from the first, over the whole drive:
     every authorization, every delivery of a request's observations and its owner events, every
     clock move, and the recovery's own) after which the host dies and a new one takes over. The
@@ -208,6 +222,7 @@ class Faults:
     reload: bool = False
     crash_after: frozenset[int] = frozenset()
     unsealed: Callable[[Request], bool] = lambda _request: False
+    reobserve_after: frozenset[int] = frozenset()
 
 
 class _CrashError(Exception):
@@ -291,6 +306,9 @@ class _Driver[S: StrategyState]:
         self.operator = harness.operator
         self.shell_events = harness.shell_events
         self.schemas = harness.schemas
+        self.ended: dict[ResourceId, JobObserved] = {}
+        """The last observation delivered of each job that has ended, by job."""
+        self.reobserve_owed = 0
 
     # -- the shell loop ---------------------------------------------------
 
@@ -313,6 +331,8 @@ class _Driver[S: StrategyState]:
             return  # the turn is running: a host that dies now leaves it begun, which is not modelled
         self.commits += 1
         self.trace.commits = self.commits
+        if self.commits in self.faults.reobserve_after:
+            self.reobserve_owed += 1
         if self.commits in self.faults.crash_after:
             raise _CrashError
 
@@ -420,12 +440,49 @@ class _Driver[S: StrategyState]:
                 deliveries.reverse()
             for request, delivery in deliveries:
                 for event in delivery:
+                    self.note_end(event)
                     for _ in range(2 if self.faults.duplicate else 1):
                         self.consume(event)
                 executed = self.ledger.get(self.key_of(request))
                 if executed is not None:
                     executed.delivered = True
                 self.commit()
+                self.reobserve()
+
+    # -- jobs observed again after their end ---------------------------------------------
+
+    def note_end(self, event: CoreEvent) -> None:
+        """Remember the first observation that reports a job's end."""
+        if isinstance(event, JobObserved) and _ends(event.observation):
+            self.ended.setdefault(event.resource_id, event)
+
+    def again(self, resource: ResourceId) -> None:
+        """The executor answers again for an ended job: the same end, at a newer sequence and time."""
+        ended = self.ended[resource]
+        key = ended.observation.request_id.root
+        sequence = self.calls.get(key, 0)
+        self.calls[key] = sequence + 1
+        self.clock += 1.0
+        view = ended.observation.model_copy(
+            update={
+                "event_id": EventId(root=f"{key}:observation:{sequence}"),
+                "sequence": sequence,
+                "observed_at": self.clock,
+            }
+        )
+        event = JobObserved(
+            resource_id=resource, observation=view, evaluation_result=ended.evaluation_result
+        )
+        self.ended[resource] = event
+        self.consume(event)
+        self.commit()
+
+    def reobserve(self) -> None:
+        """Answer again for every ended job once per ``reobserve_after`` point passed."""
+        while self.reobserve_owed and not self.trace.finished:
+            self.reobserve_owed -= 1
+            for resource in tuple(self.ended):
+                self.again(resource)
 
     def authorize_round(self) -> list[Request]:
         """Authorize every prepared request core lets go now, in ledger order."""
