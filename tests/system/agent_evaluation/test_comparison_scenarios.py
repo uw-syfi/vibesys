@@ -72,7 +72,7 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster
 from vs_runtime.api.testing import idle_environment_system
-from vs_sim.api.testing import ManualClock, SimThreads, loop_threads
+from vs_sim.api.testing import ManualClock, SimThreads, current_virtual_clock, loop_threads
 from vs_slurm.api import SlurmBatchRequest
 
 if TYPE_CHECKING:
@@ -203,6 +203,16 @@ class ScriptedWriter(ToolUsingWriter):
         self.answer["waiting"] = turn.edits
 
 
+@dataclass(frozen=True)
+class Pace:
+    """How fast the run clock passes in a scenario: jobs take time, and the base goes stale."""
+
+    runtime: float
+    """Run-clock seconds every job takes."""
+    base_staleness: float
+    """The task's ``base_staleness``."""
+
+
 @dataclass
 class Played:
     """One finished run: its state, the agent that played in it and the cluster that measured."""
@@ -223,8 +233,12 @@ async def play(
     seed: int = 7,
     commits: CommitObserver | None = None,
     task: TaskTerms = TERMS,
+    pace: Pace | None = None,
 ) -> AsyncIterator[Played]:
-    """Run the skeleton search with an implementer that plays ``script``; yield what happened."""
+    """Run the skeleton search with an implementer that plays ``script``; yield what happened.
+
+    With ``pace`` the run clock passes while jobs run, and the base goes stale at its pace.
+    """
     writers: list[ScriptedWriter] = []
     resolvers: list[ToolResolver] = []
     bridges: list[AgentEvaluationBridge] = []
@@ -276,8 +290,14 @@ async def play(
     ) as world:
         world.yields = yields
         world.limits = sample_limits(max_turns=len(script) + 2)
-        world.task = task
+        world.task = (
+            task
+            if pace is None
+            else task.model_copy(update={"base_staleness": pace.base_staleness})
+        )
         world.commits = commits
+        if pace is not None:
+            world.timed = (current_virtual_clock(), pace.runtime)
         process, _ = await run(Scenario(world, writers[0], bridges))
         state = process.shell.record.envelope.core
         yield Played(
@@ -479,3 +499,38 @@ async def test_an_egregious_count_of_evaluations_is_warned_of_once_and_none_is_r
         ]
         assert len(warned) == 1
         assert "3 evaluations" in (warned[0].detail or "")
+
+
+STALING = Pace(runtime=60.0, base_staleness=20.0)
+"""Jobs that take three times as long as a base sample stays fresh."""
+
+
+async def test_the_agent_is_told_only_the_comparison_its_fresh_base_samples_make(
+    tmp_path: Path,
+) -> None:
+    """The tool's reply and the resume receipt drop a base sample that went stale.
+
+    Each job takes three times as long as a base sample stays fresh (``STALING``). The input's
+    first run (the strategy's baseline) is stale by the agent's second evaluation, so the base is
+    measured again beside it, and only that new run counts. Both readers of the comparison,
+    the resume receipt (core's authorization) and the tool's reply (the bridge), must take the
+    run clock: read at any other moment, the stale baseline run still counts as a second base
+    sample.
+    """
+    script = (Turn(speed=130.0), Turn(speed=140.0), Turn(peek=True))
+    async with play(tmp_path, script, pace=STALING) as played:
+        state = played.process.shell.record.envelope.core
+        assert len(played.cluster.runs[BASE_SPEED]) == 2, "the stale base was measured again"
+        last = _final(played)
+        assert last.candidate_value == played.cluster.runs[140.0][0]
+        assert last.base_samples == 1, "only the fresh base run counts"
+        told = played.writer.seen[-1]
+        assert told is not None, "the tool reported no comparison to the agent"
+        assert (told["base_samples"], told["base_value"]) == (1, last.base_value)
+        receipts = [
+            wait.authorization_receipt.comparisons
+            for wait in state.evaluation.continuations
+            if wait.authorization_receipt is not None and wait.authorization_receipt.comparisons
+        ]
+        assert receipts, "a resume published the comparison"
+        assert receipts[-1] == (last,)
