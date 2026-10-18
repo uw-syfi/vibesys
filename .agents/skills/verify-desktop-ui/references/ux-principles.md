@@ -90,6 +90,20 @@ can decide it.
     `unknown`, a running turn `running`. Enforced by the token-words tests and
     the ten-idea journey.
 
+## Trade-offs
+
+18. **A trade-off chart says which way is better on each axis, and keeps its
+    axes.** With two objectives the chart plots every idea on both, draws the
+    frontier of the best trade-offs as one staircase, marks the input, mutes the
+    dominated and turned-down ideas, and names an idea on hover with both values
+    and units. Each axis title says its direction ("lower is better"), better is
+    always toward the top and right, and the axes keep their range while the time
+    bar moves, so scrubbing moves only points and the line. A tile per objective
+    sits beside it, in the same place at every level. Enforced by the
+    two-objectives journey of the desktop shell's end-to-end suite and the
+    `legend` and `chart-size` checks; whether it reads calmly is Unenforced
+    (judgment).
+
 ## Sizes the checks cover
 
 Windows of 1000, 1440 and 1920 px wide with the sidebar shown and hidden, live
