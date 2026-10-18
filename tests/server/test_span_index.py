@@ -304,7 +304,37 @@ def test_tail_pages_concatenate_to_the_journal_without_gaps_or_duplicates(
     assert [document for page in reversed(pages) for document in page] == _as_read(documents)
 
 
-_DAMAGES = ("none", "drop_sidecar", "cut_sidecar", "garbage_sidecar", "tear_journal", "other_run")
+_DAMAGES = (
+    "none",
+    "drop_sidecar",
+    "cut_sidecar",
+    "garbage_sidecar",
+    "damage_source_stamp",
+    "tear_journal",
+    "other_run",
+)
+
+
+def _damage_index_or_journal(
+    damage: str, path: Path, sidecar: Path, other: list[_Document], cut: int
+) -> None:
+    """Apply one scheduled crash or cache failure to a journal and its sidecars."""
+    if damage == "drop_sidecar":
+        sidecar.unlink(missing_ok=True)
+    elif damage == "cut_sidecar" and sidecar.exists():
+        sidecar.write_bytes(sidecar.read_bytes()[: cut % (sidecar.stat().st_size + 1)])
+    elif damage == "garbage_sidecar":
+        with sidecar.open("ab") as stream:
+            stream.write(b'[1,2,3\nnot json\n["x"]\n')
+    elif damage == "damage_source_stamp":
+        path.with_name(path.name + ".spans.source").write_bytes(b"not json")
+    elif damage == "tear_journal" and path.exists():
+        path.write_bytes(path.read_bytes()[: max(0, path.stat().st_size - cut % 200)])
+    elif damage == "other_run" and other:
+        elsewhere = path.parent / "elsewhere"
+        elsewhere.mkdir()
+        _write(elsewhere / RUN_EVENTS_FILE, other)
+        sidecar.write_bytes(sidecar_path(elsewhere / RUN_EVENTS_FILE).read_bytes())
 
 
 @_SLOW
@@ -327,20 +357,7 @@ def test_whatever_a_crash_leaves_beside_the_journal_the_answer_is_a_full_scans(
     for document in documents[:crash_after]:
         journal.append(document)
     sidecar = sidecar_path(path)
-    if damage == "drop_sidecar":
-        sidecar.unlink(missing_ok=True)
-    elif damage == "cut_sidecar" and sidecar.exists():
-        sidecar.write_bytes(sidecar.read_bytes()[: cut % (sidecar.stat().st_size + 1)])
-    elif damage == "garbage_sidecar":
-        with sidecar.open("ab") as stream:
-            stream.write(b'[1,2,3\nnot json\n["x"]\n')
-    elif damage == "tear_journal" and path.exists():
-        path.write_bytes(path.read_bytes()[: max(0, path.stat().st_size - cut % 200)])
-    elif damage == "other_run" and other:
-        elsewhere = directory / "elsewhere"
-        elsewhere.mkdir()
-        _write(elsewhere / RUN_EVENTS_FILE, other)
-        sidecar.write_bytes(sidecar_path(elsewhere / RUN_EVENTS_FILE).read_bytes())
+    _damage_index_or_journal(damage, path, sidecar, other, cut)
 
     # The reader is right at the moment of the crash...
     if path.exists():
@@ -371,6 +388,48 @@ def test_a_journal_replaced_under_its_sidecar_is_read_as_it_now_is(
     path.write_bytes(b"".join(_line(document) + b"\n" for document in rewritten))
 
     assert _entries(load_journal_index(path)) == _entries(_scan(path))
+
+
+def test_an_in_place_same_size_rewrite_cannot_make_a_span_look_empty(
+    tmp_path: Path,
+) -> None:
+    """A changed middle with matching endpoints invalidates the sidecar before an empty reply."""
+    original = [
+        _turn_event(1, "e1", "op:a", "first"),
+        _span_event(2, "op:a", None, None),
+        _turn_event(3, "e1", "op:a", "middle"),
+        _turn_event(4, "e1", "op:a", "last"),
+    ]
+    rewritten = [
+        original[0],
+        _span_event(2, "op:b", None, None),
+        _turn_event(3, "e2", "op:b", "middle"),
+        original[3],
+    ]
+    project = _project_with_journal(tmp_path, original)
+    journal = Project.log_directory_for(project.resolve(), _RUN_ID) / RUN_EVENTS_FILE
+    SpanIndexLog(journal)
+    original_bytes = journal.read_bytes()
+    rewritten_bytes = b"".join(_line(document) + b"\n" for document in rewritten)
+    assert len(rewritten_bytes) == len(original_bytes)
+    assert rewritten_bytes.splitlines()[0] == original_bytes.splitlines()[0]
+    assert rewritten_bytes.splitlines()[-1] == original_bytes.splitlines()[-1]
+    journal.write_bytes(rewritten_bytes)
+
+    reply = _ask(
+        RunsEventsForSpanRequest(
+            request_id="s",
+            deadline_ms=5000,
+            project=str(project),
+            run_id=_RUN_ID,
+            span_id="op:b",
+            max=10,
+        )
+    )
+
+    assert isinstance(reply, RunsEventsForSpanReply)
+    assert reply.total == 1
+    assert [event["sequence"] for event in reply.events] == [3]
 
 
 def test_a_valid_last_line_without_its_newline_is_indexed_and_the_run_goes_on(

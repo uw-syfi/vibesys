@@ -25,9 +25,10 @@ are the event's bytes in the journal without its newline, ``crc`` is their CRC-3
 run's writer (``SpanIndexLog``) appends a line right after it appends the event, so the
 sidecar is never ahead of the journal except by an unflushed journal. A reader trusts the
 longest valid prefix of the sidecar whose first and last entries still match the journal
-bytes they name, scans only the journal beyond it, and so gives the same answer as a scan of
-the whole journal for every sidecar state a crash, a resume, a failed write or a replaced
-journal can leave. Nothing else is ever believed: any doubt is a full scan.
+bytes they name. A small source stamp records the journal's file identity and stat snapshot
+after the writer's last sidecar update: a same-size rewrite or replaced file invalidates the
+sidecar, while an append-only extension needs only a suffix scan. A missing or damaged stamp
+causes a full scan.
 
 Public surface: ``SpanLink``, ``Entry``, ``entry_from_line``, ``JournalIndex``,
 ``load_journal_index``, ``span_page``, ``read_documents``, ``StaleIndexError``,
@@ -52,6 +53,7 @@ if TYPE_CHECKING:
     from pydantic import JsonValue
 
 SIDECAR_SUFFIX: Final = ".spans"
+_IDENTITY_SUFFIX: Final = ".source"
 _FORMAT: Final = "vibesys-span-index"
 _VERSION: Final = 1
 _HEADER: Final = (json.dumps([_FORMAT, _VERSION], separators=(",", ":")) + "\n").encode()
@@ -60,11 +62,88 @@ _LINK_FIELDS: Final = 3
 _SPAN_EVENT_KINDS: Final = frozenset({"span_started", "span_updated", "span_ended"})
 _NEWLINE: Final = b"\n"
 _SIDECAR_BATCH_BYTES: Final = 1 << 20
+_SOURCE_STAMP_MAX_BYTES: Final = 256
+_SOURCE_STAT_FIELDS: Final = 5
 
 
 def sidecar_path(journal: Path) -> Path:
     """The span index kept beside ``journal``."""
     return journal.with_name(journal.name + SIDECAR_SUFFIX)
+
+
+def _identity_path(journal: Path) -> Path:
+    """The small source-stat stamp written after the span sidecar."""
+    return journal.with_name(journal.name + SIDECAR_SUFFIX + _IDENTITY_SUFFIX)
+
+
+@dataclass(frozen=True, slots=True)
+class _SourceStat:
+    device: int
+    inode: int
+    size: int
+    mtime_ns: int
+    ctime_ns: int
+
+
+def _source_stat(path: Path) -> _SourceStat | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return _SourceStat(stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+
+
+def _same_source(path: Path, expected: _SourceStat | None) -> bool:
+    """Accept an append-only extension, but reject replacement or same-size edits."""
+    current = _source_stat(path)
+    if expected is None or current is None:
+        return False
+    if (current.device, current.inode) != (expected.device, expected.inode):
+        return False
+    if current.size < expected.size:
+        return False
+    return current.size > expected.size or (
+        current.mtime_ns == expected.mtime_ns and current.ctime_ns == expected.ctime_ns
+    )
+
+
+def _read_source_stamp(path: Path) -> _SourceStat | None:
+    """The writer's bounded-size snapshot of the journal after the indexed prefix."""
+    try:
+        with path.open("rb") as stream:
+            content = stream.read(257)
+        if len(content) > _SOURCE_STAMP_MAX_BYTES:
+            return None
+        value = json.loads(content)
+    except (OSError, UnicodeError, ValueError, RecursionError):
+        return None
+    if (
+        not isinstance(value, list)
+        or len(value) != _SOURCE_STAT_FIELDS
+        or any(type(item) is not int for item in value)
+    ):
+        return None
+    if min(value) < 0:
+        return None
+    return _SourceStat(*value)
+
+
+def _write_source_stamp(journal: Path) -> None:
+    """Record the journal identity after the corresponding sidecar write."""
+    source = _source_stat(journal)
+    if source is None:
+        return
+    stamp = _identity_path(journal)
+    try:
+        stamp.write_text(
+            json.dumps(
+                [source.device, source.inode, source.size, source.mtime_ns, source.ctime_ns],
+                separators=(",", ":"),
+            ),
+            encoding="ascii",
+        )
+    except OSError:
+        return
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,6 +251,7 @@ class JournalIndex:
     def __init__(self, tables: _Tables | None = None) -> None:
         """Start with no entries, or with the entries ``tables`` holds."""
         self._tables = _Tables() if tables is None else tables
+        self._source: _SourceStat | None = None
 
     @property
     def entries(self) -> list[Entry]:
@@ -213,7 +293,21 @@ class JournalIndex:
 
     def copy(self) -> JournalIndex:
         """An index of the same entries that ``add`` can extend without changing this one."""
-        return JournalIndex(self._tables.copy())
+        copied = JournalIndex(self._tables.copy())
+        copied._source = self._source
+        return copied
+
+    def matches_source(self, journal: Path) -> bool:
+        """Whether ``journal`` is unchanged or an append-only extension since this index."""
+        return _same_source(journal, self._source)
+
+    def record_source(self, journal: Path) -> None:
+        """Remember the journal's file identity and stat after its indexed prefix was read."""
+        self._source = _source_stat(journal)
+
+    def set_source_snapshot(self, source: _SourceStat | None) -> None:
+        """Use the source snapshot validated with a sidecar."""
+        self._source = source
 
     def tail(self, before: int | None, count: int, max_bytes: int) -> tuple[list[Entry], bool]:
         """The newest entries below sequence ``before`` (all when ``None``) one page carries.
@@ -331,13 +425,21 @@ def load_journal_index(journal: Path, previous: JournalIndex | None = None) -> J
     when the journal has grown, as long as its ends still match the journal. An absent
     journal has an empty index. Read-only: the sidecar is never written here.
     """
-    if previous is not None and previous.entries and _matches_journal(journal, previous):
+    if previous is not None and previous.entries and previous.matches_source(journal):
+        if not _matches_journal(journal, previous):
+            index = _checked_sidecar(journal)[0]
+        elif not _grown(journal, previous):
+            return previous
+        else:
+            index = previous.copy()
+    elif previous is not None and not previous.entries and previous.matches_source(journal):
         if not _grown(journal, previous):
             return previous
         index = previous.copy()
     else:
         index = _checked_sidecar(journal)[0]
     _extend_from_journal(journal, index)
+    index.record_source(journal)
     return index
 
 
@@ -366,8 +468,10 @@ def _checked_sidecar(journal: Path) -> tuple[JournalIndex, int]:
     index = JournalIndex()
     for entry in entries:
         index.add(entry)
-    if not _matches_journal(journal, index):
+    source = _read_source_stamp(_identity_path(journal))
+    if not _same_source(journal, source) or not _matches_journal(journal, index):
         return JournalIndex(), 0
+    index.set_source_snapshot(source)
     return index, valid
 
 
@@ -500,6 +604,7 @@ class SpanIndexLog:
 
     def __init__(self, journal: Path) -> None:
         """Open ``journal``'s sidecar, repairing it against the journal as it is now."""
+        self._journal = journal
         self._path = sidecar_path(journal)
         index, valid = _checked_sidecar(journal)
         kept = len(index.entries)
@@ -510,6 +615,7 @@ class SpanIndexLog:
             self._repair(valid, index.entries, kept)
         except OSError:
             return
+        _write_source_stamp(journal)
 
     def _repair(self, valid: int, entries: list[Entry], kept: int) -> None:
         """Make the sidecar hold exactly ``entries``: its first ``kept`` lines are already in it."""
@@ -539,3 +645,4 @@ class SpanIndexLog:
                 stream.write(_encode_entry(entry))
         except OSError:
             return
+        _write_source_stamp(self._journal)

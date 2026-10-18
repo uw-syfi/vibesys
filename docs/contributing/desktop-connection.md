@@ -821,11 +821,12 @@ The span index (`run-events.jsonl.spans`, beside the journal) is what makes `run
 `runs.read_tail` seek instead of scan. The journal stays the only truth: the index is a disposable read
 model, one line per event (`[offset, length, crc, sequence, span, execution, link]`), appended by the
 run's writer right after the event, so a crash leaves it behind the journal and never ahead of it. A
-reader (`server.span_index`) believes the longest valid prefix of the sidecar whose first and last entries
-still match the journal bytes they name, scans the journal beyond it, and so answers as a scan of the
-whole journal does for every state a crash, a resume, a failed write or a replaced journal can leave;
-nothing writes it but the run. A journal an older store restarted numbering in reads with the cursor the
-event store repairs it to, in these replies as in a subscription.
+reader (`server.span_index`) also checks the small source stamp (`run-events.jsonl.spans.source`), which
+records the journal's file identity and stat after the writer's last sidecar update. It rejects a
+same-size rewrite or replaced file, trusts an append-only extension, verifies the first and last indexed
+lines, and scans the journal beyond the sidecar; a missing or damaged stamp falls back to a full scan.
+Nothing writes the sidecar but the run. A journal an older store restarted numbering in reads with the
+cursor the event store repairs it to, in these replies as in a subscription.
 
 ## Decisions and alternatives
 
