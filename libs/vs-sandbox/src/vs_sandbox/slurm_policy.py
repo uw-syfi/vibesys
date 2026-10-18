@@ -64,8 +64,9 @@ class SlurmExecutionPolicy(BaseModel):
     ``agent_gpu``, when present, lets the agent run its own GPU commands as
     Slurm jobs (see :func:`agent_gpu_capability`). ``ledger``, when present
     (the ``[vibesys.ledger]`` table), submits evaluations through the project's
-    evaluation ledger on the cluster, so a restarted run reattaches to its jobs
-    instead of cancelling and resubmitting them (#2757).
+    evaluation ledger on the cluster, so runs share the job of one request, and
+    with ``keep_jobs_on_stop`` a restarted run reattaches to its jobs instead of
+    resubmitting them (#2757).
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)

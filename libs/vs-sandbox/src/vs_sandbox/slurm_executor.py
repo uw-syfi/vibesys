@@ -402,8 +402,10 @@ class SlurmEvaluationExecutor:
         """Bind scheduler policy, durable intent, and the cluster interface.
 
         With ``ledger``, jobs are submitted through the project's evaluation ledger
-        (#2757): a request the ledger already holds attaches to its job, ``close``
-        detaches without cancelling, and ``cancel`` releases this run's lease.
+        (#2757): a request the ledger already holds attaches to its job, and ``cancel``
+        and ``close`` cancel a job no other run wants (``_release``); when the ledger
+        policy keeps jobs on a stop, ``close`` detaches and ``cancel`` only releases
+        this run's lease.
         ``ledger_candidate`` labels the ledger entries for people reading them.
 
         ``clock`` times the job deadline and availability readings. The deadline is

@@ -3,9 +3,11 @@
 With an attachment, the Slurm executor submits through the ledger: a request
 whose key already has a job attaches to it, a finished one is collected from
 the cluster's disk, and only a request the ledger does not hold is submitted.
-The run renews a lease on each request it attaches to. Stopping or crashing
-cancels nothing; a request no run leases for the grace period is withdrawn by
-the sweep, which any attached run performs.
+The run renews a lease on each request it attaches to. A run that stops, or
+cancels an evaluation, withdraws each request no other run wants, cancelling its
+job (``relinquish``), unless the policy keeps jobs on a stop
+(``keep_jobs_on_stop``). A crash cancels nothing; a request no run leases for
+the grace period is withdrawn by the sweep, which any attached run performs.
 
 The calls here are blocking (they reach the cluster); the executor runs them on
 its worker threads.
