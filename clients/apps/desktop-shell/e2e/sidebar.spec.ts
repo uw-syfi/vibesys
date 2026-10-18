@@ -1,9 +1,10 @@
 import {expect, type Page, test} from '@playwright/test';
+import {screenCheck} from './checks/screen-check.js';
 import {type FakeBridgeSeed, installFakeBridge, installFakeMachines} from './fake-bridge.js';
 import {installFakeRun} from './fake-run.js';
 import {type FakeServerSeed, installFakeServer} from './fake-server.js';
 import {judgeEvents, RUN_ID, traceEvents, turnEvents} from './fake-trace.js';
-import {drawnUnderWindowControls, type FakeHostWindow, SEED, sidebar} from './world.js';
+import {drawnUnderWindowControls, type FakeHostWindow, open, SEED, sidebar} from './world.js';
 
 /**
  * Hiding the sidebar completely: the toggle in the sidebar's header, the same control at the top of
@@ -112,11 +113,13 @@ test('the button hides the sidebar to a rail with New run and Settings, and show
   await hide(page).click();
   await expect(sidebar(page)).toHaveCount(0);
   await expect(show(page)).toHaveAttribute('title', 'Show sidebar (⌘\\)');
-  // Only a narrow rail is left, and it still reaches New run and Settings.
+  // Only a rail is left, as wide as the window controls and the toggle need, and it still reaches
+  // New run and Settings.
   const rail = page.getByRole('navigation', {name: 'Quick navigation'});
   const railWidth = await rail.evaluate(element => element.getBoundingClientRect().width);
-  expect(railWidth).toBeGreaterThan(0);
-  expect(railWidth).toBeLessThan(80);
+  const toggle = await show(page).boundingBox();
+  expect(railWidth).toBeGreaterThanOrEqual((toggle?.x ?? 0) + (toggle?.width ?? 0));
+  expect(railWidth).toBeLessThan(shown / 2);
   expect(await mainWidth(page)).toBe(1440 - railWidth);
   expect(await mainWidth(page)).toBeGreaterThan(shown);
   await shot(page, 'hidden');
@@ -271,7 +274,7 @@ test('hidden, nothing sits under the window controls, and the Run screen fills t
       ),
     ).toBe(true);
     const drag = await page
-      .locator('.vs-app-strip')
+      .getByRole('navigation', {name: 'Quick navigation'})
       .evaluate(element => getComputedStyle(element).getPropertyValue('-webkit-app-region'));
     expect(drag).toBe('drag');
     await shot(page, 'hidden');
@@ -317,12 +320,52 @@ test('the toggle sits one margin after the window controls, centered on them, an
     }
     expect(hidden.x).toBe(shown.x);
     expect(hidden.y).toBe(shown.y);
-    // The page starts below the title-bar row, not against it.
-    const top = await page
-      .locator('.vs-app-content')
-      .evaluate(element => element.getBoundingClientRect().top);
-    expect(top).toBeGreaterThanOrEqual(inset.height);
     await page.keyboard.press('Meta+Backslash');
     await expect(sidebar(page)).toBeVisible();
   }
+});
+
+test('the page starts at the same height, and clear of the toggle, with the sidebar shown or hidden', async ({
+  page,
+}) => {
+  for (const width of [1440, 1000]) {
+    await page.setViewportSize({width, height: 900});
+    await openRun(page);
+    const pageTop = () =>
+      page.locator('.vs-app-content').evaluate(element => element.getBoundingClientRect().top);
+    const pageLeft = () =>
+      page.locator('.vs-app-content').evaluate(element => element.getBoundingClientRect().left);
+    const shownTop = await pageTop();
+    for (const hidden of [true, false, true]) {
+      await page.keyboard.press('Meta+Backslash');
+      await expect(sidebar(page)).toHaveCount(hidden ? 0 : 1);
+      expect(await pageTop(), `${hidden ? 'hidden' : 'shown'} at ${width} px`).toBe(shownTop);
+      if (hidden) {
+        const toggle = await show(page).boundingBox();
+        expect(await pageLeft(), `at ${width} px`).toBeGreaterThanOrEqual(
+          (toggle?.x ?? 0) + (toggle?.width ?? 0),
+        );
+      }
+    }
+    await page.keyboard.press('Meta+Backslash');
+    await expect(sidebar(page)).toBeVisible();
+  }
+});
+
+test('saved runs that could not be read are said in Recent, and the readable ones are still listed', async ({
+  page,
+}) => {
+  const skippedRecent = [
+    {index: 16, reason: 'recent.json: runs[16].task must be a task name'},
+    {index: 17, reason: 'recent.json: runs[17].instanceId must be a 12-digit instance id'},
+  ];
+  await open(page, {...SEED, skippedRecent});
+
+  const notice = sidebar(page).locator('.vs-banner');
+  await expect(notice).toContainText('2 saved runs were skipped');
+  await expect(notice).toContainText('runs[16].task must be a task name');
+  await expect(notice).toContainText('runs[17].instanceId');
+  await expect(sidebar(page).getByText('Runs you open show up here.')).toHaveCount(0);
+  await expect(sidebar(page).locator('.vs-sidebar-item').first()).toBeVisible();
+  expect(await screenCheck(page)).toEqual([]);
 });

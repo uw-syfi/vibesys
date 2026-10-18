@@ -30,6 +30,7 @@ function fakeBridge(): WelcomeBridge {
         eventCursor: 0,
         settingsProblem: null,
         recent: [],
+        skippedRecent: [],
         listings: [],
         chrome: {mode: 'welcome', attached: null, stops: {}},
         host: 'local',

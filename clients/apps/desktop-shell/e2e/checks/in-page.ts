@@ -17,6 +17,7 @@ export type CheckId =
   | 'strike'
   | 'chart-size'
   | 'pane-fill'
+  | 'scroll-room'
   | 'stability';
 
 export interface Violation {
@@ -569,6 +570,72 @@ export function paneFillCheck(): Violation[] {
   return found;
 }
 
+/** The children of `element` as drawn: a child with `display: contents` draws its own children instead. */
+function drawnChildren(element: Element): Element[] {
+  return [...element.children].flatMap(child =>
+    getComputedStyle(child).display === 'contents' ? drawnChildren(child) : [child],
+  );
+}
+
+/** The bottom edge, in the window, of what `element` may fill: its nearest clipping ancestor, else the window. */
+function roomBottom(element: Element): number {
+  for (let up = element.parentElement; up !== null; up = up.parentElement) {
+    const style = getComputedStyle(up);
+    if (style.overflowY !== 'visible') {
+      return (
+        up.getBoundingClientRect().bottom -
+        Number.parseFloat(style.paddingBottom) -
+        Number.parseFloat(style.borderBottomWidth)
+      );
+    }
+  }
+  return innerHeight;
+}
+
+/** The height of `column` that its drawn children do not use, plus what lies below it in what holds it. */
+function columnRoom(column: Element): number {
+  const style = getComputedStyle(column);
+  const rows = drawnChildren(column)
+    .map(child => child.getBoundingClientRect())
+    .sort((a, b) => a.top - b.top);
+  const gap = Number.parseFloat(style.rowGap) || 0;
+  const bottom = column.getBoundingClientRect().bottom;
+  const inner =
+    bottom - Number.parseFloat(style.paddingBottom) - Number.parseFloat(style.borderBottomWidth);
+  let room = Math.max(0, roomBottom(column) - bottom);
+  for (const [index, rect] of rows.entries()) {
+    const below = rows[index + 1]?.top ?? inner;
+    room += below - rect.bottom - (index + 1 < rows.length ? gap : 0);
+  }
+  return room;
+}
+
+/**
+ * A region that scrolls vertically while room is left to show more of it: its rows are cut
+ * although empty space sits around it. The room is the height of its column that no child
+ * uses (between the drawn children, in the order drawn, and after the last; a fixed margin counts
+ * as room too), plus what lies below the column up to the edge of what holds it. A column that is
+ * the page's whole height has none below it.
+ */
+export function scrollRoomCheck(): Violation[] {
+  const found: Violation[] = [];
+  for (const element of document.body.querySelectorAll('*')) {
+    const scrolls = ['auto', 'scroll'].includes(getComputedStyle(element).overflowY);
+    const column = element.parentElement;
+    if (!scrolls || column === null || element.scrollHeight <= element.clientHeight + 1) continue;
+    const style = getComputedStyle(column);
+    if (style.display !== 'flex' || style.flexDirection !== 'column' || !isShown(element)) continue;
+    const room = columnRoom(column);
+    if (room <= 24) continue;
+    found.push({
+      check: 'scroll-room',
+      message: `a region scrolls (${element.scrollHeight} px of content in ${element.clientHeight} px) while it has ${Math.round(room)} px of room`,
+      where: describe(element),
+    });
+  }
+  return found;
+}
+
 /** What `screen-check.ts` sends to the page ahead of a check. */
 export const HELPERS: readonly ((...args: never[]) => unknown)[] = [
   inCode,
@@ -579,6 +646,9 @@ export const HELPERS: readonly ((...args: never[]) => unknown)[] = [
   hasLabel,
   clipArea,
   isShown,
+  drawnChildren,
+  roomBottom,
+  columnRoom,
   textBoxes,
   lineCount,
   brokenWords,

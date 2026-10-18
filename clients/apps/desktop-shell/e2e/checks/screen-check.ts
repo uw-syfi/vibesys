@@ -18,6 +18,7 @@ import {
   overlapCheck,
   paneFillCheck,
   rawTextCheck,
+  scrollRoomCheck,
   strikeCheck,
   truncationCheck,
   type Violation,
@@ -39,6 +40,7 @@ const CHECKS: Readonly<Record<PageCheckId, (input: CheckInput) => Violation[]>> 
   strike: strikeCheck,
   'chart-size': chartSizeCheck,
   'pane-fill': paneFillCheck,
+  'scroll-room': scrollRoomCheck,
 };
 
 /** Enum values that never read as words: the failure reasons spelled with a hyphen or underscore. */

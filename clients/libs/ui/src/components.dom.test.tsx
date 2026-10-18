@@ -212,7 +212,7 @@ describe('AppFrame', () => {
     </AppFrame>
   );
 
-  test('shown, the navigation is available and there is no strip; hidden, it is inert, out of the accessibility tree, and the reveal control is in the main area', async () => {
+  test('shown or hidden, the main area is only the page, with no strip pushing it down; hidden, the navigation is inert, out of the accessibility tree, and the reveal control is in the title-bar row', async () => {
     const container = await mount(frame(false));
     const nav = one(container, 'nav');
     expect(nav.hasAttribute('inert')).toBe(false);
@@ -226,7 +226,7 @@ describe('AppFrame', () => {
     const hiddenNav = one(hidden, 'nav');
     expect(hiddenNav.hasAttribute('inert')).toBe(true);
     expect(hiddenNav.getAttribute('aria-hidden')).toBe('true');
-    expect(one(hidden, '.vs-app-main .vs-app-strip').textContent).toBe('');
+    expect(hidden.querySelector('.vs-app-strip')).toBeNull();
     const reveal = one(hidden, '.vs-app-titlebar-control button');
     expect(reveal.getAttribute('aria-label')).toBe('Show sidebar');
     expect(reveal.textContent).toBe('');

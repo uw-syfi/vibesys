@@ -8,6 +8,7 @@ export {
   type RecentStatus,
   recentRunKey,
   recentStatus,
+  type SkippedRecent,
   suggestProjects,
 } from './recent-status.js';
 export {

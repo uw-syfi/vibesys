@@ -68,7 +68,7 @@ const digestsOf = (requests: readonly SidebarRequest[]) =>
 
 /** The state with `listings` and `recent` known and the All runs screen open, and what it asked. */
 function open(listings: readonly HostListing[], recent: readonly RecentRun[] = []) {
-  const known = sidebarStep(SIDEBAR_EMPTY, {type: 'overview', listings, recent});
+  const known = sidebarStep(SIDEBAR_EMPTY, {type: 'overview', listings, recent, skippedRecent: []});
   return sidebarStep(known.state, {type: 'select', screen: {kind: 'all-runs'}});
 }
 
@@ -255,6 +255,51 @@ describe('the All runs screen', () => {
 
       expect(created).toEqual([...created].sort((left, right) => right - left));
       expect(rows.map(row => row.run.runId).sort()).toEqual(runs.map(each => each.runId).sort());
+    }
+  });
+
+  test('machines are ordered by their newest run, whatever the listing order', () => {
+    const HOSTS = ['ssh:host-a', 'ssh:host-b', 'local'] as const;
+    for (let seed = 1; seed <= 60; seed += 1) {
+      const newest = HOSTS.map((_, index) =>
+        seed % (index + 4) === 0 ? null : ((seed * 31 + index * 17) % 40) * HOUR,
+      );
+      const order = [...HOSTS.keys()].sort(
+        (a, b) => ((seed >> a) & 1) - ((seed >> b) & 1) || a - b,
+      );
+      const listings = order.map(index => listed(HOSTS[index] as 'ssh:host-a'));
+      const {state, requests} = open(
+        listings,
+        order.map(index => opened(HOSTS[index] as 'ssh:host-a', '/p/q', 'r0')),
+      );
+      const answered = apply(
+        state,
+        listsOf(requests).map(([host, project, token]) => {
+          const age = newest[HOSTS.indexOf(host as (typeof HOSTS)[number])] ?? null;
+          return {
+            type: 'project-runs-listed',
+            token: token as number,
+            host: host as 'ssh:host-a',
+            project: project as string,
+            runs: age === null ? [] : [run('old', age + 5), run('new', age)],
+          } satisfies SidebarAction;
+        }),
+      );
+
+      const groups = allRunsGroups(answered, CLOCK);
+      const ages = groups.map(
+        group => newest[HOSTS.indexOf(group.host as (typeof HOSTS)[number])] ?? null,
+      );
+
+      // Newest first (smallest age), the machines with no run last, ties in listing order.
+      const rank = ages.map(age => (age === null ? Number.POSITIVE_INFINITY : age));
+      expect(rank).toEqual([...rank].sort((left, right) => left - right));
+      expect(groups.map(group => group.host).sort()).toEqual([...HOSTS].sort());
+      for (const group of groups) {
+        expect(group.rows.map(row => row.run.runId)).toEqual(
+          group.rows.length === 0 ? [] : ['new', 'old'],
+        );
+      }
     }
   });
 });

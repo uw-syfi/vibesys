@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import type {HostListing} from '@vibesys/hosts';
-import type {RecentRun} from '@vibesys/runs';
+import type {RecentRun, SkippedRecent} from '@vibesys/runs';
 import {WelcomeFeed} from './welcome-feed.js';
 
 describe('WelcomeFeed', () => {
@@ -28,6 +28,16 @@ describe('WelcomeFeed', () => {
     expect(snapshot.recent).toEqual([recent('current')]);
   });
 
+  test('the disk read reports its skipped entries until a published list replaces it', () => {
+    const feed = new WelcomeFeed();
+    const skipped = [{index: 2, reason: 'recent.json: runs[2].task must be a task name'}];
+
+    expect(feed.snapshot(values([recent('a')], skipped)).skippedRecent).toEqual(skipped);
+
+    feed.recent([recent('b')]);
+    expect(feed.snapshot(values([recent('a')], skipped)).skippedRecent).toEqual([]);
+  });
+
   test('a retired host is absent from later renderer snapshots', () => {
     const feed = new WelcomeFeed();
     feed.listing(listing('ssh:worker', 'obsolete'));
@@ -38,8 +48,8 @@ describe('WelcomeFeed', () => {
   });
 });
 
-function values(recentRuns: readonly RecentRun[]) {
-  return {recent: recentRuns};
+function values(recentRuns: readonly RecentRun[], skippedRecent: readonly SkippedRecent[] = []) {
+  return {recent: recentRuns, skippedRecent};
 }
 
 function recent(runId: string): RecentRun {

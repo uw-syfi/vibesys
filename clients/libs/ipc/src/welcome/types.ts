@@ -11,7 +11,7 @@
  * `instances.watch`: there is no refresh request to forget, and no timer.
  */
 import type {HostListing} from '@vibesys/hosts';
-import type {RecentRun} from '@vibesys/runs';
+import type {RecentRun, SkippedRecent} from '@vibesys/runs';
 
 /** The events the main process sends the welcome view. */
 export const WELCOME_EVENTS = {
@@ -34,6 +34,8 @@ export interface WelcomeOverview {
   /** Events at or before this cursor are already covered by this overview. */
   readonly eventCursor: number;
   readonly recent: readonly RecentRun[];
+  /** The saved runs `recent` leaves out because they could not be read; empty when none. */
+  readonly skippedRecent: readonly SkippedRecent[];
   /** The latest value heard from every host watch. */
   readonly listings: readonly HostListing[];
 }

@@ -707,7 +707,8 @@ rather than the window of the run it names.
   exits. There is exactly one `app.exit` call site.
 - **Settings store.** `hosts.json` and `recent.json` have one writer, the store, which serializes
   updates and replaces files atomically. With the single-instance lock, no other process writes
-  them.
+  them. A `recent.json` with unreadable entries is read for the others and reports each entry
+  skipped; updates reject such a file, so the user's entries are never dropped silently.
 
 ## Guards
 

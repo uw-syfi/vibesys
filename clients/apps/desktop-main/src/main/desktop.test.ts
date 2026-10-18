@@ -2,6 +2,7 @@ import {describe, expect, test} from 'bun:test';
 import {WELCOME_CHANNELS, type WelcomeEvent, type WelcomeResult} from '@vibesys/ipc';
 import {RunHistoryStore} from '@vibesys/run-history';
 import {FakeHistorySource} from '@vibesys/run-history/testing';
+import type {SkippedRecent} from '@vibesys/runs';
 import {DEFAULT_PREFERENCES, type RecentFile} from '@vibesys/settings';
 import {SHELL_URL} from './app-assets.js';
 import {Desktop, type DesktopDeps} from './desktop.js';
@@ -119,7 +120,7 @@ interface RetirementCleanups {
   readonly retireOwner?: (owner: string) => Promise<void>;
 }
 
-function desktopWorld(cleanups: RetirementCleanups = {}) {
+function desktopWorld(cleanups: RetirementCleanups = {}, skipped: SkippedRecent[] = []) {
   const events: string[] = [];
   const logs: string[] = [];
   const checkouts: {readonly path: unknown; readonly change: unknown}[] = [];
@@ -216,7 +217,7 @@ function desktopWorld(cleanups: RetirementCleanups = {}) {
   const recent: RecentFile = {version: 4, runs: []};
   const settings: DesktopDeps['settings'] = {
     onRecentChanged: () => () => undefined,
-    recent: async () => recent,
+    recentSnapshot: async () => ({recent, skipped}),
   };
   const window: DesktopDeps['window'] = {
     welcome: document,
@@ -273,6 +274,18 @@ function desktopWorld(cleanups: RetirementCleanups = {}) {
     releaseCleanup,
   };
 }
+
+describe('Desktop overview', () => {
+  test('the overview carries the saved runs that could not be read', async () => {
+    const skipped = [{index: 16, reason: 'recent.json: runs[16].task must be a task name'}];
+    const w = desktopWorld({}, skipped);
+
+    await expect(w.ipc.invoke('10:100', WELCOME_CHANNELS.overview)).resolves.toMatchObject({
+      ok: true,
+      value: {recent: [], skippedRecent: skipped},
+    });
+  });
+});
 
 describe('Desktop run windows', () => {
   test('a run opens in its own window once, whose surface is answered until it closes', async () => {

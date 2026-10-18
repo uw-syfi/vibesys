@@ -4,11 +4,13 @@
  */
 import type {HostKey, HostListing} from '@vibesys/hosts';
 import type {PreferencesView, WelcomeEvent, WelcomeOverview} from '@vibesys/ipc';
-import type {RecentRun} from '@vibesys/runs';
+import type {RecentRun, SkippedRecent} from '@vibesys/runs';
 
 export interface WelcomeSnapshotValues {
   /** A disk read used until this process has published a newer Recent value. */
   readonly recent: readonly RecentRun[];
+  /** The entries that disk read left out of `recent`. */
+  readonly skippedRecent: readonly SkippedRecent[];
 }
 
 /** The single sequence and retained state behind the welcome snapshot-plus-stream handoff. */
@@ -46,7 +48,9 @@ export class WelcomeFeed {
   snapshot(values: WelcomeSnapshotValues): WelcomeOverview {
     return {
       ...values,
+      // A published list is of a file the store wrote, which it does while every entry is readable.
       recent: this.#recent ?? values.recent,
+      skippedRecent: this.#recent === null ? values.skippedRecent : [],
       listings: [...this.#listings.values()],
       eventCursor: this.#sequence,
     };

@@ -148,7 +148,13 @@ body > div:first-child {
     grid-column: 2;
     grid-row: 1 / 3;
     min-height: 0;
-    align-self: start;
+    display: flex;
+    flex-direction: column;
+  }
+  /* The card is as tall as its content, or as the column when that is more; its checks scroll then. */
+  .vs-page[data-side-action] .vs-action-panel {
+    flex: 0 1 auto;
+    min-height: 0;
   }
   .vs-page[data-side-action] .vs-action-panel-bar {
     display: contents;
@@ -160,12 +166,16 @@ body > div:first-child {
   }
   .vs-page[data-side-action] .vs-action-panel-details {
     order: 1;
-    max-height: 42dvh;
+    flex: 0 1 auto;
+    min-height: 0;
+    max-height: none;
     border-top: var(--hairline) solid var(--line);
     border-bottom: 0;
   }
   .vs-page[data-side-action] .vs-action-panel-summary {
     order: 2;
+    /* Its row-layout basis would reserve that much height in this column. */
+    flex: none;
     padding: var(--space-3) var(--space-4);
   }
   .vs-page[data-side-action] .vs-action-panel-action {

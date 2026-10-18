@@ -23,9 +23,10 @@ const COLLAPSE_WIDTH = 120;
  * (`--chrome-inset-height`) and at least a control tall. `control` sits in it, vertically centered
  * and after the window's controls (`--chrome-inset-width`), and stays in the same place whether the
  * column is shown or not. With `navHidden` the column takes no width at all and is gone for
- * assistive technology and the keyboard, and the `rail`, if any, takes its place; the main area then
- * starts with an empty drag strip of the row's height, so the page sits below the row. The column changes size over the `--duration-fast`
- * token, and not at all when the user prefers reduced motion.
+ * assistive technology and the keyboard, and the `rail`, if any, takes its place. The rail is wide
+ * enough to hold the window's controls and the toggle, so the page starts at the same place whether
+ * the column is shown or not. The column changes size over the `--duration-fast` token, and not at
+ * all when the user prefers reduced motion.
  */
 export function AppFrame(props: {
   /** The navigation column's accessible name. */
@@ -117,7 +118,6 @@ export function AppFrame(props: {
         </nav>
       ) : null}
       <div className="vs-app-main">
-        {hidden ? <div className="vs-app-strip" /> : null}
         <div className="vs-app-content">{props.children}</div>
       </div>
     </div>

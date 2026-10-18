@@ -14,6 +14,7 @@ import {
   parseStoredRunStart,
   type RunStart,
   recentRunKey,
+  type SkippedRecent,
 } from '@vibesys/runs';
 import {object, onlyKeys, SettingsError} from './parse.js';
 
@@ -77,9 +78,15 @@ function parseRun(value: unknown, path: string, version: 1 | 2 | 3 | 4): StoredR
     record['task'] === null
       ? null
       : matching(record['task'], isTaskName, 'a task name', `${path}.task`);
+  let project: string;
+  try {
+    project = validHostPath(record['project'], `${path}.project`);
+  } catch (error) {
+    throw new SettingsError((error as Error).message);
+  }
   return {
     host: host as HostKey,
-    project: validHostPath(record['project'], `${path}.project`),
+    project,
     task,
     runId: matching(record['runId'], isRunId, 'a run id', `${path}.runId`),
     instanceId:
@@ -105,12 +112,22 @@ function parseStart(value: unknown, path: string): RunStart | null {
   }
 }
 
+/** What `recent.json` holds: the runs it lists validly, and the entries it could not read. */
+export interface ParsedRecent {
+  readonly file: RecentFile;
+  /** Every entry left out, in file order; none is ever repaired or guessed. */
+  readonly skipped: readonly SkippedRecent[];
+}
+
 /**
- * Validate a whole `recent.json` document. Version 1 keeps its instance locator but drops an entry
- * saved before its run id was known. Version 2 predates durable locators, so it migrates with a
- * null locator until the run is next attached or inspected.
+ * Validate a whole `recent.json` document. The document itself must be valid: its keys, version and
+ * list. Each entry is validated strictly on its own, and an invalid one is skipped and reported by
+ * its place and reason, so one bad entry does not hide the others. Version 1 keeps its instance
+ * locator but drops an entry saved before its run id was known, without a report. Version 2
+ * predates durable locators, so it migrates with a null locator until the run is next attached or
+ * inspected.
  */
-export function parseRecent(value: unknown): RecentFile {
+export function parseRecent(value: unknown): ParsedRecent {
   const record = object(value, 'recent.json');
   onlyKeys(record, ['version', 'runs'], 'recent.json');
   const version = record['version'];
@@ -119,12 +136,19 @@ export function parseRecent(value: unknown): RecentFile {
   }
   const runs = record['runs'];
   if (!Array.isArray(runs)) throw new SettingsError('recent.json: runs must be a list');
-  const kept =
-    version === 1 ? runs.filter(run => object(run, 'recent.json: runs[]')['runId'] != null) : runs;
-  return {
-    version: 4,
-    runs: kept.map((run, index) => parseRun(run, `recent.json: runs[${index}]`, version)),
-  };
+  const kept: StoredRecentRun[] = [];
+  const skipped: SkippedRecent[] = [];
+  for (const [index, entry] of runs.entries()) {
+    const path = `recent.json: runs[${index}]`;
+    try {
+      if (version === 1 && object(entry, path)['runId'] == null) continue;
+      kept.push(parseRun(entry, path, version));
+    } catch (error) {
+      if (!(error instanceof SettingsError)) throw error;
+      skipped.push({index, reason: error.message});
+    }
+  }
+  return {file: {version: 4, runs: kept}, skipped};
 }
 
 function sameRun(a: StoredRecentRun, b: StoredRecentRun): boolean {

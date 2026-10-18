@@ -93,9 +93,9 @@ export function createSidebarStore(
   bridge.onPreferences(event => store.dispatch({type: 'archived', archived: event.value.archived}));
   void settled(bridge.overview()).then(result => {
     if (!result.ok) return;
-    const {listings, recent, eventCursor} = result.value;
+    const {listings, recent, skippedRecent, eventCursor} = result.value;
     cursor = eventCursor;
-    store.dispatch({type: 'overview', listings, recent});
+    store.dispatch({type: 'overview', listings, recent, skippedRecent});
     for (const {sequence, action} of early.splice(0))
       if (sequence > eventCursor) store.dispatch(action);
   });

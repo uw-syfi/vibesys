@@ -27,5 +27,9 @@ export {
   rememberInstance,
   type StoredRecentRun,
 } from './recent.js';
-export {type HostSettingsSnapshot, SettingsStore} from './settings-store.js';
+export {
+  type HostSettingsSnapshot,
+  type RecentSnapshot,
+  SettingsStore,
+} from './settings-store.js';
 export {sshGlobSegmentMatches} from './ssh-pattern.js';

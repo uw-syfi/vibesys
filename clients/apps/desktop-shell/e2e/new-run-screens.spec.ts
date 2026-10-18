@@ -1,6 +1,7 @@
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {expect, type Page, test} from '@playwright/test';
 import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
+import {screenCheck} from './checks/screen-check.js';
 import {open, SEED} from './world.js';
 
 /**
@@ -98,6 +99,8 @@ for (const theme of THEMES) {
         await expect(ready(page).getByRole('button', {name: 'Start run'})).toBeInViewport({
           ratio: 1,
         });
+        // A list that scrolls does so because the window is out of room, not before.
+        expect(await screenCheck(page, ['scroll-room'])).toEqual([]);
         if (shots !== undefined) {
           const file = `new-run__${state.name}__${size.width}x${size.height}__${theme}.png`;
           await page.screenshot({path: `${shots}/${file}`});

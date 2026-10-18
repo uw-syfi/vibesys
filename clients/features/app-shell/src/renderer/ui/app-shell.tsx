@@ -1,10 +1,20 @@
-import {AppFrame, Button, Row, SidebarGroup, SidebarItem, SidebarSection, Text} from '@vibesys/ui';
+import {
+  AppFrame,
+  Banner,
+  Button,
+  Row,
+  SidebarGroup,
+  SidebarItem,
+  SidebarSection,
+  Text,
+} from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
 import {
   type Clock,
   liveMachineGroups,
   type RunRow,
   recentGroups,
+  recentNotice,
   type Screen,
   type ShellActions,
   type SidebarAction,
@@ -53,6 +63,7 @@ export function AppShell(props: {
   const {state, dispatch, actions} = props;
   const live = liveMachineGroups(state);
   const recent = recentGroups(state, props.clock());
+  const skipped = recentNotice(state.skippedRecent);
   const recentCount = recent.groups.reduce((total, machine) => total + machine.rows.length, 0);
   const toggle = (
     <SidebarToggle
@@ -135,7 +146,10 @@ export function AppShell(props: {
               press: select({kind: 'all-runs'}),
             }}
           >
-            {recent.groups.length === 0 ? (
+            {skipped === null ? null : (
+              <Banner tone="warn" title={skipped.title} body={skipped.body} />
+            )}
+            {recent.groups.length === 0 && skipped === null ? (
               <Text variant="small" tone="muted">
                 Runs you open show up here.
               </Text>

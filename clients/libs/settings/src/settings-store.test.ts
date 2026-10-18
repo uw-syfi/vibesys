@@ -132,6 +132,32 @@ describe('SettingsStore', () => {
     }
   });
 
+  test('a recent file with invalid entries lists the valid ones, reports the rest, and is not rewritten', async () => {
+    const directory = '/settings';
+    const path = join(directory, 'recent.json');
+    const text = `${JSON.stringify({
+      version: 4,
+      runs: [run(3), {...run(2), task: ''}, run(1), {...run(0), instanceId: 'bad'}],
+    })}\n`;
+    const filesystem = new FakeSettingsFilesystem({[path]: text});
+    const {settings, logged} = store(filesystem, directory);
+    const heard: RecentFile[] = [];
+    settings.onRecentChanged(recent => heard.push(recent));
+
+    const snapshot = await settings.recentSnapshot();
+
+    expect(snapshot.recent).toEqual({version: 4, runs: [run(3), run(1)]});
+    expect(snapshot.skipped.map(each => each.index)).toEqual([1, 3]);
+    expect(snapshot.skipped[0]?.reason).toBe('recent.json: runs[1].task must be a task name');
+    expect(logged.join('\n')).toContain('runs[3].instanceId');
+
+    await expect(settings.updateRecent(current => remember(current, run(9)))).rejects.toThrow(
+      '2 unreadable entries',
+    );
+    expect(heard).toEqual([]);
+    expect(filesystem.text(path)).toBe(text);
+  });
+
   test('updates still initialize absent files and merge subsequent valid updates', async () => {
     const directory = '/settings';
     const filesystem = new FakeSettingsFilesystem();

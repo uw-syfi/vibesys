@@ -18,12 +18,16 @@
  *   update that already committed.
  * - **Invalid files are ignored by reads and reported** in the same host-settings snapshot; updates
  *   reject them before writing, so the bytes remain available for repair.
+ * - **A recent-runs file with invalid entries is read for the rest.** Each unreadable entry is
+ *   skipped and reported with its reason in the same snapshot as the runs kept; updates reject such
+ *   a file like an invalid one, so no entry is dropped from the user's file without their repair.
  *
  * Electron-free: the main process supplies the paths.
  */
 import {randomUUID} from 'node:crypto';
 import {open, readFile, rename, unlink} from 'node:fs/promises';
 import {dirname} from 'node:path';
+import type {SkippedRecent} from '@vibesys/runs';
 import {EMPTY_SETTINGS, parseSettings, type SettingsFile} from './host-settings.js';
 import {DEFAULT_PREFERENCES, type Preferences, parsePreferences} from './preferences.js';
 import {EMPTY_RECENT, parseRecent, type RecentFile} from './recent.js';
@@ -68,11 +72,22 @@ interface ReadResult<T> {
   readonly failure: Error | null;
 }
 
+interface RecentRead extends ReadResult<RecentFile> {
+  readonly skipped: readonly SkippedRecent[];
+}
+
 /** One coherent observation of `hosts.json`. */
 export interface HostSettingsSnapshot {
   readonly settings: SettingsFile;
   /** Why this observation ignored the file; null when it was valid or absent. */
   readonly problem: string | null;
+}
+
+/** One coherent observation of `recent.json`. */
+export interface RecentSnapshot {
+  readonly recent: RecentFile;
+  /** The entries this observation left out, with why; empty when none was invalid. */
+  readonly skipped: readonly SkippedRecent[];
 }
 
 /** Whether a conditional settings update crossed its atomic replace boundary. */
@@ -122,20 +137,33 @@ export class SettingsStore {
     return (await this.#readRecent()).value;
   }
 
-  async #readRecent(): Promise<ReadResult<RecentFile>> {
+  /** The recent runs and the entries left out of them, read afresh. */
+  async recentSnapshot(): Promise<RecentSnapshot> {
+    const read = await this.#readRecent();
+    return {recent: read.value, skipped: read.skipped};
+  }
+
+  async #readRecent(): Promise<RecentRead> {
     const read = await readText(this.#filesystem, this.#options.recentPath);
-    if (read.kind === 'missing') return {value: EMPTY_RECENT, failure: null};
+    if (read.kind === 'missing') return {value: EMPTY_RECENT, failure: null, skipped: []};
     if (read.kind === 'failed') {
       const failure = readFailure(this.#options.recentPath, read.error);
       this.#log(failure.message);
-      return {value: EMPTY_RECENT, failure};
+      return {value: EMPTY_RECENT, failure, skipped: []};
     }
     try {
-      return {value: parseRecent(JSON.parse(read.text) as unknown), failure: null};
+      const {file, skipped} = parseRecent(JSON.parse(read.text) as unknown);
+      if (skipped.length === 0) return {value: file, failure: null, skipped};
+      const reasons = skipped.map(entry => entry.reason).join('; ');
+      this.#log(`skipping ${skipped.length} entries of ${this.#options.recentPath}: ${reasons}`);
+      const failure = new Error(
+        `${this.#options.recentPath} has ${skipped.length} unreadable entries and is left as it is: ${reasons}`,
+      );
+      return {value: file, failure, skipped};
     } catch (error) {
       const failure = invalidFile(this.#options.recentPath, error);
       this.#log(`ignoring ${failure.message}`);
-      return {value: EMPTY_RECENT, failure};
+      return {value: EMPTY_RECENT, failure, skipped: []};
     }
   }
 

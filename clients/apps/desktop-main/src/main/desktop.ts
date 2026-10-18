@@ -58,7 +58,7 @@ export interface DesktopDeps {
   readonly history: Pick<RunHistoryStore, 'read'>;
   readonly machines: Pick<MachinesMain, 'machines' | 'report' | 'inspect' | 'remove'>;
   readonly runs: Pick<RunControl, 'attach' | 'attached' | 'detach' | 'resume' | 'start' | 'stop'>;
-  readonly settings: Pick<SettingsStore, 'onRecentChanged' | 'recent'>;
+  readonly settings: Pick<SettingsStore, 'onRecentChanged' | 'recentSnapshot'>;
   readonly preferences: Pick<PreferencesMain, 'answer'>;
   readonly newRun: Pick<NewRunMain, 'answer'>;
   /** The app shell's page: the only one admitted to the main window's requests. */
@@ -202,9 +202,9 @@ export class Desktop {
 
   async #overview(): Promise<WelcomeOverview> {
     const generation = ++this.#recentGeneration;
-    const recent = await this.#deps.settings.recent();
+    const {recent, skipped} = await this.#deps.settings.recentSnapshot();
     void this.#watchRecent(recent, generation);
-    return this.#deps.welcome.snapshot({recent: welcomeRecent(recent)});
+    return this.#deps.welcome.snapshot({recent: welcomeRecent(recent), skippedRecent: skipped});
   }
 
   /** Answer one validated surface request. */

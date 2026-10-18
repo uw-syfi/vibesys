@@ -68,7 +68,7 @@ describe('recent runs', () => {
         expect(new Set(keys).size).toBe(keys.length);
         expect(file.runs.length).toBeLessThanOrEqual(4);
       }
-      expect(parseRecent(JSON.parse(JSON.stringify(file)))).toEqual(file);
+      expect(parseRecent(JSON.parse(JSON.stringify(file)))).toEqual({file, skipped: []});
     }
   });
 
@@ -95,7 +95,7 @@ describe('recent runs', () => {
     expect(remembered.runs).toEqual([second, first]);
   });
 
-  test('parsing rejects unknown keys and unusable values, naming the path', () => {
+  test('an entry with an unknown key or an unusable value is skipped, naming the key', () => {
     const run = {
       host: 'local',
       project: '/p',
@@ -104,35 +104,66 @@ describe('recent runs', () => {
       instanceId: '0123456789ab',
       attachedAt: 1,
     };
-    expect(() => parseRecent({version: 3, runs: [{...run, extra: 1}]})).toThrow(
+    const skippedFor = (entry: unknown) =>
+      parseRecent({version: 3, runs: [entry]}).skipped.map(each => each.reason);
+    expect(skippedFor({...run, extra: 1})).toEqual([
       'recent.json: runs[0].extra is not a known field',
-    );
-    expect(() => parseRecent({version: 3, runs: [{...run, runId: null}]})).toThrow('runs[0].runId');
-    expect(() => parseRecent({version: 3, runs: [{...run, host: 'ssh:-oProxy'}]})).toThrow(
-      'runs[0].host',
-    );
-    expect(() => parseRecent({version: 3, runs: [{...run, instanceId: 'bad'}]})).toThrow(
-      'runs[0].instanceId',
-    );
-    expect(() => parseRecent({version: 5, runs: []})).toThrow('version');
+    ]);
+    expect(skippedFor({...run, runId: null})).toEqual([
+      'recent.json: runs[0].runId must be a run id',
+    ]);
+    expect(skippedFor({...run, task: ''})).toEqual([
+      'recent.json: runs[0].task must be a task name',
+    ]);
+    expect(skippedFor({...run, host: 'ssh:-oProxy'})[0]).toContain('runs[0].host');
+    expect(skippedFor({...run, project: ''})[0]).toContain('runs[0].project');
+    expect(skippedFor({...run, instanceId: 'bad'})).toEqual([
+      'recent.json: runs[0].instanceId must be a 12-digit instance id',
+    ]);
+    expect(skippedFor('not an object')).toEqual(['recent.json: runs[0] must be an object']);
   });
 
-  test('a start the run was begun with is validated, naming the key', () => {
-    const run = {
-      host: 'local',
-      project: '/p',
-      task: 'spsc',
-      runId: 'run-1',
-      instanceId: null,
-      attachedAt: 1,
-      start: {harness: null, options: {rounds: 0}, args: []},
-    };
-    expect(() => parseRecent({version: 4, runs: [run]})).toThrow(
-      'runs[0].start: options.rounds must be a positive whole number',
-    );
-    expect(() =>
-      parseRecent({version: 4, runs: [{...run, start: {harness: null, options: {}, extra: 1}}]}),
-    ).toThrow('runs[0].start: start.extra is not a known field');
+  test('the document itself must be valid: its version, keys and list', () => {
+    expect(() => parseRecent({version: 5, runs: []})).toThrow('version');
+    expect(() => parseRecent({version: 4, runs: {}})).toThrow('runs must be a list');
+    expect(() => parseRecent({version: 4, runs: [], extra: 1})).toThrow('extra');
+    expect(() => parseRecent([])).toThrow('recent.json must be an object');
+  });
+
+  test('any mix of valid and invalid entries keeps exactly the valid ones and reports the others in order', () => {
+    const invalids: ((run: StoredRecentRun) => unknown)[] = [
+      run => ({...run, task: ''}),
+      run => ({...run, instanceId: 'bad'}),
+      run => ({...run, runId: 7}),
+      run => ({...run, host: 'ssh:'}),
+      run => ({...run, attachedAt: -1}),
+      run => ({...run, extra: true}),
+      () => null,
+    ];
+    for (const seed of SEEDS) {
+      const random = new Seeded(seed);
+      const entries: unknown[] = [];
+      const valid: StoredRecentRun[] = [];
+      const invalidAt: number[] = [];
+      for (let index = 0; index < 12; index += 1) {
+        const run = arbitraryRun(random, index);
+        if (random.bool()) {
+          valid.push(run);
+          entries.push(run);
+        } else {
+          invalidAt.push(index);
+          entries.push(random.pick(invalids)(run));
+        }
+      }
+
+      const parsed = parseRecent(JSON.parse(JSON.stringify({version: 4, runs: entries})));
+
+      expect(parsed.file).toEqual({version: 4, runs: valid});
+      expect(parsed.skipped.map(each => each.index)).toEqual(invalidAt);
+      for (const each of parsed.skipped) {
+        expect(each.reason).toContain(`recent.json: runs[${each.index}]`);
+      }
+    }
   });
 
   test('a version 3 file migrates with no recorded start', () => {
@@ -149,8 +180,8 @@ describe('recent runs', () => {
         },
       ],
     });
-    expect(parsed.version).toBe(4);
-    expect(parsed.runs[0]?.start).toBeUndefined();
+    expect(parsed.file.version).toBe(4);
+    expect(parsed.file.runs[0]?.start).toBeUndefined();
   });
 
   test('a version 1 file keeps the runs it named and drops those saved before their id was known', () => {
@@ -169,27 +200,30 @@ describe('recent runs', () => {
       ],
     });
     expect(parsed).toEqual({
-      version: 4,
-      runs: [
-        {
-          host: 'local',
-          project: '/p',
-          task: 'spsc',
-          runId: 'run-1',
-          instanceId: '0123456789ab',
-          attachedAt: 1,
-        },
-      ],
+      file: {
+        version: 4,
+        runs: [
+          {
+            host: 'local',
+            project: '/p',
+            task: 'spsc',
+            runId: 'run-1',
+            instanceId: '0123456789ab',
+            attachedAt: 1,
+          },
+        ],
+      },
+      skipped: [],
     });
   });
 
   test('version 2 migrates without guessing an instance, then inspection preserves its locator', () => {
-    const parsed = parseRecent({
+    const {file: parsed} = parseRecent({
       version: 2,
       runs: [{host: 'local', project: '/p', task: null, runId: 'run-1', attachedAt: 1}],
     });
     expect(parsed.runs[0]?.instanceId).toBeNull();
-    expect(parseRecent(JSON.parse(JSON.stringify(parsed)))).toEqual(parsed);
+    expect(parseRecent(JSON.parse(JSON.stringify(parsed)))).toEqual({file: parsed, skipped: []});
 
     const located = rememberInstance(parsed, {
       host: 'local',

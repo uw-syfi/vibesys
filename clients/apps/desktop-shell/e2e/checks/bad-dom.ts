@@ -41,6 +41,10 @@ export const CLEAN_SCREEN = `
     <div>Lock-free ring with per-slot sequence numbers</div>
     <div><span data-mono-id>claude-opus-5-5</span> <span data-mono-id>perf-evaluator</span> <code>judge</code></div>
     <div>queue-rs · mpmc</div>
+    <div style="display:flex;flex-direction:column;height:80px">
+      <div style="max-height:60px;overflow-y:auto"><div style="height:200px">rows</div></div>
+      <div>Start</div>
+    </div>
     <div class="vs-pane-body" style="width:440px">
       <div style="max-width:100ch">The judge read the candidate source and found that it matches the declared outcome, so the idea passed.</div>
     </div>
@@ -188,6 +192,12 @@ export const BAD_SCREENS: readonly BadScreen[] = [
     check: 'pane-fill',
     message: /a pane's content uses 160 px of its 440 px \(36%\) while text wraps/,
     html: `<div style="${PAGE}"><div class="vs-pane-body" style="width:440px"><div style="max-width:160px">The candidate source matches the declared outcome and the gates passed.</div></div></div>`,
+  },
+  {
+    name: 'a card whose list scrolls although the card has room below it',
+    check: 'scroll-room',
+    message: /a region scrolls \(\d+ px of content in 60 px\) while it has \d+ px of room/,
+    html: `<div style="${PAGE}"><div style="display:flex;flex-direction:column;height:240px"><div style="max-height:60px;overflow-y:auto"><div style="height:200px">rows</div></div><div style="margin-top:auto">Start</div></div></div>`,
   },
   {
     name: 'text drawn outside the window',

@@ -20,6 +20,14 @@ export interface RecentRun {
   readonly start?: RunStart | null;
 }
 
+/** An entry of the saved recent runs that could not be read, so the list leaves it out. */
+export interface SkippedRecent {
+  /** Its place in the saved list. */
+  readonly index: number;
+  /** Why, naming the key that is wrong (`recent.json: runs[16].task must be a task name`). */
+  readonly reason: string;
+}
+
 /**
  * Stable identity of one logical recent run.
  *

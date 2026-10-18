@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
 import type {HarnessOffer} from '@vibesys/ipc';
-import {rawTextOf} from './checks/screen-check.js';
+import {rawTextOf, screenCheck} from './checks/screen-check.js';
 import {installFakeBridge, installFakeMachines, installFakeNewRun} from './fake-bridge.js';
 import {installFakeRun} from './fake-run.js';
 import {type FakeHostWindow, open, PROJECT, SEED} from './world.js';
@@ -108,6 +108,34 @@ test('the checks start open beside the form and closed under it, so Start run st
   await page.setViewportSize({width: 1440, height: 900});
   await page.reload();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+});
+
+test('beside the form, the checks fill the card before they scroll, and none is cut', async ({
+  page,
+}) => {
+  await open(page);
+  for (const height of [500, 600, 700, 900]) {
+    await page.setViewportSize({width: 1440, height});
+    await expect(ready(page)).toContainText(/Ready · \d+ checks passed/);
+    const details = ready(page).getByRole('region', {name: 'Details'});
+    const {clipped, scrolls} = await details.evaluate(element => ({
+      clipped: element.scrollHeight > element.clientHeight,
+      scrolls: getComputedStyle(element).overflowY === 'auto',
+    }));
+    // Either every check row is in the card, or the list scrolls inside it with no room left over.
+    if (clipped) expect(scrolls, `at ${height} px`).toBe(true);
+    else {
+      const card = await ready(page).boundingBox();
+      for (const row of await ready(page).locator('.vs-check').all()) {
+        const box = await row.boundingBox();
+        if (card === null || box === null) throw new Error(`a check row is not drawn at ${height}`);
+        expect(box.y + box.height, `${await row.innerText()} at ${height}`).toBeLessThanOrEqual(
+          card.y + card.height,
+        );
+      }
+    }
+    expect(await screenCheck(page, ['scroll-room']), `at ${height} px`).toEqual([]);
+  }
 });
 
 test('a helper without model tiers keeps the full vetted model list', async ({page}) => {

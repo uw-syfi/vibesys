@@ -17,6 +17,8 @@ export interface FakeBridgeSeed {
   readonly appearance: {readonly mode: string; readonly light: string; readonly dark: string};
   readonly listings: readonly unknown[];
   readonly recent: readonly unknown[];
+  /** The saved runs the app could not read (`SkippedRecent`), which Recent leaves out. */
+  readonly skippedRecent?: readonly unknown[];
   /**
    * What each run's journal says (`runs.list`'s digest), by run id, as the app reads it
    * (`RunDigestEntry`); a run not named is one the host has no record of. Without it the host
@@ -112,6 +114,7 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
           eventCursor: sequence,
           settingsProblem: null,
           recent,
+          skippedRecent: seed.skippedRecent ?? [],
           listings: [...listings.values()],
           chrome: {mode: 'welcome', attached: null, stops: {}},
           host: 'local',
@@ -305,12 +308,24 @@ export function installFakeNewRun(seed: FakeBridgeSeed): void {
         checks: [
           {id: 'checkout_found', state: 'ok', detail: 'VibeSys 0.9.0 at ~/vibesys.', fix: null},
           own,
+          {
+            id: 'project_clean',
+            state: 'ok',
+            detail: 'The project has no uncommitted changes.',
+            fix: null,
+          },
           {id: 'settings_valid', state: 'ok', detail: 'vibesys.yaml is valid.', fix: null},
           {id: 'docker_reachable', state: 'ok', detail: 'Docker 27.3.1.', fix: null},
           {
             id: 'agent_image',
             state: 'warn',
             detail: 'No agent image was built here yet; the first run builds it.',
+            fix: null,
+          },
+          {
+            id: 'evaluator_available',
+            state: 'ok',
+            detail: 'The task evaluator is available.',
             fix: null,
           },
         ],

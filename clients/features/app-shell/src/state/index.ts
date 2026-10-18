@@ -5,6 +5,7 @@
 
 export {type AllRunsGroup, allRunsGroups, type MachineRunsState} from './all-runs-rows.js';
 export {type NoticeKind, type RunNotice, runNotices} from './notices.js';
+export {NOTICE_REASONS, type RecentNotice, recentNotice} from './recent-notice.js';
 export {type Clock, formatWhen} from './recent-words.js';
 export {type RunRowStatus, statusWord} from './run-status.js';
 export {

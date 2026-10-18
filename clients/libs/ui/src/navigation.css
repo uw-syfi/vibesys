@@ -166,17 +166,23 @@
 .vs-app-nav .vs-sidebar-section {
   -webkit-app-region: no-drag;
 }
-/* Hidden, the column leaves a rail of icon buttons: the same title-bar offset and background. */
+/*
+ * Hidden, the column leaves a rail of icon buttons: the same title-bar offset and background. It
+ * is as wide as the window's own controls and the toggle after them need, so the page beside it
+ * starts at the same place, top and left, as with the column shown.
+ */
 .vs-app-rail {
+  --rail-start: max(var(--chrome-inset-width, var(--space-0)), var(--space-4));
   box-sizing: border-box;
   display: flex;
   flex: none;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-3);
-  width: calc(var(--control) + var(--space-4) * 2);
+  width: calc(var(--rail-start) + var(--control) + var(--space-4));
   max-height: 100%;
-  padding: calc(var(--titlebar-row) + var(--space-2)) var(--space-4) var(--space-5);
+  padding: calc(var(--titlebar-row) + var(--space-2)) var(--space-4) var(--space-5)
+    var(--rail-start);
   -webkit-app-region: drag;
   border-right: var(--hairline) solid var(--line);
   background: var(--panel-2);
@@ -289,7 +295,7 @@
   height: 100%;
   background: var(--bg);
 }
-/* With the column hidden, the row stays as an empty drag strip and the page sits below it. */
+/* A window without a column: an empty drag strip of the title-bar row's height above the page. */
 .vs-app-strip {
   flex: none;
   box-sizing: border-box;
