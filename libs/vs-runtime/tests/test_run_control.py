@@ -18,14 +18,20 @@ from vs_core.api import (
     RunControlEvent,
     SessionInputReceived,
     StopMode,
+    escalate_stop,
     initial_state,
     step,
+    stop_mode,
 )
 from vs_runtime.api.core import RunControlBridge
 from vs_runtime.api.infrastructure import (
     CapacityWake,
     ChannelRunControl,
+    ControlStatus,
+    PauseRequest,
     PauseWake,
+    RefusalReason,
+    ResumeRequest,
     RunControlTransition,
     RunControlTransitionKind,
     RunStopped,
@@ -631,3 +637,64 @@ def test_a_stop_only_escalates_and_every_escalation_reaches_core(
         assert channel.stop_mode() == _strongest(asked)
     recorded = [c.mode for c in core.run.controls if c.action == "stop" and c.mode is not None]
     assert _strongest(recorded) == _strongest(asked)
+
+
+def _never_weaker(before: StopMode | None, after: StopMode | None) -> bool:
+    """Whether ``after`` keeps every stop ``before`` held: a stop only escalates."""
+    return before is None or (after is not None and escalate_stop(before, after) is after)
+
+
+_STOP_RESUME_OPS = st.lists(
+    st.one_of(
+        st.sampled_from(StopMode).map(lambda mode: ("stop", mode)),
+        st.just(("resume",)),
+        st.just(("pause",)),
+        st.just(("poll",)),
+    ),
+    max_size=10,
+)
+
+
+@pytest.mark.regression
+@pytest.mark.xfail(strict=True, reason="PR #3209 MED-3: a resume still clears a pending stop")
+@example(ops=[("stop", StopMode.CANCEL), ("poll",), ("resume",)])
+@example(ops=[("stop", StopMode.CANCEL), ("resume",), ("poll",)])
+@example(ops=[("pause",), ("stop", StopMode.DRAIN), ("resume",)])
+@given(ops=_STOP_RESUME_OPS)
+def test_no_resume_ever_weakens_a_pending_stop(
+    ops: list[tuple[str, StopMode] | tuple[str]],
+) -> None:
+    """PR #3209 MED-3: a resume cleared the channel's stop while core went on stopping.
+
+    However stops, pauses, resumes and the run loop's polls interleave, a resume while a
+    stop is pending is refused as ``STOPPING``, and neither the channel nor core ever holds
+    a weaker stop than it held before.
+    """
+    threads = SimThreads()
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=threads)
+    control = ChannelRunControl(channel, threads)
+    bridge = RunControlBridge(channel, _DiscardingSteerArtifacts(), control=control)
+    core = initial_state()
+    asked: list[StopMode] = []
+    for number, op in enumerate([*ops, ("poll",)]):
+        held, recorded = channel.stop_mode(), stop_mode(core.run)
+        match op:
+            case ("stop", StopMode() as mode):
+                control.submit(StopRequest(control_id=f"op-{number}", mode=mode))
+                asked.append(mode)
+            case ("resume",):
+                ack = control.submit(ResumeRequest(control_id=f"op-{number}"))
+                if held is not None:
+                    assert (ack.status, ack.reason) == (
+                        ControlStatus.REFUSED,
+                        RefusalReason.STOPPING,
+                    )
+            case ("pause",):
+                control.submit(PauseRequest(control_id=f"op-{number}"))
+            case _:
+                for event in bridge.poll(core, core.run.now_at):
+                    core = step(core, event).state
+        assert _never_weaker(held, channel.stop_mode())
+        assert _never_weaker(recorded, stop_mode(core.run))
+    assert channel.stop_mode() == _strongest(asked)
+    assert stop_mode(core.run) == _strongest(asked)
