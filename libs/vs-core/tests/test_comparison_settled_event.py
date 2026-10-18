@@ -235,3 +235,46 @@ def test_a_base_run_a_restarted_host_cannot_find_ends_when_recovery_blocks_it() 
     (again,) = running(lab)
     check_told(lab, ending(lab, again, "sample", bench))
     assert stated(lab) == {(lab.scopes["a"], "input-1", "base"): False}
+
+
+@pytest.mark.regression
+def test_a_registered_measurement_job_does_not_keep_a_comparison_settling() -> None:
+    """A registered operation's job measures the candidate's input in its scope (#3208 LOW-2).
+
+    It gives no sample, so it feeds no comparison. Before, it counted as a run under way: the
+    comparison stayed settling until the job ended, and that end told nobody.
+    """
+    lab = Lab.of("a", staleness=1e9)
+    bench = Bench({"input-1": 130.0, "base": 100.0}, 0.0, seeded("registered"))
+    candidate, _ = lab.call("a", "c-a", "input-1")
+    while live := running(lab):
+        check_told(lab, ending(lab, live[0], "sample", bench))
+    assert isinstance(candidate.plan.candidate, core.RevisionRef)
+    identity = core.MeasurementIdentity.from_plan(candidate.plan, candidate.plan.candidate)
+    request = core.RequestId(root="operation:registered")
+    evaluation = lab.state.evaluation
+    registered = evaluation.model_copy(
+        update={
+            "submission_budgets": (
+                *evaluation.submission_budgets,
+                core.SubmissionBudget(
+                    scope=lab.scopes["a"],
+                    identity=identity.model_copy(update={"purpose": "profile"}),
+                    limit=1,
+                    receipts=(core.PreparedSubmissionReceipt(request_id=request, ordinal=1),),
+                ),
+            ),
+            "registered_jobs": (
+                core.RegisteredOwnedJob(
+                    operation_id=core.OperationId(root="operation:registered"),
+                    expected_measurement=identity,
+                    request_id=request,
+                    scope=lab.scopes["a"],
+                    resource_pool=core.PoolId(root="jobs"),
+                    wait=core.WaitOn(requests=(request,)),
+                ),
+            ),
+        }
+    )
+    (comparison,) = lab.comparisons()
+    assert not core.comparison_settling(registered, comparison)

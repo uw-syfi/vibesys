@@ -956,9 +956,13 @@ def run_under_way(state: EvaluationState, receipt: SubmissionReceipt | None) -> 
     Its submission has not ended (`receipt_ended`), or the job it named has not, or core is
     still collecting that job's records: its sample, if any, lands only then. Every reader of
     a comparison's runs reads it (`runs_in_flight`, `running_baseline`), and so does the
-    report that a comparison settled (`comparisons_settled`).
+    report that a comparison settled (`comparisons_settled`). A registered operation's job is
+    no run of a comparison's: it gives no sample (`vs_core._base_runs.record_samples`), so
+    nothing waits for it to end.
     """
-    if not isinstance(receipt, PreparedSubmissionReceipt):
+    if not isinstance(receipt, PreparedSubmissionReceipt) or any(
+        job.request_id == receipt.request_id for job in state.registered_jobs
+    ):
         return False
     return not receipt_ended(receipt) or any(
         job.submission_id == receipt.request_id and (not job.terminal or job.collecting is not None)
