@@ -268,47 +268,50 @@ export function MachinesScreen(props: {
   readonly dispatch: Dispatch;
   readonly newRun: (host: HostKey) => void;
   readonly back: () => void;
+  /** Settings supplies the surrounding section navigation and page header. */
+  readonly embedded?: boolean;
 }): JSX.Element {
   const {state, dispatch, newRun} = props;
-  return (
-    <Page
-      header={
-        <Row gap="space-3" align="end" wrap>
-          <Button
-            variant="quiet"
-            size="sm"
-            icon="chevron-left"
-            label="Back to Settings"
-            press={props.back}
-          />
-          <Stack gap="space-1" grow>
-            <Text variant="section">Machines</Text>
-            <Text as="h1" variant="title">
-              Where runs can go
-            </Text>
-            <Text tone="muted">
-              Each machine runs VibeSys from a checkout you already have there.
-            </Text>
-          </Stack>
-          <Button
-            variant="primary"
-            text="Add a machine"
-            press={() => dispatch({type: 'open-add'})}
-          />
-        </Row>
-      }
-    >
-      <Stack>
-        <AddMachine state={state} dispatch={dispatch} />
-        {state.listProblem === null ? null : (
-          <Banner tone="err" title="The machines could not be read" body={state.listProblem} />
-        )}
-        <Split
-          asideFirst
-          aside={<MachineList state={state} dispatch={dispatch} />}
-          main={<Detail state={state} dispatch={dispatch} newRun={newRun} />}
+  const header = (
+    <Row gap="space-3" align="end" wrap>
+      {props.embedded === true ? null : (
+        <Button
+          variant="quiet"
+          size="sm"
+          icon="chevron-left"
+          label="Back to Settings"
+          press={props.back}
         />
+      )}
+      <Stack gap="space-1" grow>
+        <Text variant="section">Machines</Text>
+        <Text as="h1" variant="title">
+          Where runs can go
+        </Text>
+        <Text tone="muted">Each machine runs VibeSys from a checkout you already have there.</Text>
       </Stack>
-    </Page>
+      <Button variant="primary" text="Add a machine" press={() => dispatch({type: 'open-add'})} />
+    </Row>
   );
+  const content = (
+    <Stack>
+      <AddMachine state={state} dispatch={dispatch} />
+      {state.listProblem === null ? null : (
+        <Banner tone="err" title="The machines could not be read" body={state.listProblem} />
+      )}
+      <Split
+        asideFirst
+        aside={<MachineList state={state} dispatch={dispatch} />}
+        main={<Detail state={state} dispatch={dispatch} newRun={newRun} />}
+      />
+    </Stack>
+  );
+  if (props.embedded === true)
+    return (
+      <Stack>
+        {header}
+        {content}
+      </Stack>
+    );
+  return <Page header={header}>{content}</Page>;
 }

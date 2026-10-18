@@ -58,6 +58,7 @@ export {
   type PageWidth,
   Reserve,
   Row,
+  SectionLayout,
   Split,
   Stack,
 } from './components/layout.js';

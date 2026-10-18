@@ -131,6 +131,24 @@ export function Split(props: {
   );
 }
 
+/** A page's persistent section navigation beside independently changing content. */
+export function SectionLayout(props: {
+  readonly label: string;
+  readonly sections: ReactNode;
+  readonly children: ReactNode;
+}): JSX.Element {
+  return (
+    <div className="vs-section-container">
+      <div className="vs-section-layout">
+        <nav className="vs-section-nav" aria-label={props.label}>
+          {props.sections}
+        </nav>
+        <div className="vs-section-content">{props.children}</div>
+      </div>
+    </div>
+  );
+}
+
 /** As many equal columns as fit, none narrower than `min`. */
 export function Grid(props: {
   readonly min: GridColumn;

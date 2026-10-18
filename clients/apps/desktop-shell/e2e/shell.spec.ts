@@ -51,6 +51,10 @@ test('Settings changes the theme at once and keeps it', async ({page}) => {
     'aria-pressed',
     'true',
   );
+  await page
+    .getByRole('navigation', {name: 'Settings sections'})
+    .getByRole('button', {name: 'Notifications'})
+    .click();
   await page.getByRole('switch', {name: /Notify me/}).uncheck();
   await expect(page.getByRole('switch', {name: /Notify me/})).not.toBeChecked();
   const axe = await new AxeBuilder({page}).analyze();

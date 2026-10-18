@@ -16,6 +16,7 @@ import {
   Icon,
   PathInput,
   Row,
+  SectionLayout,
   SegmentedControl,
   Select,
   Slider,
@@ -238,6 +239,22 @@ export const BASIC_ENTRIES = {
         <Split main={<Box label="main" />} aside={<Box label="aside" />} />
         <Split main={<Box label="main" />} aside={<Box label="aside first" />} asideFirst />
       </Stack>
+    ),
+  },
+  SectionLayout: {
+    render: () => (
+      <SectionLayout
+        label="Example sections"
+        sections={
+          <Stack gap="space-1">
+            <Text>Appearance</Text>
+            <Text>Machines</Text>
+            <Text>Notifications</Text>
+          </Stack>
+        }
+      >
+        <Box label="Selected section" />
+      </SectionLayout>
     ),
   },
   Grid: {

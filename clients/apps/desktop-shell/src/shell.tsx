@@ -273,7 +273,15 @@ export function Shell(props: {
             state={settingsState}
             dispatch={settings.dispatch}
             back={() => sidebar.store.dispatch({type: 'back-from-settings'})}
-            openMachines={() => select({kind: 'machines'})}
+            machinesContent={
+              <MachinesScreen
+                embedded
+                state={machinesState}
+                dispatch={machines.dispatch}
+                newRun={host => select({kind: 'new-run', machine: host})}
+                back={() => select({kind: 'settings'})}
+              />
+            }
             machines={machineCounts(sidebarState)}
           />
         );

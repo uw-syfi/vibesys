@@ -251,6 +251,41 @@ body > div:first-child {
   flex-direction: column;
   gap: var(--space-4);
 }
+.vs-section-container {
+  min-width: 0;
+  container-type: inline-size;
+}
+.vs-section-layout {
+  display: grid;
+  grid-template-columns: calc(var(--column-aside) * 0.65) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-5);
+}
+.vs-section-nav {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  background: var(--bg);
+}
+.vs-section-content {
+  min-width: 0;
+}
+@container (max-width: 42rem) {
+  .vs-section-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .vs-section-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    padding-block: var(--space-1);
+  }
+  .vs-section-nav .vs-sidebar-item {
+    flex: 1 1 auto;
+  }
+}
 .vs-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--grid-min)), 1fr));

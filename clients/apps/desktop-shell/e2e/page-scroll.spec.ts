@@ -89,8 +89,15 @@ async function atBottom(page: Page): Promise<Geometry> {
 }
 
 async function goTo(page: Page, where: Where): Promise<void> {
-  if (where !== 'New run') {
+  if (where !== 'New run' && where !== 'Machines') {
     await sidebar(page).getByRole('button', {name: where}).click();
+  }
+  if (where === 'Machines') {
+    await sidebar(page).getByRole('button', {name: 'Settings'}).click();
+    await page
+      .getByRole('navigation', {name: 'Settings sections'})
+      .getByRole('button', {name: /Machines/})
+      .click();
   }
   await expect(
     page.getByRole('heading', {

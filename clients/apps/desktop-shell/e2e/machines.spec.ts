@@ -70,7 +70,10 @@ async function openMachines(page: Page): Promise<void> {
     .getByRole('navigation', {name: 'VibeSys'})
     .getByRole('button', {name: 'Settings'})
     .click();
-  await page.getByRole('button', {name: 'Manage machines'}).click();
+  await page
+    .getByRole('navigation', {name: 'Settings sections'})
+    .getByRole('button', {name: /Machines/})
+    .click();
   await expect(page.getByRole('heading', {name: 'Where runs can go'})).toBeVisible();
 }
 
