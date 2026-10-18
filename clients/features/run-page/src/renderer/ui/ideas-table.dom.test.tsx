@@ -73,14 +73,14 @@ function titles(container: HTMLElement): string[] {
   ].map(each => each.textContent ?? '');
 }
 
-test('ideas are flat, newest first, with an adopted marker and no lineage controls', async () => {
+test('ideas are flat, newest first, with an adopted pill and no lineage controls', async () => {
   const screen = await shown();
   expect(titles(screen.container)).toEqual([
     'idea 6',
     'idea 5',
     'idea 4',
     'idea 3',
-    '★ idea 2',
+    'idea 2',
     'idea 1',
     'idea 0',
   ]);
@@ -88,13 +88,21 @@ test('ideas are flat, newest first, with an adopted marker and no lineage contro
   expect(screen.container.querySelector('[aria-label="Ideas"] .vs-pickrow-fold')).toBeNull();
   expect(screen.container.textContent).not.toContain('best path');
   expect(screen.container.textContent).not.toContain('from input');
-  expect(titles(screen.container)).toContain('★ idea 2');
-  const first = screen.container.querySelector('[aria-label="Ideas"] [role="option"]');
   expect(
-    [...(first?.children ?? [])]
+    screen.container.querySelectorAll('[aria-label="Ideas"] .vs-chip[data-tone="ok"]'),
+  ).toHaveLength(1);
+  expect(
+    screen.container.querySelector('[aria-label="Ideas"] .vs-chip[data-tone="ok"]')?.textContent,
+  ).toBe('Adopted');
+  const adoptedRow = [
+    ...screen.container.querySelectorAll('[aria-label="Ideas"] [role="option"]'),
+  ].find(row => row.querySelector('.vs-chip[data-tone="ok"]') !== null);
+  expect(
+    [...(adoptedRow?.children ?? [])]
       .map(child => child.className)
-      .filter(name => name === 'vs-pickrow-measure' || name === 'vs-pickrow-figure'),
-  ).toEqual(['vs-pickrow-measure', 'vs-pickrow-figure']);
+      .filter(name => name === 'vs-chip' || name === 'vs-pickrow-figure'),
+  ).toEqual(['vs-chip', 'vs-pickrow-figure']);
+  expect(screen.container.querySelector('[aria-label="Ideas"] .vs-pickrow-measure')).toBeNull();
   await screen.done();
 });
 
@@ -108,7 +116,10 @@ test('search shows matching ideas only and failed rows use one concise outcome',
   const row = screen.container.querySelector('[aria-label="Ideas"] [role="option"]');
   expect(row?.querySelector('.vs-pickrow-bar')).toBeNull();
   expect(row?.querySelector('.vs-pickrow-figure')?.textContent).toBe('–');
-  expect(row?.querySelector('.vs-pickrow-measure')?.textContent).not.toContain('failed ·');
+  expect(row?.querySelector('.vs-chip[data-tone="err"]')?.textContent).toBe('Failed');
+  expect(row?.querySelector('.vs-pickrow-text > .vs-text:last-child')?.textContent).not.toContain(
+    'failed ·',
+  );
   await screen.done();
 });
 
@@ -123,7 +134,7 @@ test('sort control changes the flat order', async () => {
   expect(titles(screen.container)).toEqual([
     'idea 0',
     'idea 1',
-    '★ idea 2',
+    'idea 2',
     'idea 3',
     'idea 4',
     'idea 5',

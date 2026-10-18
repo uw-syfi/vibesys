@@ -1,5 +1,5 @@
 /** A flat, windowed list of ideas. Ordering and filtering are presentation-only. */
-import {markdownToPlain, PickList, PickRow, Stack} from '@vibesys/ui';
+import {markdownToPlain, PickList, PickRow, type RowBadge, Stack} from '@vibesys/ui';
 import {type JSX, useMemo} from 'react';
 import {
   ageWords,
@@ -15,9 +15,18 @@ import type {ViewBase} from './views/props.js';
 export type IdeasSort = 'newest' | 'oldest' | 'result';
 
 function outcomeOf(row: IdeaRow, outcomes: ImplementerOutcomes): string {
-  if (row.outcome === 'failed') return row.state.label.replace(/^failed(?: · )?/, '') || 'failed';
-  if (row.outcome === 'running') return 'running';
-  return outcomes.get(row.id)?.outcome?.label ?? 'passed';
+  const label =
+    row.outcome === 'failed'
+      ? row.state.label.replace(/^failed(?: · )?/, '') || 'not measured'
+      : (outcomes.get(row.id)?.outcome?.label ?? row.outcome);
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function badgeOf(row: IdeaRow, adopted: boolean): readonly RowBadge[] {
+  if (adopted) return [{label: 'Adopted', tone: 'ok'}];
+  if (row.outcome === 'failed') return [{label: 'Failed', tone: 'err'}];
+  if (row.outcome === 'running') return [{label: 'Running', tone: 'live'}];
+  return [];
 }
 
 function byResult(
@@ -60,13 +69,11 @@ export function IdeasTable(props: {
   return (
     <Stack grow>
       <PickList
+        wrapSummary
         label="Ideas"
         header={{
           start: 'idea',
-          end: [
-            {label: 'outcome', fixed: 'measure-note'},
-            {label: 'vs input', fixed: 'figure'},
-          ],
+          end: [{label: 'vs input', fixed: 'figure'}],
         }}
       >
         {rows.map(row => {
@@ -77,11 +84,11 @@ export function IdeasTable(props: {
             <PickRow
               key={row.id}
               id={row.id}
-              title={`${adopted ? '★ ' : ''}${markdownToPlain(row.title)}`}
+              title={markdownToPlain(row.title)}
+              summary={outcome}
+              stacked
               mono
-              state={row.state}
-              measure={{label: outcome, size: 'note', title: outcome}}
-              measureBeforeFigure
+              badges={badgeOf(row, adopted)}
               figure={
                 row.runningSince === null
                   ? measured

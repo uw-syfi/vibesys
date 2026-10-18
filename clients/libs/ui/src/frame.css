@@ -310,6 +310,13 @@ button.vs-crumb:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Ideas keep their outcome on a second line so failure reasons never depend on a tooltip. */
+.vs-picklist[data-wrap-summary] .vs-pickrow-text > .vs-text:last-child:not(:first-child) {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .vs-guide {
   position: relative;
   flex: none;
@@ -395,6 +402,12 @@ button.vs-crumb:focus-visible {
 }
 .vs-pickrow-figure[data-tone="muted"] {
   color: var(--muted);
+}
+.vs-picklist[data-wrap-summary] .vs-pickrow-figure {
+  flex: none;
+  width: var(--gantt-figure);
+  max-width: none;
+  text-align: right;
 }
 
 .vs-meter {

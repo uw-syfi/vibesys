@@ -25,7 +25,7 @@ const failedChip = (page: Page) => page.locator('button.vs-dotlegend-item', {has
 const failedRows = (page: Page) =>
   ideas(page)
     .getByRole('option')
-    .filter({has: page.locator('.vs-pickrow-dot .vs-dot[data-tone="err"]')});
+    .filter({has: page.locator('.vs-chip[data-tone="err"]')});
 
 test('failed ideas are listed in the flat table and a filter hides them', async ({page}) => {
   await openFixture(page, fixtureNamed('finished-ten-ideas'));
@@ -34,10 +34,27 @@ test('failed ideas are listed in the flat table and a filter hides them', async 
   await expect(ideas(page).getByRole('option')).not.toHaveCount(0);
   await expect(failedRows(page)).toHaveCount(4);
   await expect(failedChip(page)).toHaveAttribute('aria-pressed', 'true');
-  // A failed idea sits under its base like the others, with its reason in words.
+  // A failed idea keeps its reason visible beside a compact status pill.
   await expect(ideas(page).getByRole('option', {name: /Replace the mutex/})).toContainText(
-    'review rejected',
+    'Review rejected',
   );
+  await expect(failedRows(page).first().locator('.vs-chip')).toHaveText('Failed');
+  for (const width of [1440, 1000]) {
+    await page.setViewportSize({width, height: 900});
+    const visibility = await failedRows(page).evaluateAll(rows =>
+      rows.map(row => {
+        const reason = row.querySelector('.vs-pickrow-text > .vs-text:last-child');
+        const box = reason?.getBoundingClientRect();
+        const parent = reason?.parentElement?.getBoundingClientRect();
+        return {
+          clipped: reason !== null && reason.scrollHeight > reason.clientHeight + 1,
+          inRow: box !== undefined && parent !== undefined && box.right <= parent.right + 1,
+        };
+      }),
+    );
+    expect(visibility).toHaveLength(4);
+    expect(visibility.every(item => !item.clipped && item.inRow)).toBe(true);
+  }
   await shot(page, 'ten-ideas-table');
 
   await failedChip(page).click();

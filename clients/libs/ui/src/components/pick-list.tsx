@@ -80,6 +80,8 @@ function idOf(row: ReactNode, index: number): string {
  */
 export function PickList(props: {
   readonly label: string;
+  /** Let row summaries wrap instead of relying on their tooltip when column space is tight. */
+  readonly wrapSummary?: boolean;
   readonly selected?: string;
   /** A row's id to scroll into view each time it changes (a row picked elsewhere). */
   readonly scrollTo?: string;
@@ -114,7 +116,11 @@ export function PickList(props: {
   };
   return (
     <SelectedRow.Provider value={props.selected}>
-      <div className="vs-picklist" data-size={props.size ?? 'default'}>
+      <div
+        className="vs-picklist"
+        data-size={props.size ?? 'default'}
+        data-wrap-summary={props.wrapSummary || undefined}
+      >
         {props.header === undefined ? null : <Header header={props.header} id={headerId} />}
         <div
           ref={scroller}
