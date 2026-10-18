@@ -9,6 +9,7 @@ import {
   type GanttRow,
   type GanttView,
   type Guide,
+  LoadingBar,
   LogPane,
   Meter,
   MetricTile,
@@ -531,6 +532,9 @@ export const FRAME_ENTRIES = {
         <Meter label="Muted, all of it" value={1} tone="muted" />
       </Stack>
     ),
+  },
+  LoadingBar: {
+    render: () => <LoadingBar label="Loading, total unknown" />,
   },
   MetricTiles: {
     render: () => (
