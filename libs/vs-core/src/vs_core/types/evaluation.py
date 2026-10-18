@@ -594,7 +594,9 @@ type SubmissionReceipt = Annotated[
 class SubmissionBudget(Value):
     """Immutable first submission bound for one scope and measurement identity.
 
-    The first limit cannot exceed the run ceiling. Workload rejection is durable;
+    The first limit cannot exceed the run ceiling, but for the budget core opens for its own
+    runs of an attempt's base, whose limit is ``MAX_CORE_BASE_RUNS``
+    (`vs_core._base_runs`). Workload rejection is durable;
     conclusive infrastructure failure may retry within this bound. Transport
     reconciliation accounting remains RequestRecord.retry_count, not this receipt list.
     """

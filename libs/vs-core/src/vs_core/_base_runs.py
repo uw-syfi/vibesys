@@ -13,6 +13,14 @@ a sample leaves each of them waiting on nothing; the next end re-checks them and
 base run that is still missing, and a close call takes its next run as the previous one ends.
 Nothing waits on an edge that may never come. Every decision is a pure function of state and
 event.
+
+What core's runs cost an attempt is bounded by constants, never by how many candidate inputs
+its agent measures (`_side_open`, `_sample_ready`): per scope, at most one run of the base and
+one of a candidate's input of core's in flight at once; at most ``MAX_CORE_BASE_RUNS`` runs of
+the base over the attempt's lifetime, and ``MAX_SUBMISSIONS_PER_MEASUREMENT`` of each candidate
+input, whoever asked for them; and at most ``MAX_SUBMISSIONS_PER_MEASUREMENT`` of core's runs
+of a side in a row that end without a sample, after which that side stops until one gives a
+sample. A run core ended out of queue budget is not replaced.
 """
 
 from __future__ import annotations
@@ -21,6 +29,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ._comparison import (
+    MAX_CORE_BASE_RUNS,
     Measured,
     base_in_flight,
     base_missing,
@@ -58,7 +67,7 @@ from .types.evaluation import (
 from .types.job_observations import MeasurementFailure
 from .types.kernel import AreaChange
 from .types.measurement import BaseClaim, BaseRef, Comparison, CoreRun, Sample
-from .types.until import Within
+from .types.until import FailureReason, Within
 
 if TYPE_CHECKING:
     from .types.common import RequestId, Seconds
@@ -220,22 +229,27 @@ def _core_run(
 ) -> AreaChange[EvaluationState]:
     """``change`` plus one more run of ``plan`` in ``origin``'s scope, recorded as core's own.
 
-    An extra sample of an identity the scope already measured is admitted when its latest run
-    ended and released and may give one (`_sample_ready`), up to the identity's submission
-    limit counted for ``behalf``'s comparison. A refusal adds nothing: a side that cannot be
-    measured leaves the candidate without a comparison, never rejected.
+    Admitted only while core may run that side in the scope at all (`_side_open`) and the
+    identity may take one more run for ``behalf``'s comparison (`_sample_ready`). The first run
+    of the base opens its budget at ``MAX_CORE_BASE_RUNS``. A refusal adds nothing: a side that
+    cannot be measured leaves the candidate without a comparison, never rejected, and a need
+    deferred while the side's run is in flight is taken when that run ends (`after_run`).
     """
     scope = origin.scope
     identity = identity_of(plan)
     if not isinstance(identity, Proven) or not isinstance(current(context, scope), Proven):
         return change
     state = change.state
+    if not _side_open(state, context, scope, baseline=plan.purpose == "baseline"):
+        return change
     matches = tuple(
         b for b in state.submission_budgets if b.scope == scope and b.identity == identity.value
     )
     budget = matches[0] if matches else None
     if len(matches) > 1 or not _sample_ready(state, context, budget, behalf.measured_input):
         return change
+    if budget is None and plan.purpose == "baseline":
+        budget = SubmissionBudget(scope=scope, identity=identity.value, limit=MAX_CORE_BASE_RUNS)
     added = allocate(state, context, origin, plan, budget)
     outbound = next((r for r in added.requests if isinstance(r.request, SubmitMeasurement)), None)
     if outbound is None or outbound.request.request_id is None:
@@ -272,21 +286,21 @@ def _sample_ready(
     """Whether the identity may take one more run: its last ended, released, and may give a sample.
 
     A run that gave a sample may be followed by another, and so may one that ended without a
-    sample for a reason that says nothing of the next run: it was cancelled (drained with its
-    attempt, or out of queue allowance), failed in the machinery, was refused at submission, or
-    succeeded and its records could not be collected. Two ends refuse another, since the next
-    run would end the same way: a run that succeeded with records but without a reading (the
-    benchmark reports no metric), and a workload failure (the revision fails the evaluation,
-    which is durable, as it is for any submission). Every run counts
-    toward the identity's submission limit, so a run that keeps dying is retried a bounded
-    number of times.
+    sample for a reason that says nothing of the next run: it was cancelled with its attempt,
+    failed in the machinery, was refused at submission, or succeeded and its records could not
+    be collected (those are bounded per side, `_side_open`). Two ends refuse another, since the
+    next run would end the same way: a run that succeeded with records but without a reading
+    (the benchmark reports no metric), and a workload failure (the revision fails the
+    evaluation, which is durable, as it is for any submission).
 
-    The limit is counted per comparison: of the identity's runs, those core took for another
-    candidate input do not count (`_charged`). A base is shared by every candidate of its
-    attempt, and counted over the attempt's lifetime its limit would starve each later
-    candidate once the base's samples go stale. Each comparison still takes at most
-    ``min(limit, MAX_SUBMISSIONS_PER_MEASUREMENT)`` runs of each side, and an attempt has one
-    comparison per candidate input its agent measured.
+    Two limits hold. Every run of the identity in the scope, whoever asked for it and whatever
+    it gave, counts toward the budget's own limit over the attempt's lifetime
+    (``SubmissionBudget`` holds no more receipts than that): ``MAX_CORE_BASE_RUNS`` for the
+    base, whose budget core opens, and at most ``MAX_SUBMISSIONS_PER_MEASUREMENT`` for a
+    candidate input, whose budget its agent's call opened. And of the runs that gave a sample,
+    a comparison is charged only its own and those nobody asked for it alone (`_charged`), at
+    most ``MAX_SUBMISSIONS_PER_MEASUREMENT``: a base is shared by every candidate of its
+    attempt, and once its samples go stale a later candidate takes its own runs of it.
     """
     if budget is None or not budget.receipts:
         return True
@@ -306,18 +320,83 @@ def _sample_ready(
     released = not observation.accepted or isinstance(
         submission_released(state, context, latest), Proven
     )
-    charged = _charged(state, budget, candidate_input)
-    return released and charged < min(budget.limit, MAX_SUBMISSIONS_PER_MEASUREMENT)
+    return (
+        released
+        and len(budget.receipts) < budget.limit
+        and _charged(state, budget, candidate_input) < MAX_SUBMISSIONS_PER_MEASUREMENT
+    )
 
 
 def _charged(state: EvaluationState, budget: SubmissionBudget, candidate_input: str) -> int:
-    """How many of ``budget``'s runs count toward the comparison of ``candidate_input``.
+    """How many of ``budget``'s runs that gave a sample count toward ``candidate_input``'s comparison.
 
-    Every run but core's own for another candidate input: a run an agent or the strategy asked
-    for is charged to every comparison, as it was asked for no particular one.
+    Every one but core's own for another candidate input: a run an agent or the strategy asked
+    for is charged to every comparison, as it was asked for no particular one. A run that gave
+    no sample is bounded by `_side_open` instead, over the attempt's lifetime.
     """
     others = {run.request_id for run in state.core_runs if run.candidate_input != candidate_input}
-    return sum(1 for receipt in budget.receipts if receipt.request_id not in others)
+    sampled = {sample.run for sample in state.samples}
+    return sum(
+        1
+        for receipt in budget.receipts
+        if isinstance(receipt, PreparedSubmissionReceipt)
+        and receipt.request_id in sampled
+        and receipt.request_id not in others
+    )
+
+
+def _side_open(
+    state: EvaluationState, context: EvaluationContext, scope: Scope, *, baseline: bool
+) -> bool:
+    """Whether core may start a run of one side (the base, else a candidate's input) in ``scope``.
+
+    Read over core's own runs of that side in the scope, newest first, back to the latest that
+    gave a sample:
+
+    - none of them is still under way: core's runs never hold an agent's turn, so nothing else
+      paces them, and one run a side in flight per scope bounds them however many candidate
+      inputs the agent measures. A run whose records are still being collected is under way;
+    - none of them was ended by core because its job waited in the queue for its whole queue
+      budget (``FailureReason.QUEUE_BUDGET_SPENT``): the queue that held it holds the next, so
+      it is not replaced at all;
+    - fewer than ``MAX_SUBMISSIONS_PER_MEASUREMENT`` of them ended without a sample. A side
+      whose runs keep dying (a machine that fails, a benchmark whose records never come) stops
+      there until one of core's runs of it gives a sample, however many candidate inputs share
+      it. The agent's own runs do not reopen it: they are of inputs the agent chose.
+    """
+    side = {
+        receipt.request_id: receipt
+        for budget in state.submission_budgets
+        if budget.scope == scope and (budget.identity.purpose == "baseline") == baseline
+        for receipt in budget.receipts
+        if isinstance(receipt, PreparedSubmissionReceipt)
+    }
+    collecting = {job.submission_id for job in state.jobs if job.collecting is not None}
+    own = tuple(run.request_id for run in state.core_runs if run.request_id in side)
+    if any(
+        (seen := side[run].observation) is None or not seen.terminal or run in collecting
+        for run in own
+    ):
+        return False
+    sampled = {sample.run for sample in state.samples}
+    unsampled = 0
+    for run in reversed(own):
+        if _out_of_queue(context, run):
+            return False
+        if run in sampled:
+            return True
+        unsampled += 1
+    return unsampled < MAX_SUBMISSIONS_PER_MEASUREMENT
+
+
+def _out_of_queue(context: EvaluationContext, run: RequestId) -> bool:
+    """Whether core ended ``run`` because its job waited in the queue for its whole queue budget."""
+    row = context.records.record(run)
+    return (
+        row is not None
+        and row.failure is not None
+        and row.failure.reason is FailureReason.QUEUE_BUDGET_SPENT
+    )
 
 
 def _fresh_count(
@@ -435,9 +514,8 @@ def after_run(
     ):
         return change
     measured_input = _measured_input(state, context, run)
-    if measured_input is None:
-        return change
-    for candidate in _candidates_of(state, context, measured_input):
+    own = next((core_run.scope for core_run in state.core_runs if core_run.request_id == run), None)
+    for candidate in _candidates_of(state, context, measured_input, own):
         change = _advance(change, context, candidate)
     return change
 
@@ -472,11 +550,14 @@ class _Candidate:
 
 
 def _candidates_of(
-    state: EvaluationState, context: EvaluationContext, measured_input: str
+    state: EvaluationState,
+    context: EvaluationContext,
+    measured_input: str | None,
+    scope: Scope | None,
 ) -> tuple[_Candidate, ...]:
-    """The latest run of each (scope, candidate input, base) that involves ``measured_input``.
+    """The latest run of each (scope, candidate input, base) of ``measured_input`` or ``scope``.
 
-    Read from the submissions, so a candidate whose run is admitted but not yet started counts:
+    A run is of ``measured_input`` when it is the candidate's input or its base's. Read from the submissions, so a candidate whose run is admitted but not yet started counts:
     it waits on its base as much as one that runs.
     """
     made = (
@@ -494,7 +575,9 @@ def _candidates_of(
     latest: dict[tuple[str, str, str], _Candidate] = {}
     for candidate in made:
         own = candidate.plan.measured_input
-        if own is None or measured_input not in (own, candidate.base.measured_input):
+        if own is None or (
+            measured_input not in (own, candidate.base.measured_input) and candidate.scope != scope
+        ):
             continue
         key = (candidate.scope.model_dump_json(), own, candidate.base.model_dump_json())
         latest[key] = candidate

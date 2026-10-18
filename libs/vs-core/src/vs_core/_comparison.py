@@ -66,9 +66,12 @@ samples: ``BASE_MAX_SAMPLES`` (2, so at most one extra base run) under a declare
 can give a verdict. Nor does it chase staleness: when base samples go stale faster than a base
 run takes, the run a close call earned can land without growing the base's fresh samples (the
 sample it was meant to join expired meanwhile), and that run is the last one a close call earns
-either side of that comparison (`base_run_stalled`). Both the stop and the submission limit
-count only the runs core took for the comparison (its scope and candidate input), so a later
-candidate of the attempt, compared once the base went stale, takes its own runs of the base.
+either side of that comparison (`base_run_stalled`). The stop counts only the runs core took
+for the comparison (its scope and candidate input), so a later candidate of the attempt,
+compared once the base went stale, takes its own runs of the base. Every run of an identity in
+a scope counts toward its submission limit (`vs_core._base_runs`), so an attempt's base is run
+at most ``MAX_SUBMISSIONS_PER_MEASUREMENT`` times in its scope, however many candidate inputs
+its agent measures, and core keeps at most one run of each side in flight per scope.
 
 Core's runs serve the comparison only. The agent's turn never waits for them (they are not its
 attempt's history, `vs_core._evaluation_history`); the comparison it reads next grows as they
@@ -93,7 +96,13 @@ from math import floor, inf, sqrt
 from typing import TYPE_CHECKING
 
 from ._values import digest
-from .types.common import EvidenceKind, ObservationStatus, RevisionRef, Value
+from .types.common import (
+    MAX_SUBMISSIONS_PER_MEASUREMENT,
+    EvidenceKind,
+    ObservationStatus,
+    RevisionRef,
+    Value,
+)
 from .types.evaluation import (
     EvidenceRef,
     MeasurementIdentity,
@@ -120,6 +129,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BASE_MAX_SAMPLES",
+    "MAX_CORE_BASE_RUNS",
     "MIN_SAMPLES_WITHOUT_FLOOR",
     "VERDICT_NOISES",
     "ComparisonPolicy",
@@ -134,6 +144,7 @@ __all__ = [
     "compare",
     "comparison_of",
     "comparison_of_result",
+    "comparison_settling",
     "comparisons_of",
     "comparisons_to_publish",
     "effect_verdict",
@@ -147,7 +158,6 @@ __all__ = [
     "remeasures_candidate",
     "run_reading",
     "running_baseline",
-    "runs_under_way",
     "sample_of",
     "samples_of",
     "terms_policy",
@@ -169,6 +179,16 @@ Three a side is the fewest that give each side's spread two degrees of freedom, 
 degrees of freedom are at least 2 and the Student-t critical number at most 4.303; it is also
 the most fresh samples a close call earns a base then, and the most runs of its input a close
 call earns a candidate."""
+MAX_CORE_BASE_RUNS = MIN_SAMPLES_WITHOUT_FLOOR * MAX_SUBMISSIONS_PER_MEASUREMENT
+"""The most runs of an attempt's base core takes in its scope over the attempt's lifetime.
+
+The base is one measurement however many candidate inputs the agent measures, and its samples
+go stale (``TaskTerms.base_staleness``), so a long attempt measures it again for a later
+candidate. This is enough for five comparisons each to take the base to the runs a verdict
+needs without a floor, and it is the limit of the submission budget core opens for the base
+(`vs_core._base_runs`), so it holds whoever asked for each run.
+"""
+
 _T_FIRST_DEGREES = MIN_SAMPLES_WITHOUT_FLOOR - 1
 """The fewest degrees of freedom a comparison that can give a verdict has (Welch's are never
 below the smaller side's runs less one)."""
@@ -621,24 +641,31 @@ def latest_comparisons(
     return tuple(found)
 
 
-def runs_under_way(state: EvaluationState, scope: Scope, candidate_input: str) -> bool:
-    """Whether core has a run under way for the scope's comparison of ``candidate_input``.
+def comparison_settling(state: EvaluationState, comparison: Comparison) -> bool:
+    """Whether a run that will feed ``comparison`` has not ended: it changes when that run lands.
 
-    A run of either side core asked for that comparison (``CoreRun.candidate_input``) that has
-    not ended: the comparison changes when it lands.
+    Any run of either side counts, whoever asked for it: a run of its base in any scope (core's,
+    another candidate's, or the strategy's run core claimed, `_base_under_way`), since a base's
+    samples are shared by every candidate compared with it, and a run of the candidate's input
+    in the comparison's own scope (`base_in_flight`).
     """
-    asked = {
-        run.request_id
-        for run in state.core_runs
-        if run.scope == scope and run.candidate_input == candidate_input
-    }
-    return any(
-        isinstance(receipt, PreparedSubmissionReceipt)
-        and receipt.request_id in asked
-        and (receipt.observation is None or not receipt.observation.terminal)
-        for budget in state.submission_budgets
-        if budget.scope == scope
-        for receipt in budget.receipts
+    evaluation = next(
+        (
+            s.evaluation
+            for s in reversed(state.samples)
+            if s.scope == comparison.scope
+            and s.measured_input == comparison.candidate_input
+            and s.base is not None
+            and s.base.measured_input == comparison.base_input
+        ),
+        None,
+    )
+    if evaluation is None:
+        return False
+    base = Measured(evaluation, comparison.base_input)
+    candidate = Measured(evaluation, comparison.candidate_input)
+    return _base_under_way(state, comparison, base) or base_in_flight(
+        state, candidate, comparison.scope
     )
 
 
@@ -658,7 +685,7 @@ def comparisons_to_publish(
     resume that told of it said (one no resume told of differs). Core's runs land after the
     resume that waited for the candidate, so an agent that resumed on a provisional comparison
     learns where it ended at its next resume, whatever that resume waited for. A comparison is
-    settling while core still has a run under way for it (`runs_under_way`).
+    settling while a run of either side that will feed it has not ended (`comparison_settling`).
     """
     last: dict[tuple[str, str], tuple[ComparisonVerdict, bool]] = {}
     for comparison, settling in told:
@@ -668,7 +695,7 @@ def comparisons_to_publish(
     found: list[Comparison] = []
     settling_now: list[str] = []
     for comparison in latest_comparisons(state, scope, held, moment):
-        settling = runs_under_way(state, scope, comparison.candidate_input)
+        settling = comparison_settling(state, comparison)
         subject = (comparison.candidate_input, comparison.base_input)
         if comparison.candidate_input in wanted or last.get(subject) != (
             comparison.verdict,

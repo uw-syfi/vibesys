@@ -649,6 +649,7 @@ def test_every_candidate_with_a_sample_gets_a_comparison_and_the_runs_stay_bound
         ]
         assert len(runs) <= core.MAX_SUBMISSIONS_PER_MEASUREMENT
     charged_within_limit(lab)
+    assert type(lab.state).model_validate_json(lab.state.model_dump_json()) == lab.state
     if not floor:
         for comparison in lab.comparisons():
             assert comparison.candidate_samples <= core.MIN_SAMPLES_WITHOUT_FLOOR

@@ -8,6 +8,7 @@ from vs_core._attempt_track import (
 )
 from vs_core._comparison import (
     BASE_MAX_SAMPLES,
+    MAX_CORE_BASE_RUNS,
     MIN_SAMPLES_WITHOUT_FLOOR,
     VERDICT_NOISES,
     ComparisonPolicy,
@@ -16,6 +17,7 @@ from vs_core._comparison import (
     close_call,
     compare,
     comparison_of,
+    comparison_settling,
     comparisons_of,
     effect_verdict,
     evaluation_of,
@@ -819,6 +821,7 @@ __all__ = [
     "INPUT",
     "INTERPRET_SUFFIX",
     "MARKDOWN_PROSE_CONVENTION",
+    "MAX_CORE_BASE_RUNS",
     "MAX_CORRECTIONS",
     "MAX_LOST_TURNS",
     "MAX_REASK_CHAIN",
@@ -1440,6 +1443,7 @@ __all__ = [
     "close_call",
     "compare",
     "comparison_of",
+    "comparison_settling",
     "comparisons_of",
     "component",
     "control_refusal",
