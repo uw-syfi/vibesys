@@ -11,7 +11,7 @@ import type {EventSubscription, SubscribeOptions} from './transport.js';
 
 /**
  * The slice of `ServerClient` a persistent stream drives. Both the production
- * client and any transport the caller wraps around it (a tui `ServerTransport`,
+ * client and any transport the caller wraps around it (a Node `ServerTransport`,
  * a test fake) satisfy this structurally, so the abstraction lives here in
  * `@vibesys/transport` without depending on anything above it.
  */

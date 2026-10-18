@@ -2,7 +2,7 @@
 
 This page is the starting point for contributors extending VibeSys. It links
 to the focused guides for framework code, domains, skills, profilers, input
-bundles, and the TUI.
+bundles, and the desktop app.
 
 ## Before you change code
 
@@ -26,7 +26,6 @@ clients/libs/contracts/      TypeScript server protocol types and validator
 clients/libs/transport/      Runtime-neutral transport and the WebSocket adapter
 clients/libs/transport-node/ Node transport: the Unix-socket client
 clients/libs/run-state/      Pure backend-event projection (the run fold)
-clients/tui/                 TypeScript terminal UI and launcher
 libs/                    Reusable standalone libraries
 examples/                Candidate repositories, tasks, and input bundles
 resources/evaluators/    Reusable versioned evaluator packages
@@ -85,19 +84,7 @@ uv run vibesys validate examples/data-structures/repositories/queue-rs --task sp
 uv run pytest
 ```
 
-To use the interactive TUI from a checkout, install Node.js 20+, Bun, and pnpm
-11 (or enable Corepack). The launcher installs frontend dependencies and builds
-the client when needed.
-
-For a headless installation directly from GitHub without a checkout:
-
-```bash
-python -m pip install "git+https://github.com/uw-syfi/vibesys.git"
-```
-
-GitHub source installs skip optional submodules and do not build the native TUI.
-Pass `--headless` to suppress the fallback notice. Use a supported PyPI wheel
-when you need the bundled TUI.
+For desktop development, see [Desktop app development](desktop-development.md).
 
 ### Tests and submodules
 
@@ -282,8 +269,7 @@ What it does not cover: GPU devices and drivers, profiler captures (only the ser
 starts), the accelerator-attached editor of the plain Docker environment on a GPU
 host, and the SkyPilot and Modal editors.
 
-The TypeScript client has its own workflow; see
-[`clients/tui/README.md`](https://github.com/uw-syfi/vibesys/blob/main/clients/tui/README.md). The short version is:
+The TypeScript client has its own workflow:
 
 ```bash
 cd clients
@@ -307,8 +293,6 @@ removes it.
 
 When Python protocol models change, regenerate the files under
 `clients/libs/contracts/src/generated/` and review the diff.
-See the [TUI architecture guide](tui-architecture.md) for package ownership and dependency rules.
-TUI-specific contributor docs are indexed in [`tui/README.md`](tui/README.md).
 
 The [desktop development guide](desktop-development.md) covers local and SSH
 connections, the shell, and the Electron app.

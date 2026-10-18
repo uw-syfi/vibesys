@@ -1,6 +1,6 @@
 # Repository component ownership, discovery, and change impact policy.
 default_base = "main"
-jobs = ["python", "tui", "examples", "agent_image", "real_tiers", "evaluators", "impact", "stitch"]
+jobs = ["python", "clients", "examples", "agent_image", "real_tiers", "evaluators", "impact", "stitch"]
 
 ignored_roots = ["website", "third_party", ".agents", ".claude", ".github/ISSUE_TEMPLATE", ".github/DISCUSSION_TEMPLATE"]
 ignored_files = ["AGENTS.md", "CLAUDE.md", "LICENSE", "agent.toml.example", ".env.example", ".gitattributes", ".gitignore", ".github/CODEOWNERS", ".github/pull_request_template.md", ".github/delegated-merge.md"]
@@ -15,22 +15,10 @@ ownership_group = "python_modules"
 
 [[discoveries]]
 adapter = "package_json"
-manifest_glob = "clients/*/package.json"
-class = "workspace_package"
-id_prefix = "pnpm:"
-job = "tui"
-ownership_group = "workspace_packages"
-workspace_prefix = "workspace:"
-dependency_fields = ["dependencies", "devDependencies", "optionalDependencies"]
-
-# Library, feature, and app packages sit one level down (`pnpm-workspace.yaml`: `libs/*`,
-# `features/*`, `apps/*`); the deprecated `tui` is the one package at the workspace root.
-[[discoveries]]
-adapter = "package_json"
 manifest_glob = "clients/libs/*/package.json"
 class = "workspace_package"
 id_prefix = "pnpm:"
-job = "tui"
+job = "clients"
 ownership_group = "workspace_packages"
 workspace_prefix = "workspace:"
 dependency_fields = ["dependencies", "devDependencies", "optionalDependencies"]
@@ -40,7 +28,7 @@ adapter = "package_json"
 manifest_glob = "clients/features/*/package.json"
 class = "workspace_package"
 id_prefix = "pnpm:"
-job = "tui"
+job = "clients"
 ownership_group = "workspace_packages"
 workspace_prefix = "workspace:"
 dependency_fields = ["dependencies", "devDependencies", "optionalDependencies"]
@@ -50,7 +38,7 @@ adapter = "package_json"
 manifest_glob = "clients/apps/*/package.json"
 class = "workspace_package"
 id_prefix = "pnpm:"
-job = "tui"
+job = "clients"
 ownership_group = "workspace_packages"
 workspace_prefix = "workspace:"
 dependency_fields = ["dependencies", "devDependencies", "optionalDependencies"]
@@ -120,12 +108,12 @@ files = [
 
 [[components]]
 id = "server_protocol"
-files = ["src/server/api/schema.py", "src/server/events.py", "src/server/api/protocol.py", "src/server/controller.py", "src/server/diagnostics.py", "src/server/settings.py"]
+files = ["src/server/api/schema.py", "src/server/events.py", "src/server/api/protocol.py", "src/server/controller.py", "src/server/diagnostics.py", ]
 
 [[components]]
 id = "server_transport"
 # The browser e2e suite is the only check that the served bundle still loads and
-# still reaches the gateway, so a transport change has to select the `tui` job.
+# still reaches the gateway, so a transport change has to select the `clients` job.
 # Covers the directory rather than `websocket.py` alone: the framing in
 # `unix_jsonl.py` and the fan-out in `subscriptions.py` are equally observable
 # from a client.
@@ -134,7 +122,7 @@ roots = ["src/server/transport"]
 [[components]]
 id = "clients"
 class = "manual"
-job = "tui"
+job = "clients"
 root = "clients"
 depends_on = ["server_protocol", "server_transport", "bun_fetcher"]
 
@@ -149,7 +137,7 @@ root = "experimental/stitch"
 [[components]]
 id = "test_isolation_policy"
 class = "manual"
-jobs = ["python", "tui"]
+jobs = ["python", "clients"]
 # The implementation, configuration, and ratchet data must select both jobs:
 # Python exercises the scanner and the client job executes it over TypeScript.
 files = [
@@ -160,7 +148,7 @@ files = [
 
 [[components]]
 id = "bun_fetcher"
-files = ["packaging/fetch_bun.py"]
+files = ["packaging/fetch_bun.py", "packaging/bun_targets.py"]
 
 [[components]]
 id = "examples"
@@ -285,7 +273,7 @@ to = "native:examples/data-structures/repositories/queue-rs"
 id = "repo_policy"
 # Policy inputs affect every CI selection.
 roots = ["support/repoctl", ".repoctl"]
-files = [".github/workflows/test.yml", ".github/actions/setup-tui/action.yml", ".github/actions/setup-repoctl/action.yml", ".github/actions/docker-cache-week/action.yml", "tests/repoctl/cases.toml"]
+files = [".github/workflows/test.yml", ".github/actions/setup-clients/action.yml", ".github/actions/setup-repoctl/action.yml", ".github/actions/docker-cache-week/action.yml", "tests/repoctl/cases.toml"]
 select_all_jobs = true
 select_all_collections = true
 # CI selects everything for a policy change; a local `repoctl test` runs only repoctl's own

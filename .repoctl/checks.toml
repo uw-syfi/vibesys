@@ -77,8 +77,8 @@ timeout_seconds = 600
 commands = [["./scripts/check_types.sh"]]
 
 [[check_groups]]
-name = "tui_tests"
-trigger_job = "tui"
+name = "clients_tests"
+trigger_job = "clients"
 include_in_test = true
 language = "typescript"
 directory = "clients"
@@ -99,7 +99,7 @@ always_commands = [
 ]
 
 [[check_groups]]
-name = "tui_quality"
+name = "clients_quality"
 language = "typescript"
 directory = "clients"
 timeout_seconds = 1200
@@ -115,7 +115,7 @@ commands = [
 ]
 
 # The gallery's screenshot compare in the Linux image CI uses, plus the check that a baseline update
-# is deterministic. CI runs the compare natively inside `tui_e2e`; this group is the local leg that
+# is deterministic. CI runs the compare natively inside `clients_e2e`; this group is the local leg that
 # `scripts/check_clients.sh` adds, so a baseline mismatch shows up before the push. Needs Docker.
 [[check_groups]]
 name = "ui_gallery_linux"
@@ -128,14 +128,14 @@ commands = [
 ]
 
 [[check_groups]]
-name = "tui_build"
+name = "clients_build"
 language = "typescript"
 directory = "clients"
 timeout_seconds = 1200
 commands = [["pnpm", "build:clients"]]
 
 [[check_groups]]
-name = "tui_e2e"
+name = "clients_e2e"
 language = "typescript"
 directory = "clients"
 timeout_seconds = 1200
@@ -144,13 +144,6 @@ commands = [
   ["pnpm", "--filter", "@vibesys/app-ui-gallery", "test:e2e"],
   ["pnpm", "--filter", "@vibesys/app-desktop-shell", "test:e2e"],
 ]
-
-[[check_groups]]
-name = "tui_package_smoke"
-language = "typescript"
-directory = "clients"
-timeout_seconds = 600
-commands = [["bash", "tools/scripts/check_package_smoke.sh"]]
 
 [[check_groups]]
 name = "examples_tests"

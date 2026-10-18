@@ -11,7 +11,6 @@ import type {
   RequestInput,
   RunEvent,
   RunSnapshot,
-  TuiDefaults,
 } from '@vibesys/contracts';
 import type {
   AbortSignalLike,
@@ -87,8 +86,6 @@ export interface RunConnection {
   ask(text: string, options?: WebChatOptions): Promise<ChatResponse>;
   /** Deliver one lifecycle command and resolve its wire response to a semantic outcome. */
   command(input: RunCommand): Promise<RunCommandOutcome>;
-  /** Read the server's presentation defaults without making UI code name the transport. */
-  tuiDefaults(): Promise<TuiDefaults | null>;
   /** Subscribe once; settles when the first subscription does. */
   subscribe(handlers: RunStreamHandlers): Promise<void>;
   /** Resume the stream where it was. */

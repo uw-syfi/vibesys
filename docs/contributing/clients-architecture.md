@@ -15,10 +15,6 @@ It builds on, and does not restate:
 - [`wire-protocol.md`](wire-protocol.md): the run protocol that `@vibesys/contracts` types.
 - [`desktop-development.md`](desktop-development.md): how to run the desktop app.
 
-`clients/tui` is deprecated. It keeps building and its checks stay green, but it is not migrated
-into this graph; it consumes the packages below through their public entry points like any other
-app, and is deleted when the desktop app replaces it.
-
 ## Why
 
 `clients/web` and `clients/desktop` grew as two large packages with layering rules enforced inside
@@ -73,7 +69,6 @@ clients/
   apps/ui-gallery        @vibesys/app-ui-gallery        development only, never shipped: every
                                                         component in every theme, screenshot-tested
                                                         in Ink
-  tui/              @vibesys/tui              deprecated terminal UI; stays at the root until it is deleted
   tools/            scripts/ (checkers, scaffold), lint-rules/ (Biome plugins), and the shared
                     tsconfig.base.json, tsconfig.architecture.json, knip.config.ts
 ```
@@ -82,8 +77,7 @@ The folder a package sits in mirrors its layer: `libs/` holds the `foundation`, 
 and `service` packages, `features/` the `feature` packages, and `apps/` the `app` packages. The
 manifest's `vibesys.layer` stays the one source of truth; the `layer-matches-folder` rule fails a
 package filed under the wrong folder. Imports are by package name, so moving a package between
-folders changes no source. `tui` is the one package outside the three folders (see
-[Layers](#layers)). Files a tool requires at the workspace root stay there: `package.json`,
+folders changes no source. Files a tool requires at the workspace root stay there: `package.json`,
 `pnpm-workspace.yaml`, `pnpm-lock.yaml`, `turbo.json`, `biome.json` and `biome.warnings.json`
 (Biome resolves a config's plugin paths against the config that extends it, so the warnings
 config sits beside `biome.json`), and `.dependency-cruiser.mjs`.
@@ -121,7 +115,7 @@ cycles, and forbids feature-to-feature and app-to-app edges, because peers share
 | `domain` | 2 | `runs`, `run-session`, `transport-node`, `run-history`, `run-fixtures` | foundation, core |
 | `service` | 3 | `ipc`, `connection`, `settings` | foundation, core, domain |
 | `feature` | 4 | `feature-*` | anything below |
-| `app` | 5 | `apps/*` (and the deprecated `tui`) | anything below |
+| `app` | 5 | `apps/*` | anything below |
 
 This refines the sketch in the brief in three places. `ui` and `store` sit in `foundation`: rank 0
 is the mechanical form of "no domain dependencies", so the layer rule enforces rule 6 for them with
@@ -198,7 +192,7 @@ through no path: only `node` entries may import them, and only `desktop-main` an
 | 7 | A foundation, core, or domain package is named for the concept it owns, not for a bucket | `bucket-names` (no segment of its name in `BUCKET_NAMES`) |
 | 8 | A sandboxed preload loads only Electron at run time; every workspace import in it is erased | `preload-sandbox` (what the entry's emitted CommonJS still requires); `.dependency-cruiser.mjs` keeps a preload's imports to `@vibesys/ipc` and Electron |
 | 9 | Control state is an XState machine; data folds are plain reducers (see [State](#state)) | `external-dependencies` (`xstate` only in features' `./state` and `./renderer` and `MACHINE_PACKAGES`); `tools/lint-rules/features-no-hand-rolled-control.grit`, `tools/lint-rules/control-state-no-store-kernel.grit` |
-| 10 | A package's folder matches the layer its manifest declares: `libs/*` is foundation, core, domain, or service; `features/*` is feature; `apps/*` is app; nothing else, except the deprecated `tui` (`DEPRECATED_OUTSIDE_FOLDERS`) | `layer-matches-folder` |
+| 10 | A package's folder matches the layer its manifest declares: `libs/*` is foundation, core, domain, or service; `features/*` is feature; `apps/*` is app; nothing else | `layer-matches-folder` |
 | 11 | Every feature and app builds UI only from `@vibesys/ui` (see [Design system enforcement](#design-system-enforcement)) | `strict-no-stylesheets`, `strict-imports`; `tools/lint-rules/strict-*.grit` through `biome.json` |
 
 All package-graph rules, and the tables they read, live in one module,
@@ -238,7 +232,6 @@ checker (`EXTERNAL_DEPENDENCIES`, rule `external-dependencies`):
 | --- | --- |
 | `react`, `react-dom` (and subpaths) | `dom` entries: `ui`, features' `./renderer`, browser and renderer apps |
 | `electron` | `node` and `preload` entries of features (`./main`) and apps (`desktop-main`) |
-| `@opentui/core` | `node` entries of apps (the deprecated `tui`) |
 | `xstate` | features' `./state` and `./renderer`; `MACHINE_PACKAGES`: `machine`, `connection` (its host connection machine), and `run-session` (its session machine). Never `store`, `run-state`, `hosts`, `runs`, `ui`, `contracts`, `transport`, or `ipc` |
 | Node builtins (`node:*` and bare names) | `node` entries |
 
@@ -246,11 +239,6 @@ A package that declares one of them in `dependencies` must have an entry allowed
 (`pnpm check:knip`) composes with this: it reports dependencies declared but never imported and
 imports of packages not declared, so between the two a dependency is declared exactly when it is
 used, and used only where its runtime allows.
-
-**Legacy packages.** `tui` predates the per-entry layout, so `LEGACY_EXEMPTIONS` in the checker
-lets it skip the per-entry project rules; every other rule applies to it. It is deprecated and keeps
-its exemption until it is deleted. The table only shrinks: `desktop` left it when its main process
-was composed from packages (`apps/desktop-main`, phase 8 of #1878).
 
 ## Design tokens and themes
 
@@ -627,7 +615,6 @@ names a missing or extra one.
 | `@vibesys/backend-client` | core | deleted: split into `transport` and `transport-node` | backend-client split (#1910) |
 | `@vibesys/desktop` | app | deleted: emptied into `connection`, `settings`, the features' `./main`, and `apps/desktop-main` | desktop main process (phase 8 of #1878) |
 | `@vibesys/web` | app | deleted with the browser client; desktop shell is the renderer | desktop cutover (#2850) |
-| `@vibesys/tui` | app | deprecated; kept building, not migrated | none |
 
 Roadmap [#1878](https://github.com/uw-syfi/vibesys/issues/1878) tracks this migration; each item gets
 a sub-issue there when it starts.

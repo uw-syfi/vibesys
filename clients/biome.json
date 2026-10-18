@@ -110,17 +110,7 @@
       ]
     },
     {
-      "includes": [
-        "**/ui/**/*.ts",
-        "**/ui/**/*.tsx",
-        "!**/*.test.ts",
-        "!**/*.test.tsx",
-        "!tui/src/ui/activity-bar.ts",
-        "!tui/src/ui/agent-map.ts",
-        "!tui/src/ui/chat-composer.ts",
-        "!tui/src/ui/experiment-log.ts",
-        "!tui/src/ui/round-rail.ts"
-      ],
+      "includes": ["**/ui/**/*.ts", "**/ui/**/*.tsx", "!**/*.test.ts", "!**/*.test.tsx"],
       "plugins": ["./tools/lint-rules/ui-no-timers.grit"]
     },
     {

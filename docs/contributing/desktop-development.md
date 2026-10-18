@@ -7,7 +7,7 @@ section says how the code is laid out and how to run it.
 
 The desktop app (`clients/apps/desktop-main`) ships its own UI (`clients/apps/desktop-shell`) and
 reaches servers through its main process, without the web gateway. A server is
-a detached run (`vibesys --detach`, see `tui-architecture.md`) on this machine
+a detached run (`vibesys --detach`) on this machine
 or on an SSH host. The main process reaches every host the same way: it runs the
 host helper there (`python -m entrypoints.host_helper`) and speaks its typed
 protocol; This Mac and an SSH host differ only in how the helper is started, and

@@ -2,7 +2,7 @@
 
 The local command lists the check groups it runs and the CI groups it leaves out (with a reason).
 CI's client jobs run named repoctl groups from ``.repoctl/checks.toml``. This test derives the
-groups the ``tui-*`` jobs of the workflow run and requires each to be in exactly one of the two
+groups the ``clients-*`` jobs of the workflow run and requires each to be in exactly one of the two
 lists, and every listed group to be defined, so a group added to CI cannot be forgotten locally.
 """
 
@@ -32,7 +32,7 @@ def _client_ci_groups() -> set[str]:
     jobs: dict[str, Any] = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
     groups: set[str] = set()
     for name, job in jobs.items():
-        if not name.startswith("tui-"):
+        if not name.startswith("clients-"):
             continue
         for step in job.get("steps", []):
             groups.update(GROUP_FLAG.findall(str(step.get("run", ""))))

@@ -5,7 +5,7 @@ and the shared fault menu of `tests.vibesys.search_faults` does the rest: a gene
 answers waits the search's own way or with any fault core can deliver, the operator may stop
 (draining or cancelling) at any point, and the run must still end in one `Finish` with every
 attempt settled. After every step, what the run published must project, through the
-registration's own projector, to the view the server and the TUI read. A new built-in fails
+registration's own projector, to the view the server and clients read. A new built-in fails
 `test_every_built_in_search_is_played_under_faults` until it registers here.
 """
 
@@ -148,7 +148,7 @@ def test_a_search_ends_cleanly_whatever_core_does_to_its_waits_and_however_it_st
     assert isinstance(projector, RuntimeRecordProjector)
 
     def projects() -> None:
-        """What the run published projects to the view the server and the TUI read, tree too."""
+        """What the run published projects to the view the server and clients read, tree too."""
         published = projector.published(host.run.state)
         if published is None:
             return

@@ -30,7 +30,7 @@ class ControlSocketStopRequester:
 
     This is the same command an attached client sends, so the run stops at its
     next controlled boundary with its state persisted, exactly as a stop from
-    the TUI does. Only the socket's owner can dial it: the socket is ``0600``
+    the client does. Only the socket's owner can dial it: the socket is ``0600``
     inside the ``0700`` registry root.
     """
 

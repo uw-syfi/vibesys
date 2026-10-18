@@ -95,7 +95,7 @@ export interface ServerTransport {
 /**
  * A transport whose control channel can be redialed on demand. Separate from
  * `ServerTransport` rather than folded into it: a frontend that offers a
- * reconnect affordance needs this, and one that does not (the TUI today) should
+ * reconnect affordance needs this, and a client that does not should
  * not have to implement a verb it never calls. Both shipped transports satisfy
  * it, so the affordance is reachable without an optional method, which would
  * make "does my transport actually redial" a per-implementation question.

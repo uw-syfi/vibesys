@@ -45,7 +45,6 @@ export type {
   RunStatus,
   ServerMessage,
   Span,
-  TuiDefaults,
 } from './protocol.js';
 export {PROTOCOL_VERSION} from './protocol.js';
 export {

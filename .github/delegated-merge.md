@@ -24,18 +24,16 @@ Membership is source-controlled and changes through the normal maintainer path.
 For example:
 
 ```toml
-[capabilities.tui]
+[capabilities.clients]
 members = ["alice"]
-prefixes = ["clients/tui/src/"]
+prefixes = ["clients/libs/run-state/src/"]
 paths = []
-additional_checks = ["release-wheels"]
+additional_checks = []
 ```
 
-Capabilities are also the boundary for conditional checks. Client source paths
-use the `tui` capability and require the release-wheel aggregate; TUI
-documentation outside `clients/` uses `tui-docs`, because `publish.yml` does
-not run for those paths. A pull request that spans both capabilities requires
-the union of their checks.
+Capabilities also bound source ownership. Shared client state and transport code use the
+`clients` capability; server source uses `server`. A pull request spanning both requires
+membership in both capabilities.
 
 The broker's policy, workflow, implementation, and configured check workflow
 paths are always denied, even if a future capability section would otherwise
@@ -150,13 +148,13 @@ the job log. If the step is skipped or produces an empty
 token, the script refuses with a message naming the landing token, before any
 landing write. It never falls back to `GITHUB_TOKEN`.
 
-## Migration from the scoped TUI bot
+## Migration from the scoped merge bot
 
 The temporary `Scoped merge gate` compatibility job was removed after the live
 repository was audited and had neither a branch-protection rule nor a ruleset
 that referred to it. `Required PR CI` is the broker's named test check and the
 merge queue's aggregate test result. Add each delegated maintainer to the
-`tui`, `tui-docs`, `server`, or applicable combination of capability member
+`clients`, `server`, or applicable combination of capability member
 lists through the normal maintainer path. The accepted command is
 `/merge-scoped`; the old command is not accepted.
 

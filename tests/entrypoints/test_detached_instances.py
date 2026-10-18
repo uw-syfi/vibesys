@@ -19,7 +19,7 @@ from entrypoints.detached_run import SERVER_EXITED, RecordPublisher
 from entrypoints.detached_run import main as detached_run_main
 from entrypoints.instances import main as instances_main
 from entrypoints.instances import run
-from entrypoints.launcher import _headless_requested
+from entrypoints.launcher import headless_command
 from entrypoints.server import (
     _DetachedGatewayEffects,
     _headless_argv,
@@ -425,7 +425,7 @@ def test_driving_finds_exactly_a_live_server_with_that_run(run_ids: list[str], w
 
 
 def test_the_launcher_routes_detached_runs_to_python() -> None:
-    assert _headless_requested(["--detach"]) is True
+    assert headless_command(["--detach"])[2] == "entrypoints.server"
 
 
 def test_the_launcher_lists_instances_in_process_without_a_child(

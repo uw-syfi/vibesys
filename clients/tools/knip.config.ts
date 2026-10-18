@@ -28,19 +28,6 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
     ],
     project: ['src/**/*.ts', 'bench/**/*.ts'],
   },
-  tui: {
-    entry: [
-      // The frontend process: the launcher (the `bin`, an entry by default) spawns `dist/index.js`.
-      'src/index.ts',
-      'src/**/*.test.ts',
-      // Replay harness: `mock-ui.sh` starts `mock-server.ts`; `harness.test.ts` runs under `bun test`.
-      'dev/mock-server.ts',
-      'dev/**/*.test.ts',
-      // Hand-run benchmark (`bun benchmarks/experiment-refresh.ts`).
-      'benchmarks/*.ts',
-    ],
-    project: ['src/**/*.ts', 'dev/**/*.ts', 'benchmarks/**/*.ts'],
-  },
   'apps/desktop-main': {
     // The Electron main process and the two sandboxed preloads (`.cts`, loaded by path from
     // `src/main/app-security.ts`) are the package's exports, entries by default; the build's copy
@@ -108,9 +95,8 @@ for (const {name, directory, manifest} of layout.packages) {
 }
 
 const config: KnipConfig = {
-  // External programs run by scripts or tests, not npm packages: `uv` (generate:protocol, dev
-  // machines only) and `pkill` (harness.test.ts cleanup).
-  ignoreBinaries: ['uv', 'pkill'],
+  // The protocol generator calls an external Python tool.
+  ignoreBinaries: ['uv'],
   workspaces,
 };
 

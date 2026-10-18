@@ -10,10 +10,8 @@ is the exhaustive flag reference.
 
 ## Entry Point
 
-Use the installed `vibesys` command. It launches the interactive TUI by default
-and runs headless with `--headless`, `--help`, `validate`, `preflight`, `control`
-(see [Control a Running Run](running-vibesys.md#control-a-running-run)), or when not
-attached to a TTY. Examples below use this command.
+Use the installed `vibesys` command for command-line and headless operation.
+The desktop app provides the interactive interface. Examples below use the CLI.
 
 ### Agent configuration
 
@@ -202,7 +200,6 @@ Several flags look independent, but they combine into one execution contract:
 | Task | `--task NAME` | Task below `.vibesys/tasks`; optional when exactly one exists. |
 | Project provisioning | `--runs-dir PATH` | Copy a repository-shaped example nested below another Git root, or a project synthesized from `--input-*` flags. Standalone repository-native projects run in place. |
 | Project repository | `--repo`, `--repo-visibility`, `--local`, `--resume` | Fresh copied projects use GitHub by default. Resume also accepts local project paths or GitHub repositories. |
-| Client theme | `--theme` | Presentation only. Which semantic theme the interactive client renders with. |
 
 Do not treat these as simple toggles. Some combinations imply a startup
 contract, profiler, or sandbox capability. Language and artifact requirements
@@ -693,48 +690,6 @@ realtime audio); its text lives in that domain's pack. Other domains declare non
 the flag; an example's own wire contract belongs in its `OBJECTIVE.md`. Domains and modalities may define language, toolchain, and
 artifact requirements. Interface-specific prose should describe only the
 direct-call or service boundary.
-
-## Client Theme
-
-`--theme` selects the semantic theme the interactive client renders with. It is
-presentation only: it never reaches the agents, the project, or the recorded
-run state, and it is ignored in headless mode.
-
-| Theme | Appearance | Use for |
-| --- | --- | --- |
-| `dark` | dark | Default dark palette. |
-| `light` | light | The baseline palette inverted for light terminals. |
-| `solarized-dark` | dark | Low-glare Solarized palette. |
-| `solarized-light` | light | Low-glare Solarized palette. |
-| `catppuccin-mocha` | dark | Softer, more expressive palette. |
-| `catppuccin-latte` | light | Softer, more expressive palette. |
-| `high-contrast-dark` | dark | Accessibility-focused; every foreground clears a 7:1 contrast ratio. |
-| `high-contrast-light` | light | Accessibility-focused; every foreground clears a 7:1 contrast ratio. |
-
-Resolution order, highest first:
-
-1. `--theme <name>` on the command line.
-2. `[tui].theme` in `agent.toml`.
-3. `dark`.
-
-An unknown name is rejected before any process starts. Inside a running
-session, `/theme` opens the theme list as a keyboard selection (Up/Down to
-move, Enter to apply, Escape to close without switching) and `/theme <name>`
-switches immediately; that switch applies to the session only and does not edit
-`agent.toml`.
-
-Themes define semantic roles — surfaces, text emphasis levels, borders,
-accents, status colors, conversation roles, and Markdown/code colors — rather
-than per-component colors, and every derived foreground is checked against its
-own background at build time. Status is never carried by color alone: agent
-phases show a marker glyph and the spelled-out status, todo items show a
-per-status marker, and the running round is the only one with an elapsed-time
-suffix.
-
-```bash
-vibesys --runs-dir /work/vibesys-runs --local \
-  --input examples/model-serving/Llama-3-8B --theme solarized-light
-```
 
 ## Skills
 

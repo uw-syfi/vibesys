@@ -560,7 +560,7 @@ def test_context_assembly_logs_stage_timings(tmp_path: Path) -> None:
     """Every assembly span up to and past the experiments gate reaches the run log.
 
     This is a regression guard for the diagnostic used to find where
-    ``open_run_resources`` spends time before the TUI's hypothesis screen
+    ``open_run_resources`` spends time before the client's hypothesis screen
     can leave "loading experiments..." (the gate flips when the second
     ``LocalRunIntegration.attach`` records ``EXPERIMENTS_CHANGED``).
     """

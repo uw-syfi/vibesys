@@ -85,9 +85,6 @@ class PendingHandleConnection implements RunConnection {
   command(): Promise<RunCommandOutcome> {
     return Promise.resolve({kind: 'rejected', message: null});
   }
-  tuiDefaults(): Promise<null> {
-    return Promise.resolve(null);
-  }
   close(): Promise<void> {
     return Promise.resolve();
   }
@@ -143,9 +140,6 @@ class FaultBeforeSnapshotConnection implements RunConnection {
   }
   command(): Promise<RunCommandOutcome> {
     return Promise.resolve({kind: 'rejected', message: null});
-  }
-  tuiDefaults(): Promise<null> {
-    return Promise.resolve(null);
   }
   close(): Promise<void> {
     return Promise.resolve();
@@ -221,9 +215,6 @@ class FailingRecoveryConnection implements RunConnection {
   }
   command(): Promise<RunCommandOutcome> {
     return Promise.resolve({kind: 'rejected', message: null});
-  }
-  tuiDefaults(): Promise<null> {
-    return Promise.resolve(null);
   }
   close(): Promise<void> {
     this.closeCalls += 1;
@@ -909,15 +900,6 @@ describe('WebSession', () => {
       1,
     );
     expect(session.getState()).toEqual(healthy());
-    await session.close();
-  });
-
-  test('reads presentation defaults through the same session-owned control connection', async () => {
-    const {session, transport} = sessionWith(new FakeLifecycle());
-
-    await session.tuiDefaults();
-
-    expect(transport.requests).toEqual([{type: 'query.tui_defaults'}]);
     await session.close();
   });
 

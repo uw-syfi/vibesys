@@ -70,7 +70,6 @@ export const REQUEST_POLICIES: Readonly<Record<RequestInput['type'], RequestPoli
   'query.iterations': READ,
   'query.performance': READ,
   'query.snapshot': READ,
-  'query.tui_defaults': READ,
   subscribe: READ,
 };
 

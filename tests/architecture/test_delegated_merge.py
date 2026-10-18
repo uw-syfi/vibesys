@@ -307,25 +307,11 @@ def test_checked_in_policy_names_one_existing_job_for_every_check() -> None:
 @pytest.mark.parametrize(
     ("filenames", "expected_capabilities", "expected_checks"),
     [
+        (["clients/libs/transport/src/index.ts"], {"clients"}, {"pr-ci"}),
         (
-            ["docs/contributing/tui/README.md"],
-            {"tui-docs"},
+            ["clients/libs/run-state/src/index.ts", "src/server/events.py"],
+            {"clients", "server"},
             {"pr-ci"},
-        ),
-        (
-            ["docs/contributing/tui/conventions.md", "clients/tui/src/app.ts"],
-            {"tui", "tui-docs"},
-            {"pr-ci", "release-wheels"},
-        ),
-        (
-            ["clients/tui/README.md", "clients/tui/src/app.ts"],
-            {"tui"},
-            {"pr-ci", "release-wheels"},
-        ),
-        (
-            ["clients/libs/transport/src/index.ts"],
-            {"tui"},
-            {"pr-ci", "release-wheels"},
         ),
     ],
 )
@@ -341,15 +327,11 @@ def test_checked_in_policy_selects_checks_that_run_for_the_changed_paths(
 
     assert capabilities == expected_capabilities
     assert checks == expected_checks
-    assert {"ayanbinrafaih", "nano-ai"} <= policy.capabilities["tui"].members
-    assert policy.checks["release-wheels"] == Check(
-        workflow_file="publish.yml",
-        job_name="Verify release artifact set",
-    )
+    assert {"ayanbinrafaih", "nano-ai"} <= policy.capabilities["clients"].members
 
 
 @pytest.mark.parametrize(
-    "filename", ["docs/contributing/other.md", "docs/contributing/tui-conventions.md"]
+    "filename", ["docs/contributing/other.md", "docs/contributing/desktop-conventions.md"]
 )
 def test_checked_in_policy_keeps_other_contributing_docs_out_of_scope(filename: str) -> None:
     policy = load_policy()

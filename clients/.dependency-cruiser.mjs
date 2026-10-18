@@ -2,8 +2,8 @@ import {fileURLToPath} from 'node:url';
 import {pathAlternation, workspaceLayout} from './tools/scripts/workspace_layout.mjs';
 
 // Scanned sources: each package's `src/`, plus the non-shipping code that lives next to it (the
-// replay harness `tui/dev` and the benchmarks) and the workspace's own
-// tooling (`tools`). Both sets come from the workspace layout rather than a name list, so a new
+// benchmarks) and the workspace's own tooling (`tools`). Both sets come from the workspace layout
+// rather than a name list, so a new
 // package, or a new directory inside one, is covered by these rules on its first commit.
 // `tools/scripts/check_ts_architecture.mjs` derives the scan roots from the same place.
 const layout = workspaceLayout(fileURLToPath(new URL('.', import.meta.url)));
@@ -11,7 +11,6 @@ const PACKAGE_DIRECTORIES = pathAlternation(layout.packages.map(({directory}) =>
 const PACKAGES = `^(?:${PACKAGE_DIRECTORIES})/`;
 // Capturing, so a rule can exclude the importer's own package with a `$1` back-reference.
 const OWN_PACKAGE = `^(${PACKAGE_DIRECTORIES})/`;
-const PACKAGE_SOURCES = `^(?:${PACKAGE_DIRECTORIES})/src/`;
 const TOOLING = `^(?:${pathAlternation(layout.toolingDirectories)})/`;
 const SCANNED = `${PACKAGES}|${TOOLING}`;
 const TEST_FILE = '\\.test\\.[cm]?[jt]sx?$';
@@ -28,15 +27,7 @@ const ANY_TEST_SUPPORT = [
   `^(?:${PACKAGE_DIRECTORIES})/src/(?:testing|test-support)/`,
   `^(?:${PACKAGE_DIRECTORIES})/src/.*/(?:testing|test-support)/`,
 ];
-// The replay harness is tooling, but it has its own rule below, with the reason it exists; the
-// remaining tooling directories are plain leaf tools.
-const DEV_HARNESS = 'tui/dev';
-if (!layout.toolingDirectories.includes(DEV_HARNESS)) {
-  throw new Error(`.dependency-cruiser.mjs: ${DEV_HARNESS} is no longer a tooling directory`);
-}
-const LEAF_TOOL_DIRECTORIES = pathAlternation(
-  layout.toolingDirectories.filter(directory => directory !== DEV_HARNESS),
-);
+const LEAF_TOOL_DIRECTORIES = pathAlternation(layout.toolingDirectories);
 const LEAF_TOOLS = `^(?:${LEAF_TOOL_DIRECTORIES})/`;
 // The importer of a `tools-are-leaves` edge: any file in a leaf tool directory, or any other file
 // in a package. Group 1 is the importer's own leaf tool directory, so `to.pathNot: '^$1/'`
@@ -224,24 +215,11 @@ export default {
       },
     },
     {
-      // `tui/dev/` is the development replay harness. It is kept out of
-      // `dist` by `rootDir: "src"`, but `tui/tsconfig.check.json` widens the root so
-      // the harness itself is typechecked, and that widening makes a src -> dev
-      // import typecheck cleanly. The build still rejects it (TS6059); this says
-      // so at the layer that owns the rule rather than leaving it to a later step.
-      // The harness may import any public workspace export, but no package code
-      // (in any package, test files included) may import it.
-      name: 'shipping-path-does-not-depend-on-dev-harness',
-      severity: 'error',
-      from: {path: PACKAGES, pathNot: `^${DEV_HARNESS}/`},
-      to: {path: `^${DEV_HARNESS}/`},
-    },
-    {
       // Benchmarks, end-to-end specs, and workspace scripts are leaf tools: they consume the
       // packages, never the other way round, so a package build or test cannot depend on them.
       // Each tool may reach its own directory and no other's, which is what the `$1`
       // back-reference on `LEAF_TOOL_IMPORTER` says. Excluding every tool from `from` instead
-      // would permit `web/e2e -> tools` and `web/e2e -> tui/benchmarks`.
+      // would permit one tool directory to import another.
       name: 'tools-are-leaves',
       severity: 'error',
       from: {path: LEAF_TOOL_IMPORTER},
@@ -303,108 +281,9 @@ export default {
         dependencyTypesNot: ['aliased-tsconfig-paths'],
       },
     },
-    // Layering inside `tui/src`. `docs/contributing/tui-architecture.md` gives the package
-    // ownership of interaction state, effects, and OpenTUI rendering/input; these rules encode
-    // that split over the current module structure. Test files are exempt: they wire layers
-    // together on purpose.
-    {
-      // Widgets render the TUI-owned session model. Wire types stop in the model/controller
-      // layer, so generated backend contracts cannot spread into presentation modules.
-      name: 'tui-ui-does-not-depend-on-transport',
-      severity: 'error',
-      from: {path: '^tui/src/ui/', pathNot: TEST_FILE},
-      to: {
-        path: [
-          '^libs/(?:transport|transport-node|contracts)/',
-          '/node_modules/@vibesys/(?:transport|transport-node|contracts)/',
-        ],
-      },
-    },
-    {
-      // The replay harness consumes published workspace entry points. A relative import into any
-      // package's src tree bypasses that interface, including an import into tui's own src tree.
-      name: 'dev-cannot-deep-import-src',
-      severity: 'error',
-      from: {path: `^${DEV_HARNESS}/`},
-      to: {path: PACKAGE_SOURCES, dependencyTypesNot: ['aliased-tsconfig-paths']},
-    },
-    {
-      // OpenTUI is the rendering runtime. It lives in `ui/`, the composition root
-      // (`index.ts`, `runtime.ts`), and the render-only self-test; state, command, and
-      // controller modules stay renderer-free so they run under plain unit tests.
-      name: 'tui-opentui-is-confined-to-ui-and-composition-root',
-      severity: 'error',
-      from: {
-        path: '^tui/src/',
-        pathNot: [TEST_FILE, '^tui/src/(?:ui/|index\\.ts$|runtime\\.ts$|self-test\\.ts$)'],
-      },
-      to: {path: '@opentui[+/]'},
-    },
-    {
-      // State and command modules (`session-model`, `chat-menu`, `commands`, `palette-model`,
-      // `diff-viewer`, ...) are below the effectful `session-controller` and the wiring that
-      // creates it.
-      name: 'tui-state-does-not-depend-on-controller-or-wiring',
-      severity: 'error',
-      from: {
-        path: '^tui/src/',
-        pathNot: [TEST_FILE, '^tui/src/ui/', '^tui/src/(?:runtime|index|launcher|self-test)\\.ts$'],
-      },
-      to: {path: '^tui/src/(?:session-controller|runtime|index|launcher)\\.ts$'},
-    },
-    {
-      // State, command, and controller modules expose presentation-ready values to widgets; they
-      // do not reach back into widget helpers. Shared pure presentation models live above ui/.
-      name: 'state-does-not-import-src/ui',
-      severity: 'error',
-      from: {
-        path: '^tui/src/',
-        pathNot: [TEST_FILE, '^tui/src/ui/', '^tui/src/(?:runtime|index|launcher|self-test)\\.ts$'],
-      },
-      to: {path: '^tui/src/ui/'},
-    },
-    {
-      // Widgets render state and call the controller; they do not construct the app or the
-      // runtime that owns them.
-      name: 'tui-ui-does-not-depend-on-composition-root',
-      severity: 'error',
-      from: {path: '^tui/src/ui/', pathNot: TEST_FILE},
-      to: {path: '^tui/src/(?:runtime|index|launcher)\\.ts$'},
-    },
-    {
-      // Widgets receive the controller as an argument and only name its interface; a value
-      // import would let rendering code build or reach into the effect layer.
-      name: 'tui-ui-uses-controller-by-type-only',
-      severity: 'error',
-      from: {path: '^tui/src/ui/', pathNot: TEST_FILE},
-      to: {path: '^tui/src/session-controller\\.ts$', dependencyTypesNot: ['type-only']},
-    },
     ...desktopRules(),
     ...rendererRules(),
     ...featureRules(),
-    {
-      // `index.ts` (the frontend process) and `launcher.ts` (the `vibesys` bin) run on import,
-      // so nothing may import them.
-      name: 'tui-entrypoints-are-not-imported',
-      severity: 'error',
-      from: {path: '^tui/(?:src|dev|benchmarks)/', pathNot: TEST_FILE},
-      to: {path: '^tui/src/(?:index|launcher)\\.ts$'},
-    },
-    {
-      // The launcher runs under Node before the renderer exists and only spawns the server and
-      // frontend processes. It shares theme names with the frontend and nothing else, so it
-      // never loads OpenTUI, the controller, or the workspace packages.
-      name: 'tui-launcher-stays-standalone',
-      severity: 'error',
-      from: {path: '^tui/src/launcher\\.ts$'},
-      to: {
-        path: [
-          '^tui/src/(?!launcher\\.ts$|theme\\.ts$)',
-          '^libs/(?:transport|transport-node|contracts|run-state|store)/',
-          '@opentui[+/]',
-        ],
-      },
-    },
   ],
   options: {
     tsConfig: {fileName: 'tools/tsconfig.architecture.json'},

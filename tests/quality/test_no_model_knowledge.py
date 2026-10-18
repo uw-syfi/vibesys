@@ -67,22 +67,17 @@ MIN_TOKEN_COUNT = 8192
 #: model literal, each with why. Shrink-only: remove an entry when its site
 #: goes, never add one to make a new literal pass; read the fact from
 #: ``vs_agent.api`` instead.
-ALLOWLIST: dict[tuple[str, str], str] = {
-    (
-        "clients/tui/src/agent-runtime-label.ts",
-        "gpt-5",
-    ): "a doc-comment example of how a model id the backend sends is displayed; no fact is read from it",
-}
+ALLOWLIST: dict[tuple[str, str], str] = {}
 
 #: Directories under ``clients/`` holding installed or built output, never walked.
 _SKIPPED_DIRS = frozenset({"node_modules", "dist", "build", "coverage", ".turbo"})
 #: A client source file by extension.
 _CLIENT_CODE = re.compile(r"\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$")
 #: Client files that are not product code: tests, generated code, fixtures and
-#: fakes, the TUI's development mocks, and installed or built output.
+#: fakes, and installed or built output.
 _TS_NON_PRODUCT = re.compile(
     r"(\.(?:test|spec)\.[cm]?[jt]sx?$|/testing/|/__tests__/|/tests?/|/e2e/|/generated/|/fixtures/"
-    r"|^/clients/tui/dev/)"
+    r")"
 )
 
 
@@ -292,8 +287,6 @@ def test_the_scan_covers_the_product_trees_only(tmp_path: Path) -> None:
         "clients/libs/x/src/testing/fake.ts",
         "clients/libs/x/src/generated/g.ts",
         "clients/libs/x/node_modules/z/src/h.ts",
-        "clients/tui/dev/fixtures/i.ts",
-        "clients/tui/dev/mock-server.ts",
         "clients/apps/desktop-shell/src/campaign-stream.ts",
         "clients/tools/scripts/j.mjs",
         "clients/apps/desktop-shell/dist/k.js",

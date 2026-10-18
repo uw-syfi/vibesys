@@ -132,7 +132,6 @@ def test_control_socket_argument_forms() -> None:
     assert _control_socket_from_argv(["--control-socket", "control.sock"]) == Path("control.sock")
     assert _headless_argv(["--local", "--control-socket", "control.sock"]) == ["--local"]
     assert _headless_argv(["--control-socket=control.sock", "--local"]) == ["--local"]
-    assert _headless_argv(["--theme", "dark", "--local"]) == ["--local"]
 
 
 def test_web_server_arguments_are_consumed_before_run_parsing() -> None:
@@ -1006,37 +1005,6 @@ def test_web_instance_claim_reports_ownership(tmp_path: Path) -> None:
     assert WebInstanceClaim.is_held(instance_path) is False
 
 
-def test_tui_defaults_use_launch_config_and_normalize_runs_dir(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    (tmp_path / "agent.toml").write_text(
-        '[model]\nname = "gpt-5.5"\n'
-        '[repository]\nowner = "my-lab"\nvisibility = "private"\n'
-        '[tui]\ntheme = "high-contrast-dark"\n'
-    )
-    monkeypatch.chdir(tmp_path)
-
-    main(["tui-defaults", "--runs-dir", "runs"])
-
-    defaults = json.loads(capsys.readouterr().out)
-    assert defaults["runs_dir"] == str((tmp_path / "runs").resolve())
-    assert defaults["repository_owner"] == "my-lab"
-    assert defaults["theme"] == "high-contrast-dark"
-
-
-def test_tui_defaults_reject_a_missing_explicit_config(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    missing = tmp_path / "missing.toml"
-    with pytest.raises(SystemExit) as exc:
-        main(["tui-defaults", "--config", str(missing)])
-    assert exc.value.code == 2
-    assert str(missing) in capsys.readouterr().err
-
-
 def test_a_run_argument_diagnostic_reaches_stderr_before_any_transport_binds(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1044,7 +1012,7 @@ def test_a_run_argument_diagnostic_reaches_stderr_before_any_transport_binds(
 ) -> None:
     """A launch from a non-project directory says so, on the argv the TUI sends.
 
-    This is the argv `clients/tui/src/launcher.ts` spawns, and the diagnostic
+    This is the argv the launcher spawns, and the diagnostic
     is the one that names the fix. `parse_cli_invocation` raises it before
     `ServerRuntime.run` binds the control socket, so the `CONFIGURATION_FAILED`
     event has no subscriber to reach and stderr is the only channel left. The
@@ -1200,7 +1168,6 @@ def test_web_main_uses_ephemeral_socket_and_web_runtime(
     assert options["web"] is True
     assert options["web_port"] == 4312
     assert options["web_assets"] == tmp_path.resolve()
-    assert callable(options["tui_defaults"])
     assert options["run_id"] == "run-1"
     assert options["project_root"] == tmp_path.resolve()
     assert observed["request"] is request

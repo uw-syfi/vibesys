@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       python: ${{ steps.filter.outputs.python }}
-      tui: ${{ steps.filter.outputs.tui }}
+      clients: ${{ steps.filter.outputs.clients }}
       examples: ${{ steps.filter.outputs.examples }}
       agent_image: ${{ steps.filter.outputs.agent_image }}
       real_tiers: ${{ steps.filter.outputs.real_tiers }}
@@ -75,7 +75,7 @@ jobs:
           ./support/repoctl/repoctl plan --github-event --github-output "$GITHUB_OUTPUT"
 
       # Stale reverts and tools' leftover files, on every change whatever it touches.
-      # Here rather than in python-checks, which a workflow, TUI or docs change skips.
+      # Here rather than in python-checks, which a workflow, client or docs change skips.
       # Stdlib scripts over the history this job already fetched, about a second, and
       # first: a stale revert stops the run before any other job starts.
       - name: Check for stale reverts and leftover files
@@ -216,67 +216,64 @@ jobs:
       - name: Check Python types
         run: ./support/repoctl/repoctl run-checks --group python_types
 
-  # The TUI work is four jobs, one per independent check group, so its wall time
+  # The client work is four jobs, one per independent check group, so its wall time
   # is the slowest leg rather than the sum (issue #1678). Each job has its own
   # checkout, so the `build` and `check` task graphs never share a `dist`.
   # Required PR CI lists all four.
-  tui-quality:
+  clients-quality:
     needs: changes
-    if: needs.changes.outputs.tui == 'true'
+    if: needs.changes.outputs.clients == 'true'
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up the TUI workspace
-        uses: ./.github/actions/setup-tui
+      - name: Set up the client workspace
+        uses: ./.github/actions/setup-clients
 
       - name: Check TypeScript packages
-        run: ./support/repoctl/repoctl run-checks --group tui_quality
+        run: ./support/repoctl/repoctl run-checks --group clients_quality
 
-  tui-tests:
+  clients-tests:
     needs: changes
-    if: needs.changes.outputs.tui == 'true'
+    if: needs.changes.outputs.clients == 'true'
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up the TUI workspace
-        uses: ./.github/actions/setup-tui
+      - name: Set up the client workspace
+        uses: ./.github/actions/setup-clients
 
       - name: Test affected TypeScript packages
         env:
           PNPM_PACKAGES: ${{ needs.changes.outputs.pnpm_packages }}
-        run: ./support/repoctl/repoctl run-checks --group tui_tests --collection-json "$PNPM_PACKAGES"
+        run: ./support/repoctl/repoctl run-checks --group clients_tests --collection-json "$PNPM_PACKAGES"
 
-  tui-build:
+  clients-build:
     needs: changes
-    if: needs.changes.outputs.tui == 'true'
+    if: needs.changes.outputs.clients == 'true'
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up the TUI workspace
-        uses: ./.github/actions/setup-tui
+      - name: Set up the client workspace
+        uses: ./.github/actions/setup-clients
 
       - name: Build TypeScript packages
-        run: ./support/repoctl/repoctl run-checks --group tui_build
+        run: ./support/repoctl/repoctl run-checks --group clients_build
 
-      - name: Smoke-test TUI packages
-        run: ./support/repoctl/repoctl run-checks --group tui_package_smoke
-
-  tui-e2e:
+  clients-e2e:
     needs: changes
-    if: needs.changes.outputs.tui == 'true'
+    if: needs.changes.outputs.clients == 'true'
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up the TUI workspace
-        uses: ./.github/actions/setup-tui
+      - name: Set up the client workspace
+        uses: ./.github/actions/setup-clients
 
       - name: Install Chromium for the desktop smoke test
         working-directory: clients
@@ -289,7 +286,7 @@ jobs:
           VIBESYS_ELECTRON_E2E_DISABLE_CHROMIUM_SANDBOX: "1"
         # Electron's native windows require a display; Playwright's dependency install above
         # provides Xvfb on this Linux runner. The wrapper owns the display for this one check group.
-        run: xvfb-run -a ./support/repoctl/repoctl run-checks --group tui_e2e
+        run: xvfb-run -a ./support/repoctl/repoctl run-checks --group clients_e2e
 
       # A gallery screenshot that differs from its baseline leaves the actual and the diff here, so
       # a reviewer can see the change without rerunning it in the Linux image.
@@ -572,7 +569,7 @@ jobs:
     needs: changes
     if: >-
       needs.changes.outputs.python == 'true' ||
-      needs.changes.outputs.tui == 'true'
+      needs.changes.outputs.clients == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -690,7 +687,7 @@ jobs:
     needs: [changes, test]
     if: >-
       needs.changes.outputs.python == 'true' ||
-      needs.changes.outputs.tui == 'true'
+      needs.changes.outputs.clients == 'true'
     runs-on: ubuntu-latest
     steps:
       # Full history (repoctl plan and diff-cover need the merge base) without the blobs
@@ -1088,10 +1085,10 @@ jobs:
       - doc-checks
       - python-checks
       - typecheck
-      - tui-quality
-      - tui-tests
-      - tui-build
-      - tui-e2e
+      - clients-quality
+      - clients-tests
+      - clients-build
+      - clients-e2e
       - queue-native
       - stitch
       - impact-tool
@@ -1151,10 +1148,10 @@ jobs:
       - changes
       - doc-checks
       - python-checks
-      - tui-quality
-      - tui-tests
-      - tui-build
-      - tui-e2e
+      - clients-quality
+      - clients-tests
+      - clients-build
+      - clients-e2e
       - queue-native
       - impact-tool
       - validate-examples

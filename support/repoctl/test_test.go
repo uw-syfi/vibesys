@@ -32,12 +32,12 @@ func testFixture() (graph, plan) {
 		NativeChecks:         nativeChecks{Commands: map[string][][]string{"go": {{"go", "test", "./..."}}}, TimeoutSeconds: 1},
 		NativeCheckOverrides: map[string]nativeCheckOverride{},
 		CheckGroups: map[string]execution.Suite{
-			"python": {Name: "python", TriggerJob: "python", IncludeInTest: true, Language: "python", Directory: ".", Commands: [][]string{{"uv", "run", "pytest"}}, TimeoutSeconds: 1},
-			"tui":    {Name: "tui", TriggerJob: "tui", IncludeInTest: true, Language: "typescript", Directory: "clients", Collection: "pnpm_packages", Commands: [][]string{{"pnpm", "test:clients"}}, PackageCommands: [][]string{{"pnpm", "--filter", "{package}", "test"}}, TimeoutSeconds: 1},
+			"python":  {Name: "python", TriggerJob: "python", IncludeInTest: true, Language: "python", Directory: ".", Commands: [][]string{{"uv", "run", "pytest"}}, TimeoutSeconds: 1},
+			"clients": {Name: "clients", TriggerJob: "clients", IncludeInTest: true, Language: "typescript", Directory: "clients", Collection: "pnpm_packages", Commands: [][]string{{"pnpm", "test:clients"}}, PackageCommands: [][]string{{"pnpm", "--filter", "{package}", "test"}}, TimeoutSeconds: 1},
 		},
 	}
 	p := plan{
-		Jobs:        map[string]bool{"python": true, "tui": true, "evaluators": true},
+		Jobs:        map[string]bool{"python": true, "clients": true, "evaluators": true},
 		Components:  map[string][]string{"native:a": {"changed apps/a/main.go"}},
 		Collections: map[string][]string{"pnpm_packages": {"@example/z", "@example/a"}},
 	}
@@ -51,9 +51,9 @@ func TestSelectedTestChecksUsePackagesAndNativeTargets(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := [][]string{
-		{"uv", "run", "pytest"},
 		{"pnpm", "--filter", "@example/a", "test"},
 		{"pnpm", "--filter", "@example/z", "test"},
+		{"uv", "run", "pytest"},
 	}
 	got := make([][]string, 0, len(checks))
 	for _, check := range checks {
@@ -64,7 +64,7 @@ func TestSelectedTestChecksUsePackagesAndNativeTargets(t *testing.T) {
 	}
 	delete(p.Collections, "pnpm_packages")
 	checks, _, _, _, err = selectedTestChecks(g, p)
-	if err != nil || !reflect.DeepEqual(checks[1].Args, []string{"pnpm", "test:clients"}) {
+	if err != nil || !reflect.DeepEqual(checks[0].Args, []string{"pnpm", "test:clients"}) {
 		t.Fatalf("fallback command = %v, err = %v", checks, err)
 	}
 }
@@ -103,13 +103,13 @@ func TestSelectedTestChecksRejectsUnknownLanguage(t *testing.T) {
 
 func TestInvalidTestSuiteConfiguration(t *testing.T) {
 	g, _ := testFixture()
-	g.Jobs = []string{"python", "tui"}
+	g.Jobs = []string{"python", "clients"}
 	g.Collections = []collectionSpec{{Name: "pnpm_packages"}}
 	tests := []execution.Suite{
 		{Name: "unknown", TriggerJob: "unknown", IncludeInTest: true, Language: "python", Directory: ".", TimeoutSeconds: 1, Commands: [][]string{{"pytest"}}},
 		{Name: "python", Language: "python", Directory: "../escape", TimeoutSeconds: 1, Commands: [][]string{{"pytest"}}},
 		{Name: "python", Language: "python", Directory: ".", TimeoutSeconds: 0, Commands: [][]string{{"pytest"}}},
-		{Name: "tui", Language: "typescript", Directory: "clients", Collection: "missing", TimeoutSeconds: 1, Commands: [][]string{{"pnpm"}}, PackageCommands: [][]string{{"pnpm", "{package}"}}},
+		{Name: "clients", Language: "typescript", Directory: "clients", Collection: "missing", TimeoutSeconds: 1, Commands: [][]string{{"pnpm"}}, PackageCommands: [][]string{{"pnpm", "{package}"}}},
 		{Name: "python", Language: "python", Directory: ".", TimeoutSeconds: 1, Commands: [][]string{{"pytest"}}, Env: map[string]string{"BAD-KEY": "value"}},
 	}
 	for _, suite := range tests {
@@ -156,9 +156,9 @@ func TestRunCheckGroupRejectsUnknownAndInvalidCollections(t *testing.T) {
 	}{
 		{"unknown group", "missing", "", "unknown check group"},
 		{"unexpected selection", "python", `["@example/a"]`, "does not use a collection"},
-		{"malformed selection", "tui", `{"name":"@example/a"}`, "JSON array"},
-		{"unregistered selection", "tui", `["@example/missing"]`, "unregistered collection value"},
-		{"duplicate selection", "tui", `["@example/a","@example/a"]`, "duplicate collection value"},
+		{"malformed selection", "clients", `{"name":"@example/a"}`, "JSON array"},
+		{"unregistered selection", "clients", `["@example/missing"]`, "unregistered collection value"},
+		{"duplicate selection", "clients", `["@example/a","@example/a"]`, "duplicate collection value"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runner := &recordingRunner{}
@@ -175,11 +175,11 @@ func TestRunCheckGroupRejectsUnknownAndInvalidCollections(t *testing.T) {
 
 func TestRunCheckGroupUsesAlwaysAndSelectedPackageCommands(t *testing.T) {
 	g, _ := testFixture()
-	tui := g.CheckGroups["tui"]
-	tui.AlwaysCommands = [][]string{{"pnpm", "check:ts"}}
-	g.CheckGroups["tui"] = tui
+	clients := g.CheckGroups["clients"]
+	clients.AlwaysCommands = [][]string{{"pnpm", "check:ts"}}
+	g.CheckGroups["clients"] = clients
 	runner := &recordingRunner{}
-	if err := runCheckGroup(t.TempDir(), g, "tui", `["@example/z"]`, false, runner); err != nil {
+	if err := runCheckGroup(t.TempDir(), g, "clients", `["@example/z"]`, false, runner); err != nil {
 		t.Fatal(err)
 	}
 	want := [][]string{{"pnpm", "check:ts"}, {"pnpm", "--filter", "@example/z", "test"}}
@@ -205,9 +205,9 @@ func TestSelectedJobWithoutLocalTargetIsSkipped(t *testing.T) {
 		wantNative  int
 	}{
 		{"untargeted job alone", map[string]bool{"real_tiers": true}, []string{"real_tiers"}, 0, 0},
-		{"mixed with runnable jobs", map[string]bool{"real_tiers": true, "python": true, "tui": true, "evaluators": true}, []string{"real_tiers"}, 3, 1},
+		{"mixed with runnable jobs", map[string]bool{"real_tiers": true, "python": true, "clients": true, "evaluators": true}, []string{"real_tiers"}, 3, 1},
 		{"two untargeted jobs", map[string]bool{"real_tiers": true, "slurm": true, "python": true}, []string{"real_tiers", "slurm"}, 1, 0},
-		{"runnable jobs only", map[string]bool{"python": true, "tui": true, "evaluators": true}, []string{}, 3, 1},
+		{"runnable jobs only", map[string]bool{"python": true, "clients": true, "evaluators": true}, []string{}, 3, 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -262,7 +262,7 @@ func keys(m map[string]bool) []string {
 
 func TestPolicyRejectsJobWithoutRunnableChecks(t *testing.T) {
 	g, _ := testFixture()
-	g.Jobs = []string{"python", "tui", "evaluators", "orphan"}
+	g.Jobs = []string{"python", "clients", "evaluators", "orphan"}
 	if err := g.validateRunnableJobs(); err == nil || !strings.Contains(err.Error(), `job "orphan"`) {
 		t.Fatalf("error = %v", err)
 	}

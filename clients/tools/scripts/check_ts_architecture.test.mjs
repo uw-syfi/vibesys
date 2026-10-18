@@ -38,30 +38,36 @@ test('dependency-cruiser rejects relative paths into a package, cycles, and unre
           '@vibesys/transport/testing': ['libs/transport/src/testing/index.ts'],
           '@vibesys/run-state': ['libs/run-state/src/index.ts'],
           '@vibesys/store/testing': ['libs/store/src/testing/index.ts'],
-          '@vibesys/tui': ['tui/src/index.ts'],
           '@vibesys/feature-run-page/renderer': ['features/run-page/src/renderer/index.ts'],
         },
       },
     }),
   );
   await writeSource(root, 'libs/transport', 'index.ts', "import '../../run-state/src/index.js';\n");
-  await writeSource(root, 'libs/run-state', 'index.ts', "import '../../../tui/src/index.js';\n");
   await writeSource(
     root,
-    'tui',
+    'libs/run-state',
+    'index.ts',
+    "import '../../../apps/desktop-shell/src/index.js';\n",
+  );
+  await writeSource(
+    root,
+    'apps/desktop-shell',
     'index.ts',
     "import '@vibesys/run-state';\nimport '@vibesys/run-state/private';\nimport './cycle-a.js';\nimport 'missing-package';\n",
   );
-  await writeSource(root, 'tui', 'cycle-a.ts', "import './cycle-b.js';\n");
-  await writeSource(root, 'tui', 'cycle-b.ts', "import './cycle-a.js';\n");
-  await writeSource(root, 'web', 'index.ts', "import '@vibesys/run-state';\n");
+  await writeSource(root, 'apps/desktop-shell', 'cycle-a.ts', "import './cycle-b.js';\n");
+  await writeSource(root, 'apps/desktop-shell', 'cycle-b.ts', "import './cycle-a.js';\n");
 
   const options = await extractDepcruiseOptions(CONFIG);
-  const result = await cruise(['libs/transport/src', 'libs/run-state/src', 'tui/src', 'web/src'], {
-    ...options,
-    baseDir: root,
-    tsConfig: {fileName: join(root, 'tsconfig.architecture.json')},
-  });
+  const result = await cruise(
+    ['libs/transport/src', 'libs/run-state/src', 'apps/desktop-shell/src'],
+    {
+      ...options,
+      baseDir: root,
+      tsConfig: {fileName: join(root, 'tsconfig.architecture.json')},
+    },
+  );
   const violatedRules = new Set(
     result.output.summary.violations.map(violation => violation.rule.name),
   );
@@ -89,6 +95,7 @@ const VALID_FILES = {
   'libs/transport/src/testing/fake-clock.test.ts':
     "import '../test-support/expect.js';\nimport './fake-clock.js';\n",
   'libs/run-state/src/index.ts': "import '@vibesys/transport';\n",
+  'apps/desktop-shell/src/index.ts': '',
   'libs/run-state/src/shared-fixtures.test.ts': "import '@vibesys/transport/testing';\n",
   'libs/store/src/index.ts': '',
   'libs/store/src/testing/index.ts': "import './model.js';\n",
@@ -98,8 +105,6 @@ const VALID_FILES = {
   // A package's test support may build on another's, and its tests may use another's Fakes.
   'libs/hosts/src/index.ts': '',
   'libs/ipc/src/index.ts': "import type {} from '@vibesys/hosts';\n",
-  'tui/src/index.ts':
-    "import '@opentui/core';\nimport '@vibesys/run-state';\nimport './runtime.js';\nimport './ui/app.js';\nimport './session-controller.js';\n",
   // The web app's composition enters a feature through its entries, and only the backend adapter
   // imports transport's runtime values. A feature's renderer drives its pure state; the state
   // names transport's types only.
@@ -119,17 +124,6 @@ const VALID_FILES = {
   // the only thing its `$1` back-reference permits.
   'apps/web/e2e/live.spec.ts': "import 'declared-package';\nimport './fixtures.js';\n",
   'apps/web/e2e/fixtures.ts': '',
-  'tui/src/runtime.ts': "import '@opentui/core';\nimport type {} from './session-controller.js';\n",
-  'tui/src/session-controller.ts': "import './session-model.js';\nimport './theme.js';\n",
-  'tui/src/session-model.ts': "import './theme.js';\n",
-  'tui/src/launcher.ts': "import './theme.js';\nimport 'node:fs';\n",
-  'tui/src/theme.ts': '',
-  'tui/src/ui/app.ts':
-    "import '@opentui/core';\nimport type {} from '../session-controller.js';\nimport '../session-model.js';\nimport '../theme.js';\n",
-  'tui/src/ui/app.test.ts': "import '../session-controller.js';\nimport '../runtime.js';\n",
-  'tui/dev/harness.ts':
-    "import '@vibesys/run-state';\nimport '@vibesys/transport';\nimport 'declared-package';\n",
-  'tui/benchmarks/bench.ts': "import '../src/session-model.js';\n",
   'tools/scripts/check.mjs': "import 'node:fs';\nimport 'declared-package';\n",
   // The desktop main process: the app composes the packages, the connection manager's shell owns
   // its processes and drives its pure state, and a preload binds `@vibesys/ipc`'s messages to
@@ -237,28 +231,16 @@ const RULE_CASES = [
     files: {'features/run-page/src/renderer/effects/replay.ts': "import '@vibesys/transport';\n"},
   },
   {
-    rule: 'shipping-path-does-not-depend-on-dev-harness',
-    files: {'tui/src/ui/theme.ts': "import '../../dev/harness.js';\n"},
-  },
-  {
-    rule: 'shipping-path-does-not-depend-on-dev-harness',
-    files: {'libs/run-state/src/index.ts': "import '../../../tui/dev/harness.js';\n"},
-  },
-  {
     rule: 'tools-are-leaves',
-    files: {'tui/src/session-model.ts': "import '../benchmarks/bench.js';\n"},
-  },
-  {
-    rule: 'tools-are-leaves',
-    files: {'tui/dev/harness.ts': "import '../../tools/scripts/check.mjs';\n"},
+    files: {'apps/desktop-shell/src/index.ts': "import '../../../tools/scripts/check.mjs';\n"},
   },
   {
     rule: 'scripts-do-not-import-package-code',
-    files: {'tools/scripts/check.mjs': "import '../../tui/src/session-model.js';\n"},
+    files: {'tools/scripts/check.mjs': "import '../../apps/desktop-shell/src/index.js';\n"},
   },
   {
     rule: 'production-code-does-not-import-tests',
-    files: {'tui/src/session-model.ts': "import './ui/app.test.js';\n"},
+    files: {'apps/desktop-shell/src/index.ts': "import './index.test.js';\n"},
   },
   {
     rule: 'production-code-does-not-import-transport-test-support',
@@ -278,7 +260,7 @@ const RULE_CASES = [
   },
   {
     rule: 'workspace-packages-use-public-exports',
-    files: {'tui/dev/harness.ts': "import '../../libs/run-state/src/index.js';\n"},
+    files: {'apps/desktop-shell/src/index.ts': "import '../../../libs/run-state/src/index.js';\n"},
   },
   {
     rule: 'no-unresolvable-imports',
@@ -287,64 +269,9 @@ const RULE_CASES = [
   {
     rule: 'no-circular-dependencies',
     files: {
-      'tui/dev/a.ts': "import './b.js';\n",
-      'tui/dev/b.ts': "import './a.js';\n",
+      'apps/desktop-shell/src/a.ts': "import './b.js';\n",
+      'apps/desktop-shell/src/b.ts': "import './a.js';\n",
     },
-  },
-  {
-    rule: 'tui-ui-does-not-depend-on-transport',
-    files: {'tui/src/ui/app.ts': "import type {} from '@vibesys/transport';\n"},
-  },
-  {
-    rule: 'dev-cannot-deep-import-src',
-    files: {'tui/dev/harness.ts': "import '../src/session-model.js';\n"},
-  },
-  {
-    rule: 'tui-opentui-is-confined-to-ui-and-composition-root',
-    files: {'tui/src/session-model.ts': "import '@opentui/core';\n"},
-  },
-  {
-    rule: 'tui-state-does-not-depend-on-controller-or-wiring',
-    files: {'tui/src/session-model.ts': "import type {} from './session-controller.js';\n"},
-  },
-  {
-    rule: 'tui-state-does-not-depend-on-controller-or-wiring',
-    files: {'tui/src/session-controller.ts': "import './runtime.js';\n"},
-  },
-  {
-    rule: 'state-does-not-import-src/ui',
-    files: {
-      'tui/src/session-model.ts': "import './ui/shared.js';\n",
-      'tui/src/ui/shared.ts': '',
-    },
-  },
-  {
-    rule: 'tui-ui-does-not-depend-on-composition-root',
-    files: {'tui/src/ui/app.ts': "import type {} from '../runtime.js';\n"},
-  },
-  {
-    rule: 'tui-ui-uses-controller-by-type-only',
-    files: {'tui/src/ui/app.ts': "import '../session-controller.js';\n"},
-  },
-  {
-    rule: 'tui-entrypoints-are-not-imported',
-    files: {'tui/src/ui/app.ts': "import type {} from '../index.js';\n"},
-  },
-  {
-    rule: 'tui-entrypoints-are-not-imported',
-    files: {'tui/dev/harness.ts': "import '../src/launcher.js';\n"},
-  },
-  {
-    rule: 'tui-launcher-stays-standalone',
-    files: {'tui/src/launcher.ts': "import './session-model.js';\n"},
-  },
-  {
-    rule: 'tui-launcher-stays-standalone',
-    files: {'tui/src/launcher.ts': "import '@opentui/core';\n"},
-  },
-  {
-    rule: 'tui-launcher-stays-standalone',
-    files: {'tui/src/launcher.ts': "import '@vibesys/run-state';\n"},
   },
 ];
 
@@ -360,7 +287,6 @@ async function violatedRules(t, files) {
           '@vibesys/transport/testing': ['libs/transport/src/testing/index.ts'],
           '@vibesys/run-state': ['libs/run-state/src/index.ts'],
           '@vibesys/store/testing': ['libs/store/src/testing/index.ts'],
-          '@vibesys/tui': ['tui/src/index.ts'],
           '@vibesys/feature-run-page/renderer': ['features/run-page/src/renderer/index.ts'],
           '@vibesys/feature-run-page/main': ['features/run-page/src/main/index.ts'],
           '@vibesys/connection': ['libs/connection/src/index.ts'],
@@ -371,7 +297,6 @@ async function violatedRules(t, files) {
       },
     }),
   );
-  await writeExternalPackage(root, '@opentui/core');
   await writeExternalPackage(root, 'declared-package');
   await writeExternalPackage(root, 'electron');
   await writeFile(join(root, 'package.json'), JSON.stringify({name: 'fixture-workspace'}));
@@ -681,8 +606,7 @@ test('the architecture gate cruises every directory the layout derives', async t
 
 test('the architecture gate reports a workspace whose layering is clean', async t => {
   const {output, exitCode} = await cruiseFixture(t, {
-    'tui/src/index.ts': "import '@vibesys/run-state';\n",
-    'apps/web/src/index.ts': "import '@vibesys/run-state';\n",
+    'apps/desktop-shell/src/index.ts': "import '@vibesys/run-state';\n",
     'libs/run-state/src/index.ts': "import '@vibesys/transport';\n",
   });
 

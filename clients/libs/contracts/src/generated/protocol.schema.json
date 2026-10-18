@@ -3225,56 +3225,6 @@
       "title": "HypothesisRound",
       "type": "object"
     },
-    "InteractiveSetupDefaults": {
-      "additionalProperties": false,
-      "description": "JSON contract passed to the interactive launch form.",
-      "properties": {
-        "runs_dir": {
-          "title": "Runs Dir",
-          "type": "string"
-        },
-        "input_path": {
-          "title": "Input Path",
-          "type": "string"
-        },
-        "experiment_name": {
-          "title": "Experiment Name",
-          "type": "string"
-        },
-        "repository_owner": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Repository Owner"
-        },
-        "repository_name": {
-          "title": "Repository Name",
-          "type": "string"
-        },
-        "visibility": {
-          "$ref": "#/$defs/RepositoryVisibility"
-        },
-        "theme": {
-          "$ref": "#/$defs/TuiTheme"
-        }
-      },
-      "required": [
-        "runs_dir",
-        "input_path",
-        "experiment_name",
-        "repository_owner",
-        "repository_name",
-        "visibility",
-        "theme"
-      ],
-      "title": "InteractiveSetupDefaults",
-      "type": "object"
-    },
     "InvocationFinishedData": {
       "additionalProperties": false,
       "description": "Result or error recorded when a model invocation ends.",
@@ -5141,16 +5091,6 @@
       "title": "RateLimitUpdateData",
       "type": "object"
     },
-    "RepositoryVisibility": {
-      "description": "Supported GitHub repository visibility values.",
-      "enum": [
-        "private",
-        "public",
-        "internal"
-      ],
-      "title": "RepositoryVisibility",
-      "type": "string"
-    },
     "Response": {
       "additionalProperties": false,
       "description": "Response envelope for all protocol requests.",
@@ -5240,17 +5180,6 @@
           "anyOf": [
             {
               "$ref": "#/$defs/ChatOptions"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "tui_defaults": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/InteractiveSetupDefaults"
             },
             {
               "type": "null"
@@ -7738,59 +7667,6 @@
       "title": "ToolResultData",
       "type": "object"
     },
-    "TuiDefaultsQuery": {
-      "additionalProperties": false,
-      "description": "Request the launch-directory configuration defaults a TUI applies.\n\nA terminal client resolves its theme from the run's configuration. Asking\nover the control channel keeps TOML parsing in the server and saves the\nlauncher an extra Python process on the boot path.",
-      "properties": {
-        "protocol_version": {
-          "const": 1,
-          "default": 1,
-          "title": "Protocol Version",
-          "type": "integer"
-        },
-        "request_id": {
-          "title": "Request Id",
-          "type": "string"
-        },
-        "client_id": {
-          "default": "",
-          "title": "Client Id",
-          "type": "string"
-        },
-        "timestamp": {
-          "format": "date-time",
-          "title": "Timestamp",
-          "type": "string"
-        },
-        "type": {
-          "const": "query.tui_defaults",
-          "default": "query.tui_defaults",
-          "title": "Type",
-          "type": "string"
-        }
-      },
-      "required": [
-        "timestamp",
-        "type"
-      ],
-      "title": "TuiDefaultsQuery",
-      "type": "object"
-    },
-    "TuiTheme": {
-      "description": "Selectable terminal UI themes.",
-      "enum": [
-        "dark",
-        "light",
-        "solarized-dark",
-        "solarized-light",
-        "catppuccin-mocha",
-        "catppuccin-latte",
-        "high-contrast-dark",
-        "high-contrast-light"
-      ],
-      "title": "TuiTheme",
-      "type": "string"
-    },
     "TurnUsageData": {
       "additionalProperties": false,
       "description": "Settled token and cost accounting for one finished agent turn.\n\nSee ``vibesys.events.TurnUsageData``.",
@@ -8360,7 +8236,6 @@
           "query.iterations": "#/$defs/IterationQuery",
           "query.performance": "#/$defs/PerformanceQuery",
           "query.snapshot": "#/$defs/SnapshotQuery",
-          "query.tui_defaults": "#/$defs/TuiDefaultsQuery",
           "subscribe": "#/$defs/SubscribeRequest"
         },
         "propertyName": "type"
@@ -8389,9 +8264,6 @@
         },
         {
           "$ref": "#/$defs/ChatOptionsQuery"
-        },
-        {
-          "$ref": "#/$defs/TuiDefaultsQuery"
         },
         {
           "$ref": "#/$defs/HistoryQuery"

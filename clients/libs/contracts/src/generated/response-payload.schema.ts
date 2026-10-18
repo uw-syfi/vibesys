@@ -986,56 +986,6 @@ const responsePayloadSchema: Record<string, unknown> = {
       "title": "HypothesisRound",
       "type": "object"
     },
-    "InteractiveSetupDefaults": {
-      "additionalProperties": false,
-      "description": "JSON contract passed to the interactive launch form.",
-      "properties": {
-        "runs_dir": {
-          "title": "Runs Dir",
-          "type": "string"
-        },
-        "input_path": {
-          "title": "Input Path",
-          "type": "string"
-        },
-        "experiment_name": {
-          "title": "Experiment Name",
-          "type": "string"
-        },
-        "repository_owner": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Repository Owner"
-        },
-        "repository_name": {
-          "title": "Repository Name",
-          "type": "string"
-        },
-        "visibility": {
-          "$ref": "#/$defs/RepositoryVisibility"
-        },
-        "theme": {
-          "$ref": "#/$defs/TuiTheme"
-        }
-      },
-      "required": [
-        "runs_dir",
-        "input_path",
-        "experiment_name",
-        "repository_owner",
-        "repository_name",
-        "visibility",
-        "theme"
-      ],
-      "title": "InteractiveSetupDefaults",
-      "type": "object"
-    },
     "IterationKind": {
       "description": "Policy-neutral kinds a client may use to label navigation rows.",
       "enum": [
@@ -1513,16 +1463,6 @@ const responsePayloadSchema: Record<string, unknown> = {
       ],
       "title": "PerformanceRound",
       "type": "object"
-    },
-    "RepositoryVisibility": {
-      "description": "Supported GitHub repository visibility values.",
-      "enum": [
-        "private",
-        "public",
-        "internal"
-      ],
-      "title": "RepositoryVisibility",
-      "type": "string"
     },
     "RunOverview": {
       "additionalProperties": false,
@@ -2026,21 +1966,6 @@ const responsePayloadSchema: Record<string, unknown> = {
       "title": "TaskObjective",
       "type": "object"
     },
-    "TuiTheme": {
-      "description": "Selectable terminal UI themes.",
-      "enum": [
-        "dark",
-        "light",
-        "solarized-dark",
-        "solarized-light",
-        "catppuccin-mocha",
-        "catppuccin-latte",
-        "high-contrast-dark",
-        "high-contrast-light"
-      ],
-      "title": "TuiTheme",
-      "type": "string"
-    },
     "WaitingOn": {
       "additionalProperties": false,
       "description": "One source a suspended flow waits on, since the run-clock time it began waiting on it.",
@@ -2107,17 +2032,6 @@ const responsePayloadSchema: Record<string, unknown> = {
       "anyOf": [
         {
           "$ref": "#/$defs/ChatOptions"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null
-    },
-    "tui_defaults": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/InteractiveSetupDefaults"
         },
         {
           "type": "null"

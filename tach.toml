@@ -87,7 +87,7 @@ layers_explicit_depends_on = true
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.settings", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_preflight", "server.host_examples", "server.host_harness"]
+depends_on = ["server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_preflight", "server.host_examples", "server.host_harness"]
 
 [[modules]]
 path = "headless"
@@ -99,7 +99,7 @@ depends_on = ["vibesys.api"]
 
 [[modules]]
 path = "server.api"
-depends_on = ["vibesys.api.display_catalog", "vs_decode.api", "vs_logs", "vibesys.api", "vibesys.api.hypothesis", "server.control_envelope", "server.host_api", "server.diagnostics", "server.journal", "server.execution", "server.settings", "server.events", "server.controller", "server.chat", "server.integration", "server.run_lifecycle", "vs_sim.api"]
+depends_on = ["vibesys.api.display_catalog", "vs_decode.api", "vs_logs", "vibesys.api", "vibesys.api.hypothesis", "server.control_envelope", "server.host_api", "server.diagnostics", "server.journal", "server.execution", "server.events", "server.controller", "server.chat", "server.integration", "server.run_lifecycle", "vs_sim.api"]
 
 [[modules]]
 path = "server.chat"
@@ -203,11 +203,7 @@ depends_on = ["server.host_api"]
 
 [[modules]]
 path = "server.runtime"
-depends_on = ["server.read_model", "server.settings", "server.chat", "server.events", "server.execution", "server.journal", "vibesys.api", "server.integration", "server.api", "server.controller", "server.transport", "server.diagnostics", "server.host_api", "vs_sim.api"]
-
-[[modules]]
-path = "server.settings"
-depends_on = ["vibesys.api"]
+depends_on = ["server.read_model", "server.chat", "server.events", "server.execution", "server.journal", "vibesys.api", "server.integration", "server.api", "server.controller", "server.transport", "server.diagnostics", "server.host_api", "vs_sim.api"]
 
 [[modules]]
 # The per-connection stdio relay to a run's control socket, used by the host helper's

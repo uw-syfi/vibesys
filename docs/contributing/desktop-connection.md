@@ -10,7 +10,6 @@ It builds on, and does not restate:
 
 - [`wire-protocol.md`](wire-protocol.md): framing and connection semantics of the run protocol
   (`WP-*` decisions). Every run connection described here carries that protocol unchanged.
-- [`tui-architecture.md`](tui-architecture.md): detached runs and the live-instance registry.
 - [`desktop-development.md`](desktop-development.md): how to start the app, the page's
   MessagePort bridge, and the ssh master.
 - [`clients-architecture.md`](clients-architecture.md): which TypeScript package each client

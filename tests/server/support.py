@@ -53,7 +53,6 @@ if TYPE_CHECKING:
         StartupFact,
     )
     from server.run_attachment import AgentSelection
-    from server.settings import InteractiveSetupDefaults
     from vibesys.api import RunRecord, RunView
     from vs_project.api import Project
     from vs_sim.api import Condition, Network, ProcessSpec, Threads, Worker
@@ -225,7 +224,6 @@ def build_server_parts(
     log_dir: Path | None = None,
     *,
     record: RunRecord | None = None,
-    tui_defaults: Callable[[], InteractiveSetupDefaults] | None = None,
     chat_agent_builder: ChatAgentBuilder | None = None,
     threads: Threads | None = None,
 ) -> ServerParts:
@@ -279,7 +277,6 @@ def build_server_parts(
         integration,
         controls=controls,
         clock=clock,
-        tui_defaults=tui_defaults,
         threads=threads,
     )
     parts = ServerParts(

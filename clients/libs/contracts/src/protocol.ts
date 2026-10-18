@@ -48,7 +48,6 @@ export type DesignPatch = NonNullable<ProtocolResponse['design_patch']>;
 export type ChatOptions = NonNullable<ProtocolResponse['chat_options']>;
 export type ChatProviderOptions = NonNullable<ChatOptions['providers']>[number];
 export type ChatModelOption = NonNullable<ChatProviderOptions['models']>[number];
-export type TuiDefaults = NonNullable<ProtocolResponse['tui_defaults']>;
 export type IterationResult = NonNullable<ProtocolResponse['iterations']>;
 export type IterationPage = Extract<IterationResult, {kind?: 'page'}>;
 export type IterationUnavailable = Extract<IterationResult, {kind?: 'unavailable'}>;

@@ -14,7 +14,7 @@
  * identity latched between the operation settling and the machine taking its output) and a
  * rejected stream batch are reported as `projection-rejected`.
  */
-import type {RunSnapshot, TuiDefaults} from '@vibesys/contracts';
+import type {RunSnapshot} from '@vibesys/contracts';
 import {
   foldSnapshot,
   hasRunEnded,
@@ -192,9 +192,6 @@ export class WebSession {
 
   /** Send one operator command without letting presentation code own the transport. */
   command = (input: RunCommand): Promise<RunCommandOutcome> => this.#connection.command(input);
-
-  /** Read the server-selected presentation defaults through the session-owned connection. */
-  tuiDefaults = (): Promise<TuiDefaults | null> => this.#connection.tuiDefaults();
 
   #reach(): Reachability {
     return {visible: this.#lifecycle.visibilityState !== 'hidden', online: this.#lifecycle.online};

@@ -459,7 +459,7 @@ machine-local `skypilot` state namespace. See
 
 ## Control a Running Run
 
-A run started without the TUI or the web app has no client to steer it from. `vibesys control`
+For a run without an attached desktop client, `vibesys control`
 sends it a control through its control inbox, a directory in the run's machine-local state
 (under the VibeSys state home, `~/.vibesys` by default, outside the project), from the project
 directory (or `--project PATH`):
@@ -598,9 +598,8 @@ under `.vibesys/tasks/` are easier to review for projects maintained by people.
 
 ## Presentation and Validation
 
-- `vibesys` launches the TUI when attached to a terminal.
-- `vibesys --headless` disables the TUI.
-- Non-interactive execution runs headless automatically.
+- `vibesys` runs in the terminal; the desktop app provides the interactive UI.
+- `vibesys --headless` remains accepted for command compatibility.
 - `vibesys validate [PROJECT] --task NAME` checks the static task contract
   without starting an agent or executing the checker and benchmark.
 - `vibesys tasks [PROJECT] [--json]` lists the tasks a project defines.

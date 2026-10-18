@@ -401,24 +401,6 @@ for (const [rule, mutate] of Object.entries(RULE_CASES)) {
   });
 }
 
-test('legacy packages skip only the per-entry project rules', async t => {
-  const workspace = validWorkspace();
-  workspace.legacy = {
-    directory: 'tui',
-    manifest: {
-      name: '@vibesys/tui',
-      vibesys: {layer: 'app', entries: {'.': 'dom'}},
-      dependencies: {'@vibesys/connection': 'workspace:*'},
-    },
-    files: {'src/index.ts': "import '@vibesys/connection';\n"},
-  };
-  const errors = packageGraphErrors(await materialize(t, workspace));
-  assert.deepEqual(
-    errors.map(error => error.split(':')[0]),
-    ['runtime-reachability'],
-  );
-});
-
 test('a preload reaches neither a Node entry nor a Node builtin', async t => {
   const workspace = validWorkspace();
   workspace['desktop-main'].files['src/preload/run.cts'] =
@@ -458,9 +440,6 @@ const EXTERNAL_CASES = {
   },
   'a Node builtin in a neutral entry': workspace => {
     workspace.contracts.files['src/index.ts'] += "import 'node:fs';\n";
-  },
-  'the terminal UI runtime outside an app': workspace => {
-    workspace.contracts.files['src/index.ts'] += "import '@opentui/core';\n";
   },
   'React declared by a package with no dom entry': workspace => {
     workspace.contracts.manifest.dependencies = {'react-dom': '19.1.1'};
@@ -625,7 +604,7 @@ for (const [name, directory, declare] of FOLDER_CASES) {
   });
 }
 
-test('layer-matches-folder accepts each library layer in libs and the deprecated tui outside', async t => {
+test('layer-matches-folder accepts each library layer in libs ', async t => {
   const workspace = validWorkspace();
   // Named for a concept each, so the bucket-names rule has nothing to say.
   const libraries = {foundation: 'alpha', core: 'beta', domain: 'gamma', service: 'delta'};
@@ -635,33 +614,8 @@ test('layer-matches-folder accepts each library layer in libs and the deprecated
     library.manifest.vibesys.layer = layer;
     workspace[name] = library;
   }
-  workspace.legacy = {
-    directory: 'tui',
-    manifest: {
-      name: '@vibesys/tui',
-      vibesys: {layer: 'app', entries: {'.': 'dom'}},
-    },
-    files: {'src/index.ts': 'export {};\n'},
-  };
   const errors = packageGraphErrors(await materialize(t, workspace));
-  assert.deepEqual(
-    errors.map(error => error.split(':')[0]),
-    [],
-  );
-});
-
-test('the deprecated allowlist is by directory, so another top-level package is rejected', async t => {
-  const workspace = validWorkspace();
-  workspace.legacy = {
-    directory: 'tui-clone',
-    manifest: {name: '@vibesys/tui', vibesys: {layer: 'app', entries: {'.': 'dom'}}},
-    files: {'src/index.ts': 'export {};\n'},
-  };
-  const errors = packageGraphErrors(await materialize(t, workspace));
-  assert.deepEqual(
-    errors.map(error => error.split(':')[0]),
-    ['layer-matches-folder'],
-  );
+  assert.deepEqual(errors, []);
 });
 
 // Design rules S2 and S6 apply to every feature and app. Each case changes one valid workspace

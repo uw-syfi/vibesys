@@ -54,8 +54,7 @@
  * - `layer-matches-folder`: a package's folder agrees with the layer its manifest declares, so the
  *   manifest stays the one source of truth and the folder tree only mirrors it (`LAYER_FOLDERS`):
  *   `libs/*` declares foundation, core, domain, or service; `features/*` declares feature; and
- *   `apps/*` declares app. A package outside those folders fails, except a deprecated package on
- *   `DEPRECATED_OUTSIDE_FOLDERS` (`tui`), which stays where it is until it is deleted.
+ *   `apps/*` declares app. A package outside those folders fails.
  *
  * Two rules hold the desktop design system for every feature and app package:
  * `strict-no-stylesheets` and `strict-imports`. Biome applies the strict Grit rules to their source.
@@ -115,13 +114,6 @@ export const LAYER_FOLDERS = {
   app: 'apps',
 };
 
-/**
- * Packages allowed to sit outside the layer folders, by directory. `clients/tui` is deprecated: it
- * is not migrated into the folder layout and is deleted when the desktop app replaces it. Nothing
- * else belongs here, and this list only shrinks.
- */
-export const DEPRECATED_OUTSIDE_FOLDERS = new Set(['tui']);
-
 /** The keys of a package's `vibesys` block. */
 const DECLARED_KEYS = new Set(['layer', 'entries']);
 
@@ -173,7 +165,6 @@ const ALL_RUNTIMES = Object.keys(RUNTIMES);
 export const EXTERNAL_DEPENDENCIES = [
   {packages: ['react', 'react-dom'], runtimes: ['dom']},
   {packages: ['electron'], runtimes: ['node', 'preload'], layers: ['feature', 'app']},
-  {packages: ['@opentui/core'], runtimes: ['node'], layers: ['app']},
   {
     packages: ['xstate'],
     runtimes: ALL_RUNTIMES,
@@ -192,9 +183,7 @@ const PRELOAD_MODULES = new Set(['electron']);
  * three) cannot apply to their single tsconfig per package. Every other rule applies. This table
  * only shrinks.
  */
-export const LEGACY_EXEMPTIONS = {
-  '@vibesys/tui': new Set(['entry-projects']),
-};
+export const LEGACY_EXEMPTIONS = {};
 
 /**
  * Packages whose production source must stay free of the product's domain, and the words that
@@ -424,7 +413,6 @@ function featureEntryErrors(where, entries) {
 // --- folders ----------------------------------------------------------------------------------
 
 function folderErrors({name, directory, manifest}) {
-  if (DEPRECATED_OUTSIDE_FOLDERS.has(directory)) return [];
   const where = `${directory}/package.json`;
   const layer = manifest.vibesys.layer;
   const expected = LAYER_FOLDERS[layer];
@@ -961,7 +949,7 @@ function strictErrors(root, workspacePackage, byName) {
   ];
 }
 
-/** The design rules cover packages in the feature and app folders, not the deprecated TUI. */
+/** The design rules cover every feature and app package. */
 function isDesignPackage({directory}) {
   return directory.startsWith('features/') || directory.startsWith('apps/');
 }

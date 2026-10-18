@@ -649,7 +649,6 @@
  "tests/server/test_startup_progress.py": 0.03,
  "tests/server/test_subscription_tracker.py": 0.21,
  "tests/server/test_transport_subscription.py": 5.59,
- "tests/server/test_tui_defaults.py": 0.0,
  "tests/server/test_tui_dev_harness.py": 0.17,
  "tests/server/test_web_port_discovery.py": 0.35,
  "tests/server/test_websocket_transport.py": 4.62,

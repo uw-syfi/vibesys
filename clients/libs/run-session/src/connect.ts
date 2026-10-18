@@ -119,10 +119,6 @@ function openRunConnection(
         status: acknowledgement.status,
       };
     },
-    async tuiDefaults() {
-      const response = await transport.request({type: 'query.tui_defaults'});
-      return response.ok === true ? (response.tui_defaults ?? null) : null;
-    },
     subscribe(handlers) {
       return stream.subscribe({
         cursor: handlers.cursor,

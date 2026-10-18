@@ -6,14 +6,14 @@ are resolved from the repository checkout at run time. An installed wheel has
 no checkout, so the wheel build copies these
 trees into the ``vibesys._resources`` package directory; ``setup.py`` calls
 :func:`stage_resources` from the same custom ``build_py`` step that stages the
-TUI. VibeSys configures ``vs_runtime.api.BundledResources`` to prefer the
+desktop app. VibeSys configures ``vs_runtime.api.BundledResources`` to prefer the
 checkout and fall back to the staged copy.
 
 Vendored skill repository checkouts (``repos/`` inside a skill) are excluded:
 they are git submodules, are already excluded from workspace materialization,
 and would bloat the wheel by hundreds of megabytes.
 
-Like ``tui_packaging``, this module is imported inside an isolated build
+This module is imported inside an isolated build
 environment, so it depends only on the standard library.
 """
 

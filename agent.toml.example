@@ -68,17 +68,6 @@
 # owner = "your-github-user"
 visibility = "private"  # private, public, or internal
 
-# [tui]
-# Theme for the interactive client, as light/dark pairs:
-#   "dark" (default) / "light"                            — the baseline palette
-#   "solarized-dark" / "solarized-light"                  — low-glare terminal palette
-#   "catppuccin-mocha" / "catppuccin-latte"               — softer, more expressive
-#   "high-contrast-dark" / "high-contrast-light"          — accessibility-focused
-#
-# The --theme flag overrides this value, and /theme switches for the current
-# session without changing the file. Ignored in headless mode.
-# theme = "dark"
-
 # [backend]
 # Hardware/runtime backend to target. Supported values are "cuda", "metal",
 # "trainium", "rocm", and "cpu". The --backend flag on `./vs` overrides this

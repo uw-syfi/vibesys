@@ -22,7 +22,7 @@ One payload invariant is relevant to framing: a recorded `RunEvent` is bounded b
 `src/server/events.py:EventStore.append`
 keeps an ordinary event byte-for-byte unchanged. If an event is larger, it retains prefixes of its
 variable-size payload values on Unicode code-point and collection-entry boundaries and carries
-`truncated: true`; web and TUI clients render that marker. The durable log holds the bounded event,
+`truncated: true`; clients render that marker. The durable log holds the bounded event,
 so live delivery and every later replay observe the same fact. The WebSocket batch chunker still
 handles only whole events and has no payload-specific branch.
 
