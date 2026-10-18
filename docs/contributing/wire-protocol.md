@@ -205,7 +205,12 @@ A run paused on a provider capacity limit (`quota_paused`) resumes when the oper
   stays paused for the operator. A second `capacity_returns` replaces the first, emitting a new
   `quota_waiting`.
 
-The wait is held by the live run server: if the server ends, the run ends like any other. `when`
+The run's state records the wait. A run resumed after its server ended does not stay paused on
+a capacity limit, because the turns that stopped did not survive. It resumes, and the
+operator's wait stands: the next turn that stops on the limit waits for capacity without asking
+again, across any number of restarts, until such a stop takes the wait or a resume ends it. A run
+the operator paused stays paused across a restart until the operator resumes it; a
+`capacity_returns` asked for under that pause is dropped, since no turn survived to wait. `when`
 is a new request field, so a client discovers support for it by `WP-CAPABILITY-PROBE`: an older
 server rejects it as an unknown field.
 
@@ -240,7 +245,16 @@ it) is journaled as a `CONTROL` event with status `failed` and the text
 `withdraws` names a control that is not a steer, or a steer that is not, or is no longer,
 standing guidance (`withdraw_not_standing`); one naming a steer the run has not recorded yet is
 accepted and checked when the run takes it, and journaled as `/steer dropped: withdraw <id> ended
-nothing: ...` if it then names no guidance in force; a `vibesys control` withdrawal that ends nothing is also set aside in the run's inbox with that reason, so it never applies later. An interrupt-mode steer that a running turn accepted is journaled as a `CONTROL` event `/steer --interrupt` with status `consumed`. One that only the next turn got is journaled as `/steer: <note>`, the note saying that no running turn kept it. An accepted withdrawal is journaled as
+nothing: ...` if it then names no guidance in force; a `vibesys control` withdrawal that ends nothing is also set aside in the run's inbox with that reason, so it never applies later. An interrupt-mode steer that a running turn accepted is journaled as a `CONTROL` event `/steer --interrupt` with status `consumed`. One that only the next turn got is journaled as `/steer: <note>`, the note saying that no running turn kept it. A
+`vibesys control` pause, resume or steer is judged by the run's own rule (`vs_core`'s
+`control_refusal`) against the pause the run is in, including a quota pause the run has not
+committed yet; one the run still refuses when it commits (an input committed first closed or ended
+the run) is set aside in the inbox with the run's reason as soon as that commit lands, and the run
+goes on. A run that recorded a stop takes no pause or resume. A pause or resume acknowledged here
+that the run then refuses, when it reads it or when it commits it, is journaled as a `CONTROL`
+event with status `failed` and the text `/control refused: <action> <id>: <reason>`, and what it
+did to the run's pause is undone: a refused pause is lifted, a refused `capacity_returns` or
+`fallback: true` is dropped. An accepted withdrawal is journaled as
 `/withdraw: <withdraws>` with status `pending`. Accepted standing guidance is journaled with
 status `active` as `/steer --standing: <text>`, and its end, once, with status `completed` as
 `/guidance ended: standing guidance <id> ended: <reason>`, where the reason is `withdrawn`,

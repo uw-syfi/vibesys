@@ -97,7 +97,7 @@ class CoreEventType(StrEnum):
     # request-time events (`*_REQUESTED`, `STEER_QUEUED`, `GUIDANCE_QUEUED`, `WITHDRAW_QUEUED`,
     # `RESUMED`) come from
     # `RunControl` callers; boundary-consume-time events (`PAUSED`, `STOPPED`,
-    # `STEER_CONSUMED`, `STEER_DELIVERED_MID_TURN`, `STEER_DROPPED`, `GUIDANCE_ENDED`) come from the run boundary or an agent turn. A server
+    # `STEER_CONSUMED`, `STEER_DELIVERED_MID_TURN`, `STEER_DROPPED`, `GUIDANCE_ENDED`, `CONTROL_REFUSED`) come from the run boundary or an agent turn. A server
     # projects both onto its own status machine
     # and CONTROL journal; there is no frontend-visible wire event for them.
     STEER_QUEUED = "steer_queued"
@@ -110,6 +110,7 @@ class CoreEventType(StrEnum):
     STEER_CONSUMED = "steer_consumed"
     STEER_DELIVERED_MID_TURN = "steer_delivered_mid_turn"
     STEER_DROPPED = "steer_dropped"
+    CONTROL_REFUSED = "control_refused"
     PAUSED = "paused"
     STOPPED = "stopped"
 

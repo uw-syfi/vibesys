@@ -32,6 +32,7 @@ from ._proofs import (
 )
 from ._registry import ContractError
 from ._routing import SIGNAL_ORDER, event_area
+from ._run_pause import control_refusal
 from ._session_inputs import check_declared_target, may_have_been_read
 from ._session_inputs import mid_turn_offers as _mid_turn_offers
 from ._validation import validate_decision
@@ -1266,8 +1267,9 @@ def _soft_stop(state: CoreState, event: RunControlEvent) -> Transition:
     """Record a stop request that carries no result: the search is told and ends the run."""
     if any(control.control_id == event.control.control_id for control in state.run.controls):
         return Transition(state=state)
-    if state.run.status == RunStatus.TERMINAL:
-        raise ContractError(("run", "status"), "terminal run rejects controls")
+    refusal = control_refusal(state.run, event.control)
+    if refusal is not None:
+        raise refusal
     run = state.run.model_copy(
         update={
             "controls": (*state.run.controls, event.control),
@@ -1297,16 +1299,15 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
         return Transition(state=state)
     if event.control.action == "stop":
         return _stop_control(state, event, dispatch)
-    if state.run.status == RunStatus.TERMINAL:
-        raise ContractError(("run", "status"), "terminal run rejects controls")
+    refusal = control_refusal(state.run, event.control)
+    if refusal is not None:
+        raise refusal
     check_declared_target(event.control.target, state.run.declaration)
-    if event.control.action in ("resume", "pause") and (
-        state.run.status in (RunStatus.CLOSING, RunStatus.BLOCKED) or state.run.result is not None
-    ):
-        raise ContractError(("run", "cleanup"), "cleanup must finish before pause or resume")
+    # A capacity wait leaves the run paused: it only records when the run resumes itself.
+    waits = event.control.when == "capacity_returns"
     statuses = {
         "pause": RunStatus.PAUSED,
-        "resume": RunStatus.RUNNING,
+        "resume": state.run.status if waits else RunStatus.RUNNING,
         "stop": RunStatus.CLOSING,
         "steer": state.run.status,
         "withdraw": state.run.status,
@@ -1319,7 +1320,7 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
         }
     )
     updated = state.model_copy(update={"run": run})
-    if event.control.action == "steer":
+    if event.control.action == "steer" or waits:
         result = Transition(state=updated)
     elif event.control.withdraws is not None:
         result = propagate(

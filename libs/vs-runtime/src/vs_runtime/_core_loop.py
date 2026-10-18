@@ -16,6 +16,7 @@ from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
     ClockAdvanced,
     ContractError,
+    ControlRefusedError,
     CoreEvent,
     CoreState,
     Decision,
@@ -33,6 +34,7 @@ from vs_core.api import (
     RequestId,
     RequestPhase,
     RequestRecord,
+    RunControlEvent,
     RunEnvelope,
     SearchDriver,
     SearchHost,
@@ -387,6 +389,8 @@ class CoreRuntime[S: StrategyState]:
         self._queue: deque[_Input[S] | _Flush] = deque()
         # Durable turn ends whose wait names a job its submission has not made core's yet.
         self._held: list[_Input[S]] = []
+        # Operator controls core refused since the run loop last took them (``take_refused``).
+        self._refused: list[ControlRefusedError] = []
         # State after the admitted inputs still queued, valid while core stays at one revision
         # (a publication or lease commit changes the storage revision, not core).
         self._tail: tuple[int, CoreState] | None = None
@@ -725,7 +729,12 @@ class CoreRuntime[S: StrategyState]:
         The exceptions are an executor's observation and the owner events committed
         with it: the effect already ran and nobody redelivers them, so a rejection
         halts the shell with ``ObservationRejectedError`` or
-        ``OwnerEventRejectedError`` instead of losing the result.
+        ``OwnerEventRejectedError`` instead of losing the result. An operator's control
+        (a ``RunControlEvent`` nobody executed) that core's ``control_refusal`` refuses is
+        set aside for ``take_refused`` and the loop goes on: the run's state may have moved
+        since the control bridge judged it (an input committed first closed the run), and
+        the bridge answers the operator with core's reason. Any other rejected input raises,
+        a malformed control included (an identity conflict is a defect in its builder).
         """
         self._require_active()
         if not self._queue:
@@ -748,8 +757,16 @@ class CoreRuntime[S: StrategyState]:
                     return True
                 self._halted = True
                 raise OwnerEventRejectedError(item.event, error) from error
+            if isinstance(item.event, RunControlEvent) and isinstance(error, ControlRefusedError):
+                self._refused.append(error)
+                return True
             raise
         return True
+
+    def take_refused(self) -> tuple[ControlRefusedError, ...]:
+        """The controls core refused since the last call, in commit order, each once."""
+        refused, self._refused = tuple(self._refused), []
+        return refused
 
     def _awaits_submissions(self, item: _Input[S]) -> bool:
         """Whether a turn end carries a wait on jobs whose submissions are still in flight.

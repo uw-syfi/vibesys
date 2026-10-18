@@ -807,6 +807,27 @@ class StopMode(StrEnum):
     CANCEL = "cancel"
 
 
+class PauseOwner(StrEnum):
+    """Who paused the run, which decides what may end the pause."""
+
+    OPERATOR = "operator"
+    """The operator holds the run: only the operator's resume ends the hold."""
+    QUOTA = "quota"
+    """A provider quota stop paused the run: the turns that stopped own the pause."""
+
+
+ResumeWhen = Literal["now", "capacity_returns"]
+"""Resume at once, or once provider capacity should be back."""
+
+
+class RunPause(Value):
+    """Why a paused run is paused, and whether the operator asked it to resume itself."""
+
+    owner: PauseOwner
+    capacity_wait: bool = False
+    """The operator asked the run to resume itself once provider capacity returns."""
+
+
 class ScopeInputTarget(Value):
     """Input for a scope, permitted before any invocation exists."""
 
@@ -875,10 +896,21 @@ class ControlInput(Value):
     """How a steer reaches its target's turns; None is the next turn. Only a steer has one."""
     withdraws: InputId | None = None
     """The standing input a withdraw ends. Exactly a withdraw names one."""
+    owner: PauseOwner | None = None
+    """Who paused the run: given with every pause, and only with a pause."""
+    when: ResumeWhen | None = None
+    """When a resume takes effect: given with every resume, and only with a resume."""
+    fallback: bool = False
+    """A resume that switches the stopped turns to the quota fallback; only an immediate one."""
+    capacity_wait_stands: bool = False
+    """An immediate resume that keeps the operator's wait for capacity for the next quota stop.
+
+    A restart resumes a quota pause, since its turns did not survive, but the operator's
+    request to wait for capacity still holds for the next turn that stops on the limit."""
 
     @model_validator(mode="after")
     def mode_belongs_to_stop(self) -> ControlInput:
-        """Each action carries its own fields: a stop's mode, a steer's target, a withdraw's input."""
+        """Each action carries exactly the fields that say what it does; nothing else."""
         if (self.action == "stop") != (self.mode is not None):
             raise ContractValidationError("mode", "required for stop and only for stop")
         if self.target is not None and self.action != "steer":
@@ -893,6 +925,16 @@ class ControlInput(Value):
             )
         if (self.action == "withdraw") != (self.withdraws is not None):
             raise ContractValidationError("withdraws", "required for withdraw and only for it")
+        if (self.action == "pause") != (self.owner is not None):
+            raise ContractValidationError("owner", "required for pause and only for pause")
+        if (self.action == "resume") != (self.when is not None):
+            raise ContractValidationError("when", "required for resume and only for resume")
+        if (self.fallback or self.capacity_wait_stands) and self.when != "now":
+            raise ContractValidationError("when", "only an immediate resume switches or keeps")
+        if self.fallback and self.capacity_wait_stands:
+            raise ContractValidationError(
+                "capacity_wait_stands", "a resume switching to the fallback ends the wait"
+            )
         return self
 
 

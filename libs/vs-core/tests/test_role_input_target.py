@@ -108,7 +108,12 @@ def test_core_refuses_a_role_its_search_does_not_declare(
 def test_only_a_steer_names_a_target() -> None:
     target = core.RoleInputTarget(role_id=core.RoleId(root="planner"))
     with pytest.raises(ValueError, match="only a steer has a target"):
-        core.ControlInput(control_id=core.ControlId(root="c"), action="pause", target=target)
+        core.ControlInput(
+            control_id=core.ControlId(root="c"),
+            action="pause",
+            owner=core.PauseOwner.OPERATOR,
+            target=target,
+        )
 
 
 @settings(max_examples=examples(pr=5, nightly=100))

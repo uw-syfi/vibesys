@@ -365,14 +365,24 @@ class _Loop:
             if refusal is not None:
                 # Requests already running finish and commit before the refusal ends the run.
                 await self._shell.finish_in_flight(self._delivery, now_at=now, refusal=refusal)
+                self._settle_controls()
                 return self._outcome(refusal)
+            # Before the loop can exit: a control the commit that ended the run refused is
+            # answered now, since no later poll will see it.
+            self._settle_controls()
             if self._core().run.status == RunStatus.TERMINAL:
                 break
-            if self._controls is not None:
-                self._controls.settled(self._core(), running=bool(self._shell.in_flight))
             if self._signature() == before:
                 await self._wait(now)
         return self._outcome()
+
+    def _settle_controls(self) -> None:
+        """Tell the control bridge what core committed and which of its controls it refused."""
+        refused = self._shell.take_refused()
+        if self._controls is not None:
+            self._controls.settled(
+                self._core(), running=bool(self._shell.in_flight), refused=refused
+            )
 
     def _slots(self) -> int:
         return self._config.max_concurrent or self._core().run.limits.max_parallel

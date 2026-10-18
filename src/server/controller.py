@@ -340,6 +340,13 @@ class RunController:
                 EventType.CONTROL, f"/steer dropped: {reason}", status=EventStatus.FAILED
             )
 
+    def record_control_refused(self, reason: str) -> None:
+        """Journal that the run refused an acknowledged control; ``reason`` names it and why."""
+        with self._condition:
+            self._journal.record(
+                EventType.CONTROL, f"/control refused: {reason}", status=EventStatus.FAILED
+            )
+
     def record_guidance_ended(self, reason: str) -> None:
         """Journal that standing guidance reaches no turn any more; ``reason`` names it and why."""
         with self._condition:

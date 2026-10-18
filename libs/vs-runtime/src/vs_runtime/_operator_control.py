@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
-from vs_core.api import StopMode
+from vs_core.api import ResumeWhen, StopMode
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -128,10 +128,6 @@ class PauseRequest(_Request):
     """Reach the next safe boundary and hold the run there."""
 
     action: Literal[ControlAction.PAUSE] = ControlAction.PAUSE
-
-
-ResumeWhen = Literal["now", "capacity_returns"]
-"""Resume at once, or once provider capacity should be back."""
 
 
 def check_one_way_to_resume(*, fallback: bool, when: ResumeWhen) -> None:
@@ -322,7 +318,8 @@ class ChannelRunControl:
     def _resume(self, request: ResumeRequest) -> tuple[ControlStatus, RefusalReason | None]:
         """Apply a resume: at once, with the fallback, or when capacity returns."""
         if request.when == "capacity_returns":
-            accepted, status = self.resume_when_capacity_returns(), ControlStatus.PENDING
+            accepted = self._channel.resume_when_capacity_returns(request.control_id)
+            status = ControlStatus.PENDING
         elif request.fallback:
             accepted = self._channel.resume_with_fallback(request.control_id)
             status = ControlStatus.CONSUMED
