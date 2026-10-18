@@ -14,8 +14,10 @@ from vs_project.api import (
     CommitFault,
     Committed,
     LocalAtomicWriteEffects,
+    LocalStateStore,
     ObservationFault,
     Project,
+    StateDocumentDamagedError,
     StoredEnvelope,
 )
 from vs_sim.api.testing import examples
@@ -109,3 +111,62 @@ def test_an_observation_sync_fault_still_fires_on_already_durable_bytes(tmp_path
     with pytest.raises(OSError, match="synchronization failed"):
         store.load()
     assert store.load() == _envelope(0)
+
+
+class _CountingDecoder:
+    """Counts how many documents a store was asked to decode."""
+
+    def __init__(self) -> None:
+        self.decodes = 0
+
+    def __call__(self) -> None:
+        self.decodes += 1
+
+
+@given(commits=st.integers(min_value=1, max_value=12), payload_size=st.integers(0, 2000))
+@settings(max_examples=examples(pr=5, nightly=10), deadline=None)
+def test_a_commit_decodes_no_document_whatever_its_size_or_the_commits_before_it(
+    commits: int, payload_size: int
+) -> None:
+    with TemporaryDirectory() as directory:
+        decoder = _CountingDecoder()
+        store = LocalStateStore(Project.open(Path(directory)), "run-1", on_decode=decoder)
+        fence = store.acquire("host-a", now=0, duration=10)
+        assert fence is not None
+        previous: int | None = None
+        for revision in range(commits):
+            envelope = _envelope(revision, b"p" * payload_size)
+            assert store.commit(previous, envelope, fence, now=1) == Committed(record=envelope)
+            previous = revision
+        assert store.load() == _envelope(commits - 1, b"p" * payload_size)
+        assert decoder.decodes == 0
+
+
+def test_a_document_another_store_replaced_is_decoded_not_remembered(tmp_path: Path) -> None:
+    decoder = _CountingDecoder()
+    reader = LocalStateStore(Project.open(tmp_path), "run-1", on_decode=decoder)
+    writer = Project.open(tmp_path).state_store("run-1")
+    fence = writer.acquire("host-a", now=0, duration=10)
+    assert fence is not None
+    writer.commit(None, _envelope(0), fence, now=1)
+    assert reader.load() == _envelope(0)
+    assert reader.load() == _envelope(0)
+    assert decoder.decodes == 1
+
+    writer.commit(0, _envelope(1), fence, now=2)
+
+    assert reader.load() == _envelope(1)
+    assert decoder.decodes == 2
+
+
+def test_damaged_bytes_are_refused_after_a_good_document_was_remembered(tmp_path: Path) -> None:
+    store = Project.open(tmp_path).state_store("run-1")
+    fence = store.acquire("host-a", now=0, duration=10)
+    assert fence is not None
+    store.commit(None, _envelope(0), fence, now=1)
+    assert store.load() == _envelope(0)
+    namespace = Project.open(tmp_path).state.state_store_namespace("run-1")
+    namespace.write_bytes("store.json", b'{"version":')
+
+    with pytest.raises(StateDocumentDamagedError):
+        store.load()

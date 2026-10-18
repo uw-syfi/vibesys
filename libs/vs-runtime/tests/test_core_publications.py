@@ -308,3 +308,35 @@ async def test_a_damaged_journal_is_a_typed_error_that_does_not_echo_it(
     with pytest.raises(StateDocumentDamagedError, match=expected) as failure:
         delivery.read()
     assert "secret-journal-bytes" not in str(failure.value)
+
+
+async def test_the_journal_decodes_a_document_once_however_often_it_is_read_or_replayed(
+    tmp_path: Path,
+) -> None:
+    store = FakeStateStore()
+    shell = runtime(store)
+    shell.start("host", now_at=0, lease_duration=10)
+    shell.submit(ClockAdvanced(now_at=1), now_at=1)
+    shell.advance()
+    namespace = Project.open(tmp_path).state.state_store_namespace("run")
+    decodes: list[None] = []
+    delivery = JournalPublicationDelivery(
+        namespace, OperationRegistry(), on_decode=lambda: decodes.append(None)
+    )
+    token = store.acquire("next", now=10, duration=10)
+    assert token is not None
+    context = _context(store, token, 10)
+    publication = shell.record.pending_publications[0]
+
+    for _ in range(5):
+        await delivery.publish(publication, context)
+        assert len(delivery.read()) == 1
+    # Only the journal this delivery did not write itself costs a decode.
+    assert not decodes
+
+    other = JournalPublicationDelivery(
+        namespace, OperationRegistry(), on_decode=lambda: decodes.append(None)
+    )
+    assert len(other.read()) == 1
+    assert len(other.read()) == 1
+    assert len(decodes) == 1

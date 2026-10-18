@@ -23,6 +23,7 @@ from vs_project._control_inbox import (
     ended_unapplied,
     validate_request_id,
 )
+from vs_project._decode_memo import DecodeMemo
 from vs_project._git_backend import (
     DEFAULT_GIT_BACKEND,
     GIT_BACKEND_ENV,
@@ -178,6 +179,7 @@ __all__ = [
     "Conflict",
     "ConflictReason",
     "ControlInbox",
+    "DecodeMemo",
     "Ended",
     "FakeStateModels",
     "FakeStateStore",

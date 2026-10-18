@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from threading import RLock
 from typing import TYPE_CHECKING
 
+from vs_project._decode_memo import DecodeMemo
 from vs_project._state_io import (
     LocalAtomicWriteEffects,
     decode_state_document,
@@ -19,7 +20,7 @@ from vs_project.api.state_store import CommitFault, ObservationFault, StateStore
 from vs_project.errors import ProjectStateError
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Callable, Iterable, Iterator
     from pathlib import Path
 
     from vs_project._state_io import AtomicWriteEffects, AtomicWriteStream, StoreDurabilityEffects
@@ -31,6 +32,10 @@ def _decode_store_document(source: bytes, *, location: str) -> StoreDocument:
     return decode_state_document(
         StoreDocument, source, source=location, versioned_by=("version", STORE_DOCUMENT_VERSION)
     )
+
+
+def _decode_local_document(source: bytes) -> StoreDocument:
+    return _decode_store_document(source, location="store.json")
 
 
 class _FaultAtomicWriteEffects(LocalAtomicWriteEffects):
@@ -178,8 +183,12 @@ class LocalStateStore(StoreOperations):
         lease_fault_plan: Iterable[CommitFault | None] = (),
         observation_fault_plan: Iterable[ObservationFault | None] = (),
         effects: StoreDurabilityEffects | None = None,
+        on_decode: Callable[[], None] | None = None,
     ) -> None:
-        """Bind a validated Project run namespace, without decoding payloads."""
+        """Bind a validated Project run namespace, without decoding payloads.
+
+        ``on_decode`` observes each document decode, which runs once per distinct stored bytes.
+        """
         # > The three fault plans are the store contract's public injection points and
         # > ``effects`` is the durability seam; a settings object would change every
         # > caller of Project.state_store for no added safety.
@@ -190,6 +199,7 @@ class LocalStateStore(StoreOperations):
         # of exactly these bytes has nothing left to synchronize; any other bytes,
         # or any publication that did not finish, make the next reload sync again.
         self._durable_source: bytes | None = None
+        self._decoded = DecodeMemo(_decode_local_document, on_decode)
         self._namespace = project.state.state_store_namespace(run_id)
         self._durable_root = project.root
 
@@ -214,7 +224,7 @@ class LocalStateStore(StoreOperations):
         source = self._namespace.read_bytes("store.json")
         if source is None:
             return StoreDocument()
-        document = _decode_store_document(source, location=str(directory / "store.json"))
+        document = self._decoded.decode(source)
         # Reload resolves a lost durability acknowledgement: synchronize the
         # whole observed document before any caller can dispatch from it. Bytes
         # this store already made durable need no second synchronization.
@@ -240,6 +250,7 @@ class LocalStateStore(StoreOperations):
         try:
             self._namespace.write_bytes("store.json", contents, effects=effects or self._effects)
             self._durable_source = contents
+            self._decoded.remember(contents, document)
         except ProjectStateError as exc:
             if isinstance(exc.__cause__, StateStoreWriteError):
                 message = str(exc.__cause__)
