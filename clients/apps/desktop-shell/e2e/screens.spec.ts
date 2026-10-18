@@ -37,19 +37,29 @@ interface Cell {
 const FINISHED: Readonly<Record<string, Journey>> = {
   'finished-run': {...DEEP, idea: 'Combine the ring with the padding', live: false},
   'finished-ten-ideas': {idea: 'Pad the slot headers', command: null, judge: false, live: false},
+  'finished-two-objectives': {
+    idea: 'Pad the slot headers',
+    command: null,
+    judge: false,
+    live: false,
+  },
 };
 
-const MAIN: readonly Cell[] = ['queue-rs-live', 'finished-run', 'finished-ten-ideas'].flatMap(
-  fixture =>
-    [true, false].flatMap(sidebar =>
-      [1000, 1440, 1920].map(width => ({
-        fixture,
-        journey: FINISHED[fixture] ?? DEEP,
-        width,
-        sidebar,
-        theme: 'ink' as const,
-      })),
-    ),
+const MAIN: readonly Cell[] = [
+  'queue-rs-live',
+  'finished-run',
+  'finished-ten-ideas',
+  'finished-two-objectives',
+].flatMap(fixture =>
+  [true, false].flatMap(sidebar =>
+    [1000, 1440, 1920].map(width => ({
+      fixture,
+      journey: FINISHED[fixture] ?? DEEP,
+      width,
+      sidebar,
+      theme: 'ink' as const,
+    })),
+  ),
 );
 const STRESS: readonly Cell[] = [
   'long-titles',
