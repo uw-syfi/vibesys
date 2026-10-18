@@ -37,7 +37,9 @@ from vs_core.api import (
     StopMode,
     capacity_wait_stands,
     control_refusal,
+    escalate_stop,
     pause_after,
+    requested_stop_mode,
     run_pause,
     stands_after,
     step,
@@ -189,7 +191,11 @@ class RunControlBridge:
         state a poll is given, is what the bridge has asked core to record."""
         self._stands = False
         """Whether the operator's wait for capacity stands (``capacity_wait_stands``), likewise."""
-        self._stopped = False
+        self._stop: StopMode | None = None
+        """The strongest stop core records or the bridge has asked it to record since.
+
+        A stop only escalates (``escalate_stop``): the channel's stop reaches core again
+        only when it is stronger than this."""
         self._landed = False
 
     def watch_stop(self, listener: Callable[[], object]) -> Callable[[], None]:
@@ -221,7 +227,7 @@ class RunControlBridge:
             self._stands = capacity_wait_stands(core.run)
             self._channel.seed(self._pause, capacity_wait_stands=self._stands)
             self._count = len(core.run.controls)
-            self._stopped = any(c.action == "stop" for c in core.run.controls)
+            self._stop = requested_stop_mode(core.run)
             self._serve_inbox()
         self._position = len(core.run.controls)
         if self._control is not None:
@@ -262,12 +268,11 @@ class RunControlBridge:
         A pause change core would refuse (the run is finishing) is refused (``_refuse``):
         the channel undoes it, and the operator hears why.
         """
-        if not self._stopped and self._channel.stop_requested():
-            self._stopped = True
+        live = self._channel.stop_mode()
+        if live is not None and escalate_stop(self._stop, live) is not self._stop:
+            self._stop = live
             by = self._channel.requested_by("stop")
-            stop = self._event(
-                core, now_at, _Change("stop", mode=self._channel.stop_mode(), control_id=by)
-            )
+            stop = self._event(core, now_at, _Change("stop", mode=live, control_id=by))
             events += () if stop is None else (stop,)
         for change in self._pause_changes(_held(core)):
             refusal = self._record_pause(core, now_at, change, events)
@@ -367,9 +372,9 @@ class RunControlBridge:
         if run.status in (RunStatus.RUNNING, RunStatus.PAUSED):
             status = RunStatus.RUNNING if self._pause is None else RunStatus.PAUSED
             run = run.model_copy(update={"status": status})
-        if self._stopped and not any(c.action == "stop" for c in run.controls):
+        if self._stop is not None and not any(c.action == "stop" for c in run.controls):
             stop = ControlInput(
-                control_id=ControlId(root="pending-stop"), action="stop", mode=StopMode.DRAIN
+                control_id=ControlId(root="pending-stop"), action="stop", mode=self._stop
             )
             run = run.model_copy(update={"controls": (*run.controls, stop)})
         return core.model_copy(update={"run": run})
@@ -648,7 +653,9 @@ class RunControlBridge:
                 # ``_submitted_request`` asked core's rule first, so this is never refused.
                 self._record_pause(core, now_at, _pause_change(request), events)
             case StopRequest(mode=mode):
-                self._stopped = True
+                # Every inbox stop is recorded, so its entry settles; it can still only
+                # escalate the run's stop (core's ``stop_mode``).
+                self._stop = escalate_stop(self._stop, mode)
                 stop = self._event(core, now_at, _Change("stop", mode=mode, control_id=identity))
                 events += () if stop is None else (stop,)
             case SteerRequest():

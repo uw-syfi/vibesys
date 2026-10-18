@@ -602,7 +602,6 @@ _STOP_OPS = st.lists(
 )
 
 
-@pytest.mark.xfail(strict=True, reason="periodic-1330 MED-2: a later stop is dropped or downgrades")
 @pytest.mark.regression
 @example(ops=[("stop", StopMode.DRAIN), ("poll",), ("stop", StopMode.CANCEL)])
 @example(ops=[("stop", StopMode.CANCEL), ("stop", StopMode.DRAIN)])

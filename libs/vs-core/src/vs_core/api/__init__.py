@@ -72,7 +72,7 @@ from vs_core._projection import (
     session_view,
     settlement_view,
 )
-from vs_core._proofs import stop_mode
+from vs_core._proofs import requested_stop_mode, stop_mode
 from vs_core._registry import (
     ENVELOPE_SCHEMA_VERSION,
     ClosedRecordContradictionError,
@@ -1489,6 +1489,7 @@ __all__ = [
     "recorded_waits",
     "recover",
     "reply_errors",
+    "requested_stop_mode",
     "resource",
     "run_pause",
     "run_view",

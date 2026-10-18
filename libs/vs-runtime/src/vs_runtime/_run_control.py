@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from vs_core.api import PauseOwner, RunPause
+from vs_core.api import PauseOwner, RunPause, escalate_stop
 from vs_runtime._operator_control import SteerMode, action_summary
 
 if TYPE_CHECKING:
@@ -696,12 +696,19 @@ class RuntimeRunControlChannel:
         reaches a boundary concurrently never reports ``STOPPED`` ahead of the
         request: a consumer folding the events would otherwise see a stop land
         on a run that was never stopping.
+
+        A stop only escalates (``escalate_stop``): a cancel replaces a pending drain, and
+        a later drain never weakens a pending cancel. The request that set the mode in
+        force names the stop.
         """
         with self._lock:
             self._emit(RunControlTransitionKind.STOP_REQUESTED)
+            held = self._stop_mode if self._stop_requested else None
+            in_force = escalate_stop(held, mode)
+            if in_force is not held:
+                self._requested_by["stop"] = control_id
             self._stop_requested = True
-            self._stop_mode = mode
-            self._requested_by["stop"] = control_id
+            self._stop_mode = in_force
             self._lock.notify_all()
             listeners = tuple(self._stop_listeners)
         for listener in listeners:
