@@ -9,8 +9,10 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 stitch-core = { path = "../stitch-core" }
-stitch-mapping = { path = "../stitch-mapping" }
-stitch-sources = { path = "../stitch-sources" }
+stitch-source-api = { path = "../stitch-source-api" }
+stitch-importer-api = { path = "../stitch-importer-api" }
 
 [dev-dependencies]
 tempfile.workspace = true
+stitch-profiler-dial9 = { path = "../../plugins/profilers/dial9" }
+stitch-source-workspace = { path = "../../plugins/source/declared-workspace" }

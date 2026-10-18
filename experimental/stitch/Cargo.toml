@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/stitch-core", "crates/stitch-sources", "crates/stitch-mapping", "crates/stitch-session", "crates/stitch-cli"]
+members = ["crates/*", "plugins/profilers/*", "plugins/source/*"]
 resolver = "2"
 
 [workspace.package]

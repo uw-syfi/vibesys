@@ -1,6 +1,19 @@
 use std::fs;
 use stitch_core::{ActivityKind, Graph, Observation, RelationshipKind};
-use stitch_sources::{builtin_importers, ImportError, Importer, ImporterRegistry, InputSpec};
+use stitch_importer_api::{ImportError, Importer, ImporterRegistry, InputSpec};
+use stitch_profiler_dial9::{Dial9BridgeImporter, Dial9NativeImporter};
+use stitch_profiler_otel::{OtlpJsonImporter, OtlpJsonlImporter};
+use stitch_profiler_perf::PerfScriptImporter;
+
+fn builtin_importers() -> ImporterRegistry {
+    let mut registry = ImporterRegistry::default();
+    registry.register(OtlpJsonImporter).unwrap();
+    registry.register(OtlpJsonlImporter).unwrap();
+    registry.register(PerfScriptImporter).unwrap();
+    registry.register(Dial9BridgeImporter).unwrap();
+    registry.register(Dial9NativeImporter).unwrap();
+    registry
+}
 
 #[test]
 fn otlp_and_perf_import_preserve_identities_and_precise_timestamps() {

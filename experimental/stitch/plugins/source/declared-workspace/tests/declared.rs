@@ -2,10 +2,10 @@ use std::fs;
 use stitch_core::{
     Activity, ActivityKind, Interval, Origin, SourceAttribution, SourceBasis, SourceLocation,
 };
-use stitch_mapping::{
-    DeclaredLocation, DeclaredLocationResolver, MappingError, MappingRegistry, SourceMapper,
-    SourceTarget, WorkspaceLocationResolver,
+use stitch_source_api::{
+    DeclaredLocation, MappingError, MappingRegistry, SourceMapper, SourceTarget,
 };
+use stitch_source_workspace::{DeclaredLocationResolver, WorkspaceLocationResolver};
 
 #[test]
 fn declared_location_maps_only_to_existing_source_within_root() {

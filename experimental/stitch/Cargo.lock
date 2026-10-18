@@ -358,7 +358,15 @@ dependencies = [
  "clap",
  "serde_json",
  "stitch-core",
+ "stitch-importer-api",
+ "stitch-profiler-dial9",
+ "stitch-profiler-gpu-bridge",
+ "stitch-profiler-otel",
+ "stitch-profiler-perf",
  "stitch-session",
+ "stitch-source-api",
+ "stitch-source-workspace",
+ "tempfile",
 ]
 
 [[package]]
@@ -370,10 +378,55 @@ dependencies = [
 ]
 
 [[package]]
-name = "stitch-mapping"
+name = "stitch-importer-api"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "stitch-core",
+ "thiserror",
+]
+
+[[package]]
+name = "stitch-profiler-dial9"
+version = "0.1.0"
+dependencies = [
+ "dial9-trace-format",
+ "serde",
+ "serde_json",
+ "stitch-core",
+ "stitch-importer-api",
+]
+
+[[package]]
+name = "stitch-profiler-gpu-bridge"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "stitch-core",
+ "stitch-importer-api",
+]
+
+[[package]]
+name = "stitch-profiler-otel"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "stitch-core",
+ "stitch-importer-api",
+]
+
+[[package]]
+name = "stitch-profiler-perf"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "stitch-core",
+ "stitch-importer-api",
+ "stitch-session",
+ "stitch-source-api",
  "tempfile",
  "thiserror",
 ]
@@ -385,22 +438,29 @@ dependencies = [
  "serde",
  "serde_json",
  "stitch-core",
- "stitch-mapping",
- "stitch-sources",
+ "stitch-importer-api",
+ "stitch-profiler-dial9",
+ "stitch-source-api",
+ "stitch-source-workspace",
  "tempfile",
  "thiserror",
 ]
 
 [[package]]
-name = "stitch-sources"
+name = "stitch-source-api"
 version = "0.1.0"
 dependencies = [
- "dial9-trace-format",
- "serde",
- "serde_json",
  "stitch-core",
- "tempfile",
  "thiserror",
+]
+
+[[package]]
+name = "stitch-source-workspace"
+version = "0.1.0"
+dependencies = [
+ "stitch-core",
+ "stitch-source-api",
+ "tempfile",
 ]
 
 [[package]]

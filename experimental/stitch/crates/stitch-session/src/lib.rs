@@ -1,12 +1,11 @@
-//! Capture and import orchestration. The process runner owns child processes.
+//! Manifest validation and import orchestration through supplied plugins.
 
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
 use stitch_core::{Graph, GraphError, Observation};
-use stitch_mapping::{MappingError, MappingRegistry, SourceTarget, WorkspaceLocationResolver};
-use stitch_sources::{builtin_importers, ImportError, ImporterRegistry, InputSpec};
+use stitch_importer_api::{ImportError, ImporterRegistry, InputSpec};
+use stitch_source_api::{MappingError, MappingRegistry, SourceTarget};
 use thiserror::Error;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -45,22 +44,6 @@ impl RunManifest {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CaptureRequest {
-    pub pid: u32,
-    pub seconds: u32,
-    pub output_dir: PathBuf,
-    pub stack_mode: CaptureStackMode,
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CaptureStackMode {
-    FramePointer,
-    #[default]
-    Dwarf,
-}
-
 #[derive(Debug, Error)]
 pub enum SessionError {
     #[error("invalid session: {0}")]
@@ -70,42 +53,12 @@ pub enum SessionError {
         path: PathBuf,
         source: std::io::Error,
     },
-    #[error("command {program} failed: {detail}")]
-    Command { program: String, detail: String },
     #[error(transparent)]
     Import(#[from] ImportError),
     #[error(transparent)]
     Graph(#[from] GraphError),
     #[error(transparent)]
     Mapping(#[from] MappingError),
-}
-
-/// The process boundary needed by capture; callers can supply an implementation
-/// that enforces their own execution policy.
-pub trait CommandRunner {
-    fn run(&self, program: &str, args: &[String]) -> Result<Output, SessionError>;
-}
-
-pub struct SystemCommandRunner;
-
-impl CommandRunner for SystemCommandRunner {
-    fn run(&self, program: &str, args: &[String]) -> Result<Output, SessionError> {
-        let output =
-            Command::new(program)
-                .args(args)
-                .output()
-                .map_err(|e| SessionError::Command {
-                    program: program.into(),
-                    detail: e.to_string(),
-                })?;
-        if !output.status.success() {
-            return Err(SessionError::Command {
-                program: program.into(),
-                detail: String::from_utf8_lossy(&output.stderr).trim().into(),
-            });
-        }
-        Ok(output)
-    }
 }
 
 pub fn load_manifest(path: &Path) -> Result<RunManifest, SessionError> {
@@ -128,17 +81,6 @@ pub fn load_manifest(path: &Path) -> Result<RunManifest, SessionError> {
     }
     manifest.validate()?;
     Ok(manifest)
-}
-
-pub fn ingest(manifest: &RunManifest) -> Result<Graph, SessionError> {
-    let mut mappers = MappingRegistry::default();
-    if let Some(root) = &manifest.source_root {
-        mappers.register(WorkspaceLocationResolver::new(
-            root,
-            manifest.source_revision.clone(),
-        )?)?;
-    }
-    ingest_with(manifest, &builtin_importers(), &mappers)
 }
 
 pub fn ingest_with(
@@ -168,95 +110,4 @@ pub fn ingest_with(
         graph.add_source_attribution(attribution)?;
     }
     Ok(graph)
-}
-
-/// Capture one process with perf and convert its samples to an importable
-/// script. Applications may emit OTel or dial9 artifacts in parallel.
-pub fn capture_perf(
-    request: &CaptureRequest,
-    runner: &dyn CommandRunner,
-) -> Result<RunManifest, SessionError> {
-    if request.pid == 0 || request.seconds == 0 || request.seconds > 3600 {
-        return Err(SessionError::Invalid(
-            "pid must be positive and seconds must be between 1 and 3600".into(),
-        ));
-    }
-    if request.output_dir.exists() {
-        return Err(SessionError::Invalid(format!(
-            "output directory already exists: {}",
-            request.output_dir.display()
-        )));
-    }
-    fs::create_dir_all(&request.output_dir).map_err(|source| SessionError::Io {
-        path: request.output_dir.clone(),
-        source,
-    })?;
-    let data = request.output_dir.join("perf.data");
-    let script = request.output_dir.join("perf.script");
-    let record_args = vec![
-        "record".into(),
-        "--clockid".into(),
-        "mono".into(),
-        "-F".into(),
-        "99".into(),
-        "--call-graph".into(),
-        match request.stack_mode {
-            CaptureStackMode::FramePointer => "fp",
-            CaptureStackMode::Dwarf => "dwarf,8192",
-        }
-        .into(),
-        "-o".into(),
-        data.display().to_string(),
-        "-p".into(),
-        request.pid.to_string(),
-        "--".into(),
-        "sleep".into(),
-        request.seconds.to_string(),
-    ];
-    runner.run("perf", &record_args)?;
-    let script_args = vec![
-        "script".into(),
-        "--no-inline".into(),
-        "--ns".into(),
-        "-F".into(),
-        "pid,tid,time,ip,sym".into(),
-        "-i".into(),
-        data.display().to_string(),
-    ];
-    let output = runner.run("perf", &script_args)?;
-    fs::write(&script, output.stdout).map_err(|source| SessionError::Io {
-        path: script.clone(),
-        source,
-    })?;
-    let captured = builtin_importers().import(&InputSpec {
-        format: "perf_script".into(),
-        path: script.clone(),
-        clock: "monotonic".into(),
-    })?;
-    if captured.is_empty() {
-        return Err(SessionError::Invalid(format!(
-            "perf recorded no CPU samples for pid {}; artifacts remain in {}",
-            request.pid,
-            request.output_dir.display()
-        )));
-    }
-    let manifest = RunManifest {
-        schema_version: 1,
-        label: format!("perf pid {}", request.pid),
-        inputs: vec![InputSpec {
-            format: "perf_script".into(),
-            path: PathBuf::from("perf.script"),
-            clock: "monotonic".into(),
-        }],
-        source_root: None,
-        source_revision: None,
-    };
-    let manifest_path = request.output_dir.join("manifest.json");
-    let serialized =
-        serde_json::to_vec_pretty(&manifest).map_err(|e| SessionError::Invalid(e.to_string()))?;
-    fs::write(&manifest_path, serialized).map_err(|source| SessionError::Io {
-        path: manifest_path,
-        source,
-    })?;
-    Ok(manifest)
 }

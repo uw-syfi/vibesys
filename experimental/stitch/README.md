@@ -28,17 +28,31 @@ to correlate them with the perf samples.
 
 ## Workspace
 
-| Crate | Responsibility |
-| --- | --- |
-| `stitch-core` | Pure evidence model, graph construction, and trace queries |
-| `stitch-sources` | Artifact importer interface and OTel, perf, dial9 binary/bridge, and GPU bridge importers |
-| `stitch-mapping` | Source attribution interface and declared-location resolver |
-| `stitch-session` | Manifest validation, capture lifecycle, import wiring |
-| `stitch-cli` | CLI commands and presentation |
+```text
+crates/
+  stitch-core/             evidence graph and pure correlation
+  stitch-importer-api/     profiler importer contract and registry
+  stitch-source-api/       source mapper contract and registry
+  stitch-session/          manifest and import orchestration
+  stitch-cli/              commands and built-in plugin selection
+plugins/
+  profilers/
+    otel/                  OTLP JSON and JSONL
+    perf/                  Linux perf capture and script import
+    dial9/                 native dial9 and provisional bridge
+    gpu-bridge/            provisional GPU event bridge
+  source/
+    declared-workspace/    declared file and line hints
+```
 
-Importers translate source-specific artifacts into typed observations. The core
-accepts importers through a registry keyed by format, and source mappers through
-a separate registry; both can be extended without changing the graph code. The core
+Each profiler integration and each source mapping implementation has its own
+crate. Format variants from the same profiler share a crate. Plugins depend on
+the small importer or source mapper contract and on `stitch-core`; the core and
+session never depend on a concrete plugin. The CLI registers the built-in
+plugins and passes their registries to the session. A new built-in plugin adds
+one crate and one CLI registration; this is compile-time Rust registration, not
+dynamic library loading. Importers translate artifacts into typed observations.
+The core
 joins OTel spans by trace and parent span IDs. A dial9 CPU region or task poll
 links to a span only when its record carries the matching trace and parent span
 IDs. A perf sample links to a CPU region or poll only with the same process, thread, and declared
@@ -82,5 +96,5 @@ event decoding, GPU vendor capture, distributed capture coordination, binary deb
 symbol resolution, and VibeSys trusted-evidence acceptance are follow-up work.
 
 The [Hotel integration guide](examples/hotel/README.md) records the application
-changes needed for each source and the live three-source validation. The check
-uses one Hotel service and does not measure a distributed request path.
+changes needed for each source, a seven-service frontend profile, and a
+separate recommendation endpoint profile.

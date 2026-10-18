@@ -1,9 +1,16 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 use stitch_core::Graph;
-use stitch_session::{
-    capture_perf, ingest, load_manifest, CaptureRequest, CaptureStackMode, SystemCommandRunner,
+use stitch_importer_api::ImporterRegistry;
+use stitch_profiler_dial9::{Dial9BridgeImporter, Dial9NativeImporter};
+use stitch_profiler_gpu_bridge::GpuBridgeImporter;
+use stitch_profiler_otel::{OtlpJsonImporter, OtlpJsonlImporter};
+use stitch_profiler_perf::{
+    capture_perf, CaptureRequest, CaptureStackMode, PerfScriptImporter, SystemCommandRunner,
 };
+use stitch_session::{ingest_with, load_manifest, RunManifest};
+use stitch_source_api::MappingRegistry;
+use stitch_source_workspace::WorkspaceLocationResolver;
 
 #[derive(Clone, Copy, ValueEnum)]
 enum StackMode {
@@ -43,6 +50,27 @@ enum Commands {
     Explain { graph: PathBuf, trace_id: String },
     /// Show a CPU sample cost tree for an ingested graph.
     Costs { graph: PathBuf },
+}
+
+/// The CLI selects its built-in plugins; the session and core do not depend on them.
+fn plugins(
+    manifest: &RunManifest,
+) -> Result<(ImporterRegistry, MappingRegistry), Box<dyn std::error::Error>> {
+    let mut importers = ImporterRegistry::default();
+    importers.register(OtlpJsonImporter)?;
+    importers.register(OtlpJsonlImporter)?;
+    importers.register(PerfScriptImporter)?;
+    importers.register(Dial9BridgeImporter)?;
+    importers.register(Dial9NativeImporter)?;
+    importers.register(GpuBridgeImporter)?;
+    let mut mappers = MappingRegistry::default();
+    if let Some(root) = &manifest.source_root {
+        mappers.register(WorkspaceLocationResolver::new(
+            root,
+            manifest.source_revision.clone(),
+        )?)?;
+    }
+    Ok((importers, mappers))
 }
 
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
@@ -91,7 +119,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::Ingest { manifest, out } => {
             let manifest = load_manifest(&manifest)?;
-            let graph = ingest(&manifest)?;
+            let (importers, mappers) = plugins(&manifest)?;
+            let graph = ingest_with(&manifest, &importers, &mappers)?;
             std::fs::write(&out, serde_json::to_vec_pretty(&graph)?)?;
             println!(
                 "Wrote {} activities, {} CPU samples, {} relationships to {}",
