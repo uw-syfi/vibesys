@@ -395,7 +395,9 @@ def test_at_equal_means_a_verdict_without_a_declared_floor_is_rare(
     about 30% of the time (30 + 3 at 0.5% / 4%: about 59%). Fewer than three runs a side give
     none, and three or more give at most 7% here, whatever the spreads and counts.
     """
-    draw = random.Random(f"{m}:{n}:{spread_mine}:{spread_theirs}")  # noqa: S311  # lint-waiver: a seeded simulation, not a secret.
+    draw = random.Random(f"{m}:{n}:{spread_mine}:{spread_theirs}")  # noqa: S311  # LW-994811; seeded simulation needs reproducible non-cryptographic draws.
+    # > System entropy would make the regression nondeterministic; a secure generator adds no
+    # > test guarantee and does not provide the Gaussian draws this simulation needs.
     verdicts = 0
     for _ in range(SIMULATED):
         mine = [100.0 * (1 + draw.gauss(0.0, spread_mine)) for _ in range(m)]
