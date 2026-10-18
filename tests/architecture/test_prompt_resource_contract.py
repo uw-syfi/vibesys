@@ -438,6 +438,15 @@ def render_packaged_prompts(installed: Path) -> int:
     context["steers"] = ({"mode": "steer", "text": "Focus on the cache."},)
     context["guidance"] = ("Keep the weights in bf16.",)
     context["text"] = "Switch the cache to fp8 now."
+    # An operator's cancel_item notice, naming one attempt of each fate.
+    context.update(
+        action="cancel_item",
+        subject="I-1",
+        stopped=("A-1",),
+        unqueued=("A-2",),
+        parked=("A-3",),
+        settling=("A-4",),
+    )
     hidden = (
         build_project_path_policy(workspace, evaluator_source=None).resolve(workspace).hidden_paths
     )

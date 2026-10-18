@@ -33,6 +33,7 @@ from .test_reopen_kernel_bridge import reopen_fixture
 from .toy_agent_search import LIMITS, Config, ToyHost, run_toy
 
 if TYPE_CHECKING:
+    # test-isolation: the trace type is test support published at vs_core.testing; vs_core.api carries no test support.
     from vs_core.testing.drive import Trace
 
 NOTICE = core.ArtifactRef(artifact_id=core.ArtifactId(root="notice"), digest="notice")
