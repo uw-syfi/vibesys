@@ -10,6 +10,8 @@ with a restart after every step.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -20,6 +22,9 @@ from vs_sim.api.testing import examples
 
 from .flow_support import ROLES, Config
 from .test_flows_restart_keeps import REVISION, measurement
+
+if TYPE_CHECKING:
+    from vs_core.api import SearchDef
 
 LIMIT = 30.0
 CANDIDATE = core.RevisionRef.of_git_commit("candidate")
@@ -168,3 +173,116 @@ def test_the_flow_looks_again_for_each_run_that_lands_and_hands_back_the_settled
         poll(run)
 
     assert run.published(Settled) == Settled(candidate_samples=1 + waits, base_samples=1 + waits)
+
+
+def measuring_within(limit: float) -> SearchDef[Config]:
+    """The measuring flow, with a measurement limit of ``limit``."""
+
+    @fake_search("settled-within", Config, ROLES)
+    async def root(ctx: core.Flow, config: Config) -> None:
+        del config
+        plan = measurement(REVISION, at=ctx.clock.now())
+        found = await ctx.evaluation.measure_compared(plan, within=limit)
+        assert not isinstance(found, core.Failed)
+        assert found.comparison is not None
+        ctx.publish(
+            Settled(
+                candidate_samples=found.comparison.candidate_samples,
+                base_samples=found.comparison.base_samples,
+            )
+        )
+
+    return root
+
+
+def journaled_while_settling(limit: float) -> int:
+    """The steps a flow journals while its comparison settles for its whole bound."""
+    run = FlowRun.start(measuring_within(limit), Config())
+    finish_measurement(run, 1, settling=True)
+    before = len(run.state.journal)
+    for _ in range(10_000):  # a hang guard only: a wait ends at its bound
+        if run.published(Settled) is not None:
+            break
+        run.advance_to(min(run.sleeping_until))
+    assert run.published(Settled) == Settled(candidate_samples=1, base_samples=1)
+    return len(run.state.journal) - before
+
+
+@pytest.mark.regression
+@pytest.mark.xfail(strict=True, reason="#3185: the settle wait polls every 5 s (MED-4)")
+@pytest.mark.parametrize("limit", [300.0, 1800.0])
+def test_a_settling_comparison_journals_no_more_steps_for_a_longer_bound(limit: float) -> None:
+    """A wait's journal does not grow with how long the comparison may settle.
+
+    Every journaled step is replayed on every resume. Before, the flow looked at the view every
+    5 run-clock seconds, journaling each look: at a 30-minute limit about a thousand steps for
+    one idea's verdict.
+    """
+    assert journaled_while_settling(limit) == journaled_while_settling(LIMIT)
+
+
+class Headline(core.Value):
+    """What the headline flow publishes: the value its result's benchmark record states."""
+
+    value: float | None
+
+
+@fake_search("settled-headline", Config, ROLES)
+async def measuring_headline(ctx: core.Flow, config: Config) -> None:
+    del config
+    plan = measurement(REVISION, at=ctx.clock.now())
+    found = await ctx.evaluation.measure_compared(plan, within=LIMIT)
+    assert not isinstance(found, core.Failed)
+    stated = [e.reading.value for e in found.result.evidence if e.reading is not None]
+    ctx.publish(Headline(value=stated[0] if stated else None))
+
+
+def benchmark(value: float) -> core.EvidenceRef:
+    """The official benchmark record of the candidate, stating ``value``."""
+    return core.EvidenceRef(
+        evidence_id=core.EvidenceId(root="benchmark"),
+        kind=core.EvidenceKind.BENCHMARK,
+        purpose="official",
+        scope=SCOPE,
+        source_request=core.RequestId(root="request-official"),
+        candidate=REVISION,
+        observation_sequence=1,
+        evaluator_digest="evaluator",
+        workload_digest="workload",
+        environment_digest="environment",
+        provenance="trusted",
+        status=core.ObservationStatus.SUCCEEDED,
+        reading=core.Reading(metric="throughput", value=value, direction="max"),
+    )
+
+
+@pytest.mark.regression
+@pytest.mark.xfail(strict=True, reason="#3187: the result keeps the earlier mean (LOW-5)")
+@RESTARTS
+def test_the_result_handed_back_states_what_the_ledger_states_once_settled(
+    *, restarting: bool
+) -> None:
+    """The measurement's record is the ledger's record as it stands when the comparison settled.
+
+    The measurement ended stating the mean of one sample; core's close-call runs then landed and
+    the ledger's record states the mean of all three. Before, the flow handed back the record
+    as the measurement ended, so a search that ranked by it ranked by the earlier mean.
+    """
+    run = FlowRun.start(measuring_headline, Config(), restarting=restarting)
+    asked = run.expect(core.Measure)
+    run.view.changes["measurements"] = (benchmark(120.0),)
+    show(run, 1, settling=True)
+    request = asked.request
+    assert isinstance(request, core.Measure)
+    result = core.MeasurementResult(
+        scope=request.scope, evidence=(benchmark(120.0),), status=core.ObservationStatus.SUCCEEDED
+    )
+    run.answer(
+        asked,
+        core.MeasurementFinished(decision=asked.decision, result=result, comparison=comparison(1)),
+    )
+    run.view.changes["measurements"] = (benchmark(118.0),)
+    show(run, 3, settling=False)
+    run.advance_to(LIMIT * 3)
+
+    assert run.published(Headline) == Headline(value=118.0)
