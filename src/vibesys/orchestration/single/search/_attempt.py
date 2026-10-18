@@ -64,6 +64,8 @@ class SingleAttempt:
     dominated_by: tuple[int, ...] = ()
     official_reason: str | None = None
     readings: tuple[AcceptedReading, ...] = ()
+    measurement_noise: serial.MeasurementNoise | None = None
+    """The noise the latest trusted comparison stated, which the next designer is shown."""
     passed: bool = False
     gate_failed: bool = False
     unmeasured: bool = False
@@ -143,8 +145,9 @@ class SingleAttempt:
     def gated(self, result: GateResult) -> Next:
         """Fold the trusted gates: a rejection is feedback, a missing measurement is nobody's fault."""
         match result:
-            case serial.Gated(readings=readings):
+            case serial.Gated(readings=readings, noise=noise):
                 self.readings = readings
+                self.measurement_noise = noise or self.measurement_noise
                 feedback = serial.failed_gate(readings)
                 if feedback is None:
                     self.passed = True

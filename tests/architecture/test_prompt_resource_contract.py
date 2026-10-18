@@ -688,6 +688,7 @@ def core_policy_context() -> dict[str, object]:
         "last_profile": None,
         "max_rounds": 3,
         "input_value": None,
+        "measurement_noise": None,
         "passed": (),
         "older_rounds": 0,
         "pending_claims": (),

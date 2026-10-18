@@ -129,6 +129,7 @@ async def _play(ctx: Flow, start: MultiRound) -> RoundDone:
         settlement=settlement,
         passed=serial.round_passed(settlement, attempt),
         metrics=attempt.benchmark_metrics(),
+        measurement_noise=attempt.measurement_noise,
     )
 
 
