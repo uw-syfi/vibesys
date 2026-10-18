@@ -73,7 +73,7 @@ from vs_agent.api.testing import (
     tool_result,
     usage,
 )
-from vs_core.api import BASE_MAX_SAMPLES
+from vs_core.api import MIN_SAMPLES_WITHOUT_FLOOR
 from vs_evaluation.api.tools import SUBMIT_TOOL, VALIDATE_WAIT_TOOL, build_core_evaluation_tools
 from vs_project.api import Project, StoredEnvelope
 from vs_sim.api import (
@@ -695,14 +695,14 @@ def _assert_headless_stream(
     jobs = {event.execution_id for event in events if event.type is CoreEventType.GATE_STARTED}
     # The baseline, the implementer's own, the candidate's, and the base runs core asked for.
     assert len(jobs) == 3 + base_runs, jobs
-    # The candidate's official measurement reused the implementer's own run of the same input
-    # (#2949): its gates say so, and no other job's do.
+    # No job reused another's run: the comparison never settled (the runs show no noise), so the
+    # candidate's official measurement ran afresh (#2949 reuses only a settled comparison).
     reused = {
         e.execution_id
         for e in events
         if e.type is CoreEventType.GATE_FINISHED and getattr(e.data, "reused", False)
     }
-    assert len(reused) == 1, reused
+    assert not reused, reused
     for job in jobs:
         # A job runs the gates its kind needs: a validation run has fewer than a trusted one.
         gates = {
@@ -871,14 +871,17 @@ def test_core_path_runs_the_fake_slurm_search(
     assert selection["kind"] == "retained_candidate"
     assert selection["revision"] != envelope["core"]["run"]["facts"]["baseline"]
     # The baseline and the implementer's own in-turn measurement through the tool were each
-    # submitted exactly once; the trusted measurement of the one candidate reused the
-    # implementer's run of the same input instead of submitting a third job (#2949).
+    # submitted exactly once. The task declares no per-run noise and the Fake benchmark reads
+    # the same value on every run, so the runs show no noise and the comparison never reaches a
+    # verdict (`vs_core._comparison`): it stays a close call, which earns the base runs of its
+    # own up to `MIN_SAMPLES_WITHOUT_FLOOR` samples, and the official check of the candidate
+    # takes a run of its own instead of reusing the implementer's (#2949 reuses only a settled
+    # comparison). Nothing else is ever submitted twice.
     evaluation = envelope["core"]["evaluation"]
-    # A close call may earn another fresh base sample, up to the comparison policy's bound.
     base_runs = len(evaluation.get("base_runs", []))
-    assert base_runs <= BASE_MAX_SAMPLES, evaluation["base_runs"]
+    assert base_runs <= MIN_SAMPLES_WITHOUT_FLOOR - 1, evaluation["base_runs"]
     assert sum("sbatch " in command for command in recorded_commands(loop_input.cluster)) == (
-        2 + base_runs
+        3 + base_runs
     )
     assert [call["rejection"] for call in evaluation["agent_calls"]] == [None]
     # The agent's own evaluation and the official one both sit in the ledger for the winner. A

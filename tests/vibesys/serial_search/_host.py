@@ -18,6 +18,7 @@ from vibesys.hypothesis import HypothesisState
 from vibesys.metrics import EvidenceReading, MetricRow
 from vibesys.serial_roadmap import RoadmapOwner
 from vs_core.api import (
+    MIN_SAMPLES_WITHOUT_FLOOR,
     ArtifactId,
     ArtifactRef,
     AttemptRef,
@@ -25,6 +26,7 @@ from vs_core.api import (
     CommandCapture,
     Comparison,
     ComparisonVerdict,
+    EffectVerdict,
     EventId,
     EvidenceId,
     EvidenceKind,
@@ -48,7 +50,7 @@ from vs_core.api import (
     ValidateLocalBase,
     Withdraw,
 )
-from vs_core.api.search import TaskStage, TaskTerms
+from vs_core.api.search import TaskStage, TaskTerms, effect_verdict, terms_policy
 from vs_core.testing.builders import initial_state
 from vs_issue_tracker.api import FakeRoadmap, PutRoadmapItems, ReadRoadmap
 
@@ -73,6 +75,12 @@ TERMS = TaskTerms(
 )
 FACTS = initial_state().run.facts.model_copy(update={"task": TERMS})
 """The run facts every story starts from: the core's sample facts plus a task that measures."""
+_AS_COMPARED = {
+    EffectVerdict.SUPPORTED: ComparisonVerdict.BETTER,
+    EffectVerdict.WITHIN_NOISE: ComparisonVerdict.WITHIN_NOISE,
+    EffectVerdict.DISPROVEN: ComparisonVerdict.WORSE,
+}
+"""A bar of one asks for any improvement: its effect verdict is the comparison's own."""
 
 KINDS = {
     "accuracy": EvidenceKind.CORRECTNESS,
@@ -303,15 +311,10 @@ class SerialHost:
         if named is None:
             return None
         ratio, noise = named
-        gain = ratio - 1
-        verdict = (
-            ComparisonVerdict.BETTER
-            if gain > 2 * noise
-            else ComparisonVerdict.WORSE
-            if gain < -2 * noise
-            else ComparisonVerdict.WITHIN_NOISE
-        )
-        return Comparison(
+        # Enough runs a side that core has an estimate of the noise under the task's policy, and
+        # the verdict core's rule gives at a bar of one.
+        runs = MIN_SAMPLES_WITHOUT_FLOOR
+        undecided = Comparison(
             scope=scope,
             metric="throughput",
             direction="max",
@@ -323,10 +326,12 @@ class SerialHost:
             base_value=INPUT_THROUGHPUT,
             ratio=ratio,
             noise=noise,
-            verdict=verdict,
-            candidate_samples=1,
-            base_samples=1,
+            verdict=ComparisonVerdict.WITHIN_NOISE,
+            candidate_samples=runs,
+            base_samples=runs,
         )
+        verdict = _AS_COMPARED[effect_verdict(undecided, 1.0, terms_policy(TERMS))]
+        return undecided.model_copy(update={"verdict": verdict})
 
     def _status_of(self, stage: str, *, is_input: bool) -> ObservationStatus:
         broken = is_input and self.baseline == "failed-workload" and stage == "benchmark"

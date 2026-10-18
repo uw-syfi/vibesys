@@ -12,6 +12,7 @@ from __future__ import annotations
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.multi._host import PLANNER, config
+from tests.vibesys.serial_search._host import TERMS
 from tests.vibesys.serial_search._replies import plan_reply
 from tests.vibesys.vibesys_flows import across_restarts
 
@@ -91,10 +92,10 @@ def test_the_recorded_outcome_is_what_the_pure_verdict_derives_from_the_comparis
         ratio=ratio,
         noise=noise,
         verdict=core.ComparisonVerdict.WITHIN_NOISE,
-        candidate_samples=1,
-        base_samples=1,
+        candidate_samples=core.MIN_SAMPLES_WITHOUT_FLOOR,
+        base_samples=core.MIN_SAMPLES_WITHOUT_FLOOR,
     )
-    expected = OUTCOME[core.effect_verdict(host_comparison, bar)]
+    expected = OUTCOME[core.effect_verdict(host_comparison, bar, core.terms_policy(TERMS))]
     assert played(restarting=restarting, bar=bar, ratio=ratio, noise=noise) == expected
 
 

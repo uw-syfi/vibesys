@@ -60,6 +60,7 @@ from vs_core.api import (
     CommandCapture,
     Compared,
     Comparison,
+    ComparisonPolicy,
     ControlInput,
     Correctable,
     Correction,
@@ -222,6 +223,7 @@ from vs_core.api import (
     minutes,
     plain_line,
     resource,
+    terms_policy,
     trusted_keys,
 )
 from vs_core.flows import search
@@ -266,6 +268,7 @@ __all__ = [
     "CommandCapture",
     "Compared",
     "Comparison",
+    "ComparisonPolicy",
     "ControlInput",
     "Correctable",
     "Correction",
@@ -429,5 +432,6 @@ __all__ = [
     "plain_line",
     "resource",
     "search",
+    "terms_policy",
     "trusted_keys",
 ]

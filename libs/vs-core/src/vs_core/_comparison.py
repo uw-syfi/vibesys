@@ -93,7 +93,7 @@ from .types.measurement import (
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from .types.common import RequestId, RunFacts, Scope, Seconds
+    from .types.common import RequestId, RunFacts, Scope, Seconds, TaskTerms
     from .types.evaluation import EvaluationState
     from .types.kernel import RunState
 
@@ -125,6 +125,7 @@ __all__ = [
     "running_baseline",
     "sample_of",
     "samples_of",
+    "terms_policy",
 ]
 
 VERDICT_NOISES = 2.0
@@ -200,7 +201,11 @@ def moment_of(run: RunState) -> Moment:
 
 def policy_of(facts: RunFacts) -> ComparisonPolicy:
     """The comparison policy a run's task fixes; the default for a run without task terms."""
-    task = facts.task
+    return terms_policy(facts.task)
+
+
+def terms_policy(task: TaskTerms | None) -> ComparisonPolicy:
+    """The comparison policy ``task`` fixes; the default for no task terms."""
     if task is None:
         return ComparisonPolicy()
     return ComparisonPolicy(
@@ -589,27 +594,39 @@ def latest_comparisons(
     return tuple(found)
 
 
-def effect_verdict(comparison: Comparison, minimum_ratio: float) -> EffectVerdict:
+def effect_verdict(
+    comparison: Comparison, minimum_ratio: float, policy: ComparisonPolicy
+) -> EffectVerdict:
     """What ``comparison`` says of an expected effect: the smallest ratio that justifies a change.
 
     ``minimum_ratio`` is the bar over the base in the metric's own direction (above one for a
     ``max`` metric, below one for ``min``; one asks for any improvement). The candidate's gain
     over the base is held against the gain the bar asks for, with the comparison's own noise
-    and the same two standard errors a verdict needs::
+    and a critical number of noises::
 
         margin = gain - required gain
-        supported     if margin >  2 * noise
-        disproven     if margin < -2 * noise
+        supported     if margin >  critical * noise
+        disproven     if margin < -critical * noise
         within_noise  otherwise
 
-    So a result inside the noise of the bar is never called either way: it is a close call, and
-    with a bar of one this is exactly the comparison's own verdict.
+    ``policy`` is the one the comparison was made under (`compare`). Under a declared floor the
+    critical number is ``VERDICT_NOISES``, and with a bar of one this is exactly the
+    comparison's own verdict. Without one, a comparison with no estimate of its noise
+    (`_noise_known`) says nothing of any bar, and otherwise the critical number is the Student-t
+    quantile at the fewest degrees Welch's test can have, ``min(m, n) - 1`` (the stored
+    comparison does not carry its exact degrees): at least the one the verdict used, so the
+    effect is never called where the comparison would not be, and with a bar of one it is the
+    comparison's verdict or ``within_noise``.
     """
+    m, n = comparison.candidate_samples, comparison.base_samples
+    if not _noise_known(m, n, comparison.noise, policy):
+        return EffectVerdict.WITHIN_NOISE
+    critical = VERDICT_NOISES if policy.floor_declared else _t_critical(min(m, n) - 1)
     sign = 1.0 if comparison.direction == "max" else -1.0
     margin = sign * (comparison.ratio - minimum_ratio)
-    if margin > VERDICT_NOISES * comparison.noise:
+    if margin > critical * comparison.noise:
         return EffectVerdict.SUPPORTED
-    if margin < -VERDICT_NOISES * comparison.noise:
+    if margin < -critical * comparison.noise:
         return EffectVerdict.DISPROVEN
     return EffectVerdict.WITHIN_NOISE
 

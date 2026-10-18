@@ -55,6 +55,7 @@ from vs_core.api.search import (
     RevisionRef,
     Settlement,
     effect_verdict,
+    terms_policy,
 )
 
 if TYPE_CHECKING:
@@ -372,7 +373,9 @@ class MultiAttempt:
                 self.effect = (
                     None
                     if comparison is None
-                    else effect_verdict(comparison, self.plan.minimum_ratio)
+                    else effect_verdict(
+                        comparison, self.plan.minimum_ratio, terms_policy(self.terms)
+                    )
                 )
                 feedback = serial.failed_gate(readings)
                 if feedback is None:

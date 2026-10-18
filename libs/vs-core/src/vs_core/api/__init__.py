@@ -23,6 +23,7 @@ from vs_core._comparison import (
     moment_of,
     policy_of,
     samples_of,
+    terms_policy,
 )
 from vs_core._continuations import SuspensionRefusal
 from vs_core._evidence_views import (
@@ -1484,6 +1485,7 @@ __all__ = [
     "step",
     "subjects",
     "suspension_refusal",
+    "terms_policy",
     "trace_step",
     "translate",
     "trusted_keys",
