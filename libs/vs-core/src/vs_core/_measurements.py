@@ -1474,14 +1474,11 @@ def _job_request(
     # stop, a drain and a late observation all name the submission's decision. Left to the
     # asker, two events asking for one step at one instant stamp it differently and the one
     # request id would carry two payloads.
-    inherited = (
-        canonical.request if canonical is not None and model is not CollectEvidence else None
-    )
     return model(
         request_id=RequestId(root=f"{_step_prefix(job, action)}{suffix}"),
         scope=job.scope,
         admission_id=canonical.request.admission_id if canonical is not None else None,
-        decision_id=inherited.decision_id if inherited is not None else None,
+        decision_id=canonical.request.decision_id if canonical is not None else None,
         resource_id=job.resource_id,
     )
 
@@ -1519,8 +1516,6 @@ def _job_outbound(
     limits = context.run.limits
     bound = limits.cancellation_bound if model is CancelOwnedJob else limits.reconciliation_bound
     outbound = within(_job_request(model, job, context, action), bound)
-    if model is CollectEvidence:
-        return outbound
     return outbound.model_copy(update={"attribution": Attribution.OWN})
 
 

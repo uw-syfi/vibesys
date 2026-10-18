@@ -522,6 +522,7 @@ from vs_core.types.measurement import (
     Sample,
 )
 from vs_core.types.records import (
+    Attribution,
     BlockedRecordStalled,
     BlockRequest,
     CancelOwnedResource,
@@ -902,6 +903,7 @@ __all__ = [
     "AttemptsContext",
     "AttemptsEvent",
     "AttemptsState",
+    "Attribution",
     "Backoff",
     "BaseClaim",
     "BaseRef",

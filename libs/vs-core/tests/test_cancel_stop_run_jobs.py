@@ -455,7 +455,13 @@ class _Run:
         return [
             r
             for r in self.sent
-            if isinstance(r, core.ObserveOwnedJob | core.InspectOwnedJob | core.CancelOwnedJob)
+            if isinstance(
+                r,
+                core.ObserveOwnedJob
+                | core.InspectOwnedJob
+                | core.CancelOwnedJob
+                | core.CollectEvidence,
+            )
             and r.resource_id in self.jobs
             and r.decision_id != self.jobs[r.resource_id].decision_id
         ]

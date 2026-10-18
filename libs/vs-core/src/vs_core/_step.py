@@ -337,7 +337,10 @@ def _resolve(state: CoreState, outbound: Outbound, cause: DecisionId | None) -> 
     """Resolve an outbound request's ``until`` to the absolute form stored on its record."""
     match outbound.until:
         case Inherited():
-            owner = cause or outbound.request.decision_id
+            # A request of its own ends with the decision it names (an agent's or core's own
+            # names none, and ends with the step's); any other, with the step that made it.
+            own = outbound.request.decision_id
+            owner = (own or cause) if outbound.attribution is Attribution.OWN else (cause or own)
             receipt = next((item for item in state.run.receipts if item.decision_id == owner), None)
             if receipt is None or receipt.until is None:
                 raise ContractError(("until",), "an inherited until needs its accepted decision")
