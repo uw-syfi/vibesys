@@ -74,6 +74,14 @@ if TYPE_CHECKING:
 __all__ = ["after_run", "base_of", "base_plan", "record_samples", "with_base"]
 
 
+@dataclass(frozen=True, slots=True)
+class _Behalf:
+    """The candidate a run of core's serves: its run, and the measured input it compares."""
+
+    run: RequestId
+    measured_input: str
+
+
 def base_of(context: EvaluationContext, event: AgentMeasurementRequested) -> BaseRef | None:
     """The attempt's own base revision with its measured input, when the candidate is comparable.
 
@@ -130,10 +138,11 @@ def with_base(
     counts, and nothing is measured twice while a run of it is under way; one that ends without
     a sample is replaced (`after_run`).
     """
-    if base is None or not _compares(context, event.plan):
+    own = event.plan.measured_input
+    if base is None or own is None or not _compares(context, event.plan):
         return change
     change = change.model_copy(update={"state": _anchored(change.state, base)})
-    if base.measured_input == event.plan.measured_input:
+    if base.measured_input == own:
         return change
     plan = base_plan(event.plan, base)
     identity = identity_of(plan)
@@ -142,7 +151,8 @@ def with_base(
     measured = Measured(evaluation_of(identity.value), base.measured_input)
     if not base_missing(change.state, measured, moment_of(context.run)):
         return change
-    return _measure_base(change, context, event.scope, plan, base, candidate, capped(event))
+    behalf = _Behalf(candidate, own)
+    return _measure_base(change, context, event.scope, plan, base, behalf, capped(event))
 
 
 def _measure_base(  # noqa: PLR0913  # lint-waiver: LW-310002 [PLR0913]; the change, the scope, the plan, the base, the candidate it serves and its limit are independent facts of one admission.
@@ -151,7 +161,7 @@ def _measure_base(  # noqa: PLR0913  # lint-waiver: LW-310002 [PLR0913]; the cha
     scope: Scope,
     plan: MeasurementPlan,
     base: BaseRef,
-    candidate: RequestId,
+    behalf: _Behalf,
     within: Within,
 ) -> AreaChange[EvaluationState]:
     """``change`` plus one more sample of ``base`` on the way: the strategy's run, else core's.
@@ -163,7 +173,7 @@ def _measure_base(  # noqa: PLR0913  # lint-waiver: LW-310002 [PLR0913]; the cha
     awaited = running_baseline(change.state, base)
     if awaited is not None:
         return change.model_copy(update={"state": _claimed(change.state, awaited, base)})
-    return _core_run(change, context, Origin(scope, None, within), plan, candidate)
+    return _core_run(change, context, Origin(scope, None, within), plan, behalf)
 
 
 def _claimed(state: EvaluationState, running: RequestId, base: BaseRef) -> EvaluationState:
@@ -206,14 +216,14 @@ def _core_run(
     context: EvaluationContext,
     origin: Origin,
     plan: MeasurementPlan,
-    candidate: RequestId,
+    behalf: _Behalf,
 ) -> AreaChange[EvaluationState]:
     """``change`` plus one more run of ``plan`` in ``origin``'s scope, recorded as core's own.
 
     An extra sample of an identity the scope already measured is admitted when its latest run
     ended and released and may give one (`_sample_ready`), up to the identity's submission
-    limit. A refusal adds nothing: a side that cannot be measured leaves the candidate without
-    a comparison, never rejected.
+    limit counted for ``behalf``'s comparison. A refusal adds nothing: a side that cannot be
+    measured leaves the candidate without a comparison, never rejected.
     """
     scope = origin.scope
     identity = identity_of(plan)
@@ -224,7 +234,7 @@ def _core_run(
         b for b in state.submission_budgets if b.scope == scope and b.identity == identity.value
     )
     budget = matches[0] if matches else None
-    if len(matches) > 1 or not _sample_ready(state, context, budget):
+    if len(matches) > 1 or not _sample_ready(state, context, budget, behalf.measured_input):
         return change
     added = allocate(state, context, origin, plan, budget)
     outbound = next((r for r in added.requests if isinstance(r.request, SubmitMeasurement)), None)
@@ -238,7 +248,8 @@ def _core_run(
                 CoreRun(
                     request_id=request_id,
                     scope=scope,
-                    candidate=candidate,
+                    candidate=behalf.run,
+                    candidate_input=behalf.measured_input,
                     fresh_when_asked=_fresh_count(state, context, plan, identity.value),
                 ),
             )
@@ -253,7 +264,10 @@ def _core_run(
 
 
 def _sample_ready(
-    state: EvaluationState, context: EvaluationContext, budget: SubmissionBudget | None
+    state: EvaluationState,
+    context: EvaluationContext,
+    budget: SubmissionBudget | None,
+    candidate_input: str,
 ) -> bool:
     """Whether the identity may take one more run: its last ended, released, and may give a sample.
 
@@ -265,6 +279,13 @@ def _sample_ready(
     fails the evaluation, which is durable, as it is for any submission). Every run counts
     toward the identity's submission limit, so a run that keeps dying is retried a bounded
     number of times.
+
+    The limit is counted per comparison: of the identity's runs, those core took for another
+    candidate input do not count (`_charged`). A base is shared by every candidate of its
+    attempt, and counted over the attempt's lifetime its limit would starve each later
+    candidate once the base's samples go stale. Each comparison still takes at most
+    ``min(limit, MAX_SUBMISSIONS_PER_MEASUREMENT)`` runs of each side, and an attempt has one
+    comparison per candidate input its agent measured.
     """
     if budget is None or not budget.receipts:
         return True
@@ -283,7 +304,18 @@ def _sample_ready(
     released = not observation.accepted or isinstance(
         submission_released(state, context, latest), Proven
     )
-    return released and len(budget.receipts) < min(budget.limit, MAX_SUBMISSIONS_PER_MEASUREMENT)
+    charged = _charged(state, budget, candidate_input)
+    return released and charged < min(budget.limit, MAX_SUBMISSIONS_PER_MEASUREMENT)
+
+
+def _charged(state: EvaluationState, budget: SubmissionBudget, candidate_input: str) -> int:
+    """How many of ``budget``'s runs count toward the comparison of ``candidate_input``.
+
+    Every run but core's own for another candidate input: a run an agent or the strategy asked
+    for is charged to every comparison, as it was asked for no particular one.
+    """
+    others = {run.request_id for run in state.core_runs if run.candidate_input != candidate_input}
+    return sum(1 for receipt in budget.receipts if receipt.request_id not in others)
 
 
 def _fresh_count(
@@ -495,17 +527,18 @@ def _advance(
     within = Within(limit=candidate.plan.time_bound)
     plan = base_plan(candidate.plan, base)
     mine = Measured(evaluation, own)
+    behalf = _Behalf(candidate.request_id, own)
     comparison = comparison_of(state, scope, mine, moment)
     if comparison is None:
         sampled = any(s.scope == scope for s in samples_of(state, mine))
         if (sampled or base_in_flight(state, mine, scope)) and base_missing(
             state, Measured(evaluation, base.measured_input), moment
         ):
-            return _measure_base(change, context, scope, plan, base, candidate.request_id, within)
+            return _measure_base(change, context, scope, plan, base, behalf, within)
         return change
     if remeasures_base(state, comparison, evaluation, moment):
-        change = _measure_base(change, context, scope, plan, base, candidate.request_id, within)
+        change = _measure_base(change, context, scope, plan, base, behalf, within)
     if remeasures_candidate(change.state, comparison, evaluation, moment):
         again = Origin(scope, None, within, base=base)
-        change = _core_run(change, context, again, candidate.plan, candidate.request_id)
+        change = _core_run(change, context, again, candidate.plan, behalf)
     return change

@@ -1001,6 +1001,7 @@ def _authorized_before_a_late_submission(
                             request_id=late_job.submission_id,
                             scope=late_job.scope,
                             candidate=state.evaluation.jobs[0].submission_id,
+                            candidate_input="candidate-input",
                             fresh_when_asked=0,
                         ),
                     ),

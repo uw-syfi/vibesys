@@ -66,7 +66,9 @@ samples: ``BASE_MAX_SAMPLES`` (2, so at most one extra base run) under a declare
 can give a verdict. Nor does it chase staleness: when base samples go stale faster than a base
 run takes, the run a close call earned can land without growing the base's fresh samples (the
 sample it was meant to join expired meanwhile), and that run is the last one a close call earns
-either side in its scope (`base_run_stalled`).
+either side of that comparison (`base_run_stalled`). Both the stop and the submission limit
+count only the runs core took for the comparison (its scope and candidate input), so a later
+candidate of the attempt, compared once the base went stale, takes its own runs of the base.
 
 Core's runs serve the comparison only. The agent's turn never waits for them (they are not its
 attempt's history, `vs_core._evaluation_history`); the comparison it reads next grows as they
@@ -765,13 +767,18 @@ def base_missing(state: EvaluationState, measured: Measured, moment: Moment) -> 
 def base_run_stalled(
     state: EvaluationState, comparison: Comparison, evaluation: str, moment: Moment
 ) -> bool:
-    """Whether a close call's base run in the comparison's scope landed without growing the base.
+    """Whether a close call's base run for this comparison landed without growing the base.
 
     Core records how many fresh samples of the base were held when it asked for a run
     (``CoreRun.fresh_when_asked``); a close call asks only while one is held. A run that landed
     with a sample, yet left no more fresh samples than that, replaced one that went stale while
     it ran, so the base goes stale faster than it runs and a verdict that needs more fresh base
-    samples cannot be reached in this scope: another run of either side would do the same.
+    samples cannot be reached for this candidate: another run of either side would do the same.
+
+    Only the runs core took for this comparison (its scope and candidate input) count. An
+    earlier candidate's base runs landed while that candidate's samples were fresh; once they
+    went stale they say nothing of how fast the base goes stale, and counting them would stop
+    every later candidate of the attempt at one run a side.
     """
     base = Measured(evaluation, comparison.base_input)
     taken = samples_of(state, base)
@@ -779,6 +786,7 @@ def base_run_stalled(
     held = len(fresh(taken, moment))
     return any(
         run.scope == comparison.scope
+        and run.candidate_input == comparison.candidate_input
         and run.request_id in landed
         and run.fresh_when_asked >= max(held, 1)
         for run in state.core_runs

@@ -16,7 +16,7 @@ from hypothesis import strategies as st
 import vs_core.api as core
 
 from .test_baseline_in_flight import strategy_baseline
-from .test_comparison_liveness import base_runs, end, running
+from .test_comparison_liveness import Bench, base_runs, compared, end, running, seeded, settle
 from .test_measurement_comparison import FLOOR, STALENESS, Lab, stamped, started_with
 from .test_resume_receipt_producers import dispatch_publication, publication_state
 
@@ -164,3 +164,75 @@ def test_a_claimed_strategy_run_counts_as_the_base_run_under_way() -> None:
     (other,) = [r for r in running(lab) if r.plan.purpose != "baseline"]
     end(lab, other, "sample", 100.4)
     assert [r for r in base_runs(lab) if r != own] == [], "still the one run under way"
+
+
+def take_turns(lab: Lab, inputs: int, gain: float) -> list[core.Comparison]:
+    """One attempt's agent evaluates ``inputs`` candidates in turn, the base going stale between.
+
+    Every run lands at once, reading ``gain`` times the base's mean at 1% run noise. The last
+    comparison of each candidate.
+    """
+    bench = Bench(
+        {f"input-{n}": 100.0 * gain for n in range(inputs)} | {"base": 100.0},
+        0.01,
+        seeded(f"turns:{gain}"),
+    )
+    last = []
+    for n in range(inputs):
+        lab.call("a", f"c{n}", f"input-{n}")
+        settle(lab, bench)
+        last.append(compared(lab, "a", f"input-{n}")[-1])
+        lab.advance(STALENESS + 1.0)
+    return last
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    ("floor", "gain", "held", "verdict"),
+    [
+        # A close call under the floor earns the base one more run.
+        (FLOOR, 1.003, (1, core.BASE_MAX_SAMPLES), core.ComparisonVerdict.WITHIN_NOISE),
+        # Without one, both sides take three runs, and a 20% gain is found.
+        (0.0, 1.2, (3, 3), core.ComparisonVerdict.BETTER),
+    ],
+)
+def test_a_later_candidate_is_not_stopped_by_an_earlier_candidates_base_runs(
+    floor: float, gain: float, held: tuple[int, int], verdict: core.ComparisonVerdict
+) -> None:
+    """After the base goes stale, the next candidate's close call takes its base runs again.
+
+    The stop on chasing staleness (`base_run_stalled`) used to read every base run core took in
+    the attempt. An earlier candidate's runs had landed while its samples were fresh; once they
+    went stale they looked like runs that left the base no fresher than they found it, so the
+    next candidate stopped at one run a side.
+    """
+    lab = Lab.of("a", floor=floor)
+    for comparison in take_turns(lab, 2, gain):
+        assert (comparison.candidate_samples, comparison.base_samples) == held
+        assert comparison.verdict is verdict
+    assert running(lab) == []
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("inputs", [3, 5])
+def test_every_candidate_of_a_long_attempt_gets_its_own_share_of_base_runs(inputs: int) -> None:
+    """The base's submission limit is counted per comparison, not over the attempt's lifetime.
+
+    Core used to count every run of the base in the attempt against one limit of five. With no
+    floor the first candidate takes three, so once the base went stale the second got two and
+    the third none: it was never compared at all. Now each comparison is charged only the runs
+    taken for it, so every candidate takes three base runs, and no more.
+    """
+    lab = Lab.of("a", floor=0.0)
+    for comparison in take_turns(lab, inputs, 1.2):
+        assert (comparison.candidate_samples, comparison.base_samples) == (3, 3)
+        assert comparison.verdict is core.ComparisonVerdict.BETTER
+    based = {run.request_id for run in base_runs(lab)}
+    for n in range(inputs):
+        served = [
+            run
+            for run in lab.state.evaluation.core_runs
+            if run.candidate_input == f"input-{n}" and run.request_id in based
+        ]
+        assert len(served) == core.MIN_SAMPLES_WITHOUT_FLOOR
+    assert len(based) == inputs * core.MIN_SAMPLES_WITHOUT_FLOOR

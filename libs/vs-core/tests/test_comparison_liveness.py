@@ -31,7 +31,7 @@ import vs_core.api as core
 from vs_sim.api.testing import examples
 
 from .test_baseline_in_flight import strategy_baseline
-from .test_measurement_comparison import FLOOR, Lab, ended_with, final_check, reading
+from .test_measurement_comparison import FLOOR, STALENESS, Lab, ended_with, final_check, reading
 from .test_measurement_reuse import revision, seen, submissions
 from .test_measurements import committed, transition
 
@@ -398,58 +398,16 @@ def test_under_a_declared_floor_core_takes_no_run_of_the_candidate() -> None:
 # Properties over realistic grids.
 
 
-Step = tuple[Literal["call", "end"], int, int]
+Step = tuple[Literal["call", "end", "wait"], int, int]
 
 
-@settings(max_examples=examples(pr=60, nightly=600))
-@given(
-    floor=st.sampled_from((FLOOR, 0.0)),
-    spread=st.sampled_from((0.0, 0.01, 0.05)),
-    ratio=st.sampled_from((0.5, 1.0, 1.003, 1.05, 2.0)),
-    steps=st.lists(
-        st.one_of(
-            st.tuples(st.just("call"), st.integers(0, 1), st.integers(0, 2)),
-            st.tuples(st.just("end"), st.integers(0, 7), st.integers(0, len(DEATHS))),
-        ),
-        min_size=1,
-        max_size=14,
-    ),
-    seed=st.integers(0, 2**16),
-)
-@example(
-    floor=0.0,
-    spread=0.0,
-    ratio=1.0,
-    steps=[("call", 0, 0), ("call", 1, 1), ("end", 1, 3), ("end", 0, 0)],
-    seed=0,
-)
-@example(
-    floor=FLOOR,
-    spread=0.01,
-    ratio=1.003,
-    steps=[("call", 0, 0), ("end", 1, 1), ("end", 0, 4), ("end", 0, 2)],
-    seed=1,
-)
-def test_every_candidate_with_a_sample_gets_a_comparison_and_the_runs_stay_bounded(
-    floor: float, spread: float, ratio: float, steps: list[Step], seed: int
-) -> None:
-    """Over any interleaving of evaluations by two attempts and run ends, some of them deaths.
-
-    A step ends a running run (chosen by index) with a sample or one of the deaths, a drain
-    closing the run's attempt. Afterwards every run ends with a sample. Then every candidate
-    that holds a sample in an attempt still open is compared with its base, each base holds no
-    more fresh samples than a close call may earn, each candidate input no more runs than the
-    minimum without a floor (one under a floor) plus its agent's, and every scope's identity
-    stays within its submission limit.
-    """
-    lab = Lab.of("a", "b", floor=floor)
+def play(lab: Lab, bench: Bench, steps: list[Step]) -> None:
+    """Take ``steps`` in turn: an agent's call, the end of a running run, or the base going stale."""
     names = ("a", "b")
-    bench = Bench(
-        {f"input-{n}": 100.0 * ratio * (1 + n / 10) for n in range(3)} | {"base": 100.0},
-        spread,
-        seeded(f"grid:{seed}"),
-    )
     for kind, who, what in steps:
+        if kind == "wait":
+            lab.advance(STALENESS + 1.0)
+            continue
         if kind == "call":
             name = names[who]
             if not any(
@@ -469,10 +427,96 @@ def test_every_candidate_with_a_sample_gets_a_comparison_and_the_runs_stay_bound
             end(lab, run, "sample", bench.read("base" if name is None else name))
         else:
             kill(lab, run, DEATHS[what])
+
+
+def charged_within_limit(lab: Lab) -> None:
+    """No comparison is charged more runs of an identity than its submission limit (`_charged`).
+
+    Core's own runs count toward the comparison they were taken for; any other run counts
+    toward every comparison.
+    """
+    limit = core.MAX_SUBMISSIONS_PER_MEASUREMENT
+    served = {run.request_id: run.candidate_input for run in lab.state.evaluation.core_runs}
+    for budget in lab.state.evaluation.submission_budgets:
+        asked = [served.get(receipt.request_id) for receipt in budget.receipts]
+        for candidate_input in set(asked) - {None}:
+            charged = sum(1 for one in asked if one in (None, candidate_input))
+            assert charged <= min(budget.limit, limit)
+        assert asked.count(None) <= min(budget.limit, limit)
+
+
+@settings(max_examples=examples(pr=60, nightly=600))
+@given(
+    floor=st.sampled_from((FLOOR, 0.0)),
+    spread=st.sampled_from((0.0, 0.01, 0.05)),
+    ratio=st.sampled_from((0.5, 1.0, 1.003, 1.05, 2.0)),
+    steps=st.lists(
+        st.one_of(
+            st.tuples(st.just("call"), st.integers(0, 1), st.integers(0, 2)),
+            st.tuples(st.just("end"), st.integers(0, 7), st.integers(0, len(DEATHS))),
+            st.tuples(st.just("wait"), st.just(0), st.just(0)),
+        ),
+        min_size=1,
+        max_size=16,
+    ),
+    seed=st.integers(0, 2**16),
+)
+@example(
+    floor=0.0,
+    spread=0.0,
+    ratio=1.0,
+    steps=[("call", 0, 0), ("call", 1, 1), ("end", 1, 3), ("end", 0, 0)],
+    seed=0,
+)
+@example(
+    floor=FLOOR,
+    spread=0.01,
+    ratio=1.003,
+    steps=[("call", 0, 0), ("end", 1, 1), ("end", 0, 4), ("end", 0, 2)],
+    seed=1,
+)
+@example(
+    floor=0.0,
+    spread=0.01,
+    ratio=1.003,
+    steps=[
+        ("call", 0, 0),
+        ("end", 0, 4),
+        ("end", 0, 4),
+        ("wait", 0, 0),
+        ("call", 0, 1),
+        ("end", 0, 1),
+        ("wait", 0, 0),
+        ("call", 0, 2),
+    ],
+    seed=2,
+)
+def test_every_candidate_with_a_sample_gets_a_comparison_and_the_runs_stay_bounded(
+    floor: float, spread: float, ratio: float, steps: list[Step], seed: int
+) -> None:
+    """Over any interleaving of evaluations by two attempts and run ends, some of them deaths.
+
+    A step ends a running run (chosen by index) with a sample or one of the deaths, a drain
+    closing the run's attempt, or lets the base's samples go stale. Afterwards every run ends
+    with a sample. Then every candidate that holds a sample in an attempt still open is
+    compared with its base, no comparison holds more base samples than a close call may earn,
+    each candidate input no more runs than the minimum without a floor (one under a floor) plus
+    its agent's, and each comparison is charged no more runs of an identity than its
+    submission limit.
+    """
+    lab = Lab.of("a", "b", floor=floor)
+    bench = Bench(
+        {f"input-{n}": 100.0 * ratio * (1 + n / 10) for n in range(3)} | {"base": 100.0},
+        spread,
+        seeded(f"grid:{seed}"),
+    )
+    play(lab, bench, steps)
     settle(lab, bench, most=80)
     most_base = core.BASE_MAX_SAMPLES if floor else core.MIN_SAMPLES_WITHOUT_FLOOR
-    base_samples = [s for s in lab.state.evaluation.samples if s.measured_input == "base"]
-    assert len(base_samples) <= most_base
+    assert all(c.base_samples <= most_base for c in lab.comparisons())
+    if not any(kind == "wait" for kind, _, _ in steps):
+        base_samples = [s for s in lab.state.evaluation.samples if s.measured_input == "base"]
+        assert len(base_samples) <= most_base
     open_scopes = {
         lab.scopes[row.attempt_id.root]
         for row in lab.state.attempts.attempts
@@ -491,8 +535,7 @@ def test_every_candidate_with_a_sample_gets_a_comparison_and_the_runs_stay_bound
             if r.scope == scope and r.plan.measured_input == candidate_input
         ]
         assert len(runs) <= core.MAX_SUBMISSIONS_PER_MEASUREMENT
-    for budget in lab.state.evaluation.submission_budgets:
-        assert len(budget.receipts) <= min(budget.limit, core.MAX_SUBMISSIONS_PER_MEASUREMENT)
+    charged_within_limit(lab)
     if not floor:
         for comparison in lab.comparisons():
             assert comparison.candidate_samples <= core.MIN_SAMPLES_WITHOUT_FLOOR

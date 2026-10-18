@@ -80,6 +80,13 @@ class CoreRun(Value):
     request_id: RequestId
     scope: Scope
     candidate: RequestId
+    candidate_input: str = Field(min_length=1)
+    """The measured input of ``candidate``: the comparison this run serves is of that input.
+
+    A close call's runs, its stop and its share of the base's submission limit are counted per
+    comparison (`vs_core._comparison`, `vs_core._base_runs`), so another candidate's runs of the
+    same base never count toward them.
+    """
     fresh_when_asked: Count
     """How many fresh samples of the input it measures were held when core asked for it.
 
