@@ -4406,7 +4406,7 @@ const hostHelperSchema: Record<string, unknown> = {
         },
         "span_id": {
           "pattern": "^(flow|op):\\S*$",
-          "title": "Span Id",
+          "title": "Requested Span Id",
           "type": "string"
         },
         "from_sequence": {

@@ -60,7 +60,7 @@ class RunsEventsForSpanRequest(HelperRequestBase):
     project: str
     """The project directory on the host; ``~`` expands to the helper's home."""
     run_id: RunId
-    span_id: SpanId
+    span_id: SpanId = Field(title="Requested Span Id")
     from_sequence: PositiveInt = 1
     """The first sequence to return: the reply's ``next_sequence`` for the next page."""
     max: Annotated[int, Field(ge=1, le=RUN_EVENTS_READ_MAX)]

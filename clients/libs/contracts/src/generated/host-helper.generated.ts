@@ -140,7 +140,7 @@ export type DeadlineMs17 = number;
 export type Type17 = "runs.events_for_span";
 export type Project4 = string;
 export type RunId2 = string;
-export type SpanId1 = string;
+export type RequestedSpanId = string;
 export type FromSequence1 = number;
 export type Max1 = number;
 export type RequestId18 = string;
@@ -512,7 +512,7 @@ export type Overview = {
 export type Spans = {
   [k: string]: JsonValue;
 }[];
-export type SpanId2 = string;
+export type SpanId1 = string;
 export type Kind2 = string;
 export type SchemaId = string;
 export type Replies = TurnReply[];
@@ -1015,7 +1015,7 @@ export interface RunsEventsForSpanRequest {
   type: Type17;
   project: Project4;
   run_id: RunId2;
-  span_id: SpanId1;
+  span_id: RequestedSpanId;
   from_sequence?: FromSequence1;
   max: Max1;
 }
@@ -1648,7 +1648,7 @@ export interface TokenTally {
  * the schema is carried once per page in ``schemas`` because it is the repeated, large part.
  */
 export interface TurnReply {
-  span_id: SpanId2;
+  span_id: SpanId1;
   kind: Kind2;
   schema_id: SchemaId;
   value: Value;
