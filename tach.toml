@@ -268,12 +268,18 @@ depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_logs", "se
 # A run's summary: the fold of its journal that the run level shows, as a pure read model.
 # Light: the standard library and the helper contracts.
 path = "server.run_summary"
+depends_on = ["server.host_run_summary", "server.run_usage"]
+
+[[modules]]
+# A run's usage records: the journal's turns joined to their executions, as a pure projection.
+# Light: Pydantic and the helper contracts.
+path = "server.run_usage"
 depends_on = ["server.host_run_summary"]
 
 [[modules]]
 # The run summary's cache beside the journal: restore, extend and keep it. Light.
 path = "server.run_summary_cache"
-depends_on = ["server.host_run_summary", "server.run_summary", "vs_project", "vs_sim.api"]
+depends_on = ["server.host_run_summary", "server.run_summary", "server.run_usage", "vs_project", "vs_sim.api"]
 
 [[modules]]
 path = "vibesys"

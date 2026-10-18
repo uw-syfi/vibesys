@@ -17,7 +17,7 @@ from tests.server.run_summary_support import (
 from server.run_summary import RunSummaryFold, schema_id
 
 if TYPE_CHECKING:
-    from server.host_run_summary import SpanTokens, TurnReply
+    from server.host_run_summary import SpanTokens, TurnReply, UsageRecord
 
 
 def _size(document: object) -> int:
@@ -97,11 +97,12 @@ def test_pages_of_any_size_partition_the_summary_and_carry_each_schema_once(
     spans: list[dict] = []
     replies: list[TurnReply] = []
     usage: list[SpanTokens] = []
+    records: list[UsageRecord] = []
     schemas: dict[str, dict] = {}
     offset: int | None = 0
     while offset is not None:
         page = fold.page(offset, budget)
-        assert page.spans or page.replies or page.usage or page.next_offset is None
+        assert page.spans or page.replies or page.usage or page.records or page.next_offset is None
         for key in page.schemas:
             assert key not in schemas
         # a page carries the schema of every reply on it that no earlier reply uses
@@ -112,22 +113,27 @@ def test_pages_of_any_size_partition_the_summary_and_carry_each_schema_once(
             + sum(_size(reply.value) for reply in page.replies)
             + sum(_size(schema) for schema in page.schemas.values())
             + sum(_size(entry.tally.model_dump()) for entry in page.usage)
+            + sum(_size(record.model_dump(mode="json")) for record in page.records)
         )
-        assert len(page.spans) + len(page.replies) + len(page.usage) == 1 or size <= budget
+        taken = len(page.spans) + len(page.replies) + len(page.usage) + len(page.records)
+        assert taken == 1 or size <= budget
         spans.extend(page.spans)
         replies.extend(page.replies)
         usage.extend(page.usage)
+        records.extend(page.records)
         schemas.update(page.schemas)
         assert page.next_offset is None or page.next_offset == (
-            len(spans) + len(replies) + len(usage)
+            len(spans) + len(replies) + len(usage) + len(records)
         )
         offset = page.next_offset
 
     assert tuple(spans) == state.spans
     assert tuple(replies) == state.replies
     assert tuple(usage) == state.usage
+    assert tuple(records) == state.records
     assert schemas == state.schemas
     assert fold.usage_count == len(usage)
+    assert fold.record_count == len(records)
     assert fold.span_count == len(spans)
     assert fold.reply_count == len(replies)
 

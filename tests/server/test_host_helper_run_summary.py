@@ -33,6 +33,7 @@ from server.host_run_summary import (
     TokenTally,
     TraceFormat,
 )
+from server.run_usage import usage_records
 from vs_core.api import Span, SpanStatus, SpanType
 from vs_decode.api import Unreadable
 from vs_project.api import Project
@@ -125,6 +126,9 @@ def test_the_pages_of_a_summary_assemble_to_the_clients_fold_of_the_journal(
         for page in pages
         for reply in page.replies
     ) == tuple(expected.replies)
+    records = tuple(usage_records([json.loads(line) for line in journal_lines(run_events)]))
+    assert pages[0].record_count == len(records)
+    assert tuple(record for page in pages for record in page.records) == records
     assert pages[-1].next_offset is None
     assert all(page.journal_bytes == _journal(project).stat().st_size for page in pages)
 
@@ -265,6 +269,7 @@ def test_the_method_needs_its_feature_and_the_messages_are_strict() -> None:
         span_count=0,
         reply_count=0,
         usage_count=0,
+        record_count=0,
         tokens=TokenTally(
             input=None, cache_read=None, cache_write=None, output=None, reasoning=None
         ),
@@ -273,6 +278,7 @@ def test_the_method_needs_its_feature_and_the_messages_are_strict() -> None:
         replies=(),
         schemas={},
         usage=(),
+        records=(),
         next_offset=None,
     )
     assert parse_helper_message(reply.model_dump_json().encode()) == reply

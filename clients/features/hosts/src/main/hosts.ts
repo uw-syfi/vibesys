@@ -12,7 +12,7 @@ import {
   type HostConnection,
   type LogsLease,
 } from '@vibesys/connection';
-import type {HelperMessage, PathsCompleteReply} from '@vibesys/contracts/host-helper';
+import type {HelperMessage, PathsCompleteReply, UsageRecord} from '@vibesys/contracts/host-helper';
 import {
   digestEntries,
   type HostId,
@@ -96,6 +96,7 @@ async function readSummaryPages(
   const spans: unknown[] = [];
   const replies: SummaryReply['replies'][number][] = [];
   const usage: SummaryReply['usage'][number][] = [];
+  const records: UsageRecord[] = [];
   const schemas = new Map<string, unknown>();
   let first: SummaryReply | null = null;
   let offset: number | null = 0;
@@ -111,6 +112,7 @@ async function readSummaryPages(
     spans.push(...page.spans);
     replies.push(...page.replies);
     usage.push(...page.usage);
+    records.push(...page.records);
     for (const [key, schema] of Object.entries(page.schemas)) schemas.set(key, schema);
     offset = page.next_offset ?? null;
   }
@@ -131,6 +133,7 @@ async function readSummaryPages(
     })),
     tokens: tokens(first.tokens),
     usage: usage.map(entry => ({spanId: entry.span_id, tokens: tokens(entry.tally)})),
+    records,
   };
 }
 

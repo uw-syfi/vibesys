@@ -449,6 +449,8 @@ export type SystemPrompt1 = string;
 export type UserPrompt1 = string;
 export type Provider5 = string | null;
 export type Model5 = string | null;
+export type ReasoningEffort = string | null;
+export type HarnessVersion = string | null;
 export type Kind7 = "agent_execution_finished";
 export type Error2 = string | null;
 export type Kind8 = string;
@@ -1663,6 +1665,8 @@ export interface AgentExecutionStartedData {
   activity: AgentExecutionActivityData;
   provider?: Provider5;
   model?: Model5;
+  reasoning_effort?: ReasoningEffort;
+  harness_version?: HarnessVersion;
 }
 /**
  * Terminal result for one agent execution.

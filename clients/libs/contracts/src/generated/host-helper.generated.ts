@@ -507,6 +507,7 @@ export type RoundsFinished1 = number;
 export type SpanCount = number;
 export type ReplyCount = number;
 export type UsageCount = number;
+export type RecordCount = number;
 export type Input = number | null;
 export type CacheRead = number | null;
 export type CacheWrite = number | null;
@@ -524,6 +525,20 @@ export type SchemaId = string;
 export type Replies = TurnReply[];
 export type SpanId2 = string;
 export type Usage = SpanTokens[];
+export type RunId9 = string | null;
+export type ExecutionId = string | null;
+export type SpanId3 = string | null;
+export type RoundLabel = string | null;
+export type Role1 = string | null;
+export type Harness = string | null;
+export type Model3 = string | null;
+export type ReasoningEffort1 = string | null;
+export type HarnessVersion = string | null;
+export type StartedAt2 = string | null;
+export type EndedAt1 = string | null;
+export type CostUsd = number | null;
+export type DurationMs = number | null;
+export type Records = UsageRecord[];
 export type NextOffset1 = number | null;
 export type RequestId46 = string;
 export type Type46 = "machine.describe";
@@ -533,7 +548,7 @@ export type Commit1 = string | null;
 export type Dirty1 = boolean | null;
 export type CpuCores = number;
 export type Vendor = string;
-export type Model3 = string;
+export type Model4 = string;
 export type Gpus = Gpu[];
 /**
  * How a machine's GPUs run work; a closed set, ``cpu`` when it has none.
@@ -636,9 +651,9 @@ export type Kind16 = "roles_not_declared";
 export type Roles1 = string[];
 export type Kind17 = "model_not_vetted";
 export type Provider2 = string;
-export type Model4 = string | null;
+export type Model5 = string | null;
 export type Vetted = string[];
-export type Role1 = string | null;
+export type Role2 = string | null;
 export type Fallback = boolean;
 export type Kind18 = "arguments_rejected";
 export type Problem4 = string;
@@ -1614,6 +1629,8 @@ export interface RunsReadTailReply {
  * - ``tokens`` and ``usage``: the run's spend, folded from ``turn_usage_recorded`` events by
  *   summing (``ledgerWith``): ``tokens`` over every turn, those the trace names and those it
  *   does not, ``usage`` over each turn span that is named, in the order the spans first spent;
+ * - ``records``: one ``UsageRecord`` per ``turn_usage_recorded`` event, in journal order, whose
+ *   tokens sum to ``tokens`` (``server.run_usage``);
  * - the idea rows, the measurement points and the chart are folds of ``spans`` and ``replies``
  *   the client already owns (``CandidateFold``, ``performanceFold``); nothing duplicates them.
  *
@@ -1634,12 +1651,14 @@ export interface RunsSummaryReply {
   span_count: SpanCount;
   reply_count: ReplyCount;
   usage_count: UsageCount;
+  record_count: RecordCount;
   tokens: TokenTally;
   overview: Overview;
   spans: Spans;
   replies: Replies;
   schemas: Schemas;
   usage: Usage;
+  records: Records;
   next_offset: NextOffset1;
 }
 /**
@@ -1684,6 +1703,32 @@ export interface SpanTokens {
   tally: TokenTally;
 }
 /**
+ * What one agent turn spent, and who and when it was: the one definition of a usage record.
+ *
+ * A projection of the journal (``server.run_usage``): a ``turn_usage_recorded`` event joined to
+ * the ``agent_execution_started`` of its ``execution_id``. A value the journal does not hold is
+ * ``None``, never a guess: a turn whose execution start is missing has no role, harness, model,
+ * effort, version or start. The run is a field so records of many runs fold together without
+ * changing the fold. ``role`` and ``harness`` are open sets (the roles of a run's flow, the
+ * providers agentshim runs) owned elsewhere, so this contract names no list of them.
+ */
+export interface UsageRecord {
+  run_id: RunId9;
+  execution_id: ExecutionId;
+  span_id: SpanId3;
+  round_label: RoundLabel;
+  role: Role1;
+  harness: Harness;
+  model: Model3;
+  reasoning_effort: ReasoningEffort1;
+  harness_version: HarnessVersion;
+  started_at: StartedAt2;
+  ended_at: EndedAt1;
+  tokens: TokenTally;
+  cost_usd: CostUsd;
+  duration_ms: DurationMs;
+}
+/**
  * The machine's description.
  */
 export interface MachineDescribeReply {
@@ -1724,7 +1769,7 @@ export interface Hardware {
  */
 export interface Gpu {
   vendor: Vendor;
-  model: Model3;
+  model: Model4;
 }
 /**
  * Docker's daemon answered, with its server version.
@@ -1919,9 +1964,9 @@ export interface RolesNotDeclared {
 export interface ModelNotVetted {
   kind: Kind17;
   provider: Provider2;
-  model: Model4;
+  model: Model5;
   vetted: Vetted;
-  role: Role1;
+  role: Role2;
   fallback: Fallback;
 }
 /**

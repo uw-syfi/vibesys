@@ -10,7 +10,7 @@ these messages into the helper's request and reply unions and gates them behind
 ``HelperFeature.RUN_SUMMARY``.
 
 Public surface: ``RunsSummaryRequest``, ``RunsSummaryReply``, ``TurnReply``, ``TokenTally``,
-``SpanTokens``, ``TraceFormat``, ``trace_format``, the documents they
+``SpanTokens``, ``UsageRecord``, ``TraceFormat``, ``trace_format``, the documents they
 pass through (``RunSpanDocument``, ``RunOverviewDocument``, ``ReplySchemaDocument``) and the
 limits and names ``RUN_SUMMARY_FILE``, ``RUN_SUMMARY_PAGE_MAX_BYTES`` and
 ``REPLY_SCHEMA_ID_PATTERN``.
@@ -22,9 +22,11 @@ from enum import StrEnum
 from typing import Annotated, Final, Literal
 
 from pydantic import (
+    AwareDatetime,
     BaseModel,
     ConfigDict,
     JsonValue,
+    NonNegativeFloat,
     NonNegativeInt,
     PositiveInt,
     StringConstraints,
@@ -88,7 +90,7 @@ class RunsSummaryRequest(HelperRequestBase):
     """The project directory on the host; ``~`` expands to the helper's home."""
     run_id: RunId
     offset: NonNegativeInt = 0
-    """The index of the first item to return, counting the spans first and then the replies."""
+    """The index of the first item to return, counting spans, then replies, usage, then records."""
 
 
 class TurnReply(BaseModel):
@@ -142,6 +144,45 @@ class SpanTokens(BaseModel):
     tally: TokenTally
 
 
+class UsageRecord(BaseModel):
+    """What one agent turn spent, and who and when it was: the one definition of a usage record.
+
+    A projection of the journal (``server.run_usage``): a ``turn_usage_recorded`` event joined to
+    the ``agent_execution_started`` of its ``execution_id``. A value the journal does not hold is
+    ``None``, never a guess: a turn whose execution start is missing has no role, harness, model,
+    effort, version or start. The run is a field so records of many runs fold together without
+    changing the fold. ``role`` and ``harness`` are open sets (the roles of a run's flow, the
+    providers agentshim runs) owned elsewhere, so this contract names no list of them.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    run_id: str | None
+    """The run the turn belongs to: the usage event's ``run_id``."""
+    execution_id: str | None
+    """The agent execution the turn ran as; the key joining the usage to its start."""
+    span_id: str | None
+    """The agent-turn span of the run trace the turn ran as, when the journal names it. The idea
+    the turn served is read from the trace by this span or by ``execution_id``."""
+    round_label: str | None
+    """The label the journal gave the turn's round, as recorded."""
+    role: str | None
+    """The agent's role (``agent_kind``), from the execution's start."""
+    harness: str | None
+    """The provider CLI that ran the turn (for example ``codex``), from the execution's start."""
+    model: str | None
+    reasoning_effort: str | None
+    """The effort the session was configured with; ``None``: the provider's default or unknown."""
+    harness_version: str | None
+    started_at: AwareDatetime | None
+    """When the execution started."""
+    ended_at: AwareDatetime | None
+    """When the turn's usage was recorded, which is when the turn ended."""
+    tokens: TokenTally
+    cost_usd: NonNegativeFloat | None
+    duration_ms: NonNegativeInt | None
+
+
 class RunsSummaryReply(HelperReplyBase):
     """One page of a run's summary: the client's fold of its journal, to ``through_sequence``.
 
@@ -157,6 +198,8 @@ class RunsSummaryReply(HelperReplyBase):
     - ``tokens`` and ``usage``: the run's spend, folded from ``turn_usage_recorded`` events by
       summing (``ledgerWith``): ``tokens`` over every turn, those the trace names and those it
       does not, ``usage`` over each turn span that is named, in the order the spans first spent;
+    - ``records``: one ``UsageRecord`` per ``turn_usage_recorded`` event, in journal order, whose
+      tokens sum to ``tokens`` (``server.run_usage``);
     - the idea rows, the measurement points and the chart are folds of ``spans`` and ``replies``
       the client already owns (``CandidateFold``, ``performanceFold``); nothing duplicates them.
 
@@ -185,6 +228,8 @@ class RunsSummaryReply(HelperReplyBase):
     """Every reply of the run, across all pages."""
     usage_count: NonNegativeInt
     """Every span with a spend, across all pages."""
+    record_count: NonNegativeInt
+    """Every usage record of the run, across all pages."""
     tokens: TokenTally
     """The whole run's spend, on every page so a page stands alone."""
     overview: RunOverviewDocument | None
@@ -197,5 +242,7 @@ class RunsSummaryReply(HelperReplyBase):
     """The schemas of this page's replies that no earlier reply uses, by ``TurnReply.schema_id``."""
     usage: tuple[SpanTokens, ...]
     """This page's per-span spend, from index ``max(0, offset - span_count - reply_count)``."""
+    records: tuple[UsageRecord, ...]
+    """This page's usage records, from index ``max(0, offset`` minus every earlier item``)``."""
     next_offset: PositiveInt | None
     """The ``offset`` of the next page, or ``None`` when this page ends the summary."""

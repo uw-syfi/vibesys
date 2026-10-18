@@ -215,6 +215,10 @@ class AgentExecutionStartedData(EventPayload):
     activity: AgentExecutionActivityData
     provider: str | None = None
     model: str | None = None
+    reasoning_effort: str | None = None
+    """The reasoning effort the session was configured with; ``None`` when the provider's default."""
+    harness_version: str | None = None
+    """The provider CLI's version when a driver reported it; ``None`` when unknown."""
 
 
 class AgentExecutionFinishedData(EventPayload):

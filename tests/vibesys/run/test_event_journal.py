@@ -71,6 +71,7 @@ def test_agent_lifecycle_adapter_records_complete_invocation(tmp_path: Path) -> 
                 user_prompt="task",
                 provider="test",
                 model="model-for-implementer",
+                reasoning_effort="high",
             )
         )
         integration.agent_execution_event(
@@ -96,6 +97,11 @@ def test_agent_lifecycle_adapter_records_complete_invocation(tmp_path: Path) -> 
         assert isinstance(started.data, AgentExecutionStartedData)
         assert started.data.attempt is None
         assert started.data.system_prompt == "system"
+        assert (started.data.provider, started.data.model, started.data.reasoning_effort) == (
+            "test",
+            "model-for-implementer",
+            "high",
+        )
     finally:
         integration.close()
 

@@ -78,6 +78,7 @@ export type {
   TaskList,
   TurnReply,
   UnreadableRecord,
+  UsageRecord,
 } from './generated/host-helper.generated.js';
 
 const STRICT: SchemaWalk = {documents: [hostHelperSchema], strict: true};
