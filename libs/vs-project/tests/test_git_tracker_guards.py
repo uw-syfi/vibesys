@@ -709,7 +709,7 @@ def test_a_control_another_process_posts_is_not_the_agents_write(tmp_path: Path)
     """
     tracker = _initialized_tracker(tmp_path)
     project = _project(tmp_path, tracker)
-    project.state.control_inbox(tracker.run_id).post("first", b"{}")
+    project.state.control_inbox(tracker.run_id).post("first", b"{}", ended=lambda: None)
     local = project.state.local_namespace(tracker.run_id, "control").external_directory()
     inbox = next(path for root in (tmp_path, local) for path in root.rglob("first.json")).parent
     assert tracker.pending_changes() == []

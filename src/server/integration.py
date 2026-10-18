@@ -109,6 +109,7 @@ _CONTROL_EVENT_TYPES = frozenset(
         CoreEventType.STEER_DELIVERED_MID_TURN,
         CoreEventType.STEER_DROPPED,
         CoreEventType.CONTROL_REFUSED,
+        CoreEventType.REQUEST_REJECTED,
         CoreEventType.PAUSED,
         CoreEventType.STOPPED,
     }
@@ -454,6 +455,9 @@ class RunIntegrationAdapter:
             ),
             CoreEventType.STEER_DROPPED: lambda: self.controller.record_steer_dropped(event.text),
             CoreEventType.CONTROL_REFUSED: lambda: self.controller.record_control_refused(
+                event.text
+            ),
+            CoreEventType.REQUEST_REJECTED: lambda: self.controller.record_request_rejected(
                 event.text
             ),
             CoreEventType.PAUSED: self.controller.land_pause_at_boundary,

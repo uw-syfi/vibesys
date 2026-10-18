@@ -8,6 +8,7 @@ refused before anything is written.
 from __future__ import annotations
 
 import io
+import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -24,10 +25,17 @@ from vs_core.api import (
     InputMode,
     RoleId,
     RoleInputTarget,
+    RunResultProposal,
+    RunStatus,
     initial_state,
     step,
 )
-from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
+from vs_project.api import (
+    OrchestrationDescriptor,
+    Project,
+    RunEnvironmentRecord,
+    StoredEnvelope,
+)
 from vs_project.api.testing import run_execution_record
 from vs_runtime.api.core import OperatorInbox, RunControlBridge
 from vs_runtime.api.infrastructure import (
@@ -45,7 +53,8 @@ if TYPE_CHECKING:
     from vs_project.api import ControlInbox
 
 
-def _project_with_run(root: Path) -> str:
+def _project_with_run(root: Path, *, served: bool = True) -> str:
+    """A run that started on this machine; ``served``: its loop declared its inbox format."""
     project = Project.open(root)
     project.state.create_project("control", now=datetime(2026, 1, 1, tzinfo=UTC))
     manifest = project.state.new_run_manifest(
@@ -61,7 +70,25 @@ def _project_with_run(root: Path) -> str:
     project.state.create_run(manifest)
     with project.state.exclusive_run_host(manifest.run_id):  # the run started on this machine
         pass
+    if served:
+        project.state.control_inbox(manifest.run_id).serve()
     return manifest.run_id
+
+
+def _record_core(root: Path, run_id: str, core: CoreState) -> None:
+    """Commit ``core`` as the run's durable core record, as the run's loop would."""
+    store = Project.open(root).state_store(run_id)
+    fence = store.acquire("writer", now=0, duration=1)
+    assert fence is not None
+    payload = json.dumps({"envelope": {"core": core.model_dump(mode="json")}}).encode()
+    store.commit(None, StoredEnvelope(revision=0, schema_version=1, payload=payload), fence, now=0)
+
+
+def _terminal(core: CoreState) -> CoreState:
+    result = RunResultProposal(outcome="cancelled", reason="stopped: by request")
+    return core.model_copy(
+        update={"run": core.run.model_copy(update={"status": RunStatus.TERMINAL, "result": result})}
+    )
 
 
 def _control(root: Path, argv: list[str], control_id: str = "r-1") -> tuple[int, str, str]:
@@ -307,3 +334,79 @@ def test_time_ordered_ids_sort_by_time(earlier: float, later: float) -> None:
     earlier, later = sorted((earlier, later))
     if round(later * 1000) > round(earlier * 1000):
         assert time_ordered_id(earlier, "ffff") < time_ordered_id(later, "0000")
+
+
+def test_status_says_what_became_of_each_request(tmp_path: Path) -> None:
+    """A request reads pending until the run applies it, or rejected with the run's reason."""
+    run_id = _project_with_run(tmp_path)
+    bridge, _requests, sink = _production_bridge(tmp_path, run_id)
+    assert _control(tmp_path, [run_id, "pause"], "p-1")[0] == 0
+    assert _control(tmp_path, [run_id, "withdraw", "nothing"], "w-1")[0] == 0
+
+    assert _control(tmp_path, [run_id, "status", "p-1"]) == (0, "pending\n", "")
+    core = _declaring(("dynamic-planner",))
+    for now in (1.0, 2.0):
+        for event in bridge.poll(core, now):
+            core = step(core, event).state
+
+    assert _control(tmp_path, [run_id, "status", "p-1"]) == (0, "applied\n", "")
+    status, out, err = _control(tmp_path, [run_id, "status", "w-1"])
+    assert (status, err) == (0, "")
+    assert out.startswith("rejected: it ended nothing")
+    rejected = [
+        t.summary for t in sink.transitions if t.kind is RunControlTransitionKind.REQUEST_REJECTED
+    ]
+    assert rejected == [f"control request w-1 rejected: {out.removeprefix('rejected: ').strip()}"]
+    status, out, err = _control(tmp_path, [run_id, "status", "never-sent"])
+    assert (status, out) == (1, "")
+    assert "never-sent" in err
+
+
+def test_an_ended_run_refuses_a_control_before_writing_it(tmp_path: Path) -> None:
+    """Regression: posting to a run that had ended exited 0 and the request never applied.
+
+    The run's core record is the one fact for its end: no marker in the inbox is needed, so
+    a run that died before setting its inbox aside, or ended before this check existed, is
+    refused all the same, and what it never applied reads as rejected, not pending.
+    """
+    run_id = _project_with_run(tmp_path)
+    _bridge, requests, _sink = _production_bridge(tmp_path, run_id)
+    assert _control(tmp_path, [run_id, "steer", "too late"], "s-1")[0] == 0
+    _record_core(tmp_path, run_id, _terminal(_declaring(("dynamic-planner",))))
+
+    status, out, err = _control(tmp_path, [run_id, "pause"], "p-1")
+
+    assert (status, out) == (3, "")
+    assert "has ended (the run ended: stopped: by request)" in err
+    assert requests.status("p-1", ended=None) is None
+    status, out, _ = _control(tmp_path, [run_id, "status", "s-1"])
+    assert status == 0
+    assert out == (
+        "rejected: the run ended before applying it: the run ended: stopped: by request\n"
+    )
+
+
+def test_a_retry_of_an_applied_control_after_the_run_ended_reports_it_applied(
+    tmp_path: Path,
+) -> None:
+    """``--control-id`` is for a retry after an uncertain write: it stays one request."""
+    run_id = _project_with_run(tmp_path)
+    bridge, _requests, _sink = _production_bridge(tmp_path, run_id)
+    assert _control(tmp_path, ["--control-id", "stop-1", run_id, "stop"])[0] == 0
+    core = _declaring(("dynamic-planner",))
+    for now in (1.0, 2.0):  # applied at the first poll, settled once core holds it
+        for event in bridge.poll(core, now):
+            core = step(core, event).state
+    _record_core(tmp_path, run_id, _terminal(core))
+
+    assert _control(tmp_path, ["--control-id", "stop-1", run_id, "stop"]) == (0, "stop-1\n", "")
+    assert _control(tmp_path, [run_id, "status", "stop-1"]) == (0, "applied\n", "")
+
+
+def test_a_post_to_a_run_that_has_not_declared_posting_order_warns(tmp_path: Path) -> None:
+    run_id = _project_with_run(tmp_path, served=False)
+
+    status, out, err = _control(tmp_path, [run_id, "pause"], "p-1")
+
+    assert (status, out) == (0, "p-1\n")
+    assert "has not declared that it applies requests in posting order" in err

@@ -146,6 +146,7 @@ from vs_runtime.api.infrastructure import (
     WithdrawRequest,
     check_one_way_to_resume,
     describe_seconds,
+    recorded_ending,
 )
 
 __all__ = [
@@ -280,5 +281,6 @@ __all__ = [
     "harnesses",
     "load_config",
     "open_run_store",
+    "recorded_ending",
     "vetted_models",
 ]

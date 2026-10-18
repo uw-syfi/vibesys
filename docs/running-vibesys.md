@@ -436,12 +436,24 @@ vibesys control <run-id> stop --mode cancel
 ```
 
 The command validates the control, writes it, and prints its id. The run applies it at its next
-control poll, about once a second, or when it resumes if it is not running. A control the run
-cannot apply, such as a pause after a stop, is marked rejected: its reason is written to the
-inbox's `rejected/` directory. Each control is applied once, even across a crash or when the
-same control also arrives over a client's socket: pass `--control-id ID` to resend the same
-control safely. An id, once used, keeps its control: sending a different control under it is
-refused.
+control poll, about once a second, or when it resumes if it is not running. Controls apply in the
+order they were sent, whatever their ids. A control the run cannot apply, such as a pause after
+a stop, is rejected: the run records a `request_rejected` event that names the control and the
+reason. Each control is applied once, even across a crash or when the same control also arrives
+over a client's socket: pass `--control-id ID` to resend the same control safely. An id, once
+used, keeps its control: sending a different control under it is refused.
+
+`vibesys control <run-id> status ID` prints what became of a control: `pending`, `applied`, or
+`rejected: <reason>`. A run has ended when its core record says so, which is final. It then
+takes no more controls: `vibesys control` refuses a new one before writing anything and exits
+with status 3, and a control the run never applied before it ended reads as
+`rejected: the run ended before applying it: ...`. Sending again, with `--control-id`, a control
+the run applied before it ended succeeds and prints its id, so a retry stays one control.
+
+Posting order needs a run started with a VibeSys that keeps it; such a run declares it in its
+inbox when its loop starts. When a run has not declared it (it has not started yet, or runs an
+older VibeSys, which applies controls in id order), `vibesys control` still posts the control
+and warns on standard error.
 
 `vibesys control` must run on the machine that holds the run's state home, and refuses a run
 whose machine-local state it cannot find there, naming the state home it looked in (set

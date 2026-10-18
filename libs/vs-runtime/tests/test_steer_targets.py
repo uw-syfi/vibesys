@@ -176,7 +176,7 @@ def test_an_inbox_steer_is_recorded_for_its_target_or_set_aside(
 ) -> None:
     core = _core()
     run = _run()
-    run.inbox.post("r1", _payload("r1", "prefer latency", target))
+    run.inbox.post("r1", _payload("r1", "prefer latency", target), ended=lambda: None)
 
     events = run.bridge.poll(core, 1.0)
 
@@ -199,9 +199,9 @@ def test_an_inbox_steer_is_recorded_for_its_target_or_set_aside(
     run.bridge.poll(core, 2.0)
     if (other.kind, other.id) != (target.kind, target.id):
         with pytest.raises(ProjectStateError, match="different request"):
-            run.inbox.post("r1", _payload("r1", "prefer latency", other))
+            run.inbox.post("r1", _payload("r1", "prefer latency", other), ended=lambda: None)
         return
-    run.inbox.post("r1", _payload("r1", "prefer latency", other))
+    run.inbox.post("r1", _payload("r1", "prefer latency", other), ended=lambda: None)
     assert _run(run.inbox).bridge.poll(core, 3.0) == ()
     assert run.inbox.pending() == ()
     assert run.inbox.rejected() == ()

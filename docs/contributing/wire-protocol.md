@@ -254,7 +254,7 @@ goes on. A run that recorded a stop takes no pause or resume. A pause or resume 
 that the run then refuses, when it reads it or when it commits it, is journaled as a `CONTROL`
 event with status `failed` and the text `/control refused: <action> <id>: <reason>`, and what it
 did to the run's pause is undone: a refused pause is lifted, a refused `capacity_returns` or
-`fallback: true` is dropped. An accepted withdrawal is journaled as
+`fallback: true` is dropped. Every request the run sets aside from its inbox is journaled, once, as a `CONTROL` event with status `failed` and the text `/control request <id> rejected: <reason>`. One exception: a request written as the run ended is refused to its poster directly and reads as rejected, but is not journaled when it was written after the run set its inbox aside, or when the run's process died before doing so. An accepted withdrawal is journaled as
 `/withdraw: <withdraws>` with status `pending`. Accepted standing guidance is journaled with
 status `active` as `/steer --standing: <text>`, and its end, once, with status `completed` as
 `/guidance ended: standing guidance <id> ended: <reason>`, where the reason is `withdrawn`,

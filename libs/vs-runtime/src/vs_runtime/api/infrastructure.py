@@ -208,6 +208,7 @@ from vs_runtime._run_control import (
     RunStopped,
     RuntimeRunControlChannel,
 )
+from vs_runtime._run_end import recorded_ending
 from vs_runtime._run_environment import (
     AgentPaths,
     DockerEnvironment,
@@ -759,6 +760,7 @@ __all__ = [
     "prepare_model_artifacts",
     "prepare_trusted_evaluation_plan",
     "prepare_trusted_evaluator",
+    "recorded_ending",
     "relative_sdk_source",
     "release_all",
     "remote_evaluator_setup_command",

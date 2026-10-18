@@ -32,6 +32,7 @@ from vs_runtime.api.core import (
     resolve_core_resume,
 )
 from vs_runtime.api.core_shell_fixtures import CounterConfig, ShellTraceTransitions, counter
+from vs_runtime.api.infrastructure import recorded_ending
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -461,3 +462,17 @@ def test_a_run_resumes_under_code_that_changed_its_roles(
 
     assert resolved.record.envelope.core.run.declaration.roles == declaration.roles
     assert shell.record.envelope.core.run.declaration.roles == declaration.roles
+
+
+def test_the_run_s_end_is_read_from_its_core_record(tmp_path: Path) -> None:
+    """``vibesys control`` judges a run ended by core's record alone, in the record's shape."""
+    project, run_id = project_run(tmp_path)
+    assert recorded_ending(project, run_id) is None  # no record yet: the run may still start
+
+    _commit(project, run_id, record(run_id))
+    assert recorded_ending(project, run_id) is None
+
+    (tmp_path / "ended").mkdir()
+    ended = project_run(tmp_path / "ended")
+    _commit(ended[0], ended[1], _ended(record(ended[1])))
+    assert recorded_ending(*ended) == "the run ended: stopped: by request"

@@ -121,7 +121,7 @@ class _CoreRunControlEvents:
         """Translate one semantic transition without changing its payload."""
         return self.journal.emit(
             CoreEventType(transition.kind.value),
-            transition.text,
+            transition.summary,
             agent_kind=transition.agent_kind,
             round_label=transition.round_label,
             execution_id=transition.execution_id,

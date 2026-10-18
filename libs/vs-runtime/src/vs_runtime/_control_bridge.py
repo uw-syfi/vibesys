@@ -42,7 +42,7 @@ from vs_core.api import (
     stands_after,
 )
 from vs_decode.api import Unreadable, decode_json
-from vs_project.api import ProjectStateError
+from vs_project.api import ProjectStateError, ended_unapplied
 from vs_runtime._operator_control import (
     CONTROL_REQUEST,
     ChannelRunControl,
@@ -53,6 +53,7 @@ from vs_runtime._operator_control import (
     StopRequest,
     WithdrawRequest,
 )
+from vs_runtime._run_end import ending as run_ending
 from vs_runtime._steer_delivery import (
     SteerConsumption,
     TargetRefusal,
@@ -112,8 +113,9 @@ class RunControlBridge:
     the channel with the pause core recorded (``RunControlChannel.seed``), so a run the
     operator paused stays paused across a restart.
 
-    With an ``inbox``, each poll also applies the inbox's requests, in id order, each as one
-    control ``op-<control id>``; see the module docstring for how each applies once. The
+    With an ``inbox``, each poll also applies the inbox's requests, in the order they were
+    posted, each as one control ``op-<control id>``; see the module docstring for how each
+    applies once. The
     channel's stop and pause are recorded first, and again before each inbox request, so a
     request is judged against the pause the run is in. Core's ``control_refusal`` alone
     decides whether a control is accepted, asked of the run as this bridge has asked core to
@@ -126,6 +128,10 @@ class RunControlBridge:
     takes one path, ``_refuse``: the channel undoes what the control asked of it, so its
     pause stays core's, and the operator hears core's reason, through the inbox's rejection
     for an inbox request and as ``control_refused`` on the channel for any other.
+
+    Every inbox request the run sets aside takes one path, ``_reject``, which reports it
+    once (``notify_request_rejected``). Once the run has ended, ``end`` refuses what the
+    channel still holds and settles or rejects what is left in the inbox.
 
     ``control`` (by default the inbox's) is where operators submit controls; each poll tells
     it which ids core already records, so a control resent after a restart replays its ack
@@ -200,6 +206,7 @@ class RunControlBridge:
             self._channel.seed(self._pause, capacity_wait_stands=self._stands)
             self._count = len(core.run.controls)
             self._stopped = any(c.action == "stop" for c in core.run.controls)
+            self._serve_inbox()
         self._position = len(core.run.controls)
         if self._control is not None:
             self._control.recall(partial(_held_as, core))
@@ -214,7 +221,7 @@ class RunControlBridge:
         self._record_channel(core, now_at, events)
         if self._inbox is not None:
             # A damaged inbox (a symlinked or misplaced directory) leaves its requests waiting
-            # and the run going on; reporting it to the operator is tracked in #3061.
+            # and the run going on, with one warning in the run's log.
             try:
                 self._read_inbox(self._inbox, core, now_at, events)
             except ProjectStateError as error:
@@ -224,7 +231,7 @@ class RunControlBridge:
                         "the run's control inbox cannot be read; its requests wait: %s", error
                     )
         # The inbox's withdrawals are taken only now, after all of its steers, so a withdrawal
-        # that sorts before its own steer in the inbox still finds it in this poll's events.
+        # posted before its own steer still finds it in this poll's events.
         withdrawals += self._channel.take_pending_withdrawals()
         self._take_steers(core, now_at, events)
         self._apply_withdrawals(core, now_at, withdrawals, events)
@@ -299,6 +306,7 @@ class RunControlBridge:
                     owner=live.owner,
                     control_id=owner_id,
                     origin=by if operator else None,
+                    rerecords=operator and not first,
                 )
             )
             recorded = RunPause(owner=live.owner)
@@ -429,10 +437,13 @@ class RunControlBridge:
     def _reject(self, request_id: str, reason: str) -> None:
         """Set the inbox request ``request_id`` aside with ``reason``: the one inbox rejection.
 
+        The operator is told once, by a ``request_rejected`` run-control event.
+
         Raises ``ProjectStateError`` when the inbox cannot be marked.
         """
-        if self._inbox is not None:
-            self._inbox.requests.reject(request_id, reason)
+        if self._inbox is not None and self._inbox.requests.reject(request_id, reason):
+            # A request rejected already keeps its first reason, which it was reported with.
+            self._channel.notify_request_rejected(request_id, reason)
 
     def _refuse(self, change: _Change, reason: str, *, request_id: str | None) -> None:
         """Refuse a control the operator sent and the channel took: the one path for it.
@@ -440,9 +451,14 @@ class RunControlBridge:
         The channel undoes what the control asked of it (``undo_refused``), so its pause is
         the one core records, and the operator hears ``reason``, core's: an inbox request
         (``request_id``) is rejected with it, and any other control an operator sent is
-        reported on the channel. A pause change the channel made itself (a quota stop, a
-        timed resume) has no operator to answer and is only left unrecorded.
+        reported on the channel. A control no operator can be told of (one sent without an
+        id, or a pause change the channel made itself, a quota stop or a timed resume) is
+        left unrecorded and logged. A re-recording of a hold core already accepted
+        (``rerecords``) is left unrecorded with nothing undone: the operator's pause stands.
         """
+        if change.rerecords:
+            # Core accepted the operator's hold long ago; only this copy of it is refused.
+            return
         if change.part is not None:
             self._channel.undo_refused(change.part, change.origin)
         if request_id is not None:
@@ -459,6 +475,10 @@ class RunControlBridge:
                 if name is not None:
                     self._told.add(name)
                 self._channel.notify_control_refused(f"{label}: {reason}")
+        else:
+            # No operator to tell (a control sent without an id, or the channel's own quota
+            # pause or timed resume): the run's log keeps the refusal.
+            _LOG.warning("the run refused a %s control: %s", change.action, reason)
 
     def _read_inbox(
         self, inbox: OperatorInbox, core: CoreState, now_at: float, events: list[CoreEvent]
@@ -467,19 +487,11 @@ class RunControlBridge:
 
         Raises ``ProjectStateError`` when the inbox itself cannot be read or marked.
         """
-        held = {control.control_id.root: control for control in core.run.controls}
+        held = _held(core)
         for entry in inbox.requests.pending():
-            if entry.unreadable is not None:
-                self._reject(entry.request_id, f"unreadable: {entry.unreadable}")
+            if self._settle_held(entry, held):
                 continue
-            control = held.get(_identity(entry.request_id).root)
-            if control is not None:
-                if _is_held(entry, control):
-                    inbox.requests.settle(entry.request_id)
-                else:
-                    reason = "its control_id already named a different control"
-                    self._reject(entry.request_id, reason)
-            elif entry.request_id not in self._submitted:
+            if entry.request_id not in self._submitted:
                 # Judged against the pause the run is in now, which core is asked to record.
                 self._record_channel(core, now_at, events)
                 reason = self._apply(inbox, entry, core, now_at, events)
@@ -487,6 +499,61 @@ class RunControlBridge:
                     self._submitted.add(entry.request_id)
                 else:
                     self._reject(entry.request_id, reason)
+
+    def _serve_inbox(self) -> None:
+        """Declare this run's inbox format, so ``vibesys control`` knows posting order holds."""
+        if self._inbox is None:
+            return
+        try:
+            self._inbox.requests.serve()
+        except ProjectStateError as error:
+            _LOG.warning("the run's control inbox cannot declare its format: %s", error)
+
+    def end(self, core: CoreState) -> None:
+        """Answer every control left once the run has ended: none is left waiting.
+
+        Only core's TERMINAL status says the run ended (``_run_end``); a run that may resume
+        keeps its controls waiting. A pause or resume the channel took after the last poll
+        is refused (``_refuse``) with core's reason, as one refused at commit is. Every inbox
+        request core holds is settled and every other one rejected with the run's end, each
+        rejection reported once. This runs after the end is durable, so it finds every
+        request a poster wrote before seeing the end; one written after is refused to its
+        poster, and reads as rejected whether or not this runs.
+        """
+        ending = run_ending(core)
+        if ending is None:
+            return
+        # Core refuses every control of an ended run, so this records nothing.
+        self._record_channel(core, core.run.now_at, [])
+        inbox = self._inbox
+        if inbox is None:
+            return
+        try:
+            for entry in inbox.requests.pending():
+                if not self._settle_held(entry, _held(core)):
+                    self._reject(entry.request_id, ended_unapplied(ending))
+        except ProjectStateError as error:
+            _LOG.warning("the run's control inbox cannot be set aside at its end: %s", error)
+
+    def _settle_held(self, entry: InboxEntry, held: dict[ControlId, ControlInput]) -> bool:
+        """Settle or set aside an entry core already decided; whether it was one.
+
+        An unreadable entry is set aside; one whose identity core holds is settled when it
+        is that control, and set aside when core holds a different control under its id.
+        Raises ``ProjectStateError`` when the inbox cannot be marked.
+        """
+        if entry.unreadable is not None:
+            self._reject(entry.request_id, f"unreadable: {entry.unreadable}")
+            return True
+        control = held.get(_identity(entry.request_id))
+        if control is None:
+            return False
+        if _is_held(entry, control):
+            if self._inbox is not None:
+                self._inbox.requests.settle(entry.request_id)
+        else:
+            self._reject(entry.request_id, "its control_id already named a different control")
+        return True
 
     def _apply(
         self,
@@ -665,6 +732,11 @@ class OperatorInbox:
     control: ChannelRunControl
 
 
+def _held(core: CoreState) -> dict[ControlId, ControlInput]:
+    """Each control core records, by its identity."""
+    return {control.control_id: control for control in core.run.controls}
+
+
 def _identity(control_id: str) -> ControlId:
     """The identity core records a control with an id under."""
     return ControlId(root=f"op-{control_id}")
@@ -688,6 +760,9 @@ class _Change:
     origin: str | None = None
     """The id of the operator control the channel says asked for this pause change; it can
     differ from ``control_id``, the identity core records (a re-recorded hold has none)."""
+    rerecords: bool = False
+    """Whether this records again an operator hold core already accepted (to clear a capacity
+    wait), rather than an operator's request: a refusal of it is not the operator's."""
 
     @property
     def part(self) -> RefusedPart | None:

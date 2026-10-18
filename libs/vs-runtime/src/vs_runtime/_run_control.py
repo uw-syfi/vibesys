@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from vs_core.api import PauseOwner, RunPause
 from vs_runtime._operator_control import SteerMode
@@ -37,6 +37,8 @@ class RunControlTransitionKind(StrEnum):
     """Standing guidance reaches no turn any more: withdrawn, or its target or the run ended."""
     CONTROL_REFUSED = "control_refused"
     """The run refused an operator control it had acknowledged; ``text`` names it and why."""
+    REQUEST_REJECTED = "request_rejected"
+    """The run set aside a request from its control inbox: ``request_id``, and ``text`` why."""
     PAUSED = "paused"
     STOPPED = "stopped"
 
@@ -51,6 +53,23 @@ class RunControlTransition(BaseModel):
     agent_kind: str | None = None
     round_label: str | None = None
     execution_id: str | None = None
+    request_id: str | None = None
+    """The inbox request a ``REQUEST_REJECTED`` transition names; None for every other kind."""
+
+    @model_validator(mode="after")
+    def _request_named_only_when_rejected(self) -> RunControlTransition:
+        rejected = self.kind is RunControlTransitionKind.REQUEST_REJECTED
+        if rejected != (self.request_id is not None):
+            message = "request_id: a request_rejected transition names its request; no other does"
+            raise ValueError(message)
+        return self
+
+    @property
+    def summary(self) -> str:
+        """The transition as one line for the run's journal, built only here."""
+        if self.request_id is not None:
+            return f"control request {self.request_id} rejected: {self.text}"
+        return self.text
 
 
 class PauseWake(StrEnum):
@@ -296,6 +315,10 @@ class RunControlChannel(Protocol):
 
         It was withdrawn, its target or the run ended, or its attempt was reopened.
         """
+        ...
+
+    def notify_request_rejected(self, request_id: str, reason: str) -> None:
+        """Record that the run set aside the inbox request ``request_id``, and why."""
         ...
 
     def notify_control_refused(self, reason: str) -> None:
@@ -790,6 +813,17 @@ class RuntimeRunControlChannel:
                     self._fallback_requested = self._resumed_with_fallback = False
                 case _:
                     pass
+
+    def notify_request_rejected(self, request_id: str, reason: str) -> None:
+        """Record that an inbox request was set aside, naming it and the reason."""
+        with self._lock:
+            self._events(
+                RunControlTransition(
+                    kind=RunControlTransitionKind.REQUEST_REJECTED,
+                    text=reason,
+                    request_id=request_id,
+                )
+            )
 
     def wait_while_paused(self) -> None:
         """Park while paused, then land any stop that released the wait."""

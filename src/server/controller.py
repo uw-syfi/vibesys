@@ -347,6 +347,11 @@ class RunController:
                 EventType.CONTROL, f"/control refused: {reason}", status=EventStatus.FAILED
             )
 
+    def record_request_rejected(self, text: str) -> None:
+        """Journal that the run set aside a request from its control inbox; ``text`` says why."""
+        with self._condition:
+            self._journal.record(EventType.CONTROL, f"/{text}", status=EventStatus.FAILED)
+
     def record_guidance_ended(self, reason: str) -> None:
         """Journal that standing guidance reaches no turn any more; ``reason`` names it and why."""
         with self._condition:

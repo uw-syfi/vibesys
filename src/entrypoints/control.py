@@ -6,10 +6,16 @@ it at its next control poll, or after it resumes if it is not running now. The r
 same ``ControlRequest`` the server's ``command.control`` carries, validated here before it is
 written, so an invalid request is refused at once with the offending option named.
 
-Each request gets an id that orders it after every earlier one from this host: milliseconds
-since the epoch, then a random suffix: the request's ``control_id``, which also names its file
-in the inbox. ``--control-id`` names it instead, so a caller that
-retries after an uncertain write posts the same request again rather than a second one.
+Each request gets an id: milliseconds since the epoch, then a random suffix. That is the
+request's ``control_id``, which also names its file in the inbox. ``--control-id`` names it
+instead, so a caller that retries after an uncertain write posts the same request again
+rather than a second one. Requests apply in the order they were posted, whatever their ids.
+
+``vibesys control <run> status CONTROL_ID`` says whether a request is pending, applied or
+rejected, and why. Whether the run has ended is what its core record says, read anew for
+each command. A run that has ended refuses every new request before anything is written and
+exits with status 3; posting again a request it applied succeeds, so a retry stays one
+request.
 """
 
 from __future__ import annotations
@@ -19,8 +25,8 @@ from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
-from vibesys.api import CONTROL_REQUEST, SteerMode, StopMode
-from vs_project.api import Project, ProjectError
+from vibesys.api import CONTROL_REQUEST, SteerMode, StopMode, recorded_ending
+from vs_project.api import INBOX_FORMAT, InboxClosedError, Project, ProjectError, RequestState
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -29,7 +35,10 @@ if TYPE_CHECKING:
 
 __all__ = ["control_main", "time_ordered_id"]
 
+_NOT_FOUND = 1
 _USAGE_ERROR = 2
+_RUN_ENDED = 3
+"""The run has ended: the request was not posted, or will not apply."""
 
 
 def time_ordered_id(now: float, token: str) -> str:
@@ -96,6 +105,10 @@ def _parser() -> argparse.ArgumentParser:
         default="now",
         help="resume now, or once provider capacity returns",
     )
+    status = actions.add_parser(
+        "status", help="say whether a request is pending, applied or rejected, and why"
+    )
+    status.add_argument("request_id", metavar="CONTROL_ID", help="the id the request was sent with")
     stop = actions.add_parser("stop", help="end the run")
     stop.add_argument(
         "--mode",
@@ -138,6 +151,8 @@ def control_main(
     ``new_control_id`` names a request posted without ``--control-id`` (``time_ordered_id``).
     """
     arguments = _parser().parse_args(argv)
+    if arguments.action == "status":
+        return _status(arguments, cwd=cwd, out=out, err=err)
     try:
         request = CONTROL_REQUEST.validate_python(
             _payload(arguments, arguments.control_id or new_control_id())
@@ -145,11 +160,49 @@ def control_main(
         project = Project.open(arguments.project or cwd)
         project.state.load_run(arguments.run_id)
         project.state.require_local_run(arguments.run_id)
-        project.state.control_inbox(arguments.run_id).post(
-            request.control_id, request.model_dump_json().encode()
+        inbox = project.state.control_inbox(arguments.run_id)
+        inbox.post(
+            request.control_id,
+            request.model_dump_json().encode(),
+            ended=lambda: recorded_ending(project, arguments.run_id),
         )
+        served = inbox.served_format()
+    except InboxClosedError as error:
+        err.write(f"vibesys control: {error}\n")
+        return _RUN_ENDED
     except (ValidationError, ProjectError) as error:
         err.write(f"vibesys control: {error}\n")
         return _USAGE_ERROR
+    if served != INBOX_FORMAT:
+        err.write(
+            f"vibesys control: run {arguments.run_id!r} has not declared that it applies "
+            "requests in posting order (it has not started yet, or runs an older VibeSys, "
+            "which applies them in id order)\n"
+        )
     out.write(f"{request.control_id}\n")
+    return 0
+
+
+def _status(arguments: argparse.Namespace, *, cwd: Path, out: TextIO, err: TextIO) -> int:
+    """Print what became of one request: ``pending``, ``applied`` or ``rejected: <why>``."""
+    try:
+        project = Project.open(arguments.project or cwd)
+        project.state.load_run(arguments.run_id)
+        project.state.require_local_run(arguments.run_id)
+        status = project.state.control_inbox(arguments.run_id).status(
+            arguments.request_id, ended=recorded_ending(project, arguments.run_id)
+        )
+    except ProjectError as error:
+        err.write(f"vibesys control: {error}\n")
+        return _USAGE_ERROR
+    if status is None:
+        err.write(
+            f"vibesys control: no request {arguments.request_id!r} was posted to run "
+            f"{arguments.run_id!r}\n"
+        )
+        return _NOT_FOUND
+    if status.state is RequestState.REJECTED:
+        out.write(f"rejected: {status.reason}\n")
+    else:
+        out.write(f"{status.state.value}\n")
     return 0

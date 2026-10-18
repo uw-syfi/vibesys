@@ -11,6 +11,7 @@ from tests.support.real_git import NO_GITHUB, REAL_GIT
 from vibesys.api import CoreEventType, RunStopped
 from vibesys.run.integration import LocalRunIntegration
 from vs_core.api import StopMode
+from vs_runtime.api.infrastructure import RunControlTransition, RunControlTransitionKind
 from vs_runtime.api.testing import idle_environment_system
 from vs_sim.api.testing import ManualClock, SimThreads
 
@@ -71,3 +72,21 @@ def test_control_transitions_keep_the_existing_persisted_event_format(
     assert persisted[1]["execution_id"] == "execution-1"
     assert persisted[2]["text"] == "role 'judge' is not declared"
     assert all(event["run_id"] == "run-1" for event in persisted)
+
+
+def test_every_run_control_transition_has_its_persisted_event_type() -> None:
+    """The adapter persists a transition under the core event type of the same value."""
+    assert {kind.value for kind in RunControlTransitionKind} <= {
+        event_type.value for event_type in CoreEventType
+    }
+
+
+def test_a_rejected_inbox_request_is_persisted_naming_it() -> None:
+    transition = RunControlTransition(
+        kind=RunControlTransitionKind.REQUEST_REJECTED, text="it ended nothing", request_id="w-1"
+    )
+    assert transition.summary == "control request w-1 rejected: it ended nothing"
+    with pytest.raises(ValueError, match="request_id"):
+        RunControlTransition(kind=RunControlTransitionKind.REQUEST_REJECTED, text="no id")
+    with pytest.raises(ValueError, match="request_id"):
+        RunControlTransition(kind=RunControlTransitionKind.PAUSED, request_id="w-1")
