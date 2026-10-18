@@ -127,7 +127,7 @@ test('the button hides the sidebar to a rail with New run and Settings, and show
   await rail.getByRole('button', {name: 'Settings'}).click();
   await expect(page.getByRole('heading', {name: 'Appearance'})).toBeVisible();
   await rail.getByRole('button', {name: 'New run'}).click();
-  await expect(page.getByRole('heading', {name: 'New run'})).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'What do you want to optimize?'})).toBeVisible();
   await expect(sidebar(page)).toHaveCount(0);
 
   await show(page).click();

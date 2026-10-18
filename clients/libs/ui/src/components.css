@@ -302,6 +302,53 @@ body > div:first-child {
     flex: 1 1 auto;
   }
 }
+/* Steps: a list beside the content while wide; under one line the reader opens when narrower. */
+.vs-section-toggle {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--control);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+  font-weight: var(--text-body-strong-weight);
+  text-align: left;
+  cursor: pointer;
+}
+.vs-section-toggle:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-section-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+@container (max-width: 56rem) {
+  .vs-section-layout[data-steps] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .vs-section-layout[data-steps] .vs-section-nav {
+    position: static;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    padding-block: 0;
+  }
+  .vs-section-layout[data-steps] .vs-section-toggle {
+    display: flex;
+  }
+  .vs-section-layout[data-steps] .vs-section-steps:not([data-open]) {
+    display: none;
+  }
+}
 .vs-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--grid-min)), 1fr));

@@ -66,7 +66,15 @@ const REGISTRY_NAMES: readonly string[] = CODE_IDS.roles.map(roleName);
  * The names the fixture worlds' user typed: a project folder, an SSH alias, a task. They are the
  * user's own identifiers, shown as they were typed, not code names the app made up.
  */
-const USER_NAMES: readonly string[] = ['queue-rs', 'queue-rs-2', 'remote-host', 'host-a', 'host-b'];
+const USER_NAMES: readonly string[] = [
+  'queue-rs',
+  'queue-rs-2',
+  'remote-host',
+  'host-a',
+  'host-b',
+  // An example's own name, which New run shows in the code face as the catalogue names it.
+  'kv-store',
+];
 
 /** The script that defines the helpers and the checks in the page and runs `only` of them. */
 function script(only: readonly PageCheckId[], input: CheckInput): string {

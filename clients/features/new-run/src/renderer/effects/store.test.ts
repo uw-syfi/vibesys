@@ -1,15 +1,9 @@
 import {expect, test} from 'bun:test';
 import type {Check, HelperFeature} from '@vibesys/contracts/host-helper';
 import type {RecentRun, RunRef} from '@vibesys/runs';
-import {
-  backendOf,
-  readiness,
-  readinessStatus,
-  rolesView,
-  startBlocked,
-  summary,
-} from '../ui/view.js';
-import {createNewRunStore, type NewRunBridge} from './store.js';
+import type {Draft} from '../../state/index.js';
+import {backendOf, readiness, readinessStatus, rolesView, startBlocked} from '../ui/view.js';
+import {createNewRunStore, type NewRunBridge, type NewRunStoreOptions} from './store.js';
 
 const ok = <T>(value: T) => Promise.resolve({ok: true as const, value});
 
@@ -65,6 +59,30 @@ function manualSchedule() {
   };
 }
 
+/** The store, with `run` run again: its machine, project, task and agent are the form's. */
+function runAgain(
+  bridge: NewRunBridge,
+  run: RecentRun,
+  options: Partial<NewRunStoreOptions> & {readonly schedule: NewRunStoreOptions['schedule']},
+) {
+  const created = createNewRunStore(bridge, {
+    recent: [run],
+    started: () => undefined,
+    ...options,
+  });
+  created.store.dispatch({type: 'again', run});
+  return created;
+}
+
+/** Answer that the run is of the user's own project, in the folder `path`. */
+function chooseFolder(store: ReturnType<typeof createNewRunStore>['store'], path: string): void {
+  store.dispatch({type: 'answer', change: {kind: 'from', from: 'project'}});
+  store.dispatch({
+    type: 'answer',
+    change: {kind: 'project', project: {source: 'folder', path}},
+  });
+}
+
 async function settle(): Promise<void> {
   for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
 }
@@ -80,25 +98,19 @@ test('the form follows the runs opened until the user changes an input', async (
   expect(store.getState().context.form.machine).toBe('local');
   store.dispatch({type: 'recent', recent: [recentRun('ssh:gpu', '/p', 2)]});
   expect(store.getState().context.form.machine).toBe('ssh:gpu');
-  expect(store.getState().context.form.project).toEqual({source: 'recent', path: '/p'});
-  store.dispatch({
-    type: 'project',
-    project: {source: 'example', example: 'kv', destination: '/kv'},
-  });
-  expect(store.getState().context.form.project).toEqual({
-    source: 'example',
-    example: 'kv',
-    destination: '/kv',
-  });
+  // A new form knows no project: the last run's project is for running that run again.
+  expect(store.getState().context.form.project).toBeNull();
+  store.dispatch({type: 'answer', change: {kind: 'from', from: 'project'}});
+  expect(store.getState().context.answers.from).toBe('project');
   store.dispatch({type: 'recent', recent: [recentRun('local', '/q', 3)]});
   expect(store.getState().context.form.machine).toBe('ssh:gpu');
+  expect(store.getState().context.answers.from).toBe('project');
 });
 
 test('a started run is handed on, and a fresh form on the same machine follows it', async () => {
   const clock = manualSchedule();
   const started: RunRef[] = [];
-  const {store} = createNewRunStore(fakeBridge(), {
-    recent: [recentRun('ssh:gpu', '/p', 2)],
+  const {store} = runAgain(fakeBridge(), recentRun('ssh:gpu', '/p', 2), {
     schedule: clock.schedule,
     started: run => started.push(run),
   });
@@ -123,7 +135,7 @@ test('Start says why it waits: inputs missing, being checked, or an item to fix'
   });
   await settle();
   expect(startBlocked(store.getState())).toBe('Choose a project, task and agent to start.');
-  store.dispatch({type: 'project', project: {source: 'folder', path: '/p'}});
+  chooseFolder(store, '/p');
   await settle();
   expect(startBlocked(store.getState())).toBe('Checking these inputs.');
   // While the checks run, the one line and its one row do not say the same thing.
@@ -176,7 +188,7 @@ test('a task missing the build its evaluator requires fails Evaluator, fixed by 
     started: () => undefined,
   });
   await settle();
-  store.dispatch({type: 'project', project: {source: 'folder', path: '/p'}});
+  chooseFolder(store, '/p');
   await settle();
   clock.runDue();
   await settle();
@@ -196,11 +208,13 @@ test('a task missing the build its evaluator requires fails Evaluator, fixed by 
 test('a helper older than New run is never asked to check or start, and Start says why', async () => {
   const clock = manualSchedule();
   const asked: string[] = [];
-  const {store} = createNewRunStore(fakeBridge(['preflight', 'harnesses'], asked), {
-    recent: [recentRun('ssh:host-b', '/p', 2)],
-    schedule: clock.schedule,
-    started: () => undefined,
-  });
+  const {store} = runAgain(
+    fakeBridge(['preflight', 'harnesses'], asked),
+    recentRun('ssh:host-b', '/p', 2),
+    {
+      schedule: clock.schedule,
+    },
+  );
   await settle();
   clock.runDue();
   await settle();
@@ -221,10 +235,8 @@ test('the role table is read from the run: pending, then its roles, from a helpe
   const clock = manualSchedule();
   const roles = ['multi-orchestrator', 'multi-judge'];
   const features = ['run_options', 'preflight', 'examples', 'run_roles'];
-  const {store} = createNewRunStore(fakeBridge(features, [], roles), {
-    recent: [recentRun('ssh:gpu', '/p', 2)],
+  const {store} = runAgain(fakeBridge(features, [], roles), recentRun('ssh:gpu', '/p', 2), {
     schedule: clock.schedule,
-    started: () => undefined,
   });
   await settle();
   expect(rolesView(store.getState().context)).toEqual({kind: 'pending'});
@@ -236,10 +248,8 @@ test('the role table is read from the run: pending, then its roles, from a helpe
 
 test('a helper that does not report roles gets an empty state, not the roles of another run', async () => {
   const clock = manualSchedule();
-  const {store} = createNewRunStore(fakeBridge(), {
-    recent: [recentRun('ssh:gpu', '/p', 2)],
+  const {store} = runAgain(fakeBridge(), recentRun('ssh:gpu', '/p', 2), {
     schedule: clock.schedule,
-    started: () => undefined,
   });
   await settle();
   clock.runDue();
@@ -284,11 +294,7 @@ function backendBridge(
 
 async function checked(bridge: NewRunBridge) {
   const clock = manualSchedule();
-  const {store} = createNewRunStore(bridge, {
-    recent: [recentRun('ssh:host-b', '/p', 2)],
-    schedule: clock.schedule,
-    started: () => undefined,
-  });
+  const {store} = runAgain(bridge, recentRun('ssh:host-b', '/p', 2), {schedule: clock.schedule});
   await settle();
   clock.runDue();
   await settle();
@@ -311,7 +317,6 @@ test("the task's backend is shown read-only once the checks report it, and is ne
   const state = await checked(backendBridge('cpu', false));
 
   expect(backendOf(state.context)).toBe('cpu');
-  expect(summary(state.context)).toContain('CPU');
   expect(Object.keys(state.context.form)).not.toContain('backend');
 });
 
@@ -321,7 +326,7 @@ test('a helper without run_backend reports no backend, and the screen shows none
   expect(backendOf(state.context)).toBeNull();
 });
 
-test("the form prefilled from the last run on a machine keeps that run's model, rounds, time limit, results and extra arguments", async () => {
+test("running a run again keeps that run's model, rounds, time limit, results and extra arguments", async () => {
   const clock = manualSchedule();
   const start = {
     harness: {provider: 'claude', model: 'm2'},
@@ -339,11 +344,13 @@ test("the form prefilled from the last run on a machine keeps that run's model, 
         ],
       }),
   };
-  const {store} = createNewRunStore(bridge, {
-    recent: [{...recentRun('ssh:gpu', '/p', 2), start}],
-    schedule: clock.schedule,
-    started: () => undefined,
-  });
+  const {store} = runAgain(
+    bridge,
+    {...recentRun('ssh:gpu', '/p', 2), start},
+    {
+      schedule: clock.schedule,
+    },
+  );
   await settle();
   clock.runDue();
   await settle();
@@ -355,7 +362,7 @@ test("the form prefilled from the last run on a machine keeps that run's model, 
   expect(form.advanced).toBe('--name "a b"');
 });
 
-test("switching machines prefills from that machine's last run, budget and extra arguments included", async () => {
+test("switching machines carries that machine's last budget and extra arguments, not its project", async () => {
   const clock = manualSchedule();
   const start = {
     harness: null,
@@ -376,6 +383,7 @@ test("switching machines prefills from that machine's last run, budget and extra
   expect(form.machine).toBe('ssh:gpu');
   expect(form.budget.rounds).toBe(5);
   expect(form.advanced).toBe('--x');
+  expect(form.project).toBeNull();
 });
 
 /** A bridge whose preflight finds the project's repository dirty, as a helper with project_clean. */
@@ -427,11 +435,7 @@ async function changing() {
     preflight: () =>
       ok({kind: 'offered' as const, value: {checks: [], roles: null, backend: project.backend}}),
   };
-  const {store} = createNewRunStore(bridge, {
-    recent: [recentRun('local', '/p', 2)],
-    schedule: clock.schedule,
-    started: () => undefined,
-  });
+  const {store} = runAgain(bridge, recentRun('local', '/p', 2), {schedule: clock.schedule});
   const checked = async () => {
     await settle();
     clock.runDue();
@@ -463,15 +467,20 @@ test("Check again reads the project's tasks again, keeping the task still offere
   expect(context.form.task).toBe('mpmc');
 });
 
-test('Check again moves a task the project no longer has to the first it offers', async () => {
+test('Check again clears a task the project no longer has, answering it when the project has only one', async () => {
   const {project, store, checked} = await changing();
   await checked();
 
+  project.tasks = ['mpmc-cpu', 'mpmc-gpu'];
+  store.dispatch({type: 'refresh'});
+  const cleared = await checked();
+  expect(cleared.form.task).toBeNull();
+  expect(cleared.answers.task).toBeNull();
+
   project.tasks = ['mpmc-cpu'];
   store.dispatch({type: 'refresh'});
-  const context = await checked();
-
-  expect(context.form.task).toBe('mpmc-cpu');
+  const only = await checked();
+  expect(only.form.task).toBe('mpmc-cpu');
 });
 
 test('a long list of dirty paths is cut with a count of the rest', async () => {
@@ -662,10 +671,8 @@ test('retry asks the failed step again, and the form it fills in is kept', async
       harnesses: [{provider: 'claude', model: 'm', default: true}],
     });
   };
-  const {store} = createNewRunStore(bridgeWithHarnesses(flaky), {
-    recent: [recentRun('local', '/p', 1)],
+  const {store} = runAgain(bridgeWithHarnesses(flaky), recentRun('local', '/p', 1), {
     schedule: clock.schedule,
-    started: () => undefined,
   });
   await settle();
   expect(store.getState().context.harnesses).toBeNull();
@@ -691,11 +698,7 @@ test('a retry does not touch a step that did not fail', async () => {
     tasks: () =>
       Promise.resolve({ok: false as const, error: 'No such project.', authNeeded: false}),
   };
-  const {store} = createNewRunStore(failing, {
-    recent: [recentRun('local', '/p', 1)],
-    schedule: clock.schedule,
-    started: () => undefined,
-  });
+  const {store} = runAgain(failing, recentRun('local', '/p', 1), {schedule: clock.schedule});
   await settle();
   expect(store.getState().context.problem?.step).toBe('tasks');
   const harnessesBefore = store.getState().context.harnesses;
@@ -705,4 +708,83 @@ test('a retry does not touch a step that did not fail', async () => {
 
   expect(store.getState().context.problem?.step).toBe('tasks');
   expect(store.getState().context.harnesses).toBe(harnessesBefore);
+});
+
+/** A draft memory held in memory, with how many times it was written. */
+function memory(initial: Draft | null = null) {
+  const kept = {draft: initial, writes: 0};
+  return {
+    kept,
+    memory: {
+      read: () => kept.draft,
+      write: (draft: Draft | null) => {
+        kept.draft = draft;
+        kept.writes += 1;
+      },
+    },
+  };
+}
+
+test('an unfinished form is kept as a draft and found again by the next store of the window', async () => {
+  const clock = manualSchedule();
+  const first = memory();
+  const {store, stop} = createNewRunStore(fakeBridge(), {
+    recent: [],
+    schedule: clock.schedule,
+    draft: first.memory,
+    started: () => undefined,
+  });
+  await settle();
+  expect(first.kept.draft).toBeNull();
+  chooseFolder(store, '/p');
+  store.dispatch({type: 'agent', provider: 'claude', model: 'm'});
+  await settle();
+  expect(first.kept.draft).toMatchObject({
+    machine: 'local',
+    answers: {from: 'project', project: {source: 'folder', path: '/p'}, task: 'mpmc'},
+    agent: {provider: 'claude', model: 'm'},
+  });
+  const writes = first.kept.writes;
+  stop();
+
+  const again = createNewRunStore(fakeBridge(), {
+    recent: [recentRun('ssh:gpu', '/q', 9)],
+    schedule: clock.schedule,
+    draft: first.memory,
+    started: () => undefined,
+  });
+  await settle();
+  const {context} = again.store.getState();
+  // The draft wins over the last run: the form is the user's.
+  expect(context.form.machine).toBe('local');
+  expect(context.answers.project).toEqual({source: 'folder', path: '/p'});
+  expect(context.form.task).toBe('mpmc');
+  // A restored draft is not written again until it changes.
+  expect(first.kept.writes).toBe(writes);
+  again.store.dispatch({type: 'recent', recent: [recentRun('ssh:other', '/r', 10)]});
+  expect(again.store.getState().context.form.machine).toBe('local');
+});
+
+test('starting over, and starting a run, forget the draft', async () => {
+  const clock = manualSchedule();
+  const kept = memory();
+  const {store} = createNewRunStore(fakeBridge(), {
+    recent: [recentRun('local', '/p', 2)],
+    schedule: clock.schedule,
+    draft: kept.memory,
+    started: () => undefined,
+  });
+  chooseFolder(store, '/p');
+  expect(kept.kept.draft).not.toBeNull();
+  store.dispatch({type: 'reset'});
+  expect(kept.kept.draft).toBeNull();
+
+  store.dispatch({type: 'again', run: recentRun('local', '/p', 2)});
+  await settle();
+  clock.runDue();
+  await settle();
+  expect(kept.kept.draft?.at).toBe('review');
+  store.dispatch({type: 'start'});
+  await settle();
+  expect(kept.kept.draft).toBeNull();
 });

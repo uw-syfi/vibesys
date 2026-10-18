@@ -2,6 +2,7 @@ import {describe, expect, test} from 'bun:test';
 import {ConnectionManager} from '@vibesys/connection';
 import {FakeLink} from '@vibesys/connection/testing';
 import type {RunInputs} from '@vibesys/ipc';
+import {exampleCatalogue} from '@vibesys/run-fixtures';
 import type {StoredRecentRun} from '@vibesys/settings';
 import {FakeClock} from '@vibesys/transport/testing';
 import {NewRunMain} from './index.js';
@@ -156,6 +157,22 @@ describe('NewRunMain', () => {
     expect(features).toContain('preflight');
     expect(features).not.toContain('run_options');
     expect(features).not.toContain('examples');
+  });
+
+  test('asks what each example is about only from a helper that has example_catalogue', async () => {
+    const {link, main} = subject();
+    link.helper.host.examples = exampleCatalogue;
+    const described = async () =>
+      (
+        (await main.answer({kind: 'examples', host: LOCAL})) as {
+          value: {examples: {task_details?: unknown}[]};
+        }
+      ).value.examples.some(example => example.task_details !== undefined);
+    expect(await described()).toBe(true);
+    link.helper.features.delete('example_catalogue');
+    expect(await described()).toBe(false);
+    const asked = link.helper.requests.filter(request => request.type === 'examples.list');
+    expect(asked.map(request => 'with_catalogue' in request)).toEqual([true, false]);
   });
 
   test('a failed request says what it was doing', async () => {

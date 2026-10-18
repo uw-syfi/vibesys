@@ -14,5 +14,5 @@ export {
   type ShellBridge,
 } from './effects/store.js';
 export {AllRunsScreen} from './ui/all-runs-screen.js';
-export {AppShell} from './ui/app-shell.js';
+export {AppShell, type SidebarDraft} from './ui/app-shell.js';
 export {PlaceholderScreen, WORDMARK} from './ui/placeholders.js';

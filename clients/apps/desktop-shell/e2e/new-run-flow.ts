@@ -1,0 +1,118 @@
+/**
+ * Driving the guided New run: choosing an answer, going on, and opening a page directly. A page is
+ * opened by giving the window the draft that would have brought it there (the draft is the
+ * window's own storage, which the page reads as it starts), so a check of every page does not
+ * click through the pages before it.
+ */
+import {expect, type Page} from '@playwright/test';
+import {
+  type Answers,
+  DRAFT_KEY,
+  type Draft,
+  NO_ANSWERS,
+  type StepId,
+  storeDraft,
+} from '@vibesys/feature-new-run/state';
+import type {FakeBridgeSeed} from './fake-bridge.js';
+import {open, SEED} from './world.js';
+
+/** The pages of every path, each with the answers that make it the page shown. */
+export interface NewRunPage {
+  readonly name: string;
+  readonly step: StepId;
+  readonly answers: Answers;
+}
+
+const EXAMPLE = {...NO_ANSWERS, from: 'example' as const};
+const LLM = {
+  ...EXAMPLE,
+  domain: 'llm-serving' as const,
+  model: 'Qwen3.5 9B',
+  hardware: 'amd|AMD MI210|1',
+};
+const OLMO = {
+  ...EXAMPLE,
+  domain: 'llm-serving' as const,
+  model: 'Olmo Hybrid 7B',
+  hardware: 'nvidia|NVIDIA L4|1',
+};
+const STRUCTURE = {
+  ...EXAMPLE,
+  domain: 'data-structures' as const,
+  structure: 'data-structures/stack',
+  workload: 'mpmc',
+};
+const DATABASE = {...EXAMPLE, domain: 'databases' as const, example: 'database/kv-store'};
+const OWN = {
+  ...NO_ANSWERS,
+  from: 'project' as const,
+  project: {source: 'recent' as const, path: '/home/me/projects/queue-rs'},
+  task: 'mpmc',
+};
+
+export const NEW_RUN_PAGES: readonly NewRunPage[] = [
+  {name: 'start', step: 'start', answers: NO_ANSWERS},
+  {name: 'domain', step: 'domain', answers: EXAMPLE},
+  {name: 'model', step: 'model', answers: {...EXAMPLE, domain: 'llm-serving'}},
+  {name: 'hardware', step: 'hardware', answers: {...LLM, hardware: null}},
+  {name: 'variant', step: 'variant', answers: OLMO},
+  {name: 'structure', step: 'structure', answers: {...EXAMPLE, domain: 'data-structures'}},
+  {name: 'workload', step: 'workload', answers: {...STRUCTURE, workload: null}},
+  {name: 'example', step: 'example', answers: {...EXAMPLE, domain: 'databases'}},
+  {name: 'goal LLM', step: 'goal', answers: LLM},
+  {name: 'goal data structure', step: 'goal', answers: STRUCTURE},
+  {name: 'goal database', step: 'goal', answers: DATABASE},
+  {name: 'where', step: 'where', answers: {...LLM, goalSeen: true}},
+  {name: 'agent', step: 'agent', answers: {...LLM, goalSeen: true}},
+  {name: 'review', step: 'review', answers: {...LLM, goalSeen: true}},
+  {name: 'project', step: 'project', answers: {...NO_ANSWERS, from: 'project'}},
+  {name: 'task', step: 'task', answers: {...OWN, task: null}},
+  {name: 'goal project', step: 'goal', answers: OWN},
+  {name: 'review project', step: 'review', answers: {...OWN, goalSeen: true}},
+];
+
+/** The draft that has `answers` made and `step` shown, on the machine the world's runs are on. */
+function draftAt(page: NewRunPage, machine = 'ssh:host-b'): Draft {
+  return {
+    machine,
+    answers: page.answers,
+    at: page.step,
+    agent: null,
+    budget: {rounds: null, timeLimitS: null, results: 'keep'},
+    advanced: '',
+    destination: null,
+  };
+}
+
+/** Opens the app showing `page`, as if its answers had been given in this window. */
+export async function openAt(
+  page: Page,
+  at: NewRunPage,
+  seed: FakeBridgeSeed = SEED,
+): Promise<void> {
+  const text = storeDraft(draftAt(at));
+  await page.addInitScript(
+    ([key, value]) => window.sessionStorage.setItem(key as string, value as string),
+    [DRAFT_KEY, text],
+  );
+  await open(page, seed);
+  await expect(page.getByRole('navigation', {name: 'New run steps'})).toBeVisible();
+}
+
+export const main = (page: Page) => page.getByRole('main');
+export const steps = (page: Page) => page.getByRole('navigation', {name: 'New run steps'});
+export const question = (page: Page, title: string | RegExp) =>
+  main(page).getByRole('heading', {level: 1, name: title});
+
+/** Choose `name` in the question's group `group`. */
+export async function choose(page: Page, group: string, name: string | RegExp): Promise<void> {
+  await main(page)
+    .getByRole('radiogroup', {name: group, exact: true})
+    .getByRole('radio', {name})
+    .check();
+}
+
+/** Press Continue (or `label`) and wait for the page after it. */
+export async function proceed(page: Page, label = 'Continue'): Promise<void> {
+  await main(page).getByRole('button', {name: label, exact: true}).click();
+}

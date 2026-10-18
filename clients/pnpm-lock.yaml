@@ -358,6 +358,9 @@ importers:
       '@types/react':
         specifier: 19.1.13
         version: 19.1.13
+      '@vibesys/run-fixtures':
+        specifier: workspace:*
+        version: link:../../libs/run-fixtures
       '@vibesys/transport':
         specifier: workspace:*
         version: link:../../libs/transport

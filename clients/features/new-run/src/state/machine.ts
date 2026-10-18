@@ -1,11 +1,12 @@
 /**
  * The New run screen's control state, as a machine (docs/contributing/clients-architecture.md,
- * "State"); the form is data in its context. While editing, parallel regions load what the machine
- * offers (its facts, vetted harnesses, examples), the project's tasks, and the "Ready to start"
- * checks for the current inputs, debounced; one more region runs a fix or the start. Changing an
- * input re-enters the regions that depend on it, which stops their work in flight, and a reply is
- * applied only for the inputs it was asked for, so a slow reply never overwrites newer state.
- * Start is enabled only when the checks are for the current inputs and none fails.
+ * "State"); the guided form is data in its context (`answers`, the step `at`, and the run's
+ * `form`, which the answers name: `flow.ts`). While editing, parallel regions load what the
+ * machine offers (its facts, vetted harnesses, examples), the project's tasks, and the "Ready to
+ * start" checks for the current inputs, debounced; one more region runs a fix or the start.
+ * Changing an input re-enters the regions that depend on it, which stops their work in flight, and
+ * a reply is applied only for the inputs it was asked for, so a slow reply never overwrites newer
+ * state. Start is enabled only when the checks are for the current inputs and none fails.
  */
 import type {
   CreatedProject,
@@ -18,13 +19,28 @@ import type {HarnessOffer, Offered, PreflightResult, RunInputs, StartedRun} from
 import {unprovided} from '@vibesys/machine';
 import type {RecentRun, RunStart} from '@vibesys/runs';
 import {and, assign, raise, type SnapshotFrom, setup} from 'xstate';
+import type {AnswerChange, Answers, StepId} from './answers.js';
+import type {CatalogueEntry} from './catalogue.js';
+import {type Draft, flowOfDraft} from './draft.js';
+import {
+  againAnswers,
+  catalogueFor,
+  type ExamplesFor,
+  type Flow,
+  flowAnswer,
+  flowBack,
+  flowGo,
+  flowNext,
+  flowSettled,
+  startFlow,
+} from './flow.js';
 import {
   type AgentChoice,
   againForm,
   type Budget,
   type ChecksFor,
   checksPass,
-  defaultAgent,
+  defaultRole,
   type FactsFor,
   type Form,
   type HelperFor,
@@ -32,7 +48,6 @@ import {
   lastRun,
   missingFeatures,
   offers,
-  type ProjectChoice,
   prefill,
   projectPath,
   type RoleChoice,
@@ -47,14 +62,24 @@ export type ProjectFix =
   | {readonly kind: 'copy_out'; readonly source: string; readonly destination: string}
   | {readonly kind: 'create_from_example'; readonly example: string; readonly destination: string};
 
+/** A fix done: what was asked, and the project the helper made of it. */
+export interface FixDone {
+  readonly fix: ProjectFix;
+  readonly created: CreatedProject;
+}
+
 export interface NewRunContext {
   readonly form: Form;
+  /** What the guided form has been told; `form.project` and `form.task` follow it. */
+  readonly answers: Answers;
+  /** The step shown. */
+  readonly at: StepId;
   readonly recent: readonly RecentRun[];
   readonly facts: FactsFor | null;
   /** What the machine's helper agreed to: New run asks only what it takes. */
   readonly helper: HelperFor | null;
   readonly harnesses: {readonly for: HostKey; readonly list: readonly HarnessOffer[]} | null;
-  readonly examples: {readonly for: HostKey; readonly value: Offered<ExampleList>} | null;
+  readonly examples: ExamplesFor | null;
   readonly tasks: {readonly for: string; readonly list: readonly string[]} | null;
   readonly checks: ChecksFor | null;
   /**
@@ -77,13 +102,20 @@ export interface NewRunContext {
 export type NewRunEvent =
   | {readonly type: 'machine'; readonly machine: HostKey}
   | {readonly type: 'again'; readonly run: RecentRun}
-  | {readonly type: 'project'; readonly project: ProjectChoice}
-  | {readonly type: 'task'; readonly task: string}
-  | {readonly type: 'provider'; readonly provider: string}
-  | {readonly type: 'model'; readonly model: string}
+  /** Answer the question of the step shown; `advance` moves on to the next step. */
+  | {readonly type: 'answer'; readonly change: AnswerChange; readonly advance?: boolean}
+  /** Show a step the answers reach. */
+  | {readonly type: 'go'; readonly step: StepId}
+  | {readonly type: 'next'}
+  | {readonly type: 'back'}
+  /** Forget the answers and start the form over on the same machine. */
+  | {readonly type: 'reset'}
+  | {readonly type: 'agent'; readonly provider: string; readonly model: string}
   | {readonly type: 'role'; readonly role: RoleChoice}
   | {readonly type: 'budget'; readonly budget: Budget}
   | {readonly type: 'advanced'; readonly advanced: string}
+  /** Where an example is copied to, before it is. */
+  | {readonly type: 'destination'; readonly destination: string}
   | {readonly type: 'recent'; readonly recent: readonly RecentRun[]}
   | {readonly type: 'more_options'; readonly machine: HostKey; readonly open: boolean}
   | {readonly type: 'recheck'}
@@ -99,40 +131,38 @@ export interface NewRunInput {
   readonly recent: readonly RecentRun[];
   /** What the user chose for More options on each machine before this form. */
   readonly moreOpen: Readonly<Record<string, boolean>>;
+  /** The unfinished form this window kept; none starts a new one. */
+  readonly draft?: Draft | null;
 }
 
 /** How long the inputs must stay still before they are checked, in milliseconds. */
 export const CHECK_DEBOUNCE_MS = 400;
 
-function withProject(form: Form, project: ProjectChoice): Form {
-  return {...form, project, task: null};
-}
-
 function withAgent(form: Form, change: (agent: AgentChoice) => AgentChoice): Form {
   return form.agent === null ? form : {...form, agent: change(form.agent)};
 }
 
-/** The events that change one input of the form. */
+/** The events that change one input of the run that the answers do not name. */
 type InputEvent = Extract<
   NewRunEvent,
-  {readonly type: 'project' | 'task' | 'provider' | 'model' | 'role' | 'budget' | 'advanced'}
+  {readonly type: 'agent' | 'role' | 'budget' | 'advanced' | 'destination'}
 >;
 
 /** The form after `event` changed one of its inputs. */
 function withInput(context: NewRunContext, event: InputEvent): Form {
   const {form} = context;
   switch (event.type) {
-    case 'project':
-      return withProject(form, event.project);
-    case 'task':
-      return {...form, task: event.task};
-    case 'provider':
+    case 'agent': {
+      const kept = form.agent?.provider === event.provider ? form.agent.roles : null;
       return {
         ...form,
-        agent: defaultAgent(context.harnesses?.list ?? [], context.roles ?? [], event.provider),
+        agent: {
+          provider: event.provider,
+          model: event.model,
+          roles: kept ?? (context.roles ?? []).map(defaultRole),
+        },
       };
-    case 'model':
-      return withAgent(form, agent => ({...agent, model: event.model}));
+    }
     case 'role':
       return withAgent(form, agent => ({
         ...agent,
@@ -142,7 +172,45 @@ function withInput(context: NewRunContext, event: InputEvent): Form {
       return {...form, budget: event.budget};
     case 'advanced':
       return {...form, advanced: event.advanced};
+    case 'destination':
+      return form.project?.source === 'example'
+        ? {...form, project: {...form.project, destination: event.destination}}
+        : form;
   }
+}
+
+/** The context's flow: its answers, the step shown, and the form they name. */
+function flowOf(context: NewRunContext): Flow {
+  return {answers: context.answers, at: context.at, form: context.form};
+}
+
+/** The entries of the catalogue of the machine the form is for; empty while it is not known. */
+function entriesOf(context: NewRunContext): readonly CatalogueEntry[] {
+  return catalogueFor(context.examples, context.form.machine) ?? [];
+}
+
+/** The parts of the context a flow sets. */
+function fromFlow(flow: Flow): Pick<NewRunContext, 'answers' | 'at' | 'form'> {
+  return {answers: flow.answers, at: flow.at, form: flow.form};
+}
+
+/**
+ * The context's parts for a form of `machine` with nothing answered, from the runs opened before:
+ * the machine's last agent, budget and extra arguments are the form's defaults.
+ */
+function freshParts(machine: HostKey, recent: readonly RecentRun[]) {
+  return {
+    ...fromFlow(startFlow(prefill(machine, recent))),
+    facts: null,
+    helper: null,
+    harnesses: null,
+    examples: null,
+    tasks: null,
+    checks: null,
+    roles: null,
+    rerun: lastRun(machine, recent)?.start ?? null,
+    problem: null,
+  };
 }
 
 /** What a preflight answer changes: the checks for the asked inputs, the roles, and the form. */
@@ -166,9 +234,67 @@ function afterPreflight(context: NewRunContext, answer: Offered<PreflightResult>
   };
 }
 
-/** The task to pick from `list`: the one already chosen when it is offered, else the first. */
-function chosenTask(form: Form, list: readonly string[]): string | null {
-  return form.task !== null && list.includes(form.task) ? form.task : (list[0] ?? null);
+/**
+ * The context's parts for the form moved to `machine`: what it offers is asked again, the example
+ * the user chose stays, and a project of theirs does not (its path is on the machine they left).
+ */
+function movedParts(context: NewRunContext, machine: HostKey) {
+  const parts = freshParts(machine, context.recent);
+  const own = context.answers.from === 'project';
+  const answers = own
+    ? {...context.answers, project: null, task: null, goalSeen: false}
+    : context.answers;
+  return {...parts, answers, at: context.at};
+}
+
+/**
+ * The parts of the context a fix done sets. It applies only to what it was asked of: an example
+ * that is still the one chosen becomes a project of its own, a project of the user's that is still
+ * the one chosen is replaced by its copy; if the user has moved on, the copy is left alone.
+ */
+function fixed(context: NewRunContext, done: FixDone): Partial<NewRunContext> {
+  const {fix, created} = done;
+  const {form, answers} = context;
+  if (fix.kind === 'create_from_example') {
+    const made = form.project;
+    if (made?.source !== 'example' || made.example !== fix.example) return {};
+    const project = {
+      source: 'created',
+      example: made.example,
+      destination: made.destination,
+      path: created.project,
+    } as const;
+    return {form: {...form, project}};
+  }
+  if (answers.project?.path !== fix.source) return {};
+  const copy = {source: 'folder', path: created.project} as const;
+  return {answers: {...answers, project: copy}, form: {...form, project: copy}};
+}
+
+/**
+ * The flow once the tasks of the user's project are read: the task answered stays when the project
+ * has it, else it is unanswered; a project with only one has it answered.
+ */
+function flowWithTasks(context: NewRunContext, list: readonly string[]): Flow {
+  const flow = flowOf(context);
+  const named = flow.answers.task;
+  const only = list.length === 1 ? list[0] : undefined;
+  if (named !== null && !list.includes(named)) {
+    const answers = {...flow.answers, task: only ?? null, goalSeen: false};
+    return flowSettled(
+      {...flow, answers, form: {...flow.form, task: only ?? null}},
+      entriesOf(context),
+    );
+  }
+  if (named === null && only !== undefined) {
+    return flowAnswer(flow, {kind: 'task', task: only}, false, entriesOf(context));
+  }
+  return flow;
+}
+
+/** Whether the machine reads the tasks of the user's own project now. */
+function readsTasks(context: NewRunContext): boolean {
+  return context.answers.from === 'project' && projectPath(context.form) !== null;
 }
 
 export const newRunMachine = setup({
@@ -189,11 +315,11 @@ export const newRunMachine = setup({
       Offered<PreflightResult>,
       {readonly host: HostKey; readonly inputs: RunInputs}
     >('preflight'),
-    fix: unprovided<CreatedProject, {readonly host: HostKey; readonly fix: ProjectFix}>('fix'),
+    fix: unprovided<FixDone, {readonly host: HostKey; readonly fix: ProjectFix}>('fix'),
     start: unprovided<StartedRun, {readonly host: HostKey; readonly inputs: RunInputs}>('start'),
   },
   guards: {
-    hasProject: ({context}) => projectPath(context.form) !== null,
+    readsTasks: ({context}) => readsTasks(context),
     hasInputs: ({context}) => inputsKey(context.form) !== null,
     mayStart: ({context}) =>
       checksPass(context.form, context.checks) &&
@@ -208,6 +334,17 @@ export const newRunMachine = setup({
     failedAt: ({context}, params: {readonly step: Step}) => context.problem?.step === params.step,
     rolesChangeInputs: ({context}, params: {readonly answer: Offered<PreflightResult>}) =>
       inputsKey(afterPreflight(context, params.answer).form) !== inputsKey(context.form),
+    // A fix is offered for the project the form has: an example to make, or a project to copy.
+    fixApplies: ({context, event}) => {
+      if (event.type !== 'fix') return false;
+      const {fix} = event;
+      return fix.kind === 'create_from_example'
+        ? context.form.project?.source === 'example' && context.form.project.example === fix.example
+        : context.answers.project?.path === fix.source;
+    },
+    // An answer to the project question, or a change of path, changes which tasks are read.
+    answersProject: ({event}) =>
+      event.type === 'answer' && (event.change.kind === 'project' || event.change.kind === 'from'),
   },
   delays: {debounce: CHECK_DEBOUNCE_MS},
   actions: {
@@ -221,21 +358,22 @@ export const newRunMachine = setup({
       form: withInput(context, event as InputEvent),
       problem: null,
     })),
+    answer: assign(({context, event}) => {
+      const {change, advance} = event as Extract<NewRunEvent, {type: 'answer'}>;
+      return {
+        ...fromFlow(flowAnswer(flowOf(context), change, advance === true, entriesOf(context))),
+        problem: null,
+      };
+    }),
   },
 }).createMachine({
   id: 'newRun',
   context: ({input}) => ({
-    form: prefill(input.machine, input.recent),
+    ...freshParts(input.machine, input.recent),
+    ...(input.draft === undefined || input.draft === null
+      ? {}
+      : fromFlow(flowOfDraft(input.draft, []))),
     recent: input.recent,
-    facts: null,
-    helper: null,
-    harnesses: null,
-    examples: null,
-    tasks: null,
-    checks: null,
-    roles: null,
-    rerun: lastRun(input.machine, input.recent)?.start ?? null,
-    problem: null,
     started: null,
     moreOpen: input.moreOpen,
   }),
@@ -247,35 +385,37 @@ export const newRunMachine = setup({
         machine: {
           target: 'editing',
           reenter: true,
-          actions: assign(({context, event}) => ({
-            form: prefill(event.machine, context.recent),
-            facts: null,
-            helper: null,
-            harnesses: null,
-            examples: null,
-            tasks: null,
-            checks: null,
-            roles: null,
-            rerun: lastRun(event.machine, context.recent)?.start ?? null,
-            problem: null,
-          })),
+          actions: assign(({context, event}) => movedParts(context, event.machine)),
         },
         // Run again: the run's place and options, its agent once the harnesses are known.
         again: {
           target: 'editing',
           reenter: true,
-          actions: assign(({event}) => ({
-            form: againForm(event.run),
+          actions: assign(({context, event}) => ({
+            ...freshParts(event.run.host, context.recent),
+            ...fromFlow({
+              answers: againAnswers(event.run),
+              at: 'review',
+              form: againForm(event.run),
+            }),
             rerun: event.run.start ?? null,
-            facts: null,
-            helper: null,
-            harnesses: null,
-            examples: null,
-            tasks: null,
-            checks: null,
-            roles: null,
-            problem: null,
           })),
+        },
+        reset: {
+          target: 'editing',
+          reenter: true,
+          actions: assign(({context}) => freshParts(context.form.machine, context.recent)),
+        },
+        go: {
+          actions: assign(({context, event}) =>
+            fromFlow(flowGo(flowOf(context), event.step, entriesOf(context))),
+          ),
+        },
+        next: {
+          actions: assign(({context}) => fromFlow(flowNext(flowOf(context), entriesOf(context)))),
+        },
+        back: {
+          actions: assign(({context}) => fromFlow(flowBack(flowOf(context), entriesOf(context)))),
         },
         recent: {actions: assign(({event}) => ({recent: event.recent}))},
         more_options: {
@@ -374,13 +514,22 @@ export const newRunMachine = setup({
                   // The default agent is part of the inputs: check them again.
                   target: 'ready',
                   actions: [
-                    assign(({context, event}) => ({
-                      harnesses: {for: context.form.machine, list: event.output},
-                      form: {
-                        ...context.form,
-                        agent: context.form.agent ?? recordedAgent(context.rerun, event.output),
-                      },
-                    })),
+                    assign(({context, event}) => {
+                      const kept = context.form.agent;
+                      const offered =
+                        kept !== null &&
+                        event.output.some(
+                          offer => offer.provider === kept.provider && offer.model === kept.model,
+                        );
+                      const agent = offered ? kept : recordedAgent(context.rerun, event.output);
+                      const flow = {...flowOf(context), form: {...context.form, agent}};
+                      return {
+                        harnesses: {for: context.form.machine, list: event.output},
+                        ...fromFlow(
+                          flowSettled(flow, catalogueFor(context.examples, context.form.machine)),
+                        ),
+                      };
+                    }),
                     raise({type: 'recheck'}),
                   ],
                 },
@@ -413,9 +562,18 @@ export const newRunMachine = setup({
                 {
                   guard: 'helperKnown',
                   target: 'ready',
-                  actions: assign(({context}) => ({
-                    examples: {for: context.form.machine, value: {kind: 'unsupported'}},
-                  })),
+                  actions: assign(({context}) => {
+                    const examples: ExamplesFor = {
+                      for: context.form.machine,
+                      value: {kind: 'unsupported'},
+                    };
+                    return {
+                      examples,
+                      ...fromFlow(
+                        flowSettled(flowOf(context), catalogueFor(examples, examples.for)),
+                      ),
+                    };
+                  }),
                 },
               ],
             },
@@ -426,9 +584,18 @@ export const newRunMachine = setup({
                 input: ({context}) => ({host: context.form.machine}),
                 onDone: {
                   target: 'ready',
-                  actions: assign(({context, event}) => ({
-                    examples: {for: context.form.machine, value: event.output},
-                  })),
+                  actions: assign(({context, event}) => {
+                    const examples: ExamplesFor = {
+                      for: context.form.machine,
+                      value: event.output,
+                    };
+                    return {
+                      examples,
+                      ...fromFlow(
+                        flowSettled(flowOf(context), catalogueFor(examples, examples.for)),
+                      ),
+                    };
+                  }),
                 },
                 onError: {
                   target: 'ready',
@@ -447,7 +614,7 @@ export const newRunMachine = setup({
           // Each region restarts on what it depends on: a transition from the parallel state itself
           // would leave and re-enter every region, stopping all their work.
           on: {
-            project: '.choosing',
+            answer: {guard: 'answersProject', target: '.choosing'},
             refresh: '.choosing',
             retry: {
               guard: {type: 'failedAt', params: {step: 'tasks'}},
@@ -457,7 +624,7 @@ export const newRunMachine = setup({
           },
           states: {
             choosing: {
-              always: [{guard: 'hasProject', target: 'loading'}, {target: 'none'}],
+              always: [{guard: 'readsTasks', target: 'loading'}, {target: 'none'}],
             },
             none: {},
             loading: {
@@ -469,12 +636,12 @@ export const newRunMachine = setup({
                   project: projectPath(context.form) ?? '',
                 }),
                 onDone: {
-                  // The task chosen from the list is part of the inputs: check them again.
+                  // The task kept or chosen from the list is part of the inputs: check them again.
                   target: 'ready',
                   actions: [
                     assign(({context, event}) => ({
                       tasks: {for: projectPath(context.form) ?? '', list: event.output},
-                      form: {...context.form, task: chosenTask(context.form, event.output)},
+                      ...fromFlow(flowWithTasks(context, event.output)),
                     })),
                     raise({type: 'recheck'}),
                   ],
@@ -494,13 +661,12 @@ export const newRunMachine = setup({
         checks: {
           initial: 'waiting',
           on: {
-            project: {target: '.waiting', actions: 'input'},
-            task: {target: '.waiting', actions: 'input'},
-            provider: {target: '.waiting', actions: 'input'},
-            model: {target: '.waiting', actions: 'input'},
+            answer: {target: '.waiting', actions: 'answer'},
+            agent: {target: '.waiting', actions: 'input'},
             role: {target: '.waiting', actions: 'input'},
             budget: {target: '.waiting', actions: 'input'},
             advanced: {target: '.waiting', actions: 'input'},
+            destination: {target: '.waiting', actions: 'input'},
             recheck: '.waiting',
             refresh: '.waiting',
             retry: {
@@ -559,7 +725,7 @@ export const newRunMachine = setup({
           states: {
             idle: {
               on: {
-                fix: 'fixing',
+                fix: {guard: 'fixApplies', target: 'fixing'},
                 start: {guard: 'mayStart', target: 'starting'},
               },
             },
@@ -575,7 +741,7 @@ export const newRunMachine = setup({
                   target: '#newRun.editing',
                   reenter: true,
                   actions: assign(({context, event}) => ({
-                    form: withProject(context.form, {source: 'folder', path: event.output.project}),
+                    ...fixed(context, event.output),
                     checks: null,
                     problem: null,
                   })),

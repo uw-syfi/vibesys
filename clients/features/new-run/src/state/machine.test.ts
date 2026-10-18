@@ -8,18 +8,25 @@ import type {
 import type {HostKey} from '@vibesys/hosts';
 import type {HarnessOffer, Offered, PreflightResult, RunInputs} from '@vibesys/ipc';
 import {checkMachine} from '@vibesys/machine/testing';
+import {exampleCatalogue} from '@vibesys/run-fixtures';
 import type {RecentRun} from '@vibesys/runs';
 import type {Seeded} from '@vibesys/store/testing';
 import {createActor, fromPromise, SimulatedClock, type SnapshotFrom} from 'xstate';
+import {type AnswerChange, chosenEntry, NO_ANSWERS, stepIds} from './answers.js';
+import type {CatalogueEntry} from './catalogue.js';
+import type {Draft} from './draft.js';
+import {catalogueFor} from './flow.js';
 import {
   CHECK_DEBOUNCE_MS,
   checksPass,
+  type FixDone,
   formWithRoles,
   inputsKey,
   missingFeatures,
   type NewRunEvent,
   newRunMachine,
   offers,
+  type ProjectFix,
   prefill,
   recordedAgent,
   roleSummary,
@@ -95,8 +102,9 @@ function checks(random: Seeded): Check[] {
 function output(operation: string, random: Seeded): unknown {
   switch (operation) {
     case 'describe':
-    case 'examples':
       return random.pick([{kind: 'unsupported'}, {kind: 'offered', value: {}}]);
+    case 'examples':
+      return random.pick([{kind: 'unsupported'}, {kind: 'offered', value: exampleCatalogue}]);
     case 'harnesses':
       return OFFERS;
     case 'features':
@@ -121,30 +129,69 @@ function output(operation: string, random: Seeded): unknown {
         },
       };
     case 'fix':
-      return {project: random.pick(['/own/a', '/own/b']), tasks: ['mpmc']};
+      return {
+        fix: random.pick<ProjectFix>([
+          {kind: 'copy_out', source: '/p/queue', destination: '/own/a'},
+          {kind: 'create_from_example', example: 'database/kv-store', destination: '~/kv'},
+        ]),
+        created: {project: random.pick(['/own/a', '/own/b']), tasks: ['mpmc']},
+      };
     default:
       return {runId: 'run-new', instanceId: '0123456789ab'};
   }
 }
 
+/** An answer a person could give at the step shown now (or any step, to also try going back). */
+function answerChange(random: Seeded): AnswerChange {
+  return random.pick<AnswerChange>([
+    {kind: 'from', from: 'example'},
+    {kind: 'from', from: 'project'},
+    {kind: 'domain', domain: random.pick(['llm-serving', 'data-structures', 'databases'] as const)},
+    {kind: 'model', model: random.pick(['Llama 3 8B Instruct', 'Qwen3.5 9B'])},
+    {kind: 'hardware', hardware: random.pick(['nvidia|NVIDIA H100|2', 'amd|AMD MI210|1'])},
+    {kind: 'structure', example: 'data-structures/stack'},
+    {kind: 'workload', task: random.pick(['mpmc', 'spsc'])},
+    {
+      kind: 'example',
+      example: random.pick(['database/kv-store', 'microservices/hotel-correctness']),
+    },
+    {kind: 'variant', task: random.pick(['from-scratch', 'vllm'])},
+    {kind: 'project', project: {source: 'folder', path: random.pick(['/p/queue', '/p/kv'])}},
+    {kind: 'task', task: random.pick(['mpmc', 'spsc'])},
+    {kind: 'goal'},
+  ]);
+}
+
+/** The agent a person picks: a harness, and one of the models the host vets for it. */
+function agentEvent(random: Seeded): NewRunEvent {
+  const provider = random.pick(['claude', 'codex']);
+  return {type: 'agent', provider, model: random.pick(vettedModels(OFFERS, provider))};
+}
+
 function inputEvent(random: Seeded, snapshot: SnapshotFrom<typeof newRunMachine>): NewRunEvent {
-  const agent = snapshot.context.form.agent;
   return random.pick<NewRunEvent>([
     {type: 'machine', machine: random.pick(['local', 'ssh:gpu'])},
-    {type: 'project', project: {source: 'folder', path: random.pick(['/p/queue', '/p/kv'])}},
-    {type: 'project', project: {source: 'example', example: 'queue-rs', destination: '~/queue-rs'}},
-    {type: 'task', task: random.pick(['mpmc', 'spsc'])},
-    {type: 'provider', provider: random.pick(['claude', 'codex'])},
-    {type: 'model', model: random.pick(vettedModels(OFFERS, agent?.provider ?? 'claude'))},
+    {type: 'answer', change: answerChange(random), advance: random.bool()},
+    {type: 'answer', change: answerChange(random), advance: random.bool()},
+    {type: 'go', step: random.pick(stepIds(snapshot.context.answers, []))},
+    {type: 'next'},
+    {type: 'back'},
+    {type: 'reset'},
+    agentEvent(random),
     {
       type: 'role',
       role: {role: random.pick(ROLE_IDS), model: null, effort: random.pick(['default', 'high'])},
     },
     {type: 'budget', budget: {rounds: random.pick([1, 2, 5]), timeLimitS: null, results: 'keep'}},
     {type: 'advanced', advanced: random.pick(['', '--max-in-flight 3', '--max-rounds 4', '"open'])},
+    {type: 'destination', destination: random.pick(['~/a', '~/b'])},
     {type: 'again', run: random.pick(RECENT)},
     {type: 'recheck'},
     {type: 'fix', fix: {kind: 'copy_out', source: '/p/queue', destination: '/own/a'}},
+    {
+      type: 'fix',
+      fix: {kind: 'create_from_example', example: 'database/kv-store', destination: '~/kv'},
+    },
     {type: 'start'},
   ]);
 }
@@ -159,7 +206,7 @@ function expectStartOnlyWhenChecksPass(before: Snapshot, after: Snapshot): void 
   }
 }
 
-const INPUTS = ['project', 'task', 'provider', 'model', 'role', 'budget', 'advanced'];
+const INPUTS = ['answer', 'agent', 'role', 'budget', 'advanced', 'destination'];
 
 /** An input other than the machine never restarts what the machine offers. */
 function expectInputKeepsFacts(before: Snapshot, event: NewRunEvent, after: Snapshot): void {
@@ -193,10 +240,11 @@ function expectAsksOnlyWhatHelperTakes(before: Snapshot, after: Snapshot): void 
 function expectInputApplied(before: Snapshot, event: NewRunEvent, after: Snapshot): void {
   if (!before.matches('editing') || !after.matches('editing')) return;
   const {form} = after.context;
-  if (event.type === 'task') expect(form.task).toBe(event.task);
   if (event.type === 'budget') expect(form.budget).toEqual(event.budget);
   if (event.type === 'advanced') expect(form.advanced).toBe(event.advanced);
-  if (event.type === 'project') expect(form.project).toEqual(event.project);
+  if (event.type === 'agent') {
+    expect(form.agent).toMatchObject({provider: event.provider, model: event.model});
+  }
 }
 
 /** The form never sets a role the run does not have, once the run has reported its roles. */
@@ -206,6 +254,49 @@ function unreportedRoles(snapshot: Snapshot): string[] {
   return form.agent.roles
     .filter(choice => !roles.includes(choice.role))
     .map(choice => `role ${choice.role} is not the run's`);
+}
+
+/**
+ * The guided form agrees with itself: where the catalogue is known (or the project is the user's
+ * own), the step shown is one the answers ask, and the project and task of the run are the ones
+ * the answers name.
+ */
+function flowProblems(snapshot: Snapshot): string[] {
+  const {answers, at, form, examples} = snapshot.context;
+  const entries = catalogueFor(examples, form.machine);
+  if (entries === null && answers.from === 'example') return [];
+  const known = entries ?? [];
+  const problems = stepIds(answers, known).includes(at) ? [] : [`the step ${at} is not asked`];
+  if (answers.from === 'example') return [...problems, ...exampleProblems(snapshot, known)];
+  return [...problems, ...ownProblems(snapshot)];
+}
+
+/** The run is of the user's own project, or of nothing yet: its project and task are the answers'. */
+function ownProblems(snapshot: Snapshot): string[] {
+  const {answers, form} = snapshot.context;
+  if (answers.from !== 'project') {
+    return form.project === null && form.task === null
+      ? []
+      : ['a run is named before anything is answered'];
+  }
+  return [
+    ...(JSON.stringify(form.project) === JSON.stringify(answers.project)
+      ? []
+      : ['the project is not the one answered']),
+    ...(form.task === answers.task ? [] : ['the task is not the one answered']),
+  ];
+}
+
+/** The run is of an example: its project and task are the ones its answers name. */
+function exampleProblems(snapshot: Snapshot, entries: readonly CatalogueEntry[]): string[] {
+  const {answers, form} = snapshot.context;
+  const entry = chosenEntry(answers, entries);
+  const made = form.project?.source === 'example' || form.project?.source === 'created';
+  return [
+    ...(form.task === (entry?.task ?? null) ? [] : ["the task is not the example's"]),
+    ...((form.project === null) === (entry === null) ? [] : ['the example project disagrees']),
+    ...(entry === null || made ? [] : ['an example is not an example project']),
+  ];
 }
 
 describe('newRunMachine', () => {
@@ -234,6 +325,7 @@ describe('newRunMachine', () => {
           if (form.project?.source === 'example' && runInputs(form) !== null) {
             problems.push('an example not yet created has run inputs');
           }
+          problems.push(...flowProblems(snapshot));
           return problems;
         },
         also: (before, event, after) => {
@@ -320,49 +412,226 @@ describe('newRunMachine', () => {
     expect(recordedAgent(null, OFFERS)).toMatchObject({provider: 'claude', model: 'claude-a'});
   });
 
-  test('prefills from the last run on the machine and picks its default agent', async () => {
-    const actor = createActor(
-      newRunMachine.provide({
-        actors: {
-          describe: fromPromise<Offered<MachineDescription>, {readonly host: HostKey}>(
-            async () => ({
-              kind: 'unsupported',
-            }),
-          ),
-          examples: fromPromise<Offered<ExampleList>, {readonly host: HostKey}>(async () => ({
-            kind: 'unsupported',
-          })),
-          harnesses: fromPromise<readonly HarnessOffer[], {readonly host: HostKey}>(
-            async () => OFFERS,
-          ),
-          features: fromPromise<readonly HelperFeature[], {readonly host: HostKey}>(async () => [
-            'run_options',
-            'preflight',
-            'examples',
-          ]),
-          tasks: fromPromise<readonly string[], {readonly host: HostKey; readonly project: string}>(
-            async () => ['spsc', 'mpmc'],
-          ),
-        },
-      }),
-      {input: {machine: 'local', recent: RECENT, moreOpen: {}}},
-    );
+  test("a new form knows no project; it carries the last run's agent and budget on its machine", async () => {
+    const actor = liveActor({machine: 'ssh:gpu'});
     actor.start();
-    await new Promise<void>(resolve => {
-      const done = actor.subscribe(snapshot => {
-        if (snapshot.matches({editing: {tasks: 'ready', harnesses: 'ready'}})) {
-          done.unsubscribe();
-          resolve();
-        }
-      });
+    await until(actor, snapshot => snapshot.matches({editing: {harnesses: 'ready'}}));
+    const {form, answers, at} = actor.getSnapshot().context;
+    expect(form.project).toBeNull();
+    expect(form.task).toBeNull();
+    expect(answers.from).toBeNull();
+    expect(at).toBe('start');
+    expect(form.agent).toMatchObject({provider: 'claude', model: 'claude-b'});
+    expect(form.budget.rounds).toBe(4);
+    actor.stop();
+  });
+
+  test("the tasks of the user's project are read; a project with one has it answered", async () => {
+    const actor = liveActor({tasks: ['only']});
+    actor.start();
+    actor.send({type: 'answer', change: {kind: 'from', from: 'project'}, advance: true});
+    actor.send({
+      type: 'answer',
+      change: {kind: 'project', project: {source: 'folder', path: '/p/solo'}},
+      advance: true,
     });
-    const {form} = actor.getSnapshot().context;
-    expect(form.project).toEqual({source: 'recent', path: '/p/queue'});
-    expect(form.task).toBe('mpmc');
-    expect(form.agent).toMatchObject({provider: 'claude', model: 'claude-a'});
+    await until(actor, snapshot => snapshot.context.answers.task === 'only');
+    const {answers, form, at} = actor.getSnapshot().context;
+    expect(form.task).toBe('only');
+    expect(answers.goalSeen).toBe(false);
+    expect(at).toBe('task');
+    actor.stop();
+  });
+
+  test('a task the project does not have is not kept, and the goal must be read again', async () => {
+    const actor = liveActor({tasks: ['one', 'two']});
+    actor.start();
+    actor.send({type: 'again', run: RECENT[0] as RecentRun});
+    await until(actor, snapshot => snapshot.matches({editing: {tasks: 'ready'}}));
+    // The run's task, `mpmc`, is not among the project's.
+    const {answers, at, form} = actor.getSnapshot().context;
+    expect(answers.task).toBeNull();
+    expect(form.task).toBeNull();
+    expect(at).toBe('task');
+    actor.stop();
+  });
+
+  test('an example answered through its questions is an example project until it is made', async () => {
+    const actor = liveActor({examples: {kind: 'offered', value: exampleCatalogue}});
+    actor.start();
+    await until(actor, snapshot => snapshot.matches({editing: {examples: 'ready'}}));
+    for (const change of [
+      {kind: 'from', from: 'example'},
+      {kind: 'domain', domain: 'data-structures'},
+      {kind: 'structure', example: 'data-structures/stack'},
+      {kind: 'workload', task: 'spsc'},
+    ] as const) {
+      actor.send({type: 'answer', change, advance: true});
+    }
+    let {form, at} = actor.getSnapshot().context;
+    expect(at).toBe('goal');
+    expect(form.task).toBe('spsc');
+    expect(form.project).toEqual({
+      source: 'example',
+      example: 'data-structures/stack',
+      destination: '~/vibesys-projects/stack',
+    });
+    actor.send({type: 'destination', destination: '~/mine'});
+    actor.send({
+      type: 'fix',
+      fix: {kind: 'create_from_example', example: 'data-structures/stack', destination: '~/mine'},
+    });
+    await until(actor, snapshot => snapshot.context.form.project?.source === 'created');
+    ({form} = actor.getSnapshot().context);
+    expect(form.project).toEqual({
+      source: 'created',
+      example: 'data-structures/stack',
+      destination: '~/mine',
+      path: '/made/stack',
+    });
+    // Another task of the same example is in the project that was made, which is kept...
+    actor.send({type: 'go', step: 'workload'});
+    actor.send({type: 'answer', change: {kind: 'workload', task: 'mpmc'}});
+    expect(actor.getSnapshot().context.form.project?.source).toBe('created');
+    expect(actor.getSnapshot().context.form.task).toBe('mpmc');
+    // ...and a different example is not in it.
+    actor.send({type: 'go', step: 'domain'});
+    actor.send({type: 'answer', change: {kind: 'domain', domain: 'databases'}});
+    expect(actor.getSnapshot().context.form.project).toBeNull();
+    actor.stop();
+  });
+
+  test("moving to another machine drops the user's project but keeps the example chosen", async () => {
+    const actor = liveActor({examples: {kind: 'offered', value: exampleCatalogue}});
+    actor.start();
+    await until(actor, snapshot => snapshot.matches({editing: {examples: 'ready'}}));
+    for (const change of [
+      {kind: 'from', from: 'example'},
+      {kind: 'domain', domain: 'databases'},
+      {kind: 'example', example: 'database/kv-store'},
+    ] as const) {
+      actor.send({type: 'answer', change, advance: true});
+    }
+    actor.send({type: 'machine', machine: 'ssh:gpu'});
+    await until(actor, snapshot => snapshot.matches({editing: {examples: 'ready'}}));
+    expect(actor.getSnapshot().context.answers.example).toBe('database/kv-store');
+    expect(actor.getSnapshot().context.form.project?.source).toBe('example');
+    actor.send({type: 'reset'});
+    actor.send({type: 'answer', change: {kind: 'from', from: 'project'}, advance: true});
+    actor.send({
+      type: 'answer',
+      change: {kind: 'project', project: {source: 'recent', path: '/p/queue'}},
+    });
+    actor.send({type: 'machine', machine: 'local'});
+    const {answers, form} = actor.getSnapshot().context;
+    expect(answers.from).toBe('project');
+    expect(answers.project).toBeNull();
+    expect(form.project).toBeNull();
+    actor.stop();
+  });
+
+  test('a draft restores the answers and the step, and the choices of the run', async () => {
+    const draft = {
+      machine: 'ssh:gpu',
+      answers: {
+        ...NO_ANSWERS,
+        from: 'project',
+        project: {source: 'recent', path: '/q'},
+        task: 'spsc',
+        goalSeen: true,
+      },
+      at: 'where',
+      agent: null,
+      budget: {rounds: 3, timeLimitS: null, results: 'keep'},
+      advanced: '',
+      destination: null,
+    } as const;
+    const actor = liveActor({machine: 'ssh:gpu', draft});
+    actor.start();
+    const {context} = actor.getSnapshot();
+    expect(context.at).toBe('where');
+    expect(context.answers.task).toBe('spsc');
+    expect(context.form).toMatchObject({
+      machine: 'ssh:gpu',
+      project: {source: 'recent', path: '/q'},
+      task: 'spsc',
+      budget: {rounds: 3},
+    });
+    await until(actor, snapshot => snapshot.matches({editing: {harnesses: 'ready'}}));
+    // The agent is chosen once the machine's harnesses are known.
+    expect(actor.getSnapshot().context.form.agent).not.toBeNull();
+    actor.send({type: 'next'});
+    expect(actor.getSnapshot().context.at).toBe('agent');
     actor.stop();
   });
 });
+
+/** An actor whose helper answers with what `options` says, and a way to wait for a state. */
+function liveActor(options: {
+  readonly machine?: HostKey;
+  readonly examples?: Offered<ExampleList>;
+  readonly tasks?: readonly string[];
+  readonly draft?: Draft;
+}) {
+  return createActor(
+    newRunMachine.provide({
+      actors: {
+        describe: fromPromise<Offered<MachineDescription>, {readonly host: HostKey}>(async () => ({
+          kind: 'unsupported',
+        })),
+        examples: fromPromise<Offered<ExampleList>, {readonly host: HostKey}>(
+          async () => options.examples ?? {kind: 'unsupported'},
+        ),
+        harnesses: fromPromise<readonly HarnessOffer[], {readonly host: HostKey}>(
+          async () => OFFERS,
+        ),
+        features: fromPromise<readonly HelperFeature[], {readonly host: HostKey}>(async () => [
+          'run_options',
+          'preflight',
+          'examples',
+        ]),
+        tasks: fromPromise<readonly string[], {readonly host: HostKey; readonly project: string}>(
+          async () => options.tasks ?? ['mpmc', 'spsc'],
+        ),
+        fix: fromPromise<FixDone, {readonly host: HostKey; readonly fix: ProjectFix}>(
+          async ({input}) => ({
+            fix: input.fix,
+            created: {
+              project: input.fix.kind === 'copy_out' ? input.fix.destination : '/made/stack',
+              tasks: ['spsc'],
+            },
+          }),
+        ),
+      },
+    }),
+    {
+      input: {
+        machine: options.machine ?? 'local',
+        recent: RECENT,
+        moreOpen: {},
+        ...(options.draft === undefined ? {} : {draft: options.draft}),
+      },
+    },
+  );
+}
+
+function until(
+  actor: ReturnType<typeof liveActor>,
+  ready: (snapshot: SnapshotFrom<typeof newRunMachine>) => boolean,
+): Promise<void> {
+  return new Promise<void>(resolve => {
+    if (ready(actor.getSnapshot())) {
+      resolve();
+      return;
+    }
+    const done = actor.subscribe(snapshot => {
+      if (ready(snapshot)) {
+        done.unsubscribe();
+        resolve();
+      }
+    });
+  });
+}
 
 describe('the run reports its roles', () => {
   /** An actor on a helper that reports `roles`, noting the inputs of each preflight in `asked`. */
@@ -450,6 +719,7 @@ describe('the run reports its roles', () => {
     const clock = new SimulatedClock();
     const actor = actorOn([], asked, clock);
     actor.start();
+    actor.send({type: 'again', run: RECENT[0] as RecentRun});
     await until(actor, snapshot => snapshot.matches(LOADED));
     clock.increment(CHECK_DEBOUNCE_MS);
     await until(actor, () => asked.length === 1);

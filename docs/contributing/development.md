@@ -161,7 +161,7 @@ cd ~/queue-run
 vibesys --task mpmc --outer-loop dynamic --agent-backend scripted --max-rounds 5 --max-in-flight 2
 ```
 
-In the desktop app's New run form, open Advanced and enter `--agent-backend scripted --max-rounds 5`
+In the desktop app's New run form, open More options on the Review page and enter `--agent-backend scripted --max-rounds 5`
 (any model chosen above is ignored). `[agent].scripted_seed = N` in `agent.toml` sets the seed
 (default `0`): the same seed over the same project plans, edits and judges the same way, in any order
 and across a resume, because each choice is a function of the seed and the hypothesis id alone.

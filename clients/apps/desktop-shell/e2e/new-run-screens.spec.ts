@@ -1,117 +1,55 @@
 import {mkdirSync, writeFileSync} from 'node:fs';
-import {expect, type Page, test} from '@playwright/test';
+import {expect, test} from '@playwright/test';
 import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
 import {screenCheck} from './checks/screen-check.js';
-import {open, SEED} from './world.js';
+import {main, NEW_RUN_PAGES, openAt} from './new-run-flow.js';
+import {SEED} from './world.js';
 
 /**
- * The New run page in the states a user meets, in both themes at two window sizes, for the
- * contact sheet the verify-desktop-ui skill's critic step reads. `SCREENS_DIR=<dir>` writes each
- * screenshot (the app window only) and the sheet; without it the states are still reached, so a
- * state that stops being reachable fails here.
+ * Every page of the guided New run, at the three window widths the app is used at: the layout
+ * checks (controls in a row align, columns start at one top, nothing overflows or overlaps, and
+ * the rest) hold on each. The width is the page's own `innerWidth`, read back, never assumed.
+ * `SCREENS_DIR=<dir>` writes each page's screenshot (the page only) and a contact sheet.
  */
 
 const shots = process.env['SCREENS_DIR'] || undefined;
 if (shots !== undefined) mkdirSync(shots, {recursive: true});
 const sheet: SheetEntry[] = [];
 
+const WIDTHS = [1440, 1000, 660] as const;
 const THEMES = ['paper', 'ink'] as const;
-const SIZES = [
-  {width: 800, height: 700},
-  {width: 1000, height: 700},
-  {width: 1440, height: 900},
-] as const;
-
-const ready = (page: Page) => page.getByRole('region', {name: 'Ready to start'});
-
-interface State {
-  readonly name: string;
-  readonly reach: (page: Page) => Promise<void>;
-}
-
-const STATES: readonly State[] = [
-  {
-    name: 'ready',
-    reach: async page => {
-      await expect(page.getByRole('radio', {name: 'Claude Code'})).toBeChecked();
-    },
-  },
-  {
-    name: 'checks-open',
-    reach: async page => {
-      const toggle = ready(page).getByRole('button', {name: /Ready/});
-      if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
-      await expect(ready(page)).toContainText('Agent image');
-    },
-  },
-  {
-    name: 'agent',
-    reach: async page => {
-      await page.getByRole('radio', {name: 'Codex'}).check();
-      await page.getByRole('region', {name: 'Agent'}).scrollIntoViewIfNeeded();
-    },
-  },
-  {
-    name: 'model-tiers',
-    reach: async page => {
-      await expect(page.getByRole('slider', {name: 'Model'})).toHaveAttribute(
-        'aria-valuetext',
-        'Opus',
-      );
-      await page.getByRole('region', {name: 'Agent'}).scrollIntoViewIfNeeded();
-    },
-  },
-  {
-    name: 'more-options',
-    reach: async page => {
-      await page.getByRole('button', {name: 'More options'}).click();
-      await expect(page.getByLabel('Extra arguments')).toBeVisible();
-      await page.getByLabel('Extra arguments').scrollIntoViewIfNeeded();
-    },
-  },
-  {
-    name: 'failing-check',
-    reach: async page => {
-      await page.getByRole('radio', {name: 'Open a folder'}).check();
-      await page.getByLabel('Folder on host-b').fill('/home/me/vibesys/examples/queue-rs');
-      await page.getByRole('button', {name: 'Open', exact: true}).click();
-      await expect(ready(page)).toContainText('1 check needs attention');
-    },
-  },
-];
 
 for (const theme of THEMES) {
-  for (const size of SIZES) {
-    for (const state of STATES) {
-      test(`New run, ${state.name}, ${theme} ${size.width}x${size.height}`, async ({page}) => {
-        await page.setViewportSize(size);
+  for (const width of WIDTHS) {
+    // The dark theme is looked at once, at the widest window: its colors do not change layout.
+    if (theme === 'ink' && width !== 1440) continue;
+    for (const each of NEW_RUN_PAGES) {
+      test(`${each.name} at ${width}px (${theme}) passes the layout checks`, async ({page}) => {
+        await page.setViewportSize({width, height: 900});
         await page.emulateMedia({colorScheme: theme === 'ink' ? 'dark' : 'light'});
-        await open(page, {
+        await openAt(page, each, {
           ...SEED,
           theme,
           appearance: {mode: theme === 'ink' ? 'dark' : 'light', light: 'paper', dark: 'ink'},
         });
-        await expect(page.getByRole('heading', {name: 'New run'})).toBeVisible();
-        // The checks have answered before the state is reached, as for a user who waited a moment.
-        await expect(ready(page)).toContainText('Ready ·');
-        await state.reach(page);
-        // Start run is in the window in every state.
-        await expect(ready(page).getByRole('button', {name: 'Start run'})).toBeInViewport({
-          ratio: 1,
-        });
-        // A list that scrolls does so because the window is out of room, not before.
-        expect(await screenCheck(page, ['scroll-room'])).toEqual([]);
+        expect(await page.evaluate(() => window.innerWidth), 'the window is as wide as asked').toBe(
+          width,
+        );
+        // Where the sidebar would float over the page (660 px), it is put away, as a user does.
+        if (width === 660) await page.getByRole('button', {name: 'Hide sidebar'}).click();
+        await expect(main(page).getByRole('heading', {level: 1})).toBeVisible();
+        expect(await screenCheck(page)).toEqual([]);
         if (shots !== undefined) {
-          const file = `new-run__${state.name}__${size.width}x${size.height}__${theme}.png`;
-          await page.screenshot({path: `${shots}/${file}`});
-          sheet.push({name: `${state.name} ${size.width}x${size.height} ${theme}`, file});
+          const file = `new-run__${each.name.replaceAll(' ', '-')}__${width}__${theme}.png`;
+          await main(page).screenshot({path: `${shots}/${file}`});
+          sheet.push({name: `${each.name} ${width} ${theme}`, file});
         }
       });
     }
   }
 }
 
-test('the contact sheet of the New run states', async ({browser}) => {
+test('the contact sheet of the New run pages', async ({browser}) => {
   test.skip(shots === undefined, 'set SCREENS_DIR to write the screenshots and the contact sheet');
   if (shots === undefined) return;
   writeFileSync(`${shots}/new-run-sheet.html`, contactSheetHtml(sheet, 4));

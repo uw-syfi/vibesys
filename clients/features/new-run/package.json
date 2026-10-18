@@ -54,6 +54,7 @@
     "@types/bun": "1.4.2",
     "@types/node": "^24.0.0",
     "@types/react": "19.1.13",
+    "@vibesys/run-fixtures": "workspace:*",
     "@vibesys/transport": "workspace:*",
     "typescript": "^5.8.3"
   }

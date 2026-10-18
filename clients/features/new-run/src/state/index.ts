@@ -7,6 +7,69 @@ export type {
   RunOption,
 } from '@vibesys/contracts/host-helper';
 export {
+  type AgentGroup,
+  agentGroups,
+  groupOf,
+  type ModelTier,
+  modelAtTier,
+  offersIn,
+  pickGroup,
+  pickHarness,
+  tierOf,
+  tiersIn,
+} from './agents.js';
+export {
+  type AnswerChange,
+  type Answers,
+  answer,
+  chosenEntry,
+  isDone,
+  NO_ANSWERS,
+  type OwnProject,
+  openEntries,
+  reachableSteps,
+  type StepFacts,
+  type StepId,
+  stepIds,
+} from './answers.js';
+export {
+  allExamples,
+  type CatalogueEntry,
+  DOMAIN_WORDS,
+  type Domain,
+  type DomainOption,
+  domainOptions,
+  entriesFor,
+  entriesOf,
+  exampleLabel,
+  examplesOf,
+  type HardwareOption,
+  hardwareGroups,
+  hardwareKey,
+  hardwareLabel,
+  hasDetails,
+  MAKER_NAMES,
+  type MakerGroup,
+  type ModelOption,
+  modelGroups,
+  tasksOfExample,
+  VENDOR_NAMES,
+  type VendorGroup,
+} from './catalogue.js';
+export {DRAFT_KEY, type Draft, draftOf, flowOfDraft, parseDraft, storeDraft} from './draft.js';
+export {type Fit, fitOf, machineHardwareWords} from './fit.js';
+export {
+  againAnswers,
+  catalogueFor,
+  defaultDestination,
+  type ExamplesFor,
+  type Flow,
+  factsOf,
+  flowAnswer,
+  flowSettled,
+  startFlow,
+} from './flow.js';
+export {
   type AgentChoice,
   advancedProblem,
   againForm,
@@ -39,6 +102,7 @@ export {
 } from './form.js';
 export {
   CHECK_DEBOUNCE_MS,
+  type FixDone,
   type NewRunContext,
   type NewRunEvent,
   type NewRunInput,

@@ -55,8 +55,10 @@ for (const name of FIXTURE_NAMES) {
     for (const machine of inSidebar.keys()) expect(machines).toContain(machine);
 
     await nav(page).getByRole('button', {name: 'New run'}).click();
+    await page.getByRole('radio', {name: /Your project/}).check();
+    await page.getByRole('button', {name: 'Continue'}).click();
     const offered = await page
-      .getByRole('combobox', {name: 'Run on'})
+      .getByRole('combobox', {name: 'Machine'})
       .locator('option')
       .allInnerTexts();
     expect([...offered].sort()).toEqual([...machines].sort());

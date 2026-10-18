@@ -91,12 +91,7 @@ export class NewRunMain {
       case 'preflight':
         return this.#preflight(request.host, request.inputs);
       case 'examples':
-        return this.#offered(
-          request.host,
-          {type: 'examples.list'},
-          'Could not list the examples',
-          reply => (reply as {listing: ExampleList}).listing,
-        );
+        return this.#examples(request.host);
       case 'create-from-example':
         return this.#created(
           request.host,
@@ -173,6 +168,28 @@ export class NewRunMain {
         return {kind: 'unsupported'};
       }
       throw plain(error, `Could not check the run on ${hostLabel(host)}`);
+    }
+  }
+
+  /**
+   * The examples, each with what its tasks are about (domain, model, hardware, objectives, goal)
+   * when the helper agreed to `example_catalogue`; a helper that did not lists them plain.
+   */
+  async #examples(host: HostId): Promise<Offered<ExampleList>> {
+    try {
+      await using lease = await this.#deps.connect(host);
+      await lease.connection.ready();
+      const described = lease.connection.features?.includes('example_catalogue') === true;
+      const reply = (await lease.connection.request({
+        type: 'examples.list',
+        ...(described ? {with_catalogue: true} : {}),
+      })) as {listing: ExampleList};
+      return {kind: 'offered', value: reply.listing};
+    } catch (error) {
+      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
+        return {kind: 'unsupported'};
+      }
+      throw plain(error, `Could not list the examples on ${hostLabel(host)}`);
     }
   }
 

@@ -27,7 +27,9 @@ for (const width of WIDTHS) {
   test(`at ${width} px the page starts at the top with the sidebar shown`, async ({page}) => {
     await shown(page, width);
     expect(await frameProblems(page)).toEqual([]);
-    await expect(page.getByRole('heading', {name: 'New run'})).toBeInViewport();
+    await expect(
+      page.getByRole('heading', {name: 'What do you want to optimize?'}),
+    ).toBeInViewport();
   });
 
   test(`at ${width} px the page starts at the top with the sidebar hidden, beside the rail`, async ({
@@ -38,6 +40,8 @@ for (const width of WIDTHS) {
     await expect(sidebar(page)).toBeHidden();
     expect(await frameProblems(page)).toEqual([]);
     await expect(page.getByRole('navigation', {name: 'Quick navigation'})).toBeVisible();
-    await expect(page.getByRole('heading', {name: 'New run'})).toBeInViewport();
+    await expect(
+      page.getByRole('heading', {name: 'What do you want to optimize?'}),
+    ).toBeInViewport();
   });
 }

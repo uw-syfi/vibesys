@@ -12,12 +12,21 @@ import type {
 import type {HostKey} from '@vibesys/hosts';
 import type {HarnessOffer, Offered, RoleOption, RunInputs} from '@vibesys/ipc';
 import type {RecentRun, RunStart} from '@vibesys/runs';
+import type {OwnProject} from './answers.js';
 
-/** Where the project comes from: a recent one, a folder on the machine, or a bundled example. */
+/**
+ * Where the project comes from: one of the user's (a recent one, or a folder on the machine), an
+ * example not made into a project yet, or the project made from an example at `path`.
+ */
 export type ProjectChoice =
-  | {readonly source: 'recent'; readonly path: string}
-  | {readonly source: 'folder'; readonly path: string}
-  | {readonly source: 'example'; readonly example: string; readonly destination: string};
+  | OwnProject
+  | {readonly source: 'example'; readonly example: string; readonly destination: string}
+  | {
+      readonly source: 'created';
+      readonly example: string;
+      readonly destination: string;
+      readonly path: string;
+    };
 
 export type Effort = RoleOption['reasoning_effort'] & string;
 
@@ -109,10 +118,9 @@ export function lastRun(machine: HostKey, recent: readonly RecentRun[]): RecentR
 }
 
 /**
- * The form for `machine`, prefilled from the last run opened on it: the same as running that run
- * again (`againForm`), so its budget and extra arguments are kept with its project and task, and
- * its agent follows once the machine's harnesses are known (`recordedAgent`, from `lastRun`'s
- * start).
+ * A form for `machine` that knows no project yet: it carries the budget and extra arguments of the
+ * last run opened on it, and its agent follows once the machine's harnesses are known
+ * (`recordedAgent`, from `lastRun`'s start).
  */
 export function prefill(machine: HostKey, recent: readonly RecentRun[]): Form {
   const last = lastRun(machine, recent);
@@ -126,7 +134,7 @@ export function prefill(machine: HostKey, recent: readonly RecentRun[]): Form {
       advanced: '',
     };
   }
-  return {...againForm(last), machine};
+  return {...againForm(last), machine, project: null, task: null};
 }
 
 /** `words` as one line of Advanced text, quoting a word that has spaces (`splitWords` reads it back). */

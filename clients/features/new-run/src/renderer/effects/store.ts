@@ -10,10 +10,13 @@ import type {RecentRun, RunRef} from '@vibesys/runs';
 import {createListenerDelivery, type Store} from '@vibesys/store';
 import {type Actor, createActor, fromPromise} from 'xstate';
 import {
+  type Draft,
+  draftOf,
   type NewRunEvent,
   type NewRunSnapshot,
   newRunMachine,
   StepFailure,
+  storeDraft,
 } from '../../state/index.js';
 import {createFolderCompletion} from './completion.js';
 
@@ -55,13 +58,14 @@ export function newRunLogic(bridge: NewRunBridge) {
       examples: fromPromise(({input}) => value(() => bridge.examples(input.host))),
       tasks: fromPromise(({input}) => value(() => bridge.tasks(input.host, input.project))),
       preflight: fromPromise(({input}) => value(() => bridge.preflight(input.host, input.inputs))),
-      fix: fromPromise(({input}) =>
-        value(() =>
+      fix: fromPromise(async ({input}) => ({
+        fix: input.fix,
+        created: await value(() =>
           input.fix.kind === 'copy_out'
             ? bridge.copyOut(input.host, input.fix.source, input.fix.destination)
             : bridge.createFromExample(input.host, input.fix.example, input.fix.destination),
         ),
-      ),
+      })),
       start: fromPromise(({input}) => value(() => bridge.startRun(input.host, input.inputs))),
     },
   });
@@ -84,8 +88,18 @@ export interface MoreOptionsMemory {
   write(choices: Readonly<Record<string, boolean>>): void;
 }
 
+/** Where this window keeps an unfinished New run, so leaving and coming back finds it. */
+export interface DraftMemory {
+  /** The stored draft; none when nothing is stored or what is stored is not a draft. */
+  read(): Draft | null;
+  /** Keep `draft` (null: forget it); a failure to store it is not an error, it just lasts this run. */
+  write(draft: Draft | null): void;
+}
+
 export interface NewRunStoreOptions {
   readonly recent: readonly RecentRun[];
+  /** Keeps the unfinished form of this window; without one it lasts the store's life. */
+  readonly draft?: DraftMemory;
   /** Remembers More options per machine; without one the choices last the store's life. */
   readonly moreOptions?: MoreOptionsMemory;
   /** Where the machine's delays (the checks' debounce) are scheduled. */
@@ -115,21 +129,36 @@ export function createNewRunStore(
   // arrive after the store was made), so it is prefilled from the last run, on its machine.
   let edited = false;
   let moreOpen = options.moreOptions?.read() ?? {};
-  const spawn = (machine: HostKey): Actor<typeof logic> => {
-    const actor = createActor(logic, {input: {machine, recent, moreOpen}, clock});
+  const restored = options.draft?.read() ?? null;
+  // What is stored is what the store holds until the form changes it.
+  let kept = restored === null ? null : storeDraft(restored);
+  const keep = (snapshot: NewRunSnapshot): void => {
+    const {answers, at, form} = snapshot.context;
+    const draft = draftOf({answers, at, form});
+    const text = draft === null ? null : storeDraft(draft);
+    if (text === kept) return;
+    kept = text;
+    options.draft?.write(draft);
+  };
+  const spawn = (machine: HostKey, draft: Draft | null = null): Actor<typeof logic> => {
+    const actor = createActor(logic, {input: {machine, recent, moreOpen, draft}, clock});
     actor.subscribe(snapshot => {
       const run = snapshot.context.started;
       if (snapshot.status === 'done' && run !== null) {
         edited = false;
         current = spawn(snapshot.context.form.machine);
         options.started({host: snapshot.context.form.machine, runId: run.runId});
+      } else {
+        keep(snapshot);
       }
       delivery.notify();
     });
     actor.start();
     return actor;
   };
-  let current = spawn(initialMachine(recent));
+  // A window that kept a draft is past the first change: the form is the user's, not the last run's.
+  edited = restored !== null;
+  let current = spawn(restored?.machine ?? initialMachine(recent), restored);
   const store: Store<NewRunSnapshot, NewRunEvent> = {
     getState: () => current.getSnapshot(),
     subscribe: delivery.subscribe,

@@ -28,6 +28,7 @@ import {
   roleSummary,
   vettedModels,
 } from '../../state/index.js';
+import {TimeLimitField} from './budget-fields.js';
 import type {CardProps} from './card-props.js';
 import {moreOptionsSummary, type RolesView, rolesView} from './view.js';
 
@@ -146,7 +147,7 @@ function ExampleDestination(props: CardProps): JSX.Element | null {
       <TextInput
         mono
         value={project.destination}
-        change={destination => dispatch({type: 'project', project: {...project, destination}})}
+        change={destination => dispatch({type: 'destination', destination})}
       />
     </Field>
   );
@@ -169,6 +170,7 @@ export function MoreOptions(
       {...(open ? {} : {summary: problem ?? moreOptionsSummary(context)})}
     >
       <Stack gap="space-4">
+        <TimeLimitField {...props} />
         <Stack gap="space-2">
           <Text variant="body-strong">Results</Text>
           <SegmentedControl

@@ -4,11 +4,10 @@ import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
 import {open, SEED, sidebar} from './world.js';
 
 /**
- * A top-level page's header never scrolls away. On New run, Machines and Settings the window
+ * A top-level page's header never scrolls away. On Machines and Settings the window
  * (the document) does not scroll at any size down to 1000 by 700; the header (the wordmark, the
  * title, the actions) stays fully inside the window after the page's body is scrolled to its
- * bottom; and on New run the Start run button is in the window without scrolling, with the form
- * open at its longest. The wordmark art is never cut off by its own box. All of it holds in both
+ * bottom. The wordmark art is never cut off by its own box. All of it holds in both
  * the light and the dark theme, and a scroll shade is only ever drawn in theme colors: never a
  * light gradient over a dark page. `SCREENS_DIR=<dir>` also writes each page's screenshot,
  * scrolled to the bottom of its body (the app window only), and a contact sheet of them.
@@ -41,8 +40,8 @@ async function openIn(page: Page, theme: ThemeName): Promise<void> {
   await open(page, seedFor(theme));
 }
 
-type Where = 'New run' | 'Machines' | 'Settings';
-const PAGES: readonly Where[] = ['New run', 'Machines', 'Settings'];
+type Where = 'Machines' | 'Settings';
+const PAGES: readonly Where[] = ['Machines', 'Settings'];
 
 interface Box {
   readonly top: number;
@@ -89,10 +88,9 @@ async function atBottom(page: Page): Promise<Geometry> {
 }
 
 async function goTo(page: Page, where: Where): Promise<void> {
-  if (where !== 'New run' && where !== 'Machines') {
+  if (where === 'Settings') {
     await sidebar(page).getByRole('button', {name: where}).click();
-  }
-  if (where === 'Machines') {
+  } else {
     await sidebar(page).getByRole('button', {name: 'Settings'}).click();
     await page
       .getByRole('navigation', {name: 'Settings sections'})
@@ -101,16 +99,9 @@ async function goTo(page: Page, where: Where): Promise<void> {
   }
   await expect(
     page.getByRole('heading', {
-      name: {'New run': 'New run', Machines: 'Where runs can go', Settings: 'Appearance'}[where],
+      name: {Machines: 'Where runs can go', Settings: 'Appearance'}[where],
     }),
   ).toBeVisible();
-  if (where === 'New run') {
-    // The longest form: More options open.
-    await page.getByRole('button', {name: 'More options'}).click();
-    await expect(page.getByLabel('Extra arguments')).toBeVisible();
-    // The checks have answered: the panel reads as it will for a user who waited a moment.
-    await expect(page.getByRole('region', {name: 'Ready to start'})).toContainText('Ready ·');
-  }
 }
 
 for (const theme of THEMES) {
@@ -122,14 +113,6 @@ for (const theme of THEMES) {
         await page.setViewportSize(size);
         await openIn(page, theme);
         await goTo(page, where);
-        if (where === 'New run') {
-          // Without scrolling the form, the primary action and what it will do are in the window.
-          const ready = page.getByRole('region', {name: 'Ready to start'});
-          await expect(ready.getByRole('button', {name: 'Start run'})).toBeInViewport({ratio: 1});
-          await expect(ready.getByRole('button', {name: /Ready|check/})).toBeInViewport({
-            ratio: 1,
-          });
-        }
         const g = await atBottom(page);
         if (shots !== undefined) {
           const name = `${where.replace(' ', '-').toLowerCase()}__${size.width}x${size.height}__${theme}`;
@@ -150,13 +133,6 @@ for (const theme of THEMES) {
             box.right > g.window.width,
         );
         expect(outside, 'header parts outside the window').toEqual([]);
-        if (where === 'New run') {
-          await expect(
-            page
-              .getByRole('region', {name: 'Ready to start'})
-              .getByRole('button', {name: 'Start run'}),
-          ).toBeInViewport({ratio: 1});
-        }
       });
 
       test(`${where} draws its scroll shade in ${theme} theme colors at ${size.width}x${size.height}`, async ({
@@ -208,15 +184,6 @@ async function shadeProblems(page: Page): Promise<string[]> {
     return problems;
   });
 }
-
-test('at 1000x700 the New run form is longer than its window and scrolls on its own', async ({
-  page,
-}) => {
-  await page.setViewportSize(SIZES[0]);
-  await open(page);
-  await goTo(page, 'New run');
-  expect((await atBottom(page)).scrolls).toBe(true);
-});
 
 test('the contact sheet of the pages', async ({browser}) => {
   test.skip(shots === undefined, 'set SCREENS_DIR to write the screenshots and the contact sheet');

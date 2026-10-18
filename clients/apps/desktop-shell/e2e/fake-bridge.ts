@@ -9,6 +9,7 @@
  * (`page.addInitScript`, in that order), so each is self-contained; the test drives pushes
  * through `window.fakeHost`.
  */
+import type {ExampleList} from '@vibesys/contracts/host-helper';
 import type {WelcomeBridge} from '@vibesys/ipc';
 
 /**
@@ -96,18 +97,11 @@ export interface FakeBridgeSeed {
   readonly newRun?: {
     readonly machine: unknown;
     readonly harnesses: readonly unknown[];
-    readonly examples: {
-      readonly checkout: string;
-      readonly examples: readonly {
-        readonly name: string;
-        readonly category: string;
-        readonly tasks: readonly string[];
-        readonly external_repo: boolean;
-      }[];
-    };
+    /** The examples as the helper lists them: with their task details only for a helper that has `example_catalogue`. */
+    readonly examples: ExampleList;
     /** The tasks of each project the machine has. */
     readonly projects: Readonly<Record<string, readonly string[]>>;
-    /** What the helper agreed to in `hello`; every feature New run uses when not given. */
+    /** What the helper agreed to in `hello`; every feature New run uses (catalogue included) when not given. */
     readonly features?: readonly string[];
     /** The roles the helper reports for a run (feature `run_roles`); the multi roles when not given. */
     readonly roles?: readonly string[];
@@ -359,13 +353,10 @@ export function installFakeNewRun(seed: FakeBridgeSeed): void {
     return ok({project, tasks});
   };
   const insideRepository = (project: string) => project.includes('/vibesys/');
-  const features = catalog?.features ?? ['run_options', 'preflight', 'examples', 'run_roles'];
-  const roles = catalog?.roles ?? [
-    'multi-orchestrator',
-    'multi-profiler',
-    'multi-implementer',
-    'multi-judge',
-  ];
+  const features =
+    catalog?.features ?? 'run_options preflight examples run_roles example_catalogue'.split(' ');
+  const roles =
+    catalog?.roles ?? 'multi-orchestrator multi-profiler multi-implementer multi-judge'.split(' ');
   const preflight = (_host: string, inputs: {project: string}) => {
     newRun.preflights.push(inputs);
     const own = insideRepository(inputs.project)

@@ -8,8 +8,13 @@ import type {BrandMarkName, CheckState, KeyValueItem} from '@vibesys/ui';
 import {
   advancedProblem,
   type Backend,
+  type CatalogueEntry,
   type Check,
+  catalogueFor,
   checksPass,
+  chosenEntry,
+  fitOf,
+  harnessLabel,
   inputsKey,
   type MachineDescription,
   missingFeatures,
@@ -18,7 +23,7 @@ import {
   offers,
   projectPath,
 } from '../../state/index.js';
-import {backendLabel, type FailureWords, failureWords} from './cause-words.js';
+import {type FailureWords, failureWords} from './cause-words.js';
 
 export interface MachineOption {
   readonly value: HostKey;
@@ -28,6 +33,11 @@ export interface MachineOption {
 /** This machine first, then each of `hosts` (the saved and watched machines) once, by label. */
 export function machineOptions(hosts: readonly HostKey[]): MachineOption[] {
   return [...new Set(['local', ...hosts])].map(key => ({value: key, label: machineLabel(key)}));
+}
+
+/** The entries of the catalogue of the machine the form is for; empty while it is not known. */
+export function entriesIn(context: NewRunContext): readonly CatalogueEntry[] {
+  return catalogueFor(context.examples, context.form.machine) ?? [];
 }
 
 export function machineLabel(key: HostKey): string {
@@ -68,12 +78,35 @@ export function hardwareLine(machine: MachineDescription): string {
   return `${hardware.cpu_cores} cores${gpus === '' ? '' : `, ${gpus}`}`;
 }
 
-/** The projects of the runs opened on `machine`, newest first, each once. */
-export function recentProjects(recent: readonly RecentRun[], machine: HostKey): string[] {
-  const runs = recent
-    .filter(run => run.host === machine)
-    .sort((left, right) => right.attachedAt - left.attachedAt);
-  return [...new Set(runs.map(run => run.project))];
+/** A project the user opened before, on the machine it is on. */
+export interface RecentChoice {
+  readonly host: HostKey;
+  readonly path: string;
+  /** The folder's name, with enough of the folders above it to tell it from another's. */
+  readonly label: string;
+}
+
+/** The projects of the runs opened, newest first, each once per machine. */
+export function recentChoices(recent: readonly RecentRun[]): RecentChoice[] {
+  const ordered = [...recent].sort((left, right) => right.attachedAt - left.attachedAt);
+  const seen = new Set<string>();
+  const unique = ordered.filter(run => {
+    const key = `${run.host}\n${run.project}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const labels = new Map(
+    [...new Set(unique.map(run => run.host))].map(host => [
+      host,
+      projectLabels(unique.filter(run => run.host === host).map(run => run.project)),
+    ]),
+  );
+  return unique.map(run => ({
+    host: run.host,
+    path: run.project,
+    label: labels.get(run.host)?.get(run.project) ?? run.project,
+  }));
 }
 
 /**
@@ -266,13 +299,54 @@ function helperItem(context: NewRunContext): Readiness | null {
   };
 }
 
+function hardwareItem(context: NewRunContext, machine: MachineDescription): Readiness | null {
+  const needs = chosenEntry(context.answers, entriesIn(context))?.details?.hardware ?? null;
+  if (needs === null) return null;
+  const fit = fitOf(needs, machine, machineLabel(context.form.machine));
+  if (fit.kind === 'unknown') return null;
+  return {
+    id: 'hardware_fit',
+    state: fit.kind === 'fits' ? 'ok' : 'warn',
+    label: 'Hardware fits the task',
+    detail: fit.words,
+  };
+}
+
+function harnessItem(context: NewRunContext, machine: MachineDescription): Readiness | null {
+  const {agent} = context.form;
+  const offered = context.harnesses?.for === context.form.machine ? context.harnesses.list : null;
+  if (agent === null || offered === null) return null;
+  const name = machineLabel(context.form.machine);
+  const installed = machine.harness_clis.includes(agent.provider);
+  const label = harnessLabel(offered, agent.provider);
+  return {
+    id: 'harness_installed',
+    state: installed ? 'ok' : 'warn',
+    label: `${label} on ${name}`,
+    detail: installed ? `${label} is installed on ${name}.` : `${label} was not found on ${name}.`,
+  };
+}
+
+/**
+ * What the machine's own report says about the run: whether it has the hardware the task targets
+ * and the agent's CLI. Both only advise (`warn`): the helper's checks decide whether Start is open.
+ */
+function machineItems(context: NewRunContext): Readiness[] {
+  const facts = context.facts?.for === context.form.machine ? context.facts.value : null;
+  if (facts === null || facts.kind !== 'offered') return [];
+  return [hardwareItem(context, facts.value), harnessItem(context, facts.value)].flatMap(item =>
+    item === null ? [] : [item],
+  );
+}
+
 /** The "Ready to start" items for the inputs now. */
 export function readiness(snapshot: NewRunSnapshot): Readiness[] {
   const helper = helperItem(snapshot.context);
   const items = inputReadiness(snapshot);
-  if (helper === null) return items;
+  const own = machineItems(snapshot.context);
+  if (helper === null) return [...items, ...own];
   // Nothing is checked on such a helper; what the inputs still lack is listed after it.
-  return [helper, ...items.filter(item => item.id !== 'checking')];
+  return [helper, ...items.filter(item => item.id !== 'checking'), ...own];
 }
 
 function inputReadiness(snapshot: NewRunSnapshot): Readiness[] {
@@ -297,29 +371,6 @@ export function startBlocked(snapshot: NewRunSnapshot): string | undefined {
   }
   if (inputsKey(context.form) === null) return 'Choose a project, task and agent to start.';
   return 'Checking these inputs.';
-}
-
-function lastSegment(path: string): string {
-  return path.split('/').filter(Boolean).at(-1) ?? path;
-}
-
-/**
- * The run in one line: project, task, machine, backend, rounds; null before it has a project. The
- * model is the Agent card's: its name comes from the backend, which this line does not yet read.
- */
-export function summary(context: NewRunContext): string | null {
-  const project = projectPath(context.form);
-  const {task, agent, budget, machine} = context.form;
-  if (project === null || task === null || agent === null) return null;
-  const rounds = budget.rounds === null ? 'rounds as configured' : `${budget.rounds} rounds`;
-  const backend = backendOf(context);
-  return [
-    lastSegment(project),
-    task,
-    machineLabel(machine),
-    ...(backend === null ? [] : [backendLabel(backend)]),
-    rounds,
-  ].join(' · ');
 }
 
 /** The one-line state of "Ready to start", and whether its checks show by themselves. */
@@ -378,6 +429,7 @@ export function moreOptionsSummary(context: NewRunContext): string {
     role => role.model !== null || role.effort !== 'default',
   ).length;
   const parts = [
+    ...(form.budget.timeLimitS === null ? [] : ['time limit']),
     ...(form.budget.results === 'publish_github' ? ['publishes to GitHub'] : []),
     ...(changedRoles === 0 ? [] : [`${count(changedRoles, 'role')} changed`]),
     ...(form.advanced.trim() === '' ? [] : ['extra arguments']),
