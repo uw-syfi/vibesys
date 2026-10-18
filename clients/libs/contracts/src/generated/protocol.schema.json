@@ -582,7 +582,7 @@
     },
     "CancelAttemptRequest": {
       "additionalProperties": false,
-      "description": "Cancel one attempt: it stops, closes cancelled, and is never judged.\n\nThe search hears it close as if it had withdrawn the attempt itself, and the run's agents\nare told at their next turn. An attempt that has ended is refused; one the run does not\nhold when it takes the request is reported dropped.",
+      "description": "Cancel one attempt: it stops, closes cancelled, and is never judged.\n\nThe search hears it close as if it had withdrawn the attempt itself, and the run's agents\nare told at their next turn. An attempt that has ended is refused when submitted; a parked\none, or one the run does not hold, is refused when the run takes the request.",
       "properties": {
         "control_id": {
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
@@ -609,7 +609,7 @@
     },
     "CancelItemRequest": {
       "additionalProperties": false,
-      "description": "Cancel one work item: every attempt at it that has not ended, and any later one.\n\nThe run starts no attempt at the item afterwards; the search hears each refused start. An\nitem already cancelled is refused; one the run does not hold when it takes the request is\nreported dropped.",
+      "description": "Cancel one work item: no attempt at it runs or starts again.\n\nEach running or waiting attempt at the item stops, as ``CancelAttemptRequest`` stops one;\neach parked or blocked one stays parked and is never reopened; one already finishing\nfinishes, and its result stands. The run starts no attempt at the item afterwards; the\nsearch hears each refused start and reopen. The run's agents are told what became of\neach attempt. An item already cancelled is refused when submitted; one the run does not\nhold is refused when the run takes the request.",
       "properties": {
         "control_id": {
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",

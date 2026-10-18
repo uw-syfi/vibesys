@@ -315,3 +315,43 @@ def test_a_parallel_limit_from_a_lax_number_is_refused_when_read() -> None:
             CONTROL_REQUEST.validate_python(
                 {"control_id": "l1", "action": "set_max_parallel", "max_parallel": value}
             )
+
+
+def test_a_cancelled_items_notice_says_what_became_of_each_of_its_attempts() -> None:
+    """D220: the notice names each attempt the cancel stopped, left parked, or let finish."""
+    base = initial_state()
+    phases = {
+        "A1": AttemptPhase.ACTIVE,
+        "A2": AttemptPhase.PARKED,
+        "A3": AttemptPhase.CLOSING,
+        "A4": AttemptPhase.TERMINAL,
+    }
+    rows = tuple(
+        AttemptView(
+            attempt_id=AttemptId(root=name),
+            generation=1,
+            item_id=ItemId(root="I-shared"),
+            phase=phase,
+            workspace=WorkspacePlan(
+                mode=WorkspaceMode.EXCLUSIVE_ROOT, base=base.run.facts.baseline
+            ),
+            budget=AttemptBudget(),
+        )
+        for name, phase in phases.items()
+    )
+    core = base.model_copy(update={"attempts": base.attempts.model_copy(update={"attempts": rows})})
+    threads = SimThreads()
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=threads)
+    control = ChannelRunControl(channel, threads)
+    texts = _Texts()
+    bridge = RunControlBridge(channel, texts, control=control)
+    control.submit(CancelItemRequest(control_id="c1", item="I-shared"))
+
+    bridge.poll(core, 1.0)
+
+    assert list(texts.held.values()) == [
+        "The operator cancelled work item I-shared. No new attempt at it will start; do not"
+        " start or continue work on it. Attempt A1 has stopped and will not be evaluated."
+        " Attempt A2 stays parked and will not be reopened. Attempt A3 was already finishing;"
+        " it finishes and its result stands."
+    ]

@@ -1328,8 +1328,8 @@ export interface WithdrawRequest {
  * Cancel one attempt: it stops, closes cancelled, and is never judged.
  *
  * The search hears it close as if it had withdrawn the attempt itself, and the run's agents
- * are told at their next turn. An attempt that has ended is refused; one the run does not
- * hold when it takes the request is reported dropped.
+ * are told at their next turn. An attempt that has ended is refused when submitted; a parked
+ * one, or one the run does not hold, is refused when the run takes the request.
  */
 export interface CancelAttemptRequest {
   control_id: ControlId5;
@@ -1337,11 +1337,14 @@ export interface CancelAttemptRequest {
   attempt: SubjectId;
 }
 /**
- * Cancel one work item: every attempt at it that has not ended, and any later one.
+ * Cancel one work item: no attempt at it runs or starts again.
  *
- * The run starts no attempt at the item afterwards; the search hears each refused start. An
- * item already cancelled is refused; one the run does not hold when it takes the request is
- * reported dropped.
+ * Each running or waiting attempt at the item stops, as ``CancelAttemptRequest`` stops one;
+ * each parked or blocked one stays parked and is never reopened; one already finishing
+ * finishes, and its result stands. The run starts no attempt at the item afterwards; the
+ * search hears each refused start and reopen. The run's agents are told what became of
+ * each attempt. An item already cancelled is refused when submitted; one the run does not
+ * hold is refused when the run takes the request.
  */
 export interface CancelItemRequest {
   control_id: ControlId6;

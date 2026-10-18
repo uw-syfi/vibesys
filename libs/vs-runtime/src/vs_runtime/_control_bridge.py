@@ -574,9 +574,9 @@ class RunControlBridge:
         (``ChannelRunControl.end``): each later one is refused in its ack. Then nothing more
         reaches the channel, and this answers all it holds. A pause or resume is refused
         (``_refuse``) with core's reason, as one refused at commit is, each operator action is
-        refused with the run's end, and each steer or withdrawal is reported dropped with it. Every inbox request core holds is
-        settled and every other one rejected with the run's end, each rejection reported
-        once. This runs after the end is durable, so it finds every request a poster wrote
+        refused with the run's end, and each steer or withdrawal is reported dropped with it.
+        Every inbox request core holds is settled and every other one rejected with the run's
+        end, each rejection reported once. This runs after the end is durable, so it finds every request a poster wrote
         before seeing the end; one written after is refused to its poster, and reads as
         rejected whether or not this runs.
         """
@@ -677,18 +677,16 @@ class RunControlBridge:
         if request.control_id != entry.request_id:
             return f"its control_id {request.control_id!r} is not its name in the inbox"
         # A control refused when the socket's copy of it was taken has its answer already.
-        told = self._told.get(request.control_id)
-        refusal = None if told is not None else self._refusal(request, core)
+        refused = self._told.get(request.control_id)
+        refusal = None if refused is not None else self._refusal(request, core)
         if refusal is not None:
             return refusal
         ack = inbox.control.submit(request)
         if ack.status is ControlStatus.CONFLICT:
             return "its control_id already named a different control"
-        if told is not None:
-            return f"refused by the run: {told}"
-        if ack.reason is not None:
-            return f"refused by the run: {REFUSAL_TEXT[ack.reason]}"
-        return request
+        if refused is None and ack.reason is not None:
+            refused = REFUSAL_TEXT[ack.reason]
+        return request if refused is None else f"refused by the run: {refused}"
 
     def _refusal(self, request: ControlRequest, core: CoreState) -> str | None:
         """Why the run refuses ``request`` now, or None; refused requests never reach core.

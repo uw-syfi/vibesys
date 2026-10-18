@@ -27,6 +27,7 @@ from pydantic import ValidationError
 
 import vs_core.api as core
 
+from .test_reopen_kernel_bridge import reopen_fixture
 from .toy_agent_search import LIMITS, Config, ToyHost, run_toy
 
 if TYPE_CHECKING:
@@ -479,3 +480,106 @@ def test_only_a_steer_or_an_operator_action_carries_a_notice(action: str) -> Non
         core.ControlInput.model_validate(
             {"control_id": core.ControlId(root="c"), "action": action, "artifact": NOTICE, **extra}
         )
+
+
+_PHASES = st.lists(st.sampled_from(sorted(core.AttemptPhase)), max_size=6)
+
+
+def _at_item(phases: list[core.AttemptPhase]) -> tuple[core.CoreState, core.AttemptView]:
+    """The running state of ``_state_with_attempt`` plus one attempt per phase at its item."""
+    state, attempt = _state_with_attempt()
+    [running] = [row for row in state.attempts.attempts if row.attempt_id.root == attempt]
+    extra = tuple(
+        running.model_copy(
+            update={"attempt_id": core.AttemptId(root=f"{attempt}-{index}"), "phase": phase}
+        )
+        for index, phase in enumerate(phases)
+    )
+    rows = (*state.attempts.attempts, *extra)
+    return state.model_copy(
+        update={"attempts": state.attempts.model_copy(update={"attempts": rows})}
+    ), running
+
+
+@given(_PHASES)
+@example([core.AttemptPhase.PARKED, core.AttemptPhase.BLOCKED, core.AttemptPhase.CLOSING])
+@example([core.AttemptPhase.QUEUED, core.AttemptPhase.TERMINAL])
+def test_cancelling_an_item_stops_what_runs_and_lets_parked_and_settling_attempts_be(
+    phases: list[core.AttemptPhase],
+) -> None:
+    """D220: running attempts are withdrawn; parked and settling ones are left as they are.
+
+    ``item_cancellation`` sorts every attempt at the item that has not ended into exactly one
+    of the three, and core withdraws exactly the ``stopped`` ones.
+    """
+    state, running = _at_item(phases)
+    item = running.item_id
+    rows = {row.attempt_id: row for row in state.attempts.attempts if row.item_id == item}
+    split = core.item_cancellation(state, item)
+    phase = {name: row.phase for name, row in rows.items()}
+
+    assert set(split.stopped) == {
+        name
+        for name, value in phase.items()
+        if value
+        in (core.AttemptPhase.QUEUED, core.AttemptPhase.ACQUIRING, core.AttemptPhase.ACTIVE)
+    }
+    assert set(split.parked) == {
+        name
+        for name, value in phase.items()
+        if value in (core.AttemptPhase.PARKED, core.AttemptPhase.BLOCKED)
+    }
+    assert set(split.settling) == {
+        name for name, value in phase.items() if value == core.AttemptPhase.CLOSING
+    }
+
+    control = _action("op", "cancel_item", item=item.root)
+    after = core.step(state, core.RunControlEvent(control=control, now_at=state.run.now_at)).state
+    withdrawn = {
+        row.decision.target.attempt_id
+        for row in after.run.receipts
+        if isinstance(row.decision, core.Withdraw)
+        and isinstance(row.decision.target, core.AttemptRef)
+    }
+    assert withdrawn == set(split.stopped)
+    left = {row.attempt_id: row for row in after.attempts.attempts}
+    for name in (*split.parked, *split.settling):
+        assert left[name] == rows[name], name
+
+
+def test_a_parked_attempt_at_a_cancelled_item_is_not_reopened() -> None:
+    """D220: core refuses a search's reopening of a parked attempt at a cancelled item."""
+
+    state, _, reopen = reopen_fixture()
+    normalization = reopen.normalized_scope_reopen
+    assert normalization is not None
+    parked = core.AttemptView(
+        attempt_id=normalization.attempt.attempt_id,
+        generation=normalization.attempt.generation,
+        item_id=core.ItemId(root="I-parked"),
+        phase=core.AttemptPhase.PARKED,
+        workspace=core.WorkspacePlan(
+            mode=core.WorkspaceMode.EXCLUSIVE_ROOT, base=state.run.facts.baseline
+        ),
+        budget=core.AttemptBudget(),
+    )
+    state = state.model_copy(
+        update={"attempts": state.attempts.model_copy(update={"attempts": (parked,)})}
+    )
+
+    def reopened(state: core.CoreState) -> tuple[core.StrategyEvent, ...]:
+        submitted = core.DecisionSubmitted(
+            decision=core.Wait(request=reopen, until=core.Within(limit=100.0)),
+            expected_revision=state.revision,
+        )
+        return core.step(state, submitted).events
+
+    # Uncancelled, the reopen passes validation and reaches the continuation it names, which
+    # this state does not hold.
+    with pytest.raises(core.ContractError, match="parked continuation"):
+        reopened(state)
+    control = _action("op", "cancel_item", item=parked.item_id.root)
+    state = core.step(state, core.RunControlEvent(control=control, now_at=state.run.now_at)).state
+    [rejected] = [e for e in reopened(state) if isinstance(e, core.Rejected)]
+    assert rejected.path == ("normalized_scope_reopen", "attempt")
+    assert rejected.code is core.RejectionCode.CLOSED_SCOPE

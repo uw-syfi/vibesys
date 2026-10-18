@@ -517,8 +517,10 @@ vibesys control <run-id> set-max-parallel 2
 ```
 
 `cancel-attempt` stops one attempt: it closes cancelled and is never evaluated or judged.
-`cancel-item` does that for every attempt at a work item that has not ended, and no new attempt
-at the item starts. `set-max-parallel N` changes how many attempts the run admits at once, from
+`cancel-item` does that for every attempt at a work item that runs or waits to run, and no new
+attempt at the item starts. A parked or blocked attempt at the item stays parked and is never
+reopened; one already finishing finishes, and its result stands. The notice the agents receive
+names what became of each attempt. `set-max-parallel N` changes how many attempts the run admits at once, from
 1 up to the limit the run was launched with; a lower limit starts nothing new until enough
 attempts end, and stops none that runs. Actions apply in the order they were posted, among the
 other requests. When the run takes an action, its agents are told what changed at their next
