@@ -16,7 +16,7 @@ import {type FakeHostWindow, listed, SEED, sidebar} from './world.js';
 const NOW = Date.parse('2026-10-17T12:00:00Z');
 const HOUR = 3_600_000;
 const QUEUE = '/home/me/projects/queue-rs';
-const STORE = '/home/me/projects/kv-store';
+const STORE = '/home/me/projects/store';
 
 interface Case {
   readonly id: string;
@@ -48,8 +48,8 @@ const CASES: readonly Case[] = [
   done(1),
   {...done(2), outcome: 'stopped', closing: 'interrupted', ideas: 2, ratio: 1.1},
   {...done(3), outcome: 'failed', closing: 'failed', ideas: 0, ratio: null, minutes: 1},
-  {...done(4), project: STORE, task: 'get-put'},
-  {...done(5), project: STORE, task: 'get-put', outcome: 'no-winner', ratio: null},
+  {...done(4), project: STORE, task: 'lookup'},
+  {...done(5), project: STORE, task: 'lookup', outcome: 'no-winner', ratio: null},
   done(6),
   {...done(7), outcome: null, closing: null},
   done(8),
