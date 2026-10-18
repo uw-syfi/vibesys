@@ -2,7 +2,7 @@
   {
     "path": ".agents/skills/review-pr/SKILL.md",
     "rule": "skill-lines",
-    "count": 169,
+    "count": 166,
     "reason": "Over the SKILL.md line limit since before the convention; move depth to references/."
   },
   {
