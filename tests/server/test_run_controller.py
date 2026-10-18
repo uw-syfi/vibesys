@@ -674,6 +674,23 @@ def test_a_withdrawal_of_no_standing_guidance_answers_its_protocol_error(tmp_pat
     assert parts.control.take_pending_withdrawals() == []
 
 
+def test_a_control_sent_after_the_run_ended_answers_that_run_control_is_unavailable(
+    tmp_path: Path,
+) -> None:
+    """The run ended before its session did: the same answer as a control after the session."""
+    parts = build_server_parts(tmp_path)
+    parts.operator_control.end()
+
+    with pytest.raises(RuntimeError) as refused:
+        parts.api.execute(
+            ControlCommand(timestamp=REQUEST_TIME, control=PauseRequest(control_id="p1"))
+        )
+
+    assert getattr(refused.value, "diagnostic_code", None) == "run_control_unavailable"
+    assert str(refused.value) == "Run control is unavailable after the run session ends"
+    assert not parts.control.pause_requested()
+
+
 def test_standing_guidance_is_journaled_in_force_then_ended(tmp_path: Path) -> None:
     """Guidance is journaled active, not waiting for a turn; its withdrawal pending, its end done.
 

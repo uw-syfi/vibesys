@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import partial
 from typing import TYPE_CHECKING
 
 from server.api.design import DesignLog
@@ -214,12 +215,14 @@ class ControlIdConflictError(RuntimeError):
         super().__init__(f"Control id {control_id!r} already named a different control")
 
 
-_REFUSALS: dict[RefusalReason, type[Exception]] = {
+_REFUSALS: dict[RefusalReason, Callable[[], Exception]] = {
     RefusalReason.NOT_PAUSED_ON_CAPACITY: CapacityWaitUnavailableError,
     RefusalReason.STOPPING: RunStoppingError,
     RefusalReason.UNKNOWN_TARGET: SteerTargetUnknownError,
     RefusalReason.ENDED_TARGET: SteerTargetEndedError,
     RefusalReason.NOT_STANDING: WithdrawNotStandingError,
+    # The run ended before its session did: the same answer as a control after the session.
+    RefusalReason.RUN_ENDED: partial(RunControlUnavailableError, _RunControlState.ENDED),
 }
 """The protocol error each refusal answers with."""
 
@@ -305,7 +308,8 @@ class RunControlSlot:
             ack = control.submit(request)
         match ack.status, ack.reason:
             case ControlStatus.REFUSED, RefusalReason() as reason:
-                raise _REFUSALS[reason]
+                refusal = _REFUSALS[reason]()
+                raise refusal
             case ControlStatus.CONFLICT, _:
                 raise ControlIdConflictError(request.control_id)
             case ControlStatus.PENDING, _:

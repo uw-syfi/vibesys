@@ -516,18 +516,30 @@ class RunControlBridge:
         """Answer every control left once the run has ended: none is left waiting.
 
         Only core's TERMINAL status says the run ended (``_run_end``); a run that may resume
-        keeps its controls waiting. A pause or resume the channel took after the last poll
-        is refused (``_refuse``) with core's reason, as one refused at commit is. Every inbox
-        request core holds is settled and every other one rejected with the run's end, each
-        rejection reported once. This runs after the end is durable, so it finds every
-        request a poster wrote before seeing the end; one written after is refused to its
-        poster, and reads as rejected whether or not this runs.
+        keeps its controls waiting. The operators' controls first stop taking new ones
+        (``ChannelRunControl.end``): each later one is refused in its ack. Then nothing more
+        reaches the channel, and this answers all it holds. A pause or resume is refused
+        (``_refuse``) with core's reason, as one refused at commit is, and each steer or
+        withdrawal is reported dropped with the run's end. Every inbox request core holds is
+        settled and every other one rejected with the run's end, each rejection reported
+        once. This runs after the end is durable, so it finds every request a poster wrote
+        before seeing the end; one written after is refused to its poster, and reads as
+        rejected whether or not this runs.
         """
         ending = run_ending(core)
         if ending is None:
             return
+        if self._control is not None:
+            self._control.end()
         # Core refuses every control of an ended run, so this records nothing.
         self._record_channel(core, core.run.now_at, [])
+        for steer in self._channel.take_pending_steer():
+            name = steer.control_id or "steer"
+            self._channel.notify_steer_dropped(f"steer {name} reached no turn: {ending}")
+        for withdrawal in self._channel.take_pending_withdrawals():
+            self._channel.notify_steer_dropped(
+                f"withdraw {withdrawal.control_id} ended nothing: {ending}"
+            )
         inbox = self._inbox
         if inbox is None:
             return

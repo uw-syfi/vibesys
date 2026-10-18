@@ -207,6 +207,8 @@ class RefusalReason(StrEnum):
     """A steer to an attempt that has ended: no turn of it could take the message."""
     NOT_STANDING = "not_standing"
     """A withdrawal naming no standing steer of the run that is still in force."""
+    RUN_ENDED = "run_ended"
+    """Any control sent after the run ended: no turn, pause or stop of the run is left to take it."""
 
 
 class ControlAck(_Request):
@@ -238,6 +240,7 @@ class ChannelRunControl:
         self._answered: dict[str, tuple[ControlRequest, ControlAck]] = {}
         self._recorded: Callable[[ControlRequest], bool | None] = _nothing_recorded
         self._check: Callable[[ControlRequest], RefusalReason | None] | None = None
+        self._ended = False
 
     def recall(self, recorded: Callable[[ControlRequest], bool | None]) -> None:
         """Answer ids the run recorded before this process, as ``recorded`` says.
@@ -264,6 +267,16 @@ class ChannelRunControl:
         with self._lock:
             self._check = check
 
+    def end(self) -> None:
+        """Refuse every control first sent from now on: the run has ended.
+
+        The run calls this once its end is durable, before it answers what the channel still
+        holds, so no control reaches the channel after that last pass. A control answered
+        before replays its first ack.
+        """
+        with self._lock:
+            self._ended = True
+
     def submit(self, request: ControlRequest) -> ControlAck:
         """Apply one control request once per ``control_id`` and say what became of it."""
         with self._lock:
@@ -284,6 +297,8 @@ class ChannelRunControl:
                     ack = self._ack(request, status)
                 case False:
                     return self._ack(request, ControlStatus.CONFLICT)
+                case None if self._ended:
+                    ack = self._ack(request, ControlStatus.REFUSED, RefusalReason.RUN_ENDED)
                 case None:
                     ack = self._apply(request)
             self._answered[request.control_id] = (request, ack)

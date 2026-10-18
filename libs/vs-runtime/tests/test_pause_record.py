@@ -42,6 +42,7 @@ from vs_core.api import (
     run_pause,
     step,
 )
+from vs_project.api import InboxEntry, RequestState, RequestStatus
 from vs_project.api.testing import FakeControlInbox
 from vs_runtime.api.core import OperatorInbox, RunControlBridge
 from vs_runtime.api.infrastructure import (
@@ -49,12 +50,16 @@ from vs_runtime.api.infrastructure import (
     ChannelRunControl,
     ControlAck,
     ControlRequest,
+    ControlStatus,
     PauseRequest,
     QuotaAction,
     QuotaPolicy,
+    RefusalReason,
     ResumeRequest,
     RunControlTransitionKind,
+    SteerRequest,
     StopRequest,
+    WithdrawRequest,
     create_run_control_channel,
     install_capacity_gate,
 )
@@ -459,14 +464,17 @@ def test_a_control_sent_after_the_last_poll_is_answered_when_the_run_ends() -> N
     """The run loop polls no more once core is TERMINAL; ``end`` answers what came after.
 
     A socket pause p3 sent between the last poll and the run's end is refused with core's
-    reason and its hold lifted, and an inbox request posted then is rejected with the run's
-    end, each told once.
+    reason and its hold lifted, a steer s5 and a withdrawal w6 sent then are reported
+    dropped with the run's end, and an inbox request posted then is rejected with it, each
+    told once.
     """
     run = _run()
     run.poll()
     _end_blocked(run)
     run.control.submit(PauseRequest(control_id="p3"))
     run.inbox.post("p4", PauseRequest(control_id="p4").model_dump_json().encode(), ended=_live)
+    run.control.submit(SteerRequest(control_id="s5", text="late"))
+    run.control.submit(WithdrawRequest(control_id="w6", withdraws="s5"))
     run.bridge.settled(run.core, running=False)
     run.bridge.end(run.core)
 
@@ -481,6 +489,95 @@ def test_a_control_sent_after_the_last_poll_is_answered_when_the_run_ends() -> N
         (RunControlTransitionKind.REQUEST_REJECTED, "p4")
     ]
     assert run.inbox.pending() == ()
+    ended = "the run ended: recovery blocked"
+    assert _dropped(run) == [
+        f"steer s5 reached no turn: {ended}",
+        f"withdraw w6 ended nothing: {ended}",
+    ]
+    assert run.channel.take_pending_steer() == []
+    assert run.channel.take_pending_withdrawals() == []
+
+
+_AFTER_THE_END: tuple[ControlRequest, ...] = (
+    PauseRequest(control_id="late"),
+    ResumeRequest(control_id="late"),
+    ResumeRequest(control_id="late", when="capacity_returns"),
+    StopRequest(control_id="late"),
+    SteerRequest(control_id="late", text="late"),
+    WithdrawRequest(control_id="late", withdraws="s0"),
+)
+
+
+@pytest.mark.parametrize("request_", _AFTER_THE_END, ids=lambda r: r.action.value)
+def test_a_control_sent_after_the_run_ended_is_refused_and_reaches_nothing(
+    request_: ControlRequest,
+) -> None:
+    """Once ``end`` has run, no later control waits: each is refused in its ack, for good."""
+    run = _run()
+    run.control.submit(PauseRequest(control_id="p0"))
+    run.poll()
+    _end_blocked(run)
+    run.bridge.settled(run.core, running=False)
+    run.bridge.end(run.core)
+    before = (run.channel.pause_state(), run.channel.stop_requested(), len(run.sink.transitions))
+
+    ack = run.control.submit(request_)
+    again = run.control.submit(request_)
+
+    assert ack.status is ControlStatus.REFUSED
+    assert ack.reason is RefusalReason.RUN_ENDED
+    assert again == ack
+    assert (
+        run.channel.pause_state(),
+        run.channel.stop_requested(),
+        len(run.sink.transitions),
+    ) == before
+    assert run.channel.take_pending_steer() == []
+    assert run.channel.take_pending_withdrawals() == []
+
+
+def test_a_control_answered_before_the_end_replays_its_ack_after_it() -> None:
+    """The end refuses only controls first sent after it; a resend keeps its first answer."""
+    run = _run()
+    first = run.control.submit(PauseRequest(control_id="p0"))
+    run.poll()
+    _end_blocked(run)
+    run.bridge.end(run.core)
+
+    assert run.control.submit(PauseRequest(control_id="p0")) == first
+
+
+class _RejectedOnceListed(FakeControlInbox):
+    """An inbox another process sets aside each request in, right after this one lists it."""
+
+    def pending(self) -> tuple[InboxEntry, ...]:
+        listed = super().pending()
+        for entry in listed:
+            self.reject(entry.request_id, "set aside by another process")
+        return listed
+
+
+def test_a_request_set_aside_already_is_not_reported_again() -> None:
+    """A rejection is reported once: only by the process whose mark set the request aside."""
+    run = _run()
+    inbox = _RejectedOnceListed()
+    bridge = RunControlBridge(run.channel, _Texts(), inbox=OperatorInbox(inbox, run.control))
+    inbox.post("p1", PauseRequest(control_id="p1").model_dump_json().encode(), ended=_live)
+    _end_blocked(run)
+
+    bridge.end(run.core)
+
+    assert _told(run) == []
+    assert inbox.status("p1", ended=None) == RequestStatus(
+        RequestState.REJECTED, "set aside by another process"
+    )
+
+
+def _dropped(run: _Run) -> list[str]:
+    """What the run reported dropped: steers that reached no turn, withdrawals that ended nothing."""
+    return [
+        t.text for t in run.sink.transitions if t.kind is RunControlTransitionKind.STEER_DROPPED
+    ]
 
 
 def test_a_refused_control_no_operator_can_be_told_of_is_logged(

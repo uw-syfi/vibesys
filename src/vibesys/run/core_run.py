@@ -175,13 +175,22 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
                     f"{type(cleanup_error).__name__}: {cleanup_error}"
                 )
         finally:
-            # An ended run sets aside what is left in its inbox, also when the loop raised
-            # after core recorded the end; a run that may resume keeps its requests.
-            controls.end(shell.record.envelope.core)
-            # A crashed process cannot reach this line, so its restart waits out the lease
-            # (see ``start_core_awaiting_lease``); any return or raise here frees it.
-            shell.release_lease(now_at=services.clock.now())
-            integration.events.emit(CoreEventType.RUN_ENDING, data=run_ending(shell))
+            try:
+                # An ended run answers every control left, also when the loop raised after
+                # core recorded the end; a run that may resume keeps its requests.
+                controls.end(shell.record.envelope.core)
+            except BaseException as end_error:
+                if run_error is None:
+                    raise
+                run_error.add_note(
+                    "Additional error while answering the run's last controls: "
+                    f"{type(end_error).__name__}: {end_error}"
+                )
+            finally:
+                # A crashed process cannot reach this line, so its restart waits out the
+                # lease (see ``start_core_awaiting_lease``); any return or raise here frees it.
+                shell.release_lease(now_at=services.clock.now())
+                integration.events.emit(CoreEventType.RUN_ENDING, data=run_ending(shell))
     if outcome.refusal is not None:
         raise CoreRunRefusedError(services.run_id, outcome.refusal)
     status = _status_of(outcome.result, shell)

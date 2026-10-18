@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
@@ -12,12 +13,18 @@ from vibesys.events import CoreEventType, RunEndingData
 from vibesys.run.core_run import CoreRunRefusedError, drive_core_run
 from vibesys.run.core_services import ClosableEvaluation, CoreServices
 from vibesys.run.host import CoreHost
-from vs_core.api import initial_state
+from vs_core.api import RunResultProposal, RunStatus, initial_state
 from vs_project.api import FakeStateStore, Project
+from vs_project.api.testing import FakeControlInbox
 from vs_runtime.api import ArtifactStore
 from vs_runtime.api.core import CoreRuntimeBindings, RunTiming
 from vs_runtime.api.core_shell_fixtures import CounterConfig, ShellTraceTransitions, counter
-from vs_runtime.api.infrastructure import create_run_control_channel
+from vs_runtime.api.infrastructure import (
+    PauseRequest,
+    RunControlTransitionKind,
+    RunStopped,
+    create_run_control_channel,
+)
 from vs_runtime.api.testing import FakeRunControlEventSink
 from vs_sim.api.testing import SimThreads, VirtualClock, run_virtual
 
@@ -28,9 +35,15 @@ if TYPE_CHECKING:
     from vibesys.events import CoreEventData
     from vibesys.run.integration import LocalRunIntegration
     from vs_core.api import CoreState
+    from vs_project.api import ControlInbox
     from vs_runtime.api import Evaluation, RunFacts
     from vs_runtime.api.core import AgentEvaluationBridge, CoreRuntime, OperationCatalog
-    from vs_runtime.api.infrastructure import OwnedWorkspaces, WorkspaceHolds
+    from vs_runtime.api.infrastructure import (
+        OwnedWorkspaces,
+        RunControlEventSink,
+        RunControlTransition,
+        WorkspaceHolds,
+    )
 
 
 class BridgeStartError(RuntimeError):
@@ -123,10 +136,26 @@ def _declared_state() -> CoreState:
     )
 
 
+@dataclass(frozen=True)
+class _Ended:
+    """A run whose committed core state has already ended, with an inbox and a control sink."""
+
+    state: CoreState
+    inbox: ControlInbox
+    sink: RunControlEventSink
+
+
 def _startup_host(
-    tmp_path: Path, bridge: _FailingBridge | None, *, stop_requested: bool = False
+    tmp_path: Path,
+    bridge: _FailingBridge | None,
+    *,
+    stop_requested: bool = False,
+    ended: _Ended | None = None,
 ) -> tuple[CoreHost, LocalRunIntegration, VirtualClock]:
-    """Build the public product boundary around the configured bridge fault."""
+    """Build the public product boundary around the configured bridge fault.
+
+    ``ended`` starts the run from a TERMINAL core state, over its inbox and control sink.
+    """
     project = Project.open(tmp_path)
     clock = VirtualClock(at=1.0)
     threads = SimThreads(clock)
@@ -142,7 +171,7 @@ def _startup_host(
         run_id="startup-ownership",
         search=counter,
         config=CounterConfig(),
-        state=_declared_state(),
+        state=_declared_state() if ended is None else ended.state,
         bindings=bindings,
         catalog=cast("OperationCatalog", object()),
         store=store,
@@ -153,6 +182,7 @@ def _startup_host(
         clock=clock,
         agent_evaluation=None if bridge is None else cast("AgentEvaluationBridge", bridge),
         stop_requested=stop_requested,
+        control_inbox=None if ended is None else ended.inbox,
     )
     workspaces = _FollowingWorkspaces()
     host = CoreHost(
@@ -164,7 +194,11 @@ def _startup_host(
     )
     integration = cast(
         "LocalRunIntegration",
-        _Integration(create_run_control_channel(FakeRunControlEventSink(), threads=threads)),
+        _Integration(
+            create_run_control_channel(
+                FakeRunControlEventSink() if ended is None else ended.sink, threads=threads
+            )
+        ),
     )
     return host, integration, clock
 
@@ -243,3 +277,85 @@ def test_a_run_force_stopped_before_starts_no_new_work_and_goes_straight_to_its_
     ((_type, ending),) = events.emitted
     assert isinstance(ending, RunEndingData)
     assert ending.rounds_finished == 0
+
+
+class SinkError(OSError):
+    """The run's control journal could not be written."""
+
+    def __init__(self) -> None:
+        super().__init__("control journal unwritable")
+
+
+class _FailingSink:
+    """A control sink whose journal write fails."""
+
+    def __call__(self, transition: RunControlTransition) -> object:
+        del transition
+        raise SinkError
+
+
+def _ended_run(sink: RunControlEventSink) -> _Ended:
+    """A run core already ended, with a pause posted to its inbox that it never applied."""
+    state = _declared_state()
+    result = RunResultProposal(outcome="cancelled", reason="stopped: by request")
+    state = state.model_copy(
+        update={
+            "run": state.run.model_copy(update={"status": RunStatus.TERMINAL, "result": result})
+        }
+    )
+    inbox = FakeControlInbox()
+    inbox.post("p1", PauseRequest(control_id="p1").model_dump_json().encode(), ended=_live)
+    return _Ended(state, inbox, sink)
+
+
+def _live() -> None:
+    return None
+
+
+@pytest.mark.parametrize("bridge", [None, _FailingBridge()], ids=["returns", "raises"])
+def test_an_ended_run_rejects_what_its_inbox_still_holds(
+    tmp_path: Path, bridge: _FailingBridge | None
+) -> None:
+    """The run answers every request left once it has ended, also when its loop raised."""
+    sink = FakeRunControlEventSink()
+    ended = _ended_run(sink)
+    host, integration, clock = _startup_host(tmp_path, bridge, ended=ended)
+
+    async def exercise() -> None:
+        with contextlib.suppress(BridgeStartError, CoreRunRefusedError, RunStopped):
+            await drive_core_run(host, integration)
+
+    run_virtual(clock, exercise())
+
+    assert ended.inbox.pending() == ()
+    assert [(t.kind, t.request_id) for t in sink.transitions] == [
+        (RunControlTransitionKind.REQUEST_REJECTED, "p1")
+    ]
+
+
+@pytest.mark.parametrize("bridge", [None, _FailingBridge()], ids=["returns", "raises"])
+def test_a_failure_answering_the_last_controls_still_releases_the_lease(
+    tmp_path: Path, bridge: _FailingBridge | None
+) -> None:
+    """The run's end is reported and its lease freed; the loop's own error is not replaced."""
+    host, integration, clock = _startup_host(tmp_path, bridge, ended=_ended_run(_FailingSink()))
+
+    async def exercise() -> BaseException:
+        with pytest.raises((SinkError, BridgeStartError)) as failure:
+            await drive_core_run(host, integration)
+        return failure.value
+
+    failure = run_virtual(clock, exercise())
+
+    if bridge is None:
+        assert isinstance(failure, SinkError)
+    else:
+        assert isinstance(failure, BridgeStartError)
+        assert failure.__notes__ == [
+            "Additional error while answering the run's last controls: "
+            "SinkError: control journal unwritable"
+        ]
+    events = cast("_Integration", integration).events
+    assert [event_type for event_type, _data in events.emitted] == [CoreEventType.RUN_ENDING]
+    # Another host takes the run's lease at once: this one freed it rather than let it lapse.
+    assert host.services.store.acquire("next-host", now=clock.now(), duration=1.0) is not None
