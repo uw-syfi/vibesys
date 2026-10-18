@@ -164,7 +164,8 @@ class EvaluationComparison(BaseModel):
     ``within_noise``. ``base_commit`` is the revision the base was measured at. More runs of
     the same candidate content add samples and narrow the noise. It describes the samples held
     when it is given: a candidate is ranked by the value stored at its official measurement,
-    which later runs do not move.
+    which later runs do not move. ``settling`` says it is provisional: a run of either side
+    that will feed it has not ended, so it may still change.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -179,6 +180,13 @@ class EvaluationComparison(BaseModel):
     base_commit: str = Field(min_length=1)
     candidate_samples: int = Field(ge=1)
     base_samples: int = Field(ge=1)
+    settling: bool = Field(
+        description=(
+            "Whether the comparison is provisional: a run of the candidate or of its base that "
+            "will add a sample is still under way, so the comparison may change when it lands. "
+            "Evaluate the unchanged content again later to read it then."
+        )
+    )
 
 
 class SubmittedReply(BaseModel):

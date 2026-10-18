@@ -580,3 +580,23 @@ async def test_an_agent_that_resumed_on_a_provisional_comparison_is_told_where_i
         assert told[0] == (ComparisonVerdict.WITHIN_NOISE, True), "first told as provisional"
         assert told[-1] == (ComparisonVerdict.BETTER, False), "later told where it ended"
         assert len(told) == len(set(told)), "each change is told once"
+
+
+@pytest.mark.regression
+async def test_a_repeat_evaluation_tells_the_agent_its_comparison_is_still_settling(
+    tmp_path: Path,
+) -> None:
+    """The tool's reply to a repeat call marks a comparison provisional, as a resume does.
+
+    With no declared noise core runs both sides again after the agent resumed. The resume
+    tells the agent to evaluate the unchanged content again to read the comparison once those
+    runs land; before, that reply carried no settling flag, so the agent could not tell a
+    provisional comparison from a final one.
+    """
+    task = TERMS.model_copy(update={"relative_noise": 0.0})
+    script = (Turn(speed=130.0), Turn(speed=131.0), Turn(peek=True))
+    async with play(tmp_path, script, task=task, pace=SLOW) as played:
+        (told,) = played.writer.seen
+        assert told is not None, "the tool reported no comparison to the agent"
+        assert told["settling"] is True, "core's runs of the comparison were still under way"
+        assert told["candidate_samples"] < 3

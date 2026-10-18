@@ -103,6 +103,7 @@ from vs_core.api import (
     SuspensionRefusal,
     Transition,
     Within,
+    comparison_settling,
     latest_comparisons,
     moment_of,
     suspension_refusal,
@@ -270,17 +271,20 @@ def _comparison_of(
 
     Read from core's log of comparisons for the input the submission measured, so the agent is
     told exactly what core recorded and replays on resume, and only while its base's samples
-    are still fresh on the run clock.
+    are still fresh on the run clock. It is marked settling as a resume marks it
+    (`comparison_settling`).
     """
     job = next((j for j in core.evaluation.jobs if j.submission_id == request_id), None)
     measured = None if job is None else job.plan.measured_input
     if measured is None:
         return None
     found = latest_comparisons(core.evaluation, scope, [measured], moment_of(core.run))
-    return agent_comparison(found[-1]) if found else None
+    if not found:
+        return None
+    return agent_comparison(found[-1], settling=comparison_settling(core.evaluation, found[-1]))
 
 
-def agent_comparison(comparison: Comparison) -> EvaluationComparison:
+def agent_comparison(comparison: Comparison, *, settling: bool) -> EvaluationComparison:
     """One core comparison as the wire contract the agent reads (the one projection)."""
     return EvaluationComparison(
         metric=comparison.metric,
@@ -294,6 +298,7 @@ def agent_comparison(comparison: Comparison) -> EvaluationComparison:
         base_commit=comparison.base.revision_id.root,
         candidate_samples=comparison.candidate_samples,
         base_samples=comparison.base_samples,
+        settling=settling,
     )
 
 
