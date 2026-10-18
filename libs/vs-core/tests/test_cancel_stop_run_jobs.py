@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, NamedTuple
 
+import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
@@ -525,6 +526,77 @@ def test_polls_stops_and_observations_at_shared_instants_never_conflict(
             run.no_record = False
             run.end_jobs()
             assert run.state.run.status == core.RunStatus.TERMINAL
+
+
+def _authorize(state: core.CoreState, requests: Iterable[core.Request]) -> core.CoreState:
+    for request in requests:
+        assert request.request_id is not None
+        state = core.step(state, core.DispatchAuthorized(request_id=request.request_id)).state
+    return state
+
+
+def _polls_blocked_by_late_restart(run: _Run) -> core.CoreState:
+    """Both jobs' polls in flight when the host died, blocked once it came back too late.
+
+    Every recovery inspection then lapses unanswered, so recovery stays BLOCKED and nothing
+    addresses the blocked polls any more: a closing run ends them itself.
+    """
+    for index in range(len(run.resources)):
+        run.observe(index, core.ObservationStatus.PENDING, accepted=True)
+    timers = [job.wait.timer for job in run.state.evaluation.jobs if job.wait is not None]
+    polled = core.step(run.state, core.ClockAdvanced(now_at=max(t for t in timers if t)))
+    state = _authorize(polled.state, polled.requests)
+    polls = [row for row in state.records.records if isinstance(row.request, core.ObserveOwnedJob)]
+    restart = max(poll.until.at for poll in polls) + 1.0
+    state = core.step(state, core.RecoveryStarted(epoch=2, now_at=restart)).state
+    late = restart + state.run.limits.reconciliation_bound
+    for poll in polls:
+        result = core.step(
+            state, core.ReconciliationDeadline(request_id=poll.request_id, now_at=late)
+        )
+        state = result.state
+        for block in result.requests:
+            if isinstance(block, core.BlockRequest):
+                state = _authorize(state, (block,))
+                answer = _answer(block, late).model_copy(
+                    update={"admission_id": block.admission_id}
+                )
+                state = core.step(state, core.RequestObserved(observation=answer)).state
+    inspections = [
+        row.request
+        for row in state.records.records
+        if row.phase == core.RequestPhase.PREPARED
+        and isinstance(row.request, core.InspectRequest)
+        and any(row.request.target == poll.request_id for poll in polls)
+    ]
+    state = _authorize(state, inspections)
+    lapsed = max(row.until.at for row in state.records.records) + 1.0
+    return core.step(state, core.ClockAdvanced(now_at=lapsed)).state
+
+
+@pytest.mark.regression
+def test_a_cancel_stop_that_ends_a_strategy_jobs_blocked_poll_cancels_an_agents_job_once() -> None:
+    """One cancel stop and the strategy job it ends both ask to cancel an agent's job.
+
+    Run r2 (2026-10-17): a recovery-blocked cancel stop asked to cancel an agent's job (its
+    submission has no decision), stamped with the stop's decision. In the same step the
+    closing run ended the strategy job's blocked poll, whose forwarded reading (caused by the
+    strategy's measure) asked for the same cancel again. Core stamped that copy with the
+    measure, so one cancel id carried two payloads and the run halted with "request identity
+    conflict". A job's steps are its own: both copies carry the agent job's (absent) decision.
+    """
+    run = _Run(2, agents=(True, False))
+    [agent_job] = [resource for resource, job in run.jobs.items() if job.decision_id is None]
+    state = _polls_blocked_by_late_restart(run)
+    assert state.records.recovery.phase == core.RecoveryPhase.BLOCKED
+    stopped = core.step(state, _stop(core.StopMode.CANCEL, state.run.now_at))
+    cancels = [
+        request
+        for request in stopped.requests
+        if isinstance(request, core.CancelOwnedJob) and request.resource_id == agent_job
+    ]
+    assert len(cancels) == 1
+    assert cancels[0].decision_id is None
 
 
 @settings(max_examples=examples(pr=6, nightly=200), deadline=None, database=None)
