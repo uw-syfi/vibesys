@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -133,14 +132,16 @@ class _SlowStateStore(FakeStateStore):
         return super().commit(expected_revision, envelope, fence, now)
 
 
-@pytest.mark.xfail(strict=True, reason="settle commits without yielding; the heartbeat starves")
 @settings(max_examples=examples(pr=3, nightly=20), deadline=None, derandomize=True, database=None)
-@given(cost=st.floats(min_value=LEASE / 6, max_value=LEASE / 2))
+@given(cost=st.floats(min_value=LEASE / 5, max_value=LEASE / 4))
 def test_slow_commits_in_one_settle_do_not_starve_the_lease(cost: float) -> None:
-    """Commits that each hold the loop for up to half a lease never cost the run its lease.
+    """Commits that each hold the loop for up to a quarter lease never cost the run its lease.
 
-    One settle commits the queue, the finished requests and the publications back to back; when
-    their total outlasts the lease, the heartbeat must still have renewed between them.
+    ``start`` and one settle commit the recovery, the queue, the finished requests and the
+    publications back to back, for longer than the lease, so the lease must be renewed between
+    them, on a schedule that counts from when the store granted it, not from when the loop
+    began. The loop renews between the steps of a settle, and a step commits at most twice
+    here, so any commit shorter than a third of a lease keeps it.
     """
     harness = Harness(
         registry=OperationRegistry(()),

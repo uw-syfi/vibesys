@@ -383,7 +383,8 @@ class CoreRuntime[S: StrategyState]:
         self._publication_failure: OSError | ContractError | None = None
         # Latest time a lease renewal or check supplied; commits never use an earlier time.
         self._time_floor = 0.0
-        # When this host last renewed its lease, and the latest renewal queued for core.
+        # When the store last granted this host its lease (acquired or renewed), and the
+        # latest renewal queued for core.
         self._renewed_at: float | None = None
         self._renewal_queued_at = 0.0
         self._queue: deque[_Input[S] | _Flush] = deque()
@@ -555,6 +556,7 @@ class CoreRuntime[S: StrategyState]:
             message = "runtime lease unavailable"
             raise LeaseUnavailableError(message)
         self._fence = fence
+        self._renewed_at = now_at
         provisional = provisional.model_copy(
             update={"fence": HostFence(host_id=HostId(root=fence.host_id), epoch=fence.epoch)}
         )
@@ -611,6 +613,19 @@ class CoreRuntime[S: StrategyState]:
         self._fence = renewed
         self._renewed_at = self._time_floor
         return renewed
+
+    @property
+    def lease_renewed_at(self) -> float:
+        """When the store last granted this host its lease; it lapses a lease duration later.
+
+        The time of the acquisition at ``start`` or of the latest ``renew``, in the store's
+        time, so a caller that schedules renewals from it never trusts a lease older than it
+        thinks (``start`` may commit for a long time after acquiring).
+        """
+        if self._renewed_at is None:
+            message = "runtime has no lease"
+            raise RuntimeCommitError(message)
+        return self._renewed_at
 
     def record_renewal(self) -> None:
         """Queue the latest lease renewal for core, which records that this host was alive then.
@@ -1319,7 +1334,9 @@ class CoreRuntime[S: StrategyState]:
         if self._flights:
             await asyncio.wait([f.task for f in self._flights], return_when=asyncio.FIRST_COMPLETED)
 
-    async def settle(
+    async def settle(  # noqa: PLR0913  # lint-waiver: LW-517306 [PLR0913]; the loop's lease upkeep joins the settle's limits as one more keyword.
+        # > A settings object bundling the limits and the upkeep adds a type for two call sites;
+        # > storing the upkeep on the shell makes every other settle caller inherit the loop's.
         self,
         delivery: PublicationDelivery,
         *,
@@ -1327,6 +1344,7 @@ class CoreRuntime[S: StrategyState]:
         max_dispatches: int | None = None,
         max_concurrent: int = 1,
         refusal: ExecutorRefusal | None = None,
+        upkeep: Callable[[], None] = lambda: None,
     ) -> ExecutorRefusal | None:
         """Do everything that does not wait for a running request, then return.
 
@@ -1348,16 +1366,19 @@ class CoreRuntime[S: StrategyState]:
         ``_finish_done``). ``max_dispatches`` bounds the requests executed from now on:
         a cycle that keeps issuing requests raises ``DispatchCapExceededError`` naming the
         kinds seen, so a spinning run fails loudly instead of hanging.
+
+        ``upkeep`` runs after every step that committed. Each commit rewrites the whole record
+        on the loop's thread, at a cost that grows with the run, and nothing here need suspend
+        (a delivery may not), so a long queue committed back to back can hold the loop for
+        longer than the lease while the heartbeat task cannot run: the caller renews it there
+        when it is due.
         """
         entered = self._dispatched
         try:
             while True:
                 # A failed request surfaces before anything else commits.
-                if self._finish_done():
-                    continue
-                if await self.cancel_ended(now_at):
-                    continue
-                if self.advance():
+                if self._finish_done() or await self.cancel_ended(now_at) or self.advance():
+                    upkeep()
                     continue
                 if refusal is None:
                     budget = None if max_dispatches is None else max_dispatches + entered
@@ -1367,6 +1388,7 @@ class CoreRuntime[S: StrategyState]:
                     if published or self._publication_failure is not None:
                         # The await let requests finish, tools admit inputs and heartbeats
                         # commit: consume them before the next request starts.
+                        upkeep()
                         continue
                 if self._flights:
                     return refusal
@@ -1406,11 +1428,19 @@ class CoreRuntime[S: StrategyState]:
             await self.wait_for_flight()
 
     async def finish_in_flight(
-        self, delivery: PublicationDelivery, *, now_at: float, refusal: ExecutorRefusal
+        self,
+        delivery: PublicationDelivery,
+        *,
+        now_at: float,
+        refusal: ExecutorRefusal,
+        upkeep: Callable[[], None] = lambda: None,
     ) -> None:
-        """Let the running requests finish and commit after ``refusal``, starting nothing."""
+        """Let the running requests finish and commit after ``refusal``, starting nothing.
+
+        ``upkeep`` is as for ``settle``.
+        """
         while True:
-            await self.settle(delivery, now_at=now_at, refusal=refusal)
+            await self.settle(delivery, now_at=now_at, refusal=refusal, upkeep=upkeep)
             if not self._flights:
                 return
             await self.wait_for_flight()
