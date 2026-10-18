@@ -34,7 +34,7 @@ from vibesys.run.agent_events import CoreAgentEventSink
 from vibesys.run.event_journal import EventJournal
 from vs_core.api import FlowDriver, FlowState, RunTrace, SpanChange, span_changes
 from vs_project.api import git_repositories
-from vs_runtime.api.core import RuntimeRecord, new_comparisons, winner_selection
+from vs_runtime.api.core import RuntimeRecord, new_comparisons, new_runaways, winner_selection
 from vs_runtime.api.infrastructure import (
     AgentExecutionLifecycleEvent,
     AgentExecutionStarted,
@@ -57,7 +57,7 @@ if TYPE_CHECKING:
     from vibesys.config import Config
     from vibesys.constants import ComputeBackend
     from vs_agent.api import AgentEventSink
-    from vs_core.api import Comparison
+    from vs_core.api import Comparison, Runaway
     from vs_github.api import GitHubCLI
     from vs_project.api import Git, GitRepositoryFactory, Project, StateStoreFactory
     from vs_runtime.api.core import WinnerSelection
@@ -383,6 +383,24 @@ def _emit_comparisons(events: EventJournal, comparisons: tuple[Comparison, ...])
         )
 
 
+def _emit_runaways(events: EventJournal, runaways: tuple[Runaway, ...]) -> None:
+    """Warn of each attempt whose agent core newly recorded as asking for too many evaluations."""
+    for runaway in runaways:
+        events.emit(
+            CoreEventType.FRAMEWORK_WARNING,
+            data=FrameworkWarningData(
+                summary="an agent has asked for an unusual number of evaluations",
+                detail=(
+                    f"the attempt {runaway.scope.owner.root} (generation {runaway.scope.generation})"
+                    f" has asked for {runaway.evaluations} evaluations (warning at "
+                    f"{runaway.limit}); evaluations are not limited, so nothing was refused"
+                ),
+                source=FrameworkSource.LOOP,
+                source_label="evaluations",
+            ),
+        )
+
+
 _SPAN_EVENTS: dict[
     SpanChange, tuple[CoreEventType, type[SpanStartedData | SpanUpdatedData | SpanEndedData]]
 ] = {
@@ -469,6 +487,10 @@ class _CoreCommitObserver:
             _emit_comparisons(
                 self._integration.events,
                 new_comparisons(previous if isinstance(previous, RuntimeRecord) else None, current),
+            )
+            _emit_runaways(
+                self._integration.events,
+                new_runaways(previous if isinstance(previous, RuntimeRecord) else None, current),
             )
         _emit_span_changes(self._integration.events, _run_trace(previous), _run_trace(current))
 

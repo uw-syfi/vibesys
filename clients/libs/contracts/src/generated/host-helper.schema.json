@@ -1089,6 +1089,70 @@
       "title": "HarnessChoice",
       "type": "object"
     },
+    "HarnessDisplay": {
+      "additionalProperties": false,
+      "description": "How a provider and model pair reads, as agentshim names it.",
+      "properties": {
+        "provider_name": {
+          "title": "Provider Name",
+          "type": "string"
+        },
+        "model_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Name"
+        },
+        "family": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Family"
+        },
+        "tier": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tier"
+        },
+        "tier_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tier Name"
+        }
+      },
+      "required": [
+        "provider_name"
+      ],
+      "title": "HarnessDisplay",
+      "type": "object"
+    },
     "HarnessOption": {
       "additionalProperties": false,
       "description": "A vetted provider and model pair a run may start with.",
@@ -1104,6 +1168,17 @@
         "default": {
           "type": "boolean",
           "title": "Default"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HarnessDisplay"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -2725,6 +2800,13 @@
           },
           "title": "Harness Clis",
           "type": "array"
+        },
+        "harness_cli_names": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Harness Cli Names",
+          "type": "object"
         },
         "runs": {
           "$ref": "#/$defs/RunCounts"

@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 from entrypoints.launcher import headless_command, source_checkout_root
 from server.host_api import HarnessOption
+from server.host_harness import HarnessDisplay
 from server.host_helper import serve_channel
 from server.host_helper_logs import HelperLogs, run_location
 from server.host_helper_machine import HostMachineProbe
@@ -81,16 +82,31 @@ def vetted_harnesses() -> tuple[HarnessOption, ...]:
     # > level every channel would pay for it before `hello` (the light-entrypoint guards forbid
     # > it). A copy of the list in a light module would be a second source of truth, and a
     # > generated copy would need a drift check for what one deferred import already gives.
-    from vs_agent.api import default_model, harnesses  # noqa: PLC0415
-
-    return tuple(
-        HarnessOption(
-            provider=harness.provider,
-            model=harness.model,
-            default=default_model(harness.provider) == harness.model,
-        )
-        for harness in harnesses()
+    from vs_agent.api import (  # noqa: PLC0415
+        default_model,
+        harnesses,
+        model_display,
+        provider_display_name,
     )
+
+    options: list[HarnessOption] = []
+    for harness in harnesses():
+        shown = model_display(harness.provider, harness.model)
+        options.append(
+            HarnessOption(
+                provider=harness.provider,
+                model=harness.model,
+                default=default_model(harness.provider) == harness.model,
+                display=HarnessDisplay(
+                    provider_name=provider_display_name(harness.provider),
+                    model_name=None if shown is None else shown.model_name,
+                    family=None if shown is None else shown.family,
+                    tier=None if shown is None else shown.tier,
+                    tier_name=None if shown is None else shown.tier_name,
+                ),
+            )
+        )
+    return tuple(options)
 
 
 @cache

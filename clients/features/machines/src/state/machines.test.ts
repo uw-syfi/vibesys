@@ -21,7 +21,8 @@ const FACTS: MachineDescription = {
   checkout: {root: '/home/me/vibesys', version: '0.1.1', commit: 'e66d941aa', dirty: false},
   hardware: {cpu_cores: 64, gpus: [], accelerator: 'cpu'},
   docker: {reachable: true, version: '29.1'},
-  harness_clis: ['claude', 'codex'],
+  harness_clis: ['claude', 'codex', 'mystery'],
+  harness_cli_names: {claude: 'Claude Code', codex: 'Codex'},
   runs: {live: 1, ended_today: 2},
 };
 
@@ -355,7 +356,7 @@ describe('machinesStep', () => {
       {key: 'Version', value: '0.1.1 · e66d941 · clean', mono: true},
       {key: 'Hardware', value: '64 CPU cores · no GPU', mono: false},
       {key: 'Docker', value: 'docker 29.1', mono: false},
-      {key: 'Harnesses', value: 'Claude · Codex installed', mono: false},
+      {key: 'Harnesses', value: 'Claude Code · Codex · mystery installed', mono: false},
       {key: 'Runs', value: '1 live · 2 ended today', mono: false},
     ]);
   });

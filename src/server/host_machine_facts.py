@@ -14,7 +14,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, NonNegativeInt, PositiveInt, model_validator
+from pydantic import BaseModel, ConfigDict, Field, NonNegativeInt, PositiveInt, model_validator
 
 
 class Accelerator(StrEnum):
@@ -104,4 +104,7 @@ class MachineDescription(BaseModel):
     docker: DockerReachable | DockerUnreachable
     harness_clis: tuple[str, ...]
     """The vetted harness providers whose CLI is installed on this machine, in offer order."""
+    harness_cli_names: dict[str, str] = Field(default_factory=dict)
+    """Each of ``harness_clis`` as people call it ("Claude Code"), as agentshim names it; a
+    helper that predates it sends none and a client shows the provider id."""
     runs: RunCounts

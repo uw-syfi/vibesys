@@ -21,10 +21,9 @@ freely.
 {% if retry > 1 %}
 ## Same-round retry boundary
 
-This is attempt {{ retry }} of the same framework round. Target or paid work recorded by any
-prior attempt remains consumed against the typed plan's hard maximum over all branches. Do not
-repeat exhausted target work; make the smallest local/report-only correction or return the
-truthful incomplete outcome.
+This is attempt {{ retry }} of the same framework round. Target work recorded by any prior
+attempt stays on record. Do not repeat work that already answered its question; make the
+smallest local/report-only correction or return the truthful incomplete outcome.
 {% endif %}
 {% if no_valid_reply %}
 
@@ -37,11 +36,10 @@ schema-valid JSON object this time.
 {{ continuation_step }}
 
 This delta replaces original task/pass criteria, but cannot change the
-hypothesis, falsifier, minimum, invariants, paid cap, evidence/workload identity,
+hypothesis, falsifier, minimum, invariants, evidence/workload identity,
 or correctness/lifecycle/evaluation gates. It grants scope, not authority.
-Tally cumulative paid work from your own records; rounds/reviews/retries do not
-replenish it. If spent or new authority is needed, make no paid call and return
-a terminal outcome with empty {{ reply.next_step }}.
+If the work needs new authority, return a terminal outcome with empty
+{{ reply.next_step }}.
 
 {% if feedback %}
 ## New review/framework feedback

@@ -81,6 +81,7 @@ from server.host_envelope import (
     RunId,
 )
 from server.host_examples import CreatedProject, ExampleList
+from server.host_harness import HarnessChoice, HarnessOption
 from server.host_machine_facts import MachineDescription
 from server.host_preflight import Backend, Check, RoleName, RunOptions
 from server.host_run_summary import RunsSummaryReply, RunsSummaryRequest
@@ -900,26 +901,6 @@ class ResumeLatest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     latest: Literal[True]
-
-
-class HarnessChoice(BaseModel):
-    """One agent CLI provider and one model it runs."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    provider: str
-    model: str
-
-
-class HarnessOption(BaseModel):
-    """A vetted provider and model pair a run may start with."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    provider: str
-    model: str
-    default: bool
-    """The model a run on ``provider`` uses when nothing names one."""
 
 
 class HarnessesListRequest(HelperRequestBase):

@@ -365,7 +365,62 @@ describe('Hosts.harnesses', () => {
 
     await expect(subject.hosts.harnesses(LOCAL)).resolves.toEqual({
       kind: 'listed',
-      harnesses: [...link.helper.host.harnesses],
+      harnesses: link.helper.host.harnesses.map(({provider, model, default: isDefault}) => ({
+        provider,
+        model,
+        default: isDefault,
+      })),
+    });
+  });
+});
+
+describe('Hosts.harnesses display', () => {
+  test('carries how each pair reads, a pair the model is unnamed for with only the provider name, and none for a pair without it', async () => {
+    const link = new FakeLink();
+    link.helper.host.harnesses.splice(
+      0,
+      link.helper.host.harnesses.length,
+      {
+        provider: 'claude',
+        model: 'claude-opus-5-5',
+        default: true,
+        display: {
+          provider_name: 'Claude Code',
+          model_name: 'Opus 5.5',
+          family: 'Claude',
+          tier: 3,
+          tier_name: 'Opus',
+        },
+      },
+      {provider: 'codex', model: 'gpt-a', default: true},
+      {
+        provider: 'codex',
+        model: 'gpt-x',
+        default: false,
+        display: {provider_name: 'Codex'},
+      },
+    );
+    const subject = completionSubject(link);
+    await using _manager = subject.manager;
+
+    await expect(subject.hosts.harnesses(LOCAL)).resolves.toEqual({
+      kind: 'listed',
+      harnesses: [
+        {
+          provider: 'claude',
+          model: 'claude-opus-5-5',
+          default: true,
+          display: {
+            providerName: 'Claude Code',
+            modelName: 'Opus 5.5',
+            family: 'Claude',
+            tier: 3,
+            tierName: 'Opus',
+          },
+        },
+        {provider: 'codex', model: 'gpt-a', default: true},
+        {provider: 'codex', model: 'gpt-x', default: false, display: {providerName: 'Codex'}},
+      ],
     });
   });
 });

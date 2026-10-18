@@ -64,9 +64,12 @@ _SCENARIOS = tuple(
 # server.host_envelope and server.host_run_summary (the helper's request and reply bases and the
 # runs.summary messages, split out of server.host_api) add 2; the summary's fold and cache load on
 # the first runs.summary, never for hello (asserted below).
+# server.host_harness (the harness choice and its display names, split from host_api to hold its
+# file-length ceiling) adds 1.
+
 # server.run_digest (the run digest fold) and server.host_machine_facts (the machine facts
 # moved out of host_api) add 2 more; the summary's fold and cache load on the first request.
-_MODULE_CEILING = 351
+_MODULE_CEILING = 352
 """The most modules a helper may load to answer ``hello``; lower it as the helper sheds imports."""
 _HELLO = {
     "type": "hello",

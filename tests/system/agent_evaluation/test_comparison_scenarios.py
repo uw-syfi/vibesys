@@ -38,7 +38,7 @@ from tests.system.agent_evaluation.test_bridge import (
     run,
 )
 
-from vibesys.events import CoreEvent, CoreEventType, MeasurementComparedData
+from vibesys.events import CoreEvent, CoreEventType, FrameworkWarningData, MeasurementComparedData
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api import AgentClient
 from vs_agent.api.testing import FakeAgentInvocationStore, FakeProvider
@@ -222,6 +222,7 @@ async def play(
     *,
     seed: int = 7,
     commits: CommitObserver | None = None,
+    task: TaskTerms = TERMS,
 ) -> AsyncIterator[Played]:
     """Run the skeleton search with an implementer that plays ``script``; yield what happened."""
     writers: list[ScriptedWriter] = []
@@ -275,7 +276,7 @@ async def play(
     ) as world:
         world.yields = yields
         world.limits = sample_limits(max_turns=len(script) + 2)
-        world.task = TERMS
+        world.task = task
         world.commits = commits
         process, _ = await run(Scenario(world, writers[0], bridges))
         state = process.shell.record.envelope.core
@@ -438,3 +439,34 @@ async def test_the_run_events_carry_what_core_compared(tmp_path: Path) -> None:
         told = played.writer.seen[-1]
         assert told is not None
         assert told["ratio"] == emitted[-1].ratio
+
+
+async def test_an_egregious_count_of_evaluations_is_warned_of_once_and_none_is_refused(
+    tmp_path: Path,
+) -> None:
+    """Evaluations have no allowance: the third call reaches the limit, the run warns, all run."""
+    integration = LocalRunIntegration(
+        clock=ManualClock(),
+        git=NO_GIT,
+        github=NO_GITHUB,
+        threads=SimThreads(),
+        system=idle_environment_system(),
+    )
+    heard: list[CoreEvent] = []
+    integration.events.subscribe(heard.append)
+    observer = integration.core_commit_observer(RUN_ID, None, "runaway-events")
+    script = (Turn(speed=110.0), Turn(speed=120.0), Turn(speed=130.0), Turn(speed=140.0))
+    task = TERMS.model_copy(update={"runaway_evaluations": 3})
+    async with play(tmp_path, script, commits=observer, task=task) as played:
+        calls = played.process.shell.record.envelope.core.evaluation.agent_calls
+        assert len([c for c in calls if c.request_id is not None and not c.repeat]) == 4
+        assert all(call.rejection is None for call in calls)
+        warned = [
+            event.data
+            for event in heard
+            if event.type is CoreEventType.FRAMEWORK_WARNING
+            and isinstance(event.data, FrameworkWarningData)
+            and event.data.source_label == "evaluations"
+        ]
+        assert len(warned) == 1
+        assert "3 evaluations" in (warned[0].detail or "")

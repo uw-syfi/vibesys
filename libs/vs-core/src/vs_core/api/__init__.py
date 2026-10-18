@@ -488,6 +488,7 @@ from vs_core.types.measurement import (
     Comparison,
     ComparisonVerdict,
     Reading,
+    Runaway,
     Sample,
 )
 from vs_core.types.records import (
@@ -1211,6 +1212,7 @@ __all__ = [
     "RunTask",
     "RunTrace",
     "RunView",
+    "Runaway",
     "Sample",
     "SchedulingChange",
     "SchedulingContext",

@@ -17,9 +17,27 @@ export interface HarnessChoice {
   readonly model: string;
 }
 
-/** A vetted pair; `default` marks the model a run on `provider` uses when nothing names one. */
+/** How a pair reads, as agentshim names it; a client renders these and never derives a name from an id. */
+interface HarnessDisplay {
+  /** The provider's CLI as people call it ("Claude Code"). */
+  readonly providerName: string;
+  /** The model alone ("Opus 5.5"); absent when agentshim does not name it: show the raw id. */
+  readonly modelName?: string;
+  /** The model line ("Claude", "GPT", "Gemini"); absent exactly when `modelName` is. */
+  readonly family?: string;
+  /** The model's rank in its family, 1 the smallest and cheapest; absent off the ladder. */
+  readonly tier?: number;
+  /** The tier as people call it ("Opus"); absent exactly when `tier` is. */
+  readonly tierName?: string;
+}
+
+/**
+ * A vetted pair; `default` marks the model a run on `provider` uses when nothing names one.
+ * `display` is absent when the host's helper predates it: the pair is then listed flat.
+ */
 export interface HarnessOffer extends HarnessChoice {
   readonly default: boolean;
+  readonly display?: HarnessDisplay;
 }
 
 /** The host's vetted harnesses, or `unsupported` when its helper predates the choice. */

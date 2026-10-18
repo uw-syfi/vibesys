@@ -38,7 +38,7 @@ from .evaluation_history import (
     RepeatedFailureGuidance,
 )
 from .job_observations import JobProgress, JobTimeout, MeasurementFailure, TimedOut
-from .measurement import BaseRef, BaseRun, Comparison, Reading, Sample
+from .measurement import BaseRef, BaseRun, Comparison, Reading, Runaway, Sample
 from .until import Within
 from .waits import WaitOn
 
@@ -617,6 +617,11 @@ class EvaluationState(Value):
 
     Appended whenever a new sample changes what a candidate compares to, so the log shows how
     a verdict firmed up as runs were added. The newest of a (scope, candidate input) is current.
+    """
+    runaways: tuple[Runaway, ...] = Field(default=(), exclude_if=unset)
+    """The scopes whose agent asked for an egregious number of evaluations, once each.
+
+    Evaluations have no allowance; this log only lets the run say so (`vs_core._runaway`).
     """
 
     def asked_without_decision(self, request_id: RequestId, scope: Scope) -> bool:

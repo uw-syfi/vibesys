@@ -94,7 +94,13 @@ from vs_agent.provider_policy import (
     harnesses,
     vetted_models,
 )
-from vs_agent.provider_profiles import launch_shell_environment, provider_binary
+from vs_agent.provider_profiles import (
+    ModelDisplay,
+    launch_shell_environment,
+    model_display,
+    provider_binary,
+    provider_display_name,
+)
 from vs_agent.reply_limits import (
     MAX_REPLY_BYTES,
     MAX_WHITESPACE_RUN,
@@ -229,6 +235,7 @@ __all__ = [
     "InvocationOutcome",
     "JsonResultPayload",
     "MCPServerSpec",
+    "ModelDisplay",
     "NullAgentEventSink",
     "NullSessionStore",
     "OrphanReapError",
@@ -283,10 +290,12 @@ __all__ = [
     "inspect_invocation_journal",
     "launch_shell_environment",
     "materialize_skills",
+    "model_display",
     "native_schema",
     "native_schema_problems",
     "parse_typed_response",
     "provider_binary",
+    "provider_display_name",
     "reap_orphaned_agents",
     "reply_breach",
     "session_env_allowlist",
