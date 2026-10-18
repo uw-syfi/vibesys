@@ -41,13 +41,13 @@ test('the performance row has a tile per objective, each with its unit and what 
   await shot(page, 'two-objectives-hero');
 });
 
-test('the trade-off chart marks the input, the frontier, the dominated and the turned down', async ({
+test('the trade-off chart marks the input, the frontier, the dominated and the failed', async ({
   page,
 }) => {
   await openFixture(page, fixtureNamed('finished-two-objectives'));
   await expect(chart(page)).toBeVisible();
   await expect(roleOf(page, 'input')).toHaveCount(1);
-  await expect(roleOf(page, 'rejected')).toHaveCount(1);
+  await expect(roleOf(page, 'failed')).toHaveCount(1);
   expect(await roleOf(page, 'frontier').count()).toBeGreaterThanOrEqual(3);
   expect(await roleOf(page, 'dominated').count()).toBeGreaterThanOrEqual(1);
   await expect(chart(page).locator('path.vs-pareto-frontier')).toHaveCount(1);
@@ -55,7 +55,7 @@ test('the trade-off chart marks the input, the frontier, the dominated and the t
   await expect(chart(page)).toContainText('Total ops/sec (ops/s), higher is better');
   await expect(chart(page)).toContainText('P99 latency (ms), lower is better');
   const key = page.getByRole('list', {name: 'Points'});
-  for (const word of ['Input', 'On the frontier', 'Dominated', 'Turned down']) {
+  for (const word of ['Input', 'On the frontier', 'Dominated', 'Failed']) {
     await expect(key.getByText(word, {exact: true})).toBeVisible();
   }
   await shot(page, 'two-objectives-chart');

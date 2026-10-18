@@ -83,7 +83,11 @@ commit and the input. All samples of one input under one evaluation are one meas
 aggregated, never picked among, and never refused for being several.
 
 Core compares a candidate with its own base, the revision the attempt's workspace was opened on
-(`WorkspacePlan.base`), whose measured input the bridge digests (`AgentMeasurementRequested.base_input`).
+(`WorkspacePlan.base`), whose measured input the runtime digests when it ensures that workspace
+(`AttemptView.base_input`). The agent's evaluation is compared with it, and so is the strategy's
+official check when the strategy asks for the comparison (`Measure.compared`, set by
+`ctx.evaluation.measure_compared`), so an idea whose implementer never called the tool still has
+one. A strategy that does not ask is measured as before, with no base run.
 `vs_core._comparison` holds the statistic, which its docstring states. The decisions that need
 state live in `vs_core._base_runs`:
 
@@ -105,7 +109,10 @@ state live in `vs_core._base_runs`:
   or refused) is replaced for every candidate that waited on it;
 - the run is core's own (`CoreRun`), in the candidate's scope. It is not the attempt's
   evaluation history, so the agent's resume never waits for it: the turn resumes when its own
-  jobs end, and the comparison it reads next grows as core's runs land.
+  jobs end, and the comparison it reads next grows as core's runs land. The strategy's verdict
+  does wait: `ctx.evaluation.measure_compared` hands back the comparison once no run that feeds
+  it is under way (`StatedComparison.settling` in the run's view), or as it stands when three
+  times the measurement's limit is spent.
 
 The comparison reaches the agent twice: in the tool's reply for a finished evaluation
 (`SubmittedReply.comparison`, absent while the base has not ended) and in the resume prompt

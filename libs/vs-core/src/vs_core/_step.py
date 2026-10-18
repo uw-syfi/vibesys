@@ -1029,7 +1029,11 @@ def _decision_signal(state: CoreState, decision: Command) -> tuple[Signal, ...]:
         case Withdraw():
             signals = _withdraw_signal(state, decision)
         case Measure():
-            signals = (MeasurementRequested(scope=decision.scope, plan=decision.plan),)
+            signals = (
+                MeasurementRequested(
+                    scope=decision.scope, plan=decision.plan, compared=decision.compared
+                ),
+            )
         case ProposeWinner():
             signals = (WinnerProposed(selection=decision.selection),)
         case Finish():

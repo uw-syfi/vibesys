@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from ._comparison import comparison_of_result, moment_of
+from ._comparison import comparison_of_result, moment_of, stated_comparisons
 from ._registry import ContractError
 from .types.attempts import AttemptExhausted, CheckpointResolved
 from .types.common import Scope
@@ -73,6 +73,7 @@ def run_view(core: CoreState) -> RunView:
         attempts=tuple(AttemptSummary.of(view) for view in core.attempts.attempts),
         measurements=core.evaluation.evidence,
         settlements=core.settlement.settlements,
+        comparisons=stated_comparisons(core.evaluation, moment_of(run)),
     )
 
 

@@ -608,6 +608,7 @@ class RuntimeWorkspaceRequests:
             children_complete=True,
             resource_id=resource_id,
             revision=request.plan.base,
+            measured_input=await self._workspaces.root.measured_input(base),
         )
 
     async def _root_baseline(self, root: RuntimeWorkspace) -> RootBaseline:
@@ -671,6 +672,7 @@ class RuntimeWorkspaceRequests:
             children_complete=True,
             resource_id=binding.resource_id,
             revision=request.plan.base,
+            measured_input=await live.measured_input(base),
         )
 
     def _bind(

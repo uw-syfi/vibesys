@@ -41,6 +41,7 @@ export const CLEAN_SCREEN = `
     <div>Lock-free ring with per-slot sequence numbers</div>
     <div><span data-mono-id>claude-opus-5-5</span> <span data-mono-id>perf-evaluator</span> <code>judge</code></div>
     <div>queue-rs · mpmc</div>
+    <div class="vs-pickrow"><span class="vs-pickrow-text"><span>Ring buffer</span><span>Within noise</span></span><span class="vs-chip">Passed</span></div>
     <div style="display:flex;flex-direction:column;height:80px">
       <div style="max-height:60px;overflow-y:auto"><div style="height:200px">rows</div></div>
       <div>Start</div>
@@ -180,6 +181,12 @@ export const BAD_SCREENS: readonly BadScreen[] = [
     check: 'strike',
     message: /struck through and reads as deleted: "failed"/,
     html: `<div style="${PAGE}"><button><s><span>failed</span></s></button></div>`,
+  },
+  {
+    name: 'a row whose line under its title repeats its badge',
+    check: 'repeat',
+    message: /a row says "Passed" twice/,
+    html: `<div style="${PAGE}"><div class="vs-pickrow"><span class="vs-pickrow-text"><span>Ring buffer</span><span>Passed</span></span><span class="vs-chip">Passed</span></div></div>`,
   },
   {
     name: 'a performance chart a third of the readable width',

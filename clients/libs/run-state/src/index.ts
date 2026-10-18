@@ -44,6 +44,7 @@ export {
   type ExecutionTodos,
   hasRunEnded,
   initialCoreState,
+  type MeasurementComparison,
   type ProviderSwitch,
   type QuotaPause,
   type QuotaState,

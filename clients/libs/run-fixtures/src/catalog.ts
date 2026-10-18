@@ -3,6 +3,7 @@
  * commit. `pnpm --filter @vibesys/app-desktop-shell fixtures` rewrites the data files; a test holds
  * the synthetic ones equal to their scenarios.
  */
+import basesAndEffects from './data/bases-and-effects.json' with {type: 'json'};
 import continuation from './data/continuation-rounds.json' with {type: 'json'};
 import failures from './data/failure-reasons.json' with {type: 'json'};
 import finished from './data/finished-run.json' with {type: 'json'};
@@ -23,6 +24,7 @@ const SOURCES: readonly unknown[] = [
   retried,
   continuation,
   bases,
+  basesAndEffects,
   reconnect,
   finished,
   tenIdeas,
@@ -45,6 +47,7 @@ export const FIXTURE_NAMES: readonly string[] = [
   'retries',
   'continuation-rounds',
   'non-input-bases',
+  'bases-and-effects',
   'live-reconnect',
   'finished-run',
   'finished-ten-ideas',

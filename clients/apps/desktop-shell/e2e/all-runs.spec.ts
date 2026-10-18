@@ -37,7 +37,7 @@ const digest = (hours: number, outcome: string, ratio: number | null) => ({
   kind: 'read',
   createdAt: ago(hours),
   ideas: 5,
-  bestRatio: ratio,
+  adoptedRatio: ratio,
   durationSeconds: 1800,
   outcome,
   closing: outcome === 'failed' ? 'failed' : 'finished',

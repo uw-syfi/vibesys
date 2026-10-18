@@ -20,7 +20,7 @@ import pytest
 from tests.support.agent_tool_world import resumes, suspensions
 from tests.support.real_git import NO_GIT, NO_GITHUB
 from tests.support.session_world import ProviderFaults, SessionHost
-from tests.support.skeleton_strategy import DIGEST, SkeletonStrategy
+from tests.support.skeleton_strategy import DIGEST, SkeletonConfig, SkeletonStrategy
 from tests.support.skeleton_world import (
     IMPLEMENTATION,
     IMPLEMENTER,
@@ -160,6 +160,9 @@ class Turn:
     """Commit a tree that measures at this throughput."""
     note: str | None = None
     """Commit a line added to ``NOTES.md``, a path the evaluation never reads."""
+    evaluates: bool = True
+    """Evaluate the committed revision through the tool; False commits and ends the turn, as an
+    implementer does that leaves the measuring to the framework."""
 
     @property
     def edits(self) -> bool:
@@ -193,6 +196,9 @@ class ScriptedWriter(ToolUsingWriter):
                 notes.write(turn.note + "\n")
         if turn.edits:
             self.answer["commit"] = self.vcs.commit_all(tree, f"turn {index}")
+            if not turn.evaluates:
+                self.answer["waiting"] = False
+                return
             reply = json.loads(submit.handler(submit.input_schema()))
             self.handles.append(reply["handle_id"])
             wait = tools[VALIDATE_WAIT_TOOL]
@@ -285,7 +291,7 @@ async def play(
 
     with open_skeleton_world(
         tmp_path,
-        SkeletonStrategy(),
+        SkeletonStrategy(config=SkeletonConfig(compared=True)),
         cluster=cluster,
         agents=agents,
         git=GitKind.REAL,
@@ -358,6 +364,28 @@ async def test_an_idea_is_better_worse_or_within_noise_by_what_the_framework_mea
         assert wait.authorization_receipt is not None
         told = wait.authorization_receipt.comparisons
         assert [c.verdict for c in told] == [verdict], "the resume publishes the comparison"
+
+
+@pytest.mark.parametrize(
+    ("speed", "verdict"),
+    [(150.0, ComparisonVerdict.BETTER), (60.0, ComparisonVerdict.WORSE)],
+)
+async def test_an_idea_its_implementer_never_evaluated_is_compared_with_its_base(
+    tmp_path: Path, speed: float, verdict: ComparisonVerdict
+) -> None:
+    """The framework's own final check compares an idea with its base, whoever measured it.
+
+    The implementer commits and ends its turn without calling the evaluation tool (live, most
+    ideas of a run were like that). The strategy's official measurement is then the only run of
+    the candidate, and it must still be compared with the base the attempt opened on: the input.
+    """
+    async with play(tmp_path, (Turn(speed=speed, evaluates=False),)) as played:
+        assert played.writer.handles == [], "the implementer never used the tool"
+        final = _final(played)
+        assert final.verdict is verdict
+        assert final.base_value == pytest.approx(BASE_SPEED, rel=0.1)
+        assert final.candidate_samples == 1
+        assert len(played.cluster.runs[BASE_SPEED]) == 1, "the input's own measurement is the base"
 
 
 async def test_the_strategys_own_baseline_run_is_the_base_so_the_base_is_not_measured_again(
@@ -600,3 +628,25 @@ async def test_a_repeat_evaluation_tells_the_agent_its_comparison_is_still_settl
         assert told is not None, "the tool reported no comparison to the agent"
         assert told["settling"] is True, "core's runs of the comparison were still under way"
         assert told["candidate_samples"] < 3
+
+
+@pytest.mark.regression
+async def test_the_final_check_of_an_idea_waits_for_the_runs_its_close_call_earned(
+    tmp_path: Path,
+) -> None:
+    """The strategy's verdict rests on the comparison once core's runs have landed.
+
+    With no declared noise a verdict needs three runs a side. The implementer never evaluates, so
+    the strategy's final check is the candidate's only run, and its comparison with the input is a
+    close call that earns both sides more runs. The strategy takes its verdict as soon as the
+    check returns, so before, the run ended with those runs cancelled and the idea judged on one
+    sample a side.
+    """
+    task = TERMS.model_copy(update={"relative_noise": 0.0})
+    async with play(
+        tmp_path, (Turn(speed=104.0, evaluates=False),), task=task, pace=SLOW
+    ) as played:
+        last = _final(played)
+        assert (last.candidate_samples, last.base_samples) == (3, 3)
+        assert len(played.cluster.runs[104.0]) == 3
+        assert len(played.cluster.runs[BASE_SPEED]) == 3

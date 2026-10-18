@@ -3,7 +3,8 @@ import {mkdtempSync, readdirSync} from 'node:fs';
 import {lstat, mkdtemp, readFile, rm, symlink, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {Seeded} from '@vibesys/store/testing';
+import {isDeepStrictEqual} from 'node:util';
+import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {EMPTY_SETTINGS, withHostSettings} from './host-settings.js';
 import {EMPTY_RECENT, type RecentFile, remember} from './recent.js';
 import {SettingsStore} from './settings-store.js';
@@ -100,10 +101,7 @@ describe('SettingsStore', () => {
   test('regression: invalid recent runs stay intact and emit nothing until corrected', async () => {
     const directory = '/settings';
     const path = join(directory, 'recent.json');
-    const invalidFiles = [
-      '{"version":2,"runs":[{"host":"local","project":"/old"}]',
-      JSON.stringify({version: 2, runs: [{...version2Run(1), runId: null}]}),
-    ];
+    const invalidFiles = ['{"version":2,"runs":[{"host":"local","project":"/old"}]'];
 
     for (const invalid of invalidFiles) {
       const filesystem = new FakeSettingsFilesystem({[path]: invalid});
@@ -132,7 +130,7 @@ describe('SettingsStore', () => {
     }
   });
 
-  test('a recent file with invalid entries lists the valid ones, reports the rest, and is not rewritten', async () => {
+  test('a recent file with invalid entries lists the valid ones and reports the rest', async () => {
     const directory = '/settings';
     const path = join(directory, 'recent.json');
     const text = `${JSON.stringify({
@@ -141,8 +139,6 @@ describe('SettingsStore', () => {
     })}\n`;
     const filesystem = new FakeSettingsFilesystem({[path]: text});
     const {settings, logged} = store(filesystem, directory);
-    const heard: RecentFile[] = [];
-    settings.onRecentChanged(recent => heard.push(recent));
 
     const snapshot = await settings.recentSnapshot();
 
@@ -150,12 +146,53 @@ describe('SettingsStore', () => {
     expect(snapshot.skipped.map(each => each.index)).toEqual([1, 3]);
     expect(snapshot.skipped[0]?.reason).toBe('recent.json: runs[1].task must be a task name');
     expect(logged.join('\n')).toContain('runs[3].instanceId');
-
-    await expect(settings.updateRecent(current => remember(current, run(9)))).rejects.toThrow(
-      '2 unreadable entries',
-    );
-    expect(heard).toEqual([]);
     expect(filesystem.text(path)).toBe(text);
+  });
+
+  test('regression: recording a run keeps every invalid entry as written and every valid one', async () => {
+    for (const seed of SEEDS) {
+      const random = new Seeded(seed);
+      const directory = '/settings';
+      const path = join(directory, 'recent.json');
+      const entries: unknown[] = [];
+      const invalid: unknown[] = [];
+      for (let index = 0; index < random.int(8); index++) {
+        if (random.int(2) === 0) {
+          const bad = random.pick([
+            {...run(index), task: ''},
+            {...run(index), instanceId: 'bad'},
+            {...run(index), extra: [index, {nested: null}]},
+            [index, 'not an object'],
+            null,
+          ]);
+          invalid.push(bad);
+          entries.push(bad);
+        } else {
+          entries.push(run(index));
+        }
+      }
+      const filesystem = new FakeSettingsFilesystem({
+        [path]: JSON.stringify({version: 4, runs: entries}),
+      });
+      const {settings} = store(filesystem, directory);
+      const before = await settings.recentSnapshot();
+
+      await settings.updateRecent(current => remember(current, run(100)));
+
+      const written = JSON.parse(filesystem.text(path)) as {runs: unknown[]};
+      const validWritten = written.runs.filter(
+        entry => !invalid.some(bad => isDeepStrictEqual(bad, entry)),
+      );
+      expect(
+        written.runs.filter(entry => invalid.some(bad => isDeepStrictEqual(bad, entry))),
+      ).toEqual(invalid);
+      expect<unknown[]>(validWritten).toEqual([run(100), ...before.recent.runs].slice(0, 20));
+      const after = await settings.recentSnapshot();
+      expect([...after.recent.runs] as unknown[]).toEqual(validWritten);
+      expect(after.skipped.map(each => each.reason.replace(/runs\[\d+\]/, 'runs[]'))).toEqual(
+        before.skipped.map(each => each.reason.replace(/runs\[\d+\]/, 'runs[]')),
+      );
+    }
   });
 
   test('updates still initialize absent files and merge subsequent valid updates', async () => {

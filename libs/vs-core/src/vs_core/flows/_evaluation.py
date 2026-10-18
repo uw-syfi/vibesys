@@ -7,6 +7,7 @@ holds are identities; ``readings`` asks the search's evidence owner to decode th
 
 from __future__ import annotations
 
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from pydantic import TypeAdapter
@@ -19,19 +20,32 @@ from vs_core._strategy_operations import (
 )
 from vs_core.types.common import THIS_RUN, DecisionId, RevisionRef, Value
 from vs_core.types.evaluation import EvidenceRef, MeasurementPlan, MeasurementResult
-from vs_core.types.measurement import Comparison
+from vs_core.types.measurement import Comparison, StatedComparison
 from vs_core.types.search import MeasurementFinished, OperationFinished
 from vs_core.types.strategy import Measure, Operation
 from vs_core.types.until import Failed, Within
 
+from ._sources import First
+
 if TYPE_CHECKING:
     from vs_core.types.common import AttemptRef, Scope, Seconds
+    from vs_core.types.search import RunView
 
     from ._kit import Kit
     from ._labels import Label
     from ._workspaces import Workspace
 
 _REFS = TypeAdapter(tuple[EvidenceRef, ...])
+_STATED = TypeAdapter(StatedComparison | None)
+
+COMPARISON_POLL = 5.0
+"""Run-clock seconds between looks at a comparison that is still settling.
+
+Core's runs for a comparison take minutes, so a look every few seconds adds a negligible delay
+to a verdict and keeps the flow's journal short."""
+SETTLE_RUNS = 3
+"""How many measurement limits a comparison may keep settling for, after the measurement that
+asked for it: one for each run a close call earns a side without a declared floor."""
 
 
 class CaptureSpec(Value):
@@ -72,9 +86,10 @@ class Evaluation:
     ) -> MeasurementResult | Failed:
         """Measure ``plan`` (in the workspace's scope, else the run's): its result, or the failure.
 
-        ``label`` labels the measurement's span.
+        ``label`` labels the measurement's span. The candidate is not compared with its base:
+        `measure_compared` is for a search that reads the comparison.
         """
-        found = await self.measure_compared(plan, workspace=workspace, within=within, label=label)
+        found = await self._measure(plan, workspace, within, label, compared=False)
         return found if isinstance(found, Failed) else found.result
 
     async def measure_compared(
@@ -87,11 +102,32 @@ class Evaluation:
     ) -> Compared | Failed:
         """Measure ``plan`` as `measure` does, with the candidate's comparison with its base.
 
-        The comparison is the one core holds when the measurement ends, over every sample of the
+        The comparison is with the base of the workspace's attempt, over every sample of the
         candidate's measured input, including runs the agent asked for; None when it has none.
+        A close call earns core more runs of either side (`vs_core._comparison`), and they land
+        after this measurement ends, so the comparison is awaited until no run that feeds it is
+        under way, at most ``SETTLE_RUNS`` times the measurement's limit: a verdict taken on it
+        rests on the runs a close call earns, never on the first one.
         """
+        found = await self._measure(plan, workspace, within, label, compared=True)
+        if isinstance(found, Failed) or found.comparison is None:
+            return found
+        settled = await self._settled(found.comparison, _within(within).limit * SETTLE_RUNS)
+        return Compared(result=found.result, comparison=settled)
+
+    async def _measure(
+        self,
+        plan: MeasurementPlan,
+        workspace: Workspace | None,
+        within: Seconds | Within,
+        label: Label | None,
+        *,
+        compared: bool,
+    ) -> Compared | Failed:
         scope = THIS_RUN if workspace is None else workspace.scope
-        request = Measure(decision_id=DecisionId(root="measure"), scope=scope, plan=plan)
+        request = Measure(
+            decision_id=DecisionId(root="measure"), scope=scope, plan=plan, compared=compared
+        )
         match await self._kit.wait(request, _within(within), label):
             case MeasurementFinished(result=result, comparison=comparison):
                 return Compared(result=result, comparison=comparison)
@@ -100,6 +136,25 @@ class Evaluation:
             case unexpected:
                 message = f"a measurement ended with {unexpected.kind}"
                 raise ContractError(("evaluation", "measure"), message)
+
+    async def _settled(self, comparison: Comparison, bound: Seconds) -> Comparison:
+        """``comparison`` as it stands once core's runs for it have ended, or when ``bound`` is spent.
+
+        The run's view holds the comparison of each candidate input and whether runs that feed it
+        are still under way. Until they have ended it is looked at again after a poll; a
+        comparison that went from the view (its base samples went stale) is the last one seen.
+        """
+        until = self._kit.now() + bound
+        seen = comparison
+        while True:
+            stated = self._kit.read(partial(_stated, comparison=seen), _STATED)
+            if stated is None:
+                return seen
+            seen = stated.comparison
+            now = self._kit.now()
+            if not stated.settling or now >= until:
+                return seen
+            await First((self._kit.timer(min(now + COMPARISON_POLL, until)),))
 
     async def readings(
         self,
@@ -216,3 +271,16 @@ def _taken(
         and item.scope.generation == attempt.generation
     )
     return tuple(sorted(held, key=lambda item: item.observation_sequence))
+
+
+def _stated(view: RunView, comparison: Comparison) -> StatedComparison | None:
+    """The view's current comparison of the same candidate input against the same base input."""
+    return next(
+        (
+            held
+            for held in view.comparisons
+            if (held.comparison.scope, held.comparison.candidate_input, held.comparison.base_input)
+            == (comparison.scope, comparison.candidate_input, comparison.base_input)
+        ),
+        None,
+    )

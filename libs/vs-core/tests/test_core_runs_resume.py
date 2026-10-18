@@ -37,6 +37,8 @@ def attempt_lab(**terms: float) -> tuple[Lab, core.Continuation]:
             ),
         }
     )
+    opened = state.attempts.attempts[0].model_copy(update={"base_input": "base"})
+    state = state.model_copy(update={"attempts": core.AttemptsState(attempts=(opened,))})
     scope = state.attempts.attempts[0]
     lab = Lab(
         state=stamped(state, **terms),

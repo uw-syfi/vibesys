@@ -34,13 +34,21 @@ ATTEMPT = core.AttemptRef(attempt_id=core.AttemptId(root="attempt-0"), generatio
 DIGEST = "ab" * 32
 
 
-class Implementation(BaseModel):
-    """The implementer's structured reply: the commit it made in its workspace."""
+class Implementation(core.RevisionReply):
+    """The implementer's structured reply: the commit it made in its workspace.
+
+    A revision reply, as every implementer's is: core holds it until the turn's checkpoint is
+    recorded, so the revision it names is known to core before the strategy measures it.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     commit: str
     waiting: bool = False
+
+    def produces_revision(self) -> bool:
+        """Only a reply that names a commit leaves work for core to checkpoint."""
+        return bool(self.commit)
 
 
 IMPLEMENTER = core.IdScheme("skeleton").role_id("implementer")
@@ -102,6 +110,9 @@ class SkeletonConfig(core.Value):
 
     measured: bool = True
     keeps_candidate: bool = True
+    compared: bool = False
+    """The final check of the candidate is compared with its base, and its verdict awaits the
+    comparison (`ctx.evaluation.measure_compared`), as a search that reads comparisons does."""
     cancels_after_start: bool = False
     probe: bool = False
     fails: bool = False
@@ -179,7 +190,14 @@ async def measure(
         now_at=_origin(ctx, config),
         facts=ctx.facts,
     )
-    match await ctx.evaluation.measure(plan, workspace=workspace, within=_MEASURE_SECONDS):
+    found = (
+        await ctx.evaluation.measure_compared(plan, workspace=workspace, within=_MEASURE_SECONDS)
+        if config.compared and purpose == "official"
+        else await ctx.evaluation.measure(plan, workspace=workspace, within=_MEASURE_SECONDS)
+    )
+    if isinstance(found, core.Compared):
+        found = found.result
+    match found:
         case Failed() as failed:
             return NoWinner(reason=f"measurement {failed.reason}")
         case core.MeasurementResult(failure=failure) if failure is not None:

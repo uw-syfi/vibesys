@@ -75,7 +75,11 @@ its agent measures, and core keeps at most one run of each side in flight per sc
 
 Core's runs serve the comparison only. The agent's turn never waits for them (they are not its
 attempt's history, `vs_core._evaluation_history`); the comparison it reads next grows as they
-land.
+land. The strategy's verdict does wait: a Measure that asks for the comparison
+(``Measure.compared``) is compared with the attempt's base too (`vs_core._base_runs.base_of`),
+and ``ctx.evaluation.measure_compared`` hands the comparison back once no run that feeds it is
+under way (`comparison_settling`), or as it stands when its bound is spent. A verdict taken on
+the first run alone would leave every close call inconclusive.
 
 Without a declared floor the candidate needs those three runs too, and nobody else gives them:
 an agent's call for content it already measured is answered with that evaluation, and the
@@ -118,6 +122,7 @@ from .types.measurement import (
     EffectVerdict,
     Reading,
     Sample,
+    StatedComparison,
 )
 
 if TYPE_CHECKING:
@@ -147,6 +152,7 @@ __all__ = [
     "comparison_settling",
     "comparisons_of",
     "comparisons_to_publish",
+    "effect_resolution",
     "effect_verdict",
     "evaluation_of",
     "fresh",
@@ -160,6 +166,7 @@ __all__ = [
     "running_baseline",
     "sample_of",
     "samples_of",
+    "stated_comparisons",
     "terms_policy",
     "verdict_unreachable",
 ]
@@ -669,6 +676,14 @@ def comparison_settling(state: EvaluationState, comparison: Comparison) -> bool:
     )
 
 
+def stated_comparisons(state: EvaluationState, moment: Moment) -> tuple[StatedComparison, ...]:
+    """Every comparison the samples held make now, each with whether it is still settling."""
+    return tuple(
+        StatedComparison(comparison=comparison, settling=comparison_settling(state, comparison))
+        for comparison in comparisons_of(state, moment)
+    )
+
+
 def comparisons_to_publish(
     state: EvaluationState,
     scope: Scope,
@@ -731,17 +746,31 @@ def effect_verdict(
     effect is never called where the comparison would not be, and with a bar of one it is the
     comparison's verdict or ``within_noise``.
     """
-    m, n = comparison.candidate_samples, comparison.base_samples
-    if not _noise_known(m, n, comparison.noise, policy):
+    resolution = effect_resolution(comparison, policy)
+    if resolution is None:
         return EffectVerdict.WITHIN_NOISE
-    critical = VERDICT_NOISES if policy.floor_declared else _t_critical(min(m, n) - 1)
     sign = 1.0 if comparison.direction == "max" else -1.0
     margin = sign * (comparison.ratio - minimum_ratio)
-    if margin > critical * comparison.noise:
+    if margin > resolution:
         return EffectVerdict.SUPPORTED
-    if margin < -critical * comparison.noise:
+    if margin < -resolution:
         return EffectVerdict.DISPROVEN
     return EffectVerdict.WITHIN_NOISE
+
+
+def effect_resolution(comparison: Comparison, policy: ComparisonPolicy) -> float | None:
+    """How far a candidate's ratio must clear a plan's bar for `effect_verdict` to call it.
+
+    The critical number of noises times the comparison's noise, in ratio units: a candidate within
+    this of its bar is ``within_noise``, so a bar the design cannot expect to clear by this much is
+    one the framework cannot call. ``policy`` is the one the comparison was made under. None when
+    the comparison has no estimate of its noise (`_noise_known`), which says nothing of any bar.
+    """
+    m, n = comparison.candidate_samples, comparison.base_samples
+    if not _noise_known(m, n, comparison.noise, policy):
+        return None
+    critical = VERDICT_NOISES if policy.floor_declared else _t_critical(min(m, n) - 1)
+    return critical * comparison.noise
 
 
 def comparison_of_result(
@@ -800,8 +829,9 @@ def _base_max_samples(policy: ComparisonPolicy) -> int:
     return BASE_MAX_SAMPLES if policy.floor_declared else MIN_SAMPLES_WITHOUT_FLOOR
 
 
-def base_in_flight(state: EvaluationState, measured: Measured, scope: Scope | None = None) -> bool:
-    """Whether a run of this measurement was admitted and has not ended (``scope``'s, or any)."""
+def runs_in_flight(state: EvaluationState, measured: Measured, scope: Scope | None = None) -> int:
+    """How many runs of this measurement were admitted and have not ended (``scope``'s, or any)."""
+    count = 0
     for budget in state.submission_budgets:
         identity = budget.identity
         if (
@@ -814,8 +844,13 @@ def base_in_flight(state: EvaluationState, measured: Measured, scope: Scope | No
         if isinstance(latest, PreparedSubmissionReceipt) and (
             latest.observation is None or not latest.observation.terminal
         ):
-            return True
-    return False
+            count += 1
+    return count
+
+
+def base_in_flight(state: EvaluationState, measured: Measured, scope: Scope | None = None) -> bool:
+    """Whether a run of this measurement was admitted and has not ended (``scope``'s, or any)."""
+    return runs_in_flight(state, measured, scope) > 0
 
 
 def running_baseline(state: EvaluationState, base: BaseRef) -> RequestId | None:
@@ -940,7 +975,8 @@ def official_needs_samples(
     The official measurement of an input the scope already measured adds a run only then:
 
     - the samples held are a close call against the base, so one more narrows the noise,
-      unless no run can give them a verdict (`verdict_unreachable`);
+      unless no run can give them a verdict (`verdict_unreachable`), or, without a declared
+      floor, the samples held and the candidate's runs under way already make the sample cap;
     - or the samples name a base but no sample of it is fresh at ``moment`` (its runs went
       stale, failed or are still running), so they have no verdict at all, and the answer must
       not rest on the runs the agent happened to make: the official check adds a run of its
@@ -955,4 +991,26 @@ def official_needs_samples(
     if not fresh(samples_of(state, Measured(measured.evaluation, anchor.measured_input)), moment):
         return True
     held = comparison_of(state, scope, measured, moment)
-    return held is not None and close_call(held) and not verdict_unreachable(held, moment.policy)
+    return (
+        held is not None
+        and close_call(held)
+        and not verdict_unreachable(held, moment.policy)
+        and not _candidate_runs_spoken_for(state, scope, measured, moment)
+    )
+
+
+def _candidate_runs_spoken_for(
+    state: EvaluationState, scope: Scope, measured: Measured, moment: Moment
+) -> bool:
+    """Whether the candidate's samples and its runs under way already make the sample cap.
+
+    Without a declared floor a candidate holds at most ``MIN_SAMPLES_WITHOUT_FLOOR`` runs
+    (`remeasures_candidate`). A run of its input still under way, core's last re-run or another
+    one, lands a sample of its own, so an official run added beside it would be one too many.
+    The official measurement is then answered by the samples held, and the comparison settles
+    when the run under way lands.
+    """
+    return not moment.policy.floor_declared and (
+        len(fresh(samples_of(state, measured), moment)) + runs_in_flight(state, measured, scope)
+        >= MIN_SAMPLES_WITHOUT_FLOOR
+    )

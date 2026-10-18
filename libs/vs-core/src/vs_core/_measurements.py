@@ -333,8 +333,13 @@ def _requested(
         return AreaChange(state=state)
     run = reused_run(state, event.scope, plan, identity.value, moment_of(context.run))
     reuses = None if run is None else run.submission_id
-    origin_of = Origin(event.scope, origin.value.decision_id, reuses=reuses)
-    return _admit(state, context, origin_of, plan, identity.value)
+    base = base_of(context, event.scope, plan) if event.compared else None
+    origin_of = Origin(event.scope, origin.value.decision_id, reuses=reuses, base=base)
+    change = _admit(state, context, origin_of, plan, identity.value)
+    outbound = next((r for r in change.requests if isinstance(r.request, SubmitMeasurement)), None)
+    if outbound is None or outbound.request.request_id is None:
+        return change
+    return with_base(change, context, origin_of, plan, outbound.request.request_id)
 
 
 def _admit(
@@ -400,14 +405,10 @@ def _agent_requested(
         request_id, deadline_at = repeated
         call = AgentCall.answered(event, request_id, deadline_at, repeat=True)
         return _recorded(AreaChange(state=state), call)
-    base = base_of(context, event)
-    change = _admit(
-        state,
-        context,
-        Origin(event.scope, None, capped(event), base=base),
-        event.plan,
-        identity.value,
+    origin = Origin(
+        event.scope, None, capped(event), base=base_of(context, event.scope, event.plan)
     )
+    change = _admit(state, context, origin, event.plan, identity.value)
     outbound = next((r for r in change.requests if isinstance(r.request, SubmitMeasurement)), None)
     if outbound is None or outbound.request.request_id is None:
         refused = AgentCall.refused(event, AgentRejection.NOT_ALLOWED)
@@ -415,7 +416,8 @@ def _agent_requested(
     call = AgentCall.answered(
         event, outbound.request.request_id, _deadline_at(context, outbound), repeat=False
     )
-    recorded = _recorded(with_base(change, context, event, base, outbound.request.request_id), call)
+    based = with_base(change, context, origin, event.plan, outbound.request.request_id)
+    recorded = _recorded(based, call)
     return recorded.model_copy(
         update={"state": runaway_noted(recorded.state, context, event.scope)}
     )

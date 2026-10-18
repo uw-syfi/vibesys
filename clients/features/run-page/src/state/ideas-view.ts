@@ -8,8 +8,9 @@
  * nothing (a tree is the same object until a span changes).
  */
 import type {Candidate, CandidateOutcome, CandidateTree} from '@vibesys/run-state/candidates';
+import {type IdeaBase, type IdeaBases, ideaBases} from './idea-bases.js';
 import type {Direction, RunModel} from './run-model.js';
-import {duration, formatValue, ratio, words} from './span-reading.js';
+import {duration, formatValue, ratio, TURNED_DOWN, words} from './span-reading.js';
 
 /** Which ideas the Ideas face shows. */
 export interface IdeasFilter {
@@ -47,8 +48,8 @@ export interface IdeaRow {
     readonly label: string;
   };
   readonly badges: readonly {readonly label: string; readonly tone: 'ok' | 'neutral'}[];
-  /** Where it started from: `input`, else the idea it built on (`parent`, which opens). */
-  readonly trail: {readonly label: string; readonly parent: string | null};
+  /** What it built on: `best`, `input`, `own work`, or another idea (`parent`, which opens). */
+  readonly trail: IdeaBase;
   /** On the winning path. */
   readonly stripe: boolean;
   /** Changed or arrived in the events just read (the row flashes once). */
@@ -80,11 +81,14 @@ function share(value: number, best: number, direction: Direction): number {
   return Math.min(1, direction === 'min' ? best / value : value / best);
 }
 
-/** An idea's outcome in words: `running`, `passed`, or `failed`, then why when it is known. */
+/**
+ * An idea's outcome in words: `running`, `passed`, or `failed`, then why when it is known. A
+ * measured idea the trusted checks turned down is only `failed`: that is its result, not a reason.
+ */
 export function outcomeWords(item: Candidate): string {
   if (item.outcome !== 'failed') return item.outcome;
   const why = item.reason ?? item.measurement?.failed?.check ?? null;
-  return why === null ? 'failed' : `failed · ${words(why)}`;
+  return why === null || why === TURNED_DOWN ? 'failed' : `failed · ${words(why)}`;
 }
 
 function stateOf(item: Candidate): IdeaRow['state'] {
@@ -125,16 +129,16 @@ function isPlanning(item: Candidate): boolean {
 
 /** What a row says before its idea has a name or a base. */
 const PLANNING = 'planning…';
-const BASE_UNKNOWN = '…';
+const BASE_UNKNOWN: IdeaBase = {kind: 'idea', label: '…', parent: null};
 
 interface RowContext {
   readonly tree: CandidateTree;
-  readonly byId: ReadonlyMap<string, Candidate>;
   readonly path: ReadonlySet<string>;
   readonly best: number | null;
   readonly direction: Direction;
   readonly unit: string;
   readonly changed: ReadonlySet<string>;
+  readonly bases: IdeaBases;
 }
 
 /** The `vs best` share. Every row holds the column, so an unmeasured one leaves an empty track. */
@@ -150,12 +154,10 @@ function barOf(item: Candidate, context: RowContext): IdeaRow['bar'] {
   };
 }
 
-/** Where the idea started from: unknown while it is planned, else the input or the idea it built on. */
-function trailOf(item: Candidate, parent: Candidate | null): IdeaRow['trail'] {
-  if (isPlanning(item)) return {label: BASE_UNKNOWN, parent: null};
-  return parent === null
-    ? {label: 'input', parent: null}
-    : {label: parent.title, parent: parent.id};
+/** Where the idea started from: unknown while it is planned, else its base. */
+function trailOf(item: Candidate, context: RowContext): IdeaRow['trail'] {
+  if (isPlanning(item)) return BASE_UNKNOWN;
+  return context.bases.get(item.id) ?? {kind: 'input', label: 'input', parent: null};
 }
 
 /** An idea's words, none when they only repeat its title (`Try: <title>` included). */
@@ -171,7 +173,6 @@ function summaryOf(item: Candidate): string | null {
 
 function rowOf(item: Candidate, context: RowContext): IdeaRow {
   const {figure, tone} = figureOf(item);
-  const parent = item.parent === null ? null : (context.byId.get(item.parent) ?? null);
   const attempts = item.attempts.length;
   return {
     id: item.id,
@@ -189,7 +190,7 @@ function rowOf(item: Candidate, context: RowContext): IdeaRow {
         : []),
       ...(attempts > 1 ? [{label: `×${attempts}`, tone: 'neutral' as const}] : []),
     ],
-    trail: trailOf(item, parent),
+    trail: trailOf(item, context),
     stripe: context.path.has(item.id),
     fresh: context.changed.has(item.id),
   };
@@ -223,12 +224,12 @@ export function ideaRowsById(model: RunModel): ReadonlyMap<string, IdeaRow> {
   if (known !== undefined) return known;
   const context: RowContext = {
     tree,
-    byId: new Map(tree.candidates.map(item => [item.id, item])),
     path: new Set(tree.bestPath),
     best: bestValue(tree),
     direction: model.direction,
     unit: unitOf(model),
     changed: model.changed,
+    bases: ideaBases(tree, model.direction),
   };
   const rows = new Map(tree.candidates.map(item => [item.id, rowOf(item, context)]));
   rowsMemo.set(tree, rows);

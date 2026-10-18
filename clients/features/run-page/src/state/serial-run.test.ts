@@ -208,7 +208,7 @@ describe('a multi-agent run', () => {
       rows.map(row => [row.title, row.figure, row.trail.label, row.state.label]).sort(),
     ).toEqual([
       ['title h1', '2.00×', 'input', 'Passed'],
-      ['title h2', '0.20×', 'title h1', 'Passed'],
+      ['title h2', '0.20×', 'best', 'Passed'],
     ]);
     expect(rows.map(row => [row.title, row.badges.map(badge => badge.label)]).sort()).toEqual([
       ['title h1', ['best']],

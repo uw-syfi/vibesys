@@ -15,6 +15,7 @@ export type CheckId =
   | 'legend'
   | 'number-label'
   | 'strike'
+  | 'repeat'
   | 'chart-size'
   | 'pane-fill'
   | 'scroll-room'
@@ -507,6 +508,28 @@ export function strikeCheck(): Violation[] {
         });
         break;
       }
+    }
+  }
+  return found;
+}
+
+/**
+ * A list row that says its status twice: the line under its title only repeats a chip on the same
+ * row (a `Passed` line beside a `Passed` badge). The line is for what the chip does not say.
+ */
+export function repeatCheck(): Violation[] {
+  const found: Violation[] = [];
+  for (const row of document.querySelectorAll('.vs-pickrow')) {
+    const text = row.querySelector('.vs-pickrow-text');
+    const line = text?.children[1]?.textContent?.trim().toLowerCase();
+    if (line === undefined || line === '') continue;
+    for (const chip of row.querySelectorAll('.vs-chip')) {
+      if (chip.textContent?.trim().toLowerCase() !== line) continue;
+      found.push({
+        check: 'repeat',
+        message: `a row says "${chip.textContent?.trim()}" twice: as its badge and under its title`,
+        where: describe(row),
+      });
     }
   }
   return found;

@@ -12,6 +12,7 @@ import {Button, Card, Chip, markdownToPlain, Pane, Panes, Row, Stack, Text} from
 import type {JSX} from 'react';
 import {
   type HistoryProgress,
+  ideaEffects,
   implementerOutcomes,
   type ResolvedZoom,
   type RunMode,
@@ -93,8 +94,16 @@ function logsOptions(main: string): {value: RunMode; label: string}[] {
 export function IdeasWorkspace(props: LevelProps & {readonly idea: Candidate | null}): JSX.Element {
   const {state, base, mode, idea, dispatch} = props;
   const outcomes = implementerOutcomes(props.core, base.model.candidates);
+  const effects = ideaEffects(props.core, base.model.candidates);
   const view: IdeaViewProps | null =
-    idea === null ? null : {...base, idea, outcome: outcomes.get(idea.id) ?? null};
+    idea === null
+      ? null
+      : {
+          ...base,
+          idea,
+          outcome: outcomes.get(idea.id) ?? null,
+          effect: effects.get(idea.id) ?? null,
+        };
   const logs: LogsViewProps | null =
     idea === null ? null : {...base, state, scope: {kind: 'idea', idea}, dispatch};
   return (
@@ -139,7 +148,13 @@ export function IdeasWorkspace(props: LevelProps & {readonly idea: Candidate | n
 function IdeaLevel(props: LevelProps & {readonly idea: Candidate}): JSX.Element {
   const {state, base, mode, idea, dispatch} = props;
   const outcomes = implementerOutcomes(props.core, base.model.candidates);
-  const view: IdeaViewProps = {...base, idea, outcome: outcomes.get(idea.id) ?? null};
+  const effects = ideaEffects(props.core, base.model.candidates);
+  const view: IdeaViewProps = {
+    ...base,
+    idea,
+    outcome: outcomes.get(idea.id) ?? null,
+    effect: effects.get(idea.id) ?? null,
+  };
   const logs: LogsViewProps = {...base, state, scope: {kind: 'idea', idea}, dispatch};
   return (
     <Panes>

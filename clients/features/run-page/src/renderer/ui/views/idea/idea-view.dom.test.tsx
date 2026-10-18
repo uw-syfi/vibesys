@@ -81,6 +81,7 @@ function view(candidate: Candidate, zoom: (event: ZoomEvent) => void) {
     zoom,
     idea: candidate,
     outcome: null,
+    effect: null,
   };
 }
 
@@ -107,7 +108,7 @@ test('the latest attempt is selected; choosing another shows its steps', async (
   const {container, unmount} = await mount(<IdeaView {...view(candidate, e => events.push(e))} />);
   const lines = options(container, 'Attempts');
   expect(lines.map(row => row.textContent)).toEqual([
-    expect.stringContaining('Turned down'),
+    expect.stringContaining('Failed'),
     expect.stringContaining('1.50×'),
     expect.stringContaining('1.50×'),
   ]);
@@ -174,6 +175,18 @@ test('shows the implementer outcome as a chip and its summary in the idea view',
   const {container, unmount} = await mount(<IdeaView {...props} />);
   expect(container.querySelector('.vs-chip')?.textContent).toBe('blocked');
   expect(container.textContent).toContain('Padded the counters.');
+  await unmount();
+});
+
+test('an implementer that reported no outcome still shows the idea’s own, with its summary', async () => {
+  const candidate = {...idea('mpmc', 'failed', 100, 300), reason: 'not_measured'};
+  const props = {
+    ...view(candidate, () => undefined),
+    outcome: {outcome: null, summary: 'Tried a padded head.'},
+  };
+  const {container, unmount} = await mount(<IdeaView {...props} />);
+  expect(container.querySelector('.vs-chip')?.textContent).toBe('Failed · not measured');
+  expect(container.textContent).toContain('Tried a padded head.');
   await unmount();
 });
 

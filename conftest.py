@@ -26,6 +26,7 @@ pytest_plugins = [
     "tests.support.tree_hygiene",
     "tests.support.path_hygiene",
     "tests.support.sharding",
+    "tests.support.worker_exit",
 ]
 
 if TYPE_CHECKING:

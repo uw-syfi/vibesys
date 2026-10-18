@@ -34,6 +34,8 @@ interface Readings {
 /** What an idea's gate or end reached. */
 type IdeaEnd =
   | {readonly kind: 'running'; readonly waiting?: boolean}
+  /** Running, its turn done and its gate under way: a value read, its comparison still taking in runs. */
+  | ({readonly kind: 'measuring'; readonly value: number; readonly ratio: number} & Readings)
   | ({readonly kind: 'passed'; readonly value: number; readonly ratio: number} & Readings)
   | ({readonly kind: 'slower'; readonly value: number; readonly ratio: number} & Readings)
   | {
@@ -77,6 +79,16 @@ export interface IdeaSpec {
   readonly summary?: string;
   /** How long the idea runs, in seconds; defaults to 600. */
   readonly took?: number;
+  /**
+   * The framework's comparison of the idea's measurement with its base's (`measurement_compared`),
+   * emitted when the gate ends; none when omitted. Only a passed idea carries a revision to join.
+   */
+  readonly effect?: 'better' | 'within_noise' | 'worse';
+  /**
+   * For a failed idea: the idea whose revision it kept because it changed nothing (its base's
+   * code). The revision then belongs to that idea's measurement, not to this one.
+   */
+  readonly keeps?: number;
   /** What the implementer's turn spent, reported when the turn ends; none when omitted. */
   readonly usage?: TurnUsage;
 }
@@ -172,7 +184,7 @@ function tried(start: number, reasons: readonly string[], done: number | null): 
 
 function gateAttrs(end: IdeaEnd): Json {
   const stage = 'correctness,benchmark';
-  if (end.kind === 'passed' || end.kind === 'slower') {
+  if (end.kind === 'passed' || end.kind === 'slower' || end.kind === 'measuring') {
     return {
       stage,
       metric_value: end.value,
@@ -208,6 +220,10 @@ function workstreamAttrs(spec: IdeaSpec, settled: boolean): Json {
   const base = spec.on === undefined || spec.on === null ? 'r0' : `r${spec.on}`;
   const account: Json = {};
   if (settled && spec.end.kind === 'passed') account['revision'] = `r${spec.n}`;
+  if (spec.end.kind === 'measuring') account['revision'] = `r${spec.n}`;
+  if (settled && spec.end.kind === 'failed' && spec.keeps !== undefined) {
+    account['revision'] = `r${spec.keeps}`;
+  }
   if (settled && spec.outcome !== undefined) account['outcome'] = spec.outcome;
   if (settled && spec.summary !== undefined) account['summary'] = spec.summary;
   return {
@@ -225,7 +241,9 @@ function workstreamLabel(spec: IdeaSpec, settled: boolean): Label {
   const attrs = workstreamAttrs(spec, settled);
   const links =
     spec.on === undefined || spec.on === null ? [] : [{rel: 'builds_on', to: ideaId(spec.on)}];
-  if (!settled || end.kind === 'running') return label('workstream', spec.title, attrs, {links});
+  if (!settled || end.kind === 'running' || end.kind === 'measuring') {
+    return label('workstream', spec.title, attrs, {links});
+  }
   if (end.kind === 'failed') {
     return label('workstream', spec.title, attrs, {verdict: 'failed', reason: end.reason, links});
   }
@@ -235,6 +253,53 @@ function workstreamLabel(spec: IdeaSpec, settled: boolean): Label {
     ...(passed ? {} : {reason: 'turned_down'}),
     links,
   });
+}
+
+/** The framework's comparison of a measured idea with its base, when the spec carries one. */
+function compared(trace: Trace, spec: IdeaSpec, at: number): void {
+  const {end} = spec;
+  if (
+    spec.effect === undefined ||
+    (end.kind !== 'passed' && end.kind !== 'slower' && end.kind !== 'measuring')
+  ) {
+    return;
+  }
+  const provisional = end.kind === 'measuring';
+  trace.event(
+    'measurement_compared',
+    {
+      metric: 'total_ops_per_sec',
+      unit: 'ops/s',
+      direction: 'max',
+      candidate_commit: `r${spec.n}`,
+      base_commit: spec.on === undefined || spec.on === null ? 'r0' : `r${spec.on}`,
+      candidate_value: end.value,
+      base_value: end.value / end.ratio,
+      ratio: end.ratio,
+      noise: 0.03,
+      verdict: spec.effect,
+      candidate_samples: provisional ? 1 : 5,
+      base_samples: provisional ? 1 : 5,
+    },
+    at,
+  );
+}
+
+/** The idea's gate span: under way when `endsAt` is null, else finished with the verdict it reached. */
+function gateSpan(spec: IdeaSpec, parent: string, startsAt: number, endsAt: number | null): Span {
+  const verdict = gateVerdict(spec.end);
+  return {
+    id: `op:w${spec.n}-gate`,
+    parent,
+    type: 'operation',
+    name: 'evaluation.measure',
+    status: endsAt === null ? 'running' : 'done',
+    started_at: startsAt,
+    ...(endsAt === null ? {} : {ended_at: endsAt}),
+    label: label('gate', 'correctness + benchmark', gateAttrs(spec.end), {
+      ...(verdict === null || endsAt === null ? {} : {verdict}),
+    }),
+  };
 }
 
 /** Write one idea: its workstream, an implementer turn (with retries), and a gate when it got there. */
@@ -296,6 +361,13 @@ export function addIdea(trace: Trace, spec: IdeaSpec): void {
       span_id: turnId,
     });
   };
+  if (end.kind === 'measuring') {
+    trace.span('span_ended', turn('done', true), turnEnd);
+    spent();
+    trace.span('span_started', gateSpan(spec, id, turnEnd + 1, null), turnEnd + 1);
+    compared(trace, spec, turnEnd + 2);
+    return;
+  }
   if (end.kind === 'failed') {
     trace.span('span_ended', turn('failed', true), turnEnd);
     spent();
@@ -311,21 +383,10 @@ export function addIdea(trace: Trace, spec: IdeaSpec): void {
   }
   trace.span('span_ended', turn('done', true), turnEnd);
   spent();
-  const verdict = gateVerdict(end);
-  const gate: Span = {
-    id: `op:w${spec.n}-gate`,
-    parent: id,
-    type: 'operation',
-    name: 'evaluation.measure',
-    status: 'done',
-    started_at: turnEnd + 1,
-    ended_at: stopsAt - 1,
-    label: label('gate', 'correctness + benchmark', gateAttrs(end), {
-      ...(verdict === null ? {} : {verdict}),
-    }),
-  };
+  const gate = gateSpan(spec, id, turnEnd + 1, stopsAt - 1);
   trace.span('span_started', {...gate, status: 'running'}, turnEnd + 1);
   trace.span('span_ended', gate, stopsAt - 1);
+  compared(trace, spec, stopsAt - 1);
   trace.span('span_ended', workstream(end.kind === 'passed' ? 'done' : 'done', true), stopsAt);
 }
 

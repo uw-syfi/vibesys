@@ -17,7 +17,7 @@ import {figureOf} from './ideas-view.js';
 import {stepLabel, stepTitle} from './names.js';
 import {roleSeries} from './role-series.js';
 import type {Direction, RunModel} from './run-model.js';
-import {duration, formatValue, ratio} from './span-reading.js';
+import {duration, formatValue, ratio, TURNED_DOWN} from './span-reading.js';
 import {plain} from './span-words.js';
 
 /** How much of the run the Timeline shows. */
@@ -335,7 +335,9 @@ function resultOf(attempt: CandidateAttempt): string {
     return ratio(measured.vsBaseline);
   }
   if (measured?.verdict !== null && measured?.verdict !== undefined) return plain(measured.verdict);
-  return attempt.reason === null ? 'Failed' : plain(attempt.reason);
+  return attempt.reason === null || attempt.reason === TURNED_DOWN
+    ? 'Failed'
+    : plain(attempt.reason);
 }
 
 const ATTEMPT_TONE: Readonly<Record<CandidateOutcome, AttemptLine['tone']>> = {

@@ -19,15 +19,16 @@ function failedFor(reason: string | null): Candidate {
 }
 
 describe('a failed idea', () => {
-  test('reads "failed · <reason>" on its row and in its state, with no underscores', () => {
+  test('reads "failed · <reason>" on its row and in its state, with no underscores, and its own result is no reason', () => {
     for (const reason of REASONS) {
       const item = failedFor(reason);
       const words = reason.replaceAll('_', ' ');
-      expect(figureOf(item).figure).toBe(`Failed · ${words}`);
-      expect(outcomeWords(item)).toBe(`failed · ${words}`);
+      const said = reason === 'turned_down' ? 'Failed' : `Failed · ${words}`;
+      expect(figureOf(item).figure).toBe(said);
+      expect(outcomeWords(item)).toBe(said.toLowerCase());
       const view = ideasView(modelOf([item]), {...IDEAS_FILTER_DEFAULT, failed: true});
-      expect(view.rows[0]?.state.label).toBe(`Failed · ${words}`);
-      expect(view.rows[0]?.figure).toBe(`Failed · ${words}`);
+      expect(view.rows[0]?.state.label).toBe(said);
+      expect(view.rows[0]?.figure).toBe(said);
     }
   });
 
@@ -54,7 +55,7 @@ describe('an idea still being planned', () => {
   test('has no base and no round-number title until an agent names it', () => {
     const row = ideasView(modelOf([planning]), IDEAS_FILTER_DEFAULT).rows[0];
     expect(row?.title).toBe('planning…');
-    expect(row?.trail).toEqual({label: '…', parent: null});
+    expect(row?.trail).toEqual({kind: 'idea', label: '…', parent: null});
   });
 
   test('reads its base once the idea is named', () => {

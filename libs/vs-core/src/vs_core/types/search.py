@@ -41,7 +41,7 @@ from .evaluation import (
 )
 from .evaluation_history import AttemptEvaluationHistory, AttemptTerminalReason
 from .kinds import EventKind
-from .measurement import Comparison
+from .measurement import Comparison, StatedComparison
 from .records import OperationResult
 from .session_inputs import InputDelivered, InputDropped
 from .sessions import InterruptCompleted, InterruptFailed, TurnResult, YieldPublicationFailed
@@ -262,6 +262,9 @@ class RunView(Value):
     attempts: tuple[AttemptSummary, ...]
     measurements: tuple[EvidenceRef, ...]
     settlements: tuple[Settlement, ...]
+    comparisons: tuple[StatedComparison, ...] = ()
+    """Every candidate input's comparison with its base as it stands now, and whether it is
+    still settling; one per scope, candidate input and base input."""
 
 
 class DiscardReason(StrEnum):

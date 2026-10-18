@@ -83,7 +83,7 @@ export interface Outcome {
   readonly word: string;
   /** Whether the run succeeded outright (adopted or kept a result). */
   readonly ok: boolean;
-  /** The best ratio so far; null when none passed or the digest is not read. */
+  /** The adopted result as a multiple of the input; null when nothing was adopted or the digest is not read. */
   readonly ratio: number | null;
   /** The ideas it made; null when the digest is not read. */
   readonly ideas: number | null;

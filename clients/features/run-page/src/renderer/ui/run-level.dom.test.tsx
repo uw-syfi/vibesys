@@ -222,8 +222,7 @@ test('the run level says passed, failed, best and adopted, never accepted, kept 
       expect(text).toContain('1 failed');
       expect(text).toContain('1 running');
       expect(text).toContain(adopted ? 'Adopted' : 'Best so far');
-      if (showFailed) expect(text).toContain('Turned down');
-      else expect(text).not.toContain('Turned down');
+      expect(text).not.toMatch(/turned down/i);
       expect(text).not.toMatch(/accepted|kept|rejected/i);
     }
   }
@@ -267,7 +266,7 @@ test('the performance row is one element whatever idea is open: dots are singled
   await draw('i1');
   expect(kinds()).toEqual(['dim', 'focus', 'dim']);
   // The idea's own result reads under the hero's figure.
-  expect(container.textContent).toContain('this idea');
+  expect(container.textContent).toContain('Selected idea:');
 
   const third = container.querySelectorAll('.vs-chart-pick')[2];
   await act(async () => {

@@ -19,6 +19,7 @@ from vs_core._comparison import (
     comparison_of,
     comparison_settling,
     comparisons_of,
+    effect_resolution,
     effect_verdict,
     evaluation_of,
     latest_comparisons,
@@ -523,6 +524,7 @@ from vs_core.types.measurement import (
     Reading,
     Runaway,
     Sample,
+    StatedComparison,
 )
 from vs_core.types.records import (
     Attribution,
@@ -1338,6 +1340,7 @@ __all__ = [
     "SpanWaitKind",
     "StageBudget",
     "StartAttempt",
+    "StatedComparison",
     "SteerReceived",
     "Step",
     "StopMode",
@@ -1450,6 +1453,7 @@ __all__ = [
     "decision_of_operation",
     "deferred",
     "downtime",
+    "effect_resolution",
     "effect_verdict",
     "encode_json",
     "evaluation_of",

@@ -3154,6 +3154,47 @@ describe('winner selection state', () => {
   });
 });
 
+describe('measurement comparison state', () => {
+  const compared = (
+    sequence: number,
+    commit: string,
+    verdict: 'better' | 'within_noise' | 'worse',
+  ) =>
+    fixtureEvent(sequence, 'measurement_compared', {
+      data: {
+        kind: 'measurement_compared',
+        metric: 'total_ops_per_sec',
+        unit: 'ops/s',
+        direction: 'max',
+        candidate_commit: commit,
+        base_commit: 'base-rev',
+        candidate_value: 120,
+        base_value: 100,
+        ratio: 1.2,
+        noise: 0.03,
+        verdict,
+        candidate_samples: 5,
+        base_samples: 5,
+      },
+    });
+
+  it('starts with none', () => {
+    expect(initialCoreState().comparisons).toEqual({});
+  });
+
+  it('keeps the latest verdict of each candidate commit', () => {
+    const state = [
+      compared(1, 'abc', 'within_noise'),
+      compared(2, 'def', 'worse'),
+      compared(3, 'abc', 'better'),
+    ].reduce(reduceEvent, initialCoreState());
+    expect(state.comparisons).toEqual({
+      abc: {verdict: 'better', ratio: 1.2},
+      def: {verdict: 'worse', ratio: 1.2},
+    });
+  });
+});
+
 describe('workstream telemetry state', () => {
   it('starts with no workstreams', () => {
     expect(initialCoreState().workstreams).toEqual({});

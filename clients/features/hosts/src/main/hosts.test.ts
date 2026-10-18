@@ -643,7 +643,7 @@ describe('Hosts.runDigests', () => {
       summary({
         kind: 'digest',
         ideas: 3,
-        best_ratio: 2.5,
+        adopted_ratio: 2.5,
         duration_s: 90,
         ending: null,
         closing: 'finished',
@@ -660,7 +660,7 @@ describe('Hosts.runDigests', () => {
       kind: 'read',
       createdAt: Date.parse('2026-10-17T03:00:00Z'),
       ideas: 3,
-      bestRatio: 2.5,
+      adoptedRatio: 2.5,
       durationSeconds: 90,
       outcome: null,
       closing: 'finished',

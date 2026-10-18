@@ -139,3 +139,35 @@ def test_more_noise_never_turns_an_undecided_result_into_a_verdict(
     noisier = result.model_copy(update={"noise": result.noise * 2 + 0.01})
     if core.effect_verdict(result, bar, policy(floor)) is core.EffectVerdict.WITHIN_NOISE:
         assert core.effect_verdict(noisier, bar, policy(floor)) is core.EffectVerdict.WITHIN_NOISE
+
+
+@given(mine=SAMPLES, theirs=SAMPLES, floor=FLOORS, direction=DIRECTIONS, bar=BARS)
+def test_the_resolution_is_the_distance_from_a_bar_at_which_the_verdict_changes(
+    mine: list[float], theirs: list[float], floor: float, direction: Direction, bar: float
+) -> None:
+    """Beyond the resolution the effect is called, within it never; no resolution, never."""
+    result = compared(mine, theirs, floor=floor, direction=direction)
+    resolution = core.effect_resolution(result, policy(floor))
+    verdict = core.effect_verdict(result, bar, policy(floor))
+    if resolution is None:
+        assert verdict is core.EffectVerdict.WITHIN_NOISE
+        return
+    assert resolution >= 0
+    margin = (1.0 if direction == "max" else -1.0) * (result.ratio - bar)
+    expected = (
+        core.EffectVerdict.SUPPORTED
+        if margin > resolution
+        else core.EffectVerdict.DISPROVEN
+        if margin < -resolution
+        else core.EffectVerdict.WITHIN_NOISE
+    )
+    assert verdict is expected
+
+
+@given(mine=SAMPLES, theirs=SAMPLES, direction=DIRECTIONS)
+def test_under_a_declared_floor_the_resolution_is_the_verdict_noises_of_the_comparisons_noise(
+    mine: list[float], theirs: list[float], direction: Direction
+) -> None:
+    result = compared(mine, theirs, floor=0.02, direction=direction)
+    resolution = core.effect_resolution(result, policy(0.02))
+    assert resolution == core.VERDICT_NOISES * result.noise

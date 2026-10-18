@@ -139,7 +139,7 @@ const EVENT_DATA_HANDLERS = {
   workspace_snapshot: ignoredEventData,
   run_configured: ignoredEventData,
   framework_warning: ignoredEventData,
-  measurement_compared: ignoredEventData,
+  measurement_compared: runEventData(applyMeasurementComparedData),
   winner_selected: runEventData(applyWinnerSelectedData),
   workstream_finished: runEventData(applyWorkstreamFinishedData),
   turn_usage_recorded: runEventData(applyTurnUsageData),
@@ -199,6 +199,17 @@ function applyWinnerSelectedData(state: CoreState, event: RunEvent): CoreState {
       selection: data.selection,
       revision: data.revision,
       settlementId: data.settlement_id ?? null,
+    },
+  });
+}
+
+function applyMeasurementComparedData(state: CoreState, event: RunEvent): CoreState {
+  const data = event.data;
+  if (data?.kind !== 'measurement_compared') return state;
+  return cloneCoreStateWith(state, {
+    comparisons: {
+      ...state.comparisons,
+      [data.candidate_commit]: {verdict: data.verdict, ratio: data.ratio},
     },
   });
 }

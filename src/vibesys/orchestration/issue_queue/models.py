@@ -15,6 +15,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
 
+from vibesys.hypothesis import DecidedFrom
 from vs_core.api.search import RevisionReply
 
 PositiveInt = Annotated[int, Field(gt=0)]
@@ -162,8 +163,13 @@ class IssueJudgeResult(_StrictModel):
 
     analysis: str
     feedback: str
-    verdict: Literal["pass", "fail"]
-    new_issues: tuple[NewBug, ...] = Field(default=(), max_length=1)
+    verdict: Annotated[
+        Literal["pass", "fail"],
+        DecidedFrom("issue.description", "summary", "self_check", "evaluations"),
+    ]
+    new_issues: Annotated[tuple[NewBug, ...], DecidedFrom("board")] = Field(
+        default=(), max_length=1
+    )
 
 
 class IssuePerfEvalResult(_StrictModel):
@@ -177,11 +183,11 @@ class IssuePerfEvalResult(_StrictModel):
     analysis: str
     metrics: PerfMetrics | GenericPerfMetrics
     evaluator_feedback: tuple[str, ...]
-    new_issues: tuple[NewIssue, ...] = ()
-    throughput_trend: PerformanceTrend | None = None
-    latency_trend: PerformanceTrend | None = None
-    primary_metric_trend: PerformanceTrend | None = None
-    secondary_metric_trend: PerformanceTrend | None = None
+    new_issues: Annotated[tuple[NewIssue, ...], DecidedFrom("board", "max_new_issues")] = ()
+    throughput_trend: Annotated[PerformanceTrend | None, DecidedFrom("prior")] = None
+    latency_trend: Annotated[PerformanceTrend | None, DecidedFrom("prior")] = None
+    primary_metric_trend: Annotated[PerformanceTrend | None, DecidedFrom("prior")] = None
+    secondary_metric_trend: Annotated[PerformanceTrend | None, DecidedFrom("prior")] = None
 
     @model_validator(mode="after")
     def _one_vocabulary(self) -> Self:

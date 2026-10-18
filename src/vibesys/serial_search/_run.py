@@ -20,7 +20,7 @@ from vibesys.hypothesis.state import HypothesisState
 from vibesys.metrics import MetricRow
 from vibesys.search_spans.api import adoption_label
 from vibesys.serial_search._ledger import LedgerJson
-from vibesys.serial_search._plan_view import LastProfile
+from vibesys.serial_search._plan_view import LastProfile, MeasurementNoise
 from vs_core.api.search import (
     INPUT,
     Input,
@@ -68,6 +68,8 @@ class RoundStart(Value):
     baseline: candidates.Baseline
     retained: tuple[Retained, ...] = ()
     """The revisions earlier rounds retained, each with the workstream that retained it."""
+    measurement_noise: MeasurementNoise | None = None
+    """The noise the latest comparison of a candidate with its base stated; None while none has."""
 
     def retained_as(self, revision: RevisionRef) -> Retained | None:
         """The latest round that retained ``revision``; None for the input."""
@@ -106,6 +108,8 @@ class RoundDone(Value):
     closed: Closed | None = None
     checkpoint: RevisionRef | None = None
     last_profile: LastProfile | None = None
+    measurement_noise: MeasurementNoise | None = None
+    """The noise the round's trusted comparison stated; None when it had none."""
     failure: str | None = None
     stopped: bool = False
 
@@ -119,6 +123,7 @@ def round_done(  # noqa: PLR0913  # LW-641205 [PLR0913]; the record joins indepe
     passed: bool,
     metrics: tuple[MetricRow, ...],
     last_profile: LastProfile | None = None,
+    measurement_noise: MeasurementNoise | None = None,
 ) -> RoundDone:
     """What a round that settled (or whose workspace never opened) leaves behind."""
     return RoundDone(
@@ -136,6 +141,7 @@ def round_done(  # noqa: PLR0913  # LW-641205 [PLR0913]; the record joins indepe
         ),
         checkpoint=None if settlement is None else settlement.candidate,
         last_profile=last_profile,
+        measurement_noise=measurement_noise,
     )
 
 
@@ -151,6 +157,7 @@ class SerialRun:
     counted: int = 0
     work_in_progress: RevisionRef | None = None
     last_profile: LastProfile | None = None
+    measurement_noise: MeasurementNoise | None = None
     closed: list[Closed] = field(default_factory=list)
     retained: list[Retained] = field(default_factory=list)
     failure: str | None = None
@@ -177,6 +184,7 @@ class SerialRun:
             last_profile=self.last_profile,
             baseline=self.baseline,
             retained=tuple(self.retained),
+            measurement_noise=self.measurement_noise,
         )
 
     def finished(self, done: RoundDone, span: SpanId | None) -> None:
@@ -201,6 +209,7 @@ class SerialRun:
                 )
             )
         self.last_profile = done.last_profile or self.last_profile
+        self.measurement_noise = done.measurement_noise or self.measurement_noise
         self.failure = done.failure or self.failure
         self.stopped = self.stopped or done.stopped
 

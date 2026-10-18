@@ -134,6 +134,13 @@ class AttemptView(Value):
     generation: Generation
     phase: AttemptPhase
     workspace: WorkspacePlan
+    base_input: str | None = Field(default=None, min_length=1, exclude_if=unset)
+    """What an evaluation reads at the workspace's base, as the runtime digested it when the
+    workspace was ensured; None until then, or when the runtime reported none.
+
+    Core knows the base (``workspace.base``) and only the runtime can digest what the evaluation
+    reads there, so a candidate's comparison with its base takes the base's measured input
+    from here (`vs_core._base_runs.base_of`)."""
     budget: AttemptBudget
     admission_id: DecisionId | None = None
     closure: AttemptClosure | None = None

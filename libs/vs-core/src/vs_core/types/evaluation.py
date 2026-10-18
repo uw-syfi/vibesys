@@ -720,6 +720,8 @@ class MeasurementRequested(Value):
     kind: Literal["measurement_requested"] = "measurement_requested"
     scope: Scope
     plan: MeasurementPlan
+    compared: bool = Field(default=False, exclude_if=unset)
+    """The strategy reads the candidate's comparison with its base (``Measure.compared``)."""
 
 
 class AgentMeasurementRequested(Value):
@@ -742,12 +744,6 @@ class AgentMeasurementRequested(Value):
     ``time_bound`` and at the run deadline.
     """
     call_id: str = Field(min_length=1)
-    base_input: str | None = Field(default=None, min_length=1, exclude_if=unset)
-    """The measured input of the attempt's base revision, as the runtime computed it.
-
-    Core compares the candidate with the attempt's own base (``WorkspacePlan.base``); only the
-    digest of what the evaluation reads there is the runtime's to give. None: no comparison.
-    """
 
 
 class AgentRejection(StrEnum):

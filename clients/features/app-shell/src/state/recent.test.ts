@@ -90,7 +90,7 @@ const read = (over: Partial<Extract<RunDigestEntry, {kind: 'read'}>> = {}): RunD
   kind: 'read',
   createdAt: NOW - 2 * HOUR,
   ideas: 10,
-  bestRatio: 3.83,
+  adoptedRatio: 3.83,
   durationSeconds: 52 * 60,
   outcome: 'adopted',
   closing: 'finished',
@@ -163,7 +163,7 @@ describe('Recent rows from run digests', () => {
       requests,
       new Map([
         ['r1', read({outcome: 'stopped', closing: 'interrupted', ideas: 2})],
-        ['r2', read({outcome: 'failed', closing: 'failed', ideas: 0, bestRatio: null})],
+        ['r2', read({outcome: 'failed', closing: 'failed', ideas: 0, adoptedRatio: null})],
       ]),
     );
     const [first, second] = recentRows(answered, CLOCK).rows;
@@ -178,7 +178,9 @@ describe('Recent rows from run digests', () => {
     const answered = answer(
       state,
       requests,
-      new Map([['r1', read({ideas: null, bestRatio: null, outcome: null, closing: 'finished'})]]),
+      new Map([
+        ['r1', read({ideas: null, adoptedRatio: null, outcome: null, closing: 'finished'})],
+      ]),
     );
     const row = recentRows(answered, CLOCK).rows[0];
 

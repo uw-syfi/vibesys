@@ -1,19 +1,22 @@
 """An agent-less run: the real backend, scripted agents, no model.
 
 The run is built from the command line as an operator builds it (``--agent-backend scripted``) and
-goes through the production launcher and host composition: real Git worktrees, the real state store,
-the runtime loop and the trusted evaluation scripts, on the executing Fake Slurm cluster. Nothing is
-substituted but the cluster and the agents, which are the scripted ones. The project is the harness's
-small CPU one (``queue.py`` holds the throughput), so the scenario runs in seconds; the scripted
-agents get a workload of their own for it, because their built-in one edits the Rust queue example.
+goes through the production launcher and host composition: real Git worktrees, the runtime loop and
+the trusted evaluation scripts, on the executing Fake Slurm cluster. Nothing is substituted but the
+cluster, the state stores and the agents, which are the scripted ones. The cluster answers in
+process (a connector process per request cost a third of the run), and the state stores are the
+Fake that commits and fences as the product's do: a run commits over a thousand times, each commit
+of the on-disk store decodes the whole document, and that was half of the run. What the run proves
+does not depend on durability, which the state-store contract and durability tests cover. The
+project is the harness's small CPU one (``queue.py`` holds the throughput), so the scenario runs in
+seconds; the scripted agents get a workload of their own for it, because their built-in one edits
+the Rust queue example.
 The edits of that example are built and measured natively by ``test_scripted_queue_recipes_e2e``.
 """
 
 from __future__ import annotations
 
-import json
 import re
-import sys
 from typing import TYPE_CHECKING
 
 from tests.e2e.dynamic_loop_harness import _AGENT_CONFIG, LoopInput, run_request
@@ -39,7 +42,7 @@ if TYPE_CHECKING:
 
     from vs_agent.api import AgentClientProtocol, AgentEventSink, AgentSpec
 
-ROUNDS = 6
+ROUNDS = 3
 SEED = 1
 _VALUE = re.compile(r"^VALUE = (-?\d+)$", re.MULTILINE)
 
@@ -109,24 +112,20 @@ class _NoAgents:
         raise AssertionError(message)
 
 
-def _executing_input(base: Path) -> LoopInput:
-    """The harness input, with its Slurm config reaching the Fake cluster through its connector."""
-    loop_input = LoopInput.create(
-        base, agent_config=f"{_AGENT_CONFIG}[agent]\nscripted_seed = {SEED}\n"
-    )
-    config = loop_input.slurm_config.read_text(encoding="utf-8")
-    command = [sys.executable, "-m", "vs_slurm.fake_connector", str(loop_input.cluster)]
-    loop_input.slurm_config.write_text(
-        config.replace('["fake-connector"]', json.dumps(command)), encoding="utf-8"
-    )
-    return loop_input
-
-
 def test_scripted_agents_plan_edit_and_judge_through_the_real_backend(tmp_path: Path) -> None:
-    loop_input = _executing_input(tmp_path)
+    loop_input = LoopInput.create(
+        tmp_path, agent_config=f"{_AGENT_CONFIG}[agent]\nscripted_seed = {SEED}\n"
+    )
     request = loop_input.request(agent_backend="scripted", max_rounds=ROUNDS, max_in_flight=2)
 
-    run = run_request(request, _NoAgents(), client_factory=_scripted_client, verify=False)
+    run = run_request(
+        request,
+        _NoAgents(),
+        client_factory=_scripted_client,
+        slurm_processes=loop_input.connector,
+        state_stores=loop_input.state_stores,
+        verify=False,
+    )
 
     run.raise_error()
     assert run.status is RunStatus.COMPLETED

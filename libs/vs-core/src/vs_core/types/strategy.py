@@ -39,6 +39,7 @@ from .common import (
     Seconds,
     StrategyId,
     Value,
+    unset,
 )
 from .evaluation import MeasurementIdentity, MeasurementPlan
 from .sessions import SessionSpec, TurnSpec
@@ -124,6 +125,13 @@ class Measure(DecisionBase):
 
     kind: Literal["measure"] = "measure"
     plan: MeasurementPlan
+    compared: bool = Field(default=False, exclude_if=unset)
+    """The strategy will read the candidate's comparison with its base.
+
+    Core then compares the candidate with the attempt's own base, taking the base's run beside
+    the candidate's when no fresh sample of it is held. A measurement nobody compares costs no
+    base run.
+    """
 
 
 class ProposeWinner(DecisionBase):

@@ -546,7 +546,10 @@ def _workspace(
                 identity
                 for identity in attempt.pending_records
                 if identity != observation.request_id
-            )
+            ),
+            "base_input": observation.measured_input
+            if isinstance(record.request, EnsureWorkspace)
+            else attempt.base_input,
         }
     )
     state = _replace(state, updated)

@@ -567,7 +567,12 @@ function endedHistoryFor(state: RunPageState, status: RunStatus): RunPageStep {
   }
 }
 
-function withRecord(state: RunPageState, record: RunRecord): RunPageStep {
+function withRecord(opened: RunPageState, record: RunRecord): RunPageStep {
+  // A run that is going again (a resume) is not gone, whatever its host once said of it.
+  const state: RunPageState =
+    opened.summary.kind === 'gone' && !isEndedRecord(record)
+      ? {...opened, summary: {kind: 'idle'}}
+      : opened;
   const instanceChanged = recordInstance(state.record) !== recordInstance(record);
   const fenced: RunPageState = instanceChanged
     ? {...state, record, logs: {kind: 'idle'}, views: {}, selected: null, detail: {kind: 'idle'}}
@@ -643,7 +648,8 @@ function withSummary(
       ? startReading(unsupported)
       : {state: unsupported, requests: []};
   }
-  if (reply.kind === 'gone') return {state: {...state, summary: reply}, requests: []};
+  if (reply.kind === 'gone')
+    return {state: {...state, summary: summaryOfGone(state)}, requests: []};
   if (reply.kind === 'failed') {
     // A live run has its session; an ended one can still read the full history.
     const failed = {...state, summary: reply};
@@ -672,6 +678,17 @@ function withSummary(
   return isEndedRecord(ready.record) && ready.wantsHistory
     ? startReading(ready)
     : {state: ready, requests: []};
+}
+
+/**
+ * What a host's "no record of this run" settles the summary to. It is a fact only about an ended run
+ * nothing else has folded: a run still going has no journal on its host until its first events
+ * land, and a run its session folded needs no summary, so neither is gone, and the summary is asked
+ * again if the run ends with nothing folded.
+ */
+function summaryOfGone(state: RunPageState): RunSummaryState {
+  if (folded(state)) return {kind: 'superseded'};
+  return isEndedRecord(state.record) ? {kind: 'gone'} : {kind: 'idle'};
 }
 
 /** A pane needs the transcript: an ended run opened from its summary reads its history now. */
@@ -1125,6 +1142,9 @@ export function runPageInvariants(state: RunPageState): string[] {
   }
   if (state.unavailable.logs !== undefined && state.logs.kind !== 'idle') {
     problems.push('logs are read although the app cannot read them');
+  }
+  if (state.summary.kind === 'gone' && !isEndedRecord(state.record)) {
+    problems.push('a run that is not over is called gone');
   }
   return problems;
 }

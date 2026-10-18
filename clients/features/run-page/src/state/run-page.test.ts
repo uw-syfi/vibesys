@@ -32,6 +32,7 @@ import {
   headerView,
   logGroups,
   quotaBannerView,
+  runGoneWords,
   stopBannerView,
   streamLines,
   timelineView,
@@ -259,30 +260,33 @@ function liveAction(random: Seeded, issued: readonly number[]): RunPageAction {
   }
 }
 
+function summaryOf(): SummaryReply {
+  return {
+    kind: 'summary',
+    snapshot: {
+      run_id: RUN.runId,
+      sequence: 5,
+      status: 'completed',
+      spans: [traceSpan('flow:a')],
+    },
+    seed: [],
+    through: 5,
+    eventCount: 5,
+    journalBytes: 100,
+    trace: 'recorded',
+    roundsFinished: 0,
+  };
+}
+
 /** A reply to a summary read (some for tokens the page never asked), of any of its outcomes. */
 function summaryAction(random: Seeded, issued: readonly number[]): RunPageAction {
   const token = random.pick(issued);
-  const outcome = random.int(4);
-  const reply: SummaryReply =
-    outcome === 0
-      ? {kind: 'unsupported'}
-      : outcome === 1
-        ? {kind: 'failed', message: 'channel closed'}
-        : {
-            kind: 'summary',
-            snapshot: {
-              run_id: RUN.runId,
-              sequence: 5,
-              status: 'completed',
-              spans: [traceSpan('flow:a')],
-            },
-            seed: [],
-            through: 5,
-            eventCount: 5,
-            journalBytes: 100,
-            trace: 'recorded',
-            roundsFinished: 0,
-          };
+  const reply = random.pick<SummaryReply>([
+    {kind: 'unsupported'},
+    {kind: 'failed', message: 'channel closed'},
+    {kind: 'gone'},
+    summaryOf(),
+  ]);
   return {type: 'summary', token, reply, wallMs: 0};
 }
 
@@ -762,6 +766,69 @@ describe('the run page store', () => {
     expect(ended.requests.some(request => request.kind === 'read-history')).toBe(false);
     expect(ended.state.run).toBe(watched.run);
     expect(ended.state.history).toEqual({kind: 'read'});
+  });
+
+  // Regression: a run opened as it started asks for its summary before its host has a journal,
+  // is told it holds no record, and kept that answer until the run ended: the finished run showed
+  // "this run is gone" with the live view replaced, until the user opened another run and back.
+  const LIVE_RECORDS = RECORDS.filter(record => record.kind === 'live');
+  const ENDED_RECORDS = RECORDS.filter(record => record.kind === 'ended');
+  for (const live of LIVE_RECORDS) {
+    for (const ended of ENDED_RECORDS) {
+      test(`a ${live.run.phase} run the host had no journal of is read again once it is ${ended.run.phase}`, () => {
+        const opened = fold(initial(), [{type: 'record', record: live}]);
+        const asked = opened.requests.find(request => request.kind === 'read-summary');
+        if (asked?.kind !== 'read-summary') throw new Error('no summary asked');
+        const early = fold(opened.state, [
+          {type: 'summary', token: asked.token, reply: {kind: 'gone'}, wallMs: 0},
+        ]);
+        expect(early.state.summary).toEqual({kind: 'idle'});
+
+        const over = fold(early.state, [{type: 'record', record: ended}]);
+        expect(runGoneWords(over.state)).toBeNull();
+        const again = over.requests.find(request => request.kind === 'read-summary');
+        if (again?.kind !== 'read-summary') throw new Error('the finished run was not read again');
+        const read = fold(over.state, [
+          {type: 'summary', token: again.token, reply: summaryOf(), wallMs: 0},
+        ]);
+        expect(read.state.summary.kind).toBe('ready');
+        expect(runGoneWords(read.state)).toBeNull();
+      });
+    }
+  }
+
+  test('a run opened ended that its host has no record of stays gone', () => {
+    const opened = fold(initial(), [{type: 'record', record: RECORDS[7] as RunRecord}]);
+    const asked = opened.requests.find(request => request.kind === 'read-summary');
+    if (asked?.kind !== 'read-summary') throw new Error('no summary asked');
+    const gone = fold(opened.state, [
+      {type: 'summary', token: asked.token, reply: {kind: 'gone'}, wallMs: 0},
+    ]);
+    expect(runGoneWords(gone.state)).not.toBeNull();
+    expect(gone.requests).toEqual([]);
+  });
+
+  test('a run its session folded is not gone when its late summary read says the host has no record', () => {
+    const opened = fold(initial(), [{type: 'record', record: RECORDS[2] as RunRecord}]);
+    const asked = opened.requests.find(request => request.kind === 'read-summary');
+    if (asked?.kind !== 'read-summary') throw new Error('no summary asked');
+    const watched = fold(opened.state, [
+      {type: 'run-data', data: {kind: 'snapshot', snapshot: snapshot(3, ['a'])}, wallMs: 0},
+      {type: 'summary', token: asked.token, reply: {kind: 'gone'}, wallMs: 0},
+      {type: 'record', record: RECORDS[7] as RunRecord},
+    ]);
+    expect(runGoneWords(watched.state)).toBeNull();
+  });
+
+  test('an ended run an operator resumes is no longer gone', () => {
+    const opened = fold(initial(), [{type: 'record', record: RECORDS[7] as RunRecord}]);
+    const asked = opened.requests.find(request => request.kind === 'read-summary');
+    if (asked?.kind !== 'read-summary') throw new Error('no summary asked');
+    const resumed = fold(opened.state, [
+      {type: 'summary', token: asked.token, reply: {kind: 'gone'}, wallMs: 0},
+      {type: 'record', record: RECORDS[2] as RunRecord},
+    ]);
+    expect(resumed.state.summary.kind).not.toBe('gone');
   });
 
   test('an ended run reads its history page by page into the run, and the tabs see its spans', () => {

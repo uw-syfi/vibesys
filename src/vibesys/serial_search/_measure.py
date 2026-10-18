@@ -17,8 +17,10 @@ from vibesys.candidates.api import Baseline, input_metrics
 from vibesys.metrics import AcceptedReading, accept_readings, reading_of
 from vibesys.search_spans.api import FAILED_CHECK, GATE, PASSED, SLOWER, GateAttrs
 from vibesys.serial_search._closing import beats_input, failed_gate
+from vibesys.serial_search._plan_view import MeasurementNoise
 from vs_core.api.search import (
     Comparison,
+    ComparisonPolicy,
     EvidenceKind,
     EvidenceRef,
     Failed,
@@ -30,6 +32,8 @@ from vs_core.api.search import (
     SpanId,
     Value,
     Workspace,
+    effect_resolution,
+    terms_policy,
     trusted_keys,
 )
 
@@ -44,6 +48,8 @@ class Gated(Value):
     The agent's own evaluations of the same input are samples of it, so this is the one
     comparison the agent was told of and the framework's verdict rests on; None when the
     candidate has no base's samples (no benchmark stage, or a base that could not be measured)."""
+    noise: MeasurementNoise | None = None
+    """The measurement noise ``comparison`` states, which the next designer is shown."""
 
 
 class NotMeasured(Value):
@@ -83,10 +89,56 @@ async def measure_gates(
     gate = ctx.operation_span
     result = await _gated(ctx, ws, revision, found)
     if isinstance(result, Gated) and not isinstance(compared, Failed):
-        result = result.model_copy(update={"comparison": compared.comparison})
+        noise = _noise_of(compared.comparison, terms_policy(terms))
+        result = result.model_copy(
+            update={
+                "readings": _settled(result.readings, compared.comparison),
+                "comparison": compared.comparison,
+                "noise": noise,
+            }
+        )
     if gate is not None and isinstance(result, Gated):
         _label_reading(ctx, gate, stage, result.readings, baseline)
     return result
+
+
+def _settled(
+    readings: tuple[AcceptedReading, ...], comparison: Comparison | None
+) -> tuple[AcceptedReading, ...]:
+    """``readings`` with the benchmark's headline stated by the settled comparison.
+
+    The record the gate read states the mean of the samples held when the official check was
+    answered, and the runs a close call earns land after it. The comparison, awaited until
+    none is under way, holds them all, so its candidate value is the one figure the round
+    reports, ranks by and labels its gate with. The record's other rows are the answering run's
+    own (a sample holds the headline only), and a comparison of another metric changes nothing.
+    """
+    reading = reading_of(readings, EvidenceKind.BENCHMARK)
+    if comparison is None or reading is None or not reading.metrics:
+        return readings
+    headline, *rest = reading.metrics
+    if headline.name != comparison.metric:
+        return readings
+    stated = headline.model_copy(update={"value": comparison.candidate_value})
+    settled = reading.model_copy(update={"metrics": (stated, *rest)})
+    return tuple(settled if item is reading else item for item in readings)
+
+
+def _noise_of(comparison: Comparison | None, policy: ComparisonPolicy) -> MeasurementNoise | None:
+    """The noise a comparison states, or None when there is none or it estimates no noise.
+
+    A comparison over too few runs (no declared floor and fewer than three a side) or over runs
+    that read alike has no estimate of its noise, so it states none.
+    """
+    resolution = None if comparison is None else effect_resolution(comparison, policy)
+    if comparison is None or resolution is None:
+        return None
+    return MeasurementNoise(
+        noise=comparison.noise,
+        resolution=resolution,
+        candidate_samples=comparison.candidate_samples,
+        base_samples=comparison.base_samples,
+    )
 
 
 def _label_reading(

@@ -1,5 +1,7 @@
 import {expect, test} from '@playwright/test';
 import {fixtureNamed} from '@vibesys/run-fixtures';
+import {screenCheck} from './checks/screen-check.js';
+import {settled} from './checks/settle.js';
 import {openFixture, playLive} from './fixture-world.js';
 
 /**
@@ -47,4 +49,24 @@ test('at 1000 px the Now pane keeps the role and the idea name readable and says
     expect(doing?.cut, `"${doing?.text}" is cut`).toBe(false);
     expect(doing?.text ?? '').not.toMatch(/^(\S+) · \1$/i);
   }
+});
+
+test('at 660 px an open idea takes the row from the list, and its close button brings the list back', async ({
+  page,
+}) => {
+  await page.setViewportSize({width: 660, height: 900});
+  const fixture = fixtureNamed('bases-and-effects');
+  await openFixture(page, fixture, {sidebar: false});
+  await playLive(page, fixture);
+  const ideas = page.getByRole('listbox', {name: 'Ideas'});
+  await ideas.getByRole('option', {name: /Per-core free lists/}).click();
+  await expect(ideas).toBeHidden();
+  const pane = page.locator('.vs-pane', {hasText: 'Per-core free lists'}).last();
+  const box = await pane.boundingBox();
+  expect(box?.width ?? 0).toBeGreaterThan(400);
+  await expect(pane.getByText('Logs', {exact: true})).toBeInViewport({ratio: 1});
+  await settled(page);
+  expect(await screenCheck(page)).toEqual([]);
+  await page.getByRole('button', {name: 'Close idea'}).click();
+  await expect(ideas).toBeVisible();
 });
