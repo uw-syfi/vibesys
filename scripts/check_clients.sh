@@ -3,7 +3,7 @@
 # failure (biome format, knip, a stale gallery screenshot) shows up before the push. Each leg is
 # a repoctl check group, the same groups the `tui-*` jobs of .github/workflows/test.yml run:
 #
-#   tui_quality       biome check (lint and format), knip, TypeScript architecture, frozen UI,
+#   tui_quality       biome check (lint and format), knip, TypeScript architecture,
 #                     protocol bindings, design tokens, package type checks
 #   tui_tests         every package's tests and the tool-script tests
 #   ui_gallery_linux  the gallery's screenshots compared in the Linux image CI uses, and a check

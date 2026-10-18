@@ -574,7 +574,7 @@ def _instance_in_use(instance_path: Path, hold: WebInstanceHold) -> str:
     """Explain a refused launch, naming the processes in the way, if it can.
 
     The blocker is whatever holds the startup log, which need not be a VibeSys
-    gateway and need not be stoppable with `vibesys web stop`: a descendant
+    gateway: a descendant
     that inherited the log keeps it after the gateway is gone, and nothing
     publishes a record for such a process. So this names the measured holders
     and offers both escapes rather than routing every case through `stop`.
@@ -588,8 +588,7 @@ def _instance_in_use(instance_path: Path, hold: WebInstanceHold) -> str:
     )
     return (
         f"Another process holds {log_path}, so this launch would overwrite a running "
-        f"gateway's output.{users} Stop the gateway with `vibesys web stop --instance "
-        f"{instance_path}`, or end those processes yourself if no gateway owns them."
+        f"gateway's output.{users} End those processes before starting another gateway."
     )
 
 
@@ -974,11 +973,7 @@ def main(
         cli.render_configuration_error(exc)
     except WebSocketBindError as exc:
         sys.stderr.write(f"{exc}\n")
-        sys.stderr.write(
-            "Inspect or stop that listener with "
-            f"`vibesys web status --port {exc.port}` or "
-            f"`vibesys web stop --port {exc.port}`.\n"
-        )
+        sys.stderr.write(f"Inspect or stop the listener on port {exc.port} before retrying.\n")
         raise SystemExit(1) from None
 
 
