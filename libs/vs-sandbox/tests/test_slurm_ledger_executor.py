@@ -509,6 +509,50 @@ async def test_an_attached_run_submits_again_a_request_withdrawn_without_its_ask
     assert world.scheduler.status(again) is SlurmJobStatus.CANCELLED
 
 
+async def test_an_attached_run_submits_again_a_request_another_runs_sweep_withdrew(
+    tmp_path: Path,
+) -> None:
+    """r3173 LOW-6: a sweep after this run's lease lapsed is not this run's cancel either.
+
+    The test above withdraws through ``withdraw``, whose signature the fix
+    changed, so at the reviewed code it failed on that call, not on the bug.
+    This one reaches the withdrawal only through the executor's ``submit`` and
+    ``poll``, whose signatures predate the fix: another run's poll sweeps the
+    request once this run's lease lapsed past the grace period. The evaluation
+    still wants its result, so it claims a new attempt and waits on its job.
+    """
+    world = _World()
+    world.scheduler.queue_s = math.inf
+    run = world.run(tmp_path / "run-1", "run-1")
+    await _attached(run, "eval-1")
+    (operation,) = world.scheduler.jobs
+    other = world.run(tmp_path / "run-2", "run-2", content="print('other')")
+    await _attached(other, "eval-2")
+    (key,) = (k for k in world.ledger.list_keys() if ledger_operation_id(k, 0) == operation)
+
+    # Run-1 does not poll for longer than its lease and the grace period (its
+    # event loop stalled); run-2 polls, renewing its own lease first, and sweeps.
+    world.clock.advance(LEASE_S + GRACE_S + 1)
+    assert (await other.executor.poll("eval-2")).phase is PollPhase.QUEUED
+    assert world.scheduler.status(operation) is SlurmJobStatus.CANCELLED
+
+    def resubmitted() -> bool:
+        entry = world.ledger.read(key)
+        return entry is not None and entry.record.attempt == 1 and entry.record.job is not None
+
+    polled = await yield_until(
+        lambda: run.executor.poll("eval-1"),
+        lambda seen: resubmitted() or seen.phase is PollPhase.ENDED,
+        "the evaluation to submit its request again",
+    )
+    assert polled.phase is not PollPhase.ENDED
+    again = ledger_operation_id(key, 1)
+    assert world.scheduler.status(again) is SlurmJobStatus.PENDING
+    await run.executor.close()
+    assert world.scheduler.status(again) is SlurmJobStatus.CANCELLED
+    await other.executor.close()
+
+
 async def test_a_job_no_run_leases_is_cancelled_by_another_runs_sweep_after_its_grace(
     tmp_path: Path,
 ) -> None:
