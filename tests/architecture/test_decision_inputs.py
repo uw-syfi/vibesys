@@ -25,6 +25,7 @@ from types import UnionType
 from typing import TYPE_CHECKING, Annotated, Union, get_args, get_origin
 
 import pytest
+from pydantic import BaseModel
 from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
 from tests.vibesys.reply_variables import context_variables
 
@@ -53,8 +54,6 @@ from vs_issue_tracker.api import RoadmapItem, RoadmapItemKind, RoadmapStatus
 from vs_prompts.api import TemplateRenderer, reply_fields
 
 if TYPE_CHECKING:
-    from pydantic import BaseModel
-
     from vs_core.api.search import RolePromptContext
 
 _COVERED: tuple[type[BaseModel], ...] = (
@@ -100,30 +99,36 @@ _PLAN = HypothesisPlan(
     invariants=_NEEDLES["plan.invariants"],
     minimum_ratio=float(_NEEDLES["plan.minimum_ratio"]),
 )
-_REPAIR = {
-    "feedback": _NEEDLES["feedback"],
-    "validation_failure": ValidationFailure(recipe="r", error=_NEEDLES["validation_failure"]),
-    "pareto_archive_conflict": ArchiveConflictView(
-        dominators=(
-            Dominator(
-                round_number=2,
-                metrics=(
-                    ConflictMetric(
-                        name=_NEEDLES["pareto_archive_conflict"], value=1.0, direction="max"
-                    ),
+_FEEDBACK = _NEEDLES["feedback"]
+_VALIDATION = ValidationFailure(recipe="r", error=_NEEDLES["validation_failure"])
+_CONFLICT = ArchiveConflictView(
+    dominators=(
+        Dominator(
+            round_number=2,
+            metrics=(
+                ConflictMetric(
+                    name=_NEEDLES["pareto_archive_conflict"], value=1.0, direction="max"
                 ),
             ),
-        )
-    ),
-}
-_IMPLEMENT = {
-    "round_number": 7,
-    "retry": 2,
-    "plan": _PLAN,
-    "base_revision": _REVISION,
-    "framework": GateFacts(),
-    **_REPAIR,
-}
+        ),
+    )
+)
+
+
+def _implement(continuation_step: str | None) -> ImplementPrompt:
+    return ImplementPrompt(
+        round_number=7,
+        retry=2,
+        plan=_PLAN,
+        base_revision=_REVISION,
+        framework=GateFacts(),
+        continuation_step=continuation_step,
+        feedback=_FEEDBACK,
+        validation_failure=_VALIDATION,
+        pareto_archive_conflict=_CONFLICT,
+    )
+
+
 _CASES: dict[str, tuple[str, RolePromptContext, type[BaseModel]]] = {
     "plan": (
         "plan",
@@ -153,10 +158,10 @@ _CASES: dict[str, tuple[str, RolePromptContext, type[BaseModel]]] = {
         ),
         OrchestratorPlan,
     ),
-    "implement": ("implement", ImplementPrompt(**_IMPLEMENT), ImplementerResponse),
+    "implement": ("implement", _implement(None), ImplementerResponse),
     "implement a continuation": (
         "implement",
-        ImplementPrompt(**_IMPLEMENT, continuation_step="step"),
+        _implement("step"),
         ImplementerResponse,
     ),
     "judge": (
@@ -223,7 +228,7 @@ def _model_of(annotation: object) -> type[BaseModel] | None:
         models = [model for arg in get_args(annotation) if (model := _model_of(arg))]
         return models[0] if len(models) == 1 else None
     return (
-        annotation if isinstance(annotation, type) and hasattr(annotation, "model_fields") else None
+        annotation if isinstance(annotation, type) and issubclass(annotation, BaseModel) else None
     )
 
 

@@ -69,7 +69,7 @@ explains how the pieces are assembled.
    Pydantic `description`, which the agent also receives.
    A reply field that makes a choice (a status, a verdict, a bar, a base) declares the
    prompt context fields it is decided from with `DecidedFrom` in its `Annotated` type,
-   and the prompt must show them (`tests/architecture/test_decision_inputs.py`).
+   and the prompt must show them (`test_the_rendered_prompt_carries_every_declared_input`).
 5. **Domain text goes in role files** that every strategy prints in one shared
    slot. All role files get the same variable set, so read what the
    domain-section renderer passes before using a variable. A modality is
