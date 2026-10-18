@@ -1086,9 +1086,11 @@ def _publication_history(
 ) -> _PublicationProof:
     owner = _attempt(context, invocation.scope)
     cursor = proof.cursor
+    # The history as published: the scope may have submitted again since (``published_history``).
     if (
         owner is None
-        or owner.evaluation_history.availability != EvaluationHistoryAvailability.COMPLETE
+        or published_history(owner.evaluation_history, cursor).availability
+        != EvaluationHistoryAvailability.COMPLETE
     ):
         return _PublicationMissing("history")
     covered = owner.evaluation_history.covered_submissions

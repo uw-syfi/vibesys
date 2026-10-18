@@ -243,7 +243,7 @@ def test_actual_suspension_publication_survives_restart_and_authorizes_dispatch(
     assert core.step(recovered, core.TurnSuspended(continuation=wait)).events == ()
 
 
-@pytest.mark.parametrize("proof", ["exact", "missing", "unavailable", "duplicate"])
+@pytest.mark.parametrize("proof", ["exact", "grown", "missing", "unavailable", "duplicate"])
 @given(ordinal=st.integers(min_value=1, max_value=3))
 def test_second_yield_captures_previous_publication_separately_from_paid_cycle(
     proof: str,
@@ -335,6 +335,19 @@ def test_second_yield_captures_previous_publication_separately_from_paid_cycle(
                 }
             ),
         )
+    kept = owner.evaluation_history
+    if proof == "grown":
+        # The scope submitted again after the publication (core's own base run, say), and
+        # that run has not ended: the stored history is unavailable past the cursor.
+        kept = kept.model_copy(
+            update={
+                "availability": core.EvaluationHistoryAvailability.UNAVAILABLE,
+                "covered_submissions": (
+                    *kept.covered_submissions,
+                    core.RequestId(root="late-base-run"),
+                ),
+            }
+        )
     state = state.model_copy(
         update={
             "attempts": core.AttemptsState(
@@ -343,6 +356,7 @@ def test_second_yield_captures_previous_publication_separately_from_paid_cycle(
                         update={
                             "checkpoints": (*owner.checkpoints, checkpoint),
                             "charges": (*owner.charges, charge),
+                            "evaluation_history": kept,
                         }
                     ),
                 )
@@ -375,8 +389,9 @@ def test_second_yield_captures_previous_publication_separately_from_paid_cycle(
     result = core.step(state, core.TurnSuspended(continuation=second))
     stored = result.state.evaluation.continuations[-1]
     assert current.evaluation_prefix == core.EvaluationHistoryCursor()
-    assert stored.preceding_submission == (receipt.history_cursor if proof == "exact" else None)
-    if proof == "exact":
+    published = proof in ("exact", "grown")
+    assert stored.preceding_submission == (receipt.history_cursor if published else None)
+    if published:
         assert stored.preceding_submission != current.evaluation_prefix
     assert (
         roundtrip(result.state).evaluation.continuations[-1].preceding_submission
