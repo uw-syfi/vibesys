@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from hypothesis import given
 from hypothesis import strategies as st
 from tests.support.child_pytest import BARE_PYTEST, child_pythonpath
-from tests.support.worker_exit import describe_exit
+from tests.support.worker_exit import describe_exit, worker_returncode
 
 if TYPE_CHECKING:
     import pytest
@@ -31,6 +31,29 @@ def test_a_non_negative_status_names_the_exit_code(code: int) -> None:
 
 def test_a_worker_that_has_not_ended_says_so() -> None:
     assert "still running" in describe_exit(None)
+
+
+class _KilledProcess:
+    """A process killed without being waited for: its status settles only when polled."""
+
+    def __init__(self, status: int) -> None:
+        self.returncode: int | None = None
+        self._status = status
+
+    def poll(self) -> int | None:
+        self.returncode = self._status
+        return self.returncode
+
+
+@given(st.integers(min_value=1, max_value=255))
+def test_a_worker_killed_without_a_wait_is_reported_by_its_signal(signal_number: int) -> None:
+    assert describe_exit(worker_returncode(_KilledProcess(-signal_number))) == (
+        f"killed by signal {signal_number}"
+    )
+
+
+def test_a_worker_with_no_process_has_no_status() -> None:
+    assert worker_returncode(None) is None
 
 
 def test_a_killed_worker_is_reported_and_the_session_ends_without_waiting_for_its_group(

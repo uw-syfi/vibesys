@@ -28,7 +28,7 @@ Public surface: ``digest_journal``.
 from __future__ import annotations
 
 from collections import deque
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Final, NamedTuple
 
 from pydantic import JsonValue, TypeAdapter, ValidationError
@@ -91,9 +91,12 @@ def _seconds(event: dict[str, JsonValue]) -> float | None:
     if not isinstance(stamp, str):
         return None
     try:
-        return datetime.fromisoformat(stamp).timestamp()
+        parsed = datetime.fromisoformat(stamp)
     except ValueError:
         return None
+    # A stamp with no offset is UTC, as the journal writes it; ``timestamp()`` would read it
+    # as the host's local time.
+    return (parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)).timestamp()
 
 
 class _Gate(NamedTuple):

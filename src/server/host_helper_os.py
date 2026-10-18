@@ -114,7 +114,10 @@ def _journal_began(log_directory: Path) -> datetime:
     began = decoded.get("timestamp") if not isinstance(decoded, Unreadable) else None
     with suppress(ValueError):
         if isinstance(began, str):
-            return datetime.fromisoformat(began)
+            parsed = datetime.fromisoformat(began)
+            # A stamp with no offset is UTC, as the journal writes it; a naive time would make
+            # sorting it against the manifests' aware times raise TypeError.
+            return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
     return datetime.fromtimestamp(stamp, UTC)
 
 
