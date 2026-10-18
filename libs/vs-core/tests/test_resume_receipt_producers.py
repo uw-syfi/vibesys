@@ -771,3 +771,76 @@ def test_a_job_polled_again_after_its_end_keeps_its_submission_in_certified_hist
     assert receipt is not None
     assert receipt.history_cursor is not None
     dispatch_publication(result.state, wait)
+
+
+@given(
+    ends=st.tuples(
+        *(
+            st.sampled_from(
+                (
+                    None,
+                    core.ObservationStatus.FAILED,
+                    core.ObservationStatus.CANCELLED,
+                    core.ObservationStatus.REJECTED,
+                )
+            ),
+        )
+        * 3
+    )
+)
+def test_a_measurement_that_ran_and_failed_without_facts_still_completes_history(
+    ends: tuple[core.ObservationStatus | None, ...],
+) -> None:
+    """An accepted job that failed or was cancelled carries no scientific facts.
+
+    The runtime withholds facts for retryable failures and cancelled jobs by design, so
+    such a submission is a conclusive empty record, not missing history. Run r2 crashed
+    when one ambiguous failure left history unavailable while the attempt read as settled:
+    core authorized the resume and then refused to dispatch it.
+    """
+    state, wait = publication_state()
+    ended = {
+        job.submission_id: status
+        for job, status in zip(state.evaluation.jobs, ends, strict=True)
+        if status is not None
+    }
+
+    def failed(observation: core.Observation | None, request: core.RequestId) -> core.Observation:
+        assert observation is not None
+        return observation.model_copy(update={"status": ended[request]})
+
+    jobs = tuple(
+        job.model_copy(update={"observation": failed(job.observation, job.submission_id)})
+        if job.submission_id in ended
+        else job
+        for job in state.evaluation.jobs
+    )
+    records = tuple(
+        row.model_copy(
+            update={
+                "observation": failed(row.observation, row.request_id),
+                "evaluation_result": None,
+            }
+        )
+        if row.request_id in ended
+        else row
+        for row in state.records.records
+    )
+    state = state.model_copy(
+        update={
+            "evaluation": state.evaluation.model_copy(update={"jobs": jobs}),
+            "records": state.records.model_copy(update={"records": records}),
+        }
+    )
+    result = core.step(state, core.TurnSuspended(continuation=wait))
+    receipt = result.state.evaluation.continuations[0].authorization_receipt
+    assert receipt is not None
+    assert receipt.history_cursor is not None
+    history = result.state.attempts.attempts[0].evaluation_history
+    assert history.availability == core.EvaluationHistoryAvailability.COMPLETE
+    assert [record.terminal_observation.status for record in history.records] == [
+        ended.get(job.submission_id, core.ObservationStatus.SUCCEEDED)
+        for job in state.evaluation.jobs
+    ]
+    assert all(not record.stages for record in history.records if record.submission_id in ended)
+    dispatch_publication(result.state, wait)

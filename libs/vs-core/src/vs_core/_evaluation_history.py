@@ -182,7 +182,11 @@ def produce_history(
             or observation.scope != scope
             or not observation.terminal
             or observation.status in (ObservationStatus.PENDING, ObservationStatus.UNKNOWN)
-            or (observation.accepted and row.evaluation_result is None)
+            or (
+                observation.accepted
+                and observation.status == ObservationStatus.SUCCEEDED
+                and row.evaluation_result is None
+            )
         ):
             continue
         facts = row.evaluation_result.model_dump() if row.evaluation_result is not None else {}
