@@ -21,7 +21,7 @@ export interface ParetoPointView {
   readonly x: number;
   readonly y: number;
   readonly time: number;
-  readonly state: 'input' | 'accepted' | 'rejected';
+  readonly state: 'input' | 'passed' | 'failed';
 }
 
 export interface ParetoView {
@@ -92,7 +92,7 @@ export function paretoView(
       x: point.x,
       y: point.y,
       time: minutes(point.at),
-      state: point.outcome === 'passed' ? ('accepted' as const) : ('rejected' as const),
+      state: point.outcome,
     })),
   ];
   const ringed = [...lit, ...(focus === null || lit.has(focus) ? WITHOUT : [focus])];

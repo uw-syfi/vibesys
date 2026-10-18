@@ -47,7 +47,7 @@ test('the trade-off chart marks the input, the frontier, the dominated and the t
   await openFixture(page, fixtureNamed('finished-two-objectives'));
   await expect(chart(page)).toBeVisible();
   await expect(roleOf(page, 'input')).toHaveCount(1);
-  await expect(roleOf(page, 'rejected')).toHaveCount(1);
+  await expect(roleOf(page, 'failed')).toHaveCount(1);
   expect(await roleOf(page, 'frontier').count()).toBeGreaterThanOrEqual(3);
   expect(await roleOf(page, 'dominated').count()).toBeGreaterThanOrEqual(1);
   await expect(chart(page).locator('path.vs-pareto-frontier')).toHaveCount(1);

@@ -150,10 +150,10 @@ describe('the trade-off chart of a run with two objectives', () => {
     expect(view?.cursor).toBeUndefined();
     expect(view?.points.map(p => [p.id, p.label, p.x, p.y, p.time, p.state])).toEqual([
       ['input', 'Input', 1000, 20, 0, 'input'],
-      ['flow:w1/#1', 'idea 1', 1500, 18, at(1), 'accepted'],
-      ['flow:w2/#1', 'idea 2', 2500, 30, at(2), 'accepted'],
-      ['flow:w3/#1', 'idea 3', 900, 25, at(3), 'rejected'],
-      ['flow:w4/#1', 'idea 4', 1200, 10, at(4), 'accepted'],
+      ['flow:w1/#1', 'idea 1', 1500, 18, at(1), 'passed'],
+      ['flow:w2/#1', 'idea 2', 2500, 30, at(2), 'passed'],
+      ['flow:w3/#1', 'idea 3', 900, 25, at(3), 'failed'],
+      ['flow:w4/#1', 'idea 4', 1200, 10, at(4), 'passed'],
     ]);
   });
 

@@ -481,10 +481,10 @@ describe('ParetoChart', () => {
   const y: ParetoAxis = {name: 'Latency', unit: 'ms', direction: 'lower'};
   const points: ParetoPoint[] = [
     {id: 'input', label: 'Input', x: 100, y: 50, time: 0, state: 'input'},
-    {id: 'a', label: 'Ring buffer', x: 140, y: 45, time: 1, state: 'accepted'},
-    {id: 'b', label: 'Batching', x: 120, y: 60, time: 2, state: 'accepted'},
-    {id: 'c', label: 'Padding', x: 130, y: 30, time: 3, state: 'accepted'},
-    {id: 'd', label: 'Unsafe', x: 300, y: 10, time: 4, state: 'rejected'},
+    {id: 'a', label: 'Ring buffer', x: 140, y: 45, time: 1, state: 'passed'},
+    {id: 'b', label: 'Batching', x: 120, y: 60, time: 2, state: 'passed'},
+    {id: 'c', label: 'Padding', x: 130, y: 30, time: 3, state: 'passed'},
+    {id: 'd', label: 'Unsafe', x: 300, y: 10, time: 4, state: 'failed'},
   ];
   const roles = (root: HTMLElement): Record<string, string> =>
     Object.fromEntries(
@@ -501,7 +501,7 @@ describe('ParetoChart', () => {
       'Ring buffer': 'frontier',
       Batching: 'dominated',
       Padding: 'frontier',
-      Unsafe: 'rejected',
+      Unsafe: 'failed',
     });
     expect([...root.querySelectorAll('li')].map(li => li.textContent)).toEqual([
       'Input',
@@ -552,9 +552,9 @@ describe('ParetoChart picking', () => {
   const x: ParetoAxis = {name: 'Throughput', unit: 'ops/s', direction: 'higher'};
   const y: ParetoAxis = {name: 'Latency', unit: 'ms', direction: 'lower'};
   const points: ParetoPoint[] = [
-    {id: 'a', label: 'Ring buffer', x: 140, y: 45, time: 1, state: 'accepted'},
-    {id: 'b', label: 'Batching', x: 120, y: 60, time: 2, state: 'accepted'},
-    {id: 'c', label: 'Padding', x: 130, y: 30, time: 3, state: 'accepted'},
+    {id: 'a', label: 'Ring buffer', x: 140, y: 45, time: 1, state: 'passed'},
+    {id: 'b', label: 'Batching', x: 120, y: 60, time: 2, state: 'passed'},
+    {id: 'c', label: 'Padding', x: 130, y: 30, time: 3, state: 'passed'},
   ];
 
   test('points are buttons with one tab stop; a press or Enter picks; hover is reported', async () => {
@@ -602,8 +602,8 @@ describe('ParetoChart values', () => {
     const x: ParetoAxis = {name: 'Throughput', unit: 'ops/s', direction: 'higher'};
     const y: ParetoAxis = {name: 'Latency', unit: '', direction: 'lower'};
     const points: ParetoPoint[] = [
-      {id: 'a', label: 'Big', x: 6_054_154, y: 0.512, time: 1, state: 'accepted'},
-      {id: 'b', label: 'Small', x: 12.34, y: 47.25, time: 2, state: 'accepted'},
+      {id: 'a', label: 'Big', x: 6_054_154, y: 0.512, time: 1, state: 'passed'},
+      {id: 'b', label: 'Small', x: 12.34, y: 47.25, time: 2, state: 'passed'},
     ];
     const root = await mount(<ParetoChart label="Trade-off" points={points} x={x} y={y} />);
     const titles = [...root.querySelectorAll('.vs-pareto-point title')].map(t => t.textContent);

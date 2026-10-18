@@ -411,7 +411,7 @@ const PARETO_POINTS: readonly ParetoPoint[] = (() => {
       x: Math.round(throughput),
       y: Math.round(latency * 10) / 10,
       time: index + 1,
-      state: index === 6 || index === 13 ? 'rejected' : 'accepted',
+      state: index === 6 || index === 13 ? 'failed' : 'passed',
     };
   });
   return [
@@ -650,10 +650,10 @@ export const RICH_ENTRIES = {
               size="strip"
               points={[
                 {id: 'in', label: 'Input', x: 1, y: 0, time: 0, state: 'input'},
-                {id: 'a', label: 'Arena', x: 1.2, y: 30, time: 1, state: 'accepted'},
-                {id: 'b', label: 'Pooling', x: 1.5, y: 12, time: 2, state: 'accepted'},
-                {id: 'c', label: 'Packing', x: 1.1, y: 55, time: 3, state: 'accepted'},
-                {id: 'd', label: 'Both', x: 1.6, y: 40, time: 4, state: 'accepted'},
+                {id: 'a', label: 'Arena', x: 1.2, y: 30, time: 1, state: 'passed'},
+                {id: 'b', label: 'Pooling', x: 1.5, y: 12, time: 2, state: 'passed'},
+                {id: 'c', label: 'Packing', x: 1.1, y: 55, time: 3, state: 'passed'},
+                {id: 'd', label: 'Both', x: 1.6, y: 40, time: 4, state: 'passed'},
               ]}
               x={{name: 'Speed-up', unit: '×', direction: 'higher'}}
               y={{name: 'Memory saved', unit: '%', direction: 'higher'}}

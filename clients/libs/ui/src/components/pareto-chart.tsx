@@ -5,10 +5,10 @@ import {type Direction, frontierAt, type Tradeoff, toward} from './pareto-fronti
 import {Text} from './text.js';
 
 /**
- * How a measured point ended: the `input` is the starting point; an `accepted` point competes for
- * the frontier; a `rejected` point was measured but turned down, so it is drawn and never competes.
+ * How a measured point ended: the `input` is the starting point; a `passed` point competes for
+ * the frontier; a `failed` point was measured but turned down, so it is drawn and never competes.
  */
-export type ParetoState = 'input' | 'accepted' | 'rejected';
+export type ParetoState = 'input' | 'passed' | 'failed';
 
 /** One measured point of a two-objective trade-off. `time` is when it was measured, in the cursor's unit. */
 export interface ParetoPoint extends Tradeoff {
@@ -25,7 +25,7 @@ export interface ParetoAxis {
   readonly direction: Direction;
 }
 
-type Role = 'input' | 'frontier' | 'dominated' | 'rejected';
+type Role = 'input' | 'frontier' | 'dominated' | 'failed';
 
 /**
  * The drawing is in pixels: its width is its container's, measured, so its text keeps its size
@@ -50,7 +50,7 @@ const R = 6;
 const R_SMALL = 4;
 const R_RING = 10;
 const GLYPH = TYPE.section.size * MONO_ADVANCE;
-const KEY_ORDER: readonly Role[] = ['input', 'frontier', 'dominated', 'rejected'];
+const KEY_ORDER: readonly Role[] = ['input', 'frontier', 'dominated', 'failed'];
 
 interface Plot {
   readonly left: number;
@@ -162,7 +162,7 @@ function staircase(
 
 function roleOf(point: ParetoPoint, onFrontier: ReadonlySet<string>): Role {
   if (point.state === 'input') return 'input';
-  if (point.state === 'rejected') return 'rejected';
+  if (point.state === 'failed') return 'failed';
   return onFrontier.has(point.id) ? 'frontier' : 'dominated';
 }
 
@@ -170,7 +170,7 @@ const ROLE_WORD: Record<Role, string> = {
   input: 'Input',
   frontier: 'On the frontier',
   dominated: 'Dominated',
-  rejected: 'Turned down',
+  failed: 'Turned down',
 };
 
 /** The words a hover shows: the point's name and both of its values. */
@@ -219,7 +219,7 @@ export function ParetoChart(props: {
 
   const cursor = props.cursor ?? Number.POSITIVE_INFINITY;
   const seen = points.filter(p => p.time <= cursor);
-  const competing = seen.filter(p => p.state !== 'rejected');
+  const competing = seen.filter(p => p.state !== 'failed');
   const frontier = frontierAt(competing, {x: x.direction, y: y.direction}, cursor);
   const onFrontier = new Set(frontier.map(p => p.id));
   // Left to right: the end with the worst x, which has the best y, first.
@@ -245,7 +245,7 @@ export function ParetoChart(props: {
         className="vs-chart"
         viewBox={`0 0 ${width} ${height}`}
         role={props.pick === undefined ? 'img' : 'group'}
-        aria-label={`${props.label}. ${frontier.length} of ${competing.length} accepted points are on the frontier.`}
+        aria-label={`${props.label}. ${frontier.length} of ${competing.length} passed points are on the frontier.`}
       >
         <Axes frame={frame} x={x} y={y} height={height} />
         {frontier.length === 0 ? null : (
