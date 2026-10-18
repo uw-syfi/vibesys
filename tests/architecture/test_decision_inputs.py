@@ -7,217 +7,70 @@ fields of the role's prompt context the decision needs.
 
 Three checks hold the declaration:
 
-- every field of a covered reply model that makes a choice (a flag, a number, a closed set)
-  declares inputs, unless it is a measurement the agent only reports (``_REPORTED``);
+- every reply model of every registered search is found through its roles, and each field of
+  it that makes a choice (a flag, a number, a closed set, or a collection of records that hold
+  one) declares inputs, unless it is a measurement the agent only reports (``_REPORTED``), so a
+  new reply or a new decision field fails until it declares;
 - every declared input is a field of the prompt context the role is asked with;
-- each prompt template of the role, rendered with a context that fills every field with a
-  distinctive value, contains the value of every input its reply declares.
+- each prompt of a role, rendered the way the render operation renders it with a context that
+  fills every field with a distinctive value, contains the value of every input its reply
+  declares.
 
-Another reply model joins ``_COVERED`` when its fields declare inputs; the models the strategies
-register and ``_COVERED`` omits are the ones still to do.
+A role whose reply declares inputs needs a case (``decision_input_cases``): the context to
+render and what each input looks like in the prompt.
 """
 
 from __future__ import annotations
 
 import enum
-from pathlib import Path
-from types import UnionType
-from typing import TYPE_CHECKING, Annotated, Union, get_args, get_origin
+from types import NoneType, UnionType
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Literal,
+    TypeAliasType,
+    Union,
+    get_args,
+    get_origin,
+)
 
 import pytest
 from pydantic import BaseModel
-from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
-from tests.vibesys.reply_variables import context_variables
-
-import vibesys.orchestration.multi.core_policy.prompts as multi_templates
-from vibesys.hypothesis import OrchestratorPlan, declared_inputs
-from vibesys.orchestration.multi.core_policy.api import run_prompt_variables
-from vibesys.orchestration.multi.models import ImplementerResponse, JudgeResponse, PreRoundDecision
-from vibesys.orchestration.multi.search.api import (
-    ArchiveConflictView,
-    ConflictMetric,
-    Dominator,
-    GateFacts,
-    HypothesisPlan,
-    ImplementerClaims,
-    ImplementPrompt,
-    JudgePrompt,
-    PreRoundPrompt,
-    ValidationFailure,
-    multi,
+from tests.architecture.decision_input_cases import (
+    Case,
+    cases,
+    orchestration_folder,
+    registered_folders,
+    renderer,
 )
-from vibesys.prompts import CORE_PROTOCOL_DIR, PROMPTS_DIR
-from vibesys.serial_search.api import PROMPTS_DIR as SERIAL_SEARCH_PROMPTS
-from vibesys.serial_search.api import PassedIdea, PlanPrompt, RoundRow
-from vs_core.api import RevisionId, RevisionRef
-from vs_issue_tracker.api import RoadmapItem, RoadmapItemKind, RoadmapStatus
-from vs_prompts.api import TemplateRenderer, reply_fields
+from tests.support.prompt_context import registered_searches
+
+from vibesys.hypothesis import declared_inputs
+from vibesys.orchestration.issue_queue.models import IssuePerfEvalResult
+from vibesys.orchestration.multi.models import ImplementerResponse
+from vibesys.orchestration.profilers import ProfilerSummary
+from vibesys.orchestration.single.models import SingleAgentRoundResponse
 
 if TYPE_CHECKING:
-    from vs_core.api.search import RolePromptContext
+    from pathlib import Path
 
-_COVERED: tuple[type[BaseModel], ...] = (
-    OrchestratorPlan,
-    ImplementerResponse,
-    JudgeResponse,
-    PreRoundDecision,
-)
-_REPORTED: dict[tuple[str, str], str] = {
-    ("ImplementerResponse", "perf_metric"): (
-        "a number the agent copies from a measurement it ran; nothing is decided from facts"
-    ),
+    from vs_core.api.search import Role
+
+_COPIED = "a number the agent copies from a measurement it ran; nothing is decided from facts"
+_REPORTED: dict[tuple[type[BaseModel], str], str] = {
+    (ProfilerSummary, "perf_metric"): _COPIED,
+    (ProfilerSummary, "metrics"): _COPIED,
+    (ImplementerResponse, "perf_metric"): _COPIED,
+    (ImplementerResponse, "metrics"): _COPIED,
+    (ImplementerResponse, "candidate_metrics"): _COPIED,
+    (SingleAgentRoundResponse, "perf_metric"): _COPIED,
+    (SingleAgentRoundResponse, "candidate_metrics"): _COPIED,
+    (IssuePerfEvalResult, "metrics"): _COPIED,
 }
-
-# What each declared input shows in a prompt, by the dotted path the declaration names.
-_NEEDLES: dict[str, str] = {
-    "input_value": "3001.5",
-    "history": "history-idea-a",
-    "passed": "passed-idea-b",
-    "base_revision": "base-rev-c",
-    "roadmap": "roadmap-item-d",
-    "plan.pass_criteria": "criteria-e",
-    "plan.invariants": "invariants-f",
-    "plan.minimum_ratio": "1.37",
-    "feedback": "feedback-g",
-    "validation_failure": "validation-error-h",
-    "pareto_archive_conflict": "conflict-metric-i",
-    "claims.status": "status-claim-j",
-    "claims.evidence": "claimed-evidence-k",
-    "round_number": "round 7",
-    "regression_kind": "regression-kind-l",
-    "exhaustion_feedback": "exhaustion-feedback-m",
+_CASES = cases()
+_ROLES = {
+    f"{search.name}/{role.name}": role for search in registered_searches() for role in search.roles
 }
-
-_REVISION = RevisionRef(
-    revision_id=RevisionId(root=_NEEDLES["base_revision"]), digest="git-commit:base"
-)
-_PLAN = HypothesisPlan(
-    hypothesis_id="hyp",
-    hypothesis="claim",
-    task="task",
-    pass_criteria=_NEEDLES["plan.pass_criteria"],
-    invariants=_NEEDLES["plan.invariants"],
-    minimum_ratio=float(_NEEDLES["plan.minimum_ratio"]),
-)
-_FEEDBACK = _NEEDLES["feedback"]
-_VALIDATION = ValidationFailure(recipe="r", error=_NEEDLES["validation_failure"])
-_CONFLICT = ArchiveConflictView(
-    dominators=(
-        Dominator(
-            round_number=2,
-            metrics=(
-                ConflictMetric(
-                    name=_NEEDLES["pareto_archive_conflict"], value=1.0, direction="max"
-                ),
-            ),
-        ),
-    )
-)
-
-
-def _implement(continuation_step: str | None) -> ImplementPrompt:
-    return ImplementPrompt(
-        round_number=7,
-        retry=2,
-        plan=_PLAN,
-        base_revision=_REVISION,
-        framework=GateFacts(),
-        continuation_step=continuation_step,
-        feedback=_FEEDBACK,
-        validation_failure=_VALIDATION,
-        pareto_archive_conflict=_CONFLICT,
-    )
-
-
-_CASES: dict[str, tuple[str, RolePromptContext, type[BaseModel]]] = {
-    "plan": (
-        "plan",
-        PlanPrompt(
-            round_number=7,
-            max_rounds=9,
-            base_revision=_REVISION,
-            input_value=float(_NEEDLES["input_value"]),
-            history=(
-                RoundRow(
-                    round_number=1,
-                    hypothesis_id=_NEEDLES["history"],
-                    passed=True,
-                    official=True,
-                    judge_verdict="pass",
-                ),
-            ),
-            passed=(PassedIdea(round_number=1, idea=_NEEDLES["passed"]),),
-            roadmap=(
-                RoadmapItem(
-                    id="major-1",
-                    kind=RoadmapItemKind.MAJOR,
-                    title=_NEEDLES["roadmap"],
-                    status=RoadmapStatus.TODO,
-                ),
-            ),
-        ),
-        OrchestratorPlan,
-    ),
-    "implement": ("implement", _implement(None), ImplementerResponse),
-    "implement a continuation": (
-        "implement",
-        _implement("step"),
-        ImplementerResponse,
-    ),
-    "judge": (
-        "judge",
-        JudgePrompt(
-            round_number=7,
-            retry=2,
-            plan=_PLAN,
-            claims=ImplementerClaims(
-                summary="summary",
-                expected_behavior="behavior",
-                status=_NEEDLES["claims.status"],
-                evidence=_NEEDLES["claims.evidence"],
-                candidate_disposition="unassessed",
-            ),
-            framework=GateFacts(),
-        ),
-        JudgeResponse,
-    ),
-    "pre-round": (
-        "pre_round",
-        PreRoundPrompt(
-            round_number=7,
-            has_history=True,
-            regression_kind=_NEEDLES["regression_kind"],
-            regression_round=6,
-            exhaustion_feedback=_NEEDLES["exhaustion_feedback"],
-            exhaustion_round=5,
-        ),
-        PreRoundDecision,
-    ),
-}
-
-_RENDERER = TemplateRenderer(
-    Path(multi_templates.__file__).parent,
-    fallback_roots=(SERIAL_SEARCH_PROMPTS, CORE_PROTOCOL_DIR, PROMPTS_DIR / "shared"),
-)
-
-
-def _render(template: str, context: RolePromptContext) -> str:
-    variables = context_variables(context, multi.reply_schemas)
-    run = run_prompt_variables(
-        domain_sections=EMPTY_DOMAIN_SECTIONS,
-        objective="Raise throughput.",
-        environment_notes="note",
-        agent_evaluation=True,
-        validation_recipe_schema='{"version": 1}',
-        profiler_id="linux_cpu",
-        profile_execution="local",
-        profiler_support_name="support",
-        profiler_mcp_name="profiler",
-        benchmark_command="bench",
-        reference_path=".",
-        interface="inprocess",
-    )
-    return str(_RENDERER.render_template(f"{template}.j2", **run, **variables))
 
 
 def _model_of(annotation: object) -> type[BaseModel] | None:
@@ -244,81 +97,113 @@ def _resolves(context: type[BaseModel], path: str) -> bool:
     return nested is not None and _resolves(nested, rest)
 
 
-def _is_a_choice(annotation: object) -> bool:
-    """Whether a field of this type picks a flag, a number or a member of a closed set."""
-    if get_origin(annotation) is Annotated:
-        return _is_a_choice(get_args(annotation)[0])
-    if get_origin(annotation) in (Union, UnionType):
-        return any(_is_a_choice(arg) for arg in get_args(annotation) if arg is not type(None))
+def _is_a_choice(annotation: object, seen: frozenset[object] = frozenset()) -> bool:
+    """Whether a field of this type picks a flag, a number or a member of a closed set.
+
+    A collection of records, or a record, counts when anything inside it makes a choice.
+    """
+    if annotation in seen:
+        return False
+    if isinstance(annotation, TypeAliasType):
+        return _is_a_choice(annotation.__value__, seen | {annotation})
+    origin = get_origin(annotation)
+    if origin is Literal:
+        return True
+    if origin is not None:
+        return any(_is_a_choice(arg, seen) for arg in get_args(annotation) if arg is not NoneType)
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return any(
+            _is_a_choice(field.annotation, seen | {annotation})
+            for field in annotation.model_fields.values()
+        )
     return isinstance(annotation, type) and issubclass(annotation, bool | int | float | enum.Enum)
 
 
-@pytest.mark.parametrize("model", _COVERED, ids=lambda model: model.__name__)
-def test_every_decision_field_of_a_covered_reply_declares_its_inputs(
-    model: type[BaseModel],
-) -> None:
+def _decision_fields(model: type[BaseModel]) -> list[str]:
+    return [name for name, field in model.model_fields.items() if _is_a_choice(field.annotation)]
+
+
+def test_every_registered_search_is_one_of_the_built_in_orchestrations() -> None:
+    assert {
+        orchestration_folder(search) for search in registered_searches()
+    } == registered_folders()
+
+
+@pytest.mark.parametrize("name", _ROLES)
+def test_every_decision_field_of_a_reply_declares_its_inputs(name: str) -> None:
+    model = _ROLES[name].reply
     declared = declared_inputs(model)
     missing = [
-        name
-        for name, field in model.model_fields.items()
-        if _is_a_choice(field.annotation)
-        and name not in declared
-        and (model.__name__, name) not in _REPORTED
+        field
+        for field in _decision_fields(model)
+        if field not in declared and (model, field) not in _REPORTED
     ]
 
     assert not missing, f"{model.__name__} decision fields declare no inputs: {missing}"
 
 
-def test_a_reported_measurement_still_exists() -> None:
-    models = {model.__name__: model for model in _COVERED}
+def test_a_reported_field_is_still_a_decision_field_of_a_reply() -> None:
+    replies = {role.reply for role in _ROLES.values()}
+    stale = [
+        (model.__name__, field)
+        for model, field in _REPORTED
+        if model not in replies or field not in _decision_fields(model)
+    ]
 
-    assert all(name in models[owner].model_fields for owner, name in _REPORTED)
+    assert not stale, f"reported fields that no reply decides: {stale}"
+
+
+def _role_of(case: Case) -> Role:
+    return _ROLES[f"{case.search}/{case.role}"]
 
 
 @pytest.mark.parametrize("name", _CASES)
 def test_a_declared_input_is_a_field_of_the_prompt_context(name: str) -> None:
-    _, context, reply = _CASES[name]
-    declared = declared_inputs(reply)
+    case = _CASES[name]
     unknown = {
         field: path
-        for field, paths in declared.items()
+        for field, paths in declared_inputs(_role_of(case).reply).items()
         for path in paths
-        if not _resolves(type(context), path)
+        if not _resolves(type(case.context), path)
     }
 
-    assert not unknown, f"inputs that are no field of {type(context).__name__}: {unknown}"
+    assert not unknown, f"inputs that are no field of {type(case.context).__name__}: {unknown}"
 
 
 @pytest.mark.parametrize("name", _CASES)
-def test_the_rendered_prompt_carries_every_declared_input(name: str) -> None:
-    template, context, reply = _CASES[name]
-    text = _render(template, context)
+def test_the_rendered_prompt_carries_every_declared_input(name: str, tmp_path: Path) -> None:
+    case = _CASES[name]
+    search = next(item for item in registered_searches() if item.name == case.search)
+    text = renderer(search).render(tmp_path, case.context, subject=case.role, held=case.held)
     absent = {
         field: path
-        for field, paths in declared_inputs(reply).items()
+        for field, paths in declared_inputs(_role_of(case).reply).items()
         for path in paths
-        if _NEEDLES[path] not in text
+        if case.needles[path] not in text
     }
 
     assert not absent, f"the {name} prompt does not show declared inputs {absent}"
 
 
-def test_every_declared_input_has_a_probe() -> None:
-    declared = {
-        path for model in _COVERED for paths in declared_inputs(model).values() for path in paths
-    }
+@pytest.mark.parametrize("name", _CASES)
+def test_every_declared_input_has_a_probe(name: str) -> None:
+    case = _CASES[name]
+    declared = {path for paths in declared_inputs(_role_of(case).reply).values() for path in paths}
 
-    assert declared <= _NEEDLES.keys()
+    assert declared <= case.needles.keys()
 
 
 @pytest.mark.parametrize("name", _CASES)
 def test_the_case_asks_the_role_whose_reply_it_checks(name: str) -> None:
-    _, context, reply = _CASES[name]
-    assert context.reply_schema is not None
-    offered = set(reply_fields(multi.reply_schemas[context.reply_schema].model_json_schema()))
+    case = _CASES[name]
 
-    assert set(reply.model_fields) <= offered
+    assert type(case.context).reply_schema == _role_of(case).reply_schema
 
 
-def test_every_covered_reply_has_a_case() -> None:
-    assert {reply for _, _, reply in _CASES.values()} == set(_COVERED)
+def test_every_reply_that_declares_inputs_has_a_case() -> None:
+    covered = {f"{case.search}/{case.role}" for case in _CASES.values()}
+    uncovered = [name for name, role in _ROLES.items() if declared_inputs(role.reply)]
+
+    assert set(uncovered) <= covered, (
+        f"roles with declared inputs and no case: {set(uncovered) - covered}"
+    )

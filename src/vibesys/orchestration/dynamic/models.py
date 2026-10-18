@@ -16,7 +16,7 @@ from pydantic import (
 )
 from pydantic.json_schema import GenerateJsonSchema
 
-from vibesys.hypothesis import HypothesisOutcome
+from vibesys.hypothesis import DecidedFrom, HypothesisOutcome
 from vibesys.hypothesis.plan import HypothesisStrategyUpdate
 from vibesys.inputs import MAX_STEPS, PlanStep, outline_problems
 from vs_core.api import RevisionReply, Value
@@ -373,7 +373,10 @@ class PortfolioPlan(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reasoning: str = Field(min_length=1, description="Why this portfolio of workstreams.")
-    workstreams: tuple[PlannerWorkstream, ...] = Field(
+    workstreams: Annotated[
+        tuple[PlannerWorkstream, ...],
+        DecidedFrom("capacity", "remaining", "buildable", "mergeable", "history", "baseline"),
+    ] = Field(
         min_length=1,
         max_length=32,
         description=(
@@ -381,10 +384,12 @@ class PortfolioPlan(BaseModel):
             "per profile (kind profile) or per merge (kind merge)."
         ),
     )
-    hypothesis_updates: tuple[PlannerHypothesisUpdate, ...] = Field(
-        default=(),
-        max_length=32,
-        description="Parks and abandonments of completed hypotheses; empty when there are none.",
+    hypothesis_updates: Annotated[tuple[PlannerHypothesisUpdate, ...], DecidedFrom("history")] = (
+        Field(
+            default=(),
+            max_length=32,
+            description="Parks and abandonments of completed hypotheses; empty when there are none.",
+        )
     )
     handoff: PlannerHandoff = Field(
         description=(
@@ -392,7 +397,7 @@ class PortfolioPlan(BaseModel):
             "of each workstream, what you would do next on each outcome, and your open doubts."
         )
     )
-    evaluation_order: tuple[str, ...] = Field(
+    evaluation_order: Annotated[tuple[str, ...], DecidedFrom("evaluations")] = Field(
         default=(),
         max_length=64,
         description=(
@@ -594,6 +599,11 @@ class WorkResult(Value):
 class ImplementerResult(WorkResult, RevisionReply):
     """What an implementer answers: its work, which core checkpoints unless it is blocked."""
 
+    outcome: Annotated[
+        HypothesisOutcome,
+        DecidedFrom("pass_criteria", "evidence", "rejection", "prior_failure_tail"),
+    ]
+
     @override
     def produces_revision(self) -> bool:
         """A blocked implementer claims no work, so core records no checkpoint for its turn."""
@@ -610,10 +620,12 @@ class MergeOutcomeKind(StrEnum):
 class MergeResult(RevisionReply):
     """What a merger answers: the merge it committed, or why it stopped without one."""
 
-    outcome: MergeOutcomeKind = Field(
-        description=(
-            "merged when every candidate is merged as instructed and the project's fast tests "
-            "pass; refused when the instructions cannot be followed without redesigning."
+    outcome: Annotated[MergeOutcomeKind, DecidedFrom("candidates", "instructions", "watch_for")] = (
+        Field(
+            description=(
+                "merged when every candidate is merged as instructed and the project's fast tests "
+                "pass; refused when the instructions cannot be followed without redesigning."
+            )
         )
     )
     summary: str = Field(min_length=1, description="What you merged, in order, and how.")
@@ -635,6 +647,8 @@ class MergeResult(RevisionReply):
 class ProfilerResult(WorkResult):
     """What a profiler answers: it measures a revision and never produces one."""
 
+    outcome: Annotated[HypothesisOutcome, DecidedFrom("question", "required_fields")]
+
 
 class PlanOutline(BaseModel):
     """The steps of the task's plan, as the planner outlines them from the plan's documents.
@@ -645,7 +659,7 @@ class PlanOutline(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    steps: tuple[PlanStep, ...] = Field(
+    steps: Annotated[tuple[PlanStep, ...], DecidedFrom("documents")] = Field(
         min_length=1,
         max_length=MAX_STEPS,
         description=(
@@ -668,7 +682,7 @@ class ReviewResult(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    passed: bool
+    passed: Annotated[bool, DecidedFrom("pass_criteria", "summary", "evidence", "evaluations")]
     analysis: str = Field(min_length=1)
     feedback: str = ""
 

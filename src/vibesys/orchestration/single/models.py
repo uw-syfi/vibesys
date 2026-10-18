@@ -1,9 +1,12 @@
 """The reply of the single-agent implementer."""
 
+from typing import Annotated
+
 from pydantic import Field, FiniteFloat
 
 from vibesys.hypothesis import (
     CandidateDisposition,
+    DecidedFrom,
     SkillResourceSelection,
 )
 from vibesys.orchestration.review import Verdict
@@ -35,7 +38,7 @@ class SingleAgentRoundResponse(RevisionReply):
     feedback: str = Field(
         description=markdown_prose("Concrete issues to fix on retry; empty when verdict is PASS.")
     )
-    verdict: Verdict = Field(
+    verdict: Annotated[Verdict, DecidedFrom("pass_criteria", "invariants")] = Field(
         description=(
             "PASS when the exact scoped outcome is supported and objective invariants, "
             "evidence identity, and resource lifecycle hold; this does not assert global "
@@ -61,7 +64,9 @@ class SingleAgentRoundResponse(RevisionReply):
         default=None,
         description="Unit/field name for perf_metric (e.g. 'median_tok_per_sec'). None when perf_metric is None.",
     )
-    candidate_disposition: CandidateDisposition = Field(
+    candidate_disposition: Annotated[
+        CandidateDisposition, DecidedFrom("minimum_ratio", "dominated_by_rounds")
+    ] = Field(
         default=CandidateDisposition.UNASSESSED,
         description="Independent provisional checkpoint-retention recommendation.",
     )

@@ -1412,7 +1412,7 @@ expose = ["OutcomeCodecError", "OutcomeValue", "bind_outcome", "prove_outcome"]
 [[modules]]
 path = "vibesys.orchestration.issue_queue.models"
 layer = "loops"
-depends_on = ["vs_core", "vs_issue_tracker"]
+depends_on = ["vs_core", "vs_issue_tracker", "vibesys.hypothesis"]
 
 [[interfaces]]
 expose = ["GenericPerfMetrics", "IssueImplementerResult", "IssueJudgeResult", "IssuePerfEvalResult", "LatencyStats", "LoadLevel", "LoadLevelMetrics", "NewBug", "NewIssue", "PerfMetrics", "PerformanceMeasurement", "PerformanceTrend", "ThroughputStats"]
@@ -1726,7 +1726,7 @@ depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.core_roles", "vibe
 [[modules]]
 path = "vibesys.orchestration.evolve.models"
 layer = "roles_search"
-depends_on = ["vs_core", "vibesys.metrics", "vibesys.orchestration.evolve.population", "vibesys.orchestration.review"]
+depends_on = ["vs_core", "vibesys.hypothesis", "vibesys.metrics", "vibesys.orchestration.evolve.population", "vibesys.orchestration.review"]
 
 [[interfaces]]
 expose = ["[A-Za-z][A-Za-z0-9_]*"]

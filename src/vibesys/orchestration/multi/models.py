@@ -124,7 +124,13 @@ class JudgeResponse(BaseModel):
     )
     verdict: Annotated[
         Verdict,
-        DecidedFrom("plan.pass_criteria", "plan.invariants", "claims.status", "claims.evidence"),
+        DecidedFrom(
+            "plan.pass_criteria",
+            "plan.invariants",
+            "claims.status",
+            "claims.evidence",
+            "cited_evidence",
+        ),
     ] = Field(
         description=(
             "PASS when verified evidence supports the declared outcome and checkpoint "
