@@ -13,6 +13,8 @@ from vs_sim.api import ByteSource, OutputStream
 
 from .cluster import SlurmCluster, recorded_job_ids
 from .cluster_types import (
+    OBSERVED_CANCEL_CALLS,
+    ClusterCall,
     ClusterCancelOutcome,
     ClusterCancelRequested,
     ClusterCollected,
@@ -235,6 +237,7 @@ __all__ = [
     "MAX_CONNECTOR_RESPONSE_BYTES",
     "MAX_REMOTE_READ_BYTES",
     "MAX_TRANSPORT_STREAM_BYTES",
+    "OBSERVED_CANCEL_CALLS",
     "PORT_PLACEHOLDER",
     "PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE",
     "REQUESTS_FILE",
@@ -248,6 +251,7 @@ __all__ = [
     "CheckJob",
     "ClaimAttempt",
     "Cluster",
+    "ClusterCall",
     "ClusterCancelOutcome",
     "ClusterCancelRequested",
     "ClusterCollectOutcome",
@@ -447,8 +451,21 @@ class Cluster(Protocol):
         """Observe scheduler evidence without submitting work."""
         ...
 
-    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
-        """Record cancellation intent, leaving confirmation to inspect."""
+    def cancel(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCancelOutcome:
+        """Record cancellation intent, leaving confirmation to inspect.
+
+        ``observed`` is a reading the caller just took of this target. When it
+        shows the job queued or running, the scancel is the cancel's first
+        transport call (``OBSERVED_CANCEL_CALLS``), with no fresh scheduler read
+        before it; the rest of the cancel follows as without it. A reading of
+        another job is Unknown, and nothing is cancelled.
+        """
         ...
 
     def collect(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shlex
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
@@ -20,8 +21,11 @@ from vs_sim.api import DISCARD, OutputSink, ProcessTimedOut
 from vs_sim.api.testing import ManualClock, examples, wait_until_started_sync
 from vs_slurm.api import (
     INITIAL_LIFE,
+    OBSERVED_CANCEL_CALLS,
+    REQUESTS_FILE,
     AccountingRow,
     Cluster,
+    ClusterCall,
     ClusterCancelRequested,
     ClusterCollected,
     ClusterConflict,
@@ -88,13 +92,16 @@ class _Case:
     forget_name_history: Callable[[str], None]
     on_accept: Callable[[str, Callable[[], None]], None]
     commands: Callable[[], Sequence[str]]
+    # Every transport call the implementation made, in order, as a caller budgets them.
+    calls: Callable[[], Sequence[ClusterCall]]
 
 
 def _make_case(implementation: str, tmp_path: Path) -> _Case:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     if implementation == "fake":
-        cluster = FakeCluster(clock=ManualClock())
+        calls: list[ClusterCall] = []
+        cluster = FakeCluster(clock=ManualClock(), on_call=calls.append)
 
         def script(operation_id: str, **values: Unpack[_ScriptOptions]) -> None:
             def lost_claim() -> None:
@@ -127,6 +134,7 @@ def _make_case(implementation: str, tmp_path: Path) -> _Case:
             cluster.forget_name_history,
             cluster.on_accept,
             lambda: (),
+            lambda: tuple(calls),
         )
     connector = FakeConnector(tmp_path / "connector")
     remote = tmp_path / "remote"
@@ -175,7 +183,26 @@ def _make_case(implementation: str, tmp_path: Path) -> _Case:
         connector.forget_name_history,
         connector.on_accept,
         lambda: recorded_commands(connector.state),
+        lambda: _recorded_calls(connector.state),
     )
+
+
+def _recorded_calls(state: Path) -> tuple[ClusterCall, ...]:
+    """Every request the connector received, as a caller budgeting transport calls counts it."""
+    path = state / REQUESTS_FILE
+    if not path.exists():
+        return ()
+    calls = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        request = json.loads(line)
+        program = shlex.split(str(request.get("command", "")))[:1]
+        if request["operation"] == "exec" and program in (["squeue"], ["sacct"]):
+            calls.append(ClusterCall.SCHEDULER_READ)
+        elif request["operation"] == "exec" and program == ["scancel"]:
+            calls.append(ClusterCall.SCANCEL)
+        else:
+            calls.append(ClusterCall.REMOTE_FILE)
+    return tuple(calls)
 
 
 @pytest.fixture(params=["fake", "slurm"])
@@ -402,6 +429,85 @@ def test_cancel_accepted_job_is_idempotent_and_inspected_separately(
     observed = case.cluster.inspect("cancel")
     assert isinstance(observed, ClusterObservation)
     assert observed.status is SlurmJobStatus.CANCELLED
+
+
+_READ, _SCANCEL, _FILE = ClusterCall.SCHEDULER_READ, ClusterCall.SCANCEL, ClusterCall.REMOTE_FILE
+# The remote cancellation marker: its directory, its file, its publish, and a sync.
+_TOMBSTONE = (_FILE,) * 4
+
+
+@pytest.mark.parametrize(
+    "state", [SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING, SlurmJobStatus.COMPLETED]
+)
+@pytest.mark.parametrize("given", [False, True])
+def test_a_cancel_makes_the_same_transport_calls_on_every_implementation(
+    case: _Case, state: SlurmJobStatus, *, given: bool
+) -> None:
+    """r3173-recheck MED-1: the Fake's cancel was one step, so no test saw the calls before its scancel.
+
+    A caller that must have the job cancelled by a deadline budgets the cancel's
+    calls: given the reading it just took, the scancel is the first
+    (``OBSERVED_CANCEL_CALLS``); without one, a scheduler read comes first.
+    """
+    case.script("budget", states=(state,))
+    assert isinstance(case.cluster.submit(_request(case), operation_id="budget"), ClusterSubmitted)
+    live = state is not SlurmJobStatus.COMPLETED
+    before = len(case.calls())
+    observed = case.cluster.inspect("budget")
+    assert isinstance(observed, ClusterObservation)
+    # The operation's remote record, then the queue, and accounting for an ended job.
+    assert tuple(case.calls()[before:]) == ((_FILE, _READ) if live else (_FILE, _READ, _READ))
+    before = len(case.calls())
+
+    cancelled = case.cluster.cancel("budget", observed=observed if given else None)
+
+    calls = tuple(case.calls()[before:])
+    assert isinstance(cancelled, ClusterCancelRequested)
+    if not live:
+        assert calls == (_READ, _READ, *_TOMBSTONE)
+    elif given:
+        assert calls == (_SCANCEL, _READ, _READ, *_TOMBSTONE)
+        assert calls.index(_SCANCEL) + 1 == OBSERVED_CANCEL_CALLS
+    else:
+        assert calls == (_READ, _SCANCEL, *_TOMBSTONE)
+    before = len(case.calls())
+    again = case.cluster.inspect("budget")
+    assert isinstance(again, ClusterObservation)
+    assert again.status is (SlurmJobStatus.CANCELLED if live else SlurmJobStatus.COMPLETED)
+    # Cancelled here, the operation needs no remote record read: its job ended.
+    assert tuple(case.calls()[before:]) == (_READ, _READ)
+
+
+def test_a_cancel_of_an_identity_with_no_job_reads_its_record_then_leaves_a_tombstone(
+    case: _Case,
+) -> None:
+    before = len(case.calls())
+    assert isinstance(case.cluster.cancel("nothing"), ClusterCancelRequested)
+    middle = len(case.calls())
+    assert isinstance(case.cluster.cancel("nothing"), ClusterCancelRequested)
+    calls = tuple(case.calls())
+    assert calls[before:middle] == (_FILE, *_TOMBSTONE)
+    assert calls[middle:] == _TOMBSTONE
+
+
+def test_a_cancel_given_a_reading_of_another_job_cancels_nothing(case: _Case) -> None:
+    """A reading names the job its scancel stops, so one of another job is refused before any call."""
+    for operation_id in ("mine", "other"):
+        case.script(operation_id, states=(SlurmJobStatus.RUNNING,))
+        submitted = case.cluster.submit(_request(case), operation_id=operation_id)
+        assert isinstance(submitted, ClusterSubmitted)
+    other = case.cluster.inspect("other")
+    assert isinstance(other, ClusterObservation)
+    before = len(case.calls())
+
+    refused = case.cluster.cancel("mine", observed=other)
+
+    assert isinstance(refused, ClusterUnknown)
+    assert tuple(case.calls()[before:]) == ()
+    for operation_id in ("mine", "other"):
+        observed = case.cluster.inspect(operation_id)
+        assert isinstance(observed, ClusterObservation)
+        assert observed.status is SlurmJobStatus.RUNNING
 
 
 def test_cancel_before_acceptance_prevents_later_submission(case: _Case) -> None:

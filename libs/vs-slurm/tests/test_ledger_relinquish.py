@@ -144,7 +144,14 @@ def test_relinquish_cancels_the_job_iff_no_other_run_leased_it_within_the_grace(
 class _CancelUnreachable(FakeCluster):
     """The Fake cluster, whose every scancel is lost on the way: the caller hears nothing."""
 
-    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
+    def cancel(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCancelOutcome:
+        del observed  # lost on the way, whatever reading the caller holds
         named = target if isinstance(target, str) and not by_job_id else None
         return ClusterUnknown(operation_id=named, reason="ssh: connection reset")
 

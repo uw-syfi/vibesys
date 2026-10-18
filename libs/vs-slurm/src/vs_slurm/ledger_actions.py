@@ -11,12 +11,16 @@ A withdrawal takes two swaps. The first writes a withdrawal mark on the attempt
 that leased the request before that read, which every run does before it reads
 the request to attach, makes it undo the mark: the withdrawal ends ``Kept`` and
 the run keeps its job. Only then is the job cancelled, and the second swap
-records the attempt withdrawn. A cancel whose outcome is unknown also undoes
-the mark, so the attempt is never left marked by a live withdrawer. A crash
-leaves the mark, or a cancelled job under a live record, which the next
-withdrawal or a run attaching to it undoes or settles once the mark outlived
-its window (``undo_expired_withdrawal``): never a withdrawn record over a live
-job.
+records the attempt withdrawn. The cancel's scancel is its first transport
+call, and goes out only while the mark holds for it, on every clock, so it
+never reaches a job a run attached to after the mark expired. A cancel whose
+outcome is unknown also undoes the mark, so the attempt is never left marked by
+a live withdrawer. A crash leaves the mark, or a cancelled job under a live
+record, which the next withdrawal or a run attaching to it undoes or settles
+once the mark outlived its window (``undo_expired_withdrawal``): never a
+withdrawn record over a job seen live. A submitting attempt with no job seen is
+the one exception: it is withdrawn first, and a job its submitter starts late
+is cancelled by that submitter or by the sweep's orphan check.
 """
 
 from __future__ import annotations
@@ -27,11 +31,15 @@ import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from .cluster_types import ClusterObservation, ClusterUnknown
+from .cluster_types import (
+    OBSERVED_CANCEL_CALLS,
+    ClusterObservation,
+    ClusterUnknown,
+    observed_live,
+)
 from .ledger import (
     LedgerEntry,
     LedgerError,
-    LedgerRecord,
     LedgerState,
     Unleased,
     WithdrawalMark,
@@ -111,13 +119,13 @@ other process's; a withdrawer acts only while its own window holds this much
 longer, so no other clock already reads it expired.
 """
 
-# The transport calls from a mark's stamp to its cancel: the mark's publish
-# (mkdir, put, link), the read that shows it, the job's inspect and its cancel.
-_CALLS_TO_CANCEL = 6
-# The calls a withdrawer must still have time for when it inspects the job, and
-# when it cancels it.
-_CALLS_AT_INSPECT = 2
-_CALLS_AT_CANCEL = 1
+# The transport calls a withdrawer must still have time for when it cancels the
+# job (the cancel's, up to its scancel, given the inspect's reading), when it
+# inspects the job, and from a mark's stamp on: the mark's publish (mkdir, put,
+# link) and the read that shows it come before the inspect.
+_CALLS_AT_CANCEL = OBSERVED_CANCEL_CALLS
+_CALLS_AT_INSPECT = 1 + _CALLS_AT_CANCEL
+_CALLS_TO_CANCEL = 4 + _CALLS_AT_INSPECT
 
 
 @dataclass(frozen=True, slots=True)
@@ -281,34 +289,100 @@ def _withdraw_marked(
     only while the mark holds: past its window another process undoes it, and
     a run may attach. So the job is inspected, and then cancelled, only while
     the mark still holds for the calls left (``WithdrawalTiming.holds``);
-    otherwise the mark is undone and nothing is cancelled.
+    otherwise the mark is undone and nothing is cancelled. The cancel is given
+    the inspect's reading, so its scancel is its first call; a job seen ending
+    is not cancelled at all, and a submitting attempt no job was seen under is
+    withdrawn before its identity is cancelled (``_withdraw_unseen``).
     """
     record = entry.record
     mark = entry.withdrawal
     if mark is None:
         return None  # not this withdrawal's: the next round decides
     key = record.key
-    timing = withdrawer.timing
     try:
         # ``still`` is the condition as it was before this withdrawal's own mark.
         if still is not None and not still(dataclasses.replace(entry, withdrawal=None)):
             _undo(ledger, entry)
             return Kept(key, record.operation_id)
-        late = WithdrawUnknown(key, "too little of the withdrawal's window was left to cancel")
-        if not timing.holds(mark, calls=_CALLS_AT_INSPECT):
-            _undo(ledger, entry)
-            return late
-        cancelled = _cancel_live(
-            cluster, record, ready=lambda: timing.holds(mark, calls=_CALLS_AT_CANCEL)
-        )
-        if isinstance(cancelled, WithdrawUnknown):
-            _undo(ledger, entry)
+        cancelled = _cancel_while_marked(ledger, cluster, entry, mark, withdrawer.timing)
+        if not isinstance(cancelled, _Cancelled):
             return cancelled
         won = ledger.replace(entry, transitioned(record, LedgerState.WITHDRAWN, reason=mark.reason))
     except LedgerError as error:
         _undo_quietly(ledger, key, withdrawer)
         return WithdrawUnknown(key, str(error))
-    return Withdrawn(key, record.operation_id, cancelled) if won else None
+    return Withdrawn(key, record.operation_id, cancelled.job) if won else None
+
+
+@dataclass(frozen=True, slots=True)
+class _Cancelled:
+    """The job is cancelled, or needs no cancel; ``job`` is the one cancelled, if one was live."""
+
+    job: str | None
+
+
+def _cancel_while_marked(
+    ledger: EvaluationLedger,
+    cluster: Cluster,
+    entry: LedgerEntry,
+    mark: WithdrawalMark,
+    timing: WithdrawalTiming,
+) -> _Cancelled | WithdrawOutcome | None:
+    """Inspect the attempt's job and cancel it if live, each only while ``mark`` holds for it.
+
+    The cancel is given the inspect's reading, so its scancel is its first
+    transport call (``OBSERVED_CANCEL_CALLS``) and lands while the mark holds, on
+    every clock. When too little of the mark is left, or the job's state or the
+    cancel's outcome is unknown, the mark is undone and nothing is recorded. A
+    submitting attempt no job was seen under ends here (``_withdraw_unseen``).
+    """
+    record = entry.record
+    reason = "too little of the withdrawal's window was left to cancel"
+    if timing.holds(mark, calls=_CALLS_AT_INSPECT):
+        observed = None if record.state.settled else cluster.inspect(record.operation_id)
+        if isinstance(observed, ClusterUnknown):
+            if record.state is LedgerState.SUBMITTING:
+                return _withdraw_unseen(ledger, cluster, entry, mark)
+            reason = observed.reason
+        elif not observed_live(observed):
+            return _Cancelled(None)  # its job ended, or is ending: nothing to stop
+        elif timing.holds(mark, calls=_CALLS_AT_CANCEL):
+            outcome = cluster.cancel(record.operation_id, observed=observed)
+            if not isinstance(outcome, ClusterUnknown):
+                return _Cancelled(outcome.job_id or observed.job_id)
+            reason = outcome.reason
+    _undo(ledger, entry)
+    return WithdrawUnknown(record.key, reason)
+
+
+def _withdraw_unseen(
+    ledger: EvaluationLedger, cluster: Cluster, entry: LedgerEntry, mark: WithdrawalMark
+) -> WithdrawOutcome | None:
+    """Withdraw a submitting attempt no job was seen under, then cancel its identity.
+
+    With no job seen, there is none to cancel while the mark holds. The attempt
+    is withdrawn first, by compare-and-swap, as a run taking over a lapsed claim
+    fails it: a submitter that recorded its job meanwhile wins, and its job is
+    never cancelled here. Once withdrawn, no run attaches to the attempt, so the
+    cancel that follows has no deadline, however many calls it makes. It
+    leaves a tombstone that keeps a late submitter from starting a job under the
+    attempt's name; one that started a job anyway cancels it when its record
+    write loses, and one that died first leaves it to the sweep's orphan check
+    (``sweep_unleased``).
+    """
+    record = entry.record
+    if not ledger.replace(entry, transitioned(record, LedgerState.WITHDRAWN, reason=mark.reason)):
+        return None
+    cancelled = cluster.cancel(record.operation_id)
+    if isinstance(cancelled, ClusterUnknown):
+        _LOG.info(
+            "evaluation ledger request %s is withdrawn; a job its submitter may yet start "
+            "under it is left to the orphan check: %s",
+            entry_id(record.key),
+            cancelled.reason,
+        )
+        return Withdrawn(record.key, record.operation_id, None)
+    return Withdrawn(record.key, record.operation_id, cancelled.job_id)
 
 
 def undo_expired_withdrawal(ledger: EvaluationLedger, entry: LedgerEntry, *, now: float) -> bool:
@@ -364,35 +438,6 @@ def settle(
     if settled is None:
         return False
     return ledger.replace(entry, transitioned(record, settled.state, reason=settled.reason))
-
-
-def _cancel_live(
-    cluster: Cluster, record: LedgerRecord, *, ready: Callable[[], bool]
-) -> str | None | WithdrawUnknown:
-    """Cancel the attempt's job if it may still run; the job cancelled, if known.
-
-    ``ready`` is asked just before the cancel: when it says no, nothing is
-    cancelled and the outcome is unknown.
-    """
-    if record.state.settled:
-        return None  # its job ended; the cluster may no longer even know it
-    observed = cluster.inspect(record.operation_id)
-    if isinstance(observed, ClusterObservation):
-        if observed.status.terminal:
-            return None
-        known: str | None = observed.job_id
-    elif record.state is LedgerState.SUBMITTING:
-        # No job is known under the attempt's identity: a tombstone keeps a submitter
-        # that is still on its way from starting one.
-        known = None
-    else:
-        return WithdrawUnknown(record.key, observed.reason)
-    if not ready():
-        return WithdrawUnknown(record.key, "too little of the withdrawal's window was left")
-    cancelled = cluster.cancel(record.operation_id)
-    if isinstance(cancelled, ClusterUnknown):
-        return WithdrawUnknown(record.key, cancelled.reason)
-    return cancelled.job_id or known
 
 
 _LOG = logging.getLogger(__name__)

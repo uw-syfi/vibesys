@@ -13,6 +13,7 @@ from vs_sim.api.testing import FakeByteSource
 
 from .cluster import collection_locator, job_handle, payload_digest
 from .cluster_types import (
+    ClusterCall,
     ClusterCancelOutcome,
     ClusterCancelRequested,
     ClusterCollected,
@@ -28,6 +29,8 @@ from .cluster_types import (
     ClusterTarget,
     ClusterUnknown,
     collection_problem,
+    observation_names,
+    observed_live,
     validate_operation_id,
 )
 from .errors import SlurmError, SlurmSubmissionRejectedError
@@ -65,6 +68,11 @@ Request: TypeAlias = SlurmJobRequest | SlurmBatchRequest
 
 
 _MULTI_STAGE = 2
+_TOMBSTONE_CALLS = 4
+
+
+def _no_call(_call: ClusterCall) -> None:
+    """Hear nothing of the transport calls."""
 
 
 class SecondsRange(BaseModel):
@@ -223,6 +231,7 @@ class FakeCluster:
         clock: Clock,
         timing: SlurmTimingProfile | None = None,
         seed: int = 0,
+        on_call: Callable[[ClusterCall], None] | None = None,
     ) -> None:
         """Create the implementation with its owned operation storage.
 
@@ -230,8 +239,15 @@ class FakeCluster:
         advances it. ``timing`` bounds queue wait, run time and COMPLETING time;
         each job's values are drawn deterministically from ``seed`` and its
         operation identity.
+
+        ``on_call`` hears each transport call an ``inspect`` or a ``cancel``
+        makes, in the order ``SlurmCluster`` makes them, as the call goes out: a call's effect (the
+        scancel's, or a read's) lands when ``on_call`` returns, so a test that
+        advances the clock there makes each call that slow. The contract suite
+        holds both implementations to the same calls.
         """
         self.clock = clock
+        self._on_call = on_call if on_call is not None else _no_call
         self._timing = timing if timing is not None else SlurmTimingProfile()
         self._seed = seed
         self._lock = RLock()
@@ -245,7 +261,9 @@ class FakeCluster:
 
     def reopen(self) -> FakeCluster:
         """Reconstruct an implementation over the same external scheduler state."""
-        reopened = FakeCluster(clock=self.clock, timing=self._timing, seed=self._seed)
+        reopened = FakeCluster(
+            clock=self.clock, timing=self._timing, seed=self._seed, on_call=self._on_call
+        )
         reopened._lock = self._lock
         reopened._scripts = self._scripts
         reopened._jobs = self._jobs
@@ -456,6 +474,7 @@ class FakeCluster:
         """Observe scheduler evidence without submitting work."""
         try:
             with self._lock:
+                self._reading_calls(self._find(target, by_job_id=by_job_id))
                 return self._inspect(target, by_job_id=by_job_id)
         except SlurmError as error:
             return ClusterUnknown(
@@ -528,38 +547,102 @@ class FakeCluster:
                 job.cancelled = True
         return life_for_status(status)
 
-    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
+    def cancel(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCancelOutcome:
         """Record cancellation intent, leaving confirmation to inspect."""
+        operation_id = target if isinstance(target, str) and not by_job_id else None
+        if observed is not None and not observation_names(target, observed, by_job_id=by_job_id):
+            return ClusterUnknown(
+                operation_id=operation_id,
+                reason="the observation passed to cancel is of another job",
+            )
         try:
             with self._lock:
+                if observed_live(observed):
+                    self._scancel(self._find(target, by_job_id=by_job_id))
                 return self._cancel(target, by_job_id=by_job_id)
         except SlurmError as error:
-            return ClusterUnknown(
-                operation_id=target if isinstance(target, str) and not by_job_id else None,
-                reason=str(error),
-            )
+            return ClusterUnknown(operation_id=operation_id, reason=str(error))
 
     def _cancel(self, target: ClusterTarget, *, by_job_id: bool) -> ClusterCancelOutcome:
         job = self._find(target, by_job_id=by_job_id)
         if job is None:
             if isinstance(target, str) and not by_job_id:
                 validate_operation_id(target)
+                if target not in self._cancelled:
+                    self._on_call(ClusterCall.REMOTE_FILE)  # the operation's remote record
                 self._cancelled.add(target)
+                self._tombstone()
                 return ClusterCancelRequested(operation_id=target)
             return ClusterUnknown(operation_id=None, reason="operation not found")
-        self._cancelled.add(job.operation_id)
-        if job.cancelled_at is None:
-            job.cancelled_at = self.clock.now()
         if job.operation_id in self._expired_names and not job.accepted_published and not by_job_id:
+            # The remote record, then the job looked up by name in the queue and accounting.
+            for call in (ClusterCall.REMOTE_FILE, *(ClusterCall.SCHEDULER_READ,) * 2):
+                self._on_call(call)
+            self._cancelled.add(job.operation_id)
+            self._tombstone()
             return ClusterUnknown(
                 operation_id=job.operation_id, reason="submission acceptance unresolved"
             )
+        self._on_call(ClusterCall.SCHEDULER_READ)
+        # A live job is cancelled by the scancel that follows the read; accounting
+        # settles a state the queue left open.
+        live = isinstance(self._peek(job), Queued | Running)
+        self._on_call(ClusterCall.SCANCEL if live else ClusterCall.SCHEDULER_READ)
+        self._cancelled.add(job.operation_id)
+        if job.cancelled_at is None:
+            job.cancelled_at = self.clock.now()
         observed = self._inspect(target, by_job_id=by_job_id)
+        self._tombstone()
         if isinstance(observed, ClusterUnknown):
             return observed
         return ClusterCancelRequested(
             operation_id=job.operation_id, job_id=job_handle(job.handle).job_id
         )
+
+    def _reading_calls(self, job: _Job | None) -> None:
+        """The calls an inspection makes: the remote record, unless cancelled here, then the queue.
+
+        Accounting is read too when the queue leaves the job's state open.
+        """
+        if job is None or job.operation_id not in self._cancelled:
+            self._on_call(ClusterCall.REMOTE_FILE)
+        if job is None:
+            return
+        self._on_call(ClusterCall.SCHEDULER_READ)
+        if not isinstance(self._peek(job), Queued | Running):
+            self._on_call(ClusterCall.SCHEDULER_READ)
+
+    def _scancel(self, job: _Job | None) -> None:
+        """One scancel call: once it returns, a job still queued or running is cancelled."""
+        self._on_call(ClusterCall.SCANCEL)
+        if job is None or not isinstance(self._peek(job), Queued | Running):
+            return
+        if job.timeline is not None:
+            if job.cancelled_at is None:
+                job.cancelled_at = self.clock.now()
+        else:
+            job.cancelled = True
+
+    def _peek(self, job: _Job) -> JobLife:
+        """The job's state now, as a scheduler read would see it, without consuming a scripted one."""
+        if job.timeline is not None:
+            return job.timeline.state(self.clock.now(), job.cancelled_at)
+        if job.cancelled:
+            return life_for_status(SlurmJobStatus.CANCELLED)
+        script = self._scripts[job.operation_id]
+        states = script.states if script.states is not None else (SlurmJobStatus.PENDING,)
+        return life_for_status(states[min(script.index, len(states) - 1)])
+
+    def _tombstone(self) -> None:
+        """The remote cancellation marker: its directory, its file, its publish and a sync."""
+        for _ in range(_TOMBSTONE_CALLS):
+            self._on_call(ClusterCall.REMOTE_FILE)
 
     def collect(
         self,

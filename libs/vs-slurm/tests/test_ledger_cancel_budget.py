@@ -16,7 +16,6 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
-import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
@@ -26,7 +25,10 @@ from vs_slurm.api import (
     AttachJob,
     AwaitWithdrawal,
     CheckJob,
+    ClusterCall,
+    ClusterRejected,
     ClusterSubmitted,
+    FakeCluster,
     FakeConnector,
     FakeEvaluationLedger,
     LedgerEntry,
@@ -44,6 +46,7 @@ from vs_slurm.api import (
     WithdrawalTiming,
     WithdrawalUndone,
     Withdrawer,
+    Withdrawn,
     evaluation_key,
     job_of_handle,
     ledger_operation_id,
@@ -116,26 +119,52 @@ class _LateAttacher:
             case _:
                 pass
 
+    def call(self, kind: ClusterCall, seconds: float) -> None:
+        """One transport call of ``seconds``: this run tries to attach before its effect lands."""
+        self.clock.advance(seconds)
+        self.step()
+        if kind is ClusterCall.SCANCEL:
+            if self.attached:
+                self.violations.append(f"scancel at {self.clock.now():.0f} killed a held job")
+            self.cancelled = True
+
     def intercept(
         self, seconds: float
     ) -> Callable[[dict[str, object], Callable[[dict[str, object]], dict[str, object]]], dict]:
-        """Each transport call takes ``seconds``; its effect lands when it returns."""
+        """The connector's every request is one call of ``seconds``."""
 
         def slow(
             request: dict[str, object], answer: Callable[[dict[str, object]], dict[str, object]]
         ) -> dict[str, object]:
-            self.clock.advance(seconds)
-            self.step()
-            if request.get("operation") == "exec" and "scancel" in str(request.get("command")):
-                if self.attached:
-                    self.violations.append(f"scancel at {self.clock.now():.0f} killed a held job")
-                self.cancelled = True
+            scancel = request.get("operation") == "exec" and "scancel" in str(
+                request.get("command")
+            )
+            self.call(ClusterCall.SCANCEL if scancel else ClusterCall.REMOTE_FILE, seconds)
             return answer(request)
 
         return slow
 
 
-def _world(root: Path, ledger: _SlowAfterMark, clock: ManualClock) -> tuple[SlurmCluster, FakeConnector, str]:
+def _record(ledger: FakeEvaluationLedger, key: str, operation: str, handle: object) -> None:
+    assert isinstance(handle, SlurmBatchHandle)
+    ledger.claim(
+        LedgerRecord(
+            key=key,
+            project=PROJECT,
+            attempt=0,
+            operation_id=operation,
+            owner="run-self",
+            created_at=NOW - 10.0,
+            claim_expires_at=NOW + 890.0,
+            state=LedgerState.SUBMITTED,
+            job=job_of_handle(handle),
+        )
+    )
+
+
+def _world(
+    root: Path, ledger: _SlowAfterMark, clock: ManualClock
+) -> tuple[SlurmCluster, FakeConnector, str]:
     """A request whose job runs, submitted by the production client, recorded in ``ledger``."""
     remote = root / "remote"
     remote.mkdir()
@@ -158,24 +187,10 @@ def _world(root: Path, ledger: _SlowAfterMark, clock: ManualClock) -> tuple[Slur
     connector.script(operation, states=(SlurmJobStatus.RUNNING,))
     submitted = cluster.submit(request, operation_id=operation)
     assert isinstance(submitted, ClusterSubmitted)
-    assert isinstance(submitted.handle, SlurmBatchHandle)
-    ledger.claim(
-        LedgerRecord(
-            key=key,
-            project=PROJECT,
-            attempt=0,
-            operation_id=operation,
-            owner="run-self",
-            created_at=NOW - 10.0,
-            claim_expires_at=NOW + 890.0,
-            state=LedgerState.SUBMITTED,
-            job=job_of_handle(submitted.handle),
-        )
-    )
+    _record(ledger, key, operation, submitted.handle)
     return cluster, connector, key
 
 
-@pytest.mark.xfail(strict=True, reason="r3173-recheck MED-1: the cancel's calls are not budgeted")
 @settings(max_examples=examples(pr=15, nightly=150), deadline=None)
 @given(
     call_share=st.floats(min_value=0.05, max_value=1.0),
@@ -187,7 +202,10 @@ def _world(root: Path, ledger: _SlowAfterMark, clock: ManualClock) -> tuple[Slur
 def test_a_slow_multi_call_cancel_never_kills_a_job_a_run_attached_to_after_the_mark_expired(
     call_share: float, slowness: float
 ) -> None:
-    """r3173-recheck MED-1: the cancel was budgeted one transport call but makes two to five."""
+    """r3173-recheck MED-1: the cancel was budgeted one transport call but made two to five.
+
+    Here the production client makes each of its calls, through the connector.
+    """
     with TemporaryDirectory() as directory:
         clock = ManualClock(NOW)
         ledger = _SlowAfterMark(project=PROJECT)
@@ -200,4 +218,100 @@ def test_a_slow_multi_call_cancel_never_kills_a_job_a_run_attached_to_after_the_
 
         withdraw(ledger, cluster, key, Withdrawer(by="run-self", reason="stopped", timing=timing))
 
+        assert late.violations == []
+
+
+@settings(max_examples=examples(pr=30, nightly=300), deadline=None)
+@given(
+    call_share=st.floats(min_value=0.05, max_value=1.0),
+    slowness=st.floats(min_value=0.0, max_value=900.0),
+)
+# One call and the skew left at the last check: a read before the scancel lands it too late.
+@example(call_share=1.0, slowness=660.0)
+def test_the_fake_cluster_cancel_spends_the_same_calls_and_never_kills_a_held_job(
+    call_share: float, slowness: float
+) -> None:
+    """r3173-recheck MED-1, on the Fake cluster: its cancel makes the production client's calls."""
+    with TemporaryDirectory() as directory:
+        clock = ManualClock(NOW)
+        ledger = _SlowAfterMark(project=PROJECT)
+        ledger.clock = clock
+        ledger.seconds = slowness
+        workspace = Path(directory)
+        request = SlurmBatchRequest(
+            workspace=workspace, stages=(SlurmBatchStage(name="bench", command=("true",)),)
+        )
+        config = SlurmConfig(
+            name="budget",
+            remote_workspace_root="/runs",
+            transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
+        )
+        key = evaluation_key(PROJECT, request, config, setup_script_sha256=None)
+        late = _LateAttacher(ledger.reopen(), clock, key)
+        cluster = FakeCluster(
+            clock=clock, on_call=lambda kind: late.call(kind, call_share * _CALL_SECONDS)
+        )
+        operation = ledger_operation_id(key, 0)
+        cluster.script(operation, states=(SlurmJobStatus.RUNNING,))
+        submitted = cluster.submit(request, operation_id=operation)
+        assert isinstance(submitted, ClusterSubmitted)
+        _record(ledger, key, operation, submitted.handle)
+        timing = WithdrawalTiming(clock=clock, call_seconds=_CALL_SECONDS)
+
+        withdraw(ledger, cluster, key, Withdrawer(by="run-self", reason="stopped", timing=timing))
+
+        assert late.violations == []
+
+
+@settings(max_examples=examples(pr=20, nightly=200), deadline=None)
+@given(slowness=st.floats(min_value=0.0, max_value=550.0))
+def test_a_submitting_attempt_with_no_job_seen_is_withdrawn_first_however_slow_its_cancel(
+    slowness: float,
+) -> None:
+    """With no job seen there is nothing to cancel by the mark's deadline.
+
+    The attempt is withdrawn first, so no run attaches to it, and only then is
+    its identity cancelled, however many slow calls that takes; a submitter
+    that comes late finds the tombstone and starts nothing.
+    """
+    with TemporaryDirectory() as directory:
+        clock = ManualClock(NOW)
+        ledger = _SlowAfterMark(project=PROJECT)
+        ledger.clock = clock
+        ledger.seconds = slowness
+        request = SlurmBatchRequest(
+            workspace=Path(directory), stages=(SlurmBatchStage(name="bench", command=("true",)),)
+        )
+        config = SlurmConfig(
+            name="budget",
+            remote_workspace_root="/runs",
+            transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
+        )
+        key = evaluation_key(PROJECT, request, config, setup_script_sha256=None)
+        operation = ledger_operation_id(key, 0)
+        late = _LateAttacher(ledger.reopen(), clock, key)
+        cluster = FakeCluster(clock=clock, on_call=lambda kind: late.call(kind, _CALL_SECONDS))
+        ledger.claim(
+            LedgerRecord(
+                key=key,
+                project=PROJECT,
+                attempt=0,
+                operation_id=operation,
+                owner="run-gone",
+                created_at=NOW - 2000.0,
+                claim_expires_at=NOW - 1100.0,
+                state=LedgerState.SUBMITTING,
+            )
+        )
+        timing = WithdrawalTiming(clock=clock, call_seconds=_CALL_SECONDS)
+
+        outcome = withdraw(
+            ledger, cluster, key, Withdrawer(by="run-self", reason="stopped", timing=timing)
+        )
+
+        assert isinstance(outcome, Withdrawn)
+        entry = ledger.read(key)
+        assert entry is not None
+        assert entry.record.state is LedgerState.WITHDRAWN
+        assert isinstance(cluster.submit(request, operation_id=operation), ClusterRejected)
         assert late.violations == []

@@ -30,6 +30,8 @@ from .cluster_types import (
     ClusterTarget,
     ClusterUnknown,
     collection_problem,
+    observation_names,
+    observed_live,
     validate_operation_id,
 )
 from .errors import SlurmError, SlurmSubmissionRejectedError
@@ -54,6 +56,8 @@ if TYPE_CHECKING:
     from vs_sim.api import ByteSource, OutputStream
 
 Request: TypeAlias = SlurmJobRequest | SlurmBatchRequest
+
+_ANOTHER_JOB = "the observation passed to cancel is of another job"
 
 
 @dataclass(frozen=True, slots=True)
@@ -438,10 +442,25 @@ class SlurmCluster:
                 reason="operation not found",
             )
 
-    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
-        """Record cancellation intent, leaving confirmation to inspect."""
+    def cancel(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCancelOutcome:
+        """Record cancellation intent, leaving confirmation to inspect.
+
+        Given ``observed`` showing the job live, the scancel goes out first, by
+        the job id it names, before any other read or write; the cancel then
+        goes on as without it, and its own scheduler read may send a second
+        scancel to the same job, which changes nothing.
+        """
+        operation_id = target if isinstance(target, str) and not by_job_id else None
+        if observed is not None and not observation_names(target, observed, by_job_id=by_job_id):
+            return ClusterUnknown(operation_id=operation_id, reason=_ANOTHER_JOB)
         try:
-            return self._cancel(target, by_job_id=by_job_id)
+            return self._cancel(target, by_job_id=by_job_id, observed=observed)
         except (
             SlurmError,
             OSError,
@@ -450,11 +469,14 @@ class SlurmCluster:
             UnicodeError,
             ProcessTimeoutError,
         ) as exc:
-            operation_id = target if isinstance(target, str) and not by_job_id else None
             return ClusterUnknown(operation_id=operation_id, reason=str(exc))
 
-    def _cancel(self, target: ClusterTarget, *, by_job_id: bool) -> ClusterCancelOutcome:
+    def _cancel(
+        self, target: ClusterTarget, *, by_job_id: bool, observed: ClusterObservation | None
+    ) -> ClusterCancelOutcome:
         with self._store.lock():
+            if observed_live(observed):
+                self._runner.cancel_job(observed.job_id)
             record, evidence = self._record(target, by_job_id=by_job_id)
             if record is None:
                 if isinstance(target, str) and not by_job_id:
