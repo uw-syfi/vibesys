@@ -81,9 +81,10 @@ The Reservation path calls user authentication then reservation creation when
 authentication succeeds. We ran both paths through frontend at 50 requests per
 second, with a 75/25 Search/Reservation mix, against all seven services, four
 MongoDB processes, and three Redis processes on one host. A five-second warmup
-preceded the 25-second measured load. Perf sampled every service and datastore
-process at 199 Hz for 15 seconds. These measurements describe this workload;
-the standalone recommendation endpoint below is a separate run.
+preceded the 25-second measured load. Perf sampled the seven instrumented
+services at 199 Hz for 15 seconds. A separate uninstrumented capture sampled
+all seven services and seven datastore processes. These measurements describe
+this workload; the standalone recommendation endpoint below is a separate run.
 
 The simultaneous three-source capture produced 8,084 OpenTelemetry spans,
 31,672 dial9 poll regions, and 7,555 perf samples. All 6,522 child spans have
