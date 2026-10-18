@@ -18,6 +18,7 @@ import {
   Row,
   SegmentedControl,
   Select,
+  Slider,
   Split,
   Stack,
   StatusDot,
@@ -174,6 +175,16 @@ function Toggles(props: {readonly kind: 'checkbox' | 'switch'}): JSX.Element {
         disabledReason="Not available on this system."
       />
     </Stack>
+  );
+}
+
+function SliderDemo(): JSX.Element {
+  const tiers = ['Luna', 'Sol', 'Astra'];
+  const [index, setIndex] = useState(1);
+  return (
+    <Field label="Tier" help="Drag, or use the arrow keys, to pick a tier.">
+      <Slider options={tiers} value={index} change={setIndex} />
+    </Field>
   );
 }
 
@@ -379,6 +390,7 @@ export const BASIC_ENTRIES = {
     ),
   },
   PathInput: {render: () => <PathDemo />},
+  Slider: {render: () => <SliderDemo />},
   Checkbox: {render: () => <Toggles kind="checkbox" />},
   Switch: {render: () => <Toggles kind="switch" />},
   Chip: {
