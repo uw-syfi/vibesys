@@ -37,6 +37,9 @@ if TYPE_CHECKING:
     )
 
 _LOG = logging.getLogger(__name__)
+# How many more times a relinquish whose outcome is unknown is tried before its
+# caller hears so; each try is a few ledger and cluster calls.
+_RELINQUISH_RETRIES = 3
 
 
 class BlockingCalls(Protocol):
@@ -230,7 +233,7 @@ class LedgerEvaluations:
                 if known is not None:
                     await self.finish_in_thread(ledger.release, known)
             elif sole:
-                outcome = await self.finish_in_thread(ledger.relinquish, self.cluster, key)
+                outcome = await self._relinquish(key)
                 if isinstance(outcome, WithdrawUnknown):
                     # Still used: a later cancel, or the stop, withdraws it again.
                     raise ExecutorCancellationUnknownError(handle_id)
@@ -238,6 +241,23 @@ class LedgerEvaluations:
         if attached and isinstance(outcome, Withdrawn | NotInLedger):
             return Released.CANCEL_HERE
         return Released.DONE
+
+    async def _relinquish(self, key: str) -> WithdrawOutcome:
+        """Relinquish ``key``, trying again at once while its outcome is unknown.
+
+        A scancel or ledger call lost over a broken connection puts the attempt
+        back as it was (``withdraw``), so trying again is safe; a stop that gave
+        up after one lost call would leave the job queued for nobody. The tries
+        do not pause: each is several remote calls, and the caller holds the
+        request's guard, which a pause would hold too.
+        """
+        outcome = await self.finish_in_thread(self.ledger.relinquish, self.cluster, key)
+        for _ in range(_RELINQUISH_RETRIES):
+            if not isinstance(outcome, WithdrawUnknown):
+                break
+            _LOG.warning("relinquishing ledger request %s again: %s", key[:12], outcome.reason)
+            outcome = await self.finish_in_thread(self.ledger.relinquish, self.cluster, key)
+        return outcome
 
     async def let_go_of_ended(self, handle_id: str, known: str | None) -> None:
         """Stop using the request of an evaluation that ended, relinquishing it if last.

@@ -587,6 +587,12 @@ class _TwoRuns:
                 if CONTENTS[run.contents[int(handle.removeprefix("eval-"))]] != "never_ends":
                     continue
                 polled = await run.executor.poll(handle)
+                # A poll whose own inspect was lost reads unknown: ask again (``faults``
+                # holds at most two calls).
+                for _ in range(2):
+                    if polled.phase is not PollPhase.UNKNOWN:
+                        break
+                    polled = await run.executor.poll(handle)
                 assert polled.phase is PollPhase.QUEUED, (
                     f"run-{run.index} {handle}, never cancelled, reads {polled.phase}"
                 )
@@ -614,6 +620,8 @@ class _TwoRuns:
         if submitting is not None:
             await asyncio.shield(submitting)  # the core cancels only what it submitted
         if handle_id not in run.submitted or run.stopped:
+            # Nothing to cancel: a later submission of the handle is wanted afresh.
+            run.cancelled.discard(handle_id)
             return
         await run.executor.cancel(handle_id)
 
@@ -681,6 +689,20 @@ async def _finished(executor: SlurmEvaluationExecutor, handle_id: str) -> bool:
     ],
     faults=frozenset(),
     schedule_seed=0,
+)
+# The check's own poll of a queued job loses its inspect.
+@example(
+    contents=[[0, 0, 0], [0, 0, 0]],
+    steps=[RunSubmit(0, 0)],
+    faults=frozenset([21]),
+    schedule_seed=0,
+)
+# A cancel of a handle never submitted, then its submission: the run wants that job.
+@example(
+    contents=[[0, 0, 0], [0, 0, 0]],
+    steps=[RunSubmit(0, 0), RunCancel(1, 2), RunStop(0), Pause(0, 0.0), RunSubmit(1, 2)],
+    faults=frozenset(),
+    schedule_seed=1,
 )
 def test_a_stopped_run_leaves_no_job_only_it_wanted_and_takes_none_a_live_run_needs(
     tmp_path_factory: pytest.TempPathFactory,
