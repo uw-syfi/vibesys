@@ -45,7 +45,7 @@ from vs_sandbox.slurm_deadlines import (
     first_deadlines,
 )
 from vs_sandbox.slurm_deadlines import observe as observe_deadlines
-from vs_sandbox.slurm_ledger import Attached, LedgerWithdrawnError
+from vs_sandbox.slurm_ledger_evaluations import LedgerEvaluations, Released
 from vs_sandbox.slurm_stage_output import CollectedStage, StageOutputFollower
 from vs_sandbox.slurm_wiring import make_cluster
 from vs_slurm.api import (
@@ -62,9 +62,7 @@ from vs_slurm.api import (
     Ended,
     EndOutcome,
     JobLife,
-    LedgerError,
     LedgerLabels,
-    NotInLedger,
     Queued,
     Running,
     SlurmBatchHandle,
@@ -76,8 +74,6 @@ from vs_slurm.api import (
     SlurmSubmissionRejectedError,
     SlurmTreeArtifact,
     Unknown,
-    Withdrawn,
-    WithdrawUnknown,
     advance_with_notice,
     recorded_job_ids,
     validate_cluster_operation_id,
@@ -87,7 +83,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping
     from pathlib import Path
 
-    from vs_sandbox.slurm_ledger import SlurmLedgerAttachment
+    from vs_sandbox.slurm_ledger import Attached, SlurmLedgerAttachment
     from vs_sandbox.slurm_stage_output import SlurmStageOutputOpener
     from vs_sim.api import Clock, Processes, Sleeper
     from vs_slurm.api import (
@@ -467,7 +463,20 @@ class SlurmEvaluationExecutor:
         # A read-only poll that sees remote terminality wakes the live owner so
         # that owner, rather than the observer, settles streams and ledger state.
         self._poll_wakeups: dict[str, asyncio.Event] = {}
-        self._ledger = ledger
+        self._ledger = (
+            None
+            if ledger is None
+            else LedgerEvaluations(
+                ledger,
+                cluster,
+                clock=clock,
+                sleeper=sleeper,
+                poll_interval=self._poll_interval,
+                job_timeout_seconds=self._job_timeout_seconds,
+                in_thread=self._in_thread,
+                finish_in_thread=self._finish_in_thread,
+            )
+        )
         self._ledger_candidate = ledger_candidate
         # Set by ``close``: no submission is taken after it.
         self._closing = False
@@ -832,7 +841,7 @@ class SlurmEvaluationExecutor:
         lease lapses.
         """
         self._closing = True
-        if self._ledger is not None and self._ledger.policy.keep_jobs_on_stop:
+        if self._ledger is not None and self._ledger.ledger.policy.keep_jobs_on_stop:
             self._detaching = True
             await self._drain()
             return
@@ -1040,70 +1049,21 @@ class SlurmEvaluationExecutor:
 
     async def _attach(
         self,
-        ledger: SlurmLedgerAttachment,
+        ledger: LedgerEvaluations,
         handle_id: str,
         request: EvaluationRequest,
         stages: tuple[SlurmStagePayload, ...],
     ) -> None:
-        """Attach to the ledger's job for this request, submitting it only if it has none.
-
-        While another process holds the request's submission, wait for it, up to
-        the job deadline; a claim whose submitter died expires (``claim_seconds``)
-        and the wait takes it over. A definite rejection raises like a direct
-        submission, and so does an operator's withdrawal of the attempt this
-        submission was recording: it ends the evaluation instead of resubmitting.
-        """
+        """Attach to the ledger's job for this request (``LedgerEvaluations.attach``)."""
         self._write_evaluation(handle_id, None, request, dispatch_started=True)
         batch = self._batch_request(request, stages)
         labels = LedgerLabels(candidate=self._ledger_candidate, workstream=request.owner_scope)
-        deadline = self._clock.now() + self._job_timeout_seconds
-        key = await self._in_thread(ledger.key, batch)
-        ledger.use(key, handle_id)
-        while True:
-            step = asyncio.ensure_future(
-                self._in_thread(ledger.attach, self._cluster, batch, labels=labels, key=key)
-            )
-            # A step may stage and submit the job for a long time: renewing this run's
-            # lease meanwhile keeps its claim from being taken over (``claim_expired``).
-            keeper = asyncio.create_task(self._keep_leased(ledger, key))
-            try:
-                outcome = await asyncio.shield(step)
-            except asyncio.CancelledError:
-                # A submission this step started finishes and is recorded, so a
-                # restart reattaches to its job instead of submitting another.
-                with contextlib.suppress(Exception):
-                    attached = await step
-                    if isinstance(attached, Attached):
-                        self._save_attached(handle_id, request, attached)
-                raise
-            except LedgerWithdrawnError as error:
-                raise ExecutorRejectedError(str(error)) from error
-            finally:
-                keeper.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await keeper
-            if isinstance(outcome, Attached):
-                break
-            remaining = deadline - self._clock.now()
-            if remaining <= 0:
-                raise _SlurmExecutionError.deadline_exceeded(self._job_timeout_seconds)
-            _LOG.info("evaluation %s waits on the ledger: %s", handle_id, outcome.reason)
-            await self._sleeper.sleep(min(self._poll_interval, remaining))
-        self._save_attached(handle_id, request, outcome)
-
-    async def _keep_leased(self, ledger: SlurmLedgerAttachment, key: str) -> None:
-        """Renew this run's lease on ``key`` every third of a lease period, until cancelled.
-
-        A renewal that fails is logged and retried at the next period: the lease
-        outlasts several missed renewals.
-        """
-        period = ledger.policy.lease_seconds / 3
-        while True:
-            await self._sleeper.sleep(period)
-            try:
-                await self._in_thread(ledger.renew, key)
-            except LedgerError:
-                _LOG.exception("could not renew the ledger lease on request %s", key[:12])
+        attached = await ledger.attach(
+            handle_id, batch, labels, functools.partial(self._save_attached, handle_id, request)
+        )
+        if attached is None:
+            raise _SlurmExecutionError.deadline_exceeded(self._job_timeout_seconds)
+        self._save_attached(handle_id, request, attached)
 
     def _save_attached(
         self, handle_id: str, request: EvaluationRequest, attached: Attached
@@ -1117,28 +1077,12 @@ class SlurmEvaluationExecutor:
         )
 
     async def _ledger_heartbeat(self, handle_id: str, durable: _DurableSlurmEvaluation) -> bool:
-        """Keep a ledger evaluation leased; return False once it was withdrawn.
-
-        A ledger the run cannot reach does not fail the evaluation: the lease
-        outlasts several missed renewals, and the job's own state still decides.
-        This check never publishes lifecycle state: a live owner must first settle
-        its streams and ledger, while an ownerless observer has no such debt.
-        """
+        """Keep a ledger evaluation leased; return False once it was withdrawn."""
         if self._ledger is None or durable.ledger_key is None or durable.handle is None:
             return True
-        try:
-            await self._in_thread(
-                self._ledger.heartbeat,
-                self._cluster,
-                durable.ledger_key,
-                durable.handle.job.invocation_id,
-            )
-        except LedgerWithdrawnError:
-            _LOG.warning("evaluation %s was withdrawn from the evaluation ledger", handle_id)
-            return False
-        except LedgerError:
-            _LOG.exception("could not renew the ledger lease of evaluation %s", handle_id)
-        return True
+        return await self._ledger.heartbeat(
+            handle_id, durable.ledger_key, durable.handle.job.invocation_id
+        )
 
     async def _ledger_settle(
         self,
@@ -1147,13 +1091,7 @@ class SlurmEvaluationExecutor:
         status: SlurmJobStatus,
         collected: ClusterCollectOutcome | None,
     ) -> None:
-        """Record a ledger job's end, so later asks reuse or replace it without asking Slurm.
-
-        It runs after collection: only results this run collected, with every
-        stage's own result, make the attempt reusable. Best effort: an
-        unreachable ledger leaves the attempt to the next asker, who inspects
-        the job itself.
-        """
+        """Record a ledger job's end (``LedgerEvaluations.settle``)."""
         if (
             self._ledger is None
             or durable is None
@@ -1161,16 +1099,9 @@ class SlurmEvaluationExecutor:
             or durable.handle is None
         ):
             return
-        try:
-            await self._in_thread(
-                self._ledger.settle,
-                durable.ledger_key,
-                durable.handle.job.invocation_id,
-                status,
-                collected,
-            )
-        except LedgerError:
-            _LOG.exception("could not record the end of ledger evaluation %s", handle_id)
+        await self._ledger.settle(
+            handle_id, durable.ledger_key, durable.handle.job.invocation_id, status, collected
+        )
 
     async def _execute(self, handle_id: str, request: EvaluationRequest) -> None:
         self._publish(
@@ -1609,41 +1540,23 @@ class SlurmEvaluationExecutor:
                 return released
         return await self._cancel_scheduler_job(handle_id, resend=resend)
 
-    async def _release(
-        self, ledger: SlurmLedgerAttachment, handle_id: str
-    ) -> _CancelOutcome | None:
-        """Let go of a ledger job; None when the job is still to be cancelled here.
-
-        This run stops wanting the request (``SlurmLedgerAttachment.relinquish``):
-        unless another run wants it, the ledger cancels its job, which is then
-        confirmed ended here like any other. When the ledger keeps jobs on a stop,
-        this run only drops its lease, and a stop (``close``) leaves even that. A
-        job this run attached to before the operator enabled the ledger is
-        cancelled as before.
-        """
-        if self._detaching:
-            return _CancelRequested(None)
+    async def _release(self, ledger: LedgerEvaluations, handle_id: str) -> _CancelOutcome | None:
+        """Let go of a ledger job; None when the job is still to be cancelled here."""
         durable = self._read_evaluation(handle_id)
         attached = durable is not None and durable.handle is not None
         known = durable.ledger_key if durable is not None and attached else None
-        if attached and known is None:
-            return None
-        if ledger.policy.keep_jobs_on_stop:
-            # Without a job attached, a submission this run started is held by its lease.
-            if known is not None:
-                await self._finish_in_thread(ledger.release, known)
-            return _CancelConfirmed()
-        key = ledger.stop_using(handle_id, known)
-        if key is None:
-            return _CancelConfirmed()  # never claimed, or another evaluation here still uses it
-        outcome = await self._finish_in_thread(ledger.relinquish, self._cluster, key)
-        if isinstance(outcome, WithdrawUnknown):
-            raise ExecutorCancellationUnknownError(handle_id)
-        return (
-            None
-            if attached and isinstance(outcome, Withdrawn | NotInLedger)
-            else _CancelConfirmed()
+        released = await ledger.release(
+            handle_id, known, attached=attached, detaching=self._detaching
         )
+        match released:
+            case Released.DETACHED:
+                return _CancelRequested(None)
+            case Released.CANCEL_HERE:
+                return None
+            case Released.DONE:
+                return _CancelConfirmed()
+            case _:
+                assert_never(released)
 
     async def _cancel_scheduler_job(
         self, handle_id: str, *, resend: bool = False
