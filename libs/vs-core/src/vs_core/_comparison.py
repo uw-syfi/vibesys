@@ -829,8 +829,9 @@ def _base_max_samples(policy: ComparisonPolicy) -> int:
     return BASE_MAX_SAMPLES if policy.floor_declared else MIN_SAMPLES_WITHOUT_FLOOR
 
 
-def base_in_flight(state: EvaluationState, measured: Measured, scope: Scope | None = None) -> bool:
-    """Whether a run of this measurement was admitted and has not ended (``scope``'s, or any)."""
+def runs_in_flight(state: EvaluationState, measured: Measured, scope: Scope | None = None) -> int:
+    """How many runs of this measurement were admitted and have not ended (``scope``'s, or any)."""
+    count = 0
     for budget in state.submission_budgets:
         identity = budget.identity
         if (
@@ -843,8 +844,13 @@ def base_in_flight(state: EvaluationState, measured: Measured, scope: Scope | No
         if isinstance(latest, PreparedSubmissionReceipt) and (
             latest.observation is None or not latest.observation.terminal
         ):
-            return True
-    return False
+            count += 1
+    return count
+
+
+def base_in_flight(state: EvaluationState, measured: Measured, scope: Scope | None = None) -> bool:
+    """Whether a run of this measurement was admitted and has not ended (``scope``'s, or any)."""
+    return runs_in_flight(state, measured, scope) > 0
 
 
 def running_baseline(state: EvaluationState, base: BaseRef) -> RequestId | None:
@@ -969,7 +975,8 @@ def official_needs_samples(
     The official measurement of an input the scope already measured adds a run only then:
 
     - the samples held are a close call against the base, so one more narrows the noise,
-      unless no run can give them a verdict (`verdict_unreachable`);
+      unless no run can give them a verdict (`verdict_unreachable`), or, without a declared
+      floor, the samples held and the candidate's runs under way already make the sample cap;
     - or the samples name a base but no sample of it is fresh at ``moment`` (its runs went
       stale, failed or are still running), so they have no verdict at all, and the answer must
       not rest on the runs the agent happened to make: the official check adds a run of its
@@ -984,4 +991,26 @@ def official_needs_samples(
     if not fresh(samples_of(state, Measured(measured.evaluation, anchor.measured_input)), moment):
         return True
     held = comparison_of(state, scope, measured, moment)
-    return held is not None and close_call(held) and not verdict_unreachable(held, moment.policy)
+    return (
+        held is not None
+        and close_call(held)
+        and not verdict_unreachable(held, moment.policy)
+        and not _candidate_runs_spoken_for(state, scope, measured, moment)
+    )
+
+
+def _candidate_runs_spoken_for(
+    state: EvaluationState, scope: Scope, measured: Measured, moment: Moment
+) -> bool:
+    """Whether the candidate's samples and its runs under way already make the sample cap.
+
+    Without a declared floor a candidate holds at most ``MIN_SAMPLES_WITHOUT_FLOOR`` runs
+    (`remeasures_candidate`). A run of its input still under way, core's last re-run or another
+    one, lands a sample of its own, so an official run added beside it would be one too many.
+    The official measurement is then answered by the samples held, and the comparison settles
+    when the run under way lands.
+    """
+    return not moment.policy.floor_declared and (
+        len(fresh(samples_of(state, measured), moment)) + runs_in_flight(state, measured, scope)
+        >= MIN_SAMPLES_WITHOUT_FLOOR
+    )
