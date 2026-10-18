@@ -64,7 +64,6 @@ _SCENARIOS = tuple(
 # server.host_envelope and server.host_run_summary (the helper's request and reply bases and the
 # runs.summary messages, split out of server.host_api) add 2; the summary's fold and cache load on
 # the first runs.summary, never for hello (asserted below).
-
 # server.host_harness (the harness choice and its display names, split from host_api to hold its
 # file-length ceiling) adds 1.
 _MODULE_CEILING = 350
