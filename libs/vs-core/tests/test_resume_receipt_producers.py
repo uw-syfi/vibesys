@@ -915,3 +915,114 @@ def test_core_authorizes_a_resume_only_when_its_dispatch_would_be_accepted(
         assert_refused(result, wait)
     # One of the two always happens: a settled wait never stays waiting.
     assert result.state.evaluation.continuations[0].phase != core.ContinuationPhase.WAITING
+
+
+def _authorized_before_a_late_submission(
+    late: core.ObservationStatus,
+) -> tuple[core.CoreState, core.Continuation]:
+    """A resume core authorized on two settled submissions, then a third in the same scope.
+
+    Core itself can submit in an attempt's scope after it authorized the resume: a close call
+    found in evidence that arrives after its job ended earns the base one more run
+    (``_base_runs``). That submission's first observation recomputes the stored history, which
+    is not complete again until the new run ends with its facts.
+    """
+    state, wait = publication_state()
+    late_job = state.evaluation.jobs[2]
+    late_budget = state.evaluation.submission_budgets[2]
+    late_record = state.records.records[3]
+    state = state.model_copy(
+        update={
+            "evaluation": state.evaluation.model_copy(
+                update={
+                    "jobs": state.evaluation.jobs[:2],
+                    "submission_budgets": state.evaluation.submission_budgets[:2],
+                }
+            ),
+            "records": state.records.model_copy(update={"records": state.records.records[:3]}),
+        }
+    )
+    wait = wait.model_copy(update={"jobs": wait.jobs[:2]})
+    published = core.step(state, core.TurnSuspended(continuation=wait))
+    assert any(isinstance(event, core.ResumeAuthorized) for event in published.events)
+    state = published.state
+    assert late_job.observation is not None
+    admission = state.attempts.attempts[0].admission_id
+    pending = late_job.observation.model_copy(
+        update={
+            "status": core.ObservationStatus.PENDING,
+            "terminal": False,
+            "admission_id": admission,
+        }
+    )
+    request = late_record.request.model_copy(update={"admission_id": admission})
+    late_job = late_job.model_copy(
+        update={
+            "observation": pending,
+            "status": core.ObservationStatus.PENDING,
+            "terminal": False,
+            "wait": core.WaitOn(timer=0.0),
+        }
+    )
+    late_record = late_record.model_copy(
+        update={
+            "request": request,
+            "payload_digest": digest(request),
+            "phase": core.RequestPhase.DISPATCHED,
+            "observation": pending,
+            "evaluation_result": None,
+        }
+    )
+    state = state.model_copy(
+        update={
+            "evaluation": state.evaluation.model_copy(
+                update={
+                    "jobs": (*state.evaluation.jobs, late_job),
+                    "submission_budgets": (*state.evaluation.submission_budgets, late_budget),
+                    # Core's own run of the base, earned by a close call of the first job.
+                    "base_runs": (
+                        *state.evaluation.base_runs,
+                        core.BaseRun(
+                            request_id=late_job.submission_id,
+                            scope=late_job.scope,
+                            candidate=state.evaluation.jobs[0].submission_id,
+                        ),
+                    ),
+                }
+            ),
+            "records": state.records.model_copy(
+                update={"records": (*state.records.records, late_record)}
+            ),
+        }
+    )
+    assert late_job.resource_id is not None
+    observed = pending.model_copy(
+        update={
+            "event_id": core.EventId(root="late-observation"),
+            "sequence": pending.sequence + 1,
+            "observed_at": pending.observed_at + 1.0,
+            "status": late,
+        }
+    )
+    state = core.step(
+        state, core.JobObserved(resource_id=late_job.resource_id, observation=observed)
+    ).state
+    return state, wait
+
+
+@pytest.mark.regression
+@given(late=st.sampled_from((core.ObservationStatus.PENDING, core.ObservationStatus.UNKNOWN)))
+def test_a_submission_made_after_authorization_never_refuses_the_authorized_resume(
+    late: core.ObservationStatus,
+) -> None:
+    """The resume's dispatch checks the history core published, not what the scope did since.
+
+    Core used to require the attempt's whole stored history to be complete at dispatch, so a
+    submission core made in the scope between authorization and dispatch left it unavailable
+    and the dispatch raised, halting the run.
+    """
+    state, wait = _authorized_before_a_late_submission(late)
+    history = state.attempts.attempts[0].evaluation_history
+    assert history.availability == core.EvaluationHistoryAvailability.UNAVAILABLE
+    assert len(history.covered_submissions) == 3
+    assert dispatch_publication(state, wait).events == ()

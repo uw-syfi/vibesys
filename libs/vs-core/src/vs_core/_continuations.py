@@ -56,7 +56,7 @@ from .types.evaluation import (
     ResumeRefused,
     TurnSuspended,
 )
-from .types.evaluation_history import EvaluationHistoryAvailability
+from .types.evaluation_history import AttemptEvaluationHistory, EvaluationHistoryAvailability
 from .types.job_observations import JobTimeout, TimedOut, WaitEnd
 from .types.kernel import AreaChange, EvaluationContext
 from .types.records import InspectRequest, Outbound, RequestPhase, within
@@ -72,7 +72,7 @@ if TYPE_CHECKING:
         EvaluationState,
         EvidenceRef,
     )
-    from .types.evaluation_history import AttemptEvaluationHistory, EvaluationHistoryCursor
+    from .types.evaluation_history import EvaluationHistoryCursor
     from .types.kernel import RunState, SessionsContext, Signal, StrategyEvent
     from .types.records import ChildLease, Request, RequestRecord
     from .types.sessions import Invocation, SessionsState
@@ -147,14 +147,50 @@ def resume_refusal(
     """Why an attempt's turn that waited from ``prefix`` cannot resume on ``history``, or None.
 
     The one rule for both ends of a resume: authorization asks it of the history it
-    publishes, and the resume's dispatch asks it of the history the attempt stored, so core
-    never authorizes a resume that its dispatch would refuse.
+    publishes, and the resume's dispatch asks it of that same history as the attempt still
+    stores it (``published_history``), so core never authorizes a resume that its dispatch
+    would refuse.
     """
     if history.availability != EvaluationHistoryAvailability.COMPLETE:
         return ResumeRefusal.HISTORY_UNAVAILABLE
     if paid_prefix_refusal(history, prefix) is not None:
         return ResumeRefusal.PREFIX_MISMATCH
     return None
+
+
+def published_history(
+    history: AttemptEvaluationHistory, cursor: EvaluationHistoryCursor | None
+) -> AttemptEvaluationHistory:
+    """``history`` as it stood when core published ``cursor`` with a resume's authorization.
+
+    The scope may submit again between the authorization and the resume's dispatch (core's
+    own base run, earned by a close call of any attempt sharing the base, is one), and that
+    submission leaves the whole stored history incomplete until it ends. Coverage and records
+    only grow, so the prefix through ``cursor`` is what authorization proved. With nothing
+    submitted since, that is the stored history itself; no cursor, or one the stored coverage
+    does not hold, is an unavailable history.
+    """
+    if (
+        cursor is None
+        or cursor.ordinal > len(history.covered_submissions)
+        or (
+            cursor.ordinal
+            and history.covered_submissions[cursor.ordinal - 1] != cursor.submission_id
+        )
+    ):
+        return AttemptEvaluationHistory()
+    if cursor.ordinal == len(history.covered_submissions):
+        return history
+    covered = history.covered_submissions[: cursor.ordinal]
+    records = tuple(record for record in history.records if record.ordinal <= cursor.ordinal)
+    complete = tuple(record.submission_id for record in records) == covered
+    return AttemptEvaluationHistory(
+        availability=EvaluationHistoryAvailability.COMPLETE
+        if complete
+        else EvaluationHistoryAvailability.UNAVAILABLE,
+        covered_submissions=covered,
+        records=records,
+    )
 
 
 def exhausted(attempts: AttemptsState, scope: Scope) -> bool:

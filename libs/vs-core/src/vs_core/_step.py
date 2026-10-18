@@ -13,6 +13,8 @@ from . import attempts, evaluation, records, scheduling, sessions, settlement
 from ._continuations import (
     SuspensionRefusal,
     exhausted,
+    paid_prefix_refusal,
+    published_history,
     resume_refusal,
     wait_refusal_in,
 )
@@ -88,7 +90,6 @@ from .types.evaluation import (
     ContinuationReopenRequested,
     EvaluationEvent,
     MeasurementRequested,
-    ResumeRefusal,
 )
 from .types.kernel import (
     AreaChange,
@@ -1557,19 +1558,15 @@ def _validate_resume_owner(
             ),
             None,
         )
-        prefix = preceding.evaluation_prefix
-        refusal = None if owner is None else resume_refusal(owner.evaluation_history, prefix)
-        if (
-            owner is None
-            or refusal is ResumeRefusal.HISTORY_UNAVAILABLE
-            or exhausted(state.attempts, request.scope)
-        ):
+        if owner is None or exhausted(state.attempts, request.scope):
             raise ContractError(
                 ("evaluation_history",), "resume requires complete unexhausted attempt history"
             )
-        if prefix is None or refusal is not None:  # None is a refusal; this narrows the type
-            raise ContractError(("evaluation_prefix",), SuspensionRefusal.PREFIX_MISMATCH.detail)
+        prefix = preceding.evaluation_prefix
         history = owner.evaluation_history
+        # Coverage only grows, so the paid-cycle prefix is checked on the stored history.
+        if prefix is None or paid_prefix_refusal(history, prefix) is not None:
+            raise ContractError(("evaluation_prefix",), SuspensionRefusal.PREFIX_MISMATCH.detail)
         if (
             publication_cursor is None
             or publication_cursor.ordinal < prefix.ordinal
@@ -1583,6 +1580,12 @@ def _validate_resume_owner(
             raise ContractError(
                 ("authorization_receipt", "history_cursor"),
                 "resume requires exact publication history prefix after paid-cycle start",
+            )
+        # The rule authorization applied, to the history it published (``published_history``).
+        refusal = resume_refusal(published_history(history, publication_cursor), prefix)
+        if refusal is not None:
+            raise ContractError(
+                ("evaluation_history",), "resume requires complete unexhausted attempt history"
             )
     else:
         if (
