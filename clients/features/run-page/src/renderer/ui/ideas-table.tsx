@@ -44,7 +44,7 @@ function byResult(
   return (direction === 'min' ? av - bv : bv - av) || newest;
 }
 
-export function sortedIdeas(model: RunModel, filter: IdeasFilter, sort: IdeasSort) {
+function sortedIdeas(model: RunModel, filter: IdeasFilter, sort: IdeasSort) {
   const rows = ideasView(model, filter).rows;
   const order = new Map(model.candidates.candidates.map((item, index) => [item.id, index]));
   if (sort === 'newest')
