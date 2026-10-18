@@ -5,7 +5,6 @@
  * nothing and the frame's header stands.
  */
 import type {AgentPaneProps, AgentsViewProps} from './agents/agents-view.js';
-import type {LogsViewProps} from './logs/logs-view.js';
 import type {PaneHeader, ViewHeader} from './props.js';
 import type {TimelineViewProps} from './timeline/timeline-view.js';
 
@@ -14,6 +13,6 @@ const NONE = (): PaneHeader => ({});
 export const timelineHeader: ViewHeader<TimelineViewProps> = NONE;
 export const agentsHeader: ViewHeader<AgentsViewProps> = NONE;
 export const agentHeader: ViewHeader<AgentPaneProps> = NONE;
-export const logsHeader: ViewHeader<LogsViewProps> = NONE;
 export {ideaHeader} from './idea/idea-view.js';
+export {logsHeader} from './logs/logs-view.js';
 export {itemHeader, stepHeader} from './step/step-view.js';

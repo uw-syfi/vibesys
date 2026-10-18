@@ -152,7 +152,7 @@ test('a long idea name is in full on the row’s name, for hover and assistive t
   await unmount();
 });
 
-test('a figure too long for its column is a short form, with the whole on hover', async () => {
+test('a failed idea has no multiple to show, so its cell is a dash, as in the Ideas list', async () => {
   const long = {...idea('long', 'failed', 0, 100), reason: 'implementer_gave_up'};
   const checked = idea('checked', 'failed', 200, 100);
   const failing = {
@@ -170,15 +170,10 @@ test('a figure too long for its column is a short form, with the whole on hover'
   };
   const fits = idea('fits', 'passed', 400, 100);
   const {container, unmount} = await mount(<TimelineView {...base([long, failing, fits], 600)} />);
-  const figures = [...container.querySelectorAll('[role="option"] .vs-gantt-figure')].map(each => [
-    each.textContent,
-    each.getAttribute('title'),
-  ]);
-  expect(figures).toEqual([
-    ['1.50×', null],
-    ['93/100', 'Failed · 93/100 trials'],
-    ['Failed', 'Failed · implementer gave up'],
-  ]);
+  const figures = [...container.querySelectorAll('[role="option"] .vs-gantt-figure')].map(
+    each => each.textContent,
+  );
+  expect(figures).toEqual(['1.50×', '–', '–']);
   await unmount();
 });
 

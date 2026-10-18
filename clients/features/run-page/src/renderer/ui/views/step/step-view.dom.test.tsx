@@ -282,7 +282,7 @@ describe('an agent turn', () => {
   test('its header carries the turn’s duration, tools and failures', () => {
     const fx = fixture(TURN);
     const header = stepHeader(viewProps(fx, fx.turn, null));
-    expect(header.kicker).toBeUndefined();
+    expect(header.kicker).toBe('Agent turn');
     expect(header.meta).toBeDefined();
   });
 

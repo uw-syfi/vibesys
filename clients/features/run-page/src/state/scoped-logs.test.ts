@@ -5,6 +5,7 @@ import {emptyLogView, type LogView} from '@vibesys/logs';
 import {Seeded} from '@vibesys/store/testing';
 import {type RunPageState, runPageInitial} from './run-page.js';
 import {paneLines, scopedLogs} from './scoped-logs.js';
+import {idea} from './timeline-fixtures.js';
 
 type Owner = LogStream['owner'];
 
@@ -165,4 +166,19 @@ test('developer boot timing stays out of the narration unless diagnostics are as
   expect(paneLines(state, 'gate').map(line => line.text)).toEqual(['boot span build: 5ms']);
   const last = scopedLogs(state, {kind: 'run'}).streams.find(item => item.id === 'narration');
   expect(last?.lastLine).toBe('round 2 started');
+});
+
+test('an empty Logs face names its scope and speaks of what a finished run did, not of yet', () => {
+  const live = pageState([]);
+  const ended: RunPageState = {...live, record: {kind: 'historical', status: 'completed'}};
+  const scopes = [
+    ['run', {kind: 'run'}],
+    ['idea', {kind: 'idea', idea: idea('a', 'passed', 0, 10)}],
+  ] as const;
+  for (const [subject, scope] of scopes) {
+    expect(scopedLogs(live, scope).notice).toMatch(/not written any logs yet/);
+    expect(scopedLogs(ended, scope).notice).toBe(`This ${subject} wrote no logs.`);
+    // A scope never says "the run" about something narrower.
+    if (subject !== 'run') expect(scopedLogs(live, scope).notice).not.toMatch(/\brun\b/i);
+  }
 });

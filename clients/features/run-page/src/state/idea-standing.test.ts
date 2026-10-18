@@ -87,8 +87,8 @@ describe('the framework verdict on an idea’s effect', () => {
 
   test('the words say the verdict is against the idea’s base', () => {
     expect(effectWords('within noise')).toBe('within noise of its base');
-    expect(effectWords('supported')).toBe('supported vs its base');
-    expect(effectWords('disproven')).toBe('disproven vs its base');
+    expect(effectWords('supported')).toBe('beat its base');
+    expect(effectWords('disproven')).toBe('did not beat its base');
     expect(effectWords('measuring')).toBe('measuring');
   });
 

@@ -20,7 +20,7 @@ import {
   runPageInitial,
 } from '../../../../state/index.js';
 import {streamToFollow} from '../../../../state/scoped-logs.js';
-import {type LogScope, LogsView} from './logs-view.js';
+import {type LogScope, LogsView, logsHeader} from './logs-view.js';
 
 const window = new Window();
 const installed = Object.getOwnPropertyNames(window).filter(name => !(name in globalThis));
@@ -247,4 +247,19 @@ test('the run lists its streams with their last line, and choosing one selects i
   expect(shown.text).toContain('last words');
   expect(shown.selects).toEqual(['s1']);
   expect(streamToFollow(state, {kind: 'run'})).toBe('s0');
+});
+
+test('a step’s Logs pane keeps the kicker of its step pane, so the role is said once', () => {
+  const turn = {...step('t1'), kind: 'agent_turn', role: 'implementer', title: 'implementer'};
+  const props = {
+    model: MODEL,
+    clock: CLOCK,
+    tokens: EMPTY_LEDGER,
+    zoom: () => undefined,
+    state: pageState([]),
+    scope: {kind: 'step', step: turn} as const,
+    dispatch: () => undefined,
+  };
+  expect(logsHeader(props)).toEqual({kicker: 'Agent turn'});
+  expect(logsHeader({...props, scope: {kind: 'run'}})).toEqual({});
 });

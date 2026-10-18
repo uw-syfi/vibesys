@@ -110,6 +110,24 @@ function stepPath(steps: readonly {readonly x: number; readonly y: number}[], at
     .join(' ');
 }
 
+/** How far a label's advance box may pass the frame before ink does: glyphs have side bearings. */
+const BEARING = 1;
+
+/**
+ * Where an x label is drawn for a tick at `x`: centred on it, but kept inside the drawing, so the
+ * label of a tick at the plot's end (`333h 20m`) is not cut by the frame; it ends at the frame's
+ * edge instead.
+ */
+function xLabelAt(
+  x: number,
+  text: string,
+): {readonly x: number; readonly anchor: 'start' | 'middle' | 'end'} {
+  const half = (text.length * TYPE.section.size * MONO_ADVANCE) / 2;
+  if (x + half > WIDTH + BEARING) return {x: WIDTH, anchor: 'end'};
+  if (x - half < -BEARING) return {x: 0, anchor: 'start'};
+  return {x, anchor: 'middle'};
+}
+
 /** The grid and labels at the ticks, and the two axes. */
 function Axes(props: {
   readonly plot: Plot;
@@ -140,17 +158,20 @@ function Axes(props: {
           </text>
         </g>
       ))}
-      {xTicks.map(tick => (
-        <text
-          key={`x${tick.value}`}
-          className="vs-chart-label"
-          x={at.x(tick.value)}
-          y={plot.bottom + 16}
-          textAnchor="middle"
-        >
-          {tick.label}
-        </text>
-      ))}
+      {xTicks.map(tick => {
+        const label = xLabelAt(at.x(tick.value), tick.label);
+        return (
+          <text
+            key={`x${tick.value}`}
+            className="vs-chart-label"
+            x={label.x}
+            y={plot.bottom + 16}
+            textAnchor={label.anchor}
+          >
+            {tick.label}
+          </text>
+        );
+      })}
       <line
         className="vs-chart-axis"
         x1={plot.left}

@@ -90,12 +90,10 @@ test('the list says what each idea built on, marks the leader Best, and says eac
   );
   const rows = lines(screen.container);
   const byTitle = (title: string) => rows.find(row => row.title === title);
-  expect(byTitle('Padded counters')?.line).toBe('From input · supported vs its base');
-  expect(byTitle('Batched enqueue on the padded counters')?.line).toBe(
-    'From best · supported vs its base',
-  );
-  expect(byTitle('Per-core free lists')?.line).toBe('From a passed idea · disproven vs its base');
-  expect(byTitle('Prefetch the next slot')?.line).toBe('From its own work · supported vs its base');
+  expect(byTitle('Padded counters')?.line).toBe('From input · beat its base');
+  expect(byTitle('Batched enqueue on the padded counters')?.line).toBe('From best · beat its base');
+  expect(byTitle('Per-core free lists')?.line).toBe('From a passed idea · did not beat its base');
+  expect(byTitle('Prefetch the next slot')?.line).toBe('From its own work · beat its base');
   expect(rows.filter(row => row.badge === 'Best').map(row => row.title)).toEqual([
     'Prefetch the next slot',
   ]);

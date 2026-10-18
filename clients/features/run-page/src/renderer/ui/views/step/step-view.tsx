@@ -29,7 +29,7 @@ import {
   TurnResult,
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
-import {tokensLine, tokensTitle, turnTokens} from '../../../../state/index.js';
+import {stepKicker, tokensLine, tokensTitle, turnTokens} from '../../../../state/index.js';
 import {
   type GateView,
   gateView,
@@ -234,13 +234,15 @@ function parentValue(props: StepViewProps): number | null {
 /** The agent turn's facts for its pane header: how long, how many tools, how many failed. */
 export function stepHeader(props: StepViewProps): PaneHeader {
   if (props.step.kind === 'gate') return {};
+  const kicker = stepKicker(props.step);
   const narrative = turnNarrative(props.model.trace, props.core, props.step.span);
-  if (narrative === null) return {};
+  if (narrative === null) return {kicker};
   const end = props.step.endedAt ?? props.clock.now;
   const seconds = end === null ? null : end - props.step.startedAt;
   const spent = turnTokens(props.tokens, props.step.span);
   const tokens = spent === null ? null : tokensLine(spent);
   return {
+    kicker,
     meta: (
       <Text
         variant="small"

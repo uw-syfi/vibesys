@@ -7,7 +7,7 @@
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {LogView} from '@vibesys/logs';
 import type {Candidate, CandidateStep} from '@vibesys/run-state/candidates';
-import type {RunPageState} from './run-page.js';
+import {type RunPageState, runHasEnded} from './run-page.js';
 import {
   type LogGroupName,
   type LogLineView,
@@ -222,12 +222,19 @@ export function scopedLogs(state: RunPageState, scope: LogScope): ScopedLogs {
   return {streams, rows: foldRows(streams, shown), shown, notice};
 }
 
-function emptyNotice(state: RunPageState, scope: LogScope): string | null {
-  const run = logsNotice(state);
-  if (scope.kind === 'run' || run !== null) return run ?? 'The run has not written any logs yet.';
-  return scope.kind === 'idea'
-    ? 'None of this idea’s steps wrote a log.'
-    : 'This step wrote no log.';
+/** What the Logs face says when its scope has no stream: the listing's own state, else who wrote none. */
+function emptyNotice(state: RunPageState, scope: LogScope): string {
+  const listing = logsNotice(state);
+  if (listing !== null) return listing;
+  const over = runHasEnded(state);
+  switch (scope.kind) {
+    case 'run':
+      return over ? 'This run wrote no logs.' : 'The run has not written any logs yet.';
+    case 'idea':
+      return over ? 'This idea wrote no logs.' : 'This idea has not written any logs yet.';
+    case 'step':
+      return 'This step wrote no log.';
+  }
 }
 
 /**

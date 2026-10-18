@@ -459,6 +459,30 @@ describe('Chart emphasis and spans', () => {
   });
 });
 
+describe('Chart x labels', () => {
+  test('a label at the plot’s end stays inside the drawing instead of being cut by it', async () => {
+    const container = await mount(
+      <Chart
+        label="c"
+        points={[{x: 0, y: 1, filled: true}]}
+        xTicks={[
+          {value: 0, label: '0s'},
+          {value: 1_200_000, label: '333h 20m'},
+        ]}
+        pick={() => undefined}
+      />,
+    );
+    const view = container.querySelector('svg.vs-chart')?.getAttribute('viewBox')?.split(' ') ?? [];
+    const width = Number(view[2]);
+    const [first, last] = [...container.querySelectorAll('text.vs-chart-label')].filter(each =>
+      /^\d+[hs]/.test(each.textContent ?? ''),
+    );
+    expect(last?.getAttribute('text-anchor')).toBe('end');
+    expect(Number(last?.getAttribute('x'))).toBeLessThanOrEqual(width);
+    expect(first?.getAttribute('text-anchor')).not.toBe('end');
+  });
+});
+
 describe('FactLine', () => {
   test('lays its facts out in order, a shrinking one marked', async () => {
     const container = await mount(

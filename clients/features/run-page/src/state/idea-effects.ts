@@ -23,11 +23,11 @@ export type IdeaEffect = 'supported' | 'within noise' | 'disproven' | 'measuring
 export function effectWords(effect: IdeaEffect): string {
   switch (effect) {
     case 'supported':
-      return 'supported vs its base';
+      return 'beat its base';
     case 'within noise':
       return 'within noise of its base';
     case 'disproven':
-      return 'disproven vs its base';
+      return 'did not beat its base';
     case 'measuring':
       return 'measuring';
   }
