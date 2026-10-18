@@ -66,7 +66,10 @@ from vs_core.api import (
     RequestId,
     RequestTurn,
     ResumeAuthorized,
+    ResumeFailed,
     ResumeReady,
+    ResumeRefusal,
+    ResumeRefused,
     Scope,
     Settlement,
     SettlementId,
@@ -416,6 +419,16 @@ class FlowRun[C]:
             evidence=(),
         )
         self.send(ResumeReady(authorization=authorization))
+
+    def resume_refused(self, continuation: Continuation, reason: ResumeRefusal) -> None:
+        """Core will never resume a suspended turn: the history its evaluations left is unusable."""
+        self._timeline.append("resume-refused")
+        refusal = ResumeRefused(
+            continuation_id=continuation.continuation_id,
+            invocation=continuation.invocation,
+            reason=reason,
+        )
+        self.send(ResumeFailed(refusal=refusal))
 
     def reply_raw(self, asked: Asked, output_json: str) -> None:
         """The agent answered with text that may not be its reply model (a correction follows)."""

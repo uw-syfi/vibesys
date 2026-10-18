@@ -24,7 +24,7 @@ from vs_sim.api.testing import examples
 
 from .test_agent_turn_runs import SCENARIOS, Scenario, assert_ended_closed
 from .test_attempt_retirement import retirement
-from .test_continuations import fixture, job_change, persisted_step, with_wait
+from .test_continuations import fixture, job_change, persisted_step, synced, with_wait
 from .test_job_release import JOB, started
 from .test_measurements import observation
 from .toy_agent_search import ROLES
@@ -180,6 +180,12 @@ def test_a_wake_carrying_an_earlier_reading_of_a_jobs_end_still_resumes(
     now = (
         *ended[:-1],
         last.model_copy(update={"observation": read_again(last.observation, later, delay)}),
+    )
+    # The ledger keeps each submission's first conclusive reading.
+    state = synced(
+        state.model_copy(
+            update={"evaluation": state.evaluation.model_copy(update={field: tuple(ended)})}
+        )
     )
     state = state.model_copy(
         update={"evaluation": state.evaluation.model_copy(update={field: now})}

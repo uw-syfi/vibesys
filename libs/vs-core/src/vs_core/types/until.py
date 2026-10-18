@@ -82,6 +82,10 @@ class WaitRefusal(StrEnum):
     NOT_PUBLISHED = "not-published"
     """Core recorded the wait but could not publish it."""
 
+    NOT_RESUMABLE = "not-resumable"
+    """Core recorded the wait, but its evaluations ended in a history that can never back a
+    resume (``ResumeRefused``), so no resume will come."""
+
 
 class WhileOpen(Value):
     """End the wait with ``WORKSPACE_CLOSED`` when this workspace stops being open."""

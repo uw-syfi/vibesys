@@ -52,6 +52,8 @@ from .types.evaluation import (
     RegisteredOwnedJob,
     ResumeAuthorizationReceipt,
     ResumeAuthorized,
+    ResumeRefusal,
+    ResumeRefused,
     TurnSuspended,
 )
 from .types.evaluation_history import EvaluationHistoryAvailability
@@ -136,6 +138,22 @@ def paid_prefix_refusal(
         )
     ):
         return SuspensionRefusal.PREFIX_MISMATCH
+    return None
+
+
+def resume_refusal(
+    history: AttemptEvaluationHistory, prefix: EvaluationHistoryCursor | None
+) -> ResumeRefusal | None:
+    """Why an attempt's turn that waited from ``prefix`` cannot resume on ``history``, or None.
+
+    The one rule for both ends of a resume: authorization asks it of the history it
+    publishes, and the resume's dispatch asks it of the history the attempt stored, so core
+    never authorizes a resume that its dispatch would refuse.
+    """
+    if history.availability != EvaluationHistoryAvailability.COMPLETE:
+        return ResumeRefusal.HISTORY_UNAVAILABLE
+    if paid_prefix_refusal(history, prefix) is not None:
+        return ResumeRefusal.PREFIX_MISMATCH
     return None
 
 
@@ -607,17 +625,30 @@ def _authorize(
                 state, continuation.model_copy(update={"phase": ContinuationPhase.AUTHORIZED})
             )
         )
+    return _publish(state, context, continuation, invocation, evidence)
+
+
+def _publish(
+    state: EvaluationState,
+    context: EvaluationContext,
+    continuation: Continuation,
+    invocation: Invocation,
+    evidence: tuple[EvidenceRef, ...],
+) -> AreaChange[EvaluationState]:
+    """Authorize the settled wait's resume once, or refuse it for good (``resume_refusal``)."""
     owner = _attempt(context, invocation.scope)
     history = (
         produce_history(invocation.scope, state, context.records, owner, context.run)
         if owner
         else None
     )
-    cursor = (
-        history.cursor
-        if history is not None and history.availability == EvaluationHistoryAvailability.COMPLETE
-        else None
-    )
+    if history is not None:
+        # Every submission has ended (``attempt_settled``), so this history is final: a
+        # refusal now is a refusal forever, and the wait ends without a resume.
+        refusal = resume_refusal(history, invocation.evaluation_prefix)
+        if refusal is not None:
+            return _refuse(state, continuation, refusal, _history_update(owner, history))
+    cursor = history.cursor if history is not None else None
     comparisons = latest_comparisons(
         state,
         invocation.scope,
@@ -655,14 +686,45 @@ def _authorize(
                 comparisons=comparisons,
             ),
         ),
-        signals=(
-            AttemptEvaluationHistoryUpdated(
-                attempt=AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation),
-                history=history,
+        signals=_history_update(owner, history),
+    )
+
+
+def _history_update(
+    owner: AttemptView | None, history: AttemptEvaluationHistory | None
+) -> tuple[Signal, ...]:
+    """The signal storing the history a continuation's end published, when it has one.
+
+    The ends of the jobs a continuation awaits leave publishing the history to it.
+    """
+    if owner is None or history is None:
+        return ()
+    return (
+        AttemptEvaluationHistoryUpdated(
+            attempt=AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation),
+            history=history,
+        ),
+    )
+
+
+def _refuse(
+    state: EvaluationState,
+    continuation: Continuation,
+    reason: ResumeRefusal,
+    signals: tuple[Signal, ...],
+) -> AreaChange[EvaluationState]:
+    """End a wait whose resume core will never authorize: cancel it and say why."""
+    cancelled = continuation.model_copy(update={"phase": ContinuationPhase.CANCELLED})
+    return AreaChange(
+        state=_store(state, cancelled),
+        events=(
+            ResumeRefused(
+                continuation_id=continuation.continuation_id,
+                invocation=continuation.invocation,
+                reason=reason,
             ),
-        )
-        if owner is not None and history is not None
-        else (),
+        ),
+        signals=signals,
     )
 
 

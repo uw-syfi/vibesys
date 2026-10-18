@@ -72,6 +72,11 @@ class Mismatch(_Verdict):
 
 type Verdict[T] = Proven[T] | Missing | Mismatch
 
+_UNACCEPTED_ENDS = frozenset(
+    (ObservationStatus.FAILED, ObservationStatus.REJECTED, ObservationStatus.CANCELLED)
+)
+"""The ends a job the executor never accepted can have."""
+
 
 def _submission_rows(
     scope: Scope, evaluation: EvaluationState, records: RecordsState
@@ -98,12 +103,12 @@ def _submission_rows(
 def attempt_settled(scope: Scope, evaluation: EvaluationState, records: RecordsState) -> bool:
     """Whether every measurement submission issued in ``scope`` has a terminal observation.
 
-    Invariant: core never authorizes a resume for a scope while this is False. A resume is
-    proven against the attempt's evaluation history, and that history is complete only when
-    each submission's outcome is final; a submission that is still running (or whose request
-    has not run) leaves it incomplete, so the resume would be unprovable. Authorization is
-    deferred, not refused: each submission's conclusive observation wakes the scope's
-    waiting continuations again.
+    Core decides no resume for a scope while this is False: a submission that is still
+    running (or whose request has not run) may yet complete the history, so the decision is
+    deferred, and each submission's conclusive observation wakes the scope's waiting
+    continuations again. Once it is True the history ``produce_history`` returns is final,
+    and ``vs_core._continuations.resume_refusal`` of it either authorizes the resume or
+    refuses it for good. This is never the authorization rule by itself.
     """
     rows = _submission_rows(scope, evaluation, records)
     return all(
@@ -189,6 +194,9 @@ def produce_history(
                 and observation.status == ObservationStatus.SUCCEEDED
                 and row.evaluation_result is None
             )
+            # A job the executor never accepted cannot have succeeded: no record proves it
+            # (``AttemptEvaluationRecord.terminal_receipt``), so it leaves history unavailable.
+            or (not observation.accepted and observation.status not in _UNACCEPTED_ENDS)
         ):
             continue
         facts = row.evaluation_result.model_dump() if row.evaluation_result is not None else {}

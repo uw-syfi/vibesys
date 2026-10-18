@@ -55,6 +55,7 @@ class Outcome(core.Value):
     ended: str
     """The type of what the session gave: ``TurnFinished`` or ``Failed``."""
     reason: str | None = None
+    refusal: str | None = None
     checkpoint: bool = False
 
 
@@ -79,7 +80,11 @@ def role_of(**changes: object) -> core.Role:
 def outcome_of(result: core.TurnFinished | core.Failed) -> Outcome:
     """The record a story reads."""
     if isinstance(result, core.Failed):
-        return Outcome(ended="Failed", reason=result.reason.value)
+        return Outcome(
+            ended="Failed",
+            reason=result.reason.value,
+            refusal=result.refusal.value if result.refusal is not None else None,
+        )
     return Outcome(ended="TurnFinished", checkpoint=result.checkpoint is not None)
 
 
@@ -329,6 +334,27 @@ def test_a_lost_resume_is_never_asked_again_whatever_the_roles_lost_turns(
     run.lose(asked)
     assert published(run) == Outcome(ended="Failed", reason="lost")
     assert min(run.sleeping_until, default=1000.0) >= 1000.0  # no backoff: only the deadline
+
+
+@_RESTARTING
+def test_a_wait_core_will_never_resume_ends_the_ask_with_a_typed_refusal(
+    *, restarting: bool
+) -> None:
+    """Core refuses a resume its own dispatch check would refuse, instead of halting the run.
+
+    The search hears a typed refusal and decides what follows; no resume turn is asked.
+    """
+    run = start(role_of(may_wait_for_evaluations=True), restarting=restarting, view=SUSPENDING)
+    run.advance_to(0.0)
+
+    run.resume_refused(run.suspend(turn(run)), core.ResumeRefusal.HISTORY_UNAVAILABLE)
+
+    assert published(run) == Outcome(
+        ended="Failed",
+        reason=core.FailureReason.WAIT_REFUSED.value,
+        refusal=core.WaitRefusal.NOT_RESUMABLE.value,
+    )
+    assert not [asked for asked in run.open if isinstance(asked.request, core.RequestTurn)]
 
 
 # -- the checkpoint --------------------------------------------------------------------------------------

@@ -44,5 +44,7 @@ class EventKind(StrEnum):
     """Plumbing of the agent pipeline: core could not publish the wait a turn ended with."""
     RESUME_READY = "resume_ready"
     """Plumbing of the agent pipeline: core authorized the resume of a suspended turn."""
+    RESUME_FAILED = "resume_failed"
+    """Plumbing of the agent pipeline: core will never resume a suspended turn."""
     CHECKPOINT_KNOWN = "checkpoint_known"
     """Plumbing of the agent pipeline: core recorded or declined a turn's checkpoint."""

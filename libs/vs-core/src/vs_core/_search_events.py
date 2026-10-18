@@ -19,7 +19,7 @@ from ._comparison import comparison_of_result, moment_of
 from ._registry import ContractError
 from .types.attempts import AttemptExhausted, CheckpointResolved
 from .types.common import Scope
-from .types.evaluation import MeasurementResult, ResumeAuthorized, TurnSuspended
+from .types.evaluation import MeasurementResult, ResumeAuthorized, ResumeRefused, TurnSuspended
 from .types.kernel import ControlChanged
 from .types.kinds import EventKind
 from .types.records import OperationResult
@@ -35,6 +35,7 @@ from .types.search import (
     MessageDelivered,
     MessageDropped,
     OperationFinished,
+    ResumeFailed,
     ResumeReady,
     RunView,
     StopRequested,
@@ -213,6 +214,11 @@ def _resume(core: CoreState, event: ResumeAuthorized) -> Event:
     return ResumeReady(authorization=event)
 
 
+def _resume_refused(core: CoreState, event: ResumeRefused) -> Event:
+    del core
+    return ResumeFailed(refusal=event)
+
+
 def _checkpoint(core: CoreState, event: CheckpointResolved) -> Event:
     del core
     return CheckpointKnown(invocation=event.invocation, checkpoint=event.checkpoint)
@@ -284,6 +290,7 @@ _TRANSLATE: dict[type, Callable[[CoreState, Any], Event | Discarded | None]] = {
     TurnSuspended: _yielded,
     YieldPublicationFailed: _yield_failed,
     ResumeAuthorized: _resume,
+    ResumeRefused: _resume_refused,
     CheckpointResolved: _checkpoint,
     MeasurementResult: _measurement,
     OperationResult: _operation,

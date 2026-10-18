@@ -28,6 +28,7 @@ from vs_core.types.search import (
     MessageDelivered,
     MessageDropped,
     OperationFinished,
+    ResumeFailed,
     ResumeReady,
     StopRequested,
     TimeReached,
@@ -82,6 +83,7 @@ type JournaledEvent = Annotated[
     | TurnYielded
     | YieldFailed
     | ResumeReady
+    | ResumeFailed
     | CheckpointKnown
     | Failed,
     Field(discriminator="kind"),

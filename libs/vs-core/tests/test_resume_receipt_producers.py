@@ -12,7 +12,7 @@ from .test_resume_dispatch_proof import digest
 
 
 def publication_state(*, facts: bool = True) -> tuple[core.CoreState, core.Continuation]:
-    state, wait = fixture(settled=True)
+    state, wait = fixture(settled=True, history=False)
     owner = state.attempts.attempts[0]
     predecessor = state.sessions.invocations[0]
     assert owner.admission_id is not None
@@ -203,6 +203,20 @@ def dispatch_publication(state: core.CoreState, wait: core.Continuation) -> core
             frames=(core.TraceFrame(signal=event, change=core.RecordsChange(state=state.records)),)
         ),
     )
+
+
+def assert_refused(result: core.Transition, wait: core.Continuation) -> None:
+    """Core refuses a resume it could never dispatch: it cancels the wait and says why."""
+    assert [event for event in result.events if not isinstance(event, core.TurnSuspended)] == [
+        core.ResumeRefused(
+            continuation_id=wait.continuation_id,
+            invocation=wait.invocation,
+            reason=core.ResumeRefusal.HISTORY_UNAVAILABLE,
+        )
+    ]
+    stored = result.state.evaluation.continuations[0]
+    assert stored.phase == core.ContinuationPhase.CANCELLED
+    assert stored.authorization_receipt is None
 
 
 def test_actual_suspension_publication_survives_restart_and_authorizes_dispatch() -> None:
@@ -419,15 +433,13 @@ def test_missing_scientific_or_submission_facts_never_certify_publication_histor
             }
         )
     result = core.step(state, core.TurnSuspended(continuation=wait))
-    receipt = result.state.evaluation.continuations[0].authorization_receipt
-    assert receipt is not None
     if facts and missing == -1:
+        receipt = result.state.evaluation.continuations[0].authorization_receipt
+        assert receipt is not None
         assert receipt.history_cursor is not None
         dispatch_publication(result.state, wait)
     else:
-        assert receipt.history_cursor is None
-        with pytest.raises(core.ContractError, match="complete unexhausted"):
-            dispatch_publication(result.state, wait)
+        assert_refused(result, wait)
 
 
 @pytest.mark.parametrize(
@@ -489,12 +501,7 @@ def test_history_certification_requires_exact_submission_identity_and_budget(
             ),
         }
     )
-    result = core.step(state, core.TurnSuspended(continuation=wait))
-    receipt = result.state.evaluation.continuations[0].authorization_receipt
-    assert receipt is not None
-    assert receipt.history_cursor is None
-    with pytest.raises(core.ContractError, match="complete unexhausted"):
-        dispatch_publication(result.state, wait)
+    assert_refused(core.step(state, core.TurnSuspended(continuation=wait)), wait)
 
 
 @pytest.mark.parametrize(
@@ -597,15 +604,13 @@ def test_registered_history_requires_declared_codec_bound_measurement_identity(
         }
     )
     result = core.step(state, core.TurnSuspended(continuation=wait))
-    receipt = result.state.evaluation.continuations[0].authorization_receipt
-    assert receipt is not None
     if fault == "exact":
+        receipt = result.state.evaluation.continuations[0].authorization_receipt
+        assert receipt is not None
         assert receipt.history_cursor is not None
         dispatch_publication(result.state, wait)
     else:
-        assert receipt.history_cursor is None
-        with pytest.raises(core.ContractError, match="complete unexhausted"):
-            dispatch_publication(result.state, wait)
+        assert_refused(result, wait)
 
 
 @pytest.mark.parametrize("fault", ["exact", "missing", "foreign-run", "duplicate", "generation"])
@@ -682,14 +687,13 @@ def test_history_correlates_source_admission_with_its_canonical_submission(
         }
     )
     result = core.step(state, core.TurnSuspended(continuation=wait))
-    receipt = result.state.evaluation.continuations[0].authorization_receipt
-    assert receipt is not None
-    assert (receipt.history_cursor is not None) == exact
     if exact:
+        receipt = result.state.evaluation.continuations[0].authorization_receipt
+        assert receipt is not None
+        assert receipt.history_cursor is not None
         assert dispatch_publication(result.state, wait).events == ()
     else:
-        with pytest.raises(core.ContractError, match="complete unexhausted"):
-            dispatch_publication(result.state, wait)
+        assert_refused(result, wait)
 
 
 def test_published_receipt_survives_valid_parking_and_confirmed_reopen_without_republication() -> (
@@ -773,74 +777,141 @@ def test_a_job_polled_again_after_its_end_keeps_its_submission_in_certified_hist
     dispatch_publication(result.state, wait)
 
 
-@given(
-    ends=st.tuples(
-        *(
-            st.sampled_from(
+class End(core.Value):
+    """How one of the three measurements ended: what its job and submission row hold."""
+
+    status: core.ObservationStatus
+    accepted: bool
+    facts: bool
+    """Whether the executor reported scientific facts. Only an accepted job can."""
+
+    @property
+    def provable(self) -> bool:
+        """Whether a history record can state this end.
+
+        Only a success owes facts, and only an accepted job can have succeeded.
+        """
+        if self.status != core.ObservationStatus.SUCCEEDED:
+            return True
+        return self.accepted and self.facts
+
+
+_ENDS = st.tuples(
+    *(
+        st.builds(
+            End,
+            status=st.sampled_from(
                 (
-                    None,
+                    core.ObservationStatus.SUCCEEDED,
                     core.ObservationStatus.FAILED,
                     core.ObservationStatus.CANCELLED,
                     core.ObservationStatus.REJECTED,
                 )
             ),
-        )
-        * 3
+            accepted=st.booleans(),
+            facts=st.booleans(),
+        ).filter(lambda end: end.accepted or not end.facts),
     )
+    * 3
 )
-def test_a_measurement_that_ran_and_failed_without_facts_still_completes_history(
-    ends: tuple[core.ObservationStatus | None, ...],
-) -> None:
-    """An accepted job that failed or was cancelled carries no scientific facts.
 
-    The runtime withholds facts for retryable failures and cancelled jobs by design, so
-    such a submission is a conclusive empty record, not missing history. Run r2 crashed
-    when one ambiguous failure left history unavailable while the attempt read as settled:
-    core authorized the resume and then refused to dispatch it.
-    """
+
+def ended_as(ends: tuple[End, ...]) -> tuple[core.CoreState, core.Continuation]:
+    """The publication state, its three measurements ended as ``ends`` say."""
     state, wait = publication_state()
-    ended = {
-        job.submission_id: status
-        for job, status in zip(state.evaluation.jobs, ends, strict=True)
-        if status is not None
-    }
+    by_request = dict(zip((job.submission_id for job in state.evaluation.jobs), ends, strict=True))
 
-    def failed(observation: core.Observation | None, request: core.RequestId) -> core.Observation:
+    def ended(observation: core.Observation | None, end: End) -> core.Observation:
         assert observation is not None
-        return observation.model_copy(update={"status": ended[request]})
+        return observation.model_copy(update={"status": end.status, "accepted": end.accepted})
 
     jobs = tuple(
-        job.model_copy(update={"observation": failed(job.observation, job.submission_id)})
-        if job.submission_id in ended
-        else job
+        job.model_copy(
+            update={"observation": ended(job.observation, by_request[job.submission_id])}
+        )
         for job in state.evaluation.jobs
     )
     records = tuple(
         row.model_copy(
             update={
-                "observation": failed(row.observation, row.request_id),
-                "evaluation_result": None,
+                "observation": ended(row.observation, by_request[row.request_id]),
+                "evaluation_result": row.evaluation_result
+                if by_request[row.request_id].facts
+                else None,
             }
         )
-        if row.request_id in ended
+        if row.request_id in by_request
         else row
         for row in state.records.records
     )
-    state = state.model_copy(
+    return state.model_copy(
         update={
             "evaluation": state.evaluation.model_copy(update={"jobs": jobs}),
             "records": state.records.model_copy(update={"records": records}),
         }
+    ), wait
+
+
+@example(
+    ends=(
+        End(status=core.ObservationStatus.SUCCEEDED, accepted=True, facts=False),
+        End(status=core.ObservationStatus.SUCCEEDED, accepted=True, facts=True),
+        End(status=core.ObservationStatus.FAILED, accepted=True, facts=True),
     )
+)
+@example(ends=(End(status=core.ObservationStatus.FAILED, accepted=True, facts=False),) * 3)
+@example(ends=(End(status=core.ObservationStatus.SUCCEEDED, accepted=False, facts=False),) * 3)
+@given(ends=_ENDS)
+def test_history_is_complete_exactly_when_every_accepted_success_carries_its_facts(
+    ends: tuple[End, ...],
+) -> None:
+    """The runtime withholds facts for a job that failed or was cancelled, by design.
+
+    Such a submission is a conclusive record without facts, not missing history; a failure
+    that did report facts keeps them. A success without facts, or one the executor never
+    accepted, leaves the history unavailable (and core used to raise building its record). Run r2 crashed when one ambiguous failure left history
+    unavailable while the attempt read as settled.
+    """
+    state, wait = ended_as(ends)
     result = core.step(state, core.TurnSuspended(continuation=wait))
-    receipt = result.state.evaluation.continuations[0].authorization_receipt
-    assert receipt is not None
-    assert receipt.history_cursor is not None
     history = result.state.attempts.attempts[0].evaluation_history
-    assert history.availability == core.EvaluationHistoryAvailability.COMPLETE
-    assert [record.terminal_observation.status for record in history.records] == [
-        ended.get(job.submission_id, core.ObservationStatus.SUCCEEDED)
-        for job in state.evaluation.jobs
-    ]
-    assert all(not record.stages for record in history.records if record.submission_id in ended)
-    dispatch_publication(result.state, wait)
+    complete = all(end.provable for end in ends)
+    assert (history.availability == core.EvaluationHistoryAvailability.COMPLETE) == complete
+    recorded = {record.submission_id: record for record in history.records}
+    for job, end in zip(state.evaluation.jobs, ends, strict=True):
+        if not end.provable:
+            assert job.submission_id not in recorded
+            continue
+        record = recorded[job.submission_id]
+        assert record.terminal_observation.status == end.status
+        assert bool(record.stages) == end.facts
+
+
+@pytest.mark.regression
+@example(
+    ends=(
+        End(status=core.ObservationStatus.SUCCEEDED, accepted=True, facts=False),
+        End(status=core.ObservationStatus.SUCCEEDED, accepted=True, facts=True),
+        End(status=core.ObservationStatus.SUCCEEDED, accepted=True, facts=True),
+    )
+)
+@given(ends=_ENDS)
+def test_core_authorizes_a_resume_only_when_its_dispatch_would_be_accepted(
+    ends: tuple[End, ...],
+) -> None:
+    """Authorization and the resume's dispatch apply one rule, so an authorized resume runs.
+
+    Core used to authorize once every submission had ended, then refuse the resume's dispatch
+    because the history was not complete, which halted the run. A history that can never be
+    complete now ends the wait with a typed refusal instead, and nothing is authorized.
+    """
+    state, wait = ended_as(ends)
+    result = core.step(state, core.TurnSuspended(continuation=wait))
+    authorized = [event for event in result.events if isinstance(event, core.ResumeAuthorized)]
+    if authorized:
+        assert authorized[0].history_cursor is not None
+        dispatch_publication(result.state, wait)
+    else:
+        assert_refused(result, wait)
+    # One of the two always happens: a settled wait never stays waiting.
+    assert result.state.evaluation.continuations[0].phase != core.ContinuationPhase.WAITING

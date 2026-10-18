@@ -10,7 +10,12 @@ from typing import TYPE_CHECKING, Literal, assert_never
 from pydantic import TypeAdapter
 
 from . import attempts, evaluation, records, scheduling, sessions, settlement
-from ._continuations import SuspensionRefusal, exhausted, paid_prefix_refusal, wait_refusal_in
+from ._continuations import (
+    SuspensionRefusal,
+    exhausted,
+    resume_refusal,
+    wait_refusal_in,
+)
 from ._deadlines import queued_until, resolve_until
 from ._dispatch_episode import (
     dispatch_episode_current,
@@ -83,8 +88,8 @@ from .types.evaluation import (
     ContinuationReopenRequested,
     EvaluationEvent,
     MeasurementRequested,
+    ResumeRefusal,
 )
-from .types.evaluation_history import EvaluationHistoryAvailability
 from .types.kernel import (
     AreaChange,
     AreaContext,
@@ -1549,21 +1554,19 @@ def _validate_resume_owner(
             ),
             None,
         )
+        prefix = preceding.evaluation_prefix
+        refusal = None if owner is None else resume_refusal(owner.evaluation_history, prefix)
         if (
             owner is None
-            or owner.evaluation_history.availability != EvaluationHistoryAvailability.COMPLETE
+            or refusal is ResumeRefusal.HISTORY_UNAVAILABLE
             or exhausted(state.attempts, request.scope)
         ):
             raise ContractError(
                 ("evaluation_history",), "resume requires complete unexhausted attempt history"
             )
-        prefix = preceding.evaluation_prefix
-        history = owner.evaluation_history
-        refusal = paid_prefix_refusal(history, prefix)
         if prefix is None or refusal is not None:  # None is a refusal; this narrows the type
-            raise ContractError(
-                ("evaluation_prefix",), (refusal or SuspensionRefusal.PREFIX_MISMATCH).detail
-            )
+            raise ContractError(("evaluation_prefix",), SuspensionRefusal.PREFIX_MISMATCH.detail)
+        history = owner.evaluation_history
         if (
             publication_cursor is None
             or publication_cursor.ordinal < prefix.ordinal

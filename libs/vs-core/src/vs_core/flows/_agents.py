@@ -56,6 +56,7 @@ from vs_core.types.job_observations import WaitEnd
 from vs_core.types.search import (
     CheckpointKnown,
     OperationFinished,
+    ResumeFailed,
     ResumeReady,
     TurnEnded,
     TurnFinished,
@@ -551,7 +552,8 @@ class _Ask:
         ready = self.kit.signal(
             f"resume of {wanted.root}",
             lambda event: (
-                isinstance(event, ResumeReady) and event.authorization.continuation_id == wanted
+                (isinstance(event, ResumeReady) and event.authorization.continuation_id == wanted)
+                or (isinstance(event, ResumeFailed) and event.refusal.continuation_id == wanted)
             ),
         )
         try:
@@ -560,6 +562,13 @@ class _Ask:
             self.kit.run.release(ready)
         if isinstance(authorized, Failed):
             return authorized
+        if isinstance(authorized, ResumeFailed):
+            return Failed(
+                reason=FailureReason.WAIT_REFUSED,
+                decision=self.decision,
+                turn=turn,
+                refusal=WaitRefusal.NOT_RESUMABLE,
+            )
         if not isinstance(authorized, ResumeReady):
             message = f"a resume was authorized as {authorized.kind}"
             raise ContractError(("agents", "turn"), message)

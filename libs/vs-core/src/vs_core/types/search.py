@@ -37,6 +37,7 @@ from .evaluation import (
     EvidenceRef,
     MeasurementResult,
     ResumeAuthorized,
+    ResumeRefused,
 )
 from .evaluation_history import AttemptEvaluationHistory, AttemptTerminalReason
 from .kinds import EventKind
@@ -107,6 +108,13 @@ class ResumeReady(Value):
 
     kind: Literal["resume_ready"] = "resume_ready"
     authorization: ResumeAuthorized
+
+
+class ResumeFailed(Value):
+    """Plumbing of the agent pipeline: core will never resume a suspended turn."""
+
+    kind: Literal["resume_failed"] = "resume_failed"
+    refusal: ResumeRefused
 
 
 class CheckpointKnown(Value):
@@ -196,6 +204,7 @@ type Event = Annotated[
     | TurnYielded
     | YieldFailed
     | ResumeReady
+    | ResumeFailed
     | CheckpointKnown
     | Failed,
     Field(discriminator="kind"),

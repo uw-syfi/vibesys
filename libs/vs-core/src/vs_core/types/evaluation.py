@@ -932,6 +932,36 @@ class ResumeAuthorized(Value):
         return self
 
 
+class ResumeRefusal(StrEnum):
+    """Why core will never authorize a waiting continuation's resume. Closed.
+
+    Core authorizes the resume of an attempt's turn only when the attempt's evaluation
+    history is complete and extends the turn's paid-cycle prefix, the same rule the resume's
+    dispatch checks (``vs_core._continuations.resume_refusal``).
+    """
+
+    HISTORY_UNAVAILABLE = "history_unavailable"
+    """Every submission of the attempt ended and its history is still not complete (a
+    submission's facts or proofs are missing or conflict), so it never will be."""
+    PREFIX_MISMATCH = "prefix_mismatch"
+    """The history does not extend the waiting turn's paid-cycle prefix."""
+
+
+class ResumeRefused(Value):
+    """The other way a continuation's wait ends besides ``ResumeAuthorized``: no resume.
+
+    Core cancels the continuation and authorizes nothing, so the run never dispatches a
+    resume its own check would refuse. The suspended turn stays ended; a strategy handles
+    this like a refused wait: it settles the attempt or asks a new turn.
+    """
+
+    kind: Literal["resume_refused"] = "resume_refused"
+    continuation_id: ContinuationId
+    invocation: InvocationRef
+    """The suspended turn whose resume is refused."""
+    reason: ResumeRefusal
+
+
 MEASUREMENT_DIAGNOSTIC_LIMIT = 4000
 
 

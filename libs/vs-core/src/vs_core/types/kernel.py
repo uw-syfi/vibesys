@@ -42,6 +42,7 @@ from .evaluation import (
     JobQueued,
     MeasurementResult,
     ResumeAuthorized,
+    ResumeRefused,
     TurnSuspended,
 )
 from .records import (
@@ -272,6 +273,7 @@ type StrategyEvent = Annotated[
     | MeasurementResult
     | JobQueued
     | ResumeAuthorized
+    | ResumeRefused
     | TurnSuspended
     | YieldPublicationFailed
     | InterruptFailed

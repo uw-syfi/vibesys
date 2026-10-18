@@ -18,6 +18,7 @@ from vs_core.types.search import (
     CheckpointKnown,
     Event,
     OperationFinished,
+    ResumeFailed,
     ResumeReady,
     StopRequested,
     TimeReached,
@@ -685,7 +686,7 @@ class _Run:
             case CheckpointKnown(invocation=invocation, checkpoint=checkpoint):
                 self.checkpoints[invocation] = checkpoint
                 self._offer(item)
-            case TurnYielded() | YieldFailed() | ResumeReady():
+            case TurnYielded() | YieldFailed() | ResumeReady() | ResumeFailed():
                 self._offer(item)
             case _:
                 self._answer(item)
