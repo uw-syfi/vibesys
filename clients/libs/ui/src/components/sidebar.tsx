@@ -20,6 +20,17 @@ export function SidebarItem(
     readonly status?: {readonly tone: StatusTone; readonly label: string};
     readonly count?: number;
     readonly detail?: string;
+    /** For entries under a group's header: the label may wrap, and `trail` follows it, muted. */
+    readonly compact?: boolean;
+    readonly trail?: string;
+    /** What assistive technology calls the entry when its text alone does not say what it is of. */
+    readonly name?: string;
+    /** What its menu is for, when that is not the label. */
+    readonly menuFor?: string;
+    /** The tooltip of the whole entry: what its text cannot hold. */
+    readonly hint?: string;
+    /** A control beside the entry (retry), outside its button. */
+    readonly action?: {readonly label: string; readonly press: () => void};
     readonly active?: boolean;
     readonly menu?: readonly MenuItem[];
   },
@@ -32,8 +43,17 @@ export function SidebarItem(
           <StatusDot tone={props.status.tone} label={props.status.label} />
         </span>
       )}
-      <span className="vs-sidebar-text">
-        <Text variant={props.detail === undefined ? 'body' : 'body-strong'}>{props.label}</Text>
+      <span className="vs-sidebar-text" data-compact={props.compact === true || undefined}>
+        <Text
+          variant={props.detail === undefined && props.compact !== true ? 'body' : 'body-strong'}
+        >
+          {props.label}
+        </Text>
+        {props.trail === undefined ? null : (
+          <Text variant="small" tone="muted">
+            {props.trail}
+          </Text>
+        )}
         {props.detail === undefined ? null : (
           <Text variant="small" tone="muted">
             {props.detail}
@@ -45,6 +65,8 @@ export function SidebarItem(
   );
   const shared = {
     className: 'vs-sidebar-link',
+    title: props.hint,
+    'aria-label': props.name,
     'aria-current': props.active === true ? ('page' as const) : undefined,
   };
   return (
@@ -61,11 +83,19 @@ export function SidebarItem(
       {props.menu === undefined ? null : (
         <Menu
           icon="more"
-          label={`More for ${props.label}`}
+          label={`More for ${props.menuFor ?? props.label}`}
           variant="quiet"
           size="sm"
           items={props.menu}
         />
+      )}
+      {props.action === undefined ? null : (
+        <>
+          <span className="vs-sidebar-break" aria-hidden="true" />
+          <button className="vs-sidebar-action" type="button" onClick={props.action.press}>
+            {props.action.label}
+          </button>
+        </>
       )}
     </div>
   );
@@ -94,5 +124,30 @@ export function SidebarSection(props: {
         </button>
       )}
     </section>
+  );
+}
+
+/**
+ * A small header over the entries of one kind, with `note` (how many follow) at its end when given. The entries are a list under it.
+ */
+export function SidebarGroup(props: {
+  readonly title: string;
+  readonly note?: string;
+  readonly children: ReactNode;
+}): JSX.Element {
+  return (
+    <div className="vs-sidebar-group">
+      <span className="vs-sidebar-group-title" title={props.title}>
+        <Text variant="small" tone="muted">
+          {props.title}
+        </Text>
+        {props.note === undefined ? null : (
+          <Text variant="small" tone="muted">
+            {props.note}
+          </Text>
+        )}
+      </span>
+      {props.children}
+    </div>
   );
 }

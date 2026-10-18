@@ -126,6 +126,8 @@ function cases(random: Seeded): Case[] {
     [
       bridge => bridge.readSummary(key, path, name),
       {kind: 'read-summary', host, project: path, runId: name},
+      bridge => bridge.runDigests(key, path, [name]),
+      {kind: 'run-digests', host, project: path, runIds: [name]},
     ],
     [
       bridge => bridge.readSpan(key, path, name, 'op:turn', 1, 100),

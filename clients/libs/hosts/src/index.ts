@@ -47,4 +47,10 @@ export {
   type RunEnd,
   type RunPause,
 } from './listing.js';
+export {
+  digestEntries,
+  digestLook,
+  type RunDigestEntry,
+  type RunDigestsReply,
+} from './run-digest.js';
 export {type EndKind, type EndLook, type EndTone, endedLook} from './run-look.js';

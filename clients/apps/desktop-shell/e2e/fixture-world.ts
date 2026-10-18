@@ -134,7 +134,7 @@ export async function openFixture(
   await page.goto('./shell.html');
   await page
     .getByRole('navigation', {name: 'VibeSys'})
-    .locator('button.vs-sidebar-link', {hasText: 'queue-rs · mpmc'})
+    .locator('button.vs-sidebar-link[title*="queue-rs · mpmc"]')
     .click();
   if (options.sidebar === false) {
     await page.evaluate(() => (window as unknown as FixtureWindow).fakeHost.toggleSidebar());

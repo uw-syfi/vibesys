@@ -2,6 +2,7 @@ import {describe, expect, test} from 'bun:test';
 import {join} from 'node:path';
 import {type ConnectionLease, ConnectionManager} from '@vibesys/connection';
 import {FakeLink, record} from '@vibesys/connection/testing';
+import type {RunSummary} from '@vibesys/contracts/host-helper';
 import type {HostId, HostListing} from '@vibesys/hosts';
 import {remember, SettingsStore, settingsFor, withHostSettings} from '@vibesys/settings';
 import {FakeSettingsFilesystem} from '@vibesys/settings/testing';
@@ -617,6 +618,77 @@ describe('Hosts.readSummary', () => {
     await expect(hosts.readSummary(LOCAL, '/srv/project', 'run-9')).rejects.toThrow(
       'Could not read the summary of run run-9',
     );
+  });
+});
+
+describe('Hosts.runDigests', () => {
+  const summary = (digest: RunSummary['digest']): RunSummary => ({
+    run_id: 'run-1',
+    task: 'mpmc',
+    display_name: 'run',
+    created_at: '2026-10-17T03:00:00Z',
+    phase: null,
+    instance_id: null,
+    ...(digest === undefined ? {} : {digest}),
+  });
+
+  test('returns the digest of each named run the host records, with when it began', async () => {
+    const link = new FakeLink();
+    link.helper.host.projects.set('/srv/project', ['mpmc']);
+    link.helper.host.runHistory.set('/srv/project', [
+      summary({
+        kind: 'digest',
+        ideas: 3,
+        best_ratio: 2.5,
+        duration_s: 90,
+        ending: null,
+        closing: 'finished',
+      }),
+    ]);
+    const subject = completionSubject(link);
+    await using _manager = subject.manager;
+
+    const reply = await subject.hosts.runDigests(LOCAL, '/srv/project', ['run-1']);
+
+    expect(reply.kind).toBe('digests');
+    if (reply.kind !== 'digests') return;
+    expect(reply.runs.get('run-1')).toEqual({
+      kind: 'read',
+      createdAt: Date.parse('2026-10-17T03:00:00Z'),
+      ideas: 3,
+      bestRatio: 2.5,
+      durationSeconds: 90,
+      outcome: null,
+      closing: 'finished',
+      over: true,
+    });
+  });
+
+  test('asks for the named runs only, and a run not named carries no digest', async () => {
+    const link = new FakeLink();
+    link.helper.host.projects.set('/srv/project', ['mpmc']);
+    link.helper.host.runHistory.set('/srv/project', [
+      summary({kind: 'unreadable', message: 'could not read'}),
+    ]);
+    const subject = completionSubject(link);
+    await using _manager = subject.manager;
+
+    const none = await subject.hosts.runDigests(LOCAL, '/srv/project', []);
+    expect(none.kind === 'digests' && none.runs.size).toBe(0);
+    const named = await subject.hosts.runDigests(LOCAL, '/srv/project', ['run-1']);
+    expect(named.kind === 'digests' && named.runs.get('run-1')?.kind).toBe('unreadable');
+  });
+
+  test('returns a typed unsupported outcome without sending the request', async () => {
+    const link = new FakeLink();
+    link.helper.features.delete('run_digest');
+    const subject = completionSubject(link);
+    await using _manager = subject.manager;
+
+    await expect(subject.hosts.runDigests(LOCAL, '/srv/project', ['run-1'])).resolves.toEqual({
+      kind: 'unsupported',
+    });
+    expect(link.helper.requests.filter(request => request.type === 'runs.list')).toEqual([]);
   });
 });
 

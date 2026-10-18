@@ -17,6 +17,12 @@ export interface FakeBridgeSeed {
   readonly appearance: {readonly mode: string; readonly light: string; readonly dark: string};
   readonly listings: readonly unknown[];
   readonly recent: readonly unknown[];
+  /**
+   * What each run's journal says (`runs.list`'s digest), by run id, as the app reads it
+   * (`RunDigestEntry`); a run not named is one the host has no record of. Without it the host
+   * answers as an older helper would: it does not offer digests.
+   */
+  readonly digests?: Readonly<Record<string, unknown>>;
   /** The saved machines, as `hosts.json` and This Mac list them. */
   readonly machines?: readonly {host: string; label: string; checkout: string}[];
   /** What each machine's facts say, by host; a machine not named here is ready with `facts`. */
@@ -104,6 +110,7 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
         );
         return store({...preferences, archived: archived ? [...others, run] : others});
       },
+      runDigests: () => ok({kind: 'unsupported'}),
       onListing: on('listing'),
       onRecent: on('recent'),
       onPreferences: on('preferences'),
@@ -143,6 +150,37 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
     paint.disconnect();
   });
   paint.observe(document, {childList: true});
+}
+
+/**
+ * The run digests part of the Fake, as a further init script after `installFakeBridge`: the
+ * host's answer to what a run's journal says (`seed.digests`), and `fakeHost.digests` and
+ * `fakeHost.digestAsks` for the journey.
+ */
+export function installFakeDigests(seed: FakeBridgeSeed): void {
+  let digests = seed.digests;
+  const asks: string[][] = [];
+  const host = window as unknown as {
+    vibesysWelcome: object;
+    fakeHost: object;
+  };
+  Object.assign(host.vibesysWelcome, {
+    runDigests: (_host: string, _project: string, runIds: readonly string[]) => {
+      asks.push([...runIds]);
+      if (digests === undefined) return Promise.resolve({ok: true, value: {kind: 'unsupported'}});
+      const known = digests;
+      const runs = new Map(runIds.flatMap(id => (id in known ? [[id, known[id]]] : [])));
+      return Promise.resolve({ok: true, value: {kind: 'digests', runs}});
+    },
+  });
+  Object.assign(host.fakeHost, {
+    /** Change what the host's journals say, for the next ask. */
+    digests: (next: Readonly<Record<string, unknown>>) => {
+      digests = next;
+    },
+    /** The run ids of each ask the page made, in order. */
+    digestAsks: () => asks,
+  });
 }
 
 /**

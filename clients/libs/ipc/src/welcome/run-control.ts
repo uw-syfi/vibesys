@@ -2,7 +2,7 @@
  * The run-control feature's welcome requests: attach, resume, stop (the view asks the user first),
  * letting a run go, and reading a run's recorded history and its summary.
  */
-import {type HostId, type HostKey, hostFromKey} from '@vibesys/hosts';
+import {type HostId, type HostKey, hostFromKey, type RunDigestsReply} from '@vibesys/hosts';
 import {exactResumeRunId, type ResumeRunId} from '@vibesys/runs';
 import type {WelcomeResult} from './types.js';
 import {type ChannelOf, instance, project} from './values.js';
@@ -15,7 +15,11 @@ export const RUN_CONTROL_CHANNELS = {
   readEvents: 'vibesys:welcome:read-events',
   readSummary: 'vibesys:welcome:read-summary',
   readSpan: 'vibesys:welcome:read-span',
+  runDigests: 'vibesys:welcome:run-digests',
 } as const;
+
+/** The most runs one digest request may name (the helper's bound). */
+const RUN_DIGESTS_MAX = 100;
 
 /** The most events one history page may ask for. */
 export const HISTORY_PAGE_MAX = 2000;
@@ -135,6 +139,15 @@ export interface RunControlWelcomeBridge {
     fromSequence: number,
     max: number,
   ): Promise<WelcomeResult<RunSpanPage>>;
+  /**
+   * What each of `runIds` in `project` on `host` says at a glance (`runs.list` with `digest_runs`):
+   * ideas, best ratio, duration, ending; or that this host's VibeSys does not offer digests.
+   */
+  runDigests(
+    host: HostKey,
+    project: string,
+    runIds: readonly string[],
+  ): Promise<WelcomeResult<RunDigestsReply>>;
 }
 
 export type RunControlRequest =
@@ -175,6 +188,12 @@ export type RunControlRequest =
       readonly spanId: string;
       readonly from: number;
       readonly max: number;
+    }
+  | {
+      readonly kind: 'run-digests';
+      readonly host: HostId;
+      readonly project: string;
+      readonly runIds: readonly string[];
     };
 
 function forceStop(value: unknown): boolean {
@@ -208,6 +227,13 @@ function pageSize(value: unknown): number {
   }
   if (value > HISTORY_PAGE_MAX) throw new Error(`the page size is at most ${HISTORY_PAGE_MAX}`);
   return value;
+}
+
+function runIds(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > RUN_DIGESTS_MAX) {
+    throw new Error(`name at most ${RUN_DIGESTS_MAX} runs`);
+  }
+  return value.map(each => exactResumeRunId(each));
 }
 
 /** The typed request on `channel` with `args`; throws naming the first invalid value. */
@@ -260,6 +286,13 @@ export function parseRunControlRequest(
         spanId: spanId(fourth),
         from: positiveSequence(fifth),
         max: pageSize(sixth),
+      };
+    case RUN_CONTROL_CHANNELS.runDigests:
+      return {
+        kind: 'run-digests',
+        host: hostFromKey(first),
+        project: project(second),
+        runIds: runIds(third),
       };
   }
 }

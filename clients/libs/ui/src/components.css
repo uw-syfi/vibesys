@@ -886,6 +886,7 @@ body > div:first-child {
 .vs-log-pane:focus-visible,
 .vs-scrubber-range:focus-visible,
 .vs-sidebar-link:focus-visible,
+.vs-sidebar-action:focus-visible,
 .vs-sidebar-more:focus-visible {
   outline: var(--focus-ring) solid var(--accent);
   outline-offset: var(--focus-offset);
@@ -1700,6 +1701,56 @@ button.vs-stage-head {
   flex: 1;
   flex-direction: column;
   min-width: 0;
+}
+/* A group of entries under a small header: its entries are one line each. */
+.vs-sidebar-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0);
+  min-width: 0;
+}
+.vs-sidebar-group-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-2) var(--space-3) var(--space-1);
+}
+.vs-sidebar-group-title > :first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-sidebar-group-title > :last-child {
+  flex: none;
+}
+/* A group's entry: when and how it came out, wrapping rather than cut, then what else it did. */
+.vs-sidebar-text[data-compact] > :first-child {
+  overflow-wrap: anywhere;
+}
+.vs-sidebar-item {
+  flex-wrap: wrap;
+}
+.vs-sidebar-break {
+  flex-basis: 100%;
+  height: 0;
+}
+.vs-sidebar-action {
+  flex: none;
+  margin: 0 0 var(--space-3) calc(var(--space-3) * 2 + var(--space-4));
+  padding: var(--space-1) var(--space-3);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  cursor: pointer;
+}
+.vs-sidebar-action:hover {
+  background: var(--panel-2);
 }
 .vs-sidebar-more {
   align-self: flex-start;

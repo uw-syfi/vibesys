@@ -1,10 +1,11 @@
-import {AppFrame, Button, Row, SidebarItem, SidebarSection, Text} from '@vibesys/ui';
+import {AppFrame, Button, Row, SidebarGroup, SidebarItem, SidebarSection, Text} from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
 import {
+  type Clock,
   liveRows,
   machineCounts,
   type RunRow,
-  recentRows,
+  recentGroups,
   type Screen,
   type ShellActions,
   type SidebarAction,
@@ -18,16 +19,33 @@ function sameScreen(left: Screen, right: Screen): boolean {
 
 function RunItem(props: {
   readonly row: RunRow;
+  /** Under a group's header: one line, without the title the header gives. */
+  readonly compact?: boolean;
   readonly state: SidebarState;
   readonly dispatch: (action: SidebarAction) => void;
   readonly actions: ShellActions;
 }): JSX.Element {
   const {row, state, dispatch, actions} = props;
   const screen: Screen = {kind: 'run', run: row.run};
+  const grouped = props.compact === true;
   return (
     <SidebarItem
-      label={row.title}
-      detail={row.detail}
+      label={grouped ? row.detail : row.title}
+      {...(grouped
+        ? {compact: true, ...(row.trail === null ? {} : {trail: row.trail})}
+        : {detail: row.detail})}
+      hint={row.tooltip}
+      {...(grouped
+        ? {name: `${row.look.word} ${row.title}, ${row.detail}`, menuFor: row.title}
+        : {})}
+      {...(row.problem?.retry === true
+        ? {
+            action: {
+              label: 'Retry',
+              press: () => dispatch({type: 'retry-digest', run: row.run}),
+            },
+          }
+        : {})}
       status={{tone: row.look.tone, label: row.look.word}}
       active={sameScreen(state.selection, screen)}
       press={() => dispatch({type: 'select', screen})}
@@ -73,11 +91,14 @@ export function AppShell(props: {
   readonly actions: ShellActions;
   readonly version: string;
   readonly shortcut: string;
+  /** The moment and zone Recent's times are worded in; the app passes the viewer's own. */
+  readonly clock: () => Clock;
   readonly screen: (screen: Screen) => ReactNode;
 }): JSX.Element {
   const {state, dispatch, actions} = props;
   const live = liveRows(state);
-  const recent = recentRows(state);
+  const recent = recentGroups(state, props.clock());
+  const recentCount = recent.groups.reduce((total, group) => total + group.rows.length, 0);
   const machines = machineCounts(state);
   const toggle = (
     <SidebarToggle
@@ -87,9 +108,10 @@ export function AppShell(props: {
     />
   );
   const select = (screen: Screen) => () => dispatch({type: 'select', screen});
-  const item = (row: RunRow) => (
+  const item = (row: RunRow, compact = false) => (
     <RunItem
       key={`${row.run.host} ${row.run.runId}`}
+      compact={compact}
       row={row}
       state={state}
       dispatch={dispatch}
@@ -121,22 +143,29 @@ export function AppShell(props: {
             press={select({kind: 'new-run'})}
           />
           {live.length === 0 ? null : (
-            <SidebarSection title="Live">{live.map(item)}</SidebarSection>
+            <SidebarSection title="Live">{live.map(row => item(row))}</SidebarSection>
           )}
           <SidebarSection
             title="Recent"
             showAll={{
-              label:
-                recent.more === 0 ? 'Show all' : `Show all (${recent.rows.length + recent.more})`,
+              label: recent.more === 0 ? 'Show all' : `Show all (${recentCount + recent.more})`,
               press: select({kind: 'all-runs'}),
             }}
           >
-            {recent.rows.length === 0 ? (
+            {recent.groups.length === 0 ? (
               <Text variant="small" tone="muted">
                 Runs you open show up here.
               </Text>
             ) : (
-              recent.rows.map(item)
+              recent.groups.map(group => (
+                <SidebarGroup
+                  key={`${group.title} ${group.rows[0]?.run.runId}`}
+                  title={group.title}
+                  {...(group.rows.length > 1 ? {note: `${group.rows.length} runs`} : {})}
+                >
+                  {group.rows.map(row => item(row, true))}
+                </SidebarGroup>
+              ))
             )}
           </SidebarSection>
         </>

@@ -12,6 +12,7 @@ import {
   WORDMARK,
 } from '@vibesys/feature-app-shell/renderer';
 import {
+  type Clock,
   type Screen,
   type SidebarState,
   sidebarShortcutLabel,
@@ -296,10 +297,14 @@ export function Shell(props: {
       actions={sidebar.actions}
       version={props.version}
       shortcut={sidebarShortcutLabel(props.stores.bridge.platform === 'darwin')}
+      clock={viewerClock}
       screen={screen}
     />
   );
 }
+
+/** The moment Recent's times are worded against: now, in the viewer's own zone. */
+const viewerClock = (): Clock => ({now: Date.now()});
 
 /**
  * A run window: the Run screen for `run` alone, with no sidebar, below the same title-bar row as

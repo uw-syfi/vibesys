@@ -25,6 +25,7 @@ export type ShellBridge = Pick<
   | 'openRunWindow'
   | 'machines'
   | 'machine'
+  | 'runDigests'
   | 'onListing'
   | 'onRecent'
   | 'onPreferences'
@@ -38,6 +39,12 @@ function perform(
   dispatch: (action: SidebarAction) => void,
 ): void {
   const {token} = request;
+  if (request.kind === 'read-digests') {
+    void settled(bridge.runDigests(request.host, request.project, request.runIds)).then(result =>
+      dispatch({type: 'digests-read', token, reply: result.ok ? result.value : null}),
+    );
+    return;
+  }
   if (request.kind === 'list-machines') {
     void settled(bridge.machines()).then(result =>
       dispatch({

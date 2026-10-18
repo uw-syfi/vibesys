@@ -3,13 +3,19 @@
  * host's listing calls for.
  */
 export {type NoticeKind, type RunNotice, runNotices} from './notices.js';
+export {type Clock, formatWhen} from './recent-words.js';
 export {type RunRowStatus, statusWord} from './run-status.js';
 export {
+  type DigestSlot,
+  digestKey,
   initialSidebar,
   liveRows,
   machineCounts,
   RECENT_ROWS,
+  type RowProblem,
+  type RunGroup,
   type RunRow,
+  recentGroups,
   recentRows,
   type Screen,
   type ShellActions,

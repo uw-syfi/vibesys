@@ -134,6 +134,7 @@ function quietBridge(): {readonly bridge: ShellBridge; menu(): void} {
     openRunWindow: () => never,
     machines: () => never,
     machine: () => never,
+    runDigests: () => never,
     onListing: ignore,
     onRecent: ignore,
     onPreferences: ignore,

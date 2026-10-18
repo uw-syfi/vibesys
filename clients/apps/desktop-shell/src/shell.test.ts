@@ -39,6 +39,7 @@ function fakeBridge(): WelcomeBridge {
     setNotifications: enabled => ok({...STORED, notifications: {enabled}}),
     archive: () => ok(STORED),
     machines: () => ok([]),
+    runDigests: () => ok({kind: 'unsupported' as const}),
     onListing: ignore,
     onRecent: ignore,
     onPreferences: ignore,

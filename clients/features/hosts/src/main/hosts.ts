@@ -14,6 +14,7 @@ import {
 } from '@vibesys/connection';
 import type {HelperMessage, PathsCompleteReply} from '@vibesys/contracts/host-helper';
 import {
+  digestEntries,
   type HostId,
   type HostKey,
   type HostListing,
@@ -24,6 +25,7 @@ import {
   hostListing,
   type InstanceInspection,
   inspectionReply,
+  type RunDigestsReply,
   validHostPath,
 } from '@vibesys/hosts';
 import type {
@@ -470,6 +472,31 @@ export class Hosts {
         return {kind: 'unsupported'};
       }
       throw plain(error, `Could not read the summary of run ${runId}`);
+    }
+  }
+
+  /**
+   * What each of `runIds` in `project` on `id` says at a glance (`runs.list` with `digest_runs`,
+   * feature `run_digest`); `unsupported` when the host's VibeSys does not offer digests.
+   */
+  async runDigests(
+    id: HostId,
+    project: string,
+    runIds: readonly string[],
+  ): Promise<RunDigestsReply> {
+    await using lease = await this.connection(id);
+    try {
+      const reply = await lease.connection.request({
+        type: 'runs.list',
+        project,
+        digest_runs: [...runIds],
+      });
+      return {kind: 'digests', runs: digestEntries(reply.runs.runs)};
+    } catch (error) {
+      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
+        return {kind: 'unsupported'};
+      }
+      throw plain(error, `Could not read the runs of ${project}`);
     }
   }
 

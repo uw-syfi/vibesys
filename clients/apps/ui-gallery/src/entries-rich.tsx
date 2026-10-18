@@ -21,6 +21,7 @@ import {
   Prose,
   Row,
   Scrubber,
+  SidebarGroup,
   SidebarItem,
   SidebarSection,
   Stack,
@@ -668,6 +669,41 @@ export const RICH_ENTRIES = {
         Entries of the SidebarSection below: icons with counts, status dots with details, the active
         one, and a row menu.
       </Text>
+    ),
+  },
+  SidebarGroup: {
+    render: () => (
+      <Grid min="tile">
+        <SidebarSection title="Runs by task">
+          <SidebarGroup title="queue-rs · mpmc" note="2 runs">
+            <SidebarItem
+              compact
+              label="07:32 · 3.83×"
+              trail="10 ideas · 52m"
+              hint="queue-rs · mpmc"
+              status={{tone: 'ok', label: 'finished'}}
+              press={noop}
+            />
+            <SidebarItem
+              compact
+              label="Yesterday 21:10 · stopped · 2 ideas"
+              trail="28m"
+              hint="queue-rs · mpmc"
+              status={{tone: 'neutral', label: 'stopped'}}
+              press={noop}
+            />
+          </SidebarGroup>
+          <SidebarGroup title="kv-store · get-put">
+            <SidebarItem
+              compact
+              label="can't read run state"
+              status={{tone: 'neutral', label: "can't read run state"}}
+              action={{label: 'Retry', press: noop}}
+              press={noop}
+            />
+          </SidebarGroup>
+        </SidebarSection>
+      </Grid>
     ),
   },
   SidebarSection: {

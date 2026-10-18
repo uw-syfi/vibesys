@@ -31,21 +31,13 @@ export function liveLook(server: HostRun): RowLook {
     : {tone: 'warn', word: statusWord('paused')};
 }
 
-/** The look of an ended server's run: its outcome in words, in the tone the shared table gives. */
-export function endedRowLook(server: HostRun | undefined): RowLook {
-  const look = server === undefined ? null : endedLook(server);
-  return look === null
-    ? {tone: 'neutral', word: statusWord('unknown')}
-    : {tone: look.tone, word: look.label.toLowerCase()};
-}
-
 const WORDS: Readonly<Record<RunRowStatus, string>> = {
   live: 'running',
   paused: 'paused',
   finished: 'finished',
   failed: 'failed',
   stopped: 'stopped',
-  unknown: 'status unknown',
+  unknown: "can't read run state",
 };
 
 /** The word for a row's status. */

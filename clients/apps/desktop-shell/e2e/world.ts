@@ -14,6 +14,8 @@ export interface FakeHostWindow extends Window {
     listing(listing: unknown): void;
     toggleSidebar(): void;
     recent(runs: readonly unknown[]): void;
+    digests(next: Readonly<Record<string, unknown>>): void;
+    digestAsks(): readonly (readonly string[])[];
   };
 }
 
