@@ -18,6 +18,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Literal
 
+import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
@@ -28,6 +29,7 @@ from vs_slurm.api import (
     ClusterUnknown,
     FakeCluster,
     FakeEvaluationLedger,
+    LedgerError,
     LedgerLabels,
     LedgerPolicy,
     SecondsRange,
@@ -76,17 +78,27 @@ Fault = Literal["fails", "answer_lost"]
 
 @dataclass
 class _Steps:
-    """Counts the calls one actor makes, and runs the other actor whole before the ``at``-th."""
+    """Counts the calls one actor makes, and runs the other actor whole before the ``at``-th.
+
+    Each counted call takes ``seconds`` of the ``clock``. ``faults`` reach the
+    cluster's inspect and cancel; with ``every_call_fails`` they also reach its
+    submit and every ledger call.
+    """
 
     at: int
     faults: dict[int, Fault] = field(default_factory=dict)
     count: int = 0
     armed: bool = False
     intruder: Callable[[], object] | None = None
+    clock: ManualClock | None = None
+    seconds: float = 0.0
+    every_call_fails: bool = False
 
     def step(self) -> Fault | None:
         if not self.armed:
             return None
+        if self.clock is not None:
+            self.clock.advance(self.seconds)
         self.count += 1
         if self.count == self.at and self.intruder is not None:
             self.armed = False  # the intruder's own calls go straight through
@@ -96,37 +108,48 @@ class _Steps:
                 self.armed = True
         return self.faults.get(self.count)
 
+    def ignore(self) -> None:
+        """Count a call that no fault reaches."""
+        self.step()
+
 
 @dataclass
 class _SteppedLedger:
-    """The Fake ledger, with every call of the stepped actor counted."""
+    """The Fake ledger, with every call of the stepped actor counted.
+
+    With ``every_call_fails``, a call that ``fails`` never reaches the ledger,
+    and one whose ``answer_lost`` reaches it while its caller hears an error.
+    """
 
     inner: FakeEvaluationLedger
     steps: _Steps
 
+    def _call[R](self, call: Callable[[], R]) -> R:
+        fault = self.steps.step() if self.steps.every_call_fails else self.steps.ignore()
+        if fault == "fails":
+            raise LedgerError.transport(ConnectionResetError("ssh: connection reset"))
+        answer = call()
+        if fault == "answer_lost":
+            raise LedgerError.transport(ConnectionResetError("ssh: connection reset"))
+        return answer
+
     def read(self, key: str) -> LedgerEntry | None:
-        self.steps.step()
-        return self.inner.read(key)
+        return self._call(lambda: self.inner.read(key))
 
     def claim(self, record: LedgerRecord) -> LedgerRecord:
-        self.steps.step()
-        return self.inner.claim(record)
+        return self._call(lambda: self.inner.claim(record))
 
     def replace(self, current: LedgerEntry, record: LedgerRecord) -> bool:
-        self.steps.step()
-        return self.inner.replace(current, record)
+        return self._call(lambda: self.inner.replace(current, record))
 
     def renew(self, key: str, lease: LedgerLease) -> None:
-        self.steps.step()
-        self.inner.renew(key, lease)
+        self._call(lambda: self.inner.renew(key, lease))
 
     def release(self, key: str, holder: str) -> None:
-        self.steps.step()
-        self.inner.release(key, holder)
+        self._call(lambda: self.inner.release(key, holder))
 
     def list_keys(self) -> tuple[str, ...]:
-        self.steps.step()
-        return self.inner.list_keys()
+        return self._call(self.inner.list_keys)
 
     def operator_file_sha256(self, path: str) -> str | None:
         return self.inner.operator_file_sha256(path)
@@ -146,8 +169,13 @@ class _SteppedCluster:
     def submit(
         self, request: SlurmBatchRequest | SlurmJobRequest, *, operation_id: str
     ) -> ClusterSubmitOutcome:
-        self.steps.step()
-        return self.inner.submit(request, operation_id=operation_id)
+        fault = self.steps.step() if self.steps.every_call_fails else self.steps.ignore()
+        if fault == "fails":
+            return ClusterUnknown(operation_id=operation_id, reason="ssh: connection reset")
+        submitted = self.inner.submit(request, operation_id=operation_id)
+        if fault == "answer_lost":
+            return ClusterUnknown(operation_id=operation_id, reason="ssh: connection reset")
+        return submitted
 
     def inspect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterInspectOutcome:
         fault = self.steps.step()
@@ -204,6 +232,7 @@ class _World:
         self.cluster = FakeCluster(clock=self.clock, timing=_QUEUED_FOREVER)
         self.ledger = FakeEvaluationLedger(project=PROJECT)
         self.steps = steps
+        steps.clock = self.clock
         self.stepped_cluster = _SteppedCluster(self.cluster, steps)
 
     def run(self, holder: str, *, stepped: bool = False) -> SlurmLedgerAttachment:
@@ -280,32 +309,26 @@ def _check_the_live_run_keeps_its_job(
 _FAULTS = st.dictionaries(
     st.integers(min_value=1, max_value=14), st.sampled_from(["fails", "answer_lost"]), max_size=2
 )
-
-
-@settings(max_examples=examples(pr=150, nightly=1500), deadline=None)
-@given(
-    race=st.sampled_from(
-        [
-            "attach_during_relinquish",
-            "relinquish_during_attach",
-            "sweep_during_attach",
-            "attach_during_sweep",
-            "relinquish_during_relinquish",
-        ]
-    ),
-    at=st.integers(min_value=1, max_value=14),
-    faults=_FAULTS,
+_RACES: tuple[Race, ...] = (
+    "attach_during_relinquish",
+    "relinquish_during_attach",
+    "sweep_during_attach",
+    "attach_during_sweep",
+    "relinquish_during_relinquish",
 )
-# The reviewed race: another run attaches while the relinquishing run cancels the job.
-@example(race="attach_during_relinquish", at=2, faults={})
-@example(race="attach_during_relinquish", at=3, faults={})
-# A relinquish between an attacher's read of the record and its lease write.
-@example(race="relinquish_during_attach", at=2, faults={})
-@example(race="relinquish_during_attach", at=3, faults={})
-def test_no_withdrawal_cancels_the_job_of_a_live_run_and_no_job_outlives_every_run(
-    race: Race, at: int, faults: dict[int, Fault]
-) -> None:
-    steps = _Steps(at=at, faults=faults)
+
+
+def _quietly(action: Callable[[], object]) -> object:
+    """Run one actor's call as the executor does: an unreachable ledger is an unknown outcome."""
+    try:
+        return action()
+    except LedgerError:
+        return None
+
+
+def _race(race: Race, steps: _Steps) -> None:
+    """Run the race; a live run keeps its job, and no job outlives every run that wanted it."""
+    at = steps.at
     with TemporaryDirectory() as directory:
         world = _World(Path(directory), steps)
         first = world.run(
@@ -344,7 +367,7 @@ def test_no_withdrawal_cancels_the_job_of_a_live_run_and_no_job_outlives_every_r
                 lambda: sweeper.sweep_if_due(steps_off),
             ),
             "attach_during_sweep": (
-                lambda: sweeper.sweep_if_due(world.stepped_cluster),
+                lambda: _quietly(lambda: sweeper.sweep_if_due(world.stepped_cluster)),
                 attach_second,
             ),
             "relinquish_during_relinquish": (
@@ -355,7 +378,7 @@ def test_no_withdrawal_cancels_the_job_of_a_live_run_and_no_job_outlives_every_r
         stepped, intruder = actions[race]
         steps.intruder = intruder
         steps.armed = True
-        outcome = stepped()
+        outcome = _quietly(stepped)
         steps.armed = False
         if steps.count < at and steps.intruder is not None:
             intruder()  # the stepped actor made fewer calls: the intruder runs after it
@@ -375,3 +398,150 @@ def test_no_withdrawal_cancels_the_job_of_a_live_run_and_no_job_outlives_every_r
             _relinquish_until_known(first, steps_off, key)
         # A run that crashed (the sweeps) lets go of nothing: its lapsed lease holds nothing.
         assert world.live_jobs(key) == [], "a job outlived every run that wanted it"
+
+
+@settings(max_examples=examples(pr=150, nightly=1500), deadline=None)
+@given(race=st.sampled_from(_RACES), at=st.integers(min_value=1, max_value=14), faults=_FAULTS)
+# The reviewed race: another run attaches while the relinquishing run cancels the job.
+@example(race="attach_during_relinquish", at=2, faults={})
+@example(race="attach_during_relinquish", at=3, faults={})
+# A relinquish between an attacher's read of the record and its lease write.
+@example(race="relinquish_during_attach", at=2, faults={})
+@example(race="relinquish_during_attach", at=3, faults={})
+def test_no_withdrawal_cancels_the_job_of_a_live_run_and_no_job_outlives_every_run(
+    race: Race, at: int, faults: dict[int, Fault]
+) -> None:
+    _race(race, _Steps(at=at, faults=faults))
+
+
+# Seconds each remote call of the stepped actor takes: none, a slow link, and the
+# default transport timeout, which a live but slow withdrawer may spend on every call.
+_CALL_SECONDS = st.sampled_from([0.0, 37.0, 110.0])
+
+
+@pytest.mark.regression
+@pytest.mark.xfail(
+    strict=True,
+    reason="#3173 re-review MED-2 and LOW-5: a slow withdrawer's mark expires before its "
+    "cancel, and a withdrawer whose mark answer was lost waits on its own mark",
+)
+@settings(max_examples=examples(pr=150, nightly=1500), deadline=None)
+@given(
+    race=st.sampled_from(_RACES),
+    at=st.integers(min_value=1, max_value=14),
+    faults=_FAULTS,
+    seconds=_CALL_SECONDS,
+)
+# MED-2: 110 s calls; run-2 attaches after the mark expired, then loses its job.
+@example(race="attach_during_relinquish", at=7, faults={}, seconds=110.0)
+@example(race="attach_during_relinquish", at=8, faults={}, seconds=110.0)
+# LOW-5: the answer to the withdrawal's mark write is lost.
+@example(race="attach_during_relinquish", at=15, faults={5: "answer_lost"}, seconds=0.0)
+def test_no_withdrawal_cancels_a_live_runs_job_however_slow_or_faulty_its_calls(
+    race: Race, at: int, faults: dict[int, Fault], seconds: float
+) -> None:
+    """r3173 MED-2, LOW-5, LOW-6: time passes on every call, and any call may fail.
+
+    Every remote call of the stepped actor takes ``seconds`` of the shared clock,
+    so marks and claims expire while it works; and its ledger calls and submits
+    fail, or lose their answer, as well as its inspects and cancels.
+    """
+    _race(race, _Steps(at=at, faults=faults, seconds=seconds, every_call_fails=True))
+
+
+@dataclass
+class _FlakyCluster:
+    """The Fake cluster, where the calls ``faults`` names fail or lose their answer.
+
+    ``faults`` maps each kind of call to the fate of its first calls, in order.
+    """
+
+    inner: FakeCluster
+    faults: dict[str, list[Fault | None]]
+
+    def _fate(self, call: str) -> Fault | None:
+        planned = self.faults.get(call, [])
+        return planned.pop(0) if planned else None
+
+    def submit(
+        self, request: SlurmBatchRequest | SlurmJobRequest, *, operation_id: str
+    ) -> ClusterSubmitOutcome:
+        fate = self._fate("submit")
+        if fate == "fails":
+            return ClusterUnknown(operation_id=operation_id, reason="ssh: connection reset")
+        submitted = self.inner.submit(request, operation_id=operation_id)
+        if fate == "answer_lost":
+            return ClusterUnknown(operation_id=operation_id, reason="ssh: connection reset")
+        return submitted
+
+    def inspect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterInspectOutcome:
+        fate = self._fate("inspect")
+        if fate == "fails":
+            return ClusterUnknown(operation_id=None, reason="ssh: connection reset")
+        observed = self.inner.inspect(target, by_job_id=by_job_id)
+        if fate == "answer_lost":
+            return ClusterUnknown(operation_id=None, reason="ssh: connection reset")
+        return observed
+
+    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
+        fate = self._fate("cancel")
+        if fate == "fails":
+            return ClusterUnknown(operation_id=None, reason="ssh: connection reset")
+        cancelled = self.inner.cancel(target, by_job_id=by_job_id)
+        if fate == "answer_lost":
+            return ClusterUnknown(operation_id=None, reason="ssh: connection reset")
+        return cancelled
+
+    def collect(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: Observation | None = None,
+    ) -> ClusterCollectOutcome:
+        return self.inner.collect(target, by_job_id=by_job_id, observed=observed)
+
+    def stage_output(
+        self, handle: SlurmBatchHandle, index: int, stream: OutputStream
+    ) -> ByteSource:
+        return self.inner.stage_output(handle, index, stream)
+
+
+_FATES = st.lists(st.sampled_from([None, "fails", "answer_lost"]), max_size=4)
+# Between two asks: none, the executor's poll pause, and past the claim window.
+_PAUSES = st.lists(st.sampled_from([0.0, 1.0, POLICY.claim_seconds + 1.0]), min_size=1, max_size=6)
+
+
+@pytest.mark.regression
+@pytest.mark.xfail(
+    strict=True,
+    reason="#3173 re-review MED-3: a run takes its own live claim for a dead process's "
+    "and submits a second attempt while the first job may still run",
+)
+@settings(max_examples=examples(pr=100, nightly=1000), deadline=None)
+@given(submits=_FATES, inspects=_FATES, cancels=_FATES, pauses=_PAUSES)
+# A lost sbatch answer, then a failed inspect, then a failed scancel.
+@example(submits=["answer_lost"], inspects=["fails"], cancels=["fails"], pauses=[0.0, 0.0])
+def test_one_run_never_holds_two_live_attempts_of_one_request(
+    submits: list[Fault | None],
+    inspects: list[Fault | None],
+    cancels: list[Fault | None],
+    pauses: list[float],
+) -> None:
+    """r3173 MED-3: one process asks for a request again after its submission's answer was lost.
+
+    Its own claim is not a dead process's: whatever the cluster answers, and
+    however long it waits, at most one attempt of the request has a live job.
+    """
+    with TemporaryDirectory() as directory:
+        world = _World(Path(directory), _Steps(at=0))
+        run = world.run("run-1")
+        request = world.request("run-1")
+        key = run.key(request)
+        cluster = _FlakyCluster(
+            world.cluster, {"submit": submits, "inspect": inspects, "cancel": cancels}
+        )
+        for pause in pauses:
+            world.clock.advance(pause)
+            run.attach(cluster, request, labels=LedgerLabels())
+            assert len(world.live_jobs(key)) <= 1, f"live jobs: {world.live_jobs(key)}"
