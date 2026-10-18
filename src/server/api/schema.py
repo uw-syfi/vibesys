@@ -38,7 +38,7 @@ from vibesys.api.display_catalog import code_ids, display_names
 from vs_logs.api import NarrationLine
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Iterator, Mapping, Sequence
 
 _LOCAL_REF_PREFIX = "#/"
 _OPTION_ARGUMENT_COUNT = 2
@@ -1248,9 +1248,9 @@ def _mark_required(member: dict[str, Any], property_name: str, path: str) -> Non
     member["required"] = [key for key in properties if key in required]
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None) -> None:
     """Write the public protocol JSON schema to the requested path."""
-    arguments = sys.argv[1:]
+    arguments = list(sys.argv[1:] if argv is None else argv)
     if len(arguments) == _OPTION_ARGUMENT_COUNT and arguments[0] == "--host-helper-schema":
         document, output = host_helper_json_schema(), Path(arguments[1])
     elif len(arguments) == _OPTION_ARGUMENT_COUNT and arguments[0] == "--response-payload-schema":

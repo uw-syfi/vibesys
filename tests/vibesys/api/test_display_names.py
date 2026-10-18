@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -61,12 +60,9 @@ _GENERATED = (
 )
 
 
-def test_the_generated_module_is_what_the_registry_says(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_the_generated_module_is_what_the_registry_says(tmp_path: Path) -> None:
     written = tmp_path / "out" / "names.ts"
-    monkeypatch.setattr(sys, "argv", ["schema", "--display-names-module", str(written)])
-    main()
+    main(["--display-names-module", str(written)])
     assert written.read_text() == display_names_typescript()
     assert written.read_text() == _GENERATED.read_text()
     assert '"perf-evaluator": "Perf evaluator"' in written.read_text()
