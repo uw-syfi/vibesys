@@ -4,8 +4,9 @@
 backend server: framing, the control channel with request correlation, redial
 and backoff, the persistent event stream, the stream reconciler, and request
 policy. The protocol's types, its runtime validator, and its error taxonomy live
-in [`@vibesys/contracts`](../contracts/README.md); the Node socket client lives
-in [`@vibesys/transport-node`](../transport-node/README.md).
+in [`@vibesys/contracts`](../contracts/README.md). No TypeScript client dials a
+run's Unix control socket: the desktop app reaches a host through the Python host
+helper, which does (`vs_project.api.OperatorDialer`).
 
 The package does not project events into application state and has no UI
 dependency. Consumers interpret its typed messages in their own state model.

@@ -43,8 +43,8 @@ const FORBIDDEN = {
   'multi-specifier import':
     "import {createClient, request} from '@vibesys/transport';\nexport {createClient, request};\n",
   're-export': "export {ipcRenderer} from 'electron';\n",
-  'transport-node import':
-    "import type {Foo} from '@vibesys/transport-node';\nexport type {Foo};\n",
+  'transport subpath type import':
+    "import type {Foo} from '@vibesys/transport/websocket';\nexport type {Foo};\n",
   'namespace import': "import * as fs from 'node:fs';\nexport {fs};\n",
   'side-effect import': "import 'node:os';\n",
   'electron import': "import {ipcRenderer} from 'electron';\nexport {ipcRenderer};\n",

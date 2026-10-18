@@ -1,7 +1,7 @@
 /**
  * The shared reconnect-backoff policy. One schedule governs every redial loop
  * in the client stack: the subscription (`PersistentEventStream`), the control
- * channel (`ServerClient`), and a resume-after-sleep watcher (#832). Keeping it
+ * channel, and a resume-after-sleep watcher (#832). Keeping it
  * here, rather than as a constant copied per call site, means a change to the
  * cadence is one edit, not a hunt for duplicates that have already drifted.
  */

@@ -74,7 +74,7 @@ Named by package.
 | --- | --- |
 | 1, 2 | `@vibesys/run-state` (small `exports`, logic behind it) |
 | 4 | The layering rules in the dependency-cruiser configuration |
-| 6 | The runtime-neutral `@vibesys/transport` versus the Node-only `@vibesys/transport-node` |
+| 6 | The runtime-neutral `@vibesys/transport` versus the Node-only `@vibesys/connection` |
 | 8 | `@vibesys/contracts` generated protocol types |
 
 ## Commands

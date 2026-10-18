@@ -48,7 +48,6 @@ clients/
   libs/run-session/ @vibesys/run-session      one live run: runStep, the session machine, its
                                               ports, connectRun, WebSession    -> contracts, run-state,
                                                                        transport, store, machine
-  libs/transport-node/ @vibesys/transport-node   stdio / unix socket / ssh channel  -> transport
   libs/run-fixtures/ @vibesys/run-fixtures   replayable run fixtures (recorded, scrubbed of hosts,
                                               paths and user names, or synthetic) for e2e harnesses
                                               and screen checks; dev only            -> contracts
@@ -93,7 +92,6 @@ flowchart BT
   runs["runs (L2)"] --> contracts & hosts
   machine["machine (L1)"] --> store
   run-session["run-session (L2)"] --> contracts & run-state & transport & store & machine
-  transport-node["transport-node (L2, Node)"] --> transport
   ipc["ipc (L3)"] --> hosts & runs
   connection["connection (L3, Node)"] --> contracts & transport & hosts & machine
   settings["settings (L3, Node)"] --> hosts & runs
@@ -112,16 +110,15 @@ cycles, and forbids feature-to-feature and app-to-app edges, because peers share
 | --- | --- | --- | --- |
 | `foundation` | 0 | `contracts`, `ui`, `store` | nothing in the workspace |
 | `core` | 1 | `run-state`, `transport`, `hosts`, `machine` | foundation |
-| `domain` | 2 | `runs`, `run-session`, `transport-node`, `run-history`, `run-fixtures` | foundation, core |
+| `domain` | 2 | `runs`, `run-session`, `run-history`, `run-fixtures` | foundation, core |
 | `service` | 3 | `ipc`, `connection`, `settings` | foundation, core, domain |
 | `feature` | 4 | `feature-*` | anything below |
 | `app` | 5 | `apps/*` | anything below |
 
 This refines the sketch in the brief in three places. `ui` and `store` sit in `foundation`: rank 0
 is the mechanical form of "no domain dependencies", so the layer rule enforces rule 6 for them with
-no special case. `transport-node`, `connection`, and `settings` get ranks of their own (`domain` and
-`service`) because each depends on another package the sketch places at the same level
-(`transport-node` on `transport`, `connection` on `transport`, `hosts`, and `machine`, `settings` and `ipc` on
+no special case. `connection` and `settings` get a rank of their own (`service`) because each
+depends on another package the sketch places at the same level (`connection` on `transport`, `hosts`, and `machine`, `settings` and `ipc` on
 `hosts` and `runs`). And `hosts` sits in
 `core`, one rank below `runs`, because a run names the host it runs on (a recent run's status reads
 its host's listing; the stop flow is keyed by host) while a host never names a run's model.
@@ -175,7 +172,7 @@ beyond `ES2022`. Effects reach the platform only through the interfaces `./state
 the app implements. A domain package that owns effects declares its ports the same way:
 `@vibesys/run-session` declares its run connection's control transport and page lifecycle.
 
-Node-only packages (`transport-node`, `connection`, `settings`) therefore reach the renderer
+Node-only packages (`connection`, `settings`) therefore reach the renderer
 through no path: only `node` entries may import them, and only `desktop-main` and features'
 `./main` entries are `node`. A preload is not `node` either, so it reaches none of them.
 
@@ -594,7 +591,7 @@ names a missing or extra one.
 | `@vibesys/run-state` | core | exists: the run event fold (`.`), with `./rounds`, `./performance`, and `./transcript` projections (the run's transcript, and `transcriptBySpan`, which reads it by the span id the server stamped on each event); depends on `contracts` only | domain split (#1949) |
 | `@vibesys/core-state` | core | deleted: split into `store` and `run-state` | domain split (#1949) |
 | `@vibesys/transport` | core | exists: `.` and `./testing` (the shared `FakeClock`) are `neutral`, `./websocket` is `dom` | backend-client split (#1910) |
-| `@vibesys/transport-node` | domain | exists: the Unix-socket `ServerClient`; desktop's ssh and local-host links join it with the connection manager | backend-client split (#1910) |
+| `@vibesys/transport-node` | domain | deleted: its Unix-socket `ServerClient` lost its last importer with the terminal client (#3156), and it presented no operator key | #3158 |
 | `@vibesys/hosts` | core | exists: host identity and keys, labels, the checkout and project path rules (`HostValidationError`), a host's listed runs with their phase text (`instancePhaseText`), path completion for host path fields (`completionStep`, moved down from `feature-hosts`), and what the window shows about a connection; depends on `contracts`, `store` | domain split (#1949) |
 | `@vibesys/runs` | domain | exists: run, task, and instance ids, a recent run's status from its host's listing, the exact-resume policy, the stop flow; depends on `contracts`, `hosts` | domain split (#1949) |
 | `@vibesys/machine` | core | exists: `actorStore`, `clockFrom`, `unprovided` (`.`) and `checkMachine` (`./testing`); domain-free | state architecture (#1950) |

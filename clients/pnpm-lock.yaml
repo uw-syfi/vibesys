@@ -781,28 +781,6 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
-  libs/transport-node:
-    dependencies:
-      '@vibesys/contracts':
-        specifier: workspace:*
-        version: link:../contracts
-      '@vibesys/transport':
-        specifier: workspace:*
-        version: link:../transport
-    devDependencies:
-      '@types/bun':
-        specifier: 1.4.2
-        version: 1.4.2
-      '@types/node':
-        specifier: ^24.0.0
-        version: 24.13.3
-      expect:
-        specifier: 30.5.2
-        version: 30.5.2
-      typescript:
-        specifier: ^5.8.3
-        version: 5.9.3
-
   libs/ui:
     dependencies:
       react:

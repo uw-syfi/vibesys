@@ -24,7 +24,6 @@ src/server/              Frontend-serving runtime and protocol
 src/entrypoints/         Process composition and command entrypoints
 clients/libs/contracts/      TypeScript server protocol types and validator
 clients/libs/transport/      Runtime-neutral transport and the WebSocket adapter
-clients/libs/transport-node/ Node transport: the Unix-socket client
 clients/libs/run-state/      Pure backend-event projection (the run fold)
 libs/                    Reusable standalone libraries
 examples/                Candidate repositories, tasks, and input bundles

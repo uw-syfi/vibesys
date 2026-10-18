@@ -53,10 +53,9 @@ export function subscribeRequest(
 
 /**
  * The transport surface a session consumes: one control request/response verb,
- * a live event subscription, and a bounded close. `ServerClient` (the Node
- * socket transport) satisfies it structurally, and a browser WebSocket
- * transport will too, so nothing above this line depends on how the bytes
- * travel. Neutral by construction: it names only protocol types, no runtime.
+ * a live event subscription, and a bounded close. The browser WebSocket
+ * transport satisfies it structurally, as any other must, so nothing above
+ * this line depends on how the bytes travel. Neutral by construction: it names only protocol types, no runtime.
  */
 export interface ServerTransport {
   /**

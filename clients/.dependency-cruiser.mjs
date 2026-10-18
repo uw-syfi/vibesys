@@ -14,8 +14,7 @@ const OWN_PACKAGE = `^(${PACKAGE_DIRECTORIES})/`;
 const TOOLING = `^(?:${pathAlternation(layout.toolingDirectories)})/`;
 const SCANNED = `${PACKAGES}|${TOOLING}`;
 const TEST_FILE = '\\.test\\.[cm]?[jt]sx?$';
-const TRANSPORT_TEST_ONLY =
-  '^libs/(?:transport|transport-node|contracts)/src/(?:test-support/|testing/)';
+const TRANSPORT_TEST_ONLY = '^libs/(?:transport|contracts)/src/(?:test-support/|testing/)';
 const STORE_TEST_ONLY = '^libs/store/src/testing/';
 // A package's own test-support directory (`connection/src/testing/`): Fakes that only tests import.
 const PACKAGE_TEST_SUPPORT = '^libs/[^/]+/src/testing/';
