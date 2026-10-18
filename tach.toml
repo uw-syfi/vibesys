@@ -1261,7 +1261,7 @@ depends_on = ["vibesys.api", "vibesys.orchestration.dynamic.scripted", "vibesys.
 
 [[modules]]
 path = "vibesys.api.runs"
-depends_on = ["vibesys.api.contracts", "vibesys.api.session"]
+depends_on = ["vibesys.api.contracts", "vibesys.api.session", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.api.catalog"
@@ -1281,7 +1281,7 @@ depends_on = ["vibesys", "vibesys.api._session", "vibesys.api.assembly", "vibesy
 [[modules]]
 path = "vs_runtime._runs"
 visibility = ["vs_runtime", "vs_runtime.api.wiring"]
-depends_on = []
+depends_on = ["vs_core"]
 
 [[modules]]
 path = "vs_runtime.api.wiring"

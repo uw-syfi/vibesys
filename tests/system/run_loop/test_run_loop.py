@@ -43,6 +43,7 @@ from vs_core.api import (
     StopMode,
     WorkspaceMode,
     WorkspacePlan,
+    escalate_stop,
 )
 from vs_core.testing.builders import initial_state, sample_limits
 from vs_runtime.api.core import (
@@ -598,13 +599,18 @@ def test_the_control_bridge_emits_one_ordered_event_per_change(operations: list[
     identities = [event.control.control_id.root for event in events]
     assert identities == [f"control-{n}" for n in range(1, len(events) + 1)]
     actions = [event.control.action for event in events]
-    assert actions.count("stop") <= 1
-    requested = [op.removeprefix("stop:") for op in operations if op.startswith("stop:")]
-    stops = [event.control for event in events if event.control.action == "stop"]
-    # The first stop asked for is the one the run gets, in the mode it was asked in.
-    assert [control.mode for control in stops] == [StopMode(mode) for mode in requested[:1]]
+    requested = [StopMode(op.removeprefix("stop:")) for op in operations if op.startswith("stop:")]
+    stops = [event.control.mode for event in events if event.control.action == "stop"]
+    # A stop only escalates: at most one drain, then at most one cancel, and nothing after it.
+    assert stops in ([], [StopMode.DRAIN], [StopMode.CANCEL], [StopMode.DRAIN, StopMode.CANCEL])
+    # The strongest stop the run records is the strongest one asked for.
+    strongest = None
+    for mode in requested:
+        strongest = escalate_stop(strongest, mode)
+    assert (stops[-1] if stops else None) == strongest
     if "stop" in actions:
-        assert all(action == "steer" for action in actions[actions.index("stop") + 1 :])
+        after = actions[actions.index("stop") + 1 :]
+        assert all(action in ("steer", "stop") for action in after)
     levels = [action for action in actions if action in ("pause", "resume")]
     assert all(a != b for a, b in itertools.pairwise(levels))
     assert not levels or levels[0] == "pause"
