@@ -38,6 +38,7 @@ def test_bun_type_packages_match_the_packaged_runtime() -> None:
         "clients/libs/logs/package.json",
         "clients/libs/machine/package.json",
         "clients/libs/run-fixtures/package.json",
+        "clients/libs/run-history/package.json",
         "clients/libs/run-session/package.json",
         "clients/libs/run-state/package.json",
         "clients/libs/runs/package.json",
