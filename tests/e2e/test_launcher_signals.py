@@ -255,9 +255,7 @@ def test_the_launcher_process_waits_for_its_engine_to_finish_tearing_down(
                 os.kill(engine_pid, signal.SIGKILL)
 
 
-@pytest.mark.xfail(
-    strict=True, reason="periodic-1330 MED-1: the engine shares the terminal's group"
-)
+@pytest.mark.regression
 def test_a_ctrl_c_reaches_the_engine_only_through_the_launcher(tmp_path: Path) -> None:
     """periodic-1330 MED-1: one Ctrl-C reached the engine twice, from the terminal and the launcher.
 
@@ -319,8 +317,8 @@ def _call_real_child(argv: list[str]) -> int:
 
 @pytest.mark.parametrize(
     ("number", "forwarded"),
-    [(signal.SIGINT, True), (signal.SIGTERM, True), (signal.SIGHUP, True)],
-    ids=["sigint-forwarded", "sigterm-forwarded", "sighup-forwarded"],
+    [(signal.SIGINT, True), (signal.SIGTERM, True), (signal.SIGHUP, True), (signal.SIGQUIT, True)],
+    ids=["sigint-forwarded", "sigterm-forwarded", "sighup-forwarded", "sigquit-forwarded"],
 )
 def test_call_child_forwards_every_shutdown_signal(
     number: signal.Signals, *, forwarded: bool

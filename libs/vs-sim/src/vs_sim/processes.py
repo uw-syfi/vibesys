@@ -927,7 +927,13 @@ class _InheritedHandle:
 
 
 class InheritedStdioLauncher:
-    """Starts real operating-system processes that use this process's terminal."""
+    """Starts real operating-system processes that use this process's terminal.
+
+    Each child leads a process group of its own, so the terminal's job-control signals
+    (interrupt, quit, suspend) reach only this process: the parent decides what reaches
+    the child, and a child never gets one keypress twice, once from the terminal and once
+    forwarded. The child still writes to the terminal; it must not read it.
+    """
 
     async def start(
         self,
@@ -937,7 +943,7 @@ class InheritedStdioLauncher:
     ) -> ForegroundChild:
         """Start ``argv`` on the running event loop with inherited standard streams."""
         process = await asyncio.create_subprocess_exec(
-            *argv, env=None if env is None else dict(env), cwd=cwd
+            *argv, env=None if env is None else dict(env), cwd=cwd, process_group=0
         )
         return _InheritedHandle(process)
 

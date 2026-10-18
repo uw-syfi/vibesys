@@ -1,13 +1,14 @@
 """Route the ``vibesys`` console command to its Python entrypoint.
 
 Light host commands run in this process. Run commands execute in a child so
-terminal signals reach the run and its own teardown remains authoritative.
+the run's own teardown remains authoritative.
 
-The launcher forwards every shutdown signal it receives, since an operator may
-signal it rather than the run (``kill -INT`` names the launcher's PID): SIGTERM
-and SIGHUP as they are, the first SIGINT as SIGINT, and every later SIGINT as
-SIGTERM. A terminal's Ctrl-C reaches the run directly too, so the run ignores a
-repeated SIGINT; a repeated Ctrl-C still forces the run to end, as SIGTERM.
+The child leads its own process group, so the terminal's signals reach only the
+launcher, and the launcher is the one path by which a signal reaches the run:
+each Ctrl-C reaches it exactly once. The launcher forwards every shutdown signal
+it receives: SIGTERM, SIGHUP and SIGQUIT as they are, the first SIGINT as
+SIGINT, and every later SIGINT as SIGTERM, so a repeated Ctrl-C forces the run
+to end. Ctrl-Z suspends only the launcher; the run goes on.
 """
 
 from __future__ import annotations
@@ -64,7 +65,7 @@ def headless_command(args: Sequence[str]) -> list[str]:
     return [sys.executable, "-m", module, *arguments]
 
 
-_FORWARDED_SIGNALS = (Signals.SIGTERM, Signals.SIGHUP)
+_FORWARDED_SIGNALS = (Signals.SIGTERM, Signals.SIGHUP, Signals.SIGQUIT)
 
 
 def call_child(
