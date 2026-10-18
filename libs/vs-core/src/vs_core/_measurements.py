@@ -47,6 +47,7 @@ from ._runaway import runaway_noted
 from ._submission_receipts import (
     canonical_failure,
     conclusive,
+    ended_unobserved,
     job_budget,
     submission_receipt,
 )
@@ -96,6 +97,7 @@ from .types.evaluation import (
     MeasurementIdentity,
     MeasurementRequested,
     MeasurementResult,
+    MeasurementSubmissionEnded,
     MeasurementSubmissionObserved,
     ObservationsDue,
     ObservedJobFacts,
@@ -133,7 +135,7 @@ if TYPE_CHECKING:
     from .types.kernel import EvaluationContext, RunState, Signal
     from .types.records import RecordsState, Request, RequestRecord
 
-__all__ = ["advance", "cancel_settled"]
+__all__ = ["advance", "cancel_settled", "submission_ended"]
 
 
 def _origin(context: EvaluationContext, event: MeasurementRequested) -> Verdict[Measure]:
@@ -574,6 +576,31 @@ def _submission_observed(
     # A waiting continuation derives and publishes the history itself when it authorizes.
     history = () if wake else _history_signals(change.state, context, scope)
     return change.model_copy(update={"signals": (*change.signals, *history, *wake)})
+
+
+def submission_ended(
+    state: EvaluationState, context: EvaluationContext, event: EvaluationEvent
+) -> AreaChange[EvaluationState]:
+    """Close the budget entry of a submission core ended before it named a job, and re-check.
+
+    No observation will reach the entry (its submission hung, or a restarted host could not
+    find it), so left open it would count its run under way for good: every comparison of its
+    input would stay settling and take no further run. A submission whose job is known ends
+    with that job. The comparisons waiting on its input take the runs they still need
+    (`after_run`).
+    """
+    if not isinstance(event, MeasurementSubmissionEnded):
+        raise ContractError(("event", event.kind), "not a submission's end")
+    if any(job.submission_id == event.request_id for job in state.jobs):
+        return AreaChange(state=state)
+    budgets = tuple(
+        ended_unobserved(budget, event.request_id, event.reason)
+        for budget in state.submission_budgets
+    )
+    if budgets == state.submission_budgets:
+        return AreaChange(state=state)
+    change = AreaChange(state=state.model_copy(update={"submission_budgets": budgets}))
+    return after_run(change, context, event.request_id)
 
 
 def _deferred_wake(

@@ -99,6 +99,7 @@ from dataclasses import dataclass
 from math import floor, inf, sqrt
 from typing import TYPE_CHECKING
 
+from ._submission_receipts import receipt_ended
 from ._values import digest
 from .types.common import (
     MAX_SUBMISSIONS_PER_MEASUREMENT,
@@ -117,6 +118,7 @@ from .types.evaluation import (
 from .types.measurement import (
     BaseRef,
     Comparison,
+    ComparisonSettled,
     ComparisonVerdict,
     Direction,
     EffectVerdict,
@@ -129,7 +131,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from .types.common import EvidenceKey, RequestId, RunFacts, Scope, Seconds, TaskTerms
-    from .types.evaluation import EvaluationState
+    from .types.evaluation import EvaluationState, SubmissionReceipt
     from .types.kernel import RunState
 
 __all__ = [
@@ -151,6 +153,7 @@ __all__ = [
     "comparison_of_result",
     "comparison_settling",
     "comparisons_of",
+    "comparisons_settled",
     "comparisons_to_publish",
     "effect_resolution",
     "effect_verdict",
@@ -165,6 +168,7 @@ __all__ = [
     "remeasures_candidate",
     "restated_answers",
     "run_reading",
+    "run_under_way",
     "running_baseline",
     "sample_of",
     "samples_of",
@@ -745,6 +749,54 @@ def feeding_run_under_way(
     return _base_under_way(state, base, measured_base) or base_in_flight(state, candidate, scope)
 
 
+def comparisons_settled(
+    before: EvaluationState, after: EvaluationState, moment: Moment
+) -> tuple[ComparisonSettled, ...]:
+    """Every comparison that was settling in ``before`` and is settled in ``after``.
+
+    Read from the view's own statement of each comparison (`stated_comparisons`), so the report
+    and the ``settling`` a flow reads are one test: a flow that read a comparison settling is
+    told exactly once, in the step whose run's end leaves no run feeding it (after the runs that
+    end started), and never while one still does. A comparison stops settling only when a run
+    under way ends (`run_under_way`) or a sample lands, so any other step costs nothing here.
+    """
+    # Samples are only ever appended.
+    if _runs_under_way(before) <= _runs_under_way(after) and len(before.samples) == len(
+        after.samples
+    ):
+        return ()
+    settling = {
+        _subject(stated.comparison)
+        for stated in stated_comparisons(before, moment)
+        if stated.settling
+    }
+    if not settling:
+        return ()
+    return tuple(
+        ComparisonSettled(
+            scope=stated.comparison.scope,
+            candidate_input=stated.comparison.candidate_input,
+            base_input=stated.comparison.base_input,
+        )
+        for stated in stated_comparisons(after, moment)
+        if not stated.settling and _subject(stated.comparison) in settling
+    )
+
+
+def _subject(comparison: Comparison) -> tuple[Scope, str, str]:
+    return (comparison.scope, comparison.candidate_input, comparison.base_input)
+
+
+def _runs_under_way(state: EvaluationState) -> frozenset[RequestId]:
+    """The request of every run admitted and not ended (`run_under_way`)."""
+    return frozenset(
+        receipt.request_id
+        for budget in state.submission_budgets
+        for receipt in budget.receipts
+        if isinstance(receipt, PreparedSubmissionReceipt) and run_under_way(state, receipt)
+    )
+
+
 def stated_comparisons(state: EvaluationState, moment: Moment) -> tuple[StatedComparison, ...]:
     """Every comparison the samples held make now, each with whether it is still settling."""
     return tuple(
@@ -898,6 +950,22 @@ def _base_max_samples(policy: ComparisonPolicy) -> int:
     return BASE_MAX_SAMPLES if policy.floor_declared else MIN_SAMPLES_WITHOUT_FLOOR
 
 
+def run_under_way(state: EvaluationState, receipt: SubmissionReceipt | None) -> bool:
+    """Whether the run ``receipt`` admitted has not ended: the one test of a run in flight.
+
+    Its submission has not ended (`receipt_ended`), or the job it named has not, or core is
+    still collecting that job's records: its sample, if any, lands only then. Every reader of
+    a comparison's runs reads it (`runs_in_flight`, `running_baseline`), and so does the
+    report that a comparison settled (`comparisons_settled`).
+    """
+    if not isinstance(receipt, PreparedSubmissionReceipt):
+        return False
+    return not receipt_ended(receipt) or any(
+        job.submission_id == receipt.request_id and (not job.terminal or job.collecting is not None)
+        for job in state.jobs
+    )
+
+
 def runs_in_flight(state: EvaluationState, measured: Measured, scope: Scope | None = None) -> int:
     """How many runs of this measurement were admitted and have not ended (``scope``'s, or any)."""
     count = 0
@@ -909,10 +977,7 @@ def runs_in_flight(state: EvaluationState, measured: Measured, scope: Scope | No
             or evaluation_of(identity) != measured.evaluation
         ):
             continue
-        latest = budget.receipts[-1] if budget.receipts else None
-        if isinstance(latest, PreparedSubmissionReceipt) and (
-            latest.observation is None or not latest.observation.terminal
-        ):
+        if run_under_way(state, budget.receipts[-1] if budget.receipts else None):
             count += 1
     return count
 
@@ -938,7 +1003,7 @@ def running_baseline(state: EvaluationState, base: BaseRef) -> RequestId | None:
             and identity.measured_input is None
             and identity.candidate == base.commit
             and isinstance(latest, PreparedSubmissionReceipt)
-            and (latest.observation is None or not latest.observation.terminal)
+            and run_under_way(state, latest)
         ):
             return latest.request_id
     return None

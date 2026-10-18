@@ -111,9 +111,12 @@ state live in `vs_core._base_runs`:
   evaluation history, so the agent's resume never waits for it: the turn resumes when its own
   jobs end, and the comparison it reads next grows as core's runs land. The strategy's verdict
   does wait: `ctx.evaluation.measure_compared` hands back the comparison once no run that feeds
-  it is under way (`StatedComparison.settling` in the run's view). Core reports the end of the
-  last such run (`ComparisonSettled`), and the flow waits for that report, not on a poll; three
-  times the measurement's limit only bounds the wait against a report that never comes.
+  it is under way (`StatedComparison.settling` in the run's view). Core reports the step that
+  takes a comparison from settling to settled (`ComparisonSettled`), read from that same
+  `settling` and so for every way a run ends, a submission core blocks before any observation
+  included (`MeasurementSubmissionEnded` closes its budget entry); the flow waits for that
+  report, not on a poll, and three times the measurement's limit only bounds the wait against a
+  report that never comes.
 
 The comparison reaches the agent twice: in the tool's reply for a finished evaluation
 (`SubmittedReply.comparison`, absent while the base has not ended) and in the resume prompt

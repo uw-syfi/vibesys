@@ -39,12 +39,12 @@ from ._comparison import (
     comparison_of,
     comparisons_of,
     evaluation_of,
-    feeding_run_under_way,
     fresh,
     moment_of,
     remeasures_base,
     remeasures_candidate,
     restated_answers,
+    run_under_way,
     running_baseline,
     sample_of,
     samples_of,
@@ -53,6 +53,7 @@ from ._comparison import (
 from ._proofs import (
     Proven,
 )
+from ._submission_receipts import receipt_ended
 from ._submissions import Origin, allocate, current, identity_of, submission_released
 from .types.common import (
     MAX_SUBMISSIONS_PER_MEASUREMENT,
@@ -70,14 +71,7 @@ from .types.evaluation import (
 )
 from .types.job_observations import MeasurementFailure
 from .types.kernel import AreaChange
-from .types.measurement import (
-    BaseClaim,
-    BaseRef,
-    Comparison,
-    ComparisonSettled,
-    CoreRun,
-    Sample,
-)
+from .types.measurement import BaseClaim, BaseRef, Comparison, CoreRun, Sample
 from .types.until import FailureReason, Within
 
 if TYPE_CHECKING:
@@ -301,8 +295,9 @@ def _sample_ready(
 
     A run that gave a sample may be followed by another, and so may one that ended without a
     sample for a reason that says nothing of the next run: it was cancelled with its attempt,
-    failed in the machinery, was refused at submission, or succeeded and its records could not
-    be collected (those are bounded per side, `_side_open`). Two ends refuse another, since the
+    failed in the machinery, was refused at submission or ended by core before it named a job,
+    or succeeded and its records could not be collected (those are bounded per side,
+    `_side_open`). Two ends refuse another, since the
     next run would end the same way: a run that succeeded with records but without a reading
     (the benchmark reports no metric), and a workload failure (the revision fails the
     evaluation, which is durable, as it is for any submission).
@@ -321,18 +316,26 @@ def _sample_ready(
     latest = budget.receipts[-1]
     if (
         not isinstance(latest, PreparedSubmissionReceipt)
-        or latest.observation is None
-        or not latest.observation.terminal
+        or not receipt_ended(latest)
         or latest.failure is MeasurementFailure.WORKLOAD
     ):
         return False
     observation = latest.observation
     sampled = any(sample.run == latest.request_id for sample in state.samples)
     recorded = any(job.submission_id == latest.request_id and job.evidence for job in state.jobs)
-    if observation.status == ObservationStatus.SUCCEEDED and recorded and not sampled:
+    if (
+        observation is not None
+        and observation.status == ObservationStatus.SUCCEEDED
+        and recorded
+        and not sampled
+    ):
         return False
-    released = not observation.accepted or isinstance(
-        submission_released(state, context, latest), Proven
+    # A submission core ended before any observation named a job ran nothing core knows of,
+    # like one refused at submission.
+    released = (
+        observation is None
+        or not observation.accepted
+        or isinstance(submission_released(state, context, latest), Proven)
     )
     return (
         released
@@ -385,12 +388,8 @@ def _side_open(
         for receipt in budget.receipts
         if isinstance(receipt, PreparedSubmissionReceipt)
     }
-    collecting = {job.submission_id for job in state.jobs if job.collecting is not None}
     own = tuple(run.request_id for run in state.core_runs if run.request_id in side)
-    if any(
-        (seen := side[run].observation) is None or not seen.terminal or run in collecting
-        for run in own
-    ):
+    if any(run_under_way(state, side[run]) for run in own):
         return False
     sampled = {sample.run for sample in state.samples}
     unsampled = 0
@@ -530,62 +529,9 @@ def after_run(
         return change
     measured_input = _measured_input(state, context, run)
     own = next((core_run.scope for core_run in state.core_runs if core_run.request_id == run), None)
-    candidates = _candidates_of(state, context, measured_input, own)
-    for candidate in candidates:
+    for candidate in _candidates_of(state, context, measured_input, own):
         change = _advance(change, context, candidate)
-    return _settled(change, _scope_of(state, context, run), measured_input, candidates)
-
-
-def _scope_of(state: EvaluationState, context: EvaluationContext, run: RequestId) -> Scope | None:
-    """The scope ``run`` was submitted in."""
-    job = next((j for j in state.jobs if j.submission_id == run), None)
-    if job is not None:
-        return job.scope
-    row = context.records.record(run)
-    return (
-        row.request.scope
-        if row is not None and isinstance(row.request, SubmitMeasurement)
-        else None
-    )
-
-
-def _settled(
-    change: AreaChange[EvaluationState],
-    scope: Scope | None,
-    measured_input: str | None,
-    candidates: tuple[_Candidate, ...],
-) -> AreaChange[EvaluationState]:
-    """``change`` telling of each comparison the ended run fed that no run feeds any more.
-
-    The run fed a candidate's comparison when it measured the candidate's base (in any scope)
-    or the candidate's own input in its scope. Once no run that feeds the comparison is under
-    way, after the runs this end started (`feeding_run_under_way`), the comparison is final until
-    another run is asked for, and a flow that waits for it is told (``ComparisonSettled``). A
-    candidate with no sample in its scope has no comparison to settle.
-    """
-    if measured_input is None:
-        return change
-    state = change.state
-    told: list[ComparisonSettled] = []
-    for candidate in candidates:
-        own = candidate.plan.measured_input
-        identity = identity_of(candidate.plan)
-        fed = measured_input == candidate.base.measured_input or (
-            measured_input == own and scope == candidate.scope
-        )
-        if own is None or not fed or not isinstance(identity, Proven):
-            continue
-        mine = Measured(evaluation_of(identity.value), own)
-        settled = ComparisonSettled(
-            scope=candidate.scope, candidate_input=own, base_input=candidate.base.measured_input
-        )
-        if (
-            settled not in told
-            and scope_samples(state, candidate.scope, mine)
-            and not feeding_run_under_way(state, candidate.scope, mine, candidate.base)
-        ):
-            told.append(settled)
-    return change.model_copy(update={"events": (*change.events, *told)}) if told else change
+    return change
 
 
 def _measured_input(

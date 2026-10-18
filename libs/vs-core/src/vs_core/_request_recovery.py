@@ -54,6 +54,7 @@ from .types.common import (
 from .types.evaluation import (
     CancelOwnedJob,
     JobTerminationRequested,
+    MeasurementSubmissionEnded,
     OwnedJob,
     RegisteredOwnedJob,
     SubmitMeasurement,
@@ -1621,7 +1622,11 @@ def _deadline(
         lost=bool(signals),
         first=previous_block is None,
     )
-    signals = (*signals, *_orphaned_jobs(state, context, record, reason))
+    signals = (
+        *signals,
+        *_orphaned_jobs(state, context, record, reason),
+        *_submission_ended(record, reason),
+    )
     observation = record.observation
     resources = []
     if (
@@ -1787,6 +1792,20 @@ def _orphaned_jobs(
         and not job.terminal
         and not cancel_settled(state, context.run, job.resource_id)
     )
+
+
+def _submission_ended(
+    record: RequestRecord, reason: FailureReason
+) -> tuple[MeasurementSubmissionEnded, ...]:
+    """The end of a measurement submission core blocks while its result is still owed.
+
+    Every measurement submission, whoever asked for it: its budget entry is the evaluation
+    area's, and a run the comparisons of its input wait on must end there even when no
+    observation ever reaches it (its submission hung, or a restarted host could not find it).
+    """
+    if not isinstance(record.request, SubmitMeasurement) or not is_open(record):
+        return ()
+    return (MeasurementSubmissionEnded(request_id=record.request_id, reason=reason),)
 
 
 def _heard_by_decision(record: RequestRecord) -> bool:
