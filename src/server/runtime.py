@@ -82,7 +82,8 @@ from server.transport.websocket import WebSocketGateway
 from server.transport.websocket import (
     browser_origin as browser_origin,  # noqa: PLC0414  # lint-waiver: LW-101108 [PLC0414]; re-export the browser-origin parser through the allowed runtime composition boundary, so the launcher validates `--web-origin` against the one definition the gateway enforces
 )
-from vibesys.api import ConfigurationError, RunStopped
+from vibesys.api import ConfigurationError, RunStopped, StopMode
+from vs_sim.api import Signals
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -241,6 +242,7 @@ class ServerRuntime:
         self.read_only_log = read_only_log
         self.observer = observer
         self._shutdown = self.threads.event()
+        self._shutdown_signal: Signals | None = None
         # Set once the Unix socket accepts connections: how a same-process
         # client learns it can dial without polling the filesystem.
         self.transport_listening = self.threads.event()
@@ -444,11 +446,31 @@ class ServerRuntime:
             )
         transport.wait_until_delivered(watermark, DETACHED_DRAIN_TIMEOUT_SECONDS)
 
-    def shutdown(self) -> None:
-        """Request a clean shutdown of a detached or read-only server."""
+    def interrupt(self) -> bool:
+        """Stop the run on Ctrl-C, cancelling its work in flight; False when no run is installed.
+
+        The stop goes through the run's control, the one authority for its stop, as an
+        operator's cancelling stop does; a repeated Ctrl-C changes nothing. The server
+        then leaves once the run has stopped, without waiting for its clients to go.
+        """
+        if not self.controls.stop(StopMode.CANCEL):
+            return False
+        self.shutdown(Signals.SIGINT)
+        return True
+
+    def shutdown(self, signal: Signals | None = None) -> None:
+        """Request a clean shutdown of a detached or read-only server.
+
+        *signal* names the signal that asked for it; the first one names how a run it
+        interrupts ended.
+        """
+        with self.condition:
+            self._shutdown_signal = self._shutdown_signal or signal
         self._shutdown.set()
 
     def _wait_for_detached_shutdown(self, transport: UnixJsonlServer) -> None:
+        if self._shutdown.is_set():
+            return
         if not self._detachable_mode:
             transport.wait_for_subscriber_disconnect()
             return
@@ -531,8 +553,17 @@ class ServerRuntime:
         return value
 
     def _finish_after_launcher_interrupt(self, terminal_cursor: int) -> None:
-        """End a run the launcher terminated, recording the interruption once."""
-        launcher_error = RuntimeError("launcher_terminated (SIGTERM)")
+        """End a run a signal interrupted, recording the interruption once.
+
+        SIGTERM and SIGHUP are the launcher terminating the run; any other cause (a Ctrl-C
+        with no run installed to stop) is an interruption, named by its signal if any.
+        """
+        with self.condition:
+            signal = self._shutdown_signal
+        reason = (
+            "launcher_terminated" if signal in {Signals.SIGTERM, Signals.SIGHUP} else "interrupted"
+        )
+        launcher_error = RuntimeError(reason if signal is None else f"{reason} ({signal.name})")
         event_diagnostic = exception_to_diagnostic(
             launcher_error,
             scope=DiagnosticScope.RUN,
@@ -556,8 +587,8 @@ class ServerRuntime:
                 EventType.RUN_INTERRUPTED,
                 status=EventStatus.FAILED,
                 data=RunInterruptedData(
-                    reason="launcher_terminated",
-                    signal="SIGTERM",
+                    reason=reason,
+                    signal=None if signal is None else signal.name,
                 ),
                 diagnostic=event_diagnostic,
             )

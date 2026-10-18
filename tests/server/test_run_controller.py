@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Literal
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 from tests.server.support import (
@@ -53,6 +53,7 @@ from vibesys.api import (
     SteerRequest,
     SteerTarget,
     SteerTargetKind,
+    StopRequest,
     WithdrawRequest,
 )
 from vibesys.events import CoreEventType
@@ -599,6 +600,41 @@ class _RefusingControl(ChannelRunControl):
             status=ControlStatus.REFUSED,
             reason=self.reason,
         )
+
+
+@pytest.mark.regression
+@example(before=[StopMode.CANCEL, StopMode.DRAIN], after=[])
+@example(before=[StopMode.DRAIN], after=[StopMode.CANCEL, StopMode.DRAIN])
+@given(
+    before=st.lists(st.sampled_from(StopMode), max_size=3),
+    after=st.lists(st.sampled_from(StopMode), max_size=3),
+)
+def test_a_runs_stop_is_the_strongest_asked_before_or_after_its_control_is_installed(
+    before: list[StopMode], after: list[StopMode]
+) -> None:
+    """periodic-1330 MED-2: the slot kept the last stop sent before the run started, so a
+    drain after a cancel weakened it; and a Ctrl-C reached the run by no single path.
+
+    Stops sent before the run's control is installed (operator commands) and after it
+    (operator commands or the server's Ctrl-C, ``stop``) leave the run's stop at the
+    strongest asked for: a cancel anywhere is a cancel.
+    """
+    threads = SimThreads()
+    channel = create_run_control_channel(_ignore, threads=threads)
+    slot = RunControlSlot(threads.condition(threads.rlock()))
+    assert not slot.stop(StopMode.CANCEL)
+    for index, mode in enumerate(before):
+        stop = StopRequest(control_id=f"before-{index}", mode=mode)
+        slot.execute(ControlCommand(timestamp=REQUEST_TIME, control=stop))
+    slot.install(ChannelRunControl(channel, threads))
+    for mode in after:
+        assert slot.stop(mode)
+
+    asked = [*before, *after]
+    expected = (
+        None if not asked else StopMode.CANCEL if StopMode.CANCEL in asked else StopMode.DRAIN
+    )
+    assert channel.stop_mode() == expected
 
 
 @pytest.mark.parametrize("reason", list(RefusalReason))

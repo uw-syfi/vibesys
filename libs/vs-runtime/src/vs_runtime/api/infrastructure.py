@@ -12,6 +12,7 @@ from enum import StrEnum
 from importlib import import_module
 from typing import TYPE_CHECKING, Protocol
 
+from vs_core.api import escalate_stop
 from vs_runtime._agent_execution import (
     AgentExecutionConfiguration,
     AgentExecutionEnvironment,
@@ -740,6 +741,7 @@ __all__ = [
     "discover_skill_dirs",
     "docker_evaluator_tools_root",
     "editor_image_plan",
+    "escalate_stop",
     "evaluator_agent_toolchains",
     "evaluator_container_setup",
     "evaluator_go_module_ready_path",

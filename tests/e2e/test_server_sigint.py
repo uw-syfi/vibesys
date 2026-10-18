@@ -37,13 +37,14 @@ if TYPE_CHECKING:
 
 
 class _SelfInterruptingRun:
-    """A run that sends its process SIGINT twice, then ends once a stop reaches it.
+    """A run that sends its process the given signals, then ends once a stop reaches it.
 
     Stops arrive on the event loop (``stop``) or from the server's signal or transport
     threads (``submit``); either wakes the run through the loop, thread-safely.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, signals: tuple[signal.Signals, ...]) -> None:
+        self._signals = signals
         self.stops: list[str] = []
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stopped: asyncio.Event | None = None
@@ -63,11 +64,11 @@ class _SelfInterruptingRun:
     async def await_result(self) -> RunResult:
         self._loop = asyncio.get_running_loop()
         self._stopped = asyncio.Event()
-        os.kill(os.getpid(), signal.SIGINT)
-        # Let the first signal's handler run before the second arrives, as a terminal's
-        # Ctrl-C and the launcher's forwarded copy arrive a few milliseconds apart.
-        await asyncio.sleep(0)
-        os.kill(os.getpid(), signal.SIGINT)
+        for number in self._signals:
+            os.kill(os.getpid(), number)
+            # Let each signal's handler run before the next arrives, as a terminal's
+            # Ctrl-C and the launcher's forwarded copy did, a few milliseconds apart.
+            await asyncio.sleep(0)
         await self._stopped.wait()
         raise RunStopped
 
@@ -84,8 +85,10 @@ class _SelfInterruptingRun:
             self._stop(request.mode)
 
 
-def _serve_interrupted_run(base: Path) -> tuple[str, list[str], list[str]]:
-    """Serve one foreground run that is sent SIGINT twice; return how it all ended.
+def _serve_interrupted_run(
+    base: Path, signals: tuple[signal.Signals, ...]
+) -> tuple[str, list[str], list[dict[str, object]]]:
+    """Serve one foreground run that is sent ``signals``; return how it all ended.
 
     Call through ``run_in_child``: it sets the environment, swaps request building and
     takes real signals. Returns how ``main`` ended, the stop modes the run received, and
@@ -102,7 +105,7 @@ def _serve_interrupted_run(base: Path) -> tuple[str, list[str], list[str]]:
     cli.build_run_request = lambda _invocation: SimpleNamespace(  # ty: ignore[invalid-assignment]  # LW-133003 [invalid-assignment]; the child replaces request building with a fixed fake
         resume=None, resolved_run_id="run-1", resolved_project_root=None
     )
-    run = _SelfInterruptingRun()
+    run = _SelfInterruptingRun(signals)
     runs = FakeRuns(
         lambda _request, _publish: run,
         identity=lambda _request: "run-1",
@@ -120,21 +123,39 @@ def _serve_interrupted_run(base: Path) -> tuple[str, list[str], list[str]]:
     else:
         ended = "returned"
     interruptions = [
-        json.dumps(event.get("data"))
+        event["data"]
         for line in (socket_dir / RUN_EVENTS_FILE).read_text(encoding="utf-8").splitlines()
         if (event := json.loads(line)).get("type") == "run_interrupted"
     ]
     return ended, run.stops, interruptions
 
 
-@pytest.mark.xfail(strict=True, reason="periodic-1330 MED-1: a second SIGINT aborts the drain")
+@pytest.mark.regression
 def test_two_sigints_stop_a_foreground_servers_run_once_and_cancel_its_work(
     tmp_path: Path,
 ) -> None:
     """The run takes a stop that cancels its work in flight; nothing hard-cancels it."""
-    ended, stops, interruptions = run_in_child(lambda: _serve_interrupted_run(tmp_path))
+    ended, stops, interruptions = run_in_child(
+        lambda: _serve_interrupted_run(tmp_path, (signal.SIGINT, signal.SIGINT))
+    )
 
     assert ended == "returned"
     assert stops
     assert set(stops) == {StopMode.CANCEL.value}
     assert interruptions == []
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("number", [signal.SIGTERM, signal.SIGHUP], ids=["sigterm", "sighup"])
+def test_a_launchers_termination_ends_the_run_now_and_is_journaled_by_its_signal(
+    tmp_path: Path, number: signal.Signals
+) -> None:
+    """periodic-1330 MED-1: every interruption was journaled as SIGTERM, and SIGHUP killed
+    the server with no teardown; each now ends the run through cleanup, named by its signal.
+    """
+    ended, _stops, interruptions = run_in_child(lambda: _serve_interrupted_run(tmp_path, (number,)))
+
+    assert ended == "interrupted"
+    assert interruptions == [
+        {"kind": "run_interrupted", "reason": "launcher_terminated", "signal": number.name}
+    ]
