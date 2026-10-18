@@ -25,7 +25,15 @@ confinement backend, built the way a run builds it:
   claims the operator-control boundary
   (``WorkspaceSandbox.claims_operator_control_boundary``) must keep both out of reach. One
   that does not (Landlock, Seatbelt) is pinned to the known gap: the probe connects. A fix
-  that closes it fails that assertion, and the fix then flips the claim.
+  that closes it fails that assertion, and the fix then flips the claim. On Linux, under
+  ``VIBESYS_REQUIRE_SANDBOX_TESTS=1``, a target the host lacks is a failure, not a skip.
+- The network probe connects to an abstract Unix socket and a loopback TCP port the test
+  listens on, as a ``dbus-launch`` bus (``unix:abstract=``) or a Docker daemon on
+  ``127.0.0.1:2375`` would. The claim does not cover them: bubblewrap shares the host's
+  network namespace, so both are reachable under it, pinned as known gaps, as they are
+  under Landlock (abstract sockets only until Landlock ABI 6 scopes them) and Seatbelt
+  (which has no abstract sockets). A Docker container has its own network namespace, so
+  neither is reachable from it.
 
 Landlock grants ``/tmp``, so the suite moves the runtime root under the account's home, as
 an operator with ``XDG_RUNTIME_DIR`` at ``/run/user/<uid>`` has it; a root under a Landlock
@@ -33,7 +41,8 @@ grant is refused when the sandbox is built (``libs/vs-sandbox/tests/test_operato
 
 Bubblewrap, Landlock and Seatbelt skip on a host without them (CI's ``sandbox_tests``
 group sets ``VIBESYS_REQUIRE_SANDBOX_TESTS=1`` and gets a failure instead). Docker is
-skipped unless ``VIBESYS_E2E_DOCKER=1``:
+skipped unless ``VIBESYS_E2E_DOCKER=1``, which no CI group sets, so the Docker test is run
+by hand:
 
 ```bash
 VIBESYS_E2E_DOCKER=1 uv run pytest tests/e2e/test_control_socket_reachability_e2e.py -q
@@ -45,8 +54,10 @@ from __future__ import annotations
 import json
 import os
 import pwd
+import secrets
 import shlex
 import shutil
+import socket
 import stat
 import sys
 import tempfile
@@ -183,6 +194,28 @@ for path in sys.argv[1:]:
 print(json.dumps(seen))
 """
 
+#: Arguments: ``abstract:<name>`` or ``tcp:<port>`` targets. Prints ``{target: "ok" or an
+#: errno name}``, one per connect attempt, to the abstract socket or to ``127.0.0.1``.
+_NETWORK_PROBE = """\
+import errno, json, socket, sys
+seen = {}
+for target in sys.argv[1:]:
+    kind, _, value = target.partition(":")
+    if kind == "abstract":
+        connection, address = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM), "\\0" + value
+    else:
+        connection, address = socket.socket(), ("127.0.0.1", int(value))
+    connection.settimeout(30)
+    try:
+        connection.connect(address)
+        seen[target] = "ok"
+    except OSError as error:
+        seen[target] = errno.errorcode.get(error.errno, str(error.errno))
+    finally:
+        connection.close()
+print(json.dumps(seen))
+"""
+
 _REQUEST = SnapshotQuery(timestamp=REQUEST_TIME).model_dump_json()
 
 #: Sockets that run any command as the operator outside every confinement. The bus is
@@ -198,6 +231,14 @@ _KNOWN_GAP = (
     "sockets, so the agent reaches {target} and escapes through it "
     "(docs/contributing/sandboxing.md, Known limits). If this assertion fails, the gap is "
     "closed: set {backend}.claims_operator_control_boundary = True and update the docs."
+)
+
+
+_NETWORK_GAP = (
+    "known gap, pinned on purpose: {backend} shares the host's network namespace for "
+    "{channel}, so the agent reaches a listener there (docs/contributing/sandboxing.md, "
+    "Known limits). If this assertion fails, the gap is closed: update the docs and "
+    "WorkspaceSandbox.claims_operator_control_boundary's docstring."
 )
 
 
@@ -483,12 +524,18 @@ def test_a_host_confined_agent_reaches_the_user_bus_and_docker_only_where_the_ga
 
 
 def _require_reachable_on_host(path: Path) -> None:
-    """Skip unless the operator, unconfined, can connect to ``path``: else nothing is probed."""
+    """Skip unless the operator, unconfined, can connect to ``path``: else nothing is probed.
+
+    On Linux under ``VIBESYS_REQUIRE_SANDBOX_TESTS=1`` a missing target fails instead, so a
+    CI host without the bus or the daemon cannot pass by probing nothing. Elsewhere it
+    skips: both targets are Linux paths, and macOS CI has no Docker daemon.
+    """
+    missing = _absent if sys.platform.startswith("linux") else pytest.skip
     try:
         if not stat.S_ISSOCK(path.stat().st_mode):
-            pytest.skip(f"{path} is not a socket on this host")
+            missing(f"{path} is not a socket on this host")
     except OSError:
-        pytest.skip(f"{path} does not exist on this host")
+        missing(f"{path} does not exist on this host")
     seen = json.loads(
         run_test_command(
             [sys.executable, "-I", "-c", _EGRESS_PROBE, str(path)],
@@ -499,11 +546,77 @@ def _require_reachable_on_host(path: Path) -> None:
         ).stdout
     )[str(path)]
     if seen != "ok":
-        pytest.skip(f"the operator cannot connect to {path} either ({seen})")
+        missing(f"the operator cannot connect to {path} either ({seen})")
+
+
+@dataclass(frozen=True)
+class _NetworkListeners:
+    """An abstract Unix socket and a loopback TCP port, both listening on the host."""
+
+    abstract: str
+    tcp: str
+
+    def targets(self) -> list[str]:
+        return [self.abstract, self.tcp]
+
+
+@pytest.fixture
+def network_listeners() -> Iterator[_NetworkListeners]:
+    """Listeners an agent should not reach, served in the test's own network namespace."""
+    abstract = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    tcp = socket.socket()
+    try:
+        name = f"vibesys-probe-{secrets.token_hex(8)}"
+        abstract.bind("\0" + name)
+        abstract.listen(1)
+        tcp.bind(("127.0.0.1", 0))
+        tcp.listen(1)
+        yield _NetworkListeners(f"abstract:{name}", f"tcp:{tcp.getsockname()[1]}")
+    finally:
+        abstract.close()
+        tcp.close()
+
+
+def _network_gap_expected(sandbox: WorkspaceSandbox, channel: str) -> bool:
+    """Whether ``sandbox`` is known to let the agent reach ``channel`` on the host."""
+    if channel == "abstract" and isinstance(sandbox, LandlockSandbox):
+        return not landlock.supports_scoping()
+    # Bubblewrap applies no Landlock scope, so its abstract gap stays open under ABI 6.
+    return True
+
+
+@pytest.mark.parametrize("build", _HOST_BACKENDS)
+@pytest.mark.parametrize("channel", ["abstract", "tcp"])
+def test_a_host_confined_agent_reaches_host_abstract_sockets_and_loopback_tcp_as_pinned(
+    build: Callable[[Path], WorkspaceSandbox],
+    channel: str,
+    network_listeners: _NetworkListeners,
+    control_socket: _ControlSocket,
+    workspace: Path,
+) -> None:
+    """No host backend has a network namespace of its own: a known gap, pinned.
+
+    A session bus started by ``dbus-launch`` listens on an abstract socket, and a Docker
+    daemon may listen on ``127.0.0.1:2375``; either runs any command as the operator.
+    Landlock ABI 6 scopes abstract sockets, which flips that pin for Landlock.
+    """
+    del control_socket  # Only for its runtime root, outside every Landlock grant.
+    if channel == "abstract" and not sys.platform.startswith("linux"):
+        pytest.skip("abstract Unix sockets are Linux only")
+    sandbox = build(workspace)
+    target = network_listeners.abstract if channel == "abstract" else network_listeners.tcp
+    seen = _probe_saw(_run_confined(sandbox, workspace, _NETWORK_PROBE, target), {target})
+
+    if _network_gap_expected(sandbox, channel):
+        assert seen[target] == "ok", _NETWORK_GAP.format(
+            backend=type(sandbox).__name__, channel=channel
+        )
+    else:
+        assert seen[target] != "ok", f"{type(sandbox).__name__} reached {target}: {seen}"
 
 
 def test_an_agent_in_a_docker_run_environment_is_refused_by_the_control_socket(
-    control_socket: _ControlSocket, tmp_path: Path
+    control_socket: _ControlSocket, network_listeners: _NetworkListeners, tmp_path: Path
 ) -> None:
     if os.environ.get(_DOCKER_ENV) != "1" or shutil.which("docker") is None:
         pytest.skip(f"set {_DOCKER_ENV}=1 with docker on PATH to run against a real daemon")
@@ -559,10 +672,14 @@ def test_an_agent_in_a_docker_run_environment_is_refused_by_the_control_socket(
         egress_probe = sandbox.execute(
             shlex.join(["python3", "-I", "-c", _EGRESS_PROBE, *targets]), output=DISCARD
         )
+        network_probe = sandbox.execute(
+            shlex.join(["python3", "-I", "-c", _NETWORK_PROBE, *network_listeners.targets()]),
+            output=DISCARD,
+        )
     finally:
         session.close()
 
-    for result in (key_probe, egress_probe):
+    for result in (key_probe, egress_probe, network_probe):
         if result.exit_code != 0:
             pytest.fail(f"the probe exited {result.exit_code}: {result.output}")
     # The run environment's agent confinement is its started container.
@@ -573,3 +690,6 @@ def test_an_agent_in_a_docker_run_environment_is_refused_by_the_control_socket(
     )
     egress = _probe_saw(egress_probe.output, set(targets))
     assert set(egress.values()) <= _UNREACHABLE, f"the container reached a host socket: {egress}"
+    # Its own network namespace: the host's abstract sockets and loopback are not its.
+    network = _probe_saw(network_probe.output, set(network_listeners.targets()))
+    assert "ok" not in network.values(), f"the container reached a host listener: {network}"

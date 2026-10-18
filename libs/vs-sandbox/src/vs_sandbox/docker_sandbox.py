@@ -311,7 +311,8 @@ class DockerSandbox(WorkspaceSandbox):
     #: The container sees only its mounts, none of which may reach the operator's runtime
     #: root, and neither the user's D-Bus nor the Docker daemon's socket is mounted (a
     #: Slurm run's command broker socket is, and serves only its brokered commands), so it
-    #: claims the boundary.
+    #: claims the boundary. The container also has its own network namespace, so host
+    #: abstract sockets and host loopback TCP are out of its reach too.
     claims_operator_control_boundary: ClassVar[bool] = True
 
     def __repr__(self) -> str:

@@ -217,14 +217,22 @@ class WorkspaceSandbox(ABC):
     #: must never reach: it holds the key to the run's control socket. A backend that
     #: can only grant refuses to construct a view that overlaps it; Seatbelt denies it.
     operator_root: Path = field(default_factory=operator_root, kw_only=True)
-    #: Whether this confinement claims a boundary against operator control and the host:
-    #: the agent can neither read the operator's runtime root nor connect to a pathname
-    #: Unix socket outside its view, such as the run's control socket, the user's D-Bus
-    #: (``$XDG_RUNTIME_DIR/bus``, which runs any command through ``systemd-run --user``)
-    #: or the Docker daemon (``/var/run/docker.sock``). Bubblewrap and Docker build a view
-    #: without those paths, so they claim it. Landlock has no right covering ``connect`` on
-    #: a pathname socket and Seatbelt's profile allows ``network*``, so neither does;
-    #: ``tests/e2e/test_control_socket_reachability_e2e.py`` probes both answers.
+    #: Whether this confinement keeps the agent from the operator's pathname sockets, the
+    #: runtime root and the operator key, and no more than that: the agent can neither read
+    #: the runtime root (where the key and every run's control socket live) nor connect to
+    #: a pathname Unix socket outside its view, such as the run's control socket, the
+    #: user's D-Bus (``$XDG_RUNTIME_DIR/bus``, which runs any command through
+    #: ``systemd-run --user``) or the Docker daemon (``/var/run/docker.sock``). Bubblewrap
+    #: and Docker build a view without those paths, so they claim it. Landlock has no right
+    #: covering ``connect`` on a pathname socket and Seatbelt's profile allows
+    #: ``network*``, so neither does.
+    #:
+    #: It does not cover the network namespace. Bubblewrap shares the host's, so abstract
+    #: Unix sockets (such as a ``dbus-launch`` bus at ``unix:abstract=``) and services on
+    #: host loopback TCP (such as a Docker daemon on ``127.0.0.1:2375``) stay reachable
+    #: under it; a Docker container has its own network namespace, so neither is.
+    #: ``tests/e2e/test_control_socket_reachability_e2e.py`` probes every one of these
+    #: answers, the gaps pinned.
     claims_operator_control_boundary: ClassVar[bool]
 
     def _refuse_operator_root(self, backend: str, granted: Iterable[Path | str]) -> None:
@@ -285,6 +293,9 @@ class HostSandbox(WorkspaceSandbox):
     #: private writable tmpfs in the namespace, next to ``/tmp``.
     temp_dirs: tuple[str, ...] = ()
 
+    #: The namespace binds neither the runtime root nor a pathname socket outside the
+    #: view. It shares the host's network namespace, so abstract sockets and loopback
+    #: TCP stay reachable (see :attr:`WorkspaceSandbox.claims_operator_control_boundary`).
     claims_operator_control_boundary: ClassVar[bool] = True
 
     def __post_init__(self) -> None:
@@ -829,6 +840,13 @@ def build(  # noqa: PLR0913  # lint-waiver: LW-010194 [PLR0913]; Preserve build'
             "(/var/run/docker.sock) would let it run any command as you, outside the "
             "confinement. Use bubblewrap or the default Docker run environment where that "
             "matters."
+        )
+    elif isinstance(sandbox, HostSandbox):
+        _log(
+            "[hostsandbox] bubblewrap shares the host network namespace: abstract Unix "
+            "sockets and services on host loopback TCP stay reachable. A D-Bus or Docker "
+            "daemon listening there would let the agent run commands as you; the default "
+            "Docker run environment has its own network namespace."
         )
     return sandbox
 
