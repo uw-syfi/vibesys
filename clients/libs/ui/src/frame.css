@@ -802,7 +802,7 @@ button.vs-crumb:focus-visible {
   stroke: none;
   opacity: 0.55;
 }
-.vs-pareto-point[data-role="rejected"] .vs-pareto-mark {
+.vs-pareto-point[data-role="failed"] .vs-pareto-mark {
   fill: var(--panel);
   stroke: var(--muted);
   stroke-width: 1.5;
@@ -825,7 +825,7 @@ button.vs-crumb:focus-visible {
 .vs-pareto-key[data-role="input"] {
   fill: var(--text);
 }
-.vs-pareto-key[data-role="rejected"] {
+.vs-pareto-key[data-role="failed"] {
   fill: var(--panel);
 }
 .vs-pareto-hover-box {
