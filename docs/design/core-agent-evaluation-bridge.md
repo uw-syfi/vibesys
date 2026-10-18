@@ -92,22 +92,25 @@ state live in `vs_core._base_runs`:
   own baseline measurement of the input counts too, bound to the base's input the first time an
   agent names it. A base sample older than `TaskTerms.base_staleness` on the run clock does not
   count;
-- a close call (within two noises of the bar) earns the base one more sample, and no more;
+- a close call (within the verdict's critical number of noises of the bar, or with no estimate
+  of the noise) earns the base more samples: up to two fresh ones under a declared
+  `relative_noise`, up to three without one, and no more;
 - the run is core's own (`BaseRun`), in the candidate's scope, so the scope's resume waits for it
   as it waits for every submission of the scope.
 
 The comparison reaches the agent twice: in the tool's reply for a finished evaluation
 (`SubmittedReply.comparison`, absent while the base has not ended) and in the resume prompt
-(`ResumeFacts.comparisons`, from `ResumeAuthorizationReceipt.comparisons`); both give the latest
-logged comparison only while the samples held at that moment still make it, so a base that went
-stale is never presented as current (`latest_comparisons`). It reaches the run's
+(`ResumeFacts.comparisons`, from `ResumeAuthorizationReceipt.comparisons`); both give, for each
+logged subject, the comparison the samples fresh at that moment make, so a base sample that went
+stale is never counted as current (`latest_comparisons`). It reaches the run's
 events as `measurement_compared`, emitted by the commit observer from core's append-only log.
 The strategy's official measurement of an input the scope already measured is answered from the
 samples held (`vs_core._measurement_reuse`), and runs afresh only when the comparison is a close
 call that one more sample would narrow. Its benchmark record enters the ledger stating the mean
-of the samples (`vs_core._comparison.as_answer`), and the reading a strategy decodes from a
-record takes its headline from the ledger's reading, so candidates are ranked by the value the
-comparison states; each run's own reading stays in its `Sample`.
+of the samples held then (`vs_core._comparison.as_answer`; a failed record keeps its own
+reading), and the reading a strategy decodes from a record takes its headline from the ledger's
+reading, so a candidate's headline in ranking is the value the comparison states; its other
+objectives are the answering run's own, and each run's own reading stays in its `Sample`.
 
 ## Reply: one continuation, never a poll
 

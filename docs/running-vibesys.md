@@ -231,26 +231,35 @@ refused because there are several, so re-running an input until a run suits the
 agent gains nothing. The strategy's official measurement of an input the attempt
 already measured is answered from those samples, and runs afresh only when a
 comparison with the base is a close call that one more sample would narrow. Either
-way, the official result states the mean of all the samples of the input, the
-value its comparison states, and that mean is what candidates are ranked by.
+way, the official result's headline objective states the mean of the samples of the
+input held when the result is stored, the value its comparison states then, and
+that mean is the candidate's headline value in ranking. A task's other objectives
+(for example p99 latency beside throughput) are the answering run's own values: a
+sample holds only the headline reading. The strategies' "beats the input" checks
+(merge and adoption) still compare that value with the input's own baseline run
+under `relative_noise`, not with the comparison's verdict.
 
 An agent's evaluation is compared with its base, the revision its workspace
 started from. The base is measured once per (measured input, gates, host) and
 cached in the run's state, and measured again only when its samples are older
 than the task's `base_staleness` on the run clock (6 hours) or a close call earns
-it one more sample (a base holds at most two fresh samples). A base the strategy is already
+it more samples (a base holds at most two fresh samples when the task declares
+`relative_noise`, three when it does not). A base the strategy is already
 measuring (its own measurement of the run's input, still running) is awaited rather than
 measured again: core claims that run, and its result becomes the base's samples when it ends. The
 comparison is the ratio of the candidate's mean over the base's mean, its noise,
 and a verdict: `better`, `within_noise` or `worse`. The noise is one standard
 error of the ratio, computed from the runs' relative spread (never below the
-task's declared `relative_noise`) and the sample counts; a verdict needs two
-noises. A task that declares no `relative_noise` gets no verdict while the
-candidate and the base hold one run each, since nothing has measured the noise
-yet: the result counts as a close call, so the base takes one more run, and the
-official check runs afresh if the result is still a close call then. The agent's evaluation tool and the resumed turn report the
-comparison only while the base's samples are fresh, and the run's events carry it
-as `measurement_compared`.
+task's declared `relative_noise`) and the sample counts; with a declared
+`relative_noise` a verdict needs two noises. A task that declares none has only
+the runs' spread to go on, so it gets a verdict only once the candidate and the
+base hold three runs each and those runs differ, and then the bar is the
+Student-t quantile for their degrees of freedom (2.78 noises at three runs a
+side), which keeps false verdicts near 5%. Until then the result is
+`within_noise` and a close call: the base takes up to two more runs, and the
+official check runs afresh. The agent's evaluation tool and the resumed turn
+report the comparison the base's fresh samples make, and the run's events carry
+each one logged as `measurement_compared`.
 
 Evaluations have no allowance. A plan cannot cap them and core admits every call it can;
 only the turn's own time limit bounds an agent's work. A conservative runaway flag only

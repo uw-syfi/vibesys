@@ -96,6 +96,8 @@ def reading_mapping(ref: EvidenceRef, evidence: TrustedEvidence) -> Mapping[str,
     The headline metric's value is the one core's ledger states (``ref.reading``): for an
     official measurement that is the mean of the samples answering it, the value its comparison
     with the base states, so whoever ranks candidates reads that number and not one run's.
+    Every other metric is the record's own, the answering run's: a sample holds only the
+    headline reading, so core states no mean of the others (`vs_core._comparison.as_answer`).
     """
     partial = evidence.partial_measurement
     progress = None if partial is None else partial.progress

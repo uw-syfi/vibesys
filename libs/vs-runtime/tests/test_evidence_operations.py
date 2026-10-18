@@ -413,28 +413,41 @@ def _eval_context(request: BaseModel) -> ExecutionContext:
     run=st.floats(min_value=1.0, max_value=1e4),
     stated=st.one_of(st.none(), st.floats(min_value=1.0, max_value=1e4)),
     metric=st.sampled_from(("throughput", "latency")),
+    secondary=st.floats(min_value=1.0, max_value=1e4),
 )
-@example(run=300.0, stated=275.0, metric="throughput")
-@example(run=300.0, stated=None, metric="throughput")
+@example(run=300.0, stated=275.0, metric="throughput", secondary=12.0)
+@example(run=300.0, stated=None, metric="throughput", secondary=12.0)
+@example(run=300.0, stated=275.0, metric="latency", secondary=275.0)
 async def test_the_headline_a_reader_decodes_is_the_one_cores_ledger_states(
-    run: float, stated: float | None, metric: str
+    run: float, stated: float | None, metric: str, secondary: float
 ) -> None:
     """An official record states the mean of its samples; ranking must read that, not one run.
 
     The runtime's record holds the run's own value. Core's ledger reference states the headline
     reading (for an official measurement, the comparison's candidate value), and the decoded
-    headline is that reading whenever it names the headline metric, else the run's value.
+    headline is that reading whenever it names the headline metric, else the run's value. A
+    record's other objectives are the answering run's own values, always: a sample holds only
+    the headline, so there is no mean of them to state (the rule `reading_mapping` documents).
     """
     ledger = FakeEvidenceLedger()
-    evidence = _evidence(0, value=run)
+    single = _evidence(0, value=run)
+    evidence = single.model_copy(
+        update={
+            "metrics": (
+                *single.metrics,
+                EvidenceMetric(name="latency", value=secondary, direction="min"),
+            )
+        }
+    )
     ledger.record(RequestId(root=SOURCE), evidence, "official")
     reading = None if stated is None else Reading(metric=metric, value=stated, direction="max")
     ref = _ref(evidence).model_copy(update={"reading": reading})
     outcome = await InterpretEvidenceOwner(ledger).execute(_Interpret(evidence=(ref,)), _context())
     decoded = _Readings.model_validate(outcome)
-    (headline,) = decoded.readings[0].metrics
+    headline, other = decoded.readings[0].metrics
     named = stated is not None and metric == evidence.metrics[0].name
     assert headline.value == (stated if named else run)
+    assert (other.name, other.value) == ("latency", secondary)
 
 
 @settings(max_examples=examples(pr=5, nightly=40), deadline=None)
