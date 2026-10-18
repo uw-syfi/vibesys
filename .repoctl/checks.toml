@@ -268,7 +268,7 @@ language = "python"
 directory = "."
 timeout_seconds = 900
 env = { VIBESYS_REQUIRE_SANDBOX_TESTS = "1" }
-commands = [["uv", "run", "python", "-m", "pytest", "libs/vs-agent/tests/test_hostsandbox.py", "-v"]]
+commands = [["uv", "run", "python", "-m", "pytest", "libs/vs-agent/tests/test_hostsandbox.py", "tests/e2e/test_control_socket_reachability_e2e.py", "-v"]]
 
 [[check_groups]]
 name = "microservice_workload_checks"

@@ -176,7 +176,12 @@ macOS when full read confinement matters.
   including the one that judges an agent's work. A steer is guidance only: no control schema
   has a field that reaches measurement or acceptance. Whether an agent can send one depends on
   whether it can reach a control ingress. The inbox is outside the project's write grant
-  (above). A client connection is limited only by the network access each backend leaves open.
+  (above). The server's control socket (`control.sock` in the user's runtime directory) is
+  not reachable under Docker or bubblewrap, where that directory does not exist in the
+  sandbox. Under Landlock, which has no right for connecting to a pathname socket, and under
+  Seatbelt, whose profile allows `network*`, an agent can connect to it and send any control.
+  #3133 tracks closing this; `tests/e2e/test_control_socket_reachability_e2e.py` pins each
+  backend's current behavior, with the Landlock and Seatbelt cases as strict `xfail`.
 - **Seatbelt** reads are broader than bubblewrap (above).
 - **Hidden-path design.** The planning issue for prebuilt agent images (#674,
   closed) proposed "no explicit hidden access: deny what is not listed". The
