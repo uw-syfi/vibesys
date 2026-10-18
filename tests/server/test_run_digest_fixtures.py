@@ -31,6 +31,7 @@ def test_the_helpers_digest_of_a_fixture_journal_is_the_figures_the_page_reads(n
 
     assert digest.ideas == fixture["digest"]["ideas"]
     assert digest.adopted_ratio == pytest.approx(fixture["digest"]["adopted_ratio"])
+    assert digest.best_so_far_ratio == pytest.approx(fixture["digest"].get("best_so_far_ratio"))
 
 
 def test_the_corpus_holds_a_run_whose_best_reading_belongs_to_a_failed_idea() -> None:

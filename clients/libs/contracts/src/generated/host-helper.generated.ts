@@ -379,6 +379,7 @@ export type Digest = (RunDigest | RunDigestUnreadable) | null;
 export type Kind = "digest";
 export type Ideas = number | null;
 export type AdoptedRatio = number | null;
+export type BestSoFarRatio = number | null;
 export type DurationS = number | null;
 export type Summary = string;
 export type Resumable1 = boolean;
@@ -1357,7 +1358,9 @@ export interface RunSummary {
  * ``adopted_ratio`` is the result the run's adoption span names, as the run page headlines it:
  * an improvement over the input (for a ``min`` objective, the input's value over the result's);
  * ``None`` when the run adopted nothing. The best raw reading of a gate is not it: that may be
- * an idea that later failed. ``ideas`` is ``None`` for a journal
+ * an idea that later failed. ``best_so_far_ratio`` is what the page headlines before the run has
+ * opened an adoption (while it works): the best idea that passed and beat the input, worded as an
+ * improvement the same way; ``None`` before one does and once an adoption exists. ``ideas`` is ``None`` for a journal
  * that predates the run trace (``TraceFormat.PREDATES_TRACE``): it records rounds, not ideas,
  * so no count is true. ``duration_s`` runs from the
  * journal's first event to the last step it recorded; ``None`` for a run with no events.
@@ -1369,6 +1372,7 @@ export interface RunDigest {
   kind: Kind;
   ideas: Ideas;
   adopted_ratio: AdoptedRatio;
+  best_so_far_ratio: BestSoFarRatio;
   duration_s: DurationS;
   ending: RunEndingFact | null;
   closing: RunClosing | null;

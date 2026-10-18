@@ -70,6 +70,7 @@ const entry = (each: Case): unknown => ({
   createdAt: NOW - each.ago * HOUR,
   ideas: each.ideas,
   adoptedRatio: each.ratio,
+  bestSoFarRatio: null,
   durationSeconds: each.minutes * 60,
   outcome: each.outcome,
   closing: each.closing,

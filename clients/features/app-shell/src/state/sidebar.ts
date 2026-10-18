@@ -29,7 +29,14 @@ import {
   listedRunRefs,
   projectRunsListed,
 } from './all-runs.js';
-import {type Clock, formatDuration, formatWhen, ideasWord, resultWords} from './recent-words.js';
+import {
+  type Clock,
+  formatDuration,
+  formatRatio,
+  formatWhen,
+  ideasWord,
+  resultWords,
+} from './recent-words.js';
 import {
   endReason,
   liveDetail,
@@ -95,6 +102,15 @@ export type DigestSlot =
   /** The host answered and holds no record of this run: asking again cannot change that. */
   | {readonly kind: 'gone'};
 
+/**
+ * What is known of one live run's digest, which is read again while the run works: the latest
+ * one read (none yet) and the request in flight for the next (none when idle).
+ */
+interface LiveDigest {
+  readonly entry: Extract<RunDigestEntry, {kind: 'read'}> | null;
+  readonly token: number | null;
+}
+
 /** What the sidebar's row menus ask of the app. */
 export interface ShellActions {
   archive(run: RunRef): void;
@@ -116,6 +132,8 @@ export interface SidebarState {
   readonly allRuns: AllRunsState;
   /** Each shown Recent run's digest, by `digestKey`. */
   readonly digests: Readonly<Record<string, DigestSlot>>;
+  /** Each live run's digest, by `digestKey`: its ideas and best so far, as the run page says them. */
+  readonly live: Readonly<Record<string, LiveDigest>>;
   /** The last token a digest request used, so each is new. */
   readonly lastDigestToken: number;
   readonly selection: Screen;
@@ -142,6 +160,8 @@ export type SidebarAction =
   | {readonly type: 'digests-read'; readonly token: number; readonly reply: RunDigestsReply | null}
   /** The user asks again for a Recent run whose state could not be read. */
   | {readonly type: 'retry-digest'; readonly run: RunRef}
+  /** The live runs' digests are due again: each live run's digest is read afresh. */
+  | {readonly type: 'refresh-live-digests'}
   /** What a machine said of one project's runs; null when it could not say. */
   | {
       readonly type: 'project-runs-listed';
@@ -174,6 +194,7 @@ export const SIDEBAR_EMPTY: SidebarState = {
   archived: [],
   allRuns: ALL_RUNS_EMPTY,
   digests: {},
+  live: {},
   lastDigestToken: 0,
   selection: {kind: 'new-run'},
   beforeSettings: {kind: 'new-run'},
@@ -224,9 +245,10 @@ export function sidebarStep(state: SidebarState, action: SidebarAction): Sidebar
   const step = baseStep(state, action);
   const listed = askAllRuns(step.state);
   const asked = askDigests(listed.state);
+  const live = askLiveDigests(asked.state, action.type === 'refresh-live-digests');
   return {
-    state: asked.state,
-    requests: [...step.requests, ...listed.requests, ...asked.requests],
+    state: live.state,
+    requests: [...step.requests, ...listed.requests, ...asked.requests, ...live.requests],
   };
 }
 
@@ -315,6 +337,41 @@ function askDigests(state: SidebarState): SidebarStep {
   return {state: {...state, digests, lastDigestToken: token}, requests};
 }
 
+/**
+ * The digest of every live run: asked when the run first shows live and again on each
+ * `refresh-live-digests`, one request at a time per run; the one before it stays on the row until
+ * the next answers, and a run that is no longer live is forgotten.
+ */
+function askLiveDigests(state: SidebarState, refresh: boolean): SidebarStep {
+  const wanted = state.listings.flatMap(listing =>
+    listing.kind !== 'listed'
+      ? []
+      : [...newestByRun(listing.live).values()].map(server => ({
+          host: listing.host,
+          project: server.projectRoot,
+          runId: server.runId,
+        })),
+  );
+  const live: Record<string, LiveDigest> = {};
+  const due: WantedDigest[] = [];
+  for (const run of wanted) {
+    const key = digestKey({host: run.host, runId: run.runId});
+    const known = state.live[key];
+    if (known === undefined || (refresh && known.token === null)) due.push(run);
+    live[key] = known ?? {entry: null, token: null};
+  }
+  const forgotten = Object.keys(state.live).length !== Object.keys(live).length;
+  if (due.length === 0) return same(forgotten ? {...state, live} : state);
+  const {requests, token} = digestRequests(due, state.lastDigestToken);
+  for (const request of requests) {
+    for (const runId of request.runIds) {
+      const key = digestKey({host: request.host, runId});
+      live[key] = {entry: live[key]?.entry ?? null, token: request.token};
+    }
+  }
+  return {state: {...state, live, lastDigestToken: token}, requests};
+}
+
 /** The project listings the All runs screen still needs, while it is shown. */
 function askAllRuns(state: SidebarState): SidebarStep {
   if (state.selection.kind !== 'all-runs') return same(state);
@@ -329,8 +386,19 @@ function digestsRead(
   state: SidebarState,
   action: Extract<SidebarAction, {type: 'digests-read'}>,
 ): SidebarStep {
+  return same({
+    ...state,
+    digests: recentDigestsRead(state.digests, action),
+    live: liveDigestsRead(state.live, action),
+  });
+}
+
+function recentDigestsRead(
+  slots: SidebarState['digests'],
+  action: Extract<SidebarAction, {type: 'digests-read'}>,
+): Record<string, DigestSlot> {
   const digests: Record<string, DigestSlot> = {};
-  for (const [key, slot] of Object.entries(state.digests)) {
+  for (const [key, slot] of Object.entries(slots)) {
     if (slot.kind !== 'loading' || slot.token !== action.token) {
       digests[key] = slot;
       continue;
@@ -346,7 +414,27 @@ function digestsRead(
           ? absent
           : {kind: 'read', entry};
   }
-  return same({...state, digests});
+  return digests;
+}
+
+/** A live run's answer replaces its figures when it read; any other answer leaves the last ones. */
+function liveDigestsRead(
+  slots: SidebarState['live'],
+  action: Extract<SidebarAction, {type: 'digests-read'}>,
+): Record<string, LiveDigest> {
+  const live: Record<string, LiveDigest> = {};
+  for (const [key, known] of Object.entries(slots)) {
+    if (known.token !== action.token) {
+      live[key] = known;
+      continue;
+    }
+    const entry =
+      action.reply?.kind === 'digests'
+        ? action.reply.runs.get(key.slice(key.indexOf(' ') + 1))
+        : undefined;
+    live[key] = {entry: entry?.kind === 'read' ? entry : known.entry, token: null};
+  }
+  return live;
 }
 
 /** A run asked for again: its slot is forgotten, so the next step reads it. */
@@ -364,6 +452,8 @@ function baseStep(state: SidebarState, action: SidebarAction): SidebarStep {
       return digestsRead(state, action);
     case 'retry-digest':
       return retryDigest(state, action.run);
+    case 'refresh-live-digests':
+      return same(state);
     case 'project-runs-listed':
       return same({...state, allRuns: projectRunsListed(state.allRuns, action)});
     case 'reload-all-runs':
@@ -428,18 +518,38 @@ export function liveRows(state: SidebarState): RunRow[] {
       const run: RunRef = {host: listing.host, runId: server.runId};
       const title = titleOf(state, run, server.projectRoot);
       const detail = `${label(listing.host)} · ${liveDetail(server)}`;
+      const trail = liveTrail(state.live[digestKey(run)]?.entry ?? null);
       return {
         run,
         title,
         detail,
-        trail: null,
-        tooltip: `${title}\n${detail}\nrun ${run.runId}`,
+        trail,
+        tooltip: [title, trail === null ? detail : `${detail} · ${trail}`, `run ${run.runId}`].join(
+          '\n',
+        ),
         status: liveStatus(server),
         look: liveLook(server),
         problem: null,
       };
     });
   });
+}
+
+/**
+ * What a live run has done so far, as its page says it: its ideas, the best result so far (the
+ * adopted one once the run is adopting), and how long it has gone on; null before a digest is read.
+ */
+function liveTrail(read: ReadDigest | null): string | null {
+  if (read === null) return null;
+  const best = read.adoptedRatio ?? read.bestSoFarRatio;
+  const parts = [
+    ideasTrail(read.ideas),
+    ...(best === null
+      ? []
+      : [`${formatRatio(best)} ${read.adoptedRatio === null ? 'best so far' : 'adopted'}`]),
+    ...(read.durationSeconds === null ? [] : [formatDuration(read.durationSeconds)]),
+  ];
+  return parts.join(' · ');
 }
 
 interface Reading {

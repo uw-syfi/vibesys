@@ -15,7 +15,8 @@ const COLLAPSE_WIDTH = 120;
 /**
  * The app window's layout, filling its container: a navigation column at the sidebar width (`nav`
  * at the top, `footer` at the bottom) and the main area beside it, which holds a `Page`; each
- * scrolls on its own. On a narrow window the column moves above the main area. The column starts
+ * scrolls on its own. On a narrow window (under 800 px) the column floats over the rail and the
+ * start of the main area, which keeps its place beside the rail. The column starts
  * below the window's own controls (`--chrome-inset-height`, which the desktop app sets before the
  * first paint) and its background drags the window.
  *
@@ -63,7 +64,11 @@ export function AppFrame(props: {
     if (next < COLLAPSE_WIDTH) props.onCollapse?.();
   };
   return (
-    <div className="vs-app-frame" style={{'--sidebar-width': `${width}px`} as CSSProperties}>
+    <div
+      className="vs-app-frame"
+      data-nav-hidden={hidden || undefined}
+      style={{'--sidebar-width': `${width}px`} as CSSProperties}
+    >
       {props.control === undefined ? null : (
         <div className="vs-app-titlebar-control">{props.control}</div>
       )}
@@ -112,7 +117,7 @@ export function AppFrame(props: {
           }}
         />
       </nav>
-      {hidden && props.rail !== undefined ? (
+      {props.rail !== undefined ? (
         <nav className="vs-app-rail" aria-label={props.rail.label}>
           {props.rail.content}
         </nav>

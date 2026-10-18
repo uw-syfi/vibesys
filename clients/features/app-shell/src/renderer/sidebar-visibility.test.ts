@@ -161,6 +161,9 @@ function memory(initial: boolean | null): SidebarPreference & {readonly writes: 
   };
 }
 
+/** A scheduler on which nothing ever comes due. */
+const NEVER = (): (() => void) => () => undefined;
+
 describe('the sidebar store', () => {
   test('it starts shown when nothing is stored, and as stored otherwise', () => {
     for (const [stored, shown] of [
@@ -168,7 +171,7 @@ describe('the sidebar store', () => {
       [true, true],
       [false, false],
     ] as const) {
-      const {store} = createSidebarStore(quietBridge().bridge, memory(stored));
+      const {store} = createSidebarStore(quietBridge().bridge, memory(stored), NEVER);
       expect(store.getState().shown).toBe(shown);
     }
   });
@@ -176,7 +179,7 @@ describe('the sidebar store', () => {
   test('property: each toggle, from the sidebar or the menu, flips it and is stored once', () => {
     const preference = memory(null);
     const world = quietBridge();
-    const {store} = createSidebarStore(world.bridge, preference);
+    const {store} = createSidebarStore(world.bridge, preference, NEVER);
     const expected: boolean[] = [];
     let shown = true;
     for (let index = 0; index < 9; index += 1) {
@@ -191,7 +194,7 @@ describe('the sidebar store', () => {
     store.dispatch({type: 'select', screen: {kind: 'settings'}});
     expect(preference.writes).toEqual(expected);
     // A new window restores what the last one left.
-    const restored = createSidebarStore(quietBridge().bridge, preference).store;
+    const restored = createSidebarStore(quietBridge().bridge, preference, NEVER).store;
     expect(restored.getState().shown).toBe(shown);
   });
 });

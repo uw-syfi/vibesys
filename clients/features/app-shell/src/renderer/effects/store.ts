@@ -8,6 +8,7 @@ import {sameRun} from '@vibesys/runs';
 import {createStore, type Store} from '@vibesys/store';
 import {
   initialSidebar,
+  liveRows,
   type ShellActions,
   type SidebarAction,
   type SidebarRequest,
@@ -30,6 +31,12 @@ export type ShellBridge = Pick<
   | 'onPreferences'
   | 'onToggleSidebar'
 >;
+
+/** Run `callback` after `delayMs`; the returned function cancels it (the app injects the scheduler). */
+export type ScheduleRefresh = (callback: () => void, delayMs: number) => () => void;
+
+/** How long a live run's digest is left before it is read again, in milliseconds. */
+export const LIVE_DIGEST_REFRESH_MS = 15_000;
 
 /** Ask what `request` names; its reply is dispatched as the action that carries its token. */
 function perform(
@@ -63,6 +70,7 @@ function perform(
 export function createSidebarStore(
   bridge: ShellBridge,
   preference: SidebarPreference,
+  schedule: ScheduleRefresh,
 ): {
   readonly store: Store<SidebarState, SidebarAction>;
   readonly actions: ShellActions;
@@ -81,6 +89,18 @@ export function createSidebarStore(
     shown = now;
     preference.write(shown);
   });
+  // While any run is live its digest is due again after each interval; the next waits on this one.
+  let refreshing = false;
+  const keepLiveDigestsFresh = (): void => {
+    if (refreshing || liveRows(store.getState()).length === 0) return;
+    refreshing = true;
+    schedule(() => {
+      refreshing = false;
+      store.dispatch({type: 'refresh-live-digests'});
+    }, LIVE_DIGEST_REFRESH_MS);
+  };
+  store.subscribe(keepLiveDigestsFresh);
+  keepLiveDigestsFresh();
   bridge.onToggleSidebar(() => store.dispatch({type: 'toggle-sidebar'}));
   let cursor: number | null = null;
   const early: {sequence: number; action: SidebarAction}[] = [];

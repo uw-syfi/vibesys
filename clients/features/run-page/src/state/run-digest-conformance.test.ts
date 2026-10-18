@@ -8,7 +8,7 @@ import {heroView} from './run-level.js';
 import {createRunReader} from './run-model.js';
 
 /**
- * The sidebar's row for a run (the host helper's digest: `ideas` and `adopted_ratio`) and the run
+ * The sidebar's row for a run (the host helper's digest: `ideas`, `adopted_ratio` and `best_so_far_ratio`) and the run
  * page it opens must say the same of the run. The fixtures under
  * `tests/conformance/fixtures/run-digest` hold a journal and the two figures the digest folds from
  * it (`tests/server/test_run_digest_fixtures.py`); this test reads the same journal as the page
@@ -19,7 +19,11 @@ const FIXTURES = resolve(import.meta.dir, '../../../../../tests/conformance/fixt
 
 interface Fixture {
   readonly events: readonly RunEvent[];
-  readonly digest: {readonly ideas: number; readonly adopted_ratio: number | null};
+  readonly digest: {
+    readonly ideas: number;
+    readonly adopted_ratio: number | null;
+    readonly best_so_far_ratio?: number | null;
+  };
 }
 
 const fixtures: Array<{name: string; fixture: Fixture}> = readdirSync(FIXTURES)
@@ -38,11 +42,9 @@ describe('the digest of a run says what its page says', () => {
       const headline = heroView(model).tiles[0]?.ratio ?? null;
 
       expect(model.candidates.candidates.length).toBe(fixture.digest.ideas);
-      expect(headline).toBe(
-        fixture.digest.adopted_ratio === null
-          ? null
-          : `${fixture.digest.adopted_ratio.toFixed(2)}×`,
-      );
+      // The headline is the adopted result, or while the run works the best gate so far.
+      const figure = fixture.digest.adopted_ratio ?? fixture.digest.best_so_far_ratio ?? null;
+      expect(headline).toBe(figure === null ? null : `${figure.toFixed(2)}×`);
     });
   }
 
