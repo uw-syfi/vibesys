@@ -148,6 +148,9 @@ _CASES = [
     pytest.param(
         (signal.SIGINT, signal.SIGTERM), "ssh", False, id="sigint-then-sigterm-stdout-ssh"
     ),
+    # Ctrl-C alone ends the run the way SIGTERM does: its job is cancelled and it exits.
+    pytest.param((signal.SIGINT,), "connector", False, id="sigint-stdout-connector"),
+    pytest.param((signal.SIGINT,), "ssh", True, id="sigint-closed-stdout-ssh"),
 ]
 
 
@@ -181,14 +184,21 @@ def _signal_the_run(
             os.close(reader)
 
     assert f"scancel {JOB_ID}" in recorded_commands(cluster)
-    assert returncode != 0
+    if set(signals) != {signal.SIGINT}:
+        assert returncode != 0
+    # Ctrl-C alone stops the run, which returns its stopped result: the stand-in exits
+    # 0, as it reports no result (the CLI exits 1 for a run that stopped early).
 
 
 # A forked run costs about 3 CPU-seconds (the Fake cluster's connector starts once per request).
 # The real process below takes SIGTERM, so a pull request signals the forked run with each of the
-# other two sequences, over the two transports and both states of the terminal's pipe; the
-# nightly job crosses all six.
-_PULL_REQUEST = {"sighup-closed-stdout-connector", "sigint-then-sigterm-stdout-ssh"}
+# other three sequences, over the two transports and both states of the terminal's pipe; the
+# nightly job runs all eight.
+_PULL_REQUEST = {
+    "sighup-closed-stdout-connector",
+    "sigint-then-sigterm-stdout-ssh",
+    "sigint-stdout-connector",
+}
 
 
 @pytest.mark.parametrize(

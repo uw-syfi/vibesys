@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from headless import printable
 from headless import run as render_run
-from vibesys.api import RunStopped
+from vibesys.api import RunStopped, StopMode, StopRequest
 from vs_sim.api import Signals
 
 if TYPE_CHECKING:
@@ -19,13 +19,17 @@ if TYPE_CHECKING:
     from vibesys.api import RunHandle, RunRequest, RunResult, Runs
     from vs_sim.api import SignalSource
 
-# Ctrl-C asks for a cooperative stop. These, and any repeated signal, end the
-# run now: its task is cancelled, so its teardown cancels external work (Slurm
-# jobs) before the process exits.
+# Ctrl-C asks for a stop that cancels the work in flight (Slurm jobs) at once,
+# bounded like every stop; a repeated Ctrl-C changes nothing, since a terminal
+# delivers it here and the launcher forwards it too (the launcher sends a
+# repeated one on as SIGTERM). SIGTERM and SIGHUP end the run now: its task is
+# cancelled, so its teardown cancels external work before the process exits.
 __all__ = ["failure_reason", "run_headless", "supervise"]
 
 _TERMINATION_SIGNALS = (Signals.SIGTERM, Signals.SIGHUP)
 _HANDLED_SIGNALS = (Signals.SIGINT, *_TERMINATION_SIGNALS)
+# The stop a Ctrl-C asks for: once per run, so a second Ctrl-C resends the same request.
+_INTERRUPT_STOP = StopRequest(control_id="signal-sigint", mode=StopMode.CANCEL)
 
 
 class _Supervisor:
@@ -44,6 +48,12 @@ class _Supervisor:
             self._stopping = True
             self._session.stop()
 
+    def interrupt(self) -> None:
+        """Request, once, a stop that cancels the work in flight instead of draining it."""
+        if not self._stopping and not self.terminating:
+            self._stopping = True
+            self._session.session.submit(_INTERRUPT_STOP)
+
     def terminate(self) -> None:
         """Cancel the run once; cancellation unwinds through its teardown."""
         if not self.terminating:
@@ -51,11 +61,10 @@ class _Supervisor:
             self._session.cancel()
 
     def on_signal(self, number: Signals) -> None:
-        """Stop on the first Ctrl-C; cancel on any other or repeated signal."""
-        first = self.signalled is None
+        """Stop, cancelling work in flight, on Ctrl-C; cancel the run on any other signal."""
         self.signalled = self.signalled or number
-        if first and number is Signals.SIGINT:
-            self.stop()
+        if number is Signals.SIGINT:
+            self.interrupt()
         else:
             self.terminate()
 
@@ -77,9 +86,12 @@ async def supervise(
     """Await the run; a stop or signal unwinds it through its own teardown.
 
     Cancelling this coroutine requests a cooperative stop and drains the run
-    before the cancellation propagates. With a *signals* source, the first SIGINT
-    requests that stop and returns the typed stopped result; SIGTERM, SIGHUP,
-    or a repeated signal cancel the run and end in ``SystemExit(128 + n)``.
+    before the cancellation propagates. With a *signals* source, SIGINT requests a
+    stop in ``StopMode.CANCEL`` (the run cancels its evaluations and jobs at once,
+    and the host bounds how long its agents' turns may take to end) and returns the
+    typed stopped result; a repeated SIGINT changes nothing. SIGTERM or SIGHUP,
+    first or after a SIGINT, cancel the run and end in ``SystemExit(128 + n)``,
+    where n is the first signal received.
     The handlers run on the event loop, so no signal raises inside a teardown step.
     *signals* is where they arrive: the process's own (``LoopSignalSource``, built
     by the entrypoint), a Fake that a test delivers by hand, or None to handle none.

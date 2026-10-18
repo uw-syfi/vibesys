@@ -187,8 +187,16 @@ def _launch_in_child(
         (signal.SIGHUP, True),
         (signal.SIGTERM, False),
         (signal.SIGHUP, False),
+        (signal.SIGINT, False),
     ],
-    ids=["ctrl-c-to-group", "hangup-to-group", "sigterm-to-launcher", "sighup-to-launcher"],
+    ids=[
+        "ctrl-c-to-group",
+        "hangup-to-group",
+        "sigterm-to-launcher",
+        "sighup-to-launcher",
+        # r3: an operator's `kill -INT` named the launcher, which kept it from the engine.
+        "sigint-to-launcher",
+    ],
 )
 def test_the_launcher_waits_for_its_engine_to_finish_tearing_down(
     tmp_path: Path, number: signal.Signals, *, to_group: bool
@@ -205,8 +213,8 @@ def test_the_launcher_waits_for_its_engine_to_finish_tearing_down(
 
 @pytest.mark.parametrize(
     ("number", "to_group"),
-    [(signal.SIGINT, True), (signal.SIGHUP, True), (signal.SIGTERM, False)],
-    ids=["ctrl-c-to-group", "hangup-to-group", "sigterm-to-launcher"],
+    [(signal.SIGINT, True), (signal.SIGHUP, True), (signal.SIGTERM, False), (signal.SIGINT, False)],
+    ids=["ctrl-c-to-group", "hangup-to-group", "sigterm-to-launcher", "sigint-to-launcher"],
 )
 def test_the_launcher_process_waits_for_its_engine_to_finish_tearing_down(
     tmp_path: Path, number: signal.Signals, *, to_group: bool
@@ -270,10 +278,10 @@ def _call_real_child(argv: list[str]) -> int:
 
 @pytest.mark.parametrize(
     ("number", "forwarded"),
-    [(signal.SIGINT, False), (signal.SIGTERM, True), (signal.SIGHUP, True)],
-    ids=["sigint-waits", "sigterm-forwarded", "sighup-forwarded"],
+    [(signal.SIGINT, True), (signal.SIGTERM, True), (signal.SIGHUP, True)],
+    ids=["sigint-forwarded", "sigterm-forwarded", "sighup-forwarded"],
 )
-def test_call_child_waits_through_sigint_and_forwards_termination(
+def test_call_child_forwards_every_shutdown_signal(
     number: signal.Signals, *, forwarded: bool
 ) -> None:
     status = run_in_child(

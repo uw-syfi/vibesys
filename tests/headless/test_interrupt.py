@@ -9,6 +9,8 @@ from io import StringIO
 from typing import cast
 
 import pytest
+from hypothesis import example, given
+from hypothesis import strategies as st
 
 from entrypoints.run import supervise
 from headless import HeadlessRenderer, run
@@ -20,6 +22,8 @@ from vibesys.api import (
     RunSession,
     RunStatus,
     RunStopped,
+    StopMode,
+    StopRequest,
 )
 from vibesys.api.testing import FakeRunHandle
 from vs_sim.api.testing import FakeSignalSource, arrival
@@ -32,6 +36,7 @@ class _InterruptibleSession:
         self.started = asyncio.Event()
         self.stop_requested = asyncio.Event()
         self.stop_calls = 0
+        self.controls: list[object] = []
         self.closed = False
 
     def start(self) -> None:
@@ -47,6 +52,11 @@ class _InterruptibleSession:
 
     def stop(self) -> None:
         self.stop_calls += 1
+        self.stop_requested.set()
+
+    def submit(self, request: object) -> None:
+        """The one control ingress: a stop request lands in the run as ``stop`` does."""
+        self.controls.append(request)
         self.stop_requested.set()
 
 
@@ -81,8 +91,11 @@ class _SignalledSession(_InterruptibleSession):
         return RunResult(run_id="signalled", loop="test", succeeded=False, status=RunStatus.STOPPED)
 
 
+@pytest.mark.regression
 @pytest.mark.asyncio
-async def test_ctrl_c_drains_the_run_and_returns_its_stopped_result() -> None:
+async def test_ctrl_c_stops_the_run_cancelling_its_work_and_returns_its_stopped_result() -> None:
+    """r3: Ctrl-C asked for a draining stop, so in-flight evaluation jobs ran on until the
+    host's stop bound cancelled the run; the stop now cancels them itself."""
     signals = FakeSignalSource()
     session = _SignalledSession(signals)
     handle = FakeRunHandle("signalled")
@@ -92,7 +105,10 @@ async def test_ctrl_c_drains_the_run_and_returns_its_stopped_result() -> None:
     result = await supervise(handle, signals=signals)
 
     assert result.status is RunStatus.STOPPED
-    assert session.stop_calls == 1
+    (stop,) = session.controls
+    assert isinstance(stop, StopRequest)
+    assert stop.mode is StopMode.CANCEL
+    assert session.stop_calls == 0
     assert not signals.handles(signal.SIGINT)
 
 
@@ -205,3 +221,62 @@ async def test_broken_pipe_during_cancellation_does_not_interrupt_async_cleanup(
     assert session.closed
     with pytest.raises(asyncio.CancelledError):
         await handle.result()
+
+
+class _EndingSession(_InterruptibleSession):
+    """A run that receives the given signals once running, and notes how it was told to end."""
+
+    def __init__(self, signals: FakeSignalSource, delivered: list[signal.Signals]) -> None:
+        super().__init__()
+        self._signals = signals
+        self._delivered = delivered
+        self.cancelled = False
+
+    async def await_result(self) -> RunResult:
+        self.started.set()
+        for number in self._delivered:
+            assert self._signals.deliver(number), f"supervise installed no {number.name} handler"
+        try:
+            await self.stop_requested.wait()
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+        return RunResult(run_id="ending", loop="test", succeeded=False, status=RunStatus.STOPPED)
+
+
+_SHUTDOWN = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+
+
+@pytest.mark.regression
+@given(st.lists(st.sampled_from(_SHUTDOWN), min_size=1, max_size=5))
+@example([signal.SIGINT])
+@example([signal.SIGTERM])
+@pytest.mark.asyncio
+async def test_every_shutdown_signal_ends_the_run_cancelling_its_work_never_draining_it(
+    delivered: list[signal.Signals],
+) -> None:
+    """SIGINT and SIGTERM end a run the same way: its work in flight is cancelled, not drained.
+
+    Ctrl-C asks for a stop in ``StopMode.CANCEL``; SIGTERM and SIGHUP cancel the run's
+    task. Either way the run's core cancels its evaluations and the teardown closes the
+    executors, which cancel every job (``test_slurm_shutdown_leaves_no_job``).
+    """
+    signals = FakeSignalSource()
+    session = _EndingSession(signals, delivered)
+    handle = FakeRunHandle("ending")
+    handle.bind(cast("RunSession", session))
+    handle.start()
+
+    if set(delivered) == {signal.SIGINT}:
+        result = await supervise(handle, signals=signals)
+        assert result.status is RunStatus.STOPPED
+    else:
+        with pytest.raises(SystemExit) as exited:
+            await supervise(handle, signals=signals)
+        assert exited.value.code == 128 + delivered[0]
+
+    assert session.stop_calls == 0
+    stops = [control for control in session.controls if isinstance(control, StopRequest)]
+    assert all(stop.mode is StopMode.CANCEL for stop in stops)
+    assert stops or session.cancelled
+    assert not any(signals.handles(number) for number in _SHUTDOWN)

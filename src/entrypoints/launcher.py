@@ -2,6 +2,12 @@
 
 Light host commands run in this process. Run commands execute in a child so
 terminal signals reach the run and its own teardown remains authoritative.
+
+The launcher forwards every shutdown signal it receives, since an operator may
+signal it rather than the run (``kill -INT`` names the launcher's PID): SIGTERM
+and SIGHUP as they are, the first SIGINT as SIGINT, and every later SIGINT as
+SIGTERM. A terminal's Ctrl-C reaches the run directly too, so the run ignores a
+repeated SIGINT; a repeated Ctrl-C still forces the run to end, as SIGTERM.
 """
 
 from __future__ import annotations
@@ -82,16 +88,21 @@ async def run_child(
     """Run the child on an existing event loop without preempting its teardown."""
     started: list[ForegroundChild] = []
 
+    interrupts: list[Signals] = []
+
     def forward(number: Signals) -> None:
         for child in started:
             child.send_signal(number)
 
-    def wait_for_child() -> None:
-        """The terminal already delivered SIGINT to the child; keep waiting."""
+    def interrupt() -> None:
+        """Forward the first SIGINT as it is, and force the run to end on a later one."""
+        if started:
+            forward(Signals.SIGTERM if interrupts else Signals.SIGINT)
+            interrupts.append(Signals.SIGINT)
 
     installed: list[Signals] = []
     try:
-        signals.add_handler(Signals.SIGINT, wait_for_child)
+        signals.add_handler(Signals.SIGINT, interrupt)
         installed.append(Signals.SIGINT)
         for number in _FORWARDED_SIGNALS:
             signals.add_handler(number, partial(forward, number))
