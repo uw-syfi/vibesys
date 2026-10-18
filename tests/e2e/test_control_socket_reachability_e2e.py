@@ -61,6 +61,7 @@ import socket
 import stat
 import sys
 import tempfile
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
@@ -551,33 +552,36 @@ def _require_reachable_on_host(path: Path) -> None:
 
 @dataclass(frozen=True)
 class _NetworkListeners:
-    """An abstract Unix socket and a loopback TCP port, both listening on the host."""
+    """A loopback TCP port and, on Linux, an abstract Unix socket, listening on the host."""
 
-    abstract: str
+    abstract: str | None
     tcp: str
 
     def targets(self) -> list[str]:
-        return [self.abstract, self.tcp]
+        return [target for target in (self.abstract, self.tcp) if target is not None]
 
 
 @pytest.fixture
 def network_listeners() -> Iterator[_NetworkListeners]:
-    """Listeners an agent should not reach, served in the test's own network namespace."""
-    abstract = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    tcp = socket.socket()
-    # Nothing accepts: a probe's connect completes on the backlog alone.
-    abstract.settimeout(HANG_GUARD_S)
-    tcp.settimeout(HANG_GUARD_S)
-    try:
-        name = f"vibesys-probe-{secrets.token_hex(8)}"
-        abstract.bind("\0" + name)
-        abstract.listen(1)
+    """Listeners an agent should not reach, served in the test's own network namespace.
+
+    Abstract Unix sockets exist only on Linux; elsewhere only the TCP listener is made.
+    """
+    with ExitStack() as stack:
+        tcp = stack.enter_context(socket.socket())
+        # Nothing accepts: a probe's connect completes on the backlog alone.
+        tcp.settimeout(HANG_GUARD_S)
         tcp.bind(("127.0.0.1", 0))
         tcp.listen(1)
-        yield _NetworkListeners(f"abstract:{name}", f"tcp:{tcp.getsockname()[1]}")
-    finally:
-        abstract.close()
-        tcp.close()
+        abstract = None
+        if sys.platform.startswith("linux"):
+            listener = stack.enter_context(socket.socket(socket.AF_UNIX, socket.SOCK_STREAM))
+            listener.settimeout(HANG_GUARD_S)
+            name = f"vibesys-probe-{secrets.token_hex(8)}"
+            listener.bind("\0" + name)
+            listener.listen(1)
+            abstract = f"abstract:{name}"
+        yield _NetworkListeners(abstract, f"tcp:{tcp.getsockname()[1]}")
 
 
 def _network_gap_expected(sandbox: WorkspaceSandbox, channel: str) -> bool:
@@ -604,10 +608,10 @@ def test_a_host_confined_agent_reaches_host_abstract_sockets_and_loopback_tcp_as
     Landlock ABI 6 scopes abstract sockets, which flips that pin for Landlock.
     """
     del control_socket  # Only for its runtime root, outside every Landlock grant.
-    if channel == "abstract" and not sys.platform.startswith("linux"):
+    target = network_listeners.abstract if channel == "abstract" else network_listeners.tcp
+    if target is None:
         pytest.skip("abstract Unix sockets are Linux only")
     sandbox = build(workspace)
-    target = network_listeners.abstract if channel == "abstract" else network_listeners.tcp
     seen = _probe_saw(_run_confined(sandbox, workspace, _NETWORK_PROBE, target), {target})
 
     if _network_gap_expected(sandbox, channel):
