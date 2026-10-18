@@ -64,7 +64,9 @@ export function useRunPage(options: RunPageOptions): {
     let created: RunPageStore | null = null;
     const instance = (): string | null => {
       const current = created?.getState().record;
-      return current === undefined || current.kind === 'unlisted' ? null : current.run.id;
+      return current === undefined || current.kind === 'unlisted' || current.kind === 'historical'
+        ? null
+        : current.run.id;
     };
     const ports = welcomeRunPorts(
       bridge,

@@ -185,3 +185,20 @@ test('the loading screen counts events of the total once the host says it, else 
   expect(open).toMatch(/5 events · .* read so far/);
   expect(open).not.toContain(' of ');
 });
+
+test('an unresolved run shows loading progress without a false empty metric or ideas pane', async () => {
+  const initial = runPageInitial({
+    identity: {host: 'ssh:remote-host', runId: FIXTURE.runId},
+    title: {project: 'queue-rs', task: null},
+    hostLabel: 'remote-host',
+    unavailable: {},
+  });
+  const locating = await screenText(initial);
+  expect(locating).toContain('Finding the run');
+  expect(locating).not.toContain('No ideas yet');
+  expect(locating).not.toContain('nothing measured yet');
+  const opened = runPageStep(initial, {type: 'record', record: {kind: 'historical', status: null}});
+  const summary = await screenText(opened.state);
+  expect(summary).toContain('Loading the run summary');
+  expect(summary).not.toContain('No ideas yet');
+});

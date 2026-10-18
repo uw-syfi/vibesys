@@ -139,6 +139,26 @@ const SEED = {
   unavailable: {logs: 'not here'},
 } as const;
 
+test('a stalled historical summary and history expose a retry instead of loading forever', () => {
+  const clock = new FakeClock();
+  const ports: RunPagePorts = {
+    ...fakePorts([]),
+    readSummary: () => new Promise(() => {}),
+    readHistory: () => new Promise(() => {}),
+  };
+  const store = createRunPageStore(SEED, ports, clock.schedule);
+  store.dispatch({type: 'record', record: {kind: 'historical', status: null}});
+  expect(store.getState().summary.kind).toBe('reading');
+  clock.advance(30_000);
+  expect(store.getState().history.kind).toBe('reading');
+  clock.advance(30_000);
+  expect(store.getState().history.kind).toBe('failed');
+  store.dispatch({type: 'retry-load'});
+  expect(store.getState().summary.kind).toBe('reading');
+  store.dispose();
+  expect(clock.pending).toBe(0);
+});
+
 test('force stop is offered after two minutes of stopping on the injected clock, not before', () => {
   const clock = new FakeClock();
   const stops: boolean[] = [];
@@ -160,7 +180,7 @@ test('dispose cancels an armed bound', () => {
   const clock = new FakeClock();
   const store = createRunPageStore(SEED, fakePorts([]), clock.schedule);
   store.dispatch({type: 'record', record: {kind: 'live', run: {...running(), phase: 'stopping'}}});
-  expect(clock.pending).toBe(1);
+  expect(clock.pending).toBe(2); // Stop bound and the initial summary read.
   store.dispose();
   expect(clock.pending).toBe(0);
 });

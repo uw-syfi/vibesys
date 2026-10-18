@@ -75,7 +75,10 @@ class Followers {
   ) {}
 
   reconcile(state: RunPageState): void {
-    const instanceId = state.record.kind === 'unlisted' ? null : state.record.run.id;
+    const instanceId =
+      state.record.kind === 'unlisted' || state.record.kind === 'historical'
+        ? null
+        : state.record.run.id;
     const wanted = new Set(instanceId === null ? [] : followedStreams(state));
     for (const [streamId, follower] of this.#followers) {
       if (wanted.has(streamId) && follower.instanceId === instanceId) continue;
@@ -149,9 +152,19 @@ function readHistory(
   ports: RunPagePorts,
   request: Extract<RunPageRequest, {readonly kind: 'read-history'}>,
   dispatch: Dispatch,
+  schedule: ScheduleTimeout,
+  cancels: Set<() => void>,
 ): void {
-  const settle = (reply: HistoryReply): void =>
+  const cancel = schedule(() => settle({kind: 'failed', message: 'The read timed out.'}), 30_000);
+  cancels.add(cancel);
+  let settled = false;
+  const settle = (reply: HistoryReply): void => {
+    if (settled) return;
+    settled = true;
+    cancel();
+    cancels.delete(cancel);
     dispatch({type: 'history', token: request.token, reply});
+  };
   void ports
     .readHistory(request.from, request.max)
     .then(settle, (error: unknown) => settle({kind: 'failed', message: String(error)}));
@@ -162,9 +175,19 @@ function readSummary(
   ports: RunPagePorts,
   request: Extract<RunPageRequest, {readonly kind: 'read-summary'}>,
   dispatch: Dispatch,
+  schedule: ScheduleTimeout,
+  cancels: Set<() => void>,
 ): void {
-  const settle = (reply: SummaryReply): void =>
+  const cancel = schedule(() => settle({kind: 'failed', message: 'The read timed out.'}), 30_000);
+  cancels.add(cancel);
+  let settled = false;
+  const settle = (reply: SummaryReply): void => {
+    if (settled) return;
+    settled = true;
+    cancel();
+    cancels.delete(cancel);
     dispatch({type: 'summary', token: request.token, reply, wallMs: ports.now()});
+  };
   void ports
     .readSummary(request.status)
     .then(settle, (error: unknown) => settle({kind: 'failed', message: String(error)}));
@@ -270,10 +293,10 @@ export function createRunPageStore(
         ports.release();
         return;
       case 'read-history':
-        readHistory(ports, request, dispatch);
+        readHistory(ports, request, dispatch, schedule, cancels);
         return;
       case 'read-summary':
-        readSummary(ports, request, dispatch);
+        readSummary(ports, request, dispatch, schedule, cancels);
         return;
       case 'pause':
       case 'resume':

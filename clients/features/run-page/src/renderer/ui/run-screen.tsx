@@ -48,7 +48,7 @@ import {
   transcriptLoading,
 } from '../../state/index.js';
 import {Hero} from './hero.js';
-import {HistoryLoading} from './history-loading.js';
+import {HistoryLoading, InitialRunLoading, RunLoadError} from './history-loading.js';
 import {DeepLevel, IdeasWorkspace, type LevelProps} from './levels.js';
 import {RunLevel} from './run-level.js';
 import {RunScrubber} from './run-scrubber.js';
@@ -359,6 +359,59 @@ function openedDetail(
   return {core, loading, problem: null};
 }
 
+/** Replace data-dependent panes until the first complete run view is available. */
+function pendingRunScreen(
+  state: RunPageState,
+  dispatch: Dispatch,
+  zoom: Zoom,
+  route: Route,
+): JSX.Element | null {
+  const header = <Header state={state} dispatch={dispatch} />;
+  if (state.record.kind === 'unlisted') {
+    return (
+      <Screen density="compact" header={header}>
+        <InitialRunLoading stage="locating" />
+      </Screen>
+    );
+  }
+  if (
+    (state.record.kind === 'ended' || state.record.kind === 'historical') &&
+    state.summary.kind === 'reading' &&
+    state.run.core === null
+  ) {
+    return (
+      <Screen density="compact" header={header}>
+        <InitialRunLoading stage="summary" />
+      </Screen>
+    );
+  }
+  const loading = historyLoading(state);
+  if (loading !== null) {
+    return (
+      <Screen density="compact" header={header}>
+        <EndedBanner state={state} dispatch={dispatch} zoom={zoom} />
+        <HistoryLoading progress={loading} />
+      </Screen>
+    );
+  }
+  const problem = historyProblem(state);
+  if (
+    problem !== null &&
+    state.summary.kind !== 'ready' &&
+    state.run.core === null &&
+    route.mode !== 'logs' &&
+    !state.followingLogs
+  ) {
+    return (
+      <Screen density="compact" header={header}>
+        <EndedBanner state={state} dispatch={dispatch} zoom={zoom} />
+        <RunLoadError message={problem} retry={() => dispatch({type: 'retry-load'})} />
+      </Screen>
+    );
+  }
+  return null;
+}
+
 /** The run's header, overview, and current level over its summary and selected detail. */
 export function RunScreen(props: {
   readonly state: RunPageState;
@@ -377,16 +430,8 @@ export function RunScreen(props: {
     tokens: props.core?.tokens ?? EMPTY_LEDGER,
     zoom,
   };
-  const loading = historyLoading(state);
-  if (loading !== null) {
-    // An ended run's history is not all in: the fold is a prefix of the run, so no pane draws it.
-    return (
-      <Screen density="compact" header={<Header state={state} dispatch={dispatch} />}>
-        <EndedBanner state={state} dispatch={dispatch} zoom={zoom} />
-        <HistoryLoading progress={loading} />
-      </Screen>
-    );
-  }
+  const pending = pendingRunScreen(state, dispatch, zoom, route);
+  if (pending !== null) return pending;
   const problem = historyProblem(state);
   const transcript = transcriptLoading(state);
   const zoomed = resolveZoom(model, route);

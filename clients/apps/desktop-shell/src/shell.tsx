@@ -197,9 +197,14 @@ function RunRoute(props: {
   readonly place: RunPlace;
 }): JSX.Element {
   const {run, sidebar, stores, place} = props;
-  const record = useMemo(() => runRecord(sidebar.listings, run), [sidebar.listings, run]);
   const recent = sidebar.recent.find(each => sameRun(each, run));
-  const project = recent?.project ?? (record.kind === 'unlisted' ? '' : record.run.projectRoot);
+  const record = useMemo(
+    () => runRecord(sidebar.listings, run, recent),
+    [sidebar.listings, run, recent],
+  );
+  const project =
+    recent?.project ??
+    (record.kind === 'live' || record.kind === 'ended' ? record.run.projectRoot : '');
   const seed = {
     identity: run,
     title: {project, task: recent?.task ?? null},

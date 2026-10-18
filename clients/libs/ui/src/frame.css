@@ -428,6 +428,17 @@ button.vs-crumb:focus-visible {
   border-radius: var(--radius-full);
   background: var(--accent);
 }
+.vs-meter-indeterminate {
+  width: 35%;
+  animation: vs-meter-sweep calc(var(--duration-base) * 8) var(--easing) infinite alternate;
+}
+@keyframes vs-meter-sweep {
+  from { transform: translateX(0); }
+  to { transform: translateX(185%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vs-meter-indeterminate { animation: none; }
+}
 .vs-meter[data-tone="ok"] .vs-meter-fill {
   background: var(--ok);
 }

@@ -57,12 +57,22 @@ export type Unavailable = Readonly<Partial<Record<RunCapability, string>>>;
 /** The run as the host's registry lists it: live, ended, or not (yet) listed. */
 export type RunRecord =
   | {readonly kind: 'unlisted'}
+  /** A recent run whose server tombstone expired; its journal may still be readable. */
+  | {
+      readonly kind: 'historical';
+      readonly status: Extract<RunStatus, 'stopped' | 'completed' | 'failed'> | null;
+    }
   | {readonly kind: 'live'; readonly run: HostRun}
   | {readonly kind: 'ended'; readonly run: HostRun};
+
+function isEndedRecord(record: RunRecord): boolean {
+  return record.kind === 'ended' || record.kind === 'historical';
+}
 
 /** The run's place in its lifecycle, as the screen shows it. */
 export type RunPhase =
   | {readonly kind: 'unlisted'}
+  | {readonly kind: 'historical'}
   | {readonly kind: 'starting'}
   | {readonly kind: 'running'; readonly pausing: boolean}
   | {readonly kind: 'paused'; readonly by: 'user' | 'quota'}
@@ -277,6 +287,7 @@ export type RunPageAction =
   /** A pane needs the run's transcript, which only its history holds: read it. */
   | {readonly type: 'need-history'}
   | {readonly type: 'need-span'; readonly spanId: string}
+  | {readonly type: 'retry-load'}
   | {readonly type: 'span'; readonly token: number; readonly reply: SpanDetailReply};
 
 export type RunPageRequest =
@@ -357,6 +368,7 @@ const STOP_IDLE: StopFlow = {kind: 'idle'};
 /** The phase the record reports, before the page's own stop is laid over it. */
 function recordPhase(record: RunRecord): RunPhase {
   if (record.kind === 'unlisted') return {kind: 'unlisted'};
+  if (record.kind === 'historical') return {kind: 'historical'};
   const {run} = record;
   if (record.kind === 'ended') return {kind: 'ended', run, end: run.end};
   switch (run.phase) {
@@ -387,7 +399,8 @@ export function runNow(state: RunPageState): number | null {
 /** The run's phase as the screen shows it. */
 export function runPhase(state: RunPageState): RunPhase {
   const phase = recordPhase(state.record);
-  if (phase.kind === 'ended' || phase.kind === 'unlisted') return phase;
+  if (phase.kind === 'ended' || phase.kind === 'unlisted' || phase.kind === 'historical')
+    return phase;
   return state.stop.kind === 'stopping' ? {kind: 'stopping'} : phase;
 }
 
@@ -428,7 +441,7 @@ function relisted(state: RunPageState): RunPageStep {
 }
 
 function recordInstance(record: RunRecord): string | null {
-  return record.kind === 'unlisted' ? null : record.run.id;
+  return record.kind === 'unlisted' || record.kind === 'historical' ? null : record.run.id;
 }
 
 /**
@@ -513,6 +526,12 @@ function historyFor(state: RunPageState): RunPageStep {
     case 'unlisted':
       return state.history.kind === 'reading'
         ? {state: {...state, history: {kind: 'idle'}}, requests: []}
+        : {state, requests: []};
+    case 'historical':
+      // The tombstone no longer supplies a terminal status. The header stays neutral; this
+      // fallback only fills the snapshot contract until a persisted status is available.
+      return state.history.kind === 'idle'
+        ? endedHistoryFor(state, state.record.status ?? 'stopped')
         : {state, requests: []};
     case 'ended':
       return state.history.kind === 'idle'
@@ -615,14 +634,14 @@ function withSummary(
   if (summary.kind !== 'reading' || summary.token !== token) return {state, requests: []};
   if (reply.kind === 'unsupported') {
     const unsupported = {...state, summary: reply};
-    return state.record.kind === 'ended' && state.history.kind === 'idle'
+    return isEndedRecord(state.record) && state.history.kind === 'idle'
       ? startReading(unsupported)
       : {state: unsupported, requests: []};
   }
   if (reply.kind === 'failed') {
     // A live run has its session; an ended one can still read the full history.
     const failed = {...state, summary: reply};
-    return state.record.kind === 'ended' && state.history.kind === 'idle'
+    return isEndedRecord(state.record) && state.history.kind === 'idle'
       ? startReading(failed)
       : {state: failed, requests: []};
   }
@@ -642,7 +661,7 @@ function withSummary(
       heard: heardAfter(state.run.heard, data, wallMs),
     },
   };
-  return ready.record.kind === 'ended' && ready.wantsHistory
+  return isEndedRecord(ready.record) && ready.wantsHistory
     ? startReading(ready)
     : {state: ready, requests: []};
 }
@@ -650,7 +669,7 @@ function withSummary(
 /** A pane needs the transcript: an ended run opened from its summary reads its history now. */
 function withNeedHistory(state: RunPageState): RunPageStep {
   const wanted = state.wantsHistory ? state : {...state, wantsHistory: true};
-  if (wanted.record.kind !== 'ended' || wanted.summary.kind !== 'ready') {
+  if (!isEndedRecord(wanted.record) || wanted.summary.kind !== 'ready') {
     return {state: wanted, requests: []};
   }
   return wanted.history.kind === 'idle' ? startReading(wanted) : {state: wanted, requests: []};
@@ -658,7 +677,7 @@ function withNeedHistory(state: RunPageState): RunPageStep {
 
 /** Read only the opened step's transcript. A legacy host takes the full-history path. */
 function withNeedSpan(state: RunPageState, spanId: string): RunPageStep {
-  if (state.record.kind !== 'ended' || state.summary.kind !== 'ready') {
+  if (!isEndedRecord(state.record) || state.summary.kind !== 'ready') {
     return {state, requests: []};
   }
   if (state.history.kind !== 'idle') return {state, requests: []};
@@ -744,7 +763,7 @@ function recordStep(next: RunPageState, record: RunRecord): RunPageStep {
   if (record.kind !== 'live') {
     // The run ended (or left the listing): no stop is pending and no force is offered.
     const settled = {...next, stop: STOP_IDLE};
-    return record.kind === 'ended' ? relisted(settled) : {state: settled, requests: []};
+    return isEndedRecord(record) ? relisted(settled) : {state: settled, requests: []};
   }
   const listing = relisted(next);
   // A stop sent by anyone (this page, another window, the CLI) gets the same bound.
@@ -986,6 +1005,24 @@ function withAttached(state: RunPageState, token: number, error: string | null):
 }
 
 /** What the attached run's session reports and folds; nothing once the link is gone. */
+function retryLoad(state: RunPageState): RunPageStep {
+  if (state.record.kind !== 'ended' && state.record.kind !== 'historical')
+    return {state, requests: []};
+  if (state.summary.kind === 'ready' && state.history.kind === 'failed')
+    return startReading({...state, history: {kind: 'idle'}});
+  if (
+    state.summary.kind === 'failed' ||
+    state.summary.kind === 'unsupported' ||
+    state.history.kind === 'failed' ||
+    state.history.kind === 'unsupported'
+  )
+    return startSummary(
+      {...state, summary: {kind: 'idle'}, history: {kind: 'idle'}},
+      state.record.kind === 'ended' ? state.record.run.phase : (state.record.status ?? 'stopped'),
+    );
+  return {state, requests: []};
+}
+
 function liveStep(state: RunPageState, action: RunPageAction): RunPageStep | null {
   const attached = state.link.kind === 'attached';
   switch (action.type) {
@@ -1031,6 +1068,8 @@ function liveStep(state: RunPageState, action: RunPageAction): RunPageStep | nul
       return withHistory(state, action.token, action.reply);
     case 'summary':
       return withSummary(state, action.token, action.reply, action.wallMs);
+    case 'retry-load':
+      return retryLoad(state);
     case 'need-history':
       return withNeedHistory(state);
     case 'need-span':
@@ -1048,7 +1087,7 @@ function liveProblems(state: RunPageState): string[] {
   const live = state.record.kind === 'live' ? state.record.run.id : null;
   const held = state.link.kind === 'none' ? null : state.link.instance;
   if (held !== live) problems.push(`the link holds ${held} while the live server is ${live}`);
-  if (state.history.kind === 'reading' && state.record.kind !== 'ended') {
+  if (state.history.kind === 'reading' && !isEndedRecord(state.record)) {
     problems.push('history is read for a run that is not ended');
   }
   if (state.session !== null && state.link.kind !== 'attached') {

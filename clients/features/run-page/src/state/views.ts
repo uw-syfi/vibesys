@@ -58,6 +58,8 @@ function status(state: RunPageState): {label: string; tone: Tone} {
   switch (phase.kind) {
     case 'unlisted':
       return {label: 'Looking for the run', tone: 'neutral'};
+    case 'historical':
+      return {label: 'Saved run', tone: 'neutral'};
     case 'starting':
       return {label: 'Starting', tone: 'live'};
     case 'running':
@@ -451,7 +453,7 @@ export type TraceArrival = 'arrived' | 'awaited' | 'none';
 
 /** An ended run's recorded data, before falling back to the fold already on the page. */
 function endedTraceArrival(state: RunPageState): TraceArrival | null {
-  if (state.record.kind !== 'ended') return null;
+  if (state.record.kind !== 'ended' && state.record.kind !== 'historical') return null;
   if (state.summary.kind === 'reading') return 'awaited';
   // A ready summary keeps the run level whole while its optional transcript is read or fails.
   switch (state.history.kind) {
@@ -477,6 +479,7 @@ export function traceArrival(state: RunPageState): TraceArrival {
     case 'live':
       return state.link.kind === 'attaching' || state.link.kind === 'attached' ? 'awaited' : 'none';
     case 'ended':
+    case 'historical':
     case 'unlisted':
       return 'none';
   }
@@ -489,7 +492,11 @@ export function traceArrival(state: RunPageState): TraceArrival {
  * and its measurements as the run's only ones.
  */
 export function historyLoading(state: RunPageState): HistoryProgress | null {
-  if (state.record.kind !== 'ended' || state.history.kind !== 'reading') return null;
+  if (
+    (state.record.kind !== 'ended' && state.record.kind !== 'historical') ||
+    state.history.kind !== 'reading'
+  )
+    return null;
   // A run opened from its summary shows its run level whole while its transcript is read.
   return state.summary.kind === 'ready' ? null : state.history.progress;
 }
@@ -500,7 +507,11 @@ export function historyLoading(state: RunPageState): HistoryProgress | null {
  * transcript, while the run level remains final and usable.
  */
 export function transcriptLoading(state: RunPageState): HistoryProgress | null {
-  if (state.record.kind !== 'ended' || state.history.kind !== 'reading') return null;
+  if (
+    (state.record.kind !== 'ended' && state.record.kind !== 'historical') ||
+    state.history.kind !== 'reading'
+  )
+    return null;
   return state.summary.kind === 'ready' ? state.history.progress : null;
 }
 
@@ -510,7 +521,7 @@ export function transcriptLoading(state: RunPageState): HistoryProgress | null {
  * run's logs and its end record stay readable.
  */
 export function historyProblem(state: RunPageState): string | null {
-  if (state.record.kind !== 'ended') return null;
+  if (state.record.kind !== 'ended' && state.record.kind !== 'historical') return null;
   switch (state.history.kind) {
     case 'failed':
       return `Could not read the run’s history: ${state.history.message}`;

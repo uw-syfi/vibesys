@@ -21,3 +21,12 @@ export function Meter(props: {
     </span>
   );
 }
+
+/** Progress whose total is unknown. No numeric value is implied by the moving fill. */
+export function LoadingBar(props: {readonly label: string}): JSX.Element {
+  return (
+    <span className="vs-meter" role="progressbar" aria-label={props.label}>
+      <span className="vs-meter-fill vs-meter-indeterminate" />
+    </span>
+  );
+}
