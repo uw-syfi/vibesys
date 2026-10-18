@@ -38,6 +38,7 @@ from .evaluation_history import (
     RepeatedFailureGuidance,
 )
 from .job_observations import JobProgress, JobTimeout, MeasurementFailure, TimedOut
+from .measurement import BaseRef, BaseRun, Comparison, Reading, Sample
 from .until import Within
 from .waits import WaitOn
 
@@ -102,8 +103,6 @@ class MeasurementPlan(Value):
     Only a run with it may answer another measurement: an agent's evaluation on a shared
     host is timed beside other work, so it can never stand for an official run.
     """
-    reuse_agent_run: bool = Field(default=False, exclude_if=unset)
-    """The task opts in to reuse (``RunFacts.reuse_agent_run``); both runs must carry it."""
     measured_input: str | None = Field(default=None, min_length=1, exclude_if=unset)
     """The digest of what the evaluation reads at ``candidate``, when the runtime computed it.
 
@@ -182,9 +181,6 @@ class EvidenceAcceptanceReceipt(Value):
         return self
 
 
-_PROOF_KINDS = frozenset({EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK})
-
-
 class EvidenceRef(Value):
     """Evidence ref lifecycle contract."""
 
@@ -210,50 +206,18 @@ class EvidenceRef(Value):
     checked carries the same evidence id and status (`vs_core._measurement_reuse`).
     """
 
-    proof_kind: EvidenceKind | None = Field(default=None, exclude_if=unset)
-    """On a ``local-validation`` record, the proof kind its stage would have in an official run.
+    reading: Reading | None = Field(default=None, exclude_if=unset)
+    """The benchmark record's headline reading, as the trusted record states it.
 
-    An agent's record is ``local-validation`` whatever stage it read, so it carries the kind of
-    its stage here (correctness for the accuracy stage, benchmark for the others). Core
-    answers an official measurement from it only with a record of exactly this kind, so a
-    reused result cannot swap two stages' kinds. None on any other record.
+    Set by the runtime on a benchmark record only. Core keeps it so that the decisions over
+    samples (`vs_core._comparison`) are pure state that a resume replays, instead of numbers
+    held only in the runtime's ledger.
     """
 
     @property
     def key(self) -> EvidenceKey:
         """Run-wide identity: evidence IDs are unique only within a source request."""
         return EvidenceKey(source_request=self.source_request, evidence_id=self.evidence_id)
-
-    @model_validator(mode="after")
-    def only_a_framework_measurement_is_proof(self) -> EvidenceRef:
-        """Count only the framework's own measurement of a revision as proof of it.
-
-        An agent's own evaluation (``local-validation``, from the in-turn
-        ``submit_evaluation`` tool) may run while other agent work shares its host,
-        so its timing is not comparable with a serial run, and the framework cannot
-        tell from the record whether it ran alone. The rule: a measurement counts as
-        trusted only when the framework took it of the exact revision it retains, and
-        the framework always takes that measurement itself, serially, with the
-        official gates (``official`` purpose). Core alone may answer it from an earlier
-        framework-run job of the same measured input, and only when that job's plan says
-        its executor held the hosts alone (``vs_core._measurement_reuse``); the records
-        it then adds are new ``official`` rows naming that job. An agent record is
-        advice: it carries a kind that no eligibility requirement or ``accuracy_proof``
-        ever selects. Without this, a candidate with an agent record and its official
-        record would hold two CORRECTNESS rows and ``accuracy_proof`` would call them
-        ambiguous.
-        """
-        if self.purpose == "local-validation" and self.kind in _PROOF_KINDS:
-            raise ContractValidationError(
-                "kind", "a local-validation record cannot be correctness or benchmark proof"
-            )
-        if self.proof_kind is not None and (
-            self.kind is not EvidenceKind.LOCAL_VALIDATION or self.proof_kind not in _PROOF_KINDS
-        ):
-            raise ContractValidationError(
-                "proof_kind", "only a local-validation record names a correctness or benchmark kind"
-            )
-        return self
 
     @model_validator(mode="after")
     def original_acceptance(self) -> EvidenceRef:
@@ -312,6 +276,8 @@ class OwnedJob(Value):
     evidence: tuple[EvidenceRef, ...] = ()
     reuses: RequestId | None = Field(default=None, exclude_if=unset)
     """The earlier submission whose finished job answers this one (`SubmitMeasurement.reuses`)."""
+    base: BaseRef | None = Field(default=None, exclude_if=unset)
+    """The revision this run's candidate is compared with (`SubmitMeasurement.base`)."""
     pacing: ObservePacing = ObservePacing()
     wait: WaitOn | None = None
     """What the live job waits on: its next poll's timer, or the poll in flight. A terminal
@@ -400,6 +366,8 @@ class ResumeAuthorizationReceipt(Value):
     history_cursor: EvaluationHistoryCursor | None
     timeout: TimedOut | None = None
     repeated_failure: RepeatedFailureGuidance | None = None
+    comparisons: tuple[Comparison, ...] = Field(default=(), exclude_if=unset)
+    """The comparisons with a base of the candidates the wait's jobs measured, as held now."""
 
     @model_validator(mode="after")
     def guidance_cursor(self) -> ResumeAuthorizationReceipt:
@@ -635,42 +603,71 @@ class EvaluationState(Value):
     evidence: tuple[EvidenceRef, ...] = ()
     submission_budgets: tuple[SubmissionBudget, ...] = ()
     agent_calls: tuple[AgentCall, ...] = ()
+    base_runs: tuple[BaseRun, ...] = Field(default=(), exclude_if=unset)
+    """The runs of a base core asked for itself, which have no decision or agent call to name them."""
+    samples: tuple[Sample, ...] = Field(default=(), exclude_if=unset)
+    """Every conclusive framework run of a measured input, in the order the runs ended.
+
+    The one record of what each input measured. A measurement is all the samples of one input
+    under one evaluation, and a base is measured once because its samples are found here
+    (`vs_core._comparison`). The state is the cache: nothing else holds a base's numbers.
+    """
+    comparisons: tuple[Comparison, ...] = Field(default=(), exclude_if=unset)
+    """Each comparison of a candidate with its base, as the samples held made it, oldest first.
+
+    Appended whenever a new sample changes what a candidate compares to, so the log shows how
+    a verdict firmed up as runs were added. The newest of a (scope, candidate input) is current.
+    """
+
+    def asked_without_decision(self, request_id: RequestId, scope: Scope) -> bool:
+        """Whether ``request_id`` is a submission core admitted for an agent call or a base run.
+
+        Such a submission has no ``Measure`` decision, so core's own record of the call or of
+        the base run is what proves where it came from.
+        """
+        return any(
+            call.request_id == request_id and call.scope == scope for call in self.agent_calls
+        ) or any(run.request_id == request_id and run.scope == scope for run in self.base_runs)
 
     def evidence_for(self, key: EvidenceKey) -> EvidenceRef | None:
         """The ledger record with this full identity, or None."""
         return next((item for item in self.evidence if item.key == key), None)
 
     def accuracy_proof(self, candidate: RevisionRef) -> EvidenceRef | None:
-        """The one accepted accuracy proof for a candidate, or None.
+        """The accepted accuracy proof for a candidate, or None.
 
-        Ingress admits successful CORRECTNESS evidence only after the accuracy
-        stage and gate passed, so a ledger record that is trusted, successful and
-        carries its acceptance receipt proves accuracy. Two such records are
-        ambiguous and prove nothing. Operations that retain or promote a revision
-        carry this record by value, and the owner checks it against the revision.
+        Ingress admits successful CORRECTNESS evidence only after the accuracy stage and gate
+        passed, so a ledger record that is trusted, successful and carries its acceptance
+        receipt proves accuracy. Every conclusive run of a revision is a sample of its one
+        measurement, whoever asked for it (the agent's tool or the framework's check): the
+        proof is the first such record, and only while no trusted run of the revision failed
+        accuracy, since a candidate that passes on one run and fails on another has no proof.
+        Operations that retain or promote a revision carry this record by value, and the
+        owner checks it against the revision.
         """
-        proofs = tuple(
+        runs = tuple(
             item
             for item in self.evidence
             if item.candidate == candidate
             and item.kind == EvidenceKind.CORRECTNESS
-            and item.status == ObservationStatus.SUCCEEDED
             and item.provenance == "trusted"
             and item.acceptance_receipt is not None
         )
-        return proofs[0] if len(proofs) == 1 else None
+        passed = tuple(item for item in runs if item.status == ObservationStatus.SUCCEEDED)
+        failed = any(item.status == ObservationStatus.FAILED for item in runs)
+        return passed[0] if passed and not failed else None
 
     def measurements_of(self, candidate: RevisionRef) -> tuple[EvidenceRef, ...]:
-        """The trusted, successful official and baseline measurements of a revision.
+        """The trusted, successful measurements of a revision, whoever asked for them.
 
-        These are what the revision is known to measure: an agent's own local validation
-        and profiling are left out. Ledger order is kept.
+        These are what the revision is known to measure: the agent's own runs, the framework's
+        checks and the input's baseline. Profiling is left out. Ledger order is kept.
         """
         return tuple(
             item
             for item in self.evidence
             if item.candidate == candidate
-            and item.purpose in ("official", "baseline")
+            and item.purpose in ("official", "baseline", "local-validation")
             and item.status == ObservationStatus.SUCCEEDED
             and item.provenance == "trusted"
         )
@@ -704,6 +701,12 @@ class AgentMeasurementRequested(Value):
     ``time_bound`` and at the run deadline.
     """
     call_id: str = Field(min_length=1)
+    base_input: str | None = Field(default=None, min_length=1, exclude_if=unset)
+    """The measured input of the attempt's base revision, as the runtime computed it.
+
+    Core compares the candidate with the attempt's own base (``WorkspacePlan.base``); only the
+    digest of what the evaluation reads there is the runtime's to give. None: no comparison.
+    """
 
 
 class AgentRejection(StrEnum):
@@ -898,6 +901,8 @@ class ResumeAuthorized(Value):
     timeout: TimedOut | None = None
     history_cursor: EvaluationHistoryCursor | None = None
     repeated_failure: RepeatedFailureGuidance | None = None
+    comparisons: tuple[Comparison, ...] = Field(default=(), exclude_if=unset)
+    """The comparisons with a base of what the awaited jobs measured, frozen at authorization."""
 
     @model_validator(mode="after")
     def guidance_cursor(self) -> ResumeAuthorized:
@@ -976,6 +981,12 @@ class SubmitMeasurement(RequestBase):
     Core sets it only under the reuse rule (`vs_core._measurement_reuse`). The runtime then
     runs no job: it reads the earlier job's result again as this submission's evidence, each
     record naming ``reuses`` as ``reused_from``.
+    """
+    base: BaseRef | None = Field(default=None, exclude_if=unset)
+    """The revision the plan's candidate is compared with, when an agent asked for the run.
+
+    Core sets it from the attempt's own base and the base's measured input the runtime
+    computed. The run's sample names it, so its comparison can find the base's samples.
     """
 
 

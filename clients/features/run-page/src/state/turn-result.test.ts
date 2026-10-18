@@ -135,9 +135,9 @@ function world(transcript: readonly RunEvent[], status: Span['status'] = 'done')
     turnSpan('turn2', 'ws2', status),
   ];
   let state = runPageInitial({
-    identity: {host: 'ssh:chelan4', runId: '20261015-163047'},
+    identity: {host: 'ssh:host-b', runId: '20261015-163047'},
     title: {project: '~/p', task: 'mpmc'},
-    hostLabel: 'chelan4',
+    hostLabel: 'host-b',
     unavailable: {},
   });
   state = {...state, link: {kind: 'attached', instance: 'a1b2c3d4e5f6'}};
@@ -322,7 +322,7 @@ describe('another role’s reply keeps its fields and ends the turn', () => {
       }),
     ]);
     const card = resultOf(w, 'turn2', 2);
-    expect(card?.label).toBe('Implementer response');
+    expect(card?.label).toBe('Implementer');
     expect(card?.headline).toBeNull();
     expect(card?.chips).toEqual([{label: 'done'}]);
     expect(card?.sections.map(each => each.key)).toEqual(['summary']);

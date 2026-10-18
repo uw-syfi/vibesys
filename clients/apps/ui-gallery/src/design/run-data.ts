@@ -1,6 +1,6 @@
 /**
  * Fake data for the Run screen layout design (desktop redesign, run-layout): a queue-rs run on
- * chelan4 modelled on the e2e loop's real runs. Organized by what every search has: candidates,
+ * host-b modelled on the e2e loop's real runs. Organized by what every search has: candidates,
  * what each built on, their agent turns and gates. Fixed content: no clock, no randomness.
  */
 import type {ChartPoint, KeyValueItem, LogLine, StatusTone, ToolState} from '@vibesys/ui';
@@ -397,7 +397,7 @@ export function gateLog(candidate: Candidate): readonly LogLine[] {
 }
 
 export const NARRATION: readonly LogLine[] = [
-  {text: '21:17:36  started on chelan4 · codex model-a · 1 h'},
+  {text: '21:17:36  started on host-b · codex model-a · 1 h'},
   {text: '21:17:41  input measured: 2,330,000 ops/s'},
   {text: '21:18:20  planned: mpmc-ring-v1, treiber-stack'},
   {text: '21:23:52  treiber-stack failed: FIFO order broken in 7/100 trials'},

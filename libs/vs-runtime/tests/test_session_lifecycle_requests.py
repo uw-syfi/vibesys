@@ -32,9 +32,15 @@ from tests.support.session_world import (
 from vs_agent.api import AgentSessionState, DurableSessionStore
 from vs_agent.api.testing import FakeAgentSessions
 from vs_core.api import (
+    Continuation,
     ContinuationId,
+    ContinuationPhase,
     DecisionId,
+    DispatchTurn,
+    InvocationId,
+    InvocationRef,
     ObservationStatus,
+    ResourceId,
     SessionObserved,
     TurnObserved,
 )
@@ -392,6 +398,54 @@ async def test_resume_continues_the_retained_conversation_with_exact_identity() 
         assert event.observation.children_complete
         assert len(w.host.turns) == 2, "a repeat replays instead of dispatching"
         assert_core_accepts([first, again], expect_retry=False)
+
+
+class _Waits:
+    """The yield source of a host whose agent always asks to wait for one evaluation job."""
+
+    def __init__(self) -> None:
+        self.asked: list[str] = []
+
+    def yielded(self, request: DispatchTurn) -> Continuation:
+        self.asked.append(request.turn.invocation_id.root)
+        here = InvocationRef(
+            session_id=request.turn.session.session_id,
+            invocation_id=request.turn.invocation_id,
+            generation=request.scope.generation,
+        )
+        return Continuation(
+            continuation_id=ContinuationId(root=f"{request.turn.invocation_id.root}/evaluation"),
+            invocation=here,
+            next_invocation=here.model_copy(
+                update={"invocation_id": InvocationId(root=f"{here.invocation_id.root}/resume")}
+            ),
+            jobs=(ResourceId(root="job"),),
+            deadline_at=100.0,
+            phase=ContinuationPhase.WAITING,
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_resumed_turn_that_waits_again_is_observed_with_its_new_suspension() -> None:
+    """Resuming a turn does not end its right to wait: its observation carries the new wait.
+
+    An implementer that sees a measurement and changes its candidate asks for another one in
+    the same turn. Dropping the suspension of the resumed dispatch left that wait unrecorded.
+    """
+    waits = _Waits()
+    async with world() as w:
+        await w.started()
+        request = resume_request()
+        result = await lifecycle_executor(w.host, w.store(), w.sessions, yields=waits).execute(
+            cast("Any", request), context_for(request)
+        )
+        assert isinstance(result, ExecutionResult)
+        (event,) = result.owner_events
+        assert isinstance(event, TurnObserved)
+        assert event.suspension is not None
+        assert event.suspension.invocation.invocation_id == request.turn.invocation_id
+        assert event.suspension.jobs == (ResourceId(root="job"),)
+        assert waits.asked == [request.turn.invocation_id.root]
 
 
 @pytest.mark.asyncio

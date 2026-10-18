@@ -136,6 +136,7 @@ class EventType(StrEnum):
     RUN_CONFIGURED = "run_configured"
     FRAMEWORK_WARNING = "framework_warning"
     WINNER_SELECTED = "winner_selected"
+    MEASUREMENT_COMPARED = "measurement_compared"
     WORKSTREAM_FINISHED = "workstream_finished"
     TURN_USAGE_RECORDED = "turn_usage_recorded"
     SPAN_STARTED = "span_started"
@@ -735,6 +736,33 @@ class WinnerSelectedData(EventPayload):
     settlement_id: str | None = None
 
 
+class MeasurementVerdict(StrEnum):
+    """Which side of the noise a candidate falls on. Mirrors ``vs_core.api.ComparisonVerdict``."""
+
+    BETTER = "better"
+    WITHIN_NOISE = "within_noise"
+    WORSE = "worse"
+
+
+class MeasurementComparedData(EventPayload):
+    """A candidate's measurement was compared with its base's. See ``vibesys.events``."""
+
+    kind: Literal["measurement_compared"] = "measurement_compared"
+    metric: str
+    unit: str | None = None
+    direction: Literal["max", "min"]
+    candidate_commit: str
+    base_commit: str
+    candidate_value: FiniteFloat
+    base_value: FiniteFloat
+    ratio: FiniteFloat
+    noise: FiniteFloat
+    verdict: MeasurementVerdict
+    candidate_samples: int
+    base_samples: int
+    source: FrameworkSource = FrameworkSource.GATES
+
+
 class WorkstreamFailureKind(StrEnum):
     """Why a workstream ended without a measured candidate. Closed.
 
@@ -880,6 +908,7 @@ EventData = Annotated[
     | RunConfiguredData
     | FrameworkWarningData
     | WinnerSelectedData
+    | MeasurementComparedData
     | WorkstreamFinishedData
     | TurnUsageData
     | SpanStartedData

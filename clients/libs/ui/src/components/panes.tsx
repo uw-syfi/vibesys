@@ -7,10 +7,11 @@ export function Panes(props: {readonly children: ReactNode}): JSX.Element {
 }
 
 /**
- * A pane's width: `rail` (a collapsed parent), `list` (the list a selection was made in), `fill`
- * (what was selected) or `inspector` (one item read in full beside its list).
+ * A pane's width: `rail` (a collapsed parent), `list` (the list a selection was made in), `outline`
+ * (a list of short rows beside what one of them opened: narrower than a `list`), `fill` (what was
+ * selected) or `inspector` (one item read in full beside its list).
  */
-export type PaneWidth = 'rail' | 'list' | 'fill' | 'inspector';
+export type PaneWidth = 'rail' | 'list' | 'outline' | 'fill' | 'inspector';
 
 /**
  * A titled region of the frame whose body scrolls on its own. `kicker` says what kind of thing it

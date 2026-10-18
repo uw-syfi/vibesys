@@ -41,12 +41,12 @@ const SEED: FakeBridgeSeed = {
   chromeInset: {width: 84, height: 40},
   appearance: {mode: 'dark', light: 'paper', dark: 'ink'},
   listings: [
-    {kind: 'listed', host: 'ssh:chelan4', live: [LIVE], ended: [], unreadable: [], unverified: []},
+    {kind: 'listed', host: 'ssh:host-b', live: [LIVE], ended: [], unreadable: [], unverified: []},
   ],
   recent: [
     {
-      host: 'ssh:chelan4',
-      hostLabel: 'chelan4',
+      host: 'ssh:host-b',
+      hostLabel: 'host-b',
       project: PROJECT,
       task: 'mpmc',
       runId: RUN_ID,

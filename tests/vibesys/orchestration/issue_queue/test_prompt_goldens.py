@@ -235,7 +235,7 @@ def test_the_judge_is_shown_every_trusted_evaluation_it_is_given() -> None:
     evaluations = tuple(
         ReviewEvaluation(
             evidence_id=EvidenceId(root=f"evidence-{index}"),
-            kind=EvidenceKind.LOCAL_VALIDATION,
+            kind=EvidenceKind.BENCHMARK,
             revision=RevisionRef.of_git_commit(f"c{index}"),
             status=ObservationStatus.SUCCEEDED,
             passed=True,

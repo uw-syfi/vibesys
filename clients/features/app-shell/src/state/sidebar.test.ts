@@ -18,7 +18,7 @@ import {
   sidebarStep,
 } from './index.js';
 
-const HOSTS: readonly HostKey[] = ['local', 'ssh:chelan4', 'ssh:gpu'];
+const HOSTS: readonly HostKey[] = ['local', 'ssh:host-b', 'ssh:gpu'];
 const RUN_IDS = Array.from(
   {length: 30},
   (_, index) => `20261015-1600${String(index).padStart(2, '0')}`,
@@ -132,7 +132,7 @@ function randomAction(random: () => number): SidebarAction {
       screen === 'run'
         ? {kind: 'run', run: randomRun(random)}
         : screen === 'new-run' && random() < 0.5
-          ? {kind: 'new-run', machine: pick(random, ['local', 'ssh:chelan4'])}
+          ? {kind: 'new-run', machine: pick(random, ['local', 'ssh:host-b'])}
           : {kind: screen},
   };
 }
@@ -175,7 +175,7 @@ describe('sidebarStep', () => {
     step = sidebarStep(step.state, {
       type: 'machines-listed',
       token: listing?.token ?? 0,
-      hosts: ['local', 'ssh:chelan3', 'ssh:chelan4'],
+      hosts: ['local', 'ssh:host-a', 'ssh:host-b'],
     });
     expect(step.state.listings).toEqual([]);
     expect(machineCounts(step.state)).toEqual({count: 3, attention: 0});
@@ -352,7 +352,7 @@ describe('row statuses', () => {
 describe('runNotices', () => {
   const listed = (live: HostRun[], ended: HostRun[]): HostListing => ({
     kind: 'listed',
-    host: 'ssh:chelan4',
+    host: 'ssh:host-b',
     live,
     ended,
     unreadable: [],
@@ -376,7 +376,7 @@ describe('runNotices', () => {
       ['failed', 'b'],
       ['paused', 'c'],
     ]);
-    expect(runNotices(before, after)[1]?.body).toBe('queue-rs on chelan4: the benchmark crashed');
+    expect(runNotices(before, after)[1]?.body).toBe('queue-rs on host-b: the benchmark crashed');
     expect(runNotices(after, after)).toEqual([]);
   });
 

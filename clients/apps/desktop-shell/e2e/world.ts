@@ -39,7 +39,7 @@ export function server(id: string, runId: string, phase: string): Record<string,
 }
 
 export function listed(live: unknown[], ended: unknown[]): Record<string, unknown> {
-  return {kind: 'listed', host: 'ssh:chelan4', live, ended, unreadable: [], unverified: []};
+  return {kind: 'listed', host: 'ssh:host-b', live, ended, unreadable: [], unverified: []};
 }
 
 const RECENT = [
@@ -47,8 +47,8 @@ const RECENT = [
   {runId: '20261014-090000', task: 'spsc', attachedAt: 2},
   {runId: '20261013-120000', task: null, attachedAt: 1},
 ].map(run => ({
-  host: 'ssh:chelan4',
-  hostLabel: 'chelan4',
+  host: 'ssh:host-b',
+  hostLabel: 'host-b',
   project: PROJECT,
   instanceId: null,
   ...run,
@@ -68,7 +68,7 @@ export const SEED: FakeBridgeSeed = {
   recent: RECENT,
   machines: [
     {host: 'local', label: 'This Mac', checkout: '~/projs/vibesys'},
-    {host: 'ssh:chelan4', label: 'chelan4', checkout: '/home/me/vibesys'},
+    {host: 'ssh:host-b', label: 'host-b', checkout: '/home/me/vibesys'},
   ],
   directories: {
     '/home/me/': [

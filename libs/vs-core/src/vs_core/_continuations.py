@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
+from ._comparison import latest_comparisons
 from ._deadlines import bound_to_run, cleanup, limit_to, time_remains
 from ._evaluation_history import attempt_settled, produce_history
 from ._proofs import continues_admitted_work
@@ -46,6 +47,7 @@ from .types.evaluation import (
     InspectOwnedJob,
     JobTerminationRequested,
     ObserveOwnedJob,
+    OwnedJob,
     RegisteredOwnedJob,
     ResumeAuthorizationReceipt,
     ResumeAuthorized,
@@ -66,7 +68,6 @@ if TYPE_CHECKING:
         EvaluationEvent,
         EvaluationState,
         EvidenceRef,
-        OwnedJob,
     )
     from .types.evaluation_history import AttemptEvaluationHistory, EvaluationHistoryCursor
     from .types.kernel import RunState, SessionsContext, Signal, StrategyEvent
@@ -616,12 +617,22 @@ def _authorize(
         if history is not None and history.availability == EvaluationHistoryAvailability.COMPLETE
         else None
     )
+    comparisons = latest_comparisons(
+        state,
+        invocation.scope,
+        (
+            job.plan.measured_input
+            for job in _jobs(state, continuation)
+            if isinstance(job, OwnedJob) and job.plan.measured_input is not None
+        ),
+    )
     publication = ResumeAuthorizationReceipt(
         continuation_id=continuation.continuation_id,
         next_invocation=continuation.next_invocation,
         evidence=evidence,
         timeout=continuation.timeout,
         history_cursor=cursor,
+        comparisons=comparisons,
     )
     authorized = continuation.model_copy(
         update={
@@ -639,6 +650,7 @@ def _authorize(
                 evidence=authorized.evidence,
                 timeout=authorized.timeout,
                 history_cursor=publication.history_cursor,
+                comparisons=comparisons,
             ),
         ),
         signals=(

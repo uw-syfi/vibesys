@@ -979,6 +979,135 @@
       "protocol_version": 1,
       "run_id": "20261014-090000",
       "sequence": 42,
+      "timestamp": "2026-10-15T16:52:53+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w5-judge",
+          "parent": "flow:root/ws-5#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "running",
+          "started_at": 1322,
+          "label": {
+            "kind": "agent_turn",
+            "title": "judge",
+            "attrs_json": "{\"role\":\"judge\",\"model\":\"example-model\",\"agent\":\"judge-5\",\"started_by\":[\"planner-1\"]}"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261014-090000",
+      "sequence": 43,
+      "timestamp": "2026-10-15T16:52:54+00:00",
+      "type": "agent_output_chunk",
+      "invocation_id": "inv-op:w5-judge",
+      "agent_kind": "multi-judge",
+      "span_id": "op:w5-judge",
+      "data": {
+        "kind": "agent_output_chunk",
+        "channel": "analysis",
+        "content": "The candidate source matches the declared outcome.\n"
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261014-090000",
+      "sequence": 44,
+      "timestamp": "2026-10-15T16:52:54+00:00",
+      "type": "agent_output_chunk",
+      "invocation_id": "inv-op:w5-judge",
+      "agent_kind": "multi-judge",
+      "span_id": "op:w5-judge",
+      "data": {
+        "kind": "agent_output_chunk",
+        "channel": "analysis",
+        "content": "The benchmark and correctness gates both passed on the final revision."
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261014-090000",
+      "sequence": 45,
+      "timestamp": "2026-10-15T16:53:18+00:00",
+      "type": "agent_execution_finished",
+      "status": "completed",
+      "invocation_id": "inv-op:w5-judge",
+      "agent_kind": "multi-judge",
+      "span_id": "op:w5-judge",
+      "data": {
+        "kind": "agent_execution_finished",
+        "result": "{\"reply\":{\"analysis\":\"The candidate source matches the declared outcome: the head and tail counters now sit on separate cache lines, the ring still uses per-slot sequence numbers, and the correctness gate passed all 100 trials. The padding adds 128 bytes per queue, which the benchmark shows is repaid by the removed false sharing. No test was weakened and no dependency was added.\",\"feedback\":\"\",\"verdict\":\"pass\",\"skills_used\":[]}}",
+        "reply": {
+          "kind": "JudgeResponse",
+          "json_schema": {
+            "$defs": {
+              "Verdict": {
+                "enum": [
+                  "pass",
+                  "fail"
+                ],
+                "type": "string"
+              }
+            },
+            "properties": {
+              "analysis": {
+                "type": "string"
+              },
+              "feedback": {
+                "type": "string"
+              },
+              "verdict": {
+                "$ref": "#/$defs/Verdict"
+              }
+            },
+            "required": [
+              "analysis",
+              "feedback",
+              "verdict"
+            ],
+            "type": "object"
+          },
+          "value": {
+            "analysis": "The candidate source matches the declared outcome: the head and tail counters now sit on separate cache lines, the ring still uses per-slot sequence numbers, and the correctness gate passed all 100 trials. The padding adds 128 bytes per queue, which the benchmark shows is repaid by the removed false sharing. No test was weakened and no dependency was added.",
+            "feedback": "",
+            "verdict": "pass",
+            "skills_used": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261014-090000",
+      "sequence": 46,
+      "timestamp": "2026-10-15T16:53:19+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w5-judge",
+          "parent": "flow:root/ws-5#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "done",
+          "started_at": 1322,
+          "ended_at": 1348,
+          "label": {
+            "kind": "agent_turn",
+            "title": "judge",
+            "attrs_json": "{\"role\":\"judge\",\"model\":\"example-model\",\"agent\":\"judge-5\",\"started_by\":[\"planner-1\"]}"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261014-090000",
+      "sequence": 47,
       "timestamp": "2026-10-15T16:47:01+00:00",
       "type": "span_started",
       "data": {
@@ -1007,7 +1136,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261014-090000",
-      "sequence": 43,
+      "sequence": 48,
       "timestamp": "2026-10-15T16:47:02+00:00",
       "type": "span_started",
       "data": {
@@ -1045,7 +1174,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261014-090000",
-      "sequence": 44,
+      "sequence": 49,
       "timestamp": "2026-10-15T16:47:32+00:00",
       "type": "span_updated",
       "data": {
@@ -1083,7 +1212,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261014-090000",
-      "sequence": 45,
+      "sequence": 50,
       "timestamp": "2026-10-15T16:53:02+00:00",
       "type": "span_ended",
       "data": {
@@ -1124,7 +1253,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261014-090000",
-      "sequence": 46,
+      "sequence": 51,
       "timestamp": "2026-10-15T16:57:01+00:00",
       "type": "span_ended",
       "data": {
@@ -1160,7 +1289,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261014-090000",
-      "sequence": 47,
+      "sequence": 52,
       "timestamp": "2026-10-15T16:47:11+00:00",
       "type": "span_started",
       "data": {
@@ -1189,7 +1318,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261014-090000",
-      "sequence": 48,
+      "sequence": 53,
       "timestamp": "2026-10-15T16:47:12+00:00",
       "type": "span_started",
       "data": {
@@ -1212,7 +1341,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261014-090000",
-      "sequence": 49,
+      "sequence": 54,
       "timestamp": "2026-10-15T16:53:12+00:00",
       "type": "span_ended",
       "data": {
@@ -1236,7 +1365,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261014-090000",
-      "sequence": 50,
+      "sequence": 55,
       "timestamp": "2026-10-15T16:53:13+00:00",
       "type": "span_started",
       "data": {
@@ -1261,7 +1390,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261014-090000",
-      "sequence": 51,
+      "sequence": 56,
       "timestamp": "2026-10-15T16:57:10+00:00",
       "type": "span_ended",
       "data": {
@@ -1286,7 +1415,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261014-090000",
-      "sequence": 52,
+      "sequence": 57,
       "timestamp": "2026-10-15T16:57:11+00:00",
       "type": "span_ended",
       "data": {
@@ -1317,7 +1446,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261014-090000",
-      "sequence": 53,
+      "sequence": 58,
       "timestamp": "2026-10-15T16:59:11+00:00",
       "type": "span_started",
       "data": {
@@ -1340,7 +1469,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261014-090000",
-      "sequence": 54,
+      "sequence": 59,
       "timestamp": "2026-10-15T16:59:12+00:00",
       "type": "span_ended",
       "data": {
@@ -1365,7 +1494,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261014-090000",
-      "sequence": 55,
+      "sequence": 60,
       "timestamp": "2026-10-15T16:59:21+00:00",
       "type": "span_ended",
       "data": {
@@ -1384,7 +1513,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261014-090000",
-      "sequence": 56,
+      "sequence": 61,
       "timestamp": "2026-10-15T17:37:31+00:00",
       "type": "run_finished",
       "status": "completed",

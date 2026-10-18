@@ -2,7 +2,8 @@
  * An opened step's body (the frame draws its pane): an agent turn read as narrative (thinking and
  * text in time order, tool calls folded into one line between paragraphs that opens in place, a
  * failed call always its own red line, and the structured reply last as a card, with a one-line
- * summary of it above the narrative that scrolls to it), or a gate's verdict, numbers and log; and, at level 3, one item of the step in full (a tool
+ * summary of it above the narrative that scrolls to it when tool calls put the card out of sight),
+ * or a gate's verdict, numbers and log; and, at level 3, one item of the step in full (a tool
  * call's outcome, input and result).
  *
  * A live turn opens at its end and offers "New below" when scrolled up; a finished one opens at
@@ -133,10 +134,16 @@ function BlockView(args: {
   }
 }
 
-/** The one line that leads a turn with a reply: what it ended with; null while it has none. */
+/**
+ * The one line that leads a turn whose reply is out of sight: what it ended with. A turn that made
+ * tool calls puts its reply card below them, so the line tells the outcome and scrolls to it. A
+ * turn of thinking and a reply (a judge's) shows the card at once, and a line above it would only
+ * repeat the card: none for it, and none while the turn has no reply.
+ */
 function resultSummary(narrative: TurnNarrative, props: StepViewProps): string | null {
   const last = narrative.blocks.at(-1);
   if (last?.kind !== 'reply') return null;
+  if (!narrative.blocks.some(block => block.kind === 'tools')) return null;
   // The line is one line of plain words, though the reply's prose it quotes is Markdown.
   return markdownToPlain(
     turnResult(last.reply, {

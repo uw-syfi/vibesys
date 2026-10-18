@@ -18,6 +18,7 @@ from vibesys.events import (
     InvocationFinishedData,
     InvocationStartedData,
     IterationsChangedData,
+    MeasurementComparedData,
     PhaseData,
     RoundFinishedData,
     SpanEndedData,
@@ -33,7 +34,7 @@ from vibesys.run.agent_events import CoreAgentEventSink
 from vibesys.run.event_journal import EventJournal
 from vs_core.api import FlowDriver, FlowState, RunTrace, SpanChange, span_changes
 from vs_project.api import git_repositories
-from vs_runtime.api.core import RuntimeRecord, winner_selection
+from vs_runtime.api.core import RuntimeRecord, new_comparisons, winner_selection
 from vs_runtime.api.infrastructure import (
     AgentExecutionLifecycleEvent,
     AgentExecutionStarted,
@@ -56,6 +57,7 @@ if TYPE_CHECKING:
     from vibesys.config import Config
     from vibesys.constants import ComputeBackend
     from vs_agent.api import AgentEventSink
+    from vs_core.api import Comparison
     from vs_github.api import GitHubCLI
     from vs_project.api import Git, GitRepositoryFactory, Project, StateStoreFactory
     from vs_runtime.api.core import WinnerSelection
@@ -357,6 +359,30 @@ def _emit_winner_selected(
     )
 
 
+def _emit_comparisons(events: EventJournal, comparisons: tuple[Comparison, ...]) -> None:
+    """Emit ``MEASUREMENT_COMPARED`` for each comparison core newly logged."""
+    for comparison in comparisons:
+        events.emit(
+            CoreEventType.MEASUREMENT_COMPARED,
+            status=EventStatus.COMPLETED,
+            data=MeasurementComparedData(
+                metric=comparison.metric,
+                unit=comparison.unit,
+                direction=comparison.direction,
+                candidate_commit=comparison.candidate.git_commit
+                or comparison.candidate.revision_id.root,
+                base_commit=comparison.base.git_commit or comparison.base.revision_id.root,
+                candidate_value=comparison.candidate_value,
+                base_value=comparison.base_value,
+                ratio=comparison.ratio,
+                noise=comparison.noise,
+                verdict=comparison.verdict,
+                candidate_samples=comparison.candidate_samples,
+                base_samples=comparison.base_samples,
+            ),
+        )
+
+
 _SPAN_EVENTS: dict[
     SpanChange, tuple[CoreEventType, type[SpanStartedData | SpanUpdatedData | SpanEndedData]]
 ] = {
@@ -439,6 +465,11 @@ class _CoreCommitObserver:
             winner_selection(previous) if isinstance(previous, RuntimeRecord) else None,
             winner_selection(current) if isinstance(current, RuntimeRecord) else None,
         )
+        if isinstance(current, RuntimeRecord):
+            _emit_comparisons(
+                self._integration.events,
+                new_comparisons(previous if isinstance(previous, RuntimeRecord) else None, current),
+            )
         _emit_span_changes(self._integration.events, _run_trace(previous), _run_trace(current))
 
     def _report_failed_projection(self, current: BaseModel, failure: str) -> None:

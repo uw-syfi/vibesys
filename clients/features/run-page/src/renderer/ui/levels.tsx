@@ -188,7 +188,7 @@ function StepLevel(
       {zoomed.idea === null ? (
         <AgentsPane {...props} selected={zoomed.agent?.id ?? null} />
       ) : (
-        <Pane kicker="steps" title={markdownToPlain(zoomed.idea.title)} width="list">
+        <Pane kicker="steps" title={markdownToPlain(zoomed.idea.title)} width="outline">
           <StepList idea={zoomed.idea} selected={step.span} tokens={base.tokens} zoom={base.zoom} />
         </Pane>
       )}
@@ -220,7 +220,7 @@ function ItemLevel(
       <FramedPane
         kicker={step.role ?? step.kind.replaceAll('_', ' ')}
         title={step.title}
-        width="list"
+        width="outline"
         header={stepHeader(view)}
       >
         <StepView {...view} />

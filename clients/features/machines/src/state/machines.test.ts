@@ -27,9 +27,9 @@ const FACTS: MachineDescription = {
 
 const ENTRIES: readonly MachineEntry[] = [
   {host: 'local', label: 'This Mac', checkout: '/Users/me/vibesys'},
-  {host: 'ssh:chelan3', label: 'chelan3', checkout: '/mnt/data/vibesys'},
-  {host: 'ssh:chelan4', label: 'chelan4', checkout: '~/vibesys'},
-  {host: 'ssh:chelan5', label: 'chelan5', checkout: '~/vibesys'},
+  {host: 'ssh:host-a', label: 'host-a', checkout: '/mnt/data/vibesys'},
+  {host: 'ssh:host-b', label: 'host-b', checkout: '~/vibesys'},
+  {host: 'ssh:host-c', label: 'host-c', checkout: '~/vibesys'},
 ];
 const HOSTS = [...ENTRIES.map(entry => entry.host), 'ssh:gone'];
 const PATHS = ['/home/me/vibesys', '/home/me/vibesys-old', '/home/me/src'];
@@ -38,7 +38,7 @@ const FORMS: readonly FormName[] = ['add', 'fix'];
 const REPORTS: readonly MachineReport[] = [
   {kind: 'ready', facts: FACTS},
   {kind: 'ready', facts: null},
-  {kind: 'checkout-not-found', detail: '~/vibesys on chelan4 is not a directory.'},
+  {kind: 'checkout-not-found', detail: '~/vibesys on host-b is not a directory.'},
   {kind: 'sign-in', detail: 'the SSH key needs its passphrase'},
   {kind: 'unavailable', detail: 'the host did not answer in time'},
 ];
@@ -87,7 +87,7 @@ function userAction(random: Seeded, state: MachinesState): MachinesAction {
   return random.pick<MachinesAction>([
     {type: 'select', host},
     {type: 'open-add'},
-    {type: 'add-host', value: random.pick(['chelan6', 'chelan4', '-bad', ''])},
+    {type: 'add-host', value: random.pick(['host-d', 'host-b', '-bad', ''])},
     {
       type: 'checkout',
       form,
@@ -219,19 +219,19 @@ describe('machinesStep', () => {
       result: {ok: true, value: [ENTRIES[2] as MachineEntry]},
     });
     const report = reports.find(request => request.kind === 'report');
-    expect(report).toMatchObject({kind: 'report', host: 'ssh:chelan4'});
+    expect(report).toMatchObject({kind: 'report', host: 'ssh:host-b'});
     expect(machineStatus(state.machines[0] as never)).toBe('checking');
     run({
       type: 'reported',
       token: report?.token ?? 0,
-      host: 'ssh:chelan4',
+      host: 'ssh:host-b',
       result: {ok: true, value: {kind: 'checkout-not-found', detail: 'not a directory'}},
     });
-    expect(state.fixing).toMatchObject({host: 'ssh:chelan4', saving: null});
+    expect(state.fixing).toMatchObject({host: 'ssh:host-b', saving: null});
     expect(state.fixing?.path.checkout).toBe('~/vibesys');
     run({type: 'checkout', form: 'fix', value: '/home/me/src/vibesys'});
     const save = run({type: 'submit', form: 'fix'}).find(request => request.kind === 'save');
-    expect(save).toMatchObject({host: 'ssh:chelan4', checkout: '/home/me/src/vibesys'});
+    expect(save).toMatchObject({host: 'ssh:host-b', checkout: '/home/me/src/vibesys'});
     const relist = run({
       type: 'saved',
       form: 'fix',
@@ -240,7 +240,7 @@ describe('machinesStep', () => {
     });
     expect(state.fixing).toBeNull();
     expect(relist).toEqual([{kind: 'list', token: state.listing?.token ?? 0}]);
-    expect(state.listing?.select).toBe('ssh:chelan4');
+    expect(state.listing?.select).toBe('ssh:host-b');
   });
 
   test('checkout save and removal for one machine are mutually exclusive', () => {
@@ -249,22 +249,22 @@ describe('machinesStep', () => {
       token: 1,
       result: {ok: true, value: [ENTRIES[2] as MachineEntry]},
     }).state;
-    const fixing = machinesStep(listed, {type: 'open-fix', host: 'ssh:chelan4'}).state;
+    const fixing = machinesStep(listed, {type: 'open-fix', host: 'ssh:host-b'}).state;
 
     const saving = machinesStep(fixing, {type: 'submit', form: 'fix'});
     expect(saving.requests).toContainEqual(
-      expect.objectContaining({kind: 'save', host: 'ssh:chelan4'}),
+      expect.objectContaining({kind: 'save', host: 'ssh:host-b'}),
     );
     const removeDuringSave = machinesStep(saving.state, {
       type: 'remove',
-      host: 'ssh:chelan4',
+      host: 'ssh:host-b',
     });
     expect(removeDuringSave.state).toBe(saving.state);
     expect(removeDuringSave.requests).toEqual([]);
 
-    const removing = machinesStep(fixing, {type: 'remove', host: 'ssh:chelan4'});
+    const removing = machinesStep(fixing, {type: 'remove', host: 'ssh:host-b'});
     expect(removing.requests).toContainEqual(
-      expect.objectContaining({kind: 'remove', host: 'ssh:chelan4'}),
+      expect.objectContaining({kind: 'remove', host: 'ssh:host-b'}),
     );
     const saveDuringRemove = machinesStep(removing.state, {type: 'submit', form: 'fix'});
     expect(saveDuringRemove.state).toBe(removing.state);
@@ -279,9 +279,9 @@ describe('machinesStep', () => {
     }).state;
     const cases: readonly [string, string, string][] = [
       ['-oProxyCommand=x', '~/vibesys', 'is not a usable ssh host name'],
-      ['chelan4', '~/vibesys', 'already a machine'],
-      ['chelan6', 'vibesys', 'must be an absolute path or start with ~/'],
-      ['chelan6', '', 'must not be empty'],
+      ['host-b', '~/vibesys', 'already a machine'],
+      ['host-d', 'vibesys', 'must be an absolute path or start with ~/'],
+      ['host-d', '', 'must not be empty'],
     ];
     for (const [host, checkout, problem] of cases) {
       let state = machinesStep(listed, {type: 'open-add'}).state;
@@ -297,7 +297,7 @@ describe('machinesStep', () => {
     let state = machinesStep(initialMachines().state, {type: 'open-add'}).state;
     let requests: readonly MachinesRequest[] = [];
     for (const action of [
-      {type: 'add-host', value: 'chelan5'},
+      {type: 'add-host', value: 'host-c'},
       {type: 'checkout', form: 'add', value: '/home/me/'},
     ] as const) {
       const step = machinesStep(state, action);
@@ -305,7 +305,7 @@ describe('machinesStep', () => {
       requests = step.requests;
     }
     const listing = requests.find(request => request.kind === 'complete');
-    expect(listing).toMatchObject({host: 'ssh:chelan5', directory: '/home/me/', form: 'add'});
+    expect(listing).toMatchObject({host: 'ssh:host-c', directory: '/home/me/', form: 'add'});
     const asked = machinesStep(state, {
       type: 'completed',
       form: 'add',
@@ -347,7 +347,7 @@ describe('machinesStep', () => {
     const state = machinesStep(step.state, {
       type: 'reported',
       token,
-      host: 'ssh:chelan4',
+      host: 'ssh:host-b',
       result: {ok: true, value: {kind: 'ready', facts: FACTS}},
     }).state;
     expect(machineFacts(state.machines[0] as never)).toEqual([

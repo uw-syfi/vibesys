@@ -10,6 +10,7 @@ from vibesys.api import (
     FrameworkWarningData,
     GateFinishedData,
     GateStartedData,
+    MeasurementComparedData,
     ProviderSwitchedData,
     QuotaAbandonedData,
     QuotaPausedData,
@@ -42,6 +43,8 @@ def format_framework_event(event: CoreEvent) -> str | None:
             text = _format_framework_warning(data)
         case WinnerSelectedData():
             text = _format_winner_selected(data)
+        case MeasurementComparedData():
+            text = _format_measurement_compared(data)
     return text
 
 
@@ -203,6 +206,17 @@ def _format_framework_warning(data: FrameworkWarningData) -> str:
     if data.detail:
         return f"[warn] {data.summary}: {data.detail}"
     return f"[warn] {data.summary}"
+
+
+def _format_measurement_compared(data: MeasurementComparedData) -> str:
+    unit = f" {data.unit}" if data.unit else ""
+    return (
+        f"[compare] {data.candidate_commit[:_SHA_ABBREV]} vs base "
+        f"{data.base_commit[:_SHA_ABBREV]}: {data.verdict.value}, "
+        f"{data.candidate_value:g}{unit} vs {data.base_value:g}{unit}, "
+        f"ratio {data.ratio:.3f} \u00b1 {data.noise:.3f} "
+        f"({data.candidate_samples} and {data.base_samples} samples)"
+    )
 
 
 def _format_winner_selected(data: WinnerSelectedData) -> str:

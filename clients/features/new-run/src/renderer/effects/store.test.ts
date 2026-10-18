@@ -184,7 +184,7 @@ test('a helper older than New run is never asked to check or start, and Start sa
   const clock = manualSchedule();
   const asked: string[] = [];
   const {store} = createNewRunStore(fakeBridge(['preflight', 'harnesses'], asked), {
-    recent: [recentRun('ssh:chelan4', '/p', 2)],
+    recent: [recentRun('ssh:host-b', '/p', 2)],
     schedule: clock.schedule,
     started: () => undefined,
   });
@@ -192,9 +192,9 @@ test('a helper older than New run is never asked to check or start, and Start sa
   clock.runDue();
   await settle();
   const [first] = readiness(store.getState());
-  expect(first).toMatchObject({id: 'helper', state: 'fail', label: 'VibeSys on chelan4'});
+  expect(first).toMatchObject({id: 'helper', state: 'fail', label: 'VibeSys on host-b'});
   expect(first?.detail).toBe(
-    'VibeSys on chelan4 is older than this app: update its checkout to start runs from here ' +
+    'VibeSys on host-b is older than this app: update its checkout to start runs from here ' +
       '(it lacks run_options, examples).',
   );
   expect(startBlocked(store.getState())).toBe('Fix the items marked above to start.');
@@ -272,7 +272,7 @@ function backendBridge(
 async function checked(bridge: NewRunBridge) {
   const clock = manualSchedule();
   const {store} = createNewRunStore(bridge, {
-    recent: [recentRun('ssh:chelan4', '/p', 2)],
+    recent: [recentRun('ssh:host-b', '/p', 2)],
     schedule: clock.schedule,
     started: () => undefined,
   });
@@ -289,7 +289,7 @@ test('a task for a backend the machine lacks is worded for this screen, naming t
 
   expect(settings?.state).toBe('fail');
   expect(settings?.detail).toBe(
-    'The task "mpmc" runs on NVIDIA GPU (CUDA), which chelan4 does not have. Choose another task or another machine.',
+    'The task "mpmc" runs on NVIDIA GPU (CUDA), which host-b does not have. Choose another task or another machine.',
   );
   expect(settings?.detail).not.toMatch(/--|backend:|setting/i);
 });

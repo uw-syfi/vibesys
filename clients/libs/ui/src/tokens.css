@@ -96,6 +96,7 @@
   --column-figure: 320px;
   --column-chart: 520px;
   --pane-list: 380px;
+  --pane-outline: 340px;
   --row-dense: 28px;
   --gantt-label: 220px;
   --gantt-label-max: 420px;
@@ -112,6 +113,7 @@
   --log: 320px;
   --log-sm: 160px;
   --thread: 480px;
+  --measure: 105ch;
   --radius-sm: 4px;
   --radius: 6px;
   --radius-lg: 8px;

@@ -1819,7 +1819,9 @@ def _orphan_source(
             return None
     else:
         return None
-    if any(call.request_id == source for call in context.evaluation.agent_calls):
+    if any(call.request_id == source for call in context.evaluation.agent_calls) or any(
+        run.request_id == source for run in context.evaluation.base_runs
+    ):
         return None
     return source
 

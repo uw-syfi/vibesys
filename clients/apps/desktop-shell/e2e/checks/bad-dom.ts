@@ -36,6 +36,10 @@ export const CLEAN_SCREEN = `
       <span style="display:inline-block;width:10px;height:10px;background:rgb(40, 90, 200)"></span> passed
     </div>
     <p>The planner explained <code>total_ops_per_sec</code> and <code>0123456789abcdef0123</code>.</p>
+    <div style="width:80px">we will pad and re-measure the queue</div>
+    <div class="vs-pane-body" style="width:440px">
+      <div style="max-width:100ch">The judge read the candidate source and found that it matches the declared outcome, so the idea passed.</div>
+    </div>
   </div>`;
 
 export const BAD_SCREENS: readonly BadScreen[] = [
@@ -138,6 +142,12 @@ export const BAD_SCREENS: readonly BadScreen[] = [
     check: 'chart-size',
     message: /the performance chart is 330 by 60 px/,
     html: `<div style="${PAGE}"><svg role="group" aria-label="Metric of each measured idea over the run, with the best so far" width="330" height="60"><circle cx="40" cy="30" r="4" fill="red"/></svg></div>`,
+  },
+  {
+    name: 'an agent turn in a column a third of its pane, with dead space beside it',
+    check: 'pane-fill',
+    message: /a pane's content uses 160 px of its 440 px \(36%\) while text wraps/,
+    html: `<div style="${PAGE}"><div class="vs-pane-body" style="width:440px"><div style="max-width:160px">The candidate source matches the declared outcome and the gates passed.</div></div></div>`,
   },
   {
     name: 'text drawn outside the window',

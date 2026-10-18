@@ -65,7 +65,7 @@ def unset(value: object) -> bool:
     new field changes the envelope's shape and version, and core refuses an envelope of
     another version (there is no migration).
     """
-    return value is None or value is False
+    return value is None or value is False or (isinstance(value, tuple) and not value)
 
 
 class Value(BaseModel):
@@ -388,7 +388,6 @@ class EvidenceKind(StrEnum):
     CORRECTNESS = "correctness"
     BENCHMARK = "benchmark"
     PROFILING = "profiling"
-    LOCAL_VALIDATION = "local-validation"
 
 
 class AssessmentKind(StrEnum):
@@ -731,6 +730,11 @@ class TaskTerms(Value):
     """Seconds a measurement may wait in the evaluation queue."""
     accuracy_stage: str | None = Field(default=None, min_length=1)
     """The stage whose pass is the correctness gate."""
+    benchmark_stage: str | None = Field(default=None, min_length=1)
+    """The stage whose benchmark reading a candidate is compared with its base on, if any.
+
+    A task without one has no number to compare, so core measures no base for it
+    (`vs_core._comparison`)."""
     accuracy_gated: tuple[EvidenceKind, ...] = ()
     """Evidence kinds that count only if the accuracy stage passed."""
     operation_seconds: float = Field(gt=0, allow_inf_nan=False)
@@ -739,6 +743,11 @@ class TaskTerms(Value):
     """The directed axes candidates are ranked on, headline first."""
     relative_noise: float = Field(default=0.0, ge=0.0, lt=1.0)
     """The benchmark's declared variation: a reading must beat the input by more than this."""
+    base_staleness: float = Field(default=21_600.0, gt=0, allow_inf_nan=False)
+    """Seconds after which a measured base no longer stands for the host it was timed on.
+
+    A candidate's comparison reads only base samples this young, on the run clock, and a base
+    with none fresh is measured again (`vs_core._comparison`)."""
     profile_fields: tuple[str, ...] = ()
     """The measurement fields the task's profile capture supplies."""
 
@@ -754,7 +763,11 @@ class TaskTerms(Value):
     @model_validator(mode="after")
     def _stages_exist(self) -> TaskTerms:
         known = {item.stage_id for item in self.stages}
-        named = {*self.measured, *([self.accuracy_stage] if self.accuracy_stage else [])}
+        named = {
+            *self.measured,
+            *([self.accuracy_stage] if self.accuracy_stage else []),
+            *([self.benchmark_stage] if self.benchmark_stage else []),
+        }
         if unknown := sorted(named - known):
             raise ContractValidationError("measured", f"names stages the task lacks: {unknown}")
         return self
@@ -776,12 +789,6 @@ class RunFacts(Value):
     The executor's capability, derived from how it submits jobs (a Slurm job with a bare
     ``--exclusive`` or an operator declaration), never from a backend's name. A run timed so is timed as an official
     measurement is, so only such a run may answer one (``vs_core._measurement_reuse``).
-    """
-    reuse_agent_run: bool = Field(default=False, exclude_if=unset)
-    """The task opts in to answering an official measurement with the agent's own run.
-
-    Declared by the task author. Off by default because reuse lets an agent re-measure until
-    a run suits it, which biases the official score upward by the benchmark's noise.
     """
     artifacts: tuple[ArtifactRef, ...] = ()
     task: TaskTerms | None = None

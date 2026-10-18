@@ -131,9 +131,9 @@ async function settled(): Promise<void> {
 }
 
 const SEED = {
-  identity: {host: 'ssh:chelan4', runId: '20261015-163047'},
+  identity: {host: 'ssh:host-b', runId: '20261015-163047'},
   title: {project: '~/vibesys-projects/queue-rs', task: 'mpmc'},
-  hostLabel: 'chelan4',
+  hostLabel: 'host-b',
   unavailable: {logs: 'not here'},
 } as const;
 

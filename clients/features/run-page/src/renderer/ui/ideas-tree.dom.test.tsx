@@ -50,9 +50,9 @@ const SHAPE = {
 
 function initial(): RunPageState {
   const state = runPageInitial({
-    identity: {host: 'ssh:chelan4', runId: 'run-1'},
+    identity: {host: 'ssh:host-b', runId: 'run-1'},
     title: {project: 'queue-rs', task: null},
-    hostLabel: 'chelan4',
+    hostLabel: 'host-b',
     unavailable: {},
   });
   return {...state, ideas: {...state.ideas, failed: true}};

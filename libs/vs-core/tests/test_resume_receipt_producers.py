@@ -731,3 +731,41 @@ def test_published_receipt_survives_valid_parking_and_confirmed_reopen_without_r
     assert resumed.events == ()
     assert resumed.state.evaluation.continuations[0].phase == core.ContinuationPhase.AUTHORIZED
     assert resumed.state.evaluation.continuations[0].authorization_receipt == receipt
+
+
+@given(
+    index=st.integers(min_value=0, max_value=2),
+    later=st.integers(min_value=1, max_value=5),
+    delay=st.floats(min_value=0.001, max_value=60.0),
+)
+def test_a_job_polled_again_after_its_end_keeps_its_submission_in_certified_history(
+    index: int, later: int, delay: float
+) -> None:
+    """A poll in flight when a job ended answers again; the ledger keeps the first answer.
+
+    The job's view of its end then differs from its submission's record only by a newer
+    sequence, event and time. That is the same conclusion read later, so it must not make
+    the attempt's history unavailable and strand the resume that waits on it.
+    """
+    state, wait = publication_state()
+    job = state.evaluation.jobs[index]
+    assert job.observation is not None
+    again = job.observation.model_copy(
+        update={
+            "sequence": job.observation.sequence + later,
+            "event_id": core.EventId(root=f"{job.observation.event_id.root}:again:{later}"),
+            "observed_at": job.observation.observed_at + delay,
+        }
+    )
+    jobs = tuple(
+        row.model_copy(update={"observation": again}) if row is job else row
+        for row in state.evaluation.jobs
+    )
+    state = state.model_copy(
+        update={"evaluation": state.evaluation.model_copy(update={"jobs": jobs})}
+    )
+    result = core.step(state, core.TurnSuspended(continuation=wait))
+    receipt = result.state.evaluation.continuations[0].authorization_receipt
+    assert receipt is not None
+    assert receipt.history_cursor is not None
+    dispatch_publication(result.state, wait)

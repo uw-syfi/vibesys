@@ -9,6 +9,7 @@ from vibesys.api import (
     FrameworkWarningData,
     GateFinishedData,
     GateStartedData,
+    MeasurementComparedData,
     ProviderSwitchedData,
     QuotaAbandonedData,
     QuotaPausedData,
@@ -31,6 +32,7 @@ from vibesys.events import (
     UsageUpdateData,
     make_core_event,
 )
+from vs_core.api import ComparisonVerdict
 
 
 def _render(
@@ -214,6 +216,30 @@ class TestFrameworkEvents:
 
         assert candidate == f"[result] selected trusted winner {'c' * 12} (settlement s-1)\n"
         assert baseline.startswith("[result] selected the trusted input unchanged")
+
+    def test_a_comparison_states_the_verdict_the_values_and_the_sample_counts(self) -> None:
+        out = _render_event(
+            CoreEventType.MEASUREMENT_COMPARED,
+            MeasurementComparedData(
+                metric="throughput",
+                unit="tok/s",
+                direction="max",
+                candidate_commit="c" * 40,
+                base_commit="b" * 40,
+                candidate_value=130.0,
+                base_value=100.0,
+                ratio=1.3,
+                noise=0.0283,
+                verdict=ComparisonVerdict.BETTER,
+                candidate_samples=2,
+                base_samples=1,
+            ),
+        )
+
+        assert out == (
+            f"[compare] {'c' * 12} vs base {'b' * 12}: better, 130 tok/s vs 100 tok/s, "
+            "ratio 1.300 \u00b1 0.028 (2 and 1 samples)\n"
+        )
 
     def test_run_configuration_header(self) -> None:
         out = _render_event(

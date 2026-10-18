@@ -246,9 +246,9 @@ const GATE = span('op:gate', 'flow:root#1', {
 
 function run(events: readonly RunEvent[]) {
   let state = runPageInitial({
-    identity: {host: 'ssh:chelan4', runId: '20261015-163047'},
+    identity: {host: 'ssh:host-b', runId: '20261015-163047'},
     title: {project: '~/p', task: 'mpmc'},
-    hostLabel: 'chelan4',
+    hostLabel: 'host-b',
     unavailable: {},
   });
   state = {...state, link: {kind: 'attached', instance: 'a1b2c3d4e5f6'}};

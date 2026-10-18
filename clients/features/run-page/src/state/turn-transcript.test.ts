@@ -9,7 +9,7 @@ import {viewedRun} from './views.js';
 
 /** A run's turns as the server sends them: span events, then each turn's events stamped with it. */
 
-const RUN = {host: 'ssh:chelan4', runId: '20261015-163047'} as const;
+const RUN = {host: 'ssh:host-b', runId: '20261015-163047'} as const;
 
 function span(
   id: string,
@@ -90,7 +90,7 @@ function page(transcript: readonly RunEvent[], span: string): Selected {
   let state = runPageInitial({
     identity: RUN,
     title: {project: '~/vibesys-projects/queue-rs', task: 'mpmc'},
-    hostLabel: 'chelan4',
+    hostLabel: 'host-b',
     unavailable: {},
   });
   // The page folds run data only while attached to the live run.

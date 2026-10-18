@@ -123,9 +123,9 @@ function fixture(
   more: readonly Span[] = [],
 ): Fixture {
   let state = runPageInitial({
-    identity: {host: 'ssh:chelan4', runId: '20261015-163047'},
+    identity: {host: 'ssh:host-b', runId: '20261015-163047'},
     title: {project: '~/p', task: 'mpmc'},
-    hostLabel: 'chelan4',
+    hostLabel: 'host-b',
     unavailable: {},
   });
   state = {...state, link: {kind: 'attached', instance: 'a1b2c3d4e5f6'}};
@@ -519,6 +519,17 @@ describe('the turn’s layout', () => {
     const container = await mount(<StepView {...viewProps(fx, fx.turn, null)} />);
     expect(all(container, '.vs-turn-result')).toHaveLength(0);
     expect(all(container, '.vs-button')).toHaveLength(0);
+  });
+
+  test('a turn of thinking and a reply shows its card at once, with no line repeating it', async () => {
+    const fx = fixture([chunk(10, 'analysis', 'Counters share a cache line.'), reply(18)]);
+    const container = await mount(<StepView {...viewProps(fx, fx.turn, null)} />);
+    expect(all(container, '.vs-turn-result')).toHaveLength(1);
+    expect(all(container, '.vs-button').map(each => each.textContent)).not.toContain(
+      'Implementer reply: done · Padded the counters.',
+    );
+    expect(one(container, '.vs-turn-result').textContent).toContain('Implementer');
+    expect(one(container, '.vs-turn-result').textContent).not.toContain('Implementer reply');
   });
 
   test('the plan card ends the orchestrator’s turn, and its base opens that idea', async () => {

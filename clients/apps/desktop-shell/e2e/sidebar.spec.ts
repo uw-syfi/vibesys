@@ -29,7 +29,7 @@ const WORLD: FakeBridgeSeed = {
   listings: [
     {
       kind: 'listed',
-      host: 'ssh:chelan4',
+      host: 'ssh:host-b',
       live: [
         {
           id: INSTANCE,
@@ -50,8 +50,8 @@ const WORLD: FakeBridgeSeed = {
   ],
   recent: [
     {
-      host: 'ssh:chelan4',
-      hostLabel: 'chelan4',
+      host: 'ssh:host-b',
+      hostLabel: 'host-b',
       project: PROJECT,
       task: 'mpmc',
       runId: RUN_ID,

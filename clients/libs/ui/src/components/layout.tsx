@@ -59,15 +59,36 @@ export function Reserve(props: {readonly children: ReactNode}): JSX.Element {
   );
 }
 
-/** The scrolling main area: the page gutter, and content centred at `width`. */
+/**
+ * The main area: the page gutter, and content centred at `width`. Without a `header` the page
+ * scrolls as one document, which suits a short page. With one, the page never scrolls: the
+ * `header` (a title, a logo, the page's actions) stays fully in view and the body below it
+ * scrolls on its own, with a shade at the edge that has more behind it. A header is for a page
+ * whose body can outgrow the window.
+ */
 export function Page(props: {
   readonly width?: PageWidth;
+  /** What stays in view above a body that scrolls. */
+  readonly header?: ReactNode;
   readonly children: ReactNode;
 }): JSX.Element {
+  const width = props.width ?? 'content';
+  if (props.header === undefined) {
+    return (
+      <main className="vs-page">
+        <div className="vs-page-content" data-width={width}>
+          {props.children}
+        </div>
+      </main>
+    );
+  }
   return (
-    <main className="vs-page">
-      <div className="vs-page-content" data-width={props.width ?? 'content'}>
-        {props.children}
+    <main className="vs-page" data-fixed-header="">
+      <div className="vs-page-content" data-width={width}>
+        <div className="vs-page-header">{props.header}</div>
+        <div className="vs-page-scroll">
+          <div className="vs-page-body">{props.children}</div>
+        </div>
       </div>
     </main>
   );
@@ -88,7 +109,8 @@ export function Row(props: FlexProps): JSX.Element {
  * `asideFirst` puts the aside before the main column, in reading order and on screen (a list
  * beside the detail of its selected row); when narrow it then sits above it. `stickyAside` keeps
  * the aside in view while a long main column scrolls past (the detail of a row picked far down a
- * list); an aside taller than the window scrolls within itself.
+ * list, or the start panel beside a long form); an aside taller than its scroll area
+ * scrolls within itself.
  */
 export function Split(props: {
   readonly main: ReactNode;

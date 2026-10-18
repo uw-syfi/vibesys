@@ -59,6 +59,9 @@ Data and validation:
 
 - Use Pydantic models for external contracts and `StrEnum` or `Literal` for
   closed sets. No raw strings where an enum or registry exists.
+- Never commit private server names, internal hostnames, personal paths, or keys and tokens;
+  use generic placeholders such as `host-a`. No repository check can hold this, because the
+  names themselves are private.
 - Reject unknown config, metadata, and routing keys. Validate early with errors
   that name the offending key or path.
 - Keep one source of truth per fact, and one authoritative definition of each

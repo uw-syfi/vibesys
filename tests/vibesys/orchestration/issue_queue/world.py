@@ -378,11 +378,7 @@ class IssueQueueWorld:
             refs.append(
                 EvidenceRef(
                     evidence_id=EvidenceId(root=f"{stage.stage_id}:{plan.purpose}:{commit}"),
-                    kind=(
-                        EvidenceKind.LOCAL_VALIDATION
-                        if plan.purpose == "local-validation"
-                        else _KINDS[stage.stage_id]
-                    ),
+                    kind=_KINDS[stage.stage_id],
                     purpose=plan.purpose,
                     scope=job.scope,
                     source_request=job.submission_id,

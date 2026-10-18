@@ -70,7 +70,7 @@ function everyCause(): Cause[] {
 
 test('every cause is worded for this screen, and no headline names a flag or the run’s raw text', () => {
   for (const cause of everyCause()) {
-    const words = failureWords(failed(cause), 'chelan4');
+    const words = failureWords(failed(cause), 'host-b');
 
     expect(words).not.toBeNull();
     expect(words?.headline.length).toBeGreaterThan(20);
@@ -85,7 +85,7 @@ test('every cause is worded for this screen, and no headline names a flag or the
 test('every cause names the control to change or the step to take next', () => {
   const next = /Choose|Fix|Edit|Clear|Reset|Set |Sign in|Commit|move the evaluator|Change/;
   for (const cause of everyCause()) {
-    expect(failureWords(failed(cause), 'chelan4')?.headline).toMatch(next);
+    expect(failureWords(failed(cause), 'host-b')?.headline).toMatch(next);
   }
 });
 
@@ -99,14 +99,14 @@ test('the run’s raw text is kept apart as a detail, and only for causes that c
     'github_unavailable',
   ]);
   for (const cause of everyCause()) {
-    const raw = failureWords(failed(cause), 'chelan4')?.raw ?? null;
+    const raw = failureWords(failed(cause), 'host-b')?.raw ?? null;
     expect(raw !== null).toBe(carrying.has(cause.kind) || cause.kind === 'arguments_unrecognized');
   }
   expect(failureWords(failed(CAUSES.arguments_unrecognized), 'm')?.raw).toBe('--max-rounds 3');
 });
 
 test('a search without rounds is worded by the Rounds control, not by its flag', () => {
-  const words = failureWords(failed(CAUSES.option_not_accepted), 'chelan4');
+  const words = failureWords(failed(CAUSES.option_not_accepted), 'host-b');
 
   expect(words?.headline).toBe(
     'This search does not take a number of rounds. Clear Rounds, or change the search in Extra arguments, then check again.',
@@ -125,15 +125,13 @@ test('causes fixed outside this screen offer Check again, and those fixed by a c
 });
 
 test('the machine is named where the failure is about it', () => {
-  expect(failureWords(failed(CAUSES.backend_unavailable), 'chelan4')?.headline).toContain(
-    'chelan4',
-  );
-  expect(failureWords(failed(CAUSES.sysbox_missing), 'chelan4')?.headline).toContain('chelan4');
-  expect(failureWords(failed(CAUSES.github_unavailable), 'chelan4')?.headline).toContain('chelan4');
+  expect(failureWords(failed(CAUSES.backend_unavailable), 'host-b')?.headline).toContain('host-b');
+  expect(failureWords(failed(CAUSES.sysbox_missing), 'host-b')?.headline).toContain('host-b');
+  expect(failureWords(failed(CAUSES.github_unavailable), 'host-b')?.headline).toContain('host-b');
 });
 
 test('a failed setting with no known cause gets a generic headline, and its message as the detail', () => {
-  const words = failureWords(failed(null), 'chelan4');
+  const words = failureWords(failed(null), 'host-b');
 
   expect(words?.headline).toBe(
     "These settings can't be used to start a run. Check the project, task, agent and Extra arguments, then check again.",
@@ -145,7 +143,7 @@ test('a failed setting with no known cause gets a generic headline, and its mess
 test('a cause from a helper newer than this app is worded generically too', () => {
   const unknown = {kind: 'a_cause_added_later', problem: RAW} as unknown as Cause;
 
-  const words = failureWords(failed(unknown), 'chelan4');
+  const words = failureWords(failed(unknown), 'host-b');
 
   expect(words?.headline).toContain("These settings can't be used");
   expect(words?.headline).not.toContain(RAW);
@@ -153,5 +151,5 @@ test('a cause from a helper newer than this app is worded generically too', () =
 });
 
 test('a failed check that is not about the settings and has no cause keeps its own detail', () => {
-  expect(failureWords(failed(null, 'docker_reachable'), 'chelan4')).toBeNull();
+  expect(failureWords(failed(null, 'docker_reachable'), 'host-b')).toBeNull();
 });

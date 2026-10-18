@@ -3,6 +3,7 @@ import {
   ELEVATION,
   FONT_STACKS,
   MOTION,
+  PROSE_MEASURE_CH,
   RADIUS,
   SERIES,
   SIZE,
@@ -72,6 +73,7 @@ function scaleDeclarations(): string[] {
     ...(Object.keys(TYPE) as TextStyle[]).flatMap(textDeclarations),
     ...Object.entries(SPACE).map(([token, px]) => `--${token}: ${px}px;`),
     ...Object.entries(SIZE).map(([token, px]) => `--${token}: ${px}px;`),
+    `--measure: ${PROSE_MEASURE_CH}ch;`,
     ...Object.entries(RADIUS).map(([token, px]) => `--${token}: ${px}px;`),
     ...Object.entries(ELEVATION).flatMap(([level, {shadow, scrim}]) => [
       `--elevation-${level}: ${shadow};`,

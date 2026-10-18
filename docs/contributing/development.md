@@ -402,7 +402,24 @@ To run it before every push that changes `clients/`, install the opt-in hook onc
 ./scripts/install_pre_push_hook.sh --remove   # remove
 ```
 
-Nothing installs the hook for you. Pushing with `--no-verify` skips it for one push.
+Nothing installs the hook for you. Pushing with `--no-verify` skips it for one push. The hook
+runs the private-terms check below on every push, not only pushes that change `clients/`.
+Re-run the installer after pulling a change to the hook.
+
+### Private terms
+
+Server names, internal hostnames and personal paths do not belong in the repository; use generic
+placeholders such as `host-a` and `/data/vibesys`. `./scripts/check_private_terms.sh` fails when
+tracked files, staged changes, or commits and messages not yet on `origin/main` match a term from a
+private list. The list is a file of newline-separated, case-insensitive regular expressions (blank
+lines and `#` comments are ignored), read from `$VIBESYS_PRIVATE_TERMS` or, by default,
+`~/.config/vibesys/private-terms.txt`. Keep it outside every clone and never commit it. A missing
+list makes the check print one line and pass, so it costs nothing on a machine without one.
+
+The report lists `file:line` and never repeats the matched text, so its output is safe to paste.
+The check cannot run in CI, and no CI job checks for these terms: the terms are private by design,
+so a list CI could read would itself be the leak. It runs on your machine, from the hook above.
+`tests/quality/test_check_private_terms.py` covers the check with made-up terms.
 
 Use `./support/repoctl/repoctl plan` to inspect the selection without running checks.
 The workflow runs named check groups from `.repoctl/checks.toml`. Run

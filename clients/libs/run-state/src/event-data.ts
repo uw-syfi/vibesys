@@ -139,6 +139,7 @@ const EVENT_DATA_HANDLERS = {
   workspace_snapshot: ignoredEventData,
   run_configured: ignoredEventData,
   framework_warning: ignoredEventData,
+  measurement_compared: ignoredEventData,
   winner_selected: runEventData(applyWinnerSelectedData),
   workstream_finished: runEventData(applyWorkstreamFinishedData),
   turn_usage_recorded: runEventData(applyTurnUsageData),
