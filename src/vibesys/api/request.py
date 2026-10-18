@@ -11,7 +11,7 @@ import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.composition import resolve_agent_specs
+from vibesys.composition import require_one_login_per_container, resolve_agent_specs
 from vibesys.config import BUNDLED_RESOURCES
 from vibesys.inputs import (
     InputBundle,
@@ -142,12 +142,15 @@ def validate_run_request(request: RunRequest, *, registry: OrchestrationRegistry
     validate_execution_request(
         request, git=git, attribution_command=attribution_command_of(options)
     )
-    resolve_agent_specs(
+    specs = resolve_agent_specs(
         request.config,
         registration.plugin.agents,
         backend=request.agent_backend,
         provider=request.cli_provider,
         allow_unvetted_model=request.allow_unvetted_model,
+    )
+    require_one_login_per_container(
+        specs, containerized=run_environment_uses_docker(request.run_environment)
     )
     if request.resume is not None and registration.plugin.core is not None:
         ensure_not_legacy_resume(request.project_root, request.resume.run_id)

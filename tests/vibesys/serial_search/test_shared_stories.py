@@ -8,11 +8,12 @@ what a workspace is closed with. Every story runs live and again with a restart 
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Unpack
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.multi import _host as multi_host
 from tests.vibesys.orchestration.single import _host as single_host
@@ -358,6 +359,11 @@ class _Played:
     bases: list[RevisionRef] = field(default_factory=list)
     expected: list[RevisionRef] = field(default_factory=list)
     passed: dict[int, RevisionRef] = field(default_factory=dict)
+    produced: dict[str, int] = field(default_factory=dict)
+    """The round that made each commit: the first to retain it as new work."""
+    keeps_base: frozenset[int] = frozenset()
+    """The failed rounds that retain the base they started on unchanged, as an implementation
+    that failed before changing anything does."""
     best: tuple[float, int] | None = None
     designed: RevisionRef | None = None
     """The base the latest accepted plan gave, until the round it designed starts."""
@@ -399,7 +405,11 @@ def _answer(
     if asked.label == JUDGE:
         host.run.reply(asked, multi_host.reviewed(passed=ok))
         return
-    checkpoint = Retained(revision=commit(f"c{number}"))
+    unchanged = not ok and number in played.keeps_base
+    retained = played.bases[number - 1] if unchanged else commit(f"c{number}")
+    if not unchanged:
+        played.produced.setdefault(retained.revision_id.root, number)
+    checkpoint = Retained(revision=retained)
     if search == "single":
         host.run.reply(asked, single_host.implemented(passed=ok), checkpoint=checkpoint)
     else:
@@ -410,7 +420,12 @@ def _answer(
             played.best = (speed, number)
 
 
-def _drive(host: SerialHost, search: str, rounds: list[tuple[float, bool, int | None]]) -> _Played:
+def _drive(
+    host: SerialHost,
+    search: str,
+    rounds: list[tuple[float, bool, int | None]],
+    keeps_base: frozenset[int] = frozenset(),
+) -> _Played:
     """Answer every agent turn of a run from the drawn rounds, and say what each base must be.
 
     Round ``n`` retains ``c<n>`` and reads as the ``n``-th draw says. A designer turn names the
@@ -418,7 +433,7 @@ def _drive(host: SerialHost, search: str, rounds: list[tuple[float, bool, int | 
     The oracle: an idea passes when it passes review (the host's gates always read); it is best
     when it also beats the input (50) by more than every earlier best.
     """
-    played = _Played()
+    played = _Played(keeps_base=keeps_base)
     for _ in range(1000):
         starts = bases(host)
         played.note_starts(starts)
@@ -434,7 +449,8 @@ def _drive(host: SerialHost, search: str, rounds: list[tuple[float, bool, int | 
             if not host.step(0):
                 return played
             continue
-        _answer(host, search, asked, played, rounds[min(max(len(starts), 1), len(rounds)) - 1])
+        draw = rounds[min(max(len(starts), 1), len(rounds)) - 1]
+        _answer(host, search, asked, played, draw)
     message = f"the run did not settle: {host.run.timeline()}"
     raise AssertionError(message)
 
@@ -482,6 +498,47 @@ def test_every_base_is_the_best_a_named_passed_idea_the_input_or_the_rounds_own_
         # the adopted result rests on a trusted measurement of that exact commit
         assert selection.revision.revision_id.root in host.measured
     assert_flow_closed(host)
+
+
+@SEARCHES
+@MODES
+@settings(max_examples=examples(pr=8, nightly=60), deadline=None, derandomize=True, database=None)
+@example(rounds=[(30.0, False, None), (30.0, False, None)], keeps_base=frozenset({1}))
+@example(
+    rounds=[(90.0, True, None), (30.0, False, None), (30.0, False, None)], keeps_base=frozenset({2})
+)
+@given(rounds=_DRAWN_ROUNDS, keeps_base=st.sets(st.integers(1, 5)).map(frozenset))
+def test_regression_a_failed_round_that_kept_its_base_unchanged_is_never_the_base_round(
+    *,
+    search: str,
+    restarting: bool,
+    rounds: list[tuple[float, bool, int | None]],
+    keeps_base: frozenset[int],
+) -> None:
+    """A round that retained its base commit made nothing, so a later round on that commit
+    names the round that made it (none for the input), never the failed round that held it.
+    """
+    speeds = {f"c{number}": speed for number, (speed, _, _) in enumerate(rounds, start=1)}
+    host = start(
+        search,
+        restarting=restarting,
+        config={"max_rounds": len(rounds), "max_continuation_rounds": 0},
+        throughputs=speeds,
+    )
+    played = _drive(host, search, rounds, keeps_base)
+
+    workstreams = [
+        (json.loads(span.label.attrs_json), span.label.verdict)
+        for span in host.run.trace().spans
+        if span.name == "play_round" and span.label is not None and span.label.attrs_json
+    ]
+    assert workstreams
+    for found, _ in workstreams:
+        parent = found.get("parent_revision")
+        if parent is not None:
+            assert found["base_round"] == played.produced.get(parent), found
+    failed = {found["round"] for found, verdict in workstreams if verdict == "failed"}
+    assert all(found.get("base_round") not in failed for found, _ in workstreams)
 
 
 # -- the paid turns and the workspace --------------------------------------------------------

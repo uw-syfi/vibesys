@@ -24,7 +24,7 @@ from pydantic import (
 from vibesys.config import BUNDLED_RESOURCES
 from vibesys.constants import ComputeBackend, DomainName
 from vibesys.inputs._plan import TaskPlan, check_plan_documents, plan_toml_lines
-from vs_project.api import Project, RunResourceRequest
+from vs_project.api import CatalogueInput, Project, RunResourceRequest
 from vs_runtime.api.infrastructure import (
     EvaluatorPackageNotFoundError,
     EvaluatorPackageRequirement,
@@ -446,6 +446,8 @@ class InputManifest(BaseModel):
     evaluator: EvaluatorInput | None = None
     plan: TaskPlan | None = None
     """The design a plan-mode run follows; inert otherwise."""
+    catalogue: CatalogueInput | None = None
+    """What an example task is about, for the catalogue a client offers; inert for a run."""
 
     @model_validator(mode="before")
     @classmethod

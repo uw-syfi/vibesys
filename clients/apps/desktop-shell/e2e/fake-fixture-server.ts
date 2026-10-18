@@ -6,13 +6,24 @@
  * sends more as a live batch; `readEvents` serves a finished run's history page by page.
  * `installFakeFixtureServer` runs in the page after `installFakeBridge`, so it is self-contained.
  */
+import type {FakeProvides} from './fake-bridge.js';
+
+/** What `installFakeFixtureServer` provides: attaching to the run, its history and its summary. */
+export type FixtureServerMethods =
+  | 'attach'
+  | 'releaseRun'
+  | 'connectRun'
+  | 'onWake'
+  | 'readEvents'
+  | 'readSummary'
+  | 'readSpan';
 
 export interface FixtureServerSeed {
   readonly runId: string;
   /** The events the first batch holds. */
   readonly first: readonly {readonly sequence?: number}[];
   /** A finished run's recorded events, which `readEvents` serves; absent: no history. */
-  readonly history?: readonly {readonly sequence?: number}[];
+  readonly history?: readonly {readonly sequence?: number; readonly span_id?: string | null}[];
   /** The snapshot's overview: the run's objective. */
   readonly overview: unknown;
 }
@@ -77,12 +88,14 @@ export function installFakeFixtureServer(seed: FixtureServerSeed): void {
     };
     port.postMessage({type: 'open', creditBytes: 16 * 1024 * 1024});
   };
-  const history = (from: number, max: number) => {
+  const history = (from: number, max: number, span?: string) => {
     if (seed.history === undefined) return ok({kind: 'unsupported'});
-    const page = seed.history.filter(event => (event.sequence ?? 0) >= from).slice(0, max);
+    const selected = seed.history.filter(
+      event => (span === undefined || event.span_id === span) && (event.sequence ?? 0) >= from,
+    );
+    const page = selected.slice(0, max);
     const next = (page.at(-1)?.sequence ?? from - 1) + 1;
-    const complete = next > (seed.history.at(-1)?.sequence ?? 0);
-    return ok({kind: 'page', events: page, next, complete});
+    return ok({kind: 'page', events: page, next, complete: page.length === selected.length});
   };
   const target = window as unknown as {vibesysWelcome: object; fakeHost: object};
   Object.assign(target.vibesysWelcome, {
@@ -94,10 +107,12 @@ export function installFakeFixtureServer(seed: FixtureServerSeed): void {
       window.postMessage({type: 'vibesys:run-port', id}, '*', [channel.port1]);
     },
     onWake: () => undefined,
-    readEvents: (_host: string, _project: string, _run: string, from: number, max: number) =>
+    readEvents: (_h: string, _p: string, _r: string, from: number, max: number) =>
       history(from, max),
     readSummary: () => Promise.resolve({ok: true, value: {kind: 'unsupported'}}),
-  });
+    readSpan: (...ask: [string, string, string, string, number, number]) =>
+      history(ask[4], ask[5], ask[3]),
+  } satisfies FakeProvides<FixtureServerMethods>);
   Object.assign(target.fakeHost, {
     /** Streams more of the run as one live batch. */
     emit: (events: readonly Event[]) => {

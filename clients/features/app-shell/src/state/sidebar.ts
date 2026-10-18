@@ -313,7 +313,8 @@ function digestRequests(
 
 /**
  * Digests for the rows that show and have none, and a run that is live again forgets its digest,
- * so it is read afresh when it ends.
+ * so it is read afresh when it ends. A live run is never asked for here: its row reads its digest
+ * through `askLiveDigests`, and asking for it here would be forgotten again by this very step.
  */
 function askDigests(state: SidebarState): SidebarStep {
   const live = liveRows(state);
@@ -321,9 +322,10 @@ function askDigests(state: SidebarState): SidebarStep {
   for (const [key, slot] of Object.entries(state.digests)) {
     if (!live.some(row => digestKey(row.run) === key)) digests[key] = slot;
   }
-  const wanted = shownRuns(state).filter(
-    run => digests[digestKey({host: run.host, runId: run.runId})] === undefined,
-  );
+  const wanted = shownRuns(state).filter(run => {
+    const key = digestKey({host: run.host, runId: run.runId});
+    return digests[key] === undefined && !live.some(row => digestKey(row.run) === key);
+  });
   if (wanted.length === 0) {
     const unchanged = Object.keys(digests).length === Object.keys(state.digests).length;
     return same(unchanged ? state : {...state, digests});
@@ -595,18 +597,17 @@ function reading(
   };
 }
 
-/** A time is known when it is a moment after the epoch; 0, negatives and NaN stand for "not recorded". */
-function known(ms: number): number | null {
-  return Number.isFinite(ms) && ms > 0 ? ms : null;
-}
-
 /**
- * When a Recent run began: its digest's creation time, else its server's start, else unknown. An
- * unknown time is never worded as a date.
+ * When a Recent run began, in words: its digest's creation time, else its server's start; null when
+ * neither is a moment a run could have begun, so an unknown time is never worded as a date.
  */
-function beganAt(entry: RunDigestEntry | undefined, ended: HostRun | undefined): number | null {
-  const created = entry === undefined ? null : known(entry.createdAt);
-  return created ?? (ended === undefined ? null : known(ended.startedAt * 1000));
+function beganAt(
+  entry: RunDigestEntry | undefined,
+  ended: HostRun | undefined,
+  clock: Clock,
+): string | null {
+  const created = entry === undefined ? null : formatWhen(entry.createdAt, clock);
+  return created ?? (ended === undefined ? null : formatWhen(ended.startedAt * 1000, clock));
 }
 
 /** What the Recent row of `recent` says, from the registry's record of its end and its digest. */
@@ -622,8 +623,8 @@ export function recentRow(state: SidebarState, recent: RecentRun, clock: Clock):
   const registered = ended === undefined ? null : endedLook(ended);
   const found = registered ?? (read === undefined || !read.over ? null : digestLook(read));
   const {look, status, result, problem, kind} = reading(found, read, slot, listing);
-  const began = beganAt(entry, ended);
-  const detail = began === null ? result : `${formatWhen(began, clock)} · ${result}`;
+  const began = beganAt(entry, ended, clock);
+  const detail = began === null ? result : `${began} · ${result}`;
   const trail = read === undefined ? null : trailWords(read, kind);
   const reason = ended === undefined ? null : endReason(ended);
   const tooltip = [

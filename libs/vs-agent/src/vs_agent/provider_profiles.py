@@ -76,6 +76,8 @@ class ModelDisplay:
 
     model_name: str
     """The model alone ("Opus 5.5")."""
+    vendor: str
+    """Who made the model, as agentshim names the vendor ("anthropic", "openai", "google")."""
     family: str
     """The model line ("Claude", "GPT", "Gemini")."""
     tier: int | None
@@ -100,6 +102,7 @@ def model_display(provider: str, model: str | None) -> ModelDisplay | None:
         return None
     return ModelDisplay(
         model_name=spec.display_name,
+        vendor=spec.vendor,
         family=spec.family,
         tier=spec.tier,
         tier_name=spec.tier_name,

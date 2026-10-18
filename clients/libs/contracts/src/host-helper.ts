@@ -28,7 +28,13 @@ export type {
   CheckoutInspectReply,
   CreatedProject,
   DetachedLaunchFailure,
+  ExampleHardware,
   ExampleList,
+  ExampleModel,
+  ExampleObjective,
+  ExampleSummary,
+  ExampleTask,
+  ExampleWorkload,
   FailureReason,
   HarnessChoice,
   HarnessesListReply,
@@ -78,6 +84,7 @@ export type {
   TaskList,
   TurnReply,
   UnreadableRecord,
+  UsageRecord,
 } from './generated/host-helper.generated.js';
 
 const STRICT: SchemaWalk = {documents: [hostHelperSchema], strict: true};

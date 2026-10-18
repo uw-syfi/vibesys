@@ -97,9 +97,11 @@ def _restore_project_config(
         unknown_roles = sorted(raw_roles.keys() - recorded.agent_roles.keys())
         changed.extend(f"agent.roles.{role_id}" for role_id in unknown_roles)
         for role_id, role in recorded.agent_roles.items():
-            for field in ("model", "reasoning_effort"):
+            # A role that records no provider runs the run's.
+            recorded_role = {**role, "provider": role["provider"] or recorded.cli_provider}
+            for field in ("provider", "model", "reasoning_effort"):
                 supplied, value = _explicit_config_value(raw, ("agent", "roles", role_id, field))
-                if supplied and value != role[field]:
+                if supplied and value != recorded_role[field]:
                     changed.append(f"agent.roles.{role_id}.{field}")
     if changed:
         _project_resume_mismatch(changed)
@@ -237,15 +239,20 @@ def _with_run_overrides(config: Config, args: argparse.Namespace) -> Config:
     The overrides are validated as if ``agent.toml`` held them, so an error names the key.
     """
     seconds = getattr(args, "max_run_seconds", None)
+    role_providers: list[tuple[str, str]] = getattr(args, "role_provider", [])
     role_models: list[tuple[str, str]] = getattr(args, "role_model", [])
     role_efforts: list[tuple[str, str]] = getattr(args, "role_reasoning_effort", [])
-    if seconds is None and not role_models and not role_efforts:
+    if seconds is None and not role_providers and not role_models and not role_efforts:
         return config
     document = config.model_dump(mode="json", exclude_unset=False)
     if seconds is not None:
         document["run"]["max_run_seconds"] = seconds
     roles = document["agent"]["roles"]
-    for key, settings in (("model", role_models), ("reasoning_effort", role_efforts)):
+    for key, settings in (
+        ("provider", role_providers),
+        ("model", role_models),
+        ("reasoning_effort", role_efforts),
+    ):
         for role, value in settings:
             roles.setdefault(role, {})[key] = value
     try:

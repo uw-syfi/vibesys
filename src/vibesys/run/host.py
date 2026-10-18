@@ -19,6 +19,7 @@ from vibesys.run.core_services import (
     CoreServices,
     agent_session_spec,
     build_core_services,
+    turn_executor,
 )
 from vibesys.run.evaluation import CoreLocalValidationEvents, create_evaluation
 from vibesys.run.evaluation_socket import prepare_queue_status_socket
@@ -27,7 +28,12 @@ from vibesys.run.profilers import WITHHELD_TOOLS_ENV, ProfilerToolOffer, profile
 from vibesys.run.queue_status import queue_status_reader, queue_status_service
 from vibesys.run.resources import open_run_resources
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
-from vs_agent.api import AgentSessionKey, AgentSessionState, DurableSessionStore
+from vs_agent.api import (
+    AgentSessionKey,
+    AgentSessionState,
+    DurableSessionStore,
+    ProviderRoutedExecutor,
+)
 from vs_runtime.api import PollingEvaluationExecutor, RetryingEvaluationExecutor, TryHandles
 from vs_runtime.api.core import MeasurementDecisions
 from vs_runtime.api.infrastructure import (
@@ -74,6 +80,7 @@ if TYPE_CHECKING:
     from vs_runtime.api.core import RunTiming, StageOutputOpener
     from vs_runtime.api.infrastructure import (
         AgentExecutionEnvironment,
+        AgentExecutionScope,
         OwnedWorkspaces,
         RunState,
         StopTimer,
@@ -328,7 +335,8 @@ class _ProductHostFactory:
         if policy is None:
             message = "core services require a plugin with a core policy"
             raise ValueError(message)
-        if self.agent_client_factory is None:
+        factory = self.agent_client_factory
+        if factory is None:
             raise CoreCompositionError(
                 "agent_client_factory", "a core run needs a factory for its agent client"
             )
@@ -346,55 +354,14 @@ class _ProductHostFactory:
             provider=self.request.cli_provider,
             allow_unvetted_model=self.request.allow_unvetted_model,
         )
-        # One client serves every role, so each role's own model and effort ride the spec.
-        base = replace(
-            base,
-            role_models={role: spec.model for role, spec in specs.items() if spec.model},
-            role_reasoning_efforts={
-                role: spec.reasoning_effort for role, spec in specs.items() if spec.reasoning_effort
-            },
-        )
-        environment = scope.open_environment(
-            AgentExecutionConfiguration(
-                agent_id="core", spec=base, reasoning_effort=base.reasoning_effort
-            )
-        )
-        ownership.callback(environment.close)
         events = CoreAgentEventSink(self.integration.events.record, self.timing.clock)
-        client = self.agent_client_factory(
-            spec=base,
-            clock=self.timing.clock,
-            session_store=session_store,
-            backends=(
-                {role.id: environment.backends["chat"] for role in self.plugin.agents}
-                if environment.backends is not None
-                else None
-            ),
-            skill_source_dirs=list(environment.skill_source_dirs),
-            skill_selection=environment.skill_selection,
-            run_log_file=scope.current_log_file(),
-            # A turn runs in the container that mounts its workspace, so a
-            # candidate's turn is not sent to the root container.
-            workspace_sandboxes=(
-                partial(_candidate_agent_sandbox, agent_runtime) if environment.use_docker else None
-            ),
-            use_docker=environment.use_docker,
-            log_dir=scope.log_directory,
-            agent_homes_dir=scope.agent_homes_directory,
-            host_resources=(*environment.host_resources,),
-            project_path_policy=environment.project_path_policy,
-            require_host_sandbox=not environment.use_docker,
-            events=events,
-        )
-        ownership.callback(client.close)
-        install_capacity_gate(
-            client,
-            control=self.integration.control,
-            events=events,
-            handling=CapacityHandling.for_policy(
-                self.request.config.agent.quota.to_policy(), self.integration.threads
-            ),
-            clock=self.timing.clock,
+        agents: dict[str, _ProviderAgents] = {}
+        for provider, spec in _provider_specs(base, specs).items():
+            agents[provider] = self._open_provider_agents(
+                factory, spec, scope, session_store, agent_runtime, events, ownership
+            )
+        turns = ProviderRoutedExecutor(
+            {provider: turn_executor(agent.client) for provider, agent in agents.items()}
         )
         # Every core session shares one run-scoped journal, named by a fixed member key.
         invocations = self.invocation_store_factory(
@@ -449,7 +416,7 @@ class _ProductHostFactory:
                     for role, spec in specs.items()
                     if spec.model and spec.model != base.model
                 },
-                agent_client=client,
+                agent_turns=turns,
                 invocation_slot=invocations,
                 configuration=configuration,
                 clock=self.timing.clock,
@@ -475,14 +442,73 @@ class _ProductHostFactory:
                     project.state.run_id, self.projector, self.plugin.id
                 ),
                 session_spec=agent_session_spec(
-                    client=client,
-                    environment=environment,
+                    environments={
+                        provider: agent.environment for provider, agent in agents.items()
+                    },
                     specs=specs,
                     variables=scope.environment_variables,
                     configuration=configuration,
                 ),
             ),
         )
+
+    def _open_provider_agents(  # noqa: PLR0913  # lint-waiver: LW-948091 [PLR0913]; each argument is an independently owned resource the host already opened, and this reads them once per provider.
+        self,
+        factory: Callable[..., AgentClientProtocol],
+        spec: AgentSpec,
+        scope: AgentExecutionScope,
+        session_store: DurableSessionStore,
+        agent_runtime: WorkspaceRuntime,
+        events: CoreAgentEventSink,
+        ownership: ReleaseStack,
+    ) -> _ProviderAgents:
+        """Open the agent environment and client of one provider, released with ``ownership``.
+
+        The client is bound to ``spec.provider``, so each role's own model and effort ride
+        ``spec`` for the roles that run on it.
+        """
+        environment = scope.open_environment(
+            AgentExecutionConfiguration(
+                agent_id="core", spec=spec, reasoning_effort=spec.reasoning_effort
+            )
+        )
+        ownership.callback(environment.close)
+        client = factory(
+            spec=spec,
+            clock=self.timing.clock,
+            session_store=session_store,
+            backends=(
+                {role.id: environment.backends["chat"] for role in self.plugin.agents}
+                if environment.backends is not None
+                else None
+            ),
+            skill_source_dirs=list(environment.skill_source_dirs),
+            skill_selection=environment.skill_selection,
+            run_log_file=scope.current_log_file(),
+            # A turn runs in the container that mounts its workspace, so a
+            # candidate's turn is not sent to the root container.
+            workspace_sandboxes=(
+                partial(_candidate_agent_sandbox, agent_runtime) if environment.use_docker else None
+            ),
+            use_docker=environment.use_docker,
+            log_dir=scope.log_directory,
+            agent_homes_dir=scope.agent_homes_directory,
+            host_resources=(*environment.host_resources,),
+            project_path_policy=environment.project_path_policy,
+            require_host_sandbox=not environment.use_docker,
+            events=events,
+        )
+        ownership.callback(client.close)
+        install_capacity_gate(
+            client,
+            control=self.integration.control,
+            events=events,
+            handling=CapacityHandling.for_policy(
+                self.request.config.agent.quota.to_policy(), self.integration.threads
+            ),
+            clock=self.timing.clock,
+        )
+        return _ProviderAgents(environment, client)
 
     def _serve_queue_status(
         self, resources: _PreparedRun, handle_root: Path, ownership: ReleaseStack
@@ -698,6 +724,37 @@ __all__ = [
 ]
 
 
+@dataclass(frozen=True, slots=True)
+class _ProviderAgents:
+    """The agent environment and the client of the roles that run on one provider."""
+
+    environment: AgentExecutionEnvironment
+    client: AgentClientProtocol
+
+
+def _provider_specs(base: AgentSpec, specs: Mapping[str, AgentSpec]) -> dict[str, AgentSpec]:
+    """One client spec per provider the roles use, carrying those roles' models and efforts.
+
+    A provider's client runs only its own roles, so a role's model belongs to the client of the
+    role's provider. A run whose plugin declares no role still gets the run's own provider.
+    """
+    providers = dict.fromkeys(spec.provider for spec in specs.values()) or {base.provider: None}
+    clients: dict[str, AgentSpec] = {}
+    for provider in providers:
+        mine = {role: spec for role, spec in specs.items() if spec.provider == provider}
+        first = next(iter(mine.values()), None)
+        clients[provider] = replace(
+            base,
+            provider=provider,
+            model=base.model if provider == base.provider or first is None else first.model,
+            role_models={role: spec.model for role, spec in mine.items() if spec.model},
+            role_reasoning_efforts={
+                role: spec.reasoning_effort for role, spec in mine.items() if spec.reasoning_effort
+            },
+        )
+    return clients
+
+
 def _candidate_agent_sandbox(runtime: WorkspaceRuntime, path: Path) -> DockerSandbox | None:
     """The container that mounts the candidate checked out at ``path``.
 
@@ -710,8 +767,8 @@ def _candidate_agent_sandbox(runtime: WorkspaceRuntime, path: Path) -> DockerSan
 def _require_supported_fallback(policy: QuotaPolicy, agent_specs: Mapping[str, AgentSpec]) -> None:
     """Reject a fallback a core run cannot honor, before the run starts.
 
-    A core run drives every role through one agent client bound to one provider, so it
-    cannot open a session on another provider. A fallback is therefore refused rather than
+    A core run fixes each role's provider when it starts (one agent client per provider), so
+    it cannot open a session on another provider. A fallback is therefore refused rather than
     accepted and ignored; a fallback that is a role's own provider is refused first, since
     it could never be a switch.
     """
@@ -725,8 +782,8 @@ def _require_supported_fallback(policy: QuotaPolicy, agent_specs: Mapping[str, A
             )
             raise ValueError(message)
     message = (
-        f"agent.quota.fallback_provider {policy.fallback.provider!r}: a run drives every role "
-        "through one agent client on one provider, so it cannot switch provider on a quota "
+        f"agent.quota.fallback_provider {policy.fallback.provider!r}: a run fixes each role's "
+        "provider when it starts, so it cannot switch provider on a quota "
         "stop; remove agent.quota.fallback_provider and fallback_model (policy = 'fallback' "
         "needs them, so use 'pause', 'wait' or 'fail')"
     )

@@ -268,7 +268,7 @@ describe('row statuses', () => {
       ).state;
       const row = recentRows(state).rows[0];
       expect(row?.look, outcome).toEqual({tone, word});
-      expect(row?.detail, outcome).toBe(`Jan 1, 1970 · ${word}`);
+      expect(row?.detail, outcome).toBe(word);
     }
   });
 

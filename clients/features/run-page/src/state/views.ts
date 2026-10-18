@@ -415,7 +415,7 @@ export function streamLines(state: RunPageState, streamId: string | null): reado
   }));
 }
 
-/** What the Logs tab says instead of lines, when it has none to show. */
+/** What the Logs tab says instead of lines while the listing is not in or has failed; null once listed. */
 export function logsNotice(state: RunPageState): string | null {
   if (state.unavailable.logs !== undefined) return state.unavailable.logs;
   switch (state.logs.kind) {
@@ -431,7 +431,7 @@ export function logsNotice(state: RunPageState): string | null {
         ? 'This saved run has no running or listed server, so its logs are not available here.'
         : 'Looking for the run’s logs…';
     case 'listed':
-      return state.logs.streams.length === 0 ? 'The run has not written any logs yet.' : null;
+      return null;
   }
 }
 

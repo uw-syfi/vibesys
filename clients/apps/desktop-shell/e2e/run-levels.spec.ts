@@ -219,12 +219,13 @@ test('the run level shows the best ratio, the ideas running first, and what runs
   await expect(now.getByRole('option', {name: /Combine W1 ring/}).first()).toBeVisible();
   await check(page, 'ink-run');
 
-  // The failed are listed; the filter hides them behind their row, which brings them back, and
-  // the search narrows the list.
-  await page.locator('button.vs-dotlegend-item', {hasText: '2 failed'}).click();
-  await expect(ideas.getByRole('option', {name: /Spin then park/})).toHaveCount(0);
+  // The failed are listed; their chip narrows the list to them and a second press brings the rest
+  // back, and the search narrows the list.
   await page.locator('button.vs-dotlegend-item', {hasText: '2 failed'}).click();
   await expect(ideas.getByRole('option', {name: /Spin then park/})).toBeVisible();
+  await expect(ideas.getByRole('option', {name: /Combine W1 ring/})).toHaveCount(0);
+  await page.locator('button.vs-dotlegend-item', {hasText: '2 failed'}).click();
+  await expect(ideas.getByRole('option', {name: /Combine W1 ring/})).toBeVisible();
   await page.getByLabel('Search ideas').fill('spin');
   await expect(ideas.getByRole('option')).toHaveText([/Spin then park/]);
 

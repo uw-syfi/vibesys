@@ -358,6 +358,9 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 thinking_budget=config.thinking.budget,
                 agent_roles={
                     role_id: AgentRoleExecutionRecord(
+                        provider=(
+                            spec.provider if spec.provider != resolved_cli_provider else None
+                        ),
                         model=spec.model if spec.model is not None else model_name,
                         reasoning_effort=spec.reasoning_effort,
                     )
@@ -701,10 +704,13 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 agent_backend=resolved_backend,
                 provider=resolved_cli_provider,
                 model=model_name,
+                # The run's own provider's models only: chat sessions run on that provider.
                 role_models=tuple(
                     spec.model
                     for spec in agent_specs.values()
-                    if spec.model is not None and spec.model != model_name
+                    if spec.model is not None
+                    and spec.model != model_name
+                    and spec.provider == resolved_cli_provider
                 ),
                 config=config,
                 allow_unvetted_model=request.allow_unvetted_model,

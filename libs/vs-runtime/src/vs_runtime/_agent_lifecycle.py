@@ -34,6 +34,7 @@ class AgentExecutionStarted(BaseModel):
     user_prompt: str
     provider: str | None = None
     model: str | None = None
+    reasoning_effort: str | None = None
 
 
 class AgentReply(BaseModel):

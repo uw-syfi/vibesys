@@ -104,7 +104,7 @@ test('a live run folds its trace into the ideas, the failed listed and hideable'
     await page.getByRole('main').screenshot({path: `${shots}/ink-live-ideas.png`});
   const shown = await ideas.getByRole('option').count();
   await expect(page.getByRole('button', {name: /^\+ \d+ failed$/})).toHaveCount(0);
-  // The status filter hides failed rows and shows them again when toggled.
+  // A status chip narrows the list to its group and shows every idea again when pressed twice.
   await page.locator('button.vs-dotlegend-item', {hasText: /\d+ failed/}).click();
   await expect.poll(() => ideas.getByRole('option').count()).toBeLessThan(shown);
   await page.locator('button.vs-dotlegend-item', {hasText: /\d+ failed/}).click();

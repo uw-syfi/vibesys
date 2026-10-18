@@ -89,7 +89,13 @@ def test_json_lists_every_example_by_category_with_its_tasks(
 
     assert (code, stderr) == (0, "")
     expected = [
-        ExampleSummary(name=name, category=name.split("/")[0], tasks=tasks, external_repo=False)
+        ExampleSummary(
+            name=name,
+            category=name.split("/")[0],
+            tasks=tasks,
+            external_repo=False,
+            task_details=(),
+        )
         for name, tasks in examples.items()
     ] + [
         ExampleSummary(
@@ -97,6 +103,7 @@ def test_json_lists_every_example_by_category_with_its_tasks(
             category="serving",
             tasks=(),
             external_repo=True,
+            task_details=(),
         )
     ]
     listing = ExampleList.model_validate_json(stdout)

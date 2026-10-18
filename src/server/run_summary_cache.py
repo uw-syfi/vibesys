@@ -49,8 +49,15 @@ from pydantic import (
     model_validator,
 )
 
-from server.host_run_summary import RUN_SUMMARY_FILE, SpanTokens, TokenTally, TurnReply
+from server.host_run_summary import (
+    RUN_SUMMARY_FILE,
+    SpanTokens,
+    TokenTally,
+    TurnReply,
+    UsageRecord,
+)
 from server.run_summary import RUN_SUMMARY_VERSION, RunSummaryFold, Summarized, SummaryState
+from server.run_usage import ExecutionStart
 from vs_project.api import ProjectError, atomic_write_bytes
 
 if TYPE_CHECKING:
@@ -94,6 +101,8 @@ class _CachedState(BaseModel):
     schemas: dict[str, dict[str, Any]]
     tokens: TokenTally
     usage: tuple[SpanTokens, ...]
+    executions: tuple[ExecutionStart, ...]
+    records: tuple[UsageRecord, ...]
 
     @model_validator(mode="after")
     def _is_a_fold(self) -> _CachedState:
@@ -243,6 +252,8 @@ def _restore(cache: Path, journal: BinaryIO) -> tuple[RunSummaryFold, int] | Non
                 schemas=state.schemas,
                 tokens=state.tokens,
                 usage=state.usage,
+                executions=state.executions,
+                records=state.records,
             )
         ),
         covered.boundary,
@@ -272,6 +283,8 @@ def _keep(cache: Path, journal: BinaryIO, fold: RunSummaryFold, boundary: int, c
             "schemas": state.schemas,
             "tokens": state.tokens.model_dump(mode="json"),
             "usage": [entry.model_dump(mode="json") for entry in state.usage],
+            "executions": [start.model_dump(mode="json") for start in state.executions],
+            "records": [record.model_dump(mode="json") for record in state.records],
         },
     }
     contents = json.dumps(document, separators=(",", ":"), ensure_ascii=False).encode()

@@ -30,3 +30,15 @@ args = [
   "--scenario", "mpmc", "--repetitions", "3",
 ]
 timeout_seconds = 300
+
+[catalogue]
+domain = "data-structures"
+
+[catalogue.hardware]
+accelerator = "CPU"
+count = 1
+vendor = "cpu"
+
+[catalogue.workload]
+name = "Multiple producers, multiple consumers"
+description = "A bounded FIFO queue where several threads add items and several threads remove them; checked for linearizability, scored in operations per second."

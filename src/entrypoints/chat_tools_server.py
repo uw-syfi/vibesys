@@ -145,7 +145,7 @@ def _get_hypothesis_tool(store: RunStore, run_id: str) -> ToolSpec[_HypothesisAr
             f"judge_verdict: {hypothesis.judge_verdict or '(none)'}",
             f"strategy_disposition: {hypothesis.strategy_disposition}",
             f"active: {hypothesis.active}",
-            f"kept: {hypothesis.kept}",
+            f"best: {hypothesis.best}",
         ]
         if hypothesis.perf_metric is not None:
             lines.append(

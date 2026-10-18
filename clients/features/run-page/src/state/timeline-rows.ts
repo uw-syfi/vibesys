@@ -13,6 +13,7 @@ import type {
   CandidateOutcome,
   CandidateStep,
 } from '@vibesys/run-state/candidates';
+import {vsInputCell} from './idea-words.js';
 import {figureOf} from './ideas-view.js';
 import {stepLabel, stepTitle} from './names.js';
 import {roleSeries} from './role-series.js';
@@ -67,10 +68,8 @@ export interface TimelineRow {
   readonly start: number;
   readonly end: number;
   readonly outcome: BarOutcome;
-  /** Short enough for the figure column. */
+  /** The `vs input` cell: the multiple, a dash when there is none, empty while running. */
   readonly figure: string;
-  /** The figure in full when `figure` is a short form of it; else null. */
-  readonly figureTitle: string | null;
   readonly segments: readonly StepSegment[];
   readonly lane: boolean;
 }
@@ -141,27 +140,6 @@ export function stepSegments(
   });
 }
 
-/** The figure column fits about this many characters. */
-const FIGURE_FITS = 12;
-/** A figure that would not fit is cut; the hover has the whole of it. */
-
-/**
- * An idea's figure in the column: the ratio, a failed check's progress, or the reason, in a short
- * form when the whole does not fit, with the whole as the hover (`figureTitle`).
- */
-function figureOfRow(item: Candidate): {figure: string; figureTitle: string | null} {
-  const whole = figureOf(item).figure;
-  if (whole.length <= FIGURE_FITS) return {figure: whole, figureTitle: null};
-  const failed = item.measurement?.failed ?? null;
-  const progress =
-    failed !== null && failed.completed !== null && failed.required !== null
-      ? `${failed.completed}/${failed.required}`
-      : null;
-  const short =
-    progress ?? (item.outcome === 'failed' ? 'Failed' : `${whole.slice(0, FIGURE_FITS - 1)}…`);
-  return {figure: short, figureTitle: whole};
-}
-
 function rowOf(item: Candidate, now: number | null): TimelineRow {
   const steps = item.attempts.flatMap(attempt => attempt.steps);
   return {
@@ -170,7 +148,7 @@ function rowOf(item: Candidate, now: number | null): TimelineRow {
     start: item.startedAt,
     end: endOf(item.startedAt, item.endedAt, now),
     outcome: OUTCOME[item.outcome],
-    ...figureOfRow(item),
+    figure: item.outcome === 'running' ? '' : vsInputCell(figureOf(item)).figure,
     segments: stepSegments(steps, now),
     lane: false,
   };
@@ -207,7 +185,6 @@ function laneOf(failed: readonly TimelineRow[]): TimelineRow {
     end,
     outcome: 'muted',
     figure: '',
-    figureTitle: null,
     segments,
     lane: true,
   };
@@ -397,7 +374,6 @@ export function attemptStrip(
       end,
       outcome: OUTCOME[attempt.outcome],
       figure: attempt.outcome === 'running' || vs === null ? '' : ratio(vs),
-      figureTitle: null,
       segments,
       lane: false,
     },

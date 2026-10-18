@@ -11,6 +11,8 @@ import {
   type CheckId,
   type CheckInput,
   chartSizeCheck,
+  columnTopsCheck,
+  controlRowCheck,
   HELPERS,
   legendCheck,
   numberLabelCheck,
@@ -43,6 +45,8 @@ const CHECKS: Readonly<Record<PageCheckId, (input: CheckInput) => Violation[]>> 
   'chart-size': chartSizeCheck,
   'pane-fill': paneFillCheck,
   'scroll-room': scrollRoomCheck,
+  'control-row': controlRowCheck,
+  'column-tops': columnTopsCheck,
 };
 
 /** Enum values that never read as words: the failure reasons spelled with a hyphen or underscore. */

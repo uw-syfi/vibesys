@@ -13,6 +13,18 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "Accelerator",
       "type": "string"
     },
+    "AcceleratorVendor": {
+      "description": "Who makes the hardware a task targets.",
+      "enum": [
+        "nvidia",
+        "amd",
+        "aws",
+        "apple",
+        "cpu"
+      ],
+      "title": "AcceleratorVendor",
+      "type": "string"
+    },
     "ArgumentsRejected": {
       "additionalProperties": false,
       "description": "The run's argument parser refused the extra arguments; ``problem`` is its message (raw).",
@@ -853,6 +865,52 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "EndRecord",
       "type": "object"
     },
+    "ExampleDomain": {
+      "description": "What an example task optimizes; the first question New run asks.",
+      "enum": [
+        "llm-serving",
+        "data-structures",
+        "databases",
+        "microservices"
+      ],
+      "title": "ExampleDomain",
+      "type": "string"
+    },
+    "ExampleHardware": {
+      "additionalProperties": false,
+      "description": "The hardware a task targets.",
+      "properties": {
+        "accelerator": {
+          "title": "Accelerator",
+          "type": "string"
+        },
+        "count": {
+          "title": "Count",
+          "type": "integer"
+        },
+        "vendor": {
+          "$ref": "#/$defs/AcceleratorVendor"
+        },
+        "backend": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Backend"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "accelerator",
+        "count",
+        "vendor",
+        "backend"
+      ],
+      "title": "ExampleHardware",
+      "type": "object"
+    },
     "ExampleList": {
       "additionalProperties": false,
       "description": "``vibesys example list --json``: every catalogued example, by category then name.",
@@ -882,6 +940,49 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "ExampleList",
       "type": "object"
     },
+    "ExampleModel": {
+      "additionalProperties": false,
+      "description": "The model an LLM-serving task serves.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "maker": {
+          "$ref": "#/$defs/ModelMaker"
+        }
+      },
+      "required": [
+        "name",
+        "maker"
+      ],
+      "title": "ExampleModel",
+      "type": "object"
+    },
+    "ExampleObjective": {
+      "additionalProperties": false,
+      "description": "One axis the task's ``objectives.toml`` declares.",
+      "properties": {
+        "metric": {
+          "title": "Metric",
+          "type": "string"
+        },
+        "direction": {
+          "enum": [
+            "max",
+            "min"
+          ],
+          "title": "Direction",
+          "type": "string"
+        }
+      },
+      "required": [
+        "metric",
+        "direction"
+      ],
+      "title": "ExampleObjective",
+      "type": "object"
+    },
     "ExampleSummary": {
       "additionalProperties": false,
       "description": "One example in ``vibesys example list --json``.",
@@ -904,6 +1005,21 @@ const hostHelperSchema: Record<string, unknown> = {
         "external_repo": {
           "title": "External Repo",
           "type": "boolean"
+        },
+        "task_details": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ExampleTask"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Details"
         }
       },
       "required": [
@@ -913,6 +1029,90 @@ const hostHelperSchema: Record<string, unknown> = {
         "external_repo"
       ],
       "title": "ExampleSummary",
+      "type": "object"
+    },
+    "ExampleTask": {
+      "additionalProperties": false,
+      "description": "What one task of an example is about, read from its ``vibesys.input.toml`` and goal file.",
+      "properties": {
+        "task": {
+          "title": "Task",
+          "type": "string"
+        },
+        "domain": {
+          "$ref": "#/$defs/ExampleDomain"
+        },
+        "hardware": {
+          "$ref": "#/$defs/ExampleHardware"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExampleModel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workload": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExampleWorkload"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectives": {
+          "items": {
+            "$ref": "#/$defs/ExampleObjective"
+          },
+          "title": "Objectives",
+          "type": "array"
+        },
+        "goal": {
+          "maxLength": 32000,
+          "title": "Goal",
+          "type": "string"
+        },
+        "goal_truncated": {
+          "title": "Goal Truncated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "task",
+        "domain",
+        "hardware",
+        "model",
+        "workload",
+        "objectives",
+        "goal",
+        "goal_truncated"
+      ],
+      "title": "ExampleTask",
+      "type": "object"
+    },
+    "ExampleWorkload": {
+      "additionalProperties": false,
+      "description": "The workload a data-structure task drives.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "description"
+      ],
+      "title": "ExampleWorkload",
       "type": "object"
     },
     "ExamplesListReply": {
@@ -964,6 +1164,18 @@ const hostHelperSchema: Record<string, unknown> = {
           "default": "examples.list",
           "title": "Type",
           "type": "string"
+        },
+        "with_catalogue": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "With Catalogue"
         }
       },
       "required": [
@@ -1147,6 +1359,28 @@ const hostHelperSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "Tier Name"
+        },
+        "maker": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Maker"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "generation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelGeneration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -1244,6 +1478,18 @@ const hostHelperSchema: Record<string, unknown> = {
           "default": "harnesses.list",
           "title": "Type",
           "type": "string"
+        },
+        "with_generations": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "With Generations"
         }
       },
       "required": [
@@ -1517,7 +1763,10 @@ const hostHelperSchema: Record<string, unknown> = {
         "project_clean",
         "run_backend",
         "run_causes",
-        "run_digest"
+        "example_catalogue",
+        "run_digest",
+        "harness_generations",
+        "run_role_agents"
       ],
       "title": "HelperFeature",
       "type": "string"
@@ -2827,6 +3076,16 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "MachineDescription",
       "type": "object"
     },
+    "Maker": {
+      "description": "Who made a model: the closed set of makers whose models a provider's CLI runs.",
+      "enum": [
+        "anthropic",
+        "openai",
+        "google"
+      ],
+      "title": "Maker",
+      "type": "string"
+    },
     "MissingLogTail": {
       "additionalProperties": false,
       "description": "The instance has no retained ``server.log`` file.",
@@ -2843,6 +3102,51 @@ const hostHelperSchema: Record<string, unknown> = {
       "required": [
         "state"
       ]
+    },
+    "ModelGeneration": {
+      "additionalProperties": false,
+      "description": "One generation of a maker's models, and where it ranks among the maker's.",
+      "properties": {
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "order": {
+          "minimum": 1,
+          "title": "Order",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "order"
+      ],
+      "title": "ModelGeneration",
+      "type": "object"
+    },
+    "ModelMaker": {
+      "description": "Who made a served model; ``OTHER`` for a maker with no entry yet.",
+      "enum": [
+        "meta",
+        "qwen",
+        "deepseek",
+        "zhipu",
+        "moonshot",
+        "ai2",
+        "openai",
+        "other"
+      ],
+      "title": "ModelMaker",
+      "type": "string"
     },
     "ModelNotVetted": {
       "additionalProperties": false,
@@ -3701,7 +4005,8 @@ const hostHelperSchema: Record<string, unknown> = {
         "time_limit",
         "results",
         "role_model",
-        "role_reasoning_effort"
+        "role_reasoning_effort",
+        "role_agent"
       ],
       "title": "RunOption",
       "type": "string"
@@ -3934,6 +4239,21 @@ const hostHelperSchema: Record<string, unknown> = {
           ],
           "default": null
         },
+        "agents": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/HarnessChoice"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agents"
+        },
         "with_roles": {
           "anyOf": [
             {
@@ -4155,6 +4475,21 @@ const hostHelperSchema: Record<string, unknown> = {
             }
           ],
           "default": null
+        },
+        "agents": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/HarnessChoice"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agents"
         }
       },
       "required": [
@@ -4781,7 +5116,7 @@ const hostHelperSchema: Record<string, unknown> = {
     },
     "RunsSummaryReply": {
       "additionalProperties": false,
-      "description": "One page of a run's summary: the client's fold of its journal, to ``through_sequence``.\n\nEvery field equals what a client reading the whole journal up to ``through_sequence`` folds\nitself, which is the contract the helper's tests hold it to:\n\n- ``spans``: the run trace (``foldTrace``): each span as its latest span event left it, in\n  the order the spans started, so each comes after its parent;\n- ``overview``: the ``overview`` of the last ``run_started`` event that declares one\n  (``foldOverview``), with no unit or direction a live server adds from run state;\n- ``replies``: the last typed reply of each agent-turn span, by ``agent_execution_finished``\n  events with a ``span_id``, in the order the spans first replied (``implementerOutcomes``);\n- ``tokens`` and ``usage``: the run's spend, folded from ``turn_usage_recorded`` events by\n  summing (``ledgerWith``): ``tokens`` over every turn, those the trace names and those it\n  does not, ``usage`` over each turn span that is named, in the order the spans first spent;\n- the idea rows, the measurement points and the chart are folds of ``spans`` and ``replies``\n  the client already owns (``CandidateFold``, ``performanceFold``); nothing duplicates them.\n\nAn event at or before the last folded sequence is skipped whole, as the client skips it. The\nrun level is final at ``through_sequence``. Events after it are the live tail: read them with\n``runs.read_events`` from ``through_sequence + 1``, or subscribe after ``through_sequence``. A\nrun still writing can move between the pages of one read: every page names its\n``through_sequence``, and a read whose pages disagree starts again.",
+      "description": "One page of a run's summary: the client's fold of its journal, to ``through_sequence``.\n\nEvery field equals what a client reading the whole journal up to ``through_sequence`` folds\nitself, which is the contract the helper's tests hold it to:\n\n- ``spans``: the run trace (``foldTrace``): each span as its latest span event left it, in\n  the order the spans started, so each comes after its parent;\n- ``overview``: the ``overview`` of the last ``run_started`` event that declares one\n  (``foldOverview``), with no unit or direction a live server adds from run state;\n- ``replies``: the last typed reply of each agent-turn span, by ``agent_execution_finished``\n  events with a ``span_id``, in the order the spans first replied (``implementerOutcomes``);\n- ``tokens`` and ``usage``: the run's spend, folded from ``turn_usage_recorded`` events by\n  summing (``ledgerWith``): ``tokens`` over every turn, those the trace names and those it\n  does not, ``usage`` over each turn span that is named, in the order the spans first spent;\n- ``records``: one ``UsageRecord`` per ``turn_usage_recorded`` event, in journal order, whose\n  tokens sum to ``tokens`` (``server.run_usage``);\n- the idea rows, the measurement points and the chart are folds of ``spans`` and ``replies``\n  the client already owns (``CandidateFold``, ``performanceFold``); nothing duplicates them.\n\nAn event at or before the last folded sequence is skipped whole, as the client skips it. The\nrun level is final at ``through_sequence``. Events after it are the live tail: read them with\n``runs.read_events`` from ``through_sequence + 1``, or subscribe after ``through_sequence``. A\nrun still writing can move between the pages of one read: every page names its\n``through_sequence``, and a read whose pages disagree starts again.",
       "properties": {
         "request_id": {
           "maxLength": 128,
@@ -4831,6 +5166,11 @@ const hostHelperSchema: Record<string, unknown> = {
         "usage_count": {
           "minimum": 0,
           "title": "Usage Count",
+          "type": "integer"
+        },
+        "record_count": {
+          "minimum": 0,
+          "title": "Record Count",
           "type": "integer"
         },
         "tokens": {
@@ -4884,6 +5224,13 @@ const hostHelperSchema: Record<string, unknown> = {
           "title": "Usage",
           "type": "array"
         },
+        "records": {
+          "items": {
+            "$ref": "#/$defs/UsageRecord"
+          },
+          "title": "Records",
+          "type": "array"
+        },
         "next_offset": {
           "anyOf": [
             {
@@ -4908,12 +5255,14 @@ const hostHelperSchema: Record<string, unknown> = {
         "span_count",
         "reply_count",
         "usage_count",
+        "record_count",
         "tokens",
         "overview",
         "spans",
         "replies",
         "schemas",
         "usage",
+        "records",
         "next_offset"
       ],
       "title": "RunsSummaryReply",
@@ -5624,6 +5973,180 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "UnreadableRecord",
       "type": "object"
     },
+    "UsageRecord": {
+      "additionalProperties": false,
+      "description": "What one agent turn spent, and who and when it was: the one definition of a usage record.\n\nA projection of the journal (``server.run_usage``): a ``turn_usage_recorded`` event joined to\nthe ``agent_execution_started`` of its ``execution_id``. A value the journal does not hold is\n``None``, never a guess: a turn whose execution start is missing has no role, harness, model,\neffort, version or start. The run is a field so records of many runs fold together without\nchanging the fold. ``role`` and ``harness`` are open sets (the roles of a run's flow, the\nproviders agentshim runs) owned elsewhere, so this contract names no list of them.",
+      "properties": {
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Run Id"
+        },
+        "execution_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Execution Id"
+        },
+        "span_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Span Id"
+        },
+        "round_label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Round Label"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Role"
+        },
+        "harness": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Harness"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Model"
+        },
+        "reasoning_effort": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reasoning Effort"
+        },
+        "harness_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Harness Version"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Started At"
+        },
+        "ended_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Ended At"
+        },
+        "tokens": {
+          "$ref": "#/$defs/TokenTally"
+        },
+        "cost_usd": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cost Usd"
+        },
+        "duration_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Duration Ms"
+        }
+      },
+      "required": [
+        "run_id",
+        "execution_id",
+        "span_id",
+        "round_label",
+        "role",
+        "harness",
+        "model",
+        "reasoning_effort",
+        "harness_version",
+        "started_at",
+        "ended_at",
+        "tokens",
+        "cost_usd",
+        "duration_ms"
+      ],
+      "title": "UsageRecord",
+      "type": "object"
+    },
     "WorkerStartRefusedCompensationFailure": {
       "additionalProperties": false,
       "description": "The helper could not start the worker that owns the compensating stop.",
@@ -5950,15 +6473,20 @@ const hostHelperSchema: Record<string, unknown> = {
   "x-vibesys-feature-by-field": {
     "run.start": {
       "harness": "harnesses",
-      "options": "run_options"
+      "options": "run_options",
+      "agents": "run_role_agents"
     },
     "run.preflight": {
       "harness": "harnesses",
       "options": "run_options",
+      "agents": "run_role_agents",
       "with_roles": "run_roles",
       "with_backend": "run_backend",
       "with_causes": "run_causes",
       "with_project_clean": "project_clean"
+    },
+    "harnesses.list": {
+      "with_generations": "harness_generations"
     },
     "logs.list": {
       "span_id": "logs_by_span"
@@ -5968,6 +6496,9 @@ const hostHelperSchema: Record<string, unknown> = {
     },
     "runs.list": {
       "digest_runs": "run_digest"
+    },
+    "examples.list": {
+      "with_catalogue": "example_catalogue"
     }
   }
 };

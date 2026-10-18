@@ -46,6 +46,15 @@ builds anything, with the key and the vetted models. At a terminal,
 `--allow-unvetted-model` runs it anyway; runs started from the desktop app
 cannot opt out. A resume keeps the pair its run was started with.
 
+A role entry may also name a `provider` (`--role-provider ROLE=PROVIDER`, with
+`--role-model ROLE=MODEL`). A role on a provider other than the run's and with no
+model runs that provider's default model, never the run's model. Each provider a
+run uses gets its own agent client, and every role runs on its own. A run
+environment that starts containers carries the login of the run's provider only,
+so roles on more than one provider are rejected there, naming the providers, until
+containers carry every provider's login; the host run environment has no such
+limit.
+
 Unknown role IDs are rejected against the selected orchestration before run
 resources open. The run manifest records the total resolved role map. Resume
 restores that map and rejects a plugin generation whose role IDs differ.
@@ -160,8 +169,8 @@ every `retry_seconds` when it reported none, and fails the turn with the quota
 error once `wait_seconds` is spent or the reset lies beyond it. `fail` does not
 pause.
 
-A run drives every role through one agent client on one provider, so it cannot
-switch to a fallback provider on a quota stop. `fallback_provider`,
+A run fixes each role's provider when it starts (one agent client per provider),
+so it cannot switch to a fallback provider on a quota stop. `fallback_provider`,
 `fallback_model` and `policy = "fallback"` are accepted by the config schema but
 refused when a run starts, naming the key; use `pause`, `wait` or `fail`. A
 misspelled key, an unknown policy, or `wait_seconds` with `pause` or `fail` is

@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import {CODE_IDS} from '@vibesys/contracts';
-import {stepLabel, stepTitle} from './names.js';
+import {stepKicker, stepLabel, stepTitle} from './names.js';
 
 /** The roles the backend declares, as a step names them in a trace: by id, and by its own title. */
 describe('how a step is named for a person', () => {
@@ -23,5 +23,22 @@ describe('how a step is named for a person', () => {
     expect(stepLabel({role: null, title: 'correctness + benchmark'})).toBe(
       'correctness + benchmark',
     );
+  });
+});
+
+describe('the kicker over a step’s pane title', () => {
+  test('never says the role the title already names, whatever the role', () => {
+    for (const role of CODE_IDS.roles) {
+      const step = {kind: 'agent_turn', role, title: role};
+      expect(stepKicker(step)).toBe('Agent turn');
+      expect(stepKicker(step)).not.toContain(stepTitle(step));
+    }
+  });
+
+  test('names the role when the title is the step’s own headline', () => {
+    expect(stepKicker({kind: 'agent_turn', role: 'implementer', title: 'Pad the counters'})).toBe(
+      'Agent turn · Implementer',
+    );
+    expect(stepKicker({kind: 'gate', role: null, title: 'correctness + benchmark'})).toBe('Gate');
   });
 });

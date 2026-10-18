@@ -342,6 +342,30 @@
           ],
           "default": null,
           "title": "Model"
+        },
+        "reasoning_effort": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reasoning Effort"
+        },
+        "harness_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Harness Version"
         }
       },
       "required": [
@@ -3021,7 +3045,7 @@
           ],
           "default": null
         },
-        "kept": {
+        "best": {
           "anyOf": [
             {
               "type": "boolean"
@@ -3031,7 +3055,7 @@
             }
           ],
           "default": null,
-          "title": "Kept"
+          "title": "Best"
         },
         "strategy_disposition": {
           "anyOf": [

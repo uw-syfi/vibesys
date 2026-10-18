@@ -19,6 +19,8 @@ export type CheckId =
   | 'chart-size'
   | 'pane-fill'
   | 'scroll-room'
+  | 'control-row'
+  | 'column-tops'
   | 'stability';
 
 export interface Violation {
@@ -659,6 +661,83 @@ export function scrollRoomCheck(): Violation[] {
   return found;
 }
 
+/** The box a person sees for a text field or select: a search box's frame, else the control. */
+function frameOf(control: Element): Element {
+  return control.closest('.vs-searchbox') ?? control;
+}
+
+/** The lowest element that holds both `a` and `b`. */
+function commonAncestor(a: Element, b: Element): Element | null {
+  for (let up: Element | null = a; up !== null; up = up.parentElement) {
+    if (up.contains(b)) return up;
+  }
+  return null;
+}
+
+/** Whether two boxes sit next to each other on one line of a flex row `style`. */
+function sideBySide(a: DOMRect, b: DOMRect, style: CSSStyleDeclaration): boolean {
+  const apart = a.right <= b.left + 1 || b.right <= a.left + 1;
+  const shared = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+  const flexRow = style.display.includes('flex') && style.flexDirection === 'row';
+  return apart && flexRow && shared >= Math.min(a.height, b.height) / 2;
+}
+
+/**
+ * Form controls side by side in one flex row (a search box and a sort select in a toolbar) that
+ * are not the same height or do not start at the same top edge, to within 1 px: they read as
+ * misaligned, whatever centers them. Radios, checkboxes and sliders are not boxes of this kind.
+ */
+export function controlRowCheck(): Violation[] {
+  const found: Violation[] = [];
+  const kinds =
+    'input:not([type="radio"],[type="checkbox"],[type="range"],[type="hidden"],[type="file"]),select';
+  const boxes = [...document.body.querySelectorAll(kinds)]
+    .filter(isShown)
+    .map(control => ({control, frame: frameOf(control)}))
+    .map(({control, frame}) => ({control, frame, box: frame.getBoundingClientRect()}))
+    .filter(each => each.box.width > 0 && each.box.height > 0);
+  for (const [at, a] of boxes.entries()) {
+    for (const b of boxes.slice(at + 1)) {
+      const row = commonAncestor(a.frame, b.frame);
+      if (row === null || !sideBySide(a.box, b.box, getComputedStyle(row))) continue;
+      const [heights, tops] = [a.box.height - b.box.height, a.box.top - b.box.top];
+      if (Math.abs(heights) <= 1 && Math.abs(tops) <= 1) continue;
+      found.push({
+        check: 'control-row',
+        message: `controls in one row do not line up: ${describe(a.control)} is ${Math.round(a.box.height)} px high and ${describe(b.control)} ${Math.round(b.box.height)} px, their tops differ by ${Math.abs(Math.round(tops))} px`,
+        where: describe(row),
+      });
+    }
+  }
+  return found;
+}
+
+/**
+ * Where a page has a side column beside its main column (the page's footer, beside its body), their
+ * first boxes share a top edge: a side card that starts level with the page's logo while the form
+ * starts 200 px lower reads as two unrelated screens.
+ */
+export function columnTopsCheck(): Violation[] {
+  const found: Violation[] = [];
+  for (const content of document.body.querySelectorAll('.vs-page-content')) {
+    const body = content.querySelector(':scope > .vs-page-scroll > .vs-page-body');
+    const side = content.querySelector(':scope > .vs-page-footer');
+    const main = body?.firstElementChild;
+    const first = side?.firstElementChild;
+    if (!body || !side || !main || !first || !isShown(side)) continue;
+    const beside = side.getBoundingClientRect().left >= body.getBoundingClientRect().right - 1;
+    if (!beside) continue;
+    const gap = Math.abs(first.getBoundingClientRect().top - main.getBoundingClientRect().top);
+    if (gap <= 2) continue;
+    found.push({
+      check: 'column-tops',
+      message: `the side column starts ${Math.round(gap)} px from the top of the main column`,
+      where: describe(first),
+    });
+  }
+  return found;
+}
+
 /** What `screen-check.ts` sends to the page ahead of a check. */
 export const HELPERS: readonly ((...args: never[]) => unknown)[] = [
   inCode,
@@ -688,4 +767,7 @@ export const HELPERS: readonly ((...args: never[]) => unknown)[] = [
   hasIdAsWord,
   idHits,
   nameHits,
+  frameOf,
+  commonAncestor,
+  sideBySide,
 ];

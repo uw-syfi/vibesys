@@ -513,6 +513,22 @@ describe('Hosts.readSummary', () => {
     output: null,
     reasoning: null,
   });
+  const record = (execution: string, input: number) => ({
+    run_id: 'run-1',
+    execution_id: execution,
+    span_id: null,
+    round_label: null,
+    role: 'implementer',
+    harness: 'codex',
+    model: null,
+    reasoning_effort: null,
+    harness_version: null,
+    started_at: null,
+    ended_at: null,
+    tokens: tally(input),
+    cost_usd: null,
+    duration_ms: null,
+  });
   const page = (through: number, rest: object) => ({
     through_sequence: through,
     event_count: through,
@@ -522,12 +538,14 @@ describe('Hosts.readSummary', () => {
     span_count: 2,
     reply_count: 1,
     usage_count: 1,
+    record_count: 2,
     tokens: tally(7),
     overview: null,
     spans: [],
     replies: [],
     schemas: {},
     usage: [],
+    records: [],
     next_offset: null,
     ...rest,
   });
@@ -554,6 +572,7 @@ describe('Hosts.readSummary', () => {
           spans: [{id: 'a'}, {id: 'b'}],
           next_offset: 2,
           schemas: {[SCHEMA]: {title: 'Plan'}},
+          records: [record('inv:a', 3)],
         }),
       },
       {
@@ -561,6 +580,7 @@ describe('Hosts.readSummary', () => {
         page: page(40, {
           replies: [{span_id: 'a', kind: 'Plan', schema_id: SCHEMA, value: {summary: 'x'}}],
           usage: [{span_id: 'a', tally: tally(5)}],
+          records: [record('inv:b', 4)],
         }),
       },
     ]);
@@ -586,6 +606,7 @@ describe('Hosts.readSummary', () => {
             tokens: {input: 5, cacheRead: null, cacheWrite: null, output: null, reasoning: null},
           },
         ],
+        records: [record('inv:a', 3), record('inv:b', 4)],
       },
     });
   });

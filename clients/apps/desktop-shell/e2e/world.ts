@@ -7,6 +7,7 @@ import {
   installFakeMachines,
   installFakeNewRun,
 } from './fake-bridge.js';
+import {FAKE_OFFER} from './fake-offer.js';
 import {STARTED_AT} from './started-at.js';
 
 export interface FakeHostWindow extends Window {
@@ -82,57 +83,7 @@ export const SEED: FakeBridgeSeed = {
     ],
   },
   newRun: {
-    machine: {
-      checkout: {root: '/home/me/vibesys', version: '0.9.0', commit: 'cc65df3', dirty: false},
-      hardware: {
-        cpu_cores: 64,
-        gpus: [{vendor: 'amd', model: 'MI300X'}],
-        accelerator: 'rocm',
-      },
-      docker: {reachable: true, version: '27.3.1'},
-      harness_clis: ['claude', 'codex'],
-      harness_cli_names: {claude: 'Claude Code', codex: 'Codex'},
-      runs: {live: 1, ended_today: 2},
-    },
-    harnesses: [
-      {
-        provider: 'claude',
-        model: 'claude-opus-4-5',
-        default: true,
-        display: {
-          providerName: 'Claude Code',
-          modelName: 'Opus 4.5',
-          family: 'Claude',
-          tier: 3,
-          tierName: 'Opus',
-        },
-      },
-      {
-        provider: 'claude',
-        model: 'claude-sonnet-4-5',
-        default: false,
-        display: {
-          providerName: 'Claude Code',
-          modelName: 'Sonnet 4.5',
-          family: 'Claude',
-          tier: 2,
-          tierName: 'Sonnet',
-        },
-      },
-      {
-        provider: 'codex',
-        model: 'gpt-5-codex',
-        default: true,
-        display: {providerName: 'Codex', modelName: 'GPT-5 Codex'},
-      },
-    ],
-    examples: {
-      checkout: '/home/me/vibesys',
-      examples: [
-        {name: 'queue-rs', category: 'rust', tasks: ['mpmc', 'mpsc', 'spsc'], external_repo: false},
-        {name: 'kv-store', category: 'rust', tasks: ['get-put'], external_repo: false},
-      ],
-    },
+    ...FAKE_OFFER,
     projects: {
       [PROJECT]: ['mpmc', 'mpsc', 'spsc'],
       '/home/me/vibesys/examples/queue-rs': ['mpmc', 'mpsc', 'spsc'],

@@ -125,6 +125,7 @@ class LifecycleReportingExecutor:
                 user_prompt=turn.message,
                 provider=session_spec.provider,
                 model=session_spec.model,
+                reasoning_effort=session_spec.reasoning_effort,
             )
         )
 

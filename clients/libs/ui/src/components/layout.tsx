@@ -5,8 +5,11 @@ import type {SpaceToken} from '../tokens/index.js';
 export type PageWidth = 'content' | 'wide' | 'narrow';
 export type Align = 'start' | 'center' | 'end' | 'stretch' | 'baseline';
 export type Justify = 'start' | 'center' | 'end' | 'between';
-/** The narrowest column a `Grid` wraps at: a form field, a tile, or a theme swatch. */
-export type GridColumn = 'field' | 'tile' | 'swatch';
+/**
+ * The narrowest column a `Grid` wraps at: a form field, a tile, a theme swatch, or a theme swatch
+ * of a group of three that stays in one row down to the narrowest window.
+ */
+export type GridColumn = 'field' | 'tile' | 'swatch' | 'swatch-row';
 
 interface FlexProps {
   readonly gap?: SpaceToken;

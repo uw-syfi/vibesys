@@ -41,12 +41,13 @@ class _ProviderError(Exception):
     """A provider failure of any kind the driver does not classify."""
 
 
-def _spec(workspace: Path) -> AgentSessionSpec:
+def _spec(workspace: Path, reasoning_effort: str | None = None) -> AgentSessionSpec:
     return AgentSessionSpec(
         role="worker",
         provider="fake",
         workspace=workspace,
         policy=AgentExecutionPolicy(require_enforcement=False),
+        reasoning_effort=reasoning_effort,
     )
 
 
@@ -107,3 +108,27 @@ def test_every_dispatched_turn_is_one_start_and_one_finish(
     }[outcome]
     assert finished.status is expected
     assert (finished.error is None) == (outcome == "answers")
+
+
+@given(effort=st.none() | _text)
+def test_a_turns_start_names_the_provider_and_reasoning_effort_of_its_session(
+    tmp_path_factory: pytest.TempPathFactory, effort: str | None
+) -> None:
+    lifecycle = FakeAgentExecutionLifecycleSink()
+    client = report_turns(
+        AgentClient(
+            FakeProvider(script=FakeTurnScript(({"value": 1},)), threads=SimThreads()),
+            clock=ManualClock(),
+            threads=SimThreads(),
+        ),
+        lifecycle,
+    )
+
+    client.run(
+        session_spec=_spec(tmp_path_factory.mktemp("workspace"), effort),
+        turn=AgentTurnRequest(message="m", output_schema=_Reply, invocation_id="inv"),
+    )
+
+    started, _ = lifecycle.events
+    assert isinstance(started, AgentExecutionStarted)
+    assert (started.provider, started.reasoning_effort) == ("fake", effort)

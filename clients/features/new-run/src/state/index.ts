@@ -46,6 +46,7 @@ export {
   newRunMachine,
   type ProjectFix,
 } from './machine.js';
+export {type Problem, problemOf, type Step, StepFailure} from './problem.js';
 export {
   agentWithRoles,
   formWithRoles,

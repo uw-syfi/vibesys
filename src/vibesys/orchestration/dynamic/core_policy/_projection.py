@@ -322,7 +322,7 @@ def _hypothesis_view(
         perf_metric_name=headline.name if headline is not None else None,
         perf_direction=headline.direction if headline is not None else None,
         perf_baseline_value=comparable.value if comparable is not None else None,
-        kept=True if snapshot.leading == item.hypothesis_id else None,
+        best=True if snapshot.leading == item.hypothesis_id else None,
         strategy_disposition=item.strategy.value,
         strategy_reason=item.reason or None,
         active=active,

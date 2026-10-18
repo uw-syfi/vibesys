@@ -41,10 +41,15 @@ export const CLEAN_SCREEN = `
     <div>Lock-free ring with per-slot sequence numbers</div>
     <div><span data-mono-id>claude-opus-5-5</span> <span data-mono-id>perf-evaluator</span> <code>judge</code></div>
     <div>queue-rs · mpmc</div>
+    <div style="display:flex;align-items:center;gap:8px"><span class="vs-searchbox" style="display:inline-flex;height:32px;box-sizing:border-box"><input type="search" aria-label="Search" style="height:30px;box-sizing:border-box"/></span><select aria-label="Sort" style="height:32px;box-sizing:border-box"><option>Newest</option></select></div>
     <div class="vs-pickrow"><span class="vs-pickrow-text"><span>Ring buffer</span><span>Within noise</span></span><span class="vs-chip">Passed</span></div>
     <div style="display:flex;flex-direction:column;height:80px">
       <div style="max-height:60px;overflow-y:auto"><div style="height:200px">rows</div></div>
       <div>Start</div>
+    </div>
+    <div class="vs-page-content" style="position:relative;width:440px;height:60px">
+      <div class="vs-page-scroll" style="width:300px"><div class="vs-page-body"><div>Machine</div></div></div>
+      <div class="vs-page-footer" style="position:absolute;left:320px;top:0;width:100px"><div>Ready</div></div>
     </div>
     <div class="vs-pane-body" style="width:440px">
       <div style="max-width:100ch">The judge read the candidate source and found that it matches the declared outcome, so the idea passed.</div>
@@ -205,6 +210,18 @@ export const BAD_SCREENS: readonly BadScreen[] = [
     check: 'scroll-room',
     message: /a region scrolls \(\d+ px of content in 60 px\) while it has \d+ px of room/,
     html: `<div style="${PAGE}"><div style="display:flex;flex-direction:column;height:240px"><div style="max-height:60px;overflow-y:auto"><div style="height:200px">rows</div></div><div style="margin-top:auto">Start</div></div></div>`,
+  },
+  {
+    name: 'a search box and a select in one row, the select pushed down by its label',
+    check: 'control-row',
+    message: /controls in one row do not line up: .* is 32 px high and .* 40 px/,
+    html: `<div style="${PAGE}"><div style="display:flex;align-items:center;gap:8px"><span class="vs-searchbox" style="display:inline-flex;height:32px;box-sizing:border-box"><input type="search" aria-label="Search" style="height:30px;box-sizing:border-box"/></span><div style="display:flex;flex-direction:column"><label for="sort" style="height:20px">Sort</label><select id="sort" style="height:40px"><option>Newest</option></select></div></div></div>`,
+  },
+  {
+    name: 'a side card that starts level with the page title while the form starts below it',
+    check: 'column-tops',
+    message: /the side column starts \d+ px from the top of the main column/,
+    html: `<div style="${PAGE}"><div class="vs-page-content" style="position:relative;width:440px;height:200px"><div class="vs-page-scroll" style="width:300px"><div class="vs-page-body" style="padding-top:60px"><div>Machine</div></div></div><div class="vs-page-footer" style="position:absolute;left:320px;top:0;width:100px"><div>Ready</div></div></div></div>`,
   },
   {
     name: 'text drawn outside the window',

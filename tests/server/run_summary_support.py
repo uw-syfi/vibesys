@@ -17,7 +17,9 @@ from typing import TYPE_CHECKING, Any
 from hypothesis import strategies as st
 
 from server.events import (
+    AgentExecutionActivityData,
     AgentExecutionFinishedData,
+    AgentExecutionStartedData,
     EventType,
     OutputData,
     RunEvent,
@@ -34,6 +36,9 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
 RUN_ID = "20261010-120000-11111111-dynamic"
+
+EXECUTION_IDS = ("inv:planner:000001:0", "inv:implementer:000001:0", "inv:judge:000002:0")
+ROLES = ("planner", "implementer", "judge")
 
 _SPAN_IDS = ("flow:search#1", "flow:search/idea#1", "op:000001/implementer.1", "op:000002/gate.1")
 _SCHEMAS: tuple[dict[str, Any], ...] = (
@@ -78,6 +83,8 @@ class _Draft:
     type: EventType
     data: Any
     span_id: str | None = None
+    execution_id: str | None = None
+    agent_kind: str | None = None
 
 
 def _drafts() -> st.SearchStrategy[_Draft]:
@@ -103,19 +110,45 @@ def _drafts() -> st.SearchStrategy[_Draft]:
         _Draft(EventType.RUN_STARTED, RunStartedData(outer_loop="dynamic", input="no overview"))
     )
     counts = st.none() | st.integers(min_value=0, max_value=5000)
-    spent = st.builds(
+    usage_data = st.builds(
         TurnUsageData,
         input_tokens=counts,
         cache_creation_input_tokens=counts,
         cache_read_input_tokens=counts,
         output_tokens=counts,
         reasoning_output_tokens=counts,
+        total_cost_usd=st.none() | st.floats(0, 5, allow_nan=False),
+        duration_ms=counts,
         span_id=st.none() | st.sampled_from(_SPAN_IDS),
-    ).map(lambda data: _Draft(EventType.TURN_USAGE_RECORDED, data))
+    )
+    spent = st.tuples(usage_data, st.none() | st.sampled_from(EXECUTION_IDS)).map(
+        lambda pair: _Draft(EventType.TURN_USAGE_RECORDED, pair[0], execution_id=pair[1])
+    )
+    begun = st.tuples(
+        st.sampled_from(range(len(EXECUTION_IDS))),
+        st.none() | st.sampled_from(["codex", "claude_code"]),
+        st.none() | st.sampled_from(["gpt-6-luna", "opus-5"]),
+        st.none() | st.sampled_from(["low", "high"]),
+    ).map(
+        lambda parts: _Draft(
+            EventType.AGENT_EXECUTION_STARTED,
+            AgentExecutionStartedData(
+                stage=ROLES[parts[0]],
+                activity=AgentExecutionActivityData(mode="thinking", summary="working"),
+                provider=parts[1],
+                model=parts[2],
+                reasoning_effort=parts[3],
+            ),
+            execution_id=EXECUTION_IDS[parts[0]],
+            agent_kind=ROLES[parts[0]],
+        )
+    )
     noise = st.text(max_size=300).map(
         lambda text: _Draft(EventType.OUTPUT, OutputData(stream="stdout", content=text))
     )
-    return st.one_of(span_data, span_data, finished, finished, spent, spent, started, unseen, noise)
+    return st.one_of(
+        span_data, span_data, finished, finished, spent, spent, begun, started, unseen, noise
+    )
 
 
 @st.composite
@@ -143,6 +176,8 @@ def events(draw: st.DrawFn, max_size: int = 40) -> list[RunEvent]:
                 type=draft.type,
                 data=draft.data,
                 span_id=draft.span_id,
+                execution_id=draft.execution_id,
+                agent_kind=draft.agent_kind,
             )
         )
     return made

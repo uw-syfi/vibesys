@@ -1,6 +1,7 @@
 /** The components' behavior in a browser DOM, through the `.` entry only. */
 
 import {afterAll, beforeAll, describe, expect, test} from 'bun:test';
+import {readFileSync} from 'node:fs';
 import {Window} from 'happy-dom';
 import {act, type ReactNode, useState} from 'react';
 import {createRoot} from 'react-dom/client';
@@ -27,8 +28,11 @@ import {
   Select,
   StatusDot,
   type StatusTone,
+  Text,
   TextInput,
+  type TextStyle,
 } from './index.js';
+import {TYPE} from './tokens/index.js';
 
 const window = new Window();
 const installed = Object.getOwnPropertyNames(window).filter(name => !(name in globalThis));
@@ -266,6 +270,24 @@ describe('Field', () => {
     expect(described).toEqual(['Shown in the list', 'Too long']);
   });
 
+  test('a hidden label still names its control and is marked for the stylesheet to hide', async () => {
+    const container = await mount(
+      <Field label="Sort ideas" hideLabel>
+        <Select
+          size="sm"
+          value="a"
+          change={() => undefined}
+          options={[{value: 'a', label: 'Newest'}]}
+        />
+      </Field>,
+    );
+    const label = one(container, 'label');
+    expect(label.getAttribute('for')).toBe(one(container, 'select').id);
+    expect(label.textContent).toBe('Sort ideas');
+    expect(label.hasAttribute('data-hidden')).toBe(true);
+    expect(one(container, '.vs-select').getAttribute('data-size')).toBe('sm');
+  });
+
   test('a control outside a Field refuses to render', async () => {
     const original = console.error;
     console.error = () => undefined;
@@ -456,6 +478,30 @@ describe('Chart emphasis and spans', () => {
     const band = marked.querySelector('.vs-chart-span-band');
     const axis = marked.querySelector('line.vs-chart-axis');
     expect(band?.getAttribute('x')).toBe(axis?.getAttribute('x1'));
+  });
+});
+
+describe('Chart x labels', () => {
+  test('a label at the plot’s end stays inside the drawing instead of being cut by it', async () => {
+    const container = await mount(
+      <Chart
+        label="c"
+        points={[{x: 0, y: 1, filled: true}]}
+        xTicks={[
+          {value: 0, label: '0s'},
+          {value: 1_200_000, label: '333h 20m'},
+        ]}
+        pick={() => undefined}
+      />,
+    );
+    const view = container.querySelector('svg.vs-chart')?.getAttribute('viewBox')?.split(' ') ?? [];
+    const width = Number(view[2]);
+    const [first, last] = [...container.querySelectorAll('text.vs-chart-label')].filter(each =>
+      /^\d+[hs]/.test(each.textContent ?? ''),
+    );
+    expect(last?.getAttribute('text-anchor')).toBe('end');
+    expect(Number(last?.getAttribute('x'))).toBeLessThanOrEqual(width);
+    expect(first?.getAttribute('text-anchor')).not.toBe('end');
   });
 });
 
@@ -670,5 +716,30 @@ describe('ActionPanel', () => {
     expect(container.textContent).toContain('Start run');
     await click(status);
     expect(container.textContent).not.toContain('Every check passed.');
+  });
+});
+
+describe('Text', () => {
+  test('draws every role of the type scale from custom properties tokens.css declares', async () => {
+    const css = readFileSync(new URL('./tokens.css', import.meta.url), 'utf8');
+    const roles = Object.keys(TYPE) as TextStyle[];
+    const container = await mount(
+      <>
+        {roles.map(role => (
+          <Text key={role} variant={role}>
+            {role}
+          </Text>
+        ))}
+      </>,
+    );
+    const drawn = [...container.querySelectorAll<HTMLElement>('.vs-text')];
+    expect(drawn).toHaveLength(roles.length);
+    roles.forEach((role, index) => {
+      const style = (drawn[index] as HTMLElement).getAttribute('style') ?? '';
+      for (const part of ['family', 'size', 'line', 'weight', 'tracking', 'transform']) {
+        expect(style).toContain(`var(--text-${role}-${part})`);
+        expect(css).toContain(`--text-${role}-${part}:`);
+      }
+    });
   });
 });

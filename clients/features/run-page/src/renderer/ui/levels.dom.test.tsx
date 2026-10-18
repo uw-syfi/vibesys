@@ -32,11 +32,11 @@ afterAll(async () => {
   await window.happyDOM.close();
 });
 
-/** The chips of the opened idea's header. */
-async function chipsOf(
+/** The chips of the opened idea's header and the text of its whole pane. */
+async function paneOf(
   outcome: 'passed' | 'failed' | 'running',
   reason: string | null,
-): Promise<(string | null)[]> {
+): Promise<{chips: (string | null)[]; text: string}> {
   const opened = {...idea('mpmc', outcome, 100, 300), reason};
   const model = {
     ...modelOf([opened]),
@@ -68,21 +68,29 @@ async function chipsOf(
     ),
   );
   const chips = [...container.querySelectorAll('.vs-chip')].map(chip => chip.textContent);
+  const pane = [...container.querySelectorAll('section.vs-pane')].at(-1);
+  const text = pane?.textContent ?? '';
   await act(async () => root.unmount());
   container.remove();
-  return chips;
+  return {chips, text};
 }
 
-test('a failed idea names why in its header, as the Ideas list does', async () => {
+const chipsOf = async (outcome: 'passed' | 'failed' | 'running', reason: string | null) =>
+  (await paneOf(outcome, reason)).chips;
+
+test('a failed idea says why once: its badge says Failed and its body line gives the reason', async () => {
   for (const [reason, said] of [
-    ['turned_down', 'Failed'],
-    ['not_measured', 'Failed · not measured'],
-    ['no_design', 'Failed · no design'],
-    ['not_opened', 'Failed · not opened'],
+    ['turned_down', 'Not measured'],
+    ['not_measured', 'Not measured'],
+    ['no_design', 'No design'],
+    ['not_opened', 'Not opened'],
   ] as const) {
-    expect(await chipsOf('failed', reason)).toContain(said);
+    const {chips, text} = await paneOf('failed', reason);
+    expect(chips).toContain('Failed');
+    expect(text).toContain(said);
+    expect(text.match(new RegExp(said, 'gi'))).toHaveLength(1);
+    expect(text).not.toMatch(/Failed · /);
   }
-  expect(await chipsOf('failed', null)).toContain('Failed');
 });
 
 test('a passed or running idea carries no reason in its header', async () => {

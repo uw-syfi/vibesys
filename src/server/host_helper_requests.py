@@ -102,9 +102,12 @@ from server.host_helper_logs import HelperLogs, ReadWithdrawal, list_logs, read_
 from server.host_helper_preflight import (
     PreflightFacts,
     abbreviates,
+    conflicting_agent,
     option_arguments,
     preflight_checks,
     repeated_option,
+    undeclared_agent,
+    unvetted_agent,
     unvetted_role,
 )
 from server.host_machine_facts import (
@@ -378,8 +381,8 @@ class ExampleProjects(Protocol):
     ``not_nested`` or ``project_create_failed``.
     """
 
-    def list(self) -> ExampleList:
-        """Every catalogued example with its tasks."""
+    def list(self, *, with_catalogue: bool = False) -> ExampleList:
+        """Every catalogued example with its tasks, and with their catalogue facts if asked."""
         ...
 
     def create(self, example: str, destination: Path) -> CreatedProject:
@@ -639,17 +642,20 @@ def refused_argument(request: RunStartRequest | RunPreflightRequest) -> str | No
                 if flag == UNVETTED_MODEL_FLAG:
                     return f"{token} selects {flag}; runs started here use only vetted harnesses"
                 return f"{token} selects {flag}, which the chosen harness already sets"
-    return repeated_option(request.args, request.options)
+    return repeated_option(request.args, request.options, request.agents)
 
 
 def unvetted_harness(
     request: RunStartRequest | RunPreflightRequest, harnesses: tuple[HarnessOption, ...]
 ) -> HelperError | None:
-    """``unvetted_harness`` naming the allowed models: for a harness not offered, or a role model.
+    """``unvetted_harness`` naming the allowed models: for a harness not offered, or a role's.
 
-    A role's model must be one of the chosen harness's vetted models.
+    A role's model must be one of the chosen harness's vetted models, and each ``agents`` entry
+    a pair ``harnesses`` offers.
     """
-    role = unvetted_role(request.options, request.harness, harnesses)
+    role = unvetted_role(request.options, request.harness, harnesses) or unvetted_agent(
+        request.agents, harnesses
+    )
     if role is not None:
         return _error(request.request_id, HelperErrorCode.UNVETTED_HARNESS, role)
     choice = request.harness
@@ -673,7 +679,7 @@ def run_arguments(request: RunStartRequest | RunPreflightRequest) -> tuple[str, 
         if request.harness is None
         else (CLI_PROVIDER_FLAG, request.harness.provider, MODEL_FLAG, request.harness.model)
     )
-    return (*task, *harness, *option_arguments(request.options), *request.args)
+    return (*task, *harness, *option_arguments(request.options, request.agents), *request.args)
 
 
 def launch_arguments(request: RunStartRequest) -> tuple[str, ...]:
@@ -806,8 +812,9 @@ def _examples_reply(
 ) -> ExamplesListReply | ProjectCreateFromExampleReply | ProjectCopyOutReply:
     """Answer one read of the example catalog, or make one new project."""
     match request:
-        case ExamplesListRequest(request_id=request_id):
-            return ExamplesListReply(request_id=request_id, listing=host.examples.list())
+        case ExamplesListRequest(request_id=request_id, with_catalogue=with_catalogue):
+            listing = host.examples.list(with_catalogue=with_catalogue is True)
+            return ExamplesListReply(request_id=request_id, listing=listing)
         case ProjectCreateFromExampleRequest(
             request_id=request_id, example=example, destination=destination
         ):
@@ -955,12 +962,14 @@ def _run_summary_reply(request: RunsSummaryRequest, host: HelperHost) -> RunsSum
         span_count=fold.span_count,
         reply_count=fold.reply_count,
         usage_count=fold.usage_count,
+        record_count=fold.record_count,
         tokens=fold.tokens,
         overview=fold.overview,
         spans=page.spans,
         replies=page.replies,
         schemas=page.schemas,
         usage=page.usage,
+        records=page.records,
         next_offset=page.next_offset,
     )
 
@@ -991,6 +1000,13 @@ def _start(request: RunStartRequest, host: HelperHost) -> RunStartReply | Helper
     if refusal is not None:
         return refusal
     root = host.projects.require_initialized(Path(_host_path(request.project, host.directories)))
+    if request.agents:
+        # Only the run's own validation knows which roles its orchestration declares.
+        undeclared = undeclared_agent(
+            request.agents, host.preflight.report(root, run_arguments(request))
+        )
+        if undeclared is not None:
+            return _error(request.request_id, HelperErrorCode.INVALID_REQUEST, undeclared)
     launch = host.launcher.start(root, launch_arguments(request))
     return RunStartReply(request_id=request.request_id, launch=launch)
 
@@ -1009,10 +1025,17 @@ def _preflight(request: RunPreflightRequest, host: HelperHost) -> RunPreflightRe
         docker=host.machine.docker(),
     )
     report = host.preflight.report(root, run_arguments(request))
+    undeclared = undeclared_agent(request.agents, report)
+    if undeclared is not None:
+        return _error(request.request_id, HelperErrorCode.INVALID_REQUEST, undeclared)
     checks = tuple(
         check
         for check in preflight_checks(
-            facts, report, options=request.options, with_causes=bool(request.with_causes)
+            facts,
+            report,
+            options=request.options,
+            agents=request.agents,
+            with_causes=bool(request.with_causes),
         )
         if request.with_project_clean or check.id is not CheckId.PROJECT_CLEAN
     )
@@ -1036,7 +1059,10 @@ def _refusal(
     refusal = refused_argument(request)
     if refusal is not None:
         return _error(request.request_id, HelperErrorCode.INVALID_REQUEST, refusal)
-    if request.harness is None and request.options is None:
+    conflict = conflicting_agent(request.options, request.agents)
+    if conflict is not None:
+        return _error(request.request_id, HelperErrorCode.INVALID_REQUEST, conflict)
+    if request.harness is None and request.options is None and request.agents is None:
         return None
     return unvetted_harness(request, host.harnesses())
 
@@ -1074,10 +1100,13 @@ def _host_read_reply(
             return PingReply(request_id=request_id)
         case PathsCompleteRequest():
             return complete_path(request, host.directories)
-        case HarnessesListRequest(request_id=request_id):
+        case HarnessesListRequest(request_id=request_id, with_generations=with_generations):
+            listed = installed_first(host.harnesses(), host.machine.harness_clis())
             return HarnessesListReply(
                 request_id=request_id,
-                harnesses=installed_first(host.harnesses(), host.machine.harness_clis()),
+                harnesses=(
+                    listed if with_generations else tuple(o.without_generations() for o in listed)
+                ),
             )
         case LogsListRequest() | LogsReadRequest() if host.logs is None:
             message = f"{request.type} needs a log store, which this host does not have"

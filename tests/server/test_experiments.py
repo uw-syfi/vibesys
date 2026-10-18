@@ -288,7 +288,7 @@ def test_projection_uses_nested_rounds_and_one_official_measurement_tuple() -> N
     assert (entry.first_round, entry.last_round) == (1, 2)
     assert entry.resolved_outcome == "disproven"
     assert entry.judge_verdict == "pass"
-    assert entry.kept is False
+    assert entry.best is False
     assert entry.strategy_disposition == "abandoned"
     # Do not combine the newer second-round value with the official first-round
     # causal comparison.

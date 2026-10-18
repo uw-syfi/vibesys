@@ -449,6 +449,8 @@ export type SystemPrompt1 = string;
 export type UserPrompt1 = string;
 export type Provider5 = string | null;
 export type Model5 = string | null;
+export type ReasoningEffort = string | null;
+export type HarnessVersion = string | null;
 export type Kind7 = "agent_execution_finished";
 export type Error2 = string | null;
 export type Kind8 = string;
@@ -816,7 +818,7 @@ export type PerfBaselineCommit = string | null;
  * than being relabelled as unresolved.
  */
 export type PerfDeltaReason = "no_baseline_yet" | "baseline_unresolved" | "not_framework_measured";
-export type Kept = boolean | null;
+export type Best = boolean | null;
 export type StrategyDisposition = ("available" | "parked" | "abandoned") | null;
 export type StrategyReason = string | null;
 export type Active = boolean;
@@ -1663,6 +1665,8 @@ export interface AgentExecutionStartedData {
   activity: AgentExecutionActivityData;
   provider?: Provider5;
   model?: Model5;
+  reasoning_effort?: ReasoningEffort;
+  harness_version?: HarnessVersion;
 }
 /**
  * Terminal result for one agent execution.
@@ -2308,7 +2312,7 @@ export interface HypothesisEntry {
   perf_baseline_round?: PerfBaselineRound;
   perf_baseline_commit?: PerfBaselineCommit;
   perf_delta_reason?: PerfDeltaReason | null;
-  kept?: Kept;
+  best?: Best;
   strategy_disposition?: StrategyDisposition;
   strategy_reason?: StrategyReason;
   active?: Active;

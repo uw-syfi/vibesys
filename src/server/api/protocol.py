@@ -488,9 +488,10 @@ class HypothesisEntry(ProtocolModel):
     # records predating provenance tracking, which keep reading as deliberate
     # absolute measurements.
     perf_delta_reason: PerfDeltaReason | None = None
-    # Integration, not truth: the framework's explicit retention decision.
-    # None means legacy or not yet assessed, never "official evaluation ran".
-    kept: bool | None = None
+    # Integration, not truth: the framework's decision that this idea is the best so far
+    # (its trusted measurement beat what stood). None means legacy or not yet assessed,
+    # never "official evaluation ran".
+    best: bool | None = None
     # Orchestrator strategy is separate from empirical resolution and
     # candidate retention. It is structured server state, not roadmap prose.
     strategy_disposition: Literal["available", "parked", "abandoned"] | None = None

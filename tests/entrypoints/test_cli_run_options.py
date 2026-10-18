@@ -22,12 +22,18 @@ from entrypoints.cli.preflight import (
 )
 from entrypoints.cli.preflight import preflight_report as _preflight_report
 from launch import built_in_orchestrations
-from server.host_api import MAX_RUN_SECONDS_FLAG, ROLE_MODEL_FLAG, ROLE_REASONING_EFFORT_FLAG
+from server.host_api import (
+    MAX_RUN_SECONDS_FLAG,
+    ROLE_MODEL_FLAG,
+    ROLE_PROVIDER_FLAG,
+    ROLE_REASONING_EFFORT_FLAG,
+)
 from server.host_preflight import (
     Backend,
     BackendUnavailable,
     CheckId,
     CheckState,
+    ConfigInvalid,
     DeclareBuild,
     PreflightReport,
     SettingsInvalid,
@@ -615,3 +621,60 @@ def test_a_project_that_is_no_repository_yet_reports_no_changes(tmp_path: Path) 
     report = _preflight_of(tmp_path, project, ScriptedProbe(lambda _argv: None))
 
     assert report.project_changes == ()
+
+
+def _first_declared_role(tmp_path: Path) -> str:
+    """A role the run's orchestration declares: the first its own preflight reports."""
+    report = preflight_report(
+        _argv(tmp_path / "discover", "--backend", "cpu", "--profiler", "none"),
+        _parse,
+        ScriptedProbe(lambda _argv: None),
+    )
+    return report.roles[0]
+
+
+@pytest.mark.parametrize("environment", ["docker", None], ids=["docker", "default"])
+def test_roles_on_two_providers_are_refused_where_containers_carry_one_login(
+    tmp_path: Path, environment: str | None
+) -> None:
+    """A container carries the run's provider's login only, so another provider's role cannot start."""
+    role = _first_declared_role(tmp_path)
+    flags = [ROLE_PROVIDER_FLAG, f"{role}=claude", "--cli-provider", "codex"]
+    if environment is not None:
+        flags += ["--run-environment", environment]
+
+    report = preflight_report(
+        _argv(tmp_path, "--backend", "cpu", "--profiler", "none", *flags),
+        _parse,
+        ScriptedProbe(lambda _argv: None),
+    )
+
+    assert isinstance(report.settings, SettingsInvalid)
+    assert "claude, codex" in report.settings.message
+    assert isinstance(report.settings.cause, ConfigInvalid)
+
+
+def test_roles_on_the_runs_own_provider_are_accepted_whatever_the_environment(
+    tmp_path: Path,
+) -> None:
+    role = _first_declared_role(tmp_path)
+    flags = [ROLE_PROVIDER_FLAG, f"{role}=codex", "--cli-provider", "codex"]
+
+    report = preflight_report(
+        _argv(tmp_path, "--backend", "cpu", "--profiler", "none", *flags),
+        _parse,
+        ScriptedProbe(lambda _argv: None),
+    )
+
+    assert isinstance(report.settings, SettingsValid)
+    assert report.roles
+
+
+def test_a_role_provider_flag_reaches_the_roles_configuration(tmp_path: Path) -> None:
+    flags = [ROLE_PROVIDER_FLAG, "implementer=claude", ROLE_MODEL_FLAG, "implementer=claude-opus-5"]
+    args = cli.parse_cli_invocation(_argv(tmp_path, *flags)).args
+
+    config, _skills, _backend = load_config_and_skills(args, domain=DomainName.LLM_SERVING)
+
+    assert config.agent.roles["implementer"].provider == "claude"
+    assert config.agent.roles["implementer"].model == "claude-opus-5"

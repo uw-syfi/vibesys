@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import itertools
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 from hypothesis import HealthCheck, given, settings
@@ -133,3 +133,32 @@ def test_every_journaled_run_is_listed_once_after_the_recorded_older_one(
 
     assert isinstance(listed, RunsListReply)
     assert [run.run_id for run in listed.runs.runs] == [RUN_ID, *sorted(ids)]
+
+
+_EPOCH_SECONDS = st.integers(min_value=946_684_800, max_value=4_102_444_800)  # 2000 to 2100
+_OFFSETS = st.integers(min_value=-14 * 60, max_value=14 * 60).map(
+    lambda minutes: timezone(timedelta(minutes=minutes))
+)
+_STAMPS = st.one_of(
+    _EPOCH_SECONDS.map(lambda seconds: datetime.fromtimestamp(seconds, UTC).replace(tzinfo=None)),
+    st.builds(datetime.fromtimestamp, _EPOCH_SECONDS, _OFFSETS),
+).map(lambda moment: moment.isoformat())
+
+
+@settings(
+    max_examples=15, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+)
+@given(stamps=st.lists(_STAMPS, min_size=1, max_size=5))
+def test_journaled_runs_with_or_without_a_utc_offset_list_with_aware_times_in_order(
+    tmp_path: Path, stamps: list[str]
+) -> None:
+    project = project_with_run(tmp_path / f"proj-{next(_CHECKOUTS)}", RUN_ID)
+    for index, stamp in enumerate(stamps):
+        _unrecorded(project, f"20261016-195926-83eaab12-proj-{index}", stamp)
+
+    listed = _ask(project, "list")
+
+    assert isinstance(listed, RunsListReply)
+    times = [run.created_at for run in listed.runs.runs]
+    assert all(moment.tzinfo is not None for moment in times)
+    assert times == sorted(times)

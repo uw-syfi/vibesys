@@ -6,14 +6,14 @@
  */
 import {EmptyState, LogPane, PickList, PickRow} from '@vibesys/ui';
 import type {JSX} from 'react';
-import type {RunPageAction, RunPageState} from '../../../../state/index.js';
+import {type RunPageAction, type RunPageState, stepKicker} from '../../../../state/index.js';
 import {
   type LogScope,
   paneLines,
   type ScopedLogs,
   scopedLogs,
 } from '../../../../state/scoped-logs.js';
-import type {ViewBase} from '../props.js';
+import type {PaneHeader, ViewBase, ViewHeader} from '../props.js';
 
 export type {LogScope};
 
@@ -22,6 +22,10 @@ export interface LogsViewProps extends ViewBase {
   readonly scope: LogScope;
   readonly dispatch: (action: RunPageAction) => void;
 }
+
+/** A step's Logs pane keeps the step pane's kicker, so the role is not said twice over its title. */
+export const logsHeader: ViewHeader<LogsViewProps> = ({scope}): PaneHeader =>
+  scope.kind === 'step' ? {kicker: stepKicker(scope.step)} : {};
 
 type Dispatch = (action: RunPageAction) => void;
 type Row = ScopedLogs['rows'][number];

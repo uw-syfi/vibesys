@@ -85,6 +85,9 @@ export type Model1 = string | null;
  */
 export type ReasoningEffort = "default" | "low" | "medium" | "high";
 export type Roles = RoleOption[];
+export type Agents = {
+  [k: string]: HarnessChoice;
+} | null;
 export type RequestId8 = string;
 export type DeadlineMs8 = number;
 export type Type8 = "run.stop";
@@ -127,6 +130,7 @@ export type ReadId = string;
 export type RequestId15 = string;
 export type DeadlineMs15 = number;
 export type Type15 = "harnesses.list";
+export type WithGenerations = boolean | null;
 export type RequestId16 = string;
 export type DeadlineMs16 = number;
 export type Type16 = "runs.read_events";
@@ -169,6 +173,9 @@ export type Type22 = "run.preflight";
 export type Project7 = string;
 export type Task1 = string | null;
 export type Args1 = string[];
+export type Agents1 = {
+  [k: string]: HarnessChoice;
+} | null;
 export type WithRoles = boolean | null;
 export type WithProjectClean = boolean | null;
 export type WithBackend = boolean | null;
@@ -176,6 +183,7 @@ export type WithCauses = boolean | null;
 export type RequestId23 = string;
 export type DeadlineMs23 = number;
 export type Type23 = "examples.list";
+export type WithCatalogue = boolean | null;
 export type RequestId24 = string;
 export type DeadlineMs24 = number;
 export type Type24 = "project.create_from_example";
@@ -246,7 +254,10 @@ export type HelperFeature =
   | "project_clean"
   | "run_backend"
   | "run_causes"
-  | "run_digest";
+  | "example_catalogue"
+  | "run_digest"
+  | "harness_generations"
+  | "run_role_agents";
 export type Features1 = HelperFeature[];
 export type VibesysVersion = string;
 export type Root = string;
@@ -469,6 +480,13 @@ export type ModelName = string | null;
 export type Family = string | null;
 export type Tier = number | null;
 export type TierName = string | null;
+/**
+ * Who made a model: the closed set of makers whose models a provider's CLI runs.
+ */
+export type Maker = "anthropic" | "openai" | "google";
+export type Id6 = string;
+export type Name2 = string;
+export type Order = number;
 export type Harnesses = HarnessOption[];
 export type RequestId42 = string;
 export type Type42 = "runs.read_events";
@@ -507,6 +525,7 @@ export type RoundsFinished1 = number;
 export type SpanCount = number;
 export type ReplyCount = number;
 export type UsageCount = number;
+export type RecordCount = number;
 export type Input = number | null;
 export type CacheRead = number | null;
 export type CacheWrite = number | null;
@@ -524,6 +543,20 @@ export type SchemaId = string;
 export type Replies = TurnReply[];
 export type SpanId2 = string;
 export type Usage = SpanTokens[];
+export type RunId9 = string | null;
+export type ExecutionId = string | null;
+export type SpanId3 = string | null;
+export type RoundLabel = string | null;
+export type Role1 = string | null;
+export type Harness = string | null;
+export type Model3 = string | null;
+export type ReasoningEffort1 = string | null;
+export type HarnessVersion = string | null;
+export type StartedAt2 = string | null;
+export type EndedAt1 = string | null;
+export type CostUsd = number | null;
+export type DurationMs = number | null;
+export type Records = UsageRecord[];
 export type NextOffset1 = number | null;
 export type RequestId46 = string;
 export type Type46 = "machine.describe";
@@ -533,7 +566,7 @@ export type Commit1 = string | null;
 export type Dirty1 = boolean | null;
 export type CpuCores = number;
 export type Vendor = string;
-export type Model3 = string;
+export type Model4 = string;
 export type Gpus = Gpu[];
 /**
  * How a machine's GPUs run work; a closed set, ``cpu`` when it has none.
@@ -636,9 +669,9 @@ export type Kind16 = "roles_not_declared";
 export type Roles1 = string[];
 export type Kind17 = "model_not_vetted";
 export type Provider2 = string;
-export type Model4 = string | null;
+export type Model5 = string | null;
 export type Vetted = string[];
-export type Role1 = string | null;
+export type Role2 = string | null;
 export type Fallback = boolean;
 export type Kind18 = "arguments_rejected";
 export type Problem4 = string;
@@ -648,7 +681,7 @@ export type Kind20 = "option_not_accepted";
 /**
  * A typed New run option (``RunOptions``); closed.
  */
-export type RunOption = "rounds" | "time_limit" | "results" | "role_model" | "role_reasoning_effort";
+export type RunOption = "rounds" | "time_limit" | "results" | "role_model" | "role_reasoning_effort" | "role_agent";
 export type Kind21 = "github_unavailable";
 export type Problem5 = string;
 export type Checks = Check[];
@@ -657,10 +690,34 @@ export type RequestId49 = string;
 export type Type49 = "examples.list";
 export type Version12 = 1;
 export type Checkout1 = string;
-export type Name2 = string;
+export type Name3 = string;
 export type Category = string;
 export type Tasks1 = string[];
 export type ExternalRepo = boolean;
+export type TaskDetails = ExampleTask[] | null;
+export type Task10 = string;
+/**
+ * What an example task optimizes; the first question New run asks.
+ */
+export type ExampleDomain = "llm-serving" | "data-structures" | "databases" | "microservices";
+export type Accelerator1 = string;
+export type Count = number;
+/**
+ * Who makes the hardware a task targets.
+ */
+export type AcceleratorVendor = "nvidia" | "amd" | "aws" | "apple" | "cpu";
+export type Name4 = string;
+/**
+ * Who made a served model; ``OTHER`` for a maker with no entry yet.
+ */
+export type ModelMaker = "meta" | "qwen" | "deepseek" | "zhipu" | "moonshot" | "ai2" | "openai" | "other";
+export type Name5 = string;
+export type Description = string;
+export type Metric = string;
+export type Direction = "max" | "min";
+export type Objectives = ExampleObjective[];
+export type Goal = string;
+export type GoalTruncated = boolean;
 export type Examples = ExampleSummary[];
 export type RequestId50 = string;
 export type Type50 = "project.create_from_example";
@@ -756,7 +813,7 @@ export type RequestId55 = string;
 export type Detail4 = string;
 export type Kind24 = "stop_unconfirmed";
 export type Version13 = 1;
-export type Id6 = string;
+export type Id7 = string;
 export type Outcome1 = "stopping" | "still_running" | "unsupported";
 
 /**
@@ -859,6 +916,7 @@ export interface RunStartRequest {
   resume?: Resume;
   harness?: HarnessChoice | null;
   options?: RunOptions | null;
+  agents?: Agents;
 }
 /**
  * Resume this run.
@@ -992,6 +1050,7 @@ export interface HarnessesListRequest {
   request_id: RequestId15;
   deadline_ms: DeadlineMs15;
   type: Type15;
+  with_generations?: WithGenerations;
 }
 /**
  * A page of one run's recorded events, from its journal on disk, live or ended.
@@ -1082,6 +1141,7 @@ export interface RunPreflightRequest {
   args?: Args1;
   harness?: HarnessChoice | null;
   options?: RunOptions | null;
+  agents?: Agents1;
   with_roles?: WithRoles;
   with_project_clean?: WithProjectClean;
   with_backend?: WithBackend;
@@ -1094,6 +1154,7 @@ export interface ExamplesListRequest {
   request_id: RequestId23;
   deadline_ms: DeadlineMs23;
   type: Type23;
+  with_catalogue?: WithCatalogue;
 }
 /**
  * Copy ``example`` into its own new Git repository at ``destination`` (absent or empty).
@@ -1565,6 +1626,16 @@ export interface HarnessDisplay {
   family?: Family;
   tier?: Tier;
   tier_name?: TierName;
+  maker?: Maker | null;
+  generation?: ModelGeneration | null;
+}
+/**
+ * One generation of a maker's models, and where it ranks among the maker's.
+ */
+export interface ModelGeneration {
+  id: Id6;
+  name: Name2;
+  order: Order;
 }
 /**
  * One page of a run's recorded events, oldest first.
@@ -1614,6 +1685,8 @@ export interface RunsReadTailReply {
  * - ``tokens`` and ``usage``: the run's spend, folded from ``turn_usage_recorded`` events by
  *   summing (``ledgerWith``): ``tokens`` over every turn, those the trace names and those it
  *   does not, ``usage`` over each turn span that is named, in the order the spans first spent;
+ * - ``records``: one ``UsageRecord`` per ``turn_usage_recorded`` event, in journal order, whose
+ *   tokens sum to ``tokens`` (``server.run_usage``);
  * - the idea rows, the measurement points and the chart are folds of ``spans`` and ``replies``
  *   the client already owns (``CandidateFold``, ``performanceFold``); nothing duplicates them.
  *
@@ -1634,12 +1707,14 @@ export interface RunsSummaryReply {
   span_count: SpanCount;
   reply_count: ReplyCount;
   usage_count: UsageCount;
+  record_count: RecordCount;
   tokens: TokenTally;
   overview: Overview;
   spans: Spans;
   replies: Replies;
   schemas: Schemas;
   usage: Usage;
+  records: Records;
   next_offset: NextOffset1;
 }
 /**
@@ -1684,6 +1759,32 @@ export interface SpanTokens {
   tally: TokenTally;
 }
 /**
+ * What one agent turn spent, and who and when it was: the one definition of a usage record.
+ *
+ * A projection of the journal (``server.run_usage``): a ``turn_usage_recorded`` event joined to
+ * the ``agent_execution_started`` of its ``execution_id``. A value the journal does not hold is
+ * ``None``, never a guess: a turn whose execution start is missing has no role, harness, model,
+ * effort, version or start. The run is a field so records of many runs fold together without
+ * changing the fold. ``role`` and ``harness`` are open sets (the roles of a run's flow, the
+ * providers agentshim runs) owned elsewhere, so this contract names no list of them.
+ */
+export interface UsageRecord {
+  run_id: RunId9;
+  execution_id: ExecutionId;
+  span_id: SpanId3;
+  round_label: RoundLabel;
+  role: Role1;
+  harness: Harness;
+  model: Model3;
+  reasoning_effort: ReasoningEffort1;
+  harness_version: HarnessVersion;
+  started_at: StartedAt2;
+  ended_at: EndedAt1;
+  tokens: TokenTally;
+  cost_usd: CostUsd;
+  duration_ms: DurationMs;
+}
+/**
  * The machine's description.
  */
 export interface MachineDescribeReply {
@@ -1724,7 +1825,7 @@ export interface Hardware {
  */
 export interface Gpu {
   vendor: Vendor;
-  model: Model3;
+  model: Model4;
 }
 /**
  * Docker's daemon answered, with its server version.
@@ -1919,9 +2020,9 @@ export interface RolesNotDeclared {
 export interface ModelNotVetted {
   kind: Kind17;
   provider: Provider2;
-  model: Model4;
+  model: Model5;
   vetted: Vetted;
-  role: Role1;
+  role: Role2;
   fallback: Fallback;
 }
 /**
@@ -1972,10 +2073,54 @@ export interface ExampleList {
  * One example in ``vibesys example list --json``.
  */
 export interface ExampleSummary {
-  name: Name2;
+  name: Name3;
   category: Category;
   tasks: Tasks1;
   external_repo: ExternalRepo;
+  task_details?: TaskDetails;
+}
+/**
+ * What one task of an example is about, read from its ``vibesys.input.toml`` and goal file.
+ */
+export interface ExampleTask {
+  task: Task10;
+  domain: ExampleDomain;
+  hardware: ExampleHardware;
+  model: ExampleModel | null;
+  workload: ExampleWorkload | null;
+  objectives: Objectives;
+  goal: Goal;
+  goal_truncated: GoalTruncated;
+}
+/**
+ * The hardware a task targets.
+ */
+export interface ExampleHardware {
+  accelerator: Accelerator1;
+  count: Count;
+  vendor: AcceleratorVendor;
+  backend: Backend | null;
+}
+/**
+ * The model an LLM-serving task serves.
+ */
+export interface ExampleModel {
+  name: Name4;
+  maker: ModelMaker;
+}
+/**
+ * The workload a data-structure task drives.
+ */
+export interface ExampleWorkload {
+  name: Name5;
+  description: Description;
+}
+/**
+ * One axis the task's ``objectives.toml`` declares.
+ */
+export interface ExampleObjective {
+  metric: Metric;
+  direction: Direction;
 }
 /**
  * The project made from the example.
@@ -2069,7 +2214,7 @@ export interface StopUnconfirmedCompensationFailure {
  */
 export interface UnconfirmedInstanceStopResult {
   version?: Version13;
-  id: Id6;
+  id: Id7;
   outcome: Outcome1;
   route?: StopRoute | null;
 }

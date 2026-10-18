@@ -10,7 +10,8 @@
  * the route shown. Only the window itself sends `restore` (its address on open, Back, Forward),
  * which sets the route the address already holds without pushing (`ZoomMachineEvent`).
  * The mode (`ideas`, `timeline`, `agents`, `logs`) switches what the panes show and keeps the
- * level. `up` goes one level up: from an item to its step, a step to its idea or agent, an idea or
+ * level, except that Timeline and Agents list the whole run, so choosing one closes an open idea
+ * or agent (an idea is only ever open in the Ideas or Logs mode). `up` goes one level up: from an item to its step, a step to its idea or agent, an idea or
  * agent to the run, and at the run back to the Ideas.
  */
 import {assign, setup} from 'xstate';
@@ -116,6 +117,7 @@ export const zoomMachine = setup({
         ? {
             route: {
               ...context.route,
+              mode: event.idea === undefined ? context.route.mode : keptMode(context.route.mode),
               idea: event.idea ?? context.route.idea,
               agent: event.idea === undefined ? context.route.agent : null,
               step: event.step,
@@ -146,12 +148,20 @@ export const zoomMachine = setup({
         'remember',
       ],
     },
-    mode: {
-      actions: [
-        assign(({context, event}) => ({route: {...context.route, mode: event.mode}})),
-        'remember',
-      ],
-    },
+    mode: [
+      {
+        // The Timeline and Agents faces list the whole run, so they replace an open idea or agent.
+        guard: ({context, event}) => listsRun(event.mode) && isOpen(context.route),
+        target: '.run',
+        actions: [assign(({event}) => ({route: {...RUN_ROUTE, mode: event.mode}})), 'remember'],
+      },
+      {
+        actions: [
+          assign(({context, event}) => ({route: {...context.route, mode: event.mode}})),
+          'remember',
+        ],
+      },
+    ],
     jump: [
       {target: '.run', ...fromJump('run')},
       {target: '.opened', ...fromJump('opened')},
@@ -223,8 +233,17 @@ export const zoomMachine = setup({
   },
 });
 
+/** Whether the face lists the run's ideas or agents, which an open idea or agent would hide. */
+function listsRun(mode: RunMode): boolean {
+  return mode === 'timeline' || mode === 'agents';
+}
+
+function isOpen(route: Route): boolean {
+  return route.idea !== null || route.agent !== null;
+}
+
 /** At a deeper level the mode only says whether the detail shows its logs. */
-function keptMode(mode: RunMode): RunMode {
+function keptMode(mode: string | undefined): RunMode {
   return mode === 'logs' ? 'logs' : 'ideas';
 }
 
@@ -264,7 +283,7 @@ export function routeFromQuery(text: string): Route {
   const opened = idea !== null || agent !== null;
   const step = opened ? (query.get('step') ?? null) : null;
   return {
-    mode: RUN_MODES.find(each => each === mode) ?? 'ideas',
+    mode: idea === null ? (RUN_MODES.find(each => each === mode) ?? 'ideas') : keptMode(mode),
     idea,
     agent,
     step,

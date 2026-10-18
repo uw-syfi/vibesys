@@ -4,11 +4,13 @@
  * (`recordFixture`, with every host, path and user name scrubbed) or from a synthetic scenario
  * (`scenarios`, `weeksRun`). `catalog` is the committed set, by name.
  */
+
 export {
   committedFixtures,
   FIXTURE_NAMES,
   fixtureNamed,
 } from './catalog.js';
+export {exampleCatalogue, exampleCatalogueWithoutDetails} from './examples.js';
 export {
   END_OUTCOMES,
   type EndOutcome,

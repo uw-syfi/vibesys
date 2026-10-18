@@ -18,14 +18,16 @@ import {
   useSideActionLayout,
 } from '@vibesys/ui';
 import {type JSX, type ReactNode, useState} from 'react';
-import type {NewRunEvent, NewRunSnapshot} from '../../state/index.js';
+import type {NewRunContext, NewRunEvent, NewRunSnapshot} from '../../state/index.js';
 import {AgentCard} from './agent-card.js';
 import {BudgetCard} from './budget-card.js';
 import {MachineCard} from './machine-card.js';
 import {MoreOptions} from './more-options.js';
+import {problemWords} from './problem-words.js';
 import {type FolderCompletion, ProjectCard} from './project-card.js';
 import {
   type MachineOption,
+  machineLabel,
   type ReadinessFix,
   readiness,
   readinessStatus,
@@ -114,6 +116,26 @@ function ReadyPanel(props: {
   );
 }
 
+/** Why the last load, fix or start failed, in plain words, with a retry for a load or check. */
+function ProblemBanner(props: {
+  readonly context: NewRunContext;
+  readonly dispatch: Dispatch;
+}): JSX.Element | null {
+  const {context, dispatch} = props;
+  if (context.problem === null) return null;
+  const words = problemWords(context.problem, machineLabel(context.form.machine));
+  return (
+    <Banner
+      tone="err"
+      title={words.title}
+      body={words.body}
+      {...(words.retry
+        ? {actions: <Button text="Try again" press={() => dispatch({type: 'retry'})} />}
+        : {})}
+    />
+  );
+}
+
 /** The New run screen over its store's snapshot; `hero` is the app's wordmark. */
 export function NewRunScreen(props: {
   readonly snapshot: NewRunSnapshot;
@@ -143,9 +165,7 @@ export function NewRunScreen(props: {
             </Text>
             <Text tone="muted">Prefilled from your last run on this machine.</Text>
           </Stack>
-          {context.problem === null ? null : (
-            <Banner tone="err" title="Something went wrong." body={context.problem} />
-          )}
+          <ProblemBanner context={context} dispatch={dispatch} />
         </>
       }
       footer={

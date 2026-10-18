@@ -3,7 +3,7 @@
 The search publishes a `RunSnapshot`; `project_run_snapshot` turns it into the iteration tree,
 the rounds and the agent projection frontends read. Its properties are stated over generated
 snapshots: one workstream node per scheduled workstream in the order it was scheduled, a
-status that follows how it ended, the leader marked kept, and a metric shown only when a
+status that follows how it ended, the leader marked best, and a metric shown only when a
 trusted evaluation measured it.
 """
 
@@ -381,13 +381,13 @@ def test_a_failures_text_reflects_its_own_kind_not_only_no_trusted_evidence() ->
 
 @settings(max_examples=examples(pr=10, nightly=60), deadline=None)
 @given(_snapshots())
-def test_only_the_leader_is_kept_and_only_running_work_is_active(snapshot: RunSnapshot) -> None:
+def test_only_the_leader_is_best_and_only_running_work_is_active(snapshot: RunSnapshot) -> None:
     view = agent_projection(
         _run_view(project_run_snapshot(snapshot, experiment_revision=1).payload)
     )
 
     assert view is not None
-    assert [item.hypothesis_id for item in view.hypotheses if item.kept] == (
+    assert [item.hypothesis_id for item in view.hypotheses if item.best] == (
         [] if snapshot.leading is None else [snapshot.leading]
     )
     running = {item.plan.work_id for item in snapshot.running}

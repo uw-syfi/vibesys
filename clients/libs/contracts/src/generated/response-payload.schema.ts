@@ -782,7 +782,7 @@ const responsePayloadSchema: Record<string, unknown> = {
           ],
           "default": null
         },
-        "kept": {
+        "best": {
           "anyOf": [
             {
               "type": "boolean"
@@ -792,7 +792,7 @@ const responsePayloadSchema: Record<string, unknown> = {
             }
           ],
           "default": null,
-          "title": "Kept"
+          "title": "Best"
         },
         "strategy_disposition": {
           "anyOf": [

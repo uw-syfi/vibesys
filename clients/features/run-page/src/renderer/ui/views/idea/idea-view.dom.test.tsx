@@ -185,7 +185,7 @@ test('an implementer that reported no outcome still shows the idea’s own, with
     outcome: {outcome: null, summary: 'Tried a padded head.'},
   };
   const {container, unmount} = await mount(<IdeaView {...props} />);
-  expect(container.querySelector('.vs-chip')?.textContent).toBe('Failed · not measured');
+  expect(container.querySelector('.vs-chip')?.textContent).toBe('Failed');
   expect(container.textContent).toContain('Tried a padded head.');
   await unmount();
 });

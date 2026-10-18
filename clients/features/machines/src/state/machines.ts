@@ -38,6 +38,15 @@ export interface Machine extends MachineEntry {
 /** Which form a path field belongs to. */
 export type FormName = 'add' | 'fix';
 
+/** Which field of a form a problem belongs under. */
+type FormField = 'host' | 'checkout';
+
+/** What is wrong with a form, and the one field it names. */
+interface FormProblem {
+  readonly field: FormField;
+  readonly text: string;
+}
+
 interface AddForm {
   /** The SSH host as typed. */
   readonly host: string;
@@ -45,14 +54,14 @@ interface AddForm {
   /** The check and save awaited, or null while the user edits. */
   readonly saving: number | null;
   /** Why the last check failed, or what is wrong with the input; null when nothing is. */
-  readonly problem: string | null;
+  readonly problem: FormProblem | null;
 }
 
 interface FixForm {
   readonly host: HostKey;
   readonly path: PathForm;
   readonly saving: number | null;
-  readonly problem: string | null;
+  readonly problem: FormProblem | null;
 }
 
 export interface MachinesState {
@@ -174,17 +183,23 @@ export function machineStatus(machine: Machine): MachineStatus {
 /**
  * The machines as the Settings navigation counts them: every machine this screen lists, and those
  * whose facts say they need attention (checked, and not ready). One list, so the count cannot
- * disagree with it.
+ * disagree with it. `listed` is false while the machines are being read or could not be: the
+ * count is then not known, and must not be worded as "none".
  */
 export function machineCounts(state: MachinesState): {
   readonly count: number;
   readonly attention: number;
+  readonly listed: boolean;
 } {
   const attention = state.machines.filter(machine => {
     const status = machineStatus(machine);
     return status !== 'ready' && status !== 'checking';
   });
-  return {count: state.machines.length, attention: attention.length};
+  return {
+    count: state.machines.length,
+    attention: attention.length,
+    listed: state.listing === null && state.listProblem === null,
+  };
 }
 
 /** The machine shown in the detail, or null when there is none. */
@@ -240,7 +255,7 @@ function withForm(
   state: MachinesState,
   form: FormName,
   path: PathForm,
-  problem?: string | null,
+  problem?: FormProblem | null,
 ): MachinesState {
   if (form === 'add') {
     if (state.adding === null) return state;
@@ -272,7 +287,7 @@ function fromForm(
   state: MachinesState,
   form: FormName,
   step: PathFormStep,
-  problem?: string | null,
+  problem?: FormProblem | null,
 ): MachinesStep {
   return {
     state: {...withForm(state, form, step.form, problem), lastToken: step.lastToken},
@@ -293,25 +308,46 @@ function problemOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** The first thing wrong with a submitted form, under the field that names it, or the save to ask for. */
+function checked(
+  state: MachinesState,
+  form: FormName,
+  current: AddForm | FixForm,
+): {readonly host: HostKey; readonly checkout: string} | FormProblem {
+  let host: HostKey;
+  if (form === 'add') {
+    const typedHost = (state.adding?.host ?? '').trim();
+    if (typedHost === '') return {field: 'host', text: 'The SSH host is required.'};
+    try {
+      host = hostKey({kind: 'ssh', alias: validAlias(typedHost)});
+    } catch (error) {
+      return {field: 'host', text: problemOf(error)};
+    }
+    if (state.machines.some(machine => machine.host === host)) {
+      return {
+        field: 'host',
+        text: `${typedHost} is already a machine; change its checkout instead.`,
+      };
+    }
+  } else {
+    host = state.fixing?.host as HostKey;
+  }
+  if (current.path.checkout.trim() === '') {
+    return {field: 'checkout', text: 'The VibeSys checkout is required.'};
+  }
+  try {
+    return {host, checkout: validHostPath(current.path.checkout, 'the VibeSys checkout')};
+  } catch (error) {
+    return {field: 'checkout', text: problemOf(error)};
+  }
+}
+
 function submit(state: MachinesState, form: FormName): MachinesStep {
   const current = form === 'add' ? state.adding : state.fixing;
   if (current === null || current.saving !== null || state.pending !== null) return same(state);
-  let host: HostKey;
-  let checkout: string;
-  try {
-    host =
-      form === 'add'
-        ? hostKey({kind: 'ssh', alias: validAlias((state.adding?.host ?? '').trim())})
-        : (state.fixing?.host as HostKey);
-    if (form === 'add' && state.machines.some(machine => machine.host === host)) {
-      throw new Error(
-        `${state.adding?.host.trim()} is already a machine; change its checkout instead.`,
-      );
-    }
-    checkout = validHostPath(current.path.checkout, 'the VibeSys checkout');
-  } catch (error) {
-    return same(withForm(state, form, current.path, problemOf(error)));
-  }
+  const result = checked(state, form, current);
+  if ('field' in result) return same(withForm(state, form, current.path, result));
+  const {host, checkout} = result;
   const token = state.lastToken + 1;
   const saving = {...current, saving: token, problem: null};
   const next =
@@ -339,7 +375,11 @@ function saved(
   const current = action.form === 'add' ? state.adding : state.fixing;
   if (current === null || current.saving !== action.token) return same(state);
   if (!action.result.ok) {
-    const failed = {...current, saving: null, problem: action.result.error};
+    const failed = {
+      ...current,
+      saving: null,
+      problem: {field: 'checkout', text: action.result.error},
+    };
     return same(
       action.form === 'add'
         ? {...state, adding: failed as AddForm}

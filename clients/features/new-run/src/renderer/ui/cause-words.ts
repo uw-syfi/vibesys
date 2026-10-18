@@ -51,6 +51,10 @@ const OPTION_CONTROLS: Readonly<
     name: 'a reasoning effort for each role',
     reset: "Set each role's reasoning effort to the default in Agent",
   },
+  role_agent: {
+    name: 'an agent for each role',
+    reset: "Set each role's agent to the run's in Agent",
+  },
 };
 
 function lastSegment(path: string): string {

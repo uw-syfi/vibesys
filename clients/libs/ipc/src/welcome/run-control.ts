@@ -2,6 +2,8 @@
  * The run-control feature's welcome requests: attach, resume, stop (the view asks the user first),
  * letting a run go, and reading a run's recorded history and its summary.
  */
+
+import type {UsageRecord} from '@vibesys/contracts/host-helper';
 import {
   type HostId,
   type HostKey,
@@ -90,6 +92,8 @@ export interface RunSummary {
   readonly tokens: SummaryTokens;
   /** Each turn span's spend. */
   readonly usage: readonly {readonly spanId: string; readonly tokens: SummaryTokens}[];
+  /** One record per finished turn, as the helper words it: its tokens sum to `tokens`. */
+  readonly records: readonly UsageRecord[];
 }
 
 /**

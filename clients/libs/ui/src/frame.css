@@ -1184,8 +1184,14 @@ button.vs-dotlegend-item {
   cursor: pointer;
 }
 button.vs-dotlegend-item[aria-pressed="true"] {
-  border-color: var(--line);
+  border-color: var(--accent);
   background: var(--panel-2);
+}
+button.vs-dotlegend-item:disabled {
+  cursor: default;
+}
+button.vs-dotlegend-item:disabled .vs-text {
+  color: var(--muted);
 }
 /* A hidden state is drawn without the pill, never struck through (that reads as deleted); a failed count keeps the failed color. */
 .vs-dotlegend-item[data-tone="err"] .vs-text {

@@ -75,20 +75,27 @@ test('the model tiers choose a vetted model, and the full list can choose a vers
   await expect(slider).toHaveAttribute('aria-valuetext', 'Opus');
 });
 
-test('the model tiers are no wider than the selectors on the page', async ({page}) => {
-  await page.setViewportSize({width: 1920, height: 1000});
+test('the selectors and the model tiers fill their card, with no empty band beside them', async ({
+  page,
+}) => {
+  await page.setViewportSize({width: 1440, height: 900});
   await open(page);
-  const widths = await page.evaluate(() => {
-    const aside = Number.parseFloat(
-      getComputedStyle(document.documentElement).getPropertyValue('--column-aside'),
-    );
-    const width = (selector: string) =>
-      document.querySelector(selector)?.getBoundingClientRect().width;
-    return {cap: aside * 1.8, slider: width('.vs-slider'), select: width('.vs-select')};
+  const fields = await page.evaluate(() => {
+    const box = (element: Element) => element.getBoundingClientRect();
+    return ['.vs-select', '.vs-slider'].flatMap(selector => {
+      const field = document.querySelector(selector);
+      const card = field?.closest('.vs-card');
+      if (!field || !card) return [];
+      const style = getComputedStyle(card);
+      const inner =
+        box(card).width -
+        Number.parseFloat(style.paddingLeft) -
+        Number.parseFloat(style.paddingRight);
+      return [{selector, field: box(field).width, inner}];
+    });
   });
-  expect(widths.slider).toBeGreaterThan(0);
-  expect(widths.slider).toBeLessThanOrEqual(widths.cap);
-  expect(widths.select).toBeLessThanOrEqual(widths.cap);
+  expect(fields.map(each => each.selector)).toEqual(['.vs-select', '.vs-slider']);
+  for (const each of fields) expect(each.field).toBeGreaterThanOrEqual(each.inner - 3);
 });
 
 test('the checks start open beside the form and closed under it, so Start run stays in view', async ({
@@ -321,6 +328,41 @@ test('Run again prefills the model, rounds and extra arguments the run was start
   await expect(page.getByRole('button', {name: /More options/})).toContainText('extra arguments');
   await page.getByRole('button', {name: 'More options'}).click();
   await expect(page.getByLabel('Extra arguments')).toHaveValue('--max-in-flight 3');
+});
+
+test('a bridge call that throws is worded plainly, names what failed, and Try again reloads it', async ({
+  page,
+}) => {
+  await page.addInitScript(installFakeBridge, SEED);
+  await page.addInitScript(installFakeMachines, SEED);
+  await page.addInitScript(installFakeNewRun, SEED);
+  // The agents' request is missing, as a bridge built before it would be.
+  await page.addInitScript(() => {
+    const bridge = (window as unknown as {vibesysWelcome: Record<string, unknown>}).vibesysWelcome;
+    (window as unknown as {restoreHarnesses: () => void}).restoreHarnesses = (() => {
+      const real = bridge['harnesses'];
+      delete bridge['harnesses'];
+      return () => {
+        bridge['harnesses'] = real;
+      };
+    })();
+  });
+  await page.goto('./shell.html');
+  await page
+    .getByRole('navigation', {name: 'VibeSys'})
+    .getByRole('button', {name: 'New run'})
+    .click();
+
+  await expect(page.getByText(/Could not read the agents .* runs\./)).toBeVisible();
+  await expect(page.getByText('Something unexpected happened.', {exact: false})).toBeVisible();
+  await expect(page.getByText(/is not a function/)).toHaveCount(0);
+
+  await page.evaluate(() =>
+    (window as unknown as {restoreHarnesses: () => void}).restoreHarnesses(),
+  );
+  await page.getByRole('button', {name: 'Try again'}).click();
+  await expect(page.getByRole('radio', {name: 'Claude Code'})).toBeChecked();
+  await expect(page.getByRole('button', {name: 'Try again'})).toHaveCount(0);
 });
 
 test('the harness is chosen from tiles with a mark and a name each', async ({page}) => {

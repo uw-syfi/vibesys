@@ -190,8 +190,8 @@ provider's reset time plus a margin, else `retry_seconds`, cut to what is left o
 spent or the reset lies beyond it, it publishes `quota_abandoned` and raises the
 quota error, so the turn fails as it did before. A stop request ends any wait.
 
-A run drives every role through one agent client bound to one provider, so it
-cannot open a session on another provider: the run host refuses a configured
+A run fixes each role's provider when it starts (one agent client per provider),
+so it cannot open a session on another provider: the run host refuses a configured
 `fallback_provider` at startup, naming the key, rather than accepting and ignoring it
 (`policy = "fallback"` needs one, so it is refused too). The gate and
 `ProviderFallback` still implement the switch for a host whose sessions can change

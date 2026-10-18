@@ -19,7 +19,7 @@ Without it ``--dist loadgroup`` keeps waiting for the tests the dead worker stil
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import pytest
 
@@ -38,6 +38,19 @@ def describe_exit(returncode: int | None) -> str:
     return f"exited with code {returncode}"
 
 
+class _Process(Protocol):
+    def poll(self) -> int | None: ...
+
+
+def worker_returncode(popen: _Process | None) -> int | None:
+    """The worker process's exit status, ``None`` while it runs or when it has no process.
+
+    ``poll`` settles the status of a worker that teardown killed without waiting for it
+    (execnet's ``kill``), which ``Popen.returncode`` alone still reports as running.
+    """
+    return None if popen is None else popen.poll()
+
+
 def pytest_testnodedown(node: WorkerController, error: object | None) -> None:
     """Remember a worker that died mid-run (a clean shutdown has no error)."""
     if error is not None:
@@ -52,9 +65,8 @@ def pytest_terminal_summary(
         # execnet's popen gateways hold the worker's process; other gateway kinds have none.
         popen = getattr(node.gateway._io, "popen", None)  # noqa: SLF001  # LW-001001; execnet exposes no public handle on the worker process.
         # > The only alternatives are patching execnet's spawn to keep our own Popen or parsing the
-        # > exit status from the log, both hackier than reading one attribute that xdist's
-        # > teardown (which waited for the process) has already settled.
-        returncode = None if popen is None else popen.returncode
+        # > exit status from the log, both hackier than asking the process for its status.
+        returncode = worker_returncode(popen)
         terminalreporter.write_line(
             f"worker {node.gateway.id} {describe_exit(returncode)} ({error})", red=True
         )

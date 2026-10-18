@@ -24,6 +24,7 @@ import {
 import {type JSX, useState} from 'react';
 import {
   ageWords,
+  chipPressed,
   type IdeaEffects,
   type IdeasFilter,
   type ImplementerOutcomes,
@@ -31,8 +32,10 @@ import {
   ideasView,
   implementerOutcomes,
   type NowItem,
+  noIdeasWords,
   nowView,
   predatesTraceWords,
+  pressChip,
   type RunMode,
   type RunPageAction,
   type RunPageState,
@@ -85,6 +88,10 @@ export function IdeasList(props: {
 }): JSX.Element {
   const {base, filter, dispatch} = props;
   const view = ideasView(base.model, filter);
+  if (view.rows.length === 0 && view.hiddenFailed === 0) {
+    const words = noIdeasWords(filter);
+    return <EmptyState title={words.title} body={words.body} />;
+  }
   return (
     <Stack gap="space-2" grow>
       <PickList
@@ -134,31 +141,15 @@ function IdeasLegend(props: {
 }): JSX.Element {
   const filter = props.state.ideas;
   const {counts} = ideasView(props.base.model, filter);
-  const toggle = (key: 'passed' | 'running' | 'failed') => (on: boolean) =>
-    props.dispatch({type: 'ideas-filter', filter: {...filter, [key]: on}});
+  const chip = (group: 'passed' | 'running' | 'failed', tone: 'ok' | 'live' | 'err') => ({
+    tone,
+    label: `${counts[group]} ${group}`,
+    on: chipPressed(filter, group),
+    disabled: counts[group] === 0,
+    toggle: () => props.dispatch({type: 'ideas-filter', filter: pressChip(filter, group)}),
+  });
   return (
-    <DotLegend
-      items={[
-        {
-          tone: 'ok',
-          label: `${counts.passed} passed`,
-          on: filter.passed,
-          toggle: toggle('passed'),
-        },
-        {
-          tone: 'live',
-          label: `${counts.running} running`,
-          on: filter.running,
-          toggle: toggle('running'),
-        },
-        {
-          tone: 'err',
-          label: `${counts.failed} failed`,
-          on: filter.failed,
-          toggle: toggle('failed'),
-        },
-      ]}
-    />
+    <DotLegend items={[chip('passed', 'ok'), chip('running', 'live'), chip('failed', 'err')]} />
   );
 }
 
@@ -194,8 +185,9 @@ function IdeasFace(props: {
             change={query => dispatch({type: 'ideas-filter', filter: {...state.ideas, query}})}
           />
         </Stack>
-        <Field label="Sort ideas">
+        <Field label="Sort ideas" hideLabel>
           <Select
+            size="sm"
             value={sort}
             options={[
               {value: 'newest', label: 'Newest'},

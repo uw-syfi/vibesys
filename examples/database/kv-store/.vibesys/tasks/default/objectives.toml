@@ -1,0 +1,3 @@
+[[objective]]
+name = "throughput_ops_per_sec"
+direction = "max"

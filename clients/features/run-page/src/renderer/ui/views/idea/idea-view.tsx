@@ -23,7 +23,7 @@ import {type JSX, useState} from 'react';
 import {ideaBases} from '../../../../state/idea-bases.js';
 import {effectWords, type IdeaEffect} from '../../../../state/idea-effects.js';
 import type {ImplementerOutcome} from '../../../../state/idea-outcomes.js';
-import {outcomeWords} from '../../../../state/ideas-view.js';
+import {standingOf, statusLabel} from '../../../../state/idea-words.js';
 import {
   ideaOutcomeLine,
   spendOf,
@@ -58,17 +58,9 @@ const OUTCOME_TONE: Readonly<Record<Candidate['outcome'], 'live' | 'ok' | 'err'>
   failed: 'err',
 };
 
-/** `Failed · not measured`: the outcome capitalized, with its reason when the idea failed. */
-function outcomeLabel(idea: Candidate): string {
-  const text = outcomeWords(idea);
-  return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
-}
-
-/** The idea's outcome, or `Best`/`Adopted` when it is the run's leader. */
+/** The idea's status, or `Best`/`Adopted` when it is the run's leader. */
 function standingLabel(props: IdeaViewProps): string {
-  const best = props.model.candidates.best;
-  if (best === null || best.candidate !== props.idea.id) return outcomeLabel(props.idea);
-  return best.adopted ? 'Adopted' : 'Best';
+  return standingOf(props.model.candidates.best, props.idea.id) ?? statusLabel(props.idea);
 }
 
 /**
@@ -112,7 +104,7 @@ function Implemented(props: {
           implementer
         </Text>
         {outcome === null ? (
-          <Chip label={outcomeLabel(props.idea)} tone={OUTCOME_TONE[props.idea.outcome]} dot />
+          <Chip label={statusLabel(props.idea)} tone={OUTCOME_TONE[props.idea.outcome]} dot />
         ) : (
           <Chip label={outcome.label} tone={outcome.tone} dot />
         )}

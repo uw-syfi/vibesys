@@ -184,7 +184,7 @@ def test_hypothesis_view_matches_fixture_facts_field_for_field() -> None:
         "base-c1",
     )
     assert view.perf_delta_reason == measurement_delta_reason(hypothesis)
-    assert view.kept is False
+    assert view.best is False
     assert view.strategy_disposition == HypothesisStrategy.ABANDONED.value
     assert view.strategy_reason == "The official baseline regressed."
     assert view.active is False

@@ -20,14 +20,15 @@ const CLOCK: Clock = {now: NOW, timeZone: 'UTC'};
 const HOUR = 3_600_000;
 
 describe('formatWhen', () => {
-  const at = (iso: string): string => formatWhen(Date.parse(iso), CLOCK);
+  const at = (iso: string): string | null => formatWhen(Date.parse(iso), CLOCK);
 
   test('is the time today, with Yesterday before it, then the date, then the year', () => {
     expect(at('2026-10-17T07:32:00Z')).toBe('07:32');
     expect(at('2026-10-17T00:05:00Z')).toBe('00:05');
     expect(at('2026-10-16T21:10:00Z')).toBe('Yesterday 21:10');
     expect(at('2026-10-15T09:00:00Z')).toBe('Oct 15');
-    expect(at('2025-12-31T23:59:00Z')).toBe('Dec 31, 2025');
+    const nextYear: Clock = {now: Date.parse('2027-01-10T12:00:00Z'), timeZone: 'UTC'};
+    expect(formatWhen(Date.parse('2026-12-31T23:59:00Z'), nextYear)).toBe('Dec 31, 2026');
   });
 
   test('reads the day in the viewer’s zone, not in UTC', () => {
@@ -39,7 +40,21 @@ describe('formatWhen', () => {
 
 describe('when a Recent row says a run began', () => {
   const WORDS = '3.83×';
-  const NO_TIME = [0, -1, -86_400_000, Number.NaN, Number.NEGATIVE_INFINITY];
+  /** Moments no run began at: unset, negative, not a number, or an epoch the product predates. */
+  const NO_TIME = [
+    0,
+    -1,
+    -86_400_000,
+    Number.NaN,
+    Number.NEGATIVE_INFINITY,
+    Number.POSITIVE_INFINITY,
+    3,
+    3_000,
+    86_400_000,
+    Date.UTC(2000, 0, 1),
+    Date.UTC(2026, 0, 1),
+    Date.parse('2026-05-07T00:00:00Z') - 1,
+  ];
 
   function detailOf(createdAt: number, startedAt: number | null): string | undefined {
     const ended: HostRun[] =
@@ -70,15 +85,23 @@ describe('when a Recent row says a run began', () => {
     return recentRows(answered, CLOCK).rows[0]?.detail;
   }
 
-  test('a missing or non-positive time is never worded as a date', () => {
-    for (let seed = 1; seed <= 60; seed += 1) {
-      const bad = NO_TIME[seed % NO_TIME.length] as number;
-      const badSeconds = Number.isFinite(bad) ? bad / 1000 : 0;
-      for (const startedAt of [null, badSeconds]) {
+  test('a time before the product existed is never worded as a date, in any zone', () => {
+    for (const bad of NO_TIME) {
+      for (const timeZone of ['UTC', 'America/Los_Angeles', 'Pacific/Kiritimati']) {
+        expect(formatWhen(bad, {now: NOW, timeZone}), `${bad} in ${timeZone}`).toBeNull();
+      }
+      for (const startedAt of [null, bad / 1000]) {
         const detail = detailOf(bad, startedAt);
-        expect(detail).toBe(WORDS);
+        expect(detail, `${bad} ${startedAt}`).toBe(WORDS);
         expect(detail).not.toMatch(/19(69|70)/);
       }
+    }
+  });
+
+  test('a moment since the product existed is always worded', () => {
+    for (let seed = 1; seed <= 200; seed += 1) {
+      const at = Date.parse('2026-05-07T00:00:00Z') + ((seed * 104_729) % 5_000_000) * 60_000;
+      expect(formatWhen(at, {now: NOW, timeZone: 'UTC'})).not.toBeNull();
     }
   });
 

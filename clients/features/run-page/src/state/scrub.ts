@@ -28,7 +28,7 @@ export interface ScrubberView {
   readonly backLabel: string;
   /** The playhead in words: the time of the event it stands at, and the planning call by then. */
   readonly position: string;
-  /** A tick where each planning call started. */
+  /** A tick where each planning call started, labelled with the call's number (`planning call 3` says what it counts). */
   readonly ticks: readonly {readonly at: number; readonly label: string}[];
 }
 
@@ -98,7 +98,7 @@ export function scrubberView(
     ),
     ticks: [...log.calls].map((start, index) => ({
       at: indexOf(positions, start),
-      label: `Call ${index + 1}`,
+      label: String(index + 1),
     })),
   };
 }

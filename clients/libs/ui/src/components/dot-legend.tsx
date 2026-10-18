@@ -8,6 +8,8 @@ export interface LegendItem {
   readonly label: string;
   readonly on?: boolean;
   readonly toggle?: (on: boolean) => void;
+  /** A chip with nothing behind it (a count of zero) cannot be pressed. */
+  readonly disabled?: boolean;
 }
 
 /**
@@ -38,6 +40,7 @@ export function DotLegend(props: {readonly items: readonly LegendItem[]}): JSX.E
             className="vs-dotlegend-item"
             data-tone={item.tone}
             aria-pressed={item.on === true}
+            disabled={item.disabled === true}
             onClick={() => toggle(item.on !== true)}
           >
             {face}

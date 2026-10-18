@@ -9,6 +9,7 @@
       "helper-invalid-request",
       "helper-feature-gated",
       "helper-preflight-roles-gated",
+      "helper-examples-catalogue-gated",
       "helper-preflight-backend-gated",
       "helper-preflight-causes-gated",
       "helper-harnesses",

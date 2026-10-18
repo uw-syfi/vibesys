@@ -38,3 +38,15 @@ result_protocol = 2
 # This diagnostic command does not enter session_runner preflight or warmup.
 command = ["uv", "run", "python", "${PROJECT_ROOT}/.vibesys/tasks/default/benchmark/profile.py", "--base-url", "http://127.0.0.1:VIBESYS_DYNAMIC_PORT/v1"]
 timeout_seconds = 120
+
+[catalogue]
+domain = "llm-serving"
+
+[catalogue.hardware]
+accelerator = "AMD MI210"
+count = 1
+vendor = "amd"
+
+[catalogue.model]
+name = "Qwen3.5 9B"
+maker = "qwen"
