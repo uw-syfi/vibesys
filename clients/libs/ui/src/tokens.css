@@ -12,8 +12,8 @@
   --text-display-tracking: -0.03em;
   --text-display-transform: none;
   --text-title-family: var(--font-sans);
-  --text-title-size: 24px;
-  --text-title-line: 30px;
+  --text-title-size: 26px;
+  --text-title-line: 32px;
   --text-title-weight: 600;
   --text-title-tracking: -0.01em;
   --text-title-transform: none;
@@ -23,6 +23,12 @@
   --text-heading-weight: 600;
   --text-heading-tracking: 0em;
   --text-heading-transform: none;
+  --text-item-family: var(--font-sans);
+  --text-item-size: 15px;
+  --text-item-line: 20px;
+  --text-item-weight: 600;
+  --text-item-tracking: 0em;
+  --text-item-transform: none;
   --text-body-family: var(--font-sans);
   --text-body-size: 14px;
   --text-body-line: 20px;

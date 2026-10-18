@@ -1,6 +1,7 @@
 /** The components' behavior in a browser DOM, through the `.` entry only. */
 
 import {afterAll, beforeAll, describe, expect, test} from 'bun:test';
+import {readFileSync} from 'node:fs';
 import {Window} from 'happy-dom';
 import {act, type ReactNode, useState} from 'react';
 import {createRoot} from 'react-dom/client';
@@ -27,8 +28,11 @@ import {
   Select,
   StatusDot,
   type StatusTone,
+  Text,
   TextInput,
+  type TextStyle,
 } from './index.js';
+import {TYPE} from './tokens/index.js';
 
 const window = new Window();
 const installed = Object.getOwnPropertyNames(window).filter(name => !(name in globalThis));
@@ -712,5 +716,30 @@ describe('ActionPanel', () => {
     expect(container.textContent).toContain('Start run');
     await click(status);
     expect(container.textContent).not.toContain('Every check passed.');
+  });
+});
+
+describe('Text', () => {
+  test('draws every role of the type scale from custom properties tokens.css declares', async () => {
+    const css = readFileSync(new URL('./tokens.css', import.meta.url), 'utf8');
+    const roles = Object.keys(TYPE) as TextStyle[];
+    const container = await mount(
+      <>
+        {roles.map(role => (
+          <Text key={role} variant={role}>
+            {role}
+          </Text>
+        ))}
+      </>,
+    );
+    const drawn = [...container.querySelectorAll<HTMLElement>('.vs-text')];
+    expect(drawn).toHaveLength(roles.length);
+    roles.forEach((role, index) => {
+      const style = (drawn[index] as HTMLElement).getAttribute('style') ?? '';
+      for (const part of ['family', 'size', 'line', 'weight', 'tracking', 'transform']) {
+        expect(style).toContain(`var(--text-${role}-${part})`);
+        expect(css).toContain(`--text-${role}-${part}:`);
+      }
+    });
   });
 });

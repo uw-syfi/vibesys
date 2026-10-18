@@ -130,6 +130,7 @@ export type TextStyle =
   | 'display'
   | 'title'
   | 'heading'
+  | 'item'
   | 'body'
   | 'body-strong'
   | 'small'
@@ -166,8 +167,10 @@ export const TYPE: Readonly<Record<TextStyle, TextSpec>> = {
   // under its size, slightly tight tracking) so the block glyphs join into solid letters instead of
   // showing antialiased seams; at most 30 px, sized to its container's width.
   display: text('mono', 30, 29, 700, {tracking: -0.03}),
-  title: text('sans', 24, 30, 600, {tracking: -0.01}),
+  title: text('sans', 26, 32, 600, {tracking: -0.01}),
   heading: text('sans', 18, 24, 600),
+  // The name of a card, an option or a settings row.
+  item: text('sans', 15, 20, 600),
   body: text('sans', 14, 20, 400),
   'body-strong': text('sans', 14, 20, 500),
   small: text('sans', 13, 18, 400),

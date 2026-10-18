@@ -38,6 +38,7 @@ import {WORDMARK} from './wordmark.js';
 const STYLES: readonly TextStyle[] = [
   'title',
   'heading',
+  'item',
   'body',
   'body-strong',
   'small',
