@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,7 +14,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
     AttachJob,
     AwaitWithdrawal,
@@ -32,6 +33,7 @@ from vs_slurm.api import (
     SubmitBoundJob,
     UnreadableLease,
     WithdrawalMark,
+    WithdrawalTiming,
     WithdrawalUndone,
     encode_ledger_document,
     ledger_operation_id,
@@ -566,3 +568,97 @@ def test_an_operator_file_digest_is_its_content_hash_and_absence_is_none(content
             assert case.reopen().operator_file_sha256(path) == hashlib.sha256(content).hexdigest()
             missing = path.replace("setup.sh", "missing.sh")
             assert case.reopen().operator_file_sha256(missing) is None
+
+
+# r3206 LOW-A: documents a newline splits. The remote read printed one line per file, so
+# each failed the whole read as a malformed reply.
+_MULTI_LINE_WITHDRAWALS = (
+    '{\n  "format_version": 2,\n  "kind": "mark",\n  "attempt": 0,\n  "by": "run-new"\n}\n',
+    '{"format_version": 2,\n"kind": "mark"}',
+    "damaged\n\n\x01 attempt-0.0.json \x7f\n",
+)
+
+
+@pytest.mark.parametrize("document", _MULTI_LINE_WITHDRAWALS)
+@pytest.mark.parametrize(
+    "implementation",
+    [
+        "fake",
+        pytest.param(
+            "remote",
+            marks=pytest.mark.xfail(
+                strict=True, reason="r3206 LOW-A: the remote read prints one line per file"
+            ),
+        ),
+    ],
+)
+def test_a_multi_line_withdrawal_revision_or_lease_never_fails_the_read(
+    tmp_path: Path, implementation: str, document: str
+) -> None:
+    case = _make(implementation, tmp_path)
+    planted = _record(state=LedgerState.SUBMITTED)
+    case.plant(KEY, 0, encode_ledger_document(planted))
+    case.plant_withdrawal(KEY, 0, 0, document, _WRITTEN_AT)
+    case.plant_lease(KEY, "run-new", document, _WRITTEN_AT)
+
+    entry = case.reopen().read(KEY)
+
+    assert entry is not None
+    assert (entry.record, entry.withdrawal_revision) == (planted, 0)
+    assert isinstance(submit_step(entry, now=_WRITTEN_AT), AwaitWithdrawal)
+    assert entry.unreadable_leases == (UnreadableLease("run-new", _WRITTEN_AT),)
+
+
+def _record_with_claim_window(seconds: float) -> LedgerRecord:
+    """A submitted record whose claim window, its claiming run's ``claim_seconds``, is ``seconds``."""
+    record = _record(state=LedgerState.SUBMITTED)
+    return record.model_copy(update={"claim_expires_at": record.created_at + seconds})
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="r3206 LOW-B: an unreadable mark holds for the record's claim window, however short",
+)
+@pytest.mark.parametrize("claim_seconds", [60.0, 300.0, 829.0])
+def test_an_unreadable_withdrawal_holds_for_at_least_any_withdrawers_window(
+    case: _Case, claim_seconds: float
+) -> None:
+    """Its writer may be a build whose mark holds a whole window: it is not undone before that.
+
+    The record's claim window is the claiming run's own setting, and may be
+    shorter than any withdrawer's mark window.
+    """
+    window = WithdrawalTiming(clock=ManualClock(0.0), call_seconds=110.0).window_seconds
+    case.plant(KEY, 0, encode_ledger_document(_record_with_claim_window(claim_seconds)))
+    case.plant_withdrawal(KEY, 0, 0, _UNREADABLE_WITHDRAWALS[0], _WRITTEN_AT)
+
+    entry = case.reopen().read(KEY)
+
+    assert entry is not None
+    assert submit_step(entry, now=_WRITTEN_AT + window) == AwaitWithdrawal(entry, expired=False)
+    assert not undo_expired_withdrawal(case.reopen(), entry, now=_WRITTEN_AT + window)
+
+
+@pytest.mark.xfail(
+    strict=True, reason="r3206 LOW-B: an unreadable file time held the request for ever"
+)
+def test_an_unreadable_withdrawal_whose_file_time_is_unknown_is_expired_at_once() -> None:
+    """``date -r`` failed: it never blocks the request, so the first asker undoes it.
+
+    On the remote ledger a time ``date -r`` cannot read is infinite; the Fake
+    plants that reading directly.
+    """
+    ledger = FakeEvaluationLedger(project=PROJECT)
+    planted = _record(state=LedgerState.SUBMITTED)
+    ledger.store_raw(KEY, 0, encode_ledger_document(planted))
+    ledger.store_raw_withdrawal(KEY, 0, 0, _UNREADABLE_WITHDRAWALS[0], written_at=math.inf)
+
+    entry = ledger.read(KEY)
+
+    assert entry is not None
+    now = planted.claim_expires_at + 1.0
+    assert submit_step(entry, now=now) == AwaitWithdrawal(entry, expired=True)
+    assert undo_expired_withdrawal(ledger, entry, now=now)
+    undone = ledger.read(KEY)
+    assert undone is not None
+    assert isinstance(submit_step(undone, now=now), CheckJob | AttachJob)

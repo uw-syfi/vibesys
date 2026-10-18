@@ -16,6 +16,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
+import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
@@ -25,7 +26,9 @@ from vs_slurm.api import (
     AttachJob,
     AwaitWithdrawal,
     CheckJob,
+    ClaimAttempt,
     ClusterCall,
+    ClusterObservation,
     ClusterRejected,
     ClusterSubmitted,
     FakeCluster,
@@ -40,6 +43,7 @@ from vs_slurm.api import (
     SlurmCluster,
     SlurmConfig,
     SlurmConnectorTransport,
+    SlurmError,
     SlurmJobRunner,
     SlurmJobStatus,
     WithdrawalMark,
@@ -47,6 +51,7 @@ from vs_slurm.api import (
     WithdrawalUndone,
     Withdrawer,
     Withdrawn,
+    WithdrawUnknown,
     evaluation_key,
     job_of_handle,
     ledger_operation_id,
@@ -315,3 +320,87 @@ def test_a_submitting_attempt_with_no_job_seen_is_withdrawn_first_however_slow_i
         assert entry.record.state is LedgerState.WITHDRAWN
         assert isinstance(cluster.submit(request, operation_id=operation), ClusterRejected)
         assert late.violations == []
+
+
+@dataclass
+class _Transport:
+    """The Fake cluster's transport: every call fails while ``failing``."""
+
+    failing: bool = False
+
+    def __call__(self, _call: ClusterCall) -> None:
+        if self.failing:
+            raise SlurmError.transport_timed_out("exec")
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="r3206 LOW-C: a failed inspect withdrew the attempt with its job's fate unknown",
+)
+@pytest.mark.parametrize("state", [SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING])
+def test_a_failed_inspect_and_a_failed_cancel_never_leave_a_live_job_beside_the_next_attempts(
+    state: SlurmJobStatus,
+) -> None:
+    """A dead submitter's job runs, unrecorded; the withdrawal's inspect and cancel both fail.
+
+    The attempt must stay as it was, so the next ask resolves it rather than
+    claiming a new attempt and starting a second live job beside the first.
+    """
+    with TemporaryDirectory() as directory:
+        clock = ManualClock(NOW)
+        transport = _Transport()
+        cluster = FakeCluster(clock=clock, on_call=transport)
+        ledger = FakeEvaluationLedger(project=PROJECT)
+        request = SlurmBatchRequest(
+            workspace=Path(directory), stages=(SlurmBatchStage(name="bench", command=("true",)),)
+        )
+        config = SlurmConfig(
+            name="budget",
+            remote_workspace_root="/runs",
+            transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
+        )
+        key = evaluation_key(PROJECT, request, config, setup_script_sha256=None)
+        first = ledger_operation_id(key, 0)
+        cluster.script(first, states=(state,))
+        # The submitter's sbatch went through; it died before it recorded the job.
+        assert isinstance(cluster.submit(request, operation_id=first), ClusterSubmitted)
+        ledger.claim(
+            LedgerRecord(
+                key=key,
+                project=PROJECT,
+                attempt=0,
+                operation_id=first,
+                owner="run-gone",
+                created_at=NOW - 2000.0,
+                claim_expires_at=NOW - 1100.0,
+                state=LedgerState.SUBMITTING,
+            )
+        )
+        timing = WithdrawalTiming(clock=clock, call_seconds=_CALL_SECONDS)
+
+        transport.failing = True
+        outcome = withdraw(
+            ledger, cluster, key, Withdrawer(by="run-self", reason="stopped", timing=timing)
+        )
+        transport.failing = False
+
+        entry = ledger.read(key)
+        assert entry is not None
+        operations = [first]
+        step = submit_step(entry, now=clock.now())
+        if isinstance(step, ClaimAttempt):  # the next ask starts the next attempt's job
+            operations.append(ledger_operation_id(key, step.attempt))
+            cluster.script(operations[-1], states=(SlurmJobStatus.RUNNING,))
+            assert isinstance(
+                cluster.submit(request, operation_id=operations[-1]), ClusterSubmitted
+            )
+        live = [
+            operation
+            for operation in operations
+            if isinstance(observed := cluster.inspect(operation), ClusterObservation)
+            and not observed.status.terminal
+        ]
+        assert len(live) <= 1, f"live jobs of attempts {live}"
+        assert isinstance(outcome, WithdrawUnknown)
+        assert entry.record.state is LedgerState.SUBMITTING
+        assert entry.withdrawal is None

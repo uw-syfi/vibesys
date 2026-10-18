@@ -819,3 +819,21 @@ def test_the_sweep_cancels_every_live_job_named_for_a_failed_or_withdrawn_attemp
             )
             == ()
         )
+
+
+@pytest.mark.xfail(strict=True, reason="r3206 LOW-B: any transport timeout was accepted")
+@given(call_seconds=st.floats(min_value=0.0, max_value=1000.0))
+@settings(max_examples=examples(pr=30, nightly=300), deadline=None)
+def test_a_withdrawal_timing_whose_mark_outlasts_the_longest_window_is_refused(
+    call_seconds: float,
+) -> None:
+    """Every build's marks hold at most 900 s, which a reader that cannot decode one relies on."""
+    window = 7 * call_seconds + 60
+    if window <= 900.0:
+        assert _timing(0.0).window_seconds <= 900.0
+        assert WithdrawalTiming(
+            clock=ManualClock(0.0), call_seconds=call_seconds
+        ).window_seconds == (pytest.approx(window))
+        return
+    with pytest.raises(LedgerError, match="transport_timeout_seconds"):
+        WithdrawalTiming(clock=ManualClock(0.0), call_seconds=call_seconds)
