@@ -26,11 +26,15 @@ from vs_core.api import (
     AttemptBudget,
     AttemptId,
     AttemptPhase,
+    AttemptRef,
+    AttemptReopenRequest,
     AttemptView,
     ControlId,
     ControlRefusedError,
     CoreState,
+    DecisionId,
     ItemId,
+    RequestId,
     RunControlEvent,
     WorkspaceMode,
     WorkspacePlan,
@@ -318,13 +322,14 @@ def test_a_parallel_limit_from_a_lax_number_is_refused_when_read() -> None:
 
 
 def test_a_cancelled_items_notice_says_what_became_of_each_of_its_attempts() -> None:
-    """D220: the notice names each attempt the cancel stopped, left parked, or let finish."""
+    """D220: the notice names each attempt the cancel stopped, unqueued, left parked, or let finish."""
     base = initial_state()
     phases = {
         "A1": AttemptPhase.ACTIVE,
         "A2": AttemptPhase.PARKED,
         "A3": AttemptPhase.CLOSING,
         "A4": AttemptPhase.TERMINAL,
+        "A5": AttemptPhase.PARKED,
     }
     rows = tuple(
         AttemptView(
@@ -339,7 +344,17 @@ def test_a_cancelled_items_notice_says_what_became_of_each_of_its_attempts() -> 
         )
         for name, phase in phases.items()
     )
-    core = base.model_copy(update={"attempts": base.attempts.model_copy(update={"attempts": rows})})
+    reopen = AttemptReopenRequest(
+        decision_id=DecisionId(root="reopen-A5"),
+        request_id=RequestId(root="operation:reopen-A5"),
+        attempt=AttemptRef(attempt_id=AttemptId(root="A5"), generation=1),
+    )
+    core = base.model_copy(
+        update={
+            "attempts": base.attempts.model_copy(update={"attempts": rows}),
+            "scheduling": base.scheduling.model_copy(update={"queue": (reopen,)}),
+        }
+    )
     threads = SimThreads()
     channel = create_run_control_channel(FakeRunControlEventSink(), threads=threads)
     control = ChannelRunControl(channel, threads)
@@ -352,6 +367,7 @@ def test_a_cancelled_items_notice_says_what_became_of_each_of_its_attempts() -> 
     assert list(texts.held.values()) == [
         "The operator cancelled work item I-shared. No new attempt at it will start; do not"
         " start or continue work on it. Attempt A1 has stopped and will not be evaluated."
-        " Attempt A2 stays parked and will not be reopened. Attempt A3 was already finishing;"
+        " Attempt A5 was waiting to reopen; its queued reopen is cancelled and it will not run"
+        " again. Attempt A2 stays parked and will not be reopened. Attempt A3 was already finishing;"
         " it finishes and its result stands."
     ]

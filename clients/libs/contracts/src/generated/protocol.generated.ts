@@ -1340,8 +1340,9 @@ export interface CancelAttemptRequest {
  * Cancel one work item: no attempt at it runs or starts again.
  *
  * Each running or waiting attempt at the item stops, as ``CancelAttemptRequest`` stops one;
- * each parked or blocked one stays parked and is never reopened; one already finishing
- * finishes, and its result stands. The run starts no attempt at the item afterwards; the
+ * a parked one waiting to reopen has its reopen cancelled and ends; any other parked or
+ * blocked one stays parked and is never reopened; one already finishing finishes, and its
+ * result stands. The run starts no attempt at the item afterwards; the
  * search hears each refused start and reopen. The run's agents are told what became of
  * each attempt. An item already cancelled is refused when submitted; one the run does not
  * hold is refused when the run takes the request.

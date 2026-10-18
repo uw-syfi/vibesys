@@ -5,9 +5,10 @@ search, through the lifecycle a search's own decisions use:
 
 - ``cancel_attempt`` withdraws the attempt with a ``Cancel`` disposition, as a search would;
   the search hears the attempt close cancelled (``WorkspaceClosed``).
-- ``cancel_item`` does that for every running attempt at the item, and core refuses every
-  later ``StartAttempt`` at the item and every reopening of a parked attempt at it. An
-  attempt already settling finishes, and its result stands (``ItemCancellation``).
+- ``cancel_item`` does that for every running attempt at the item, retires the queued
+  reopening of a parked one, and core refuses every later ``StartAttempt`` at the item and
+  every later reopening of a parked attempt at it. An attempt already settling finishes, and
+  its result stands (``ItemCancellation``).
 - ``set_max_parallel`` changes the limit core's admission holds the run's attempts to. A
   lower limit admits nothing new until enough attempts end; it stops none that runs.
 
@@ -24,16 +25,18 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from ._registry import ContractError
-from .types.attempts import AttemptPhase
+from .types.attempts import AttemptPhase, RetireRequested
 from .types.common import (
     OPERATOR_ACTIONS,
     AttemptRef,
     DecisionId,
     InputId,
     InputMode,
+    RequestId,
     Scope,
     ScopeInputTarget,
 )
+from .types.scheduling import AttemptReopenRequest
 from .types.session_inputs import SessionInput
 from .types.sessions import SessionInputReceived
 from .types.strategy import Cancel, Withdraw
@@ -89,11 +92,14 @@ class ItemCancellation:
     """What ``cancel_item`` does to each attempt at the item that has not ended.
 
     ``stopped`` attempts run or wait to run: core withdraws each with a ``Cancel``
-    disposition. ``parked`` attempts (parked or blocked) run nothing; core refuses to reopen
-    them. ``settling`` attempts were already closing: they finish, and their results stand.
+    disposition. ``unqueued`` attempts are parked with a reopening queued for admission: core
+    retires that reopening, and the attempt ends cancelled. ``parked`` attempts (parked or
+    blocked, nothing queued) run nothing; core refuses to reopen them. ``settling`` attempts
+    were already closing: they finish, and their results stand.
     """
 
     stopped: tuple[AttemptId, ...]
+    unqueued: tuple[AttemptId, ...]
     parked: tuple[AttemptId, ...]
     settling: tuple[AttemptId, ...]
 
@@ -101,10 +107,49 @@ class ItemCancellation:
 def item_cancellation(state: CoreState, item: ItemId) -> ItemCancellation:
     """What cancelling ``item`` in ``state`` does to each of its attempts."""
     rows = _attempts_of(state, item)
+    queued = _queued_reopens(state, item)
+    parked = tuple(row.attempt_id for row in rows if row.phase in _PARKED)
     return ItemCancellation(
         stopped=tuple(row.attempt_id for row in rows if row.phase not in _ENDED | _PARKED),
-        parked=tuple(row.attempt_id for row in rows if row.phase in _PARKED),
+        unqueued=tuple(attempt for attempt in parked if attempt in queued),
+        parked=tuple(attempt for attempt in parked if attempt not in queued),
         settling=tuple(row.attempt_id for row in rows if row.phase == AttemptPhase.CLOSING),
+    )
+
+
+def _queued_reopens(state: CoreState, item: ItemId) -> dict[AttemptId, AttemptReopenRequest]:
+    """The reopening queued for admission of each parked attempt at ``item`` that has one."""
+    parked = {
+        (row.attempt_id, row.generation)
+        for row in _attempts_of(state, item)
+        if row.phase == AttemptPhase.PARKED
+    }
+    return {
+        request.attempt.attempt_id: request
+        for request in state.scheduling.queue
+        if isinstance(request, AttemptReopenRequest)
+        and (request.attempt.attempt_id, request.attempt.generation) in parked
+    }
+
+
+def reopen_retirements(state: CoreState, control: ControlInput) -> tuple[RetireRequested, ...]:
+    """The retirements of the queued reopenings a ``cancel_item`` ends, one per attempt.
+
+    Each cancels the queued admission episode, as a cancelling stop does, so the parked
+    attempt ends cancelled and never runs again; a parked attempt with nothing queued is
+    left as it is.
+    """
+    if control.action != "cancel_item" or control.item is None:
+        return ()
+    return tuple(
+        RetireRequested(
+            attempt=request.attempt,
+            disposition="cancel",
+            authority=RequestId(root=f"control:{control.control_id.root}:{attempt.root}"),
+            admission_id=request.decision_id,
+            requested_at=state.run.now_at,
+        )
+        for attempt, request in _queued_reopens(state, control.item).items()
     )
 
 

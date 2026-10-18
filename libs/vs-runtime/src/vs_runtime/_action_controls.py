@@ -48,11 +48,17 @@ def notice_text(request: ActionRequest, core: CoreState) -> RenderedPrompt:
     ``core`` is the state the run takes it in: a cancelled item's notice says what became
     of each of its attempts there (``item_cancellation``).
     """
-    attempts: dict[str, tuple[str, ...]] = {"stopped": (), "parked": (), "settling": ()}
+    attempts: dict[str, tuple[str, ...]] = {
+        "stopped": (),
+        "unqueued": (),
+        "parked": (),
+        "settling": (),
+    }
     if isinstance(request, CancelItemRequest):
         done = item_cancellation(core, ItemId(root=request.item))
         attempts = {
             "stopped": tuple(a.root for a in done.stopped),
+            "unqueued": tuple(a.root for a in done.unqueued),
             "parked": tuple(a.root for a in done.parked),
             "settling": tuple(a.root for a in done.settling),
         }

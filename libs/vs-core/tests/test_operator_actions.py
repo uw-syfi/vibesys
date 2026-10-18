@@ -27,6 +27,8 @@ from pydantic import ValidationError
 
 import vs_core.api as core
 
+from .test_attempt_retirement import REDUCERS as QUEUED_REOPEN_REDUCERS
+from .test_attempt_retirement import reopen_fixture as queued_reopen_fixture
 from .test_reopen_kernel_bridge import reopen_fixture
 from .toy_agent_search import LIMITS, Config, ToyHost, run_toy
 
@@ -583,3 +585,44 @@ def test_a_parked_attempt_at_a_cancelled_item_is_not_reopened() -> None:
     [rejected] = [e for e in reopened(state) if isinstance(e, core.Rejected)]
     assert rejected.path == ("normalized_scope_reopen", "attempt")
     assert rejected.code is core.RejectionCode.CLOSED_SCOPE
+
+
+def _queued_reopen() -> tuple[core.CoreState, core.AttemptReopenRequest]:
+    """A parked attempt whose reopening the search asked for waits in the admission queue."""
+    state, event, _ = queued_reopen_fixture()
+    assert event.request.request_id is not None
+    queued = core.AttemptReopenRequest(
+        decision_id=core.DecisionId(root="reopen"),
+        request_id=event.request.request_id,
+        attempt=event.normalization.attempt,
+    )
+    scheduling = state.scheduling.model_copy(update={"slots": (), "queue": (queued,)})
+    return state.model_copy(update={"scheduling": scheduling}), queued
+
+
+def test_cancelling_an_item_retires_a_reopening_already_queued_at_it() -> None:
+    """A parked attempt waiting to reopen at a cancelled item never runs again.
+
+    The reopening passed the reopen fence before the cancel, so only retiring it stops it:
+    the attempt ends cancelled, the queue no longer holds it, and its admission arriving
+    later reopens nothing. The notice names it.
+    """
+    state, queued = _queued_reopen()
+    [parked] = state.attempts.attempts
+    assert parked.phase == core.AttemptPhase.PARKED
+    split = core.item_cancellation(state, parked.item_id)
+    assert (split.unqueued, split.parked) == ((parked.attempt_id,), ())
+
+    control = _action("op", "cancel_item", item=parked.item_id.root)
+    cancel = core.RunControlEvent(control=control, now_at=state.run.now_at)
+    after = core.step(state, cancel, reducers=QUEUED_REOPEN_REDUCERS).state
+
+    [ended] = after.attempts.attempts
+    assert ended.phase == core.AttemptPhase.TERMINAL
+    assert after.scheduling.queue == ()
+    admitted = core.ScopeReopenAdmitted(
+        attempt=queued.attempt, request_id=queued.request_id, admission_id=queued.decision_id
+    )
+    later = core.step(after, admitted, reducers=QUEUED_REOPEN_REDUCERS)
+    assert later.state.attempts == after.attempts
+    assert later.requests == ()

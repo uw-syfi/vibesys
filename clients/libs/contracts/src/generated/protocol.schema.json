@@ -609,7 +609,7 @@
     },
     "CancelItemRequest": {
       "additionalProperties": false,
-      "description": "Cancel one work item: no attempt at it runs or starts again.\n\nEach running or waiting attempt at the item stops, as ``CancelAttemptRequest`` stops one;\neach parked or blocked one stays parked and is never reopened; one already finishing\nfinishes, and its result stands. The run starts no attempt at the item afterwards; the\nsearch hears each refused start and reopen. The run's agents are told what became of\neach attempt. An item already cancelled is refused when submitted; one the run does not\nhold is refused when the run takes the request.",
+      "description": "Cancel one work item: no attempt at it runs or starts again.\n\nEach running or waiting attempt at the item stops, as ``CancelAttemptRequest`` stops one;\na parked one waiting to reopen has its reopen cancelled and ends; any other parked or\nblocked one stays parked and is never reopened; one already finishing finishes, and its\nresult stands. The run starts no attempt at the item afterwards; the\nsearch hears each refused start and reopen. The run's agents are told what became of\neach attempt. An item already cancelled is refused when submitted; one the run does not\nhold is refused when the run takes the request.",
       "properties": {
         "control_id": {
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",

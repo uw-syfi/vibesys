@@ -20,7 +20,7 @@ from ._dispatch_episode import (
 )
 from ._host_epochs import downtime
 from ._inspection import validate_inspection_target, validate_registered_owner
-from ._operator_actions import cancellations, notice
+from ._operator_actions import cancellations, notice, reopen_retirements
 from ._ownership import cleanup_pending
 from ._proofs import (
     Proven,
@@ -1342,13 +1342,14 @@ def _operator_action(state: CoreState, event: RunControlEvent, dispatch: Dispatc
     """Apply an operator action core has recorded: its notice, then what it changes.
 
     A cancel withdraws each attempt it names as a search's own ``Withdraw`` would, with a
-    ``Cancel`` disposition and the cleanup bound as its limit; a new parallel limit retries
-    admission. ``_operator_actions`` says what each action changes.
+    ``Cancel`` disposition and the cleanup bound as its limit, and retires each queued
+    reopening it ends; a new parallel limit retries admission. ``_operator_actions`` says what each action changes.
     """
     control = event.control
     signals: tuple[Signal, ...] = (notice(state, control, event.now_at),)
     if control.action == "set_max_parallel":
         signals += (ParallelLimitChanged(),)
+    signals += reopen_retirements(state, control)
     result = propagate(state, signals, dispatch)
     within = Within(limit=state.run.limits.cleanup_bound)
     for withdraw in cancellations(state, control):
