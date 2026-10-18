@@ -65,8 +65,8 @@ class FakeHosts {
 
 class FakeSettings {
   onRecentChanged() {}
-  recent() {
-    return Promise.resolve({version: 3, runs: []});
+  recentSnapshot() {
+    return Promise.resolve({recent: {version: 4, runs: []}, skipped: []});
   }
 }
 
