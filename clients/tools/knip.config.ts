@@ -41,20 +41,6 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
     ],
     project: ['src/**/*.ts', 'dev/**/*.ts', 'benchmarks/**/*.ts'],
   },
-  'apps/web': {
-    entry: [
-      // knip's Vite plugin finds the browser page (`index.html` -> `src/app/main.tsx`) itself.
-      // The browser transport bundle's entry (`vite.browser.config.ts`).
-      'src/platform/backend.ts',
-      'src/**/*.test.ts',
-      'src/**/*.test.tsx',
-      // Playwright specs, run by `pnpm --filter @vibesys/app-web test:e2e`.
-      'e2e/**/*.spec.ts',
-      // Loaded by gateway-form-harness.html rather than by a TypeScript import.
-      'e2e/gateway-form-harness.ts',
-    ],
-    project: ['src/**/*.ts', 'src/**/*.tsx', 'e2e/**/*.ts'],
-  },
   'apps/desktop-main': {
     // The Electron main process and the two sandboxed preloads (`.cts`, loaded by path from
     // `src/main/app-security.ts`) are the package's exports, entries by default; the build's copy

@@ -226,12 +226,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Full history without blobs: `check_frozen_ui` compares against the merge base with
-      # origin/main and reads only the frozen packages' files there.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          filter: blob:none
 
       - name: Set up the TUI workspace
         uses: ./.github/actions/setup-tui
@@ -269,10 +264,6 @@ jobs:
       - name: Build TypeScript packages
         run: ./support/repoctl/repoctl run-checks --group tui_build
 
-      - name: Check browser transport bundle for Node builtins
-        working-directory: clients
-        run: pnpm check:web-browser-bundle
-
       - name: Smoke-test TUI packages
         run: ./support/repoctl/repoctl run-checks --group tui_package_smoke
 
@@ -287,11 +278,11 @@ jobs:
       - name: Set up the TUI workspace
         uses: ./.github/actions/setup-tui
 
-      - name: Install Chromium for the web smoke test
+      - name: Install Chromium for the desktop smoke test
         working-directory: clients
-        run: pnpm --filter @vibesys/app-web exec playwright install --with-deps chromium
+        run: pnpm --filter @vibesys/app-desktop-main exec playwright install --with-deps chromium
 
-      - name: Test the replay-driven web viewer
+      - name: Test the desktop app
         env:
           # The downloaded Electron runtime's SUID helper cannot have Chromium's required root
           # ownership on a hosted runner. This opt-out is scoped to the E2E child process.

@@ -11,7 +11,7 @@ It builds on, and does not restate:
 - [`wire-protocol.md`](wire-protocol.md): framing and connection semantics of the run protocol
   (`WP-*` decisions). Every run connection described here carries that protocol unchanged.
 - [`tui-architecture.md`](tui-architecture.md): detached runs and the live-instance registry.
-- [`web-development.md`](web-development.md) (Desktop app): how to start the app, the page's
+- [`desktop-development.md`](desktop-development.md): how to start the app, the page's
   MessagePort bridge, and the ssh master.
 - [`clients-architecture.md`](clients-architecture.md): which TypeScript package each client
   component below lives in, and the layer and runtime rules between them.
@@ -82,7 +82,7 @@ desktop main process (apps/desktop-main)              host (local or ssh)
 | Detached run server | `entrypoints.server` (changed) | Takes the lock and publishes its record (with `run_id` and phase `starting/resolving`) before importing the engine; owns its phases. |
 | Generated helper types | `clients/libs/contracts/src/generated/`, read through `@vibesys/contracts/host-helper` | `host-helper.schema.json` (committed, language neutral), the TypeScript types and descriptor generated from it, and the strict parse every helper line goes through. |
 | Connection manager | `@vibesys/connection` (`clients/libs/connection`: a pure `state/` machine and a `shell/`) | The only code that creates links and channels. One `HostConnection` per host; its machine is the one retry loop. |
-| Screen stores | the desktop features (`clients/features/*`) and `clients/apps/web` | One store per screen; pure reducer; React renders state. |
+| Screen stores | the desktop features (`clients/features/*`) and `clients/apps/desktop-shell` | One store per screen; pure reducer; React renders state. |
 | App lifecycle | `clients/apps/desktop-main` (`src/main/app-lifecycle.ts`) and `@vibesys/settings` | Single-instance lock, the quit sequence, the settings store. |
 
 Placement follows [architecture.md](architecture.md): the registry and relay are generic mechanisms
@@ -140,7 +140,7 @@ Properties:
 
 The app starts the helper with one fixed command line per host. On ssh it is the existing shell-safe
 form (`sh -c '<fixed script>' ROLE xHEX...`, every datum hex encoded, see
-[web-development.md](web-development.md)); locally it is a direct `spawn` with an argument vector.
+[desktop-development.md](desktop-development.md)); locally it is a direct `spawn` with an argument vector.
 The script only resolves the interpreter and `exec`s it:
 
 1. If the host setting is a checkout (and the fallback for any host without the console script): `uv run --no-sync --project CHECKOUT python -I -m
@@ -696,10 +696,6 @@ and opens the run window, whose own shell document attaches it. A bare `--host N
 Known gaps: in a run window "Run again" only focuses the main window (`show-main-window`) instead
 of opening New run with the run's inputs there, and a notification click focuses the main window
 rather than the window of the run it names.
-
-The campaign workspace UI these run pages can render, and the live telemetry stream it folds, are
-designed in [campaign-workspace-ui.md](../design/campaign-workspace-ui.md) and
-[live-campaign-streaming.md](../design/live-campaign-streaming.md).
 
 ## App lifecycle
 

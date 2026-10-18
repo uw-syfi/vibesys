@@ -208,7 +208,7 @@ def _headless_requested(args: list[str]) -> bool:
         or "-h" in args
     ):
         return True
-    if args and args[0] in {"tui-defaults", "validate", "preflight", "web", "control"}:
+    if args and args[0] in {"tui-defaults", "validate", "preflight", "control"}:
         return True
     return not (sys.stdin.isatty() and sys.stdout.isatty())
 
@@ -220,23 +220,15 @@ def headless_command(args: Sequence[str]) -> list[str]:
     desktop app starts runs exactly what ``vibesys --detach`` at a terminal runs.
     """
     args = list(args)
-    subcommands = {"web": "entrypoints.web"}
     module = (
-        subcommands[args[0]]
-        if args and args[0] in subcommands
-        else "entrypoints.server"
+        "entrypoints.server"
         if (args and args[0] == "tui-defaults")
         or "--web" in args
         or "--web-reopen" in args
         or "--detach" in args
         else "entrypoints.headless"
     )
-    if module in subcommands.values():
-        command_args = args[1:]
-    elif module == "entrypoints.server":
-        command_args = args
-    else:
-        command_args = _without_option(args, "--theme")
+    command_args = args if module == "entrypoints.server" else _without_option(args, "--theme")
     return [sys.executable, "-m", module, *command_args]
 
 

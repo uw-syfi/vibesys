@@ -310,9 +310,8 @@ When Python protocol models change, regenerate the files under
 See the [TUI architecture guide](tui-architecture.md) for package ownership and dependency rules.
 TUI-specific contributor docs are indexed in [`tui/README.md`](tui/README.md).
 
-The [web UI development guide](web-development.md) covers replay mode, live
-WebSocket smoke runs, detached gateway lifecycle, and SSH access from a local
-laptop to a remote VibeSys host.
+The [desktop development guide](desktop-development.md) covers local and SSH
+connections, the shell, and the Electron app.
 
 ## Extend VibeSys
 
@@ -359,17 +358,17 @@ command. The wrapper runs the repository's Go tool, so install Go 1.25 first:
 ./support/repoctl/repoctl test
 ```
 
-This does not run every CI check. Browser end-to-end tests (`tui_e2e`) are
+This does not run every CI check. Electron end-to-end tests (`tui_e2e`) are
 CI-only by default: Playwright needs Chromium and its system libraries as well
 as the client and Python environments, so making the normal local command
 acquire or require them would make it unexpectedly heavyweight. Run that group
-explicitly when browser coverage is needed. Each Playwright run asks the OS for
+explicitly when desktop coverage is needed. Each Playwright run asks the OS for
 a free port for its own server, so parallel runs on one machine do not collide.
 
 ```bash
 uv sync --dev
 pnpm --dir clients install --frozen-lockfile
-(cd clients && pnpm --filter @vibesys/app-web exec playwright install --with-deps chromium)
+(cd clients && pnpm --filter @vibesys/app-desktop-main exec playwright install --with-deps chromium)
 ./support/repoctl/repoctl run-checks --group tui_e2e
 ```
 

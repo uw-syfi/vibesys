@@ -485,10 +485,7 @@ export class ControlChannel {
    * the command applied invisibly seconds later. An idempotent request waits
    * either way, because repeating it is free.
    *
-   * Note for readers tracing coverage: the refusal branch is unreachable from
-   * `clients/apps/web`, which issues only `query.snapshot` and so takes the
-   * idempotent default on every call. `websocket.test.ts` and
-   * `node/client.test.ts` reach it directly.
+   * `websocket.test.ts` and `node/client.test.ts` reach the refusal branch directly.
    */
   #enqueue(entry: ControlRequest): void {
     const phase = this.#phase;

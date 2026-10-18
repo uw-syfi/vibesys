@@ -881,9 +881,6 @@ REAL_API_EDGES: dict[Key, str] = {
     ("src/entrypoints/server.py", "interpreter"): (
         "entrypoint: names the interpreter in the helper command it starts"
     ),
-    ("src/entrypoints/web.py", "interpreter"): (
-        "entrypoint: names the interpreter in the server command it starts"
-    ),
     ("src/entrypoints/detached_run.py", "threading"): (
         "entrypoint: installs and restores threading.excepthook, a process-global interpreter "
         "hook no vs_sim interface stands in for; it starts no thread"
@@ -1458,7 +1455,6 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
     ),
     "src/entrypoints/launcher.py": (EdgeKind.PACKAGED_RESOURCE, "package versions"),
     "src/entrypoints/server.py": (EdgeKind.PROCESS_BOUNDARY, "log file and socket directory"),
-    "src/entrypoints/web.py": (EdgeKind.STATIC_FILES, "the web client build"),
     "src/entrypoints/web_assets.py": (EdgeKind.STATIC_FILES, "the web client build manifest"),
     "src/server/api/schema.py": (EdgeKind.GENERATOR, "protocol schema files"),
     "src/entrypoints/protocol_schema.py": (EdgeKind.GENERATOR, "the protocol schema file"),

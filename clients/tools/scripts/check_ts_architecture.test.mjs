@@ -171,14 +171,6 @@ const RULE_CASES = [
     },
   },
   {
-    // Test support nested below a package's sources is test support too.
-    rule: 'production-code-does-not-import-other-packages-test-support',
-    files: {
-      'apps/web/src/platform/backend.ts':
-        "import '../../../../libs/connection/src/testing/index.js';\n",
-    },
-  },
-  {
     rule: 'desktop-main-does-not-import-preloads',
     files: {'apps/desktop-main/src/main/index.ts': "import '../preload/bridge.cjs';\n"},
   },
@@ -208,15 +200,7 @@ const RULE_CASES = [
   },
   {
     rule: 'renderers-do-not-import-electron',
-    files: {'apps/web/src/platform/backend.ts': "import 'electron';\n"},
-  },
-  {
-    rule: 'renderers-do-not-import-electron',
     files: {'features/run-page/src/renderer/effects/replay.ts': "import 'electron';\n"},
-  },
-  {
-    rule: 'web-opens-no-sockets-or-processes',
-    files: {'apps/web/src/platform/backend.ts': "import 'net';\n"},
   },
   {
     rule: 'web-opens-no-sockets-or-processes',
@@ -235,14 +219,6 @@ const RULE_CASES = [
     files: {
       'apps/desktop-shell/src/shell.ts': "import '@vibesys/store/testing';\n",
     },
-  },
-  {
-    rule: 'web-platform-does-not-import-app',
-    files: {'apps/web/src/platform/backend.ts': "import '../app/compose.js';\n"},
-  },
-  {
-    rule: 'web-transport-only-in-backend-adapter',
-    files: {'apps/web/src/app/compose.ts': "import '@vibesys/transport';\n"},
   },
   {
     rule: 'feature-state-is-pure',
@@ -275,24 +251,6 @@ const RULE_CASES = [
   {
     rule: 'tools-are-leaves',
     files: {'tui/dev/harness.ts': "import '../../tools/scripts/check.mjs';\n"},
-  },
-  {
-    rule: 'tools-are-leaves',
-    files: {'apps/web/src/app/compose.ts': "import '../../e2e/live.spec.js';\n"},
-  },
-  {
-    // One leaf tool reaching another. Excluding every tool from `from` rather than only the
-    // importer's own directory permits this, so this case fails without the `$1` back-reference.
-    rule: 'tools-are-leaves',
-    files: {'apps/web/e2e/live.spec.ts': "import '../../../tools/scripts/check.mjs';\n"},
-  },
-  {
-    rule: 'tools-are-leaves',
-    files: {'apps/web/e2e/live.spec.ts': "import '../../../tui/benchmarks/bench.js';\n"},
-  },
-  {
-    rule: 'tools-are-leaves',
-    files: {'libs/run-state/bench/run.ts': "import '../../../apps/web/e2e/fixtures.js';\n"},
   },
   {
     rule: 'scripts-do-not-import-package-code',

@@ -224,7 +224,7 @@ def test_web_gateway_rejects_a_manifest_after_its_source_changes(
     assert exit_info.value.code == 2
     assert f"web assets {assets} are stale" in diagnostic
     assert str(source_file) in diagnostic
-    assert "pnpm --dir clients/apps/web build" in diagnostic
+    assert "rebuild the supplied --web-assets bundle" in diagnostic
     assert not (tmp_path / "web-gateway.json").exists()
 
 
@@ -251,7 +251,7 @@ def test_web_gateway_rejects_a_manifest_after_a_build_input_file_changes(
     assert exit_info.value.code == 2
     assert f"web assets {assets} are stale" in diagnostic
     assert str(build_input) in diagnostic
-    assert "pnpm --dir clients/apps/web build" in diagnostic
+    assert "rebuild the supplied --web-assets bundle" in diagnostic
     assert not (tmp_path / "web-gateway.json").exists()
 
 
@@ -296,7 +296,7 @@ def test_web_gateway_rejects_assets_that_do_not_match_their_build_id(
     assert exit_info.value.code == 2
     assert f"web assets {assets} do not match build" in diagnostic
     assert str(assets / "index.html") in diagnostic
-    assert "pnpm --dir clients/apps/web build" in diagnostic
+    assert "rebuild the supplied --web-assets bundle" in diagnostic
 
 
 def test_web_reopen_accepts_a_log_directory_or_run_events_file(tmp_path: Path) -> None:

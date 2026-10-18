@@ -48,14 +48,9 @@ def test_bun_type_packages_match_the_packaged_runtime() -> None:
         "clients/libs/transport-node/package.json",
         "clients/tui/package.json",
         "clients/libs/ui/package.json",
-        "clients/features/campaign/package.json",
-        "clients/features/conversation/package.json",
-        "clients/features/gateway-connect/package.json",
         "clients/features/hosts/package.json",
         "clients/features/machines/package.json",
         "clients/features/run-control/package.json",
-        "clients/features/run-view/package.json",
-        "clients/features/web-theme/package.json",
         "clients/apps/desktop-main/package.json",
         "clients/apps/ui-gallery/package.json",
         "clients/apps/desktop-shell/package.json",
@@ -63,7 +58,6 @@ def test_bun_type_packages_match_the_packaged_runtime() -> None:
         "clients/features/settings/package.json",
         "clients/features/run-page/package.json",
         "clients/features/new-run/package.json",
-        "clients/apps/web/package.json",
     }
     assert set(pins.values()) == {BUN_VERSION}
 

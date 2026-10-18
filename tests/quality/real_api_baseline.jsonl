@@ -50,10 +50,6 @@
 {"path": "tests/entrypoints/test_launcher_signals.py", "rule": "signal", "count": 11}
 {"path": "tests/entrypoints/test_server.py", "rule": "subprocess", "count": 4}
 {"path": "tests/entrypoints/test_server.py", "rule": "interpreter", "count": 2}
-{"path": "tests/entrypoints/test_web.py", "rule": "fs_sync", "count": 2}
-{"path": "tests/entrypoints/test_web.py", "rule": "subprocess", "count": 4}
-{"path": "tests/entrypoints/test_web.py", "rule": "interpreter", "count": 1}
-{"path": "tests/entrypoints/test_web_script.py", "rule": "subprocess", "count": 1}
 {"path": "tests/evaluators/test_request_factory_evaluator.py", "rule": "subprocess", "count": 1}
 {"path": "tests/evaluators/test_request_factory_evaluator.py", "rule": "interpreter", "count": 4}
 {"path": "tests/examples/request_factory_cpu_smoke.py", "rule": "socket_io", "count": 1}
@@ -132,7 +128,7 @@
 {"path": "libs/vs-slurm/tests/test_connector_process_contract.py", "rule": "interpreter", "count": 1}
 {"path": "libs/vs-slurm/tests/test_fake_connector.py", "rule": "interpreter", "count": 2}
 {"path": "tests/architecture/test_prompt_resource_contract.py", "rule": "interpreter", "count": 1}
-{"path": "tests/entrypoints/test_launcher.py", "rule": "interpreter", "count": 7}
+{"path": "tests/entrypoints/test_launcher.py", "rule": "interpreter", "count": 6}
 {"path": "tests/examples/test_differential_dataflow_example.py", "rule": "interpreter", "count": 2}
 {"path": "tests/examples/test_engine_free_image.py", "rule": "interpreter", "count": 1}
 {"path": "tests/examples/test_llama3_8b_trn2_request_factory.py", "rule": "interpreter", "count": 1}

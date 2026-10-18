@@ -2,7 +2,7 @@ import {fileURLToPath} from 'node:url';
 import {pathAlternation, workspaceLayout} from './tools/scripts/workspace_layout.mjs';
 
 // Scanned sources: each package's `src/`, plus the non-shipping code that lives next to it (the
-// replay harness `tui/dev`, the benchmarks, the web end-to-end specs) and the workspace's own
+// replay harness `tui/dev` and the benchmarks) and the workspace's own
 // tooling (`tools`). Both sets come from the workspace layout rather than a name list, so a new
 // package, or a new directory inside one, is covered by these rules on its first commit.
 // `tools/scripts/check_ts_architecture.mjs` derives the scan roots from the same place.
@@ -52,14 +52,9 @@ const LEAF_TOOL_IMPORTER = `^(${LEAF_TOOL_DIRECTORIES})/|${PACKAGES}`;
 // Only a feature's browser parts: a later `main/` (Node) entry is not held to the renderer rules.
 const FEATURE = '^features/[^/]+/src/(?:state|renderer)/';
 const RENDERER_PART = part => `^features/[^/]+/src/renderer/${part}/`;
-// The web app (`apps/web/src`) is composition only: `app/` (the entries and the composition) over
-// `platform/` (the browser's services: the one backend adapter, lifecycle, storage, the desktop
-// shell's bridge). `docs/contributing/web-development.md` describes the layout.
-const WEB = '^apps/web/src/';
 const TRANSPORT = ['^libs/transport(?:-node)?/', '/node_modules/@vibesys/transport(?:-node)?/'];
 // The protocol vocabulary, which presentational code never names.
 const CONTRACTS = ['^libs/contracts/', '/node_modules/@vibesys/contracts/'];
-const WEB_BACKEND_ADAPTER = `${WEB}platform/backend\\.ts$`;
 
 function featureRules() {
   return [
@@ -107,25 +102,6 @@ function featureRules() {
       name: 'feature-transport-is-type-only',
       severity: 'error',
       from: {path: FEATURE, pathNot: TEST_FILE},
-      to: {path: TRANSPORT, dependencyTypesNot: ['type-only']},
-    },
-  ];
-}
-
-function webAppRules() {
-  return [
-    {
-      name: 'web-platform-does-not-import-app',
-      severity: 'error',
-      from: {path: `${WEB}platform/`, pathNot: TEST_FILE},
-      to: {path: `${WEB}app/`},
-    },
-    {
-      // One path to the backend: `platform/backend.ts` is the only module that imports
-      // @vibesys/transport's runtime values (`web-fetch-only-in-backend.grit` holds `fetch` to it).
-      name: 'web-transport-only-in-backend-adapter',
-      severity: 'error',
-      from: {path: WEB, pathNot: [TEST_FILE, WEB_BACKEND_ADAPTER]},
       to: {path: TRANSPORT, dependencyTypesNot: ['type-only']},
     },
   ];
@@ -207,7 +183,7 @@ function rendererRules() {
       // its preload's bridge.
       name: 'renderers-do-not-import-electron',
       severity: 'error',
-      from: {path: [DESKTOP_SHELL, WEB, FEATURE], pathNot: TEST_FILE},
+      from: {path: [DESKTOP_SHELL, FEATURE], pathNot: TEST_FILE},
       to: {path: '(?:^|/)node_modules/electron/', dependencyTypesNot: ['type-only']},
     },
     {
@@ -215,7 +191,7 @@ function rendererRules() {
       // the preload's bridge.
       name: 'web-opens-no-sockets-or-processes',
       severity: 'error',
-      from: {path: [DESKTOP_SHELL, WEB, FEATURE], pathNot: TEST_FILE},
+      from: {path: [DESKTOP_SHELL, FEATURE], pathNot: TEST_FILE},
       to: {dependencyTypes: ['core'], path: '^(?:node:)?(?:net|child_process)$'},
     },
   ];
@@ -406,7 +382,6 @@ export default {
     ...desktopRules(),
     ...rendererRules(),
     ...featureRules(),
-    ...webAppRules(),
     {
       // `index.ts` (the frontend process) and `launcher.ts` (the `vibesys` bin) run on import,
       // so nothing may import them.

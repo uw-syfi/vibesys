@@ -81,7 +81,6 @@ SIDEBAR_STRING = re.compile(r"""['"]([\w./-]+)['"]""")
 ORPHAN_ALLOWLIST = frozenset(
     {
         "docs/contributing/kernel3-contract-decisions.md",
-        "docs/contributing/web-run-viewer-parity.md",
         "docs/design/core-agent-evaluation-bridge.md",
         "docs/design/iteration-navigation.md",
         "docs/design/launch.md",

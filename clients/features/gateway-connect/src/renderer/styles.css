@@ -1,8 +1,0 @@
-/* The browser's gateway connect form. */
-.gateway-connect { display: grid; gap: 9px; margin: 16px auto 0; max-width: 1120px; padding: 0 24px; }
-.gateway-connect label { color: var(--subtle); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
-.gateway-connect-row { display: flex; gap: 10px; }
-.gateway-connect input { background: var(--field-background); border: 1px solid var(--border); border-radius: 7px; color: var(--text); flex: 1; font: inherit; min-width: 0; padding: 11px 13px; }
-.gateway-connect button { background: var(--accent); border: 0; border-radius: 7px; color: var(--on-accent); cursor: pointer; font: inherit; font-weight: 700; padding: 11px 16px; }
-.gateway-connect-status { color: var(--subtle); margin: 0; }
-.gateway-connect-error { color: var(--failure); margin: 0; }

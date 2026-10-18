@@ -294,9 +294,9 @@ def test_the_scan_covers_the_product_trees_only(tmp_path: Path) -> None:
         "clients/libs/x/node_modules/z/src/h.ts",
         "clients/tui/dev/fixtures/i.ts",
         "clients/tui/dev/mock-server.ts",
-        "clients/apps/web/campaign-stream.ts",
+        "clients/apps/desktop-shell/src/campaign-stream.ts",
         "clients/tools/scripts/j.mjs",
-        "clients/apps/web/dist/k.js",
+        "clients/apps/desktop-shell/dist/k.js",
         "src/vibesys/prompts/l.md.j2",
         "libs/vs-x/src/vs_x/m.toml",
         "libs/vs-x/src/vs_x.egg-info/PKG-INFO",
@@ -307,7 +307,7 @@ def test_the_scan_covers_the_product_trees_only(tmp_path: Path) -> None:
         (tmp_path / relative).write_text("M = 'claude-opus-5-5'\n", encoding="utf-8")
 
     assert sorted(line.split(":")[0] for line in violations(tmp_path)) == [
-        "clients/apps/web/campaign-stream.ts",
+        "clients/apps/desktop-shell/src/campaign-stream.ts",
         "clients/features/y/src/ui/f.tsx",
         "clients/libs/x/src/e.ts",
         "clients/tools/scripts/j.mjs",

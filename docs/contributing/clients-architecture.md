@@ -13,7 +13,7 @@ It builds on, and does not restate:
 - [`desktop-connection.md`](desktop-connection.md): what the desktop main process, the host helper,
   and the screen stores do. This document says which package each of those lives in.
 - [`wire-protocol.md`](wire-protocol.md): the run protocol that `@vibesys/contracts` types.
-- [`web-development.md`](web-development.md): how to run the web UI and the desktop app.
+- [`desktop-development.md`](desktop-development.md): how to run the desktop app.
 
 `clients/tui` is deprecated. It keeps building and its checks stay green, but it is not migrated
 into this graph; it consumes the packages below through their public entry points like any other
@@ -325,25 +325,6 @@ Every failure names the file and line (or the manifest key), the rule id and the
 (`<Card {...props} />` can carry a `className`); the components take no `className` or `style`
 prop (rule S1, with the component API), which closes that path. Unenforced: whether a screen
 matches its design needs a reader; the checks hold the parts it is built from.
-
-### Frozen UI packages
-
-An old UI package gets fixes only. `FROZEN_UI_PACKAGES` in
-[`clients/tools/scripts/check_frozen_ui.mjs`](https://github.com/uw-syfi/vibesys/blob/main/clients/tools/scripts/check_frozen_ui.mjs)
-is the one list of them, each with the paths that hold its UI (`src/renderer/` for a feature;
-`src/app/` and `src/styles.css` for `apps/web`). In `tui_quality`, `pnpm check:frozen-ui --base-ref origin/main`
-compares the change with its merge base with `origin/main`, and in a listed package it refuses:
-
-- a new file under a UI path (new test files are allowed);
-- a name added to the exports of the package's `./renderer` entry, followed through `export *`;
-- a rise, in any UI file, of the count of JSX intrinsic interactive elements (`button`, `a`,
-  `input`, `select`, `textarea`, `label`, `dialog`, `details`, `summary`, `form`) or of raw color
-  literals, so a fix may move or delete such code and not add to it.
-
-The check is a function of two file trees (`frozenUiErrors(base, head)`); the command line only
-builds them, the base from the merge base. A package leaves the list when it is deleted: remove its
-entry in the same change, and the check fails if a listed package no longer exists. The list only
-shrinks.
 
 ## Components
 

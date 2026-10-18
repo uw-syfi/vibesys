@@ -153,13 +153,7 @@ def _web_assets_from_argv(argv: list[str]) -> WebAssetBundle | None:
     value = cli._option_from_argv(argv, "--web-assets")  # noqa: SLF001  # lint-waiver: LW-101004 [SLF001]; reuse the CLI's private option scanner before full argument parsing
     if value is not None:
         return WebAssetBundle.from_directory(Path(value), require_manifest=False)
-    source_root = Path(__file__).resolve().parents[2]
-    candidate = source_root / "clients" / "apps" / "web" / "dist"
-    return (
-        WebAssetBundle.from_directory(candidate, require_manifest=True)
-        if candidate.is_dir()
-        else None
-    )
+    return None
 
 
 def _web_origins_from_argv(argv: list[str]) -> tuple[str, ...]:

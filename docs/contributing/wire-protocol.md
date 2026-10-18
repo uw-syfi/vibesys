@@ -26,10 +26,8 @@ variable-size payload values on Unicode code-point and collection-entry boundari
 so live delivery and every later replay observe the same fact. The WebSocket batch chunker still
 handles only whole events and has no payload-specific branch.
 
-It also does not specify how the WebSocket gateway serves the browser bundle over plain HTTP. The
-response headers, the Content-Security-Policy, and the token-free `/assets/*` route are gateway
-serving decisions with no counterpart on the Unix transport, so they are owned by
-[`web-development.md`](web-development.md) rather than being `WP-*` decision tokens here.
+It also does not specify optional HTTP asset serving by the WebSocket gateway. That behavior has no
+counterpart on the Unix transport and is outside the `WP-*` protocol decisions here.
 
 The authoritative message taxonomy is three unions in `src/server/api/protocol.py`:
 

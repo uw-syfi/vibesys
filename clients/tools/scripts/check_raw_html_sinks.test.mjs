@@ -107,7 +107,7 @@ const OPTIONAL_AND_COMPUTED_CALLS = [
 
 for (const [name, source] of Object.entries(RAW_HTML_SINKS)) {
   test(`the client gate rejects ${name}`, async t => {
-    assertRawHtmlDiagnostics(await lintFixture(t, 'apps/web/src', source), 1);
+    assertRawHtmlDiagnostics(await lintFixture(t, 'apps/desktop-shell/src', source), 1);
   });
 }
 
@@ -117,7 +117,7 @@ for (const [name, sources] of [
   ['optional and computed calls', OPTIONAL_AND_COMPUTED_CALLS],
 ]) {
   test(`the client gate rejects ${name}`, async t => {
-    const diagnostics = await lintFixture(t, 'apps/web/src', `${sources.join('\n')}\n`);
+    const diagnostics = await lintFixture(t, 'apps/desktop-shell/src', `${sources.join('\n')}\n`);
     assertRawHtmlDiagnostics(diagnostics, sources.length);
   });
 }
@@ -143,5 +143,5 @@ for (const parent of ['features/run-page/src', 'libs/run-state/src', 'tui/src/ui
 
 test('text and structured DOM APIs remain available', async t => {
   const source = "element.textContent = text;\nelement.setAttribute('data-status', text);\n";
-  assert.deepEqual(await lintFixture(t, 'apps/web/src', source), []);
+  assert.deepEqual(await lintFixture(t, 'apps/desktop-shell/src', source), []);
 });

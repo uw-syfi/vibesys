@@ -546,8 +546,6 @@
  "tests/entrypoints/test_skills_wiring.py": 0.24,
  "tests/entrypoints/test_tasks_cli.py": 0.13,
  "tests/entrypoints/test_validate_layout.py": 0.02,
- "tests/entrypoints/test_web.py": 0.47,
- "tests/entrypoints/test_web_script.py": 0.03,
  "tests/evaluators/test_queue_abi_header.py": 0.06,
  "tests/evaluators/test_request_factory_evaluator.py": 1.2,
  "tests/examples/test_deepseek_v32_request_factory.py": 0.08,

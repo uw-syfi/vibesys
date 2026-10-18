@@ -120,9 +120,6 @@ def test_launcher_routes_noninteractive_commands_to_headless(
         ["-h"],
     ]
 
-    assert cli.main(["web", "dev"]) == 0
-    assert commands[-1] == [sys.executable, "-m", "entrypoints.web", "dev"]
-
 
 @pytest.mark.parametrize("status", [0, 3, -9])
 def test_the_engine_runs_in_a_foreground_child_whose_status_is_the_launchers(
