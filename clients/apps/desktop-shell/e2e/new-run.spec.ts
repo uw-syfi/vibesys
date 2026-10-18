@@ -45,6 +45,7 @@ test('New run is prefilled from the last run on its machine and starts once the 
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
 
   await start(page).click();
+  await expect(page.getByRole('radiogroup', {name: 'Show'})).toBeVisible();
   await expect(page.getByText('host-b · 20261015-200000')).toBeVisible();
   const {started} = await fakeNewRun(page);
   expect(started).toEqual([
@@ -72,6 +73,22 @@ test('the model tiers choose a vetted model, and the full list can choose a vers
   await page.getByLabel('Model', {exact: true}).selectOption('claude-opus-4-5');
   await page.getByRole('button', {name: 'Show model tiers'}).click();
   await expect(slider).toHaveAttribute('aria-valuetext', 'Opus');
+});
+
+test('the model tiers are no wider than the selectors on the page', async ({page}) => {
+  await page.setViewportSize({width: 1920, height: 1000});
+  await open(page);
+  const widths = await page.evaluate(() => {
+    const aside = Number.parseFloat(
+      getComputedStyle(document.documentElement).getPropertyValue('--column-aside'),
+    );
+    const width = (selector: string) =>
+      document.querySelector(selector)?.getBoundingClientRect().width;
+    return {cap: aside * 1.8, slider: width('.vs-slider'), select: width('.vs-select')};
+  });
+  expect(widths.slider).toBeGreaterThan(0);
+  expect(widths.slider).toBeLessThanOrEqual(widths.cap);
+  expect(widths.select).toBeLessThanOrEqual(widths.cap);
 });
 
 test('a helper without model tiers keeps the full vetted model list', async ({page}) => {
@@ -139,6 +156,7 @@ test('extra arguments may not repeat an option set above, and roles change the r
   await page.getByLabel('Judge reasoning effort').selectOption('high');
   await expect(start(page)).not.toHaveAttribute('aria-disabled', 'true');
   await start(page).click();
+  await expect(page.getByRole('radiogroup', {name: 'Show'})).toBeVisible();
   await expect(page.getByText('host-b · 20261015-200000')).toBeVisible();
   const {started} = await fakeNewRun(page);
   expect(started).toEqual([

@@ -31,7 +31,6 @@ export {
   sidebarStep,
 } from './sidebar.js';
 export {
-  isSettingsShortcut,
   isSidebarShortcut,
   parseSidebarShown,
   type ShortcutKey,

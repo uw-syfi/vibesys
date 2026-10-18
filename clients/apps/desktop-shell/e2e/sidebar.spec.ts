@@ -121,6 +121,10 @@ test('the button hides the sidebar completely and shows it again', async ({page}
   expect(await mainWidth(page)).toBe(shown);
 });
 
+function openSettingsFromMenu(page: Page) {
+  return page.evaluate(() => (window as unknown as FakeHostWindow).fakeHost.openSettings());
+}
+
 test('the shortcut and the menu item toggle it, from any focus', async ({page}) => {
   await openRun(page);
   await page.keyboard.press('Meta+Backslash');
@@ -138,15 +142,15 @@ test('the shortcut and the menu item toggle it, from any focus', async ({page}) 
   await expect(sidebar(page)).toBeVisible();
 });
 
-test('Command-comma opens Settings repeatedly and Back restores the run with the sidebar shown or hidden', async ({
+test('the Settings menu item opens Settings repeatedly and Back restores the run with the sidebar shown or hidden', async ({
   page,
 }) => {
   await openRun(page);
   for (const collapsed of [false, true]) {
     if (collapsed) await page.keyboard.press('Meta+Backslash');
-    await page.keyboard.press('Meta+,');
+    await openSettingsFromMenu(page);
     await expect(page.getByRole('heading', {name: 'Appearance'})).toBeVisible();
-    await page.keyboard.press('Meta+,');
+    await openSettingsFromMenu(page);
     await page.getByRole('button', {name: 'Back', exact: true}).click();
     await expect(page.getByRole('heading', {name: 'Appearance'})).toHaveCount(0);
     await expect(page.getByRole('button', {name: 'New run'})).toHaveCount(collapsed ? 0 : 1);
@@ -173,7 +177,7 @@ test('Settings sections are peers; Back exits to the same run', async ({page}) =
   await host.fill('host');
   await host.press(',');
   await expect(host).toHaveValue('host,');
-  await host.press('Meta+,');
+  await openSettingsFromMenu(page);
   await expect(page.getByRole('heading', {name: 'Where runs can go'})).toBeVisible();
   await notifications.click();
   await expect(notifications).toHaveAttribute('aria-current', 'page');

@@ -56,6 +56,16 @@ export interface FakeBridgeSeed {
 }
 
 /** What the fake helper did for New run, for the journey to read. */
+/** A host's listing as the page receives it: its live and ended runs. */
+interface HostListing {
+  readonly kind: 'listed';
+  readonly host: string;
+  readonly live: readonly Record<string, unknown>[];
+  readonly ended: readonly Record<string, unknown>[];
+  readonly unreadable: readonly unknown[];
+  readonly unverified: readonly unknown[];
+}
+
 export interface FakeNewRun {
   readonly preflights: readonly unknown[];
   readonly started: readonly unknown[];
@@ -79,6 +89,7 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
     for (const listener of listeners[event] ?? []) listener({sequence, value});
   };
   const toggleListeners: (() => void)[] = [];
+  const settingsListeners: (() => void)[] = [];
   const ok = (value: unknown) => Promise.resolve({ok: true, value});
   const on = (event: string) => (listener: Listener) => {
     listeners[event] = [...(listeners[event] ?? []), listener];
@@ -119,17 +130,25 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
       onToggleSidebar: (listener: () => void) => {
         toggleListeners.push(listener);
       },
-      onOpenSettings: () => undefined,
+      onOpenSettings: (listener: () => void) => {
+        settingsListeners.push(listener);
+      },
     },
     fakeHost: {
       /** The application menu's "Toggle Sidebar". */
       toggleSidebar: () => {
         for (const listener of toggleListeners) listener();
       },
+      /** The application menu's "Settings…" (its Command-comma accelerator). */
+      openSettings: () => {
+        for (const listener of settingsListeners) listener();
+      },
       listing: (listing: {host: string}) => {
         listings.set(listing.host, listing);
         push('listing', listing);
       },
+      /** The host's current listing, as the page last received it. */
+      listingOf: (host: string) => listings.get(host),
       recent: (runs: readonly unknown[]) => {
         recent = runs;
         push('recent', runs);
@@ -277,6 +296,10 @@ export function installFakeNewRun(seed: FakeBridgeSeed): void {
     });
   };
   const page = window as unknown as {vibesysWelcome: object; fakeHost: object};
+  const fakeHost = page.fakeHost as unknown as {
+    listingOf(host: string): HostListing | undefined;
+    listing(listing: HostListing): void;
+  };
   Object.assign(page.vibesysWelcome, {
     describeMachine: () => offered(catalog?.machine),
     helperFeatures: () => ok(catalog === undefined ? [] : features),
@@ -294,9 +317,19 @@ export function installFakeNewRun(seed: FakeBridgeSeed): void {
       ),
     copyOut: (_host: string, source: string, destination: string) =>
       created(destination, projects.get(source) ?? []),
-    startRun: (_host: string, inputs: unknown) => {
+    // As a real host does, a started run is listed as live from then on.
+    startRun: (host: string, inputs: {project: string}) => {
       newRun.started.push(inputs);
-      return ok({runId: '20261015-200000', instanceId: '00000000000c'});
+      const runId = '20261015-200000';
+      const instanceId = '00000000000c';
+      const none = {kind: 'listed', host, live: [], ended: [], unreadable: [], unverified: []};
+      const current = fakeHost.listingOf(host) ?? (none as HostListing);
+      const run = {id: instanceId, projectRoot: inputs.project, runId, status: 'running'};
+      fakeHost.listing({
+        ...current,
+        live: [...current.live, {...run, phase: 'running', paused: null, end: null, startedAt: 1}],
+      });
+      return ok({runId, instanceId});
     },
   });
   Object.assign(page.fakeHost, {newRun});

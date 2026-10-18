@@ -571,7 +571,7 @@ body > div:first-child {
   transform: translateY(-50%);
   pointer-events: none;
 }
-.vs-page[data-side-action] .vs-select {
+.vs-page[data-side-action] :is(.vs-select, .vs-slider) {
   width: 100%;
   max-width: calc(var(--column-aside) * 1.8);
 }

@@ -34,12 +34,6 @@ export function isSidebarShortcut(event: ShortcutKey, mac: boolean): boolean {
   return modifier && !event.altKey && !event.shiftKey && !event.repeat && event.key === '\\';
 }
 
-/** The Settings shortcut on the viewer's platform, without extra modifiers or key repeats. */
-export function isSettingsShortcut(event: ShortcutKey, mac: boolean): boolean {
-  const modifier = mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
-  return modifier && !event.altKey && !event.shiftKey && !event.repeat && event.key === ',';
-}
-
 /** The shortcut as the tooltip and the menu show it. */
 export function sidebarShortcutLabel(mac: boolean): string {
   return mac ? '⌘\\' : 'Ctrl+\\';

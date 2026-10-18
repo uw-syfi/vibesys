@@ -1,5 +1,5 @@
 import {mkdirSync} from 'node:fs';
-import {expect, test} from '@playwright/test';
+import {expect, type Page, test} from '@playwright/test';
 import {fixtureNamed} from '@vibesys/run-fixtures';
 import {KNOWN_FAILURES} from './checks/known-failures.js';
 import {report, screenCheck} from './checks/screen-check.js';
@@ -14,9 +14,21 @@ import {openFixture, releaseHistory} from './fixture-world.js';
  * `SCREENS_DIR=<dir>` also writes each loading screen's screenshot (the app window only).
  */
 
+/** Where the loading screen and the loaded run draw their shared header: it does not move. */
+const HEADER = ['main h1', 'main button[aria-label="More actions"]'];
+
 const fixture = fixtureNamed('finished-run');
 const shots = process.env['SCREENS_DIR'] || undefined;
 if (shots !== undefined) mkdirSync(shots, {recursive: true});
+
+async function headerPlace(page: Page) {
+  return Promise.all(
+    HEADER.map(async selector => {
+      const box = await page.locator(selector).first().boundingBox();
+      return box === null ? null : {x: box.x, y: box.y, width: box.width};
+    }),
+  );
+}
 
 for (const width of [1000, 1440]) {
   for (const total of [true, false]) {
@@ -47,8 +59,11 @@ for (const width of [1000, 1440]) {
       if (shots !== undefined) {
         await page.screenshot({path: `${shots}/${name.replaceAll('/', '__')}.png`});
       }
+      const header = await headerPlace(page);
       await releaseHistory(page);
       await expect(page.getByRole('listbox', {name: 'Ideas'})).toBeVisible();
+      await settled(page);
+      expect(await headerPlace(page)).toEqual(header);
       await expect(main).not.toContainText('Reading the run’s history…');
     });
   }

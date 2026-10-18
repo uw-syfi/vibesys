@@ -1,5 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
+import {settled} from './checks/settle.js';
+import {type Anchor, anchorsOf, RUN_ANCHORS, stabilityViolations} from './checks/stability.js';
 import {type FakeBridgeSeed, installFakeBridge, installFakeMachines} from './fake-bridge.js';
 import {lineageRun} from './fake-lineage.js';
 import {installFakeRun} from './fake-run.js';
@@ -162,5 +164,39 @@ test('opening an idea preserves the Ideas list and controls at wide and narrow w
     await page.getByRole('button', {name: 'Close idea'}).click();
     await expect(ideas).toHaveAttribute('data-test-persist', 'yes');
     expect(await geometry()).toEqual(before);
+  }
+});
+
+/** What stays through a change of idea: the list and the chart (the steps are another idea's). */
+const PANES: readonly Anchor[] = [
+  ...RUN_ANCHORS,
+  {name: 'ideas list', selector: '[role="listbox"][aria-label="Ideas"]'},
+];
+
+test('choosing another idea keeps the list, the detail and the chart where they are', async ({
+  page,
+}) => {
+  await openRun(page, 10);
+  const options = page.getByRole('listbox', {name: 'Ideas'}).getByRole('option');
+  await settled(page);
+  await options.nth(0).click();
+  await expect(page.getByRole('listbox', {name: /steps$/})).toBeVisible();
+  await settled(page);
+  const before = await anchorsOf(page, PANES);
+  const steps = page.getByRole('listbox', {name: /steps$/});
+  // The steps list is as tall as the idea's steps, so only where it starts and how wide it is hold.
+  const placed = async () => {
+    const box = await steps.boundingBox();
+    return box === null ? null : {x: box.x, y: box.y, width: box.width};
+  };
+  const stepsBefore = await placed();
+  for (const index of [1, 2, 0]) {
+    await options.nth(index).hover();
+    await settled(page);
+    await options.nth(index).click();
+    await expect(options.nth(index)).toHaveAttribute('aria-selected', 'true');
+    await settled(page);
+    expect(await stabilityViolations(page, `idea ${index}`, before, PANES)).toEqual([]);
+    expect(await placed()).toEqual(stepsBefore);
   }
 });

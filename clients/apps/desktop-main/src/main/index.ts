@@ -33,6 +33,7 @@ import {app, ipcMain, Menu, Notification, nativeTheme, net, powerMonitor, shell}
 import {SHELL_URL} from './app-assets.js';
 import {AppLaunches} from './app-launches.js';
 import {AppLifecycle, realTimers} from './app-lifecycle.js';
+import {applicationMenuTemplate} from './app-menu.js';
 import {
   confineContents,
   lockDownSession,
@@ -63,41 +64,6 @@ function log(message: string): void {
   console.error(`vibesys-desktop: ${message}`);
 }
 
-/**
- * The application menu. View's "Toggle Sidebar" only shows the shortcut: the app shell's page
- * handles the key itself, so the menu must not register it too and toggle twice.
- */
-function applicationMenu(toggleSidebar: () => void): Menu {
-  const first: Electron.MenuItemConstructorOptions =
-    process.platform === 'darwin' ? {role: 'appMenu'} : {role: 'fileMenu'};
-  return Menu.buildFromTemplate([
-    first,
-    {role: 'editMenu'},
-    {
-      label: 'View',
-      submenu: [
-        {
-          label: 'Toggle Sidebar',
-          accelerator: 'CmdOrCtrl+\\',
-          registerAccelerator: false,
-          click: toggleSidebar,
-        },
-        {type: 'separator'},
-        {role: 'reload'},
-        {role: 'forceReload'},
-        {role: 'toggleDevTools'},
-        {type: 'separator'},
-        {role: 'resetZoom'},
-        {role: 'zoomIn'},
-        {role: 'zoomOut'},
-        {type: 'separator'},
-        {role: 'togglefullscreen'},
-      ],
-    },
-    {role: 'windowMenu'},
-  ]);
-}
-
 /** Report the network coming back (offline to online) to every host connection. */
 function watchNetwork(manager: ConnectionManager): void {
   let online = true;
@@ -119,13 +85,28 @@ function newRunMain(hosts: Hosts, settings: SettingsStore): NewRunMain {
   });
 }
 
+/** Install the application menu, whose items act on the main window as it is when chosen. */
+function installApplicationMenu(main: () => AppWindow): void {
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate(
+      applicationMenuTemplate(process.platform, app.name, {
+        openSettings: () => {
+          main().openSettings();
+          main().focus();
+        },
+        toggleSidebar: () => main().toggleSidebar(),
+      }),
+    ),
+  );
+}
+
 async function openWindow(
   manager: ConnectionManager,
   fatal: (error: Error) => void,
 ): Promise<Desktop> {
   lockDownSession(log);
   serveBundledUi();
-  Menu.setApplicationMenu(applicationMenu(() => windows.main.toggleSidebar()));
+  installApplicationMenu(() => windows.main);
   const userData = app.getPath('userData');
   const settings = new SettingsStore({
     settingsPath: join(userData, 'hosts.json'),

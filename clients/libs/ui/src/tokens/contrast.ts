@@ -53,6 +53,9 @@ export function mixHex(first: string, share: number, second: string): string {
  */
 export const LOG_ERR_MIX = {role: 'err', share: 60, into: 'log-text', on: 'log-bg'} as const;
 
+/** A chip's fill: its tone mixed into the panel it sits on, and the text of that tone drawn on it. */
+export const CHIP_FILL_MIX = {share: 12, into: 'panel'} as const;
+
 export interface ContrastPair {
   readonly foreground: ColorRole;
   readonly background: ColorRole;
