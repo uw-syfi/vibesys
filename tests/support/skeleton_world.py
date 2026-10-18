@@ -112,6 +112,7 @@ if TYPE_CHECKING:
         CommitObserver,
         ExecutionContext,
         Inspection,
+        TurnSteering,
         TurnYields,
     )
     from vs_runtime.api.infrastructure import RuntimeWorkspaces
@@ -228,6 +229,8 @@ class World:
     """The evaluation executor of every process started, which a host closes at exit."""
     task: TaskTerms | None = None
     """What the task fixes about measuring and comparing, when the world's run has terms."""
+    steering: Callable[[TurnSteering], TurnSteering] | None = None
+    """Wraps the turn steering of each process started, so a test sees what reaches the turn."""
 
     def initial(self) -> CoreState:
         """The state of a run that has not started, from the real baseline commit."""
@@ -332,6 +335,8 @@ class World:
         bindings = self.bindings()
         if self.commits is not None:
             bindings = dataclasses.replace(bindings, commits=self.commits)
+        if self.steering is not None and bindings.steering is not None:
+            bindings = dataclasses.replace(bindings, steering=self.steering(bindings.steering))
         store = self.store if self.store is not None else self.env.project.state_store(RUN_ID)
         if self.gate is not None:
             store = FaultingStore(store, self.gate)

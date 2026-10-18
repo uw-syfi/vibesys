@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
-from vibesys.api import CONTROL_REQUEST, StopMode
+from vibesys.api import CONTROL_REQUEST, SteerMode, StopMode
 from vs_project.api import Project, ProjectError
 
 if TYPE_CHECKING:
@@ -59,11 +59,25 @@ def _parser() -> argparse.ArgumentParser:
             metavar="ID",
             help=f"give it to the next turn of this {kind} only (default: the whole run)",
         )
-    steer.add_argument(
+    mode = steer.add_mutually_exclusive_group()
+    mode.add_argument(
         "--standing",
-        action="store_true",
+        action="store_const",
+        const=SteerMode.STANDING,
+        dest="mode",
         help="give it to every turn of the target from now on, until withdrawn",
     )
+    mode.add_argument(
+        "--interrupt",
+        action="store_const",
+        const=SteerMode.INTERRUPT,
+        dest="mode",
+        help=(
+            "offer it to a turn of the target running now, on a provider that takes "
+            "messages mid-turn; otherwise the next turn gets it"
+        ),
+    )
+    steer.set_defaults(mode=SteerMode.NEXT_TURN)
     withdraw = actions.add_parser(
         "withdraw", help="end standing guidance sent earlier as a standing steer"
     )
@@ -99,9 +113,8 @@ def _payload(arguments: argparse.Namespace, control_id: str) -> dict[str, object
             kinds = ("role", "attempt", "item")
             named = [(kind, getattr(arguments, kind)) for kind in kinds]
             target = next(({"kind": k, "id": i} for k, i in named if i is not None), None)
-            mode = "standing" if arguments.standing else "next_turn"
             targeted = {"target": target} if target else {}
-            return {**common, "text": arguments.text, "mode": mode, **targeted}
+            return {**common, "text": arguments.text, "mode": arguments.mode.value, **targeted}
         case "withdraw":
             return {**common, "withdraws": arguments.withdraws}
         case "resume":

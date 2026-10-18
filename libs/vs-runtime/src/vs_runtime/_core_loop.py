@@ -75,6 +75,7 @@ if TYPE_CHECKING:
     from vs_core.api import OpenWait, Request
     from vs_project.api import Project
     from vs_runtime._core_requests import ExecutionOutcome
+    from vs_runtime._mid_turn_steering import TurnSteering
 
 
 class CoreTransitions(Protocol):
@@ -317,6 +318,8 @@ class CoreRuntimeBindings:
     commits: CommitObserver = field(default_factory=IgnoreCommits)
     check_liveness: bool = False
     """Check ``orphan_waits`` after every commit, not only at start. Linear in state size."""
+    steering: TurnSteering | None = None
+    """Reaches the turns this host runs while they run; None offers no input mid-turn."""
 
 
 class CoreRuntime[S: StrategyState]:
@@ -352,6 +355,8 @@ class CoreRuntime[S: StrategyState]:
         self._transitions = selected.transitions
         self._commits = selected.commits
         self._check_liveness = selected.check_liveness
+        self.steering = selected.steering
+        """What reaches a running turn with an interrupt-mode input, if the host has one."""
         self._record_model = cast(
             "type[RuntimeRecord[S]]", RuntimeRecord.__class_getitem__(search.state_model)
         )

@@ -68,8 +68,11 @@ export type {
   RunStartReply,
   RunStatus,
   RunSummary,
+  RunsSummaryReply,
+  RunsSummaryRequest,
   StopOutcome,
   TaskList,
+  TurnReply,
   UnreadableRecord,
 } from './generated/host-helper.generated.js';
 

@@ -13,6 +13,7 @@ import {type AdoptedCandidate, adoptedCandidate, endReason} from './end-words.js
 import {overviewAt, traceAt} from './live.js';
 import {
   commandable,
+  type HistoryProgress,
   quotaPause,
   type RunPageState,
   runPhase,
@@ -94,7 +95,8 @@ export function headerView(state: RunPageState): HeaderView {
     title: task === null ? name : `${name} · ${task}`,
     subtitle: `${state.hostLabel} · ${state.identity.runId}`,
     status: status(state),
-    spent: tokensReading(state.run.core?.tokens.total),
+    // Tokens counted over a prefix of the history are not what the run spent.
+    spent: historyLoading(state) === null ? tokensReading(state.run.core?.tokens.total) : null,
     pause: offer(phase.kind === 'running' && !phase.pausing, commandReason(state)),
     // A run paused by a usage limit is resumed from its banner, which also offers to wait.
     resume: offer(phase.kind === 'paused' && phase.by === 'user', commandReason(state)),
@@ -440,13 +442,27 @@ function adoptedAtEnd(
 /**
  * Whether the run's spans have reached the window: `arrived` once a snapshot or a span event is
  * folded; `awaited` while they are on their way (a live run attaching or waiting for its first
- * snapshot, an ended run's history being read); `none` when nothing is coming (a run the host
- * does not list, a refused attach, a failed or unsupported history read). A face shows loading
- * while they are awaited, and says it is empty only once they arrived or none will.
+ * snapshot, an ended run's history being read: a page of it is a prefix, not the run); `none` when
+ * nothing is coming (a run the host does not list, a refused attach, a failed or unsupported
+ * history read). A face shows loading while they are awaited, and says it is empty only once they
+ * arrived or none will.
  */
 export type TraceArrival = 'arrived' | 'awaited' | 'none';
 
 export function traceArrival(state: RunPageState): TraceArrival {
+  if (state.record.kind === 'ended') {
+    // The history is read into the fold page by page: until the last, the fold is a prefix.
+    switch (state.history.kind) {
+      case 'reading':
+        return 'awaited';
+      case 'failed':
+      case 'unsupported':
+        return 'none';
+      case 'idle':
+      case 'read':
+        break;
+    }
+  }
   const {trace} = state.run;
   if (state.session?.hasSnapshot === true || trace.base.sequence > 0 || trace.events.length > 0) {
     return 'arrived';
@@ -455,9 +471,36 @@ export function traceArrival(state: RunPageState): TraceArrival {
     case 'live':
       return state.link.kind === 'attaching' || state.link.kind === 'attached' ? 'awaited' : 'none';
     case 'ended':
-      return state.history.kind === 'reading' ? 'awaited' : 'none';
     case 'unlisted':
       return 'none';
+  }
+}
+
+/**
+ * How far an ended run's history read has come while it is read, else null: the Run screen then
+ * shows the progress in place of the run (`HistoryLoading`). The run fold is a prefix of the run
+ * until the last page, and no pane draws a prefix as the run: its open spans would read as running
+ * and its measurements as the run's only ones.
+ */
+export function historyLoading(state: RunPageState): HistoryProgress | null {
+  if (state.record.kind !== 'ended' || state.history.kind !== 'reading') return null;
+  return state.history.progress;
+}
+
+/**
+ * Why an ended run's history is not on the screen: the host could not read it, or does not serve
+ * it. Null otherwise. The panes then have no run to draw (a failed read drops its prefix), but the
+ * run's logs and its end record stay readable.
+ */
+export function historyProblem(state: RunPageState): string | null {
+  if (state.record.kind !== 'ended') return null;
+  switch (state.history.kind) {
+    case 'failed':
+      return `Could not read the run’s history: ${state.history.message}`;
+    case 'unsupported':
+      return 'This machine’s VibeSys does not serve run history. Update its checkout to read finished runs here.';
+    default:
+      return null;
   }
 }
 
@@ -472,6 +515,9 @@ export interface EndedView {
 /** What the ended banner says while the history that settles its verdict is still being read. */
 const HISTORY_PENDING = 'Reading the run’s history…';
 
+/** What the page knows of the adopted candidate while the history is not (all) read: nothing. */
+const NOT_READ: ReturnType<typeof adoptedAtEnd> = [null, undefined];
+
 /** The ended banner, from the end record. */
 export function endedView(state: RunPageState): EndedView | null {
   const phase = runPhase(state);
@@ -479,13 +525,15 @@ export function endedView(state: RunPageState): EndedView | null {
   const {label, tone} = endedStatus(phase.run.phase, phase.end);
   const end = phase.end;
   // An adoption is read from the whole trace: a prefix of the history would name the wrong one.
-  const incomplete = end?.outcome === 'adopted' && state.history.kind === 'reading';
+  const loading = historyLoading(state) !== null;
+  const [adopted, direction] =
+    loading || historyProblem(state) !== null ? NOT_READ : adoptedAtEnd(state);
   const reason =
     end === null
       ? (phase.run.reason ?? 'The run’s record does not say why it ended.')
-      : incomplete
+      : loading && end.outcome === 'adopted'
         ? HISTORY_PENDING
-        : endReason(end.outcome, end.reason, ...adoptedAtEnd(state));
+        : endReason(end.outcome, end.reason, adopted, direction);
   const round = end?.resume_from_round ?? null;
   const resume =
     end?.resumable === true ? (round === null ? 'Resume' : `Resume from round ${round}`) : null;

@@ -149,7 +149,7 @@ export type Id = string | null;
 /**
  * How a steer reaches the turns of its target.
  */
-export type SteerMode = "next_turn" | "standing";
+export type SteerMode = "next_turn" | "standing" | "interrupt";
 export type ControlId1 = string;
 export type Action1 = "pause";
 export type ControlId2 = string;
@@ -1240,7 +1240,8 @@ export interface ControlCommand {
  * Free-text guidance for the agent turns of its target, the whole run by default.
  *
  * With ``mode`` ``next_turn`` the message reaches exactly one turn of the target, once; with
- * ``standing`` it reaches every turn of the target until withdrawn. A target the run cannot
+ * ``standing`` it reaches every turn of the target until withdrawn; with ``interrupt`` it
+ * reaches a running turn of the target now, or else the next one. A target the run cannot
  * resolve (a role the search does not declare, an attempt or item it does not hold, or an
  * attempt that has ended) is refused, and the message reaches no one.
  */

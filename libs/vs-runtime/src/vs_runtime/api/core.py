@@ -145,6 +145,7 @@ from vs_runtime._measurement_progress import (
     StageSettled,
     StageStarted,
 )
+from vs_runtime._mid_turn_steering import MidTurnSteering, TurnSteering
 from vs_runtime._observation_factory import (
     ObservationFactory,
     ObservationFacts,
@@ -334,6 +335,7 @@ __all__ = [
     "MeasurementObserver",
     "MeasurementRequests",
     "MeasurementServices",
+    "MidTurnSteering",
     "NamespaceOperationReceipts",
     "NeverBegun",
     "NextWake",
@@ -430,6 +432,7 @@ __all__ = [
     "Transient",
     "TurnDispatcher",
     "TurnMessages",
+    "TurnSteering",
     "TurnYields",
     "Unrecorded",
     "ValidateLocalOwner",

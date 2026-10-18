@@ -388,6 +388,11 @@ screenshots. One command runs them, as the same repoctl check groups CI runs:
 ./scripts/check_clients.sh --dry-run  # print the commands
 ```
 
+The client tests need the Bun version pinned in `packaging/tui_packaging.py` (`BUN_VERSION`), the
+one CI installs. `clients/tools/scripts/run_bun_tests.mjs` fails at once, naming the pin and
+`packaging/fetch_bun.py`, when the Bun on `PATH` differs, because another version resolves
+imports differently (Bun 1.3.9 cannot find `./welcome.cjs` from its `welcome.cts` source).
+
 `ui_gallery_linux` compares the gallery's screenshots in the Linux image CI uses and checks
 that two baseline updates write identical images, so it needs Docker. The script leaves out the
 CI groups that need a display or build the shipped packages (`tui_build`, `tui_package_smoke`,

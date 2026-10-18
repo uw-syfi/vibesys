@@ -26,6 +26,9 @@
       "path": "./tsconfig.renderer.json"
     },
     {
+      "path": "../../libs/run-fixtures/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/store/tsconfig.testing.json"
     },
     {

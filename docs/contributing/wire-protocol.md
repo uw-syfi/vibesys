@@ -205,7 +205,7 @@ server rejects it as an unknown field.
 
 `command.control` carries one `control`, a `ControlRequest` (`vibesys.api`): the schema every
 control ingress accepts, so a client and a headless run's inbox say the same things. Its
-`action` is `steer` (`text`, a `target` of `kind` `run`, the default, or `role`, `attempt` or `item` with its `id`, and a `mode`: `next_turn`, the default, or `standing`, which every later turn of the target receives until withdrawn), `withdraw` (`withdraws`: the `control_id` of a standing steer), `pause`, `resume` (`fallback`, `when`, as `command.resume`) or
+`action` is `steer` (`text`, a `target` of `kind` `run`, the default, or `role`, `attempt` or `item` with its `id`, and a `mode`: `next_turn`, the default, `standing`, which every later turn of the target receives until withdrawn, or `interrupt`, offered to a running turn of the target now and otherwise given to its next turn), `withdraw` (`withdraws`: the `control_id` of a standing steer), `pause`, `resume` (`fallback`, `when`, as `command.resume`) or
 `stop` (`mode`: `drain`, the default, or `cancel`, which also cancels the work in flight). Like
 every protocol model it forbids unknown keys, and it has no field that reaches evaluation,
 checkers, trust rules or resource partitions: `vs_runtime`'s `control_schema_fields` holds every
@@ -232,7 +232,7 @@ it) is journaled as a `CONTROL` event with status `failed` and the text
 `withdraws` names a control that is not a steer, or a steer that is not, or is no longer,
 standing guidance (`withdraw_not_standing`); one naming a steer the run has not recorded yet is
 accepted and checked when the run takes it, and journaled as `/steer dropped: withdraw <id> ended
-nothing: ...` if it then names no guidance in force; a `vibesys control` withdrawal that ends nothing is also set aside in the run's inbox with that reason, so it never applies later. An accepted withdrawal is journaled as
+nothing: ...` if it then names no guidance in force; a `vibesys control` withdrawal that ends nothing is also set aside in the run's inbox with that reason, so it never applies later. An interrupt-mode steer that a running turn accepted is journaled as a `CONTROL` event `/steer --interrupt` with status `consumed`. One that only the next turn got is journaled as `/steer: <note>`, the note saying that no running turn kept it. An accepted withdrawal is journaled as
 `/withdraw: <withdraws>` with status `pending`. Accepted standing guidance is journaled with
 status `active` as `/steer --standing: <text>`, and its end, once, with status `completed` as
 `/guidance ended: standing guidance <id> ended: <reason>`, where the reason is `withdrawn`,

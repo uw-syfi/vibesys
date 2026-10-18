@@ -9,7 +9,7 @@ import {
 } from './fake-bridge.js';
 import {installFakeRun} from './fake-run.js';
 import {type FakeServerSeed, installFakeServer} from './fake-server.js';
-import {listed, SEED, server} from './world.js';
+import {drawnUnderWindowControls, listed, SEED, server} from './world.js';
 
 /**
  * Open in new window: the Run screen's "⋯" and the sidebar row menu ask main to show the run in a
@@ -81,6 +81,15 @@ test('a run opens in a window of its own, shown alone and live there', async ({p
   await expect(runWindow.getByRole('radiogroup', {name: 'Show'})).toBeVisible();
   await expect(runWindow.getByText(`host-b · ${RUN_ID}`)).toBeVisible();
   await expect(sidebar(runWindow)).toHaveCount(0);
+  // Its title is clear of the window controls, below the same title-bar row as the main window's,
+  // and the row drags the window.
+  expect(await drawnUnderWindowControls(runWindow)).toEqual([]);
+  expect(await drawnUnderWindowControls(page)).toEqual([]);
+  const row = await runWindow.locator('.vs-app-strip').evaluate(element => ({
+    height: element.getBoundingClientRect().height,
+    drag: getComputedStyle(element).getPropertyValue('-webkit-app-region'),
+  }));
+  expect(row).toEqual({height: 40, drag: 'drag'});
   // The run is live in its window (it attached there), and the main window let it go.
   await expect.poll(() => commands(runWindow)).toContain('attach 00000000000a');
   await expect.poll(() => commands(page)).toContain('release');

@@ -7,13 +7,21 @@ through today's agentshim API. Such an invocation is never blindly replayed.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from contextlib import contextmanager
 from dataclasses import replace
 from typing import TYPE_CHECKING, Annotated, Literal, Protocol, runtime_checkable
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from vs_agent.contracts import (
     AgentOutputSchemaError,
@@ -21,6 +29,7 @@ from vs_agent.contracts import (
     AgentTurnRequest,
     AgentTurnResult,
     SchemaViolation,
+    SteerOutcome,
     session_spec_fingerprint,
 )
 from vs_agent.runner import parse_typed_response
@@ -38,8 +47,35 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from contextlib import AbstractContextManager
 
+    from pydantic import GetCoreSchemaHandler
+    from pydantic_core import core_schema
+
     from vs_agent.contracts import AgentCapabilities, AgentObserver
     from vs_sim.api import Threads
+
+
+class _EveryFieldStored:
+    """Decode a stored dataclass only if it names every field, defaulted ones included.
+
+    The result type gives its later fields defaults so a provider can omit them, but a stored
+    result was written by this version, which writes every field. Without this, a stored
+    result missing ``refused_steers`` would decode as "nothing refused" and a restarted host
+    would settle a refused steer as consumed. The defaults are dropped from a copy of the
+    decoding schema only, so construction in code and strict JSON decoding are unchanged.
+    """
+
+    def __get_pydantic_core_schema__(
+        self, source: type[object], handler: GetCoreSchemaHandler
+    ) -> core_schema.CoreSchema:
+        schema = copy.deepcopy(handler.resolve_ref_schema(handler(source)))
+        if schema["type"] != "dataclass" or schema["schema"]["type"] != "dataclass-args":
+            message = f"{source!r} is not decoded as a dataclass"
+            raise TypeError(message)
+        schema.pop("ref", None)
+        for stored in schema["schema"]["fields"]:
+            if stored["schema"]["type"] == "default":
+                stored["schema"] = stored["schema"]["schema"]
+        return schema
 
 
 class _SessionObservation(BaseModel):
@@ -82,7 +118,7 @@ class Completed(_InvocationObservation):
     kind: Literal["completed"] = "completed"
     session_key: str
     invocation_id: str = Field(min_length=1)
-    result: AgentTurnResult
+    result: Annotated[AgentTurnResult, _EveryFieldStored()]
     checkpoint: AgentSessionCheckpoint
 
     def parse[T: BaseModel](self, response_cls: type[T]) -> T:
@@ -166,6 +202,18 @@ class AgentSessions(Protocol):
         """
         ...
 
+    def steer(
+        self, key: AgentSessionKey, invocation_id: str, text: str, *, steer_id: str
+    ) -> SteerOutcome:
+        """Offer *text* to *invocation_id*'s turn if this instance is running it.
+
+        ``NO_RUNNING_TURN`` when it is not. ``DELIVERED`` says the provider took the
+        message; the turn's result settles it exactly once, whether the turn returns or
+        raises and however often a capacity stop resends it: consumed, or named by
+        *steer_id* in ``AgentTurnResult.refused_steers`` of the completed invocation.
+        """
+        ...
+
     def release(self, key: AgentSessionKey) -> None:
         """Release the key's live provider resources, keeping its durable checkpoint.
 
@@ -206,8 +254,23 @@ class AgentInvocationState(BaseModel):
     """Strict machine-local invocation ledger, stored through Project's StateSlot."""
 
     model_config = ConfigDict(extra="forbid")
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
+    """2: a completed turn's result stores ``refused_steers``, and every result field is required."""
     invocations: dict[str, AgentInvocationRecord] = Field(default_factory=dict)
+
+    @field_validator("schema_version", mode="before")
+    @classmethod
+    def _this_version(cls, value: object) -> object:
+        """Refuse a ledger another VibeSys version wrote, naming the remedy."""
+        current = cls.model_fields["schema_version"].default
+        if isinstance(value, int) and not isinstance(value, bool) and value != current:
+            message = (
+                f"the ledger is version {value} and this VibeSys reads only version "
+                f"{current}; a run whose agent ledger another version wrote cannot resume "
+                "here: start a new run"
+            )
+            raise ValueError(message)
+        return value
 
     def record(self, record: AgentInvocationRecord) -> None:
         """Preserve dispatch order independently of JSON object key ordering.
@@ -328,6 +391,14 @@ class AgentTurnExecutor(Protocol):
         """Ask the keyed conversation's in-flight turn to stop, keeping its checkpoint."""
         ...
 
+    def steer_session(self, key: AgentSessionKey, text: str, *, steer_id: str) -> SteerOutcome:
+        """Offer *text* to the keyed conversation's in-flight turn, queuing nothing.
+
+        A ``DELIVERED`` message the provider does not keep is named by *steer_id* in the
+        turn's ``AgentTurnResult.refused_steers``.
+        """
+        ...
+
     def release_session(self, key: AgentSessionKey) -> None:
         """Release the keyed conversation's live resources, keeping its checkpoint."""
         ...
@@ -408,6 +479,17 @@ class ClientAgentSessions:
             running = invocation_id in self._active
         if running:
             self._client.cancel_session(key)
+
+    def steer(
+        self, key: AgentSessionKey, invocation_id: str, text: str, *, steer_id: str
+    ) -> SteerOutcome:
+        """Offer *text* to *invocation_id*'s turn if this instance is running it."""
+        self._validate_invocation(key, invocation_id)
+        with self._lock:
+            running = invocation_id in self._active
+        if not running:
+            return SteerOutcome.NO_RUNNING_TURN
+        return self._client.steer_session(key, text, steer_id=steer_id)
 
     def release(self, key: AgentSessionKey) -> None:
         """Release the key's live provider resources, keeping its durable checkpoint."""

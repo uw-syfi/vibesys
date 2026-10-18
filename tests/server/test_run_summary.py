@@ -1,0 +1,134 @@
+"""The run summary fold equals what a client folds of the same journal prefix, at every prefix."""
+
+from __future__ import annotations
+
+import json
+from typing import TYPE_CHECKING
+
+from hypothesis import given
+from hypothesis import strategies as st
+from tests.server.run_summary_support import (
+    ClientFold,
+    client_fold,
+    events,
+    journal_lines,
+)
+
+from server.run_summary import RunSummaryFold, schema_id
+
+if TYPE_CHECKING:
+    from server.host_run_summary import TurnReply
+
+
+def _size(document: object) -> int:
+    return len(json.dumps(document, separators=(",", ":"), ensure_ascii=False).encode())
+
+
+def _summary_of(fold: RunSummaryFold) -> ClientFold:
+    """The fold's state in the shape ``client_fold`` returns, replies with their schemas."""
+    state = fold.state()
+    return ClientFold(
+        through_sequence=state.through_sequence,
+        event_count=state.event_count,
+        spans=state.spans,
+        overview=state.overview,
+        replies=tuple(
+            {
+                "span_id": reply.span_id,
+                "kind": reply.kind,
+                "json_schema": state.schemas[reply.schema_id],
+                "value": reply.value,
+            }
+            for reply in state.replies
+        ),
+    )
+
+
+@given(run_events=events())
+def test_the_summary_equals_the_clients_fold_at_every_prefix(run_events: list) -> None:
+    fold = RunSummaryFold()
+    assert _summary_of(fold) == client_fold([])
+    for count, line in enumerate(journal_lines(run_events), start=1):
+        assert fold.consume(line)
+        assert _summary_of(fold) == client_fold(run_events[:count])
+
+
+@given(run_events=events(), cut=st.integers(min_value=0, max_value=40))
+def test_continuing_a_state_equals_folding_the_whole_journal(run_events: list, cut: int) -> None:
+    lines = journal_lines(run_events)
+    cut = min(cut, len(lines))
+    first = RunSummaryFold()
+    for line in lines[:cut]:
+        first.consume(line)
+
+    resumed = RunSummaryFold.from_state(first.state())
+    for line in lines[cut:]:
+        resumed.consume(line)
+
+    whole = RunSummaryFold()
+    for line in lines:
+        whole.consume(line)
+    assert resumed.state() == whole.state()
+
+
+@given(run_events=events(), cut=st.integers(min_value=1, max_value=4000))
+def test_a_line_cut_short_is_no_event_when_it_may_be_unfinished(run_events: list, cut: int) -> None:
+    fold = RunSummaryFold()
+    for line in journal_lines(run_events):
+        before = fold.state()
+        torn = line.rstrip(b"\n")[:cut]
+        if len(torn) < len(line.rstrip(b"\n")):
+            assert not fold.consume(torn, complete=False)
+            assert fold.state() == before
+        assert fold.consume(line)
+
+
+@given(run_events=events(max_size=60), budget=st.integers(min_value=1, max_value=900))
+def test_pages_of_any_size_partition_the_summary_and_carry_each_schema_once(
+    run_events: list, budget: int
+) -> None:
+    fold = RunSummaryFold()
+    for line in journal_lines(run_events):
+        fold.consume(line)
+    state = fold.state()
+
+    spans: list[dict] = []
+    replies: list[TurnReply] = []
+    schemas: dict[str, dict] = {}
+    offset: int | None = 0
+    while offset is not None:
+        page = fold.page(offset, budget)
+        assert page.spans or page.replies or page.next_offset is None
+        for key in page.schemas:
+            assert key not in schemas
+        # a page carries the schema of every reply on it that no earlier reply uses
+        known = set(schemas) | set(page.schemas)
+        assert all(reply.schema_id in known for reply in page.replies)
+        size = (
+            sum(_size(span) for span in page.spans)
+            + sum(_size(reply.value) for reply in page.replies)
+            + sum(_size(schema) for schema in page.schemas.values())
+        )
+        assert len(page.spans) + len(page.replies) == 1 or size <= budget
+        spans.extend(page.spans)
+        replies.extend(page.replies)
+        schemas.update(page.schemas)
+        assert page.next_offset is None or page.next_offset == len(spans) + len(replies)
+        offset = page.next_offset
+
+    assert tuple(spans) == state.spans
+    assert tuple(replies) == state.replies
+    assert schemas == state.schemas
+    assert fold.span_count == len(spans)
+    assert fold.reply_count == len(replies)
+
+
+def test_a_page_past_the_end_is_empty_and_ends_the_summary() -> None:
+    page = RunSummaryFold().page(5)
+
+    assert (page.spans, page.replies, page.schemas, page.next_offset) == ((), (), {}, None)
+
+
+def test_a_reply_schema_is_identified_by_its_canonical_json() -> None:
+    assert schema_id({"b": 1, "a": [1, 2]}) == schema_id({"a": [1, 2], "b": 1})
+    assert schema_id({"a": 1}) != schema_id({"a": 2})

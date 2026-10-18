@@ -7041,14 +7041,15 @@
       "description": "How a steer reaches the turns of its target.",
       "enum": [
         "next_turn",
-        "standing"
+        "standing",
+        "interrupt"
       ],
       "title": "SteerMode",
       "type": "string"
     },
     "SteerRequest": {
       "additionalProperties": false,
-      "description": "Free-text guidance for the agent turns of its target, the whole run by default.\n\nWith ``mode`` ``next_turn`` the message reaches exactly one turn of the target, once; with\n``standing`` it reaches every turn of the target until withdrawn. A target the run cannot\nresolve (a role the search does not declare, an attempt or item it does not hold, or an\nattempt that has ended) is refused, and the message reaches no one.",
+      "description": "Free-text guidance for the agent turns of its target, the whole run by default.\n\nWith ``mode`` ``next_turn`` the message reaches exactly one turn of the target, once; with\n``standing`` it reaches every turn of the target until withdrawn; with ``interrupt`` it\nreaches a running turn of the target now, or else the next one. A target the run cannot\nresolve (a role the search does not declare, an attempt or item it does not hold, or an\nattempt that has ended) is refused, and the message reaches no one.",
       "properties": {
         "control_id": {
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",

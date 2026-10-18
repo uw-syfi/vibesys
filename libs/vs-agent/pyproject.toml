@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dependencies = [
     "agentshim>=0.18.3,<0.19",
     "pydantic>=2",
+    "pydantic-core",
     "vs-decode",
     "vs-faults",
     "vs-mcp",

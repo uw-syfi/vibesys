@@ -1474,6 +1474,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         "OS adapter and project pyproject loader for the host helper",
     ),
     "src/server/registry.py": (EdgeKind.STORE, "the server instance registry"),
+    "src/server/run_summary_cache.py": (
+        EdgeKind.STORE,
+        "the run summary's cache beside the event journal",
+    ),
     "src/server/settings.py": (EdgeKind.INPUT_LOADER, "server settings"),
     "src/server/transport/discovery.py": (
         EdgeKind.STORE,
@@ -1774,6 +1778,14 @@ PARSE_EDGE_MODULES: dict[str, tuple[ParseKind, str]] = {
         "operation records the cluster store wrote, and in-memory re-validation",
     ),
     "src/server/events.py": (ParseKind.OWN_STORE, "the run's event log this server appends"),
+    "src/server/run_summary.py": (
+        ParseKind.OWN_STORE,
+        "the run's event log lines this server appended, folded into the summary",
+    ),
+    "src/server/run_summary_cache.py": (
+        ParseKind.OWN_STORE,
+        "the summary cache this helper wrote beside the journal",
+    ),
     "src/vibesys/hypothesis/rounds.py": (ParseKind.OWN_STORE, "the saved hypothesis ledger"),
     "src/vibesys/issue_queue_board.py": (ParseKind.OWN_STORE, "a recorded progress payload"),
     "src/vibesys/orchestration/evolve/population/openevolve_selector.py": (

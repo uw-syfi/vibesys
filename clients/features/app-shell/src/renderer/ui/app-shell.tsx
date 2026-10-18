@@ -64,8 +64,8 @@ function SidebarToggle(props: {
 /**
  * The app's one window: the sidebar (New run, Live, Recent with "Show all", Machines and
  * Settings) beside the selected screen, which `screen` renders. The sidebar can be hidden
- * completely; its toggle is in the sidebar's header, and in the main area's top strip while the
- * sidebar is hidden. `shortcut` is the toggle's keyboard shortcut, as a tooltip shows it.
+ * completely; its toggle is in the window's title-bar row beside the window controls, in the same
+ * place whether the sidebar is shown or hidden. `shortcut` is the toggle's keyboard shortcut, as a tooltip shows it.
  */
 export function AppShell(props: {
   readonly state: SidebarState;
@@ -100,7 +100,7 @@ export function AppShell(props: {
     <AppFrame
       label="VibeSys"
       navHidden={!state.shown}
-      reveal={toggle}
+      control={toggle}
       nav={
         <>
           <Row justify="between">
@@ -112,7 +112,6 @@ export function AppShell(props: {
                 {props.version}
               </Text>
             </Row>
-            {toggle}
           </Row>
           <Button
             variant="primary"

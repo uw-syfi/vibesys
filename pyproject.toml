@@ -25,6 +25,7 @@ dependencies = [
     "mcp>=1.0,<2",
     "modal>=1.4.2",
     "pydantic>=2",
+    "pydantic-core",
     "pygit2>=1.18,<2",
     "websockets>=14.2,<15",
     "pyyaml>=6",
@@ -289,7 +290,7 @@ convention = "google"
 "asyncio.sleep".msg = "Wait on a vs_sim.api Sleeper; yield to the loop with vs_sim.api.yield_now()."
 
 [tool.ruff.lint.flake8-type-checking]
-runtime-evaluated-base-classes = ["pydantic.BaseModel", "server.control_envelope.ProtocolModel", "server.control_envelope.Request", "server.control_envelope.ResponseEnvelope", "vs_core._outcomes.OutcomeValue", "vs_core.types.common.Value", "vs_core.types.common.Identity", "vs_core.types.common.RequestBase", "vs_core.types.common.OperationSchemaRef", "vs_core.types.strategy.DecisionBase", "vs_core.types.kernel.AreaContext", "vs_core.types.strategy.OperationRequest"]
+runtime-evaluated-base-classes = ["pydantic.BaseModel", "server.control_envelope.ProtocolModel", "server.control_envelope.Request", "server.control_envelope.ResponseEnvelope", "server.host_envelope.HelperRequestBase", "server.host_envelope.HelperReplyBase", "vs_core._outcomes.OutcomeValue", "vs_core.types.common.Value", "vs_core.types.common.Identity", "vs_core.types.common.RequestBase", "vs_core.types.common.OperationSchemaRef", "vs_core.types.strategy.DecisionBase", "vs_core.types.kernel.AreaContext", "vs_core.types.strategy.OperationRequest"]
 
 [tool.ruff.lint.per-file-ignores]
 # The e2e tests drive the real library and CLIs, so they may use real time.

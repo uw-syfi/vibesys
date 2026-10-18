@@ -119,3 +119,30 @@ export async function open(page: Page, seed: FakeBridgeSeed = SEED): Promise<voi
 }
 
 export const sidebar = (page: Page) => page.getByRole('navigation', {name: 'VibeSys'});
+
+/**
+ * What the page draws inside the window controls' rectangle (`--chrome-inset-width` by
+ * `--chrome-inset-height`, from the window's top-left corner), other than the sidebar toggle that
+ * is meant to sit beside them: text and controls, as `text at x,y`. Empty when nothing is covered.
+ */
+export async function drawnUnderWindowControls(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const style = getComputedStyle(document.documentElement);
+    const inset = {
+      width: Number.parseFloat(style.getPropertyValue('--chrome-inset-width')),
+      height: Number.parseFloat(style.getPropertyValue('--chrome-inset-height')),
+    };
+    const drawn = [...document.querySelectorAll('body *')].filter(
+      element =>
+        element.matches('a, button, input, select, textarea, [tabindex]:not([tabindex="-1"])') ||
+        [...element.childNodes].some(
+          node => node.nodeType === Node.TEXT_NODE && node.textContent?.trim() !== '',
+        ),
+    );
+    return drawn.flatMap(element => {
+      const box = element.getBoundingClientRect();
+      const hit = box.width > 0 && box.left < inset.width && box.top < inset.height;
+      return hit ? [`${element.textContent?.trim()} at ${box.left},${box.top}`] : [];
+    });
+  });
+}

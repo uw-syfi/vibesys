@@ -375,6 +375,33 @@ def fake_host(
     )
 
 
+def project_with_run(root: Path, run_id: str) -> Path:
+    """A new project at ``root`` (a directory to create) that has one run, ``run_id``, and no journal."""
+    root.mkdir()
+    write_task(root, 'version = 1\n[agent]\ndomain = "generic"\n', objective="Faster.\n")
+    project = Project.open(root)
+    project.state.create_project(root.name, now=datetime(2026, 1, 1, tzinfo=UTC))
+    manifest = project.state.new_run_manifest(
+        root.name,
+        run_id=run_id,
+        branch=f"vibesys-runs/{run_id}",
+        vibesys_version="0.2.0-test",
+        run_environment=RunEnvironmentRecord(name="docker"),
+        execution=run_execution_record(),
+        orchestration=OrchestrationDescriptor(
+            id="dynamic",
+            config_version=1,
+            options=DynamicLaunch(interface="service", max_rounds=2, judge_every=2).model_dump(
+                mode="json", exclude={"profiling"}
+            ),
+        ),
+        trusted_input_baseline="0" * 40,
+        now=datetime(2026, 10, 10, 12, tzinfo=UTC),
+    )
+    project.state.create_run(manifest, make_current=True)
+    return root
+
+
 def quiet_machine(
     script: Callable[[tuple[str, ...]], ProbeResult | None] = lambda _argv: None,
     *,
@@ -482,29 +509,3 @@ def serve_on(
         )
 
     return threads.spawn(run, name="helper")
-
-
-def project_with_run(root: Path) -> Path:
-    root.mkdir()
-    write_task(root, 'version = 1\n[agent]\ndomain = "generic"\n', objective="Faster.\n")
-    project = Project.open(root)
-    project.state.create_project(root.name, now=datetime(2026, 1, 1, tzinfo=UTC))
-    manifest = project.state.new_run_manifest(
-        root.name,
-        run_id=RUN_ID,
-        branch=f"vibesys-runs/{RUN_ID}",
-        vibesys_version="0.2.0-test",
-        run_environment=RunEnvironmentRecord(name="docker"),
-        execution=run_execution_record(),
-        orchestration=OrchestrationDescriptor(
-            id="dynamic",
-            config_version=1,
-            options=DynamicLaunch(interface="service", max_rounds=2, judge_every=2).model_dump(
-                mode="json", exclude={"profiling"}
-            ),
-        ),
-        trusted_input_baseline="0" * 40,
-        now=datetime(2026, 10, 10, 12, tzinfo=UTC),
-    )
-    project.state.create_run(manifest, make_current=True)
-    return root

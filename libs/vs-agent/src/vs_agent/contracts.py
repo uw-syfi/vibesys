@@ -603,6 +603,13 @@ class AgentTurnResult:
     is still valid.
     """
     skills: AgentSkillUse = field(default_factory=AgentSkillUse)
+    refused_steers: tuple[str, ...] = ()
+    """The ids of the keyed steers this turn's provider took and then did not keep.
+
+    Each steer a keyed call answered ``DELIVERED`` (``steer_session``) ends the turn either
+    consumed or here: refused by the provider, or still unresolved when the provider stopped
+    (a quota stop before the turn was sent again counts). The model did not read these.
+    """
 
 
 class SteerOutcome(StrEnum):

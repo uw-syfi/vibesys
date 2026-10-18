@@ -5,6 +5,7 @@
  * hero, chart, ideas and Now, the logs, and the scrubber (`scrubberView`) over the trace log.
  */
 
+export {type HistoryLoadingView, historyLoadingView} from './history-words.js';
 export {type IdeaFocusView, ideaFocusView, openIdeaId} from './idea-focus.js';
 export {
   type ImplementerOutcome,
@@ -45,6 +46,7 @@ export {
 } from './run-level.js';
 export {createRunReader, type RunModel} from './run-model.js';
 export {
+  type HistoryProgress,
   type HistoryReply,
   type ResumeWhen,
   type RunPageAction,
@@ -72,6 +74,8 @@ export {
   endedView,
   followedStreams,
   headerView,
+  historyLoading,
+  historyProblem,
   type Offer,
   quotaBannerView,
   stopBannerView,

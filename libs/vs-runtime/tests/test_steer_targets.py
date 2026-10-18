@@ -294,9 +294,23 @@ def test_a_steer_whose_target_ends_before_the_run_takes_it_is_reported_dropped()
     assert "fake-judge" in dropped
 
 
-def test_a_steer_core_drops_is_reported_once() -> None:
+@pytest.mark.parametrize(
+    ("reason", "report"),
+    [
+        (InputDropReason.RUN_TERMINAL, "steer s1 reached no turn: run-terminal"),
+        (
+            InputDropReason.DELIVERY_UNKNOWN,
+            "steer s1 may have reached the agent mid-turn: its turn's provider took it, "
+            "and no later turn can confirm it",
+        ),
+    ],
+)
+def test_a_steer_core_drops_is_reported_once(reason: InputDropReason, report: str) -> None:
     """Regression: only deliveries were reported, so a dropped steer was never heard of; then
-    it was named by its core control id (``op-s1``) instead of the id it was sent under."""
+    it was named by its core control id (``op-s1``) instead of the id it was sent under.
+
+    A steer a provider took that no turn confirmed is not reported as reaching no turn.
+    """
     run = _run()
     core = _core()
     run.bridge.poll(core, 1.0)
@@ -307,7 +321,7 @@ def test_a_steer_core_drops_is_reported_once() -> None:
     receipt = InputDropped(
         input_id=record.input.input_id,
         target=record.input.target,
-        reason=InputDropReason.RUN_TERMINAL,
+        reason=reason,
         at=3.0,
     )
     dropped = core.sessions.model_copy(
@@ -319,7 +333,7 @@ def test_a_steer_core_drops_is_reported_once() -> None:
     run.bridge.poll(core, 4.0)
 
     # Named by the id the operator sent it under, as a refusal at take is.
-    assert _drops(run) == ["steer s1 reached no turn: run-terminal"]
+    assert _drops(run) == [report]
 
 
 def test_a_steer_with_no_target_is_for_the_whole_run() -> None:

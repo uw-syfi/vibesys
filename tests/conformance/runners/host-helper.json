@@ -11,7 +11,8 @@
       "helper-preflight-roles-gated",
       "helper-preflight-backend-gated",
       "helper-preflight-causes-gated",
-      "helper-harnesses"
+      "helper-harnesses",
+      "helper-run-summary-gated"
     ],
     "registry": [
       "helper-instances-empty",
@@ -24,7 +25,8 @@
       "helper-project-missing",
       "helper-paths-missing",
       "helper-machine",
-      "helper-preflight-project-missing"
+      "helper-preflight-project-missing",
+      "helper-run-summary-project-missing"
     ],
     "examples": [
       "helper-examples-unavailable"

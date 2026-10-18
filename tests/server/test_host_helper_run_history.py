@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.server.host_helper_support import RUN_ID, fake_host, project_with_run
+from tests.server.host_helper_support import fake_host, project_with_run
 
 from server.host_api import (
     RUN_EVENTS_FILE,
@@ -25,12 +25,14 @@ if TYPE_CHECKING:
 
     from pydantic import JsonValue
 
+_RUN_ID = "20261010-120000-11111111-dynamic"
+
 
 def _event(sequence: int, text: str = "") -> dict[str, JsonValue]:
     return {
         "protocol_version": 1,
         "sequence": sequence,
-        "run_id": RUN_ID,
+        "run_id": _RUN_ID,
         "type": "output",
         "text": text,
         "data": {"nested": {"sequence": 0}},
@@ -102,13 +104,13 @@ def _read(project: Path, run_id: str, from_sequence: int, limit: int) -> object:
 
 
 def test_an_ended_runs_journal_is_read_through_the_helper(tmp_path: Path) -> None:
-    project = project_with_run(tmp_path / "proj")
-    journal = Project.log_directory_for(project.resolve(), RUN_ID) / RUN_EVENTS_FILE
+    project = project_with_run(tmp_path / "proj", _RUN_ID)
+    journal = Project.log_directory_for(project.resolve(), _RUN_ID) / RUN_EVENTS_FILE
     journal.parent.mkdir(parents=True, exist_ok=True)
     journal.write_bytes(b"".join(_lines([_event(1), _event(2), _event(3)])))
 
-    first = _read(project, RUN_ID, 1, 2)
-    rest = _read(project, RUN_ID, 3, 2)
+    first = _read(project, _RUN_ID, 1, 2)
+    rest = _read(project, _RUN_ID, 3, 2)
 
     assert first == RunsReadEventsReply(
         request_id="h", events=(_event(1), _event(2)), next_sequence=3, complete=False
@@ -119,15 +121,15 @@ def test_an_ended_runs_journal_is_read_through_the_helper(tmp_path: Path) -> Non
 
 
 def test_a_run_that_journaled_nothing_has_no_events(tmp_path: Path) -> None:
-    project = project_with_run(tmp_path / "proj")
+    project = project_with_run(tmp_path / "proj", _RUN_ID)
 
-    assert _read(project, RUN_ID, 1, 5) == RunsReadEventsReply(
+    assert _read(project, _RUN_ID, 1, 5) == RunsReadEventsReply(
         request_id="h", events=(), next_sequence=1, complete=True
     )
 
 
 def test_an_unknown_run_is_refused_naming_it(tmp_path: Path) -> None:
-    project = project_with_run(tmp_path / "proj")
+    project = project_with_run(tmp_path / "proj", _RUN_ID)
 
     reply = _read(project, "20261010-120000-22222222-other", 1, 5)
 

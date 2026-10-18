@@ -72,6 +72,7 @@ class SteerLedger:
         """Start with nothing outstanding; locks come from ``threads``."""
         self._lock = threads.lock()
         self._waiting: dict[str, deque[Callable[[], None]]] = {}
+        self._refused: list[str] = []
 
     def expect(self, text: str, on_rejected: Callable[[], None]) -> None:
         """Remember an accepted *text* and the fallback for a later refusal."""
@@ -97,10 +98,28 @@ class SteerLedger:
         if callback is not None:
             callback()
 
-    def clear(self) -> None:
-        """Forget everything outstanding at a turn boundary."""
+    def end_turn(self) -> None:
+        """Resolve every steer still outstanding as refused, once, when a turn call ends.
+
+        Whether the turn returned or raised (a quota stop, a dead process), a steer whose fate
+        the provider never reported reaches its fallback here, so none is left unresolved.
+        """
         with self._lock:
-            self._waiting.clear()
+            waiting, self._waiting = self._waiting, {}
+        for callbacks in waiting.values():
+            for callback in callbacks:
+                callback()
+
+    def note_refused(self, steer_id: str) -> None:
+        """Record a keyed steer the provider did not keep, for the turn's result."""
+        with self._lock:
+            self._refused.append(steer_id)
+
+    def take_refused(self) -> tuple[str, ...]:
+        """The keyed steers refused since the last call, and forget them."""
+        with self._lock:
+            refused, self._refused = self._refused, []
+        return tuple(refused)
 
     def _pop(self, text: str) -> Callable[[], None] | None:
         with self._lock:
@@ -316,8 +335,9 @@ class LaunchedSession:
         A one-shot provider process reads no input after launch, so its
         profile says it cannot steer and the library is not asked. A refusal
         the provider reports after accepting the message calls *on_rejected*,
-        once, on the thread running the turn; it is never called for any other
-        outcome.
+        once, on the thread running the turn, and so does a message still
+        unresolved when the turn call returns or raises; it is never called for
+        any other outcome, and never after the turn call ended.
         """
         return _steer_turn(self, text, on_rejected=on_rejected)
 
@@ -369,7 +389,7 @@ def _run_turn(
     finally:
         events.observer = None
         events.structured = False
-        live.steers.clear()
+        live.steers.end_turn()
 
     result = turn.result
     usage = shim_translation.usage_from(
@@ -383,6 +403,7 @@ def _run_turn(
         provider_session_id=result.session_id,
         restarted=turn.continuity is not agentshim.Continuity.CONTINUED,
         skills=shim_translation.skill_use_from(result.skills),
+        refused_steers=live.steers.take_refused(),
     )
     refusal = events.breach or reply_breach(shim_translation.result_text(result))
     if refusal is not None:

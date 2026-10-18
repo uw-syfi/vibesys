@@ -200,7 +200,7 @@ def test_a_run_ended_longer_ago_than_its_tombstone_lasts_still_says_how_it_ended
     tmp_path: Path,
 ) -> None:
     """The registry keeps a tombstone a day; after that only the journal knows the ending."""
-    project = project_with_run(tmp_path / "proj")
+    project = project_with_run(tmp_path / "proj", RUN_ID)
     _write_journal(project, _ENDED)
 
     (run,) = _list(project, digest_runs=(RUN_ID,)).runs.runs
@@ -214,7 +214,7 @@ def test_a_run_ended_longer_ago_than_its_tombstone_lasts_still_says_how_it_ended
 def test_only_the_runs_asked_for_carry_a_digest_and_an_unasked_reply_has_no_field(
     tmp_path: Path,
 ) -> None:
-    project = project_with_run(tmp_path / "proj")
+    project = project_with_run(tmp_path / "proj", RUN_ID)
     _write_journal(project, _ENDED)
 
     plain = _list(project, digest_runs=None)
@@ -235,7 +235,7 @@ def test_asking_for_digests_needs_the_run_digest_feature() -> None:
 def test_a_run_with_no_journal_has_an_empty_digest_and_an_unreadable_one_says_so(
     tmp_path: Path,
 ) -> None:
-    project = project_with_run(tmp_path / "proj")
+    project = project_with_run(tmp_path / "proj", RUN_ID)
     projects = FileProjects(FakeGitRepositories().repository)
     root = project.resolve()
 
@@ -250,7 +250,7 @@ def test_a_run_with_no_journal_has_an_empty_digest_and_an_unreadable_one_says_so
 def test_an_ended_runs_digest_is_kept_while_its_journal_is_unchanged_and_a_live_runs_is_not(
     tmp_path: Path,
 ) -> None:
-    project = project_with_run(tmp_path / "proj")
+    project = project_with_run(tmp_path / "proj", RUN_ID)
     projects = FileProjects(FakeGitRepositories().repository)
     root = project.resolve()
     journal = _write_journal(project, _ENDED)

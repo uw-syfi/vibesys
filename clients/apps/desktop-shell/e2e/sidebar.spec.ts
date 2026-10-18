@@ -3,7 +3,7 @@ import {type FakeBridgeSeed, installFakeBridge, installFakeMachines} from './fak
 import {installFakeRun} from './fake-run.js';
 import {type FakeServerSeed, installFakeServer} from './fake-server.js';
 import {judgeEvents, RUN_ID, traceEvents, turnEvents} from './fake-trace.js';
-import {type FakeHostWindow, SEED, sidebar} from './world.js';
+import {drawnUnderWindowControls, type FakeHostWindow, SEED, sidebar} from './world.js';
 
 /**
  * Hiding the sidebar completely: the toggle in the sidebar's header, the same control at the top of
@@ -181,25 +181,7 @@ test('hidden, nothing sits under the window controls, and the Run screen fills t
     await openRun(page);
     await page.keyboard.press('Meta+Backslash');
     await expect(sidebar(page)).toHaveCount(0);
-    const overlaps = await page.evaluate(() => {
-      const style = getComputedStyle(document.documentElement);
-      const inset = {
-        width: Number.parseFloat(style.getPropertyValue('--chrome-inset-width')),
-        height: Number.parseFloat(style.getPropertyValue('--chrome-inset-height')),
-      };
-      const drawn = [...document.querySelectorAll('body *')].filter(
-        element =>
-          element.matches('a, button, input, select, textarea, [tabindex]:not([tabindex="-1"])') ||
-          [...element.childNodes].some(
-            node => node.nodeType === Node.TEXT_NODE && node.textContent?.trim() !== '',
-          ),
-      );
-      return drawn.flatMap(element => {
-        const box = element.getBoundingClientRect();
-        const hit = box.width > 0 && box.left < inset.width && box.top < inset.height;
-        return hit ? [`${element.textContent?.trim()} at ${box.left},${box.top}`] : [];
-      });
-    });
+    const overlaps = await drawnUnderWindowControls(page);
     expect(overlaps, `at ${width} px`).toEqual([]);
     const box = await show(page).boundingBox();
     expect(box?.x ?? 0).toBeGreaterThanOrEqual(84);
@@ -218,5 +200,51 @@ test('hidden, nothing sits under the window controls, and the Run screen fills t
     await page.keyboard.press('Meta+Backslash');
     await expect(sidebar(page)).toBeVisible();
     await shot(page, 'shown');
+    expect(await drawnUnderWindowControls(page), `shown at ${width} px`).toEqual([]);
+  }
+});
+
+test('the toggle sits one margin after the window controls, centered on them, and does not move when the sidebar is hidden', async ({
+  page,
+}) => {
+  for (const width of [1440, 1000]) {
+    await page.setViewportSize({width, height: 900});
+    await openRun(page);
+    const inset = await page.evaluate(() => {
+      const style = getComputedStyle(document.documentElement);
+      return {
+        width: Number.parseFloat(style.getPropertyValue('--chrome-inset-width')),
+        height: Number.parseFloat(style.getPropertyValue('--chrome-inset-height')),
+      };
+    });
+    const toggleBox = async (name: 'Hide sidebar' | 'Show sidebar') => {
+      const box = await page.getByRole('button', {name}).boundingBox();
+      if (box === null) throw new Error(`no ${name} button`);
+      return box;
+    };
+    const shown = await toggleBox('Hide sidebar');
+    await page.keyboard.press('Meta+Backslash');
+    await expect(sidebar(page)).toHaveCount(0);
+    const hidden = await toggleBox('Show sidebar');
+    for (const [state, box] of [
+      ['shown', shown],
+      ['hidden', hidden],
+    ] as const) {
+      // The inset already includes the margin past the last window control (12 to 16 px on a Mac).
+      expect(box.x, `${state} at ${width}`).toBeGreaterThanOrEqual(inset.width);
+      expect(box.x, `${state} at ${width}`).toBeLessThanOrEqual(inset.width + 4);
+      // Centered on the window controls, which are centered in the inset's height.
+      const offset = Math.abs(box.y + box.height / 2 - inset.height / 2);
+      expect(offset, `${state} at ${width}`).toBeLessThanOrEqual(1);
+    }
+    expect(hidden.x).toBe(shown.x);
+    expect(hidden.y).toBe(shown.y);
+    // The page starts below the title-bar row, not against it.
+    const top = await page
+      .locator('.vs-app-content')
+      .evaluate(element => element.getBoundingClientRect().top);
+    expect(top).toBeGreaterThanOrEqual(inset.height);
+    await page.keyboard.press('Meta+Backslash');
+    await expect(sidebar(page)).toBeVisible();
   }
 });

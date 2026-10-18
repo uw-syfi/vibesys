@@ -32,7 +32,8 @@ from ._proofs import (
 )
 from ._registry import ContractError
 from ._routing import SIGNAL_ORDER, event_area
-from ._session_inputs import check_declared_target
+from ._session_inputs import check_declared_target, may_have_been_read
+from ._session_inputs import mid_turn_offers as _mid_turn_offers
 from ._validation import validate_decision
 from ._values import digest, share_unchanged
 from ._waits import (
@@ -186,6 +187,7 @@ if TYPE_CHECKING:
     from .evaluation import Reducer as EvaluationReducer
     from .types.evaluation import Continuation
     from .types.evaluation_history import EvaluationHistoryCursor
+    from .types.session_inputs import MidTurnOffer
 
 MAX_SIGNALS = 1024
 
@@ -219,6 +221,15 @@ def _event_adapter[E](event_type: type[E]) -> TypeAdapter[E]:
 
 def _context[C: AreaContext](state: CoreState, model: type[C]) -> C:
     return model(**{name: getattr(state, name) for name in model.model_fields})
+
+
+def mid_turn_offers(state: CoreState) -> tuple[MidTurnOffer, ...]:
+    """The running turn each pending interrupt-mode input can be offered to now.
+
+    The shell offers each with ``InputOfferedMidTurn`` and asks the provider only once core
+    has committed the offer.
+    """
+    return _mid_turn_offers(state.sessions, _context(state, SessionsContext))
 
 
 def suspension_refusal(
@@ -547,8 +558,8 @@ def validate_terminal_inputs(
     """Validate the pure input-finalization output before terminal publication.
 
     Preserve every occurrence, payload, sibling field and existing receipt.
-    Each pending occurrence gains one RUN_TERMINAL drop at now_at and exactly
-    one matching event. Finalization emits no requests or signals. Raises
+    Each pending occurrence gains one RUN_TERMINAL drop (DELIVERY_UNKNOWN for one a provider
+    took mid-turn) at now_at and exactly one matching event. Finalization emits no requests or signals. Raises
     ContractError naming the offending output field without changing state.
     """
     if change.requests or change.signals:
@@ -567,7 +578,12 @@ def validate_terminal_inputs(
             )
         if old.receipt is None and (
             not isinstance(new.receipt, InputDropped)
-            or new.receipt.reason != InputDropReason.RUN_TERMINAL
+            or new.receipt.reason
+            != (
+                InputDropReason.DELIVERY_UNKNOWN
+                if may_have_been_read(old)
+                else InputDropReason.RUN_TERMINAL
+            )
             or new.receipt.at != now_at
             or new.receipt.target != old.input.target
             or new.receipt.input_id != old.input.input_id
