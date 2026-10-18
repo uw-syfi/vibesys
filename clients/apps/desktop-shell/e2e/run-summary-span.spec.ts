@@ -55,7 +55,7 @@ const fixture: RunFixture = {
 };
 
 test('summary opens without history and a step fetches only its span', async ({page}) => {
-  await openFixture(page, fixture, {summaryServing: {summary}});
+  await openFixture(page, fixture, {summaryServing: {summary, holdSpan: true}});
   await expect(page.getByRole('listbox', {name: 'Ideas'})).toBeVisible();
   const calls = () =>
     page.evaluate(
@@ -71,5 +71,12 @@ test('summary opens without history and a step fetches only its span', async ({p
     .first()
     .click();
   await expect.poll(calls).toContain('span:op:000002/implementer.1');
+  await expect(steps).toBeVisible();
+  await expect(page.getByText('Reading step transcript…')).toBeVisible();
+  await page.evaluate(() =>
+    (window as unknown as {fakeHost: {releaseSpan: () => void}}).fakeHost.releaseSpan(),
+  );
+  await expect(page.getByText('Reading step transcript…')).toHaveCount(0);
+  await expect(steps).toBeVisible();
   expect(await calls()).not.toContain('history');
 });
