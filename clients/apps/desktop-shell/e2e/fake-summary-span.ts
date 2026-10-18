@@ -8,7 +8,7 @@ export interface FakeSummarySpanSeed {
 export function installFakeSummarySpan(seed: FakeSummarySpanSeed): void {
   const calls: string[] = [];
   const ok = (value: unknown) => Promise.resolve({ok: true, value});
-  let release = () => undefined;
+  let release: () => void = () => undefined;
   const gate = new Promise<void>(resolve => {
     release = resolve;
   });
