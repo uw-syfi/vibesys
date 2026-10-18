@@ -54,6 +54,9 @@
   color: var(--muted);
   cursor: default;
 }
+.vs-sidebar-item[data-disabled][data-active] .vs-sidebar-link {
+  color: var(--text);
+}
 .vs-sidebar-dot {
   display: flex;
   padding-top: var(--space-2);

@@ -9,12 +9,17 @@ export type {
 export {
   type AgentGroup,
   agentGroups,
+  familiesIn,
+  type Generation,
+  generationsIn,
   groupOf,
   type ModelTier,
   modelAtTier,
   offersIn,
   pickGroup,
   pickHarness,
+  type Scope,
+  scopeOf,
   tierOf,
   tiersIn,
 } from './agents.js';

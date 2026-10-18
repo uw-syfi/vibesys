@@ -551,3 +551,50 @@ for (const each of NEW_RUN_PAGES) {
     expect(await rawTextOf(page)).toEqual([]);
   });
 }
+
+test('models by maker: the latest generation is shown and older ones wait behind Older (n)', async ({
+  page,
+}) => {
+  const newRun = SEED.newRun;
+  if (newRun === undefined) throw new Error('the seed has no New run helper');
+  const offer = (model: string, tier: number, tierName: string, generation: number) => ({
+    provider: 'codex',
+    model,
+    default: model === 'gpt-6-sol',
+    display: {
+      providerName: 'Codex',
+      modelName: model.toUpperCase(),
+      family: 'GPT',
+      tier,
+      tierName,
+      maker: 'openai',
+      generation: {id: `g${generation}`, name: `GPT-${7 - generation}`, order: generation},
+    },
+  });
+  await openAt(page, pageNamed('agent'), {
+    ...SEED,
+    newRun: {
+      ...newRun,
+      harnesses: [
+        offer('gpt-6-luna', 1, 'Luna', 1),
+        offer('gpt-6-sol', 2, 'Sol', 1),
+        offer('gpt-5-luna', 1, 'Luna', 2),
+        offer('gpt-5-sol', 2, 'Sol', 2),
+      ],
+    },
+  });
+  await expect(main(page).getByRole('radio', {name: 'OpenAI'})).toBeChecked();
+  const generation = main(page).getByRole('radiogroup', {name: 'Generation'});
+  await expect(generation.getByRole('radio')).toHaveCount(1);
+  await expect(generation).toContainText('GPT-6 (latest)');
+  await main(page).getByRole('button', {name: 'Older (1)'}).click();
+  await expect(generation.getByRole('radio')).toHaveCount(2);
+  await generation.getByRole('radio', {name: 'GPT-5'}).check();
+  // The tier the reader was on is kept in the older generation.
+  await expect(main(page).getByRole('slider', {name: 'Model'})).toHaveAttribute(
+    'aria-valuetext',
+    'Sol',
+  );
+  await expect(main(page).getByText('GPT-5-SOL', {exact: true})).toBeVisible();
+  await expect(main(page).getByRole('button', {name: /Older/})).toHaveCount(0);
+});

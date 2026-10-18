@@ -61,7 +61,11 @@ function Folder(props: ProjectProps): JSX.Element {
         <PathInput value={draft} change={type} completions={completions} placeholder="~/project" />
       </Field>
       <Row>
-        <Button text="Use this folder" press={open} />
+        <Button
+          text="Use this folder"
+          press={open}
+          {...(draft.trim() === '' ? {disabledReason: 'Type or choose a folder first.'} : {})}
+        />
       </Row>
     </Stack>
   );

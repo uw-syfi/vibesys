@@ -1,7 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import {join} from 'node:path';
 import {type ConnectionLease, ConnectionManager} from '@vibesys/connection';
-import {FakeLink, record} from '@vibesys/connection/testing';
+import {FAKE_MODEL_CATALOGUE, FakeLink, record} from '@vibesys/connection/testing';
 import type {RunSummary} from '@vibesys/contracts/host-helper';
 import type {HostId, HostListing} from '@vibesys/hosts';
 import {remember, SettingsStore, settingsFor, withHostSettings} from '@vibesys/settings';
@@ -423,6 +423,33 @@ describe('Hosts.harnesses display', () => {
         {provider: 'codex', model: 'gpt-x', default: false, display: {providerName: 'Codex'}},
       ],
     });
+  });
+});
+
+describe('Hosts.harnesses makers and generations', () => {
+  test("carry each pair's maker and generation, asked only of a helper that has them", async () => {
+    const link = new FakeLink();
+    link.helper.host.harnesses.splice(
+      0,
+      link.helper.host.harnesses.length,
+      ...FAKE_MODEL_CATALOGUE,
+    );
+    const subject = completionSubject(link);
+    await using _manager = subject.manager;
+    const listed = async () => {
+      const listing = await subject.hosts.harnesses(LOCAL);
+      return listing.kind === 'listed' ? listing.harnesses : [];
+    };
+
+    const sol = (await listed()).find(offer => 'generation' in (offer.display ?? {}));
+    expect(sol?.display).toMatchObject({maker: 'openai', generation: {id: 'gpt-6', order: 1}});
+    link.helper.features.delete('harness_generations');
+    for (const offer of await listed()) {
+      expect(offer.display ?? {}).not.toHaveProperty('maker');
+      expect(offer.display ?? {}).not.toHaveProperty('generation');
+    }
+    const asked = link.helper.requests.filter(request => request.type === 'harnesses.list');
+    expect(asked.map(request => 'with_generations' in request)).toEqual([true, false]);
   });
 });
 

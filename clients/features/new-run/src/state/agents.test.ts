@@ -3,11 +3,14 @@ import type {HarnessOffer} from '@vibesys/ipc';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {
   agentGroups,
+  familiesIn,
+  generationsIn,
   groupOf,
   modelAtTier,
   offersIn,
   pickGroup,
   pickHarness,
+  scopeOf,
   tierOf,
   tiersIn,
 } from './agents.js';
@@ -111,5 +114,111 @@ describe('the agent as the host offers it', () => {
         current = picked;
       }
     }
+  });
+});
+
+interface MadeSpec {
+  readonly model: string;
+  readonly maker: 'anthropic' | 'openai';
+  readonly family: string;
+  readonly generation?: {id: string; name: string; order: number};
+  readonly tier: number;
+  readonly tierName: string;
+}
+
+function made(spec: MadeSpec): HarnessOffer {
+  const provider = spec.maker === 'anthropic' ? 'claude' : 'codex';
+  return {
+    provider,
+    model: spec.model,
+    default: false,
+    display: {
+      providerName: provider,
+      modelName: spec.model,
+      family: spec.family,
+      tier: spec.tier,
+      tierName: spec.tierName,
+      maker: spec.maker,
+      ...(spec.generation === undefined ? {} : {generation: spec.generation}),
+    },
+  };
+}
+
+const NEW = {id: 'gpt-6', name: 'GPT-6', order: 1};
+const OLD = {id: 'gpt-5', name: 'GPT-5', order: 2};
+const MADE: readonly HarnessOffer[] = [
+  made({
+    model: 'gpt-5-sol',
+    maker: 'openai',
+    family: 'GPT',
+    generation: OLD,
+    tier: 2,
+    tierName: 'Sol',
+  }),
+  made({
+    model: 'gpt-6-luna',
+    maker: 'openai',
+    family: 'GPT',
+    generation: NEW,
+    tier: 1,
+    tierName: 'Luna',
+  }),
+  made({
+    model: 'gpt-6-sol',
+    maker: 'openai',
+    family: 'GPT',
+    generation: NEW,
+    tier: 2,
+    tierName: 'Sol',
+  }),
+  made({model: 'opus', maker: 'anthropic', family: 'Claude', tier: 3, tierName: 'Opus'}),
+  made({model: 'haiku', maker: 'anthropic', family: 'Claude', tier: 1, tierName: 'Haiku'}),
+];
+
+describe('the agent when the host reports makers and generations', () => {
+  test('cards are makers, named as people name them', () => {
+    expect(agentGroups(MADE).map(group => [group.id, group.name])).toEqual([
+      ['maker:openai', 'OpenAI'],
+      ['maker:anthropic', 'Anthropic'],
+    ]);
+  });
+
+  test('generations are listed newest first, only when there is more than one', () => {
+    const [openai, anthropic] = agentGroups(MADE);
+    if (openai === undefined || anthropic === undefined) throw new Error('no cards');
+    expect(generationsIn(MADE, openai, 'codex', 'GPT').map(each => each.name)).toEqual([
+      'GPT-6',
+      'GPT-5',
+    ]);
+    expect(generationsIn(MADE, anthropic, 'claude', 'Claude')).toEqual([]);
+  });
+
+  test('the models of a generation are its own, and a tier is only offered within it', () => {
+    const [openai] = agentGroups(MADE);
+    if (openai === undefined) throw new Error('no cards');
+    const six = {family: 'GPT', generation: 'gpt-6'};
+    expect(offersIn(MADE, openai, 'codex', six).map(each => each.model)).toEqual([
+      'gpt-6-luna',
+      'gpt-6-sol',
+    ]);
+    // GPT-5 has one model: no slider, a list of one.
+    expect(tiersIn(MADE, openai, 'codex', {family: 'GPT', generation: 'gpt-5'})).toEqual([]);
+    const sol5 = MADE.find(each => each.model === 'gpt-5-sol') as HarnessOffer;
+    expect(scopeOf(sol5)).toEqual({family: 'GPT', generation: 'gpt-5'});
+    // Moving to the newer generation keeps the tier the reader was on.
+    expect(
+      pickHarness(MADE, openai, 'codex', {provider: 'codex', model: 'gpt-5-sol'}, six),
+    ).toEqual({provider: 'codex', model: 'gpt-6-sol'});
+  });
+
+  test('families are offered only when a card has more than one', () => {
+    const mixed = [
+      ...MADE,
+      made({model: 'opus-x', maker: 'anthropic', family: 'Claude Next', tier: 2, tierName: 'X'}),
+    ];
+    const anthropic = agentGroups(mixed).find(group => group.id === 'maker:anthropic');
+    if (anthropic === undefined) throw new Error('no card');
+    expect(familiesIn(mixed, anthropic, 'claude')).toEqual(['Claude', 'Claude Next']);
+    expect(familiesIn(MADE, anthropic, 'claude')).toEqual([]);
   });
 });

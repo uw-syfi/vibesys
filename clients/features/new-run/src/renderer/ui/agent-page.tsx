@@ -1,12 +1,29 @@
 /**
- * The Agent page: which model line (a card each), which model of it (a slider from faster and
- * cheaper to stronger), which harness runs it on the machine, and how many ideas to try. Older
- * generations and a different agent for a role wait for the host to report them.
+ * The Agent page: which maker's models (a card each), which family and generation of them when the
+ * host names them (the latest generation shown, older ones behind "Older (n)"), which model of it
+ * (a slider from faster and cheaper to stronger), which harness runs it on the machine, and how
+ * many ideas to try. A different agent for a role is set on Review, under More options.
  */
-import {BrandMark, ChoiceTiles, Field, Select, Slider, Stack, Text} from '@vibesys/ui';
-import type {JSX} from 'react';
+import type {HarnessOffer} from '@vibesys/ipc';
 import {
+  BrandMark,
+  Button,
+  ChoiceTiles,
+  Field,
+  Row,
+  SegmentedControl,
+  Select,
+  Slider,
+  Stack,
+  Text,
+} from '@vibesys/ui';
+import {type JSX, useState} from 'react';
+import {
+  type AgentChoice,
+  type AgentGroup,
   agentGroups,
+  familiesIn,
+  generationsIn,
   groupOf,
   harnessLabel,
   modelAtTier,
@@ -14,6 +31,8 @@ import {
   offersIn,
   pickGroup,
   pickHarness,
+  type Scope,
+  scopeOf,
   tierOf,
   tiersIn,
 } from '../../state/index.js';
@@ -21,22 +40,128 @@ import {IdeasField} from './budget-fields.js';
 import type {CardProps} from './card-props.js';
 import {harnessMark, machineLabel} from './view.js';
 
+type Pick = (provider: string, model: string) => void;
+
+/** The generations of a model line, the newest first and the older ones behind "Older (n)". */
+function Generations(props: {
+  readonly generations: readonly {readonly id: string; readonly name: string}[];
+  readonly current: string | null;
+  readonly choose: (id: string) => void;
+}): JSX.Element {
+  const [older, setOlder] = useState(false);
+  const {generations} = props;
+  const shown = older || generations.slice(1).some(each => each.id === props.current);
+  const visible = shown ? generations : generations.slice(0, 1);
+  return (
+    <Stack gap="space-2">
+      <Text variant="body-strong">Generation</Text>
+      <Row wrap>
+        <ChoiceTiles
+          label="Generation"
+          options={visible.map((each, index) => ({
+            value: each.id,
+            label: index === 0 ? `${each.name} (latest)` : each.name,
+          }))}
+          value={props.current}
+          change={props.choose}
+        />
+        {shown ? null : (
+          <Button
+            variant="quiet"
+            size="sm"
+            text={`Older (${generations.length - 1})`}
+            press={() => setOlder(true)}
+          />
+        )}
+      </Row>
+    </Stack>
+  );
+}
+
+/** The model within the card: its family and generation, then the slider over its tiers. */
+function ModelChoice(props: {
+  readonly offers: readonly HarnessOffer[];
+  readonly group: AgentGroup;
+  readonly agent: AgentChoice;
+  readonly pick: Pick;
+}): JSX.Element {
+  const {offers, group, agent, pick} = props;
+  const current = offers.find(
+    offer => offer.provider === agent.provider && offer.model === agent.model,
+  );
+  const scope: Scope | null = current === undefined ? null : scopeOf(current);
+  const families = familiesIn(offers, group, agent.provider);
+  const generations = generationsIn(offers, group, agent.provider, scope?.family ?? null);
+  const tiers = tiersIn(offers, group, agent.provider, scope);
+  const within = (next: Scope): void => {
+    const chosen = pickHarness(offers, group, agent.provider, agent, next);
+    if (chosen !== null) pick(chosen.provider, chosen.model);
+  };
+  return (
+    <>
+      {families.length === 0 ? null : (
+        <SegmentedControl
+          label="Model family"
+          value={scope?.family ?? families[0] ?? ''}
+          options={families.map(family => ({value: family, label: family}))}
+          change={family =>
+            within({
+              family,
+              generation: generationsIn(offers, group, agent.provider, family)[0]?.id ?? null,
+            })
+          }
+        />
+      )}
+      {generations.length === 0 ? null : (
+        <Generations
+          generations={generations}
+          current={scope?.generation ?? null}
+          choose={generation => within({family: scope?.family ?? null, generation})}
+        />
+      )}
+      <Field
+        label="Model"
+        {...(tiers.length === 0
+          ? {}
+          : {help: 'Faster and cheaper on the left, stronger and slower on the right.'})}
+      >
+        {tiers.length > 0 ? (
+          <Slider
+            options={tiers.map(tier => tier.name)}
+            value={Math.max(0, tierOf(tiers, agent.model) ?? 0)}
+            change={index => {
+              const tier = tiers[index];
+              if (tier !== undefined) pick(agent.provider, modelAtTier(tier));
+            }}
+          />
+        ) : (
+          <Select
+            value={agent.model}
+            options={offersIn(offers, group, agent.provider, scope).map(offer => ({
+              value: offer.model,
+              label: modelLabel(offers, offer.provider, offer.model),
+            }))}
+            change={model => pick(agent.provider, model)}
+          />
+        )}
+      </Field>
+      <Text tone="muted">{modelLabel(offers, agent.provider, agent.model)}</Text>
+    </>
+  );
+}
+
 export function AgentPage(props: CardProps): JSX.Element {
   const {context, dispatch} = props;
   const {agent, machine} = context.form;
   const offers = context.harnesses?.for === machine ? context.harnesses.list : null;
   if (offers === null) return <Text tone="muted">Asking the machine which agents it runs.</Text>;
-  if (offers.length === 0 || agent === null) {
+  const groups = agentGroups(offers);
+  const group =
+    agent === null ? undefined : (groupOf(offers, agent.provider, agent.model) ?? groups[0]);
+  if (agent === null || group === undefined) {
     return <Text tone="warn">This machine offers no vetted agent harness.</Text>;
   }
-  const groups = agentGroups(offers);
-  const group = groupOf(offers, agent.provider, agent.model) ?? groups[0];
-  if (group === undefined)
-    return <Text tone="warn">This machine offers no vetted agent harness.</Text>;
-  const pick = (provider: string, model: string): void =>
-    dispatch({type: 'agent', provider, model});
-  const tiers = tiersIn(offers, group, agent.provider);
-  const models = offersIn(offers, group, agent.provider);
+  const pick: Pick = (provider, model) => dispatch({type: 'agent', provider, model});
   const installed =
     context.facts?.for === machine && context.facts.value.kind === 'offered'
       ? context.facts.value.value.harness_clis
@@ -56,33 +181,7 @@ export function AgentPage(props: CardProps): JSX.Element {
             if (chosen !== null) pick(chosen.provider, chosen.model);
           }}
         />
-        <Field
-          label="Model"
-          {...(tiers.length === 0
-            ? {}
-            : {help: 'Faster and cheaper on the left, stronger and slower on the right.'})}
-        >
-          {tiers.length > 0 ? (
-            <Slider
-              options={tiers.map(tier => tier.name)}
-              value={Math.max(0, tierOf(tiers, agent.model) ?? 0)}
-              change={index => {
-                const tier = tiers[index];
-                if (tier !== undefined) pick(agent.provider, modelAtTier(tier));
-              }}
-            />
-          ) : (
-            <Select
-              value={agent.model}
-              options={models.map(offer => ({
-                value: offer.model,
-                label: modelLabel(offers, offer.provider, offer.model),
-              }))}
-              change={model => pick(agent.provider, model)}
-            />
-          )}
-        </Field>
-        <Text tone="muted">{modelLabel(offers, agent.provider, agent.model)}</Text>
+        <ModelChoice offers={offers} group={group} agent={agent} pick={pick} />
       </Stack>
       <Stack gap="space-3">
         <Text variant="section">Harness on {machineLabel(machine)}</Text>

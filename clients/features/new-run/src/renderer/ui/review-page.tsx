@@ -16,6 +16,7 @@ import {
 import type {JSX} from 'react';
 import {
   chosenEntry,
+  exampleLabel,
   hardwareLabel,
   type NewRunContext,
   type NewRunEvent,
@@ -94,7 +95,10 @@ function answers(context: NewRunContext): Answer[] {
   return [
     {
       label: 'Task',
-      value: entry === null ? (form.task ?? 'Not chosen') : `${entry.example} · ${entry.task}`,
+      value:
+        entry === null
+          ? (form.task ?? 'Not chosen')
+          : `${exampleLabel(entry.example)} · ${entry.task}`,
       step: taskStep(context),
     },
     ...(target === null || target.vendor === 'cpu'

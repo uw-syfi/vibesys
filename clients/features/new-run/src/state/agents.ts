@@ -8,7 +8,12 @@
 import type {HarnessOffer} from '@vibesys/ipc';
 import {harnessLabel} from './form.js';
 
-/** One card of the Agent question: a model line and the harnesses that run it. */
+/** The makers the host reports, as people name them. */
+const MAKER_NAMES: Readonly<
+  Record<NonNullable<HarnessOffer['display']>['maker'] & string, string>
+> = {anthropic: 'Anthropic', openai: 'OpenAI', google: 'Google'};
+
+/** One card of the Agent question: a maker's models (or a family, or a harness, when the host says no more) and the harnesses that run them. */
 export interface AgentGroup {
   readonly id: string;
   readonly name: string;
@@ -22,9 +27,10 @@ export interface ModelTier {
   readonly offers: readonly HarnessOffer[];
 }
 
-/** The line an offer belongs to: its family when the host names one, else its harness alone. */
+/** The card an offer belongs to: its maker when the host names one, else its family, else its harness alone. */
 function groupIdOf(offer: HarnessOffer): string {
-  const family = offer.display?.family;
+  const {maker, family} = offer.display ?? {};
+  if (maker !== undefined) return `maker:${maker}`;
   return family === undefined ? `harness:${offer.provider}` : `family:${family}`;
 }
 
@@ -34,7 +40,10 @@ export function agentGroups(offers: readonly HarnessOffer[]): AgentGroup[] {
   for (const offer of offers) {
     const id = groupIdOf(offer);
     const group = groups.get(id) ?? {
-      name: offer.display?.family ?? harnessLabel(offers, offer.provider),
+      name:
+        offer.display?.maker === undefined
+          ? (offer.display?.family ?? harnessLabel(offers, offer.provider))
+          : MAKER_NAMES[offer.display.maker],
       providers: [],
     };
     if (!group.providers.includes(offer.provider)) group.providers.push(offer.provider);
@@ -54,13 +63,73 @@ export function groupOf(
   return agentGroups(offers).find(group => group.id === groupIdOf(offer)) ?? null;
 }
 
-/** The offers of `group` that `provider` runs, in the host's order. */
+/** Which of a card's models: a family and a generation of it, each null when the host names none. */
+export interface Scope {
+  readonly family: string | null;
+  readonly generation: string | null;
+}
+
+/** The scope `offer` sits in. */
+export function scopeOf(offer: HarnessOffer): Scope {
+  return {family: offer.display?.family ?? null, generation: offer.display?.generation?.id ?? null};
+}
+
+function inScope(offer: HarnessOffer, scope: Scope | null): boolean {
+  if (scope === null) return true;
+  const own = scopeOf(offer);
+  return own.family === scope.family && own.generation === scope.generation;
+}
+
+/** The offers of `group` that `provider` runs (those in `scope`, when given), in the host's order. */
 export function offersIn(
   offers: readonly HarnessOffer[],
   group: AgentGroup,
   provider: string,
+  scope: Scope | null = null,
 ): HarnessOffer[] {
-  return offers.filter(offer => offer.provider === provider && groupIdOf(offer) === group.id);
+  return offers.filter(
+    offer => offer.provider === provider && groupIdOf(offer) === group.id && inScope(offer, scope),
+  );
+}
+
+/** The families a card's models on `provider` come in, in the host's order; empty with fewer than two. */
+export function familiesIn(
+  offers: readonly HarnessOffer[],
+  group: AgentGroup,
+  provider: string,
+): string[] {
+  const families = offersIn(offers, group, provider).flatMap(offer => {
+    const family = offer.display?.family;
+    return family === undefined ? [] : [family];
+  });
+  const distinct = [...new Set(families)];
+  return distinct.length > 1 ? distinct : [];
+}
+
+export interface Generation {
+  readonly id: string;
+  readonly name: string;
+}
+
+/**
+ * The generations of `family` on `provider`, newest first (the host's `order` ascends from the
+ * newest); empty when the host names none or only one, so the generation row appears only when
+ * there is something to choose.
+ */
+export function generationsIn(
+  offers: readonly HarnessOffer[],
+  group: AgentGroup,
+  provider: string,
+  family: string | null,
+): Generation[] {
+  const found = new Map<string, {name: string; order: number}>();
+  for (const offer of offersIn(offers, group, provider)) {
+    const generation = offer.display?.generation;
+    if (generation === undefined || (offer.display?.family ?? null) !== family) continue;
+    found.set(generation.id, {name: generation.name, order: generation.order});
+  }
+  const sorted = [...found].sort((left, right) => left[1].order - right[1].order);
+  return sorted.length > 1 ? sorted.map(([id, each]) => ({id, name: each.name})) : [];
 }
 
 /**
@@ -71,9 +140,10 @@ export function tiersIn(
   offers: readonly HarnessOffer[],
   group: AgentGroup,
   provider: string,
+  scope: Scope | null = null,
 ): ModelTier[] {
   const tiers = new Map<number, ModelTier>();
-  for (const offer of offersIn(offers, group, provider)) {
+  for (const offer of offersIn(offers, group, provider, scope)) {
     const {tier, tierName} = offer.display ?? {};
     if (tier === undefined || tierName === undefined) continue;
     const before = tiers.get(tier);
@@ -106,12 +176,14 @@ function fallbackModel(
   offers: readonly HarnessOffer[],
   group: AgentGroup,
   provider: string,
+  scope: Scope | null,
 ): string | null {
-  const defaulted = offersIn(offers, group, provider).find(offer => offer.default);
+  const own = offersIn(offers, group, provider, scope);
+  const defaulted = own.find(offer => offer.default);
   if (defaulted !== undefined) return defaulted.model;
-  const top = tiersIn(offers, group, provider).at(-1);
+  const top = tiersIn(offers, group, provider, scope).at(-1);
   if (top !== undefined) return modelAtTier(top);
-  return offersIn(offers, group, provider)[0]?.model ?? null;
+  return own[0]?.model ?? null;
 }
 
 /**
@@ -131,12 +203,16 @@ export function pickGroup(
   return pickHarness(offers, group, provider, current);
 }
 
-/** The agent for running `group` on `provider`, keeping the tier of `current` where it exists. */
+/**
+ * The agent for running `group` on `provider` (within `scope`, when given), keeping the tier of
+ * `current` where it exists.
+ */
 export function pickHarness(
   offers: readonly HarnessOffer[],
   group: AgentGroup,
   provider: string,
   current: AgentPick | null,
+  scope: Scope | null = null,
 ): AgentPick | null {
   const currentOffer =
     current === null
@@ -146,8 +222,8 @@ export function pickHarness(
   const sameTier =
     rank === undefined
       ? undefined
-      : tiersIn(offers, group, provider).find(tier => tier.rank === rank);
+      : tiersIn(offers, group, provider, scope).find(tier => tier.rank === rank);
   const model =
-    sameTier === undefined ? fallbackModel(offers, group, provider) : modelAtTier(sameTier);
+    sameTier === undefined ? fallbackModel(offers, group, provider, scope) : modelAtTier(sameTier);
   return model === null ? null : {provider, model};
 }

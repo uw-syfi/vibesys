@@ -23,6 +23,7 @@ import {
   type Budget,
   defaultRole,
   type Effort,
+  modelLabel,
   type NewRunContext,
   roleLabel,
   roleSummary,
@@ -74,7 +75,7 @@ function RoleRows(
                 value={choice.model ?? NONE}
                 options={[
                   {value: NONE, label: 'Same as run'},
-                  ...models.map(m => ({value: m, label: m})),
+                  ...models.map(m => ({value: m, label: modelLabel(offers, agent.provider, m)})),
                 ]}
                 change={model =>
                   dispatch({type: 'role', role: {...choice, model: model === NONE ? null : model}})
