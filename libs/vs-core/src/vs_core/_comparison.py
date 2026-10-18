@@ -29,7 +29,8 @@ A task that declares no floor (``relative_noise`` is 0) has not said its runs ar
 said nothing. While each side holds one sample, the runs have no spread to show either, so
 ``sigma`` is 0 because nothing measured the noise, not because there is none. Such a
 comparison gives no verdict (``within_noise``) and is a close call (`close_call`), so the base
-and the official check each take one more sample and the spread becomes measurable. Any fixed
+takes one more sample (and the official check one more, while the call stays close) and the
+spread becomes measurable. Any fixed
 default floor would be a number nobody measured; requiring the key would refuse every task
 that has a benchmark and no ``[pareto]`` table.
 

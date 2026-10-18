@@ -374,7 +374,8 @@ async def test_repeated_runs_of_one_input_aggregate_and_a_lucky_run_is_not_picke
 
     Every run of the input is a sample, the agent's four and, only when they leave a close call
     against the base, the strategy's own final check as a fifth. The comparison is the mean of
-    all of them over the base's, however the runs came out.
+    all of them over the base's, however the runs came out, and the official record the ledger
+    carries to ranking states that same mean, not one run's value.
     """
     script = (
         Turn(speed=104.0),
@@ -392,6 +393,14 @@ async def test_repeated_runs_of_one_input_aggregate_and_a_lucky_run_is_not_picke
         assert last.candidate_samples == len(values)
         assert last.candidate_value == pytest.approx(sum(values) / len(values))
         assert last.candidate_value != max(values)
+        state = played.process.shell.record.envelope.core
+        (answer,) = (
+            item
+            for item in state.evaluation.evidence
+            if item.purpose == "official" and item.kind is EvidenceKind.BENCHMARK
+        )
+        assert answer.reading is not None
+        assert answer.reading.value == last.candidate_value, "ranking reads what was compared"
         peeked = played.writer.seen[-1]
         assert peeked is not None
         assert peeked["candidate_samples"] == 4

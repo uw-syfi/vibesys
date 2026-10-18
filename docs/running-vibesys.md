@@ -230,7 +230,9 @@ Samples of one input are aggregated: nothing is picked among them and nothing is
 refused because there are several, so re-running an input until a run suits the
 agent gains nothing. The strategy's official measurement of an input the attempt
 already measured is answered from those samples, and runs afresh only when a
-comparison with the base is a close call that one more sample would narrow.
+comparison with the base is a close call that one more sample would narrow. Either
+way, the official result states the mean of all the samples of the input, the
+value its comparison states, and that mean is what candidates are ranked by.
 
 An agent's evaluation is compared with its base, the revision its workspace
 started from. The base is measured once per (measured input, gates, host) and
@@ -243,8 +245,12 @@ comparison is the ratio of the candidate's mean over the base's mean, its noise,
 and a verdict: `better`, `within_noise` or `worse`. The noise is one standard
 error of the ratio, computed from the runs' relative spread (never below the
 task's declared `relative_noise`) and the sample counts; a verdict needs two
-noises. The agent's evaluation tool and the resumed turn report it, and the run's
-events carry it as `measurement_compared`.
+noises. A task that declares no `relative_noise` gets no verdict while the
+candidate and the base hold one run each, since nothing has measured the noise
+yet: the result counts as a close call, so the base takes one more run, and the
+official check runs afresh if the result is still a close call then. The agent's evaluation tool and the resumed turn report the
+comparison only while the base's samples are fresh, and the run's events carry it
+as `measurement_compared`.
 
 Evaluations have no allowance. A plan cannot cap them and core admits every call it can;
 only the turn's own time limit bounds an agent's work. A conservative runaway flag only

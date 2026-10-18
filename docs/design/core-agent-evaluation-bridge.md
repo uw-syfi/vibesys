@@ -98,11 +98,16 @@ state live in `vs_core._base_runs`:
 
 The comparison reaches the agent twice: in the tool's reply for a finished evaluation
 (`SubmittedReply.comparison`, absent while the base has not ended) and in the resume prompt
-(`ResumeFacts.comparisons`, from `ResumeAuthorizationReceipt.comparisons`). It reaches the run's
+(`ResumeFacts.comparisons`, from `ResumeAuthorizationReceipt.comparisons`); both give the latest
+logged comparison only while the samples held at that moment still make it, so a base that went
+stale is never presented as current (`latest_comparisons`). It reaches the run's
 events as `measurement_compared`, emitted by the commit observer from core's append-only log.
 The strategy's official measurement of an input the scope already measured is answered from the
 samples held (`vs_core._measurement_reuse`), and runs afresh only when the comparison is a close
-call that one more sample would narrow.
+call that one more sample would narrow. Its benchmark record enters the ledger stating the mean
+of the samples (`vs_core._comparison.as_answer`), and the reading a strategy decodes from a
+record takes its headline from the ledger's reading, so candidates are ranked by the value the
+comparison states; each run's own reading stays in its `Sample`.
 
 ## Reply: one continuation, never a poll
 
