@@ -420,6 +420,68 @@ def test_second_web_launch_reuses_live_instance(
     assert opened == [record.url]
 
 
+def test_second_launch_without_web_assets_reuses_gateway_and_opens_no_browser(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    instance_path = tmp_path / ".vibesys" / "web-gateway.json"
+    record = WebInstanceRecord(
+        pid=123,
+        port=43_211,
+        token="capability",  # noqa: S106  # lint-waiver: LW-101210 [S106]; use a fixed capability token in a launch-reuse fixture
+        url="http://127.0.0.1:43211/?token=capability",
+        project_root=str(tmp_path),
+        started_at=1.0,
+    )
+    opened: list[str] = []
+    # test-isolation: inject the discovered live gateway to exercise reuse without a real launcher
+    monkeypatch.setattr(
+        server_entrypoint, "_discover_web_instance", lambda _path, _finder, _threads: record
+    )
+    # test-isolation: capture browser opening so the test remains headless and deterministic
+    monkeypatch.setattr(
+        server_entrypoint.webbrowser, "open", lambda url, **_kwargs: opened.append(url)
+    )
+
+    main(["--web", "--web-instance", str(instance_path)])
+
+    assert capsys.readouterr().out == f"VibeSys gateway: {record.url}\n"
+    assert opened == []
+
+
+def test_detached_startup_with_web_assets_opens_the_browser(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assets = tmp_path / "dist"
+    assets.mkdir()
+    (assets / "index.html").write_text("<!doctype html>\n", encoding="utf-8")
+    process = RecordingDetachedProcess(status=None)
+    record = WebInstanceRecord(
+        pid=123,
+        port=43_211,
+        token="capability",  # noqa: S106  # lint-waiver: LW-101211 [S106]; use a fixed capability token in a detached-startup fixture
+        url="http://127.0.0.1:43211/?token=capability",
+        project_root=str(tmp_path),
+        started_at=1.0,
+    )
+    effects = RecordingDetachedEffects(process, times=[0.0, 0.0], record=record)
+    opened: list[str] = []
+    # test-isolation: keep the startup test headless while verifying the opened URL.
+    monkeypatch.setattr(
+        server_entrypoint.webbrowser, "open", lambda url, **_kwargs: opened.append(url)
+    )
+
+    _spawn_detached(
+        ["--web", "--detach", "--web-assets", str(assets)], tmp_path / "web-gateway.json", effects
+    )
+
+    assert capsys.readouterr().out == f"VibeSys web UI: {record.url}\n"
+    assert opened == [record.url]
+
+
 def test_detached_startup_surfaces_early_child_failure(tmp_path: Path) -> None:
     process = RecordingDetachedProcess(status=7)
     effects = RecordingDetachedEffects(process, times=[0.0, 0.0])
