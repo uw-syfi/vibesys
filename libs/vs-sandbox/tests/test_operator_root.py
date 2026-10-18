@@ -24,6 +24,7 @@ from vs_sandbox.api import (
     exposed_grant,
 )
 from vs_sandbox.api.testing import ScriptedDockerCli
+from vs_sim.api import DISCARD
 from vs_sim.api.testing import SimThreads
 
 if TYPE_CHECKING:
@@ -207,6 +208,30 @@ def test_bubblewrap_refuses_at_wrap_a_grant_retargeted_into_the_root(
 
     with pytest.raises(SandboxUnavailableError, match="operator's runtime root"):
         sandbox.wrap(["true"])
+
+
+@pytest.mark.parametrize("target_of", ["root", "inside", "ancestor"])
+def test_docker_refuses_at_start_a_mount_retargeted_into_the_root(
+    tmp_path: Path, target_of: str
+) -> None:
+    """The engine binds a mount as it resolves at ``docker run``, so it is checked there too."""
+    workspace, root, link = _granted_link(tmp_path)
+    docker = ScriptedDockerCli()
+    sandbox = DockerSandbox(
+        host_workspace=str(workspace),
+        image="python:3.12-bookworm",
+        bind_mounts=[(str(link), "/mnt/probe", True)],
+        docker=docker,
+        threads=SimThreads(),
+        operator_root=root,
+    )
+
+    _retarget(link, {"root": root, "inside": root / "runs", "ancestor": root.parent}[target_of])
+    (root / "runs").mkdir(exist_ok=True)
+
+    with pytest.raises(SandboxUnavailableError, match="operator's runtime root"):
+        sandbox.start(output=DISCARD)
+    assert docker.calls == []
 
 
 @pytest.mark.parametrize("target_of", ["root", "inside", "ancestor"])

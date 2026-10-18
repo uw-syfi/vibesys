@@ -471,14 +471,8 @@ class DockerSandbox(WorkspaceSandbox):
         self._env = env or {}
         self._resources: tuple[HostResource, ...] = tuple(resources)
         self._bind_mounts = list(bind_mounts or []) + _bind_mounts_for_resources(self._resources)
-        # The container sees only what is mounted, so no mount may reach the operator's
-        # runtime root, which holds the key to the run's control socket.
-        root = default_operator_root() if operator_root is None else operator_root
-        grant = exposed_grant(
-            root, [host_workspace, *(host_path for host_path, _, _ in self._bind_mounts)]
-        )
-        if grant is not None:
-            raise SandboxUnavailableError(exposure_message("Docker", root, grant))
+        self._operator_root = default_operator_root() if operator_root is None else operator_root
+        self._refuse_exposed_root(host_workspace)
         self._agent_path_map: tuple[tuple[str, str], ...] = _agent_path_map(
             host_workspace, self._container_root, self._resources
         )
@@ -551,8 +545,24 @@ class DockerSandbox(WorkspaceSandbox):
         # Fallback: pass through as-is (e.g. user explicitly set gpus="device=0")
         return gpus
 
+    def _refuse_exposed_root(self, host_workspace: str) -> None:
+        """Raise ``SandboxUnavailableError`` if a mount would reach the operator's runtime root.
+
+        The container sees only what is mounted, so no mount may reach the root, which
+        holds the key to the run's control socket. Run when the sandbox is built and again
+        as each ``docker run`` is built, since the engine binds a mount source as it
+        resolves then: a mounted symlink retargeted into the root since is caught there.
+        """
+        root = self._operator_root
+        grant = exposed_grant(
+            root, [host_workspace, *(host_path for host_path, _, _ in self._bind_mounts)]
+        )
+        if grant is not None:
+            raise SandboxUnavailableError(exposure_message("Docker", root, grant))
+
     def _start_command(self) -> list[str]:
         """Build the Docker argv for starting this configured sandbox."""
+        self._refuse_exposed_root(self._host_workspace)
         cmd = [
             "docker",
             "run",
