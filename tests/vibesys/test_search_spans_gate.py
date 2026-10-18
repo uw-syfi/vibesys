@@ -71,11 +71,21 @@ def _latest(readings: list[EvidenceReading], kind: EvidenceKind) -> EvidenceRead
 
 
 @settings(max_examples=examples(pr=200, nightly=2000))
-@given(readings=_readings(), input_value=st.one_of(st.none(), st.floats(0.1, 1e6)))
+@given(
+    readings=_readings(),
+    input_values=st.lists(st.floats(0.1, 1e6), max_size=2),
+)
 def test_a_gate_reads_the_benchmark_headline_and_the_first_check_that_rejected(
-    readings: list[EvidenceReading], input_value: float | None
+    readings: list[EvidenceReading], input_values: list[float]
 ) -> None:
-    attrs = GateAttrs.read("accuracy,benchmark", readings, input_value)
+    input_metrics = tuple(
+        MetricRow(name=name, value=value, direction="max")
+        for name, value in zip(("throughput", "latency"), input_values, strict=False)
+    )
+    input_value = input_metrics[0].value if input_metrics else None
+    attrs = GateAttrs.read("accuracy,benchmark", readings, input_metrics)
+    # Where the input stands on every axis reaches the label too, headline first.
+    assert attrs.input_metrics == input_metrics
 
     benchmark = _latest(readings, EvidenceKind.BENCHMARK)
     value = None if benchmark is None or not benchmark.metrics else benchmark.metrics[0].value
@@ -140,9 +150,18 @@ def test_a_benchmark_that_reports_two_objectives_labels_its_gate_with_both() -> 
         ),
     )
 
-    attrs = GateAttrs.read("benchmark", [reading], 100.0)
+    input_rows = (
+        MetricRow(name="throughput", value=100.0, direction="max", unit="ops/s"),
+        MetricRow(name="p99_latency", value=10.0, direction="min", unit="ms"),
+    )
+    attrs = GateAttrs.read("benchmark", [reading], input_rows)
 
     assert attrs.metric_value == 120.0
+    assert attrs.vs_baseline == 1.2
+    assert [(m.name, m.value) for m in attrs.input_metrics] == [
+        ("throughput", 100.0),
+        ("p99_latency", 10.0),
+    ]
     assert [(m.name, m.value, m.unit, m.direction) for m in attrs.metrics] == [
         ("throughput", 120.0, "ops/s", "max"),
         ("p99_latency", 8.5, "ms", "min"),

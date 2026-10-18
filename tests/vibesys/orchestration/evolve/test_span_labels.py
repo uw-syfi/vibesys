@@ -82,6 +82,7 @@ def test_a_cold_start_and_the_child_built_on_it_are_workstreams_with_turns_gates
             "stage": "accuracy,benchmark",
             "metric_value": value,
             "vs_baseline": None,
+            "input_metrics": [],
             "metrics": [
                 {"name": "throughput", "value": value, "direction": "max", "unit": "tokens/s"}
             ],

@@ -963,6 +963,7 @@ export type Name4 = string;
 export type Finite = number;
 export type Direction4 = "max" | "min";
 export type Unit5 = string | null;
+export type InputMetrics = MetricRow[];
 export type Metrics = MetricRow[];
 /**
  * Closed measurement kinds used for eligibility requirements.
@@ -2614,6 +2615,7 @@ export interface GateAttrs {
   stage: Stage3;
   metric_value?: MetricValue1;
   vs_baseline?: VsBaseline1;
+  input_metrics?: InputMetrics;
   metrics?: Metrics;
   failed?: FailedCheck | null;
 }

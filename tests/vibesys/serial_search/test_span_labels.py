@@ -200,6 +200,14 @@ def test_a_round_that_adopts_a_candidate_is_a_passed_workstream_with_its_turns_a
         "stage": "accuracy,benchmark",
         "metric_value": CANDIDATE_THROUGHPUT,
         "vs_baseline": CANDIDATE_THROUGHPUT / INPUT_THROUGHPUT,
+        "input_metrics": [
+            {
+                "name": "throughput",
+                "value": INPUT_THROUGHPUT,
+                "direction": "max",
+                "unit": "tokens/s",
+            }
+        ],
         "metrics": [
             {
                 "name": "throughput",

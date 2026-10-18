@@ -5,7 +5,7 @@ provider turn is an agent turn and a workstream's trusted measurement is its gat
 goes through ``ctx.label`` or ``label=``; nothing here builds a projection of its own.
 """
 
-from vibesys.candidates.api import turned_down
+from vibesys.candidates.api import input_metrics, turned_down
 from vibesys.orchestration.dynamic.search._outcomes import (
     UNSETTLED,
     Closing,
@@ -13,7 +13,6 @@ from vibesys.orchestration.dynamic.search._outcomes import (
     WorkstreamDone,
     WorkstreamStart,
     beats_input,
-    input_headline,
 )
 from vibesys.orchestration.dynamic.search._values import WorkKind
 from vibesys.search_spans.api import (
@@ -99,8 +98,7 @@ def label_outcome(
     if work.gate is None:
         return
     span, stage = work.gate
-    base = input_headline(work.baseline)
-    attrs = GateAttrs.read(stage, closing.readings, None if base is None else base.value)
+    attrs = GateAttrs.read(stage, closing.readings, input_metrics(work.baseline))
     if profile:
         ctx.label(GATE, span=span, attrs=attrs)
         return

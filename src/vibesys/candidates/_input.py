@@ -148,6 +148,11 @@ def input_value(baseline: Baseline | None) -> float | None:
     return seen.metrics[0].value if seen is not None and seen.metrics else None
 
 
+def input_metrics(baseline: Baseline | None) -> tuple[MetricRow, ...]:
+    """Every reading the input's benchmark reported, headline first; empty when unmeasured."""
+    return baseline.reading.metrics if isinstance(baseline, Measured) else ()
+
+
 def failure(baseline: Baseline) -> InputFailure | None:
     """Why the input is unmeasurable, or None."""
     return baseline.failure if isinstance(baseline, Unmeasurable) else None

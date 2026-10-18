@@ -137,6 +137,9 @@ class GateAttrs(Value):
     metric_value: float | None = None
     vs_baseline: float | None = None
     """The candidate's headline value divided by the input's; None while either is unknown."""
+    input_metrics: tuple[MetricRow, ...] = ()
+    """Every reading of the input's own measurement, headline first: where the input stands on each
+    axis, for a client that marks it beside the candidates; empty while it is unmeasured."""
     metrics: tuple[MetricRow, ...] = ()
     """Every reading the benchmark reported, headline first, each with its unit and direction.
 
@@ -147,9 +150,12 @@ class GateAttrs(Value):
 
     @classmethod
     def read(
-        cls, stage: str, readings: Sequence[EvidenceReading], input_value: float | None
+        cls,
+        stage: str,
+        readings: Sequence[EvidenceReading],
+        input_metrics: Sequence[MetricRow] = (),
     ) -> Self:
-        """The gate of ``stage`` that read ``readings``, against the input's ``input_value``.
+        """The gate of ``stage`` that read ``readings``, against the input's ``input_metrics``.
 
         Its value is the benchmark's headline and ``metrics`` all its readings; ``failed`` the first
         check that rejected.
@@ -157,11 +163,13 @@ class GateAttrs(Value):
         benchmark = reading_of(tuple(readings), EvidenceKind.BENCHMARK)
         headline = None if benchmark is None else benchmark.headline()
         value = None if headline is None else headline.value
+        input_value = input_metrics[0].value if input_metrics else None
         ratio = None if value is None or not input_value else value / input_value
         return cls(
             stage=stage,
             metric_value=value,
             vs_baseline=ratio,
+            input_metrics=tuple(input_metrics),
             metrics=() if benchmark is None else benchmark.metrics,
             failed=FailedCheck.of(readings),
         )

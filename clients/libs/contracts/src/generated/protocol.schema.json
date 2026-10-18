@@ -2447,6 +2447,14 @@
           "default": null,
           "title": "Vs Baseline"
         },
+        "input_metrics": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/MetricRow"
+          },
+          "title": "Input Metrics",
+          "type": "array"
+        },
         "metrics": {
           "default": [],
           "items": {
