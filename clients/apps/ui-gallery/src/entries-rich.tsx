@@ -109,7 +109,7 @@ function DialogDemo(): JSX.Element {
         }
       >
         <Text tone="muted">
-          Work in progress finishes its current step first. Measured results are kept.
+          Work in progress finishes its current step first. Measured results stay.
         </Text>
       </Dialog>
     </Row>
@@ -128,15 +128,15 @@ const ATTEMPTS: readonly Attempt[] = [
   {
     id: 'W1',
     title: 'Pad the head and tail counters',
-    outcome: 'accepted',
+    outcome: 'passed',
     delta: '+18.2%',
     took: '6m',
   },
-  {id: 'W2', title: 'Batch the producer handoff', outcome: 'rejected', delta: '-3.1%', took: '9m'},
+  {id: 'W2', title: 'Batch the producer handoff', outcome: 'failed', delta: '-3.1%', took: '9m'},
   {
     id: 'W3',
     title: 'Spin before parking a consumer',
-    outcome: 'accepted',
+    outcome: 'passed',
     delta: '+7.4%',
     took: '5m',
   },
@@ -213,8 +213,8 @@ function TreeDemo(): JSX.Element {
             depth={1}
             title="Pad the counters"
             subtitle="Measured +18.2%"
-            state={{tone: 'ok', label: 'Accepted'}}
-            chips={[{label: 'accepted', tone: 'ok'}]}
+            state={{tone: 'ok', label: 'Passed'}}
+            chips={[{label: 'passed', tone: 'ok'}]}
             select={() => setSelected('w1')}
           />
           <TreeRow
@@ -231,8 +231,8 @@ function TreeDemo(): JSX.Element {
             depth={1}
             title="Batch the handoff"
             subtitle="Slower than the baseline"
-            state={{tone: 'err', label: 'Rejected'}}
-            chips={[{label: 'rejected', tone: 'err'}]}
+            state={{tone: 'err', label: 'Failed'}}
+            chips={[{label: 'failed', tone: 'err'}]}
             select={() => setSelected('w3')}
           />
         </>
@@ -519,7 +519,7 @@ export const RICH_ENTRIES = {
           <Stat label="Best" value="+27.0%" sub="over the baseline" />
         </Card>
         <Card>
-          <Stat label="Measured" value="14" sub="6 accepted" />
+          <Stat label="Measured" value="14" sub="6 passed" />
         </Card>
         <Card>
           <Stat label="Elapsed" value="24m" />

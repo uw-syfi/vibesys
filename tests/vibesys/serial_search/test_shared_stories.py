@@ -8,7 +8,8 @@ what a workspace is closed with. Every story runs live and again with a restart 
 
 from __future__ import annotations
 
-from typing import Unpack
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Unpack
 
 import pytest
 from hypothesis import given, settings
@@ -35,10 +36,14 @@ from vs_core.api import (
 )
 from vs_sim.api.testing import examples
 
+if TYPE_CHECKING:
+    from vs_core.api.testing import Asked
+
 MODES = across_restarts
 SEARCHES = pytest.mark.parametrize("search", ["single", "multi"])
 PLANNER = "orchestrator"
 IMPLEMENTER = "implementer"
+JUDGE = "judge"
 PROFILE_GUIDED = {"command": ("profile",), "timeout_seconds": 10}
 
 
@@ -206,6 +211,7 @@ def test_a_failed_attribution_command_ends_the_run_naming_what_ran_and_why(
 # -- the base ---------------------------------------------------------------------------------------
 
 INPUT = FACTS.baseline
+INPUT_SPEED = 50.0
 SLOWER_THAN_INPUT = 30.0
 """What a candidate measures (the input measures 50): it passes review but is slower."""
 
@@ -334,70 +340,145 @@ def test_an_idea_that_continues_its_hypothesis_builds_on_its_own_work_in_progres
     assert bases(host)[:3] == [INPUT, commit("c1"), commit("c2")]
 
 
+_DRAWN_ROUNDS = st.lists(
+    st.tuples(
+        st.sampled_from([30.0, 70.0, 90.0, 120.0, 160.0]),
+        st.booleans(),
+        st.none() | st.integers(0, 5),
+    ),
+    min_size=1,
+    max_size=5,
+)
+
+
+@dataclass
+class _Played:
+    """What a driven run recorded: the base each round started on, and what it should be."""
+
+    bases: list[RevisionRef] = field(default_factory=list)
+    expected: list[RevisionRef] = field(default_factory=list)
+    passed: dict[int, RevisionRef] = field(default_factory=dict)
+    best: tuple[float, int] | None = None
+    designed: RevisionRef | None = None
+    """The base the latest accepted plan gave, until the round it designed starts."""
+
+    def base_of_plan(self, named: int | None) -> RevisionRef | None:
+        """The base a plan gets: the one it names (the input or a passed idea), else the best;
+        None when it names neither, so the ledger refuses it."""
+        if named is None:
+            return INPUT if self.best is None else commit(f"c{self.best[1]}")
+        return INPUT if named == 0 else self.passed.get(named)
+
+    def note_starts(self, starts: list[RevisionRef]) -> None:
+        """Record each round that started since last looked: a round with no design before it
+        continues the one before it, on the work in progress that one retained."""
+        while len(self.bases) < len(starts):
+            number = len(self.bases) + 1
+            self.bases.append(starts[number - 1])
+            self.expected.append(self.designed or commit(f"c{number - 1}"))
+            self.designed = None
+
+
+def _answer(
+    host: SerialHost,
+    search: str,
+    asked: Asked,
+    played: _Played,
+    draw: tuple[float, bool, int | None],
+) -> None:
+    """Answer one turn as round ``len(played.bases)``'s draw says."""
+    speed, ok, named = draw
+    number = max(len(played.bases), 1)
+    if asked.label == PLANNER:
+        if getattr(asked.context, "problem", None) is not None:
+            named = None  # asked again after a refusal: no base this time
+        extra = {} if named is None else {"base_round": named}
+        host.run.reply_raw(asked, plan_reply(f"h{len(played.bases) + 1}", **extra))
+        played.designed = played.base_of_plan(named) or played.designed
+        return
+    if asked.label == JUDGE:
+        host.run.reply(asked, multi_host.reviewed(passed=ok))
+        return
+    checkpoint = Retained(revision=commit(f"c{number}"))
+    if search == "single":
+        host.run.reply(asked, single_host.implemented(passed=ok), checkpoint=checkpoint)
+    else:
+        host.run.reply(asked, multi_host.implemented(), checkpoint=checkpoint)
+    if ok:
+        played.passed[number] = commit(f"c{number}")
+        if speed > INPUT_SPEED and (played.best is None or speed > played.best[0]):
+            played.best = (speed, number)
+
+
+def _drive(host: SerialHost, search: str, rounds: list[tuple[float, bool, int | None]]) -> _Played:
+    """Answer every agent turn of a run from the drawn rounds, and say what each base must be.
+
+    Round ``n`` retains ``c<n>`` and reads as the ``n``-th draw says. A designer turn names the
+    drawn base; a refused name is asked again without one.
+    The oracle: an idea passes when it passes review (the host's gates always read); it is best
+    when it also beats the input (50) by more than every earlier best.
+    """
+    played = _Played()
+    for _ in range(1000):
+        starts = bases(host)
+        played.note_starts(starts)
+        asked = next(
+            (
+                item
+                for item in host.run.open
+                if item.until is not None and item.label in {PLANNER, IMPLEMENTER, JUDGE}
+            ),
+            None,
+        )
+        if asked is None:
+            if not host.step(0):
+                return played
+            continue
+        _answer(host, search, asked, played, rounds[min(max(len(starts), 1), len(rounds)) - 1])
+    message = f"the run did not settle: {host.run.timeline()}"
+    raise AssertionError(message)
+
+
 @SEARCHES
 @MODES
-@settings(max_examples=examples(pr=6, nightly=40), deadline=None, derandomize=True, database=None)
-@given(
-    rounds=st.lists(
-        st.tuples(
-            st.sampled_from([30.0, 70.0, 90.0, 120.0, 160.0]),
-            st.booleans(),
-            st.none() | st.integers(0, 4),
-        ),
-        min_size=1,
-        max_size=4,
-    )
-)
-def test_every_base_is_the_best_a_named_passed_idea_or_the_input_and_the_best_was_measured(
-    *, search: str, restarting: bool, rounds: list[tuple[float, bool, int | None]]
+@settings(max_examples=examples(pr=8, nightly=60), deadline=None, derandomize=True, database=None)
+@given(rounds=_DRAWN_ROUNDS, continuations=st.integers(0, 2))
+def test_every_base_is_the_best_a_named_passed_idea_the_input_or_the_rounds_own_work(
+    *,
+    search: str,
+    restarting: bool,
+    rounds: list[tuple[float, bool, int | None]],
+    continuations: int,
 ) -> None:
-    """Whatever each idea measures, passes and names as its base, the run follows the rules.
-
-    The oracle: an idea passes when it passes review (the host's gates always read); it is best
-    when it also beats the input (50) by more than every earlier best; a named base is honored
-    only for the input or a passed idea, else the plan is refused and asked again without one.
+    """Whatever each idea measures, passes and names as its base, and whether a failed idea is
+    continued, every round starts on the best, a named passed idea, the input, or (a
+    continuation) its own work in progress; never a failed or unknown idea. A named base is
+    honored only for the input or a passed idea, else the plan is refused and asked again
+    without one. The best and the adopted result rest on a trusted measurement of that commit.
     """
     speeds = {f"c{number}": speed for number, (speed, _, _) in enumerate(rounds, start=1)}
     host = start(
         search,
         restarting=restarting,
-        config={"max_rounds": len(rounds), "max_continuation_rounds": 0},
+        config={"max_rounds": len(rounds), "max_continuation_rounds": continuations},
         throughputs=speeds,
     )
-    passed: dict[int, RevisionRef] = {}
-    best: tuple[float, int] | None = None
-    expected: list[RevisionRef] = []
-    for number, (speed, ok, drawn_base) in enumerate(rounds, start=1):
-        named = drawn_base
-        host.drain_until_turn(PLANNER)
-        asked = host.run.expect_turn(role=PLANNER)
-        base_of_best = INPUT if best is None else commit(f"c{best[1]}")
-        honored = named is None or named == 0 or named in passed
-        extra = {} if named is None else {"base_round": named}
-        host.run.reply_raw(asked, plan_reply(f"h{number}", **extra))
-        if not honored:
-            correction = host.run.expect_turn(role=PLANNER)
-            assert f"base_round {named} " in str(correction.context.problem)  # ty: ignore[unresolved-attribute]
-            host.run.reply_raw(correction, plan_reply(f"h{number}"))
-            named = None
-        expected.append(base_of_best if named is None else INPUT if named == 0 else passed[named])
-        implement(host, search, f"c{number}", passed=ok)
-        if ok:
-            passed[number] = commit(f"c{number}")
-            if speed > 50.0 and (best is None or speed > best[0]):
-                best = (speed, number)
-    host.drain()
+    played = _drive(host, search, rounds)
 
-    assert bases(host) == expected
+    assert played.bases == played.expected
+    passed = set(played.passed.values())
+    for base in played.bases:
+        if base in passed:
+            assert base.revision_id.root in host.measured, f"{base} is a base but never measured"
     finish = host.run.finished
     assert isinstance(finish, Finish)
     selection = finish.result.selection
     assert selection is not None
-    if best is None:
+    if played.best is None:
         assert selection.kind != "retained_candidate"
     else:
         assert selection.kind == "retained_candidate"
-        assert selection.revision == commit(f"c{best[1]}")
+        assert selection.revision == commit(f"c{played.best[1]}")
         # the adopted result rests on a trusted measurement of that exact commit
         assert selection.revision.revision_id.root in host.measured
     assert_flow_closed(host)
