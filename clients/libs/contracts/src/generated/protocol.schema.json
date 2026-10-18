@@ -582,7 +582,7 @@
     },
     "CancelAttemptRequest": {
       "additionalProperties": false,
-      "description": "Cancel one attempt: it stops, closes cancelled, and is never judged.\n\nThe search hears it close as if it had withdrawn the attempt itself, and the run's agents\nare told at their next turn. An attempt that has ended is refused when submitted; a parked\none, or one the run does not hold, is refused when the run takes the request.",
+      "description": "Cancel one attempt: it stops, closes cancelled, and is never judged.\n\nThe search hears it close as if it had withdrawn the attempt itself, and the run's agents\nare told at their next turn. A parked attempt waiting to reopen has that reopen cancelled\nand ends. An attempt that has ended is refused when submitted; a blocked one, a parked one\nwith no reopen waiting, or one the run does not hold, is refused when the run takes the\nrequest.",
       "properties": {
         "control_id": {
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",

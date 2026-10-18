@@ -1328,8 +1328,10 @@ export interface WithdrawRequest {
  * Cancel one attempt: it stops, closes cancelled, and is never judged.
  *
  * The search hears it close as if it had withdrawn the attempt itself, and the run's agents
- * are told at their next turn. An attempt that has ended is refused when submitted; a parked
- * one, or one the run does not hold, is refused when the run takes the request.
+ * are told at their next turn. A parked attempt waiting to reopen has that reopen cancelled
+ * and ends. An attempt that has ended is refused when submitted; a blocked one, a parked one
+ * with no reopen waiting, or one the run does not hold, is refused when the run takes the
+ * request.
  */
 export interface CancelAttemptRequest {
   control_id: ControlId5;

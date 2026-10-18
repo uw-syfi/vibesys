@@ -627,3 +627,29 @@ def test_cancelling_an_item_retires_a_reopening_already_queued_at_it() -> None:
     later = core.step(after, admitted, reducers=QUEUED_REOPEN_REDUCERS)
     assert later.state.attempts == after.attempts
     assert later.requests == ()
+
+
+def test_cancelling_a_parked_attempt_retires_its_queued_reopening() -> None:
+    """D224: a parked attempt waiting to reopen is cancelled as ``cancel_item`` would.
+
+    Core takes the cancel, retires the queued reopening, and the attempt ends cancelled; its
+    admission arriving later reopens nothing. A parked attempt with nothing queued is still
+    refused (``test_a_cancel_of_a_parked_attempt_is_refused_with_why``).
+    """
+    state, queued = _queued_reopen()
+    [parked] = state.attempts.attempts
+    control = _action("op", "cancel_attempt", attempt=parked.attempt_id.root)
+    assert core.control_refusal(state, control) is None
+
+    cancel = core.RunControlEvent(control=control, now_at=state.run.now_at)
+    after = core.step(state, cancel, reducers=QUEUED_REOPEN_REDUCERS).state
+
+    [ended] = after.attempts.attempts
+    assert ended.phase == core.AttemptPhase.TERMINAL
+    assert after.scheduling.queue == ()
+    admitted = core.ScopeReopenAdmitted(
+        attempt=queued.attempt, request_id=queued.request_id, admission_id=queued.decision_id
+    )
+    later = core.step(after, admitted, reducers=QUEUED_REOPEN_REDUCERS)
+    assert later.state.attempts == after.attempts
+    assert later.requests == ()
