@@ -73,6 +73,7 @@ from vs_agent.api.testing import (
     tool_result,
     usage,
 )
+from vs_core.api import BASE_MAX_SAMPLES
 from vs_evaluation.api.tools import SUBMIT_TOOL, VALIDATE_WAIT_TOOL, build_core_evaluation_tools
 from vs_project.api import Project, StoredEnvelope
 from vs_sim.api import (
@@ -873,11 +874,9 @@ def test_core_path_runs_the_fake_slurm_search(
     # submitted exactly once; the trusted measurement of the one candidate reused the
     # implementer's run of the same input instead of submitting a third job (#2949).
     evaluation = envelope["core"]["evaluation"]
-    # The agent's evaluation may start while the baseline measurement still runs (whether the
-    # scripted agent outpaces the cluster decides it). Core then measures the base once more for
-    # the comparison, and records that run as its own; no other job is ever a second one.
+    # A close call may earn another fresh base sample, up to the comparison policy's bound.
     base_runs = len(evaluation.get("base_runs", []))
-    assert base_runs <= 1, evaluation["base_runs"]
+    assert base_runs <= BASE_MAX_SAMPLES, evaluation["base_runs"]
     assert sum("sbatch " in command for command in recorded_commands(loop_input.cluster)) == (
         2 + base_runs
     )

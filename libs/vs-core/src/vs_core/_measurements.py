@@ -7,7 +7,8 @@ receipt. Continuation wakes carry the exact facts before the atomic job update.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, NamedTuple
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from . import _wait_clock
 from ._base_runs import base_of, record_samples, with_base
@@ -998,7 +999,8 @@ def _side_facts(
     return Proven(job)
 
 
-class _Stored(NamedTuple):
+@dataclass(frozen=True, slots=True)
+class _Stored:
     """What a job's observation added to the ledger."""
 
     accepted: tuple[EvidenceRef, ...]
@@ -1060,7 +1062,13 @@ def _job_observed(
     observation = event.observation
     if observation.resource_id is None:
         return AreaChange(state=state)
-    accepted, ledger, refused, measured = _store_evidence(state, job, event)
+    stored = _store_evidence(state, job, event)
+    accepted, ledger, refused, measured = (
+        stored.accepted,
+        stored.ledger,
+        stored.refused,
+        stored.measured,
+    )
     incomplete = not reused_evidence_complete(
         state, job, accepted, terminal=event.observation.terminal
     )

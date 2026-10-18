@@ -1233,7 +1233,7 @@ expose = ["FocusLedger", "FocusLedgerRow", "FocusView", "ProfileAttributionError
 from = ["vibesys.profile_focus"]
 
 [[interfaces]]
-expose = ["BackendPromptRenderer", "CORE_PROTOCOL_DIR", "ComputeBackendFragment", "CoreProtocolTemplate", "WaitUnrecordedPrompt", "CpuComputeBackendFragment", "CudaComputeBackendFragment", "MetalComputeBackendFragment", "PROMPTS_DIR", "RocmComputeBackendFragment", "TrainiumComputeBackendFragment", "get_backend_fragment", "render_plan_correction", "render_string", "render_template"]
+expose = ["BackendPromptRenderer", "CORE_PROTOCOL_DIR", "ComparisonRule", "ComputeBackendFragment", "CoreProtocolTemplate", "WaitUnrecordedPrompt", "CpuComputeBackendFragment", "CudaComputeBackendFragment", "MetalComputeBackendFragment", "PROMPTS_DIR", "RocmComputeBackendFragment", "TrainiumComputeBackendFragment", "core_protocol_variables", "get_backend_fragment", "render_plan_correction", "render_string", "render_template"]
 from = ["vibesys.prompts"]
 
 [[interfaces]]
