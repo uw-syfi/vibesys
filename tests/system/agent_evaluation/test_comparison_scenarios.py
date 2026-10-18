@@ -525,9 +525,9 @@ async def test_the_agent_is_told_only_the_comparison_its_fresh_base_samples_make
     async with play(tmp_path, script, pace=STALING) as played:
         state = played.process.shell.record.envelope.core
         assert len(played.cluster.runs[BASE_SPEED]) == 3, "each stale base was measured again"
-        assert {c.candidate_value for c in played.comparisons} >= {
-            played.cluster.runs[130.0][0]
-        }, "the first candidate, whose base went stale while it ran, was compared too"
+        assert {c.candidate_value for c in played.comparisons} >= {played.cluster.runs[130.0][0]}, (
+            "the first candidate, whose base went stale while it ran, was compared too"
+        )
         last = _final(played)
         assert last.candidate_value == played.cluster.runs[140.0][0]
         assert last.base_samples == 1, "only the fresh base run counts"
