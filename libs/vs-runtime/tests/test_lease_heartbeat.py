@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -33,10 +34,12 @@ from vs_core.api import (
 )
 from vs_core.api.testing import Harness, Succeeded, sample_limits, sample_retries
 from vs_core.flows import search
+from vs_project.api import FakeStateStore
 from vs_runtime.api.testing import LEASE, HostOptions, Launch, ScriptedExecutors, scripted_host
 from vs_sim.api.testing import VirtualClock, examples
 
 if TYPE_CHECKING:
+    from vs_project.api import CommitOutcome, StoredEnvelope, StoreFence
     from vs_runtime.api.core import ExecutionContext, ExecutionResult
 
 BASELINE = RevisionRef.of_git_commit("abc123")
@@ -102,6 +105,54 @@ def test_a_request_longer_than_the_lease_does_not_lose_it(thirds: int) -> None:
         HostOptions(translator=LongExecutors),
     )
     clocks.append(host.clock)
+
+    run = host.run()
+
+    assert run.halted is None
+    assert run.core.run.status == RunStatus.TERMINAL
+
+
+class _SlowStateStore(FakeStateStore):
+    """The memory store, but every commit holds the loop for ``cost`` seconds of run time.
+
+    A production commit rewrites and fsyncs the whole run record on the loop's thread, so its
+    cost grows with the record (seconds after hours of run time) and nothing else on the loop
+    runs meanwhile. Moving the virtual clock inside the call, with no await, is exactly that.
+    """
+
+    def __init__(self, cost: float) -> None:
+        super().__init__()
+        self.cost = cost
+        self.clock: VirtualClock | None = None
+
+    def commit(
+        self, expected_revision: int | None, envelope: StoredEnvelope, fence: StoreFence, now: float
+    ) -> CommitOutcome:
+        if self.clock is not None:
+            self.clock.at += self.cost
+        return super().commit(expected_revision, envelope, fence, now)
+
+
+@pytest.mark.xfail(strict=True, reason="settle commits without yielding; the heartbeat starves")
+@settings(max_examples=examples(pr=3, nightly=20), deadline=None, derandomize=True, database=None)
+@given(cost=st.floats(min_value=LEASE / 6, max_value=LEASE / 2))
+def test_slow_commits_in_one_settle_do_not_starve_the_lease(cost: float) -> None:
+    """Commits that each hold the loop for up to half a lease never cost the run its lease.
+
+    One settle commits the queue, the finished requests and the publications back to back; when
+    their total outlasts the lease, the heartbeat must still have renewed between them.
+    """
+    harness = Harness(
+        registry=OperationRegistry(()),
+        facts=FACTS,
+        limits=sample_limits(
+            max_attempts=2, max_turns=2, max_parallel=1, request_retries=sample_retries(2)
+        ),
+        envelope_type=RunEnvelope[FlowState],
+    )
+    store = _SlowStateStore(cost)
+    host = scripted_host(Launch(one_step, OneStepConfig()), _answer, harness, {}, store=store)
+    store.clock = host.clock
 
     run = host.run()
 
