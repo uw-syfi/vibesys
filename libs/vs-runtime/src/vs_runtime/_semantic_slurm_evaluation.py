@@ -30,6 +30,7 @@ from vs_evaluation.api import (
     ExecutorObservation,
     ExecutorPoll,
     ExecutorRejectedError,
+    ExecutorSubmissionError,
     PartialMeasurement,
     PollPhase,
     ResourceRequirements,
@@ -183,6 +184,8 @@ class SemanticSlurmEvaluationExecutor:
         self._stage_output = stage_output
         self._executions: dict[str, _Execution] = {}
         self._lock = asyncio.Lock()
+        # Set by ``close``: no submission makes a new candidate executor after it.
+        self._closing = False
         self._ledger = ledger if ledger is not None else self._open_ledger(ledger_identity)
         self._availability = self._make_executor(workspaces.root.path)
 
@@ -204,6 +207,7 @@ class SemanticSlurmEvaluationExecutor:
         # or candidate worktree exists. Each refusal is a typed rejection so the
         # requester resolves at once; any other exception reads as an ambiguous
         # submission and leaves the requester waiting.
+        self._refuse_if_closing(handle_id)
         try:
             provider_request = self._provider_request(request)
             record = self._record(request)
@@ -228,7 +232,7 @@ class SemanticSlurmEvaluationExecutor:
                 message = f"candidate revision {record.snapshot!r} is not a commit of this run"
                 raise ExecutorRejectedError(message)
             self._namespace.save(self._path(handle_id), record)
-        execution = await self._execution(handle_id, record)
+        execution = await self._execution(handle_id, record, submitting=True)
         await execution.executor.submit(provider_request, handle_id=handle_id)
 
     async def inspect_only(self, handle_id: str) -> ExecutorObservation | None:
@@ -291,7 +295,12 @@ class SemanticSlurmEvaluationExecutor:
         await execution.executor.cancel(handle_id)
 
     async def close(self) -> None:
-        """Release candidate worktrees after provider tasks have settled."""
+        """Refuse new submissions, then release candidate worktrees once provider tasks settled.
+
+        A submission already holding its candidate executor is refused by that
+        executor's own ``close``.
+        """
+        self._closing = True
         async with self._lock:
             cleanups = tuple(
                 cleanup
@@ -321,11 +330,17 @@ class SemanticSlurmEvaluationExecutor:
             raise ValueError(message)
         return _DurableSemanticSubmission(request=request, snapshot=next(iter(snapshots)))
 
-    async def _execution(self, handle_id: str, record: _DurableSemanticSubmission) -> _Execution:
+    async def _execution(
+        self, handle_id: str, record: _DurableSemanticSubmission, *, submitting: bool = False
+    ) -> _Execution:
         async with self._lock:
             existing = self._executions.get(handle_id)
             if existing is not None:
                 return existing
+            if submitting:
+                # ``close`` may have run while this submission awaited: an executor made
+                # now would never be closed, and its job never cancelled.
+                self._refuse_if_closing(handle_id)
             workspace = await self._workspaces.create_measured_candidate(record.snapshot)
             executor = self._make_executor(
                 workspace.path,
@@ -335,6 +350,12 @@ class SemanticSlurmEvaluationExecutor:
             execution = _Execution(workspace, executor)
             self._executions[handle_id] = execution
             return execution
+
+    def _refuse_if_closing(self, handle_id: str) -> None:
+        """Refuse a submission once ``close`` began: ambiguous, so a resume may submit it."""
+        if self._closing:
+            message = f"semantic Slurm evaluation {handle_id!r} arrived while closing"
+            raise ExecutorSubmissionError(RuntimeError(message))
 
     def _open_ledger(self, identity: tuple[str, str] | None) -> SlurmLedgerAttachment | None:
         """The run's attachment to its project's ledger, if the operator enabled one."""
