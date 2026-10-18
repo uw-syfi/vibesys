@@ -15,6 +15,7 @@ from ._base_runs import after_run, base_of, record_samples, with_base
 from ._comparison import (
     as_answer,
     moment_of,
+    run_reading,
 )
 from ._deadlines import resolve_until
 from ._evaluation_history import produce_history
@@ -1056,6 +1057,7 @@ def _store_evidence(
     state: EvaluationState,
     job: OwnedJob | RegisteredOwnedJob,
     event: JobObserved | RegisteredJobObserved,
+    now_at: Seconds,
 ) -> _Stored:
     """Accept evidence keyed by (source request, evidence id).
 
@@ -1073,18 +1075,37 @@ def _store_evidence(
         if not isinstance(verdict, Proven) or not reused_record(state, job, evidence):
             continue
         reported = verdict.value
-        incoming = as_answer(state, job, reported) if isinstance(job, OwnedJob) else reported
+        incoming = (
+            as_answer(state, job, reported, now_at) if isinstance(job, OwnedJob) else reported
+        )
         previous = next((e for e in ledger if e.key == incoming.key), None)
         if previous is None:
             ledger.append(incoming)
             accepted.append(incoming)
             measured.append(reported)
-        elif previous != incoming:
+        elif previous != incoming and not _same_report(state, job, previous, reported):
             refused = True
         elif incoming not in accepted:
             accepted.append(incoming)
             measured.append(reported)
     return _Stored(tuple(accepted), tuple(ledger), refused, tuple(measured))
+
+
+def _same_report(
+    state: EvaluationState,
+    job: OwnedJob | RegisteredOwnedJob,
+    previous: EvidenceRef,
+    reported: EvidenceRef,
+) -> bool:
+    """Whether ``reported`` repeats the record the ledger holds as ``previous``, as its run read it.
+
+    An official answer whose restating closed (``OwnedJob.answer_until``) keeps the mean it
+    stated then, while `as_answer` would state the mean of every sample now; the run's own
+    reading (`run_reading`) is what a repeat of its report must match.
+    """
+    return isinstance(job, OwnedJob) and (
+        previous.model_copy(update={"reading": run_reading(state, job, previous)}) == reported
+    )
 
 
 def _job_observed(
@@ -1101,7 +1122,7 @@ def _job_observed(
     observation = event.observation
     if observation.resource_id is None:
         return AreaChange(state=state)
-    stored = _store_evidence(state, job, event)
+    stored = _store_evidence(state, job, event, context.run.now_at)
     accepted, ledger, refused, measured = (
         stored.accepted,
         stored.ledger,

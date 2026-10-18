@@ -7,7 +7,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from . import _continuations, _job_releases, _measurements
-from ._comparison import comparisons_settled, moment_of
+from ._comparison import closed_answers, comparisons_settled, moment_of
 from .types.evaluation import (
     AgentMeasurementRequested,
     ContinuationJobsChanged,
@@ -80,9 +80,11 @@ def advance_evaluation(
     announced = _job_releases.job_release_signals(state, after.state, context)
     # So is every comparison the step settled, however the run that fed it ended, after the
     # step's own results.
-    settled = comparisons_settled(state, after.state, moment_of(context.run))
+    moment = moment_of(context.run)
+    settled = comparisons_settled(state, after.state, moment)
     return after.model_copy(
         update={
+            "state": closed_answers(after.state, moment),
             "signals": (*due.signals, *change.signals, *after.signals, *announced),
             "requests": (*due.requests, *change.requests, *after.requests),
             "events": (*due.events, *change.events, *after.events, *settled),

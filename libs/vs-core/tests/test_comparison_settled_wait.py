@@ -316,3 +316,36 @@ def test_the_result_handed_back_states_what_the_ledger_states_once_settled(
     run.advance_to(LIMIT * 3)
 
     assert run.published(Headline) == Headline(value=118.0)
+
+
+@pytest.mark.regression
+@RESTARTS
+@pytest.mark.parametrize("until", [7.0, 55.0])
+def test_a_settling_comparison_is_read_when_core_stops_restating_its_record(
+    *, restarting: bool, until: float
+) -> None:
+    """The flow's bound is the moment core stops restating the official record.
+
+    Core states it (``StatedComparison.answer_until``); the flow reads the ledger's record then,
+    and the record does not move after. Before, the flow kept its own bound, so a run that
+    landed between the two restated a record the round had already taken its figure from.
+    """
+    run = FlowRun.start(measuring_headline, Config(), restarting=restarting)
+    asked = run.expect(core.Measure)
+    run.view.changes["measurements"] = (benchmark(120.0),)
+    stated = core.StatedComparison(comparison=comparison(1), settling=True, answer_until=until)
+    run.view.changes["comparisons"] = (stated,)
+    request = asked.request
+    assert isinstance(request, core.Measure)
+    result = core.MeasurementResult(
+        scope=request.scope, evidence=(benchmark(120.0),), status=core.ObservationStatus.SUCCEEDED
+    )
+    run.answer(
+        asked,
+        core.MeasurementFinished(decision=asked.decision, result=result, comparison=comparison(1)),
+    )
+    assert run.sleeping_until == (until,)
+    run.view.changes["measurements"] = (benchmark(118.0),)
+    run.advance_to(until)
+
+    assert run.published(Headline) == Headline(value=118.0)

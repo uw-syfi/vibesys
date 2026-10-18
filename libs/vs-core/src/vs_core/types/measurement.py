@@ -13,7 +13,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
-from .common import Count, RequestId, RevisionRef, Scope, Seconds, Value
+from .common import Count, RequestId, RevisionRef, Scope, Seconds, Value, unset
 
 type Finite = Annotated[float, Field(allow_inf_nan=False)]
 type Direction = Literal["max", "min"]
@@ -175,6 +175,10 @@ class StatedComparison(Value):
 
     comparison: Comparison
     settling: bool
+    answer_until: Seconds | None = Field(default=None, exclude_if=unset)
+    """When the scope's latest official record of the candidate input stops moving
+    (``OwnedJob.answer_until``): a flow that waits for this comparison takes its verdict then
+    at the latest, on the record as it stands. None when no official run of it has ended."""
 
 
 class ComparisonSettled(Value):

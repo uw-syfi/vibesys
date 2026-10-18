@@ -291,6 +291,11 @@ class OwnedJob(Value):
     The job ended without its records, so core asked for them (``CollectEvidence``); until
     that request ends, whether the run gave a sample is not known, and the comparisons it
     serves take no replacement run (`vs_core._base_runs.after_run`)."""
+    answer_until: Seconds | None = Field(default=None, exclude_if=unset)
+    """For an ended official run: until when a sample that lands may still restate its answer
+    (`vs_core._comparison.restated_answers`). Set when the run ends, to ``SETTLE_RUNS`` times its
+    limit later, and brought forward to the step its comparison settles; from then on its
+    ledger record states the figure the flow that waited for it took its verdict on."""
     queue_credit: Seconds = 0
     """Seconds of queue time this job's facts earned: its limit counts from its start.
 

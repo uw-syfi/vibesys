@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import TypeAdapter
 
+from vs_core._comparison import SETTLE_RUNS
 from vs_core._registry import ContractError
 from vs_core._strategy_operations import (
     CommandCapture,
@@ -37,12 +38,6 @@ if TYPE_CHECKING:
 
 _REFS = TypeAdapter(tuple[EvidenceRef, ...])
 _STATED = TypeAdapter(StatedComparison | None)
-
-SETTLE_RUNS = 3
-"""How many measurement limits a flow waits at most for a comparison to settle, after the
-measurement that asked for it: one for each run a close call earns a side without a declared
-floor. Core reports the settling (``ComparisonSettled``); this bound only guards against a report
-that never comes."""
 
 
 class CaptureSpec(Value):
@@ -105,9 +100,11 @@ class Evaluation:
         after this measurement ends, so the comparison is awaited until no run that feeds it is
         under way, at most ``SETTLE_RUNS`` times the measurement's limit: a verdict taken on it
         rests on the runs a close call earns, never on the first one. Those runs restate the
-        official record's headline (`vs_core._comparison.restated_answers`), so the result's
-        records are handed back as the ledger states them then: the record and the comparison
-        state one value.
+        official record's headline (`vs_core._comparison.restated_answers`) until core closes
+        it, when the comparison settles or at the bound core states for it
+        (``StatedComparison.answer_until``), which is when this flow stops waiting. The
+        result's records are handed back as the ledger states them then, and the ledger keeps
+        that figure: the round's headline and the record cannot part.
         """
         found = await self._measure(plan, workspace, within, label, compared=True)
         if isinstance(found, Failed) or found.comparison is None:
@@ -144,9 +141,12 @@ class Evaluation:
 
         The run's view holds the comparison of each candidate input and whether runs that feed it
         are still under way. Until they have ended the flow waits for core to report that they
-        have (``ComparisonSettled``), and reads the view once more then; ``bound`` only guards
-        against a report that never comes. A comparison that went from the view (its base samples
-        went stale) is the last one seen. The wait journals no step of its own while it lasts.
+        have (``ComparisonSettled``), and reads the view once more then. A report that never
+        comes is bounded by the moment core stops restating the official record
+        (``StatedComparison.answer_until``), so the flow reads the record once it no longer
+        moves; ``bound`` from now only when no official record of it is held. A comparison that
+        went from the view (its base samples went stale) is the last one seen. The wait journals
+        no step of its own while it lasts.
         """
         subject = (comparison.scope, comparison.candidate_input, comparison.base_input)
         settled = self._kit.signal(
@@ -161,7 +161,10 @@ class Evaluation:
             if stated is None or not stated.settling:
                 return comparison if stated is None else stated.comparison
             seen = stated.comparison
-            await First((settled, self._kit.timer(self._kit.now() + bound)))
+            until = stated.answer_until
+            await First(
+                (settled, self._kit.timer(self._kit.now() + bound if until is None else until))
+            )
         finally:
             self._kit.run.release(settled)
         stated = self._kit.read(partial(_stated, comparison=seen), _STATED)

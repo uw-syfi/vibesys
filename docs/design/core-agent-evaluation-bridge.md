@@ -129,8 +129,12 @@ samples held (`vs_core._measurement_reuse`), and runs afresh only when the compa
 call that one more sample would narrow (not one that no run can settle). Its benchmark record enters the ledger stating the mean
 of the scope's samples of the input (`vs_core._comparison.as_answer`; a failed record keeps its
 own reading), and each later sample of the input in the scope restates it
-(`restated_answers`). `measure_compared` hands back the records as the ledger states them once
-the comparison settled, and the reading a strategy decodes from a record takes its headline from
+(`restated_answers`) while the answer is open (`OwnedJob.answer_until`): from the official
+run's end until the comparison settles, or at most `SETTLE_RUNS` times the run's limit. Core
+states that moment in the view (`StatedComparison.answer_until`), `measure_compared` stops
+waiting at it and hands back the records as the ledger states them then, and from then on the
+record, and every later official record of the input in the scope, states that figure. The
+reading a strategy decodes from a record takes its headline from
 the ledger's reading, so a candidate's headline in ranking is the value the comparison states; its other
 objectives are the answering run's own, and each run's own reading stays in its `Sample`.
 

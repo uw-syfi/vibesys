@@ -41,6 +41,7 @@ from ._comparison import (
     evaluation_of,
     fresh,
     moment_of,
+    opened_answer,
     remeasures_base,
     remeasures_candidate,
     restated_answers,
@@ -454,11 +455,14 @@ def record_samples(
     if sample is not None:
         sample = _with_known_base(state, sample)
         state = restated_answers(
-            state.model_copy(update={"samples": (*state.samples, sample)}), sample
+            state.model_copy(update={"samples": (*state.samples, sample)}),
+            sample,
+            context.run.now_at,
         )
         state = state.model_copy(update={"comparisons": _logged(state, context)})
     if not job.terminal:
         return AreaChange(state=state)
+    state = opened_answer(state, job, context.run.now_at)
     return after_run(AreaChange(state=state), context, job.submission_id)
 
 
