@@ -21,8 +21,8 @@ export type RunDigestEntry =
       readonly createdAt: number;
       /** The ideas the run tried; null when its journal predates the run trace and records none. */
       readonly ideas: number | null;
-      /** The best passed candidate's value as a multiple of the input's; null when none passed. */
-      readonly bestRatio: number | null;
+      /** The adopted result as a multiple of the input, as the run page headlines it; null when the run adopted nothing. */
+      readonly adoptedRatio: number | null;
       readonly durationSeconds: number | null;
       /** The run's own ending record's outcome, when its journal has one that names it. */
       readonly outcome: NonNullable<RunEnd>['outcome'] | null;
@@ -43,7 +43,7 @@ function read(digest: RunDigest, createdAt: number): RunDigestEntry {
     kind: 'read',
     createdAt,
     ideas: digest.ideas,
-    bestRatio: digest.best_ratio,
+    adoptedRatio: digest.adopted_ratio,
     durationSeconds: digest.duration_s,
     outcome: ending?.outcome ?? null,
     closing,

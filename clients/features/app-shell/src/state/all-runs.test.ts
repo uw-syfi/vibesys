@@ -51,7 +51,7 @@ const read = (over: Partial<Extract<RunDigestEntry, {kind: 'read'}>> = {}): RunD
   kind: 'read',
   createdAt: NOW - 2 * HOUR,
   ideas: 4,
-  bestRatio: 2,
+  adoptedRatio: 2,
   durationSeconds: 600,
   outcome: 'adopted',
   closing: 'finished',

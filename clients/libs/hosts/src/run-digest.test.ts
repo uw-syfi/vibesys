@@ -17,7 +17,7 @@ const read = (over: Partial<Read>): Read => ({
   kind: 'read',
   createdAt: 0,
   ideas: 0,
-  bestRatio: null,
+  adoptedRatio: null,
   durationSeconds: null,
   outcome: null,
   closing: null,
@@ -31,7 +31,7 @@ describe('digestEntries', () => {
       summary('a', {
         kind: 'digest',
         ideas: 2,
-        best_ratio: 1.5,
+        adopted_ratio: 1.5,
         duration_s: 10,
         ending: {outcome: 'adopted', summary: '', resumable: false, rounds_finished: 2},
         closing: null,
@@ -49,7 +49,7 @@ describe('digestEntries', () => {
       summary('a', {
         kind: 'digest',
         ideas: null,
-        best_ratio: null,
+        adopted_ratio: null,
         duration_s: 5,
         ending: null,
         closing: 'finished',
@@ -63,7 +63,7 @@ describe('digestEntries', () => {
       summary('a', {
         kind: 'digest',
         ideas: 0,
-        best_ratio: null,
+        adopted_ratio: null,
         duration_s: null,
         ending: null,
         closing: null,

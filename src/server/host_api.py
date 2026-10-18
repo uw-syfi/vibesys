@@ -1317,9 +1317,11 @@ class RunClosing(StrEnum):
 class RunDigest(BaseModel):
     """What a run's journal says at a glance, for a list row; never a replay of the run.
 
-    ``ideas`` counts the workstreams that ended (probes excluded) and ``best_ratio`` is the
-    best measured candidate that passed its gate, as a multiple of the input's value, by the
-    objective's direction; ``None`` when no gate passed. ``ideas`` is ``None`` for a journal
+    ``ideas`` counts the ideas the run page counts (one per hypothesis, probes excluded) and
+    ``adopted_ratio`` is the result the run's adoption span names, as the run page headlines it:
+    an improvement over the input (for a ``min`` objective, the input's value over the result's);
+    ``None`` when the run adopted nothing. The best raw reading of a gate is not it: that may be
+    an idea that later failed. ``ideas`` is ``None`` for a journal
     that predates the run trace (``TraceFormat.PREDATES_TRACE``): it records rounds, not ideas,
     so no count is true. ``duration_s`` runs from the
     journal's first event to the last step it recorded; ``None`` for a run with no events.
@@ -1332,7 +1334,7 @@ class RunDigest(BaseModel):
 
     kind: Literal["digest"] = "digest"
     ideas: NonNegativeInt | None
-    best_ratio: float | None
+    adopted_ratio: float | None
     duration_s: NonNegativeFloat | None
     ending: RunEndingFact | None
     closing: RunClosing | None

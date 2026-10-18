@@ -464,7 +464,7 @@ function reading(
       kind: found.kind,
       word: look.word,
       ok: found.tone === 'ok',
-      ratio: read?.bestRatio ?? null,
+      ratio: read?.adoptedRatio ?? null,
       ideas: read?.ideas ?? null,
     });
     return {look, status: found.kind, result, problem: null, kind: found.kind};

@@ -3504,7 +3504,7 @@
     },
     "RunDigest": {
       "additionalProperties": false,
-      "description": "What a run's journal says at a glance, for a list row; never a replay of the run.\n\n``ideas`` counts the workstreams that ended (probes excluded) and ``best_ratio`` is the\nbest measured candidate that passed its gate, as a multiple of the input's value, by the\nobjective's direction; ``None`` when no gate passed. ``ideas`` is ``None`` for a journal\nthat predates the run trace (``TraceFormat.PREDATES_TRACE``): it records rounds, not ideas,\nso no count is true. ``duration_s`` runs from the\njournal's first event to the last step it recorded; ``None`` for a run with no events.\n``ending`` is the run's ending record and ``closing`` its terminal event: both ``None``\nfor a run still going or one whose server died without a word, which is how a run's\nending is known after its registry tombstone expired (a day).",
+      "description": "What a run's journal says at a glance, for a list row; never a replay of the run.\n\n``ideas`` counts the ideas the run page counts (one per hypothesis, probes excluded) and\n``adopted_ratio`` is the result the run's adoption span names, as the run page headlines it:\nan improvement over the input (for a ``min`` objective, the input's value over the result's);\n``None`` when the run adopted nothing. The best raw reading of a gate is not it: that may be\nan idea that later failed. ``ideas`` is ``None`` for a journal\nthat predates the run trace (``TraceFormat.PREDATES_TRACE``): it records rounds, not ideas,\nso no count is true. ``duration_s`` runs from the\njournal's first event to the last step it recorded; ``None`` for a run with no events.\n``ending`` is the run's ending record and ``closing`` its terminal event: both ``None``\nfor a run still going or one whose server died without a word, which is how a run's\nending is known after its registry tombstone expired (a day).",
       "properties": {
         "kind": {
           "const": "digest",
@@ -3524,7 +3524,7 @@
           ],
           "title": "Ideas"
         },
-        "best_ratio": {
+        "adopted_ratio": {
           "anyOf": [
             {
               "type": "number"
@@ -3533,7 +3533,7 @@
               "type": "null"
             }
           ],
-          "title": "Best Ratio"
+          "title": "Adopted Ratio"
         },
         "duration_s": {
           "anyOf": [
@@ -3571,7 +3571,7 @@
       "required": [
         "kind",
         "ideas",
-        "best_ratio",
+        "adopted_ratio",
         "duration_s",
         "ending",
         "closing"

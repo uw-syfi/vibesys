@@ -81,4 +81,4 @@ def test_a_journal_from_before_the_trace_has_rounds_and_an_honest_end_but_no_ide
     assert digest.ideas is None
     assert digest.closing is not None
     assert digest.closing.value == "finished"
-    assert digest.best_ratio is None
+    assert digest.adopted_ratio is None
