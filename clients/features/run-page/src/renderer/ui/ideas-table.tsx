@@ -26,7 +26,7 @@ function badgeOf(row: IdeaRow, adopted: boolean): readonly RowBadge[] {
   if (adopted) return [{label: 'Adopted', tone: 'ok'}];
   if (row.outcome === 'failed') return [{label: 'Failed', tone: 'err'}];
   if (row.outcome === 'running') return [{label: 'Running', tone: 'live'}];
-  return [];
+  return [{label: 'Passed', tone: 'ok'}];
 }
 
 function byResult(

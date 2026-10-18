@@ -109,6 +109,10 @@ test('opening an idea preserves the Ideas list and controls at wide and narrow w
   await openRun(page, 10);
   const ideas = page.getByRole('listbox', {name: 'Ideas'});
   const controls = page.locator('.vs-pane', {has: ideas});
+  const detail = page.locator('.vs-pane[data-width="fill"]');
+  await expect(
+    ideas.locator('.vs-chip[data-tone="ok"]', {hasText: 'Passed'}).first(),
+  ).toBeVisible();
   const geometry = () =>
     ideas.evaluate(list => {
       const pane = list.closest('.vs-pane');
@@ -146,6 +150,14 @@ test('opening an idea preserves the Ideas list and controls at wide and narrow w
     if (process.env['RUN_SHOTS'] !== undefined) {
       await page.screenshot({path: `${process.env['RUN_SHOTS']}/ideas-open-${width}.png`});
     }
+    expect(await geometry()).toEqual(before);
+    await detail.getByRole('radio', {name: 'Logs'}).check({force: true});
+    await expect(detail.getByRole('radio', {name: 'Logs'})).toBeChecked();
+    await expect(ideas).toHaveAttribute('data-test-persist', 'yes');
+    await expect(controls.locator('.vs-dotlegend-item')).toHaveCount(3);
+    expect(await geometry()).toEqual(before);
+    await detail.getByRole('radio', {name: 'Steps'}).check({force: true});
+    await expect(detail.getByRole('radio', {name: 'Steps'})).toBeChecked();
     expect(await geometry()).toEqual(before);
     await page.getByRole('button', {name: 'Close idea'}).click();
     await expect(ideas).toHaveAttribute('data-test-persist', 'yes');

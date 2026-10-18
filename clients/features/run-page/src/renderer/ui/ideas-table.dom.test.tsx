@@ -102,10 +102,17 @@ test('ideas are flat, newest first, with an adopted pill and no lineage controls
   expect(screen.container.textContent).not.toContain('from input');
   expect(
     screen.container.querySelectorAll('[aria-label="Ideas"] .vs-chip[data-tone="ok"]'),
+  ).toHaveLength(6);
+  expect(
+    [...screen.container.querySelectorAll('[aria-label="Ideas"] .vs-chip[data-tone="ok"]')].filter(
+      chip => chip.textContent === 'Adopted',
+    ),
   ).toHaveLength(1);
   expect(
-    screen.container.querySelector('[aria-label="Ideas"] .vs-chip[data-tone="ok"]')?.textContent,
-  ).toBe('Adopted');
+    [...screen.container.querySelectorAll('[aria-label="Ideas"] .vs-chip[data-tone="ok"]')].filter(
+      chip => chip.textContent === 'Passed',
+    ),
+  ).toHaveLength(5);
   const adoptedRow = [
     ...screen.container.querySelectorAll('[aria-label="Ideas"] [role="option"]'),
   ].find(row => row.querySelector('.vs-chip[data-tone="ok"]') !== null);

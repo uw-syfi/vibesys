@@ -65,7 +65,11 @@ function LevelBody(props: {
   if (props.transcript !== null && (props.deep || props.route.mode === 'agents')) {
     return <HistoryLoading progress={props.transcript} />;
   }
-  if (props.route.mode === 'ideas' && props.zoomed.step === null && props.zoomed.agent === null) {
+  if (
+    props.zoomed.step === null &&
+    props.zoomed.agent === null &&
+    (props.route.mode === 'ideas' || props.zoomed.idea !== null)
+  ) {
     return <IdeasWorkspace {...props.level} idea={props.zoomed.idea} />;
   }
   return props.deep ? (
@@ -77,7 +81,7 @@ function LevelBody(props: {
 
 function showsBreadcrumb(route: Route, zoomed: ResolvedZoom): boolean {
   if (routeLevel(route) === 'run') return false;
-  return !(route.mode === 'ideas' && zoomed.idea !== null && zoomed.step === null);
+  return !(zoomed.idea !== null && zoomed.step === null && zoomed.agent === null);
 }
 
 function reason(offer: Offer): {disabledReason?: string} {
