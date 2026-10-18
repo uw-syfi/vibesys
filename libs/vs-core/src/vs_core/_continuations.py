@@ -163,12 +163,12 @@ def published_history(
 ) -> AttemptEvaluationHistory:
     """``history`` as it stood when core published ``cursor`` with a resume's authorization.
 
-    The scope may submit again between the authorization and the resume's dispatch (core's
-    own base run, earned by a close call of any attempt sharing the base, is one), and that
-    submission leaves the whole stored history incomplete until it ends. Coverage and records
-    only grow, so the prefix through ``cursor`` is what authorization proved. With nothing
-    submitted since, that is the stored history itself; no cursor, or one the stored coverage
-    does not hold, is an unavailable history.
+    The scope may submit again between the authorization and the resume's dispatch, and that
+    submission leaves the whole stored history incomplete until it ends. (Core's own runs in
+    the scope are not the attempt's history, so they never do: ``_evaluation_history``.)
+    Coverage and records only grow, so the prefix through ``cursor`` is what authorization
+    proved. With nothing submitted since, that is the stored history itself; no cursor, or one
+    the stored coverage does not hold, is an unavailable history.
     """
     if (
         cursor is None
