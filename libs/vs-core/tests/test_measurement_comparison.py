@@ -27,7 +27,7 @@ from .test_measurement_reuse import (
     seen,
     submissions,
 )
-from .test_measurements import committed, transition
+from .test_measurements import committed, plan, transition
 
 if TYPE_CHECKING:
     import random
@@ -469,6 +469,49 @@ def test_a_close_call_earns_the_base_one_more_run_and_a_decisive_result_does_not
     decisive.call("a", "far", "input-1")
     decisive.measure({"input-1": 300.0, "base": 100.0})
     assert len(decisive.baselines()) == 1
+
+
+def test_a_close_call_ended_by_the_strategys_base_run_is_sampled_again() -> None:
+    """The base run a close call earns is core's own, whichever job's end earned it.
+
+    The strategy measures the run's input (its ``Measure`` decision, in the run's scope) while
+    an agent's candidate runs. The base's end makes the close call, so core allocated the
+    extra base run while it stepped that decision's job, and stamped it with the decision.
+    The decision measured another scope, so the run's origin no longer proved out and its
+    reading was dropped: the comparison never got its second base sample.
+    """
+    lab = Lab.of("a")
+    run_scope = core.Scope(owner=lab.state.run.run_id, generation=lab.state.run.generation)
+    base_plan = plan(
+        purpose="baseline",
+        candidate=lab.state.run.facts.baseline,
+        measured_input="base",
+        dedicated_measurement_resources=True,
+    )
+    lab.state = transition(
+        lab.state,
+        core.DecisionSubmitted(
+            decision=core.Wait(
+                request=core.Measure(
+                    decision_id=core.DecisionId(root="baseline"), scope=run_scope, plan=base_plan
+                ),
+                until=core.Within(limit=100.0),
+            ),
+            expected_revision=lab.state.revision,
+        ),
+    ).state
+    (candidate,) = lab.call("a", "close", "input-1")
+    (base,) = lab.baselines()
+    for request, value in ((candidate, 100.3), (base, 100.0)):
+        assert request.request_id is not None
+        lab.ended.add(request.request_id.root)
+        lab.state = ended_with(lab.state, request, value)
+    (first,) = lab.comparisons()
+    assert core.close_call(first)
+    extra = [r for r in lab.baselines() if r.scope == candidate.scope]
+    assert [r.decision_id for r in extra] == [None], "the extra base run is core's own"
+    lab.measure({"input-1": 100.3, "base": 100.0})
+    assert [c.base_samples for c in lab.comparisons()] == [1, 2]
 
 
 def test_samples_of_one_input_aggregate_and_a_lucky_run_changes_nothing_but_the_mean() -> None:

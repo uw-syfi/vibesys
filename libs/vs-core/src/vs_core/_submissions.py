@@ -42,7 +42,7 @@ from .types.evaluation import (
     SubmitMeasurement,
 )
 from .types.kernel import AreaChange
-from .types.records import Outbound, inherit
+from .types.records import Attribution, Outbound, inherit
 
 if TYPE_CHECKING:
     from .types.common import DecisionId, Observation
@@ -211,11 +211,13 @@ def allocate(
     )
     # A measurement decision waits as long as its wait says; an agent's own submission, as
     # long as the limit parsed from its call says. Neither is a field of the plan.
+    # The origin names the decision, if any: core's own base run and an agent's call have
+    # none, whatever decision's step allocates them.
     outbound = (
         inherit(request)
         if decision_id is not None or origin.within is None
         else Outbound(request=request, until=origin.within)
-    )
+    ).model_copy(update={"attribution": Attribution.OWN})
     return AreaChange(
         state=state.model_copy(update={"submission_budgets": budgets}), requests=(outbound,)
     )

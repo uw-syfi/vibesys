@@ -108,16 +108,32 @@ type Request = Annotated[
 ]
 
 
+class Attribution(StrEnum):
+    """Where a request core creates takes its ``decision_id`` and ``admission_id`` from."""
+
+    CAUSE = "cause"
+    """The step that creates it: an unset field is filled from the decision and admission
+    of the signal being handled, for a request that is that decision's own work."""
+    OWN = "own"
+    """The request itself, as the reducer built it; an unset ``decision_id`` stays unset.
+
+    For a request whose id names what it belongs to (a job's poll or cancel, a submission
+    core allocates for an agent's call or a base run): any signal in a step may ask for
+    it, so filling it from the asker would give one id a payload per asker."""
+
+
 class Outbound(Value):
     """A request together with how long it may take: the one way core creates a request.
 
     ``until`` is a ``Within`` (a duration from now, plus watches) or ``Inherited`` (the
     same ``Until`` as the decision that caused the request). Requests carry no deadline;
     core stores the resolved ``Until`` on the ``RequestRecord`` when it registers this.
+    ``attribution`` says whether the step's cause may fill the request's decision.
     """
 
     request: Request
     until: Within | Inherited | Until | FromDispatch
+    attribution: Attribution = Attribution.CAUSE
 
 
 def within(request: Request, limit: float, *watches: Watch) -> Outbound:

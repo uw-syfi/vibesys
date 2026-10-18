@@ -108,6 +108,7 @@ from .types.kernel import (
     Transition,
 )
 from .types.records import (
+    Attribution,
     BlockedRecordStalled,
     BlockRequest,
     CancelOwnedResource,
@@ -808,24 +809,30 @@ def propagate(
         pending.extend((child, cause, admission_id) for child in change.signals)
         _validate_area_outputs(state, area, change, cause)
         requests.extend(
-            _resolve(
-                state,
-                outbound.model_copy(
-                    update={
-                        "request": outbound.request.model_copy(
-                            update={
-                                "decision_id": outbound.request.decision_id or cause,
-                                "admission_id": outbound.request.admission_id or admission_id,
-                            }
-                        )
-                    }
-                ),
-                cause,
-            )
+            _resolve(state, _attributed(outbound, cause, admission_id), cause)
             for outbound in change.requests
         )
         events.extend(change.events)
     return _end_fired_watches(_registered_transition(state, requests, events), dispatch)
+
+
+def _attributed(
+    outbound: Outbound, cause: DecisionId | None, admission_id: DecisionId | None
+) -> Outbound:
+    """``outbound`` with the decision and admission it belongs to (see ``Attribution``)."""
+    if outbound.attribution is Attribution.OWN:
+        return outbound
+    request = outbound.request
+    return outbound.model_copy(
+        update={
+            "request": request.model_copy(
+                update={
+                    "decision_id": request.decision_id or cause,
+                    "admission_id": request.admission_id or admission_id,
+                }
+            )
+        }
+    )
 
 
 def _end_fired_watches(transition: Transition, dispatch: Dispatch) -> Transition:
