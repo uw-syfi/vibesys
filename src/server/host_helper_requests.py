@@ -140,8 +140,8 @@ if TYPE_CHECKING:
     from server.host_examples import CreatedProject, ExampleList
     from server.host_preflight import PreflightReport
     from server.registry import InstanceInspector, LiveRegistry, StopEffects
-    from server.relay import Dialer
     from server.run_summary import Summarized
+    from vs_project.api import OperatorDialer
     from vs_sim.api import Clock, Connection
 
 SCAN_LIMIT: Final = 10_000
@@ -419,7 +419,7 @@ class HelperHost:
     directories: Directories
     launcher: RunLauncher
     checkout: CheckoutProbe
-    dialer: Dialer
+    dialer: OperatorDialer
     vibesys_version: str
     harnesses: Callable[[], tuple[HarnessOption, ...]]
     """The vetted provider and model pairs, read when a request needs them: the list

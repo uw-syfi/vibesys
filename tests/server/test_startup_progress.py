@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from tests.server.support import RecordingObserver, build_server_parts
+from tests.server.support import CONTROL_KEY, RecordingObserver, build_server_parts
 
 from entrypoints.production import production_runs
 from server.events import EventType, RunStartupProgressData
@@ -99,6 +99,7 @@ def _detached_runtime(tmp_path: Path, observer: RecordingObserver) -> ServerRunt
         detach=True,
         observer=observer,
         platform=Platform.real(),
+        control_key=CONTROL_KEY,
     )
 
 

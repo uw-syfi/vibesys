@@ -7,6 +7,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.server.support import CONTROL_KEY
 from tests.support.core_plugins import failing_plugin
 from tests.support.real_git import REAL_PROCESSES
 from tests.support.task_project import write_task
@@ -196,6 +197,7 @@ def test_server_entry_starts_launch_run_and_projects_events(tmp_path: Path) -> N
         socket_path=tmp_path / "control.sock",
         runs=runs,
         platform=Platform.real(),
+        control_key=CONTROL_KEY,
     )
     try:
         result = runtime.drive(_request(tmp_path / "project"))
@@ -242,6 +244,7 @@ def test_server_retains_chat_after_run_result_and_releases_it_on_close(tmp_path:
         socket_path=tmp_path / "control.sock",
         runs=runs,
         platform=Platform.real(),
+        control_key=CONTROL_KEY,
     )
     try:
         runtime.drive(_request(tmp_path / "project"))

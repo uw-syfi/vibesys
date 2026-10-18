@@ -107,7 +107,7 @@ depends_on = ["vibesys.api", "vs_prompts", "server", "server.controller", "serve
 
 [[modules]]
 path = "server.transport"
-depends_on = ["vs_decode.api", "server.api", "server.registry", "vs_async_ops.api", "vs_sim.api"]
+depends_on = ["vs_decode.api", "server.api", "server.registry", "vs_async_ops.api", "vs_project", "vs_sim.api"]
 
 [[modules]]
 path = "server.controller"
@@ -183,7 +183,7 @@ depends_on = ["server.diagnostics", "server.host_api"]
 [[modules]]
 # Asks a live server to stop over its control socket (control envelope only).
 path = "server.instances"
-depends_on = ["vs_decode.api", "server.control_envelope", "vs_sim.api"]
+depends_on = ["vs_decode.api", "server.control_envelope", "vs_project", "vs_sim.api"]
 
 [[modules]]
 path = "server.trace"
@@ -203,7 +203,7 @@ depends_on = ["server.host_api"]
 
 [[modules]]
 path = "server.runtime"
-depends_on = ["server.read_model", "server.chat", "server.events", "server.execution", "server.journal", "vibesys.api", "server.integration", "server.api", "server.controller", "server.transport", "server.diagnostics", "server.host_api", "vs_sim.api"]
+depends_on = ["server.read_model", "server.chat", "server.events", "server.execution", "server.journal", "vibesys.api", "server.integration", "server.api", "server.controller", "server.transport", "server.diagnostics", "server.host_api", "vs_project", "vs_sim.api"]
 
 [[modules]]
 # The per-connection stdio relay to a run's control socket, used by the host helper's
@@ -221,7 +221,7 @@ depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_requests",
 [[modules]]
 # The host helper's request answering: one request through the host's interfaces.
 path = "server.host_helper_requests"
-depends_on = ["vs_decode.api", "server.host_api", "server.host_examples", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_events", "server.registry", "server.relay", "server.run_summary", "vs_sim.api"]
+depends_on = ["vs_decode.api", "server.host_api", "server.host_examples", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_events", "server.registry", "server.relay", "server.run_summary", "vs_project", "vs_sim.api"]
 
 [[modules]]
 # The host helper's `logs` feature: chunking, tails and the long poll over the LogReader role.

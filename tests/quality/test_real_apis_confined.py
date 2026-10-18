@@ -904,6 +904,7 @@ REAL_API_EDGES: dict[Key, str] = {
     **{
         (relative, "fs_sync"): f"{_OWN_STORE}: {what}"
         for relative, what in (
+            ("libs/vs-project/src/vs_project/_operator_key.py", "the operator key file"),
             ("libs/vs-project/src/vs_project/_state.py", "the project state lock file"),
             ("libs/vs-project/src/vs_project/_state_io.py", "atomic state file replacement"),
             ("libs/vs-project/src/vs_project/_state_store.py", "LocalStateStore's lock file"),
@@ -1240,6 +1241,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
     "libs/vs-project/src/vs_project/_cli_git_repository.py": (
         EdgeKind.STORE,
         "GitRepository implementation over the git CLI (git state is files)",
+    ),
+    "libs/vs-project/src/vs_project/_operator_key.py": (
+        EdgeKind.STORE,
+        "the operator key file, created once with O_EXCL and read with O_NOFOLLOW",
     ),
     "libs/vs-project/src/vs_project/_exclude_file.py": (
         EdgeKind.STORE,

@@ -1,16 +1,35 @@
-"""Whether a confined agent can connect to its run's control socket, per backend (#3133).
+"""What a confined agent can reach of its run's operator control, per backend, for real.
 
-A run's server listens on ``control.sock`` in the user's runtime directory (the path
-``server.registry.instance_socket_path`` derives). Whoever connects can send any operator
-control, including a cancel of another attempt. This suite binds a real listening socket at
-that path and runs a probe under each confinement backend, built the way a run builds it,
-that tries to connect.
+A run's server listens on ``control.sock`` in the user's runtime root (the path
+``server.registry.instance_socket_path`` derives), and whoever it serves can send any
+operator control, including a cancel of another attempt (#3133). The socket serves only a
+connection that first presents the operator key (``vs_project.api.OperatorKey``), and the
+key lives in the runtime root, which every confinement keeps out of the agent's view
+(``vs_sandbox.operator_root``).
 
-The expected results pin today's behavior. Bubblewrap and Docker do not show the runtime
-directory to the agent, so the connection fails. Landlock has no right that governs
-connecting to a pathname socket, and Seatbelt's profile allows ``network*``, so the probe
-connects there. Those two cases are strict ``xfail`` against #3133: the fix makes them
-pass, and strictness then fails the suite until the marker is removed.
+This suite serves a real control socket at that path and runs probes under each
+confinement backend, built the way a run builds it:
+
+- The key probe does what an agent would: it reads the key file if it can, connects,
+  sends the hello it could make and a snapshot query, and prints the reply. Bubblewrap and
+  Docker must not even show the socket (``ENOENT`` or ``ECONNREFUSED``). Landlock and
+  Seatbelt let it connect (no Landlock right covers connecting to a pathname socket, and
+  the Seatbelt profile allows ``network*``), so there the socket must answer
+  ``control_key_refused``.
+- The swap probe moves the socket aside and binds its own in its place, to read the next
+  client's hello. In the runtime root it must fail under every backend. In a directory
+  Landlock grants (host ``/tmp``, where the web socket used to live) it succeeds,
+  so the operator's dialer must refuse to present the key there at all.
+- The egress probe connects to the user's D-Bus and the Docker daemon socket, either of
+  which runs any command as the operator outside the confinement. A backend whose type
+  claims the operator-control boundary
+  (``WorkspaceSandbox.claims_operator_control_boundary``) must keep both out of reach. One
+  that does not (Landlock, Seatbelt) is pinned to the known gap: the probe connects. A fix
+  that closes it fails that assertion, and the fix then flips the claim.
+
+Landlock grants ``/tmp``, so the suite moves the runtime root under the account's home, as
+an operator with ``XDG_RUNTIME_DIR`` at ``/run/user/<uid>`` has it; a root under a Landlock
+grant is refused when the sandbox is built (``libs/vs-sandbox/tests/test_operator_root.py``).
 
 Bubblewrap, Landlock and Seatbelt skip on a host without them (CI's ``sandbox_tests``
 group sets ``VIBESYS_REQUIRE_SANDBOX_TESTS=1`` and gets a failure instead). Docker is
@@ -23,25 +42,36 @@ VIBESYS_E2E_DOCKER=1 uv run pytest tests/e2e/test_control_socket_reachability_e2
 
 from __future__ import annotations
 
+import json
 import os
 import pwd
+import shlex
 import shutil
-import socket
+import stat
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 import pytest
+from tests.server.support import REQUEST_TIME, build_server_parts
 from tests.support import run_test_command
 
+from server.api.protocol import ProtocolErrorMessage, SnapshotQuery
 from server.registry import (
     instance_root,
-    instance_run_directory,
     instance_socket_path,
     new_instance_id,
 )
+from server.transport.unix_jsonl import ControlKeyRefusedError, UnixJsonlServer
 from vibesys.run.environment import open_run_environment
+from vs_project.api import (
+    OperatorDialer,
+    OperatorSocketOutsideRootError,
+    create_operator_key,
+    operator_key_path,
+)
 from vs_runtime.api.infrastructure import (
     EnvironmentSystem,
     RunEnvironmentRequest,
@@ -51,6 +81,7 @@ from vs_runtime.api.infrastructure import (
 from vs_sandbox import host_sandbox, landlock
 from vs_sandbox.api import (
     ComputeBackend,
+    DockerSandbox,
     ProjectPathPolicy,
     SandboxUnavailableError,
     SubprocessDockerCli,
@@ -79,25 +110,94 @@ _DOCKER_ENV = "VIBESYS_E2E_DOCKER"
 _BASE_IMAGE = os.environ.get("VIBESYS_E2E_DOCKER_BASE_IMAGE", "python:3.12-bookworm")
 _ENV = {"HOME": "/home/socket-probe", "PATH": "/usr/bin:/bin"}
 
-#: Prints ``connected`` or ``refused <errno name>``; any other output means the probe
-#: itself did not run, which must not pass for a refusal.
-_PROBE = (
-    "import errno, socket, sys\n"
-    "s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
-    "try:\n"
-    "    s.connect(sys.argv[1])\n"
-    "except OSError as e:\n"
-    "    print('refused', errno.errorcode.get(e.errno, e.errno))\n"
-    "else:\n"
-    "    print('connected')\n"
-)
+#: Arguments: the socket, the key file, and the request line. Prints one JSON object:
+#: ``key`` (the key file's contents, or an errno name), ``connect`` (``ok`` or an errno
+#: name) and ``reply`` (the first line the socket sent back, or ``null``). Output that is
+#: not that object means the probe did not run, which must not pass for a refusal.
+_PROBE = """\
+import errno, json, socket, sys
+socket_path, key_path, request = sys.argv[1:4]
+seen = {"key": None, "connect": None, "reply": None}
+hello = ""
+try:
+    with open(key_path) as key_file:
+        seen["key"] = key_file.read()
+    hello = json.dumps({"control_key": seen["key"].strip()}, separators=(",", ":")) + "\\n"
+except OSError as error:
+    seen["key"] = errno.errorcode.get(error.errno, str(error.errno))
+connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+connection.settimeout(30)
+try:
+    connection.connect(socket_path)
+    seen["connect"] = "ok"
+    connection.sendall((hello + request + "\\n").encode())
+    reply = b""
+    while not reply.endswith(b"\\n"):
+        chunk = connection.recv(65536)
+        if not chunk:
+            break
+        reply += chunk
+    seen["reply"] = reply.decode() or None
+except OSError as error:
+    seen["connect"] = seen["connect"] or errno.errorcode.get(error.errno, str(error.errno))
+print(json.dumps(seen))
+"""
 
-#: Only the reachability assertion may fail: a probe that did not run fails the test
-#: through ``pytest.fail``, which this marker does not excuse.
-_OPEN_ISSUE = pytest.mark.xfail(
-    raises=AssertionError,
-    strict=True,
-    reason="#3133: an agent under this backend can connect to its run's control socket",
+#: Argument: the socket. Moves it aside and binds a listener in its place, as an agent
+#: stealing the next hello would. Prints ``rename`` and ``bind`` (``ok`` or an errno name).
+_SWAP_PROBE = """\
+import errno, json, os, socket, sys
+socket_path = sys.argv[1]
+seen = {"rename": None, "bind": None}
+def name(error):
+    return errno.errorcode.get(error.errno, str(error.errno))
+try:
+    os.rename(socket_path, socket_path + ".real")
+    seen["rename"] = "ok"
+except OSError as error:
+    seen["rename"] = name(error)
+listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+try:
+    listener.bind(socket_path)
+    listener.listen(1)
+    seen["bind"] = "ok"
+except OSError as error:
+    seen["bind"] = name(error)
+print(json.dumps(seen))
+"""
+
+#: Arguments: sockets. Prints ``{path: "ok" or an errno name}``, one per connect attempt.
+_EGRESS_PROBE = """\
+import errno, json, socket, sys
+seen = {}
+for path in sys.argv[1:]:
+    connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    connection.settimeout(30)
+    try:
+        connection.connect(path)
+        seen[path] = "ok"
+    except OSError as error:
+        seen[path] = errno.errorcode.get(error.errno, str(error.errno))
+    finally:
+        connection.close()
+print(json.dumps(seen))
+"""
+
+_REQUEST = SnapshotQuery(timestamp=REQUEST_TIME).model_dump_json()
+
+#: Sockets that run any command as the operator outside every confinement. The bus is
+#: systemd's per-user one; the test session moves ``XDG_RUNTIME_DIR``, so it is not read.
+_EGRESS_TARGETS = {
+    "user-bus": Path("/run/user") / str(os.getuid()) / "bus",
+    "docker": Path("/var/run/docker.sock"),
+}
+#: What a probe sees of a socket its confinement keeps out of its view.
+_UNREACHABLE = frozenset({"ENOENT", "ECONNREFUSED"})
+_KNOWN_GAP = (
+    "known gap, pinned on purpose: {backend} does not restrict connect() to pathname Unix "
+    "sockets, so the agent reaches {target} and escapes through it "
+    "(docs/contributing/sandboxing.md, Known limits). If this assertion fails, the gap is "
+    "closed: set {backend}.claims_operator_control_boundary = True and update the docs."
 )
 
 
@@ -108,40 +208,84 @@ def _absent(reason: str) -> NoReturn:
     pytest.skip(reason)
 
 
-@pytest.fixture
-def control_socket() -> Iterator[Path]:
-    """A listening socket where a run's server binds its control socket."""
-    root = instance_root(os.environ, os.getuid())
-    instance = new_instance_id()
-    directory = instance_run_directory(root, instance)
-    directory.mkdir(mode=0o700, parents=True)
-    path = instance_socket_path(root, instance)
-    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    # The kernel queues a probe's connection; nothing here accepts, so nothing blocks.
-    listener.settimeout(HANG_GUARD_S)
-    try:
-        listener.bind(str(path))
-        listener.listen(4)
-        yield path
-    finally:
-        listener.close()
-        path.unlink(missing_ok=True)
-        directory.rmdir()
+@dataclass(frozen=True)
+class _ControlSocket:
+    """A served control socket, the operator key file it demands, and the operator's dialer."""
+
+    path: Path
+    key_file: Path
+    dialer: OperatorDialer
 
 
 @pytest.fixture
-def workspace() -> Iterator[Path]:
-    """A project directory outside ``/tmp``: Landlock refuses a project under a granted tree.
+def probe_root() -> Iterator[Path]:
+    """A directory outside ``/tmp``: Landlock refuses a project or runtime root under a grant.
 
     The test session moves ``HOME`` under ``/tmp``, so the account's own home is read
     from the password database.
     """
     parent = Path(pwd.getpwuid(os.getuid()).pw_dir) / ".cache"
     parent.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=parent, prefix="vibesys-socket-probe-") as root:
-        project = Path(root) / "project"
-        project.mkdir()
-        yield project
+    with tempfile.TemporaryDirectory(dir=parent, prefix="vs-sock-") as root:
+        yield Path(root)
+
+
+@pytest.fixture
+def control_socket(probe_root: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[_ControlSocket]:
+    """A run's control socket, served where a run's server binds it, with the real key."""
+    runtime = probe_root / "run"
+    runtime.mkdir(mode=0o700)
+    # The operator's environment: the server, its clients and every confinement built
+    # below read the runtime root from it.
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
+    root = instance_root(os.environ, os.getuid())
+    key = create_operator_key(os.environ, os.getuid())
+    path = instance_socket_path(root, new_instance_id())
+    threads = OsThreads()
+    parts = build_server_parts(threads=threads)
+    network = UnixNetwork()
+    # The operator's own client, as `vibesys instances` and the host helper build it.
+    dialer = OperatorDialer.for_user(network, os.environ, os.getuid())
+    try:
+        with UnixJsonlServer(path, parts.api, None, threads, network, key=key):
+            served = _ControlSocket(path, operator_key_path(os.environ, os.getuid()), dialer)
+            assert _served(_reply_to_operator(served))
+            yield served
+    finally:
+        parts.close()
+
+
+@pytest.fixture
+def workspace(probe_root: Path) -> Path:
+    """The confined project, beside the runtime root."""
+    project = probe_root / "project"
+    project.mkdir()
+    return project
+
+
+def _reply_to_operator(served: _ControlSocket) -> str:
+    """What the socket answers the operator's own client: the control that must keep working."""
+    connection = served.dialer.connect(str(served.path), HANG_GUARD_S)
+    try:
+        connection.send(_REQUEST.encode() + b"\n", HANG_GUARD_S)
+        reply = b""
+        while not reply.endswith(b"\n"):
+            chunk = connection.recv(65536, HANG_GUARD_S)
+            if not chunk:
+                break
+            reply += chunk
+    finally:
+        connection.close()
+    return reply.decode()
+
+
+def _served(reply: str | None) -> bool:
+    """Whether ``reply`` is the socket serving the request, not refusing the connection."""
+    if not reply:
+        return False
+    message = json.loads(reply)
+    diagnostic = message.get("diagnostic") or {}
+    return diagnostic.get("code") != ControlKeyRefusedError.diagnostic_code
 
 
 def _bubblewrap(workspace: Path) -> WorkspaceSandbox:
@@ -186,31 +330,44 @@ def _seatbelt(workspace: Path) -> WorkspaceSandbox:
 _INTERPRETER = "/usr/bin/python3" if sys.platform.startswith("linux") else sys.executable
 
 
-def _connects(output: str) -> bool:
-    """Whether the probe connected; fails the test if the probe did not run."""
+def _probe_saw(output: str, fields: set[str]) -> dict[str, str | None]:
+    """What the probe saw; fails the test if the probe did not run."""
     lines = output.strip().splitlines()
-    verdict = lines[-1] if lines else ""
-    if verdict != "connected" and not verdict.startswith("refused "):
+    try:
+        seen = json.loads(lines[-1]) if lines else None
+    except json.JSONDecodeError:
+        seen = None
+    if not isinstance(seen, dict) or set(seen) != fields:
         pytest.fail(f"the probe did not run: {output!r}")
-    return verdict == "connected"
+    return seen
 
 
-@pytest.mark.parametrize(
-    "build",
-    [
-        pytest.param(_bubblewrap, id="bubblewrap"),
-        pytest.param(_landlock, id="landlock", marks=_OPEN_ISSUE),
-        pytest.param(_seatbelt, id="seatbelt", marks=_OPEN_ISSUE),
-    ],
-)
-def test_a_host_confined_agent_cannot_reach_the_control_socket(
-    build: Callable[[Path], WorkspaceSandbox],
-    control_socket: Path,
-    workspace: Path,
+def _assert_refused(
+    seen: dict[str, str | None], served: _ControlSocket, sandbox: WorkspaceSandbox
 ) -> None:
-    sandbox = build(workspace)
+    """The probe did not read the key, and could not reach or was refused by the socket.
+
+    A confinement that claims the operator-control boundary must not show the socket at
+    all. Where the socket is visible, only a connected probe that read the server's
+    ``control_key_refused`` passes: a reset, a timeout or an empty reply proves nothing.
+    """
+    key = served.key_file.read_text()
+    assert seen["key"] != key, "the confined probe read the operator key"
+    if sandbox.claims_operator_control_boundary:
+        assert seen["connect"] in _UNREACHABLE, f"the confined probe reached the socket: {seen}"
+        return
+    assert seen["connect"] == "ok", f"the probe could not connect, so nothing was tested: {seen}"
+    reply = seen["reply"]
+    assert reply, f"the socket sent the probe nothing: {seen}"
+    refusal = ProtocolErrorMessage.model_validate_json(reply)
+    assert refusal.diagnostic is not None, refusal
+    assert refusal.diagnostic.code == ControlKeyRefusedError.diagnostic_code, refusal
+
+
+def _run_confined(sandbox: WorkspaceSandbox, workspace: Path, probe: str, *arguments: str) -> str:
+    """Run ``probe`` under ``sandbox`` with the system interpreter; return its stdout."""
     result = run_test_command(
-        sandbox.wrap([_INTERPRETER, "-I", "-c", _PROBE, str(control_socket)]),
+        sandbox.wrap([_INTERPRETER, "-I", "-c", probe, *arguments]),
         capture_output=True,
         text=True,
         check=False,
@@ -220,11 +377,133 @@ def test_a_host_confined_agent_cannot_reach_the_control_socket(
     )
     if result.returncode != 0:
         pytest.fail(f"the probe exited {result.returncode}: {result.stderr}")
-    assert not _connects(result.stdout), result.stdout
+    return result.stdout
 
 
-def test_an_agent_in_a_docker_run_environment_cannot_reach_the_control_socket(
-    control_socket: Path, tmp_path: Path
+_HOST_BACKENDS = [
+    pytest.param(_bubblewrap, id="bubblewrap"),
+    pytest.param(_landlock, id="landlock"),
+    pytest.param(_seatbelt, id="seatbelt"),
+]
+
+
+@pytest.mark.parametrize("build", _HOST_BACKENDS)
+def test_a_host_confined_agent_is_refused_by_the_control_socket(
+    build: Callable[[Path], WorkspaceSandbox],
+    control_socket: _ControlSocket,
+    workspace: Path,
+) -> None:
+    sandbox = build(workspace)
+    output = _run_confined(
+        sandbox,
+        workspace,
+        _PROBE,
+        str(control_socket.path),
+        str(control_socket.key_file),
+        _REQUEST,
+    )
+
+    _assert_refused(_probe_saw(output, {"key", "connect", "reply"}), control_socket, sandbox)
+
+
+@pytest.mark.parametrize("build", _HOST_BACKENDS)
+def test_a_host_confined_agent_cannot_swap_the_control_socket(
+    build: Callable[[Path], WorkspaceSandbox],
+    control_socket: _ControlSocket,
+    workspace: Path,
+) -> None:
+    """The runtime root is not the agent's to write, so the operator's next hello is safe."""
+    sandbox = build(workspace)
+    output = _run_confined(sandbox, workspace, _SWAP_PROBE, str(control_socket.path))
+
+    seen = _probe_saw(output, {"rename", "bind"})
+    assert seen["rename"] != "ok", f"the confined probe moved the control socket: {seen}"
+    assert seen["bind"] != "ok", f"the confined probe bound the control socket's path: {seen}"
+    assert _served(_reply_to_operator(control_socket))
+
+
+def test_the_operator_presents_no_key_to_a_socket_landlock_lets_the_agent_swap(
+    control_socket: _ControlSocket, workspace: Path
+) -> None:
+    """In a directory Landlock grants, the swap works; the operator's dialer refuses it.
+
+    This is where the web socket used to live (a temporary directory in host
+    ``/tmp``). The agent replaces the socket with its own listener, and the operator's
+    client, which would have sent its hello to that listener, refuses before connecting.
+    """
+    sandbox = _landlock(workspace)
+    assert isinstance(sandbox, LandlockSandbox)
+    granted = next(
+        (Path(root) for root in sandbox.scratch_write_roots if Path(root).name == "tmp"), None
+    )
+    if granted is None or not granted.is_dir():
+        pytest.skip("this Landlock ruleset grants no host tmp directory")
+    threads = OsThreads()
+    parts = build_server_parts(threads=threads)
+    network = UnixNetwork()
+    key = create_operator_key(os.environ, os.getuid())
+    try:
+        with tempfile.TemporaryDirectory(dir=granted, prefix="vibesys-session-") as session:
+            legacy = Path(session) / "control.sock"
+            with UnixJsonlServer(legacy, parts.api, None, threads, network, key=key):
+                output = _run_confined(sandbox, workspace, _SWAP_PROBE, str(legacy))
+                seen = _probe_saw(output, {"rename", "bind"})
+                # The attack works here: the agent now owns what answers at this path.
+                assert seen == {"rename": "ok", "bind": "ok"}, seen
+                assert stat.S_ISSOCK(legacy.lstat().st_mode)
+                with pytest.raises(OperatorSocketOutsideRootError):
+                    control_socket.dialer.connect(str(legacy), HANG_GUARD_S)
+    finally:
+        parts.close()
+
+
+@pytest.mark.parametrize("build", _HOST_BACKENDS)
+@pytest.mark.parametrize("target", sorted(_EGRESS_TARGETS))
+def test_a_host_confined_agent_reaches_the_user_bus_and_docker_only_where_the_gap_is_known(
+    build: Callable[[Path], WorkspaceSandbox],
+    target: str,
+    control_socket: _ControlSocket,
+    workspace: Path,
+) -> None:
+    """Only a confinement that does not claim the operator-control boundary lets them through.
+
+    Either socket gives a full escape: ``systemd-run --user --pipe cat <key>`` over the
+    bus, or a container with the host's filesystem over Docker.
+    """
+    del control_socket  # Only for its runtime root, outside every Landlock grant.
+    path = _EGRESS_TARGETS[target]
+    _require_reachable_on_host(path)
+    sandbox = build(workspace)
+    seen = json.loads(_run_confined(sandbox, workspace, _EGRESS_PROBE, str(path)))[str(path)]
+
+    if sandbox.claims_operator_control_boundary:
+        assert seen in _UNREACHABLE, f"{type(sandbox).__name__} let the agent reach {path}: {seen}"
+    else:
+        assert seen == "ok", _KNOWN_GAP.format(backend=type(sandbox).__name__, target=path)
+
+
+def _require_reachable_on_host(path: Path) -> None:
+    """Skip unless the operator, unconfined, can connect to ``path``: else nothing is probed."""
+    try:
+        if not stat.S_ISSOCK(path.stat().st_mode):
+            pytest.skip(f"{path} is not a socket on this host")
+    except OSError:
+        pytest.skip(f"{path} does not exist on this host")
+    seen = json.loads(
+        run_test_command(
+            [sys.executable, "-I", "-c", _EGRESS_PROBE, str(path)],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+        ).stdout
+    )[str(path)]
+    if seen != "ok":
+        pytest.skip(f"the operator cannot connect to {path} either ({seen})")
+
+
+def test_an_agent_in_a_docker_run_environment_is_refused_by_the_control_socket(
+    control_socket: _ControlSocket, tmp_path: Path
 ) -> None:
     if os.environ.get(_DOCKER_ENV) != "1" or shutil.which("docker") is None:
         pytest.skip(f"set {_DOCKER_ENV}=1 with docker on PATH to run against a real daemon")
@@ -261,13 +540,36 @@ def test_an_agent_in_a_docker_run_environment_cannot_reach_the_control_socket(
     )
     session = open_run_environment(build_run_environment(RunEnvironmentSpec("docker")), request)
     try:
-        script = _PROBE.replace("'", "'\"'\"'")
-        result = session.sandbox.execute(
-            f"python3 -I -c '{script}' {control_socket}", output=DISCARD
+        sandbox = session.sandbox
+        key_probe = sandbox.execute(
+            shlex.join(
+                [
+                    "python3",
+                    "-I",
+                    "-c",
+                    _PROBE,
+                    str(control_socket.path),
+                    str(control_socket.key_file),
+                    _REQUEST,
+                ]
+            ),
+            output=DISCARD,
+        )
+        targets = [str(path) for path in _EGRESS_TARGETS.values()]
+        egress_probe = sandbox.execute(
+            shlex.join(["python3", "-I", "-c", _EGRESS_PROBE, *targets]), output=DISCARD
         )
     finally:
         session.close()
 
-    if result.exit_code != 0:
-        pytest.fail(f"the probe exited {result.exit_code}: {result.output}")
-    assert not _connects(result.output), result.output
+    for result in (key_probe, egress_probe):
+        if result.exit_code != 0:
+            pytest.fail(f"the probe exited {result.exit_code}: {result.output}")
+    # The run environment's agent confinement is its started container.
+    assert isinstance(sandbox, DockerSandbox)
+    assert sandbox.claims_operator_control_boundary
+    _assert_refused(
+        _probe_saw(key_probe.output, {"key", "connect", "reply"}), control_socket, sandbox
+    )
+    egress = _probe_saw(egress_probe.output, set(targets))
+    assert set(egress.values()) <= _UNREACHABLE, f"the container reached a host socket: {egress}"

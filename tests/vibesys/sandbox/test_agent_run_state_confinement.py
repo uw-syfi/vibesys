@@ -156,7 +156,11 @@ def test_landlock_names_the_run_record_among_the_hidden_paths_it_cannot_enforce(
 ) -> None:
     root = tmp_path / "project"
     _project_with_run_record(root, "run-1")
-    sandbox = LandlockSandbox(workspace=root, project_path_policy=_policy(root))
+    # ``/tmp`` is dropped from the scratch roots: the test session's runtime root lives
+    # under it, and Landlock refuses a grant that reaches the operator's runtime root.
+    sandbox = LandlockSandbox(
+        workspace=root, project_path_policy=_policy(root), scratch_write_roots=("/dev", "/proc")
+    )
 
     gaps = "\n".join(sandbox.unenforced_policy())
 

@@ -36,6 +36,7 @@ from server.host_api import (
 from server.registry import FileInstanceStore, instance_root
 from server.relay import EXIT_STATUS
 from server.transport.unix_jsonl import UnixJsonlServer
+from vs_project.api import create_operator_key
 from vs_sim.api import OsThreads, UnixNetwork
 from vs_sim.api.testing import swept
 
@@ -66,15 +67,29 @@ def _sampled(group: tuple[str, ...]) -> list[str]:
 
 
 @pytest.fixture
-def env(tmp_path: Path) -> dict[str, str]:
-    runtime = tmp_path / "runtime"
-    runtime.mkdir(mode=0o700)
-    return {**os.environ, "XDG_RUNTIME_DIR": str(runtime), "PYTHONPATH": os.pathsep.join(sys.path)}
+def env(socket_dir: Path) -> dict[str, str]:
+    """A user environment whose runtime root holds the run sockets.
+
+    The helper dials a run's control socket only inside the user's runtime
+    root, so the runtime directory is the shallow ``socket_dir`` and every run
+    socket in these tests sits under its ``vibesys`` directory.
+    """
+    socket_dir.chmod(0o700)
+    (socket_dir / "vibesys").mkdir(mode=0o700)
+    return {
+        **os.environ,
+        "XDG_RUNTIME_DIR": str(socket_dir),
+        "PYTHONPATH": os.pathsep.join(sys.path),
+    }
 
 
 @contextmanager
 def _registered(env: Mapping[str, str], socket_path: Path) -> Iterator[None]:
-    """A live record for ``_INSTANCE_ID`` naming ``socket_path``, as a detached server publishes."""
+    """A live record for ``_INSTANCE_ID`` naming ``socket_path``, as a detached server publishes.
+
+    A detached server creates the operator key as it starts, and the helper only reads it.
+    """
+    create_operator_key(env, os.getuid())
     hold = FileInstanceStore(instance_root(env, os.getuid())).hold(_INSTANCE_ID)
     try:
         hold.publish(
@@ -161,7 +176,13 @@ def _bridged(
     with (
         _registered(env, socket_path),
         UnixJsonlServer(
-            socket_path, parts.api, subscriptions=None, threads=OsThreads(), network=UnixNetwork()
+            socket_path,
+            parts.api,
+            subscriptions=None,
+            threads=OsThreads(),
+            network=UnixNetwork(),
+            # The key the helper subprocess finds in the runtime root it is given.
+            key=create_operator_key(env, os.getuid()),
         ),
     ):
         connection = _BridgeConnection(env)
@@ -181,7 +202,7 @@ def test_bootstrap_scenarios_cross_the_bridge(
     for index in range(_HISTORY_EVENTS):
         parts.journal.publish_output("stdout", f"conformance-{index}")
     try:
-        with _bridged(env, parts, socket_dir / "bridge.sock") as connection:
+        with _bridged(env, parts, socket_dir / "vibesys" / "bridge.sock") as connection:
             batch = run_steps(connection, load_scenario(scenario_name))[-1]
         expected_floor = (
             parts.api.latest_sequence - 50 if scenario_name == "tail-bootstrap-spine-prepend" else 0
@@ -197,7 +218,7 @@ def test_control_scenarios_cross_the_bridge(
 ) -> None:
     parts = build_server_parts(tmp_path / "logs")
     try:
-        with _bridged(env, parts, socket_dir / "bridge.sock") as connection:
+        with _bridged(env, parts, socket_dir / "vibesys" / "bridge.sock") as connection:
             assert len(run_steps(connection, load_scenario(scenario_name))) == 1
     finally:
         parts.close()
@@ -210,7 +231,7 @@ def test_tail_overflow_rebootstrap_crosses_the_bridge(
     steps = load_scenario(scenario_name)["steps"]
     parts = build_server_parts(tmp_path / "logs")
     try:
-        with _bridged(env, parts, socket_dir / "bridge.sock") as connection:
+        with _bridged(env, parts, socket_dir / "vibesys" / "bridge.sock") as connection:
             connection.send(steps[0]["frame"])
             assert_frame_matches(connection.receive(), steps[1]["expect"])
             assert_frame_matches(connection.receive(), steps[2]["expect"])
@@ -227,7 +248,7 @@ def test_tail_overflow_rebootstrap_crosses_the_bridge(
 def test_a_missing_socket_is_answered_run_gone_and_the_channel_stays_a_request_channel(
     env: dict[str, str], socket_dir: Path
 ) -> None:
-    with _registered(env, socket_dir / "absent.sock"):
+    with _registered(env, socket_dir / "vibesys" / "absent.sock"):
         connection = _BridgeConnection(env)
     assert (connection.connected["type"], connection.connected["code"]) == ("error", "run_gone")
     assert connection.finish() == (0, b"")
@@ -236,7 +257,7 @@ def test_a_missing_socket_is_answered_run_gone_and_the_channel_stays_a_request_c
 def test_a_server_close_relays_the_last_frame_then_exits_as_server_closed(
     env: dict[str, str], socket_dir: Path
 ) -> None:
-    path = socket_dir / "closing.sock"
+    path = socket_dir / "vibesys" / "closing.sock"
     final = {"type": "protocol_error", "message": "stream failed"}
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
         listener.bind(str(path))

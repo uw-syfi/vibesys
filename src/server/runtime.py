@@ -91,6 +91,7 @@ if TYPE_CHECKING:
     from server.events import RunEvent
     from server.host_api import RunStatus
     from vibesys.api import RunHandle, RunRequest, RunResult, Runs, RunSession
+    from vs_project.api import OperatorKey
     from vs_sim.api import Platform
 
 
@@ -193,6 +194,7 @@ class ServerRuntime:
         self,
         *,
         socket_path: Path,
+        control_key: OperatorKey,
         runs: Runs,
         run_id: str | None = None,
         project_root: Path | None = None,
@@ -215,6 +217,9 @@ class ServerRuntime:
         thread the server creates; its network binds the Unix control socket and its
         blocking runner runs the web gateway's synchronous requests.
 
+        ``control_key`` is the operator key a client of the control socket must present
+        before anything is served.
+
         ``run_id`` names the run every journaled event belongs to, from the
         first; only a read-only reopen (``read_only_log``) takes it from the
         recorded events instead.
@@ -225,6 +230,7 @@ class ServerRuntime:
         self.network = platform.network
         self.runs = runs
         self.socket_path = socket_path
+        self._control_key = control_key
         self.web = web
         self.web_port = web_port
         self.web_assets = web_assets
@@ -353,6 +359,7 @@ class ServerRuntime:
                         threads=self.threads,
                         network=self.network,
                         subscriptions=subscriptions,
+                        key=self._control_key,
                     )
                 )
                 # Registered after the transport, so it runs before the

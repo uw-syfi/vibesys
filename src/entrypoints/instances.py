@@ -39,6 +39,7 @@ from server.registry import (
     instance_root,
     parse_instance_id,
 )
+from vs_project.api import OperatorDialer
 from vs_sim.api import OsThreads, PidfdProcessSignaller, SystemClock, UnixNetwork
 
 
@@ -209,7 +210,9 @@ def main(argv: list[str] | None = None) -> int:
             ),
             effects=StopEffects(
                 requester=ControlSocketStopRequester(
-                    UnixNetwork(), clock=epoch, deadline_clock=threads
+                    OperatorDialer.for_user(UnixNetwork(), os.environ, os.getuid()),
+                    clock=epoch,
+                    deadline_clock=threads,
                 ),
                 signaller=PidfdProcessSignaller(),
                 clock=threads,

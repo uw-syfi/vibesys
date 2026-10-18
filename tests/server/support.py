@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tests.support.real_git import REAL_GIT
@@ -23,7 +24,7 @@ from vibesys.orchestration.agent_options import (
     AgentOrchestrationOptions,
 )
 from vibesys.run.event_journal import EventJournal as CoreEventJournal
-from vs_project.api import OrchestrationDescriptor
+from vs_project.api import OperatorDialer, OperatorKey, OrchestrationDescriptor
 from vs_runtime.api.infrastructure import (
     ChannelRunControl,
     RunControlChannel,
@@ -42,7 +43,6 @@ from vs_sim.api.testing import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     from server.chat.factory import ChatAgentBuilder
     from server.host_api import (
@@ -60,6 +60,19 @@ if TYPE_CHECKING:
 
 REQUEST_TIME = datetime(2026, 1, 1, tzinfo=UTC)
 """The stamp a test gives a request or response it builds."""
+CONTROL_KEY = OperatorKey("5" * 64)
+"""The operator key every test server demands and every test client presents."""
+ANY_SOCKET_ROOT = Path("/")
+"""A dialer root that contains every socket, for tests not about where the socket lives.
+
+``libs/vs-project/tests/test_operator_key.py`` pins that a dialer refuses a socket outside
+its root; the transport and lifecycle tests here bind theirs in temporary directories.
+"""
+
+
+def operator_dialer(network: Network) -> OperatorDialer:
+    """The operator's dialer over ``network``: it presents :data:`CONTROL_KEY` anywhere."""
+    return OperatorDialer(network, CONTROL_KEY, root=ANY_SOCKET_ROOT)
 
 
 class RecordingObserver:

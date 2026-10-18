@@ -27,7 +27,13 @@ from urllib.request import urlopen
 import pytest
 from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
-from tests.server.support import DEADLOCK_GUARD_S, REQUEST_TIME, ServerParts, build_server_parts
+from tests.server.support import (
+    CONTROL_KEY,
+    DEADLOCK_GUARD_S,
+    REQUEST_TIME,
+    ServerParts,
+    build_server_parts,
+)
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import ServerConnection, serve
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK, InvalidStatus
@@ -2006,6 +2012,7 @@ def test_a_half_open_subscriber_is_reaped_by_the_keepalive_and_lets_the_run_fini
                 tracker,
                 threads=OsThreads(),
                 network=UnixNetwork(),
+                key=CONTROL_KEY,
             ) as unix,
             WebSocketGateway(
                 parts.api,
@@ -2076,6 +2083,7 @@ def test_a_subscriber_that_stops_draining_is_abandoned_at_the_write_deadline(
                 tracker,
                 threads=OsThreads(),
                 network=UnixNetwork(),
+                key=CONTROL_KEY,
             ) as unix,
             WebSocketGateway(
                 parts.api,

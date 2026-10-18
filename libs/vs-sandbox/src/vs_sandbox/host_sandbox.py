@@ -65,11 +65,12 @@ import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from vs_sandbox import landlock
 from vs_sandbox.host_resource_importer import prepare_host_resource_imports
 from vs_sandbox.linked_worktree import linked_worktree_git_paths
+from vs_sandbox.operator_root import exposed_grant, exposure_message, operator_root
 from vs_sandbox.project_paths import ProjectPathPolicy
 from vs_sim.api import SubprocessProbe
 
@@ -212,6 +213,25 @@ class WorkspaceSandbox(ABC):
     #: sandbox was constructed directly. Named apart from the public ``env``
     #: property below so the two do not collide on a frozen dataclass.
     build_env: Mapping[str, str] | None = None
+    #: The operator's runtime root (:mod:`vs_sandbox.operator_root`), which the agent
+    #: must never reach: it holds the key to the run's control socket. A backend that
+    #: can only grant refuses to construct a view that overlaps it; Seatbelt denies it.
+    operator_root: Path = field(default_factory=operator_root, kw_only=True)
+    #: Whether this confinement claims a boundary against operator control and the host:
+    #: the agent can neither read the operator's runtime root nor connect to a pathname
+    #: Unix socket outside its view, such as the run's control socket, the user's D-Bus
+    #: (``$XDG_RUNTIME_DIR/bus``, which runs any command through ``systemd-run --user``)
+    #: or the Docker daemon (``/var/run/docker.sock``). Bubblewrap and Docker build a view
+    #: without those paths, so they claim it. Landlock has no right covering ``connect`` on
+    #: a pathname socket and Seatbelt's profile allows ``network*``, so neither does;
+    #: ``tests/e2e/test_control_socket_reachability_e2e.py`` probes both answers.
+    claims_operator_control_boundary: ClassVar[bool]
+
+    def _refuse_operator_root(self, backend: str, granted: Iterable[Path | str]) -> None:
+        """Raise ``SandboxUnavailableError`` if any of ``granted`` reaches the operator root."""
+        grant = exposed_grant(self.operator_root, granted)
+        if grant is not None:
+            raise SandboxUnavailableError(exposure_message(backend, self.operator_root, grant))
 
     @abstractmethod
     def wrap(self, argv: list[str], cwd: Path | str | None = None) -> list[str]:
@@ -265,6 +285,30 @@ class HostSandbox(WorkspaceSandbox):
     #: private writable tmpfs in the namespace, next to ``/tmp``.
     temp_dirs: tuple[str, ...] = ()
 
+    claims_operator_control_boundary: ClassVar[bool] = True
+
+    def __post_init__(self) -> None:
+        """Refuse a namespace that would bind the operator's runtime root."""
+        self._refuse_exposed_root()
+
+    def _refuse_exposed_root(self) -> None:
+        """Raise ``SandboxUnavailableError`` if any bind would reach the operator's root.
+
+        Run when the sandbox is built and again by every :meth:`wrap`, which binds the
+        paths as they resolve then: a granted symlink retargeted into the root since
+        construction is caught there.
+        """
+        self._refuse_operator_root(
+            "bubblewrap",
+            (
+                *self.system_read_roots,
+                *self.read_paths,
+                *self.write_paths,
+                *self.gpu_device_nodes,
+                self.workspace,
+            ),
+        )
+
     def _temp_dir_mounts(self) -> list[str]:
         """Return the ``--tmpfs`` arguments for the host's scratch paths.
 
@@ -286,6 +330,7 @@ class HostSandbox(WorkspaceSandbox):
         backend always confines to :attr:`workspace`.
         """
         del cwd
+        self._refuse_exposed_root()
         ws = str(self.workspace.resolve())
         project_paths = self.project_path_policy.resolve(self.workspace)
         cmd: list[str] = [
@@ -419,6 +464,33 @@ class LandlockSandbox(WorkspaceSandbox):
     system_read_roots: tuple[str, ...] = _SYSTEM_READ_ROOTS
     scratch_write_roots: tuple[str, ...] = _LINUX_SCRATCH_WRITE_ROOTS
 
+    claims_operator_control_boundary: ClassVar[bool] = False
+
+    def __post_init__(self) -> None:
+        """Refuse a ruleset that would grant the operator's runtime root."""
+        self._refuse_exposed_root()
+
+    def _refuse_exposed_root(self) -> None:
+        """Raise ``SandboxUnavailableError`` if any grant would reach the operator's root.
+
+        Landlock rules only add rights, so a granted tree that contains the root (``/tmp``
+        does, when ``XDG_RUNTIME_DIR`` is unset and the root falls back to
+        ``/tmp/vibesys-<uid>``) cannot be narrowed to leave it out. Run when the sandbox
+        is built and again by every :meth:`policy`, which grants the paths as they resolve
+        then: a granted symlink retargeted into the root since construction is caught
+        there.
+        """
+        self._refuse_operator_root(
+            "Landlock",
+            (
+                *self.system_read_roots,
+                *self.read_paths,
+                *self.scratch_write_roots,
+                *self.write_paths,
+                self.workspace,
+            ),
+        )
+
     def unenforced_policy(self) -> tuple[str, ...]:
         """Return human-readable policy tiers this backend cannot enforce."""
         policy = self.project_path_policy
@@ -445,6 +517,7 @@ class LandlockSandbox(WorkspaceSandbox):
                 take it back, so the run must not proceed believing itself
                 confined.
         """
+        self._refuse_exposed_root()
         workspace = self.workspace.resolve()
         write_roots = (
             *(Path(root) for root in self.scratch_write_roots),
@@ -524,6 +597,10 @@ class SeatbeltSandbox(WorkspaceSandbox):
     sandbox_exec_path: str = field(kw_only=True)
     system_read_roots: tuple[str, ...] = _MACOS_SYSTEM_READ_ROOTS
 
+    #: The profile allows ``network*``, so a pathname socket outside the view (Docker
+    #: Desktop's, say) stays reachable. By analogy with Landlock; not probed on macOS.
+    claims_operator_control_boundary: ClassVar[bool] = False
+
     def blind_roots(self) -> list[Path]:
         """Project ancestor directories to deny for sibling isolation.
 
@@ -585,6 +662,14 @@ class SeatbeltSandbox(WorkspaceSandbox):
             lines += [f"    (subpath {_sbpl_string(str(r))})" for r in blind]
             lines.append(")")
             lines.append(f"(allow file-read* file-write* (subpath {ws}))")
+
+        # The operator's runtime root holds the control socket's key; deny it after
+        # every allow, so the last matching rule keeps it out of reach.
+        lines.append(
+            _seatbelt_path_rule(
+                "deny file-read* file-write*", self.operator_root.resolve(), is_directory=True
+            )
+        )
 
         # Project restrictions come after every project allow. Hidden paths
         # deny both visibility and mutation; read-only paths deny mutation.
@@ -727,16 +812,32 @@ def build(  # noqa: PLR0913  # lint-waiver: LW-010194 [PLR0913]; Preserve build'
         )
         return _unavailable(message, require_enforcement=require_enforcement, log=_log)
 
+    sandbox: WorkspaceSandbox | None = None
     if sys.platform.startswith("linux"):
-        return _build_linux(workspace, options)
-    if sys.platform == "darwin":
-        return _build_macos(workspace, options)
+        sandbox = _build_linux(workspace, options)
+    elif sys.platform == "darwin":
+        sandbox = _build_macos(workspace, options)
+    else:
+        return _unavailable(
+            _no_backend_message(), require_enforcement=require_enforcement, log=_log
+        )
+    if sandbox is not None and not sandbox.claims_operator_control_boundary:
+        _log(
+            f"[hostsandbox] NOT A BOUNDARY against operator control or the host: "
+            f"{type(sandbox).__name__} cannot stop the agent connecting to a pathname Unix "
+            "socket, so the user's D-Bus ($XDG_RUNTIME_DIR/bus) or the Docker socket "
+            "(/var/run/docker.sock) would let it run any command as you, outside the "
+            "confinement. Use bubblewrap or the default Docker run environment where that "
+            "matters."
+        )
+    return sandbox
 
-    message = (
+
+def _no_backend_message() -> str:
+    return (
         f"[hostsandbox] no host confinement backend for {sys.platform!r}; agent "
         "runs unconfined. Use the default Docker run environment for an externally sandboxed run."
     )
-    return _unavailable(message, require_enforcement=require_enforcement, log=_log)
 
 
 def build_remote_job_prefix(

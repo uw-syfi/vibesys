@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.server.support import REQUEST_TIME
+from tests.server.support import CONTROL_KEY, REQUEST_TIME, operator_dialer
 from tests.support.real_git import NO_GITHUB, REAL_GIT
 
 from entrypoints.production import production_runs
@@ -101,7 +101,7 @@ class _Subscriber:
     """A client's event stream, read until the run's terminal status."""
 
     def __init__(self, socket_path: Path) -> None:
-        self.connection = UnixNetwork().connect(str(socket_path), HANG_GUARD_S)
+        self.connection = operator_dialer(UnixNetwork()).connect(str(socket_path), HANG_GUARD_S)
         self.seen: list[str] = []
         self.subscribed = threading.Event()
         self.stopped = threading.Event()
@@ -156,6 +156,7 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
         run_id="run-1",
         runs=production_runs(),
         socket_path=socket_path,
+        control_key=CONTROL_KEY,
         detach=True,
         platform=Platform.real(),
     )
@@ -210,7 +211,9 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
             instance_id,
             StopEffects(
                 ControlSocketStopRequester(
-                    UnixNetwork(), clock=SystemClock(), deadline_clock=threads
+                    operator_dialer(UnixNetwork()),
+                    clock=SystemClock(),
+                    deadline_clock=threads,
                 ),
                 _NoSignal(),
                 threads,

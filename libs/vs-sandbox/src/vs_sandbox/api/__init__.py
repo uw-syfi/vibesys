@@ -126,6 +126,7 @@ if TYPE_CHECKING:
     from vs_sandbox.local_compute_backend import LocalBackend
     from vs_sandbox.local_shell import LocalShellRunner
     from vs_sandbox.modal_model_setup import ensure_model_volume
+    from vs_sandbox.operator_root import exposed_grant, operator_root
     from vs_sandbox.rocm_backend import RocmBackend
     from vs_sandbox.toolchain_features import (
         CONTAINER_RUNTIME_TOOLCHAIN,
@@ -237,10 +238,12 @@ __all__ = [
     "deduplicate_host_resources",
     "ensure_model_volume",
     "execute_as_root",
+    "exposed_grant",
     "feature_project_problems",
     "host_resource_for_mount",
     "linked_worktree_git_paths",
     "observe_removal",
+    "operator_root",
     "option_env_name",
     "parse_feature_metadata",
     "parse_gpu_info_output",
@@ -371,6 +374,8 @@ _LAZY_EXPORTS = {
     "start_sandbox": ("lifecycle", "start_sandbox"),
     "stop_sandbox": ("lifecycle", "stop_sandbox"),
     "linked_worktree_git_paths": ("linked_worktree", "linked_worktree_git_paths"),
+    "exposed_grant": ("operator_root", "exposed_grant"),
+    "operator_root": ("operator_root", "operator_root"),
     "LocalShellRunner": ("local_shell", "LocalShellRunner"),
     "ensure_model_volume": ("modal_model_setup", "ensure_model_volume"),
 }

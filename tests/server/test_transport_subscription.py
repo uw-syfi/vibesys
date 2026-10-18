@@ -14,7 +14,14 @@ from typing import Literal, Never, TypedDict, Unpack
 import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
-from tests.server.support import REQUEST_TIME, ServerParts, Task, build_server_parts
+from tests.server.support import (
+    CONTROL_KEY,
+    REQUEST_TIME,
+    ServerParts,
+    Task,
+    build_server_parts,
+    operator_dialer,
+)
 
 from server.api.protocol import (
     EventsQuery,
@@ -170,6 +177,7 @@ def _subscribed_client(
         # so a reader never waits on an absent reply, only on a slow one.
         client.settimeout(HANG_GUARD_S)
         client.connect(str(socket_path))
+        client.sendall(CONTROL_KEY.hello())
         with client.makefile("rwb") as stream:
             stream.write(request.model_dump_json().encode() + b"\n")
             stream.flush()
@@ -181,7 +189,12 @@ def _live_subscription(api: RunApi, request: SubscribeRequest) -> Generator[Call
     socket_path = Path(tempfile.gettempdir()) / f"vibesys-test-{uuid.uuid4().hex}.sock"
     with (
         UnixJsonlServer(
-            socket_path, api, subscriptions=None, threads=OsThreads(), network=UnixNetwork()
+            socket_path,
+            api,
+            subscriptions=None,
+            threads=OsThreads(),
+            network=UnixNetwork(),
+            key=CONTROL_KEY,
         ),
         _subscribed_client(socket_path, request) as read,
     ):
@@ -864,7 +877,12 @@ def test_disconnect_wait_blocks_until_last_subscriber_closes(
     request = SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0)
 
     with UnixJsonlServer(
-        socket_path, parts.api, subscriptions=None, threads=OsThreads(), network=UnixNetwork()
+        socket_path,
+        parts.api,
+        subscriptions=None,
+        threads=OsThreads(),
+        network=UnixNetwork(),
+        key=CONTROL_KEY,
     ) as server:
         with _subscribed_client(socket_path, request) as read:
             assert read()["type"] == "subscribed"
@@ -924,7 +942,12 @@ def test_an_idle_stream_paces_itself_through_the_injected_threads(tmp_path: Path
 
     with (
         UnixJsonlServer(
-            socket_path, parts.api, threads=threads, subscriptions=None, network=UnixNetwork()
+            socket_path,
+            parts.api,
+            threads=threads,
+            subscriptions=None,
+            network=UnixNetwork(),
+            key=CONTROL_KEY,
         ),
         _subscribed_client(socket_path, request) as read,
     ):
@@ -975,9 +998,14 @@ def test_a_store_swap_mid_stream_replays_the_new_store_from_its_start(
             store_id=first_store if request_store == "named" else "",
         )
         with UnixJsonlServer(
-            root / "control.sock", parts.api, threads=threads, network=network, subscriptions=None
+            root / "control.sock",
+            parts.api,
+            threads=threads,
+            network=network,
+            subscriptions=None,
+            key=CONTROL_KEY,
         ):
-            client = network.connect(str(root / "control.sock"))
+            client = operator_dialer(network).connect(str(root / "control.sock"))
             client.send(request.model_dump_json().encode() + b"\n")
             read = _sim_lines(client)
             assert json.loads(read())["type"] == "subscribed"
@@ -1041,6 +1069,7 @@ def test_terminal_drain_refuses_a_late_unix_subscription(
             subscriptions=None,
             threads=threads,
             network=network,
+            key=CONTROL_KEY,
         ) as server:
             with parts.condition:
                 watermark = DeliveryWatermark(
@@ -1048,7 +1077,7 @@ def test_terminal_drain_refuses_a_late_unix_subscription(
                     sequence=parts.journal.latest_sequence_locked(),
                 )
             assert server.wait_until_delivered(watermark, 0.0)
-            client = network.connect(str(root / "control.sock"))
+            client = operator_dialer(network).connect(str(root / "control.sock"))
             client.send(request.model_dump_json().encode() + b"\n")
             refusal = json.loads(_sim_lines(client)())
             client.close()

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.server.support import REQUEST_TIME, sim_platform
+from tests.server.support import CONTROL_KEY, REQUEST_TIME, operator_dialer, sim_platform
 from tests.support.real_git import NO_GITHUB, REAL_GIT
 
 from entrypoints.production import production_runs
@@ -144,13 +144,14 @@ def test_a_subscriber_reads_the_event_that_ends_the_run_before_the_server_closes
             socket_path=socket_path,
             detach=ending.detach,
             platform=sim_platform(threads, network=network),
+            control_key=CONTROL_KEY,
         )
         seen: list[list[str]] = []
         read = threads.event()
 
         def subscriber() -> None:
             assert runtime.transport_listening.wait(HANG_GUARD_S)
-            client = network.connect(str(socket_path))
+            client = operator_dialer(network).connect(str(socket_path))
             client.send(
                 SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0)
                 .model_dump_json()
@@ -183,7 +184,7 @@ class _Subscription:
     """One client's event stream, read a message at a time on ``SimNetwork``."""
 
     def __init__(self, network: SimNetwork, socket_path: Path) -> None:
-        self._connection = network.connect(str(socket_path), HANG_GUARD_S)
+        self._connection = operator_dialer(network).connect(str(socket_path), HANG_GUARD_S)
         self._connection.send(
             SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0).model_dump_json().encode()
             + b"\n"
@@ -238,6 +239,7 @@ def _runtime(socket_path: Path, threads: SimThreads, network: SimNetwork) -> Ser
         runs=production_runs(),
         socket_path=socket_path,
         platform=sim_platform(threads, network=network),
+        control_key=CONTROL_KEY,
     )
 
 

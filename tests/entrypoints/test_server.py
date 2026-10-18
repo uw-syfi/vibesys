@@ -1129,6 +1129,9 @@ def test_web_main_uses_ephemeral_socket_and_web_runtime(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    runtime = tmp_path / "runtime"
+    runtime.mkdir(mode=0o700)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
     observed: dict[str, object] = {}
     invocation = object()
     request = SimpleNamespace(resolved_run_id="run-1", resolved_project_root=tmp_path.resolve())
@@ -1163,6 +1166,8 @@ def test_web_main_uses_ephemeral_socket_and_web_runtime(
     assert isinstance(observed["socket_path"], Path)
     assert observed["socket_path"].name == "control.sock"
     assert observed["socket_path"].parent.name.startswith("vibesys-web-")
+    # In the runtime root, where no confined agent can write and where clients dial.
+    assert observed["socket_path"].parent.parent == runtime / "vibesys"
     options = observed["options"]
     assert isinstance(options, dict)
     assert options["web"] is True

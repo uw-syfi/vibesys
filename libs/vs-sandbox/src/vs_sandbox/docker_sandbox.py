@@ -13,7 +13,7 @@ import uuid
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, override
+from typing import TYPE_CHECKING, ClassVar, Protocol, override
 
 from vs_project.api import atomic_write_bytes
 from vs_sandbox.command_execution import execute_command
@@ -37,8 +37,10 @@ from vs_sandbox.docker_states import (
     released,
 )
 from vs_sandbox.host_resources import HostResourceAccess
-from vs_sandbox.host_sandbox import WorkspaceSandbox
+from vs_sandbox.host_sandbox import SandboxUnavailableError, WorkspaceSandbox
 from vs_sandbox.lifecycle import SandboxLifecycle, SandboxLifecycleHooks
+from vs_sandbox.operator_root import exposed_grant, exposure_message
+from vs_sandbox.operator_root import operator_root as default_operator_root
 from vs_sandbox.process_execution import KILL, PipedStoppableProcess, RemoteProcesses
 from vs_sim.api import DISCARD, NotReleasedError, ProcessTimeoutError
 
@@ -306,6 +308,12 @@ class DockerSandbox(WorkspaceSandbox):
     __eq__ = object.__eq__
     __hash__ = object.__hash__
 
+    #: The container sees only its mounts, none of which may reach the operator's runtime
+    #: root, and neither the user's D-Bus nor the Docker daemon's socket is mounted (a
+    #: Slurm run's command broker socket is, and serves only its brokered commands), so it
+    #: claims the boundary.
+    claims_operator_control_boundary: ClassVar[bool] = True
+
     def __repr__(self) -> str:
         """Return a debug repr that never touches the unset dataclass fields."""
         return f"DockerSandbox(image={self._image!r}, container_id={self._container_id!r})"
@@ -338,6 +346,7 @@ class DockerSandbox(WorkspaceSandbox):
         docker_in_docker: bool = False,
         same_path_workspace: bool = False,
         run_id: str | None = None,
+        operator_root: Path | None = None,
     ) -> None:
         """Initialize Docker sandbox configuration.
 
@@ -424,6 +433,10 @@ class DockerSandbox(WorkspaceSandbox):
             run_id: Id of the run this container belongs to, recorded as the
                 :data:`RUN_ID_LABEL` label. ``None`` leaves the container
                 unlabelled.
+            operator_root: The operator's runtime root, which no mount may
+                reach (:mod:`vs_sandbox.operator_root`); this process's own by
+                default. A mount that reaches it raises
+                ``SandboxUnavailableError``.
         """
         if docker_in_docker and (gpus is not None or devices):
             message = (
@@ -458,6 +471,14 @@ class DockerSandbox(WorkspaceSandbox):
         self._env = env or {}
         self._resources: tuple[HostResource, ...] = tuple(resources)
         self._bind_mounts = list(bind_mounts or []) + _bind_mounts_for_resources(self._resources)
+        # The container sees only what is mounted, so no mount may reach the operator's
+        # runtime root, which holds the key to the run's control socket.
+        root = default_operator_root() if operator_root is None else operator_root
+        grant = exposed_grant(
+            root, [host_workspace, *(host_path for host_path, _, _ in self._bind_mounts)]
+        )
+        if grant is not None:
+            raise SandboxUnavailableError(exposure_message("Docker", root, grant))
         self._agent_path_map: tuple[tuple[str, str], ...] = _agent_path_map(
             host_workspace, self._container_root, self._resources
         )

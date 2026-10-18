@@ -51,7 +51,7 @@ from server.runtime import (
     browser_origin,
 )
 from vibesys.api import ConfigurationError
-from vs_project.api import Project
+from vs_project.api import Project, create_operator_key
 from vs_sim.api import (
     OsThreads,
     Platform,
@@ -951,7 +951,12 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
         )
     temp_socket_dir: tempfile.TemporaryDirectory[str] | None = None
     if control_socket is None:
-        temp_socket_dir = tempfile.TemporaryDirectory(prefix="vibesys-web-")
+        # In the operator's runtime root, where no confined agent can write: in a shared
+        # /tmp an agent could move the socket aside and bind its own to read the operator
+        # key a client presents. Clients refuse a socket anywhere else (OperatorDialer).
+        temp_socket_dir = tempfile.TemporaryDirectory(
+            prefix="vibesys-web-", dir=instance_root(os.environ, os.getuid())
+        )
         control_socket = Path(temp_socket_dir.name) / "control.sock"
     try:
         request = (
@@ -968,9 +973,11 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
         project_root = None if request is None else request.resolved_project_root
         server_runtime = import_module("server.runtime").ServerRuntime
         platform = Platform.real()
+        control_key = create_operator_key(os.environ, os.getuid())
         if web:
             runtime = server_runtime(
                 socket_path=control_socket,
+                control_key=control_key,
                 runs=production_runs() if runs is None else runs,
                 run_id=run_id,
                 project_root=project_root,
@@ -987,6 +994,7 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
         else:
             runtime = server_runtime(
                 socket_path=control_socket,
+                control_key=control_key,
                 runs=production_runs() if runs is None else runs,
                 run_id=run_id,
                 project_root=project_root,

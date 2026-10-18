@@ -145,7 +145,7 @@ class TestLandlockPolicyCompilation:
         assert argv[-3:] == ["--", "agent", "--flag"]
 
     def test_unenforced_policy_names_every_tier_it_drops(self, tmp_path: Path) -> None:
-        sandbox = LandlockSandbox(workspace=_workspace(tmp_path), project_path_policy=_policy())
+        sandbox = _confined(_workspace(tmp_path), project_path_policy=_policy())
 
         gaps = "\n".join(sandbox.unenforced_policy())
 
@@ -156,7 +156,7 @@ class TestLandlockPolicyCompilation:
         assert ".state/runs" in gaps
 
     def test_unenforced_policy_is_empty_without_a_nested_policy(self, tmp_path: Path) -> None:
-        sandbox = LandlockSandbox(workspace=_workspace(tmp_path))
+        sandbox = _confined(_workspace(tmp_path))
 
         assert sandbox.unenforced_policy() == ()
 

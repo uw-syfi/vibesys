@@ -50,7 +50,7 @@ from server.registry import (
     instance_root,
 )
 from server.relay import FdSink, FdSource
-from vs_project.api import Git, git_repositories
+from vs_project.api import Git, OperatorDialer, git_repositories
 from vs_sim.api import (
     OsProcesses,
     OsThreads,
@@ -165,8 +165,11 @@ class ExampleProjectsOnUse:
 
 def real_host(environ: Mapping[str, str], uid: int, threads: Threads) -> HelperHost:
     """This host as the helper sees it; ``PermissionError`` when the registry root is unsafe."""
-    network = UnixNetwork()
     root = instance_root(environ, uid)
+    # Every control socket the helper opens (a stop, a relayed ``run.connect``) presents
+    # the operator key first: the socket serves nobody else. The helper only reads the key,
+    # as each connection opens, since it may start before any server has made one.
+    network = OperatorDialer.for_user(UnixNetwork(), environ, uid)
     store = FileInstanceStore(root)
     # Records carry epoch times, so they age on the epoch clock, not ``threads``' monotonic one.
     epoch = SystemClock()

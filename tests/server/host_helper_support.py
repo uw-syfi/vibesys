@@ -14,6 +14,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from tests.server.support import CONTROL_KEY, operator_dialer
 from tests.support.example_materializer import FakeExampleMaterializer
 from tests.support.task_project import write_task
 
@@ -70,7 +71,7 @@ if TYPE_CHECKING:
 
     from pydantic import JsonValue
 
-    from vs_sim.api import Network, ProbeResult, Threads, Worker
+    from vs_sim.api import Connection, Listener, Network, ProbeResult, Threads, Worker
     from vs_sim.api.testing import SimThreads
 
 RUN_ID = "20261010-120000-11111111-dynamic"
@@ -188,7 +189,7 @@ def record(
         id=instance_id,
         status=InstanceStatus.SERVING,
         phase=phase or RunPhase(status=RunStatus.RUNNING),
-        socket_path="run.sock",
+        socket_path="/run.sock",
         log_path=f"/run/{instance_id}/server.log",
         project_root=project_root,
         run_id=run_id,
@@ -340,6 +341,18 @@ def failed_launch(_: Path, __: tuple[str, ...]) -> DetachedLaunchFailure:
     )
 
 
+def accept_operator(listener: Listener) -> Connection:
+    """Accept one connection, as a run's control socket does, and check it presents ``CONTROL_KEY``."""
+    connection = listener.accept(HANG_GUARD_S)
+    hello = b""
+    while not hello.endswith(b"\n"):
+        chunk = connection.recv(1, HANG_GUARD_S)
+        assert chunk, f"the client hung up before presenting the operator key: {hello!r}"
+        hello += chunk
+    assert CONTROL_KEY.admits(hello), hello
+    return connection
+
+
 def fake_host(
     threads: Threads,
     network: Network,
@@ -348,8 +361,12 @@ def fake_host(
     directories: FakeDirectories | None = None,
     launcher: FakeRunLauncher | None = None,
 ) -> HelperHost:
-    """A helper host over Fakes, on ``threads``' clock and ``network``, with no log store."""
+    """A helper host over Fakes, on ``threads``' clock and ``network``, with no log store.
+
+    The host dials ``network`` as the operator, presenting ``CONTROL_KEY`` first.
+    """
     instance_store = store or FakeInstanceStore()
+    dialer = operator_dialer(network)
     return HelperHost(
         registry=LiveRegistry(instance_store, threads),
         inspector=InstanceInspector(
@@ -359,7 +376,7 @@ def fake_host(
             threads,
         ),
         stop_effects=StopEffects(
-            requester=ControlSocketStopRequester(network, clock=threads, deadline_clock=threads),
+            requester=ControlSocketStopRequester(dialer, clock=threads, deadline_clock=threads),
             signaller=FakeProcessSignaller(set()),
             clock=threads,
             pause=threads.sleep,
@@ -371,7 +388,7 @@ def fake_host(
         preflight=FakeRunPreflight(),
         examples=HelperExampleProjects(None, FakeExampleMaterializer()),
         checkout=FakeCheckout(),
-        dialer=network,
+        dialer=dialer,
         vibesys_version=VIBESYS_VERSION,
         logs=None,
         harnesses=lambda: HARNESSES,

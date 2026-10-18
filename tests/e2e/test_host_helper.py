@@ -30,6 +30,7 @@ from tests.support.light_imports import BUDGET_MS, is_heavy, loaded_modules
 from server.host_api import InstanceStatus, LiveInstanceRecord, RunPhase, RunStatus
 from server.registry import FileInstanceStore, instance_root
 from server.transport.unix_jsonl import UnixJsonlServer
+from vs_project.api import create_operator_key
 from vs_sim.api import OsThreads, UnixNetwork
 from vs_sim.api.testing import swept
 
@@ -71,7 +72,9 @@ _SCENARIOS = tuple(
 # server.host_run_events (the run history's messages, split out of host_api) and
 # server.span_index (the journal's span index, read by the span and tail requests) add 2 light
 # modules: the standard library and Pydantic only.
-_MODULE_CEILING = 354
+# vs_project._operator_key (the key every control-socket connection presents first) adds 1,
+# loading neither hmac nor secrets; main already loaded 355 before it.
+_MODULE_CEILING = 356
 """The most modules a helper may load to answer ``hello``; lower it as the helper sheds imports."""
 _HELLO = {
     "type": "hello",
@@ -136,12 +139,18 @@ class _HelperChannel:
 
 
 @pytest.fixture
-def env(tmp_path: Path) -> dict[str, str]:
-    runtime = tmp_path / "runtime"
-    runtime.mkdir(mode=0o700)
+def env(socket_dir: Path) -> dict[str, str]:
+    """A user environment whose runtime root holds the run sockets.
+
+    The helper dials a run's control socket only inside the user's runtime
+    root, so the runtime directory is the shallow ``socket_dir`` and every run
+    socket in these tests sits under its ``vibesys`` directory.
+    """
+    socket_dir.chmod(0o700)
+    (socket_dir / "vibesys").mkdir(mode=0o700)
     return {
         **os.environ,
-        "XDG_RUNTIME_DIR": str(runtime),
+        "XDG_RUNTIME_DIR": str(socket_dir),
         "PYTHONPATH": os.pathsep.join(sys.path),
     }
 
@@ -188,7 +197,7 @@ def test_hello_loads_no_engine_and_reports_its_start_up_time(
 def test_run_connect_makes_the_channel_a_relay_to_the_run(
     env: dict[str, str], tmp_path: Path, socket_dir: Path
 ) -> None:
-    socket_path = socket_dir / "helper.sock"
+    socket_path = socket_dir / "vibesys" / "helper.sock"
     instance_id = "0123456789ab"
     parts = build_server_parts(tmp_path / "logs")
     store = FileInstanceStore(instance_root(env, os.getuid()))
@@ -210,7 +219,13 @@ def test_run_connect_makes_the_channel_a_relay_to_the_run(
             )
         )
         with UnixJsonlServer(
-            socket_path, parts.api, subscriptions=None, threads=OsThreads(), network=UnixNetwork()
+            socket_path,
+            parts.api,
+            subscriptions=None,
+            threads=OsThreads(),
+            network=UnixNetwork(),
+            # The key the helper subprocess finds in the runtime root it is given.
+            key=create_operator_key(env, os.getuid()),
         ):
             channel = _HelperChannel(env)
             channel.send(_HELLO)

@@ -34,7 +34,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from tests.server.support import REQUEST_TIME
+from tests.server.support import CONTROL_KEY, REQUEST_TIME, operator_dialer
 from tests.support.core_plugins import capability_plugin
 from tests.support.skeleton_strategy import (
     ATTEMPT,
@@ -419,7 +419,9 @@ class _Client:
         while not self.ended:
             assert self.connections < _MAX_CONNECTIONS, self
             try:
-                connection = self.network.connect(str(self.socket_path), HANG_GUARD_S)
+                connection = operator_dialer(self.network).connect(
+                    str(self.socket_path), HANG_GUARD_S
+                )
             except ConnectionRefusedError:
                 return  # the server closed between connections: read_log takes over
             self.connections += 1
@@ -504,7 +506,7 @@ class _StalledSubscriber:
     def then(self, client: _Client, runtime: ServerRuntime) -> None:
         """Subscribe and stop reading, then let ``client`` follow the run; wait for the end."""
         assert runtime.transport_listening.wait(HANG_GUARD_S)
-        connection = self.network.connect(str(self.socket_path), HANG_GUARD_S)
+        connection = operator_dialer(self.network).connect(str(self.socket_path), HANG_GUARD_S)
         request = SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0)
         connection.send(request.model_dump_json().encode() + b"\n")
         client.follow(runtime)
@@ -605,6 +607,7 @@ def _run(tmp_path: Path, sim: Sim, faults: _Faults, stall: _Stall | None = None)
             run_id=_RUN_ID,
             runs=runs,
             socket_path=socket_path,
+            control_key=CONTROL_KEY,
             platform=platform,
         )
         client = _Client(network, socket_path)

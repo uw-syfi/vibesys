@@ -13,6 +13,7 @@ from pydantic import TypeAdapter
 from tests.conformance.frame_matching import assert_frame_matches
 from tests.conformance.replay import ScenarioConnection, load_scenario, run_steps, runner_group
 from tests.server.support import (
+    CONTROL_KEY,
     DEADLOCK_GUARD_S,
     FakeSettleWindow,
     ServerParts,
@@ -46,6 +47,7 @@ class _UnixConnection:
         self._socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self._socket.settimeout(DEADLOCK_GUARD_S)
         self._socket.connect(str(path))
+        self._socket.sendall(CONTROL_KEY.hello())
         self._stream = self._socket.makefile("rwb")
         self._closed = False
 
@@ -117,7 +119,12 @@ def _running_connection(
 ) -> Generator[ScenarioConnection]:
     if transport == "unix":
         with UnixJsonlServer(
-            socket_path, parts.api, subscriptions=None, threads=OsThreads(), network=UnixNetwork()
+            socket_path,
+            parts.api,
+            subscriptions=None,
+            threads=OsThreads(),
+            network=UnixNetwork(),
+            key=CONTROL_KEY,
         ):
             connection = _UnixConnection(socket_path)
             try:
@@ -453,7 +460,12 @@ def test_dual_transport_subscriptions_have_independent_floors_and_teardown(
     try:
         with (
             UnixJsonlServer(
-                socket_path, parts.api, tracker, threads=OsThreads(), network=UnixNetwork()
+                socket_path,
+                parts.api,
+                tracker,
+                threads=OsThreads(),
+                network=UnixNetwork(),
+                key=CONTROL_KEY,
             ),
             WebSocketGateway(
                 parts.api,

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.server.support import operator_dialer
 from tests.support.task_project import write_task
 
 from entrypoints import launcher
@@ -473,7 +474,9 @@ def _run(
         # to the signal path, as it does for a server that does not answer.
         effects=StopEffects(
             ControlSocketStopRequester(
-                SimNetwork(threads), clock=ManualClock(), deadline_clock=threads
+                operator_dialer(SimNetwork(threads)),
+                clock=ManualClock(),
+                deadline_clock=threads,
             ),
             FakeProcessSignaller(set()),
             clock,
@@ -635,7 +638,8 @@ def test_the_command_reads_this_users_runtime_root(
     assert instances_main(["list", "--json"]) == 0
     assert InstanceList.model_validate_json(capsys.readouterr().out).instances == ()
     assert stat.S_IMODE((tmp_path / "vibesys").stat().st_mode) == 0o700
-    assert [entry.name for entry in (tmp_path / "vibesys").iterdir()] == ["instances"]
+    # A client never creates the operator key: only a server does, as it starts.
+    assert sorted(entry.name for entry in (tmp_path / "vibesys").iterdir()) == ["instances"]
 
 
 def _starting(instance_id: str) -> LiveInstanceRecord:

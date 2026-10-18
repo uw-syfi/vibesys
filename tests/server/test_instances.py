@@ -15,7 +15,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, precondition, rule
 from pydantic import ValidationError
-from tests.server.support import REQUEST_TIME
+from tests.server.support import CONTROL_KEY, REQUEST_TIME, operator_dialer
 
 import server.registry as instance_module
 from server.api.protocol import CommandAck, Response
@@ -988,7 +988,7 @@ def test_an_unreadable_lock_is_reported_but_neither_trusted_nor_removed() -> Non
 # exercises the signal fallback.
 _UNANSWERED_THREADS = SimThreads()
 _UNANSWERED = ControlSocketStopRequester(
-    SimNetwork(_UNANSWERED_THREADS),
+    operator_dialer(SimNetwork(_UNANSWERED_THREADS)),
     clock=_UNANSWERED_THREADS,
     deadline_clock=_UNANSWERED_THREADS,
 )
@@ -1249,6 +1249,10 @@ def _stop_against(
         connection = listener.accept(HANG_GUARD_S)
         if reply is _Reply.TRICKLE:
             threads.sleep(delays.request_read)
+        hello = b""
+        while not hello.endswith(b"\n"):
+            hello += connection.recv(1, HANG_GUARD_S)
+        assert CONTROL_KEY.admits(hello), hello
         line = b""
         while not line.endswith(b"\n"):
             line += connection.recv(1, HANG_GUARD_S)
@@ -1267,7 +1271,9 @@ def _stop_against(
         return LiveRegistry(store, CLOCK).stop(
             IDS[0],
             StopEffects(
-                ControlSocketStopRequester(network, clock=threads, deadline_clock=threads),
+                ControlSocketStopRequester(
+                    operator_dialer(network), clock=threads, deadline_clock=threads
+                ),
                 signaller,
                 threads,
                 threads.sleep,

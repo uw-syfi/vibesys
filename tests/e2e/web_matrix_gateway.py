@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from entrypoints.production import production_runs
 from server.runtime import ServerRuntime
+from vs_project.api import OperatorKey
 from vs_sim.api import Platform
 
 if TYPE_CHECKING:
@@ -45,6 +46,8 @@ def main() -> int:
         run_id="run-1",
         runs=production_runs(),
         socket_path=arguments.store_directory / "control.sock",
+        # The browser reaches the run through the WebSocket gateway only; no client dials this.
+        control_key=OperatorKey.generate(),
         web=True,
         web_port=arguments.port,
         web_assets=arguments.web_assets,

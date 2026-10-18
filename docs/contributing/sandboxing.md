@@ -177,15 +177,45 @@ macOS when full read confinement matters.
   only. The operator actions `cancel_attempt` and `cancel_item` do change selection: a
   cancelled attempt is never judged, so it cannot win. `set_max_parallel` only lowers how
   much runs at once. No control field carries a measurement command, a checker or a trust
-  rule. Whether an agent can send a control depends on whether it can reach a control
-  ingress. The inbox is outside the project's write grant (above). The server's control
-  socket (`control.sock` in the user's runtime directory) is not reachable under Docker or
-  bubblewrap, where that directory does not exist in the sandbox. Under Landlock, which has
-  no right for connecting to a pathname socket, and under Seatbelt, whose profile allows
-  `network*`, an agent can connect to it and send any control, including a cancel of a
-  rival's attempt. #3133 tracks authenticating the connection;
-  `tests/e2e/test_control_socket_reachability_e2e.py` pins each backend's current behavior,
-  with the Landlock and Seatbelt cases as strict `xfail`.
+  rule. The inbox is outside the project's write grant (above). The server's control
+  socket (`control.sock`) serves a connection only after its first line presents the
+  operator key (`vs_project.api.OperatorKey`, checked in `server.transport.unix_jsonl`).
+  The key is a `0600` file, `control.key`, in the user's runtime root
+  (`vs_project.api.user_runtime_root`: `$XDG_RUNTIME_DIR/vibesys`, else
+  `/tmp/vibesys-<uid>`), and it never enters an argument vector or an environment
+  variable. Only a server creates it; clients only read it. Every operator socket (a
+  detached run's, web mode's) is created in that root, and the operator's clients present
+  the key only to a socket whose resolved directory is inside it (`OperatorDialer`), so an
+  agent that can write elsewhere cannot swap in its own listener to read the key. A
+  connection must send its whole hello within 10 s of being accepted, and at
+  most 8 connections may wait to do so; more are closed on accept, so peers without the
+  key hold at most 8 server workers for at most 10 s each. Every agent confinement keeps
+  the root out of the agent's view (`vs_sandbox.operator_root`): bubblewrap, Landlock and
+  Docker refuse with `SandboxUnavailableError` to build a view in which a grant or mount
+  contains the root or lies inside it, checked again each time a view is compiled, and
+  Seatbelt denies it after every allow. Code that runs unconfined on the host as the
+  operator can read the key, including candidate code a trusted gate runs on the host: the
+  key separates confined agents from the operator, not one unconfined host process from
+  another.
+- **Only bubblewrap and Docker are a boundary against operator control and the host.**
+  `WorkspaceSandbox.claims_operator_control_boundary` records which confinements claim it,
+  and `build_host_sandbox` logs the gap for one that does not. Landlock does not restrict
+  `connect()` to a pathname Unix socket, so a Landlock agent can connect to any socket its
+  uid may open, wherever it is. Two give a full escape: the user's D-Bus
+  (`$XDG_RUNTIME_DIR/bus`; `systemd-run --user --pipe cat <file>` runs any command as the
+  operator, unconfined, and reads the operator key with it) and the Docker daemon
+  (`/var/run/docker.sock`, for a user in the `docker` group; a container can mount the
+  host's filesystem). Under Landlock, the operator key and the runtime root's placement
+  stop an agent that only talks to the control socket, but not one that uses those
+  sockets. Seatbelt's profile allows `network*`, so the same holds on macOS by analogy
+  (not probed there). Use bubblewrap or the default Docker run environment where operator
+  control or the host must be protected. `tests/e2e/test_control_socket_reachability_e2e.py`
+  probes every backend for real, the bus and Docker gap included, pinned so that closing
+  it fails the test; `tests/server/test_control_admission.py` and
+  `libs/vs-sandbox/tests/test_operator_root.py` cover the refusal without one. Because
+  Landlock grants `/tmp`, it needs `XDG_RUNTIME_DIR` (systemd's `/run/user/<uid>`):
+  without it the root falls back to `/tmp/vibesys-<uid>`, inside the grant, and Landlock
+  refuses to start.
 - **Seatbelt** reads are broader than bubblewrap (above).
 - **Hidden-path design.** The planning issue for prebuilt agent images (#674,
   closed) proposed "no explicit hidden access: deny what is not listed". The
