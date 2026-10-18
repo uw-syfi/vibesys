@@ -88,7 +88,16 @@ function niceTicks(low: number, high: number, wanted: number): readonly number[]
 }
 
 const COMPACT = new Intl.NumberFormat('en-US', {notation: 'compact', maximumFractionDigits: 2});
-const FULL = new Intl.NumberFormat('en-US', {maximumSignificantDigits: 4});
+
+/**
+ * A value as a hover writes it: grouped, never rounded to hundreds, with fewer decimals the larger
+ * it is (`6,054,154`, `47.2`, `3.84`, `0.512`).
+ */
+function exact(value: number): string {
+  const magnitude = Math.abs(value);
+  const digits = magnitude >= 100 ? 0 : magnitude >= 10 ? 1 : magnitude >= 1 ? 2 : 3;
+  return value.toLocaleString('en-US', {maximumFractionDigits: digits});
+}
 
 function layoutAxis(measured: readonly number[], direction: Direction, count: number): Layout {
   const values = measured.length === 0 ? [0, 1] : measured;
@@ -166,7 +175,7 @@ const ROLE_WORD: Record<Role, string> = {
 
 /** The words a hover shows: the point's name and both of its values. */
 function describe(point: ParetoPoint, x: ParetoAxis, y: ParetoAxis): string {
-  const value = (axis: ParetoAxis, v: number): string => `${FULL.format(v)} ${axis.unit}`.trim();
+  const value = (axis: ParetoAxis, v: number): string => `${exact(v)} ${axis.unit}`.trim();
   return `${point.label ?? point.id} · ${value(x, point.x)} · ${value(y, point.y)}`;
 }
 

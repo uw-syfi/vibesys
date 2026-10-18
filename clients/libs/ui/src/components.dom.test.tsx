@@ -558,3 +558,17 @@ describe('ParetoChart picking', () => {
     expect(root.querySelector('svg')?.getAttribute('role')).toBe('img');
   });
 });
+
+describe('ParetoChart values', () => {
+  test('a hover writes a value exactly, never rounded to hundreds, with a unit', async () => {
+    const x: ParetoAxis = {name: 'Throughput', unit: 'ops/s', direction: 'higher'};
+    const y: ParetoAxis = {name: 'Latency', unit: '', direction: 'lower'};
+    const points: ParetoPoint[] = [
+      {id: 'a', label: 'Big', x: 6_054_154, y: 0.512, time: 1, state: 'accepted'},
+      {id: 'b', label: 'Small', x: 12.34, y: 47.25, time: 2, state: 'accepted'},
+    ];
+    const root = await mount(<ParetoChart label="Trade-off" points={points} x={x} y={y} />);
+    const titles = [...root.querySelectorAll('.vs-pareto-point title')].map(t => t.textContent);
+    expect(titles).toEqual(['Big · 6,054,154 ops/s · 0.512', 'Small · 12.3 ops/s · 47.3']);
+  });
+});
