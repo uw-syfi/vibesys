@@ -2,6 +2,8 @@
  * The app shell's pure state: the sidebar's store and its rows, and which run notifications a
  * host's listing calls for.
  */
+
+export {type AllRunsGroup, allRunsGroups, type MachineRunsState} from './all-runs-rows.js';
 export {type NoticeKind, type RunNotice, runNotices} from './notices.js';
 export {type Clock, formatWhen} from './recent-words.js';
 export {type RunRowStatus, statusWord} from './run-status.js';

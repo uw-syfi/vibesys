@@ -25,6 +25,8 @@ import {
   hostListing,
   type InstanceInspection,
   inspectionReply,
+  type ListedRun,
+  listedRuns,
   type RunDigestsReply,
   validHostPath,
 } from '@vibesys/hosts';
@@ -499,6 +501,17 @@ export class Hosts {
         return {kind: 'unsupported'};
       }
       throw plain(error, `Could not read the runs of ${project}`);
+    }
+  }
+
+  /** Every run of `project` on `id`, newest first (`runs.list`); a digest is asked for separately. */
+  async projectRuns(id: HostId, project: string): Promise<readonly ListedRun[]> {
+    await using lease = await this.connection(id);
+    try {
+      const reply = await lease.connection.request({type: 'runs.list', project});
+      return listedRuns(reply.runs.runs);
+    } catch (error) {
+      throw plain(error, `Could not list the runs of ${project}`);
     }
   }
 

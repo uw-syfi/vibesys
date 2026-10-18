@@ -45,6 +45,7 @@ export interface DesktopDeps {
     | 'readSummary'
     | 'readSpan'
     | 'runDigests'
+    | 'projectRuns'
     | 'logs'
     | 'recent'
     | 'releaseLogs'
@@ -261,6 +262,8 @@ export class Desktop {
         );
       case 'run-digests':
         return hosts.runDigests(request.host, request.project, request.runIds);
+      case 'project-runs':
+        return hosts.projectRuns(request.host, request.project);
       case 'release-run':
         this.#deps.window.releaseSurfaceRun();
         return null;

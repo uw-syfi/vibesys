@@ -696,6 +696,49 @@ describe('Hosts.runDigests', () => {
   });
 });
 
+describe('Hosts.projectRuns', () => {
+  const run = (id: string, task: string | null, created: string): RunSummary => ({
+    run_id: id,
+    task,
+    display_name: id,
+    created_at: created,
+    phase: null,
+    instance_id: null,
+  });
+
+  test('lists every run of the project, newest first, with no digest read', async () => {
+    const link = new FakeLink();
+    link.helper.host.projects.set('/srv/project', ['mpmc']);
+    link.helper.host.runHistory.set('/srv/project', [
+      run('run-1', 'mpmc', '2026-10-17T03:00:00Z'),
+      run('run-3', null, '2026-10-17T05:00:00Z'),
+      run('run-2', 'mpmc', '2026-10-17T04:00:00Z'),
+    ]);
+    const subject = completionSubject(link);
+    await using _manager = subject.manager;
+
+    const runs = await subject.hosts.projectRuns(LOCAL, '/srv/project');
+
+    expect(runs).toEqual([
+      {runId: 'run-3', task: null, createdAt: Date.parse('2026-10-17T05:00:00Z')},
+      {runId: 'run-2', task: 'mpmc', createdAt: Date.parse('2026-10-17T04:00:00Z')},
+      {runId: 'run-1', task: 'mpmc', createdAt: Date.parse('2026-10-17T03:00:00Z')},
+    ]);
+    expect(link.helper.requests.filter(request => request.type === 'runs.list')).toEqual([
+      expect.not.objectContaining({digest_runs: expect.anything()}),
+    ]);
+  });
+
+  test('names the project when the host cannot list its runs', async () => {
+    const subject = completionSubject(new FakeLink());
+    await using _manager = subject.manager;
+
+    await expect(subject.hosts.projectRuns(LOCAL, '/srv/missing')).rejects.toThrow(
+      'Could not list the runs of /srv/missing',
+    );
+  });
+});
+
 describe('Hosts checkout changes', () => {
   test('removing a host fences an older checkout validation before acknowledging removal', async () => {
     const settings = new SettingsStore({

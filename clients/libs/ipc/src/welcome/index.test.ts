@@ -54,6 +54,7 @@ const VALID_ARGUMENTS: Readonly<
   [WELCOME_CHANNELS.readSummary]: ['local', '/srv/project', 'run-1'],
   [WELCOME_CHANNELS.readSpan]: ['local', '/srv/project', 'run-1', 'op:turn', 1, 100],
   [WELCOME_CHANNELS.runDigests]: ['local', '/srv/project', ['run-1']],
+  [WELCOME_CHANNELS.projectRuns]: ['local', '/srv/project'],
   [WELCOME_CHANNELS.preferences]: [],
   [WELCOME_CHANNELS.setAppearance]: [{mode: 'dark', light: 'mist', dark: 'midnight'}],
   [WELCOME_CHANNELS.setNotifications]: [false],

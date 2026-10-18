@@ -1,10 +1,11 @@
 /**
  * The app shell's composition: the sidebar, Settings, Machines and New run stores over the welcome
  * bridge, the theme following the Settings store, and the shell rendering the selected screen: New
- * run, Settings, Machines, the Run screen for a selected run, or a placeholder for a screen not
+ * run, Settings, Machines, All runs, the Run screen for a selected run, or a placeholder for a screen not
  * built yet.
  */
 import {
+  AllRunsScreen,
   AppShell,
   createSidebarStore,
   PlaceholderScreen,
@@ -12,6 +13,7 @@ import {
   WORDMARK,
 } from '@vibesys/feature-app-shell/renderer';
 import {
+  allRunsGroups,
   type Clock,
   type Screen,
   type SidebarState,
@@ -244,6 +246,21 @@ function RunRoute(props: {
   );
 }
 
+/** The All runs screen over the sidebar's store and its state. */
+function AllRuns(props: {
+  readonly sidebar: ShellStores['sidebar'];
+  readonly state: SidebarState;
+}): JSX.Element {
+  return (
+    <AllRunsScreen
+      groups={allRunsGroups(props.state, viewerClock())}
+      state={props.state}
+      dispatch={props.sidebar.store.dispatch}
+      actions={props.sidebar.actions}
+    />
+  );
+}
+
 /** The window: the sidebar and the selected screen. */
 export function Shell(props: {
   readonly stores: ShellStores;
@@ -299,6 +316,8 @@ export function Shell(props: {
             back={() => select({kind: 'settings'})}
           />
         );
+      case 'all-runs':
+        return <AllRuns sidebar={sidebar} state={sidebarState} />;
       case 'run':
         return (
           <RunRoute

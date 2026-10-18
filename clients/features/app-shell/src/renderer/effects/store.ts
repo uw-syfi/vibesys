@@ -24,6 +24,7 @@ export type ShellBridge = Pick<
   | 'archive'
   | 'openRunWindow'
   | 'runDigests'
+  | 'projectRuns'
   | 'onListing'
   | 'onRecent'
   | 'onPreferences'
@@ -37,6 +38,19 @@ function perform(
   dispatch: (action: SidebarAction) => void,
 ): void {
   const {token} = request;
+  if (request.kind === 'list-project-runs') {
+    const {host, project} = request;
+    void settled(bridge.projectRuns(host, project)).then(result =>
+      dispatch({
+        type: 'project-runs-listed',
+        token,
+        host,
+        project,
+        runs: result.ok ? result.value : null,
+      }),
+    );
+    return;
+  }
   void settled(bridge.runDigests(request.host, request.project, request.runIds)).then(result =>
     dispatch({type: 'digests-read', token, reply: result.ok ? result.value : null}),
   );

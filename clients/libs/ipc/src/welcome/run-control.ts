@@ -2,7 +2,13 @@
  * The run-control feature's welcome requests: attach, resume, stop (the view asks the user first),
  * letting a run go, and reading a run's recorded history and its summary.
  */
-import {type HostId, type HostKey, hostFromKey, type RunDigestsReply} from '@vibesys/hosts';
+import {
+  type HostId,
+  type HostKey,
+  hostFromKey,
+  type ListedRun,
+  type RunDigestsReply,
+} from '@vibesys/hosts';
 import {exactResumeRunId, type ResumeRunId} from '@vibesys/runs';
 import type {WelcomeResult} from './types.js';
 import {type ChannelOf, instance, project} from './values.js';
@@ -16,6 +22,7 @@ export const RUN_CONTROL_CHANNELS = {
   readSummary: 'vibesys:welcome:read-summary',
   readSpan: 'vibesys:welcome:read-span',
   runDigests: 'vibesys:welcome:run-digests',
+  projectRuns: 'vibesys:welcome:project-runs',
 } as const;
 
 /** The most runs one digest request may name (the helper's bound). */
@@ -155,6 +162,8 @@ export interface RunControlWelcomeBridge {
     project: string,
     runIds: readonly string[],
   ): Promise<WelcomeResult<RunDigestsReply>>;
+  /** Every run of `project` on `host`, newest first, before any digest is read. */
+  projectRuns(host: HostKey, project: string): Promise<WelcomeResult<readonly ListedRun[]>>;
 }
 
 export type RunControlRequest =
@@ -201,7 +210,8 @@ export type RunControlRequest =
       readonly host: HostId;
       readonly project: string;
       readonly runIds: readonly string[];
-    };
+    }
+  | {readonly kind: 'project-runs'; readonly host: HostId; readonly project: string};
 
 function forceStop(value: unknown): boolean {
   if (typeof value !== 'boolean') throw new Error('force stop must be a boolean');
@@ -301,5 +311,7 @@ export function parseRunControlRequest(
         project: project(second),
         runIds: runIds(third),
       };
+    case RUN_CONTROL_CHANNELS.projectRuns:
+      return {kind: 'project-runs', host: hostFromKey(first), project: project(second)};
   }
 }

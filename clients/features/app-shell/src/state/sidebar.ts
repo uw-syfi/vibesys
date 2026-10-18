@@ -14,11 +14,20 @@ import {
   type HostRun,
   hostFromKey,
   hostLabel,
+  type ListedRun,
   type RunDigestEntry,
   type RunDigestsReply,
 } from '@vibesys/hosts';
 import {type RecentRun, type RunRef, sameRun} from '@vibesys/runs';
 import type {Step} from '@vibesys/store';
+import {
+  ALL_RUNS_EMPTY,
+  type AllRunsState,
+  askProjectRuns,
+  type ListProjectRuns,
+  listedRunRefs,
+  projectRunsListed,
+} from './all-runs.js';
 import {type Clock, formatDuration, formatWhen, ideasWord, resultWords} from './recent-words.js';
 import {
   endReason,
@@ -100,6 +109,8 @@ export interface SidebarState {
   readonly listings: readonly HostListing[];
   readonly recent: readonly RecentRun[];
   readonly archived: readonly RunRef[];
+  /** What each machine lists of its projects' runs, for the All runs screen. */
+  readonly allRuns: AllRunsState;
   /** Each shown Recent run's digest, by `digestKey`. */
   readonly digests: Readonly<Record<string, DigestSlot>>;
   /** The last token a digest request used, so each is new. */
@@ -126,18 +137,29 @@ export type SidebarAction =
   /** What the host said of the digests asked under `token`; null when it could not be asked. */
   | {readonly type: 'digests-read'; readonly token: number; readonly reply: RunDigestsReply | null}
   /** The user asks again for a Recent run whose state could not be read. */
-  | {readonly type: 'retry-digest'; readonly run: RunRef};
+  | {readonly type: 'retry-digest'; readonly run: RunRef}
+  /** What a machine said of one project's runs; null when it could not say. */
+  | {
+      readonly type: 'project-runs-listed';
+      readonly token: number;
+      readonly host: HostKey;
+      readonly project: string;
+      readonly runs: readonly ListedRun[] | null;
+    }
+  /** The user asks the All runs screen to list every machine's runs again. */
+  | {readonly type: 'reload-all-runs'};
 
 /** What the sidebar asks of the main process. */
 export type SidebarRequest =
   /** Read what these runs of `project` on `host` say at a glance. */
-  {
-    readonly kind: 'read-digests';
-    readonly token: number;
-    readonly host: HostKey;
-    readonly project: string;
-    readonly runIds: readonly string[];
-  };
+  | {
+      readonly kind: 'read-digests';
+      readonly token: number;
+      readonly host: HostKey;
+      readonly project: string;
+      readonly runIds: readonly string[];
+    }
+  | ListProjectRuns;
 
 export type SidebarStep = Step<SidebarState, SidebarRequest>;
 
@@ -145,6 +167,7 @@ export const SIDEBAR_EMPTY: SidebarState = {
   listings: [],
   recent: [],
   archived: [],
+  allRuns: ALL_RUNS_EMPTY,
   digests: {},
   lastDigestToken: 0,
   selection: {kind: 'new-run'},
@@ -169,7 +192,13 @@ function selected(state: SidebarState, screen: Screen): SidebarStep {
     state.selection.kind !== 'machines'
       ? state.selection
       : state.beforeSettings;
-  const next = {...state, selection: screen, beforeSettings};
+  const entering = screen.kind === 'all-runs' && state.selection.kind !== 'all-runs';
+  const next = {
+    ...state,
+    selection: screen,
+    beforeSettings,
+    ...(entering ? {allRuns: ALL_RUNS_EMPTY} : {}),
+  };
   return same(next);
 }
 
@@ -188,8 +217,12 @@ export function digestKey(run: RunRef): string {
 /** The next state for `action`, and the requests it makes. */
 export function sidebarStep(state: SidebarState, action: SidebarAction): SidebarStep {
   const step = baseStep(state, action);
-  const asked = askDigests(step.state);
-  return {state: asked.state, requests: [...step.requests, ...asked.requests]};
+  const listed = askAllRuns(step.state);
+  const asked = askDigests(listed.state);
+  return {
+    state: asked.state,
+    requests: [...step.requests, ...listed.requests, ...asked.requests],
+  };
 }
 
 /** The Recent runs the sidebar lists: not archived, not live, newest first (all of them). */
@@ -201,9 +234,59 @@ function recentRuns(state: SidebarState): RecentRun[] {
     .sort((left, right) => right.attachedAt - left.attachedAt);
 }
 
+/** A run whose digest a row of the sidebar or the All runs screen shows. */
+interface WantedDigest {
+  readonly host: HostKey;
+  readonly project: string;
+  readonly runId: string;
+}
+
+/** The runs whose digest a screen shows now: Recent's rows, and every run the All runs screen lists. */
+function shownRuns(state: SidebarState): WantedDigest[] {
+  const recent = recentRuns(state).slice(0, RECENT_ROWS);
+  const all = state.selection.kind === 'all-runs' ? listedRunRefs(state.allRuns) : [];
+  return [...recent, ...all.map(({host, project, run}) => ({host, project, runId: run.runId}))];
+}
+
+/** The most runs one digest request names (the helper's bound). */
+const DIGESTS_PER_REQUEST = 100;
+
 /**
- * Digests for the Recent rows that show and have none: one request per project on a host, and a
- * run that is live again forgets its digest, so it is read afresh when it ends.
+ * Requests for `wanted` digests, in groups of at most `DIGESTS_PER_REQUEST` runs of one project on
+ * one host, each with a token after `last`.
+ */
+function digestRequests(
+  wanted: readonly WantedDigest[],
+  last: number,
+): {readonly requests: Extract<SidebarRequest, {kind: 'read-digests'}>[]; readonly token: number} {
+  const groups = new Map<string, WantedDigest[]>();
+  for (const run of wanted) {
+    const key = JSON.stringify([run.host, run.project]);
+    groups.set(key, [...(groups.get(key) ?? []), run]);
+  }
+  const requests: Extract<SidebarRequest, {kind: 'read-digests'}>[] = [];
+  let token = last;
+  for (const [first, ...rest] of [...groups.values()].map(group => group)) {
+    if (first === undefined) continue;
+    const group = [first, ...rest];
+    for (let at = 0; at < group.length; at += DIGESTS_PER_REQUEST) {
+      token += 1;
+      const runIds = group.slice(at, at + DIGESTS_PER_REQUEST).map(run => run.runId);
+      requests.push({
+        kind: 'read-digests',
+        token,
+        host: first.host,
+        project: first.project,
+        runIds,
+      });
+    }
+  }
+  return {requests, token};
+}
+
+/**
+ * Digests for the rows that show and have none, and a run that is live again forgets its digest,
+ * so it is read afresh when it ends.
  */
 function askDigests(state: SidebarState): SidebarStep {
   const live = liveRows(state);
@@ -211,34 +294,29 @@ function askDigests(state: SidebarState): SidebarStep {
   for (const [key, slot] of Object.entries(state.digests)) {
     if (!live.some(row => digestKey(row.run) === key)) digests[key] = slot;
   }
-  const wanted = recentRuns(state)
-    .slice(0, RECENT_ROWS)
-    .filter(recent => digests[digestKey(recent)] === undefined);
+  const wanted = shownRuns(state).filter(
+    run => digests[digestKey({host: run.host, runId: run.runId})] === undefined,
+  );
   if (wanted.length === 0) {
     const unchanged = Object.keys(digests).length === Object.keys(state.digests).length;
     return same(unchanged ? state : {...state, digests});
   }
-  let token = state.lastDigestToken;
-  const requests: SidebarRequest[] = [];
-  const groups = new Map<string, RecentRun[]>();
-  for (const recent of wanted) {
-    const key = JSON.stringify([recent.host, recent.project]);
-    groups.set(key, [...(groups.get(key) ?? []), recent]);
-  }
-  for (const runs of groups.values()) {
-    token += 1;
-    const [first] = runs;
-    if (first === undefined) continue;
-    requests.push({
-      kind: 'read-digests',
-      token,
-      host: first.host,
-      project: first.project,
-      runIds: runs.map(run => run.runId),
-    });
-    for (const run of runs) digests[digestKey(run)] = {kind: 'loading', token};
+  const {requests, token} = digestRequests(wanted, state.lastDigestToken);
+  for (const request of requests) {
+    for (const runId of request.runIds) {
+      digests[digestKey({host: request.host, runId})] = {kind: 'loading', token: request.token};
+    }
   }
   return {state: {...state, digests, lastDigestToken: token}, requests};
+}
+
+/** The project listings the All runs screen still needs, while it is shown. */
+function askAllRuns(state: SidebarState): SidebarStep {
+  if (state.selection.kind !== 'all-runs') return same(state);
+  const asked = askProjectRuns(state.allRuns, state.listings, state.recent);
+  return asked.requests.length === 0
+    ? same(state)
+    : {state: {...state, allRuns: asked.all}, requests: asked.requests};
 }
 
 /** What the host said of the digests asked under `token`, in each slot that awaited it. */
@@ -281,6 +359,10 @@ function baseStep(state: SidebarState, action: SidebarAction): SidebarStep {
       return digestsRead(state, action);
     case 'retry-digest':
       return retryDigest(state, action.run);
+    case 'project-runs-listed':
+      return same({...state, allRuns: projectRunsListed(state.allRuns, action)});
+    case 'reload-all-runs':
+      return same({...state, allRuns: ALL_RUNS_EMPTY});
     case 'overview':
       return same({
         ...state,
@@ -320,8 +402,13 @@ function newestByRun(runs: readonly HostRun[]): Map<string, HostRun> {
   return newest;
 }
 
-function titleOf(state: SidebarState, run: RunRef, project: string): string {
-  const task = state.recent.find(recent => sameRun(recent, run))?.task ?? null;
+function titleOf(
+  state: SidebarState,
+  run: RunRef,
+  project: string,
+  listedTask: string | null = null,
+): string {
+  const task = state.recent.find(recent => sameRun(recent, run))?.task ?? listedTask;
   const name = projectName(project);
   return task === null ? name : `${name} · ${task}`;
 }
@@ -398,12 +485,12 @@ function beganAt(entry: RunDigestEntry | undefined, ended: HostRun | undefined):
 }
 
 /** What the Recent row of `recent` says, from the registry's record of its end and its digest. */
-function recentRow(state: SidebarState, recent: RecentRun, clock: Clock): RunRow {
+export function recentRow(state: SidebarState, recent: RecentRun, clock: Clock): RunRow {
   const listing = state.listings.find(each => each.host === recent.host);
   const ended =
     listing?.kind === 'listed' ? newestByRun(listing.ended).get(recent.runId) : undefined;
   const run: RunRef = {host: recent.host, runId: recent.runId};
-  const title = titleOf(state, run, recent.project);
+  const title = titleOf(state, run, recent.project, recent.task);
   const slot = state.digests[digestKey(run)];
   const entry = slot?.kind === 'read' ? slot.entry : undefined;
   const read = entry?.kind === 'read' ? entry : undefined;

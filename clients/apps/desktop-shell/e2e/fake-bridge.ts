@@ -23,6 +23,11 @@ export interface FakeBridgeSeed {
    * answers as an older helper would: it does not offer digests.
    */
   readonly digests?: Readonly<Record<string, unknown>>;
+  /**
+   * What each machine lists of a project's runs (`runs.list`, as `ListedRun`s), by
+   * `<host>|<project>`; a project not named is one the machine cannot list.
+   */
+  readonly projectRuns?: Readonly<Record<string, readonly unknown[]>>;
   /** The saved machines, as `hosts.json` and This Mac list them. */
   readonly machines?: readonly {host: string; label: string; checkout: string}[];
   /** What each machine's facts say, by host; a machine not named here is ready with `facts`. */
@@ -122,6 +127,7 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
         return store({...preferences, archived: archived ? [...others, run] : others});
       },
       runDigests: () => ok({kind: 'unsupported'}),
+      projectRuns: () => ok([]),
       onListing: on('listing'),
       onRecent: on('recent'),
       onPreferences: on('preferences'),
@@ -183,6 +189,24 @@ export function installFakeDigests(seed: FakeBridgeSeed): void {
       if (digests === undefined) return Promise.resolve({ok: true, value: {kind: 'unsupported'}});
       const runs = new Map(runIds.flatMap(id => (id in digests ? [[id, digests[id]]] : [])));
       return Promise.resolve({ok: true, value: {kind: 'digests', runs}});
+    },
+  });
+}
+
+/**
+ * The project listings part of the Fake, as a further init script after `installFakeBridge`: each
+ * project's runs on each machine (`seed.projectRuns`), or a failure for a project not named.
+ */
+export function installFakeProjectRuns(seed: FakeBridgeSeed): void {
+  const listings = seed.projectRuns ?? {};
+  Object.assign((window as unknown as {vibesysWelcome: object}).vibesysWelcome, {
+    projectRuns: (host: string, project: string) => {
+      const runs = listings[`${host}|${project}`];
+      return Promise.resolve(
+        runs === undefined
+          ? {ok: false, error: `Could not list the runs of ${project}`, authNeeded: false}
+          : {ok: true, value: runs},
+      );
     },
   });
 }

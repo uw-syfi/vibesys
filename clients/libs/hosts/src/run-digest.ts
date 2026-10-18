@@ -84,3 +84,23 @@ export function digestLook(entry: Extract<RunDigestEntry, {kind: 'read'}>): EndL
       return null;
   }
 }
+
+/** One run of a project as the host lists it: what an all-runs list needs before its digest is read. */
+export interface ListedRun {
+  readonly runId: string;
+  /** The task it ran, or null when the run has no record of one (it stopped at start-up). */
+  readonly task: string | null;
+  /** When the run was created, in milliseconds. */
+  readonly createdAt: number;
+}
+
+/** The runs of `summaries`, newest first (ties by run id, so the order is total). */
+export function listedRuns(summaries: readonly RunSummary[]): ListedRun[] {
+  return summaries
+    .map(summary => ({
+      runId: summary.run_id,
+      task: summary.task ?? null,
+      createdAt: Date.parse(summary.created_at),
+    }))
+    .sort((left, right) => right.createdAt - left.createdAt || (left.runId < right.runId ? 1 : -1));
+}

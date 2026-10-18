@@ -12,29 +12,26 @@ export const WORDMARK = [
   '  ╚═══╝  ╚═╝╚═════╝ ╚══════╝╚══════╝   ╚═╝   ╚══════╝',
 ].join('\n');
 
-const COMING: Readonly<Record<Exclude<Screen['kind'], 'settings'>, {title: string; body: string}>> =
-  {
-    'new-run': {
-      title: 'New run is on its way',
-      body: 'Machine, project and task, agent and budget, with a ready-to-start check, arrive here next.',
-    },
-    machines: {
-      title: 'Machines are on their way',
-      body: 'Your SSH hosts and their VibeSys checkouts will be listed and checked here.',
-    },
-    'all-runs': {
-      title: 'All runs are on their way',
-      body: 'Every run of every project on your machines will be listed here.',
-    },
-    run: {
-      title: 'The run screen is on its way',
-      body: 'Its timeline, map, work and logs arrive here next.',
-    },
-  };
+const COMING: Readonly<
+  Record<Exclude<Screen['kind'], 'settings' | 'all-runs'>, {title: string; body: string}>
+> = {
+  'new-run': {
+    title: 'New run is on its way',
+    body: 'Machine, project and task, agent and budget, with a ready-to-start check, arrive here next.',
+  },
+  machines: {
+    title: 'Machines are on their way',
+    body: 'Your SSH hosts and their VibeSys checkouts will be listed and checked here.',
+  },
+  run: {
+    title: 'The run screen is on its way',
+    body: 'Its timeline, map, work and logs arrive here next.',
+  },
+};
 
 /** A screen not built yet: the New run hero with the wordmark, or a titled empty state. */
 export function PlaceholderScreen(props: {
-  readonly screen: Exclude<Screen, {readonly kind: 'settings'}>;
+  readonly screen: Exclude<Screen, {readonly kind: 'settings' | 'all-runs'}>;
 }): JSX.Element {
   const {title, body} = COMING[props.screen.kind];
   if (props.screen.kind !== 'new-run') {
