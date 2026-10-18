@@ -15,6 +15,7 @@ import {
   Page,
   Stack,
   Text,
+  useSideActionLayout,
 } from '@vibesys/ui';
 import {type JSX, type ReactNode, useState} from 'react';
 import type {NewRunEvent, NewRunSnapshot} from '../../state/index.js';
@@ -63,8 +64,9 @@ const RANK: Readonly<Record<CheckState, number>> = {fail: 0, warn: 1, pending: 2
 
 /**
  * "Ready to start": one line while all is well, the failed checks and their fixes open as soon as
- * one fails. The user's own opening or closing holds until the line's kind changes (ready, failing),
- * which is what `key` restarts.
+ * one fails. Beside the form the checks are open to start with; under it (a narrow window) they
+ * start closed, so the form and Start run stay in view. The user's own opening or closing holds
+ * until the line's kind changes (ready, failing).
  */
 function ReadyPanel(props: {
   readonly snapshot: NewRunSnapshot;
@@ -87,7 +89,9 @@ function ReadyPanel(props: {
     null,
   );
   // A choice is for the kind of line it was made on: a check that starts failing opens it again.
-  const open = chosen?.for === status.open ? chosen.open : true;
+  // Unless the line fails, the checks open by themselves only where they have a column of their own.
+  const sideLayout = useSideActionLayout();
+  const open = chosen?.for === status.open ? chosen.open : status.open || sideLayout;
   const blocked = startBlocked(snapshot);
   const line = summary(snapshot.context);
   return (

@@ -166,6 +166,27 @@
 .vs-app-nav .vs-sidebar-section {
   -webkit-app-region: no-drag;
 }
+/* Hidden, the column leaves a rail of icon buttons: the same title-bar offset and background. */
+.vs-app-rail {
+  box-sizing: border-box;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  width: calc(var(--control) + var(--space-4) * 2);
+  max-height: 100%;
+  padding: calc(var(--titlebar-row) + var(--space-2)) var(--space-4) var(--space-5);
+  -webkit-app-region: drag;
+  border-right: var(--hairline) solid var(--line);
+  background: var(--panel-2);
+}
+.vs-app-rail :is(a, button, [tabindex]) {
+  -webkit-app-region: no-drag;
+}
+.vs-app-rail > :last-child {
+  margin-top: auto;
+}
 .vs-app-nav-pinned {
   flex: none;
   display: flex;

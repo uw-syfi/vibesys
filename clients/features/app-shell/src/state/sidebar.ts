@@ -1,10 +1,8 @@
 /**
  * The sidebar's store: a pure reducer over what the hosts' watches push (their listings), the runs
- * this user opened (Recent), the runs archived, the saved machines and whether each is ready, and
- * which screen is shown. The rows the sidebar draws are selectors over it, so a push is folded once
- * and every row follows. The machines are the saved ones (`hosts.json`, the same list the Machines
- * screen reads), listed at start and again when the user leaves the Machines screen, where they
- * may have changed; each listing and check carries a token, so a late reply is dropped.
+ * this user opened (Recent), the runs archived, and which screen is shown. The rows the sidebar
+ * draws are selectors over it, so a push is folded once and every row follows. The saved machines
+ * are the Machines store's, not kept here.
  */
 import {
   digestLook,
@@ -95,28 +93,11 @@ export interface ShellActions {
   openWindow(run: RunRef): void;
 }
 
-/** One saved machine: whether its last check found it ready, or the check awaited. */
-export interface SidebarMachine {
-  readonly host: HostKey;
-  /** Null until a check answers. */
-  readonly ready: boolean | null;
-  readonly checking: number | null;
-}
-
-export interface SidebarMachines {
-  /** The listing awaited, or null. */
-  readonly listing: number | null;
-  readonly saved: readonly SidebarMachine[];
-  /** The last token issued, so each is new. */
-  readonly lastToken: number;
-}
-
 export interface SidebarState {
   /** The latest listing of each host, one per host. */
   readonly listings: readonly HostListing[];
   readonly recent: readonly RecentRun[];
   readonly archived: readonly RunRef[];
-  readonly machines: SidebarMachines;
   /** Each shown Recent run's digest, by `digestKey`. */
   readonly digests: Readonly<Record<string, DigestSlot>>;
   /** The last token a digest request used, so each is new. */
@@ -143,33 +124,18 @@ export type SidebarAction =
   /** What the host said of the digests asked under `token`; null when it could not be asked. */
   | {readonly type: 'digests-read'; readonly token: number; readonly reply: RunDigestsReply | null}
   /** The user asks again for a Recent run whose state could not be read. */
-  | {readonly type: 'retry-digest'; readonly run: RunRef}
-  /** The saved machines, or why they could not be read. */
-  | {
-      readonly type: 'machines-listed';
-      readonly token: number;
-      readonly hosts: readonly HostKey[] | null;
-    }
-  /** Whether one machine's check found it ready (`machine` answered `ready`). */
-  | {
-      readonly type: 'machine-checked';
-      readonly token: number;
-      readonly host: HostKey;
-      readonly ready: boolean;
-    };
+  | {readonly type: 'retry-digest'; readonly run: RunRef};
 
-/** What the sidebar asks of the main process: the saved machines, and one machine's check. */
+/** What the sidebar asks of the main process. */
 export type SidebarRequest =
-  | {readonly kind: 'list-machines'; readonly token: number}
   /** Read what these runs of `project` on `host` say at a glance. */
-  | {
-      readonly kind: 'read-digests';
-      readonly token: number;
-      readonly host: HostKey;
-      readonly project: string;
-      readonly runIds: readonly string[];
-    }
-  | {readonly kind: 'check-machine'; readonly token: number; readonly host: HostKey};
+  {
+    readonly kind: 'read-digests';
+    readonly token: number;
+    readonly host: HostKey;
+    readonly project: string;
+    readonly runIds: readonly string[];
+  };
 
 export type SidebarStep = Step<SidebarState, SidebarRequest>;
 
@@ -177,7 +143,6 @@ export const SIDEBAR_EMPTY: SidebarState = {
   listings: [],
   recent: [],
   archived: [],
-  machines: {listing: null, saved: [], lastToken: 0},
   digests: {},
   lastDigestToken: 0,
   selection: {kind: 'new-run'},
@@ -185,55 +150,16 @@ export const SIDEBAR_EMPTY: SidebarState = {
   shown: true,
 };
 
-function listMachines(state: SidebarState): SidebarStep {
-  const token = state.machines.lastToken + 1;
-  return {
-    state: {...state, machines: {...state.machines, listing: token, lastToken: token}},
-    requests: [{kind: 'list-machines', token}],
-  };
-}
-
-/** The sidebar before anything is heard, shown or hidden as the viewer left it: it asks for the saved machines. */
-export function initialSidebar(shown = true): SidebarStep {
-  return listMachines({...SIDEBAR_EMPTY, shown});
-}
-
 function same(state: SidebarState): SidebarStep {
   return {state, requests: []};
 }
 
-/** The listed machines, each checked again; what was known of one that stays is kept meanwhile. */
-function machinesListed(
-  state: SidebarState,
-  action: Extract<SidebarAction, {type: 'machines-listed'}>,
-): SidebarStep {
-  const {machines} = state;
-  if (machines.listing !== action.token) return same(state);
-  if (action.hosts === null) return same({...state, machines: {...machines, listing: null}});
-  let last = machines.lastToken;
-  const requests: SidebarRequest[] = [];
-  const saved = [...new Set(action.hosts)].map(host => {
-    last += 1;
-    requests.push({kind: 'check-machine', token: last, host});
-    const known = machines.saved.find(machine => machine.host === host);
-    return {host, ready: known?.ready ?? null, checking: last};
-  });
-  return {state: {...state, machines: {listing: null, saved, lastToken: last}}, requests};
+/** The sidebar before anything is heard, shown or hidden as the viewer left it. */
+export function initialSidebar(shown = true): SidebarStep {
+  return same({...SIDEBAR_EMPTY, shown});
 }
 
-function machineChecked(
-  state: SidebarState,
-  action: Extract<SidebarAction, {type: 'machine-checked'}>,
-): SidebarStep {
-  const machine = state.machines.saved.find(each => each.host === action.host);
-  if (machine === undefined || machine.checking !== action.token) return same(state);
-  const saved = state.machines.saved.map(each =>
-    each === machine ? {...each, ready: action.ready, checking: null} : each,
-  );
-  return same({...state, machines: {...state.machines, saved}});
-}
-
-/** The selection, and a fresh listing when the user leaves the Machines screen. */
+/** The selection, remembering the screen Settings was opened from. */
 function selected(state: SidebarState, screen: Screen): SidebarStep {
   const beforeSettings =
     (screen.kind === 'settings' || screen.kind === 'machines') &&
@@ -242,8 +168,7 @@ function selected(state: SidebarState, screen: Screen): SidebarStep {
       ? state.selection
       : state.beforeSettings;
   const next = {...state, selection: screen, beforeSettings};
-  const leaving = state.selection.kind === 'machines' && screen.kind !== 'machines';
-  return leaving ? listMachines(next) : same(next);
+  return same(next);
 }
 
 /** How many runs Recent shows before "Show all". */
@@ -371,10 +296,6 @@ function baseStep(state: SidebarState, action: SidebarAction): SidebarStep {
       return selected(state, state.beforeSettings);
     case 'toggle-sidebar':
       return same({...state, shown: !state.shown});
-    case 'machines-listed':
-      return machinesListed(state, action);
-    case 'machine-checked':
-      return machineChecked(state, action);
   }
 }
 
@@ -571,18 +492,6 @@ export function liveMachineGroups(
   return groups;
 }
 
-/**
- * The machines the sidebar counts: every saved machine, and those whose last check found them not
- * ready (checkout not found, sign-in, or unreachable).
- */
-export function machineCounts(state: SidebarState): {
-  readonly count: number;
-  readonly attention: number;
-} {
-  const {saved} = state.machines;
-  return {count: saved.length, attention: saved.filter(machine => machine.ready === false).length};
-}
-
 function recentProblems(state: SidebarState, live: readonly RunRow[]): string[] {
   const problems: string[] = [];
   const {rows} = recentRows(state);
@@ -621,12 +530,8 @@ function liveProblems(live: readonly RunRow[]): string[] {
 export function sidebarInvariants(state: SidebarState): string[] {
   const hosts = state.listings.map(listing => listing.host);
   const live = liveRows(state);
-  const machines = state.machines.saved.map(machine => machine.host);
-  const {attention, count} = machineCounts(state);
   return [
     ...(new Set(hosts).size === hosts.length ? [] : ['a host is listed twice']),
-    ...(new Set(machines).size === machines.length ? [] : ['a machine is counted twice']),
-    ...(attention <= count ? [] : ['more machines need attention than are saved']),
     ...recentProblems(state, live),
     ...liveProblems(live),
   ];

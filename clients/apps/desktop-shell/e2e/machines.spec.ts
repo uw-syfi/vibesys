@@ -137,6 +137,12 @@ test('add a machine, change a checkout from labelled suggestions, and remove a m
   await page.getByRole('button', {name: 'Check and add'}).click();
   await expect(row(page, 'host-c')).toContainText('Ready');
   await expect(page.getByRole('heading', {name: 'host-c'})).toBeVisible();
+  // The count in the navigation is the list beside it, as machines come and go.
+  const nav = page
+    .getByRole('navigation', {name: 'Settings sections'})
+    .getByRole('button', {name: /Machines/});
+  await expect(machineList(page).getByRole('treeitem')).toHaveCount(4);
+  await expect(nav).toContainText('4 saved · 2 need attention');
 
   // Change checkout offers the checkouts it finds, each with its version.
   await row(page, 'This Mac').click();
@@ -159,6 +165,8 @@ test('add a machine, change a checkout from labelled suggestions, and remove a m
   await row(page, 'host-c').click();
   await page.getByRole('button', {name: 'Remove'}).click();
   await expect(row(page, 'host-c')).toHaveCount(0);
+  await expect(machineList(page).getByRole('treeitem')).toHaveCount(3);
+  await expect(nav).toContainText('3 saved · 2 need attention');
   await row(page, 'This Mac').click();
   await expect(page.getByRole('button', {name: 'Remove'})).toHaveCount(0);
 

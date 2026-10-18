@@ -13,12 +13,12 @@ import {
 } from '@vibesys/feature-app-shell/renderer';
 import {
   type Clock,
-  machineCounts,
   type Screen,
   type SidebarState,
   sidebarShortcutLabel,
 } from '@vibesys/feature-app-shell/state';
 import {createMachinesStore, MachinesScreen} from '@vibesys/feature-machines/renderer';
+import {machineCounts} from '@vibesys/feature-machines/state';
 import {
   createNewRunStore,
   type MoreOptionsMemory,
@@ -287,7 +287,7 @@ export function Shell(props: {
                 back={() => select({kind: 'settings'})}
               />
             }
-            machines={machineCounts(sidebarState)}
+            machines={machineCounts(machinesState)}
           />
         );
       case 'machines':

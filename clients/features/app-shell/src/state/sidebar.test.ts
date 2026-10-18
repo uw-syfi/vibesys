@@ -5,7 +5,6 @@ import {checkModel, type Seeded} from '@vibesys/store/testing';
 import {
   initialSidebar,
   liveRows,
-  machineCounts,
   RECENT_ROWS,
   type RunRowStatus,
   recentRows,
@@ -89,25 +88,8 @@ function randomRun(random: () => number): RunRef {
   return {host: pick(random, HOSTS), runId: pick(random, RUN_IDS)};
 }
 
-/** A model action: a push, a selection, or a machines reply with any token issued so far. */
-function modelAction(random: Seeded, tokens: readonly number[]): SidebarAction {
-  const roll = random.next();
-  if (roll < 0.15) {
-    const hosts = HOSTS.filter(() => random.bool());
-    return {
-      type: 'machines-listed',
-      token: random.pick(tokens),
-      hosts: random.bool() ? hosts : null,
-    };
-  }
-  if (roll < 0.35) {
-    return {
-      type: 'machine-checked',
-      token: random.pick(tokens),
-      host: random.pick(HOSTS),
-      ready: random.bool(),
-    };
-  }
+/** A model action: a push or a selection. */
+function modelAction(random: Seeded): SidebarAction {
   return randomAction(() => random.next());
 }
 
@@ -138,58 +120,16 @@ function randomAction(random: () => number): SidebarAction {
 }
 
 describe('sidebarStep', () => {
-  test('model: holds its invariants and drops stale machine replies over seeded sequences', () => {
+  test('model: holds its invariants over seeded sequences', () => {
     checkModel<SidebarState, SidebarAction, SidebarRequest>({
       initial: initialSidebar().state,
       step: sidebarStep,
-      action: (random, tokens) => modelAction(random, tokens),
+      action: random => modelAction(random),
       issues: request => request.token,
-      awaited: state => ({
-        listing: state.machines.listing,
-        ...Object.fromEntries(
-          state.machines.saved.map(machine => [`check:${machine.host}`, machine.checking]),
-        ),
-      }),
-      reply: action =>
-        action.type === 'machines-listed'
-          ? {slot: 'listing', token: action.token}
-          : action.type === 'machine-checked'
-            ? {slot: `check:${action.host}`, token: action.token}
-            : null,
+      awaited: () => ({}),
+      reply: () => null,
       invariants: sidebarInvariants,
-      also: (before, action, after, requests) => {
-        // Leaving the Machines screen lists the saved machines again.
-        const left =
-          action.type === 'select' &&
-          before.selection.kind === 'machines' &&
-          action.screen.kind !== 'machines';
-        expect(requests.some(request => request.kind === 'list-machines')).toBe(left);
-        expect(machineCounts(after).count).toBe(after.machines.saved.length);
-      },
     });
-  });
-
-  test('regression: the Machines count is the saved machines, with no host watched', () => {
-    let step = initialSidebar();
-    const listing = step.requests.find(request => request.kind === 'list-machines');
-    step = sidebarStep(step.state, {
-      type: 'machines-listed',
-      token: listing?.token ?? 0,
-      hosts: ['local', 'ssh:host-a', 'ssh:host-b'],
-    });
-    expect(step.state.listings).toEqual([]);
-    expect(machineCounts(step.state)).toEqual({count: 3, attention: 0});
-    let state = step.state;
-    for (const request of step.requests) {
-      if (request.kind !== 'check-machine') continue;
-      state = sidebarStep(state, {
-        type: 'machine-checked',
-        token: request.token,
-        host: request.host,
-        ready: request.host === 'local',
-      }).state;
-    }
-    expect(machineCounts(state)).toEqual({count: 3, attention: 2});
   });
 
   test('Recent keeps the newest runs up to its limit, without archived or live ones', () => {

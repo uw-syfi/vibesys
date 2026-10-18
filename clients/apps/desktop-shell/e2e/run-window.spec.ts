@@ -110,3 +110,28 @@ test('a run opens in a window of its own, shown alone and live there', async ({p
   await runWindow.close();
   await expect(page.getByRole('heading', {name: 'New run'})).toBeVisible();
 });
+
+test('the Settings menu item opens Settings in the main window while a run shows in its own window', async ({
+  page,
+  context,
+}) => {
+  await install(context);
+  await page.goto('./shell.html');
+  await sidebar(page)
+    .getByRole('button', {name: /^\S+ queue-rs · mpmc/})
+    .click();
+  const opening = context.waitForEvent('page');
+  await page.getByRole('button', {name: 'More actions'}).click();
+  await page.getByRole('menuitem', {name: 'Open in new window'}).click();
+  const runWindow = await opening;
+  await runWindow.waitForLoadState();
+  await expect(runWindow.getByRole('radiogroup', {name: 'Show'})).toBeVisible();
+
+  // The menu belongs to the application, not to the page that has focus: it reaches the main window.
+  await page.evaluate(() =>
+    (window as unknown as {fakeHost: {openSettings(): void}}).fakeHost.openSettings(),
+  );
+  await expect(page.getByRole('heading', {name: 'Appearance'})).toBeVisible();
+  await expect(runWindow.getByRole('radiogroup', {name: 'Show'})).toBeVisible();
+  await expect(runWindow.getByRole('heading', {name: 'Appearance'})).toHaveCount(0);
+});

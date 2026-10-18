@@ -335,9 +335,9 @@ describe('Recent groups', () => {
     ]);
   });
 
-  test('the first start asks for the saved machines and nothing else', () => {
+  test("the first start asks for nothing: the saved machines are the Machines store's", () => {
     const action: SidebarAction = {type: 'toggle-sidebar'};
-    expect(initialSidebar().requests.map(each => each.kind)).toEqual(['list-machines']);
+    expect(initialSidebar().requests).toEqual([]);
     expect(sidebarStep(SIDEBAR_EMPTY, action).requests).toEqual([]);
   });
 

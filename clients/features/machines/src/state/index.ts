@@ -12,6 +12,7 @@ export {
   type MachinesRequest,
   type MachinesState,
   type MachinesStep,
+  machineCounts,
   machineStatus,
   machinesAwaited,
   machinesInvariants,

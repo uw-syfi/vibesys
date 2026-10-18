@@ -91,6 +91,25 @@ test('the model tiers are no wider than the selectors on the page', async ({page
   expect(widths.select).toBeLessThanOrEqual(widths.cap);
 });
 
+test('the checks start open beside the form and closed under it, so Start run stays in view', async ({
+  page,
+}) => {
+  const toggle = ready(page).getByRole('button', {name: /Ready/});
+  await page.setViewportSize({width: 800, height: 900});
+  await open(page);
+  await expect(toggle).toBeVisible();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(ready(page).getByRole('region', {name: 'Details'})).toHaveCount(0);
+  await expect(start(page)).toBeVisible();
+  await expect(page.getByLabel('Task', {exact: true})).toBeInViewport();
+  await toggle.click();
+  await expect(ready(page).getByRole('region', {name: 'Details'})).toBeVisible();
+
+  await page.setViewportSize({width: 1440, height: 900});
+  await page.reload();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+});
+
 test('a helper without model tiers keeps the full vetted model list', async ({page}) => {
   const newRun = SEED.newRun;
   if (newRun === undefined) throw new Error('the seed has no New run helper');

@@ -1,7 +1,7 @@
 /**
  * The sidebar's shell: its store, fed by the welcome bridge's overview and pushes (a host's
- * listing, Recent, the preferences), and by the saved machines and their checks, which the store
- * asks for itself (`SidebarRequest`).
+ * listing, Recent, the preferences), and by the run digests, which the store asks for itself
+ * (`SidebarRequest`).
  */
 import {settled, type WelcomeBridge} from '@vibesys/ipc';
 import {sameRun} from '@vibesys/runs';
@@ -23,8 +23,6 @@ export type ShellBridge = Pick<
   | 'preferences'
   | 'archive'
   | 'openRunWindow'
-  | 'machines'
-  | 'machine'
   | 'runDigests'
   | 'onListing'
   | 'onRecent'
@@ -39,30 +37,8 @@ function perform(
   dispatch: (action: SidebarAction) => void,
 ): void {
   const {token} = request;
-  if (request.kind === 'read-digests') {
-    void settled(bridge.runDigests(request.host, request.project, request.runIds)).then(result =>
-      dispatch({type: 'digests-read', token, reply: result.ok ? result.value : null}),
-    );
-    return;
-  }
-  if (request.kind === 'list-machines') {
-    void settled(bridge.machines()).then(result =>
-      dispatch({
-        type: 'machines-listed',
-        token,
-        hosts: result.ok ? result.value.map(machine => machine.host) : null,
-      }),
-    );
-    return;
-  }
-  const {host} = request;
-  void settled(bridge.machine(host)).then(result =>
-    dispatch({
-      type: 'machine-checked',
-      token,
-      host,
-      ready: result.ok && result.value.kind === 'ready',
-    }),
+  void settled(bridge.runDigests(request.host, request.project, request.runIds)).then(result =>
+    dispatch({type: 'digests-read', token, reply: result.ok ? result.value : null}),
   );
 }
 

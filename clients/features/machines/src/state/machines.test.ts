@@ -9,6 +9,7 @@ import {
   type MachinesAction,
   type MachinesRequest,
   type MachinesState,
+  machineCounts,
   machineFacts,
   machineStatus,
   machinesAwaited,
@@ -165,6 +166,10 @@ function checkRequests(
   after: MachinesState,
   requests: readonly MachinesRequest[],
 ): void {
+  // The count the Settings navigation shows is the list the screen draws, in every state.
+  const counts = machineCounts(after);
+  expect(counts.count).toBe(after.machines.length);
+  expect(counts.attention).toBeLessThanOrEqual(counts.count);
   for (const request of requests) {
     if (request.kind === 'save') {
       expect(action.type).toBe('submit');
@@ -242,6 +247,29 @@ describe('machinesStep', () => {
     expect(state.fixing).toBeNull();
     expect(relist).toEqual([{kind: 'list', token: state.listing?.token ?? 0}]);
     expect(state.listing?.select).toBe('ssh:host-b');
+  });
+
+  test('regression: the Machines count follows the list when a machine is added or removed', () => {
+    let {state} = initialMachines();
+    const run = (action: MachinesAction): void => {
+      state = machinesStep(state, action).state;
+    };
+    run({type: 'listed', token: 1, result: {ok: true, value: ENTRIES.slice(0, 2)}});
+    expect(machineCounts(state)).toEqual({count: 2, attention: 0});
+    // A machine is added: the screen lists again, and the count is the new list's.
+    const token = state.lastToken + 1;
+    state = {...state, listing: {token, select: null}, lastToken: token};
+    run({type: 'listed', token, result: {ok: true, value: ENTRIES.slice(0, 3)}});
+    expect(machineCounts(state)).toEqual({count: 3, attention: 0});
+    const host = state.machines[2]?.host ?? 'local';
+    const checking = state.machines.find(machine => machine.host === host)?.checking ?? 0;
+    run({
+      type: 'reported',
+      token: checking,
+      host,
+      result: {ok: true, value: {kind: 'sign-in', detail: 'the key needs its passphrase'}},
+    });
+    expect(machineCounts(state)).toEqual({count: 3, attention: 1});
   });
 
   test('checkout save and removal for one machine are mutually exclusive', () => {

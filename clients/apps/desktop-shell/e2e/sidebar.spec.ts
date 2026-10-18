@@ -100,7 +100,9 @@ const mainWidth = (page: Page) =>
 
 test.use({colorScheme: 'dark', viewport: {width: 1440, height: 900}});
 
-test('the button hides the sidebar completely and shows it again', async ({page}) => {
+test('the button hides the sidebar to a rail with New run and Settings, and shows it again', async ({
+  page,
+}) => {
   await openRun(page);
   const shown = await mainWidth(page);
   await expect(hide(page)).toHaveAttribute('title', 'Hide sidebar (⌘\\)');
@@ -109,11 +111,20 @@ test('the button hides the sidebar completely and shows it again', async ({page}
 
   await hide(page).click();
   await expect(sidebar(page)).toHaveCount(0);
-  await expect(page.getByRole('button', {name: 'New run'})).toHaveCount(0);
   await expect(show(page)).toHaveAttribute('title', 'Show sidebar (⌘\\)');
-  expect(await mainWidth(page)).toBe(1440);
+  // Only a narrow rail is left, and it still reaches New run and Settings.
+  const rail = page.getByRole('navigation', {name: 'Quick navigation'});
+  const railWidth = await rail.evaluate(element => element.getBoundingClientRect().width);
+  expect(railWidth).toBeGreaterThan(0);
+  expect(railWidth).toBeLessThan(80);
+  expect(await mainWidth(page)).toBe(1440 - railWidth);
   expect(await mainWidth(page)).toBeGreaterThan(shown);
   await shot(page, 'hidden');
+  await rail.getByRole('button', {name: 'Settings'}).click();
+  await expect(page.getByRole('heading', {name: 'Appearance'})).toBeVisible();
+  await rail.getByRole('button', {name: 'New run'}).click();
+  await expect(page.getByRole('heading', {name: 'New run'})).toBeVisible();
+  await expect(sidebar(page)).toHaveCount(0);
 
   await show(page).click();
   await expect(sidebar(page)).toBeVisible();
@@ -153,7 +164,10 @@ test('the Settings menu item opens Settings repeatedly and Back restores the run
     await openSettingsFromMenu(page);
     await page.getByRole('button', {name: 'Back', exact: true}).click();
     await expect(page.getByRole('heading', {name: 'Appearance'})).toHaveCount(0);
-    await expect(page.getByRole('button', {name: 'New run'})).toHaveCount(collapsed ? 0 : 1);
+    await expect(sidebar(page)).toHaveCount(collapsed ? 0 : 1);
+    await expect(page.getByRole('navigation', {name: 'Quick navigation'})).toHaveCount(
+      collapsed ? 1 : 0,
+    );
   }
 });
 

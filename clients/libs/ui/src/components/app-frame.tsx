@@ -23,8 +23,8 @@ const COLLAPSE_WIDTH = 120;
  * (`--chrome-inset-height`) and at least a control tall. `control` sits in it, vertically centered
  * and after the window's controls (`--chrome-inset-width`), and stays in the same place whether the
  * column is shown or not. With `navHidden` the column takes no width at all and is gone for
- * assistive technology and the keyboard; the main area then starts with an empty drag strip of the
- * row's height, so the page sits below the row. The column changes size over the `--duration-fast`
+ * assistive technology and the keyboard, and the `rail`, if any, takes its place; the main area then
+ * starts with an empty drag strip of the row's height, so the page sits below the row. The column changes size over the `--duration-fast`
  * token, and not at all when the user prefers reduced motion.
  */
 export function AppFrame(props: {
@@ -38,6 +38,11 @@ export function AppFrame(props: {
   readonly navHidden?: boolean;
   /** The title-bar row's control (the sidebar toggle), shown whether the column is hidden or not. */
   readonly control?: ReactNode;
+  /**
+   * What stays reachable while the column is hidden: a narrow rail of icon buttons in its place,
+   * named `label` for assistive technology. The first child sits at the top, the last at the bottom.
+   */
+  readonly rail?: {readonly label: string; readonly content: ReactNode};
   readonly onCollapse?: () => void;
   readonly children: ReactNode;
 }): JSX.Element {
@@ -106,6 +111,11 @@ export function AppFrame(props: {
           }}
         />
       </nav>
+      {hidden && props.rail !== undefined ? (
+        <nav className="vs-app-rail" aria-label={props.rail.label}>
+          {props.rail.content}
+        </nav>
+      ) : null}
       <div className="vs-app-main">
         {hidden ? <div className="vs-app-strip" /> : null}
         <div className="vs-app-content">{props.children}</div>

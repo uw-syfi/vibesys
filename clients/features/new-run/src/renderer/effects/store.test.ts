@@ -1,7 +1,14 @@
 import {expect, test} from 'bun:test';
 import type {Check, HelperFeature} from '@vibesys/contracts/host-helper';
 import type {RecentRun, RunRef} from '@vibesys/runs';
-import {backendOf, readiness, rolesView, startBlocked, summary} from '../ui/view.js';
+import {
+  backendOf,
+  readiness,
+  readinessStatus,
+  rolesView,
+  startBlocked,
+  summary,
+} from '../ui/view.js';
 import {createNewRunStore, type NewRunBridge} from './store.js';
 
 const ok = <T>(value: T) => Promise.resolve({ok: true as const, value});
@@ -119,6 +126,12 @@ test('Start says why it waits: inputs missing, being checked, or an item to fix'
   store.dispatch({type: 'project', project: {source: 'folder', path: '/p'}});
   await settle();
   expect(startBlocked(store.getState())).toBe('Checking these inputs.');
+  // While the checks run, the one line and its one row do not say the same thing.
+  const waiting = readiness(store.getState());
+  expect(waiting.map(item => item.id)).toEqual(['checking']);
+  const line = readinessStatus(waiting).text;
+  expect(line).toBe('Checking');
+  expect(waiting.flatMap(item => [item.label, item.detail])).not.toContain(line);
   clock.runDue();
   await settle();
   expect(startBlocked(store.getState())).toBeUndefined();

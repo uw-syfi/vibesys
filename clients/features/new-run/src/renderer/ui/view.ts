@@ -348,7 +348,9 @@ export function readinessStatus(items: readonly Readiness[]): ReadinessStatus {
   }
   const pending = of('pending')[0];
   if (pending !== undefined) {
-    return {state: 'pending', text: pending.detail ?? pending.label, open: false};
+    // The waiting-for-the-checks row says what is checked; the line says only that it is.
+    const text = pending.id === 'checking' ? 'Checking' : (pending.detail ?? pending.label);
+    return {state: 'pending', text, open: false};
   }
   const passed = of('ok').length;
   const warned = of('warn').length;
