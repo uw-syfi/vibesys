@@ -46,6 +46,8 @@ from vs_project.api import InboxEntry, RequestState, RequestStatus
 from vs_project.api.testing import FakeControlInbox
 from vs_runtime.api.core import OperatorInbox, RunControlBridge
 from vs_runtime.api.infrastructure import (
+    CancelAttemptRequest,
+    CancelItemRequest,
     CapacityHandling,
     ChannelRunControl,
     ControlAck,
@@ -57,6 +59,7 @@ from vs_runtime.api.infrastructure import (
     RefusalReason,
     ResumeRequest,
     RunControlTransitionKind,
+    SetMaxParallelRequest,
     SteerRequest,
     StopRequest,
     WithdrawRequest,
@@ -465,8 +468,8 @@ def test_a_control_sent_after_the_last_poll_is_answered_when_the_run_ends() -> N
 
     A socket pause p3 sent between the last poll and the run's end is refused with core's
     reason and its hold lifted, a steer s5 and a withdrawal w6 sent then are reported
-    dropped with the run's end, and an inbox request posted then is rejected with it, each
-    told once.
+    dropped with the run's end, an operator action a7 is refused with it, and an inbox
+    request posted then is rejected with it, each told once.
     """
     run = _run()
     run.poll()
@@ -475,27 +478,28 @@ def test_a_control_sent_after_the_last_poll_is_answered_when_the_run_ends() -> N
     run.inbox.post("p4", PauseRequest(control_id="p4").model_dump_json().encode(), ended=_live)
     run.control.submit(SteerRequest(control_id="s5", text="late"))
     run.control.submit(WithdrawRequest(control_id="w6", withdraws="s5"))
+    run.control.submit(SetMaxParallelRequest(control_id="a7", max_parallel=1))
     run.bridge.settled(run.core, running=False)
     run.bridge.end(run.core)
 
     assert run.channel.pause_state() is None
     told = _told(run)
-    assert told[0] == (
-        RunControlTransitionKind.CONTROL_REFUSED,
-        None,
-        "pause p3: terminal run rejects controls",
-    )
-    assert [(kind, request_id) for kind, request_id, _ in told[1:]] == [
+    ended = "the run ended: recovery blocked"
+    assert told[:2] == [
+        (RunControlTransitionKind.CONTROL_REFUSED, None, "pause p3: terminal run rejects controls"),
+        (RunControlTransitionKind.CONTROL_REFUSED, None, f"set_max_parallel a7: {ended}"),
+    ]
+    assert [(kind, request_id) for kind, request_id, _ in told[2:]] == [
         (RunControlTransitionKind.REQUEST_REJECTED, "p4")
     ]
     assert run.inbox.pending() == ()
-    ended = "the run ended: recovery blocked"
     assert _dropped(run) == [
         f"steer s5 reached no turn: {ended}",
         f"withdraw w6 ended nothing: {ended}",
     ]
     assert run.channel.take_pending_steer() == []
     assert run.channel.take_pending_withdrawals() == []
+    assert run.channel.take_pending_actions() == []
 
 
 _AFTER_THE_END: tuple[ControlRequest, ...] = (
@@ -505,6 +509,9 @@ _AFTER_THE_END: tuple[ControlRequest, ...] = (
     StopRequest(control_id="late"),
     SteerRequest(control_id="late", text="late"),
     WithdrawRequest(control_id="late", withdraws="s0"),
+    CancelAttemptRequest(control_id="late", attempt="A-1"),
+    CancelItemRequest(control_id="late", item="I-1"),
+    SetMaxParallelRequest(control_id="late", max_parallel=1),
 )
 
 
@@ -534,6 +541,7 @@ def test_a_control_sent_after_the_run_ended_is_refused_and_reaches_nothing(
     ) == before
     assert run.channel.take_pending_steer() == []
     assert run.channel.take_pending_withdrawals() == []
+    assert run.channel.take_pending_actions() == []
 
 
 def test_a_control_answered_before_the_end_replays_its_ack_after_it() -> None:

@@ -572,8 +572,8 @@ class RunControlBridge:
         keeps its controls waiting. The operators' controls first stop taking new ones
         (``ChannelRunControl.end``): each later one is refused in its ack. Then nothing more
         reaches the channel, and this answers all it holds. A pause or resume is refused
-        (``_refuse``) with core's reason, as one refused at commit is, and each steer or
-        withdrawal is reported dropped with the run's end. Every inbox request core holds is
+        (``_refuse``) with core's reason, as one refused at commit is, each operator action is
+        refused with the run's end, and each steer or withdrawal is reported dropped with it. Every inbox request core holds is
         settled and every other one rejected with the run's end, each rejection reported
         once. This runs after the end is durable, so it finds every request a poster wrote
         before seeing the end; one written after is refused to its poster, and reads as
@@ -593,6 +593,11 @@ class RunControlBridge:
             self._channel.notify_steer_dropped(
                 f"withdraw {withdrawal.control_id} ended nothing: {ending}"
             )
+        for request in self._channel.take_pending_actions():
+            change = _Change(
+                request.action.value, control_id=request.control_id, action_request=request
+            )
+            self._refuse(change, ending, request_id=None)
         inbox = self._inbox
         if inbox is None:
             return
