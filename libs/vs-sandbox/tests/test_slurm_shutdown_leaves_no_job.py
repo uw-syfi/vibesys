@@ -112,7 +112,7 @@ class _Scheduler(FakeCluster):
 
 
 @dataclass(frozen=True)
-class Submit:
+class SubmitEvaluation:
     handle: int
 
 
@@ -137,12 +137,12 @@ class Close:
 # Loop turns after the run's steps for a task the executor left behind to reach sbatch.
 _SETTLE_TURNS = 20
 
-Step = Submit | Cancel | Pause | Close
+Step = SubmitEvaluation | Cancel | Pause | Close
 
 _handle = st.integers(min_value=0, max_value=len(HANDLES) - 1)
 _steps = st.lists(
     st.one_of(
-        st.builds(Submit, _handle),
+        st.builds(SubmitEvaluation, _handle),
         st.builds(Cancel, _handle),
         st.builds(
             Pause,
@@ -205,7 +205,7 @@ class _Shutdown:
         started: list[asyncio.Task[None]] = []
         for step in steps:
             match step:
-                case Submit(handle=index):
+                case SubmitEvaluation(handle=index):
                     started.append(asyncio.create_task(self._submit(index)))
                 case Cancel(handle=index):
                     started.append(asyncio.create_task(self._cancel(HANDLES[index])))
@@ -266,11 +266,11 @@ def _request(index: int) -> EvaluationRequest:
     schedule_seed=st.integers(min_value=0, max_value=2**16),
 )
 # The reported run: the ledger, a job submitted before the shutdown began.
-@example(mode="ledger", steps=[Submit(0), Pause(6, 3.0), Close()], schedule_seed=0)
+@example(mode="ledger", steps=[SubmitEvaluation(0), Pause(6, 3.0), Close()], schedule_seed=0)
 # A submission that arrives once the executor has closed.
-@example(mode="direct", steps=[Close(), Submit(1)], schedule_seed=0)
+@example(mode="direct", steps=[Close(), SubmitEvaluation(1)], schedule_seed=0)
 # Submissions racing the close: the close does not see either of them.
-@example(mode="direct", steps=[Submit(0), Close(), Submit(1)], schedule_seed=1)
+@example(mode="direct", steps=[SubmitEvaluation(0), Close(), SubmitEvaluation(1)], schedule_seed=1)
 def test_no_job_of_the_run_is_left_on_the_cluster_once_its_executor_closed(
     tmp_path_factory: pytest.TempPathFactory,
     mode: Mode,

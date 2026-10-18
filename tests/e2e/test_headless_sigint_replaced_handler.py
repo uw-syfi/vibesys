@@ -14,7 +14,7 @@ import signal
 from typing import cast
 
 from entrypoints.run import supervise
-from vibesys.api import RunResult, RunSession, RunStatus
+from vibesys.api import RunResult, RunSession, RunStatus, StopMode, StopRequest
 from vibesys.api.testing import FakeRunHandle
 from vs_sim.api import LoopSignalSource
 from vs_sim.api.testing import run_in_child
@@ -32,6 +32,7 @@ class _SelfInterruptingSession:
     def __init__(self) -> None:
         self.stop_requested = asyncio.Event()
         self.stop_calls = 0
+        self.controls: list[object] = []
 
     def start(self) -> None:
         pass
@@ -48,8 +49,13 @@ class _SelfInterruptingSession:
         self.stop_calls += 1
         self.stop_requested.set()
 
+    def submit(self, request: object) -> None:
+        """The one control ingress: a stop request lands in the run as ``stop`` does."""
+        self.controls.append(request)
+        self.stop_requested.set()
 
-def _drain_after_real_sigint() -> tuple[RunStatus, int, bool]:
+
+def _drain_after_real_sigint() -> tuple[RunStatus, int, list[str], bool]:
     signal.signal(signal.SIGINT, _replacement_handler)
     session = _SelfInterruptingSession()
 
@@ -60,12 +66,20 @@ def _drain_after_real_sigint() -> tuple[RunStatus, int, bool]:
         return (await supervise(handle, signals=LoopSignalSource())).status
 
     status = asyncio.run(execute())
-    return status, session.stop_calls, signal.getsignal(signal.SIGINT) is _replacement_handler
+    # The child's result crosses a pipe: name each control's stop mode, or its type.
+    controls = [
+        control.mode.value if isinstance(control, StopRequest) else type(control).__name__
+        for control in session.controls
+    ]
+    restored = signal.getsignal(signal.SIGINT) is _replacement_handler
+    return status, session.stop_calls, controls, restored
 
 
 def test_ctrl_c_drains_the_run_even_when_a_dependency_replaced_the_sigint_handler() -> None:
-    status, stop_calls, handler_restored = run_in_child(_drain_after_real_sigint)
+    """Ctrl-C reaches the run as one stop that cancels its work in flight (``StopMode.CANCEL``)."""
+    status, stop_calls, controls, handler_restored = run_in_child(_drain_after_real_sigint)
 
     assert status is RunStatus.STOPPED
-    assert stop_calls == 1
+    assert controls == [StopMode.CANCEL.value]
+    assert stop_calls == 0
     assert handler_restored
