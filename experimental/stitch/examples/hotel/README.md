@@ -31,7 +31,9 @@ region is deliberately modeled as a `cpu_region`, not a Tokio `task_poll`.
 
 Build `hotel_recommendation` with `--features stitch_profile`, then start it
 with `STITCH_PROFILE_DIR` set to a new directory. Generate recommendation RPC
-traffic while the process runs. Use `stitch capture --pid PID --seconds 12
+traffic with Hotel's `hotel_recommendation_stitch_load` binary, which reuses one
+gRPC connection. Direct profile output to memory-backed storage if available;
+the profile exporter writes synchronously for each request. Use `stitch capture --pid PID --seconds 12
 --out PERF_DIR` during that traffic. Send SIGINT to Hotel after capture so the
 dial9 recorder seals `dial9.0.bin`.
 
@@ -47,8 +49,41 @@ IDs, so Stitch does not guess a wall-clock offset. The source line on a dial9
 region is a declared location. Perf frames are not yet resolved through debug
 information to source lines.
 
+For the measurement below, `perf record --call-graph dwarf,8192` and
+`perf script --no-inline --ns -F pid,tid,time,ip,sym` gave substantially more
+complete stacks than frame-pointer capture. Stitch now selects DWARF by
+default and offers `--stack-mode frame-pointer` when the target build retains
+frame pointers. The `--no-inline` option also avoided a `perf script`
+addr2line error on this Hotel binary.
+
 ## Live validation
 
 The captured fixture files in `fixtures/` are from a real Hotel recommendation
 request. Tests import those files through Stitch's public importer interface.
 The full live run and measured counts are recorded in the pull request.
+
+### What the profile says
+
+A localhost load generator reused one gRPC connection and sent the `dis`
+recommendation request repeatedly. The server ran an unoptimized build with
+stdout directed to `/dev/null`; profiled output went to `/dev/shm`. A 12-second
+perf capture of the uninstrumented service contained 705 CPU samples. Among
+them, 552 (78.3%) had gRPC/HTTP2/protobuf protocol frames and no more specific
+recommendation, logging, or network category; 20 (2.8%) entered the
+recommendation calculation, including 10 with Haversine distance frames.
+HTTP2 HPACK appeared in 171 samples (24.3%), framing in 147 (20.9%), and
+stream management in 249 (35.3%). Those three counts overlap and must not be
+added. The main observed CPU cost for this endpoint is RPC protocol processing,
+not the hotel-distance scan. This is a single endpoint under one localhost
+workload, so it does not rank the full Hotel application.
+
+The simultaneous three-source run produced 12,379 OpenTelemetry spans,
+12,379 dial9 CPU regions, and 1,009 perf samples. Stitch linked every span to
+its region and assigned 92 samples to handler regions by PID, TID, and
+monotonic time. Only the synchronous handler body is marked as a region;
+unassigned samples still contribute to the process cost tree. In a controlled
+5,000-request comparison, the same client took 13.017 seconds without the
+profile feature and 16.934 seconds with it (30.1% longer). Therefore use the
+uninstrumented perf run for a production-cost ranking and the three-source run
+for correlation and source-point navigation. This one-run timing comparison is
+diagnostic, not a performance benchmark.

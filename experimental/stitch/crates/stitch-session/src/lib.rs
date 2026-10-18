@@ -50,6 +50,15 @@ pub struct CaptureRequest {
     pub pid: u32,
     pub seconds: u32,
     pub output_dir: PathBuf,
+    pub stack_mode: CaptureStackMode,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CaptureStackMode {
+    FramePointer,
+    #[default]
+    Dwarf,
 }
 
 #[derive(Debug, Error)]
@@ -191,7 +200,11 @@ pub fn capture_perf(
         "-F".into(),
         "99".into(),
         "--call-graph".into(),
-        "fp".into(),
+        match request.stack_mode {
+            CaptureStackMode::FramePointer => "fp",
+            CaptureStackMode::Dwarf => "dwarf,8192",
+        }
+        .into(),
         "-o".into(),
         data.display().to_string(),
         "-p".into(),
@@ -203,6 +216,7 @@ pub fn capture_perf(
     runner.run("perf", &record_args)?;
     let script_args = vec![
         "script".into(),
+        "--no-inline".into(),
         "--ns".into(),
         "-F".into(),
         "pid,tid,time,ip,sym".into(),

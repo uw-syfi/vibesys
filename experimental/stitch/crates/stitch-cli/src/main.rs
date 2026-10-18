@@ -1,7 +1,15 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 use stitch_core::Graph;
-use stitch_session::{capture_perf, ingest, load_manifest, CaptureRequest, SystemCommandRunner};
+use stitch_session::{
+    capture_perf, ingest, load_manifest, CaptureRequest, CaptureStackMode, SystemCommandRunner,
+};
+
+#[derive(Clone, Copy, ValueEnum)]
+enum StackMode {
+    Dwarf,
+    FramePointer,
+}
 
 #[derive(Parser)]
 #[command(name = "stitch", about = "Experimental heterogeneous profiling CLI")]
@@ -22,6 +30,8 @@ enum Commands {
         seconds: u32,
         #[arg(long)]
         out: PathBuf,
+        #[arg(long, value_enum, default_value_t = StackMode::Dwarf)]
+        stack_mode: StackMode,
     },
     /// Import profiler artifacts and build the evidence graph.
     Ingest {
@@ -61,11 +71,20 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 "CPU sample to poll linkage requires the same process, thread, and clock domain."
             );
         }
-        Commands::Capture { pid, seconds, out } => {
+        Commands::Capture {
+            pid,
+            seconds,
+            out,
+            stack_mode,
+        } => {
             let request = CaptureRequest {
                 pid,
                 seconds,
                 output_dir: out.clone(),
+                stack_mode: match stack_mode {
+                    StackMode::Dwarf => CaptureStackMode::Dwarf,
+                    StackMode::FramePointer => CaptureStackMode::FramePointer,
+                },
             };
             capture_perf(&request, &SystemCommandRunner)?;
             println!("Captured perf artifacts in {}", out.display());

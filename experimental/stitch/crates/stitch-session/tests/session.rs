@@ -3,7 +3,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Output;
 use stitch_session::{
-    capture_perf, ingest, load_manifest, CaptureRequest, CommandRunner, SessionError,
+    capture_perf, ingest, load_manifest, CaptureRequest, CaptureStackMode, CommandRunner,
+    SessionError,
 };
 
 struct FakeRunner {
@@ -45,6 +46,7 @@ fn capture_records_a_reopenable_manifest_and_imports_samples() {
             pid: 7,
             seconds: 2,
             output_dir: output_dir.clone(),
+            stack_mode: CaptureStackMode::Dwarf,
         },
         &runner,
     )
@@ -52,7 +54,9 @@ fn capture_records_a_reopenable_manifest_and_imports_samples() {
     let commands = runner.calls.borrow();
     assert_eq!(commands.len(), 2);
     assert!(commands[0].contains(&"7".to_string()));
+    assert!(commands[0].contains(&"dwarf,8192".to_string()));
     assert!(commands[1].contains(&"pid,tid,time,ip,sym".to_string()));
+    assert!(commands[1].contains(&"--no-inline".to_string()));
     assert!(!commands[1].contains(&"-G".to_string()));
     drop(commands);
     let manifest = load_manifest(&output_dir.join("manifest.json")).unwrap();
@@ -60,6 +64,28 @@ fn capture_records_a_reopenable_manifest_and_imports_samples() {
     assert_eq!(graph.cpu_samples.len(), 1);
     assert_eq!(graph.unassigned_samples, 1);
     assert_eq!(graph.cpu_samples[0].frames, ["hotel::search"]);
+}
+
+#[test]
+fn capture_accepts_frame_pointer_unwinding() {
+    let dir = tempfile::tempdir().unwrap();
+    let runner = FakeRunner {
+        calls: RefCell::new(Vec::new()),
+        script: b"7 8 12.123456789: hotel::search\n".to_vec(),
+    };
+    capture_perf(
+        &CaptureRequest {
+            pid: 7,
+            seconds: 2,
+            output_dir: dir.path().join("capture"),
+            stack_mode: CaptureStackMode::FramePointer,
+        },
+        &runner,
+    )
+    .unwrap();
+    let commands = runner.calls.borrow();
+    assert!(commands[0].contains(&"fp".to_string()));
+    assert!(!commands[0].contains(&"dwarf,8192".to_string()));
 }
 
 #[test]
@@ -98,6 +124,7 @@ fn capture_rejects_reusing_an_output_directory() {
             pid: 7,
             seconds: 1,
             output_dir: PathBuf::from(dir.path()),
+            stack_mode: CaptureStackMode::FramePointer,
         },
         &runner,
     );
@@ -117,6 +144,7 @@ fn empty_capture_and_empty_ingest_do_not_claim_success() {
             pid: 7,
             seconds: 1,
             output_dir: dir.path().join("empty"),
+            stack_mode: CaptureStackMode::FramePointer,
         },
         &runner,
     );
