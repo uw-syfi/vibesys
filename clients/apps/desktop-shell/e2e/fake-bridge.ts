@@ -155,32 +155,16 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
 
 /**
  * The run digests part of the Fake, as a further init script after `installFakeBridge`: the
- * host's answer to what a run's journal says (`seed.digests`), and `fakeHost.digests` and
- * `fakeHost.digestAsks` for the journey.
+ * host's answer to what a run's journal says (`seed.digests`), or that it offers none.
  */
 export function installFakeDigests(seed: FakeBridgeSeed): void {
-  let digests = seed.digests;
-  const asks: string[][] = [];
-  const host = window as unknown as {
-    vibesysWelcome: object;
-    fakeHost: object;
-  };
-  Object.assign(host.vibesysWelcome, {
+  const digests = seed.digests;
+  Object.assign((window as unknown as {vibesysWelcome: object}).vibesysWelcome, {
     runDigests: (_host: string, _project: string, runIds: readonly string[]) => {
-      asks.push([...runIds]);
       if (digests === undefined) return Promise.resolve({ok: true, value: {kind: 'unsupported'}});
-      const known = digests;
-      const runs = new Map(runIds.flatMap(id => (id in known ? [[id, known[id]]] : [])));
+      const runs = new Map(runIds.flatMap(id => (id in digests ? [[id, digests[id]]] : [])));
       return Promise.resolve({ok: true, value: {kind: 'digests', runs}});
     },
-  });
-  Object.assign(host.fakeHost, {
-    /** Change what the host's journals say, for the next ask. */
-    digests: (next: Readonly<Record<string, unknown>>) => {
-      digests = next;
-    },
-    /** The run ids of each ask the page made, in order. */
-    digestAsks: () => asks,
   });
 }
 

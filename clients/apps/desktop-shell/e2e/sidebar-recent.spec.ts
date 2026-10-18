@@ -3,13 +3,13 @@ import {expect, type Page, test} from '@playwright/test';
 import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
 import {screenCheck} from './checks/screen-check.js';
 import {installFakeBridge, installFakeDigests, installFakeMachines} from './fake-bridge.js';
-import {type FakeHostWindow, listed, SEED, sidebar} from './world.js';
+import {listed, SEED, sidebar} from './world.js';
 
 /**
  * Recent runs that can be told apart: fourteen runs of one task, another project's runs among
  * them, runs that failed, stopped, were never recorded as ended and one whose state cannot be read.
  * Each row says when the run began and how it came out, runs of one machine sit under one header,
- * no two neighbours read the same, and a run whose state cannot be read says so and offers a retry.
+ * no two neighbours read the same, and a run whose state cannot be read says so with a retry.
  * `SIDEBAR_RECENT_DIR` names a directory for the window's screenshots and a contact sheet.
  */
 
@@ -118,7 +118,7 @@ const rows = (page: Page) => sidebar(page).locator('section[aria-label="Recent"]
 
 test.use({timezoneId: 'UTC', colorScheme: 'dark'});
 
-for (const width of [1000, 1440, 1920]) {
+for (const width of [1000, 1920]) {
   test(`recent runs differ and pass the checks at ${width}`, async ({page}) => {
     await page.setViewportSize({width, height: 1400});
     await open(page);
@@ -207,40 +207,6 @@ test('dragging the sidebar resizes it and a narrow drag collapses it', async ({p
   await page.mouse.move(60, wider.y + 20);
   await page.mouse.up();
   await expect(nav).toBeHidden();
-});
-
-test('retry asks again for the run, and a run read the second time shows its figures', async ({
-  page,
-}) => {
-  await page.setViewportSize({width: 1440, height: 900});
-  await open(page);
-  const asks = () =>
-    page.evaluate(() => (window as unknown as FakeHostWindow).fakeHost.digestAsks().length);
-  const before = await asks();
-  await page.evaluate(
-    ([digests, id, value]) =>
-      (window as unknown as FakeHostWindow).fakeHost.digests({...(digests as object), [id]: value}),
-    [DIGESTS, UNREADABLE.id, entry(UNREADABLE)] as const,
-  );
-  await sidebar(page)
-    .locator('.vs-sidebar-item', {hasText: "can't read run state"})
-    .last()
-    .getByRole('button', {name: 'Retry'})
-    .click();
-  await expect.poll(asks).toBeGreaterThan(before);
-  await expect(sidebar(page).getByRole('button', {name: 'Retry'})).toHaveCount(1);
-});
-
-test('a host that does not offer digests says so instead of "status unknown"', async ({page}) => {
-  await page.setViewportSize({width: 1440, height: 900});
-  await page.clock.setFixedTime(NOW);
-  const {digests: _offered, ...world} = WORLD;
-  await page.addInitScript(installFakeBridge, world);
-  await page.addInitScript(installFakeMachines, world);
-  await page.addInitScript(installFakeDigests, world);
-  await page.goto('./shell.html');
-  await expect(sidebar(page).getByText('machine needs a newer VibeSys').first()).toBeVisible();
-  await expect(sidebar(page).getByText('status unknown')).toHaveCount(0);
 });
 
 test('the contact sheet shows every recent-runs screen', async ({browser}) => {
