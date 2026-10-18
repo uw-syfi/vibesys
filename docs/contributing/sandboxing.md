@@ -187,9 +187,14 @@ macOS when full read confinement matters.
   detached run's, web mode's) is created in that root, and the operator's clients present
   the key only to a socket whose resolved directory is inside it (`OperatorDialer`), so an
   agent that can write elsewhere cannot swap in its own listener to read the key. A
-  connection must send its whole hello within 10 s of being accepted, and at
-  most 8 connections may wait to do so; more are closed on accept, so peers without the
-  key hold at most 8 server workers for at most 10 s each. Every agent confinement keeps
+  connection must send its whole hello within 2 s of being accepted (every operator
+  client sends it as its first write), and at most 8 connections may wait to do so. A
+  connection accepted while 8 wait closes the one that has waited longest, not the new
+  one, so peers without the key hold at most 8 server workers for at most 2 s each and
+  cannot keep the operator out by reconnecting. The operator's hello arrives with its
+  connection, so it is evicted only if 8 more connections are accepted before the server
+  reads that write; against 8 peers that reconnect at once, every operator connection
+  is served (`tests/server/test_control_admission.py`). Every agent confinement keeps
   the root out of the agent's view (`vs_sandbox.operator_root`): bubblewrap, Landlock and
   Docker refuse with `SandboxUnavailableError` to build a view in which a grant or mount
   contains the root or lies inside it, checked again each time a view is compiled, and
@@ -206,7 +211,8 @@ macOS when full read confinement matters.
   operator, unconfined, and reads the operator key with it) and the Docker daemon
   (`/var/run/docker.sock`, for a user in the `docker` group; a container can mount the
   host's filesystem). Under Landlock, the operator key and the runtime root's placement
-  stop an agent that only talks to the control socket, but not one that uses those
+  stop an agent that only talks to the control socket, from being served or from
+  keeping the operator out, but not one that uses those
   sockets. Seatbelt's profile allows `network*`, so the same holds on macOS by analogy
   (not probed there). Use bubblewrap or the default Docker run environment where operator
   control or the host must be protected. `tests/e2e/test_control_socket_reachability_e2e.py`

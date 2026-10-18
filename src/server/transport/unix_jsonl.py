@@ -65,18 +65,24 @@ subscriber to leave, so it would never exit. The WebSocket gateway's analogue is
 """
 MAX_REQUEST_LINE_BYTES = 1024 * 1024
 """The longest request line a session buffers; the WebSocket gateway's inbound frame cap."""
-HELLO_TIMEOUT_SECONDS = 10.0
+HELLO_TIMEOUT_SECONDS = 2.0
 """How long after it is accepted a connection may take to present the whole operator key.
 
 One deadline for the whole hello, however it is split, so a peer that trickles one byte at
-a time is refused at the same time as a silent one. A real client sends its hello as its
-first write after connecting.
+a time is refused at the same time as a silent one. Every operator client sends its hello
+as its first write after connecting (``vs_project.api.OperatorDialer``), so it needs only
+the time a local write takes; the bound is short because it is also how long a peer
+without the key holds a slot.
 """
 MAX_UNADMITTED_SESSIONS = 8
-"""How many connections may wait to present the key at once; more are closed on accept.
+"""How many connections may wait to present the key at once.
 
-With :data:`HELLO_TIMEOUT_SECONDS`, this bounds what peers without the key can hold: at
-most this many workers, each for at most that long.
+When every slot is taken, accepting another connection closes the one that has waited
+longest, rather than the new one. Peers without the key therefore cannot lock the
+operator out by keeping the slots full: the operator's connection presents its hello in
+its first write, and is admitted unless this many connections arrive after it before the
+server reads that write. With :data:`HELLO_TIMEOUT_SECONDS`, the slots bound what such
+peers hold: at most this many workers, each for at most that long.
 """
 
 _LOG = logging.getLogger(__name__)
@@ -144,8 +150,12 @@ class _OwnedClientSession:
     worker_ready: Event
     worker: Worker | None = None
     owner: object | None = None
+    accepted: int = 0
+    """The order the server accepted it in: the lowest waiting one is evicted first."""
     admitted: bool = False
     """Whether the connection presented the key; written under the server's guard."""
+    evicted: bool = False
+    """Whether the server closed it unadmitted to make room; written under the guard."""
 
 
 class _ClientSession:
@@ -495,6 +505,7 @@ class UnixJsonlServer:
         self._acceptor: Worker | None = None
         self._guard = self._threads.lock()
         self._sessions: set[_OwnedClientSession] = set()
+        self._accepted = 0
         self._thread_identity = self._threads.local(object)
         self._closing = False
 
@@ -544,8 +555,11 @@ class UnixJsonlServer:
                 if self._closing:
                     connection.close()
                     return
-                session = self._track_locked(connection)
-            if session is not None and not self._start_worker(session):
+                session, evicted = self._track_locked(connection)
+            if evicted is not None:
+                # Its worker's read of the hello fails, and the worker returns unadmitted.
+                evicted.close()
+            if not self._start_worker(session):
                 return
 
     def _start_worker(self, session: _OwnedClientSession) -> bool:
@@ -579,18 +593,28 @@ class UnixJsonlServer:
         session.worker_ready.set()
         return True
 
-    def _track_locked(self, connection: Connection) -> _OwnedClientSession | None:
-        """Track ``connection`` for a worker, or close it when the unadmitted slots are full."""
+    def _track_locked(
+        self, connection: Connection
+    ) -> tuple[_OwnedClientSession, Connection | None]:
+        """Track ``connection`` for a worker; return it and the oldest waiting one it evicts.
+
+        When the unadmitted slots are full, the connection that has waited longest is
+        marked evicted, and the caller closes it once it has released the guard.
+
+        Closing the newcomer instead would let peers that reconnect as soon as they are
+        refused keep every slot, and the operator out, for as long as they like.
+        """
         self._discard_finished_sessions_locked()
-        waiting = sum(1 for owned in self._sessions if not owned.admitted)
-        if waiting >= MAX_UNADMITTED_SESSIONS:
-            # Peers that have not presented the key hold every slot for them; this one is
-            # closed unread rather than given a worker.
-            connection.close()
-            return None
-        session = _OwnedClientSession(connection, self._threads.event())
+        waiting = [owned for owned in self._sessions if not owned.admitted and not owned.evicted]
+        evicted: Connection | None = None
+        if len(waiting) >= MAX_UNADMITTED_SESSIONS:
+            oldest = min(waiting, key=lambda owned: owned.accepted)
+            oldest.evicted = True
+            evicted = oldest.connection
+        self._accepted += 1
+        session = _OwnedClientSession(connection, self._threads.event(), accepted=self._accepted)
         self._sessions.add(session)
-        return session
+        return session, evicted
 
     def _serve(self, owned: _OwnedClientSession) -> None:
         owned.worker_ready.wait()
@@ -603,6 +627,8 @@ class UnixJsonlServer:
                 session.refuse()
                 return
             with self._guard:
+                if owned.evicted:
+                    return
                 owned.admitted = True
             session.handle()
         except _PeerGoneError:

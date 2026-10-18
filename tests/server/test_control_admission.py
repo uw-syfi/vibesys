@@ -9,6 +9,7 @@ request it sent was answered, so none was served.
 from __future__ import annotations
 
 import json
+from contextlib import suppress
 from typing import TYPE_CHECKING
 
 from hypothesis import given, settings
@@ -221,37 +222,94 @@ def test_a_hello_trickled_byte_by_byte_is_refused_at_one_overall_deadline(
     assert waited <= HELLO_TIMEOUT_SECONDS + pause + 1
 
 
-def test_connections_beyond_the_unadmitted_cap_are_closed_unread(tmp_path: Path) -> None:
-    """Silent peers hold at most the cap; the next is closed at once, and the slots free up."""
+def test_a_connection_over_the_unadmitted_cap_evicts_the_longest_waiting_one(
+    tmp_path: Path,
+) -> None:
+    """Silent peers fill every slot; the next connection is served and the oldest is closed."""
     socket_path = tmp_path / "control.sock"
     threads = SimThreads(schedule_seed=0)
 
-    def main() -> tuple[bytes, float, list[bytes]]:
+    def main() -> tuple[list[bytes], float, list[bool], list[bytes]]:
         parts = build_server_parts(None, threads=threads)
         network = SimNetwork(threads)
         with UnixJsonlServer(socket_path, parts.api, None, threads, network, key=CONTROL_KEY):
-            silent = [
-                network.connect(str(socket_path), HANG_GUARD_S)
-                for _ in range(MAX_UNADMITTED_SESSIONS)
-            ]
-            # Let the server accept every silent peer before the one over the cap.
-            threads.sleep(HELLO_TIMEOUT_SECONDS / 10)
+            silent = []
+            for _ in range(MAX_UNADMITTED_SESSIONS):
+                silent.append(network.connect(str(socket_path), HANG_GUARD_S))
+                # Accepted one by one, so the order of waiting is the order of connecting.
+                threads.sleep(HELLO_TIMEOUT_SECONDS / 100)
             started = threads.now()
-            extra = network.connect(str(socket_path), HANG_GUARD_S)
-            over_cap = b"".join(_until_end(extra))
-            closed_after = threads.now() - started
-            extra.close()
-            for peer in silent:
-                _until_end(peer)
-                peer.close()
             operator = network.connect(str(socket_path), HANG_GUARD_S)
             operator.send(CONTROL_KEY.hello() + _SNAPSHOT, HANG_GUARD_S)
             served = _first_lines(operator, [CONTROL_KEY.hello() + _SNAPSHOT])
+            oldest = _until_end(silent[0])
+            evicted_after = threads.now() - started
+            still_open = [not peer.peer_closed() for peer in silent[1:]]
             operator.close()
-            return over_cap, closed_after, served
+            for peer in silent:
+                peer.close()
+            return oldest, evicted_after, still_open, served
 
-    over_cap, closed_after, served = threads.run(main)
+    oldest, evicted_after, still_open, served = threads.run(main)
 
-    assert over_cap == b""
-    assert closed_after < HELLO_TIMEOUT_SECONDS
     assert Response.model_validate_json(served[0]).ok
+    # Closed unread, without waiting out its hello timeout.
+    assert oldest == []
+    assert evicted_after < HELLO_TIMEOUT_SECONDS
+    assert all(still_open)
+
+
+@settings(max_examples=10, deadline=None)
+@given(seed=st.integers(0, 2**16))
+def test_peers_that_reconnect_at_once_cannot_lock_the_operator_out(
+    tmp_path_factory: pytest.TempPathFactory, seed: int
+) -> None:
+    """Peers without the key keep every slot full; every operator connection is still served.
+
+    Each peer reconnects as soon as it is refused or evicted, the worst a peer can do to the
+    slots. Before eviction, the new connection was the one closed, and none was served.
+    """
+    socket_path = tmp_path_factory.mktemp("sock") / "control.sock"
+    threads = SimThreads(schedule_seed=seed)
+
+    def main() -> tuple[int, int]:
+        parts = build_server_parts(None, threads=threads)
+        network = SimNetwork(threads)
+        with UnixJsonlServer(socket_path, parts.api, None, threads, network, key=CONTROL_KEY):
+            stop = threads.event()
+
+            def occupy() -> None:
+                while not stop.is_set():
+                    peer = network.connect(str(socket_path), HANG_GUARD_S)
+                    with suppress(OSError):
+                        while peer.recv(4096, HANG_GUARD_S):
+                            pass
+                    peer.close()
+
+            occupiers = [
+                threads.spawn(occupy, name=f"occupier-{index}", daemon=True)
+                for index in range(MAX_UNADMITTED_SESSIONS)
+            ]
+            threads.sleep(HELLO_TIMEOUT_SECONDS / 20)
+            served = attempts = 0
+            end = threads.now() + 3 * HELLO_TIMEOUT_SECONDS
+            while threads.now() < end:
+                attempts += 1
+                operator = network.connect(str(socket_path), HANG_GUARD_S)
+                try:
+                    operator.send(CONTROL_KEY.hello() + _SNAPSHOT, HANG_GUARD_S)
+                    lines = _first_lines(operator, [CONTROL_KEY.hello() + _SNAPSHOT])
+                    served += bool(lines) and Response.model_validate_json(lines[0]).ok
+                except (OSError, ValueError):
+                    pass
+                operator.close()
+                threads.sleep(HELLO_TIMEOUT_SECONDS / 4)
+            stop.set()
+            for occupier in occupiers:
+                occupier.join(HANG_GUARD_S)
+            return attempts, served
+
+    attempts, served = threads.run(main)
+
+    assert attempts > 1
+    assert served == attempts
