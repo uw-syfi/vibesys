@@ -13,7 +13,8 @@
       "helper-preflight-backend-gated",
       "helper-preflight-causes-gated",
       "helper-harnesses",
-      "helper-run-summary-gated"
+      "helper-run-summary-gated",
+      "helper-compute-gated"
     ],
     "registry": [
       "helper-instances-empty",
