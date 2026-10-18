@@ -83,9 +83,7 @@ class EvaluationTerminalFacts(Value):
     Executors supply values, not history ordinals or coverage authority. Records A
     forwards these unchanged to Measurements A, which validates canonical source,
     scope and stage identities before constructing the durable history record.
-    Absent facts on accepted execution that succeeded mean history is unavailable, never
-    empty. An accepted job that failed or was cancelled may carry none: executors withhold
-    facts for retryable failures, so that submission is a conclusive empty record.
+    Absent facts on accepted execution mean history is unavailable, never empty.
     """
 
     # Fields declared with this class hold exactly this class (a subclass instance is rebuilt as

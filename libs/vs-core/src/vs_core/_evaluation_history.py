@@ -182,6 +182,8 @@ def produce_history(
             or observation.scope != scope
             or not observation.terminal
             or observation.status in (ObservationStatus.PENDING, ObservationStatus.UNKNOWN)
+            # Only a success owes facts. Executors withhold them for an accepted job that
+            # failed or was cancelled, so that submission is a conclusive empty record.
             or (
                 observation.accepted
                 and observation.status == ObservationStatus.SUCCEEDED
