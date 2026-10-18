@@ -126,6 +126,27 @@ describe('each scenario shows its case', () => {
     expect(usage.some(each => !('cache_read_input_tokens' in each))).toBe(true);
   });
 
+  it('two objectives: the overview declares both, and every measured gate reads both and the input', () => {
+    const fixture = fixtureNamed('finished-two-objectives');
+    const started = fixture.events.find(event => event.type === 'run_started');
+    const overview = started?.data?.kind === 'run_started' ? started.data.overview : undefined;
+    expect(overview?.objective.objectives).toEqual([
+      {name: 'total_ops_per_sec', direction: 'max'},
+      {name: 'p99_latency', direction: 'min'},
+    ]);
+    const tree = treeOf(fixture);
+    const measured = tree.candidates.filter(c => c.measurement?.metricValue != null);
+    expect(measured).toHaveLength(9);
+    for (const idea of measured) {
+      expect(idea.measurement?.readings.map(r => r.name)).toEqual([
+        'total_ops_per_sec',
+        'p99_latency',
+      ]);
+      expect(idea.measurement?.inputReadings.map(r => r.value)).toEqual([1_581_539, 12.4]);
+    }
+    expect(tree.candidates.filter(c => c.outcome === 'passed')).toHaveLength(8);
+  });
+
   it('14 days: 600 ideas, about 40 passed, three running, a long winning path', () => {
     const tree = treeOf(weeksRun());
     const passed = tree.candidates.filter(candidate => candidate.outcome === 'passed').length;
