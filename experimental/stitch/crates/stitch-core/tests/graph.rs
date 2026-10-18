@@ -62,6 +62,32 @@ fn explicit_context_and_unique_same_clock_poll_support_attribution() {
 }
 
 #[test]
+fn source_annotated_cpu_region_links_unix_span_to_monotonic_sample() {
+    let mut span = activity("span", ActivityKind::Span, None);
+    span.interval.clock = "unix".into();
+    span.interval.start_ns = 100;
+    span.interval.end_ns = 200;
+    let mut region = activity("region", ActivityKind::CpuRegion, Some("s1"));
+    region.pid = Some(7);
+    region.tid = Some(8);
+    let graph = Graph::build([
+        Observation::Activity(span),
+        Observation::Activity(region),
+        Observation::CpuSample(sample("cpu", "mono")),
+    ])
+    .unwrap();
+    assert_eq!(graph.trace("trace").assigned_samples, 1);
+    assert!(graph
+        .relationships
+        .iter()
+        .any(|edge| edge.kind == RelationshipKind::SpanContext));
+    assert!(graph
+        .relationships
+        .iter()
+        .any(|edge| edge.kind == RelationshipKind::SampledDuring));
+}
+
+#[test]
 fn unaligned_or_ambiguous_samples_remain_unassigned() {
     for ambiguous in [false, true] {
         let mut observations = vec![Observation::Activity(activity(

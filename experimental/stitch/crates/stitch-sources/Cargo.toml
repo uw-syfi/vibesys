@@ -9,6 +9,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 stitch-core = { path = "../stitch-core" }
+dial9-trace-format = { version = "0.5.2", features = ["serde-deserialize"] }
 
 [dev-dependencies]
 tempfile.workspace = true

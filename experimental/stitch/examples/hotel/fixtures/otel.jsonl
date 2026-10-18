@@ -1,0 +1,1 @@
+{"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"hotel-recommendation"}}]},"scopeSpans":[{"spans":[{"traceId":"0e71ce8b4876aacad2f42133d5e1ea55","spanId":"b60831352d012ac5","name":"recommendation.get_recommendations","startTimeUnixNano":"1792300598076012502","endTimeUnixNano":"1792300598076171109"}]}]}]}

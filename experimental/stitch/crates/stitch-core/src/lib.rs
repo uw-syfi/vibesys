@@ -9,6 +9,7 @@ use thiserror::Error;
 pub enum ActivityKind {
     Span,
     TaskPoll,
+    CpuRegion,
     GpuKernel,
 }
 
@@ -256,18 +257,18 @@ impl Graph {
 
         let mut unassigned_samples = 0;
         for sample in &cpu_samples {
-            let matching_polls: Vec<_> = activities
+            let matching_regions: Vec<_> = activities
                 .iter()
-                .filter(|a| a.kind == ActivityKind::TaskPoll)
+                .filter(|a| matches!(a.kind, ActivityKind::TaskPoll | ActivityKind::CpuRegion))
                 .filter(|a| a.pid == Some(sample.pid) && a.tid == Some(sample.tid))
                 .filter(|a| a.interval.contains(sample.at_ns, &sample.clock))
                 .collect();
-            if matching_polls.len() == 1 {
+            if matching_regions.len() == 1 {
                 relationships.push(Relationship {
-                    from: matching_polls[0].id.clone(),
+                    from: matching_regions[0].id.clone(),
                     to: sample.id.clone(),
                     kind: RelationshipKind::SampledDuring,
-                    reason: "same process, thread, clock, and unique poll interval".into(),
+                    reason: "same process, thread, clock, and unique CPU interval".into(),
                 });
             } else {
                 unassigned_samples += 1;

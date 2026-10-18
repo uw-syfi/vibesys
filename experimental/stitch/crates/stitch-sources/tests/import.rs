@@ -1,5 +1,5 @@
 use std::fs;
-use stitch_core::Observation;
+use stitch_core::{ActivityKind, Graph, Observation, RelationshipKind};
 use stitch_sources::{builtin_importers, ImportError, Importer, ImporterRegistry, InputSpec};
 
 #[test]
@@ -30,6 +30,40 @@ fn otlp_and_perf_import_preserve_identities_and_precise_timestamps() {
     assert!(
         matches!(&samples[0], Observation::CpuSample(s) if s.at_ns == 12_123_456_789 && s.frames == ["hotel::search"])
     );
+}
+
+#[test]
+fn real_hotel_otel_and_dial9_artifacts_join_by_span_identity() {
+    let fixtures =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hotel/fixtures");
+    let registry = builtin_importers();
+    let spans = registry
+        .import(&InputSpec {
+            format: "otlp_jsonl".into(),
+            path: fixtures.join("otel.jsonl"),
+            clock: "unix".into(),
+        })
+        .unwrap();
+    let regions = registry
+        .import(&InputSpec {
+            format: "dial9_stitch_bin".into(),
+            path: fixtures.join("dial9.0.bin"),
+            clock: "monotonic".into(),
+        })
+        .unwrap();
+    let graph = Graph::build(spans.into_iter().chain(regions)).unwrap();
+    assert_eq!(graph.activities.len(), 2);
+    assert!(graph
+        .activities
+        .iter()
+        .any(|a| a.kind == ActivityKind::Span));
+    assert!(graph.activities.iter().any(|a| {
+        a.kind == ActivityKind::CpuRegion
+            && a.service.as_deref() == Some("hotel-recommendation")
+            && a.source_file.as_deref() == Some("apps/hotel/src/recommendation/server.rs")
+    }));
+    assert_eq!(graph.relationships.len(), 1);
+    assert_eq!(graph.relationships[0].kind, RelationshipKind::SpanContext);
 }
 
 #[test]

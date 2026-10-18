@@ -43,8 +43,10 @@ pub trait Importer {
 }
 
 pub struct OtlpJsonImporter;
+pub struct OtlpJsonlImporter;
 pub struct PerfScriptImporter;
 pub struct Dial9BridgeImporter;
+pub struct Dial9NativeImporter;
 pub struct GpuBridgeImporter;
 
 #[derive(Default)]
@@ -77,10 +79,16 @@ pub fn builtin_importers() -> ImporterRegistry {
         .register(OtlpJsonImporter)
         .expect("unique built-in importer");
     registry
+        .register(OtlpJsonlImporter)
+        .expect("unique built-in importer");
+    registry
         .register(PerfScriptImporter)
         .expect("unique built-in importer");
     registry
         .register(Dial9BridgeImporter)
+        .expect("unique built-in importer");
+    registry
+        .register(Dial9NativeImporter)
         .expect("unique built-in importer");
     registry
         .register(GpuBridgeImporter)
@@ -165,64 +173,102 @@ impl Importer for OtlpJsonImporter {
     fn import(&self, input: &InputSpec) -> Result<Vec<Observation>, ImportError> {
         let value: serde_json::Value = serde_json::from_str(&read_text(&input.path)?)
             .map_err(|e| invalid("otlp_json", &input.path, e.to_string()))?;
-        let resources = value["resourceSpans"]
+        import_otlp_value(&value, input)
+    }
+}
+
+impl Importer for OtlpJsonlImporter {
+    fn format(&self) -> &'static str {
+        "otlp_jsonl"
+    }
+
+    fn import(&self, input: &InputSpec) -> Result<Vec<Observation>, ImportError> {
+        let mut resources = Vec::new();
+        for (index, line) in read_text(&input.path)?.lines().enumerate() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let mut document: serde_json::Value = serde_json::from_str(line).map_err(|e| {
+                invalid(
+                    "otlp_jsonl",
+                    &input.path,
+                    format!("line {}: {e}", index + 1),
+                )
+            })?;
+            let spans = document["resourceSpans"].as_array_mut().ok_or_else(|| {
+                invalid(
+                    "otlp_jsonl",
+                    &input.path,
+                    format!("line {}: missing resourceSpans", index + 1),
+                )
+            })?;
+            resources.append(spans);
+        }
+        import_otlp_value(&serde_json::json!({"resourceSpans": resources}), input)
+    }
+}
+
+fn import_otlp_value(
+    value: &serde_json::Value,
+    input: &InputSpec,
+) -> Result<Vec<Observation>, ImportError> {
+    let resources = value["resourceSpans"]
+        .as_array()
+        .ok_or_else(|| invalid("otlp_json", &input.path, "missing resourceSpans array"))?;
+    let mut out = Vec::new();
+    for (resource_index, resource) in resources.iter().enumerate() {
+        let service = resource["resource"]["attributes"]
             .as_array()
-            .ok_or_else(|| invalid("otlp_json", &input.path, "missing resourceSpans array"))?;
-        let mut out = Vec::new();
-        for (resource_index, resource) in resources.iter().enumerate() {
-            let service = resource["resource"]["attributes"]
-                .as_array()
-                .and_then(|attributes| {
-                    attributes.iter().find_map(|attribute| {
-                        (attribute["key"] == "service.name")
-                            .then(|| attribute["value"]["stringValue"].as_str())
-                            .flatten()
-                    })
+            .and_then(|attributes| {
+                attributes.iter().find_map(|attribute| {
+                    (attribute["key"] == "service.name")
+                        .then(|| attribute["value"]["stringValue"].as_str())
+                        .flatten()
                 })
-                .map(str::to_owned);
-            let scopes = resource["scopeSpans"]
+            })
+            .map(str::to_owned);
+        let scopes = resource["scopeSpans"]
+            .as_array()
+            .ok_or_else(|| invalid("otlp_json", &input.path, "missing scopeSpans array"))?;
+        for (scope_index, scope) in scopes.iter().enumerate() {
+            let spans = scope["spans"]
                 .as_array()
-                .ok_or_else(|| invalid("otlp_json", &input.path, "missing scopeSpans array"))?;
-            for (scope_index, scope) in scopes.iter().enumerate() {
-                let spans = scope["spans"]
-                    .as_array()
-                    .ok_or_else(|| invalid("otlp_json", &input.path, "missing spans array"))?;
-                for (span_index, span) in spans.iter().enumerate() {
-                    let trace_id = required_str(span, "traceId", "otlp_json", &input.path)?;
-                    let span_id = required_str(span, "spanId", "otlp_json", &input.path)?;
-                    let start_ns = timestamp(span, "startTimeUnixNano", &input.path)?;
-                    let end_ns = timestamp(span, "endTimeUnixNano", &input.path)?;
-                    out.push(Observation::Activity(Activity {
-                        id: format!("otel:{trace_id}:{span_id}"),
-                        kind: ActivityKind::Span,
-                        name: required_str(span, "name", "otlp_json", &input.path)?.into(),
-                        interval: Interval {
-                            start_ns,
-                            end_ns,
-                            clock: input.clock.clone(),
-                        },
-                        service: service.clone(),
-                        trace_id: Some(trace_id.into()),
-                        span_id: Some(span_id.into()),
-                        parent_span_id: span["parentSpanId"]
-                            .as_str()
-                            .filter(|s| !s.is_empty())
-                            .map(str::to_owned),
-                        pid: None,
-                        tid: None,
-                        source_file: None,
-                        source_line: None,
-                        origin: Origin {
-                            source: "otel".into(),
-                            artifact: input.path.display().to_string(),
-                            record: format!("{resource_index}/{scope_index}/{span_index}"),
-                        },
-                    }));
-                }
+                .ok_or_else(|| invalid("otlp_json", &input.path, "missing spans array"))?;
+            for (span_index, span) in spans.iter().enumerate() {
+                let trace_id = required_str(span, "traceId", "otlp_json", &input.path)?;
+                let span_id = required_str(span, "spanId", "otlp_json", &input.path)?;
+                let start_ns = timestamp(span, "startTimeUnixNano", &input.path)?;
+                let end_ns = timestamp(span, "endTimeUnixNano", &input.path)?;
+                out.push(Observation::Activity(Activity {
+                    id: format!("otel:{trace_id}:{span_id}"),
+                    kind: ActivityKind::Span,
+                    name: required_str(span, "name", "otlp_json", &input.path)?.into(),
+                    interval: Interval {
+                        start_ns,
+                        end_ns,
+                        clock: input.clock.clone(),
+                    },
+                    service: service.clone(),
+                    trace_id: Some(trace_id.into()),
+                    span_id: Some(span_id.into()),
+                    parent_span_id: span["parentSpanId"]
+                        .as_str()
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_owned),
+                    pid: None,
+                    tid: None,
+                    source_file: None,
+                    source_line: None,
+                    origin: Origin {
+                        source: "otel".into(),
+                        artifact: input.path.display().to_string(),
+                        record: format!("{resource_index}/{scope_index}/{span_index}"),
+                    },
+                }));
             }
         }
-        Ok(out)
     }
+    Ok(out)
 }
 
 impl Importer for PerfScriptImporter {
@@ -377,6 +423,70 @@ impl Importer for Dial9BridgeImporter {
                 },
             }));
         }
+        Ok(out)
+    }
+}
+
+#[derive(Deserialize)]
+struct NativeRegionRecord {
+    timestamp_ns: u64,
+    start_ns: u64,
+    pid: u32,
+    tid: u32,
+    region_id: u64,
+    trace_id: String,
+    parent_span_id: String,
+    service: String,
+    name: String,
+    source_file: String,
+    source_line: u32,
+}
+
+impl Importer for Dial9NativeImporter {
+    fn format(&self) -> &'static str {
+        "dial9_stitch_bin"
+    }
+
+    fn import(&self, input: &InputSpec) -> Result<Vec<Observation>, ImportError> {
+        let data = std::fs::read(&input.path).map_err(|source| ImportError::Io {
+            path: input.path.clone(),
+            source,
+        })?;
+        let mut decoder = dial9_trace_format::decoder::Decoder::new(&data)
+            .ok_or_else(|| invalid("dial9_stitch_bin", &input.path, "invalid dial9 header"))?;
+        let mut out = Vec::new();
+        decoder
+            .try_for_each_event(|event| -> Result<(), String> {
+                if event.name != "StitchCpuRegion" {
+                    return Ok(());
+                }
+                let region: NativeRegionRecord = event.deserialize().map_err(|e| e.to_string())?;
+                out.push(Observation::Activity(Activity {
+                    id: format!("dial9:{}:{}", input.path.display(), region.region_id),
+                    kind: ActivityKind::CpuRegion,
+                    name: region.name,
+                    interval: Interval {
+                        start_ns: region.start_ns,
+                        end_ns: region.timestamp_ns,
+                        clock: input.clock.clone(),
+                    },
+                    service: Some(region.service),
+                    trace_id: Some(region.trace_id),
+                    span_id: None,
+                    parent_span_id: Some(region.parent_span_id),
+                    pid: Some(region.pid),
+                    tid: Some(region.tid),
+                    source_file: Some(region.source_file),
+                    source_line: Some(region.source_line),
+                    origin: Origin {
+                        source: "dial9".into(),
+                        artifact: input.path.display().to_string(),
+                        record: out.len().to_string(),
+                    },
+                }));
+                Ok(())
+            })
+            .map_err(|e| invalid("dial9_stitch_bin", &input.path, e.to_string()))?;
         Ok(out)
     }
 }

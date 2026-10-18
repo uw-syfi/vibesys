@@ -31,7 +31,7 @@ to correlate them with the perf samples.
 | Crate | Responsibility |
 | --- | --- |
 | `stitch-core` | Pure evidence model, graph construction, and trace queries |
-| `stitch-sources` | Artifact importer interface and OTel, perf, dial9 bridge, and GPU bridge importers |
+| `stitch-sources` | Artifact importer interface and OTel, perf, dial9 binary/bridge, and GPU bridge importers |
 | `stitch-mapping` | Source attribution interface and declared-location resolver |
 | `stitch-session` | Manifest validation, capture lifecycle, import wiring |
 | `stitch-cli` | CLI commands and presentation |
@@ -39,9 +39,9 @@ to correlate them with the perf samples.
 Importers translate source-specific artifacts into typed observations. The core
 accepts importers through a registry keyed by format, and source mappers through
 a separate registry; both can be extended without changing the graph code. The core
-joins OTel spans by trace and parent span IDs. A dial9 task poll links to a span
-only when the exported record carries the matching trace and parent span IDs. A
-perf sample links to a poll only with the same process, thread, and declared
+joins OTel spans by trace and parent span IDs. A dial9 CPU region or task poll
+links to a span only when its record carries the matching trace and parent span
+IDs. A perf sample links to a CPU region or poll only with the same process, thread, and declared
 clock domain, and only when exactly one poll contains the sample timestamp.
 Unassigned samples remain visible in the graph. A source resolver maps explicit
 file and line hints to a configured source tree; the attribution records which
@@ -59,12 +59,16 @@ manifest and bridge-record keys are rejected.
 
 Supported `format` values:
 
-- `otlp_json`: OTLP JSON `resourceSpans` with `service.name` attributes.
+- `otlp_json`: one OTLP JSON document with `resourceSpans` and `service.name`.
+- `otlp_jsonl`: one OTLP JSON document per line, for a streaming file exporter.
 - `perf_script`: `perf script --ns -F pid,tid,time,ip,sym` output, including
   indented call-chain frames.
 - `dial9_bridge_jsonl`: one normalized task-poll record per line, with task,
   poll, process, thread, interval, optional trace context, and optional file and
   line. This is a provisional bridge format, **not** native dial9 binary input.
+- `dial9_stitch_bin`: native dial9 binary events from an application Stitch CPU
+  region. This is a real dial9 recording, but it does not provide dial9's full
+  Tokio runtime hook coverage.
 - `gpu_bridge_jsonl`: a provisional normalized GPU-kernel event format, **not**
   a native vendor profiler import.
 
@@ -73,13 +77,10 @@ already be configured in the target application to emit artifacts; Stitch does
 not yet initiate their in-process recording. Clock labels are assertions by the
 operator: Stitch does not yet calibrate clocks. Its CPU report counts samples;
 it does not claim exact CPU time or source lines for perf frames. A source
-revision supplied in a manifest is not independently verified. Native dial9
-decoding, GPU vendor capture, distributed capture coordination, binary debug
+revision supplied in a manifest is not independently verified. Full Tokio task
+event decoding, GPU vendor capture, distributed capture coordination, binary debug
 symbol resolution, and VibeSys trusted-evidence acceptance are follow-up work.
 
-The first live application check used Masa Hotel's recommendation service with
-gRPC requests. Stitch captured and ingested its perf call chains and produced a
-sample cost tree. This is a one-service integration check, not a distributed
-Hotel run or an optimization result. Hotel currently emits neither OTLP spans
-nor native dial9 traces in that setup, so cross-source correlation on Hotel
-remains unverified.
+The [Hotel integration guide](examples/hotel/README.md) records the application
+changes needed for each source and the live three-source validation. The check
+uses one Hotel service and does not measure a distributed request path.
