@@ -15,6 +15,9 @@ from hypothesis import strategies as st
 
 from vs_sim.api.testing import examples
 from vs_slurm.api import (
+    AttachJob,
+    AwaitWithdrawal,
+    CheckJob,
     EvaluationLedger,
     FakeEvaluationLedger,
     LedgerError,
@@ -32,6 +35,8 @@ from vs_slurm.api import (
     WithdrawalUndone,
     encode_ledger_document,
     ledger_operation_id,
+    submit_step,
+    undo_expired_withdrawal,
 )
 
 # test-isolation: the public executable transport Fake gives the remote ledger a real filesystem.
@@ -54,6 +59,8 @@ class _Case:
     put_file: Callable[[str, bytes], str]
     # Plant a lease's bytes, its file last written at the given epoch second.
     plant_lease: Callable[[str, str, str, float], None]
+    # Plant a withdrawal revision's bytes (key, attempt, revision, document), written at a second.
+    plant_withdrawal: Callable[[str, int, int, str, float], None]
 
 
 def _make(implementation: str, root: Path) -> _Case:
@@ -68,7 +75,14 @@ def _make(implementation: str, root: Path) -> _Case:
         def plant_fake_lease(key: str, holder: str, document: str, written_at: float) -> None:
             fake.store_raw_lease(key, holder, document, written_at=written_at)
 
-        return _Case(fake, fake.reopen, fake.store_raw, put_fake, plant_fake_lease)
+        def plant_fake_withdrawal(
+            key: str, attempt: int, revision: int, document: str, written_at: float
+        ) -> None:
+            fake.store_raw_withdrawal(key, attempt, revision, document, written_at=written_at)
+
+        return _Case(
+            fake, fake.reopen, fake.store_raw, put_fake, plant_fake_lease, plant_fake_withdrawal
+        )
     remote = root / "remote"
     remote.mkdir()
     config = SlurmConfig(
@@ -103,7 +117,16 @@ def _make(implementation: str, root: Path) -> _Case:
         path.write_text(document, encoding="utf-8")
         os.utime(path, (written_at, written_at))
 
-    return _Case(open_ledger(), open_ledger, plant, put_file, plant_lease)
+    def plant_withdrawal(
+        key: str, attempt: int, revision: int, document: str, written_at: float
+    ) -> None:
+        directory = remote / "contract" / "ledger" / PROJECT / key
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"withdrawal-{attempt}.{revision}.json"
+        path.write_text(document, encoding="utf-8")
+        os.utime(path, (written_at, written_at))
+
+    return _Case(open_ledger(), open_ledger, plant, put_file, plant_lease, plant_withdrawal)
 
 
 IMPLEMENTATIONS = ("fake", "remote")
@@ -270,6 +293,66 @@ def test_a_mark_on_an_earlier_attempt_is_not_the_current_attempts(case: _Case) -
     assert entry is not None
     assert entry.record.attempt == 1
     assert (entry.withdrawal, entry.withdrawal_revision) == (None, -1)
+
+
+_WRITTEN_AT = 1_700_000_000.0
+# Withdrawal revisions this build cannot decode: a newer build's mark, one with no
+# version, a damaged file, and a mark of this format filed under another attempt.
+_UNREADABLE_WITHDRAWALS = (
+    '{"format_version": 2, "kind": "mark", "attempt": 0, "by": "run-new"}\n',
+    '{"kind": "mark", "attempt": 0}\n',
+    "not json\n",
+    encode_ledger_document(_mark(3)),
+)
+
+
+@pytest.mark.xfail(strict=True, reason="r3173-recheck LOW-4: one such file fails the whole read")
+@pytest.mark.parametrize("document", _UNREADABLE_WITHDRAWALS)
+def test_a_withdrawal_revision_this_build_cannot_read_is_a_withdrawal_under_way(
+    case: _Case, document: str
+) -> None:
+    """It never fails the read: no run attaches until one claim window after it was written.
+
+    Then anyone may undo it, as an expired mark, and the request is attached to
+    again. The record stays as it was.
+    """
+    planted = _record(state=LedgerState.SUBMITTED)
+    case.plant(KEY, 0, encode_ledger_document(planted))
+    case.plant_withdrawal(KEY, 0, 0, document, _WRITTEN_AT)
+
+    entry = case.reopen().read(KEY)
+
+    assert entry is not None
+    assert (entry.record, entry.revision, entry.withdrawal_revision) == (planted, 0, 0)
+    held_until = _WRITTEN_AT + entry.claim_window
+    assert submit_step(entry, now=held_until) == AwaitWithdrawal(entry, expired=False)
+    assert submit_step(entry, now=held_until + 1) == AwaitWithdrawal(entry, expired=True)
+    assert not undo_expired_withdrawal(case.reopen(), entry, now=held_until)
+    assert undo_expired_withdrawal(case.reopen(), entry, now=held_until + 1)
+    undone = case.reopen().read(KEY)
+    assert undone is not None
+    assert (undone.record, undone.withdrawal, undone.withdrawal_revision) == (planted, None, 1)
+    assert isinstance(submit_step(undone, now=held_until + 1), CheckJob | AttachJob)
+
+
+@pytest.mark.xfail(strict=True, reason="r3173-recheck LOW-4: one such file fails the whole read")
+@pytest.mark.parametrize("document", _UNREADABLE_WITHDRAWALS)
+def test_a_withdrawal_revision_this_build_cannot_read_stands_only_as_its_attempts_newest(
+    case: _Case, document: str
+) -> None:
+    """Under a newer revision this build reads, or on an earlier attempt, it changes nothing."""
+    case.plant(KEY, 0, encode_ledger_document(_record(state=LedgerState.WITHDRAWN)))
+    case.plant_withdrawal(KEY, 0, 0, document, _WRITTEN_AT)
+    case.plant(KEY, 1, encode_ledger_document(_record(attempt=1, state=LedgerState.SUBMITTED)))
+    case.plant_withdrawal(KEY, 1, 0, document, _WRITTEN_AT)
+    case.plant_withdrawal(
+        KEY, 1, 1, encode_ledger_document(WithdrawalUndone(attempt=1)), _WRITTEN_AT
+    )
+
+    entry = case.reopen().read(KEY)
+
+    assert entry is not None
+    assert (entry.record.attempt, entry.withdrawal, entry.withdrawal_revision) == (1, None, 1)
 
 
 @given(withdrawers=st.lists(st.sampled_from(("run-b", "run-c", "vibesys-sweep")), min_size=2))
