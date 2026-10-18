@@ -157,9 +157,14 @@ class EvaluationComparison(BaseModel):
     Every number is the framework's: the candidate's mean over its samples and the base's mean
     over its own, their ``ratio`` (candidate over base), the ``noise`` (one standard error of
     that ratio) and the ``verdict`` it reached. ``better`` and ``worse`` need the difference to
-    exceed two noises in the metric's direction (``max`` or ``min`` is better); anything closer
-    is ``within_noise``. ``base_commit`` is the revision the base was measured at. More runs of
-    the same candidate content add samples and narrow the noise.
+    exceed a critical number of noises in the metric's direction (``max`` or ``min`` is
+    better): two under a task's declared per-run noise; without one, Welch's t test at 95%,
+    and no verdict until each side holds ``MIN_SAMPLES_WITHOUT_FLOOR`` (3) runs that do not
+    all read alike (the rule is in ``vs_core._comparison``). Anything closer is
+    ``within_noise``. ``base_commit`` is the revision the base was measured at. More runs of
+    the same candidate content add samples and narrow the noise. It describes the samples held
+    when it is given: a candidate is ranked by the value stored at its official measurement,
+    which later runs do not move.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -205,8 +210,10 @@ class SubmittedReply(BaseModel):
         default=None,
         description=(
             "How the finished candidate measured against its base: both values, the ratio, "
-            "the noise, the framework's verdict and the base commit. Absent while the "
-            "evaluation runs, and while the base's own measurement has not ended."
+            "the noise, the framework's verdict and the base commit, over the runs held now. "
+            "Absent while the evaluation runs, and while no fresh run of the base has ended. "
+            "A candidate is ranked by the value stored at its official measurement; runs "
+            "after that move this comparison, not the ranked value."
         ),
     )
 

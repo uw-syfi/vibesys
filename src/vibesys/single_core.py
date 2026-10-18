@@ -41,11 +41,18 @@ from vibesys.plugin_registration import (
     OrchestrationRegistration,
     RuntimeRecordProjector,
 )
-from vibesys.prompts import CORE_PROTOCOL_DIR
+from vibesys.prompts import CORE_PROTOCOL_DIR, core_protocol_variables
 from vibesys.serial_roadmap import roadmap_entries
 from vibesys.serial_search.api import PROMPTS_DIR as SERIAL_SEARCH_PROMPTS
 from vibesys.single_roles import CORE_ROLES
-from vs_core.api import FlowDriver, FlowState, MeasurementRecipe, OperationRegistry, RevisionRef
+from vs_core.api import (
+    FlowDriver,
+    FlowState,
+    MeasurementRecipe,
+    OperationRegistry,
+    RevisionRef,
+    policy_of,
+)
 from vs_core.api import RunFacts as CoreRunFacts
 from vs_runtime.api import CoreOperation, CorePlan, CorePolicy, OrchestrationPlugin
 from vs_runtime.api.core import (
@@ -162,7 +169,8 @@ def _plan_for(launch_type: type[SingleRunLaunch]) -> Callable[[CoreRunContext], 
             facts=facts,
             limits=limits_for(budget(config), context),
             deadline_seconds=run_deadline_at(context.max_run_seconds),
-            prompt_variables=run_prompt_variables(
+            prompt_variables=core_protocol_variables(policy_of(facts))
+            | run_prompt_variables(
                 objective=facts.objective,
                 environment_notes=context.facts.environment_notes,
                 agent_evaluation=True,

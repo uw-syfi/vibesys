@@ -372,7 +372,9 @@ class ResumeAuthorizationReceipt(Value):
     comparisons: tuple[Comparison, ...] = Field(default=(), exclude_if=unset)
     """The comparisons with a base of the candidates the wait's jobs measured, as held now.
 
-    A logged comparison whose base samples went stale is left out (`latest_comparisons`).
+    Each is recomputed over the samples fresh now, so a base whose samples partly went stale is
+    compared over the rest, and an input none of whose base samples is fresh is left out
+    (`latest_comparisons`).
     """
 
     @model_validator(mode="after")

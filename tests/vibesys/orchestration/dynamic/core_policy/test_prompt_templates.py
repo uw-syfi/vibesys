@@ -13,12 +13,13 @@ import re
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic.core_policy._contexts import (
     CONTEXTS,
     OBJECTIVE,
     PLANNER_PROMPTS,
+    RENDERER,
     ROOT,
     TEMPLATE_FILES,
     render,
@@ -39,6 +40,7 @@ from vibesys.orchestration.dynamic.search.api import (
 from vibesys.prompts import CORE_PROTOCOL_DIR, PROMPTS_DIR, CoreProtocolTemplate, render_template
 from vibesys.run.environment import agent_environment_notes
 from vs_core.api import (
+    MIN_SAMPLES_WITHOUT_FLOOR,
     AttemptId,
     Comparison,
     ComparisonVerdict,
@@ -91,6 +93,23 @@ def test_the_evaluation_tool_is_described_exactly_when_it_is_offered(
 
     assert ("submit_evaluation" in text) is offered
     assert ("validate_evaluation_wait" in text) is offered
+
+
+@pytest.mark.regression
+def test_the_evaluation_tool_says_when_the_base_is_measured_and_what_is_ranked() -> None:
+    """The base is measured again on staleness and close calls, not once for the run.
+
+    Before, the agent was told the base was measured "once for the run", while a close call
+    without a declared noise measures it up to three times per staleness window. The tool's
+    comparison also describes the runs held now, while a candidate is ranked by the value
+    stored at its official measurement; the agent is told so.
+    """
+    text = RENDERER.render_template("agent_evaluation.j2", agent_evaluation=True)
+    prose = " ".join(text.split())
+
+    assert "once for the run" not in prose
+    assert "again when the base's runs go stale or a comparison is too close to call" in prose
+    assert "the value stored then is the one it is ranked by" in prose
 
 
 # -- the planner ------------------------------------------------------------------------------
@@ -391,20 +410,64 @@ _COMPARISONS = st.builds(
 )
 
 
+_PINNED_COMPARISON = Comparison(
+    scope=Scope(owner=AttemptId(root="attempt"), generation=0),
+    metric="throughput",
+    unit="tokens/s",
+    direction="max",
+    candidate=RevisionRef.of_git_commit("abcdef0"),
+    candidate_input="sha256:candidate",
+    base=RevisionRef.of_git_commit("0fedcba"),
+    base_input="sha256:base",
+    candidate_value=100.3,
+    base_value=100.0,
+    ratio=1.003,
+    noise=0.0,
+    verdict=ComparisonVerdict.WITHIN_NOISE,
+    candidate_samples=1,
+    base_samples=1,
+)
+
+
 @settings(max_examples=examples(pr=8, nightly=100))
 @given(
     context=CONTEXTS[CoreProtocolTemplate.RESUME],
     comparisons=st.lists(_COMPARISONS, max_size=3),
+    noise_declared=st.booleans(),
+)
+@example(
+    context=ResumeFacts(agent="implementer", retained=None, ended_by=None),
+    comparisons=[_PINNED_COMPARISON],
+    noise_declared=False,
+)
+@example(
+    context=ResumeFacts(agent="implementer", retained=None, ended_by=None),
+    comparisons=[_PINNED_COMPARISON],
+    noise_declared=True,
 )
 def test_a_resumed_turn_states_each_comparison_the_framework_made_and_none_it_did_not(
-    context: BaseModel, comparisons: list[Comparison]
+    context: BaseModel, comparisons: list[Comparison], *, noise_declared: bool
 ) -> None:
+    """Each comparison, and the rule its verdict was reached by, as core applies it.
+
+    Before, the resume said a verdict meant "two noises" for every task, although a task that
+    declares no per-run noise gets no verdict before ``MIN_SAMPLES_WITHOUT_FLOOR`` runs a side
+    and is then judged by Welch's t test. The rule now comes from the run's comparison policy.
+    """
     assert isinstance(context, ResumeFacts)
     text = render(
-        CoreProtocolTemplate.RESUME, context.model_copy(update={"comparisons": tuple(comparisons)})
+        CoreProtocolTemplate.RESUME,
+        context.model_copy(update={"comparisons": tuple(comparisons)}),
+        noise_declared=noise_declared,
     )
 
     assert ("compared each measured candidate with its base" in text) is bool(comparisons)
+    prose = " ".join(text.split())
+    if comparisons:
+        assert ("exceeds 2 noises" in prose) is noise_declared
+        assert (f"at least {MIN_SAMPLES_WITHOUT_FLOOR} runs" in prose) is not noise_declared
+        assert "two noises" not in prose
+        assert "the value stored then is the one it is ranked by" in prose
     for item in comparisons:
         assert f"**{item.verdict.value.replace('_', ' ')}**" in text
         assert item.candidate.revision_id.root[:7] in text

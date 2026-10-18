@@ -14,6 +14,7 @@ import pytest
 from jinja2 import Environment, meta
 
 from vs_core.api import (
+    ComparisonPolicy,
     EvidenceId,
     EvidenceKind,
     ObservationStatus,
@@ -78,7 +79,7 @@ from vibesys.orchestration.skill_selection import (
     resolve_agent_resource_paths,
 )
 from vibesys.profile_focus import FocusLedger
-from vibesys.prompts import render_template
+from vibesys.prompts import core_protocol_variables, render_template
 from vibesys.run.contracts import ProfilerKind
 from vibesys.run.project_policy import build_project_path_policy
 from vibesys.run.workspace_policy import (
@@ -596,6 +597,7 @@ def core_policy_context() -> dict[str, object]:
         "base_accuracy_passed": True,
         "repeated_failure": None,
         "comparisons": (),
+        **core_protocol_variables(ComparisonPolicy()),
         "required_fields": (),
         "prior_failure_tail": "AssertionError: fixture",
         "prior_failure_fence": "```",
