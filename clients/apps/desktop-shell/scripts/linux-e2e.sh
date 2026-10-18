@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs the app shell's Playwright suite in the Linux image Playwright publishes for the version the
-# workspace pins, on x86-64: the browser and OS the `tui_e2e` CI job uses (Chromium on
+# workspace pins, on x86-64: the browser and OS the `clients_e2e` CI job uses (Chromium on
 # ubuntu-latest). The layout and wording checks read real layout, which differs a little between
 # macOS and Linux text rendering, so a check that passes here passes in CI. Needs Docker. Arguments
 # go to `playwright test`; `SCREENS_DIR=<dir under clients/>` writes the contact sheet there.

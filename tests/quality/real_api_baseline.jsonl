@@ -64,8 +64,6 @@
 {"path": "tests/headless/test_interrupt.py", "rule": "signal", "count": 2}
 {"path": "tests/packaging/test_fetch_bun.py", "rule": "socket_io", "count": 1}
 {"path": "tests/packaging/test_fetch_bun.py", "rule": "threading", "count": 1}
-{"path": "tests/packaging/test_release_wheel_builder.py", "rule": "subprocess", "count": 11}
-{"path": "tests/packaging/test_release_wheel_builder.py", "rule": "interpreter", "count": 1}
 {"path": "tests/vibesys/loops/test_profiler_teardown.py", "rule": "signal", "count": 17}
 {"path": "tests/vibesys/loops/test_profiler_teardown.py", "rule": "subprocess", "count": 3}
 {"path": "tests/vibesys/loops/test_rocprof_capture.py", "rule": "socket", "count": 3}
@@ -128,12 +126,12 @@
 {"path": "libs/vs-slurm/tests/test_connector_process_contract.py", "rule": "interpreter", "count": 1}
 {"path": "libs/vs-slurm/tests/test_fake_connector.py", "rule": "interpreter", "count": 2}
 {"path": "tests/architecture/test_prompt_resource_contract.py", "rule": "interpreter", "count": 1}
-{"path": "tests/entrypoints/test_launcher.py", "rule": "interpreter", "count": 6}
+{"path": "tests/entrypoints/test_launcher.py", "rule": "interpreter", "count": 1}
 {"path": "tests/examples/test_differential_dataflow_example.py", "rule": "interpreter", "count": 2}
 {"path": "tests/examples/test_engine_free_image.py", "rule": "interpreter", "count": 1}
 {"path": "tests/examples/test_llama3_8b_trn2_request_factory.py", "rule": "interpreter", "count": 1}
 {"path": "tests/examples/test_verus_queue_task.py", "rule": "interpreter", "count": 4}
-{"path": "tests/packaging/test_installed_release_verifier.py", "rule": "interpreter", "count": 4}
+{"path": "tests/packaging/test_installed_release_verifier.py", "rule": "interpreter", "count": 1}
 {"path": "tests/quality/test_check_tach.py", "rule": "interpreter", "count": 1}
 {"path": "tests/vibesys/agents/test_api_surface.py", "rule": "interpreter", "count": 1}
 {"path": "tests/vibesys/backends/test_backend_registry_imports.py", "rule": "interpreter", "count": 1}
@@ -172,7 +170,6 @@
 {"path": "tests/entrypoints/test_chat_tools_server.py", "rule": "real_impl", "count": 2}
 {"path": "tests/entrypoints/test_launch_frontends.py", "rule": "real_impl", "count": 16}
 {"path": "tests/entrypoints/test_launch_selection.py", "rule": "real_impl", "count": 12}
-{"path": "tests/entrypoints/test_launcher.py", "rule": "real_impl", "count": 2}
 {"path": "tests/entrypoints/test_legacy_resume.py", "rule": "real_impl", "count": 1}
 {"path": "tests/entrypoints/test_server.py", "rule": "real_impl", "count": 2}
 {"path": "tests/examples/test_differential_dataflow_example.py", "rule": "real_impl", "count": 1}

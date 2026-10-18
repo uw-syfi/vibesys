@@ -353,14 +353,6 @@ def test_root_metadata_declares_internal_runtime_dependencies_directly() -> None
     assert all((library / "pyproject.toml").is_file() for library in libraries)
 
 
-def test_frontend_payload_belongs_to_the_entrypoints_package() -> None:
-    pyproject = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())
-    package_data = pyproject["tool"]["setuptools"]["package-data"]
-
-    assert "_tui/**/*" in package_data["entrypoints"]
-    assert "_tui/**/*" not in package_data["vibesys"]
-
-
 @pytest.mark.xdist_group("built_wheel")
 def test_built_distribution_caps_dependencies_without_current_intel_macos_wheels(
     built_wheel: BuiltWheel,

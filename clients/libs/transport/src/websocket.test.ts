@@ -1905,7 +1905,7 @@ describe('WebSocketTransport', () => {
         .frames()
         .map(frame => frame['type'])
         .sort(),
-    ).toEqual(['command.pause', 'query.snapshot', 'query.chat_options']);
+    ).toEqual(['command.pause', 'query.chat_options', 'query.snapshot']);
 
     gateway.socket(2).answerAll();
     await expect(Promise.all([first, second, third])).resolves.toHaveLength(3);

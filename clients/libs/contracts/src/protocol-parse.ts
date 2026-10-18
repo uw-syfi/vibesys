@@ -186,7 +186,7 @@ function validateEventBatch(record: Record<string, unknown>): void {
   // Kind only, deliberately. That `history_after_sequence` is a non-negative
   // safe integer is `StreamReconciler.declaredFloorOf`'s check and stays
   // there: its comment records why the boundary must not refuse a value the
-  // web client currently folds through `?? 0` and never reads back.
+  // desktop client currently folds through `?? 0` and never reads back.
   optionalNumber(record, 'history_after_sequence', STREAM);
   optionalBoolean(record, 'rebootstrap', STREAM);
   validateActiveExecutions(record, STREAM);

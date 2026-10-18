@@ -5,7 +5,7 @@ import {E2E_HOST, runPort} from '../../tools/e2e/free-port.mjs';
  * The gallery's visual and accessibility suite (rules S11 and S12 of #2827).
  *
  * Screenshots are compared against baselines rendered by Chromium on Linux, the browser and OS the
- * `tui_e2e` CI job uses; the template has no platform suffix, so one set is checked in, and it is
+ * `clients_e2e` CI job uses; the template has no platform suffix, so one set is checked in, and it is
  * written in the same Linux image (`pnpm update:screenshots`). The page draws its text only in the
  * bundled fonts, under reduced motion, at a fixed viewport and scale, with nothing from a clock.
  */

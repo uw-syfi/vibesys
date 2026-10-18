@@ -34,7 +34,7 @@ untenable, saying so next to the rule.
       (`test_every_model_forbids_unknown_keys_or_declares_why_not` holds every
       product model to it); closed sets are `StrEnum` or `Literal`; a
       cross-process contract has one authoritative definition with generated
-      downstream types (`check_contract_sot`, and the `tui_quality` group
+      downstream types (`check_contract_sot`, and the `clients_quality` group
       regenerates the protocol bindings and fails on a diff).
    2. Lint rules. Ruff, including banned imports through `TID251`; Grit
       plugins loaded by the Biome configuration; Biome's own rules.
@@ -52,7 +52,7 @@ untenable, saying so next to the rule.
    codebase skill that has neither a check nor the marker.
 3. **Wire the check where every relevant change runs it.** A Python policy
    script joins the `python_quality` check group; a pytest guard runs in
-   `python_guards`; a TypeScript check joins `tui_quality`. Paths that the
+   `python_guards`; a TypeScript check joins `clients_quality`. Paths that the
    CI component selector ignores (such as the agent skills) select no job, so
    a check over them goes in the always-on `doc-checks` job, stdlib-only.
    Stay inside the CI wall-time budget that CI enforces: a scan of the whole

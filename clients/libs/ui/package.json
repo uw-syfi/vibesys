@@ -66,6 +66,14 @@
     "remark-gfm": "4.0.1",
     "simple-icons": "16.35.0"
   },
+  "peerDependencies": {
+    "@types/react": "19.1.13"
+  },
+  "peerDependenciesMeta": {
+    "@types/react": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/bun": "1.4.2",
     "@types/react": "19.1.13",

@@ -1,6 +1,6 @@
 /**
  * Writes `src/tokens.css` from the token tables (`generate`), or fails when the checked-in file
- * differs from what they generate (`check`, rule S9, run by the `tui_quality` group). It runs under
+ * differs from what they generate (`check`, rule S9, run by the `clients_quality` group). It runs under
  * bun, which imports the TypeScript tables directly; the logic is `renderTokensCss` and
  * `tokensCssDrift`, which this package's tests cover.
  *

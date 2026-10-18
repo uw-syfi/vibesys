@@ -342,7 +342,7 @@ command. The wrapper runs the repository's Go tool, so install Go 1.25 first:
 ./support/repoctl/repoctl test
 ```
 
-This does not run every CI check. Electron end-to-end tests (`tui_e2e`) are
+This does not run every CI check. Electron end-to-end tests (`clients_e2e`) are
 CI-only by default: Playwright needs Chromium and its system libraries as well
 as the client and Python environments, so making the normal local command
 acquire or require them would make it unexpectedly heavyweight. Run that group
@@ -353,10 +353,10 @@ a free port for its own server, so parallel runs on one machine do not collide.
 uv sync --dev
 pnpm --dir clients install --frozen-lockfile
 (cd clients && pnpm --filter @vibesys/app-desktop-main exec playwright install --with-deps chromium)
-./support/repoctl/repoctl run-checks --group tui_e2e
+./support/repoctl/repoctl run-checks --group clients_e2e
 ```
 
-The CI-only decision is specific to `tui_e2e`. It does not change the
+The CI-only decision is specific to `clients_e2e`. It does not change the
 selection policy for the other check groups without local-selection keys; each
 has its own prerequisites and needs its own policy decision.
 
@@ -367,19 +367,19 @@ format check, knip, the TypeScript architecture checks, the frozen-UI check, and
 screenshots. One command runs them, as the same repoctl check groups CI runs:
 
 ```bash
-./scripts/check_clients.sh            # tui_quality, tui_tests, ui_gallery_linux
+./scripts/check_clients.sh            # clients_quality, clients_tests, ui_gallery_linux
 ./scripts/check_clients.sh --dry-run  # print the commands
 ```
 
-The client tests need the Bun version pinned in `packaging/tui_packaging.py` (`BUN_VERSION`), the
+The client tests need the Bun version pinned in `packaging/fetch_bun.py` (`BUN_VERSION`), the
 one CI installs. `clients/tools/scripts/run_bun_tests.mjs` fails at once, naming the pin and
 `packaging/fetch_bun.py`, when the Bun on `PATH` differs, because another version resolves
 imports differently (Bun 1.3.9 cannot find `./welcome.cjs` from its `welcome.cts` source).
 
 `ui_gallery_linux` compares the gallery's screenshots in the Linux image CI uses and checks
 that two baseline updates write identical images, so it needs Docker. The script leaves out the
-CI groups that need a display or build the shipped packages (`tui_build`, `tui_package_smoke`,
-`tui_e2e`), each named with its reason in the script.
+CI groups that need a display or build the client (`clients_build`, `clients_e2e`), each named
+with its reason in the script.
 `tests/quality/test_check_clients_matches_ci.py` fails when CI gains a client group the script
 neither runs nor lists, so the two cannot drift.
 

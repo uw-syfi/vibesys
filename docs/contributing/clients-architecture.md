@@ -372,11 +372,11 @@ component with no gallery entry. Run it with `pnpm --filter @vibesys/app-ui-gall
 The gallery is an app package, so it shows that a page built only from `@vibesys/ui` passes the
 strict rules.
 
-Its Playwright suite (in the `tui_e2e` group) runs in one theme, Ink: it fails on any axe
+Its Playwright suite (in the `clients_e2e` group) runs in one theme, Ink: it fails on any axe
 violation and compares each component's screenshot against `e2e/__screenshots__/ink-<Component>.png`
 under reduced motion at a fixed 1280 by 900 viewport. The other themes are not screenshot-tested;
 the token test still holds every theme to the contrast floors. The baselines are Chromium on Linux, the
-`tui_e2e` job's browser and OS, so they are written in Playwright's Linux image, never on macOS:
+`clients_e2e` job's browser and OS, so they are written in Playwright's Linux image, never on macOS:
 
 ```bash
 pnpm --filter @vibesys/app-ui-gallery update:screenshots   # rewrite the baselines (needs Docker)
@@ -401,7 +401,7 @@ vendor id). Each vocabulary has one owner of its names:
 
 - an agent role's name is the `title` its search declares on its `Role`; `vibesys.api.display_catalog`
   gathers them and `pnpm generate:protocol` writes `display-names.generated.ts` from it, which
-  `@vibesys/contracts` serves as `roleName`. The `tui_quality` group regenerates it and fails on a
+  `@vibesys/contracts` serves as `roleName`. The `clients_quality` group regenerates it and fails on a
   diff; the role `title` pattern and `test_every_role_name_reads_as_words` fail a role with no
   readable name. A role a plugin declares reads as the words of its id;
 - harness and model names are agentshim's, served by the backend. A client renders the field it

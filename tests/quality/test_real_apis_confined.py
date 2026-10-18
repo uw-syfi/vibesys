@@ -1475,7 +1475,6 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         EdgeKind.STORE,
         "the run summary's cache beside the event journal",
     ),
-    "src/server/settings.py": (EdgeKind.INPUT_LOADER, "server settings"),
     "src/server/transport/discovery.py": (
         EdgeKind.STORE,
         "instance records, and a /proc OS adapter",

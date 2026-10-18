@@ -21,8 +21,7 @@ The scan reads three kinds of product file:
   YAML, Markdown, shell), matched line by line for a model id.
 - Every TypeScript and JavaScript file under ``clients/``, matched line by
   line for a model id. Excluded: tests, generated code, test fixtures and
-  fakes, the TUI's ``dev/`` mock server and journal (canned data for local
-  development, never shipped), and installed or built output.
+  fakes, and installed or built output.
 
 Not scanned: ``tests/`` (a test names models to pin behavior), ``docs/`` and
 ``examples/`` (an operator's configuration names models, which is data), and

@@ -2047,8 +2047,7 @@ describe('chunk gluing per channel', () => {
 });
 
 describe('the framework-validation gate command adapter', () => {
-  // Legacy adapter for the shape recorded at
-  // clients/tui/dev/fixtures/bad-cpp-round1.jsonl:388, produced by loop.py's
+  // Legacy adapter for the shape recorded by loop.py's
   // `ctx.lprint(f"[framework-validation] running {recipe.name}: {recipe.command}")`
   // on the diagnostic channel. See #692 / PR #697.
   const GATE_LINE =

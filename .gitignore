@@ -274,15 +274,6 @@ sandbox-*/
 
 # TypeScript client build/install output
 node_modules/
-clients/tui/dist/
-
-# TUI bundle staged into the package by setup.py's build_py step
-src/vibesys/_tui/
-
-# Lockfiles written by the wheel-time TUI build (repo uses pnpm-lock.yaml)
-clients/tui/package-lock.json
-clients/tui/bun.lock
-clients/tui/bun.lockb
 
 # Go workspaces are developer-local, never committed. A committed go.work would
 # point evaluators at the local SDK source, so CI would test a build that no

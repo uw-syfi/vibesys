@@ -31,6 +31,7 @@ from packaging_support import (  # noqa: E402
 # lint-waiver: LW-008021 [E402]; This standalone bundle adds a sibling module directory to sys.path before importing its modules.
 from resources_packaging import stage_resources, stage_sdk  # noqa: E402
 
+
 class BuildPy(_build_py):
     """Standard ``build_py`` plus staging framework resources and the SDK."""
 

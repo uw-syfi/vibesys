@@ -1010,7 +1010,7 @@ def test_a_run_argument_diagnostic_reaches_stderr_before_any_transport_binds(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A launch from a non-project directory says so, on the argv the TUI sends.
+    """A launch from a non-project directory says so, on the argv a client sends.
 
     This is the argv the launcher spawns, and the diagnostic
     is the one that names the fix. `parse_cli_invocation` raises it before

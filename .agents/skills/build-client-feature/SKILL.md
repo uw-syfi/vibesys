@@ -1,6 +1,6 @@
 ---
 name: build-client-feature
-description: Add or change a feature in the TypeScript clients (the web app, the desktop app, the deprecated terminal UI, features, and shared libraries), placing it in the package graph, writing its control state as an XState machine and its data folds as reducers, wiring the live run through @vibesys/run-session, and bounding and cancelling its asynchronous work. Use when changing client apps, features or shared libraries, scaffolding a client package, or fixing a client bug about stale results, hangs, or leaked connections.
+description: Add or change a feature in the TypeScript clients (the desktop app, features, and shared libraries), placing it in the package graph, writing its control state as an XState machine and its data folds as reducers, wiring the live run through @vibesys/run-session, and bounding and cancelling its asynchronous work. Use when changing client apps, features or shared libraries, scaffolding a client package, or fixing a client bug about stale results, hangs, or leaked connections.
 metadata:
   kind: codebase
 ---
@@ -24,8 +24,7 @@ core; it owns sockets, timers and processes.
 
 ## When this applies
 
-- Any change to a client app, a client feature, a shared client library, or
-  the terminal UI (deprecated: new work goes to the web and desktop apps).
+- Any change to a client app, a client feature, or a shared client library.
 - Scaffolding or moving client packages. Changing the run protocol or the
   host-helper contract itself is the `change-wire-protocol` skill; this skill
   covers consuming them.

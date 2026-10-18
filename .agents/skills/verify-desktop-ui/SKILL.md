@@ -52,7 +52,7 @@ From the clients workspace root:
   Fix the UI, not the check. A known-failure entry is only for a defect already
   on the base branch that has its own issue; never add one for a defect your
   change causes. The run fails on an entry no screen shows any more, so delete
-  the entries your change fixes. CI runs the same suite (`tui_e2e`).
+  the entries your change fixes. CI runs the same suite (`clients_e2e`).
 - To look at a fixture yourself, build the shell and run one spec headed:
   `pnpm --filter @vibesys/app-desktop-shell e2e --headed <spec> -g <fixture>`.
 - The same suite in CI's Linux image (needs Docker):

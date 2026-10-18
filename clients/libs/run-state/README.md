@@ -39,5 +39,5 @@ consumer write fails before it can corrupt another generation. Production builds
 guard and its traversal, so correctness must not depend on the freeze.
 
 Frontends own presentation state outside this package. The desktop app adds focus, selection, theme,
-layout, and local chat placeholders. The web client adds transport lifecycle and React state. No
+layout, local chat placeholders, transport lifecycle and React state. No
 frontend imports a file below the package's entries or reproduces event-fold behavior.

@@ -518,12 +518,10 @@ export function configurationFailureContent(data: {
 /**
  * Legacy/recorded-prose adapter: a live backend on `main` now emits a typed
  * `gate_started` event whose `command` field `eventToTranscriptEntry` reads
- * directly (see above), but a run recorded before #697 (e.g. the dev harness
- * fixture `clients/tui/dev/fixtures/bad-cpp-round1.jsonl`, replayed byte for
- * byte as `agent_output_chunk`/diagnostic) still carries the gate command as
- * free text: loop.py's old `ctx.lprint(f"[framework-validation] running
+ * directly (see above), but a run recorded before #697 (replayed as `agent_output_chunk`/diagnostic)
+ * still carries the gate command as free text: loop.py's old `ctx.lprint(f"[framework-validation] running
  * {recipe.name}: {recipe.command}")`. This is the one place that text is
- * folded into an entry, so it is split here rather than let the TUI
+ * folded into an entry, so it is split here rather than let a renderer
  * word-wrap a shell command as prose.
  *
  * Deliberately narrow: only the exact "[framework-validation] running
