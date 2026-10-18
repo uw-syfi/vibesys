@@ -119,6 +119,7 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
       onToggleSidebar: (listener: () => void) => {
         toggleListeners.push(listener);
       },
+      onOpenSettings: () => undefined,
     },
     fakeHost: {
       /** The application menu's "Toggle Sidebar". */
@@ -353,6 +354,10 @@ export function installFakeWindows(): void {
       return ok();
     },
     showMainWindow: () => {
+      record.shownMain += 1;
+      return ok();
+    },
+    openSettings: () => {
       record.shownMain += 1;
       return ok();
     },

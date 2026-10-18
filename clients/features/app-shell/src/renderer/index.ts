@@ -1,6 +1,7 @@
 /** The app shell's renderer entry: the window's sidebar and layout, and the placeholder screens. */
 
 export {
+  bindRunWindowSettingsShortcut,
   bindSidebarShortcut,
   browserSidebarPreference,
   type KeyTarget,

@@ -162,6 +162,7 @@ function cases(random: Seeded): Case[] {
       {kind: 'open-run-window', run: {host: key, runId: name}},
     ],
     [bridge => bridge.showMainWindow(), {kind: 'show-main-window'}],
+    [bridge => bridge.openSettings(), {kind: 'open-settings'}],
     [
       bridge => bridge.openExternal('https://example.com/a?b=1'),
       {kind: 'open-external', url: 'https://example.com/a?b=1'},
@@ -201,6 +202,16 @@ describe('the welcome contract', () => {
     });
     main.subscribed.get('vibesys:toggle-sidebar')?.(undefined);
     expect(toggled).toBe(1);
+  });
+
+  test('a run window can request Settings in the main window', () => {
+    const main = new ParsingMain();
+    let opened = 0;
+    main.bridge.onOpenSettings(() => {
+      opened += 1;
+    });
+    main.subscribed.get('vibesys:open-settings')?.(undefined);
+    expect(opened).toBe(1);
   });
 
   test('every event the main process sends reaches the listener the view registered', () => {

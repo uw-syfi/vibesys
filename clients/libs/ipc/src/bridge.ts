@@ -39,6 +39,7 @@ export const CONNECT_CHANNEL = 'vibesys:connect';
 export const WAKE_CHANNEL = 'vibesys:wake';
 /** IPC channel on which the main process tells the app shell that the menu asked to toggle the sidebar. */
 export const TOGGLE_SIDEBAR_CHANNEL = 'vibesys:toggle-sidebar';
+export const OPEN_SETTINGS_CHANNEL = 'vibesys:open-settings';
 
 /**
  * Bytes either side may have in flight across one bridge connection.

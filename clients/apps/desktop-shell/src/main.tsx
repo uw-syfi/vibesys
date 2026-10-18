@@ -4,7 +4,11 @@
 import '@vibesys/ui/tokens.css';
 import '@vibesys/ui/fonts.css';
 import '@vibesys/ui/components.css';
-import {bindSidebarShortcut, browserSidebarPreference} from '@vibesys/feature-app-shell/renderer';
+import {
+  bindRunWindowSettingsShortcut,
+  bindSidebarShortcut,
+  browserSidebarPreference,
+} from '@vibesys/feature-app-shell/renderer';
 import {browserMoreOptionsMemory} from '@vibesys/feature-new-run/renderer';
 import {pageAppearance} from '@vibesys/feature-settings/renderer';
 import {runOfWindow, type WelcomeBridge} from '@vibesys/ipc';
@@ -60,6 +64,13 @@ if (bridge === undefined) {
   const run = runOfWindow(window.location.search);
   if (run === null) {
     bindSidebarShortcut(window, bridge.platform === 'darwin', stores.sidebar.store.dispatch);
+    bridge.onOpenSettings(() =>
+      stores.sidebar.store.dispatch({type: 'select', screen: {kind: 'settings'}}),
+    );
+  } else {
+    bindRunWindowSettingsShortcut(window, bridge.platform === 'darwin', () => {
+      void bridge.openSettings();
+    });
   }
   // A link in written text opens in the user's own browser or mail app, never in this window.
   const openExternal = (url: string): void => void bridge.openExternal(url);

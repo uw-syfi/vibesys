@@ -219,7 +219,8 @@ function desktopWorld(cleanups: RetirementCleanups = {}) {
   };
   const window: DesktopDeps['window'] = {
     welcome: document,
-    focus: () => undefined,
+    focus: () => events.push('main:focus'),
+    openSettings: () => events.push('main:settings'),
     releaseSurfaceRun: () => undefined,
     sendWelcome: <T>(_channel: string, _event: WelcomeEvent<T>): void => undefined,
   };
@@ -297,6 +298,12 @@ describe('Desktop run windows', () => {
     await expect(fromRunWindow(20, '30:300', WELCOME_CHANNELS.releaseLogs)).resolves.toMatchObject({
       ok: true,
     });
+
+    await expect(fromRunWindow(20, '30:300', WELCOME_CHANNELS.openSettings)).resolves.toEqual({
+      ok: true,
+      value: null,
+    });
+    expect(w.events.slice(-2)).toEqual(['main:settings', 'main:focus']);
 
     // Opening the same run again, from either window, focuses its window.
     await fromRunWindow(20, '30:300', WELCOME_CHANNELS.openRunWindow, run);

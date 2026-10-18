@@ -13,6 +13,7 @@ export {
   type DesktopSocket,
   type DesktopSocketHandlers,
   type MainToPage,
+  OPEN_SETTINGS_CHANNEL,
   type PageToMain,
   parsePageMessage,
   TOGGLE_SIDEBAR_CHANNEL,

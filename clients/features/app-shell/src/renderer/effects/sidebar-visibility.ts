@@ -69,3 +69,18 @@ export function bindSidebarShortcut(
   target.addEventListener('keydown', listener);
   return () => target.removeEventListener('keydown', listener);
 }
+
+/** Open Settings from a run window, where the main window owns the sidebar state. */
+export function bindRunWindowSettingsShortcut(
+  target: KeyTarget,
+  mac: boolean,
+  openSettings: () => void,
+): () => void {
+  const listener = (event: ShortcutKey & {preventDefault(): void}): void => {
+    if (!isSettingsShortcut(event, mac)) return;
+    event.preventDefault();
+    openSettings();
+  };
+  target.addEventListener('keydown', listener);
+  return () => target.removeEventListener('keydown', listener);
+}

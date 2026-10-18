@@ -44,6 +44,8 @@ function fakeBridge(): WelcomeBridge {
     onRecent: ignore,
     onPreferences: ignore,
     onToggleSidebar: ignore,
+    onOpenSettings: ignore,
+    openSettings: () => ok(null),
     describeMachine: () => ok({kind: 'unsupported' as const}),
     harnesses: () => ok({kind: 'unsupported' as const}),
     examples: () => ok({kind: 'unsupported' as const}),

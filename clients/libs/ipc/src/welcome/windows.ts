@@ -9,6 +9,7 @@ import type {ChannelOf} from './values.js';
 export const WINDOWS_CHANNELS = {
   openRunWindow: 'vibesys:welcome:open-run-window',
   showMainWindow: 'vibesys:welcome:show-main-window',
+  openSettings: 'vibesys:welcome:open-settings',
   openExternal: 'vibesys:welcome:open-external',
 } as const;
 
@@ -42,15 +43,20 @@ export interface WindowsWelcomeBridge {
   openRunWindow(run: RunRef): Promise<WelcomeResult<null>>;
   /** Bring the main window (the sidebar and its screens) to the front. */
   showMainWindow(): Promise<WelcomeResult<null>>;
+  /** Focus the main window and show its Settings screen. */
+  openSettings(): Promise<WelcomeResult<null>>;
   /** Open a web or mail address in the user's own browser or mail app; never in the app. */
   openExternal(url: string): Promise<WelcomeResult<null>>;
   /** The application menu's "Toggle Sidebar" was chosen. */
   onToggleSidebar(listener: () => void): void;
+  /** Another app window requested Settings. */
+  onOpenSettings(listener: () => void): void;
 }
 
 export type WindowsRequest =
   | {readonly kind: 'open-run-window'; readonly run: RunRef}
   | {readonly kind: 'show-main-window'}
+  | {readonly kind: 'open-settings'}
   | {readonly kind: 'open-external'; readonly url: string};
 
 /** The typed request on `channel` with `args`; throws naming the first invalid value. */
@@ -63,6 +69,8 @@ export function parseWindowsRequest(
       return {kind: 'open-run-window', run: parseRunRef(args[0], 'run')};
     case WINDOWS_CHANNELS.showMainWindow:
       return {kind: 'show-main-window'};
+    case WINDOWS_CHANNELS.openSettings:
+      return {kind: 'open-settings'};
     case WINDOWS_CHANNELS.openExternal:
       return {kind: 'open-external', url: parseExternalUrl(args[0], 'url')};
   }

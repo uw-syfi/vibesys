@@ -9,6 +9,7 @@ import {
   storeSidebarShown,
 } from '../state/index.js';
 import {
+  bindRunWindowSettingsShortcut,
   bindSidebarShortcut,
   browserSidebarPreference,
   createSidebarStore,
@@ -94,6 +95,30 @@ describe('the toggle shortcut', () => {
       {type: 'select', screen: {kind: 'settings'}},
       {type: 'select', screen: {kind: 'settings'}},
     ]);
+    stop();
+    expect(listeners.size).toBe(0);
+  });
+
+  test('a run window routes Command+, to Settings and leaves comma entry alone', () => {
+    const listeners = new Set<(event: KeyboardEvent) => void>();
+    const target: KeyTarget = {
+      addEventListener: (_type, listener) => void listeners.add(listener),
+      removeEventListener: (_type, listener) => void listeners.delete(listener),
+    };
+    let opened = 0;
+    const stop = bindRunWindowSettingsShortcut(target, true, () => {
+      opened += 1;
+    });
+    const press = (modifiers: Partial<ShortcutKey>): boolean => {
+      let prevented = false;
+      const event = {...NONE, key: ',', ...modifiers, preventDefault: () => (prevented = true)};
+      for (const listener of listeners) listener(event as unknown as KeyboardEvent);
+      return prevented;
+    };
+    expect(press({})).toBe(false);
+    expect(press({metaKey: true, repeat: true})).toBe(false);
+    expect(press({metaKey: true})).toBe(true);
+    expect(opened).toBe(1);
     stop();
     expect(listeners.size).toBe(0);
   });

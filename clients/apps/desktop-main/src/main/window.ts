@@ -12,6 +12,7 @@
 import type {RelayPort} from '@vibesys/feature-run-control/main';
 import {
   CONNECT_CHANNEL,
+  OPEN_SETTINGS_CHANNEL,
   TOGGLE_SIDEBAR_CHANNEL,
   WAKE_CHANNEL,
   type WelcomeEvent,
@@ -185,6 +186,14 @@ export class AppWindow {
     const surface = this.#pages.current;
     if (surface !== null && !surface.webContents.isDestroyed()) {
       surface.webContents.send(TOGGLE_SIDEBAR_CHANNEL);
+    }
+  }
+
+  /** Tell the main shell to show Settings, including requests from a run window. */
+  openSettings(): void {
+    const surface = this.#pages.current;
+    if (surface !== null && !surface.webContents.isDestroyed()) {
+      surface.webContents.send(OPEN_SETTINGS_CHANNEL);
     }
   }
 

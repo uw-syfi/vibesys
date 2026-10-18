@@ -53,6 +53,7 @@ const CHANNELS: Channels = {
   helperFeatures: 'vibesys:welcome:helper-features',
   openRunWindow: 'vibesys:welcome:open-run-window',
   showMainWindow: 'vibesys:welcome:show-main-window',
+  openSettings: 'vibesys:welcome:open-settings',
   openExternal: 'vibesys:welcome:open-external',
 };
 const EVENTS: Events = {
@@ -66,6 +67,8 @@ const CONNECT_CHANNEL: typeof import('@vibesys/ipc').CONNECT_CHANNEL = 'vibesys:
 const WAKE_CHANNEL: typeof import('@vibesys/ipc').WAKE_CHANNEL = 'vibesys:wake';
 const TOGGLE_SIDEBAR_CHANNEL: typeof import('@vibesys/ipc').TOGGLE_SIDEBAR_CHANNEL =
   'vibesys:toggle-sidebar';
+const OPEN_SETTINGS_CHANNEL: typeof import('@vibesys/ipc').OPEN_SETTINGS_CHANNEL =
+  'vibesys:open-settings';
 const RUN_PORT_MESSAGE: typeof import('@vibesys/ipc').RUN_PORT_MESSAGE = 'vibesys:run-port';
 
 /** Effects the sandbox grants this preload, injectable so the exposed bridge has a public Fake. */
@@ -131,8 +134,10 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
     helperFeatures: host => call(CHANNELS.helperFeatures, host),
     openRunWindow: run => call(CHANNELS.openRunWindow, run),
     showMainWindow: () => call(CHANNELS.showMainWindow),
+    openSettings: () => call(CHANNELS.openSettings),
     openExternal: url => call(CHANNELS.openExternal, url),
     onToggleSidebar: listener => capabilities.on(TOGGLE_SIDEBAR_CHANNEL, () => listener()),
+    onOpenSettings: listener => capabilities.on(OPEN_SETTINGS_CHANNEL, () => listener()),
     onRecent: on(EVENTS.recent),
     onListing: on(EVENTS.listing),
     onPreferences: on(EVENTS.preferences),

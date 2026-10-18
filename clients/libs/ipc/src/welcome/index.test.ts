@@ -60,6 +60,7 @@ const VALID_ARGUMENTS: Readonly<
   [WELCOME_CHANNELS.archive]: [{host: 'local', runId: '20261015-163047'}, true],
   [WELCOME_CHANNELS.openRunWindow]: [{host: 'ssh:host-b', runId: '20261015-163047'}],
   [WELCOME_CHANNELS.showMainWindow]: [],
+  [WELCOME_CHANNELS.openSettings]: [],
   [WELCOME_CHANNELS.openExternal]: ['https://example.com/a'],
   [WELCOME_CHANNELS.machines]: [],
   [WELCOME_CHANNELS.machine]: ['ssh:host-b'],
