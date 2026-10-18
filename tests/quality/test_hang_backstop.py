@@ -20,10 +20,16 @@ def test_a_hard_timeout_is_configured_with_the_signal_method() -> None:
     assert PYTEST["timeout_method"] == "signal"
 
 
-def test_the_stack_dump_fires_before_the_timeout() -> None:
-    # The timeout failure carries no all-thread stacks; faulthandler's earlier dump to
-    # stderr shows where the test was stuck.
-    assert 0 < PYTEST["faulthandler_timeout"] < PYTEST["timeout"]
+def test_the_stack_dump_comes_from_the_timeout_not_faulthandler_s_watchdog() -> None:
+    # faulthandler's watchdog dumps from a thread without the GIL and can segfault the worker
+    # it is meant to diagnose; the timeout's own dump runs in Python with the GIL held.
+    assert "faulthandler_timeout" not in PYTEST
+
+
+def test_a_crashed_worker_ends_the_session_instead_of_stalling_it() -> None:
+    # `--dist loadgroup` never replaces a dead worker, so the tests it still owed would wait
+    # for the CI job timeout; with no restarts allowed xdist stops and reports the crash.
+    assert "--max-worker-restart=0" in PYTEST["addopts"].split()
 
 
 def test_the_timeout_plugin_is_a_dev_dependency() -> None:
