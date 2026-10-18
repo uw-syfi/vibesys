@@ -14,10 +14,10 @@ import type {ViewBase} from './views/props.js';
 
 export type IdeasSort = 'newest' | 'oldest' | 'result';
 
-function outcomeOf(row: IdeaRow, outcomes: ImplementerOutcomes): string {
+export function outcomeOf(row: IdeaRow, outcomes: ImplementerOutcomes): string {
   const label =
     row.outcome === 'failed'
-      ? row.state.label.replace(/^failed(?: · )?/, '') || 'not measured'
+      ? row.state.label.replace(/^failed(?:\s*·\s*)?/i, '').trim() || 'not measured'
       : (outcomes.get(row.id)?.outcome?.label ?? row.outcome);
   return label.charAt(0).toUpperCase() + label.slice(1);
 }

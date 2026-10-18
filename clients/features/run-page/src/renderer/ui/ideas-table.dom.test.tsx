@@ -4,7 +4,8 @@ import {Window} from 'happy-dom';
 import {act, useState} from 'react';
 import {createRoot, type Root} from 'react-dom/client';
 import {modelOfShape} from '../../state/ideas-tree-fixtures.js';
-import {type RunPageAction, runPageInitial, runPageStep} from '../../state/index.js';
+import {ideasView, type RunPageAction, runPageInitial, runPageStep} from '../../state/index.js';
+import {outcomeOf} from './ideas-table.js';
 import {RunLevel} from './run-level.js';
 
 const window = new Window();
@@ -31,6 +32,17 @@ const SHAPE = {
   outcomes: ['passed', 'passed', 'passed', 'passed', 'failed', 'passed', 'passed'],
   best: 2,
 } as const;
+
+test('a capitalized failed state leaves only the reason beside the Failed pill', () => {
+  const model = modelOfShape(SHAPE);
+  const row = ideasView(model, {query: '', passed: true, running: true, failed: true}).rows.find(
+    item => item.outcome === 'failed',
+  );
+  if (row === undefined) throw new Error('fixture needs a failed idea');
+  expect(outcomeOf({...row, state: {...row.state, label: 'Failed · turned down'}}, new Map())).toBe(
+    'Turned down',
+  );
+});
 
 async function shown() {
   const container = document.createElement('div');
