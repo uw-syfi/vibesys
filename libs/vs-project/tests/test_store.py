@@ -382,8 +382,10 @@ def test_logged_runs_are_named_per_checkout_without_creating_any_state(tmp_path:
     first.mkdir(parents=True)
     second.mkdir(parents=True)
 
+    store = Project.log_directory_for(first, "run-a").parents[2]
+
     assert Project.logged_run_ids_for(first) == ()
-    assert not (Path(os.environ["VIBESYS_STATE_HOME"]) / "projects").exists()
+    assert not store.exists()
 
     Project.log_directory_for(first, "run-b").mkdir(parents=True)
     Project.log_directory_for(first, "run-a").mkdir(parents=True)
