@@ -53,6 +53,11 @@ if TYPE_CHECKING:
 _CONFIG = RunLoopConfig(host_id="loop", lease_duration=300.0, control_poll_interval=1.0)
 
 
+def _live() -> str | None:
+    """A poster's view of a run that has not ended."""
+    return None
+
+
 class _Texts:
     def put(self, ref: ArtifactRef, text: str) -> None:
         del ref, text
@@ -213,7 +218,9 @@ async def test_an_inbox_pause_refused_by_the_commit_that_ends_the_run_is_rejecte
 
     def actions(clock: _Operator, host: CoreRunHost) -> None:
         def operator_and_end() -> None:
-            wiring.inbox.post("p1", PauseRequest(control_id="p1").model_dump_json().encode())
+            wiring.inbox.post(
+                "p1", PauseRequest(control_id="p1").model_dump_json().encode(), ended=_live
+            )
             _ends_first(host)
 
         clock.actions.append((_always, operator_and_end))

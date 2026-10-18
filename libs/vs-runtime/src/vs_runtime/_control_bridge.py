@@ -68,7 +68,7 @@ from vs_runtime._steer_delivery import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Collection, Sequence
 
     from vs_core.api import (
         ControlRefusedError,
@@ -251,18 +251,19 @@ class RunControlBridge:
                 core, now_at, _Change("stop", mode=self._channel.stop_mode(), control_id=by)
             )
             events += () if stop is None else (stop,)
-        for change in self._pause_changes():
+        for change in self._pause_changes(_held(core)):
             refusal = self._record_pause(core, now_at, change, events)
             if refusal is not None:
                 self._refuse(change, refusal, request_id=None)
 
-    def _pause_changes(self) -> list[_Change]:
+    def _pause_changes(self, held: Collection[ControlId]) -> list[_Change]:
         """The pause and resume controls that bring core's record of the pause to the channel's.
 
         The channel holds only its current pause, so changes between two polls that left
         the pause as it was are not recorded: core only needs the pause the run is in, and
         whether the operator's wait for capacity stands. A control re-recording a pause the
-        operator already holds has no operator id: its id names the first record.
+        operator already holds has no operator id: its id names the first record, which core
+        may hold (``held``) even when its pause is gone since (a stop lifts it).
         """
         recorded, live = self._pause, self._channel.pause_state()
         stands = self._channel.capacity_wait_stands()
@@ -298,7 +299,9 @@ class RunControlBridge:
             or recorded.owner is not live.owner
             or (recorded.capacity_wait and not live.capacity_wait)
         ):
-            first = recorded is None or recorded.owner is not live.owner
+            first = (recorded is None or recorded.owner is not live.owner) and (
+                by is None or _identity(by) not in held
+            )
             owner_id = by if operator and first else None
             changes.append(
                 _Change(
