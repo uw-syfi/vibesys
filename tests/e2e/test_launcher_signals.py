@@ -45,7 +45,7 @@ handled = {{signal.SIGINT, signal.SIGTERM, signal.SIGHUP}}
 signal.pthread_sigmask(signal.SIG_BLOCK, handled)
 release = os.open(os.environ["ENGINE_RELEASE"], os.O_RDWR)
 events = open(os.environ["ENGINE_EVENTS"], "w", buffering=1)
-events.write(f"ready {{os.getpid()}}\\n")
+events.write(f"ready {{os.getpid()}} {{os.getpgrp()}}\\n")
 events.write(f"signal {{signal.sigwait(handled)}}\\n")
 os.read(release, 1)
 sys.exit({_ENGINE_STATUS})
@@ -117,8 +117,8 @@ def _drive_engine(
     launcher_alive: int,
     send: Callable[[], None],
     number: signal.Signals,
-) -> int:
-    """Signal the launcher once its engine is ready; return the engine's pid.
+) -> tuple[int, int]:
+    """Signal the launcher once its engine is ready; return the engine's pid and process group.
 
     Asserts the engine sees the signal while the launcher still waits, then releases the
     engine. ``launcher_alive`` reaches end-of-file when the launcher exits.
@@ -135,7 +135,8 @@ def _drive_engine(
             stream.write(b"x")
     finally:
         engine.close()
-    return int(ready.split()[1])
+    _, pid, group = ready.split()
+    return int(pid), int(group)
 
 
 def _launch_in_child(
@@ -161,7 +162,7 @@ def _launch_in_child(
 
     def drive() -> None:
         try:
-            pids.append(_drive_engine(environment, launcher_alive, send, number))
+            pids.append(_drive_engine(environment, launcher_alive, send, number)[0])
         except AssertionError as error:
             failures.append(repr(error))
 
@@ -242,7 +243,7 @@ def test_the_launcher_process_waits_for_its_engine_to_finish_tearing_down(
             os.kill(launcher.pid, number)
 
     try:
-        engine_pid = _drive_engine(environment, launcher_alive, send, number)
+        engine_pid, _ = _drive_engine(environment, launcher_alive, send, number)
         assert launcher.wait(timeout=HANG_GUARD_S) == _ENGINE_STATUS
     finally:
         if launcher.poll() is None:
@@ -250,6 +251,46 @@ def test_the_launcher_process_waits_for_its_engine_to_finish_tearing_down(
             launcher.wait(timeout=HANG_GUARD_S)
         if engine_pid is not None:
             # At the merge base the engine outlives a SIGTERMed launcher.
+            with suppress(ProcessLookupError):
+                os.kill(engine_pid, signal.SIGKILL)
+
+
+@pytest.mark.xfail(
+    strict=True, reason="periodic-1330 MED-1: the engine shares the terminal's group"
+)
+def test_a_ctrl_c_reaches_the_engine_only_through_the_launcher(tmp_path: Path) -> None:
+    """periodic-1330 MED-1: one Ctrl-C reached the engine twice, from the terminal and the launcher.
+
+    The engine leads a process group of its own, so a terminal's Ctrl-C (sent to the
+    launcher's group) does not reach it directly: it arrives once, as the launcher's copy.
+    """
+    environment = _write_engine(tmp_path)
+    launcher_alive, held_by_launcher = os.pipe()
+    # lint-waiver: LW-133001 [S603]; the test runs the real launcher process.
+    # > Calling `main` in the test's process would signal pytest itself; a fixed argv is the boundary.
+    launcher = subprocess.Popen(  # noqa: S603
+        [sys.executable, "-c", _launcher_script(tmp_path / "stub")],
+        cwd=tmp_path,
+        env={**os.environ, **environment},
+        start_new_session=True,
+        pass_fds=(held_by_launcher,),
+    )
+    os.close(held_by_launcher)
+    engine_pid: int | None = None
+    try:
+        engine_pid, engine_group = _drive_engine(
+            environment,
+            launcher_alive,
+            partial(os.killpg, launcher.pid, signal.SIGINT),
+            signal.SIGINT,
+        )
+        assert launcher.wait(timeout=HANG_GUARD_S) == _ENGINE_STATUS
+        assert engine_group == engine_pid != launcher.pid
+    finally:
+        if launcher.poll() is None:
+            launcher.kill()
+            launcher.wait(timeout=HANG_GUARD_S)
+        if engine_pid is not None:
             with suppress(ProcessLookupError):
                 os.kill(engine_pid, signal.SIGKILL)
 

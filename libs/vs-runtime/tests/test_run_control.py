@@ -24,10 +24,12 @@ from vs_core.api import (
 from vs_runtime.api.core import RunControlBridge
 from vs_runtime.api.infrastructure import (
     CapacityWake,
+    ChannelRunControl,
     PauseWake,
     RunControlTransition,
     RunControlTransitionKind,
     RunStopped,
+    StopRequest,
     create_run_control_channel,
 )
 from vs_runtime.api.testing import FakeRunControlEventSink
@@ -585,3 +587,48 @@ def test_a_turns_cancel_ends_only_its_own_wait(
         elif resume_at is not None:
             assert wake in {PauseWake.ELAPSED, CapacityWake.ELAPSED}
             assert at == pytest.approx(run.base + resume_at)
+
+
+def _strongest(modes: list[StopMode]) -> StopMode | None:
+    """The stop in force after ``modes``: a cancel once any asked to cancel, else a drain."""
+    if StopMode.CANCEL in modes:
+        return StopMode.CANCEL
+    return StopMode.DRAIN if modes else None
+
+
+_STOP_OPS = st.lists(
+    st.one_of(st.sampled_from(StopMode).map(lambda mode: ("stop", mode)), st.just(("poll",))),
+    max_size=8,
+)
+
+
+@pytest.mark.xfail(strict=True, reason="periodic-1330 MED-2: a later stop is dropped or downgrades")
+@pytest.mark.regression
+@example(ops=[("stop", StopMode.DRAIN), ("poll",), ("stop", StopMode.CANCEL)])
+@example(ops=[("stop", StopMode.CANCEL), ("stop", StopMode.DRAIN)])
+@given(ops=_STOP_OPS)
+def test_a_stop_only_escalates_and_every_escalation_reaches_core(
+    ops: list[tuple[str, StopMode] | tuple[str]],
+) -> None:
+    """periodic-1330 MED-2: the run kept the last stop's mode and told core only the first.
+
+    However stop requests and the run loop's polls interleave, the run's stop is the
+    strongest one asked for (a drain never replaces a cancel), and core records it.
+    """
+    threads = SimThreads()
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=threads)
+    control = ChannelRunControl(channel, threads)
+    bridge = RunControlBridge(channel, _DiscardingSteerArtifacts(), control=control)
+    core = initial_state()
+    asked: list[StopMode] = []
+    for op in [*ops, ("poll",)]:
+        match op:
+            case ("stop", StopMode() as mode):
+                control.submit(StopRequest(control_id=f"stop-{len(asked)}", mode=mode))
+                asked.append(mode)
+            case _:
+                for event in bridge.poll(core, core.run.now_at):
+                    core = step(core, event).state
+        assert channel.stop_mode() == _strongest(asked)
+    recorded = [c.mode for c in core.run.controls if c.action == "stop" and c.mode is not None]
+    assert _strongest(recorded) == _strongest(asked)

@@ -280,3 +280,57 @@ async def test_every_shutdown_signal_ends_the_run_cancelling_its_work_never_drai
     assert all(stop.mode is StopMode.CANCEL for stop in stops)
     assert stops or session.cancelled
     assert not any(signals.handles(number) for number in _SHUTDOWN)
+
+
+class _EscalatingSession(_InterruptibleSession):
+    """A run that ends only once it is told to cancel its work, noting each stop's mode."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.modes: list[StopMode] = []
+        self.release = asyncio.Event()
+
+    async def await_result(self) -> RunResult:
+        self.started.set()
+        await self.release.wait()
+        return RunResult(run_id="escalated", loop="test", succeeded=False, status=RunStatus.STOPPED)
+
+    def _stopped(self, mode: StopMode) -> None:
+        self.modes.append(mode)
+        self.stop_requested.set()
+
+    def stop(self, mode: StopMode = StopMode.DRAIN) -> None:
+        self.stop_calls += 1
+        self._stopped(mode)
+
+    def submit(self, request: object) -> None:
+        self.controls.append(request)
+        if isinstance(request, StopRequest):
+            self._stopped(request.mode)
+
+
+@pytest.mark.xfail(strict=True, reason="periodic-1330 MED-2: a Ctrl-C after a drain is dropped")
+@pytest.mark.asyncio
+async def test_a_ctrl_c_after_a_draining_stop_escalates_it_to_cancel_the_work() -> None:
+    """periodic-1330 MED-2: a Ctrl-C while the run drained changed nothing.
+
+    Cancelling the supervision drains the run; a Ctrl-C then still asks the run to cancel
+    its work in flight, as Ctrl-C always does, instead of being dropped as a repeat.
+    """
+    signals = FakeSignalSource()
+    session = _EscalatingSession()
+    handle = FakeRunHandle("escalated")
+    handle.bind(cast("RunSession", session))
+    handle.start()
+    supervision = asyncio.create_task(supervise(handle, signals=signals))
+    await arrival(session.started.wait(), supervision)
+
+    supervision.cancel()
+    await arrival(session.stop_requested.wait(), supervision)
+    assert signals.deliver(Signals.SIGINT)
+    modes = list(session.modes)
+    session.release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await supervision
+    assert modes == [StopMode.DRAIN, StopMode.CANCEL]
