@@ -68,11 +68,13 @@ class Sample(Value):
     base: BaseRef | None = None
 
 
-class BaseRun(Value):
-    """A run of a base that core itself asked for, on a candidate's behalf, in its scope.
+class CoreRun(Value):
+    """A run core itself asked for, on a candidate's behalf, in its scope.
 
     No decision and no agent call asked for it, so this record is its origin: core admitted it
-    to compare ``candidate`` (the run whose result needed a base) with a measured base.
+    so that ``candidate`` (the run whose result needed it) has a comparison with a measured
+    base. Its plan says which side it measures: the base, or (under no declared floor) the
+    candidate's own input again (`vs_core._comparison`).
     """
 
     request_id: RequestId

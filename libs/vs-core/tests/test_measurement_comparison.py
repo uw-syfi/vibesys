@@ -831,39 +831,47 @@ def test_the_official_record_states_the_value_its_comparison_compared(
 
 @pytest.mark.regression
 def test_a_task_that_declares_no_noise_gets_no_verdict_from_runs_that_show_none() -> None:
-    """With no declared ``relative_noise``, identical base runs measure no noise either.
+    """With no declared ``relative_noise``, identical runs measure no noise either.
 
     Before, the close call earned the base one more run, and when it read what the first did
     (a quantized or cached benchmark), the spread was zero and the 0.3% gap between the two
-    sides was ``better``: the official check then reused the agent's single run. Now the base
-    takes at most two extra runs (three in all, the fewest that can give a verdict), the
-    comparison stays ``within_noise`` and a close call, and the official check runs afresh.
+    sides was ``better``: the official check then reused the agent's single run. Now each side
+    takes three runs (the fewest that can give a verdict) and no more, the comparison stays
+    ``within_noise``, and since no run can change that (`verdict_unreachable`) the official
+    check is answered by the samples held instead of a run that would read the same.
     """
     lab = Lab.of("a", floor=0.0)
     lab.call("a", "c1", "input-1")
     lab.measure({"input-1": 100.3, "base": 100.0})
-    assert [(c.candidate_samples, c.base_samples) for c in lab.comparisons()] == [
-        (1, 1),
-        (1, 2),
-        (1, core.MIN_SAMPLES_WITHOUT_FLOOR),
-    ]
+    last = lab.comparisons()[-1]
+    assert (last.candidate_samples, last.base_samples) == (3, 3)
     assert {c.verdict for c in lab.comparisons()} == {core.ComparisonVerdict.WITHIN_NOISE}
+    assert core.verdict_unreachable(last, core.moment_of(lab.state.run).policy)
     assert len(lab.baselines()) == core.MIN_SAMPLES_WITHOUT_FLOOR, "at most two extra base runs"
     check = final_check(lab, "a", "c1", "input-1")
-    assert check.reuses is None, "still a close call: the official check takes its own run"
+    assert check.reuses is not None, "no run can settle it: the samples held answer"
 
 
 def test_three_runs_a_side_without_a_declared_floor_give_a_verdict() -> None:
-    """The agent's three runs of one input and the base's three, with a spread: a verdict."""
+    """One evaluation of one commit: core runs it and its base three times each, with a spread."""
     lab = Lab.of("a", floor=0.0)
-    for number, value in enumerate((110.0, 111.0, 109.0)):
-        lab.call("a", f"c{number}", "input-1")
-        lab.measure({"input-1": value, "base": 100.0})
+    lab.call("a", "c1", "input-1")
+    readings = {"input-1": iter((110.0, 111.0, 109.0)), "base": iter((100.0, 101.0, 99.0))}
+    while running := [
+        r
+        for r in submissions(lab.state)
+        if r.request_id is not None and r.request_id.root not in lab.ended
+    ]:
+        request = running[0]
+        assert request.request_id is not None
+        assert request.plan.measured_input is not None
+        lab.ended.add(request.request_id.root)
+        lab.state = ended_with(lab.state, request, next(readings[request.plan.measured_input]))
     last = lab.comparisons()[-1]
     assert (last.candidate_samples, last.base_samples) == (3, 3)
     assert last.verdict is core.ComparisonVerdict.BETTER
     assert not core.close_call(last)
-    assert final_check(lab, "a", "c2", "input-1").reuses is not None
+    assert final_check(lab, "a", "c1", "input-1").reuses is not None
 
 
 @pytest.mark.regression

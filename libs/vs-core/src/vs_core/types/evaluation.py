@@ -38,7 +38,7 @@ from .evaluation_history import (
     RepeatedFailureGuidance,
 )
 from .job_observations import JobProgress, JobTimeout, MeasurementFailure, TimedOut
-from .measurement import BaseClaim, BaseRef, BaseRun, Comparison, Reading, Runaway, Sample
+from .measurement import BaseClaim, BaseRef, Comparison, CoreRun, Reading, Runaway, Sample
 from .until import Within
 from .waits import WaitOn
 
@@ -611,8 +611,9 @@ class EvaluationState(Value):
     evidence: tuple[EvidenceRef, ...] = ()
     submission_budgets: tuple[SubmissionBudget, ...] = ()
     agent_calls: tuple[AgentCall, ...] = ()
-    base_runs: tuple[BaseRun, ...] = Field(default=(), exclude_if=unset)
-    """The runs of a base core asked for itself, which have no decision or agent call to name them."""
+    core_runs: tuple[CoreRun, ...] = Field(default=(), exclude_if=unset)
+    """The runs core asked for itself (of a base, or of a candidate again), which have no decision
+    or agent call to name them."""
     base_claims: tuple[BaseClaim, ...] = Field(default=(), exclude_if=unset)
     """The strategy's own runs of a base that core awaits instead of starting another."""
     samples: tuple[Sample, ...] = Field(default=(), exclude_if=unset)
@@ -635,14 +636,14 @@ class EvaluationState(Value):
     """
 
     def asked_without_decision(self, request_id: RequestId, scope: Scope) -> bool:
-        """Whether ``request_id`` is a submission core admitted for an agent call or a base run.
+        """Whether ``request_id`` is a submission core admitted for an agent call or itself.
 
         Such a submission has no ``Measure`` decision, so core's own record of the call or of
-        the base run is what proves where it came from.
+        its own run is what proves where it came from.
         """
         return any(
             call.request_id == request_id and call.scope == scope for call in self.agent_calls
-        ) or any(run.request_id == request_id and run.scope == scope for run in self.base_runs)
+        ) or any(run.request_id == request_id and run.scope == scope for run in self.core_runs)
 
     def evidence_for(self, key: EvidenceKey) -> EvidenceRef | None:
         """The ledger record with this full identity, or None."""

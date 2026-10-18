@@ -24,6 +24,7 @@ from vs_core._comparison import (
     policy_of,
     samples_of,
     terms_policy,
+    verdict_unreachable,
 )
 from vs_core._continuations import SuspensionRefusal
 from vs_core._evidence_views import (
@@ -513,9 +514,9 @@ from vs_core.types.kinds import EventKind, WorkKind
 from vs_core.types.measurement import (
     BaseClaim,
     BaseRef,
-    BaseRun,
     Comparison,
     ComparisonVerdict,
+    CoreRun,
     EffectVerdict,
     Reading,
     Runaway,
@@ -907,7 +908,6 @@ __all__ = [
     "Backoff",
     "BaseClaim",
     "BaseRef",
-    "BaseRun",
     "BenchmarkFailure",
     "BlockRequest",
     "BlockedRecordStalled",
@@ -964,6 +964,7 @@ __all__ = [
     "ControlRefusedError",
     "CoreEvent",
     "CoreReducers",
+    "CoreRun",
     "CoreState",
     "CoreStep",
     "CoreView",
@@ -1502,6 +1503,7 @@ __all__ = [
     "unreleased_records",
     "validate_startup",
     "validate_terminal_inputs",
+    "verdict_unreachable",
     "verify_encoding",
     "waits",
     "within",

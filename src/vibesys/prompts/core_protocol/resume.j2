@@ -44,12 +44,14 @@ there is no verdict until the candidate and its base each have at least
 {{ comparison_rule.min_runs }} runs, and their runs do not all read alike. Then `better` and `worse` mean
 the difference exceeds a critical number of noises (Welch's t test at 95%), larger the
 fewer runs there are; `within noise` means the runs held cannot tell the candidate from its
-base.
+base. While a result is within noise, the framework runs the candidate and its base again
+itself, up to {{ comparison_rule.min_runs }} runs each. If every run on both sides reads
+alike, no verdict is possible and no more runs are taken.
 {% endif %}
-Another run of the same candidate content adds a sample and narrows the noise. A
-comparison describes the runs held now; once a candidate's official measurement is stored,
-the value stored then is the one it is ranked by, and later runs move the comparison, not
-that value.
+Evaluating unchanged candidate content again returns the evaluation already made (a new
+run only after the machinery failed it), so it adds no sample. A comparison describes the runs held now; once a candidate's
+official measurement is stored, the value stored then is the one it is ranked by, and later
+runs move the comparison, not that value.
 {% endif %}
 {% if repeated_failure %}
 

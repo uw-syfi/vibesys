@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from . import _wait_clock
-from ._base_runs import base_of, record_samples, with_base
+from ._base_runs import after_run, base_of, record_samples, with_base
 from ._comparison import (
     as_answer,
     moment_of,
@@ -564,6 +564,9 @@ def _submission_observed(
         or not isinstance(proof.value.request, SubmitMeasurement)
     ):
         return change
+    # A submission can end without a job to observe (refused at submission), and its end is
+    # what frees a run its comparisons wait on, so they are re-checked here too.
+    change = after_run(change, context, proof.value.request_id)
     scope = proof.value.request.scope
     wake = _deferred_wake(change.state, event, proof.value)
     # A waiting continuation derives and publishes the history itself when it authorizes.

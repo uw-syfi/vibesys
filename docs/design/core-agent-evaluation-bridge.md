@@ -94,8 +94,14 @@ state live in `vs_core._base_runs`:
   count;
 - a close call (within the verdict's critical number of noises of the bar, or with no estimate
   of the noise) earns the base more samples: up to two fresh ones under a declared
-  `relative_noise`, up to three without one, and no more;
-- the run is core's own (`BaseRun`), in the candidate's scope, so the scope's resume waits for it
+  `relative_noise`, up to three without one, and no more. Without a declared `relative_noise`
+  it also earns the candidate's own input runs in its scope, up to three in all, since a
+  repeated call for unchanged content is answered with the evaluation already made. Three runs
+  a side that all read alike can never give a verdict, so nothing more is run for them;
+- these decisions are re-taken from state whenever any run of either side ends, with a sample
+  or without, so a base run that dies (drained with its attempt, out of queue allowance, failed
+  or refused) is replaced for every candidate that waited on it;
+- the run is core's own (`CoreRun`), in the candidate's scope, so the scope's resume waits for it
   as it waits for every submission of the scope.
 
 The comparison reaches the agent twice: in the tool's reply for a finished evaluation
@@ -106,7 +112,7 @@ stale is never counted as current (`latest_comparisons`). It reaches the run's
 events as `measurement_compared`, emitted by the commit observer from core's append-only log.
 The strategy's official measurement of an input the scope already measured is answered from the
 samples held (`vs_core._measurement_reuse`), and runs afresh only when the comparison is a close
-call that one more sample would narrow. Its benchmark record enters the ledger stating the mean
+call that one more sample would narrow (not one that no run can settle). Its benchmark record enters the ledger stating the mean
 of the samples held then (`vs_core._comparison.as_answer`; a failed record keeps its own
 reading), and the reading a strategy decodes from a record takes its headline from the ledger's
 reading, so a candidate's headline in ranking is the value the comparison states; its other

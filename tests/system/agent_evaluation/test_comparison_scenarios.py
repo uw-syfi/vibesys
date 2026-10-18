@@ -513,9 +513,10 @@ async def test_the_agent_is_told_only_the_comparison_its_fresh_base_samples_make
 ) -> None:
     """The tool's reply and the resume receipt drop a base sample that went stale.
 
-    Each job takes three times as long as a base sample stays fresh (``STALING``). The input's
-    first run (the strategy's baseline) is stale by the agent's second evaluation, so the base is
-    measured again beside it, and only that new run counts. Both readers of the comparison,
+    Each job takes three times as long as a base sample stays fresh (``STALING``), so the base
+    sample held when a candidate's run starts is stale when it ends. Each candidate's end then
+    measures the base again, and only that new run counts: two candidates, the strategy's
+    baseline and two more base runs. Both readers of the comparison,
     the resume receipt (core's authorization) and the tool's reply (the bridge), must take the
     run clock: read at any other moment, the stale baseline run still counts as a second base
     sample.
@@ -523,7 +524,10 @@ async def test_the_agent_is_told_only_the_comparison_its_fresh_base_samples_make
     script = (Turn(speed=130.0), Turn(speed=140.0), Turn(peek=True))
     async with play(tmp_path, script, pace=STALING) as played:
         state = played.process.shell.record.envelope.core
-        assert len(played.cluster.runs[BASE_SPEED]) == 2, "the stale base was measured again"
+        assert len(played.cluster.runs[BASE_SPEED]) == 3, "each stale base was measured again"
+        assert {c.candidate_value for c in played.comparisons} >= {
+            played.cluster.runs[130.0][0]
+        }, "the first candidate, whose base went stale while it ran, was compared too"
         last = _final(played)
         assert last.candidate_value == played.cluster.runs[140.0][0]
         assert last.base_samples == 1, "only the fresh base run counts"

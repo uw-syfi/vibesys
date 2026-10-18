@@ -60,6 +60,11 @@ def running(lab: Lab) -> list[core.SubmitMeasurement]:
     ]
 
 
+def running_bases(lab: Lab) -> list[core.SubmitMeasurement]:
+    """The runs of the base under way; without a floor, core also runs the candidate again."""
+    return [r for r in running(lab) if r.plan.purpose == "baseline"]
+
+
 def test_an_agent_evaluating_while_the_strategys_baseline_runs_starts_no_second_base_run() -> None:
     lab = Lab.of("a")
     own = strategy_baseline(lab)
@@ -95,14 +100,20 @@ def test_the_candidate_is_compared_when_the_strategys_baseline_ended_before_the_
     assert base_runs(lab) == [own]
 
 
+@pytest.mark.regression
 def test_a_strategy_baseline_that_ends_without_a_reading_leaves_the_base_to_core() -> None:
-    """The claim holds no sample, so the next evaluation asks for the base itself."""
+    """The claim holds no sample, so core asks for the base itself as the claimed run ends.
+
+    Before, the candidate that claimed it waited until another evaluation asked for the base.
+    """
     lab = Lab.of("a")
     own = strategy_baseline(lab)
     lab.call("a", "c1", "input-1")
     end(lab, own, None)
+    (replaced,) = base_runs(lab)[1:]
+    assert replaced.plan.measured_input == "base"
     asked = lab.call("a", "c2", "input-2")
-    assert [r.plan.purpose for r in asked] == ["local-validation", "baseline"]
+    assert [r.plan.purpose for r in asked] == ["local-validation"], "one base run serves both"
 
 
 @pytest.mark.regression
@@ -131,15 +142,15 @@ def test_a_close_call_awaits_the_strategys_running_baseline_and_counts_it(
         own = strategy_baseline(lab)
     end(lab, candidate, 100.3)
     while len(base_runs(lab)) < most:
-        (extra,) = running(lab)
+        (extra,) = running_bases(lab)
         own = strategy_baseline(lab)
         end(lab, extra, 100.1)
     assert own is not None
     assert core.close_call(lab.comparisons()[-1])
     assert base_runs(lab)[-1] == own, "the close call awaits the strategy's run"
-    assert running(lab) == [own], "and starts no run of the base beside it"
+    assert running_bases(lab) == [own], "and starts no run of the base beside it"
     end(lab, own, 100.2)
-    assert running(lab) == [], "the claimed run counts toward the bound"
+    assert running_bases(lab) == [], "the claimed run counts toward the bound"
     assert len(base_runs(lab)) == most
     assert lab.comparisons()[-1].base_samples == most
 

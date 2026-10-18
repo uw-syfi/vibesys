@@ -7,8 +7,8 @@ there are several. This module owns the pure decisions over samples:
 - ``evaluation_of`` names an evaluation (everything but the commit and purpose), so two runs of
   one input in one host and gates are samples of one measurement;
 - ``compare`` compares a candidate's samples with its base's: a ``Comparison``;
-- ``base_missing`` and ``remeasures_base`` decide when the base is measured, and nothing else
-  does.
+- ``base_missing``, ``remeasures_base`` and ``remeasures_candidate`` decide when either side
+  is measured again, and nothing else does.
 
 The statistic
 -------------
@@ -48,21 +48,33 @@ otherwise.
   ``MIN_SAMPLES_WITHOUT_FLOOR`` runs and the noise is above zero. Fewer runs, or identical
   runs, are no estimate of a noise: identical readings of a quantized or cached benchmark show
   none, not that there is none. Until then the comparison is ``within_noise`` and a close call
-  (`close_call`), which earns the base more samples (below). Any fixed default floor would be a
+  (`close_call`), which earns both sides more samples (below). Any fixed default floor would be a
   number nobody measured; requiring the key would refuse every task that has a benchmark and no
   ``[pareto]`` table.
 
-When the base is measured
--------------------------
+When each side is measured
+--------------------------
 
 The base is measured once per (measured input, evaluation): the first time a candidate is
-compared with it and no run of it is held or running. It is measured again only when its
-samples are stale (older than ``TaskTerms.base_staleness`` on the run clock) or when a
+compared with it and no run of it is held or running, and again when every run of it a
+candidate waited on ended without a sample (`vs_core._base_runs`). It is measured again only
+when its samples are stale (older than ``TaskTerms.base_staleness`` on the run clock) or when a
 candidate's result is a close call (``within_noise``, `close_call`), because one more base
-sample narrows the noise. A close call never takes a base past
-`_base_max_samples` fresh samples: ``BASE_MAX_SAMPLES`` (2, so at most one extra base run)
-under a declared floor, and ``MIN_SAMPLES_WITHOUT_FLOOR`` (3, so at most two extra base runs)
-without one, the fewest that can give a verdict.
+sample narrows the noise. A close call never takes a base past `_base_max_samples` fresh
+samples: ``BASE_MAX_SAMPLES`` (2, so at most one extra base run) under a declared floor, and
+``MIN_SAMPLES_WITHOUT_FLOOR`` (3, so at most two extra base runs) without one, the fewest that
+can give a verdict.
+
+Without a declared floor the candidate needs those three runs too, and nobody else gives them:
+an agent's call for content it already measured is answered with that evaluation, and the
+official check adds at most one run. So a close call without a floor also earns the candidate's
+input more runs in its scope (`remeasures_candidate`), up to ``MIN_SAMPLES_WITHOUT_FLOOR`` in
+all. Under a floor one run a side can give a verdict, and core takes no run of the candidate.
+
+A comparison without a floor whose ``MIN_SAMPLES_WITHOUT_FLOOR`` runs a side all read alike can
+never give a verdict (`verdict_unreachable`): a deterministic benchmark reads the same again. It
+earns neither side another run, and the official check is answered by the samples held instead
+of adding one (`official_needs_samples`), so the runs a comparison costs are bounded.
 """
 
 from __future__ import annotations
@@ -121,11 +133,13 @@ __all__ = [
     "official_needs_samples",
     "policy_of",
     "remeasures_base",
+    "remeasures_candidate",
     "run_reading",
     "running_baseline",
     "sample_of",
     "samples_of",
     "terms_policy",
+    "verdict_unreachable",
 ]
 
 VERDICT_NOISES = 2.0
@@ -141,7 +155,8 @@ MIN_SAMPLES_WITHOUT_FLOOR = 3
 
 Three a side is the fewest that give each side's spread two degrees of freedom, so Welch's
 degrees of freedom are at least 2 and the Student-t critical number at most 4.303; it is also
-the most fresh samples a close call earns a base then."""
+the most fresh samples a close call earns a base then, and the most runs of its input a close
+call earns a candidate."""
 _T_FIRST_DEGREES = MIN_SAMPLES_WITHOUT_FLOOR - 1
 """The fewest degrees of freedom a comparison that can give a verdict has (Welch's are never
 below the smaller side's runs less one)."""
@@ -663,6 +678,21 @@ def close_call(comparison: Comparison) -> bool:
     return comparison.verdict is ComparisonVerdict.WITHIN_NOISE
 
 
+def verdict_unreachable(comparison: Comparison, policy: ComparisonPolicy) -> bool:
+    """Whether no further run can give ``comparison`` a verdict, so none is taken for it.
+
+    Under no declared floor, once each side holds ``MIN_SAMPLES_WITHOUT_FLOOR`` runs that all
+    read alike the noise is zero, and it stays zero: a deterministic (quantized or cached)
+    benchmark reads the same value again, and no number of runs shows a noise it does not have.
+    A declared floor is a noise estimate, so a comparison under one is never in this state.
+    """
+    return (
+        not policy.floor_declared
+        and min(comparison.candidate_samples, comparison.base_samples) >= MIN_SAMPLES_WITHOUT_FLOOR
+        and comparison.noise == 0
+    )
+
+
 def _base_max_samples(policy: ComparisonPolicy) -> int:
     """The most fresh samples a close call earns a base (module docstring).
 
@@ -672,12 +702,13 @@ def _base_max_samples(policy: ComparisonPolicy) -> int:
     return BASE_MAX_SAMPLES if policy.floor_declared else MIN_SAMPLES_WITHOUT_FLOOR
 
 
-def base_in_flight(state: EvaluationState, measured: Measured) -> bool:
-    """Whether a run of this measurement was admitted and has not ended (any scope's)."""
+def base_in_flight(state: EvaluationState, measured: Measured, scope: Scope | None = None) -> bool:
+    """Whether a run of this measurement was admitted and has not ended (``scope``'s, or any)."""
     for budget in state.submission_budgets:
         identity = budget.identity
         if (
-            identity.measured_input != measured.measured_input
+            (scope is not None and budget.scope != scope)
+            or identity.measured_input != measured.measured_input
             or evaluation_of(identity) != measured.evaluation
         ):
             continue
@@ -735,8 +766,28 @@ def remeasures_base(
     held = fresh(samples_of(state, base), moment)
     return (
         close_call(comparison)
+        and not verdict_unreachable(comparison, moment.policy)
         and len(held) < _base_max_samples(moment.policy)
         and not base_in_flight(state, base)
+    )
+
+
+def remeasures_candidate(
+    state: EvaluationState, comparison: Comparison, evaluation: str, moment: Moment
+) -> bool:
+    """Whether a close call is worth one more run of the candidate's input, in its scope.
+
+    Only under no declared floor, while the candidate holds fewer than
+    ``MIN_SAMPLES_WITHOUT_FLOOR`` runs and none of its input is running in the scope: its side
+    needs that many before any verdict (module docstring), and only core can take them, since a
+    repeat of the same content is answered with the evaluation already made.
+    """
+    candidate = Measured(evaluation, comparison.candidate_input)
+    return (
+        not moment.policy.floor_declared
+        and close_call(comparison)
+        and comparison.candidate_samples < MIN_SAMPLES_WITHOUT_FLOOR
+        and not base_in_flight(state, candidate, comparison.scope)
     )
 
 
@@ -747,7 +798,8 @@ def official_needs_samples(
 
     The official measurement of an input the scope already measured adds a run only then:
 
-    - the samples held are a close call against the base, so one more narrows the noise;
+    - the samples held are a close call against the base, so one more narrows the noise,
+      unless no run can give them a verdict (`verdict_unreachable`);
     - or the samples name a base but no sample of it is fresh at ``moment`` (its runs went
       stale, failed or are still running), so they have no verdict at all, and the answer must
       not rest on the runs the agent happened to make: the official check adds a run of its
@@ -762,4 +814,4 @@ def official_needs_samples(
     if not fresh(samples_of(state, Measured(measured.evaluation, anchor.measured_input)), moment):
         return True
     held = comparison_of(state, scope, measured, moment)
-    return held is not None and close_call(held)
+    return held is not None and close_call(held) and not verdict_unreachable(held, moment.policy)

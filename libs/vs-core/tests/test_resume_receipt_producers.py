@@ -995,9 +995,9 @@ def _authorized_before_a_late_submission(
                     "jobs": (*state.evaluation.jobs, late_job),
                     "submission_budgets": (*state.evaluation.submission_budgets, late_budget),
                     # Core's own run of the base, earned by a close call of the first job.
-                    "base_runs": (
-                        *state.evaluation.base_runs,
-                        core.BaseRun(
+                    "core_runs": (
+                        *state.evaluation.core_runs,
+                        core.CoreRun(
                             request_id=late_job.submission_id,
                             scope=late_job.scope,
                             candidate=state.evaluation.jobs[0].submission_id,
