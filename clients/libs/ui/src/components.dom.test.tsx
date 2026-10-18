@@ -577,6 +577,8 @@ describe('ParetoChart values', () => {
     const root = await mount(<ParetoChart label="Trade-off" points={points} x={x} y={y} />);
     const titles = [...root.querySelectorAll('.vs-pareto-point title')].map(t => t.textContent);
     expect(titles).toEqual(['Big · 6,054,154 ops/s · 0.512', 'Small · 12.3 ops/s · 47.3']);
+  });
+});
 
 function ControlledTiles() {
   const [value, setValue] = useState('a');
