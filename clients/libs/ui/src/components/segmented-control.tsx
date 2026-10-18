@@ -27,7 +27,7 @@ export function SegmentedControl<T extends string>(props: {
       data-size={props.size ?? 'md'}
     >
       {props.options.map(option => (
-        <label key={option.value} className="vs-segment">
+        <label key={option.value} className="vs-segment" data-label={option.label}>
           <input
             className="vs-segment-input"
             type="radio"

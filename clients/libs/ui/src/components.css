@@ -540,7 +540,9 @@ body > div:first-child {
 }
 .vs-segment {
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
+  justify-content: center;
   min-height: var(--control);
   margin: 0;
   padding: 0 var(--space-4);
@@ -554,6 +556,15 @@ body > div:first-child {
   font-weight: var(--text-body-weight);
   cursor: pointer;
   position: relative;
+}
+/* The chosen segment is bolder: its bold label is reserved unseen under every segment's, so a segment
+   is as wide chosen as not and the control is the same box whichever is chosen. */
+.vs-segment::after {
+  content: attr(data-label);
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  font-weight: var(--text-body-strong-weight);
 }
 /* The native radio covers its segment, unseen: it takes the presses, the focus and the arrow keys. */
 .vs-segment-input {
