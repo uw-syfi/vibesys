@@ -136,3 +136,62 @@ func TestModelsAgreeOnSequentialHistories(t *testing.T) {
 		})
 	}
 }
+
+// memoCost decides operations against model and reports how many state comparisons the checker made
+// per transition it tried. Both counts are a function of the history alone, so the ratio does not
+// depend on how fast the machine is.
+func memoCost(model porcupine.Model, operations []porcupine.Operation) (steps, comparisons int) {
+	step, equal := model.Step, model.Equal
+	model.Step = func(state, input, output any) (bool, any) {
+		steps++
+		return step(state, input, output)
+	}
+	model.Equal = func(first, second any) bool {
+		comparisons++
+		return equal(first, second)
+	}
+	porcupine.CheckOperationsTimeout(model, operations, defaultCheckBudget)
+	return steps, comparisons
+}
+
+// unobservableDequeue holds count overlapping enqueues followed by a dequeue of a value nobody
+// enqueued. The history is rejected, and only after the checker has tried every publication order of
+// the enqueues, so the cost is the number of states the search must tell apart.
+func unobservableDequeue(count int) []recordedOperation {
+	history := make([]recordedOperation, 0, count+1)
+	for index := 0; index < count; index++ {
+		enqueue := enqueueRecord(index, uint64(index+1), true, int64(index+1))
+		enqueue.Return = int64(100 + index)
+		history = append(history, enqueue)
+	}
+	return append(history, dequeueRecord(count, value(uint64(count+1)), int64(1000)))
+}
+
+func TestModelsMemoizeStatesWithoutComparingAgainstEveryOne(t *testing.T) {
+	for count := 5; count <= 7; count++ {
+		history := unobservableDequeue(count)
+		reservation, ok := reservationAwareOperations(history)
+		if !ok {
+			t.Fatal("the generated history is malformed")
+		}
+		exact := make([]porcupine.Operation, 0, len(history))
+		for _, op := range history {
+			exact = append(exact, op.porcupine())
+		}
+		models := map[string]struct {
+			model      porcupine.Model
+			operations []porcupine.Operation
+		}{
+			"reservation": {reservationAwareFIFOModel(count), reservation},
+			"exact":       {exactFIFOModel(count), exact},
+		}
+		for name, tc := range models {
+			steps, comparisons := memoCost(tc.model, tc.operations)
+			if comparisons > steps {
+				t.Errorf("%s model, %d enqueues: %d state comparisons for %d steps; "+
+					"a missing Hash makes each lookup scan every state of a linearized set",
+					name, count, comparisons, steps)
+			}
+		}
+	}
+}
