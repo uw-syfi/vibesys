@@ -188,6 +188,8 @@ class MultiAttempt:
     readings: tuple[AcceptedReading, ...] = ()
     effect: EffectVerdict | None = None
     """What the framework's comparison says of the plan's typed bar; None without a comparison."""
+    measurement_noise: serial.MeasurementNoise | None = None
+    """The noise the latest trusted comparison stated, which the next designer is shown."""
     passed: bool = False
     gate_failed: bool = False
     unmeasured: bool = False
@@ -368,8 +370,9 @@ class MultiAttempt:
     def gated(self, result: GateResult) -> Next:
         """Fold the trusted gates: a rejection is feedback, a missing measurement is nobody's fault."""
         match result:
-            case serial.Gated(readings=readings, comparison=comparison):
+            case serial.Gated(readings=readings, comparison=comparison, noise=noise):
                 self.readings = readings
+                self.measurement_noise = noise or self.measurement_noise
                 self.effect = (
                     None
                     if comparison is None

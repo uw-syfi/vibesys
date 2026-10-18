@@ -85,6 +85,7 @@ def plan_prompt(  # noqa: PLR0913  # LW-641208 [PLR0913]; the request is built f
             "roadmap": roadmap,
             "passed": _passed(start, ledger),
             "input_value": input_value(start.baseline),
+            "measurement_noise": start.measurement_noise,
         }
     )
     return PlanPrompt(

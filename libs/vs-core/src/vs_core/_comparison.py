@@ -147,6 +147,7 @@ __all__ = [
     "comparison_settling",
     "comparisons_of",
     "comparisons_to_publish",
+    "effect_resolution",
     "effect_verdict",
     "evaluation_of",
     "fresh",
@@ -731,17 +732,31 @@ def effect_verdict(
     effect is never called where the comparison would not be, and with a bar of one it is the
     comparison's verdict or ``within_noise``.
     """
-    m, n = comparison.candidate_samples, comparison.base_samples
-    if not _noise_known(m, n, comparison.noise, policy):
+    resolution = effect_resolution(comparison, policy)
+    if resolution is None:
         return EffectVerdict.WITHIN_NOISE
-    critical = VERDICT_NOISES if policy.floor_declared else _t_critical(min(m, n) - 1)
     sign = 1.0 if comparison.direction == "max" else -1.0
     margin = sign * (comparison.ratio - minimum_ratio)
-    if margin > critical * comparison.noise:
+    if margin > resolution:
         return EffectVerdict.SUPPORTED
-    if margin < -critical * comparison.noise:
+    if margin < -resolution:
         return EffectVerdict.DISPROVEN
     return EffectVerdict.WITHIN_NOISE
+
+
+def effect_resolution(comparison: Comparison, policy: ComparisonPolicy) -> float | None:
+    """How far a candidate's ratio must clear a plan's bar for `effect_verdict` to call it.
+
+    The critical number of noises times the comparison's noise, in ratio units: a candidate within
+    this of its bar is ``within_noise``, so a bar the design cannot expect to clear by this much is
+    one the framework cannot call. ``policy`` is the one the comparison was made under. None when
+    the comparison has no estimate of its noise (`_noise_known`), which says nothing of any bar.
+    """
+    m, n = comparison.candidate_samples, comparison.base_samples
+    if not _noise_known(m, n, comparison.noise, policy):
+        return None
+    critical = VERDICT_NOISES if policy.floor_declared else _t_critical(min(m, n) - 1)
+    return critical * comparison.noise
 
 
 def comparison_of_result(

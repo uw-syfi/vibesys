@@ -36,7 +36,7 @@ from vibesys.orchestration.multi.search.api import (
 from vibesys.orchestration.profilers import ACTIVE_PROFILER_KINDS
 from vibesys.prompts import CORE_PROTOCOL_DIR, PROMPTS_DIR
 from vibesys.serial_search.api import PROMPTS_DIR as SERIAL_SEARCH_PROMPTS
-from vibesys.serial_search.api import LastProfile, PlanPrompt, PlanTemplate
+from vibesys.serial_search.api import LastProfile, MeasurementNoise, PlanPrompt, PlanTemplate
 from vs_core.api import RevisionId, RevisionRef, Value
 from vs_prompts.api import TemplateRenderer
 from vs_sim.api.testing import examples
@@ -160,6 +160,14 @@ _PLANNING = st.builds(
         analysis=_TEXT,
         bottlenecks=_TEXT,
     ),
+    measurement_noise=st.none()
+    | st.builds(
+        MeasurementNoise,
+        noise=st.floats(0, 0.5),
+        resolution=st.floats(0, 2),
+        candidate_samples=st.integers(1, 5),
+        base_samples=st.integers(1, 5),
+    ),
 )
 
 
@@ -222,6 +230,22 @@ def test_the_planning_prompt_shows_a_fresh_profile(
     text = _render(PlanTemplate.PLAN, context)
     if context.last_profile is not None:
         assert "fresh profiler result" in text
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(context=_PLANNING)
+def test_the_planning_prompt_states_the_measurement_noise_or_that_it_is_not_known(
+    context: PlanPrompt,
+) -> None:
+    """The designer sets its bar knowing how far a result must clear it, or that nobody knows."""
+    text = _render(PlanTemplate.PLAN, context)
+    found = context.measurement_noise
+    if found is None:
+        assert "Measurement noise: not yet measured" in text
+    else:
+        assert f"varies by {found.noise * 100:.2f}% of the base" in text
+        assert f"more than {found.resolution * 100:.2f}% of the base" in text
+        assert "not yet measured" not in text
 
 
 @settings(max_examples=examples(pr=8, nightly=100))

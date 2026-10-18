@@ -96,6 +96,23 @@ class LastProfile(Value):
     perf_unit: str | None = None
 
 
+class MeasurementNoise(Value):
+    """How far a candidate's ratio to its base wanders by chance, from the latest comparison.
+
+    The designer sets the bar an idea must clear (``minimum_ratio``). The framework calls the
+    idea supported or disproven only when the measured ratio is more than the ``resolution`` away
+    from that bar (`vs_core.api.effect_resolution`) and ``within_noise`` inside it, so a bar set
+    without this figure can sit inside the noise and the idea ends inconclusive however it fares.
+    """
+
+    noise: float = Field(ge=0)
+    """One standard error of the candidate's ratio to the base, in ratio units."""
+    resolution: float = Field(ge=0)
+    """How far the ratio must clear a bar for the framework to call the effect, in ratio units."""
+    candidate_samples: int = Field(ge=1)
+    base_samples: int = Field(ge=1)
+
+
 class PlanEvidence(Value):
     """The fields every new-hypothesis planning request carries about the search so far."""
 
@@ -106,6 +123,8 @@ class PlanEvidence(Value):
     """The ideas that passed, oldest first: each is a base a plan may name."""
     input_value: float | None = None
     """What the trusted gates measured of the input; None when it was not measured."""
+    measurement_noise: MeasurementNoise | None = None
+    """The noise the latest comparison of a candidate with its base states; None while none has."""
     benchmark_enabled: bool = True
     history: tuple[RoundRow, ...] = ()
     older_rounds: int = Field(default=0, ge=0)

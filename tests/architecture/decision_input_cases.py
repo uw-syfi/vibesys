@@ -56,7 +56,7 @@ from vibesys.orchestration.multi.search.api import (
     ValidationFailure,
 )
 from vibesys.orchestration.single.search.api import RoundPrompt
-from vibesys.serial_search.api import PassedIdea, PlanPrompt, RoundRow
+from vibesys.serial_search.api import MeasurementNoise, PassedIdea, PlanPrompt, RoundRow
 from vs_core.api import EvidenceId, EvidenceKind, ObservationStatus, RevisionId, RevisionRef
 from vs_issue_tracker.api import RoadmapItem, RoadmapItemKind, RoadmapStatus
 from vs_runtime.api import RunFacts
@@ -210,6 +210,9 @@ _DESIGNER = PlanPrompt(
     max_rounds=9,
     base_revision=_BASE,
     input_value=3001.5,
+    measurement_noise=MeasurementNoise(
+        noise=0.0314, resolution=0.0628, candidate_samples=2, base_samples=3
+    ),
     history=(
         RoundRow(
             round_number=1,
@@ -231,6 +234,7 @@ _DESIGNER = PlanPrompt(
 )
 _DESIGNER_NEEDLES = {
     "input_value": "3001.5",
+    "measurement_noise": "3.14%",
     "history": "history-idea-a",
     "passed": "passed-idea-b",
     "base_revision": "base-rev-c",

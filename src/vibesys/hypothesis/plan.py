@@ -232,7 +232,9 @@ class OrchestratorPlan(BaseModel):
             "hypothesis; this is not an acceptance threshold."
         ),
     )
-    minimum_ratio: Annotated[float, DecidedFrom("input_value", "history", "passed")] = Field(
+    minimum_ratio: Annotated[
+        float, DecidedFrom("input_value", "history", "passed", "measurement_noise")
+    ] = Field(
         default=1.0,
         gt=0,
         allow_inf_nan=False,

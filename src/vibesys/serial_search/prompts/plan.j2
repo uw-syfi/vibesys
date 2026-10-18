@@ -40,6 +40,11 @@ tests, or launch benchmarks.
 - No idea has passed yet.
 {% endif %}
 - Base: this idea starts from {% if bests %}the current best, idea {{ bests[0].round_number }}{% else %}the input, which no passed idea has beaten{% endif %}, unless {{ reply.base_round }} names another base: a passed idea's number, or 0 for the input. A failed idea cannot be a base.
+{% if measurement_noise %}
+- Measurement noise, from the latest candidate compared with its base ({{ measurement_noise.candidate_samples }} candidate and {{ measurement_noise.base_samples }} base run(s)): its ratio to the base varies by {{ '%.2f'|format(measurement_noise.noise * 100) }}% of the base by chance (one standard error). The framework calls {{ reply.minimum_ratio }} met or missed only when the measured ratio is more than {{ '%.2f'|format(measurement_noise.resolution * 100) }}% of the base beyond it; closer than that the idea ends within noise.
+{% else %}
+- Measurement noise: not yet measured; no candidate has been compared with its base over enough runs to estimate it.
+{% endif %}
 {% if frontier %}
 - Pareto frontier (trusted parents, noise-aware):
 {% for row in frontier %}
