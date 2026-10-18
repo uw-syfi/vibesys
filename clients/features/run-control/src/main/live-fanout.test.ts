@@ -42,6 +42,7 @@ interface Host {
   readonly stream: Duplex;
   readonly requests: string[];
   send(message: object): void;
+  finishRaw(data: string): void;
 }
 
 function host(): Host {
@@ -53,6 +54,7 @@ function host(): Host {
     stream: Duplex.from({writable: input, readable: output}),
     requests,
     send: message => output.write(`${JSON.stringify(message)}\n`),
+    finishRaw: data => output.end(data),
   };
 }
 
@@ -74,6 +76,63 @@ async function settle(): Promise<void> {
 }
 
 describe('live subscription fanout', () => {
+  test('malformed scalar and object frames close the joined port without throwing in main', async () => {
+    for (const malformed of ['null\n', '[]\n', '{"type":12}\n']) {
+      const server = host();
+      const fanout = new LiveFanout();
+      const page = new PagePort();
+      const done = relay(page, signal => fanout.open('run', async () => server.stream, signal));
+      await page.until(() => page.posted.some(message => message.type === 'open'));
+      page.grant();
+      page.send(subscribe('page'));
+      await settle();
+      server.send({type: 'subscribed', request_id: 'page', run_id: 'run', latest_sequence: 0});
+      await page.until(() => page.frames().length === 1);
+      server.finishRaw(malformed);
+      await done;
+      expect(page.posted.at(-1)).toEqual({type: 'close'});
+    }
+  });
+
+  test('a truncated host frame reports invalid_frame to every joined port before close', async () => {
+    const primary = host();
+    const unused = host();
+    let dials = 0;
+    const fanout = new LiveFanout();
+    const dial = async (): Promise<Duplex> => (++dials === 1 ? primary.stream : unused.stream);
+    const first = new PagePort();
+    const firstDone = relay(first, signal => fanout.open('run', dial, signal));
+    await first.until(() => first.posted.some(message => message.type === 'open'));
+    first.grant();
+    first.send(subscribe('first'));
+    await settle();
+    primary.send({type: 'subscribed', request_id: 'first', run_id: 'run', latest_sequence: 1});
+    primary.send({type: 'event_batch', events: [{sequence: 1}], through_sequence: 1});
+    await first.until(() => first.frames().length === 2);
+    const second = new PagePort();
+    const secondDone = relay(second, signal => fanout.open('run', dial, signal));
+    await second.until(() => second.posted.some(message => message.type === 'open'));
+    second.grant();
+    second.send(subscribe('second'));
+    await second.until(() => second.frames().length === 2);
+
+    primary.finishRaw('{"type":"event_batch"');
+    await Promise.all([firstDone, secondDone]);
+    for (const page of [first, second]) {
+      expect(page.frames().map(frame => JSON.parse(frame)['type'])).toEqual([
+        'subscribed',
+        'event_batch',
+        'protocol_error',
+      ]);
+      expect(JSON.parse(page.frames()[2] ?? '{}')).toEqual({
+        type: 'protocol_error',
+        code: 'invalid_frame',
+        message: 'Server stream ended with an incomplete newline-delimited frame',
+      });
+      expect(page.posted.at(-1)).toEqual({type: 'close'});
+    }
+  });
+
   test('two desktop message ports share the replay and both keep receiving live updates', async () => {
     const primary = host();
     const unused = host();

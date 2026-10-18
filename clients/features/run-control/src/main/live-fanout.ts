@@ -34,6 +34,17 @@ function shareable(request: unknown): request is Request {
   );
 }
 
+function recordFrame(frame: string): Request | null {
+  try {
+    const parsed: unknown = JSON.parse(frame);
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const message = parsed as Request;
+    return typeof message['type'] === 'string' ? message : null;
+  } catch {
+    return null;
+  }
+}
+
 /** One server channel opened through the existing host connection. */
 export type RunDial = (signal: AbortSignal) => Promise<Duplex>;
 
@@ -82,6 +93,7 @@ export class LiveFanout {
       const owned = group;
       group.upstream.setEncoding('utf8');
       group.upstream.on('data', (chunk: string) => this.#receive(runId, owned, chunk));
+      group.upstream.once('end', () => this.#end(runId, owned));
       group.upstream.once('error', () => this.#retire(runId, owned));
       group.upstream.once('close', () => this.#retire(runId, owned));
     }
@@ -114,12 +126,8 @@ export class LiveFanout {
   }
 
   #deliverFrame(group: Group, frame: string): boolean {
-    let message: Request;
-    try {
-      message = JSON.parse(frame) as Request;
-    } catch {
-      return false;
-    }
+    const message = recordFrame(frame);
+    if (message === null) return false;
     if (message['type'] === 'subscribed') {
       group.acknowledgement = message;
       for (const member of group.members) member.deliver(this.#ack(message, member.request));
@@ -153,6 +161,21 @@ export class LiveFanout {
     }
     for (const member of group.members) member.deliver(frame);
     return true;
+  }
+
+  /** Match the relay's EOF diagnostic, after any complete frames already delivered. */
+  #end(runId: string, group: Group): void {
+    try {
+      group.framer.finish();
+    } catch (error) {
+      const fault = JSON.stringify({
+        type: 'protocol_error',
+        code: 'invalid_frame',
+        message: error instanceof Error ? error.message : String(error),
+      });
+      for (const member of group.members) member.deliver(fault);
+    }
+    this.#retire(runId, group);
   }
 
   #ack(message: Request, request: Request | null): string {
