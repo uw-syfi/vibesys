@@ -116,7 +116,9 @@ button.vs-crumb:focus-visible {
   flex: 0 1 var(--pane-list);
 }
 .vs-pane[data-width="master"] {
-  flex: 0 0 var(--pane-outline);
+  /* A share of the row, bounded, and never shrunk: the list is the same width before and after
+     an idea opens beside it, and wide enough for a title when the window is. */
+  flex: 0 0 clamp(var(--pane-outline), 42%, var(--pane-master));
 }
 /* The list beside what one of its rows opened (the steps of an idea, a turn's transcript): rows are
    short, so the opened pane gets the room. */

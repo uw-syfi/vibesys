@@ -361,6 +361,37 @@ describe('Scrubber', () => {
   });
 });
 
+describe('Scrubber with one position', () => {
+  const range = async (last: number, value: number) => {
+    const container = await mount(
+      <Scrubber
+        label="Run position"
+        value={value}
+        last={last}
+        live
+        pastLabel="Replay"
+        latestLabel="End"
+        position="07:32:14"
+        change={() => undefined}
+        backToLive={() => undefined}
+      />,
+    );
+    return container.querySelector('input[type="range"]') as HTMLInputElement;
+  };
+
+  test('regression: a run with only its end to stand at shows a whole track, the playhead at its end', async () => {
+    const only = await range(0, 0);
+    expect([only.min, only.max, only.value]).toEqual(['0', '1', '1']);
+    expect(only.disabled).toBe(true);
+  });
+
+  test('with more positions the track is the positions and the playhead stays where it is put', async () => {
+    const some = await range(4, 2);
+    expect([some.min, some.max, some.value]).toEqual(['0', '4', '2']);
+    expect(some.disabled).toBe(false);
+  });
+});
+
 describe('Chart emphasis and spans', () => {
   const points: ChartPoint[] = [
     {id: 'a', x: 1, y: 10, filled: true},

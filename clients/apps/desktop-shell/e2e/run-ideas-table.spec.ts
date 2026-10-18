@@ -200,3 +200,30 @@ test('choosing another idea keeps the list, the detail and the chart where they 
     expect(await placed()).toEqual(stepsBefore);
   }
 });
+
+test('regression: a wide window gives the idea titles room, the same before and after one opens', async ({
+  page,
+}) => {
+  await openRun(page, 10);
+  const ideas = page.getByRole('listbox', {name: 'Ideas'});
+  await expect(ideas.getByRole('option').first()).toBeVisible();
+  const titleWidth = () =>
+    ideas
+      .locator('.vs-pickrow-text')
+      .first()
+      .evaluate(text => text.getBoundingClientRect().width);
+  const paneWidth = () =>
+    page.locator('.vs-pane', {has: ideas}).evaluate(pane => pane.getBoundingClientRect().width);
+  await settled(page);
+  const closed = {pane: await paneWidth(), title: await titleWidth()};
+  // 340 px of pane gave a title about 20 characters of the monospace face.
+  expect(closed.pane).toBeGreaterThanOrEqual(480);
+  expect(closed.title).toBeGreaterThanOrEqual(250);
+  await ideas.getByRole('option').first().click();
+  await expect(page.getByRole('button', {name: 'Close idea'})).toBeVisible();
+  await settled(page);
+  expect({pane: await paneWidth(), title: await titleWidth()}).toEqual(closed);
+  await page.setViewportSize({width: 1000, height: 800});
+  await settled(page);
+  expect(await paneWidth()).toBeGreaterThanOrEqual(340);
+});

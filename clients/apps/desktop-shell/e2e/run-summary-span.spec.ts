@@ -1,6 +1,8 @@
 import {readFileSync} from 'node:fs';
 import {expect, test} from '@playwright/test';
 import type {RunFixture} from '@vibesys/run-fixtures';
+import {settled} from './checks/settle.js';
+import {anchorsOf, RUN_ANCHORS, stabilityViolations} from './checks/stability.js';
 import {openFixture} from './fixture-world.js';
 
 const source = JSON.parse(
@@ -79,4 +81,43 @@ test('summary opens without history and a step fetches only its span', async ({p
   await expect(page.getByText('Reading step transcript…')).toHaveCount(0);
   await expect(steps).toBeVisible();
   expect(await calls()).not.toContain('history');
+});
+
+test('regression: a run opened from its summary has its time bar whole, at the end', async ({
+  page,
+}) => {
+  await openFixture(page, fixture, {summaryServing: {summary, holdSpan: true}});
+  await expect(page.getByRole('listbox', {name: 'Ideas'})).toBeVisible();
+  const bar = page.getByRole('slider', {name: 'Run position'});
+  await expect(bar).toBeVisible();
+  // One position to stand at: the track is drawn whole, the playhead at its end, nothing to move.
+  expect(
+    await bar.evaluate(range => {
+      const input = range as HTMLInputElement;
+      return [input.min, input.max, input.value, input.disabled];
+    }),
+  ).toEqual(['0', '1', '1', true]);
+  await expect(page.getByText('End', {exact: true})).toBeVisible();
+});
+
+test('regression: opening a step moves neither pane, the chart nor the time bar', async ({
+  page,
+}) => {
+  await openFixture(page, fixture, {summaryServing: {summary, holdSpan: false}});
+  await page.getByRole('listbox', {name: 'Ideas'}).getByRole('option').first().click();
+  const steps = page.getByRole('listbox', {name: /steps$/});
+  await expect(steps).toBeVisible();
+  await settled(page);
+  const before = await anchorsOf(page, RUN_ANCHORS);
+  const panesTop = () =>
+    page.locator('.vs-panes').evaluate(panes => panes.getBoundingClientRect().y);
+  const top = await panesTop();
+  await steps
+    .getByRole('option', {name: /implementer/i})
+    .first()
+    .click();
+  await expect(page.getByRole('navigation', {name: 'Zoom'})).toBeVisible();
+  await settled(page);
+  expect(await panesTop()).toBe(top);
+  expect(await stabilityViolations(page, 'step', before, RUN_ANCHORS)).toEqual([]);
 });

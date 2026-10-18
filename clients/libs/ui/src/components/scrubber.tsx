@@ -18,6 +18,9 @@ export interface ScrubberTick {
  * that has ended reads, for example, "End" and "Jump to end". The arrows, Page Up and Down, Home
  * and End step it (a native range).
  * `position` describes the playhead in words (for example a time), read out as its value.
+ * A sequence with one position has nothing to scrub: the track is drawn whole with the playhead at
+ * its end (the one position is the newest) and cannot be moved, instead of a zero-width range with
+ * the playhead at the start of a track that reads "End".
  */
 export function Scrubber(props: {
   readonly label: string;
@@ -36,6 +39,7 @@ export function Scrubber(props: {
   readonly backToLive: () => void;
 }): JSX.Element {
   const id = useId();
+  const single = props.last === 0;
   const share = (at: number): number => (props.last === 0 ? 0 : at / props.last);
   const [measure, width] = useInlineSize();
   const ticks = props.ticks ?? [];
@@ -67,9 +71,10 @@ export function Scrubber(props: {
         className="vs-scrubber-range"
         type="range"
         min={0}
-        max={props.last}
+        max={single ? 1 : props.last}
         step={1}
-        value={props.value}
+        value={single ? 1 : props.value}
+        disabled={single}
         aria-label={props.label}
         aria-valuetext={props.position}
         onChange={event => props.change(Number(event.target.value))}

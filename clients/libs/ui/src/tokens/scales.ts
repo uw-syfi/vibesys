@@ -49,6 +49,7 @@ export type SizeToken =
   | 'column-chart'
   | 'pane-list'
   | 'pane-outline'
+  | 'pane-master'
   | 'row-dense'
   | 'gantt-label'
   | 'gantt-label-max'
@@ -83,6 +84,7 @@ export const SIZE: Readonly<Record<SizeToken, number>> = {
   'column-chart': 520,
   'pane-list': 380,
   'pane-outline': 340,
+  'pane-master': 480,
   'row-dense': 28,
   'gantt-label': 220,
   'gantt-label-max': 420,

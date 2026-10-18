@@ -10,6 +10,7 @@ import {
   Menu,
   type MenuItem,
   markdownToPlain,
+  Reserve,
   Row,
   Screen,
   Stack,
@@ -76,6 +77,16 @@ function LevelBody(props: {
     <RunLevel {...props.level} />
   );
 }
+
+/**
+ * What the breadcrumb row is as tall as: a step to go back to and the place you are at. The row is
+ * drawn empty and kept where no breadcrumb shows, so the panes below it stay where they are when
+ * a step opens and the breadcrumb appears.
+ */
+const BREADCRUMB_ROW: readonly Crumb[] = [
+  {id: 'back', label: 'Run', press: () => undefined},
+  {id: 'here', label: 'Here'},
+];
 
 function showsBreadcrumb(route: Route, zoomed: ResolvedZoom): boolean {
   if (routeLevel(route) === 'run') return false;
@@ -488,7 +499,11 @@ export function RunScreen(props: {
       />
       {showsBreadcrumb(route, zoomed) ? (
         <Breadcrumb label="Zoom" items={crumbs(zoomed, route, zoom)} />
-      ) : null}
+      ) : (
+        <Reserve>
+          <Breadcrumb label="Zoom" items={BREADCRUMB_ROW} />
+        </Reserve>
+      )}
       {detail.problem === null ? null : (
         <Banner tone="warn" title="The step’s transcript is not available" body={detail.problem} />
       )}
