@@ -9,6 +9,58 @@
  * (`page.addInitScript`, in that order), so each is self-contained; the test drives pushes
  * through `window.fakeHost`.
  */
+import type {WelcomeBridge} from '@vibesys/ipc';
+
+/**
+ * The bridge methods one Fake installer provides, as a type its object literal is checked against
+ * (`satisfies Record<...>`): a method missing from the literal, or one the real bridge does not
+ * have, is a compile error. `fixture-world.ts` checks that the installers it runs together
+ * provide every method of `WelcomeBridge`, so a method added to the bridge cannot be forgotten
+ * by the Fake: the app would fail on it at run time, in a world no test visited.
+ */
+export type FakeProvides<Method extends keyof WelcomeBridge> = Record<Method, unknown>;
+
+/** What `installFakeBridge` provides: the app's own requests, preferences, and the pushes. */
+export type CoreMethods =
+  | 'platform'
+  | 'overview'
+  | 'preferences'
+  | 'setAppearance'
+  | 'setNotifications'
+  | 'archive'
+  | 'runDigests'
+  | 'projectRuns'
+  | 'onListing'
+  | 'onRecent'
+  | 'onPreferences'
+  | 'onToggleSidebar'
+  | 'onOpenSettings';
+
+/** What `installFakeMachines` provides: the saved machines and the checkout and sign-in requests. */
+export type MachinesMethods =
+  | 'machines'
+  | 'machine'
+  | 'inspectCheckout'
+  | 'removeMachine'
+  | 'setCheckout'
+  | 'cancelCheckout'
+  | 'signIn'
+  | 'complete';
+
+/** What `installFakeNewRun` provides: what a machine offers, the checks, and starting a run. */
+export type NewRunMethods =
+  | 'describeMachine'
+  | 'helperFeatures'
+  | 'harnesses'
+  | 'examples'
+  | 'tasks'
+  | 'preflight'
+  | 'createFromExample'
+  | 'copyOut'
+  | 'startRun';
+
+/** What `installFakeWindows` provides. */
+export type WindowsMethods = 'openRunWindow' | 'showMainWindow' | 'openSettings' | 'openExternal';
 
 export interface FakeBridgeSeed {
   readonly theme: string;
@@ -134,15 +186,13 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
       onListing: on('listing'),
       onRecent: on('recent'),
       onPreferences: on('preferences'),
-      onChrome: on('chrome'),
-      onShowHost: on('showHost'),
       onToggleSidebar: (listener: () => void) => {
         toggleListeners.push(listener);
       },
       onOpenSettings: (listener: () => void) => {
         settingsListeners.push(listener);
       },
-    },
+    } satisfies FakeProvides<CoreMethods>,
     fakeHost: {
       /** The application menu's "Toggle Sidebar". */
       toggleSidebar: () => {
@@ -265,7 +315,7 @@ export function installFakeMachines(seed: FakeBridgeSeed): void {
       const entries = seed.directories?.[directory] ?? [];
       return ok({kind: 'listed', directory, entries, truncated: false});
     },
-  });
+  } satisfies FakeProvides<MachinesMethods>);
 }
 
 /**
@@ -372,7 +422,7 @@ export function installFakeNewRun(seed: FakeBridgeSeed): void {
       });
       return ok({runId, instanceId});
     },
-  });
+  } satisfies FakeProvides<NewRunMethods>);
   Object.assign(page.fakeHost, {newRun});
 }
 
@@ -423,6 +473,6 @@ export function installFakeWindows(): void {
       record.external.push(url);
       return ok();
     },
-  });
+  } satisfies FakeProvides<WindowsMethods>);
   Object.assign(page.fakeHost, {windows: record});
 }

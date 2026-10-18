@@ -174,17 +174,23 @@ export function machineStatus(machine: Machine): MachineStatus {
 /**
  * The machines as the Settings navigation counts them: every machine this screen lists, and those
  * whose facts say they need attention (checked, and not ready). One list, so the count cannot
- * disagree with it.
+ * disagree with it. `listed` is false while the machines are being read or could not be: the
+ * count is then not known, and must not be worded as "none".
  */
 export function machineCounts(state: MachinesState): {
   readonly count: number;
   readonly attention: number;
+  readonly listed: boolean;
 } {
   const attention = state.machines.filter(machine => {
     const status = machineStatus(machine);
     return status !== 'ready' && status !== 'checking';
   });
-  return {count: state.machines.length, attention: attention.length};
+  return {
+    count: state.machines.length,
+    attention: attention.length,
+    listed: state.listing === null && state.listProblem === null,
+  };
 }
 
 /** The machine shown in the detail, or null when there is none. */

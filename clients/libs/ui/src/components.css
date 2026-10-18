@@ -138,15 +138,20 @@ body > div:first-child {
     display: grid;
     grid-template-columns: minmax(0, 1fr) var(--column-aside);
     grid-template-rows: auto minmax(0, 1fr);
-    column-gap: var(--space-5);
+    gap: 0 var(--space-5);
   }
-  .vs-page[data-side-action] .vs-page-header,
+  /* The header heads the whole page; the columns beneath it start on one line. */
+  .vs-page[data-side-action] .vs-page-header {
+    grid-column: 1 / -1;
+  }
   .vs-page[data-side-action] .vs-page-scroll {
     grid-column: 1;
   }
   .vs-page[data-side-action] .vs-page-footer {
     grid-column: 2;
-    grid-row: 1 / 3;
+    grid-row: 2;
+    /* The scrolling column's own padding, so both columns' first boxes share a top edge. */
+    padding-top: var(--space-2);
     min-height: 0;
     display: flex;
     flex-direction: column;
@@ -599,7 +604,6 @@ body > div:first-child {
 }
 .vs-page[data-side-action] :is(.vs-select, .vs-slider) {
   width: 100%;
-  max-width: calc(var(--column-aside) * 1.8);
 }
 
 .vs-path-input {

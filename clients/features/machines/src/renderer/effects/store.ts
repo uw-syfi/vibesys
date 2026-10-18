@@ -5,9 +5,9 @@
  * the request's token so leaving the form can cancel it; path listings are its `complete`.
  */
 import {
+  attempt,
   type HostsWelcomeBridge,
   type MachinesWelcomeBridge,
-  settled,
   type WelcomeResult,
 } from '@vibesys/ipc';
 import {createStore, type Store} from '@vibesys/store';
@@ -39,47 +39,68 @@ function perform(
 ): Promise<void> {
   const {token} = request;
   const then = <T>(
-    call: Promise<WelcomeResult<T>>,
+    call: () => Promise<WelcomeResult<T>>,
     action: (result: Outcome<T>) => MachinesAction,
-  ): Promise<void> => settled(call).then(result => dispatch(action(outcome(result))));
+  ): Promise<void> => attempt(call).then(result => dispatch(action(outcome(result))));
   switch (request.kind) {
     case 'list':
-      return then(bridge.machines(), result => ({type: 'listed', token, result}));
+      return then(
+        () => bridge.machines(),
+        result => ({type: 'listed', token, result}),
+      );
     case 'report':
-      return then(bridge.machine(request.host), result => ({
-        type: 'reported',
-        token,
-        host: request.host,
-        result,
-      }));
+      return then(
+        () => bridge.machine(request.host),
+        result => ({
+          type: 'reported',
+          token,
+          host: request.host,
+          result,
+        }),
+      );
     case 'complete':
-      return then(bridge.complete(request.host, request.directory), result => ({
-        type: 'completed',
-        form: request.form,
-        token,
-        result,
-      }));
+      return then(
+        () => bridge.complete(request.host, request.directory),
+        result => ({
+          type: 'completed',
+          form: request.form,
+          token,
+          result,
+        }),
+      );
     case 'inspect':
-      return then(bridge.inspectCheckout(request.host, request.path), result => ({
-        type: 'inspected',
-        form: request.form,
-        path: request.path,
-        token,
-        result,
-      }));
+      return then(
+        () => bridge.inspectCheckout(request.host, request.path),
+        result => ({
+          type: 'inspected',
+          form: request.form,
+          path: request.path,
+          token,
+          result,
+        }),
+      );
     case 'save':
-      return then(bridge.setCheckout(request.host, request.checkout, token), result => ({
-        type: 'saved',
-        form: request.form,
-        token,
-        result,
-      }));
+      return then(
+        () => bridge.setCheckout(request.host, request.checkout, token),
+        result => ({
+          type: 'saved',
+          form: request.form,
+          token,
+          result,
+        }),
+      );
     case 'cancel-save':
-      return settled(bridge.cancelCheckout(token)).then(() => undefined);
+      return attempt(() => bridge.cancelCheckout(token)).then(() => undefined);
     case 'remove':
-      return then(bridge.removeMachine(request.host), result => ({type: 'done', token, result}));
+      return then(
+        () => bridge.removeMachine(request.host),
+        result => ({type: 'done', token, result}),
+      );
     case 'sign-in':
-      return then(bridge.signIn(request.host), result => ({type: 'done', token, result}));
+      return then(
+        () => bridge.signIn(request.host),
+        result => ({type: 'done', token, result}),
+      );
   }
 }
 

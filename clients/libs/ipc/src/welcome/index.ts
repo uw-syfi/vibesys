@@ -209,8 +209,11 @@ export type {
   StartRunWelcomeBridge,
 } from './start-run.js';
 export {
+  attempt,
   type PathCompletion,
   settled,
+  UNEXPECTED_FAILURE,
+  type UnexpectedFailure,
   WELCOME_EVENTS,
   type WelcomeEvent,
   type WelcomeOverview,

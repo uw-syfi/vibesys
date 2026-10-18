@@ -255,12 +255,12 @@ describe('machinesStep', () => {
       state = machinesStep(state, action).state;
     };
     run({type: 'listed', token: 1, result: {ok: true, value: ENTRIES.slice(0, 2)}});
-    expect(machineCounts(state)).toEqual({count: 2, attention: 0});
+    expect(machineCounts(state)).toEqual({count: 2, attention: 0, listed: true});
     // A machine is added: the screen lists again, and the count is the new list's.
     const token = state.lastToken + 1;
     state = {...state, listing: {token, select: null}, lastToken: token};
     run({type: 'listed', token, result: {ok: true, value: ENTRIES.slice(0, 3)}});
-    expect(machineCounts(state)).toEqual({count: 3, attention: 0});
+    expect(machineCounts(state)).toEqual({count: 3, attention: 0, listed: true});
     const host = state.machines[2]?.host ?? 'local';
     const checking = state.machines.find(machine => machine.host === host)?.checking ?? 0;
     run({
@@ -269,7 +269,22 @@ describe('machinesStep', () => {
       host,
       result: {ok: true, value: {kind: 'sign-in', detail: 'the key needs its passphrase'}},
     });
-    expect(machineCounts(state)).toEqual({count: 3, attention: 1});
+    expect(machineCounts(state)).toEqual({count: 3, attention: 1, listed: true});
+  });
+
+  test('regression: no count is worded while the machines are being read or could not be', () => {
+    const {state: reading} = initialMachines();
+    expect(machineCounts(reading)).toEqual({count: 0, attention: 0, listed: false});
+
+    const failed = machinesStep(reading, {
+      type: 'listed',
+      token: 1,
+      result: {ok: false, error: 'hosts.json is unreadable.'},
+    }).state;
+    expect(machineCounts(failed)).toEqual({count: 0, attention: 0, listed: false});
+
+    const empty = machinesStep(reading, {type: 'listed', token: 1, result: {ok: true, value: []}});
+    expect(machineCounts(empty.state)).toEqual({count: 0, attention: 0, listed: true});
   });
 
   test('checkout save and removal for one machine are mutually exclusive', () => {

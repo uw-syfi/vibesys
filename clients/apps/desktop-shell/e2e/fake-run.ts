@@ -5,6 +5,10 @@
  * `window.fakeHost.calls`. `installFakeRun` runs in the page after `installFakeBridge`
  * (`page.addInitScript`, in that order), so it is self-contained and adds to that bridge.
  */
+import type {FakeProvides} from './fake-bridge.js';
+
+/** What `installFakeRun` provides: the log streams and the run commands. */
+export type RunMethods = 'logs' | 'releaseLogs' | 'stopConfirmed' | 'resume';
 
 export interface FakeRunSeed {
   readonly streams: readonly unknown[];
@@ -43,6 +47,6 @@ export function installFakeRun(seed: FakeRunSeed): void {
     releaseLogs: () => ok(null),
     stopConfirmed: record('stopConfirmed'),
     resume: record('resume'),
-  });
+  } satisfies FakeProvides<RunMethods>);
   Object.assign(target.fakeHost, {calls});
 }

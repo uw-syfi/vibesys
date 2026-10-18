@@ -23,7 +23,7 @@ import {
   Tree,
   TreeRow,
 } from '@vibesys/ui';
-import type {JSX} from 'react';
+import type {JSX, KeyboardEvent} from 'react';
 import {
   formSuggestions,
   type Machine,
@@ -43,6 +43,32 @@ type Dispatch = (action: MachinesAction) => void;
 const LOCAL: HostKey = 'local';
 const CHECKING = 'The app is starting VibeSys from this checkout to check it.';
 
+/** A ref callback with one identity, so it runs as the form mounts and not on every render. */
+function focusFirstField(form: HTMLDivElement | null): void {
+  form?.querySelector('input')?.focus();
+}
+
+/**
+ * A form that opens in place: its first field takes the focus as it opens, and Escape closes it
+ * (`close`) unless a field in it already used the key (a path's suggestions close first).
+ */
+function OpenForm(props: {
+  readonly close: () => void;
+  readonly children: JSX.Element;
+}): JSX.Element {
+  const keyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key !== 'Escape' || event.defaultPrevented) return;
+    event.preventDefault();
+    props.close();
+  };
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: the wrapper only hears the Escape that bubbles up from the form's own fields.
+    <div ref={focusFirstField} onKeyDown={keyDown}>
+      {props.children}
+    </div>
+  );
+}
+
 function AddMachine(props: {
   readonly state: MachinesState;
   readonly dispatch: Dispatch;
@@ -55,38 +81,40 @@ function AddMachine(props: {
   const checking = adding.saving !== null;
   return (
     <Card section="Add a machine">
-      <Stack>
-        <Grid min="field">
-          <Field label="SSH host" help="As you’d type after ssh; your SSH config and keys apply.">
-            <TextInput
-              value={adding.host}
-              placeholder="host-c"
-              change={value => dispatch({type: 'add-host', value})}
+      <OpenForm close={() => dispatch({type: 'close', form: 'add'})}>
+        <Stack>
+          <Grid min="field">
+            <Field label="SSH host" help="As you’d type after ssh; your SSH config and keys apply.">
+              <TextInput
+                value={adding.host}
+                placeholder="host-c"
+                change={value => dispatch({type: 'add-host', value})}
+              />
+            </Field>
+            <Field
+              label="VibeSys checkout"
+              {...(completions.length > 0 && host !== '' ? {help: `Found on ${host}:`} : {})}
+              {...(adding.problem === null ? {} : {error: adding.problem})}
+            >
+              <PathInput
+                value={adding.path.checkout}
+                placeholder="~/vibesys"
+                completions={completions}
+                change={value => dispatch({type: 'checkout', form: 'add', value})}
+              />
+            </Field>
+          </Grid>
+          <Row gap="space-2" wrap>
+            <Button
+              variant="primary"
+              text={checking ? 'Checking…' : 'Check and add'}
+              {...(checking ? {disabledReason: CHECKING} : {})}
+              press={() => dispatch({type: 'submit', form: 'add'})}
             />
-          </Field>
-          <Field
-            label="VibeSys checkout"
-            {...(completions.length > 0 && host !== '' ? {help: `Found on ${host}:`} : {})}
-            {...(adding.problem === null ? {} : {error: adding.problem})}
-          >
-            <PathInput
-              value={adding.path.checkout}
-              placeholder="~/vibesys"
-              completions={completions}
-              change={value => dispatch({type: 'checkout', form: 'add', value})}
-            />
-          </Field>
-        </Grid>
-        <Row gap="space-2" wrap>
-          <Button
-            variant="primary"
-            text={checking ? 'Checking…' : 'Check and add'}
-            {...(checking ? {disabledReason: CHECKING} : {})}
-            press={() => dispatch({type: 'submit', form: 'add'})}
-          />
-          <Button text="Cancel" press={() => dispatch({type: 'close', form: 'add'})} />
-        </Row>
-      </Stack>
+            <Button text="Cancel" press={() => dispatch({type: 'close', form: 'add'})} />
+          </Row>
+        </Stack>
+      </OpenForm>
     </Card>
   );
 }
@@ -101,27 +129,29 @@ function CheckoutForm(props: {
   if (fixing === null || fixing.host !== machine.host) return null;
   const checking = fixing.saving !== null;
   return (
-    <Stack gap="space-3">
-      <Field
-        label={`VibeSys checkout on ${machine.label}`}
-        {...(fixing.problem === null ? {} : {error: fixing.problem})}
-      >
-        <PathInput
-          value={fixing.path.checkout}
-          completions={formSuggestions(fixing.path)}
-          change={value => dispatch({type: 'checkout', form: 'fix', value})}
-        />
-      </Field>
-      <Row gap="space-2" wrap>
-        <Button
-          variant="primary"
-          text={checking ? 'Checking…' : 'Check and save'}
-          {...(checking ? {disabledReason: CHECKING} : {})}
-          press={() => dispatch({type: 'submit', form: 'fix'})}
-        />
-        <Button text="Cancel" press={() => dispatch({type: 'close', form: 'fix'})} />
-      </Row>
-    </Stack>
+    <OpenForm close={() => dispatch({type: 'close', form: 'fix'})}>
+      <Stack gap="space-3">
+        <Field
+          label={`VibeSys checkout on ${machine.label}`}
+          {...(fixing.problem === null ? {} : {error: fixing.problem})}
+        >
+          <PathInput
+            value={fixing.path.checkout}
+            completions={formSuggestions(fixing.path)}
+            change={value => dispatch({type: 'checkout', form: 'fix', value})}
+          />
+        </Field>
+        <Row gap="space-2" wrap>
+          <Button
+            variant="primary"
+            text={checking ? 'Checking…' : 'Check and save'}
+            {...(checking ? {disabledReason: CHECKING} : {})}
+            press={() => dispatch({type: 'submit', form: 'fix'})}
+          />
+          <Button text="Cancel" press={() => dispatch({type: 'close', form: 'fix'})} />
+        </Row>
+      </Stack>
+    </OpenForm>
   );
 }
 
@@ -163,23 +193,35 @@ function Problem(props: {
   );
 }
 
-function Detail(props: {
-  readonly state: MachinesState;
-  readonly dispatch: Dispatch;
-  readonly newRun: (host: HostKey) => void;
-}): JSX.Element {
-  const {state, dispatch, newRun} = props;
-  const machine = selectedMachine(state);
-  if (machine === null) {
-    return (
-      <Card>
+/**
+ * What the screen says when no machine is selected, which (by the store's invariants) is when none
+ * is listed: while they are read, that they are being read, not that there are none; while a form
+ * is open, nothing, since the form says what to do.
+ */
+function NoMachine(props: {readonly state: MachinesState}): JSX.Element | null {
+  const {state} = props;
+  if (state.adding !== null) return null;
+  return (
+    <Card>
+      {state.listing !== null ? (
+        <EmptyState title="Reading the machines" />
+      ) : (
         <EmptyState
           title="No machine yet"
           body="Add the SSH host where your VibeSys checkout is."
         />
-      </Card>
-    );
-  }
+      )}
+    </Card>
+  );
+}
+
+function Detail(props: {
+  readonly state: MachinesState;
+  readonly machine: Machine;
+  readonly dispatch: Dispatch;
+  readonly newRun: (host: HostKey) => void;
+}): JSX.Element {
+  const {state, machine, dispatch, newRun} = props;
   const status = machineStatus(machine);
   const removing = state.pending?.kind === 'remove' && state.pending.host === machine.host;
   const savingHere = state.fixing?.host === machine.host && state.fixing.saving !== null;
@@ -272,6 +314,7 @@ export function MachinesScreen(props: {
   readonly embedded?: boolean;
 }): JSX.Element {
   const {state, dispatch, newRun} = props;
+  const machine = selectedMachine(state);
   const header = (
     <Row gap="space-3" align="end" wrap>
       {props.embedded === true ? null : (
@@ -299,11 +342,15 @@ export function MachinesScreen(props: {
       {state.listProblem === null ? null : (
         <Banner tone="err" title="The machines could not be read" body={state.listProblem} />
       )}
-      <Split
-        asideFirst
-        aside={<MachineList state={state} dispatch={dispatch} />}
-        main={<Detail state={state} dispatch={dispatch} newRun={newRun} />}
-      />
+      {machine === null ? (
+        <NoMachine state={state} />
+      ) : (
+        <Split
+          asideFirst
+          aside={<MachineList state={state} dispatch={dispatch} />}
+          main={<Detail state={state} machine={machine} dispatch={dispatch} newRun={newRun} />}
+        />
+      )}
     </Stack>
   );
   if (props.embedded === true)

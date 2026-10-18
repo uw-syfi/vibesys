@@ -26,6 +26,7 @@ export {
   type RunLogsRequest,
 } from './run-logs.js';
 export {
+  attempt,
   type CheckoutInspection,
   FIRST_PAINT_CHANNEL,
   type FirstPaint,
@@ -60,6 +61,8 @@ export {
   type StartRunWelcomeBridge,
   type SummaryTokens,
   settled,
+  UNEXPECTED_FAILURE,
+  type UnexpectedFailure,
   WELCOME_CHANNELS,
   WELCOME_EVENTS,
   type WelcomeBridge,

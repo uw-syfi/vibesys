@@ -180,3 +180,47 @@ test('the machines screen names its harnesses and hardware, never their ids', as
   await expect(page.getByText('Claude Code · Codex installed')).toBeVisible();
   expect(await rawTextOf(page)).toEqual([]);
 });
+
+test('Escape closes Add a machine, which has the focus as it opens, and no empty state sits beside it', async ({
+  page,
+}) => {
+  const none: FakeBridgeSeed = {...SEED, machines: []};
+  await page.addInitScript(installFakeBridge, none);
+  await page.addInitScript(installFakeMachines, none);
+  await page.addInitScript(installFakeNewRun, none);
+  await page.goto('./shell.html');
+  await page
+    .getByRole('navigation', {name: 'VibeSys'})
+    .getByRole('button', {name: 'Settings'})
+    .click();
+  await page
+    .getByRole('navigation', {name: 'Settings sections'})
+    .getByRole('button', {name: /Machines/})
+    .click();
+  await expect(page.getByText('No machine yet')).toBeVisible();
+
+  await page.getByRole('button', {name: 'Add a machine'}).click();
+  await expect(page.getByRole('textbox', {name: 'SSH host'})).toBeFocused();
+  await expect(page.getByText('No machine yet')).toHaveCount(0);
+
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('textbox', {name: 'SSH host'})).toHaveCount(0);
+  await expect(page.getByText('No machine yet')).toBeVisible();
+});
+
+test('Escape in the checkout field first hides its suggestions, and closes the form the next time', async ({
+  page,
+}) => {
+  await openMachines(page);
+  await page.getByRole('button', {name: 'Add a machine'}).click();
+  await page.getByRole('textbox', {name: 'SSH host'}).fill('host-a');
+  const checkout = page.getByRole('combobox', {name: 'VibeSys checkout'});
+  await checkout.fill('/home/me/');
+  await expect(page.getByRole('option').first()).toBeVisible();
+
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('option')).toHaveCount(0);
+  await expect(checkout).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(checkout).toHaveCount(0);
+});

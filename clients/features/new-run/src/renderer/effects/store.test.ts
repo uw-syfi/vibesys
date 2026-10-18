@@ -597,3 +597,112 @@ test('More options is remembered per machine: read at the start, written on a ch
   expect(store.getState().context.form.machine).toBe('ssh:other');
   expect(store.getState().context.moreOpen).toEqual({'ssh:gpu': false, local: true});
 });
+
+/** A bridge whose `harnesses` is the given call: a missing method, a rejection, or an answer. */
+function bridgeWithHarnesses(harnesses: NewRunBridge['harnesses']): NewRunBridge {
+  return {...fakeBridge(), harnesses};
+}
+
+test('a bridge method that is missing fails its step without showing the raw error', async () => {
+  const clock = manualSchedule();
+  const missing = (() => {
+    throw new TypeError('bridge.harnesses is not a function');
+  }) as NewRunBridge['harnesses'];
+  const {store} = createNewRunStore(bridgeWithHarnesses(missing), {
+    recent: [],
+    schedule: clock.schedule,
+    started: () => undefined,
+  });
+  await settle();
+
+  const {problem} = store.getState().context;
+
+  expect(problem).toEqual({step: 'harnesses', detail: null});
+  expect(JSON.stringify(problem)).not.toContain('is not a function');
+});
+
+test('a call that rejects fails its step without showing the raw error', async () => {
+  const clock = manualSchedule();
+  const rejecting: NewRunBridge['harnesses'] = () =>
+    Promise.reject(new Error("Error invoking remote method 'harnesses': gone"));
+  const {store} = createNewRunStore(bridgeWithHarnesses(rejecting), {
+    recent: [],
+    schedule: clock.schedule,
+    started: () => undefined,
+  });
+  await settle();
+
+  expect(store.getState().context.problem).toEqual({step: 'harnesses', detail: null});
+});
+
+test('a failure the main process reported keeps its words', async () => {
+  const clock = manualSchedule();
+  const refusing: NewRunBridge['harnesses'] = () =>
+    Promise.resolve({ok: false as const, error: 'host-a is not reachable.', authNeeded: false});
+  const {store} = createNewRunStore(bridgeWithHarnesses(refusing), {
+    recent: [],
+    schedule: clock.schedule,
+    started: () => undefined,
+  });
+  await settle();
+
+  expect(store.getState().context.problem).toEqual({
+    step: 'harnesses',
+    detail: 'host-a is not reachable.',
+  });
+});
+
+test('retry asks the failed step again, and the form it fills in is kept', async () => {
+  const clock = manualSchedule();
+  let broken = true;
+  const flaky: NewRunBridge['harnesses'] = () => {
+    if (broken) throw new TypeError('bridge.harnesses is not a function');
+    return ok({
+      kind: 'listed' as const,
+      harnesses: [{provider: 'claude', model: 'm', default: true}],
+    });
+  };
+  const {store} = createNewRunStore(bridgeWithHarnesses(flaky), {
+    recent: [recentRun('local', '/p', 1)],
+    schedule: clock.schedule,
+    started: () => undefined,
+  });
+  await settle();
+  expect(store.getState().context.harnesses).toBeNull();
+
+  broken = false;
+  store.dispatch({type: 'retry'});
+  await settle();
+  clock.runDue();
+  await settle();
+
+  const {context} = store.getState();
+  expect(context.problem).toBeNull();
+  expect(context.harnesses?.list.map(offer => offer.model)).toEqual(['m']);
+  expect(context.form.project).toEqual({source: 'recent', path: '/p'});
+  expect(context.form.agent).not.toBeNull();
+});
+
+test('a retry does not touch a step that did not fail', async () => {
+  const clock = manualSchedule();
+  const asked: string[] = [];
+  const failing: NewRunBridge = {
+    ...fakeBridge(['run_options', 'preflight', 'examples'], asked),
+    tasks: () =>
+      Promise.resolve({ok: false as const, error: 'No such project.', authNeeded: false}),
+  };
+  const {store} = createNewRunStore(failing, {
+    recent: [recentRun('local', '/p', 1)],
+    schedule: clock.schedule,
+    started: () => undefined,
+  });
+  await settle();
+  expect(store.getState().context.problem?.step).toBe('tasks');
+  const harnessesBefore = store.getState().context.harnesses;
+
+  store.dispatch({type: 'retry'});
+  await settle();
+
+  expect(store.getState().context.problem?.step).toBe('tasks');
+  expect(store.getState().context.harnesses).toBe(harnessesBefore);
+});

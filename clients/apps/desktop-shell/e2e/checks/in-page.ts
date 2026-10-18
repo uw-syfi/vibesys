@@ -20,6 +20,7 @@ export type CheckId =
   | 'pane-fill'
   | 'scroll-room'
   | 'control-row'
+  | 'column-tops'
   | 'stability';
 
 export interface Violation {
@@ -707,6 +708,32 @@ export function controlRowCheck(): Violation[] {
         where: describe(row),
       });
     }
+  }
+  return found;
+}
+
+/**
+ * Where a page has a side column beside its main column (the page's footer, beside its body), their
+ * first boxes share a top edge: a side card that starts level with the page's logo while the form
+ * starts 200 px lower reads as two unrelated screens.
+ */
+export function columnTopsCheck(): Violation[] {
+  const found: Violation[] = [];
+  for (const content of document.body.querySelectorAll('.vs-page-content')) {
+    const body = content.querySelector(':scope > .vs-page-scroll > .vs-page-body');
+    const side = content.querySelector(':scope > .vs-page-footer');
+    const main = body?.firstElementChild;
+    const first = side?.firstElementChild;
+    if (!body || !side || !main || !first || !isShown(side)) continue;
+    const beside = side.getBoundingClientRect().left >= body.getBoundingClientRect().right - 1;
+    if (!beside) continue;
+    const gap = Math.abs(first.getBoundingClientRect().top - main.getBoundingClientRect().top);
+    if (gap <= 2) continue;
+    found.push({
+      check: 'column-tops',
+      message: `the side column starts ${Math.round(gap)} px from the top of the main column`,
+      where: describe(first),
+    });
   }
   return found;
 }

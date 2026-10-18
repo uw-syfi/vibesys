@@ -39,6 +39,7 @@ import {
   recordedAgent,
   runInputs,
 } from './form.js';
+import {type Problem, problemOf, type Step} from './problem.js';
 import {formWithRoles, rolesAfter} from './roles.js';
 
 /** The fixes the screen performs itself; the rest are the shell's (Machines) or the user's. */
@@ -63,8 +64,8 @@ export interface NewRunContext {
   readonly roles: readonly string[] | null;
   /** What the run being run again was started with: its agent is chosen from it once known. */
   readonly rerun: RunStart | null;
-  /** Why the last load, fix or start failed, until the next input. */
-  readonly problem: string | null;
+  /** Which load, fix or start failed last and what was reported of it, until the next input. */
+  readonly problem: Problem | null;
   readonly started: StartedRun | null;
   /**
    * Whether the user opened More options, by machine: absent until they chose. The screen keeps it
@@ -88,6 +89,8 @@ export type NewRunEvent =
   | {readonly type: 'recheck'}
   /** Check again: read the project's tasks and check the inputs once more. */
   | {readonly type: 'refresh'}
+  /** Try again the load or check that failed (`problem`). */
+  | {readonly type: 'retry'}
   | {readonly type: 'fix'; readonly fix: ProjectFix}
   | {readonly type: 'start'};
 
@@ -201,13 +204,16 @@ export const newRunMachine = setup({
       offers(context.helper, context.form.machine, 'run_options'),
     offersExamples: ({context}) => offers(context.helper, context.form.machine, 'examples'),
     // The roles the run reported change what is asked: check the inputs again.
+    // The failed step is the one a region would run again on `retry`.
+    failedAt: ({context}, params: {readonly step: Step}) => context.problem?.step === params.step,
     rolesChangeInputs: ({context}, params: {readonly answer: Offered<PreflightResult>}) =>
       inputsKey(afterPreflight(context, params.answer).form) !== inputsKey(context.form),
   },
   delays: {debounce: CHECK_DEBOUNCE_MS},
   actions: {
-    fail: assign((_, params: {readonly error: unknown}) => ({
-      problem: params.error instanceof Error ? params.error.message : String(params.error),
+    clearProblem: assign({problem: null}),
+    fail: assign((_, params: {readonly step: Step; readonly error: unknown}) => ({
+      problem: problemOf(params.step, params.error),
     })),
     // An input changes in the checks region, which every input restarts: an event a region handles
     // is not also handled by the parallel state above it.
@@ -281,6 +287,13 @@ export const newRunMachine = setup({
       states: {
         helper: {
           initial: 'loading',
+          on: {
+            retry: {
+              guard: {type: 'failedAt', params: {step: 'features'}},
+              target: '.loading',
+              actions: 'clearProblem',
+            },
+          },
           states: {
             loading: {
               invoke: {
@@ -299,7 +312,10 @@ export const newRunMachine = setup({
                 },
                 onError: {
                   target: 'ready',
-                  actions: {type: 'fail', params: ({event}) => ({error: event.error})},
+                  actions: {
+                    type: 'fail',
+                    params: ({event}) => ({step: 'features', error: event.error}),
+                  },
                 },
               },
             },
@@ -308,6 +324,13 @@ export const newRunMachine = setup({
         },
         facts: {
           initial: 'loading',
+          on: {
+            retry: {
+              guard: {type: 'failedAt', params: {step: 'describe'}},
+              target: '.loading',
+              actions: 'clearProblem',
+            },
+          },
           states: {
             loading: {
               invoke: {
@@ -322,7 +345,10 @@ export const newRunMachine = setup({
                 },
                 onError: {
                   target: 'ready',
-                  actions: {type: 'fail', params: ({event}) => ({error: event.error})},
+                  actions: {
+                    type: 'fail',
+                    params: ({event}) => ({step: 'describe', error: event.error}),
+                  },
                 },
               },
             },
@@ -331,6 +357,13 @@ export const newRunMachine = setup({
         },
         harnesses: {
           initial: 'loading',
+          on: {
+            retry: {
+              guard: {type: 'failedAt', params: {step: 'harnesses'}},
+              target: '.loading',
+              actions: 'clearProblem',
+            },
+          },
           states: {
             loading: {
               invoke: {
@@ -353,7 +386,10 @@ export const newRunMachine = setup({
                 },
                 onError: {
                   target: 'ready',
-                  actions: {type: 'fail', params: ({event}) => ({error: event.error})},
+                  actions: {
+                    type: 'fail',
+                    params: ({event}) => ({step: 'harnesses', error: event.error}),
+                  },
                 },
               },
             },
@@ -362,6 +398,13 @@ export const newRunMachine = setup({
         },
         examples: {
           initial: 'pending',
+          on: {
+            retry: {
+              guard: {type: 'failedAt', params: {step: 'examples'}},
+              target: '.pending',
+              actions: 'clearProblem',
+            },
+          },
           states: {
             // A helper without `examples` is never asked: it offers none.
             pending: {
@@ -389,7 +432,10 @@ export const newRunMachine = setup({
                 },
                 onError: {
                   target: 'ready',
-                  actions: {type: 'fail', params: ({event}) => ({error: event.error})},
+                  actions: {
+                    type: 'fail',
+                    params: ({event}) => ({step: 'examples', error: event.error}),
+                  },
                 },
               },
             },
@@ -400,7 +446,15 @@ export const newRunMachine = setup({
           initial: 'choosing',
           // Each region restarts on what it depends on: a transition from the parallel state itself
           // would leave and re-enter every region, stopping all their work.
-          on: {project: '.choosing', refresh: '.choosing'},
+          on: {
+            project: '.choosing',
+            refresh: '.choosing',
+            retry: {
+              guard: {type: 'failedAt', params: {step: 'tasks'}},
+              target: '.choosing',
+              actions: 'clearProblem',
+            },
+          },
           states: {
             choosing: {
               always: [{guard: 'hasProject', target: 'loading'}, {target: 'none'}],
@@ -427,7 +481,10 @@ export const newRunMachine = setup({
                 },
                 onError: {
                   target: 'ready',
-                  actions: {type: 'fail', params: ({event}) => ({error: event.error})},
+                  actions: {
+                    type: 'fail',
+                    params: ({event}) => ({step: 'tasks', error: event.error}),
+                  },
                 },
               },
             },
@@ -446,6 +503,11 @@ export const newRunMachine = setup({
             advanced: {target: '.waiting', actions: 'input'},
             recheck: '.waiting',
             refresh: '.waiting',
+            retry: {
+              guard: {type: 'failedAt', params: {step: 'preflight'}},
+              target: '.waiting',
+              actions: 'clearProblem',
+            },
           },
           states: {
             waiting: {
@@ -482,7 +544,10 @@ export const newRunMachine = setup({
                 ],
                 onError: {
                   target: 'ready',
-                  actions: {type: 'fail', params: ({event}) => ({error: event.error})},
+                  actions: {
+                    type: 'fail',
+                    params: ({event}) => ({step: 'preflight', error: event.error}),
+                  },
                 },
               },
             },
@@ -517,7 +582,7 @@ export const newRunMachine = setup({
                 },
                 onError: {
                   target: 'idle',
-                  actions: {type: 'fail', params: ({event}) => ({error: event.error})},
+                  actions: {type: 'fail', params: ({event}) => ({step: 'fix', error: event.error})},
                 },
               },
             },
@@ -535,7 +600,10 @@ export const newRunMachine = setup({
                 },
                 onError: {
                   target: 'idle',
-                  actions: {type: 'fail', params: ({event}) => ({error: event.error})},
+                  actions: {
+                    type: 'fail',
+                    params: ({event}) => ({step: 'start', error: event.error}),
+                  },
                 },
               },
             },

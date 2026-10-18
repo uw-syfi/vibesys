@@ -4,12 +4,17 @@
  * on and starts a fresh form, prefilled from the runs this user opened.
  */
 import type {CompletionAction, CompletionState, HostKey} from '@vibesys/hosts';
-import {settled, type WelcomeBridge, type WelcomeResult} from '@vibesys/ipc';
+import {attempt, type WelcomeBridge, type WelcomeResult} from '@vibesys/ipc';
 import {clockFrom, type ScheduleTimeout} from '@vibesys/machine';
 import type {RecentRun, RunRef} from '@vibesys/runs';
 import {createListenerDelivery, type Store} from '@vibesys/store';
 import {type Actor, createActor, fromPromise} from 'xstate';
-import {type NewRunEvent, type NewRunSnapshot, newRunMachine} from '../../state/index.js';
+import {
+  type NewRunEvent,
+  type NewRunSnapshot,
+  newRunMachine,
+  StepFailure,
+} from '../../state/index.js';
 import {createFolderCompletion} from './completion.js';
 
 /** The bridge calls the New run screen makes. */
@@ -27,11 +32,14 @@ export type NewRunBridge = Pick<
   | 'complete'
 >;
 
-/** What `call` answered, or a rejection with its error (a call that throws rejects too). */
+/**
+ * What `call` answered, or a `StepFailure`: with the main process's words when it reported one, with
+ * none when the call threw or rejected (a bridge method that is missing, the main process gone).
+ */
 async function value<T>(call: () => Promise<WelcomeResult<T>>): Promise<T> {
-  const result = await settled(call());
-  if (!result.ok) throw new Error(result.error);
-  return result.value;
+  const result = await attempt(call);
+  if (result.ok) return result.value;
+  throw new StepFailure('unexpected' in result ? null : result.error);
 }
 
 /** The machine with every operation provided by `bridge`. */

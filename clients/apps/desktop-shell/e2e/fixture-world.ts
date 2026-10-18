@@ -5,17 +5,49 @@
  */
 import type {Page} from '@playwright/test';
 import {expect} from '@playwright/test';
+import type {WelcomeBridge} from '@vibesys/ipc';
 import {type EndOutcome, type RunFixture, splitLive} from '@vibesys/run-fixtures';
-import {type FakeBridgeSeed, installFakeBridge, installFakeMachines} from './fake-bridge.js';
-import {installFakeFixtureServer} from './fake-fixture-server.js';
+import {
+  type CoreMethods,
+  type FakeBridgeSeed,
+  installFakeBridge,
+  installFakeMachines,
+  installFakeNewRun,
+  installFakeProjectRuns,
+  installFakeWindows,
+  type MachinesMethods,
+  type NewRunMethods,
+  type WindowsMethods,
+} from './fake-bridge.js';
+import {type FixtureServerMethods, installFakeFixtureServer} from './fake-fixture-server.js';
 import {type FakeHistorySeed, installFakeHistory} from './fake-history.js';
-import {installFakeRun} from './fake-run.js';
+import {FAKE_OFFER} from './fake-offer.js';
+import {installFakeRun, type RunMethods} from './fake-run.js';
 import {type FakeSummarySpanSeed, installFakeSummarySpan} from './fake-summary-span.js';
 import {STARTED_AT} from './started-at.js';
 
 const PROJECT = '/work/queue-rs';
+const TASK = 'mpmc';
 const INSTANCE = '00000000000a';
 const HOST = 'ssh:remote-host';
+const CHECKOUT = '~/vibesys';
+
+/**
+ * Whether the Fake bridge the fixture world installs has every method of the real one: the
+ * installers `fixtureScripts` runs, together, provide all of `WelcomeBridge`. A method added to
+ * the bridge and not to the Fake makes this a compile error here, not a page that fails when
+ * someone first presses the control that calls it.
+ */
+type ProvidedByWorld =
+  | CoreMethods
+  | MachinesMethods
+  | NewRunMethods
+  | WindowsMethods
+  | RunMethods
+  | FixtureServerMethods;
+type MissingMethods = Exclude<keyof WelcomeBridge, ProvidedByWorld>;
+const complete: [MissingMethods] extends [never] ? true : MissingMethods = true;
+void complete;
 
 interface FixtureWindow extends Window {
   fakeHost: {
@@ -74,23 +106,54 @@ function listingOf(fixture: RunFixture): Record<string, unknown> {
   };
 }
 
+/**
+ * The runs `host` lists for `PROJECT`: those its servers and registry hold, and those the user
+ * opened (Recent), as `runs.list` would answer. The one place the world says which runs a machine
+ * has, so the sidebar, All runs and the machines agree.
+ */
+function projectRuns(
+  listing: Record<string, unknown>,
+  recent: readonly Record<string, unknown>[],
+): Record<string, readonly unknown[]> {
+  const servers = [...(listing['live'] as unknown[]), ...(listing['ended'] as unknown[])];
+  const runs = new Map<string, unknown>();
+  for (const each of servers) {
+    const {runId, startedAt} = each as {runId: string; startedAt: number};
+    runs.set(runId, {runId, task: TASK, createdAt: startedAt});
+  }
+  for (const each of recent) {
+    const {runId, task, attachedAt} = each as {runId: string; task: string; attachedAt: number};
+    if (!runs.has(runId)) runs.set(runId, {runId, task, createdAt: attachedAt});
+  }
+  return {[`${HOST}|${PROJECT}`]: [...runs.values()]};
+}
+
 function seedOf(fixture: RunFixture, theme: 'ink' | 'paper'): FakeBridgeSeed {
+  const listing = listingOf(fixture);
+  const recent = [
+    {
+      host: HOST,
+      hostLabel: 'remote-host',
+      project: PROJECT,
+      task: TASK,
+      runId: fixture.runId,
+      instanceId: fixture.state === 'live' ? INSTANCE : null,
+      attachedAt: 3,
+    },
+  ];
   return {
     theme,
     chromeInset: {width: 84, height: 40},
     appearance: {mode: theme === 'ink' ? 'dark' : 'light', light: 'paper', dark: 'ink'},
-    listings: [listingOf(fixture)],
-    recent: [
-      {
-        host: HOST,
-        hostLabel: 'remote-host',
-        project: PROJECT,
-        task: 'mpmc',
-        runId: fixture.runId,
-        instanceId: fixture.state === 'live' ? INSTANCE : null,
-        attachedAt: 3,
-      },
+    listings: [listing],
+    recent,
+    // The machines are the ones the run is on: This Mac, and its host with the run's checkout.
+    machines: [
+      {host: 'local', label: 'This Mac', checkout: CHECKOUT},
+      {host: HOST, label: 'remote-host', checkout: CHECKOUT},
     ],
+    projectRuns: projectRuns(listing, recent),
+    newRun: {...FAKE_OFFER, projects: {[PROJECT]: [TASK]}},
   };
 }
 
@@ -111,6 +174,9 @@ export function fixtureScripts(fixture: RunFixture, options: OpenOptions = {}): 
   const scripts = [
     script(installFakeBridge, seed),
     script(installFakeMachines, seed),
+    script(installFakeProjectRuns, seed),
+    script(installFakeNewRun, seed),
+    script(installFakeWindows, undefined),
     script(installFakeRun, {streams: [], text: {}}),
     script(installFakeFixtureServer, {
       runId: fixture.runId,

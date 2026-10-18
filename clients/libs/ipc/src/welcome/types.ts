@@ -60,3 +60,32 @@ export function settled<T>(call: Promise<WelcomeResult<T>>): Promise<WelcomeResu
     }),
   );
 }
+
+/** What a screen says of a bridge call that failed for a reason the main process did not report. */
+export const UNEXPECTED_FAILURE =
+  'Something unexpected happened. Try again; if it keeps happening, restart VibeSys.';
+
+/** A call that did not answer: it threw, or its promise rejected. */
+export interface UnexpectedFailure {
+  readonly ok: false;
+  readonly error: typeof UNEXPECTED_FAILURE;
+  readonly authNeeded: false;
+  readonly unexpected: true;
+}
+
+/**
+ * A bridge call as a result a screen may show. The main process's own answer (a value, or a failure
+ * it worded) passes through. A call that throws before it returns (a bridge method that is not
+ * there) or whose promise rejects (the main process went away) is a bug or an outage, whose raw
+ * error is for developers, not users: it becomes an `UnexpectedFailure` saying so in plain words.
+ * `settled` is the older form that passes a rejection's message on.
+ */
+export async function attempt<T>(
+  call: () => Promise<WelcomeResult<T>>,
+): Promise<WelcomeResult<T> | UnexpectedFailure> {
+  try {
+    return await call();
+  } catch {
+    return {ok: false, error: UNEXPECTED_FAILURE, authNeeded: false, unexpected: true};
+  }
+}

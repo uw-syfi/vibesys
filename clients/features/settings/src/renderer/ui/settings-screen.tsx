@@ -63,7 +63,12 @@ export function SettingsScreen(props: {
   readonly dispatch: (action: SettingsAction) => void;
   readonly back: () => void;
   readonly machinesContent: ReactNode;
-  readonly machines: {readonly count: number; readonly attention: number};
+  /** The Machines section's own count; while it is not `listed`, no count is worded. */
+  readonly machines: {
+    readonly count: number;
+    readonly attention: number;
+    readonly listed: boolean;
+  };
 }): JSX.Element {
   const {state, dispatch} = props;
   const [section, setSection] = useState<Section>('appearance');
@@ -139,7 +144,11 @@ export function SettingsScreen(props: {
             />
             <SidebarItem
               label="Machines"
-              detail={`${props.machines.count} saved${props.machines.attention === 0 ? '' : ` · ${props.machines.attention} need attention`}`}
+              {...(props.machines.listed
+                ? {
+                    detail: `${props.machines.count} saved${props.machines.attention === 0 ? '' : ` · ${props.machines.attention} need attention`}`,
+                  }
+                : {})}
               active={section === 'machines'}
               press={() => setSection('machines')}
             />
