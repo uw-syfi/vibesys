@@ -43,6 +43,15 @@ _PASSED = core.EvaluationTerminalFacts(
     ),
     accuracy_passed=True,
 )
+_FAILED = core.EvaluationTerminalFacts(
+    stages=(
+        core.EvaluationStageResult(stage_id="accuracy", outcome=core.EvaluationStageOutcome.PASSED),
+        core.EvaluationStageResult(
+            stage_id="benchmark", outcome=core.EvaluationStageOutcome.FAILED
+        ),
+    ),
+    accuracy_passed=True,
+)
 
 
 def terms(*, floor: float = FLOOR, staleness: float = STALENESS) -> core.TaskTerms:
@@ -100,40 +109,74 @@ def reading(value: float) -> core.Reading:
     return core.Reading(metric=METRIC, value=value, direction="max", unit="tok/s")
 
 
+def started_with(state: core.CoreState, request: core.SubmitMeasurement) -> core.CoreState:
+    """Accept ``request``'s job: it is running, and core holds it in the order it started."""
+    started = seen(request, 1)
+    state = committed(state, started)
+    state = transition(state, core.MeasurementSubmissionObserved(observation=started)).state
+    resource = started.resource_id
+    assert resource is not None
+    return transition(state, core.JobObserved(resource_id=resource, observation=started)).state
+
+
 def ended_with(
     state: core.CoreState,
     request: core.SubmitMeasurement,
     value: float | None,
     *,
     reused: core.RequestId | None = None,
+    failed: bool = False,
 ) -> core.CoreState:
-    """Accept ``request``'s job and end it passed, its benchmark record reading ``value``.
-
-    With None the record carries no reading, as a benchmark that reported no metric does. With
-    ``reused`` the records are that run's, re-read, as the runtime reports a reusing submission.
-    """
-    return ended_transition(state, request, value).state
+    """Accept ``request``'s job and end it with the benchmark reading ``value``."""
+    return ended_transition(state, request, value, reused=reused, failed=failed).state
 
 
 def ended_transition(
-    state: core.CoreState, request: core.SubmitMeasurement, value: float | None
+    state: core.CoreState,
+    request: core.SubmitMeasurement,
+    value: float | None,
+    *,
+    reused: core.RequestId | None = None,
+    failed: bool = False,
 ) -> core.Transition:
-    """`ended_with`, with the transition that ended the job: its events and its state."""
-    started = seen(request, 1)
-    state = committed(state, started)
-    state = transition(state, core.MeasurementSubmissionObserved(observation=started)).state
-    resource = started.resource_id
-    assert resource is not None
-    state = transition(state, core.JobObserved(resource_id=resource, observation=started)).state
+    """End a newly accepted job and return its final transition."""
+    state = started_with(state, request)
+    return finished_transition(state, request, value, reused=reused, failed=failed)
+
+
+def finished_with(
+    state: core.CoreState,
+    request: core.SubmitMeasurement,
+    value: float | None,
+    *,
+    reused: core.RequestId | None = None,
+    failed: bool = False,
+) -> core.CoreState:
+    """End an already accepted job as passed or as a workload failure."""
+    return finished_transition(state, request, value, reused=reused, failed=failed).state
+
+
+def finished_transition(
+    state: core.CoreState,
+    request: core.SubmitMeasurement,
+    value: float | None,
+    *,
+    reused: core.RequestId | None = None,
+    failed: bool = False,
+) -> core.Transition:
+    """End an already accepted job and return the final transition."""
+    status = core.ObservationStatus.FAILED if failed else core.ObservationStatus.SUCCEEDED
     finished = seen(
         request,
         2,
-        status=core.ObservationStatus.SUCCEEDED,
+        status=status,
         terminal=True,
         released=True,
         children_complete=True,
         observed_at=state.run.now_at,
     )
+    resource = finished.resource_id
+    assert resource is not None
     assert isinstance(request.plan.candidate, core.RevisionRef)
     assert request.request_id is not None
     source = request.request_id if reused is None else reused
@@ -152,21 +195,26 @@ def ended_transition(
             workload_digest=request.plan.workload_digest,
             environment_digest=request.plan.environment_digest,
             provenance="trusted",
-            status=core.ObservationStatus.SUCCEEDED,
+            status=status,
             reading=reading(value) if stage == "benchmark" and value is not None else None,
             reused_from=reused,
         )
         for stage in ("accuracy", "benchmark")
     )
-    state = committed(state, finished, _PASSED)
-    state = transition(state, core.MeasurementSubmissionObserved(observation=finished)).state
+    facts = _FAILED if failed else _PASSED
+    failure = core.MeasurementFailure.WORKLOAD if failed else None
+    state = committed(state, finished, facts)
+    state = transition(
+        state, core.MeasurementSubmissionObserved(observation=finished, failure=failure)
+    ).state
     return transition(
         state,
         core.JobObserved(
             resource_id=resource,
             observation=finished,
             evidence=records,
-            evaluation_result=_PASSED,
+            evaluation_result=facts,
+            failure=failure,
         ),
     )
 
@@ -625,20 +673,111 @@ def test_the_official_record_states_the_value_its_comparison_compared(
 
 
 @pytest.mark.regression
-def test_a_task_that_declares_no_noise_gets_more_samples_before_a_verdict() -> None:
-    """With no declared ``relative_noise``, one run a side measured no noise at all.
+def test_a_task_that_declares_no_noise_gets_no_verdict_from_runs_that_show_none() -> None:
+    """With no declared ``relative_noise``, identical base runs measure no noise either.
 
-    Before, a 0.3% difference between two single runs was ``better``, and only an exact tie was
-    a close call, so the base was never measured again. Now it is no verdict and a close call:
-    the base takes a second sample, so the runs can show their spread.
+    Before, the close call earned the base one more run, and when it read what the first did
+    (a quantized or cached benchmark), the spread was zero and the 0.3% gap between the two
+    sides was ``better``: the official check then reused the agent's single run. Now the base
+    takes at most two extra runs (three in all, the fewest that can give a verdict), the
+    comparison stays ``within_noise`` and a close call, and the official check runs afresh.
     """
     lab = Lab.of("a", floor=0.0)
     lab.call("a", "c1", "input-1")
     lab.measure({"input-1": 100.3, "base": 100.0})
-    first = lab.comparisons()[0]
-    assert (first.candidate_samples, first.base_samples) == (1, 1)
-    assert first.verdict is core.ComparisonVerdict.WITHIN_NOISE
-    assert len([s for s in lab.state.evaluation.samples if s.measured_input == "base"]) == 2
+    assert [(c.candidate_samples, c.base_samples) for c in lab.comparisons()] == [
+        (1, 1),
+        (1, 2),
+        (1, core.MIN_SAMPLES_WITHOUT_FLOOR),
+    ]
+    assert {c.verdict for c in lab.comparisons()} == {core.ComparisonVerdict.WITHIN_NOISE}
+    assert len(lab.baselines()) == core.MIN_SAMPLES_WITHOUT_FLOOR, "at most two extra base runs"
+    check = final_check(lab, "a", "c1", "input-1")
+    assert check.reuses is None, "still a close call: the official check takes its own run"
+
+
+def test_three_runs_a_side_without_a_declared_floor_give_a_verdict() -> None:
+    """The agent's three runs of one input and the base's three, with a spread: a verdict."""
+    lab = Lab.of("a", floor=0.0)
+    for number, value in enumerate((110.0, 111.0, 109.0)):
+        lab.call("a", f"c{number}", "input-1")
+        lab.measure({"input-1": value, "base": 100.0})
+    last = lab.comparisons()[-1]
+    assert (last.candidate_samples, last.base_samples) == (3, 3)
+    assert last.verdict is core.ComparisonVerdict.BETTER
+    assert not core.close_call(last, core.policy_of(lab.state.run.facts))
+    assert final_check(lab, "a", "c2", "input-1").reuses is not None
+
+
+@pytest.mark.regression
+@settings(max_examples=examples(pr=20, nightly=200))
+@given(official=st.floats(min_value=1.0, max_value=400.0), reused=st.booleans())
+@example(official=80.0, reused=False)
+@example(official=80.0, reused=True)
+def test_a_failed_official_record_keeps_the_reading_its_run_reported(
+    *, official: float, reused: bool
+) -> None:
+    """The official answer states the samples' mean only for a record that passed.
+
+    A benchmark can report its metrics and then fail a check, so its FAILED record carries a
+    reading. Before, the official record was restated as the mean of the runs that passed, so
+    a failed run read as a passing number. Without ``reused`` the official check runs afresh
+    and fails; with it the agent's own run of the input failed, and the official measurement
+    re-reads that run, as the reuse rule prefers a failed run.
+    """
+    lab = Lab.of("a")
+    lab.call("a", "c1", "input-1")
+    lab.measure({"input-1": 200.0 if reused else 101.0, "base": 100.0})
+    if reused:
+        asked = lab.call("a", "c2", "input-1")
+        (failing,) = (r for r in asked if r.plan.purpose == "local-validation")
+        assert failing.request_id is not None
+        lab.ended.add(failing.request_id.root)
+        lab.state = ended_with(lab.state, failing, official, failed=True)
+        lab.measure({"base": 100.0})
+        check = final_check(lab, "a", "c2", "input-1")
+        assert check.reuses == failing.request_id
+    else:
+        check = final_check(lab, "a", "c1", "input-1")
+        assert check.reuses is None, "a close call runs afresh"
+    assert check.request_id is not None
+    lab.ended.add(check.request_id.root)
+    lab.state = ended_with(lab.state, check, official, reused=check.reuses, failed=True)
+    stated = official_reading(lab, check)
+    assert stated.value == official
+
+
+def test_an_official_run_is_reused_by_its_own_reading_not_the_answer_its_record_states() -> None:
+    """A second official measurement of the input re-reads the first official run as it ran.
+
+    The first official run of the input is the first conclusive run, so it carries the answer
+    for a later official measurement of the same input (another commit of the same tree). Its
+    ledger record states the mean of the samples, but the runtime re-reports the run's own
+    reading, so the reused record is checked against that (``run_reading``); checked against
+    the stated mean it would be refused and the measurement would run afresh.
+    """
+    lab = Lab.of("a")
+    first = final_check(lab, "a", "c1", "input-1")
+    assert first.reuses is None, "no run of the input yet"
+    lab.state = started_with(lab.state, first)
+    agent, base = lab.call("a", "c2", "input-1")
+    for request, value in ((agent, 200.0), (base, 100.0)):
+        assert request.request_id is not None
+        lab.ended.add(request.request_id.root)
+        lab.state = ended_with(lab.state, request, value)
+    assert first.request_id is not None
+    lab.ended.add(first.request_id.root)
+    lab.state = finished_with(lab.state, first, 210.0)
+    assert official_reading(lab, first).value == 205.0, "the mean of 200 and 210"
+    second = final_check(lab, "a", "c3", "input-1")
+    assert second.reuses == first.request_id
+    assert second.request_id is not None
+    lab.ended.add(second.request_id.root)
+    lab.state = ended_with(lab.state, second, 210.0, reused=first.request_id)
+    assert official_reading(lab, second).value == 205.0
+    (job,) = (j for j in lab.state.evaluation.jobs if j.submission_id == second.request_id)
+    assert job.status is core.ObservationStatus.SUCCEEDED
+    assert len(job.evidence) == 2, "every record of the re-read run was accepted"
 
 
 def fresh_base_samples(lab: Lab) -> list[core.Sample]:
@@ -681,19 +820,25 @@ def base_running(lab: Lab) -> bool:
         max_size=7,
     ),
     reload_at=st.integers(min_value=0, max_value=7),
+    floor=st.sampled_from((FLOOR, 0.0)),
 )
+@example(calls=[("a", 0, 1.01, 0.0)], reload_at=7, floor=FLOOR)
+@example(calls=[("a", 0, 1.01, 0.0), ("a", 0, 1.0, 1.0)], reload_at=1, floor=0.0)
 def test_the_base_is_measured_once_per_input_and_again_only_on_staleness_or_a_close_call(
-    calls: list[tuple[str, int, float, float]], reload_at: int
+    calls: list[tuple[str, int, float, float]], reload_at: int, floor: float
 ) -> None:
     """Over any sequence of evaluations by two attempts with the clock moving between them.
 
     A call allocates a run of the base exactly when no fresh sample of it is held and none is
     running. The only other runs of the base are the re-measures a close call earns once a
     candidate's samples end, so no base is ever measured twice for a decisive result, and a
-    close call never takes the base past ``BASE_MAX_SAMPLES`` fresh samples. A reload loses
-    nothing.
+    close call never takes the base past ``BASE_MAX_SAMPLES`` fresh samples under a declared
+    floor (one extra run) or ``MIN_SAMPLES_WITHOUT_FLOOR`` without one (two extra runs). A
+    reload loses nothing.
     """
-    lab = Lab.of("a", "b")
+    lab = Lab.of("a", "b", floor=floor)
+    policy = core.policy_of(lab.state.run.facts)
+    most = core.BASE_MAX_SAMPLES if floor else core.MIN_SAMPLES_WITHOUT_FLOOR
     values: dict[str, float] = {"base": 100.0}
     for number, (name, input_number, factor, wait) in enumerate(calls):
         if number == reload_at:
@@ -711,10 +856,10 @@ def test_the_base_is_measured_once_per_input_and_again_only_on_staleness_or_a_cl
         lab.measure(values)
         remeasures = len(lab.baselines()) - after_call
         if remeasures:
-            assert any(core.close_call(c) for c in lab.comparisons()[logged:]), (
+            assert any(core.close_call(c, policy) for c in lab.comparisons()[logged:]), (
                 "a base run beyond the first is earned by a close call"
             )
-        assert len(fresh_base_samples(lab)) <= core.BASE_MAX_SAMPLES
+        assert len(fresh_base_samples(lab)) <= most
     assert reloaded(lab.state) == lab.state
 
 

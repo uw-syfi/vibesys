@@ -9,6 +9,7 @@ from vs_core._attempt_track import (
 from vs_core._comparison import (
     BASE_MAX_SAMPLES,
     CLOSE_CALL_NOISES,
+    MIN_SAMPLES_WITHOUT_FLOOR,
     VERDICT_NOISES,
     ComparisonPolicy,
     Measured,
@@ -823,6 +824,7 @@ __all__ = [
     "MAX_TURN_SECONDS",
     "MAY_WAIT_ON",
     "MEASUREMENT_DIAGNOSTIC_LIMIT",
+    "MIN_SAMPLES_WITHOUT_FLOOR",
     "NOT_ADOPTED",
     "OPERATOR_ACTIONS",
     "PLAIN_LINE_CONVENTION",

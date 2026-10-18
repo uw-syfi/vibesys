@@ -4,22 +4,22 @@ A comparison is of the candidate's samples with the base's. These properties hol
 samples: the order they were taken in changes nothing, a unit change (scaling every value)
 changes nothing, flipping which way is better flips better and worse, more noise never turns
 a within-noise result into a verdict, and the noise never falls below what the task declares
-for the samples it has.
+for the samples it has. A task that declares no noise gets a verdict only from runs that
+measure it: three a side with a spread, judged by the Student-t quantile, so at equal means a
+verdict is about as rare as the 5% the statistic intends.
 """
 
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Literal
+import random
+from typing import Literal
 
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
 
 import vs_core.api as core
-
-if TYPE_CHECKING:
-    import random
 
 type Direction = Literal["max", "min"] | None
 
@@ -152,16 +152,15 @@ def test_the_noise_is_never_below_what_the_declared_floor_gives_the_samples_held
 def test_a_higher_floor_never_turns_an_undecided_result_into_a_verdict(
     mine: list[float], theirs: list[float], floor: float, extra: float
 ) -> None:
-    """Among floors a task declares: an undeclared floor (0) with one run a side is no estimate.
+    """Among floors a task declares. An undeclared floor (0) is not the bottom of the scale.
 
-    Such a comparison has no noise figure at all, so it gives no verdict whatever a declared
-    floor would allow (`test_one_run_a_side_and_no_declared_floor_decide_nothing`).
+    Without a declared floor the noise is estimated from the runs, so a verdict needs three
+    runs a side and the wider Student-t bar, where a declared floor uses two noises from one
+    run a side (`test_without_a_declared_floor_a_verdict_needs_three_runs_a_side_with_a_spread`).
     """
     low = compared(mine, theirs, floor=floor)
     high = compared(mine, theirs, floor=floor + extra)
-    if low.verdict is core.ComparisonVerdict.WITHIN_NOISE and (
-        floor > 0 or len(mine) + len(theirs) > 2
-    ):
+    if low.verdict is core.ComparisonVerdict.WITHIN_NOISE and floor > 0:
         assert high.verdict is core.ComparisonVerdict.WITHIN_NOISE
     assert high.noise >= low.noise - 1e-12
 
@@ -202,19 +201,118 @@ def test_one_run_a_side_and_no_declared_floor_decide_nothing(
     """
     result = compared([mine], [theirs], direction=direction)
     assert result.verdict is core.ComparisonVerdict.WITHIN_NOISE
-    assert core.close_call(result)
+    assert core.close_call(result, UNDECLARED)
 
 
+UNDECLARED = core.ComparisonPolicy()
+"""The policy of a task that declares no ``relative_noise``."""
+MIN = core.MIN_SAMPLES_WITHOUT_FLOOR
+
+
+@pytest.mark.regression
 @given(
-    mine=st.lists(VALUES, min_size=1, max_size=4),
-    theirs=st.lists(VALUES, min_size=1, max_size=4),
+    mine=st.lists(VALUES, min_size=1, max_size=6),
+    theirs=st.lists(VALUES, min_size=1, max_size=6),
     gain=st.floats(min_value=0.5, max_value=2.0),
 )
 @example(mine=[100.0, 100.0], theirs=[50.0], gain=1.0)
-def test_a_verdict_without_a_declared_floor_needs_runs_that_show_a_spread(
+@example(mine=[100.3, 100.3], theirs=[100.0, 100.0], gain=1.0)
+@example(mine=[100.3, 100.2, 100.4], theirs=[100.0, 100.0], gain=1.0)
+def test_without_a_declared_floor_a_verdict_needs_three_runs_a_side_with_a_spread(
     mine: list[float], theirs: list[float], gain: float
 ) -> None:
-    """Without a declared floor, a verdict is reached only once three runs give a spread."""
+    """With no declared floor, fewer than three runs a side decide nothing, whatever they read.
+
+    Before, one more base run (two on one side, one degree of freedom) was enough: when it read
+    what the first did, the spread was zero and a 0.3% gap was ``better`` again, and even a
+    nonzero spread from one degree of freedom judged by two noises gives a verdict at equal
+    means about 30% of the time. Such a comparison stays a close call, so it earns samples.
+    """
     result = compared([v * gain for v in mine], theirs)
-    if result.verdict is not core.ComparisonVerdict.WITHIN_NOISE:
-        assert len(mine) + len(theirs) > 2
+    if min(len(mine), len(theirs)) < MIN:
+        assert result.verdict is core.ComparisonVerdict.WITHIN_NOISE
+        assert core.close_call(result, UNDECLARED)
+
+
+@pytest.mark.regression
+@given(
+    value=VALUES,
+    other=VALUES,
+    m=st.integers(min_value=1, max_value=8),
+    n=st.integers(min_value=1, max_value=8),
+    direction=st.sampled_from(("max", "min")),
+)
+@example(value=100.3, other=100.0, m=1, n=2, direction="max")
+@example(value=101.0, other=100.0, m=MIN, n=MIN, direction="max")
+@example(value=50.0, other=100.0, m=8, n=8, direction="min")
+def test_identical_runs_without_a_declared_floor_never_give_a_verdict(
+    value: float, other: float, m: int, n: int, direction: Literal["max", "min"]
+) -> None:
+    """Runs that all read alike show no noise; without a declared floor that is no estimate.
+
+    A quantized, cached or deterministic benchmark reads the same every time. Before, the
+    second base run of such a benchmark gave a spread of zero, so a zero noise, and the sign
+    of the difference became the verdict.
+    """
+    result = compared([value] * m, [other] * n, direction=direction)
+    assert result.verdict is core.ComparisonVerdict.WITHIN_NOISE
+    assert core.close_call(result, UNDECLARED)
+
+
+T_975_AT_4 = 2.776
+"""The two-sided 95% Student-t quantile for 4 degrees of freedom (three runs a side)."""
+
+
+def test_three_runs_a_side_with_a_spread_give_a_verdict_at_the_student_t_bar() -> None:
+    """Three runs a side, no declared floor: the noise is the pooled spread, the bar ``t(4)``.
+
+    Candidate 101, 99, 100 and base 100, 102, 98 have relative deviations whose squares sum to
+    0.001 over 4 degrees of freedom, so the noise is ``sqrt(0.001 / 4) * sqrt(2 / 3)`` at a
+    ratio of one. A gain just above ``t(4)`` noises is ``better``; one between two noises and
+    ``t(4)`` noises is not, because the spread was estimated from those six runs.
+    """
+    noise = math.sqrt(0.001 / 4) * math.sqrt(2 / 3)
+    level = compared([101.0, 99.0, 100.0], [100.0, 102.0, 98.0])
+    assert math.isclose(level.noise, noise, rel_tol=1e-9)
+    assert level.verdict is core.ComparisonVerdict.WITHIN_NOISE
+    # Scaling the candidate by r keeps the spread and scales the noise by r, so a gain of
+    # k noises is the ratio r with r - 1 = k * r * noise.
+    for factor, verdict in (
+        (1 / (1 - 1.01 * T_975_AT_4 * noise), core.ComparisonVerdict.BETTER),
+        (1 / (1 - 0.99 * T_975_AT_4 * noise), core.ComparisonVerdict.WITHIN_NOISE),
+        (1 / (1 - 2.5 * noise), core.ComparisonVerdict.WITHIN_NOISE),
+        (1 / (1 + 1.01 * T_975_AT_4 * noise), core.ComparisonVerdict.WORSE),
+    ):
+        result = compared([101.0 * factor, 99.0 * factor, 100.0 * factor], [100.0, 102.0, 98.0])
+        assert result.verdict is verdict, factor
+        assert core.close_call(result, UNDECLARED) is (
+            verdict is core.ComparisonVerdict.WITHIN_NOISE
+        )
+
+
+SIMULATED = 4000
+"""Comparisons simulated per sample count: enough that 7% is several standard errors above 5%."""
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(("m", "n"), [(3, 3), (3, 5), (4, 4), (6, 6), (1, 2), (2, 2)])
+def test_at_equal_means_a_verdict_without_a_declared_floor_is_rare(m: int, n: int) -> None:
+    """At equal true means, at most about 5% of comparisons give a verdict (seeded simulation).
+
+    Every run reads 100 times one plus a normal relative noise of 2%, on both sides, so any
+    verdict is false. Before, two runs on one side and one on the other (one degree of
+    freedom) judged by two noises gave a false verdict about 30% of the time. Fewer than three
+    runs a side now give none, and three or more give about 5%: at most 7% here.
+    """
+    draw = random.Random(f"{m}:{n}")  # noqa: S311  # lint-waiver: a seeded simulation, not a secret.
+    verdicts = 0
+    for _ in range(SIMULATED):
+        mine = [100.0 * (1 + draw.gauss(0.0, 0.02)) for _ in range(m)]
+        theirs = [100.0 * (1 + draw.gauss(0.0, 0.02)) for _ in range(n)]
+        if compared(mine, theirs).verdict is not core.ComparisonVerdict.WITHIN_NOISE:
+            verdicts += 1
+    rate = verdicts / SIMULATED
+    if min(m, n) < MIN:
+        assert rate == 0
+    else:
+        assert rate <= 0.07, rate
