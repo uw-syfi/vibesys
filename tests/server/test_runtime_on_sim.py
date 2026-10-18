@@ -20,6 +20,7 @@ from tests.support.real_git import NO_GITHUB, REAL_GIT
 
 from entrypoints.production import production_runs
 from server.api.protocol import StopCommand, SubscribeRequest
+from server.events import RunInterruptedData
 from server.runtime import ServerRuntime
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.events import CoreEventType, EventStatus
@@ -507,7 +508,9 @@ def test_an_interrupted_run_is_journaled_by_the_signal_that_ended_it(
         subscriber.join(HANG_GUARD_S)
         assert not subscriber.is_alive()
         interruptions = [
-            event.data for event in runtime.journal.read() if event.type.value == "run_interrupted"
+            event.data
+            for event in runtime.journal.read()
+            if isinstance(event.data, RunInterruptedData)
         ]
         assert len(interruptions) == 1
         assert interruptions[0].signal == ending.name
