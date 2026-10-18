@@ -73,7 +73,7 @@ explains how the pieces are assembled.
    Every reply of every registered search is found through its roles, so a new reply or
    decision field fails until it declares (`test_every_decision_field_of_a_reply_declares_its_inputs`);
    a measurement the agent only copies is listed with its reason, and a role whose reply declares
-   inputs gets a case in `tests/architecture/decision_input_cases.py`.
+   inputs gets a case in the check's case table.
 5. **Domain text goes in role files** that every strategy prints in one shared
    slot. All role files get the same variable set, so read what the
    domain-section renderer passes before using a variable. A modality is
