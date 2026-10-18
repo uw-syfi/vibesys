@@ -59,6 +59,7 @@ from vs_slurm.api import (
     settlement,
     submit_step,
     sweep_unleased,
+    sweep_withdrawer,
     transitioned,
     undo_expired_withdrawal,
     validate_holder,
@@ -150,9 +151,10 @@ class SlurmLedgerAttachment:
     _guards: dict[str, asyncio.Lock] = field(default_factory=dict)
     _orphans: OrphanChecks = field(init=False)
     _timing: WithdrawalTiming = field(init=False)
-    # One withdrawer, and so one writer id, for all this process's relinquishes: a
-    # relinquish tried again knows a mark an earlier try left as its own.
+    # One withdrawer, and so one writer id, for all this process's relinquishes, and
+    # one for all its sweeps: one tried again knows a mark an earlier try left as its own.
     _withdrawer: Withdrawer = field(init=False)
+    _sweeper: Withdrawer = field(init=False)
 
     def __post_init__(self) -> None:
         """Reject a project or holder that cannot name a ledger path."""
@@ -167,6 +169,7 @@ class SlurmLedgerAttachment:
             reason=f"its run {self.holder} stopped wanting it",
             timing=self._timing,
         )
+        self._sweeper = sweep_withdrawer(self._timing, grace_seconds=self.policy.grace_seconds)
 
     def key(self, request: SlurmBatchRequest) -> str:
         """The request's idempotency key, over the setup script's content on the cluster too."""
@@ -362,7 +365,7 @@ class SlurmLedgerAttachment:
         return sweep_unleased(
             self.ledger,
             cluster,
-            timing=self._timing,
+            sweeper=self._sweeper,
             grace_seconds=self.policy.grace_seconds,
             orphans=self._orphans,
         )

@@ -513,11 +513,23 @@ def _cancel_orphans(
     return tuple(outcomes)
 
 
+def sweep_withdrawer(timing: WithdrawalTiming, *, grace_seconds: float) -> Withdrawer:
+    """The withdrawer of a process's sweeps (``sweep_unleased``): build one per process, and keep it.
+
+    Its writer id is the process's: a sweep finds a mark an earlier sweep of the
+    process left standing (its write's answer lost, its undo failed) for its
+    own, and finishes that withdrawal, as a run's relinquish does with its own.
+    """
+    return Withdrawer(
+        by=SWEEP_WITHDRAWER, reason=f"no run leased it for {grace_seconds:.0f} s", timing=timing
+    )
+
+
 def sweep_unleased(
     ledger: EvaluationLedger,
     cluster: Cluster,
     *,
-    timing: WithdrawalTiming,
+    sweeper: Withdrawer,
     grace_seconds: float,
     orphans: OrphanChecks,
 ) -> tuple[WithdrawOutcome, ...]:
@@ -533,8 +545,10 @@ def sweep_unleased(
     ended unsuccessfully settles ``failed``, and one that COMPLETED is left for
     the next ask, which collects it (only a collected result settles
     ``completed``; it costs one cluster call per sweep until then).
-    ``timing`` is the sweep's clock and transport bound (``Withdrawer``).
+    ``sweeper`` is the process's sweep withdrawer (``sweep_withdrawer``), with
+    the sweep's clock and transport bound.
     """
+    timing = sweeper.timing
     now = timing.clock.now()
 
     def sweepable(entry: LedgerEntry) -> bool:
@@ -543,7 +557,7 @@ def sweep_unleased(
         if record.state.settled:
             return False
         mark = entry.withdrawal
-        if mark is not None and not withdrawal_expired(mark, now=now):
+        if mark is not None and not sweeper.wrote(mark) and not withdrawal_expired(mark, now=now):
             return False  # another withdrawal is under way; an expired one is undone
         return isinstance(lease_verdict(entry, now=now, grace_seconds=grace_seconds), Unleased)
 
@@ -560,12 +574,7 @@ def sweep_unleased(
         if entry.unreadable_leases and not entry.record.state.settled:
             _warn_unreadable(entry)
         if sweepable(entry):
-            withdrawer = Withdrawer(
-                by=SWEEP_WITHDRAWER,
-                reason=f"no run leased it for {grace_seconds:.0f} s",
-                timing=timing,
-            )
-            outcome = _sweep_one(ledger, cluster, entry, withdrawer, still=sweepable)
+            outcome = _sweep_one(ledger, cluster, entry, sweeper, still=sweepable)
             if outcome is not None:
                 outcomes.append(outcome)
     return tuple(outcomes)
@@ -673,6 +682,7 @@ __all__ = [
     "relinquish",
     "settle",
     "sweep_unleased",
+    "sweep_withdrawer",
     "undo_expired_withdrawal",
     "withdraw",
 ]

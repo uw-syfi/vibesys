@@ -13,8 +13,6 @@ from __future__ import annotations
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-import pytest
-
 from vs_sandbox.api.slurm import SlurmLedgerAttachment
 from vs_sim.api.testing import ManualClock
 from vs_slurm.api import (
@@ -74,7 +72,6 @@ class _LosesTheFirstMark(FakeEvaluationLedger):
         return won
 
 
-@pytest.mark.xfail(strict=True, reason="r3173-recheck LOW-3: each sweep had its own writer id")
 def test_a_sweep_takes_up_the_mark_an_earlier_sweep_of_its_process_left_standing() -> None:
     """r3173-recheck LOW-3: a sweep built a new withdrawer, so a new writer id, for each key and pass."""
     with TemporaryDirectory() as directory:

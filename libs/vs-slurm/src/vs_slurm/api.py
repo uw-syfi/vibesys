@@ -127,6 +127,7 @@ from .ledger_actions import (
     relinquish,
     settle,
     sweep_unleased,
+    sweep_withdrawer,
     undo_expired_withdrawal,
     withdraw,
 )
@@ -414,6 +415,7 @@ __all__ = [
     "status_of",
     "submit_step",
     "sweep_unleased",
+    "sweep_withdrawer",
     "transitioned",
     "tree_content_identity",
     "undo_expired_withdrawal",
