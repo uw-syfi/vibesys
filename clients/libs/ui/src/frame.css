@@ -468,6 +468,11 @@ button.vs-crumb:focus-visible {
   align-items: center;
   padding: var(--space-2) var(--space-4);
 }
+@media (max-width: 950px) {
+  .vs-panes:has(> .vs-pane[data-width="master"]) > .vs-pane[data-width="fill"] > .vs-pane-header {
+    flex-wrap: wrap;
+  }
+}
 .vs-screen[data-density="compact"] .vs-pane-titles {
   flex-direction: row;
   flex-wrap: wrap;

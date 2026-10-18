@@ -19,7 +19,7 @@ test('on a 600-idea run the first row opens its idea without lineage controls', 
   await expect(first.locator('.vs-pickrow-fold, .vs-guide')).toHaveCount(0);
   expect(await ideas.getByRole('option').count()).toBeLessThan(80);
   await first.click();
-  await expect(page.getByRole('navigation', {name: 'Zoom'})).toBeVisible();
+  await expect(page.getByRole('button', {name: 'Close idea'})).toBeVisible();
 });
 
 test('at 1000 px the Now pane keeps the role and the idea name readable and says the role once', async ({

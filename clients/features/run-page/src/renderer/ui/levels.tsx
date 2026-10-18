@@ -100,11 +100,12 @@ export function IdeasWorkspace(props: LevelProps & {readonly idea: Candidate | n
           width="fill"
           enterKey={`idea ${idea.id}`}
           actions={
-            <Row gap="space-2">
+            <Row gap="space-2" wrap>
               <Button
                 size="sm"
                 variant="quiet"
-                text="Close idea"
+                icon="cross"
+                label="Close idea"
                 press={() => base.zoom({type: 'up'})}
               />
               <ModeSwitch mode={mode} options={logsOptions('Steps')} zoom={base.zoom} />

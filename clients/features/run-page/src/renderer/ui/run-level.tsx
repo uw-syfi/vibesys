@@ -169,7 +169,12 @@ function IdeasFace(props: {
   const {state, base, dispatch} = props;
   const [sort, setSort] = useState<IdeasSort>('newest');
   if (base.model.candidates.candidates.length === 0) {
-    return <EmptyState title="No ideas yet" body="Each idea the run tries shows here." />;
+    return (
+      <>
+        {props.modeControls ? <ModeSwitch mode="ideas" options={MODES} zoom={base.zoom} /> : null}
+        <EmptyState title="No ideas yet" body="Each idea the run tries shows here." />
+      </>
+    );
   }
   return (
     <>

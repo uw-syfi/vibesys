@@ -239,13 +239,9 @@ test('every level opens by click and walks back by Escape, the crumbs and Back',
   const ideas = page.getByRole('listbox', {name: 'Ideas'});
 
   // Level 1: the idea beside the ideas, with what it built on.
-  await ideas.getByRole('option', {name: /^Running Combine W1 ring with W2 padding/}).click();
+  await ideas.getByRole('option', {name: /Combine W1 ring with W2 padding/}).click();
   await expect(page.getByRole('heading', {name: 'Combine W1 ring with W2 padding'})).toBeVisible();
-  await expect(
-    page
-      .getByRole('region', {name: 'Combine W1 ring with W2 padding'})
-      .getByRole('button', {name: 'Lock-free ring with per-slot sequence numbers'}),
-  ).toBeVisible();
+  await expect(page.getByText(/^from$/)).toHaveCount(0);
   await check(page, 'ink-idea');
 
   // Level 2: a step beside the idea's steps.
@@ -364,7 +360,7 @@ test('the performance row is the same element, in the same place and size, at ev
   };
 
   const ideas = page.getByRole('listbox', {name: 'Ideas'});
-  await ideas.getByRole('option', {name: /^Running Combine W1 ring with W2 padding/}).click();
+  await ideas.getByRole('option', {name: /Combine W1 ring with W2 padding/}).click();
   await expect(page.getByRole('heading', {name: 'Combine W1 ring with W2 padding'})).toBeVisible();
   await unchanged();
   await page
@@ -401,7 +397,7 @@ test('an open idea is singled out on the chart: its dot ringed, the rest dimmed,
   expect(await emphasized(page)).toEqual({focus: [], related: [], dim: []});
 
   // A measured idea: its own dot is the focus, the other dots stay (dimmed), its base is outlined.
-  await ideas.getByRole('option', {name: /^Passed Cache-line padding/}).click();
+  await ideas.getByRole('option', {name: /Cache-line padding/}).click();
   expect(await emphasized(page)).toEqual({
     focus: ['Cache-line padding and batched enqueue'],
     related: ['Lock-free ring with per-slot sequence numbers'],
@@ -414,7 +410,7 @@ test('an open idea is singled out on the chart: its dot ringed, the rest dimmed,
 
   // An idea with no measurement singles nothing out, outlines its base, and says why in words.
   await page.keyboard.press('Escape');
-  await ideas.getByRole('option', {name: /^Running Combine W1 ring with W2 padding/}).click();
+  await ideas.getByRole('option', {name: /Combine W1 ring with W2 padding/}).click();
   expect(await emphasized(page)).toEqual({
     focus: [],
     related: ['Lock-free ring with per-slot sequence numbers'],
@@ -499,7 +495,7 @@ test('an idea’s header stays on clean lines without lineage at 900 and 1500 px
   await openRun(page, false, long);
   await page
     .getByRole('listbox', {name: 'Ideas'})
-    .getByRole('option', {name: /^Passed Cache-line padding/})
+    .getByRole('option', {name: /Cache-line padding/})
     .click();
   for (const width of [900, 1500]) {
     await page.setViewportSize({width, height: 900});
@@ -581,9 +577,13 @@ test('the Logs face lists the run’s streams by owner, and an idea shows only i
   await page.getByRole('radiogroup', {name: 'Show'}).getByText('Ideas').click();
   await page
     .getByRole('listbox', {name: 'Ideas'})
-    .getByRole('option', {name: /^Running Combine W1 ring with W2 padding/})
+    .getByRole('option', {name: /Combine W1 ring with W2 padding/})
     .click();
-  await page.getByRole('radiogroup', {name: 'Show'}).getByText('Logs').click();
+  await page
+    .locator('.vs-pane[data-width="fill"]')
+    .getByRole('radiogroup', {name: 'Show'})
+    .getByText('Logs')
+    .click();
   await expect(page.getByRole('log', {name: /benchmark/})).toContainText('repetition 1');
   await expect(page.getByRole('listbox', {name: 'Log streams'})).toHaveCount(0);
   await check(page, 'ink-logs-idea');
@@ -640,9 +640,13 @@ test('an idea’s Logs face shows its stream without a pick: the page follows wh
   await openRun(page);
   await page
     .getByRole('listbox', {name: 'Ideas'})
-    .getByRole('option', {name: /^Running Combine W1 ring with W2 padding/})
+    .getByRole('option', {name: /Combine W1 ring with W2 padding/})
     .click();
-  await page.getByRole('radiogroup', {name: 'Show'}).getByText('Logs').click();
+  await page
+    .locator('.vs-pane[data-width="fill"]')
+    .getByRole('radiogroup', {name: 'Show'})
+    .getByText('Logs')
+    .click();
   await expect(page.getByRole('log', {name: /benchmark/})).toContainText('repetition 1: 41.2');
 });
 

@@ -113,7 +113,10 @@ async function backToIdea(page: Page): Promise<void> {
 /** The run level again, by its crumb, from wherever the walk is. */
 async function backToRun(page: Page): Promise<void> {
   await settled(page);
-  await page.getByRole('navigation', {name: 'Zoom'}).getByRole('button', {name: 'Run'}).click();
+  const close = page.getByRole('button', {name: 'Close idea'});
+  if (await close.isVisible()) await close.click();
+  else
+    await page.getByRole('navigation', {name: 'Zoom'}).getByRole('button', {name: 'Run'}).click();
   await expect(page.getByRole('listbox', {name: 'Ideas'})).toBeVisible();
 }
 
