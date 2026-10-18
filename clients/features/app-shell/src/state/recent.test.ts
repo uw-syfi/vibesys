@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import type {HostListing, RunDigestEntry, RunDigestsReply} from '@vibesys/hosts';
+import type {HostListing, HostRun, RunDigestEntry, RunDigestsReply} from '@vibesys/hosts';
 import type {RecentRun} from '@vibesys/runs';
 import {
   type Clock,
@@ -34,6 +34,62 @@ describe('formatWhen', () => {
     const tokyo: Clock = {now: NOW, timeZone: 'Asia/Tokyo'};
     // 18:00 UTC on the 16th is 03:00 on the 17th in Tokyo, where it is already the 17th at noon UTC.
     expect(formatWhen(Date.parse('2026-10-16T18:00:00Z'), tokyo)).toBe('03:00');
+  });
+});
+
+describe('when a Recent row says a run began', () => {
+  const WORDS = '3.83×';
+  const NO_TIME = [0, -1, -86_400_000, Number.NaN, Number.NEGATIVE_INFINITY];
+
+  function detailOf(createdAt: number, startedAt: number | null): string | undefined {
+    const ended: HostRun[] =
+      startedAt === null
+        ? []
+        : [
+            {
+              id: 's1',
+              projectRoot: '/p/queue-rs',
+              runId: 'r1',
+              status: 'completed',
+              phase: 'completed',
+              paused: null,
+              end: {outcome: 'adopted', reason: 'adopted the best', resumable: false},
+              startedAt,
+              reason: null,
+            },
+          ];
+    const first = sidebarStep(SIDEBAR_EMPTY, {
+      type: 'listing',
+      listing: {...listed(), ended},
+    });
+    const opened = sidebarStep(first.state, {
+      type: 'recent',
+      recent: [recent('r1', '/p/queue-rs', 'mpmc', 1)],
+    });
+    const answered = answer(opened.state, opened.requests, new Map([['r1', read({createdAt})]]));
+    return recentRows(answered, CLOCK).rows[0]?.detail;
+  }
+
+  test('a missing or non-positive time is never worded as a date', () => {
+    for (let seed = 1; seed <= 60; seed += 1) {
+      const bad = NO_TIME[seed % NO_TIME.length] as number;
+      const badSeconds = Number.isFinite(bad) ? bad / 1000 : 0;
+      for (const startedAt of [null, badSeconds]) {
+        const detail = detailOf(bad, startedAt);
+        expect(detail).toBe(WORDS);
+        expect(detail).not.toMatch(/19(69|70)/);
+      }
+    }
+  });
+
+  test('a positive time is worded as usual, from the digest first and the server otherwise', () => {
+    for (let seed = 1; seed <= 60; seed += 1) {
+      const ago = ((seed * 7919) % 5000) * 60_000 + 1;
+      const at = NOW - ago;
+      expect(detailOf(at, null)).toBe(`${formatWhen(at, CLOCK)} · ${WORDS}`);
+      const server = NOW - ago * 2;
+      expect(detailOf(Number.NaN, server / 1000)).toBe(`${formatWhen(server, CLOCK)} · ${WORDS}`);
+    }
   });
 });
 

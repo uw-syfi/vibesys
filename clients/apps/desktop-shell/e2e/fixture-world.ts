@@ -11,6 +11,7 @@ import {installFakeFixtureServer} from './fake-fixture-server.js';
 import {type FakeHistorySeed, installFakeHistory} from './fake-history.js';
 import {installFakeRun} from './fake-run.js';
 import {type FakeSummarySpanSeed, installFakeSummarySpan} from './fake-summary-span.js';
+import {STARTED_AT} from './started-at.js';
 
 const PROJECT = '/work/queue-rs';
 const INSTANCE = '00000000000a';
@@ -54,7 +55,7 @@ function server(fixture: RunFixture): Record<string, unknown> {
     phase,
     paused: null,
     end: end === undefined ? null : {...end, resumable: false},
-    startedAt: 1,
+    startedAt: STARTED_AT,
     reason: null,
   };
 }

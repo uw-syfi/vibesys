@@ -8,6 +8,7 @@ import {
 } from './fake-bridge.js';
 import {type FakeRunSeed, installFakeRun} from './fake-run.js';
 import {type FakeServerSeed, installFakeServer} from './fake-server.js';
+import {STARTED_AT} from './started-at.js';
 
 /**
  * The Run screen's journey against the Fake bridge and a fake run that reports its startup steps
@@ -33,7 +34,7 @@ function server(phase: string, end: unknown = null): Record<string, unknown> {
     phase,
     paused: null,
     end,
-    startedAt: 1,
+    startedAt: STARTED_AT,
     reason: null,
   };
 }

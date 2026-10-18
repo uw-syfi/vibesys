@@ -6,6 +6,7 @@ import {type FakeBridgeSeed, installFakeBridge, installFakeMachines} from './fak
 import {lineageRun} from './fake-lineage.js';
 import {installFakeRun} from './fake-run.js';
 import {installFakeServer} from './fake-server.js';
+import {STARTED_AT} from './started-at.js';
 
 const PROJECT = '/home/me/vibesys-projects/queue-rs';
 const INSTANCE = '00000000000a';
@@ -27,7 +28,7 @@ const SEED: FakeBridgeSeed = {
           phase: 'running',
           paused: null,
           end: null,
-          startedAt: 1,
+          startedAt: STARTED_AT,
           reason: null,
         },
       ],

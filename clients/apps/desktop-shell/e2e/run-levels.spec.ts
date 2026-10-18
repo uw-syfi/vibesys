@@ -11,6 +11,7 @@ import {installFakeLive, moreTurnEvents, turnReplyEvent} from './fake-live.js';
 import {installFakeRun} from './fake-run.js';
 import {type FakeServerSeed, installFakeServer} from './fake-server.js';
 import {judgeEvents, RUN_ID, traceEvents, turnEvents, W5_GATE} from './fake-trace.js';
+import {STARTED_AT} from './started-at.js';
 
 /**
  * The Run screen's levels against the Fake bridge and a fake run server whose stream carries a
@@ -36,7 +37,7 @@ function server(phase: string, end: unknown = null): Record<string, unknown> {
     phase,
     paused: null,
     end,
-    startedAt: 1,
+    startedAt: STARTED_AT,
     reason: null,
   };
 }

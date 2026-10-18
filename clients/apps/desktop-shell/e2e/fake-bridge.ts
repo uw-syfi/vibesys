@@ -364,9 +364,11 @@ export function installFakeNewRun(seed: FakeBridgeSeed): void {
       const none = {kind: 'listed', host, live: [], ended: [], unreadable: [], unverified: []};
       const current = fakeHost.listingOf(host) ?? (none as HostListing);
       const run = {id: instanceId, projectRoot: inputs.project, runId, status: 'running'};
+      // This function runs in the page, where `STARTED_AT` (started-at.ts) is out of reach: the same moment.
+      const startedAt = 1_792_000_000;
       fakeHost.listing({
         ...current,
-        live: [...current.live, {...run, phase: 'running', paused: null, end: null, startedAt: 1}],
+        live: [...current.live, {...run, phase: 'running', paused: null, end: null, startedAt}],
       });
       return ok({runId, instanceId});
     },

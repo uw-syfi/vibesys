@@ -4,6 +4,7 @@ import {type FakeBridgeSeed, installFakeBridge, installFakeMachines} from './fak
 import {installFakeRun} from './fake-run.js';
 import {type FakeServerSeed, installFakeServer} from './fake-server.js';
 import {judgeEvents, RUN_ID, traceEvents, turnEvents} from './fake-trace.js';
+import {STARTED_AT} from './started-at.js';
 import {drawnUnderWindowControls, type FakeHostWindow, open, SEED, sidebar} from './world.js';
 
 /**
@@ -40,7 +41,7 @@ const WORLD: FakeBridgeSeed = {
           phase: 'running',
           paused: null,
           end: null,
-          startedAt: 1,
+          startedAt: STARTED_AT,
           reason: null,
         },
       ],

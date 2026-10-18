@@ -4,6 +4,7 @@ import {type FakeBridgeSeed, installFakeBridge, installFakeMachines} from './fak
 import {installFakeRun} from './fake-run.js';
 import {type FakeServerSeed, installFakeServer} from './fake-server.js';
 import {judgeEvents, RUN_ID, traceEvents, turnEvents, usageEvents, W5_GATE} from './fake-trace.js';
+import {STARTED_AT} from './started-at.js';
 
 /**
  * The Agents face of the Run screen against the Fake bridge and a fake run server whose span
@@ -27,7 +28,7 @@ function server(phase: string, end: unknown = null): Record<string, unknown> {
     phase,
     paused: null,
     end,
-    startedAt: 1,
+    startedAt: STARTED_AT,
     reason: null,
   };
 }

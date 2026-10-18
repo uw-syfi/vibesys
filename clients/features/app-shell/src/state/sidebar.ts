@@ -595,10 +595,18 @@ function reading(
   };
 }
 
-/** When a Recent run began: its digest's creation time, else its server's start. */
+/** A time is known when it is a moment after the epoch; 0, negatives and NaN stand for "not recorded". */
+function known(ms: number): number | null {
+  return Number.isFinite(ms) && ms > 0 ? ms : null;
+}
+
+/**
+ * When a Recent run began: its digest's creation time, else its server's start, else unknown. An
+ * unknown time is never worded as a date.
+ */
 function beganAt(entry: RunDigestEntry | undefined, ended: HostRun | undefined): number | null {
-  if (entry !== undefined && Number.isFinite(entry.createdAt)) return entry.createdAt;
-  return ended === undefined ? null : ended.startedAt * 1000;
+  const created = entry === undefined ? null : known(entry.createdAt);
+  return created ?? (ended === undefined ? null : known(ended.startedAt * 1000));
 }
 
 /** What the Recent row of `recent` says, from the registry's record of its end and its digest. */

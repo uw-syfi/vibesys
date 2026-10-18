@@ -4,6 +4,7 @@ import {type FakeBridgeSeed, installFakeBridge, installFakeMachines} from './fak
 import {installFakeRun} from './fake-run.js';
 import {prototypeRun} from './fake-run-data.js';
 import {type FakeServerSeed, installFakeServer} from './fake-server.js';
+import {STARTED_AT} from './started-at.js';
 
 /**
  * The Run screen's live connection against the Fake bridge and a fake run server: selecting a live
@@ -29,7 +30,7 @@ function server(phase: string, paused: string | null = null): Record<string, unk
     phase,
     paused,
     end: null,
-    startedAt: 1,
+    startedAt: STARTED_AT,
     reason: null,
   };
 }

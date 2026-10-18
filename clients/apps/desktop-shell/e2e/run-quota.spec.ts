@@ -3,6 +3,7 @@ import {expect, type Page, test} from '@playwright/test';
 import {type FakeBridgeSeed, installFakeBridge, installFakeMachines} from './fake-bridge.js';
 import {installFakeRun} from './fake-run.js';
 import {type FakeServerSeed, installFakeServer} from './fake-server.js';
+import {STARTED_AT} from './started-at.js';
 
 /**
  * The quota banner against the Fake bridge and a fake run paused on a usage limit: it names the
@@ -32,7 +33,7 @@ const LIVE = {
   phase: 'paused',
   paused: 'quota',
   end: null,
-  startedAt: 1,
+  startedAt: STARTED_AT,
   reason: null,
 };
 

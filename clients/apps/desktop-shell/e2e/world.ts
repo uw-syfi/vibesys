@@ -7,6 +7,7 @@ import {
   installFakeMachines,
   installFakeNewRun,
 } from './fake-bridge.js';
+import {STARTED_AT} from './started-at.js';
 
 export interface FakeHostWindow extends Window {
   fakeHost: {
@@ -34,7 +35,7 @@ export function server(id: string, runId: string, phase: string): Record<string,
     phase,
     paused,
     end,
-    startedAt: 1,
+    startedAt: STARTED_AT,
     reason: null,
   };
 }
