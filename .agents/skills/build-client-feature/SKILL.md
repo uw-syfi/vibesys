@@ -74,11 +74,10 @@ core; it owns sockets, timers and processes.
    lifecycle; read the web app's entrypoint for the working composition.
    Features render the session's types and never re-implement start-up,
    recovery or snapshot fencing. `feature-transport-is-type-only` fails a
-   feature that imports transport values. The TUI predates this and folds
-   events through `@vibesys/run-state` directly.
+   feature that imports transport values.
 8. **Consume the protocol; do not redefine it.** Import message types from
    `@vibesys/contracts` and turn wire text into them only through its
-   validators; never edit its generated bindings. The `tui_quality` check
+   validators; never edit its generated bindings. The `clients_quality` check
    group regenerates the bindings and fails on a diff.
 9. **Desktop: respect the runtimes.** Main-process code is a feature's
    `./main` entry or the desktop main app; a preload imports workspace
@@ -86,13 +85,10 @@ core; it owns sockets, timers and processes.
    parsers. `check_package_graph` fails by rule name (`preload-sandbox`,
    `runtime-reachability`), and `desktop-preloads-import-only-ipc-and-electron`
    covers preloads.
-10. **TUI** (deprecated): keep OpenTUI in `ui/`
-    (`tui-opentui-is-confined-to-ui-and-composition-root`); follow
-    [references/tui-conventions.md](references/tui-conventions.md).
-11. **Build, check, test with Turborepo** (from the clients workspace root): `pnpm check:ts`,
+10. **Build, check, test with Turborepo** (from the clients workspace root): `pnpm check:ts`,
     `pnpm check:ts-architecture`, `pnpm check:knip`, `pnpm check:clients`,
     `pnpm test:clients`; `./scripts/check_clients.sh` runs CI's client checks together.
-12. **Before opening a pull request that changes what a user sees, run the
+11. **Before opening a pull request that changes what a user sees, run the
     `verify-desktop-ui` skill**: replay fixtures through the built app, pass the
     screen checks, attach the contact sheet, judge the screens. The Run screen
     lives in `@vibesys/feature-run-page` (`./state`, `./renderer`) and is
@@ -115,8 +111,7 @@ core; it owns sockets, timers and processes.
 - The Bun test runner fails a run that collected fewer test files than the
   package holds, and bounds each test only as a hang guard. Unenforced: keep
   tests fast by driving time with a fake clock.
-- TUI layout bugs get a `createTestRenderer` test at a fixed size; app
-  journeys get Playwright tests in each app's end-to-end suite, which CI runs.
+- App journeys get Playwright tests in each app's end-to-end suite, which CI runs.
   Unenforced: which journeys need a browser test is judgment.
 - A bug fix carries a regression test that fails at the merge base.
   Unenforced: CI runs only the head; state the merge-base result in the PR.
@@ -127,8 +122,7 @@ core; it owns sockets, timers and processes.
   retirement, the gateway bootstrap, an unterminated helper line. Unenforced: step 5.
 - A late reply overwrites newer state: stale chat menu results, stale thread
   creation, a superseded snapshot load. Machines make this structural
-  (`features-no-hand-rolled-control`); the TUI uses a latest-wins query owner,
-  Unenforced there.
+  (`features-no-hand-rolled-control`).
 - Work outlives its owner: subscriptions left open at shutdown, abandoned relay
   dials, an ssh master attempt not killed on release. Unenforced: step 4.
 - A gap between checking `aborted` and listening lost a cancellation; use

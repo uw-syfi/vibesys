@@ -11,7 +11,6 @@ through pnpm workspaces, linted by Biome.
 | No patching | No mechanical check yet; reviewers reject `mock`, `mock.module` and `spyOn` |
 | Fakes | An in-memory implementation beside the interface, shared by consumers |
 | Exemption | `// test-isolation: <reason>` on the site's line or the line above |
-| Geometry symptoms in the TUI | Reproduce through the OpenTUI test renderer (`createTestRenderer` from `@opentui/core/testing`), not a formatter unit test |
 
 ## Contract suites
 

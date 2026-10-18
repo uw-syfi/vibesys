@@ -9,7 +9,7 @@ matching the changed surfaces.
 - [Correctness, Failure, And Lifecycle](#correctness-failure-and-lifecycle)
 - [Contracts And Compatibility](#contracts-and-compatibility)
 - [Python 3.12](#python-312)
-- [TypeScript TUI](#typescript-tui)
+- [TypeScript clients](#typescript-clients)
 - [Go, Rust, C, And C++ Evaluators](#go-rust-c-and-c-evaluators)
 - [Configuration, Features, And Generated Files](#configuration-features-and-generated-files)
 - [Prompts, Templates, And Agent Skills](#prompts-templates-and-agent-skills)
@@ -118,11 +118,11 @@ Ask of new abstractions:
   structure. When relevant, run focused tests, `./scripts/check_format.sh`,
   `./scripts/check_lint.sh`, and `./scripts/check_types.sh` for affected typed packages.
 
-## TypeScript TUI
+## TypeScript clients
 
 - Preserve the Python event/schema models as the protocol source of truth;
   regenerate client schema and types instead of hand-editing generated files.
-- Keep protocol data semantic and rendering/UI state in the terminal UI client.
+- Keep protocol data semantic and rendering/UI state in the desktop client.
   Validate missing, duplicate, out-of-order, reconnect, and terminal events in
   session state transitions.
 - Protocol-defined closed sets (run status, event kinds, verdicts) must reach
@@ -132,9 +132,8 @@ Ask of new abstractions:
   unchecked indexed access, exhaustive control flow, and unused checks. Do not
   use assertions or `any` to bypass uncertain protocol states.
 - Check listener/timer/subscription teardown, asynchronous races, stale render
-  state, terminal width and Unicode handling, and non-interactive/headless use.
-- Run root Biome checks plus `pnpm --filter @vibesys/tui check` and focused
-  Vitest tests when the diff touches the client.
+  state, window size and Unicode handling, and non-interactive/headless use.
+- Run root Biome checks plus focused package checks and tests when the diff touches a client.
 
 ## Go, Rust, C, And C++ Evaluators
 
@@ -231,10 +230,7 @@ take the wrong action. Do not require prose churn for a purely internal change.
 - For a bug fix, require a regression test that fails at the merge base at
   the lowest layer that reproduces the reported symptom. Reject a test that
   passes unchanged on the pre-fix code or that restates the fix's constants
-  in the test body. For TUI symptoms stated in terminal geometry, the layer
-  is the OpenTUI test renderer (`createTestRenderer`); a pure-function test
-  over a formatter is not evidence. See the regression-test table in
-  `docs/contributing/tui-architecture.md`.
+  in the test body.
 - Test application configuration and implementation separately, then add a
   focused wiring test when their connection changes.
 - Require one contract suite per I/O interface, shipped by its owning library

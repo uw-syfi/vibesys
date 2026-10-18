@@ -21,7 +21,7 @@ labels. Apply them in the order written; the first matching bucket wins.
 | --- | --- | --- |
 | `mergeable` | GitHub's merge computation | `UNKNOWN` is transient. Re-query with `gh pr view N --json mergeable` after a few seconds; treat persistent `UNKNOWN` as unverified, not as clean. |
 | `ci` | Rollup of the head commit's checks | `none` usually means CI has not run for a fork or the head was force-pushed moments ago. |
-| `failing_checks` | Names of failed checks | Repository check names: `python-checks` (format, lint, boundaries, doc links), `typecheck`, `tui` (TypeScript lint, boundaries, generated bindings, tests, build), `queue-native`, `test (3.12)`, `sandbox-linux`, `sandbox-macos`, `ci-budget`, `validate-examples`, plus Codecov patch coverage. |
+| `failing_checks` | Names of failed checks | Repository check names: `python-checks` (format, lint, boundaries, doc links), `typecheck`, `clients` (TypeScript lint, boundaries, generated bindings, tests, build), `queue-native`, `test (3.12)`, `sandbox-linux`, `sandbox-macos`, `ci-budget`, `validate-examples`, plus Codecov patch coverage. |
 | `waiting_on` | Heuristic owner of the next move | See [Who Acts Next](#who-acts-next). |
 | `is_trunk_base` / `stack` | Native stack membership | `stack` is populated only for PRs whose base is not trunk or whose body mentions stacking. Base not trunk with `stack: null` means an unregistered dependency. |
 | `template` | PR body headings from `.github/pull_request_template.md` | `unfilled: true` means an HTML comment from the template is still present. |
