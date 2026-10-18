@@ -18,14 +18,15 @@ from .ledger import (
     LedgerRecord,
     UnreadableLease,
     WithdrawalMark,
+    WithdrawalRevision,
     WithdrawalUndone,
     check_transition,
     check_withdrawal,
     decode_lease,
     decode_record,
-    decode_withdrawal,
     encode,
     entry_of,
+    read_withdrawal_revision,
     validate_holder,
     validate_key,
     validate_project,
@@ -87,7 +88,10 @@ class RemoteEvaluationLedger:
         lease) is absent, never malformed: each file is read in one ``cat`` whose
         failure skips it. A lease that is there but cannot be decoded is reported
         in ``unreadable_leases``, with its file's modification time; it never
-        fails the read. A time ``date -r`` cannot read is infinite: the lease holds.
+        fails the read. A withdrawal revision that cannot be decoded is a
+        withdrawal under way until one claim window after that time
+        (``read_withdrawal_revision``). A time ``date -r`` cannot read is
+        infinite: the lease, or the withdrawal, holds.
         """
         directory = self._key_directory(key)
         quoted = shlex.quote(directory.as_posix())
@@ -102,7 +106,7 @@ class RemoteEvaluationLedger:
         if not lines or lines[-1] != _END:
             raise LedgerError.malformed_reply("read")
         revisions: list[tuple[int, int, LedgerRecord]] = []
-        withdrawals: list[tuple[int, int, WithdrawalMark | WithdrawalUndone]] = []
+        withdrawals: list[tuple[int, int, WithdrawalRevision]] = []
         leases: list[LedgerLease] = []
         unreadable: list[UnreadableLease] = []
         for line in lines[:-1]:
@@ -120,9 +124,9 @@ class RemoteEvaluationLedger:
                 raise LedgerError.malformed_reply("read")
             attempt, revision = int(numbered["attempt"]), int(numbered["revision"])
             if numbered["kind"] == "withdrawal":
-                withdrawal = decode_withdrawal(document, path=path)
-                if withdrawal.attempt != attempt:
-                    raise LedgerError.unreadable(path, "the withdrawal names another attempt")
+                withdrawal = read_withdrawal_revision(
+                    document, path=path, attempt=attempt, written_at=_written_at(written)
+                )
                 withdrawals.append((attempt, revision, withdrawal))
                 continue
             record = decode_record(document, path=path)

@@ -306,7 +306,6 @@ _UNREADABLE_WITHDRAWALS = (
 )
 
 
-@pytest.mark.xfail(strict=True, reason="r3173-recheck LOW-4: one such file fails the whole read")
 @pytest.mark.parametrize("document", _UNREADABLE_WITHDRAWALS)
 def test_a_withdrawal_revision_this_build_cannot_read_is_a_withdrawal_under_way(
     case: _Case, document: str
@@ -335,7 +334,6 @@ def test_a_withdrawal_revision_this_build_cannot_read_is_a_withdrawal_under_way(
     assert isinstance(submit_step(undone, now=held_until + 1), CheckJob | AttachJob)
 
 
-@pytest.mark.xfail(strict=True, reason="r3173-recheck LOW-4: one such file fails the whole read")
 @pytest.mark.parametrize("document", _UNREADABLE_WITHDRAWALS)
 def test_a_withdrawal_revision_this_build_cannot_read_stands_only_as_its_attempts_newest(
     case: _Case, document: str
