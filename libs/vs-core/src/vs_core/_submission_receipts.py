@@ -1,9 +1,10 @@
-"""Recording a measurement submission's observation on its budget receipt.
+"""A measurement submission's conclusion, and recording its observation on its budget receipt.
 
 Split from ``vs_core._measurements`` so each module stays within the file-length ceiling.
-A receipt keeps the submission's latest observation and the failure class core accepts for
-it; the helpers here are pure functions of the committed facts and never import the
-measurement reducer.
+``conclusive`` and ``same_conclusion`` are the one definition of when a submission has
+ended and when two views of it state the same end. A receipt keeps the submission's latest
+observation and the failure class core accepts for it; the helpers here are pure functions
+of the committed facts and never import the measurement reducer.
 """
 
 from __future__ import annotations
@@ -34,7 +35,13 @@ if TYPE_CHECKING:
     from .types.kernel import EvaluationContext
     from .types.records import RequestRecord
 
-__all__ = ["canonical_failure", "conclusive", "job_budget", "submission_receipt"]
+__all__ = [
+    "canonical_failure",
+    "conclusive",
+    "job_budget",
+    "same_conclusion",
+    "submission_receipt",
+]
 
 
 def canonical_failure(
@@ -71,6 +78,32 @@ def conclusive(observation: Observation | None) -> bool:
         observation is not None
         and observation.terminal
         and observation.status not in (ObservationStatus.UNKNOWN, ObservationStatus.PENDING)
+    )
+
+
+_READ_AGAIN = ("event_id", "sequence", "observed_at")
+"""What a later reading of one end changes: which event read it, and when."""
+
+
+def same_conclusion(job: Observation | None, recorded: Observation | None) -> bool:
+    """Whether a job's view of its end states the end that ``recorded`` holds.
+
+    The one comparison of a job's observation with an observation recorded of it elsewhere:
+    its submission's ledger row, a release proof, a wake. The ledger takes the job's first
+    conclusive observation as its submission's own and keeps it
+    (`vs_core._measurements._ended`), while the job takes every later one: a poll that was
+    already in flight when the job ended answers again with the same outcome (#3124). Such a
+    reading is the same end read later, at a newer sequence, event and time. Any other
+    difference, a job view older than the record, or a view that is not a conclusion, is not.
+    """
+    if job is None or recorded is None:
+        return job == recorded
+    if job == recorded:
+        return True
+    if not (conclusive(job) and conclusive(recorded)) or job.sequence <= recorded.sequence:
+        return False
+    return job.model_copy(update={field: getattr(recorded, field) for field in _READ_AGAIN}) == (
+        recorded
     )
 
 

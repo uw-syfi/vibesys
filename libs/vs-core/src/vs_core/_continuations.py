@@ -16,6 +16,7 @@ from ._evaluation_history import attempt_settled, produce_history
 from ._proofs import continues_admitted_work
 from ._registry import ContractError
 from ._session_scope import dispatching_request
+from ._submission_receipts import same_conclusion
 from ._wait_clock import Bound, wait_bounds
 from .types.attempts import (
     AttemptEvaluationHistoryUpdated,
@@ -1234,7 +1235,8 @@ def _changed(
         job = next(
             job for job in _jobs(state, continuation) if job.resource_id == event.resource_id
         )
-        if job.observation != event.observation:
+        # A wake may carry an earlier reading of the job's end than the job holds now.
+        if not same_conclusion(job.observation, event.observation):
             continue
         _job_ownership(state, context, continuation)
         _timeout_proof(continuation)

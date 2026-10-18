@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from ._acquisition_stall import is_stalled_acquisition
 from ._deadlines import cleanup
+from ._submission_receipts import same_conclusion
 from .types.attempts import (
     AttemptCheckpoint,
     AttemptClosure,
@@ -1062,7 +1063,7 @@ def _job_proof(
             source = job.request_id if hasattr(job, "request_id") else job.submission_id
             return (
                 job.scope == _scope(owner)
-                and job.observation == observation
+                and same_conclusion(job.observation, observation)
                 and source == observation.request_id
                 and _typed_job_released(context, job)
             )
@@ -1694,7 +1695,7 @@ def _known_job_observation(
     return any(
         job.scope == _scope(owner)
         and job.resource_id == observation.resource_id
-        and job.observation == observation
+        and same_conclusion(job.observation, observation)
         and (job.request_id if isinstance(job, RegisteredOwnedJob) else job.submission_id)
         == observation.request_id
         for job in (*context.evaluation.jobs, *context.evaluation.registered_jobs)
