@@ -661,7 +661,6 @@ def _strategy_finish(state: core.CoreState, mode: core.StopMode) -> core.Decisio
     return core.DecisionSubmitted(decision=finish, expected_revision=state.revision)
 
 
-@pytest.mark.xfail(strict=True, reason="periodic-1330 MED-2: core keeps the first stop's mode")
 @pytest.mark.regression
 @settings(max_examples=examples(pr=6, nightly=300), deadline=None, database=None)
 @example(count=1, stops=[core.StopMode.DRAIN, core.StopMode.CANCEL], finish_at=1, restart=False)
@@ -694,10 +693,8 @@ def test_a_stop_only_escalates_whatever_order_its_requests_come_in(
         if not finished and (index >= finish_at or mode is None):
             finished = True
             run.feed(_strategy_finish(run.state, stops[0] if index else core.StopMode.DRAIN))
-            run.answer_now()
         if mode is not None and run.state.run.status != core.RunStatus.TERMINAL:
             run.feed(_operator_stop(index, mode, run.now))
-            run.answer_now()
         if restart:
             run.state = _reload(run.state)
     run.mode = core.StopMode.CANCEL if core.StopMode.CANCEL in stops else core.StopMode.DRAIN

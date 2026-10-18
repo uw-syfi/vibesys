@@ -32,11 +32,14 @@ from ._ownership import cleanup_pending
 from ._proofs import (
     Proven,
     accepted_receipt_for,
+    committed_stop,
     descriptor_matches,
     observation_for,
     occupied_episode,
     operation_for,
     request_dependency_status,
+    requested_stop_mode,
+    stop_mode,
 )
 from ._registry import ContractError
 from ._routing import SIGNAL_ORDER, event_area
@@ -84,6 +87,8 @@ from .types.common import (
     Scope,
     SettlementId,
     SignalCycleError,
+    StopMode,
+    escalate_stop,
 )
 from .types.evaluation import (
     ContinuationPhase,
@@ -1037,7 +1042,10 @@ def _decision_signal(state: CoreState, decision: Command) -> tuple[Signal, ...]:
         case ProposeWinner():
             signals = (WinnerProposed(selection=decision.selection),)
         case Finish():
-            signals = (AdmissionControl(action=decision.mode),)
+            # The search's Finish carries the mode it read from the first stop; a cancel the
+            # run recorded since escalates it, so the closing run cancels from its start.
+            mode = escalate_stop(requested_stop_mode(state.run), StopMode(decision.mode))
+            signals = (AdmissionControl(action=mode.value),)
         case Operation():
             signals = (_operation_prepared(state, decision),)
         case _:
@@ -1279,6 +1287,32 @@ def _stop_control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) 
     )
 
 
+def _escalated(before: CoreState, result: Transition, dispatch: Dispatch) -> Transition:
+    """Apply a stop control that turned a closing run's drain into a cancel.
+
+    A stop only escalates (``stop_mode``). A cancel recorded once a drain Finish committed
+    cancels at once what the drain was letting finish: the run's queued and running
+    episodes, its own jobs and its sessions, as a cancel Finish does when it commits. A
+    stop recorded before any Finish needs nothing here: the Finish applies the mode in
+    force when it commits (``_decision_signal``).
+    """
+    after = result.state
+    if (
+        stop_mode(before.run) is not StopMode.DRAIN
+        or stop_mode(after.run) is not StopMode.CANCEL
+        or after.run.status != RunStatus.CLOSING
+        or not isinstance(committed_stop(after.run), Proven)
+    ):
+        return result
+    cancelled = propagate(after, (AdmissionControl(action="cancel"),), dispatch)
+    return cancelled.model_copy(
+        update={
+            "requests": (*result.requests, *cancelled.requests),
+            "events": (*result.events, *cancelled.events),
+        }
+    )
+
+
 def _finish_mode(control: ControlInput) -> Literal["drain", "cancel"]:
     """The operator's choice, given with the stop; core never picks one."""
     if control.mode is None:
@@ -1318,10 +1352,10 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
         if previous != event.control:
             raise ContractError(("control_id",), "control identity payload conflict")
         if event.control.action == "stop":
-            return _stop_control(state, event, dispatch)
+            return _escalated(state, _stop_control(state, event, dispatch), dispatch)
         return Transition(state=state)
     if event.control.action == "stop":
-        return _stop_control(state, event, dispatch)
+        return _escalated(state, _stop_control(state, event, dispatch), dispatch)
     refusal = control_refusal(state, event.control)
     if refusal is not None:
         raise refusal

@@ -72,6 +72,7 @@ from vs_core._projection import (
     session_view,
     settlement_view,
 )
+from vs_core._proofs import stop_mode
 from vs_core._registry import (
     ENVELOPE_SCHEMA_VERSION,
     ClosedRecordContradictionError,
@@ -412,6 +413,7 @@ from vs_core.types.common import (
     Value,
     WorkspaceMode,
     WorkspaceRef,
+    escalate_stop,
 )
 from vs_core.types.evaluation import (
     MEASUREMENT_DIAGNOSTIC_LIMIT,
@@ -1456,6 +1458,7 @@ __all__ = [
     "effect_resolution",
     "effect_verdict",
     "encode_json",
+    "escalate_stop",
     "evaluation_of",
     "evidence_view",
     "flow",
@@ -1500,6 +1503,7 @@ __all__ = [
     "span_changes",
     "stands_after",
     "step",
+    "stop_mode",
     "subjects",
     "suspension_refusal",
     "terms_policy",

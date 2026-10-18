@@ -40,6 +40,7 @@ from ._proofs import (
     operation_for,
     released_owner,
     request_matches,
+    stop_mode,
     submission_budget_for,
 )
 from ._registry import ContractError
@@ -76,6 +77,7 @@ from .types.common import (
     RevisionRef,
     RunStatus,
     Scope,
+    StopMode,
 )
 from .types.evaluation import (
     MEASUREMENT_DIAGNOSTIC_LIMIT,
@@ -1669,7 +1671,8 @@ def _cancelling_scope(context: EvaluationContext) -> Scope | None:
     """
     match committed_stop(context.run):
         case Proven(value=stop) if context.run.status == RunStatus.CLOSING and (
-            stop.mode == "cancel" or context.run.now_at >= context.run.deadline_at
+            stop_mode(context.run) is StopMode.CANCEL
+            or context.run.now_at >= context.run.deadline_at
         ):
             return stop.scope
         case _:
