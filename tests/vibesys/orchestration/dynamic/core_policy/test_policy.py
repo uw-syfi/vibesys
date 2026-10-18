@@ -398,25 +398,6 @@ def test_measurement_plans_carry_dedicated_resources_only_when_the_executor_decl
     assert made.facts.dedicated_measurement_resources is exclusive
 
 
-@pytest.mark.parametrize("opted_in", [False, True])
-def test_the_tasks_reuse_opt_in_reaches_the_facts_and_changes_the_recipe_identity(
-    tmp_path: Path, *, opted_in: bool
-) -> None:
-    """``[benchmark] reuse_agent_run`` is read into the plan the run's facts and recipe come from."""
-
-    def made(*, reuse: bool) -> CorePlan:
-        plan = TrustedEvaluationPlan(
-            accuracy_command="true", accuracy_timeout_seconds=11, reuse_agent_run=reuse
-        )
-        return plan_of(resolved(tmp_path, plan=plan))
-
-    chosen, other = made(reuse=opted_in), made(reuse=not opted_in)
-    assert chosen.facts.reuse_agent_run is opted_in
-    assert chosen.facts.task is not None
-    assert other.facts.task is not None
-    assert chosen.facts.task.recipe != other.facts.task.recipe
-
-
 @_SETTINGS
 @given(seconds=st.none() | st.integers(1, 10**9))
 def test_the_deadline_is_the_run_budget_or_unbounded(

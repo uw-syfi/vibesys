@@ -258,10 +258,10 @@ def test_a_winner_completes_only_after_a_positive_verification() -> None:
 
 
 def test_a_candidate_with_an_agent_record_and_the_official_accuracy_record_is_adopted() -> None:
-    """The live path holds both: the agent's own evaluation (kind local-validation) and the official one."""
+    """The live path holds both: the agent's own evaluation and the official one, as samples."""
     agent = accuracy_proof("rev-a").model_copy(
         update={
-            "kind": core.EvidenceKind.LOCAL_VALIDATION,
+            "kind": core.EvidenceKind.CORRECTNESS,
             "purpose": "local-validation",
             "evidence_id": core.EvidenceId(root="agent-rev-a"),
         }
@@ -827,7 +827,7 @@ _RECORD = st.tuples(
 )
 _KIND_OF = {
     "baseline": core.EvidenceKind.BENCHMARK,
-    "local-validation": core.EvidenceKind.LOCAL_VALIDATION,
+    "local-validation": core.EvidenceKind.BENCHMARK,
     "official": core.EvidenceKind.BENCHMARK,
     "profile": core.EvidenceKind.PROFILING,
 }
@@ -867,7 +867,7 @@ def test_an_adoption_carries_exactly_the_winners_trusted_measurements(
         ref
         for ref in evaluation.evidence
         if ref.candidate == GOOD[0].revision
-        and ref.purpose in ("official", "baseline")
+        and ref.purpose in ("official", "baseline", "local-validation")
         and ref.status is core.ObservationStatus.SUCCEEDED
         and ref.provenance == "trusted"
     )

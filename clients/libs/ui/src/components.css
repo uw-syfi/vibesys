@@ -1063,6 +1063,13 @@ body > div:first-child {
 .vs-markdown table {
   margin: 0;
 }
+/* Prose keeps a readable line; code and tables use the whole column. */
+.vs-markdown p,
+.vs-markdown ul,
+.vs-markdown ol,
+.vs-markdown blockquote {
+  max-width: var(--measure);
+}
 .vs-markdown ul,
 .vs-markdown ol {
   padding-left: var(--space-6);

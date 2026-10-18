@@ -107,7 +107,6 @@ def trusted_evaluation_plan(
         benchmark_contract=contract,
         candidate_startup_causes=candidate_startup_causes,
         unread_paths=() if bundle.manifest.workspace is None else bundle.manifest.workspace.unread,
-        reuse_agent_run=bundle.manifest.benchmark.reuse_agent_run,
         accuracy_gated=(
             (EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK)
             if bundle.manifest.benchmark.requires_accuracy

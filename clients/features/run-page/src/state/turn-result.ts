@@ -161,6 +161,12 @@ function planResult(reply: ReplyRow, context: ResultContext): TurnResultView {
   };
 }
 
+/** The card is the response, so its label does not say so: `Judge response` reads as `Judge`. */
+function cardLabel(title: string): string {
+  const bare = title.replace(/\s+(response|reply)$/i, '');
+  return bare === '' ? title : bare;
+}
+
 /** Any other reply: its choices as chips, its summary, and every other field after them. */
 function genericResult(reply: ReplyRow): TurnResultView {
   const overview = new Set(replyOverview(reply.fields));
@@ -177,7 +183,7 @@ function genericResult(reply: ReplyRow): TurnResultView {
   const lead = sections[0];
   return {
     id: reply.id,
-    label: reply.title,
+    label: cardLabel(reply.title),
     author: reply.author,
     headline: null,
     chips,

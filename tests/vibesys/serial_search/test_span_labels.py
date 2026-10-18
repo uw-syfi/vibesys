@@ -97,7 +97,9 @@ def measure_itself(host: SerialHost, evaluations: list[Evaluation]) -> None:
             taken.append(
                 EvidenceRef(
                     evidence_id=EvidenceId(root=f"{stage}:{len(taken)}"),
-                    kind=EvidenceKind.LOCAL_VALIDATION,
+                    kind=EvidenceKind.CORRECTNESS
+                    if stage == "accuracy"
+                    else EvidenceKind.BENCHMARK,
                     purpose="local-validation",
                     scope=scope,
                     source_request=request,

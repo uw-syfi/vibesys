@@ -585,6 +585,7 @@ def core_policy_context() -> dict[str, object]:
         "offer_snapshot": "fixture-offer",
         "base_accuracy_passed": True,
         "repeated_failure": None,
+        "comparisons": (),
         "required_fields": (),
         "prior_failure_tail": "AssertionError: fixture",
         "prior_failure_fence": "```",

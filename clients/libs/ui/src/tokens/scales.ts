@@ -47,6 +47,7 @@ export type SizeToken =
   | 'column-figure'
   | 'column-chart'
   | 'pane-list'
+  | 'pane-outline'
   | 'row-dense'
   | 'gantt-label'
   | 'gantt-label-max'
@@ -79,6 +80,7 @@ export const SIZE: Readonly<Record<SizeToken, number>> = {
   'column-figure': 320,
   'column-chart': 520,
   'pane-list': 380,
+  'pane-outline': 340,
   'row-dense': 28,
   'gantt-label': 220,
   'gantt-label-max': 420,
@@ -96,6 +98,12 @@ export const SIZE: Readonly<Record<SizeToken, number>> = {
   'log-sm': 160,
   thread: 480,
 };
+
+/**
+ * The longest line of a paragraph, in characters: a paragraph is capped here and wraps, while
+ * the column that holds it fills its pane (a cap on a column is dead space beside it).
+ */
+export const PROSE_MEASURE_CH = 105;
 
 export type RadiusToken = 'radius-sm' | 'radius' | 'radius-lg' | 'radius-full';
 export const RADIUS: Readonly<Record<RadiusToken, number>> = {

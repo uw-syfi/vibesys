@@ -138,9 +138,12 @@ def measurement(
         evaluator_digest=evaluator_digest,
         workload_digest=workload_digest,
         environment_digest=environment_digest,
-        stages=tuple(
-            core.MeasurementStage(stage_id=name, execution_budget=10.0)
-            for name in ("accuracy", "benchmark")
+        # Each stage waits for the one before it, as every recipe-built plan does.
+        stages=(
+            core.MeasurementStage(stage_id="accuracy", execution_budget=10.0),
+            core.MeasurementStage(
+                stage_id="benchmark", depends_on=("accuracy",), execution_budget=10.0
+            ),
         ),
         policy="ordered",
         recipe=core.ArtifactRef(artifact_id=core.ArtifactId(root="recipe"), digest=DIGEST),

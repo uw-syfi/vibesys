@@ -7,10 +7,13 @@ receipt. Continuation wakes carry the exact facts before the atomic job update.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from . import _wait_clock
+from ._base_runs import base_of, record_samples, with_base
+from ._comparison import (
+    moment_of,
+)
 from ._deadlines import resolve_until
 from ._evaluation_history import produce_history
 from ._measurement_reuse import (
@@ -29,7 +32,6 @@ from ._proofs import (
     accepted_receipt_for,
     committed_stop,
     continues_admitted_work,
-    current_admission,
     current_closure,
     fresh_observation,
     observation_for,
@@ -45,10 +47,17 @@ from ._submission_receipts import (
     job_budget,
     submission_receipt,
 )
-from ._values import digest
+from ._submissions import (
+    Origin,
+    allocate,
+    capped,
+    current,
+    identity_of,
+    rejected,
+    submission_released,
+)
 from .types.attempts import (
     AttemptEvaluationHistoryUpdated,
-    AttemptPhase,
     CloseAttemptScope,
     SnapshotAndRetain,
 )
@@ -109,32 +118,12 @@ from .types.until import Until, Within
 from .types.waits import WaitOn
 
 if TYPE_CHECKING:
-    from .types.common import DecisionId, Observation, ResourceId, Seconds
+    from .types.common import Observation, ResourceId, Seconds
     from .types.evaluation import EvaluationEvent, EvaluationState, EvidenceRef, MeasurementPlan
     from .types.kernel import EvaluationContext, RunState, Signal
     from .types.records import RecordsState, Request, RequestRecord
 
 __all__ = ["advance", "cancel_settled"]
-
-
-def _current(context: EvaluationContext, scope: Scope) -> Verdict[DecisionId | None]:
-    if not continues_admitted_work(context.run):
-        return Missing(ProofReason.UNRESOLVED)
-    if scope.owner == context.run.run_id:
-        return (
-            Proven(None)
-            if scope.generation == context.run.generation
-            else Mismatch(ProofField.GENERATION)
-        )
-    owner = next((row for row in context.attempts.attempts if row.attempt_id == scope.owner), None)
-    proof = current_admission(owner, scope, owner.admission_id if owner is not None else None)
-    if not isinstance(proof, Proven):
-        return proof
-    if owner is None or owner.phase != AttemptPhase.ACTIVE or owner.closure is not None:
-        return Missing(ProofReason.UNRESOLVED)
-    if owner.terminal_reason is not None:
-        return Missing(ProofReason.UNRESOLVED)
-    return proof
 
 
 def _origin(context: EvaluationContext, event: MeasurementRequested) -> Verdict[Measure]:
@@ -208,15 +197,6 @@ def _snapshot_revision(
     )
 
 
-def _identity(plan: MeasurementPlan) -> Verdict[MeasurementIdentity]:
-    if not isinstance(plan.candidate, RevisionRef):
-        return Missing(ProofReason.ABSENT_CHECKPOINT)
-    try:
-        return Proven(MeasurementIdentity.from_plan(plan, plan.candidate))
-    except ValueError:
-        return Mismatch(ProofField.PAYLOAD)
-
-
 def _budget_ready(
     state: EvaluationState, context: EvaluationContext, budget: SubmissionBudget | None
 ) -> Verdict[SubmissionBudget | None]:
@@ -236,66 +216,13 @@ def _budget_ready(
         or not latest.failure.retryable
         or (
             observation.accepted
-            and not isinstance(_submission_released(state, context, latest), Proven)
+            and not isinstance(submission_released(state, context, latest), Proven)
         )
     ):
         return Missing(ProofReason.UNRESOLVED)
     if len(budget.receipts) >= min(budget.limit, MAX_SUBMISSIONS_PER_MEASUREMENT):
         return Missing(ProofReason.ABSENT_CHARGE)
     return Proven(budget)
-
-
-def _submission_released(
-    state: EvaluationState, context: EvaluationContext, receipt: PreparedSubmissionReceipt
-) -> Verdict[Observation]:
-    rows = tuple(
-        j
-        for j in (*state.jobs, *state.registered_jobs)
-        if (j.submission_id if isinstance(j, OwnedJob) else j.request_id) == receipt.request_id
-    )
-    if len(rows) != 1:
-        return Missing(ProofReason.ABSENT_RESOURCE)
-    job = rows[0]
-    proof = released_owner(job, context.records.records)
-    if not isinstance(proof, Proven):
-        return proof
-    return (
-        proof
-        if isinstance(_descendants_released(context, job), Proven)
-        else Missing(ProofReason.INCOMPLETE_MANIFEST)
-    )
-
-
-def _descendants_released(
-    context: EvaluationContext, job: OwnedJob | RegisteredOwnedJob
-) -> Verdict[OwnedJob | RegisteredOwnedJob]:
-    pending = list(
-        dict.fromkeys(
-            (*job.children, *(job.observation.descendants if job.observation is not None else ()))
-        )
-    )
-    seen = set()
-    while pending:
-        resource = pending.pop()
-        if resource in seen:
-            continue
-        seen.add(resource)
-        rows = tuple(
-            child
-            for child in context.records.children
-            if child.resource_id == resource and child.scope == job.scope
-        )
-        if len(rows) != 1:
-            return Missing(ProofReason.INCOMPLETE_MANIFEST)
-        child = rows[0]
-        if not isinstance(released_owner(child, context.records.records), Proven):
-            return Missing(ProofReason.UNRESOLVED)
-        pending.extend(
-            resource
-            for mark in child.observation_watermarks
-            for resource in mark.observation.descendants
-        )
-    return Proven(job)
 
 
 def _reused(
@@ -317,7 +244,7 @@ def _reusable_capture(
     plan: MeasurementPlan,
     evidence: EvidenceRef,
 ) -> Verdict[EvidenceRef]:
-    identity = _identity(plan)
+    identity = identity_of(plan)
     if not isinstance(identity, Proven):
         return identity
     jobs = tuple(
@@ -364,7 +291,7 @@ def _reusable_capture(
 def _requested(
     state: EvaluationState, context: EvaluationContext, event: MeasurementRequested
 ) -> AreaChange[EvaluationState]:
-    authority = _current(context, event.scope)
+    authority = current(context, event.scope)
     origin = _origin(context, event)
     resolved = _resolved_plan(context, event.scope, event.plan)
     if (
@@ -372,11 +299,11 @@ def _requested(
         or not isinstance(origin, Proven)
         or not isinstance(resolved, Proven)
     ):
-        return _rejected(state, event.scope)
+        return rejected(state, event.scope)
     plan = checkpoint_input(context, event.scope, resolved.value)
-    identity = _identity(plan)
+    identity = identity_of(plan)
     if not isinstance(identity, Proven):
-        return _rejected(state, event.scope)
+        return rejected(state, event.scope)
     reuse = _reused(state, context, event.scope, plan)
     if reuse:
         return AreaChange(
@@ -394,28 +321,16 @@ def _requested(
         for row in context.records.records
     ):
         return AreaChange(state=state)
-    run = reused_run(state, event.scope, plan, identity.value)
+    run = reused_run(state, event.scope, plan, identity.value, moment_of(context.run))
     reuses = None if run is None else run.submission_id
-    origin_of = _Origin(event.scope, origin.value.decision_id, reuses=reuses)
+    origin_of = Origin(event.scope, origin.value.decision_id, reuses=reuses)
     return _admit(state, context, origin_of, plan, identity.value)
-
-
-@dataclass(frozen=True, slots=True)
-class _Origin:
-    """Who a submission is charged to: the scope and the Measure decision, if any."""
-
-    scope: Scope
-    decision_id: DecisionId | None
-    within: Within | None = None
-    """The agent's limit; None for a Measure decision, whose limit is its wait's."""
-    reuses: RequestId | None = None
-    """The run that answers a first submission without a new one (`reused_run`)."""
 
 
 def _admit(
     state: EvaluationState,
     context: EvaluationContext,
-    origin: _Origin,
+    origin: Origin,
     plan: MeasurementPlan,
     identity: MeasurementIdentity,
 ) -> AreaChange[EvaluationState]:
@@ -439,8 +354,8 @@ def _admit(
             if budget is not None
             else None
         )
-        return _rejected(state, scope, failure)
-    return _allocate(state, context, origin, plan, budget)
+        return rejected(state, scope, failure)
+    return allocate(state, context, origin, plan, budget)
 
 
 def _agent_requested(
@@ -460,11 +375,11 @@ def _agent_requested(
     """
     if any(call.call_id == event.call_id for call in state.agent_calls):
         return AreaChange(state=state)
-    identity = _identity(event.plan)
+    identity = identity_of(event.plan)
     rejection: AgentRejection | None = None
     if not continues_admitted_work(context.run):
         rejection = AgentRejection.RUN_STOPPING
-    elif not isinstance(_current(context, event.scope), Proven):
+    elif not isinstance(current(context, event.scope), Proven):
         rejection = AgentRejection.NOT_ADMITTED
     elif not isinstance(identity, Proven):
         rejection = AgentRejection.INVALID_PLAN
@@ -475,8 +390,13 @@ def _agent_requested(
         request_id, deadline_at = repeated
         call = AgentCall.answered(event, request_id, deadline_at, repeat=True)
         return _recorded(AreaChange(state=state), call)
+    base = base_of(context, event)
     change = _admit(
-        state, context, _Origin(event.scope, None, _capped(event)), event.plan, identity.value
+        state,
+        context,
+        Origin(event.scope, None, capped(event), base=base),
+        event.plan,
+        identity.value,
     )
     outbound = next((r for r in change.requests if isinstance(r.request, SubmitMeasurement)), None)
     if outbound is None or outbound.request.request_id is None:
@@ -485,13 +405,7 @@ def _agent_requested(
     call = AgentCall.answered(
         event, outbound.request.request_id, _deadline_at(context, outbound), repeat=False
     )
-    return _recorded(change, call)
-
-
-def _capped(event: AgentMeasurementRequested) -> Within:
-    """The agent's limit, no longer than the plan's declared stages and queue allowance."""
-    within = event.within
-    return within.model_copy(update={"limit": min(within.limit, event.plan.time_bound)})
+    return _recorded(with_base(change, context, event, base, outbound.request.request_id), call)
 
 
 def _deadline_at(context: EvaluationContext, outbound: Outbound) -> Seconds:
@@ -558,79 +472,6 @@ def _deadline_of(
     if row is not None and isinstance(row.request, SubmitMeasurement):
         return row.until.at
     return None
-
-
-def _allocate(
-    state: EvaluationState,
-    context: EvaluationContext,
-    origin: _Origin,
-    plan: MeasurementPlan,
-    budget: SubmissionBudget | None,
-) -> AreaChange[EvaluationState]:
-    scope, decision_id = origin.scope, origin.decision_id
-    identity = _identity(plan)
-    authority = _current(context, scope)
-    if not isinstance(identity, Proven) or not isinstance(authority, Proven):
-        return _rejected(state, scope)
-    if budget is None:
-        budget = SubmissionBudget(
-            scope=scope, identity=identity.value, limit=MAX_SUBMISSIONS_PER_MEASUREMENT
-        )
-    # New work is refused once the run's time is over, and a submission needs a positive limit.
-    if not context.run.deadline_at > context.run.now_at or (
-        origin.within is not None and origin.within.limit <= 0
-    ):
-        return _rejected(state, scope)
-    ordinal = len(budget.receipts) + 1
-    key = digest(budget.identity)[:24]
-    identity_id = RequestId(
-        root=f"measurement:{scope.owner.root}:{scope.generation}:{key}:{ordinal}"
-    )
-    request = SubmitMeasurement(
-        request_id=identity_id,
-        scope=scope,
-        admission_id=authority.value,
-        decision_id=decision_id,
-        plan=plan,
-        # Only a first submission reuses: a retry after a failure measures afresh.
-        reuses=origin.reuses if ordinal == 1 else None,
-    )
-    updated = budget.model_copy(
-        update={
-            "receipts": (
-                *budget.receipts,
-                PreparedSubmissionReceipt(request_id=identity_id, ordinal=ordinal),
-            )
-        }
-    )
-    budgets = (
-        tuple(updated if b == budget else b for b in state.submission_budgets)
-        if budget in state.submission_budgets
-        else (*state.submission_budgets, updated)
-    )
-    # A measurement decision waits as long as its wait says; an agent's own submission, as
-    # long as the limit parsed from its call says. Neither is a field of the plan.
-    outbound = (
-        inherit(request)
-        if decision_id is not None or origin.within is None
-        else Outbound(request=request, until=origin.within)
-    )
-    return AreaChange(
-        state=state.model_copy(update={"submission_budgets": budgets}), requests=(outbound,)
-    )
-
-
-def _rejected(
-    state: EvaluationState, scope: Scope, failure: MeasurementFailure | None = None
-) -> AreaChange[EvaluationState]:
-    return AreaChange(
-        state=state,
-        events=(
-            MeasurementResult(
-                scope=scope, evidence=(), status=ObservationStatus.REJECTED, failure=failure
-            ),
-        ),
-    )
 
 
 def _reported_to_strategy(context: EvaluationContext, job: OwnedJob | RegisteredOwnedJob) -> bool:
@@ -822,6 +663,7 @@ def _submission_job(
             scope=request.scope,
             plan=request.plan,
             reuses=request.reuses,
+            base=request.base,
             status=ObservationStatus.PENDING,
             # A job nobody has polled is due now. Normally the first JobObserved replaces
             # this; after a restart that lost it (the submit ran, its job observation was
@@ -851,17 +693,17 @@ def _registered_requested(
 ) -> AreaChange[EvaluationState]:
     request = event.request
     proof = operation_for(context.run.receipts, request)
-    current = _current(context, request.scope)
-    if not isinstance(proof, Proven) or not isinstance(current, Proven):
-        return _rejected(state, request.scope)
+    authority = current(context, request.scope)
+    if not isinstance(proof, Proven) or not isinstance(authority, Proven):
+        return rejected(state, request.scope)
     if (
         request.operation.schema_ref.lifecycle != LifecycleClass.OWNED_JOB
         or request.request_id is None
     ):
-        return _rejected(state, request.scope)
+        return rejected(state, request.scope)
     identity = proof.value.registered_measurement
     if event.expected_measurement != identity:
-        return _rejected(state, request.scope)
+        return rejected(state, request.scope)
     existing = tuple(
         j
         for j in state.registered_jobs
@@ -873,13 +715,13 @@ def _registered_requested(
             if len(existing) == 1
             and existing[0].scope == request.scope
             and existing[0].expected_measurement == identity
-            else _rejected(state, request.scope)
+            else rejected(state, request.scope)
         )
     budgets = state.submission_budgets
     if identity is not None:
         matches = tuple(b for b in budgets if b.scope == request.scope and b.identity == identity)
         if matches:
-            return _rejected(state, request.scope)
+            return rejected(state, request.scope)
         budgets = (
             *budgets,
             SubmissionBudget(
@@ -908,7 +750,7 @@ def _registered_requested(
 
 def _job_identity(job: OwnedJob | RegisteredOwnedJob) -> Verdict[MeasurementIdentity]:
     if isinstance(job, OwnedJob):
-        return _identity(job.plan)
+        return identity_of(job.plan)
     return (
         Proven(job.expected_measurement)
         if job.expected_measurement is not None
@@ -1060,10 +902,7 @@ def _measure_origin(
     request it allocated, so the same scope and request id prove the origin.
     """
     if request.decision_id is None:
-        admitted = any(
-            call.request_id == source.request_id and call.scope == request.scope
-            for call in state.agent_calls
-        )
+        admitted = state.asked_without_decision(source.request_id, request.scope)
         return Proven(None) if admitted else Missing(ProofReason.ABSENT_RECEIPT)
     receipt = accepted_receipt_for(context.run.receipts, request.decision_id, None)
     if not isinstance(receipt, Proven):
@@ -1245,10 +1084,16 @@ def _job_observed(
         has_facts=event.evaluation_result is not None,
     )
     state = job_budget(state, context, updated, claim, reuse_incomplete=incomplete)
+    state, requests = record_samples(
+        state,
+        context,
+        updated,
+        tuple(e for e in accepted if e not in job.evidence),
+        observation.observed_at,
+    )
     wake = ContinuationJobsChanged(
         resource_id=observation.resource_id, observation=observation, previous=previous
     )
-    requests: tuple[Outbound, ...] = ()
     events: tuple[MeasurementResult | JobQueued, ...] = _queued_notice(updated, job, context)
     source_id = updated.submission_id if isinstance(updated, OwnedJob) else updated.request_id
     reported = _reported_to_strategy(context, job)
@@ -1304,7 +1149,10 @@ def _job_observed(
             # before producing evidence) is itself observed as a job event, and asking
             # again on that event would never end.
             if not context.records.positions(collect.request_id):
-                requests = (_job_outbound(CollectEvidence, updated, context, "evidence"),)
+                requests = (
+                    *requests,
+                    _job_outbound(CollectEvidence, updated, context, "evidence"),
+                )
     closing = _ended(context, job, event)
     return AreaChange(
         state=state,

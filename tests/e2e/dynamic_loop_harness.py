@@ -489,8 +489,7 @@ class LoopInput:
             '[accuracy]\ncommand = ["python", ".vibesys/tasks/default/accuracy.py"]\n'
             "timeout_seconds = 30\n"
             '[benchmark]\ncommand = ["python", ".vibesys/tasks/default/benchmark.py"]\n'
-            # The task opts in to reusing the agent's own run for the official measurement.
-            "timeout_seconds = 30\nresult_protocol = 2\nreuse_agent_run = true\n",
+            "timeout_seconds = 30\nresult_protocol = 2\n",
             objective="Raise queue throughput.\n",
         )
         (task / "benchmark.py").write_text(_BENCHMARK, encoding="utf-8")

@@ -1,20 +1,18 @@
-"""Only the framework's own measurement of a revision is proof of it.
+"""A framework measurement is trusted whoever requested it.
 
-An agent's evaluation may run while other agent work shares its host, so the framework never
-counts it: it measures the revision it retains itself, serially, with the official gates. The
-record of an agent's evaluation (``local-validation``) can therefore never carry the kinds that
-eligibility and the accuracy proof select, whatever else the record says; every other purpose can.
+An agent's evaluation runs through the framework's executor on a committed revision, with the
+same gates as the framework's own check, so its records are as trusted as the check's. The
+purpose of a run says who asked for it; it never limits which kinds the record carries. Several
+runs of one revision are samples of one measurement (`vs_core._comparison`), not rivals.
 """
 
 from __future__ import annotations
 
-import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
 import vs_core.api as core
 
-PROOF = (core.EvidenceKind.CORRECTNESS, core.EvidenceKind.BENCHMARK)
 PURPOSES = ("baseline", "local-validation", "official", "profile")
 
 
@@ -36,11 +34,7 @@ def record(purpose: str, kind: core.EvidenceKind) -> core.EvidenceRef:
 
 
 @given(purpose=st.sampled_from(PURPOSES), kind=st.sampled_from(list(core.EvidenceKind)))
-def test_an_agents_own_evaluation_is_never_a_correctness_or_benchmark_proof(
+def test_no_requester_limits_the_kinds_a_framework_record_carries(
     purpose: str, kind: core.EvidenceKind
 ) -> None:
-    if purpose == "local-validation" and kind in PROOF:
-        with pytest.raises(ValueError, match="local-validation record cannot be"):
-            record(purpose, kind)
-    else:
-        assert record(purpose, kind).kind is kind
+    assert record(purpose, kind).kind is kind

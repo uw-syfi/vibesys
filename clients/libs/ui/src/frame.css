@@ -115,6 +115,11 @@ button.vs-crumb:focus-visible {
 .vs-pane[data-width="list"] {
   flex: 0 1 var(--pane-list);
 }
+/* The list beside what one of its rows opened (the steps of an idea, a turn's transcript): rows are
+   short, so the opened pane gets the room. */
+.vs-pane[data-width="outline"] {
+  flex: 0 1 var(--pane-outline);
+}
 .vs-pane[data-width="inspector"] {
   flex: 1 1 var(--column-main);
 }
@@ -823,10 +828,10 @@ button.vs-crumb:focus-visible {
 
 /* --- narrative: a turn as thinking, text and folded tool lines ----------------------------------- */
 
+/* The narrative fills its pane; only a paragraph is capped (below), never the column. */
 .vs-narrative-wrap {
   position: relative;
   min-width: 0;
-  max-width: var(--column-main);
 }
 .vs-narrative-wrap[data-size="fill"] {
   flex: 1 1 auto;
@@ -854,6 +859,7 @@ button.vs-crumb:focus-visible {
 }
 .vs-thought,
 .vs-said {
+  max-width: var(--measure);
   margin: 0;
   font-family: var(--text-body-family);
   font-size: var(--text-body-size);

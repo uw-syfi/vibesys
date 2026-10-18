@@ -29,7 +29,7 @@ from vs_agent.api import (
     TodoItemData,
     ToolResultPayload,
 )
-from vs_core.api import EndReason, SpanId, WireSpan
+from vs_core.api import ComparisonVerdict, EndReason, SpanId, WireSpan
 from vs_redaction.api import redact_diagnostic_text
 from vs_runtime.api.infrastructure import AgentReply, EnvironmentStartupStage
 
@@ -76,6 +76,7 @@ class CoreEventType(StrEnum):
     RUN_CONFIGURED = "run_configured"
     FRAMEWORK_WARNING = "framework_warning"
     WINNER_SELECTED = "winner_selected"
+    MEASUREMENT_COMPARED = "measurement_compared"
     WORKSTREAM_FINISHED = "workstream_finished"
     TURN_USAGE_RECORDED = "turn_usage_recorded"
     SPAN_STARTED = "span_started"
@@ -761,6 +762,32 @@ class WinnerSelectedData(EventPayload):
     settlement_id: str | None = None
 
 
+class MeasurementComparedData(EventPayload):
+    """A candidate's measurement was compared with its base's: ratio, noise and verdict.
+
+    Emitted when core records a comparison (and again when more samples change it). ``ratio``
+    is the candidate's mean over the base's, as measured, and ``direction`` says which way is
+    better; ``noise`` is one standard error of that ratio, and ``verdict`` needs two of them.
+    The values are means over ``candidate_samples`` and ``base_samples`` runs of one measured
+    input each, and ``base_commit`` is the revision the base was measured at.
+    """
+
+    kind: Literal["measurement_compared"] = "measurement_compared"
+    metric: str
+    unit: str | None = None
+    direction: Literal["max", "min"]
+    candidate_commit: str
+    base_commit: str
+    candidate_value: FiniteFloat
+    base_value: FiniteFloat
+    ratio: FiniteFloat
+    noise: FiniteFloat
+    verdict: ComparisonVerdict
+    candidate_samples: int
+    base_samples: int
+    source: FrameworkSource = FrameworkSource.GATES
+
+
 class WorkstreamFailureKind(StrEnum):
     """Why a workstream ended without a measured candidate. Closed.
 
@@ -914,6 +941,7 @@ CoreEventData = Annotated[
     | RunConfiguredData
     | FrameworkWarningData
     | WinnerSelectedData
+    | MeasurementComparedData
     | WorkstreamFinishedData
     | TurnUsageData
     | SpanStartedData

@@ -158,6 +158,7 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
     wrap_git: Callable[[GitRepository], GitRepository] | None = None,
     events: WorkspaceResourceEventSink | None = None,
     system: EnvironmentSystem | None = None,
+    unread_paths: tuple[str, ...] = (),
 ) -> Iterator[WorkspaceEnv]:
     """A fresh run with one started host. The caller closes ``env.hosts`` (async) before exit.
 
@@ -170,7 +171,8 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
     case can stand between the run and Git, for example to kill the host at a Git step.
     ``events`` observes workspace resource events (for example a reported baseline drift);
     the default discards them. ``system`` is the host the environments run on; the default
-    starts nothing (:func:`~vs_runtime.api.testing.idle_environment_system`).
+    starts nothing (:func:`~vs_runtime.api.testing.idle_environment_system`). ``unread_paths``
+    are the workspace paths the task's evaluation never reads (``[workspace] unread``).
     """
     disk = FakeGitRepositories() if git is GitKind.FAKE else REAL_GIT
     root = tmp_path / "project"
@@ -232,7 +234,7 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
             factory = WorkspaceResourceFactory(
                 project,
                 environment,
-                evaluation_plan=TrustedEvaluationPlan(),
+                evaluation_plan=TrustedEvaluationPlan(unread_paths=unread_paths),
                 memory_paths=memory_paths,
                 skill_source_dirs=(),
                 skill_selection=NULL_SKILL_SELECTION,

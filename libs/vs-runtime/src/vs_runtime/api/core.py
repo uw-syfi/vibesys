@@ -62,6 +62,7 @@ from vs_runtime._core_record import (
     PublicationLease,
     RuntimeRecord,
     WinnerSelection,
+    new_comparisons,
     winner_selection,
 )
 from vs_runtime._core_requests import (
@@ -446,6 +447,7 @@ __all__ = [
     "drive_core",
     "empty_catalog",
     "handle_for",
+    "new_comparisons",
     "new_core_state",
     "open_session_requests",
     "operation_roles",

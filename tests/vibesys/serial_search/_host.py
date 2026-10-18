@@ -336,7 +336,7 @@ class SerialHost:
         """
         metrics = ()
         passed = ref.status is ObservationStatus.SUCCEEDED
-        own = ref.kind is EvidenceKind.LOCAL_VALIDATION
+        own = ref.purpose == "local-validation"
         stage = ref.evidence_id.root.split(":")[0] if own else ref.kind.value
         if passed and (ref.kind is EvidenceKind.BENCHMARK or (own and stage == "benchmark")):
             value = (

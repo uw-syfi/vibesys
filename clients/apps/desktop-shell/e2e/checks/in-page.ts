@@ -16,6 +16,7 @@ export type CheckId =
   | 'number-label'
   | 'strike'
   | 'chart-size'
+  | 'pane-fill'
   | 'stability';
 
 export interface Violation {
@@ -132,22 +133,34 @@ function lineCount(node: Text): number {
   return tops.length;
 }
 
-/** The words of at most `limit` characters that a text node breaks across two lines. */
+/**
+ * The words of at most `limit` characters that a text node breaks across two lines. A hyphen is a
+ * place a line may break (`re-` then `measure`), so a word counts as broken only inside one of its
+ * hyphen-separated parts.
+ */
 function brokenWords(node: Text, limit: number): string[] {
   const text = node.textContent ?? '';
   const broken: string[] = [];
   for (const match of text.matchAll(/\S+/g)) {
-    const start = match.index ?? 0;
     if (match[0].length < 2 || match[0].length > limit) continue;
-    const first = document.createRange();
-    first.setStart(node, start);
-    first.setEnd(node, start + 1);
-    const last = document.createRange();
-    last.setStart(node, start + match[0].length - 1);
-    last.setEnd(node, start + match[0].length);
-    const a = first.getBoundingClientRect();
-    const b = last.getBoundingClientRect();
-    if (a.height > 0 && Math.abs(a.top - b.top) > a.height / 2) broken.push(match[0]);
+    let from = match.index ?? 0;
+    for (const part of match[0].split(/(?<=-)/)) {
+      const start = from;
+      from += part.length;
+      if (part.length < 2) continue;
+      const first = document.createRange();
+      first.setStart(node, start);
+      first.setEnd(node, start + 1);
+      const last = document.createRange();
+      last.setStart(node, start + part.length - 1);
+      last.setEnd(node, start + part.length);
+      const a = first.getBoundingClientRect();
+      const b = last.getBoundingClientRect();
+      if (a.height > 0 && Math.abs(a.top - b.top) > a.height / 2) {
+        broken.push(match[0]);
+        break;
+      }
+    }
   }
   return broken;
 }
@@ -467,6 +480,44 @@ export function chartSizeCheck(): Violation[] {
   return found;
 }
 
+/** The child of `body` that holds `element`; null when `element` is not inside `body`. */
+function columnOf(body: Element, element: Element): Element | null {
+  let column: Element | null = element;
+  while (column !== null && column.parentElement !== body) column = column.parentElement;
+  return column;
+}
+
+/**
+ * A pane (`.vs-pane-body`) whose content column is narrower than the pane while its text wraps:
+ * the user sees a block of text with dead space beside it. The column is the body's own child
+ * that holds the wrapped text (a narrative, a card, a log); it must cover 85% of the body's inner
+ * width. Text that fits on single lines wants no more room, and a paragraph inside a full-width
+ * column may still be capped by its own line length: only the column is checked.
+ */
+export function paneFillCheck(): Violation[] {
+  const found: Violation[] = [];
+  const share = 0.85;
+  const wrapped = textBoxes().filter(box => !inCode(box.element) && lineCount(box.node) > 1);
+  for (const body of document.querySelectorAll('.vs-pane-body')) {
+    const style = getComputedStyle(body);
+    const inner = body.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    const reported = new Set<Element>();
+    for (const box of wrapped) {
+      const column = columnOf(body, box.element);
+      if (column === null || reported.has(column)) continue;
+      const used = column.getBoundingClientRect().width;
+      if (inner <= 0 || used >= inner * share) continue;
+      reported.add(column);
+      found.push({
+        check: 'pane-fill',
+        message: `a pane's content uses ${Math.round(used)} px of its ${Math.round(inner)} px (${Math.round((100 * used) / inner)}%) while text wraps: "${box.text.slice(0, 40)}"`,
+        where: describe(column),
+      });
+    }
+  }
+  return found;
+}
+
 /** What `screen-check.ts` sends to the page ahead of a check. */
 export const HELPERS: readonly ((...args: never[]) => unknown)[] = [
   inCode,
@@ -488,4 +539,5 @@ export const HELPERS: readonly ((...args: never[]) => unknown)[] = [
   stripMarks,
   markColors,
   legendColors,
+  columnOf,
 ];

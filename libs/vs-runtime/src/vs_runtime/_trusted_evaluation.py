@@ -265,15 +265,6 @@ class TrustedEvaluationPlan(BaseModel):
 
     _check_unread_paths = field_validator("unread_paths")(check_unread_paths)
 
-    reuse_agent_run: bool = False
-    """The task lets an official measurement reuse the agent's own run of the same input.
-
-    Declared by the task author (``[benchmark] reuse_agent_run``) and read from the project
-    root at start. It is part of the recipe, so it is part of every measurement's identity.
-    Off by default: reuse lets an agent re-measure until a run suits it, which biases the
-    official score upward by the benchmark's noise.
-    """
-
     accuracy_gated: tuple[EvidenceKind, ...] = ()
     """The task's trust rule: kinds of evidence that count only if the accuracy stage passed.
 

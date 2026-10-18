@@ -123,12 +123,8 @@ class WorkspaceInput(BaseModel):
     """Workspace paths (files or directories) the evaluation never reads, such as agent notes.
 
     A commit that changes only these is the same measured input as one an earlier run
-    already measured. Its official measurement then reuses that run instead of running
-    again, but only when the task sets ``[benchmark] reuse_agent_run = true``, the run was
-    the scope's only measurement submission, both runs had dedicated measurement resources
-    and the same stages, budgets and policy, and it ended in a pass or a workload failure.
-    Without the opt-in the paths still define the measured input, and every official
-    measurement runs fresh.
+    already measured, so the runs of both are samples of one measurement and the official
+    measurement can reuse them instead of running again (see ``docs/running-vibesys.md``).
     """
 
     _check_unread = field_validator("unread")(check_unread_paths)
@@ -281,12 +277,6 @@ class BenchmarkCommand(InputCommand):
     #: passed. A task whose benchmark is meaningful without a passing accuracy check
     #: declares ``requires_accuracy = false``.
     requires_accuracy: StrictBool = True
-    #: Opt-in to answering an official measurement with the agent's own earlier evaluation of
-    #: the identical input (see ``docs/running-vibesys.md``). Off by default: an agent that
-    #: keeps a lucky first run and re-measures an unlucky one would bias the official score
-    #: upward, so only a task whose benchmark noise is small enough declares
-    #: ``reuse_agent_run = true``.
-    reuse_agent_run: StrictBool = False
 
     @model_validator(mode="after")
     def _one_result_contract(self) -> BenchmarkCommand:
@@ -706,8 +696,6 @@ def _append_benchmark(lines: list[str], manifest: InputManifest) -> None:
         lines.append(f"result_protocol = {manifest.benchmark.result_protocol}")
     if not manifest.benchmark.requires_accuracy:
         lines.append("requires_accuracy = false")
-    if manifest.benchmark.reuse_agent_run:
-        lines.append("reuse_agent_run = true")
     if manifest.benchmark.result is not None:
         lines.extend(
             [
