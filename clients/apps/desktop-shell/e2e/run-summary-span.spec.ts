@@ -114,6 +114,14 @@ test('regression: opening a step moves neither pane, the chart nor the time bar'
   const panesTop = () =>
     page.locator('.vs-panes').evaluate(panes => panes.getBoundingClientRect().y);
   const top = await panesTop();
+  const columns = () =>
+    page.locator('.vs-panes > .vs-pane').evaluateAll(panes =>
+      panes.map(pane => {
+        const {x, width} = pane.getBoundingClientRect();
+        return {x, width};
+      }),
+    );
+  const placed = await columns();
   await steps
     .getByRole('option', {name: /implementer/i})
     .first()
@@ -121,5 +129,7 @@ test('regression: opening a step moves neither pane, the chart nor the time bar'
   await expect(page.getByRole('navigation', {name: 'Zoom'})).toBeVisible();
   await settled(page);
   expect(await panesTop()).toBe(top);
+  // Horizontally too: the list beside the detail keeps its width, so the detail keeps its edge.
+  expect(await columns()).toEqual(placed);
   expect(await stabilityViolations(page, 'step', before, RUN_ANCHORS)).toEqual([]);
 });

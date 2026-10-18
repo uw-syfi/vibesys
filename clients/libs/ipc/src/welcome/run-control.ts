@@ -92,10 +92,14 @@ export interface RunSummary {
   readonly usage: readonly {readonly spanId: string; readonly tokens: SummaryTokens}[];
 }
 
-/** A run's summary, or that this host's VibeSys does not serve one. */
+/**
+ * A run's summary, that this host's VibeSys does not serve one, or that the host holds no record
+ * of the run (`unknown_run`): a run the sidebar calls gone.
+ */
 export type RunSummaryResult =
   | {readonly kind: 'summary'; readonly summary: RunSummary}
-  | {readonly kind: 'unsupported'};
+  | {readonly kind: 'unsupported'}
+  | {readonly kind: 'gone'};
 
 /** One bounded page of a span's recorded, non-trace events. */
 export type RunSpanPage =

@@ -15,6 +15,7 @@ import {
   hostFromKey,
   hostLabel,
   type ListedRun,
+  RUN_GONE_WORDS,
   type RunDigestEntry,
   type RunDigestsReply,
 } from '@vibesys/hosts';
@@ -534,7 +535,7 @@ function recentProblem(
 ): RowProblem | null {
   if (slot === undefined || slot.kind === 'loading') return null;
   if (slot.kind === 'unsupported') return {text: 'machine needs a newer VibeSys', retry: false};
-  if (slot.kind === 'gone') return {text: 'this run is gone', retry: false};
+  if (slot.kind === 'gone') return {text: RUN_GONE_WORDS, retry: false};
   if (listing?.kind === 'unavailable') return {text: "can't reach the machine", retry: true};
   return {text: "can't read run state", retry: true};
 }

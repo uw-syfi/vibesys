@@ -221,11 +221,13 @@ class Projects(Protocol):
         """The project's resolved root and its runs, oldest first."""
         ...
 
-    def run_digest(self, project_root: Path, run_id: str) -> RunDigest | RunDigestUnreadable:
-        """What run ``run_id``'s journal says at a glance; empty for a run with no journal.
+    def run_digest(self, project_root: Path, run_id: str) -> RunDigest | RunDigestUnreadable | None:
+        """What run ``run_id``'s journal says at a glance; ``None`` when this machine holds none.
 
         ``project_root`` is a root ``runs`` returned. Never raises: a journal that exists and
-        cannot be read is ``RunDigestUnreadable``.
+        cannot be read is ``RunDigestUnreadable``. A run recorded in the checkout whose journal
+        is not in the log store of ``project_root`` has no digest: an empty one would say the
+        run recorded nothing and stopped.
         """
         ...
 
@@ -789,9 +791,10 @@ def _project_reply(
             root, runs = host.projects.runs(project)
             known = {run.run_id for run in runs}
             digests = {
-                run_id: host.projects.run_digest(root, run_id)
+                run_id: digest
                 for run_id in dict.fromkeys(digest_runs or ())
                 if run_id in known
+                and (digest := host.projects.run_digest(root, run_id)) is not None
             }
             summaries = run_summaries(root, runs, host.registry.list(), digests)
             return RunsListReply(request_id=request_id, runs=summaries)

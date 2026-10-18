@@ -457,7 +457,8 @@ export class Hosts {
    * Run `runId`'s summary in `project` on `id` (`runs.summary`): what the run level shows, without
    * the history it comes from, its pages joined. A run still writing can move between pages; every
    * page names the sequence it was read at, and a read whose pages disagree starts again, a few
-   * times before it fails. `unsupported` when the host's VibeSys does not serve summaries.
+   * times before it fails. `unsupported` when the host's VibeSys does not serve summaries, `gone` when it holds no
+   * record of the run.
    */
   async readSummary(id: HostId, project: string, runId: string): Promise<RunSummaryResult> {
     await using lease = await this.connection(id);
@@ -474,6 +475,9 @@ export class Hosts {
     } catch (error) {
       if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
         return {kind: 'unsupported'};
+      }
+      if (error instanceof HelperRequestError && error.code === 'unknown_run') {
+        return {kind: 'gone'};
       }
       throw plain(error, `Could not read the summary of run ${runId}`);
     }

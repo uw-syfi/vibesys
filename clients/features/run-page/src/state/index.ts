@@ -94,6 +94,7 @@ export {
   historyProblem,
   type Offer,
   quotaBannerView,
+  runGoneWords,
   stopBannerView,
   streamLines,
   type TraceArrival,

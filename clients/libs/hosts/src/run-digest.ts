@@ -7,6 +7,12 @@ import type {RunClosing, RunDigest, RunSummary} from '@vibesys/contracts/host-he
 import type {RunEnd} from './listing.js';
 import {type EndLook, endedLook} from './run-look.js';
 
+/**
+ * What every screen says of a run its host holds no record of (a digest left it out, a summary
+ * refused it): the one wording, which offers no Retry because asking again cannot find it.
+ */
+export const RUN_GONE_WORDS = 'this run is gone';
+
 /** One run's digest, or why it could not be read. */
 export type RunDigestEntry =
   | {

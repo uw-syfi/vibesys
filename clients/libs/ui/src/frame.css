@@ -315,8 +315,10 @@ button.vs-crumb:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Ideas keep their outcome on a second line so failure reasons never depend on a tooltip. */
-.vs-picklist[data-wrap-summary] .vs-pickrow-text > .vs-text:last-child:not(:first-child) {
+/* Ideas keep their title whole and their outcome on a second line, so neither depends on a tooltip
+   or on how wide the window is. */
+.vs-picklist[data-wrap-summary] .vs-pickrow-text > .vs-text:last-child:not(:first-child),
+.vs-picklist[data-wrap-summary] .vs-pickrow-text > .vs-text:first-child {
   overflow: visible;
   text-overflow: clip;
   white-space: normal;

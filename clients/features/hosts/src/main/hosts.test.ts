@@ -615,13 +615,13 @@ describe('Hosts.readSummary', () => {
     expect(link.helper.requests.filter(request => request.type === 'runs.summary')).toEqual([]);
   });
 
-  test('names the run when the host has none by that name', async () => {
+  test('says the run is gone when the host holds no record of it', async () => {
     const {hosts, manager} = await subject([]);
     await using _manager = manager;
 
-    await expect(hosts.readSummary(LOCAL, '/srv/project', 'run-9')).rejects.toThrow(
-      'Could not read the summary of run run-9',
-    );
+    await expect(hosts.readSummary(LOCAL, '/srv/project', 'run-9')).resolves.toEqual({
+      kind: 'gone',
+    });
   });
 });
 

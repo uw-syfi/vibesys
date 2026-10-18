@@ -227,3 +227,29 @@ test('regression: a wide window gives the idea titles room, the same before and 
   await settled(page);
   expect(await paneWidth()).toBeGreaterThanOrEqual(340);
 });
+
+test('regression: no idea title is cut short with an ellipsis, closed or open, at any width', async ({
+  page,
+}) => {
+  await openRun(page, 10);
+  const ideas = page.getByRole('listbox', {name: 'Ideas'});
+  await expect(ideas.getByRole('option').first()).toBeVisible();
+  const cut = () =>
+    ideas
+      .locator('.vs-pickrow-text > .vs-text:first-child')
+      .evaluateAll(titles =>
+        titles
+          .filter(title => title.scrollWidth > title.clientWidth)
+          .map(title => title.textContent),
+      );
+  for (const width of [1440, 1000]) {
+    await page.setViewportSize({width, height: 900});
+    await settled(page);
+    expect(await cut(), `closed at ${width}`).toEqual([]);
+    await ideas.getByRole('option').first().click();
+    await expect(page.getByRole('button', {name: 'Close idea'})).toBeVisible();
+    await settled(page);
+    expect(await cut(), `open at ${width}`).toEqual([]);
+    await page.getByRole('button', {name: 'Close idea'}).click();
+  }
+});

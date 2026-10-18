@@ -41,6 +41,7 @@ import {
   roleLabel,
   roundsBeforeTrace,
   routeLevel,
+  runGoneWords,
   runHasEnded,
   runNow,
   runPhase,
@@ -52,7 +53,7 @@ import {
   transcriptLoading,
 } from '../../state/index.js';
 import {Hero} from './hero.js';
-import {HistoryLoading, InitialRunLoading, RunLoadError} from './history-loading.js';
+import {HistoryLoading, InitialRunLoading, RunGone, RunLoadError} from './history-loading.js';
 import {DeepLevel, IdeasWorkspace, type LevelProps} from './levels.js';
 import {RunLevel} from './run-level.js';
 import {RunScrubber} from './run-scrubber.js';
@@ -396,6 +397,14 @@ function pendingRunScreen(
     return (
       <Screen density="compact" header={header}>
         <InitialRunLoading stage="summary" />
+      </Screen>
+    );
+  }
+  const gone = runGoneWords(state);
+  if (gone !== null) {
+    return (
+      <Screen density="compact" header={header}>
+        <RunGone words={gone} />
       </Screen>
     );
   }

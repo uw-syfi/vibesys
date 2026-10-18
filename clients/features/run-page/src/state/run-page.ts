@@ -643,6 +643,7 @@ function withSummary(
       ? startReading(unsupported)
       : {state: unsupported, requests: []};
   }
+  if (reply.kind === 'gone') return {state: {...state, summary: reply}, requests: []};
   if (reply.kind === 'failed') {
     // A live run has its session; an ended one can still read the full history.
     const failed = {...state, summary: reply};

@@ -5,7 +5,7 @@
  */
 import type {LogOwner, RunEvent, RunOverview, Span} from '@vibesys/contracts';
 import type {LogStream} from '@vibesys/contracts/host-helper';
-import {endedLook, type HostRun, type RunEnd} from '@vibesys/hosts';
+import {endedLook, type HostRun, RUN_GONE_WORDS, type RunEnd} from '@vibesys/hosts';
 import {decodeNarrationLine, type LogView, logViewRecords} from '@vibesys/logs';
 import type {CoreState} from '@vibesys/run-state';
 import {type RunTrace, traceSpans} from '@vibesys/run-state/trace';
@@ -532,6 +532,15 @@ export function historyProblem(state: RunPageState): string | null {
     default:
       return null;
   }
+}
+
+/**
+ * Why a past run has nothing to show because its host holds no record of it (the sidebar's words
+ * for the same run), else null. Asking again finds nothing, so the screen offers no Retry.
+ */
+export function runGoneWords(state: RunPageState): string | null {
+  if (state.record.kind !== 'ended' && state.record.kind !== 'historical') return null;
+  return state.summary.kind === 'gone' ? RUN_GONE_WORDS : null;
 }
 
 export interface EndedView {

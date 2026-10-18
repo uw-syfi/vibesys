@@ -70,6 +70,7 @@ export interface SummaryFacts {
 export type SummaryReply =
   | ({readonly kind: 'summary'} & SummaryFacts)
   | {readonly kind: 'unsupported'}
+  | {readonly kind: 'gone'}
   | {readonly kind: 'failed'; readonly message: string};
 
 /**
@@ -91,6 +92,8 @@ export type RunSummaryState =
   /** It arrived after a live session had already folded the run; the session's data stands. */
   | {readonly kind: 'superseded'}
   | {readonly kind: 'unsupported'}
+  /** The host holds no record of the run: there is nothing to read, and asking again finds none. */
+  | {readonly kind: 'gone'}
   | {readonly kind: 'failed'; readonly message: string};
 
 /** The time of every rebuilt event: they carry none, and nothing reads it. */

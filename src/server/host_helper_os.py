@@ -221,8 +221,8 @@ class FileProjects:
         runs = sorted([*recorded, *journaled], key=lambda run: (run.created_at, run.run_id))
         return opened.root, tuple(runs)
 
-    def run_digest(self, project_root: Path, run_id: str) -> RunDigest | RunDigestUnreadable:
-        """What run ``run_id``'s journal says at a glance.
+    def run_digest(self, project_root: Path, run_id: str) -> RunDigest | RunDigestUnreadable | None:
+        """What run ``run_id``'s journal says at a glance; ``None`` when there is no journal.
 
         An ended run's journal never changes, so its digest is kept for as long as the journal
         keeps its size and modification time; a run still going is read again.
@@ -237,7 +237,7 @@ class FileProjects:
                     return kept[1]
                 digest = digest_journal(lines)
         except FileNotFoundError:
-            return digest_journal(())
+            return None
         except OSError as exc:
             return RunDigestUnreadable(
                 message=f"the run's journal could not be read: {exc.strerror}"
@@ -337,7 +337,11 @@ class FileProjects:
 
         if self._summary_reader is None:
             self._summary_reader = SummaryReader(self._threads.lock())
-        return self._summary_reader.summarize(self._journal(project, run_id))
+        journal = self._journal(project, run_id)
+        if not journal.is_file():
+            message = f"{project} holds no journal of run {run_id!r}"
+            raise ProjectLookupError(HelperErrorCode.UNKNOWN_RUN, str(project), message)
+        return self._summary_reader.summarize(journal)
 
     def _indexed_read[Facts](
         self, journal: Path, ask: Callable[[JournalIndex], tuple[list[Entry], Facts]]

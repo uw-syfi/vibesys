@@ -52,6 +52,7 @@ export {
   digestLook,
   type ListedRun,
   listedRuns,
+  RUN_GONE_WORDS,
   type RunDigestEntry,
   type RunDigestsReply,
 } from './run-digest.js';

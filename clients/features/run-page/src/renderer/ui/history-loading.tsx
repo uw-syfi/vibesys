@@ -43,6 +43,18 @@ export function InitialRunLoading(props: {readonly stage: 'locating' | 'summary'
   );
 }
 
+/** A run its host holds no record of: said plainly, with no Retry since asking again finds none. */
+export function RunGone(props: {readonly words: string}): JSX.Element {
+  return (
+    <Card>
+      <Stack gap="space-3">
+        <Text variant="heading">Could not load this run</Text>
+        <Text tone="muted">{props.words}</Text>
+      </Stack>
+    </Card>
+  );
+}
+
 export function RunLoadError(props: {
   readonly message: string;
   readonly retry: () => void;

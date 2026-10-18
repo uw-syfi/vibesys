@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from hypothesis import example, given
@@ -30,9 +31,12 @@ from vs_project.api.testing import FakeGitRepositories
 from vs_sim.api.testing import SimNetwork, SimThreads
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from pydantic import JsonValue
+
+
+_LEGACY_FIXTURE = (
+    Path(__file__).parents[1] / "conformance" / "fixtures" / "run-summary" / "predates-trace.json"
+)
 
 
 def _stamp(seconds: float) -> str:
@@ -243,14 +247,14 @@ def test_asking_for_digests_needs_the_run_digest_feature() -> None:
     assert request_features(plain) == ()
 
 
-def test_a_run_with_no_journal_has_an_empty_digest_and_an_unreadable_one_says_so(
+def test_a_run_with_no_journal_has_no_digest_and_an_unreadable_one_says_so(
     tmp_path: Path,
 ) -> None:
     project = project_with_run(tmp_path / "proj", RUN_ID)
     projects = FileProjects(FakeGitRepositories().repository, SimThreads())
     root = project.resolve()
 
-    assert projects.run_digest(root, RUN_ID) == digest_journal(())
+    assert projects.run_digest(root, RUN_ID) is None
     journal = Project.log_directory_for(root, RUN_ID) / RUN_EVENTS_FILE
     journal.mkdir(parents=True)  # a journal that exists but cannot be opened as a file
     unreadable = projects.run_digest(root, RUN_ID)
@@ -278,3 +282,32 @@ def test_an_ended_runs_digest_is_kept_while_its_journal_is_unchanged_and_a_live_
     first = projects.run_digest(root, RUN_ID)
     journal.write_bytes(b"".join([*live, _event(3, "tool_call", 9)]))
     assert projects.run_digest(root, RUN_ID) != first
+
+
+def test_a_recorded_run_whose_journal_is_not_here_is_absent_from_the_digests_not_empty(
+    tmp_path: Path,
+) -> None:
+    """An empty digest read as a run that recorded nothing and stopped, with no ideas."""
+    project = project_with_run(tmp_path / "proj", RUN_ID)
+
+    (run,) = _list(project, digest_runs=(RUN_ID,)).runs.runs
+
+    assert run.run_id == RUN_ID
+    assert run.digest is None
+
+
+def test_a_journal_from_before_the_trace_is_digested_without_ideas_through_the_helper(
+    tmp_path: Path,
+) -> None:
+    fixture = json.loads(_LEGACY_FIXTURE.read_text())
+    run_id = fixture["events"][0]["run_id"]
+    project = project_with_run(tmp_path / "proj", run_id)
+    journal = Project.log_directory_for(project.resolve(), run_id) / RUN_EVENTS_FILE
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    journal.write_bytes(b"".join(json.dumps(event).encode() + b"\n" for event in fixture["events"]))
+
+    (run,) = _list(project, digest_runs=(run_id,)).runs.runs
+
+    assert isinstance(run.digest, RunDigest)
+    assert run.digest.ideas is None
+    assert run.digest.closing is RunClosing.FINISHED

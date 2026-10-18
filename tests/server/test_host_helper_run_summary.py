@@ -192,14 +192,32 @@ def test_the_events_after_a_summary_are_the_live_tail(project: Path) -> None:
     assert (cursor, summary.through_sequence) == (5, 8)
 
 
-def test_a_run_that_journaled_nothing_has_an_empty_summary(tmp_path: Path) -> None:
+def test_a_run_recorded_with_no_journal_here_has_no_summary_not_an_empty_one(
+    tmp_path: Path,
+) -> None:
+    """Its journal is in another project's log store, say: an empty summary would call it an empty run."""
     project = project_with_run(tmp_path / "proj", RUN_ID)
 
     reply = _ask(project, RUN_ID, 0)
 
+    assert isinstance(reply, HelperError)
+    assert reply.code is HelperErrorCode.UNKNOWN_RUN
+    assert RUN_ID in reply.message
+
+
+def test_a_journal_from_before_the_trace_is_summarized_as_one(tmp_path: Path) -> None:
+    fixture = json.loads(_LEGACY_FIXTURE.read_text())
+    run_id = fixture["events"][0]["run_id"]
+    project = project_with_run(tmp_path / "proj", run_id)
+    journal = Project.log_directory_for(project.resolve(), run_id) / RUN_EVENTS_FILE
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    journal.write_bytes(b"".join(json.dumps(event).encode() + b"\n" for event in fixture["events"]))
+
+    reply = _ask(project, run_id, 0)
+
     assert isinstance(reply, RunsSummaryReply)
-    assert (reply.through_sequence, reply.event_count, reply.journal_bytes) == (0, 0, 0)
-    assert (reply.spans, reply.replies, reply.schemas, reply.next_offset) == ((), (), {}, None)
+    assert reply.trace is TraceFormat.PREDATES_TRACE
+    assert reply.rounds_finished == fixture["summary"]["rounds_finished"]
 
 
 def test_an_unknown_run_is_refused_naming_it(tmp_path: Path) -> None:

@@ -108,7 +108,7 @@ function summaryReply(
   status: RunStatus,
 ): SummaryReply {
   if (!result.ok) return {kind: 'failed', message: result.error};
-  if (result.value.kind === 'unsupported') return result.value;
+  if (result.value.kind !== 'summary') return result.value;
   try {
     return {kind: 'summary', ...summaryFacts(result.value.summary, runId, status)};
   } catch (error) {
