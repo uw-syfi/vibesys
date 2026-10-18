@@ -200,8 +200,7 @@ class AgentLibraryLogins:
         # lint-waiver: LW-271507 [PLC0415]; the helper answers hello without loading the agent library.
         # > The same deferral as `vetted_harnesses`: `vs_agent.api` owns the provider facts and
         # > importing it at module level would make every channel pay half a second before `hello`.
-        from vs_agent.api import LoginKind, provider_display_name  # noqa: PLC0415
-        from vs_agent.api import LoginState as ProviderLoginState  # noqa: PLC0415
+        from vs_agent import api as agents  # noqa: PLC0415
 
         found = self._login_of(provider)
         credential = found.credential
@@ -209,17 +208,17 @@ class AgentLibraryLogins:
         if credential is not None:
             how = (
                 ApiKeyLogin(variable=credential.variable, file=credential.file)
-                if credential.kind is LoginKind.API_KEY
+                if credential.kind is agents.LoginKind.API_KEY
                 else AccountLogin()
             )
         state = {
-            ProviderLoginState.SIGNED_IN: LoginState.SIGNED_IN,
-            ProviderLoginState.SIGNED_OUT: LoginState.SIGNED_OUT,
-            ProviderLoginState.UNKNOWN: LoginState.UNKNOWN,
+            agents.LoginState.SIGNED_IN: LoginState.SIGNED_IN,
+            agents.LoginState.SIGNED_OUT: LoginState.SIGNED_OUT,
+            agents.LoginState.UNKNOWN: LoginState.UNKNOWN,
         }[found.state]
         return AgentLogin(
             provider=provider,
-            provider_name=provider_display_name(provider),
+            provider_name=agents.provider_display_name(provider),
             installed=found.installed,
             state=state,
             how=how,
