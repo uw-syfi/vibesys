@@ -22,11 +22,11 @@ export function ChoiceTiles<T extends string>(props: {
 }): JSX.Element {
   const name = useId();
   return (
-    <div className="vs-tiles" role="radiogroup" aria-label={props.label}>
+    <div className="vs-choice-tiles" role="radiogroup" aria-label={props.label}>
       {props.options.map(option => (
-        <label key={option.value} className="vs-tile">
+        <label key={option.value} className="vs-choice-tile">
           <input
-            className="vs-tile-input"
+            className="vs-choice-tile-input"
             type="radio"
             name={name}
             value={option.value}
@@ -34,9 +34,9 @@ export function ChoiceTiles<T extends string>(props: {
             onChange={() => props.change(option.value)}
           />
           {option.leading === undefined ? null : (
-            <span className="vs-tile-leading">{option.leading}</span>
+            <span className="vs-choice-tile-leading">{option.leading}</span>
           )}
-          <span className="vs-tile-label">{option.label}</span>
+          <span className="vs-choice-tile-label">{option.label}</span>
         </label>
       ))}
     </div>

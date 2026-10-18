@@ -603,7 +603,7 @@ describe('ChoiceTiles', () => {
     expect(new Set(radios.map(radio => radio.name)).size).toBe(1);
     await click(radios[1] as HTMLInputElement);
     expect(radios.map(radio => radio.checked)).toEqual([false, true]);
-    const tiles = [...container.querySelectorAll('.vs-tile')];
+    const tiles = [...container.querySelectorAll('.vs-choice-tile')];
     expect(tiles.map(tile => tile.textContent)).toEqual(['Alpha', 'Beta']);
     // A mark is decoration beside its name: hidden from assistive technology.
     expect(tiles.every(tile => tile.querySelector('svg[aria-hidden="true"]') !== null)).toBe(true);

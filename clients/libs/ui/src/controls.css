@@ -3,12 +3,12 @@
 
 /* --- choice tiles ------------------------------------------------------------------------------ */
 
-.vs-tiles {
+.vs-choice-tiles {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-3);
 }
-.vs-tile {
+.vs-choice-tile {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -28,26 +28,26 @@
   cursor: pointer;
 }
 /* The native radio covers its tile, unseen: it takes the presses, the focus and the arrow keys. */
-.vs-tile-input {
+.vs-choice-tile-input {
   position: absolute;
   inset: 0;
   margin: 0;
   opacity: 0;
   cursor: inherit;
 }
-.vs-tile:hover {
+.vs-choice-tile:hover {
   color: var(--text);
 }
-.vs-tile:has(:checked) {
+.vs-choice-tile:has(:checked) {
   border-color: var(--text);
   color: var(--text);
   font-weight: var(--text-body-strong-weight);
 }
-.vs-tile:has(:focus-visible) {
+.vs-choice-tile:has(:focus-visible) {
   outline: var(--focus-ring) solid var(--accent);
   outline-offset: var(--focus-offset);
 }
-.vs-tile-leading {
+.vs-choice-tile-leading {
   display: flex;
   flex: none;
 }
