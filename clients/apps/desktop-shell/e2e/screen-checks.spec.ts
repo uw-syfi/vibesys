@@ -63,7 +63,7 @@ test('a chart that moves or vanishes on navigation is reported', async ({page}) 
   });
   const moved = await stabilityViolations(page, 'step', before, RUN_ANCHORS);
   expect(moved.map(each => each.message)).toEqual([
-    'the performance chart changed its y at "step"',
+    'the performance chart changed its y from 0 to 6 at "step"',
   ]);
   await page.evaluate(() => document.getElementById('chart')?.remove());
   const gone = await stabilityViolations(page, 'item', before, RUN_ANCHORS);

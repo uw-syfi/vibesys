@@ -22,7 +22,9 @@ export async function settled(page: Page): Promise<void> {
           // To a tenth of a pixel: the stability check holds an element to half a pixel, so a
           // settle that rounds to whole pixels can call a frame at rest that is still moving it.
           const tenths = (value: number): number => Math.round(value * 10);
-          parts.push(`${tenths(box.x)},${tenths(box.y)},${tenths(box.width)},${tenths(box.height)}`);
+          parts.push(
+            `${tenths(box.x)},${tenths(box.y)},${tenths(box.width)},${tenths(box.height)}`,
+          );
         }
         return parts.join('|');
       };
