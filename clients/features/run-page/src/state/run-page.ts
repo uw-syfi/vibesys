@@ -120,7 +120,7 @@ export type HistoryReply =
   | {readonly kind: 'failed'; readonly message: string};
 
 /** A bounded read of the opened step's transcript, separate from the run-level summary. */
-export type SpanDetail =
+type SpanDetail =
   | {readonly kind: 'idle'}
   | {
       readonly kind: 'reading';
