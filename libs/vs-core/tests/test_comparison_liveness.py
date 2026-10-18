@@ -65,6 +65,13 @@ def died(state: core.CoreState, request: core.SubmitMeasurement, how: Outcome) -
     The job's end reaches core before its submission's own observation, as it does in a run
     (`_ended` hands the job's end to the ledger). A refused submission has no job at all.
     """
+    return died_steps(state, request, how)[-1].state
+
+
+def died_steps(
+    state: core.CoreState, request: core.SubmitMeasurement, how: Outcome
+) -> tuple[core.Transition, ...]:
+    """Every transition `died` takes, in order."""
     assert request.request_id is not None
     if how == "refused":
         refused = seen(
@@ -77,19 +84,24 @@ def died(state: core.CoreState, request: core.SubmitMeasurement, how: Outcome) -
             observed_at=state.run.now_at,
         )
         state = committed(state, refused)
-        return transition(
-            state,
-            core.MeasurementSubmissionObserved(
-                observation=refused, failure=core.MeasurementFailure.INFRASTRUCTURE
+        return (
+            transition(
+                state,
+                core.MeasurementSubmissionObserved(
+                    observation=refused, failure=core.MeasurementFailure.INFRASTRUCTURE
+                ),
             ),
-        ).state
+        )
     started = seen(request, 1)
     state = committed(state, started)
-    state = transition(state, core.MeasurementSubmissionObserved(observation=started)).state
+    steps = [transition(state, core.MeasurementSubmissionObserved(observation=started))]
     assert started.resource_id is not None
-    state = transition(
-        state, core.JobObserved(resource_id=started.resource_id, observation=started)
-    ).state
+    steps.append(
+        transition(
+            steps[-1].state, core.JobObserved(resource_id=started.resource_id, observation=started)
+        )
+    )
+    state = steps[-1].state
     status, failure = {
         "cancelled": (core.ObservationStatus.CANCELLED, None),
         "infrastructure": (core.ObservationStatus.FAILED, core.MeasurementFailure.INFRASTRUCTURE),
@@ -132,19 +144,25 @@ def died(state: core.CoreState, request: core.SubmitMeasurement, how: Outcome) -
         )
     )
     state = committed(state, finished, facts)
-    state = transition(
-        state,
-        core.JobObserved(
-            resource_id=finished.resource_id or started.resource_id,
-            observation=finished,
-            evidence=records,
-            evaluation_result=facts,
-            failure=failure,
-        ),
-    ).state
-    return transition(
-        state, core.MeasurementSubmissionObserved(observation=finished, failure=failure)
-    ).state
+    steps.append(
+        transition(
+            state,
+            core.JobObserved(
+                resource_id=finished.resource_id or started.resource_id,
+                observation=finished,
+                evidence=records,
+                evaluation_result=facts,
+                failure=failure,
+            ),
+        )
+    )
+    steps.append(
+        transition(
+            steps[-1].state,
+            core.MeasurementSubmissionObserved(observation=finished, failure=failure),
+        )
+    )
+    return tuple(steps)
 
 
 def closed(lab: Lab, name: str) -> None:
