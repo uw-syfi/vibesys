@@ -27,7 +27,6 @@ from .test_stories import design, implement, judge, selection_of, start
 if TYPE_CHECKING:
     from tests.vibesys.orchestration.multi._host import MultiHost
 
-    from vs_core.api import Span
 
 NOISE = 0.01
 RATIOS = st.floats(1.2, 3.0, allow_nan=False)
@@ -41,12 +40,12 @@ def settled_value(ratio: float) -> float:
 
 def attrs_of(host: MultiHost, kind: str) -> list[dict[str, object]]:
     """The attributes of every span of ``kind`` the run labelled, in the order they started."""
-    found: list[Span] = [
-        span
-        for span in host.run.trace().spans
-        if span.label is not None and span.label.kind == kind and span.label.attrs_json
-    ]
-    return [json.loads(span.label.attrs_json or "{}") for span in found]
+    found: list[dict[str, object]] = []
+    for span in host.run.trace().spans:
+        label = span.label
+        if label is not None and label.kind == kind and label.attrs_json:
+            found.append(json.loads(label.attrs_json))
+    return found
 
 
 def play(
