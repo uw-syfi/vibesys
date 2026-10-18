@@ -17,8 +17,8 @@ import {
   PickRow,
   Row,
   SearchBox,
-  Select,
   SegmentedControl,
+  Select,
   Stack,
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
@@ -38,7 +38,7 @@ import {
 } from '../../state/index.js';
 import {FramedPane} from './framed-pane.js';
 import {IdeaPickRow} from './idea-pick-row.js';
-import {IdeasTable, type IdeasSort} from './ideas-table.js';
+import {type IdeasSort, IdeasTable} from './ideas-table.js';
 import {AgentsView, type AgentsViewProps} from './views/agents/agents-view.js';
 import {agentsHeader, logsHeader, timelineHeader} from './views/headers.js';
 import {LogsView, type LogsViewProps} from './views/logs/logs-view.js';

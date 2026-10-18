@@ -1,12 +1,12 @@
 /** A flat, windowed list of ideas. Ordering and filtering are presentation-only. */
-import {PickList, PickRow, Stack, markdownToPlain} from '@vibesys/ui';
-import {useMemo, type JSX} from 'react';
+import {markdownToPlain, PickList, PickRow, Stack} from '@vibesys/ui';
+import {type JSX, useMemo} from 'react';
 import {
   ageWords,
-  ideasView,
   type IdeaRow,
   type IdeasFilter,
   type ImplementerOutcomes,
+  ideasView,
   type RunModel,
   type RunPageAction,
 } from '../../state/index.js';

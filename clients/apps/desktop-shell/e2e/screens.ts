@@ -22,7 +22,7 @@ type Screen =
   | 'scrubbed';
 
 export interface Journey {
-  /** The title of the idea to open, or null for the second row. */
+  /** The title of the idea to open, or null for the first row. */
   readonly idea: string | null;
   /** The command of a tool call in that idea's implementer turn; null: go no deeper than the idea. */
   readonly command: string | null;
@@ -37,8 +37,8 @@ export type Visit = (screen: Screen, page: Page) => Promise<void>;
 
 const source = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const escaped = (text: string): RegExp => new RegExp(source(text));
-/** A row whose name starts with its state word and then `title` (a row's base is in its name too). */
-const row = (title: string): RegExp => new RegExp(`^(?:\\w+ )?${source(title)}`);
+/** The adopted idea can have a star before its title. */
+const row = (title: string): RegExp => new RegExp(`^(?:★ )?${source(title)}`);
 
 class Walk {
   readonly moved: Violation[] = [];
@@ -71,8 +71,7 @@ class Walk {
 async function openIdea(page: Page, idea: string | null): Promise<void> {
   await settled(page);
   const options = page.getByRole('listbox', {name: 'Ideas'}).getByRole('option');
-  // The first row is the root of the tree: on a long run its first click selects without opening.
-  const other = (await options.count()) > 1 ? options.nth(1) : options.first();
+  const other = options.first();
   const target = idea === null ? other : options.filter({hasText: row(idea)}).first();
   // Pointing at a row redraws the chart (it lights the row's chain): on a long run that takes long
   // enough to swallow a click that arrives with the first pointer move, so point first, then press.

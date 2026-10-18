@@ -492,9 +492,7 @@ function expectApart(boxes: Awaited<ReturnType<typeof headerBoxes>>, width: numb
 const LONG_BASE =
   'Replace the per-slot sequence numbers of the lock-free ring with a contiguous payload arena and batched cursor publication';
 
-test('an idea’s header stays on clean lines at 900 and 1500 px, with a long base title', async ({
-  page,
-}) => {
+test('an idea’s header stays on clean lines without lineage at 900 and 1500 px', async ({page}) => {
   const long = JSON.parse(
     JSON.stringify(SERVER).replaceAll('Lock-free ring with per-slot sequence numbers', LONG_BASE),
   ) as FakeServerSeed;
@@ -505,29 +503,26 @@ test('an idea’s header stays on clean lines at 900 and 1500 px, with a long ba
     .click();
   for (const width of [900, 1500]) {
     await page.setViewportSize({width, height: 900});
-    await expect(page.getByText('0.91× vs base')).toBeVisible();
+    await expect(page.getByText('0.91× vs base')).toHaveCount(0);
+    await expect(page.getByText(/^from$/)).toHaveCount(0);
     const boxes = await headerBoxes(page);
-    expect(boxes.length).toBeGreaterThan(4);
+    expect(boxes.length).toBeGreaterThan(2);
     expectApart(boxes, width);
     // Everything stays inside the header, and a fact that must be whole is not cut.
     for (const box of boxes)
       expect(box.inside, `${box.text} leaves the header at ${width}px`).toBe(true);
-    for (const box of boxes.filter(
-      each => each.fact && /^(Passed|0\.91× vs base|\d+m)$/.test(each.text),
-    )) {
+    for (const box of boxes.filter(each => each.fact && /^(Passed|\d+m)$/.test(each.text))) {
       expect(box.clipped, `${box.text} is cut at ${width}px`).toBe(false);
     }
     // The performance row keeps room for its chart whatever the title lengths.
     expect((await perfRow(page)).chart.width).toBeGreaterThan(200);
     // Every figure and label is one line high (a small button is 32px, a wrapped line pair 40+).
-    for (const box of boxes.filter(each =>
-      /^(Passed|0\.91× vs base|\d+m|from.*)$/.test(each.text),
-    )) {
+    for (const box of boxes.filter(each => /^(Passed|\d+m)$/.test(each.text))) {
       expect(box.height, `${box.text} wraps at ${width}px`).toBeLessThanOrEqual(34);
     }
-    // Wide enough, the facts share one line: the base title is cut, the rest is whole.
+    // The outcome and duration stay on one line.
     const facts = boxes.filter(each => each.fact);
-    expect(facts.length).toBe(4);
+    expect(facts.length).toBe(2);
     if (width >= 1500) {
       expect(
         Math.max(...facts.map(each => each.y)) - Math.min(...facts.map(each => each.y)),

@@ -103,10 +103,10 @@ test('a live run folds its trace into the ideas, the failed listed and hideable'
     await page.getByRole('main').screenshot({path: `${shots}/ink-live-ideas.png`});
   const shown = await ideas.getByRole('option').count();
   await expect(page.getByRole('button', {name: /^\+ \d+ failed$/})).toHaveCount(0);
-  // Hiding the failed leaves a row that says how many, which brings them back.
+  // The status filter hides failed rows and shows them again when toggled.
   await page.locator('button.vs-dotlegend-item', {hasText: /\d+ failed/}).click();
   await expect.poll(() => ideas.getByRole('option').count()).toBeLessThan(shown);
-  await page.getByRole('button', {name: /^\+ \d+ failed$/}).click();
+  await page.locator('button.vs-dotlegend-item', {hasText: /\d+ failed/}).click();
   await expect.poll(() => ideas.getByRole('option').count()).toBe(shown);
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
 });
