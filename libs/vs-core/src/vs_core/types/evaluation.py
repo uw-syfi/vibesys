@@ -38,7 +38,7 @@ from .evaluation_history import (
     RepeatedFailureGuidance,
 )
 from .job_observations import JobProgress, JobTimeout, MeasurementFailure, TimedOut
-from .measurement import BaseRef, BaseRun, Comparison, Reading, Runaway, Sample
+from .measurement import BaseClaim, BaseRef, BaseRun, Comparison, Reading, Runaway, Sample
 from .until import Within
 from .waits import WaitOn
 
@@ -605,6 +605,8 @@ class EvaluationState(Value):
     agent_calls: tuple[AgentCall, ...] = ()
     base_runs: tuple[BaseRun, ...] = Field(default=(), exclude_if=unset)
     """The runs of a base core asked for itself, which have no decision or agent call to name them."""
+    base_claims: tuple[BaseClaim, ...] = Field(default=(), exclude_if=unset)
+    """The strategy's own runs of a base that core awaits instead of starting another."""
     samples: tuple[Sample, ...] = Field(default=(), exclude_if=unset)
     """Every conclusive framework run of a measured input, in the order the runs ended.
 

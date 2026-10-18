@@ -14,10 +14,12 @@ from typing import TYPE_CHECKING
 from ._comparison import (
     Measured,
     base_missing,
+    claimed_base,
     comparisons_of,
     evaluation_of,
     moment_of,
     remeasures_base,
+    running_baseline,
     sample_of,
 )
 from ._proofs import (
@@ -40,11 +42,11 @@ from .types.evaluation import (
     SubmitMeasurement,
 )
 from .types.kernel import AreaChange
-from .types.measurement import BaseRef, BaseRun, Comparison, Sample
+from .types.measurement import BaseClaim, BaseRef, BaseRun, Comparison, Sample
 from .types.until import Within
 
 if TYPE_CHECKING:
-    from .types.common import Seconds
+    from .types.common import RequestId, Seconds
     from .types.evaluation import EvaluationState, EvidenceRef, MeasurementPlan
     from .types.kernel import EvaluationContext
     from .types.records import Outbound
@@ -116,7 +118,18 @@ def with_base(
     measured = Measured(evaluation_of(identity.value), base.measured_input)
     if not base_missing(state, measured, moment_of(context.run)):
         return change
+    awaited = running_baseline(state, base)
+    if awaited is not None:
+        return change.model_copy(update={"state": _claimed(state, awaited, base)})
     return _base_run(change, context, event.scope, plan, candidate, capped(event))
+
+
+def _claimed(state: EvaluationState, running: RequestId, base: BaseRef) -> EvaluationState:
+    """``state`` counting the strategy's run in flight as samples of ``base`` when it ends."""
+    if any(claim.request_id == running for claim in state.base_claims):
+        return state
+    claims = (*state.base_claims, BaseClaim(request_id=running, base=base))
+    return state.model_copy(update={"base_claims": claims})
 
 
 def _anchored(state: EvaluationState, base: BaseRef) -> EvaluationState:
@@ -232,7 +245,7 @@ def record_samples(
         (
             made
             for evidence in newly
-            if (made := sample_of(job, evidence, observed_at)) is not None
+            if (made := sample_of(job, evidence, observed_at, _input_of(state, job))) is not None
             and all(held.run != made.run for held in state.samples)
         ),
         None,
@@ -253,6 +266,12 @@ def record_samples(
         )
         change = _remeasure(change, context, comparison, sample.evaluation)
     return change.state, change.requests
+
+
+def _input_of(state: EvaluationState, job: OwnedJob) -> str | None:
+    """The measured input of a claimed run of the strategy's, whose plan names none."""
+    claimed = claimed_base(state, job.submission_id)
+    return None if claimed is None else claimed.measured_input
 
 
 def _with_known_base(state: EvaluationState, sample: Sample) -> Sample:

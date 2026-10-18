@@ -62,7 +62,7 @@ from .types.measurement import BaseRef, Comparison, ComparisonVerdict, Direction
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from .types.common import RunFacts, Scope, Seconds
+    from .types.common import RequestId, RunFacts, Scope, Seconds
     from .types.evaluation import EvaluationState
     from .types.kernel import RunState
 
@@ -75,6 +75,7 @@ __all__ = [
     "Moment",
     "base_in_flight",
     "base_missing",
+    "claimed_base",
     "close_call",
     "compare",
     "comparison_of",
@@ -86,6 +87,7 @@ __all__ = [
     "official_needs_samples",
     "policy_of",
     "remeasures_base",
+    "running_baseline",
     "sample_of",
     "samples_of",
 ]
@@ -379,6 +381,34 @@ def base_in_flight(state: EvaluationState, measured: Measured) -> bool:
         ):
             return True
     return False
+
+
+def running_baseline(state: EvaluationState, base: BaseRef) -> RequestId | None:
+    """The strategy's own run of ``base`` that has not ended, if one is under way.
+
+    The strategy measures the run's input from a plan that names no measured input, so
+    `base_in_flight` (which matches on one) does not see it. It is the same revision under the
+    same gates and host as an agent's base run would be, so a second run would measure the base
+    twice: a wasted job on a contended cluster.
+    """
+    for budget in state.submission_budgets:
+        identity = budget.identity
+        latest = budget.receipts[-1] if budget.receipts else None
+        if (
+            identity.purpose == "baseline"
+            and identity.measured_input is None
+            and identity.candidate == base.commit
+            and isinstance(latest, PreparedSubmissionReceipt)
+            and (latest.observation is None or not latest.observation.terminal)
+        ):
+            return latest.request_id
+    return None
+
+
+def claimed_base(state: EvaluationState, request_id: RequestId) -> BaseRef | None:
+    """The base a claimed run of the strategy's is counted as samples of, if it is claimed."""
+    claim = next((c for c in state.base_claims if c.request_id == request_id), None)
+    return None if claim is None else claim.base
 
 
 def base_missing(state: EvaluationState, measured: Measured, moment: Moment) -> bool:
