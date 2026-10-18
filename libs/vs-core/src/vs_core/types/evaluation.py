@@ -285,6 +285,12 @@ class OwnedJob(Value):
     wait: WaitOn | None = None
     """What the live job waits on: its next poll's timer, or the poll in flight. A terminal
     job waits on nothing."""
+    collecting: RequestId | None = Field(default=None, exclude_if=unset)
+    """The collection of the ended job's evidence still under way, if one is.
+
+    The job ended without its records, so core asked for them (``CollectEvidence``); until
+    that request ends, whether the run gave a sample is not known, and the comparisons it
+    serves take no replacement run (`vs_core._base_runs.after_run`)."""
     queue_credit: Seconds = 0
     """Seconds of queue time this job's facts earned: its limit counts from its start.
 
@@ -297,6 +303,10 @@ class OwnedJob(Value):
     def waits_while_live(self) -> OwnedJob:
         """Only a live job waits, and it always names what will move it."""
         _job_wait(terminal=self.terminal, wait=self.wait)
+        if self.collecting is not None and (not self.terminal or self.evidence):
+            raise ContractValidationError(
+                "collecting", "only an ended job without its evidence collects it"
+            )
         return self
 
 
@@ -891,11 +901,13 @@ class DeadlineReached(Value):
 
 
 class JobWaitLapsed(Value):
-    """A request a live job waits on ended without moving the job.
+    """A request a job waits on ended without moving the job.
 
     Internal signal raised once a step's other signals settle, never shell input: the poll
     blocked at its bound, or the job refused its answer (stale or foreign). The job polls
-    again after its backoff instead of waiting on a request that is over.
+    again after its backoff instead of waiting on a request that is over. For an ended job it
+    is the collection of its evidence that ended (``OwnedJob.collecting``): the job stops
+    collecting, and the comparisons its run serves take the runs they still need.
     """
 
     kind: Literal["job_wait_lapsed"] = "job_wait_lapsed"

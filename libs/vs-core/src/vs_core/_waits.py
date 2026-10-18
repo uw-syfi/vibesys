@@ -527,16 +527,26 @@ def lapsed_job_waits(core: CoreState) -> tuple[JobWaitLapsed, ...]:
 
     A job's own transition takes an answer of its poll and waits again, so a job still naming
     an ended request is one the answer did not reach: the poll blocked at its bound, or the
-    job refused what it said. The wake makes the job wait again (``JobWaitLapsed``).
+    job refused what it said. The wake makes the job wait again (``JobWaitLapsed``). An ended
+    job whose evidence collection is over (``OwnedJob.collecting``) is woken too, so the
+    comparisons its run serves are re-checked.
     """
     if core.run.status == RunStatus.TERMINAL:
         return ()
-    return tuple(
+    polls = tuple(
         JobWaitLapsed(job=owner, request_id=request_id)
         for _, owner, wait in _job_waits(core)
         for request_id in wait.requests
         if _request_ended(core, request_id)
     )
+    # An ended job collecting its evidence hears the collection end the same way, when no
+    # answer of it reached the job (it blocked at its bound).
+    collections = tuple(
+        JobWaitLapsed(job=job.submission_id, request_id=job.collecting)
+        for job in core.evaluation.jobs
+        if job.collecting is not None and _request_ended(core, job.collecting)
+    )
+    return (*polls, *collections)
 
 
 def lapsed_check_waits(core: CoreState) -> tuple[RecoveryCheckWaitLapsed, ...]:

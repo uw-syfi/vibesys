@@ -1108,6 +1108,9 @@ def _job_observed(
             **_next_poll(job, observation, context),
         }
     )
+    collect = _collection(updated, context)
+    if isinstance(updated, OwnedJob):
+        updated = updated.model_copy(update={"collecting": _collecting(updated, context, collect)})
     state = state.model_copy(
         update={
             "jobs": tuple(updated if j == job else j for j in state.jobs)
@@ -1171,23 +1174,8 @@ def _job_observed(
                     operator_diagnostic=event.operator_diagnostic[-MEASUREMENT_DIAGNOSTIC_LIMIT:],
                 ),
             )
-        # A cancel stop discards its run's jobs, so it collects nothing from them: a job the
-        # executor holds no record of cannot be collected from, and asking would hold the
-        # run closing for good.
-        if (
-            observation.accepted
-            and not updated.evidence
-            and _cancelling_scope(context) != job.scope
-        ):
-            collect = _job_request(CollectEvidence, updated, context, "evidence")
-            # One collection per job. A collection that yields nothing (a job that failed
-            # before producing evidence) is itself observed as a job event, and asking
-            # again on that event would never end.
-            if not context.records.positions(collect.request_id):
-                requests = (
-                    *requests,
-                    _job_outbound(CollectEvidence, updated, context, "evidence"),
-                )
+        if collect is not None:
+            requests = (*requests, collect)
     closing = _ended(context, job, event)
     return AreaChange(
         state=state,
@@ -1198,6 +1186,52 @@ def _job_observed(
         requests=requests if context.run.status != RunStatus.TERMINAL else (),
         events=events,
     )
+
+
+def _collection(job: OwnedJob | RegisteredOwnedJob, context: EvaluationContext) -> Outbound | None:
+    """The collection of an ended job's evidence to ask for now, if the job needs one.
+
+    A cancel stop discards its run's jobs, so it collects nothing from them: a job the executor
+    holds no record of cannot be collected from, and asking would hold the run closing for
+    good. One collection per job: a collection that yields nothing (a job that failed before
+    producing evidence) is itself observed as a job event, and asking again on that event
+    would never end.
+    """
+    observation = job.observation
+    if (
+        not conclusive(observation)
+        or observation is None
+        or not observation.accepted
+        or job.evidence
+        or _cancelling_scope(context) == job.scope
+    ):
+        return None
+    collect = _job_request(CollectEvidence, job, context, "evidence")
+    if context.records.positions(collect.request_id):
+        return None
+    return _job_outbound(CollectEvidence, job, context, "evidence")
+
+
+def _collecting(
+    job: OwnedJob, context: EvaluationContext, collect: Outbound | None
+) -> RequestId | None:
+    """The collection of ``job``'s evidence still under way, while it may still bring a sample.
+
+    The one asked for now, else the one asked for before while it is open and no evidence came.
+    Only a framework run that succeeded can give a sample (`sample_of`): the evidence of any
+    other changes nothing a comparison waits on, so its end is decided at once.
+    """
+    if (
+        job.evidence
+        or not job.terminal
+        or job.status != ObservationStatus.SUCCEEDED
+        or job.reuses is not None
+    ):
+        return None
+    if collect is not None:
+        return collect.request.request_id
+    held = None if job.collecting is None else context.records.record(job.collecting)
+    return job.collecting if held is not None and _open(held) else None
 
 
 def _queued_notice(
@@ -1361,10 +1395,14 @@ def _wait_lapsed(
     The poll blocked at its bound (the executor never answered in time, or the host was
     down past it) or the job refused its answer. A registered job whose operation ended
     without ever naming a job has nothing to poll: it ends with what that request reported,
-    and its release is proved from that record like any other.
+    and its release is proved from that record like any other. An ended job whose evidence
+    collection ended without reaching it stops collecting, and its run's end is decided then
+    (`after_run`).
     """
 
     def woken[J: OwnedJob | RegisteredOwnedJob](job: J) -> J:
+        if isinstance(job, OwnedJob) and job.collecting == event.request_id:
+            return job.model_copy(update={"collecting": None})
         if _owner_request(job) != event.job or job.wait is None:
             return job
         ended = context.records.record(event.request_id)
@@ -1382,7 +1420,7 @@ def _wait_lapsed(
             }
         )
 
-    return AreaChange(
+    change = AreaChange(
         state=state.model_copy(
             update={
                 "jobs": tuple(woken(job) for job in state.jobs),
@@ -1390,6 +1428,12 @@ def _wait_lapsed(
             }
         )
     )
+    collected = any(
+        job.submission_id == event.job and job.collecting == event.request_id for job in state.jobs
+    )
+    # The collection of an ended job's evidence ended without reaching it: its run gave no
+    # sample, and the comparisons it serves take the runs they still need.
+    return after_run(change, context, event.job) if collected else change
 
 
 def _open(record: RequestRecord) -> bool:

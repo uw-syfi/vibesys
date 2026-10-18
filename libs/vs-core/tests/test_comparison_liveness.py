@@ -31,8 +31,16 @@ import vs_core.api as core
 from vs_sim.api.testing import examples
 
 from .test_baseline_in_flight import strategy_baseline
-from .test_measurement_comparison import FLOOR, STALENESS, Lab, ended_with, final_check, reading
-from .test_measurement_reuse import revision, seen, submissions
+from .test_measurement_comparison import (
+    FLOOR,
+    STALENESS,
+    Lab,
+    ended_with,
+    final_check,
+    reading,
+    started_with,
+)
+from .test_measurement_reuse import record, revision, seen, submissions
 from .test_measurements import committed, transition
 
 Death = Literal["cancelled", "infrastructure", "refused", "drained"]
@@ -312,6 +320,111 @@ def test_a_base_run_that_keeps_dying_is_retried_a_bounded_number_of_times() -> N
 
 
 # Finding 1: under no floor the candidate side reaches the runs a verdict needs.
+
+
+# Late evidence: a run that ended before its records arrived is not replaced on the way.
+
+
+def ended_without_records(lab: Lab, run: core.SubmitMeasurement) -> core.RequestId:
+    """End ``run`` as succeeded, its records not yet known; the collection core asks for."""
+    assert run.request_id is not None
+    lab.state = started_with(lab.state, run)
+    finished = seen(
+        run,
+        2,
+        status=core.ObservationStatus.SUCCEEDED,
+        terminal=True,
+        released=True,
+        children_complete=True,
+        observed_at=lab.state.run.now_at,
+    )
+    assert finished.resource_id is not None
+    lab.state = committed(lab.state, finished, _PASSED)
+    lab.state = transition(
+        lab.state, core.MeasurementSubmissionObserved(observation=finished)
+    ).state
+    ended = transition(
+        lab.state,
+        core.JobObserved(
+            resource_id=finished.resource_id, observation=finished, evaluation_result=_PASSED
+        ),
+    )
+    lab.state = ended.state
+    lab.ended.add(run.request_id.root)
+    (collect,) = (r for r in ended.requests if isinstance(r, core.CollectEvidence))
+    assert collect.request_id is not None
+    return collect.request_id
+
+
+def collected(lab: Lab, run: core.SubmitMeasurement, collect: core.RequestId, value: float) -> None:
+    """The collection answers with ``run``'s records, the benchmark reading ``value``."""
+    answer = seen(
+        run,
+        3,
+        status=core.ObservationStatus.SUCCEEDED,
+        terminal=True,
+        released=True,
+        children_complete=True,
+        observed_at=lab.state.run.now_at,
+    )
+    rows = tuple(
+        row.model_copy(update={"phase": core.RequestPhase.COMPLETED})
+        if row.request_id == collect
+        else row
+        for row in lab.state.records.records
+    )
+    lab.state = lab.state.model_copy(
+        update={"records": lab.state.records.model_copy(update={"records": rows})}
+    )
+    status = core.ObservationStatus.SUCCEEDED
+    records = (
+        record(run, answer, "accuracy", status),
+        record(run, answer, "benchmark", status).model_copy(update={"reading": reading(value)}),
+    )
+    assert answer.resource_id is not None
+    lab.state = transition(
+        lab.state,
+        core.JobObserved(
+            resource_id=answer.resource_id,
+            observation=answer,
+            evidence=records,
+            evaluation_result=_PASSED,
+        ),
+    ).state
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("floor", [FLOOR, 0.0])
+def test_a_base_run_whose_records_are_still_being_collected_is_not_replaced(floor: float) -> None:
+    """The base run ended before its records came; core waits for its collection, not a rerun.
+
+    Before, the end of the job without records read as a run that gave no sample, so core
+    started a replacement base run at once, and the records that arrived next made it a
+    duplicate.
+    """
+    lab = Lab.of("a", floor=floor)
+    candidate, base = lab.call("a", "c1", "input-1")
+    end(lab, candidate, "sample", 130.0)
+    collect = ended_without_records(lab, base)
+    assert running(lab) == [], "no base run is started while its records are collected"
+    collected(lab, base, collect, 100.0)
+    (comparison,) = compared(lab, "a", "input-1")
+    assert comparison.base_samples == 1, "the collected records are the base's sample"
+
+
+@pytest.mark.regression
+def test_a_base_run_whose_collection_ends_without_records_is_replaced() -> None:
+    """A collection that blocks at its bound leaves no sample: the base is measured again."""
+    lab = Lab.of("a")
+    candidate, base = lab.call("a", "c1", "input-1")
+    end(lab, candidate, "sample", 130.0)
+    collect = ended_without_records(lab, base)
+    row = lab.state.records.record(collect)
+    assert row is not None
+    lab.state = transition(lab.state, core.ClockAdvanced(now_at=row.until.at + 1.0)).state
+    (again,) = running(lab)
+    assert again.plan.purpose == "baseline"
+    assert again.request_id != base.request_id
 
 
 @dataclass

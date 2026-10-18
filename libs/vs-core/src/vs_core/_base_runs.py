@@ -273,10 +273,11 @@ def _sample_ready(
 
     A run that gave a sample may be followed by another, and so may one that ended without a
     sample for a reason that says nothing of the next run: it was cancelled (drained with its
-    attempt, or out of queue allowance), failed in the machinery, or was refused at submission.
-    Two ends refuse another, since the next run would end the same way: a run that succeeded
-    without a reading (the benchmark reports no metric), and a workload failure (the revision
-    fails the evaluation, which is durable, as it is for any submission). Every run counts
+    attempt, or out of queue allowance), failed in the machinery, was refused at submission, or
+    succeeded and its records could not be collected. Two ends refuse another, since the next
+    run would end the same way: a run that succeeded with records but without a reading (the
+    benchmark reports no metric), and a workload failure (the revision fails the evaluation,
+    which is durable, as it is for any submission). Every run counts
     toward the identity's submission limit, so a run that keeps dying is retried a bounded
     number of times.
 
@@ -299,7 +300,8 @@ def _sample_ready(
         return False
     observation = latest.observation
     sampled = any(sample.run == latest.request_id for sample in state.samples)
-    if observation.status == ObservationStatus.SUCCEEDED and not sampled:
+    recorded = any(job.submission_id == latest.request_id and job.evidence for job in state.jobs)
+    if observation.status == ObservationStatus.SUCCEEDED and recorded and not sampled:
         return False
     released = not observation.accepted or isinstance(
         submission_released(state, context, latest), Proven
@@ -423,10 +425,14 @@ def after_run(
     re-checked from the state (`_advance`), whether ``run`` gave a sample or not; each check is
     idempotent, so the job's end and its submission's end may both ask. A submission whose job
     has not been seen to end yet is left to that end, which carries its sample: deciding before
-    it would take its input for unmeasured.
+    it would take its input for unmeasured. So is a job whose evidence core is still collecting
+    (``OwnedJob.collecting``): the collection's end decides, with its sample or without.
     """
     state = change.state
-    if any(job.submission_id == run and not job.terminal for job in state.jobs):
+    if any(
+        job.submission_id == run and (not job.terminal or job.collecting is not None)
+        for job in state.jobs
+    ):
         return change
     measured_input = _measured_input(state, context, run)
     if measured_input is None:
