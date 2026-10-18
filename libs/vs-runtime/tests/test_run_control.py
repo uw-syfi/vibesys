@@ -695,3 +695,30 @@ def test_no_resume_ever_weakens_a_pending_stop(
         assert _never_weaker(recorded, stop_mode(core.run))
     assert channel.stop_mode() == _strongest(asked)
     assert stop_mode(core.run) == _strongest(asked)
+
+
+@pytest.mark.regression
+@example(modes=[StopMode.DRAIN, StopMode.DRAIN])
+@example(modes=[StopMode.DRAIN, StopMode.CANCEL, StopMode.DRAIN, StopMode.CANCEL])
+@given(modes=st.lists(st.sampled_from(StopMode), max_size=6))
+def test_a_stop_request_is_announced_only_when_it_changes_the_stop(modes: list[StopMode]) -> None:
+    """PR #3209 LOW-4: every repeated stop emitted another ``STOP_REQUESTED``.
+
+    The channel announces a stop request, to its event sink and its stop listeners, only
+    when it changes the stop in force: the first stop, and a cancel that escalates a drain.
+    """
+    events = FakeRunControlEventSink()
+    channel = create_run_control_channel(events, threads=SimThreads())
+    heard: list[StopMode | None] = []
+    channel.on_stop_requested(lambda: heard.append(channel.stop_mode()))
+    in_force: list[StopMode] = []
+    for mode in modes:
+        channel.request_stop(mode)
+        mode_now = channel.stop_mode()
+        assert mode_now is not None
+        if not in_force or in_force[-1] is not mode_now:
+            in_force.append(mode_now)
+
+    kinds = [transition.kind for transition in events.transitions]
+    assert kinds == [RunControlTransitionKind.STOP_REQUESTED] * len(in_force)
+    assert heard == in_force

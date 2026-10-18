@@ -706,14 +706,16 @@ class RuntimeRunControlChannel:
 
         A stop only escalates (``escalate_stop``): a cancel replaces a pending drain, and
         a later drain never weakens a pending cancel. The request that set the mode in
-        force names the stop.
+        force names the stop. Only a request that changes the stop in force is announced
+        (``STOP_REQUESTED`` and the stop listeners); a repeat changes nothing.
         """
         with self._lock:
-            self._emit(RunControlTransitionKind.STOP_REQUESTED)
             held = self._stop_mode if self._stop_requested else None
             in_force = escalate_stop(held, mode)
-            if in_force is not held:
-                self._requested_by["stop"] = control_id
+            if in_force is held:
+                return
+            self._emit(RunControlTransitionKind.STOP_REQUESTED)
+            self._requested_by["stop"] = control_id
             self._stop_requested = True
             self._stop_mode = in_force
             self._lock.notify_all()
