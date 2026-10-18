@@ -306,6 +306,25 @@ def test_three_runs_a_side_with_a_spread_give_a_verdict_at_welchs_bar() -> None:
             assert core.close_call(result) is (verdict is core.ComparisonVerdict.WITHIN_NOISE)
 
 
+@pytest.mark.regression
+def test_one_outlier_run_of_the_base_keeps_a_large_loss_within_noise() -> None:
+    """A live run read a candidate at 0.66 of its base, with noise 0.22, and called it within noise.
+
+    The base's three runs read 2.69M, 2.28M and 6.01M ops/s on a shared host. Their relative
+    spread (0.56) makes the noise of the ratio 0.22 and leaves 2 degrees of freedom, so the bar
+    is ``t(2)`` = 4.303 noises: a loss of 0.34 is 1.6 noises. The call is the statistic's, not a
+    fault: against a base of the same mean without the spread the same candidate is ``worse``.
+    """
+    candidate = [2_562_962.8, 2_573_260.6, 2_109_707.7]
+    noisy = compared(candidate, [2_688_992.7, 2_275_733.2, 6_013_612.1])
+    assert (round(noisy.ratio, 2), round(noisy.noise, 2)) == (0.66, 0.22)
+    assert noisy.verdict is core.ComparisonVerdict.WITHIN_NOISE
+    assert (1 - noisy.ratio) < T_975_AT_2 * noisy.noise
+    steady = compared(candidate, [3_500_000.0, 3_660_000.0, 3_820_000.0])
+    assert round(steady.ratio, 2) == 0.66
+    assert steady.verdict is core.ComparisonVerdict.WORSE
+
+
 def student_t_quantile(degrees: int) -> float:
     """The two-sided 95% Student-t quantile, from the density integrated numerically.
 

@@ -10,7 +10,15 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from vs_core.api import InvocationId, InvocationRef, SessionId, SnapshotAndRetain
+import pytest
+
+from vs_core.api import (
+    InvocationId,
+    InvocationRef,
+    SessionId,
+    SnapshotAndRetain,
+    WorkspaceMode,
+)
 
 from .test_workspace_requests import (
     _attempt,
@@ -103,6 +111,30 @@ def test_a_measured_candidate_holds_the_revision_less_its_unread_paths(tmp_path:
         finally:
             await agents.discard()
             await measured.discard()
+
+    with _workspaces(tmp_path) as workspaces:
+        asyncio.run(exercise(workspaces))
+
+
+@pytest.mark.parametrize("mode", [WorkspaceMode.ISOLATED_CHILD, WorkspaceMode.EXCLUSIVE_ROOT])
+def test_an_ensured_workspace_names_the_measured_input_of_its_base(
+    tmp_path: Path, mode: WorkspaceMode
+) -> None:
+    """Core compares a candidate with the attempt's base, whose input only the runtime digests.
+
+    The ensure's observation carries what an evaluation reads at the base, the digest a
+    snapshot of that revision would carry, in either workspace mode.
+    """
+
+    async def exercise(workspaces: RuntimeWorkspaces) -> None:
+        executor, _ = _executor(workspaces)
+        attempt = _attempt()
+        ensure = _ensure(workspaces, attempt, "ensure-1", mode)
+        observed = (await _run(executor, ensure)).observation
+        base = ensure.plan.base.git_commit
+        assert base is not None
+        assert observed.observation.measured_input == await workspaces.root.measured_input(base)
+        assert observed.observation.measured_input is not None
 
     with _workspaces(tmp_path) as workspaces:
         asyncio.run(exercise(workspaces))

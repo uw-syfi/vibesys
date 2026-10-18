@@ -47,6 +47,7 @@ from vs_core.api import (
     RevisionRef,
     Settle,
     StartAttempt,
+    StatedComparison,
     ValidateLocalBase,
     Withdraw,
 )
@@ -128,6 +129,11 @@ class SerialHost:
     """For a candidate, by its revision's id, the (ratio, noise) over its base that core's
     comparison of its measured samples gives; a candidate named here is compared, any other has
     no base's samples."""
+    stated: list[StatedComparison] = field(default_factory=list)
+    """The comparisons the run's view holds, one per measured candidate input."""
+    landing: dict[str, Comparison] = field(default_factory=dict)
+    """The settled comparison of each measured candidate input, which core's close-call runs make
+    when they land; until the clock moves the view holds the provisional one."""
     baseline: Baseline = "measured"
     validation: Validation = "passed"
     attribution_output: str = ""
@@ -216,6 +222,7 @@ class SerialHost:
             self.answer(answerable[pick % len(answerable)], variant)
             return True
         if self.run.sleeping_until:
+            self._land()
             self.run.advance_to(min(self.run.sleeping_until))
             return True
         return False
@@ -298,11 +305,42 @@ class SerialHost:
             evidence=refs,
             status=ObservationStatus.FAILED if failed else ObservationStatus.SUCCEEDED,
         )
-        comparison = self._comparison(request.scope, candidate) if not is_input else None
+        settled = self._comparison(request.scope, candidate) if not is_input else None
+        comparison = None if settled is None else self._provisional(settled)
         self.run.answer(
             asked,
             MeasurementFinished(decision=asked.decision, result=result, comparison=comparison),
         )
+
+    def _provisional(self, settled: Comparison) -> Comparison:
+        """What core holds when the measurement ends: one run a side, a close call, still settling.
+
+        Core's runs that the close call earns land when the clock next moves (`step`), and the
+        view then holds the settled comparison, as it does in production.
+        """
+        provisional = settled.model_copy(
+            update={
+                "candidate_samples": 1,
+                "base_samples": 1,
+                "noise": 0.0,
+                "verdict": ComparisonVerdict.WITHIN_NOISE,
+            }
+        )
+        self.landing[settled.candidate_input] = settled
+        self._show(StatedComparison(comparison=provisional, settling=True))
+        return provisional
+
+    def _land(self) -> None:
+        """Core's close-call runs end: the view holds each comparison settled."""
+        for settled in self.landing.values():
+            self._show(StatedComparison(comparison=settled, settling=False))
+
+    def _show(self, stated: StatedComparison) -> None:
+        """The run's view holds ``stated`` as its candidate input's comparison."""
+        held = {item.comparison.candidate_input: item for item in self.stated}
+        held[stated.comparison.candidate_input] = stated
+        self.stated = list(held.values())
+        self.run.view.changes["comparisons"] = tuple(self.stated)
 
     def _comparison(self, scope: Scope, candidate: RevisionRef) -> Comparison | None:
         """What core's comparison of ``candidate`` with its base says, for a candidate named in

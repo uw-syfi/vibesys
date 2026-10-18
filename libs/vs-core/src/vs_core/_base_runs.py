@@ -1,10 +1,12 @@
 """The runs core takes itself so a candidate is compared with its base, and the samples they give.
 
-An agent's evaluation is compared with its base (`vs_core._comparison`). This module takes the
-admission decisions that need core's state: asking for a base run when no fresh sample of it is
-held or being taken, counting the strategy's own measurement of the input as samples of the
-base, recording the sample a finished run gives with the comparison it changes, and taking the
-runs a waiting comparison still needs whenever a run of either side ends (`after_run`).
+A candidate's evaluation is compared with its base (`vs_core._comparison`), whether an agent
+asked for it through its tool or the strategy asks for it as the official measurement. This
+module takes the admission decisions that need core's state: asking for a base run when no fresh
+sample of it is held or being taken, counting the strategy's own measurement of the input as
+samples of the base, recording the sample a finished run gives with the comparison it changes,
+and taking the runs a waiting comparison still needs whenever a run of either side ends
+(`after_run`).
 
 That last decision is re-taken from the state at every end of a run, whatever the run gave: a
 sample, a failure, a cancellation (its attempt closed, or it ran out of queue allowance) or a
@@ -48,7 +50,7 @@ from ._comparison import (
 from ._proofs import (
     Proven,
 )
-from ._submissions import Origin, allocate, capped, current, identity_of, submission_released
+from ._submissions import Origin, allocate, current, identity_of, submission_released
 from .types.common import (
     MAX_SUBMISSIONS_PER_MEASUREMENT,
     ObservationStatus,
@@ -56,7 +58,6 @@ from .types.common import (
     Scope,
 )
 from .types.evaluation import (
-    AgentMeasurementRequested,
     MeasurementResult,
     OwnedJob,
     PreparedSubmissionReceipt,
@@ -91,25 +92,25 @@ class _Behalf:
     measured_input: str
 
 
-def base_of(context: EvaluationContext, event: AgentMeasurementRequested) -> BaseRef | None:
+def base_of(context: EvaluationContext, scope: Scope, plan: MeasurementPlan) -> BaseRef | None:
     """The attempt's own base revision with its measured input, when the candidate is comparable.
 
-    Core knows the base (the workspace the attempt was opened on); only the digest of what the
-    evaluation reads there is the runtime's to give. A candidate without a measured input has
-    no sample, so there is nothing to compare.
+    Core knows the base (the workspace the attempt was opened on); the digest of what the
+    evaluation reads there is the runtime's, given when it ensured that workspace
+    (``AttemptView.base_input``). A candidate without a measured input has no sample, so there
+    is nothing to compare.
     """
-    plan = event.plan
     owner = next(
         (
             row
             for row in context.attempts.attempts
-            if row.attempt_id == event.scope.owner and row.generation == event.scope.generation
+            if row.attempt_id == scope.owner and row.generation == scope.generation
         ),
         None,
     )
-    if owner is None or event.base_input is None or plan.measured_input is None:
+    if owner is None or owner.base_input is None or plan.measured_input is None:
         return None
-    return BaseRef(commit=owner.workspace.base, measured_input=event.base_input)
+    return BaseRef(commit=owner.workspace.base, measured_input=owner.base_input)
 
 
 def base_plan(plan: MeasurementPlan, base: BaseRef) -> MeasurementPlan:
@@ -136,8 +137,8 @@ def _compares(context: EvaluationContext, plan: MeasurementPlan) -> bool:
 def with_base(
     change: AreaChange[EvaluationState],
     context: EvaluationContext,
-    event: AgentMeasurementRequested,
-    base: BaseRef | None,
+    origin: Origin,
+    plan: MeasurementPlan,
     candidate: RequestId,
 ) -> AreaChange[EvaluationState]:
     """``change`` plus a run of the base, when no fresh sample of it is held or being taken.
@@ -145,23 +146,27 @@ def with_base(
     The base is measured once per (measured input, evaluation), first here. Whether its samples
     are held is read from the ledger of samples, so another attempt's run of the same base
     counts, and nothing is measured twice while a run of it is under way; one that ends without
-    a sample is replaced (`after_run`).
+    a sample is replaced (`after_run`). ``origin`` names the candidate's scope and the base it is
+    compared with, ``plan`` its run (an agent's, or the strategy's own final check) and
+    ``candidate`` that run's request. The base run is bounded as the agent's call is, or by the
+    plan's own stages for a Measure decision.
     """
-    own = event.plan.measured_input
-    if base is None or own is None or not _compares(context, event.plan):
+    base, own = origin.base, plan.measured_input
+    if base is None or own is None or not _compares(context, plan):
         return change
     change = change.model_copy(update={"state": _anchored(change.state, base)})
     if base.measured_input == own:
         return change
-    plan = base_plan(event.plan, base)
-    identity = identity_of(plan)
+    base_run = base_plan(plan, base)
+    identity = identity_of(base_run)
     if not isinstance(identity, Proven):
         return change
     measured = Measured(evaluation_of(identity.value), base.measured_input)
     if not base_missing(change.state, measured, moment_of(context.run)):
         return change
+    within = origin.within or Within(limit=plan.time_bound)
     behalf = _Behalf(candidate, own)
-    return _measure_base(change, context, event.scope, plan, base, behalf, capped(event))
+    return _measure_base(change, context, origin.scope, base_run, base, behalf, within)
 
 
 def _measure_base(  # noqa: PLR0913  # lint-waiver: LW-310002 [PLR0913]; the change, the scope, the plan, the base, the candidate it serves and its limit are independent facts of one admission.

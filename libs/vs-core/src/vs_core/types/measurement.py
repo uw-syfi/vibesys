@@ -162,3 +162,16 @@ class Comparison(Value):
     verdict: ComparisonVerdict
     candidate_samples: Count
     base_samples: Count
+
+
+class StatedComparison(Value):
+    """A candidate's comparison with its base as a flow reads it from the run's view.
+
+    ``settling`` is true while a run that will feed the comparison has not ended (core's own
+    run of the base, or of the candidate's input, that a close call earned): the comparison
+    changes when it lands, so it is not yet the one a verdict may rest on
+    (`vs_core._comparison.comparison_settling`).
+    """
+
+    comparison: Comparison
+    settling: bool

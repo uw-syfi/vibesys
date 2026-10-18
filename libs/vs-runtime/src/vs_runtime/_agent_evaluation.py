@@ -832,7 +832,6 @@ class AgentEvaluationBridge:
             scoped = self._scoped(scope)
             revision = await self._revision(workspace, scoped)
             measured_input = await workspace.measured_input(revision)
-            base_input = await self._base_input(shell, scope, workspace)
             key = OwedKey(scope=scope, revision=revision, policy=self._policy_digest)
             owed = self._owed.find(key)
             charged = None if owed is None else self._charge_of(shell, owed)
@@ -852,7 +851,6 @@ class AgentEvaluationBridge:
                     ),
                     within=Within(limit=self._policy.measurement.budget()),
                     call_id=owed.call_id,
-                    base_input=base_input,
                 )
                 transition = self._admit(shell, event, now)
                 call = self._call_of(transition.state, owed.call_id)
@@ -898,26 +896,6 @@ class AgentEvaluationBridge:
             message = "core accepted evidence the evidence ledger never recorded"
             raise ContractError(("evidence",), message)
         return entry.evidence
-
-    @staticmethod
-    async def _base_input(
-        shell: AdmissionShell, scope: Scope, workspace: SnapshotWorkspace
-    ) -> str | None:
-        """What the evaluation reads at the attempt's own base revision; None without one.
-
-        Core knows the base (the revision the attempt's workspace was opened on); only the
-        runtime can digest what the evaluation reads there.
-        """
-        owner = next(
-            (
-                row
-                for row in shell.admitted_core.attempts.attempts
-                if row.attempt_id == scope.owner and row.generation == scope.generation
-            ),
-            None,
-        )
-        commit = None if owner is None else owner.workspace.base.git_commit
-        return None if commit is None else await workspace.measured_input(commit)
 
     @staticmethod
     def _call_of(state: CoreState, call_id: str) -> AgentCall:

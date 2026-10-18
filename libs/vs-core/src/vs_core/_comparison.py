@@ -75,7 +75,11 @@ its agent measures, and core keeps at most one run of each side in flight per sc
 
 Core's runs serve the comparison only. The agent's turn never waits for them (they are not its
 attempt's history, `vs_core._evaluation_history`); the comparison it reads next grows as they
-land.
+land. The strategy's verdict does wait: a Measure that asks for the comparison
+(``Measure.compared``) is compared with the attempt's base too (`vs_core._base_runs.base_of`),
+and ``ctx.evaluation.measure_compared`` hands the comparison back once no run that feeds it is
+under way (`comparison_settling`), or as it stands when its bound is spent. A verdict taken on
+the first run alone would leave every close call inconclusive.
 
 Without a declared floor the candidate needs those three runs too, and nobody else gives them:
 an agent's call for content it already measured is answered with that evaluation, and the
@@ -118,6 +122,7 @@ from .types.measurement import (
     EffectVerdict,
     Reading,
     Sample,
+    StatedComparison,
 )
 
 if TYPE_CHECKING:
@@ -161,6 +166,7 @@ __all__ = [
     "running_baseline",
     "sample_of",
     "samples_of",
+    "stated_comparisons",
     "terms_policy",
     "verdict_unreachable",
 ]
@@ -667,6 +673,14 @@ def comparison_settling(state: EvaluationState, comparison: Comparison) -> bool:
     candidate = Measured(evaluation, comparison.candidate_input)
     return _base_under_way(state, comparison, base) or base_in_flight(
         state, candidate, comparison.scope
+    )
+
+
+def stated_comparisons(state: EvaluationState, moment: Moment) -> tuple[StatedComparison, ...]:
+    """Every comparison the samples held make now, each with whether it is still settling."""
+    return tuple(
+        StatedComparison(comparison=comparison, settling=comparison_settling(state, comparison))
+        for comparison in comparisons_of(state, moment)
     )
 
 

@@ -73,15 +73,20 @@ def terms(*, floor: float = FLOOR, staleness: float = STALENESS) -> core.TaskTer
 
 
 def attempt(
-    name: str, base: core.RevisionRef, state: core.CoreState
+    name: str, base: core.RevisionRef, state: core.CoreState, *, base_input: str | None = "base"
 ) -> tuple[core.CoreState, core.Scope]:
-    """``state`` with one more active attempt whose workspace was opened on ``base``."""
+    """``state`` with one more active attempt whose workspace was opened on ``base``.
+
+    ``base_input`` is what the runtime digested at ``base`` when it ensured the workspace; None
+    when it reported none.
+    """
     owner = core.AttemptView(
         attempt_id=core.AttemptId(root=name),
         item_id=core.ItemId(root=f"item-{name}"),
         generation=0,
         phase=core.AttemptPhase.ACTIVE,
         workspace=core.WorkspacePlan(mode=core.WorkspaceMode.EXCLUSIVE_ROOT, base=base),
+        base_input=base_input,
         budget=core.AttemptBudget(),
         admission_id=core.DecisionId(root=f"admission-{name}"),
     )
@@ -234,11 +239,19 @@ class Lab:
     ended: set[str] = field(default_factory=set)
 
     @classmethod
-    def of(cls, *attempts: str, floor: float = FLOOR, staleness: float = STALENESS) -> Lab:
+    def of(
+        cls,
+        *attempts: str,
+        floor: float = FLOOR,
+        staleness: float = STALENESS,
+        base_input: str | None = "base",
+    ) -> Lab:
         state = stamped(core.initial_state(), floor=floor, staleness=staleness)
         scopes: dict[str, core.Scope] = {}
         for name in attempts:
-            state, scopes[name] = attempt(name, state.run.facts.baseline, state)
+            state, scopes[name] = attempt(
+                name, state.run.facts.baseline, state, base_input=base_input
+            )
         return cls(state=state, scopes=scopes)
 
     def call(
@@ -247,7 +260,6 @@ class Lab:
         commit: str,
         candidate_input: str,
         *,
-        base_input: str = "base",
         variant: Variant = "same",
     ) -> list[core.SubmitMeasurement]:
         """The agent of attempt ``name`` evaluates ``commit``; the submissions core allocated.
@@ -264,7 +276,6 @@ class Lab:
                 plan=measured("local-validation", commit, candidate_input, variant),
                 within=core.Within(limit=100.0),
                 call_id=f"call-{self.calls}",
-                base_input=base_input,
             ),
         ).state
         return submissions(self.state)[before:]
@@ -340,7 +351,7 @@ def test_a_base_run_that_gave_no_sample_is_not_asked_for_again() -> None:
 
 
 def test_a_call_without_the_bases_measured_input_is_not_compared() -> None:
-    lab = Lab.of("a")
+    lab = Lab.of("a", base_input=None)
     lab.state = transition(
         lab.state,
         core.AgentMeasurementRequested(
@@ -362,7 +373,6 @@ def test_a_candidate_without_a_measured_input_has_nothing_to_compare() -> None:
             plan=measured("local-validation", "c1", None),
             within=core.Within(limit=100.0),
             call_id="c",
-            base_input="base",
         ),
     ).state
     assert [r.plan.purpose for r in submissions(lab.state)] == ["local-validation"]
@@ -650,29 +660,26 @@ def test_a_comparison_whose_base_went_partly_stale_is_recomputed_over_the_rest()
 
 
 @pytest.mark.regression
-def test_an_input_presents_the_comparison_with_its_current_base_in_its_newest_evaluation() -> None:
-    """An input whose base changed, then measured in a second evaluation: one comparison, current.
+def test_an_input_presents_the_comparison_of_its_newest_evaluation() -> None:
+    """An input measured in a second evaluation: one comparison, the newest evaluation's.
 
-    The agent compares one input with ``base``, then with ``base-2``, then evaluates it under
-    another evaluation (another environment) against ``base-2``. The comparison presented is
-    the newest evaluation's against the input's current base: not the one against the base it
-    no longer names, nor the older evaluation's.
+    The agent compares one input with its base, then evaluates it under another evaluation
+    (another environment). The comparison presented is the newest evaluation's, not the older
+    one's.
     """
     lab = Lab.of("a")
-    values = {"input-1": 130.0, "base": 100.0, "base-2": 110.0}
+    values = {"input-1": 130.0, "base": 100.0}
     lab.call("a", "c1", "input-1")
-    lab.measure(values)
-    lab.call("a", "c2", "input-1", base_input="base-2")
     lab.measure(values)
     now = core.moment_of(lab.state.run)
     (first,) = core.latest_comparisons(lab.state.evaluation, lab.scopes["a"], ["input-1"], now)
-    assert (first.base_input, first.candidate_samples) == ("base-2", 2)
-    lab.call("a", "c3", "input-1", base_input="base-2", variant="environment")
+    assert (first.base_input, first.candidate_samples) == ("base", 1)
+    lab.call("a", "c3", "input-1", variant="environment")
     lab.measure(values | {"input-1": 140.0})
     now = core.moment_of(lab.state.run)
     (latest,) = core.latest_comparisons(lab.state.evaluation, lab.scopes["a"], ["input-1"], now)
     assert (latest.base_input, latest.candidate_samples, latest.candidate_value) == (
-        "base-2",
+        "base",
         1,
         140.0,
     )
@@ -726,12 +733,18 @@ def test_an_official_check_whose_base_has_no_fresh_sample_runs_afresh(
     assert check.reuses is None, "the official check runs afresh"
 
 
-def final_check(lab: Lab, name: str, commit: str, candidate_input: str) -> core.SubmitMeasurement:
-    """The strategy's official measurement of an input in the attempt's scope: its submission."""
+def final_check(
+    lab: Lab, name: str, commit: str, candidate_input: str, *, compared: bool = True
+) -> core.SubmitMeasurement:
+    """The strategy's official measurement of an input in the attempt's scope: its submission.
+
+    ``compared`` is whether the strategy reads the comparison with the attempt's base.
+    """
     decision = core.Measure(
         decision_id=core.DecisionId(root=f"official-{commit}"),
         scope=lab.scopes[name],
         plan=measured("official", commit, candidate_input),
+        compared=compared,
     )
     asked = transition(
         lab.state,
@@ -740,7 +753,11 @@ def final_check(lab: Lab, name: str, commit: str, candidate_input: str) -> core.
             expected_revision=lab.state.revision,
         ),
     )
-    (submission,) = [r for r in asked.requests if isinstance(r, core.SubmitMeasurement)]
+    (submission,) = [
+        r
+        for r in asked.requests
+        if isinstance(r, core.SubmitMeasurement) and r.plan.purpose == "official"
+    ]
     lab.state = asked.state
     return submission
 
@@ -925,7 +942,8 @@ def test_an_official_run_is_reused_by_its_own_reading_not_the_answer_its_record_
     first = final_check(lab, "a", "c1", "input-1")
     assert first.reuses is None, "no run of the input yet"
     lab.state = started_with(lab.state, first)
-    agent, base = lab.call("a", "c2", "input-1")
+    (base,) = lab.baselines()
+    (agent,) = lab.call("a", "c2", "input-1")
     for request, value in ((agent, 200.0), (base, 100.0)):
         assert request.request_id is not None
         lab.ended.add(request.request_id.root)
@@ -1098,6 +1116,45 @@ def test_a_finished_measurement_reaches_the_search_with_the_comparison_of_its_ca
     assert finished.comparison.base == core.initial_state().run.facts.baseline
     lab.state = done.state
     assert finished.comparison == lab.comparisons()[-1]
+
+
+@pytest.mark.regression
+def test_an_official_check_no_agent_evaluated_is_compared_with_the_attempts_base() -> None:
+    """The strategy's own check of an idea names the attempt's base, as an agent's call does.
+
+    Live, most ideas were measured only by the framework's final check, which named no base:
+    they ended with no comparison, so no verdict and no noise. The check asks for the base's
+    run beside its own, and its sample is compared once both land.
+    """
+    lab = Lab.of("a")
+    check = final_check(lab, "a", "unseen", "input-9")
+    (base,) = lab.baselines()
+    assert check.base == core.BaseRef(
+        commit=core.initial_state().run.facts.baseline, measured_input="base"
+    )
+    assert (base.plan.candidate, base.plan.measured_input) == (check.base.commit, "base")
+    lab.measure({"input-9": 130.0, "base": 100.0})
+    (held,) = lab.comparisons()
+    assert (held.candidate_input, held.base_input, held.verdict) == (
+        "input-9",
+        "base",
+        core.ComparisonVerdict.BETTER,
+    )
+
+
+def test_an_official_check_nobody_reads_a_comparison_of_costs_no_base_run() -> None:
+    """A strategy that does not ask for the comparison is measured as before: no base run."""
+    lab = Lab.of("a")
+    check = final_check(lab, "a", "unseen", "input-9", compared=False)
+    assert check.base is None
+    assert lab.baselines() == []
+
+
+def test_an_official_check_is_not_compared_when_the_runtime_gave_no_base_input() -> None:
+    lab = Lab.of("a", base_input=None)
+    check = final_check(lab, "a", "unseen", "input-9")
+    assert check.base is None
+    assert lab.baselines() == []
 
 
 def test_a_measurement_of_an_input_no_agent_evaluated_reaches_the_search_without_one() -> None:

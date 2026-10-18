@@ -524,6 +524,7 @@ from vs_core.types.measurement import (
     Reading,
     Runaway,
     Sample,
+    StatedComparison,
 )
 from vs_core.types.records import (
     Attribution,
@@ -1339,6 +1340,7 @@ __all__ = [
     "SpanWaitKind",
     "StageBudget",
     "StartAttempt",
+    "StatedComparison",
     "SteerReceived",
     "Step",
     "StopMode",
