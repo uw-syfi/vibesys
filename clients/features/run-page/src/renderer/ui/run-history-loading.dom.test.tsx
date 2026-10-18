@@ -202,3 +202,30 @@ test('an unresolved run shows loading progress without a false empty metric or i
   expect(summary).toContain('Loading the run summary');
   expect(summary).not.toContain('No ideas yet');
 });
+
+test('a saved run whose record expired reads as ended on the timeline, never Live', async () => {
+  let state = runPageInitial({
+    identity: {host: 'ssh:remote-host', runId: FIXTURE.runId},
+    title: {project: 'queue-rs', task: null},
+    hostLabel: 'remote-host',
+    unavailable: {},
+  });
+  let asked: readonly RunPageRequest[] = [];
+  const step = (action: RunPageAction): void => {
+    const next = runPageStep(state, action);
+    state = next.state;
+    asked = next.requests;
+  };
+  step({type: 'record', record: {kind: 'historical', status: 'completed'}});
+  const summary = asked.find(request => request.kind === 'read-summary');
+  if (summary?.kind !== 'read-summary') throw new Error('no summary asked');
+  step({type: 'summary', token: summary.token, reply: {kind: 'unsupported'}, wallMs: 0});
+  const nextRead = () => asked.find(request => request.kind === 'read-history');
+  for (let request = nextRead(); request?.kind === 'read-history'; request = nextRead()) {
+    step({type: 'history', token: request.token, reply: pageOf(request.from, 40, undefined)});
+  }
+  expect(state.history.kind).toBe('read');
+  const text = await screenText(state);
+  expect(text).toContain('Saved run');
+  expect(text).not.toContain('Live');
+});

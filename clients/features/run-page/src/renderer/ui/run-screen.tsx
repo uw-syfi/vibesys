@@ -38,6 +38,7 @@ import {
   resolveZoom,
   roleLabel,
   routeLevel,
+  runHasEnded,
   runNow,
   runPhase,
   stepLabel,
@@ -460,7 +461,7 @@ export function RunScreen(props: {
             <RunScrubber
               log={state.run.trace}
               view={state.view}
-              ended={runPhase(state).kind === 'ended'}
+              ended={runHasEnded(state)}
               carried={clockCarried(model, runNow(state))}
               change={view => dispatch({type: 'view', view})}
             />

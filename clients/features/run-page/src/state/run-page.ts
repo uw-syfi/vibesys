@@ -69,6 +69,11 @@ function isEndedRecord(record: RunRecord): boolean {
   return record.kind === 'ended' || record.kind === 'historical';
 }
 
+/** Whether the run is over (ended, or a saved run whose tombstone expired) rather than live. */
+export function runHasEnded(state: RunPageState): boolean {
+  return isEndedRecord(state.record);
+}
+
 /** The run's place in its lifecycle, as the screen shows it. */
 export type RunPhase =
   | {readonly kind: 'unlisted'}

@@ -64,6 +64,7 @@ export {
   type RunPageState,
   type RunRecord,
   type RunView,
+  runHasEnded,
   runNow,
   runPageInitial,
   runPageStep,
