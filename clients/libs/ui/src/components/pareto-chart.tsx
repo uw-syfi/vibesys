@@ -195,6 +195,10 @@ export function ParetoChart(props: {
   readonly cursor?: number;
   readonly highlighted?: readonly string[];
   readonly size?: ParetoSize;
+  /** With it every point is a button that calls `pick(id)`; the points are one tab stop. */
+  readonly pick?: (id: string) => void;
+  /** Called with a point's id as the pointer or the focus enters it, and null as it leaves. */
+  readonly hover?: (id: string | null) => void;
 }): JSX.Element {
   const {points, x, y} = props;
   const height = HEIGHT[props.size ?? 'default'];
@@ -219,13 +223,19 @@ export function ParetoChart(props: {
   const drawn = [...seen].sort((a, b) => order(a) - order(b));
   const named = seen.find(p => p.id === hovered);
   const roles = new Set(seen.map(p => roleOf(p, onFrontier)));
+  const stop =
+    (props.highlighted ?? []).find(id => seen.some(p => p.id === id)) ?? drawn.at(-1)?.id;
+  const enter = (id: string | null): void => {
+    setHovered(id);
+    props.hover?.(id);
+  };
 
   return (
     <div className="vs-pareto" ref={measure}>
       <svg
         className="vs-chart"
         viewBox={`0 0 ${width} ${height}`}
-        role="img"
+        role={props.pick === undefined ? 'img' : 'group'}
         aria-label={`${props.label}. ${frontier.length} of ${competing.length} accepted points are on the frontier.`}
       >
         <Axes frame={frame} x={x} y={y} height={height} />
@@ -233,20 +243,17 @@ export function ParetoChart(props: {
           <path className="vs-pareto-frontier" d={staircase(placed, plot)} />
         )}
         {drawn.map(point => (
-          // biome-ignore lint/a11y/noStaticElementInteractions: hover only names a point; the same words are its title and the chart's label.
-          <g
+          <PointMark
             key={point.id}
-            className="vs-pareto-point"
-            data-role={roleOf(point, onFrontier)}
-            onMouseEnter={() => setHovered(point.id)}
-            onMouseLeave={() => setHovered(null)}
-          >
-            <title>{describe(point, x, y)}</title>
-            {lit.has(point.id) ? (
-              <circle className="vs-chart-ring" cx={px(point.x)} cy={py(point.y)} r={R_RING} />
-            ) : null}
-            <Shape role={roleOf(point, onFrontier)} cx={px(point.x)} cy={py(point.y)} />
-          </g>
+            point={point}
+            role={roleOf(point, onFrontier)}
+            at={{x: px(point.x), y: py(point.y)}}
+            text={describe(point, x, y)}
+            ringed={lit.has(point.id)}
+            stop={point.id === stop}
+            pick={props.pick}
+            enter={enter}
+          />
         ))}
         {named === undefined ? null : (
           <Hover text={describe(named, x, y)} at={{x: px(named.x), y: py(named.y)}} plot={plot} />
@@ -268,6 +275,86 @@ export function ParetoChart(props: {
       </ul>
     </div>
   );
+}
+
+/** One point: its mark and ring, named by its title; a button when the chart can pick. */
+function PointMark(props: {
+  readonly point: ParetoPoint;
+  readonly role: Role;
+  readonly at: {readonly x: number; readonly y: number};
+  readonly text: string;
+  readonly ringed: boolean;
+  readonly stop: boolean;
+  readonly pick: ((id: string) => void) | undefined;
+  readonly enter: (id: string | null) => void;
+}): JSX.Element {
+  const {point, role, at, pick, enter} = props;
+  const body = (
+    <>
+      <title>{props.text}</title>
+      {props.ringed ? <circle className="vs-chart-ring" cx={at.x} cy={at.y} r={R_RING} /> : null}
+      <Shape role={role} cx={at.x} cy={at.y} />
+    </>
+  );
+  if (pick === undefined) {
+    return (
+      // biome-ignore lint/a11y/noStaticElementInteractions: hover only names a point; the same words are its title and the chart's label.
+      <g
+        className="vs-pareto-point"
+        data-role={role}
+        onMouseEnter={() => enter(point.id)}
+        onMouseLeave={() => enter(null)}
+      >
+        {body}
+      </g>
+    );
+  }
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: an SVG point cannot be a <button>; the group carries the button role, name and keys instead.
+    <g
+      className="vs-pareto-point vs-chart-pick"
+      data-role={role}
+      role="button"
+      tabIndex={props.stop ? 0 : -1}
+      aria-label={props.text}
+      aria-pressed={props.ringed}
+      onClick={() => pick(point.id)}
+      onMouseEnter={() => enter(point.id)}
+      onMouseLeave={() => enter(null)}
+      onFocus={() => enter(point.id)}
+      onBlur={() => enter(null)}
+      onKeyDown={event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          pick(point.id);
+        } else if (moveAmong(event.currentTarget, event.key)) {
+          event.preventDefault();
+        }
+      }}
+    >
+      {body}
+    </g>
+  );
+}
+
+/** Moves the focus among a chart's points by an arrow, Home or End; whether `key` did. */
+function moveAmong(current: SVGGElement, key: string): boolean {
+  const points = [
+    ...(current.ownerSVGElement?.querySelectorAll<SVGGElement>('.vs-chart-pick') ?? []),
+  ];
+  const index = points.indexOf(current);
+  const target: Record<string, number> = {
+    ArrowRight: index + 1,
+    ArrowUp: index + 1,
+    ArrowLeft: index - 1,
+    ArrowDown: index - 1,
+    Home: 0,
+    End: points.length - 1,
+  };
+  const at = target[key];
+  if (at === undefined) return false;
+  points[Math.max(0, Math.min(points.length - 1, at))]?.focus();
+  return true;
 }
 
 /** The grid, the tick labels, the two axes and their titles. */

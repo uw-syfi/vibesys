@@ -509,3 +509,52 @@ describe('ParetoChart', () => {
     expect(root.querySelectorAll('.vs-chart-ring')).toHaveLength(1);
   });
 });
+
+describe('ParetoChart picking', () => {
+  const x: ParetoAxis = {name: 'Throughput', unit: 'ops/s', direction: 'higher'};
+  const y: ParetoAxis = {name: 'Latency', unit: 'ms', direction: 'lower'};
+  const points: ParetoPoint[] = [
+    {id: 'a', label: 'Ring buffer', x: 140, y: 45, time: 1, state: 'accepted'},
+    {id: 'b', label: 'Batching', x: 120, y: 60, time: 2, state: 'accepted'},
+    {id: 'c', label: 'Padding', x: 130, y: 30, time: 3, state: 'accepted'},
+  ];
+
+  test('points are buttons with one tab stop; a press or Enter picks; hover is reported', async () => {
+    const picked: string[] = [];
+    const hovered: (string | null)[] = [];
+    const root = await mount(
+      <ParetoChart
+        label="Trade-off"
+        points={points}
+        x={x}
+        y={y}
+        highlighted={['b']}
+        pick={id => picked.push(id)}
+        hover={id => hovered.push(id)}
+      />,
+    );
+    const buttons = [...root.querySelectorAll('[role="button"]')];
+    expect(buttons).toHaveLength(3);
+    expect(buttons.filter(b => b.getAttribute('tabindex') === '0')).toHaveLength(1);
+    expect(root.querySelector('[tabindex="0"]')?.getAttribute('aria-label')).toContain('Batching');
+    const named = (id: string) =>
+      buttons.find(b => b.getAttribute('aria-label')?.startsWith(id)) as Element;
+    await act(async () => {
+      named('Ring buffer').dispatchEvent(new MouseEvent('click', {bubbles: true}));
+    });
+    await press(named('Padding') as unknown as HTMLElement, 'Enter');
+    expect(picked).toEqual(['a', 'c']);
+    hovered.length = 0;
+    await act(async () => {
+      named('Ring buffer').dispatchEvent(new MouseEvent('mouseover', {bubbles: true}));
+      named('Ring buffer').dispatchEvent(new MouseEvent('mouseout', {bubbles: true}));
+    });
+    expect(hovered).toEqual(['a', null]);
+  });
+
+  test('without pick the chart is one image and nothing is a button', async () => {
+    const root = await mount(<ParetoChart label="Trade-off" points={points} x={x} y={y} />);
+    expect(root.querySelector('[role="button"]')).toBeNull();
+    expect(root.querySelector('svg')?.getAttribute('role')).toBe('img');
+  });
+});

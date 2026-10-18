@@ -619,6 +619,7 @@ export const RICH_ENTRIES = {
             x={PARETO_THROUGHPUT}
             y={PARETO_LATENCY}
             highlighted={['p9']}
+            pick={noop}
           />
         </Card>
         <Grid min="tile">
