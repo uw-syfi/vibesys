@@ -321,19 +321,22 @@ describe('machinesStep', () => {
       token: 1,
       result: {ok: true, value: [ENTRIES[2] as MachineEntry]},
     }).state;
-    const cases: readonly [string, string, string][] = [
-      ['-oProxyCommand=x', '~/vibesys', 'is not a usable ssh host name'],
-      ['host-b', '~/vibesys', 'already a machine'],
-      ['host-d', 'vibesys', 'must be an absolute path or start with ~/'],
-      ['host-d', '', 'must not be empty'],
+    const cases: readonly [string, string, 'host' | 'checkout', string][] = [
+      ['-oProxyCommand=x', '~/vibesys', 'host', 'is not a usable ssh host name'],
+      ['host-b', '~/vibesys', 'host', 'already a machine'],
+      ['', '', 'host', 'The SSH host is required.'],
+      ['', '~/vibesys', 'host', 'The SSH host is required.'],
+      ['host-d', 'vibesys', 'checkout', 'must be an absolute path or start with ~/'],
+      ['host-d', '', 'checkout', 'The VibeSys checkout is required.'],
     ];
-    for (const [host, checkout, problem] of cases) {
+    for (const [host, checkout, field, problem] of cases) {
       let state = machinesStep(listed, {type: 'open-add'}).state;
       state = machinesStep(state, {type: 'add-host', value: host}).state;
       state = machinesStep(state, {type: 'checkout', form: 'add', value: checkout}).state;
       const step = machinesStep(state, {type: 'submit', form: 'add'});
       expect(step.requests).toEqual([]);
-      expect(step.state.adding?.problem).toContain(problem);
+      expect(step.state.adding?.problem?.field).toBe(field);
+      expect(step.state.adding?.problem?.text).toContain(problem);
     }
   });
 

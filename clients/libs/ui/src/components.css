@@ -315,6 +315,10 @@ body > div:first-child {
 .vs-grid[data-min="swatch"] {
   --grid-min: var(--column-swatch);
 }
+.vs-grid[data-min="swatch-row"] {
+  /* Three previews of this width, with their gaps, fit the narrowest Settings card. */
+  --grid-min: calc(var(--column-swatch) * 3 / 4);
+}
 
 /* --- text -------------------------------------------------------------------------------------- */
 

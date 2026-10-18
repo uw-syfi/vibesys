@@ -40,7 +40,7 @@ function ThemeChoice(props: {
   const {mode, appearance, choose} = props;
   return (
     <Card section={mode === 'light' ? 'Light theme' : 'Dark theme'}>
-      <Grid min="swatch" gap="space-3">
+      <Grid min="swatch-row" gap="space-3">
         {themesOf(mode).map(theme => (
           <ThemeSwatch
             key={theme}

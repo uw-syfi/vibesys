@@ -84,21 +84,25 @@ function AddMachine(props: {
       <OpenForm close={() => dispatch({type: 'close', form: 'add'})}>
         <Stack>
           <Grid min="field">
-            <Field label="SSH host" help="As you’d type after ssh; your SSH config and keys apply.">
+            <Field
+              label="SSH host"
+              help="As you’d type after ssh; your SSH config and keys apply."
+              {...(adding.problem?.field === 'host' ? {error: adding.problem.text} : {})}
+            >
               <TextInput
                 value={adding.host}
-                placeholder="host-c"
+                placeholder="e.g. host-c"
                 change={value => dispatch({type: 'add-host', value})}
               />
             </Field>
             <Field
               label="VibeSys checkout"
               {...(completions.length > 0 && host !== '' ? {help: `Found on ${host}:`} : {})}
-              {...(adding.problem === null ? {} : {error: adding.problem})}
+              {...(adding.problem?.field === 'checkout' ? {error: adding.problem.text} : {})}
             >
               <PathInput
                 value={adding.path.checkout}
-                placeholder="~/vibesys"
+                placeholder="e.g. ~/vibesys"
                 completions={completions}
                 change={value => dispatch({type: 'checkout', form: 'add', value})}
               />
@@ -133,7 +137,7 @@ function CheckoutForm(props: {
       <Stack gap="space-3">
         <Field
           label={`VibeSys checkout on ${machine.label}`}
-          {...(fixing.problem === null ? {} : {error: fixing.problem})}
+          {...(fixing.problem === null ? {} : {error: fixing.problem.text})}
         >
           <PathInput
             value={fixing.path.checkout}
