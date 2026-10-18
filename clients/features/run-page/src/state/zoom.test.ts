@@ -6,6 +6,7 @@ import {
   type Route,
   RUN_MODES,
   RUN_ROUTE,
+  type RunMode,
   routeFromQuery,
   routeLevel,
   routeQuery,
@@ -23,7 +24,8 @@ function randomRoute(random: Seeded): Route {
   const agent = opened === 2 ? random.pick(IDS) : null;
   const step = opened > 0 && random.bool() ? random.pick(IDS) : null;
   const item = step !== null && random.bool() ? random.pick(IDS) : null;
-  return {mode: random.pick(RUN_MODES), idea, agent, step, item};
+  const mode = idea === null ? random.pick(RUN_MODES) : random.pick<RunMode>(['ideas', 'logs']);
+  return {mode, idea, agent, step, item};
 }
 
 function randomZoom(random: Seeded): ZoomEvent {
@@ -103,6 +105,18 @@ function zoom(...events: ZoomMachineEvent[]): {route: Route; remembered: string[
   return {route: actor.getSnapshot().context.route, remembered};
 }
 
+/** What a route must never say: two things open, an item without its step, a hidden idea. */
+function routeProblems(route: Route): string[] {
+  const hidden = route.mode === 'timeline' || route.mode === 'agents';
+  return [
+    ...(route.idea !== null && route.agent !== null ? ['an idea and an agent open'] : []),
+    ...(route.idea !== null && hidden
+      ? [`an idea open under the ${route.mode} face, which would hide it`]
+      : []),
+    ...(route.item !== null && route.step === null ? ['an item without its step'] : []),
+  ];
+}
+
 describe('the zoom machine', () => {
   test('its state is the route’s level, and every zoom but a restore is remembered', () => {
     checkMachine({
@@ -112,11 +126,9 @@ describe('the zoom machine', () => {
       invariants: snapshot => {
         const level = routeLevel(snapshot.context.route);
         const state = level === 'opened' ? 'opened' : level;
-        const route = snapshot.context.route;
         return [
           ...(snapshot.matches(state) ? [] : [`level ${level} in ${String(snapshot.value)}`]),
-          ...(route.idea !== null && route.agent !== null ? ['an idea and an agent open'] : []),
-          ...(route.item !== null && route.step === null ? ['an item without its step'] : []),
+          ...routeProblems(snapshot.context.route),
         ];
       },
       also: (before, event, after, actions: readonly MachineAction[]) => {
@@ -168,6 +180,20 @@ describe('the zoom machine', () => {
     const opened = zoom({type: 'open-step', idea: 'i2', step: 's9'}, {type: 'mode', mode: 'logs'});
     expect(opened.route).toEqual({...RUN_ROUTE, mode: 'logs', idea: 'i2', step: 's9'});
     expect(opened.remembered).toEqual(['idea=i2&step=s9', 'mode=logs&idea=i2&step=s9']);
+  });
+
+  test('the Timeline and Agents faces replace an open idea, so the tab always changes the pane', () => {
+    for (const mode of ['timeline', 'agents'] as const) {
+      const opened = zoom({type: 'open-idea', idea: 'i1'}, {type: 'mode', mode});
+      expect(opened.route).toEqual({...RUN_ROUTE, mode});
+      expect(opened.remembered).toEqual(['idea=i1', `mode=${mode}`]);
+    }
+    const logs = zoom({type: 'open-idea', idea: 'i1'}, {type: 'mode', mode: 'logs'});
+    expect(logs.route).toEqual({...RUN_ROUTE, mode: 'logs', idea: 'i1'});
+  });
+
+  test('an address that opens an idea under the Timeline face shows the idea', () => {
+    expect(routeFromQuery('mode=timeline&idea=i1')).toEqual({...RUN_ROUTE, idea: 'i1'});
   });
 
   test('an agent’s turn goes up to the agent, then to the Agents face', () => {

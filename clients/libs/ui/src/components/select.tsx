@@ -21,11 +21,13 @@ export function Select<T extends string>(props: {
   readonly options: readonly SelectOption<T>[];
   readonly change: (value: T) => void;
   readonly mono?: boolean;
+  /** `sm` is the height of the other small controls (a search box), for a toolbar row. */
+  readonly size?: 'sm';
 }): JSX.Element {
   const wiring = useFieldWiring('Select');
   const {options, change} = props;
   return (
-    <span className="vs-select">
+    <span className="vs-select" data-size={props.size}>
       <select
         className="vs-input"
         id={wiring.id}

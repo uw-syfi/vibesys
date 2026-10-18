@@ -266,6 +266,24 @@ describe('Field', () => {
     expect(described).toEqual(['Shown in the list', 'Too long']);
   });
 
+  test('a hidden label still names its control and is marked for the stylesheet to hide', async () => {
+    const container = await mount(
+      <Field label="Sort ideas" hideLabel>
+        <Select
+          size="sm"
+          value="a"
+          change={() => undefined}
+          options={[{value: 'a', label: 'Newest'}]}
+        />
+      </Field>,
+    );
+    const label = one(container, 'label');
+    expect(label.getAttribute('for')).toBe(one(container, 'select').id);
+    expect(label.textContent).toBe('Sort ideas');
+    expect(label.hasAttribute('data-hidden')).toBe(true);
+    expect(one(container, '.vs-select').getAttribute('data-size')).toBe('sm');
+  });
+
   test('a control outside a Field refuses to render', async () => {
     const original = console.error;
     console.error = () => undefined;

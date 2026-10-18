@@ -534,6 +534,16 @@ body > div:first-child {
   color: var(--text);
   margin-bottom: var(--space-1);
 }
+.vs-field-label[data-hidden] {
+  position: absolute;
+  width: var(--hairline);
+  height: var(--hairline);
+  margin: calc(var(--hairline) * -1);
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 .vs-input {
   box-sizing: border-box;
   width: 100%;
@@ -572,6 +582,12 @@ body > div:first-child {
   appearance: none;
   padding-right: var(--space-7);
   cursor: pointer;
+}
+.vs-select[data-size="sm"] .vs-input {
+  min-height: var(--control-sm);
+  padding-right: var(--space-6);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-small-size);
 }
 .vs-select-chevron {
   position: absolute;

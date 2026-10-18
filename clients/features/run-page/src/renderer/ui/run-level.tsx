@@ -194,8 +194,9 @@ function IdeasFace(props: {
             change={query => dispatch({type: 'ideas-filter', filter: {...state.ideas, query}})}
           />
         </Stack>
-        <Field label="Sort ideas">
+        <Field label="Sort ideas" hideLabel>
           <Select
+            size="sm"
             value={sort}
             options={[
               {value: 'newest', label: 'Newest'},
