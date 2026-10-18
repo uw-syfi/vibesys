@@ -5,8 +5,9 @@ search, through the lifecycle a search's own decisions use:
 
 - ``cancel_attempt`` withdraws the attempt with a ``Cancel`` disposition, as a search would;
   the search hears the attempt close cancelled (``WorkspaceClosed``).
-- ``cancel_item`` does that for every attempt at the item that has not ended, and core
-  refuses every later ``StartAttempt`` at the item.
+- ``cancel_item`` does that for every running attempt at the item, and core refuses every
+  later ``StartAttempt`` at the item and every reopening of a parked attempt at it. An
+  attempt already settling finishes, and its result stands (``ItemCancellation``).
 - ``set_max_parallel`` changes the limit core's admission holds the run's attempts to. A
   lower limit admits nothing new until enough attempts end; it stops none that runs.
 
@@ -18,6 +19,7 @@ Pure: it reads state and returns values.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
@@ -38,7 +40,7 @@ from .types.strategy import Cancel, Withdraw
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptView
-    from .types.common import ControlInput, ItemId
+    from .types.common import AttemptId, ControlInput, ItemId
     from .types.kernel import CoreState, RunState
 
 _ENDED = frozenset({AttemptPhase.CLOSING, AttemptPhase.TERMINAL})
@@ -71,14 +73,39 @@ def _latest(state: CoreState, attempt_id: object) -> AttemptView | None:
     return latest
 
 
-def _live_attempts_of(state: CoreState, item: ItemId) -> tuple[AttemptView, ...]:
+def _attempts_of(state: CoreState, item: ItemId) -> tuple[AttemptView, ...]:
+    """The latest generation of each attempt at ``item``, by attempt id."""
     latest: dict[str, AttemptView] = {}
     for row in state.attempts.attempts:
         if row.item_id == item:
             held = latest.get(row.attempt_id.root)
             if held is None or row.generation > held.generation:
                 latest[row.attempt_id.root] = row
-    return tuple(row for _, row in sorted(latest.items()) if row.phase not in _ENDED)
+    return tuple(row for _, row in sorted(latest.items()))
+
+
+@dataclass(frozen=True)
+class ItemCancellation:
+    """What ``cancel_item`` does to each attempt at the item that has not ended.
+
+    ``stopped`` attempts run or wait to run: core withdraws each with a ``Cancel``
+    disposition. ``parked`` attempts (parked or blocked) run nothing; core refuses to reopen
+    them. ``settling`` attempts were already closing: they finish, and their results stand.
+    """
+
+    stopped: tuple[AttemptId, ...]
+    parked: tuple[AttemptId, ...]
+    settling: tuple[AttemptId, ...]
+
+
+def item_cancellation(state: CoreState, item: ItemId) -> ItemCancellation:
+    """What cancelling ``item`` in ``state`` does to each of its attempts."""
+    rows = _attempts_of(state, item)
+    return ItemCancellation(
+        stopped=tuple(row.attempt_id for row in rows if row.phase not in _ENDED | _PARKED),
+        parked=tuple(row.attempt_id for row in rows if row.phase in _PARKED),
+        settling=tuple(row.attempt_id for row in rows if row.phase == AttemptPhase.CLOSING),
+    )
 
 
 class ActionRefusal(StrEnum):
@@ -138,7 +165,6 @@ def _attempt_refusal(latest: AttemptView | None) -> ActionRefusal | None:
     if latest.phase in _PARKED:
         return ActionRefusal.PARKED
     return None
-    return None
 
 
 def cancellations(state: CoreState, control: ControlInput) -> tuple[Withdraw, ...]:
@@ -152,7 +178,10 @@ def cancellations(state: CoreState, control: ControlInput) -> tuple[Withdraw, ..
             latest = _latest(state, control.attempt)
             targets = () if latest is None or latest.phase in _ENDED else (latest,)
         case "cancel_item" if control.item is not None:
-            targets = _live_attempts_of(state, control.item)
+            stopped = item_cancellation(state, control.item).stopped
+            targets = tuple(
+                row for row in _attempts_of(state, control.item) if row.attempt_id in stopped
+            )
         case _:
             targets = ()
     scope = Scope(owner=state.run.run_id, generation=state.run.generation)

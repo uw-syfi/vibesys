@@ -23,6 +23,7 @@ from vs_core.api import (
     ControlInput,
     ItemId,
     control_refusal,
+    item_cancellation,
 )
 from vs_prompts.api import TemplateRenderer
 from vs_runtime._operator_control import (
@@ -41,19 +42,33 @@ if TYPE_CHECKING:
 _RENDERER = TemplateRenderer(Path(__file__).with_name("prompts"))
 
 
-def notice_text(request: ActionRequest) -> RenderedPrompt:
-    """What the run's agents are told at their next turn once the run took ``request``."""
+def notice_text(request: ActionRequest, core: CoreState) -> RenderedPrompt:
+    """What the run's agents are told at their next turn once the run took ``request``.
+
+    ``core`` is the state the run takes it in: a cancelled item's notice says what became
+    of each of its attempts there (``item_cancellation``).
+    """
+    attempts: dict[str, tuple[str, ...]] = {"stopped": (), "parked": (), "settling": ()}
+    if isinstance(request, CancelItemRequest):
+        done = item_cancellation(core, ItemId(root=request.item))
+        attempts = {
+            "stopped": tuple(a.root for a in done.stopped),
+            "parked": tuple(a.root for a in done.parked),
+            "settling": tuple(a.root for a in done.settling),
+        }
     return _RENDERER.render_template(
-        "operator_action.j2", action=request.action.value, subject=action_subject(request)
+        "operator_action.j2",
+        action=request.action.value,
+        subject=action_subject(request),
+        **attempts,
     )
 
 
-def action_control(identity: ControlId, request: ActionRequest) -> ControlInput:
-    """The control core records for ``request``; its notice carries the text's digest."""
-    text = notice_text(request)
-    notice = ArtifactRef(
+def action_control(identity: ControlId, request: ActionRequest, notice: str) -> ControlInput:
+    """The control core records for ``request``; it carries the digest of its ``notice``."""
+    notice_ref = ArtifactRef(
         artifact_id=ArtifactId(root=f"notice-{identity.root}"),
-        digest=hashlib.sha256(text.encode()).hexdigest(),
+        digest=hashlib.sha256(notice.encode()).hexdigest(),
     )
     match request:
         case CancelAttemptRequest(attempt=attempt):
@@ -63,13 +78,13 @@ def action_control(identity: ControlId, request: ActionRequest) -> ControlInput:
         case SetMaxParallelRequest(max_parallel=limit):
             subject = {"max_parallel": limit}
     return ControlInput.model_validate(
-        {"control_id": identity, "action": request.action.value, "artifact": notice, **subject}
+        {"control_id": identity, "action": request.action.value, "artifact": notice_ref, **subject}
     )
 
 
 def records_action(control: ControlInput, request: ActionRequest) -> bool:
     """Whether ``control`` records ``request``: the same action on the same subject."""
-    probe = action_control(control.control_id, request)
+    probe = action_control(control.control_id, request, "")
     return (control.action, control.attempt, control.item, control.max_parallel) == (
         probe.action,
         probe.attempt,
@@ -94,7 +109,7 @@ def submit_refusal(core: CoreState, request: ActionRequest) -> RefusalReason | N
     not hold yet may appear, and a parked attempt may be reopened, before the run takes the
     request; the run asks core again then.
     """
-    refusal = control_refusal(core, action_control(ControlId(root="probe"), request))
+    refusal = control_refusal(core, action_control(ControlId(root="probe"), request, ""))
     kind = None if refusal is None else refusal.action_refusal
     return None if kind is None else _FINAL.get(kind)
 

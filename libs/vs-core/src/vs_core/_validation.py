@@ -91,12 +91,26 @@ def validate_decision(
 
 
 def _cancelled_item(state: CoreState, decision: Command) -> Rejected | None:
-    """No attempt starts at a work item the operator cancelled (``cancel_item``)."""
-    if not isinstance(decision, StartAttempt) or decision.item_id not in cancelled_items(state.run):
+    """No attempt starts or reopens at a work item the operator cancelled (``cancel_item``)."""
+    if isinstance(decision, StartAttempt):
+        item, path = decision.item_id, ("item_id",)
+    elif isinstance(decision, Operation) and decision.normalized_scope_reopen is not None:
+        reopened = decision.normalized_scope_reopen.attempt
+        item = next(
+            (
+                attempt.item_id
+                for attempt in state.attempts.attempts
+                if (attempt.attempt_id, attempt.generation)
+                == (reopened.attempt_id, reopened.generation)
+            ),
+            None,
+        )
+        path = ("normalized_scope_reopen", "attempt")
+    else:
         return None
-    return _reject(
-        decision, RejectionCode.CLOSED_SCOPE, ("item_id",), "the operator cancelled the item"
-    )
+    if item is None or item not in cancelled_items(state.run):
+        return None
+    return _reject(decision, RejectionCode.CLOSED_SCOPE, path, "the operator cancelled the item")
 
 
 def _validate_until(state: CoreState, submission: Submission, decision: Command) -> Rejected | None:

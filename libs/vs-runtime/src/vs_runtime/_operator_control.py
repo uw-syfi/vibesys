@@ -179,8 +179,8 @@ class CancelAttemptRequest(_Request):
     """Cancel one attempt: it stops, closes cancelled, and is never judged.
 
     The search hears it close as if it had withdrawn the attempt itself, and the run's agents
-    are told at their next turn. An attempt that has ended is refused; one the run does not
-    hold when it takes the request is reported dropped.
+    are told at their next turn. An attempt that has ended is refused when submitted; a parked
+    one, or one the run does not hold, is refused when the run takes the request.
     """
 
     action: Literal[ControlAction.CANCEL_ATTEMPT] = ControlAction.CANCEL_ATTEMPT
@@ -356,8 +356,9 @@ class ChannelRunControl:
         only what no later state could accept: a steer to an undeclared role or an ended
         attempt, a withdrawal of a steer that is not, or is no longer, standing guidance, a
         cancel of an ended attempt or of an item already cancelled. The run resolves an
-        accepted steer's target, an accepted withdrawal's guidance and an accepted action's
-        subject again when it takes them, and reports one it cannot resolve then as dropped.
+        accepted steer's target and an accepted withdrawal's guidance again when it takes
+        them, and reports one it cannot resolve then as dropped; it judges an accepted action
+        again by core's rule, and refuses one core refuses then.
         """
         with self._lock:
             self._check = check

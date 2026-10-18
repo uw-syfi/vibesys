@@ -50,7 +50,9 @@ from vs_core._measurement_recipe import (
 from vs_core._operator_actions import (
     ACTION_REFUSAL_TEXT,
     ActionRefusal,
+    ItemCancellation,
     cancelled_items,
+    item_cancellation,
     notice_input_id,
     parallel_limit,
 )
@@ -1068,6 +1070,7 @@ __all__ = [
     "InvocationId",
     "InvocationInputTarget",
     "InvocationRef",
+    "ItemCancellation",
     "ItemId",
     "ItemInputTarget",
     "JobFactsBeforeObservation",
@@ -1435,6 +1438,7 @@ __all__ = [
     "hours",
     "inherit",
     "initial_state",
+    "item_cancellation",
     "item_id",
     "latest_comparisons",
     "ledger_refs",

@@ -441,21 +441,6 @@ class RunControlBridge:
         events += () if control is None else (control,)
         return None
 
-    def _action_refusal(
-        self, core: CoreState, events: list[CoreEvent], change: _Change, control_id: str
-    ) -> str | None:
-        """Why core would refuse the action ``change`` after this poll's ``events``, or None.
-
-        An action no control can record (a subject core's types refuse) is refused with
-        why, never raised.
-        """
-        try:
-            control = change.control(_identity(control_id))
-        except ValueError as error:
-            return f"it cannot be recorded: {error}"
-        refusal = control_refusal(self._as_asked(_after(core, events)), control)
-        return None if refusal is None else refusal.detail
-
     def _take_actions(
         self,
         core: CoreState,
@@ -467,26 +452,28 @@ class RunControlBridge:
         """Emit the queued operator actions, in the order they were queued.
 
         Core's ``control_refusal`` decides whether each is taken, asked of the state this
-        poll's earlier events lead to, so an action follows what was posted before it. A
-        refused one becomes no control; the operator hears core's reason (``_refuse``). The
-        refusal of the inbox request ``inbox_id`` is returned for its caller to reject.
+        poll's earlier events lead to, so an action follows what was posted before it; the
+        notice says what the action does in that state. A refused one becomes no control;
+        the operator hears core's reason (``_refuse``). The refusal of the inbox request
+        ``inbox_id`` is returned for its caller to reject.
         """
         refused_inbox = None
         for request in self._channel.take_pending_actions():
+            state = self._as_asked(_after(core, events))
             change = _Change(
                 request.action.value,
-                text=notice_text(request),
+                text=notice_text(request, state),
                 control_id=request.control_id,
                 action_request=request,
             )
-            reason = self._action_refusal(core, events, change, request.control_id)
-            if reason is None:
+            refusal = control_refusal(state, change.control(_identity(request.control_id)))
+            if refusal is None:
                 emitted = self._event(core, now_at, change)
                 events += () if emitted is None else (emitted,)
             elif request.control_id == inbox_id:
-                refused_inbox = f"refused by the run: {reason}"
+                refused_inbox = f"refused by the run: {refusal.detail}"
             else:
-                self._refuse(change, reason, request_id=None)
+                self._refuse(change, refusal.detail, request_id=None)
         return refused_inbox
 
     def _reject_withdrawal(self, control_id: str, reason: str) -> None:
@@ -563,13 +550,7 @@ class RunControlBridge:
             if entry.request_id not in self._submitted:
                 # Judged against the pause the run is in now, which core is asked to record.
                 self._record_channel(core, now_at, events)
-                try:
-                    reason = self._apply(inbox, entry, core, now_at, events)
-                except ValueError as error:
-                    # A request the run cannot turn into a control (a field core's types
-                    # refuse) is answered, never raised: left pending, it would end the run
-                    # again at every restart.
-                    reason = f"the run cannot apply it: {error}"
+                reason = self._apply(inbox, entry, core, now_at, events)
                 if reason is None:
                     self._submitted.add(entry.request_id)
                 else:
@@ -884,7 +865,7 @@ class _Change:
     def control(self, identity: ControlId) -> ControlInput:
         """The control core records; a steer carries its text's digest, not the text."""
         if self.action_request is not None:
-            return action_control(identity, self.action_request)
+            return action_control(identity, self.action_request, self.text or "")
         artifact = None
         if self.text is not None:
             artifact = ArtifactRef(

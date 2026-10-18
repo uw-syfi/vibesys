@@ -213,6 +213,91 @@ def test_a_lower_parallel_limit_admits_nothing_new_until_attempts_end(
     _assert_notice_settled(trace, host.sent[0])
 
 
+@dataclass
+class _LoweredHost(OperatorHost):
+    """The operator lowers the limit to 1; ``held`` is the first state after that in which
+    the run holds at least one attempt but fewer than its launch limit."""
+
+    held: core.CoreState | None = None
+
+    def during_turn(
+        self, request: core.Request, state: core.CoreState
+    ) -> tuple[core.CoreEvent, ...]:
+        if (
+            self.held is None
+            and core.parallel_limit(state.run) == 1
+            and 1 <= len(state.scheduling.slots) < LIMITS.max_parallel
+        ):
+            self.held = state
+        return super().during_turn(request, state)
+
+
+def _held_to_one() -> core.CoreState:
+    """A run the operator holds to one attempt at a time, holding more than one."""
+    host = _LoweredHost(at=0, act="set_max_parallel", limit=1)
+    run_toy(host, Config(workstreams=3, in_flight=3))
+    assert host.held is not None, "the run never held attempts under the lowered limit"
+    return host.held
+
+
+def _waiting(state: core.CoreState) -> core.CoreState:
+    """``state`` with one more attempt the search asked to start, waiting for admission."""
+    start = core.StartAttempt(
+        decision_id=core.DecisionId(root="extra"),
+        scope=core.Scope(owner=state.run.run_id, generation=state.run.generation),
+        attempt_id=core.AttemptId(root="extra"),
+        item_id=core.ItemId(root="extra"),
+        workspace=core.WorkspacePlan(
+            mode=core.WorkspaceMode.ISOLATED_CHILD, base=state.run.facts.baseline
+        ),
+        budget=core.AttemptBudget(admission_charge=1, paid_invocation_limit=6),
+    )
+    submitted = core.DecisionSubmitted(
+        decision=core.Wait(request=start, until=core.Within(limit=10.0)),
+        expected_revision=state.revision,
+    )
+    return core.step(state, submitted).state
+
+
+def _admitted(state: core.CoreState) -> bool:
+    return any(slot.attempt.attempt_id.root == "extra" for slot in state.scheduling.slots)
+
+
+def _limited(state: core.CoreState, control_id: str, limit: int) -> core.CoreState:
+    control = _action(control_id, "set_max_parallel", max_parallel=limit)
+    return core.step(state, core.RunControlEvent(control=control, now_at=state.run.now_at)).state
+
+
+def test_the_latest_parallel_limit_is_in_force() -> None:
+    """Each new limit replaces the one before it, whichever was lower."""
+    state = _held_to_one()
+    for control_id, limit in (("l2", 2), ("l1", 1), ("l3", 3)):
+        state = _limited(state, control_id, limit)
+        assert core.parallel_limit(state.run) == limit
+
+
+def test_the_scheduling_view_offers_no_admission_beyond_the_limit_in_force() -> None:
+    """The view a search plans from counts the operator's limit, not the launch limit."""
+    state = _held_to_one()
+
+    assert core.project(state).scheduling.available_tokens == 0
+
+
+def test_admission_starts_nothing_while_the_run_holds_the_limit_in_force() -> None:
+    """An attempt asked for while the run is full under the operator's limit waits."""
+    state = _waiting(_held_to_one())
+
+    assert not _admitted(state)
+    assert not _admitted(_limited(state, "again", 1))
+
+
+def test_raising_the_limit_admits_a_waiting_attempt_at_once() -> None:
+    """A raise admits what now fits in the same step, without waiting for another event."""
+    state = _waiting(_held_to_one())
+
+    assert _admitted(_limited(state, "raise", LIMITS.max_parallel))
+
+
 @pytest.mark.parametrize("limit", [1, LIMITS.max_parallel, LIMITS.max_parallel + 1])
 def test_a_parallel_limit_above_the_launch_limit_is_refused(limit: int) -> None:
     """The launch limit sized the run's host: an operator may lower the limit, not raise it."""
