@@ -1,7 +1,8 @@
 /**
  * Waits until the screen is at rest, so a check reads the layout the app settles on and not a frame
  * of it on the way: the page's fonts are loaded, and the page's own text and the boxes of its
- * elements are the same on `FRAMES` consecutive animation frames in a row. The wait is a state, not
+ * elements (to a tenth of a pixel, finer than the stability check's half) are the same on `FRAMES`
+ * consecutive animation frames in a row. The wait is a state, not
  * a duration: it ends when the state holds, however fast or slow the machine is. `LIMIT` frames is
  * only a guard against a page that never settles, which fails with that said.
  */
@@ -18,9 +19,10 @@ export async function settled(page: Page): Promise<void> {
         const parts: string[] = [document.body.innerText.length.toString()];
         for (const element of document.body.querySelectorAll('*')) {
           const box = element.getBoundingClientRect();
-          parts.push(
-            `${Math.round(box.x)},${Math.round(box.y)},${Math.round(box.width)},${Math.round(box.height)}`,
-          );
+          // To a tenth of a pixel: the stability check holds an element to half a pixel, so a
+          // settle that rounds to whole pixels can call a frame at rest that is still moving it.
+          const tenths = (value: number): number => Math.round(value * 10);
+          parts.push(`${tenths(box.x)},${tenths(box.y)},${tenths(box.width)},${tenths(box.height)}`);
         }
         return parts.join('|');
       };

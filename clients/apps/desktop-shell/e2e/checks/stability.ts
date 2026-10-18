@@ -89,5 +89,7 @@ function movement(was: Placed, is: Placed & {same: boolean}): string | null {
   if (!is.same) return 'was replaced by a new element (a remount)';
   const keys = ['x', 'y', 'width', 'height'] as const;
   const moved = keys.filter(key => Math.abs(was[key] - is[key]) > 0.5);
-  return moved.length === 0 ? null : `changed its ${moved.join(', ')}`;
+  return moved.length === 0
+    ? null
+    : `changed its ${moved.map(key => `${key} from ${was[key]} to ${is[key]}`).join(', ')}`;
 }
