@@ -90,7 +90,6 @@ if TYPE_CHECKING:
 
     from server.events import RunEvent
     from server.host_api import RunStatus
-    from server.settings import InteractiveSetupDefaults
     from vibesys.api import RunHandle, RunRequest, RunResult, Runs, RunSession
     from vs_sim.api import Platform
 
@@ -197,7 +196,6 @@ class ServerRuntime:
         runs: Runs,
         run_id: str | None = None,
         project_root: Path | None = None,
-        tui_defaults: Callable[[], InteractiveSetupDefaults] | None = None,
         web: bool = False,
         web_port: int = 0,
         web_assets: Path | None = None,
@@ -286,7 +284,6 @@ class ServerRuntime:
             controls=self.controls,
             clock=clock,
             project_scope=_project_scope(project_root) if project_root is not None else None,
-            tui_defaults=tui_defaults,
             threads=self.threads,
         )
         self.chat.enable_terminal_retention()

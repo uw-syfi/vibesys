@@ -38,20 +38,15 @@ Repository = "https://github.com/uw-syfi/vibesys"
 Issues = "https://github.com/uw-syfi/vibesys/issues"
 
 [project.scripts]
-# The `vibesys` launcher: starts the interactive TUI (bundled only when the
-# wheel was built with a JavaScript toolchain), or runs the headless engine with
-# `--headless`/`validate`/no TTY. The engine itself is
-# `python -m entrypoints.headless`.
+# The `vibesys` launcher routes run and host commands to their Python entrypoints.
 vibesys = "entrypoints.launcher:main"
 # The one program the desktop app runs on a host, once per channel
 # (docs/contributing/desktop-connection.md, "The host helper").
 vibesys-host-helper = "entrypoints.host_helper:main"
 
 [tool.setuptools.package-data]
-# ``entrypoints/_tui`` is produced at build time by setup.py's build_py step;
-# the glob keeps it as package data when present.
 vibesys = ["prompts/*.j2", "prompts/**/*.j2", "prompts/**/*.md", "orchestration/*/prompts/*.j2", "orchestration/*/prompts/**/*.j2", "domains/README.md", "domains/*/prompts/*.md", "inputs/prompts/*.j2", "run/prompts/*.j2", "_resources/**/*", "_sdk/**/*"]
-entrypoints = ["py.typed", "_tui/**/*"]
+entrypoints = ["py.typed"]
 server = ["py.typed", "chat/prompts/*.j2"]
 launch = ["py.typed"]
 vs_evaluator_protocol = ["py.typed"]
@@ -370,8 +365,8 @@ root = [
     # Repository root: the `scripts` package is imported by tests, which pytest
     # makes importable through `[tool.pytest.ini_options] pythonpath`.
     ".",
-    # Release/packaging helpers (`wheel_targets`, `packaging_support`,
-    # `tui_packaging`, `resources_packaging`, `release_versions`) are top-level
+    # Release/packaging helpers (`packaging_support`, `resources_packaging`,
+    # `release_versions`) are top-level
     # modules in `packaging/`, which deliberately has no `__init__.py` so it
     # cannot shadow the PyPA `packaging` library.
     "packaging",

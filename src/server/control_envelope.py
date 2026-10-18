@@ -95,7 +95,6 @@ class ResponseEnvelopeReader(ResponseEnvelope):
     chat: JsonValue = None
     chat_thread: JsonValue = None
     chat_options: JsonValue = None
-    tui_defaults: JsonValue = None
     snapshot: JsonValue = None
     events: JsonValue = None
     performance: JsonValue = None

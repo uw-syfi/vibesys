@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 import tomllib
 import zipfile
@@ -16,10 +15,8 @@ from packaging.version import Version
 from release_versions import (
     ReleaseIdentity,
     ReleaseVersionSyntaxError,
-    npm_release_identity,
     python_release_identity,
 )
-from wheel_targets import TARGETS
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -53,14 +50,6 @@ def check_release_version(
     project_identity = _python_identity(python_raw, source="project.version")
     version = Version(python_raw)
 
-    tui_document = json.loads((source_root / "clients/tui/package.json").read_text())
-    if not isinstance(tui_document, dict) or not isinstance(tui_document.get("version"), str):
-        _fail("clients/tui/package.json must declare version as a string")
-    tui_raw = cast("str", tui_document["version"])
-    tui_identity = _npm_identity(tui_raw, source="TUI version")
-    if tui_identity != project_identity:
-        _fail(f"TUI version {tui_raw!r} does not match project version {python_raw!r}")
-
     if tag is not None:
         prefix = "refs/tags/v"
         if not tag.startswith(prefix) or len(tag) == len(prefix):
@@ -82,21 +71,14 @@ def _python_identity(raw: str, *, source: str) -> ReleaseIdentity:
         raise ReleaseVersionError(str(exc)) from exc
 
 
-def _npm_identity(raw: str, *, source: str) -> ReleaseIdentity:
-    try:
-        return npm_release_identity(raw, source=source)
-    except ReleaseVersionSyntaxError as exc:
-        raise ReleaseVersionError(str(exc)) from exc
-
-
 def _check_wheels(wheel_dir: Path, *, version: Version) -> None:
-    expected = {
-        f"vibesys-{version}-py3-none-{target.wheel_platform}.whl" for target in TARGETS.values()
+    expected = {f"vibesys-{version}-py3-none-any.whl"}
+    actual = {
+        path.name for path in wheel_dir.iterdir() if path.is_file() and path.name != ".gitignore"
     }
-    actual = {path.name for path in wheel_dir.iterdir() if path.is_file()}
     if actual != expected:
         _fail(
-            "Release directory must contain exactly the four expected wheels and no sdist: "
+            "Release directory must contain exactly one universal wheel and no sdist: "
             f"expected {sorted(expected)}, found {sorted(actual)}"
         )
     for filename in sorted(expected):

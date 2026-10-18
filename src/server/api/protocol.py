@@ -22,7 +22,6 @@ from server.events import ChatThreadId, RunEvent, RunOverview, WireSpan
 from server.execution import ActiveAgentExecution
 from server.host_api import PROTOCOL_VERSION
 from server.run_lifecycle import RunStatus
-from server.settings import InteractiveSetupDefaults
 from vibesys.api import (
     ControlAction,
     ControlRequest,
@@ -201,17 +200,6 @@ class ChatOptionsQuery(Request):
     type: Literal["query.chat_options"] = "query.chat_options"
 
 
-class TuiDefaultsQuery(Request):
-    """Request the launch-directory configuration defaults a TUI applies.
-
-    A terminal client resolves its theme from the run's configuration. Asking
-    over the control channel keeps TOML parsing in the server and saves the
-    launcher an extra Python process on the boot path.
-    """
-
-    type: Literal["query.tui_defaults"] = "query.tui_defaults"
-
-
 class HistoryQuery(Request):
     """Request persisted run history."""
 
@@ -331,7 +319,6 @@ ProtocolRequest = Annotated[
     | ChatQuery
     | ChatThreadCreateQuery
     | ChatOptionsQuery
-    | TuiDefaultsQuery
     | HistoryQuery
     | PerformanceQuery
     | ExperimentQuery
@@ -602,9 +589,6 @@ class Response(ResponseEnvelope):
     # None means the run has not attached its agent selection yet, which is
     # distinct from a run that offers no provider at all.
     chat_options: ChatOptions | None = None
-    # None means this server was started without a defaults provider, so the
-    # client keeps its own built-in defaults. It never means "no defaults".
-    tui_defaults: InteractiveSetupDefaults | None = None
     snapshot: RunSnapshot | None = None
     events: list[RunEvent] = Field(default_factory=list)
     performance: list[PerformanceRound] = Field(default_factory=list)

@@ -952,15 +952,6 @@ def fully_populated_response() -> Response:
                     }
                 ]
             },
-            "tui_defaults": {
-                "runs_dir": "runs",
-                "input_path": "input.py",
-                "experiment_name": "experiment",
-                "repository_owner": None,
-                "repository_name": "repository",
-                "visibility": "private",
-                "theme": "dark",
-            },
             "snapshot": {
                 "run_id": "run",
                 "sequence": 1,

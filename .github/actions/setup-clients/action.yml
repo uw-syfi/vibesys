@@ -1,8 +1,8 @@
-name: Set up the TUI workspace
+name: Set up the client workspace
 description: >-
   Node, pnpm with its store cache, verified Bun, uv with the Python dev
   environment, the `clients/` workspace install, and Go for repoctl. Every
-  `tui-*` job of test.yml starts from this, so the legs cannot drift apart.
+  client job of test.yml starts from this, so the legs cannot drift apart.
 
 runs:
   using: composite
@@ -33,7 +33,7 @@ runs:
         # store is still worth most of its download cost.
         restore-keys: pnpm-store-${{ runner.os }}-
 
-    - name: Set up verified Bun 1.4.2 for OpenTUI
+    - name: Set up verified Bun 1.4.2 for client tests
       shell: bash
       run: |
         python3 packaging/fetch_bun.py --target linux-x86_64 --output "$RUNNER_TEMP/bun/bin/bun"
@@ -53,7 +53,7 @@ runs:
       shell: bash
       run: uv sync --dev
 
-    - name: Install TUI dependencies
+    - name: Install client dependencies
       shell: bash
       working-directory: clients
       run: pnpm install --frozen-lockfile

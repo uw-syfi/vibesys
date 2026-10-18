@@ -33,14 +33,14 @@ import {fileURLToPath} from 'node:url';
 
 const RUNNER = 'bun';
 /**
- * The one place the Bun version is pinned: CI installs it from here (`packaging/fetch_bun.py`) and
- * the TUI ships it. A Bun older than the pin resolves imports differently (1.3.9 does not map
+ * The Bun version is pinned in `packaging/fetch_bun.py`, which CI uses to install it.
+ * A Bun older than the pin resolves imports differently (1.3.9 does not map
  * `./welcome.cjs` to its `welcome.cts` source), so a test run on it fails on a module it cannot
  * find, which reads as a missing build and not as the wrong runtime.
  */
 const BUN_PIN_FILE = resolve(
   dirname(fileURLToPath(import.meta.url)),
-  '../../../packaging/tui_packaging.py',
+  '../../../packaging/fetch_bun.py',
 );
 /**
  * The per-test bound, in milliseconds. It only guards against a hang: no test waits on time (they
@@ -63,7 +63,7 @@ const REPORT_FILE = 'collected.xml';
 
 /**
  * Bun's test-file discovery rules, transcribed, because the gate has to glob the same set bun
- * does. Verified against bun 1.4.2, the version `packaging/tui_packaging.py` pins: a name is a
+ * does. Verified against bun 1.4.2, the version `packaging/fetch_bun.py` pins: a name is a
  * test file when `test` or `spec` is its last dot- or underscore-separated component before the
  * extension, for each of `js`, `jsx`, `ts`, `tsx`, `mjs`, `cjs`, `mts`, and `cts`; a directory
  * whose name starts with a dot or is `node_modules` is not searched, while a *file* whose name
@@ -144,7 +144,7 @@ export function collectionErrors(expected, collected) {
 }
 
 /**
- * The Bun version `packaging/tui_packaging.py` pins, read from its `BUN_VERSION = "x.y.z"` line.
+ * The Bun version `packaging/fetch_bun.py` pins, read from its `BUN_VERSION = "x.y.z"` line.
  *
  * @param {string} source the text of that file
  * @returns {string}
@@ -166,7 +166,7 @@ export function bunVersionError(actual, pinned) {
   if (actual === pinned) return undefined;
   return (
     `bun ${actual} is on PATH but the clients tests need bun ${pinned} (the pin in ` +
-    'packaging/tui_packaging.py, the version CI installs). Another version resolves imports ' +
+    'packaging/fetch_bun.py, the version CI installs). Another version resolves imports ' +
     'differently, so a test can fail on a module it cannot find. Install the pinned version, ' +
     'for example `python3 packaging/fetch_bun.py --target <linux-x86_64|linux-aarch64|macos-arm64> ' +
     '--output <dir>/bin/bun`, and put that directory first on PATH.'
