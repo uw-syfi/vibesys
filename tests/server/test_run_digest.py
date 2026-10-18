@@ -208,7 +208,7 @@ def _measured_journal(
         attrs: dict[str, JsonValue] = {"hypothesis_id": f"h{index}", "revision": f"rev-{index}"}
         started = {"id": f"flow:{index}", "label": _label("workstream", None, attrs)}
         lines.append(_event(len(lines) + 1, "span_started", 1 + index, {"span": started}))
-        gate = {"metric_value": idea.value, "vs_baseline": idea.value / 100}
+        gate: dict[str, JsonValue] = {"metric_value": idea.value, "vs_baseline": idea.value / 100}
         span = {
             "id": f"op:{index}",
             "parent": f"flow:{index}",
@@ -269,7 +269,7 @@ def test_an_idea_still_running_or_whose_gate_reads_for_a_failed_attempt_is_not_t
         return _event(sequence, kind, sequence, {"span": {"id": "flow:1", "label": label}})
 
     gate_label = _label("gate", "passed", {"metric_value": 150.0, "vs_baseline": 1.5})
-    gate = {"id": "op:1", "parent": "flow:1", "label": gate_label}
+    gate: dict[str, JsonValue] = {"id": "op:1", "parent": "flow:1", "label": gate_label}
     measured = _event(3, "span_ended", 3, {"span": gate})
     running = [_event(1, "run_started", 0), workstream(2, "span_started", None), measured]
 
