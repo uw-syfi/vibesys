@@ -1,6 +1,6 @@
 /**
- * An opened idea's body (the frame draws its pane; the header is its facts on one line: outcome,
- * what it is built on, against that, how long): its attempts (one line each, the latest selected
+ * An opened idea's body (the frame draws its pane; the header shows outcome and duration):
+ * its attempts (one line each, the latest selected
  * until another is chosen), the strip of the selected attempt's steps over its time, and those
  * steps (agent turns and gates, each marked by its role's color and named by its role and headline), each opening the step; and the
  * compact step list beside an opened step.
@@ -8,13 +8,11 @@
 import type {TokenLedger} from '@vibesys/run-state';
 import type {Candidate, CandidateStep} from '@vibesys/run-state/candidates';
 import {
-  Button,
   Chip,
   EmptyState,
   Fact,
   FactLine,
   Markdown,
-  markdownToPlain,
   PickList,
   PickRow,
   Row,
@@ -28,12 +26,7 @@ import {spendOf, stepLabel, stepTitle, tokensColumn, turnTokens} from '../../../
 import {roleSeries} from '../../../../state/role-series.js';
 import {duration} from '../../../../state/span-reading.js';
 import {plain, statusWords} from '../../../../state/span-words.js';
-import {
-  type AttemptLine,
-  attemptLines,
-  endOf,
-  versusParent,
-} from '../../../../state/timeline-rows.js';
+import {type AttemptLine, attemptLines, endOf} from '../../../../state/timeline-rows.js';
 import type {ViewBase, ViewHeader, Zoom} from '../props.js';
 import {StepStrip} from '../timeline/step-strip.js';
 
@@ -61,30 +54,16 @@ function outcomeLabel(idea: Candidate): string {
 }
 
 /**
- * The idea's facts, which never overlap or break inside: its outcome, its value against the base's,
- * how long it took, and what it is built on (the base's title once, which gives way first and
- * opens the base). The idea's own figure against the input is the performance row's, above.
+ * The idea's outcome and duration. Its value against the input is in the performance row above.
  */
 function IdeaFacts(props: IdeaViewProps): JSX.Element {
-  const {idea, model, clock} = props;
-  const parent =
-    idea.parent === null
-      ? null
-      : (model.candidates.candidates.find(c => c.id === idea.parent) ?? null);
-  const vs = versusParent(idea, parent, model.direction);
+  const {idea, clock} = props;
   const known = idea.endedAt !== null || clock.now !== null;
   return (
     <FactLine>
       <Fact>
         <Chip label={outcomeLabel(idea)} tone={OUTCOME_TONE[idea.outcome]} dot />
       </Fact>
-      {vs === null ? null : (
-        <Fact>
-          <Text variant="code" tone="muted">
-            {`${vs} vs base`}
-          </Text>
-        </Fact>
-      )}
       {known ? (
         <Fact>
           <Text variant="code" tone="muted">
@@ -92,25 +71,6 @@ function IdeaFacts(props: IdeaViewProps): JSX.Element {
           </Text>
         </Fact>
       ) : null}
-      {parent === null ? (
-        <Fact>
-          <Text variant="small" tone="muted">
-            from input
-          </Text>
-        </Fact>
-      ) : (
-        <Fact shrink title={markdownToPlain(parent.title)}>
-          <Text variant="small" tone="muted">
-            from
-          </Text>
-          <Button
-            size="sm"
-            variant="quiet"
-            text={markdownToPlain(parent.title)}
-            press={() => props.zoom({type: 'open-idea', idea: parent.id})}
-          />
-        </Fact>
-      )}
     </FactLine>
   );
 }

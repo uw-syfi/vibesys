@@ -141,9 +141,9 @@ async function openRun(page: Page, live = false, server: FakeServerSeed = SERVER
     .click();
 }
 
-/** The Ideas pane opens as a tree once ideas build on others; these tests read the flat list. */
+/** The Ideas pane is always a flat list. */
 async function showList(page: Page): Promise<void> {
-  await page.getByRole('radiogroup', {name: 'Ideas layout'}).getByText('List').click();
+  await expect(page.getByRole('listbox', {name: 'Ideas'})).toBeVisible();
 }
 
 /** Presses Tab until the focus is inside `target`; at most `limit` presses (guards a hang). */
@@ -222,7 +222,7 @@ test('the run level shows the best ratio, the ideas running first, and what runs
   // the search narrows the list.
   await page.locator('button.vs-dotlegend-item', {hasText: '2 failed'}).click();
   await expect(ideas.getByRole('option', {name: /Spin then park/})).toHaveCount(0);
-  await page.getByRole('button', {name: '+ 2 failed'}).click();
+  await page.locator('button.vs-dotlegend-item', {hasText: '2 failed'}).click();
   await expect(ideas.getByRole('option', {name: /Spin then park/})).toBeVisible();
   await page.getByLabel('Search ideas').fill('spin');
   await expect(ideas.getByRole('option')).toHaveText([/Spin then park/]);

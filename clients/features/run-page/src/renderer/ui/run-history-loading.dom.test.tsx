@@ -172,6 +172,8 @@ test('the last page settles the screen: the run, final, with no loading left', a
   const text = await screenText(replay(5, FIXTURE.events.length).at(-1) as RunPageState);
   expect(text).not.toContain('Reading the run’s history…');
   expect(text).not.toMatch(/[1-9]\d* running/);
+  expect(text).not.toContain('Adopted the candidate');
+  expect(text).not.toContain('View logs');
 });
 
 test('the loading screen counts events of the total once the host says it, else events so far', async () => {

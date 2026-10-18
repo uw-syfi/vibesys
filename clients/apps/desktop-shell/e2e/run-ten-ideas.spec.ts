@@ -4,7 +4,7 @@ import {openFixture} from './fixture-world.js';
 
 /**
  * A finished run of ten ideas (six passed, four failed), as the user sees it: the failed ideas are
- * listed by default in the Tree and the List and can be hidden by the filter; the performance row
+ * listed by default in the flat table and can be hidden by the filter; the performance row
  * is a tile per measure with a unit on its values; the chart joins no dots; and tokens are split
  * into input (with its cached share) and output wherever they are written, with a part nobody
  * reported written as unknown. `RUN_SHOTS` names a directory to save the app window in.
@@ -25,25 +25,20 @@ const failedChip = (page: Page) => page.locator('button.vs-dotlegend-item', {has
 const failedRows = (page: Page) =>
   ideas(page)
     .getByRole('option')
-    .filter({hasText: /Failed ·/});
+    .filter({has: page.locator('.vs-pickrow-dot .vs-dot[data-tone="err"]')});
 
-test('failed ideas are listed by default, in the tree and the list, and a filter hides them', async ({
-  page,
-}) => {
+test('failed ideas are listed in the flat table and a filter hides them', async ({page}) => {
   await openFixture(page, fixtureNamed('finished-ten-ideas'));
-  await expect(page.getByRole('radio', {name: 'Tree'})).toBeChecked();
+  await expect(page.getByRole('combobox', {name: 'Sort ideas'})).toHaveValue('newest');
+  await expect(ideas(page).locator('.vs-guide, .vs-pickrow-fold')).toHaveCount(0);
   await expect(ideas(page).getByRole('option')).not.toHaveCount(0);
   await expect(failedRows(page)).toHaveCount(4);
   await expect(failedChip(page)).toHaveAttribute('aria-pressed', 'true');
   // A failed idea sits under its base like the others, with its reason in words.
   await expect(ideas(page).getByRole('option', {name: /Replace the mutex/})).toContainText(
-    'Failed · review rejected',
+    'review rejected',
   );
-  await shot(page, 'ten-ideas-tree');
-
-  await page.getByRole('radio', {name: 'List'}).check({force: true});
-  await expect(failedRows(page)).toHaveCount(4);
-  await shot(page, 'ten-ideas-list');
+  await shot(page, 'ten-ideas-table');
 
   await failedChip(page).click();
   await expect(failedRows(page)).toHaveCount(0);
@@ -112,7 +107,7 @@ test('tokens are split into input with its cached share, and output, where they 
   await shot(page, 'ten-ideas-agents');
 });
 
-test('the hero, the chart and the ideas tree at 1440 and 1000 px', async ({page}) => {
+test('the hero, the chart and the ideas table at 1440 and 1000 px', async ({page}) => {
   test.skip(shots === undefined, 'set RUN_SHOTS to save the app window');
   await openFixture(page, fixtureNamed('finished-ten-ideas'));
   for (const width of [1440, 1000]) {
@@ -128,6 +123,6 @@ test('the hero, the chart and the ideas tree at 1440 and 1000 px', async ({page}
     await page
       .getByRole('listbox', {name: 'Ideas'})
       .locator('xpath=ancestor::*[contains(@class,"vs-pane")][1]')
-      .screenshot({path: `${shots}/tree-${width}.png`});
+      .screenshot({path: `${shots}/ideas-${width}.png`});
   }
 });

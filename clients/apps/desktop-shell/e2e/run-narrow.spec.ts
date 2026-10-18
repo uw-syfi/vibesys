@@ -4,13 +4,11 @@ import {openFixture, playLive} from './fixture-world.js';
 
 /**
  * Behaviours of the Run screen that the screen checks cannot decide: what a click on the first row
- * of a long Ideas tree does, and that the Now pane keeps the role and the idea's name legible in a
+ * of a long Ideas table does, and that the Now pane keeps the role and the idea's name legible in a
  * narrow window. Both read the fixtures the screen checks walk.
  */
 
-test('on a 600-idea run the first row says what a click does, and one click does it', async ({
-  page,
-}) => {
+test('on a 600-idea run the first row opens its idea without lineage controls', async ({page}) => {
   await page.setViewportSize({width: 1440, height: 900});
   const fixture = fixtureNamed('weeks-600-ideas');
   await openFixture(page, fixture);
@@ -18,16 +16,8 @@ test('on a 600-idea run the first row says what a click does, and one click does
   const ideas = page.getByRole('listbox', {name: 'Ideas'});
   const first = ideas.getByRole('option').first();
   await expect(first).toBeVisible();
-  // The first row is the fold of the older ideas: it shows a chevron, so a click reads as "open
-  // this" and opens it in place (it is not an idea, so no idea opens).
-  await expect(first).toContainText(/earlier/);
-  await expect(first.locator('.vs-pickrow-fold[data-fold="closed"]')).toBeVisible();
-  const before = await ideas.getByRole('option').count();
-  await first.click();
-  await expect(first).not.toContainText(/earlier/);
-  expect(await ideas.getByRole('option').count()).toBeGreaterThanOrEqual(before);
-  await expect(page.getByRole('navigation', {name: 'Zoom'})).toHaveCount(0);
-  // The row now first is an idea: one click opens it.
+  await expect(first.locator('.vs-pickrow-fold, .vs-guide')).toHaveCount(0);
+  expect(await ideas.getByRole('option').count()).toBeLessThan(80);
   await first.click();
   await expect(page.getByRole('navigation', {name: 'Zoom'})).toBeVisible();
 });

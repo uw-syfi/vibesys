@@ -220,9 +220,9 @@ test('the run level says passed, failed, best and adopted, never accepted, kept 
       expect(text).toContain('1 passed');
       expect(text).toContain('1 failed');
       expect(text).toContain('1 running');
-      expect(text).toContain(adopted ? 'adopted' : 'best');
+      expect(text).toContain(adopted ? '★' : 'Best so far');
       if (showFailed) expect(text).toContain('turned down');
-      else expect(text).toContain('+ 1 failed');
+      else expect(text).not.toContain('turned down');
       expect(text).not.toMatch(/accepted|kept|rejected/i);
     }
   }

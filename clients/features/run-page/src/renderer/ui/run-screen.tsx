@@ -221,7 +221,8 @@ function EndedBanner(props: {
 }): JSX.Element | null {
   const {state, dispatch} = props;
   const ended = endedView(state);
-  if (ended === null) return null;
+  // The header already says Finished. Logs and Run again remain in the run controls.
+  if (ended === null || ended.title === 'Finished') return null;
   return (
     <Banner
       tone={ended.tone}

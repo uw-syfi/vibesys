@@ -153,11 +153,15 @@ test('an idea with no attempts has no steps to show', async () => {
   await unmount();
 });
 
-test('the header reads the outcome, how long it took and the base once, with no figure of its own', async () => {
-  const candidate = idea('mpmc', 'passed', 100, 300);
-  const meta = ideaHeader(view(candidate, () => undefined)).meta;
+test('the header reads outcome and duration without lineage', async () => {
+  const candidate = {...idea('mpmc', 'passed', 100, 300), parent: 'base'};
+  const props = view(candidate, () => undefined);
+  const meta = ideaHeader({
+    ...props,
+    model: modelOf([idea('base', 'passed', 0, 100), candidate]),
+  }).meta;
   const {container, unmount} = await mount(meta);
-  expect(container.textContent).toBe('Passed5mfrom input');
+  expect(container.textContent).toBe('Passed5m');
   await unmount();
 });
 

@@ -223,11 +223,22 @@ function Trail(props: {
   readonly figure?: string;
   readonly figureTone?: 'default' | 'ok' | 'err' | 'muted';
   readonly measure?: Measure | readonly Measure[];
+  readonly measureBeforeFigure?: boolean;
   readonly trail?: RowTrail;
 }): JSX.Element {
   const trail = props.trail;
   const measures =
     props.measure === undefined ? [] : 'label' in props.measure ? [props.measure] : props.measure;
+  const figure =
+    props.figure === undefined ? null : (
+      <span
+        className="vs-pickrow-figure"
+        data-tone={props.figureTone ?? 'default'}
+        title={props.figure}
+      >
+        {props.figure}
+      </span>
+    );
   return (
     <>
       {(props.badges ?? []).map(badge =>
@@ -249,16 +260,8 @@ function Trail(props: {
           <Meter label={props.bar.label} value={props.bar.value} tone={props.bar.tone} />
         </span>
       )}
-      {props.figure === undefined ? null : (
-        <span
-          className="vs-pickrow-figure"
-          data-tone={props.figureTone ?? 'default'}
-          title={props.figure}
-        >
-          {props.figure}
-        </span>
-      )}
-      <Measures measures={measures} />
+      {props.measureBeforeFigure === true ? <Measures measures={measures} /> : figure}
+      {props.measureBeforeFigure === true ? figure : <Measures measures={measures} />}
       {trail === undefined ? null : trail.press === undefined ? (
         <span
           className="vs-pickrow-trail"
@@ -370,6 +373,8 @@ export function PickRow(props: {
   readonly bar?: RowBar;
   /** Muted columns after the figure (counts of tokens), one width for every row. */
   readonly measure?: Measure | readonly Measure[];
+  /** Draw measures before the figure when the list's headers use that order. */
+  readonly measureBeforeFigure?: boolean;
   /** A muted last column after the figure, such as "from <parent>"; with `press` it is a link. */
   readonly trail?: RowTrail;
   /** An accent stripe down the row's edge: it is on the chain the reader is led along (a winning path). */

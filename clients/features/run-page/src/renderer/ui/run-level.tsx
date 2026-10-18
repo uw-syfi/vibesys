@@ -9,6 +9,7 @@ import {
   Button,
   DotLegend,
   EmptyState,
+  Field,
   markdownToPlain,
   Pane,
   Panes,
@@ -16,23 +17,20 @@ import {
   PickRow,
   Row,
   SearchBox,
+  Select,
   SegmentedControl,
   Stack,
 } from '@vibesys/ui';
-import type {JSX} from 'react';
+import {type JSX, useState} from 'react';
 import {
   ageWords,
-  bestLine,
-  defaultLayout,
   type IdeasFilter,
-  type IdeasLayout,
   type ImplementerOutcomes,
   ideasView,
   implementerOutcomes,
   type NowItem,
   nowView,
   type RunMode,
-  type RunModel,
   type RunPageAction,
   type RunPageState,
   traceArrival,
@@ -40,7 +38,7 @@ import {
 } from '../../state/index.js';
 import {FramedPane} from './framed-pane.js';
 import {IdeaPickRow} from './idea-pick-row.js';
-import {BestLineRow, IdeasTreeList, LayoutSwitch} from './ideas-tree.js';
+import {IdeasTable, type IdeasSort} from './ideas-table.js';
 import {AgentsView, type AgentsViewProps} from './views/agents/agents-view.js';
 import {agentsHeader, logsHeader, timelineHeader} from './views/headers.js';
 import {LogsView, type LogsViewProps} from './views/logs/logs-view.js';
@@ -160,27 +158,20 @@ function IdeasLegend(props: {
   );
 }
 
-/** The layout the Ideas face is in: the reader's pick, else by the run. */
-function ideasLayout(state: RunPageState, model: RunModel): IdeasLayout {
-  return state.ideasLayout ?? defaultLayout(model);
-}
-
 function IdeasFace(props: {
   readonly state: RunPageState;
   readonly base: ViewBase;
   readonly outcomes: ImplementerOutcomes;
   readonly dispatch: Dispatch;
 }): JSX.Element {
-  const {state, base, outcomes, dispatch} = props;
+  const {state, base, dispatch} = props;
+  const [sort, setSort] = useState<IdeasSort>('newest');
   if (base.model.candidates.candidates.length === 0) {
     return <EmptyState title="No ideas yet" body="Each idea the run tries shows here." />;
   }
-  const line = bestLine(base.model);
-  const layout = ideasLayout(state, base.model);
   return (
     <>
       <IdeasLegend state={state} base={base} dispatch={dispatch} />
-      {line === null ? null : <BestLineRow line={line} dispatch={dispatch} />}
       <Row gap="space-3" align="center">
         <Stack gap="space-0" grow>
           <SearchBox
@@ -190,20 +181,25 @@ function IdeasFace(props: {
             change={query => dispatch({type: 'ideas-filter', filter: {...state.ideas, query}})}
           />
         </Stack>
-        <LayoutSwitch layout={layout} dispatch={dispatch} />
+        <Field label="Sort ideas">
+          <Select
+            value={sort}
+            options={[
+              {value: 'newest', label: 'Newest'},
+              {value: 'oldest', label: 'Oldest'},
+              {value: 'result', label: 'Best result'},
+            ]}
+            change={setSort}
+          />
+        </Field>
       </Row>
-      {layout === 'tree' ? (
-        <IdeasTreeList base={base} outcomes={outcomes} state={state} dispatch={dispatch} />
-      ) : (
-        <IdeasList
-          base={base}
-          outcomes={outcomes}
-          filter={state.ideas}
-          selected={null}
-          compact={false}
-          dispatch={dispatch}
-        />
-      )}
+      <IdeasTable
+        base={base}
+        filter={state.ideas}
+        sort={sort}
+        outcomes={props.outcomes}
+        dispatch={dispatch}
+      />
     </>
   );
 }
