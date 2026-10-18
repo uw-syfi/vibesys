@@ -13,6 +13,18 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "Accelerator",
       "type": "string"
     },
+    "AcceleratorVendor": {
+      "description": "Who makes the hardware a task targets.",
+      "enum": [
+        "nvidia",
+        "amd",
+        "aws",
+        "apple",
+        "cpu"
+      ],
+      "title": "AcceleratorVendor",
+      "type": "string"
+    },
     "ArgumentsRejected": {
       "additionalProperties": false,
       "description": "The run's argument parser refused the extra arguments; ``problem`` is its message (raw).",
@@ -853,6 +865,52 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "EndRecord",
       "type": "object"
     },
+    "ExampleDomain": {
+      "description": "What an example task optimizes; the first question New run asks.",
+      "enum": [
+        "llm-serving",
+        "data-structures",
+        "databases",
+        "microservices"
+      ],
+      "title": "ExampleDomain",
+      "type": "string"
+    },
+    "ExampleHardware": {
+      "additionalProperties": false,
+      "description": "The hardware a task targets.",
+      "properties": {
+        "accelerator": {
+          "title": "Accelerator",
+          "type": "string"
+        },
+        "count": {
+          "title": "Count",
+          "type": "integer"
+        },
+        "vendor": {
+          "$ref": "#/$defs/AcceleratorVendor"
+        },
+        "backend": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Backend"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "accelerator",
+        "count",
+        "vendor",
+        "backend"
+      ],
+      "title": "ExampleHardware",
+      "type": "object"
+    },
     "ExampleList": {
       "additionalProperties": false,
       "description": "``vibesys example list --json``: every catalogued example, by category then name.",
@@ -882,6 +940,49 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "ExampleList",
       "type": "object"
     },
+    "ExampleModel": {
+      "additionalProperties": false,
+      "description": "The model an LLM-serving task serves.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "maker": {
+          "$ref": "#/$defs/ModelMaker"
+        }
+      },
+      "required": [
+        "name",
+        "maker"
+      ],
+      "title": "ExampleModel",
+      "type": "object"
+    },
+    "ExampleObjective": {
+      "additionalProperties": false,
+      "description": "One axis the task's ``objectives.toml`` declares.",
+      "properties": {
+        "metric": {
+          "title": "Metric",
+          "type": "string"
+        },
+        "direction": {
+          "enum": [
+            "max",
+            "min"
+          ],
+          "title": "Direction",
+          "type": "string"
+        }
+      },
+      "required": [
+        "metric",
+        "direction"
+      ],
+      "title": "ExampleObjective",
+      "type": "object"
+    },
     "ExampleSummary": {
       "additionalProperties": false,
       "description": "One example in ``vibesys example list --json``.",
@@ -904,6 +1005,21 @@ const hostHelperSchema: Record<string, unknown> = {
         "external_repo": {
           "title": "External Repo",
           "type": "boolean"
+        },
+        "task_details": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ExampleTask"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Details"
         }
       },
       "required": [
@@ -913,6 +1029,90 @@ const hostHelperSchema: Record<string, unknown> = {
         "external_repo"
       ],
       "title": "ExampleSummary",
+      "type": "object"
+    },
+    "ExampleTask": {
+      "additionalProperties": false,
+      "description": "What one task of an example is about, read from its ``vibesys.input.toml`` and goal file.",
+      "properties": {
+        "task": {
+          "title": "Task",
+          "type": "string"
+        },
+        "domain": {
+          "$ref": "#/$defs/ExampleDomain"
+        },
+        "hardware": {
+          "$ref": "#/$defs/ExampleHardware"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExampleModel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workload": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExampleWorkload"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objectives": {
+          "items": {
+            "$ref": "#/$defs/ExampleObjective"
+          },
+          "title": "Objectives",
+          "type": "array"
+        },
+        "goal": {
+          "maxLength": 32000,
+          "title": "Goal",
+          "type": "string"
+        },
+        "goal_truncated": {
+          "title": "Goal Truncated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "task",
+        "domain",
+        "hardware",
+        "model",
+        "workload",
+        "objectives",
+        "goal",
+        "goal_truncated"
+      ],
+      "title": "ExampleTask",
+      "type": "object"
+    },
+    "ExampleWorkload": {
+      "additionalProperties": false,
+      "description": "The workload a data-structure task drives.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "description"
+      ],
+      "title": "ExampleWorkload",
       "type": "object"
     },
     "ExamplesListReply": {
@@ -964,6 +1164,18 @@ const hostHelperSchema: Record<string, unknown> = {
           "default": "examples.list",
           "title": "Type",
           "type": "string"
+        },
+        "with_catalogue": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "With Catalogue"
         }
       },
       "required": [
@@ -1517,6 +1729,7 @@ const hostHelperSchema: Record<string, unknown> = {
         "project_clean",
         "run_backend",
         "run_causes",
+        "example_catalogue",
         "run_digest"
       ],
       "title": "HelperFeature",
@@ -2843,6 +3056,21 @@ const hostHelperSchema: Record<string, unknown> = {
       "required": [
         "state"
       ]
+    },
+    "ModelMaker": {
+      "description": "Who made a served model; ``OTHER`` for a maker with no entry yet.",
+      "enum": [
+        "meta",
+        "qwen",
+        "deepseek",
+        "zhipu",
+        "moonshot",
+        "ai2",
+        "openai",
+        "other"
+      ],
+      "title": "ModelMaker",
+      "type": "string"
     },
     "ModelNotVetted": {
       "additionalProperties": false,
@@ -5968,6 +6196,9 @@ const hostHelperSchema: Record<string, unknown> = {
     },
     "runs.list": {
       "digest_runs": "run_digest"
+    },
+    "examples.list": {
+      "with_catalogue": "example_catalogue"
     }
   }
 };

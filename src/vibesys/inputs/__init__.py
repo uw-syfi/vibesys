@@ -31,13 +31,6 @@ from vibesys.inputs._manifest import (
     render_input_manifest,
 )
 from vibesys.inputs._objective import with_operator_constraints
-from vibesys.inputs._objectives import (
-    OBJECTIVES_NAME,
-    ObjectiveAxisInput,
-    ObjectivesInput,
-    ParetoInput,
-    load_objectives,
-)
 from vibesys.inputs._plan import (
     MAX_STEPS,
     DeviationPolicy,
@@ -51,6 +44,13 @@ from vibesys.inputs._synthesis import (
     InputSynthesisError,
     SynthesizedInputSpec,
     synthesize_input_bundle,
+)
+from vs_project.api import (
+    OBJECTIVES_NAME,
+    ObjectiveAxisInput,
+    ObjectivesInput,
+    ParetoInput,
+    load_objectives,
 )
 
 __all__ = [

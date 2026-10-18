@@ -15,3 +15,11 @@ timeout_seconds = 300
 [benchmark.result]
 json_argument = "--output-json"
 metric = "throughput_ops_per_sec"
+
+[catalogue]
+domain = "databases"
+
+[catalogue.hardware]
+accelerator = "CPU"
+count = 1
+vendor = "cpu"

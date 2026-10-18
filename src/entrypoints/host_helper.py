@@ -150,9 +150,9 @@ def checkout_example_projects() -> ExampleProjects:
 class ExampleProjectsOnUse:
     """The helper's ``ExampleProjects``, which loads the example machinery on its first request."""
 
-    def list(self) -> ExampleList:
-        """Every catalogued example with its tasks."""
-        return checkout_example_projects().list()
+    def list(self, *, with_catalogue: bool = False) -> ExampleList:
+        """Every catalogued example with its tasks, and with their catalogue facts if asked."""
+        return checkout_example_projects().list(with_catalogue=with_catalogue)
 
     def create(self, example: str, destination: Path) -> CreatedProject:
         """Copy ``example`` into its own new Git repository at ``destination``."""

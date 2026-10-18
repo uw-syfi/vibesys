@@ -1,0 +1,56 @@
+{
+  "id": "helper-examples-catalogue-gated",
+  "protocol": "host-helper",
+  "title": "Asking for the example catalogue needs the example_catalogue feature",
+  "description": "After a hello that negotiated examples but not example_catalogue, examples.list with with_catalogue set is answered feature_not_negotiated, so a client that did not ask never sees task_details.",
+  "role": "control",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [
+          "examples"
+        ],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": [
+          "examples"
+        ]
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "examples.list",
+        "request_id": "p",
+        "deadline_ms": 30000,
+        "with_catalogue": true
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "p",
+        "code": "feature_not_negotiated"
+      }
+    }
+  ]
+}

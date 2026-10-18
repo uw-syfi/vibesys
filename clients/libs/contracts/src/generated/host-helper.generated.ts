@@ -176,6 +176,7 @@ export type WithCauses = boolean | null;
 export type RequestId23 = string;
 export type DeadlineMs23 = number;
 export type Type23 = "examples.list";
+export type WithCatalogue = boolean | null;
 export type RequestId24 = string;
 export type DeadlineMs24 = number;
 export type Type24 = "project.create_from_example";
@@ -246,6 +247,7 @@ export type HelperFeature =
   | "project_clean"
   | "run_backend"
   | "run_causes"
+  | "example_catalogue"
   | "run_digest";
 export type Features1 = HelperFeature[];
 export type VibesysVersion = string;
@@ -661,6 +663,30 @@ export type Name2 = string;
 export type Category = string;
 export type Tasks1 = string[];
 export type ExternalRepo = boolean;
+export type TaskDetails = ExampleTask[] | null;
+export type Task10 = string;
+/**
+ * What an example task optimizes; the first question New run asks.
+ */
+export type ExampleDomain = "llm-serving" | "data-structures" | "databases" | "microservices";
+export type Accelerator1 = string;
+export type Count = number;
+/**
+ * Who makes the hardware a task targets.
+ */
+export type AcceleratorVendor = "nvidia" | "amd" | "aws" | "apple" | "cpu";
+export type Name3 = string;
+/**
+ * Who made a served model; ``OTHER`` for a maker with no entry yet.
+ */
+export type ModelMaker = "meta" | "qwen" | "deepseek" | "zhipu" | "moonshot" | "ai2" | "openai" | "other";
+export type Name4 = string;
+export type Description = string;
+export type Metric = string;
+export type Direction = "max" | "min";
+export type Objectives = ExampleObjective[];
+export type Goal = string;
+export type GoalTruncated = boolean;
 export type Examples = ExampleSummary[];
 export type RequestId50 = string;
 export type Type50 = "project.create_from_example";
@@ -1094,6 +1120,7 @@ export interface ExamplesListRequest {
   request_id: RequestId23;
   deadline_ms: DeadlineMs23;
   type: Type23;
+  with_catalogue?: WithCatalogue;
 }
 /**
  * Copy ``example`` into its own new Git repository at ``destination`` (absent or empty).
@@ -1976,6 +2003,50 @@ export interface ExampleSummary {
   category: Category;
   tasks: Tasks1;
   external_repo: ExternalRepo;
+  task_details?: TaskDetails;
+}
+/**
+ * What one task of an example is about, read from its ``vibesys.input.toml`` and goal file.
+ */
+export interface ExampleTask {
+  task: Task10;
+  domain: ExampleDomain;
+  hardware: ExampleHardware;
+  model: ExampleModel | null;
+  workload: ExampleWorkload | null;
+  objectives: Objectives;
+  goal: Goal;
+  goal_truncated: GoalTruncated;
+}
+/**
+ * The hardware a task targets.
+ */
+export interface ExampleHardware {
+  accelerator: Accelerator1;
+  count: Count;
+  vendor: AcceleratorVendor;
+  backend: Backend | null;
+}
+/**
+ * The model an LLM-serving task serves.
+ */
+export interface ExampleModel {
+  name: Name3;
+  maker: ModelMaker;
+}
+/**
+ * The workload a data-structure task drives.
+ */
+export interface ExampleWorkload {
+  name: Name4;
+  description: Description;
+}
+/**
+ * One axis the task's ``objectives.toml`` declares.
+ */
+export interface ExampleObjective {
+  metric: Metric;
+  direction: Direction;
 }
 /**
  * The project made from the example.

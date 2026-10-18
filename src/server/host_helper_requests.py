@@ -378,8 +378,8 @@ class ExampleProjects(Protocol):
     ``not_nested`` or ``project_create_failed``.
     """
 
-    def list(self) -> ExampleList:
-        """Every catalogued example with its tasks."""
+    def list(self, *, with_catalogue: bool = False) -> ExampleList:
+        """Every catalogued example with its tasks, and with their catalogue facts if asked."""
         ...
 
     def create(self, example: str, destination: Path) -> CreatedProject:
@@ -806,8 +806,9 @@ def _examples_reply(
 ) -> ExamplesListReply | ProjectCreateFromExampleReply | ProjectCopyOutReply:
     """Answer one read of the example catalog, or make one new project."""
     match request:
-        case ExamplesListRequest(request_id=request_id):
-            return ExamplesListReply(request_id=request_id, listing=host.examples.list())
+        case ExamplesListRequest(request_id=request_id, with_catalogue=with_catalogue):
+            listing = host.examples.list(with_catalogue=with_catalogue is True)
+            return ExamplesListReply(request_id=request_id, listing=listing)
         case ProjectCreateFromExampleRequest(
             request_id=request_id, example=example, destination=destination
         ):

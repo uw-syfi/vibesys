@@ -20,8 +20,24 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
-from server.host_examples import ExampleList, ExampleSummary
-from vs_project.api import Project, ProjectError
+from server.host_examples import (
+    GOAL_MAX_CHARS,
+    ExampleHardware,
+    ExampleList,
+    ExampleModel,
+    ExampleObjective,
+    ExampleSummary,
+    ExampleTask,
+    ExampleWorkload,
+)
+from server.host_preflight import Backend
+from vs_project.api import (
+    CatalogueInput,
+    Project,
+    ProjectError,
+    TaskDirectory,
+    load_objectives,
+)
 
 REGISTRY_RELATIVE = PurePosixPath("examples/registry.toml")
 """Where the registry lives in a checkout."""
@@ -148,8 +164,8 @@ def load_registry(checkout: Path) -> Registry:
         raise CatalogError(message) from exc
 
 
-def example_tasks(root: Path) -> tuple[str, ...]:
-    """Return the sorted task names under ``root/.vibesys/tasks``; empty when there are none.
+def _task_directories(root: Path) -> tuple[TaskDirectory, ...]:
+    """The tasks under ``root/.vibesys/tasks`` sorted by name; empty when there are none.
 
     An external repository that is not fetched has no directory yet, so no tasks.
     """
@@ -159,13 +175,76 @@ def example_tasks(root: Path) -> tuple[str, ...]:
         project = Project.open(root)
         if not project.is_initialized():
             return ()
-        return tuple(sorted(task.name.value for task in project.discover_tasks()))
+        return tuple(sorted(project.discover_tasks(), key=lambda task: task.name.value))
     except ProjectError as exc:
         message = f"{root}: {exc}"
         raise CatalogError(message) from exc
 
 
-def list_examples(checkout: Path) -> ExampleList:
+def example_tasks(root: Path) -> tuple[str, ...]:
+    """Return the sorted task names under ``root/.vibesys/tasks``; empty when there are none."""
+    return tuple(task.name.value for task in _task_directories(root))
+
+
+def bounded_goal(text: str) -> tuple[str, bool]:
+    """``text`` cut to ``GOAL_MAX_CHARS``, and whether anything was cut."""
+    return text[:GOAL_MAX_CHARS], len(text) > GOAL_MAX_CHARS
+
+
+def read_task_detail(task: TaskDirectory) -> ExampleTask | None:
+    """What ``task`` is about; ``None`` when its input file declares no ``[catalogue]``.
+
+    Reads only the facts a client shows: the ``[catalogue]`` table, the first of ``backends``,
+    ``objectives.toml`` and the goal file. Anything malformed raises ``CatalogError`` naming
+    its file, so one bad task is not silently listed without its facts.
+    """
+    try:
+        document = tomllib.loads(task.manifest_path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        message = f"cannot read {task.manifest_path}: {exc}"
+        raise CatalogError(message) from exc
+    table = document.get("catalogue")
+    if table is None:
+        return None
+    try:
+        catalogue = CatalogueInput.model_validate(table)
+        backends = document.get("backends") or ()
+        backend = Backend(backends[0]) if backends else None
+        objectives = load_objectives(task.path).objective
+    except (ValidationError, ValueError) as exc:
+        message = f"invalid {task.manifest_path}: {exc}"
+        raise CatalogError(message) from exc
+    try:
+        text = task.objective_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        message = f"cannot read {task.objective_path}: {exc}"
+        raise CatalogError(message) from exc
+    goal, truncated = bounded_goal(text)
+    return ExampleTask(
+        task=task.name.value,
+        domain=catalogue.domain,
+        hardware=ExampleHardware(backend=backend, **catalogue.hardware.model_dump()),
+        model=None if catalogue.model is None else ExampleModel(**catalogue.model.model_dump()),
+        workload=(
+            None
+            if catalogue.workload is None
+            else ExampleWorkload(**catalogue.workload.model_dump())
+        ),
+        objectives=tuple(
+            ExampleObjective(metric=axis.name, direction=axis.direction) for axis in objectives
+        ),
+        goal=goal,
+        goal_truncated=truncated,
+    )
+
+
+def example_task_details(root: Path) -> tuple[ExampleTask, ...]:
+    """The catalogue facts of each task of the example at ``root`` that declares them."""
+    details = (read_task_detail(task) for task in _task_directories(root))
+    return tuple(detail for detail in details if detail is not None)
+
+
+def list_examples(checkout: Path, *, with_task_details: bool = True) -> ExampleList:
     """Describe every registered example of ``checkout``, sorted by category and name."""
     root = checkout.expanduser().resolve()
     entries = sorted(load_registry(root).example, key=lambda entry: (entry.category, entry.name))
@@ -177,6 +256,9 @@ def list_examples(checkout: Path) -> ExampleList:
                 category=entry.category,
                 tasks=example_tasks(root / entry.path),
                 external_repo=entry.external_repo,
+                task_details=(
+                    example_task_details(root / entry.path) if with_task_details else None
+                ),
             )
             for entry in entries
         ),

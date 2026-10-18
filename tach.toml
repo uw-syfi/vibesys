@@ -231,7 +231,7 @@ depends_on = ["server.host_api", "vs_sim.api"]
 [[modules]]
 # Light contracts for the example catalog and the projects made from it or copied out.
 path = "server.host_examples"
-depends_on = []
+depends_on = ["server.host_preflight", "vs_project"]
 
 [[modules]]
 # Light contracts for the harness a run starts with: the provider and model pair and how it reads.

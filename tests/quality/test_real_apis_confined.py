@@ -1238,6 +1238,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         EdgeKind.STORE,
         "the local progress log",
     ),
+    "libs/vs-project/src/vs_project/_task_files.py": (
+        EdgeKind.INPUT_LOADER,
+        "task objectives",
+    ),
     "libs/vs-project/src/vs_project/_cli_git_repository.py": (
         EdgeKind.STORE,
         "GitRepository implementation over the git CLI (git state is files)",
@@ -1492,7 +1496,6 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
     "src/vibesys/config.py": (EdgeKind.INPUT_LOADER, "VibeSys configuration"),
     "src/vibesys/domains/rendering.py": (EdgeKind.PACKAGED_RESOURCE, "role templates"),
     "src/vibesys/inputs/_manifest.py": (EdgeKind.INPUT_LOADER, "the task manifest"),
-    "src/vibesys/inputs/_objectives.py": (EdgeKind.INPUT_LOADER, "task objectives"),
     "src/vibesys/inputs/_synthesis.py": (EdgeKind.GENERATOR, "writes a synthesized task folder"),
     "src/vibesys/orchestration/skill_selection.py": (
         EdgeKind.PACKAGED_RESOURCE,

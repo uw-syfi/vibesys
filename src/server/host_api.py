@@ -805,6 +805,9 @@ class HelperFeature(StrEnum):
     RUN_CAUSES = "run_causes"
     """``run.preflight``'s ``with_causes``: the typed ``cause`` of a failed ``settings_valid``
     check beyond an unrunnable backend (the task, configuration, agent and argument failures)."""
+    EXAMPLE_CATALOGUE = "example_catalogue"
+    """``examples.list``'s ``with_catalogue``: each task's domain, served model, hardware,
+    workload, objectives and goal text, in ``task_details``."""
     RUN_DIGEST = "run_digest"
     """``runs.list``'s ``digest_runs``: each named run's ``digest``, read from its journal."""
 
@@ -1125,6 +1128,9 @@ class ExamplesListRequest(HelperRequestBase):
     """The examples of the checkout this helper runs from, with their tasks."""
 
     type: Literal["examples.list"] = "examples.list"
+    with_catalogue: bool | None = None
+    """Ask for each example's ``task_details``. Sent only after ``hello`` returned
+    ``example_catalogue``."""
 
 
 class ProjectCreateFromExampleRequest(HelperRequestBase):
@@ -1181,6 +1187,7 @@ HELPER_FIELD_FEATURES: Final[Mapping[type[HelperRequestBase], Mapping[str, Helpe
     LogsListRequest: {"span_id": HelperFeature.LOGS_BY_SPAN},
     RunsReadEventsRequest: {"with_totals": HelperFeature.RUN_HISTORY_PAGES},
     RunsListRequest: {"digest_runs": HelperFeature.RUN_DIGEST},
+    ExamplesListRequest: {"with_catalogue": HelperFeature.EXAMPLE_CATALOGUE},
 }
 """The feature each gated optional field needs when it is set (not ``None``), exported too."""
 

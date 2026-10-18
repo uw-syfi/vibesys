@@ -277,11 +277,11 @@ class HelperExampleProjects:
     checkout: Path | None
     materializer: ExampleMaterializer
 
-    def list(self) -> ExampleList:
-        """Every catalogued example with its tasks."""
+    def list(self, *, with_catalogue: bool = False) -> ExampleList:
+        """Every catalogued example with its tasks, and with their catalogue facts if asked."""
         root = self._catalog()
         try:
-            return list_examples(root)
+            return list_examples(root, with_task_details=with_catalogue)
         except CatalogError as exc:
             raise ProjectLookupError(
                 HelperErrorCode.EXAMPLES_UNAVAILABLE, str(root), str(exc)

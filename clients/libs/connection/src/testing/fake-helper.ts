@@ -128,11 +128,20 @@ export interface FakeHost {
   /** The compute backend `run.preflight` reports the run resolved to (`with_backend`). */
   backend: Backend | null;
   /**
-   * What `examples.list` answers, or `null` for a helper with no catalog (`examples_unavailable`,
-   * as from an installed distribution). `project.create_from_example` and `project.copy_out` add
+   * What `examples.list` answers (its `task_details` only when the request set `with_catalogue`),
+   * or `null` for a helper with no catalog (`examples_unavailable`, as from an installed
+   * distribution). `project.create_from_example` and `project.copy_out` add
    * the project they make to `projects` and `directories`.
    */
   examples: ExampleList | null;
+}
+
+/** `listing` as a helper answers a client that does not set `with_catalogue`. */
+function withoutTaskDetails(listing: ExampleList): ExampleList {
+  return {
+    ...listing,
+    examples: listing.examples.map(({task_details: _details, ...example}) => example),
+  };
 }
 
 /** `check` as a helper answers a client that sets (or not) `with_backend` and `with_causes`. */
@@ -292,6 +301,7 @@ export class FakeHelper {
     'run_causes',
     'project_clean',
     'run_digest',
+    'example_catalogue',
   ]);
   /** The run log streams `logs.list` and `logs.read` serve; replace it to seed a store. */
   logStore = new FakeLogStore();
@@ -607,11 +617,7 @@ class HelperSession {
         this.#preflight(request);
         return;
       case 'examples.list':
-        if (this.#helper.host.examples === null) {
-          this.#send({...this.#error(id, 'examples_unavailable', 'no catalog'), path: ''});
-          return;
-        }
-        this.#send({type: 'examples.list', request_id: id, listing: this.#helper.host.examples});
+        this.#examples(request);
         return;
       case 'project.create_from_example':
       case 'project.copy_out':
@@ -650,6 +656,22 @@ class HelperSession {
         this.#send({type: 'logs.cancel', request_id: id, read_id: request.read_id});
         return;
     }
+  }
+
+  #examples(request: Extract<HelperRequest, {type: 'examples.list'}>): void {
+    const listing = this.#helper.host.examples;
+    if (listing === null) {
+      this.#send({
+        ...this.#error(request.request_id, 'examples_unavailable', 'no catalog'),
+        path: '',
+      });
+      return;
+    }
+    this.#send({
+      type: 'examples.list',
+      request_id: request.request_id,
+      listing: request.with_catalogue === true ? listing : withoutTaskDetails(listing),
+    });
   }
 
   #logs(request: Extract<HelperRequest, {type: 'logs.list' | 'logs.read'}>): void {
