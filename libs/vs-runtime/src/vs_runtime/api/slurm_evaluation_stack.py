@@ -57,6 +57,7 @@ if TYPE_CHECKING:
 
     from vs_runtime.api.core import StageOutputOpener
     from vs_runtime.contracts import CandidateWorkspace
+    from vs_sandbox.api.slurm import SlurmLedgerAttachment
     from vs_sim.api import Sleeper
 
 SCOPE = Scope(owner=RunId(root="run"), generation=0)
@@ -179,13 +180,14 @@ def _config() -> SlurmConfig:
     )
 
 
-async def build_stack(
+async def build_stack(  # noqa: PLR0913  # lint-waiver: LW-455560 [PLR0913]; each optional Fake (cluster, profile, streams, pacing, ledger) is an independent test seam, and an options type would only rename them.
     root: Path,
     cluster: ScenarioCluster | None = None,
     *,
     profile_command: tuple[str, ...] | None = None,
     stage_output: StageOutputOpener | None = None,
     sleeper: Sleeper | None = None,
+    ledger: SlurmLedgerAttachment | None = None,
 ) -> Stack:
     """Build the semantic Slurm executor over ``cluster``, reusing durable state under root.
 
@@ -194,7 +196,8 @@ async def build_stack(
     With ``profile_command`` the run can capture a profile, whose stdout is
     ``cluster.profile_output``. ``stage_output`` opens each stage's output stream.
     ``sleeper`` paces the executor's polls of a running job; by default a pause
-    passes at once.
+    passes at once. With ``ledger`` the run's evaluations go through that
+    evaluation ledger attachment.
     """
     cluster = cluster or ScenarioCluster()
     workspaces = _Candidates(
@@ -228,6 +231,7 @@ async def build_stack(
         sleeper=sleeper or ManualClock(),
         cluster=cluster,
         stage_output=stage_output,
+        ledger=ledger,
     )
     return Stack(executor, cluster, snapshot, workspaces)
 
