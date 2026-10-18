@@ -67,7 +67,7 @@ test('summary opens without history and a step fetches only its span', async ({p
   const steps = page.getByRole('listbox', {name: /steps$/});
   await expect(steps).toBeVisible();
   await steps
-    .getByRole('option', {name: /implementer/})
+    .getByRole('option', {name: /implementer/i})
     .first()
     .click();
   await expect.poll(calls).toContain('span:op:000002/implementer.1');
