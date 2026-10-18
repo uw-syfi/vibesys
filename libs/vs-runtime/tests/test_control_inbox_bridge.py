@@ -55,6 +55,7 @@ from vs_project.api.testing import FakeControlInbox
 from vs_runtime.api.core import OperatorInbox, RunControlBridge
 from vs_runtime.api.infrastructure import (
     CONTROL_REQUEST,
+    CancelAttemptRequest,
     ChannelRunControl,
     ControlAck,
     ControlRequest,
@@ -260,9 +261,16 @@ _REJECTED_AND_POLLED_AGAIN_AFTER_RESTART = [
     ("poll",),
 ]
 """A pause after a stop is set aside: reported once, though polled again after a restart."""
+_REFUSED_ON_THE_SOCKET_THEN_POSTED = [
+    ("socket", "k0", {"action": "cancel_attempt", "attempt": "A-none"}),
+    ("post", "k0", {"action": "cancel_attempt", "attempt": "A-none"}),
+    ("poll",),
+]
+"""The socket's copy is refused when taken; its inbox twin is set aside with the same reason."""
 
 
 @given(_STEPS)
+@example(_REFUSED_ON_THE_SOCKET_THEN_POSTED)
 @example(_POSTED_IN_REVERSE_ID_ORDER)
 @example(_ACTIONS_IN_POSTING_ORDER)
 @example(_A_SUBJECT_CORE_REFUSES_IS_SET_ASIDE)
@@ -366,6 +374,26 @@ def _check_posting_order_and_reports(
     assert reported == Counter(
         f"control request {entry.request_id} rejected: {entry.reason}" for entry in inbox.rejected()
     )
+
+
+def test_an_inbox_request_whose_socket_copy_was_refused_gets_the_same_answer() -> None:
+    """One control id, one answer: the socket's refusal reason, not a second, different one."""
+    inbox = FakeControlInbox()
+    sink = FakeRunControlEventSink()
+    bridge, control = _wired(inbox, _Texts(), sink)
+    request = CancelAttemptRequest(control_id="k0", attempt="A-none")
+    control.submit(request)
+    inbox.post("k0", _json(request), ended=_LIVE)
+
+    _commit(_with_attempts(), bridge.poll(_with_attempts(), 1.0))
+
+    [refused] = [
+        t.text for t in sink.transitions if t.kind is RunControlTransitionKind.CONTROL_REFUSED
+    ]
+    label, reason = refused.split(": ", 1)
+    assert label == "cancel_attempt k0"
+    [entry] = inbox.rejected()
+    assert (entry.request_id, entry.reason) == ("k0", f"refused by the run: {reason}")
 
 
 def test_a_pause_sent_through_the_socket_and_the_inbox_is_recorded_once() -> None:

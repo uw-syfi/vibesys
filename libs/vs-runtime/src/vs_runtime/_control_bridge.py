@@ -171,9 +171,10 @@ class RunControlBridge:
         """Inbox requests emitted since the shell last committed; ``settled`` clears it."""
         self._asked: dict[ControlId, _Change] = {}
         """Each control emitted since the shell last committed, by identity, for ``settled``."""
-        self._told: set[str] = set()
-        """The refused controls the operator was told of; a change the channel still holds
-        (a resume cannot be undone) is refused again at each poll, but told once."""
+        self._told: dict[str, str] = {}
+        """The refused controls the operator was told of, with core's reason: a change the
+        channel still holds (a resume cannot be undone) is refused again at each poll, but
+        told once, and an inbox request under the same id gets the same answer."""
         # Inbox withdrawals submitted in this poll: one that ends nothing is set aside.
         self._inbox_withdrawals: set[str] = set()
         self._warned_damaged = False
@@ -528,7 +529,7 @@ class RunControlBridge:
             label = change.action if name is None else f"{change.action} {name}"
             if name is None or name not in self._told:
                 if name is not None:
-                    self._told.add(name)
+                    self._told[name] = reason
                 self._channel.notify_control_refused(f"{label}: {reason}")
         else:
             # No operator to tell (a control sent without an id, or the channel's own quota
@@ -665,18 +666,26 @@ class RunControlBridge:
     def _submitted_request(
         self, inbox: OperatorInbox, entry: InboxEntry, core: CoreState
     ) -> ControlRequest | str:
-        """Parse and submit one inbox request; the reason it cannot apply, if it cannot."""
+        """Parse and submit one inbox request; the reason it cannot apply, if it cannot.
+
+        One control id gets one answer, whichever way it was sent: a request whose socket copy
+        the run refused when it took it is set aside with that refusal's reason.
+        """
         request = _parsed(entry)
         if isinstance(request, Unreadable):
             return f"not a control request: {request.details()}"
         if request.control_id != entry.request_id:
             return f"its control_id {request.control_id!r} is not its name in the inbox"
-        refusal = self._refusal(request, core)
+        # A control refused when the socket's copy of it was taken has its answer already.
+        told = self._told.get(request.control_id)
+        refusal = None if told is not None else self._refusal(request, core)
         if refusal is not None:
             return refusal
         ack = inbox.control.submit(request)
         if ack.status is ControlStatus.CONFLICT:
             return "its control_id already named a different control"
+        if told is not None:
+            return f"refused by the run: {told}"
         if ack.reason is not None:
             return f"refused by the run: {REFUSAL_TEXT[ack.reason]}"
         return request
