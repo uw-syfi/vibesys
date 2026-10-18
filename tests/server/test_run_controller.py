@@ -414,16 +414,15 @@ def test_stop_releases_the_pause_wait_and_ends_the_run(tmp_path: Path) -> None:
     ]
 
 
-def test_resume_before_the_boundary_cancels_the_pending_stop(tmp_path: Path) -> None:
-    """A resume that beats the stop boundary keeps the run going."""
+def test_a_resume_before_the_boundary_leaves_the_stop_pending(tmp_path: Path) -> None:
+    """A stop only escalates: a resume that beats the stop boundary does not cancel it."""
     parts = build_server_parts(tmp_path)
     execution = parts.start_execution("implementer", "round 1", "work")
     parts.controller.stop_after_call()
     parts.controller.resume()
     parts.controller.after_agent("implementer", "round 1", execution_id=execution.execution_id)
 
-    assert parts.api.snapshot().status is RunStatus.RUNNING
-    assert parts.controller.before_agent("judge", "round 1", "review") == "review"
+    assert parts.api.snapshot().status is RunStatus.STOPPED
 
 
 def test_finish_after_a_landed_stop_records_no_terminal_event(tmp_path: Path) -> None:

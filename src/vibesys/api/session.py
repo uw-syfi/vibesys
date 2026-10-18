@@ -56,7 +56,10 @@ class RunControl(Protocol):
         ...
 
     def resume(self) -> None:
-        """Request the run acquire the write lease and continue from checkpoint."""
+        """Request the run acquire the write lease and continue from checkpoint.
+
+        A stop only escalates: while a stop is pending, a resume changes nothing.
+        """
         ...
 
     def resume_with_fallback(self) -> bool:

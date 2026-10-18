@@ -204,8 +204,12 @@ class RunControlChannel(Protocol):
         """
         ...
 
-    def resume(self, control_id: str | None = None) -> None:
-        """Cancel a pause or stop request and release a parked run."""
+    def resume(self, control_id: str | None = None) -> bool:
+        """End a pause or cancel a pending one, releasing a parked run; whether it did.
+
+        A stop only escalates, and nothing undoes it: while a stop is pending the resume
+        changes nothing and answers False.
+        """
         ...
 
     def requested_by(self, flag: Literal["pause", "stop", "capacity"]) -> str | None:
@@ -585,9 +589,13 @@ class RuntimeRunControlChannel:
                 self._resume_at = at if self._resume_at is None else min(self._resume_at, at)
             self._lock.notify_all()
 
-    def resume(self, control_id: str | None = None) -> None:
-        """Cancel a pending pause or stop and release a parked run."""
-        self._release(fallback=False, control_id=control_id)
+    def resume(self, control_id: str | None = None) -> bool:
+        """End or cancel a pause and release a parked run, unless a stop is pending."""
+        with self._lock:
+            if self._stop_requested:
+                return False
+            self._release(fallback=False, control_id=control_id)
+        return True
 
     def requested_by(self, flag: Literal["pause", "stop", "capacity"]) -> str | None:
         """The id of the control that last set ``flag``, or None when it had none."""
@@ -605,9 +613,8 @@ class RuntimeRunControlChannel:
             self._emit(RunControlTransitionKind.PAUSED)
 
     def _release(self, *, fallback: bool, control_id: str | None) -> None:
+        """Resume the run for an operator; the caller holds the lock and no stop is pending."""
         with self._lock:
-            self._stop_requested = False
-            self._stop_mode = None
             self._unpause(PauseWake.RESUMED)
             self._fallback_requested = self._resumed_with_fallback = fallback
             self._requested_by = {"pause": control_id}

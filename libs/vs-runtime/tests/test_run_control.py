@@ -132,23 +132,21 @@ def test_stop_releases_a_paused_boundary_and_unwinds() -> None:
     ]
 
 
-def test_stop_lands_on_every_boundary_until_resume_cancels_it() -> None:
+def test_stop_lands_on_every_boundary_and_no_resume_cancels_it() -> None:
     events = FakeRunControlEventSink()
     control = create_run_control_channel(events, threads=SimThreads())
     control.request_stop(StopMode.DRAIN)
 
     with pytest.raises(RunStopped):
         control.raise_if_stopped()
+    assert not control.resume()
     with pytest.raises(RunStopped):
         control.raise_if_stopped()
 
-    control.resume()
-    control.raise_if_stopped()
     assert [transition.kind for transition in events.transitions] == [
         RunControlTransitionKind.STOP_REQUESTED,
         RunControlTransitionKind.STOPPED,
         RunControlTransitionKind.STOPPED,
-        RunControlTransitionKind.RESUMED,
     ]
 
 
@@ -656,7 +654,6 @@ _STOP_RESUME_OPS = st.lists(
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="PR #3209 MED-3: a resume still clears a pending stop")
 @example(ops=[("stop", StopMode.CANCEL), ("poll",), ("resume",)])
 @example(ops=[("stop", StopMode.CANCEL), ("resume",), ("poll",)])
 @example(ops=[("pause",), ("stop", StopMode.DRAIN), ("resume",)])
