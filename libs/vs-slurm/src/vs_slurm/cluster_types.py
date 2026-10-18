@@ -193,6 +193,9 @@ class ClusterCall(StrEnum):
     """Any other call: a remote operation record read or written."""
 
 
+ANOTHER_JOB: Final = "the observation passed to cancel is of another job"
+"""Why ``Cluster.cancel`` given a reading of another job than its target cancels nothing."""
+
 OBSERVED_CANCEL_CALLS: Final = 1
 """The transport calls ``Cluster.cancel`` makes up to and including its scancel, given ``observed``.
 

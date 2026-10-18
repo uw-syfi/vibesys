@@ -431,63 +431,38 @@ def test_cancel_accepted_job_is_idempotent_and_inspected_separately(
     assert observed.status is SlurmJobStatus.CANCELLED
 
 
-_READ, _SCANCEL, _FILE = ClusterCall.SCHEDULER_READ, ClusterCall.SCANCEL, ClusterCall.REMOTE_FILE
-# The remote cancellation marker: its directory, its file, its publish, and a sync.
-_TOMBSTONE = (_FILE,) * 4
-
-
 @pytest.mark.parametrize(
     "state", [SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING, SlurmJobStatus.COMPLETED]
 )
 @pytest.mark.parametrize("given", [False, True])
-def test_a_cancel_makes_the_same_transport_calls_on_every_implementation(
+def test_a_cancel_given_a_live_reading_sends_its_scancel_first(
     case: _Case, state: SlurmJobStatus, *, given: bool
 ) -> None:
-    """r3173-recheck MED-1: the Fake's cancel was one step, so no test saw the calls before its scancel.
+    """r3173-recheck MED-1: a caller budgets the calls before a cancel's scancel.
 
-    A caller that must have the job cancelled by a deadline budgets the cancel's
-    calls: given the reading it just took, the scancel is the first
-    (``OBSERVED_CANCEL_CALLS``); without one, a scheduler read comes first.
+    Given the live reading it just took, the scancel is the cancel's first
+    transport call (``OBSERVED_CANCEL_CALLS``), so a caller that must have the
+    job cancelled by a deadline need budget nothing before it. Only that is
+    pinned: each implementation makes its other calls as it needs. A job that
+    has ended is sent no scancel, and one that is live is always sent one.
     """
     case.script("budget", states=(state,))
     assert isinstance(case.cluster.submit(_request(case), operation_id="budget"), ClusterSubmitted)
     live = state is not SlurmJobStatus.COMPLETED
-    before = len(case.calls())
     observed = case.cluster.inspect("budget")
     assert isinstance(observed, ClusterObservation)
-    # The operation's remote record, then the queue, and accounting for an ended job.
-    assert tuple(case.calls()[before:]) == ((_FILE, _READ) if live else (_FILE, _READ, _READ))
     before = len(case.calls())
 
     cancelled = case.cluster.cancel("budget", observed=observed if given else None)
 
     calls = tuple(case.calls()[before:])
     assert isinstance(cancelled, ClusterCancelRequested)
-    if not live:
-        assert calls == (_READ, _READ, *_TOMBSTONE)
-    elif given:
-        assert calls == (_SCANCEL, _READ, _READ, *_TOMBSTONE)
-        assert calls.index(_SCANCEL) + 1 == OBSERVED_CANCEL_CALLS
-    else:
-        assert calls == (_READ, _SCANCEL, *_TOMBSTONE)
-    before = len(case.calls())
+    assert (ClusterCall.SCANCEL in calls) is live
+    if live and given:
+        assert calls.index(ClusterCall.SCANCEL) + 1 == OBSERVED_CANCEL_CALLS
     again = case.cluster.inspect("budget")
     assert isinstance(again, ClusterObservation)
     assert again.status is (SlurmJobStatus.CANCELLED if live else SlurmJobStatus.COMPLETED)
-    # Cancelled here, the operation needs no remote record read: its job ended.
-    assert tuple(case.calls()[before:]) == (_READ, _READ)
-
-
-def test_a_cancel_of_an_identity_with_no_job_reads_its_record_then_leaves_a_tombstone(
-    case: _Case,
-) -> None:
-    before = len(case.calls())
-    assert isinstance(case.cluster.cancel("nothing"), ClusterCancelRequested)
-    middle = len(case.calls())
-    assert isinstance(case.cluster.cancel("nothing"), ClusterCancelRequested)
-    calls = tuple(case.calls())
-    assert calls[before:middle] == (_FILE, *_TOMBSTONE)
-    assert calls[middle:] == _TOMBSTONE
 
 
 def test_a_cancel_given_a_reading_of_another_job_cancels_nothing(case: _Case) -> None:

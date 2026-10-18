@@ -308,9 +308,6 @@ def _cluster(
     return _ContendedSlurmCluster(runner, state_root=root / "ids")
 
 
-@pytest.mark.xfail(
-    strict=True, reason="r3206 MED-1: the cancel waits for the store lock before its scancel"
-)
 @pytest.mark.parametrize("implementation", ["slurm", "fake"])
 def test_a_withdrawals_scancel_is_never_held_up_behind_another_thread_of_the_run(
     tmp_path: Path, implementation: str
