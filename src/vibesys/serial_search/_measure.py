@@ -90,10 +90,38 @@ async def measure_gates(
     result = await _gated(ctx, ws, revision, found)
     if isinstance(result, Gated) and not isinstance(compared, Failed):
         noise = _noise_of(compared.comparison, terms_policy(terms))
-        result = result.model_copy(update={"comparison": compared.comparison, "noise": noise})
+        result = result.model_copy(
+            update={
+                "readings": _settled(result.readings, compared.comparison),
+                "comparison": compared.comparison,
+                "noise": noise,
+            }
+        )
     if gate is not None and isinstance(result, Gated):
         _label_reading(ctx, gate, stage, result.readings, baseline)
     return result
+
+
+def _settled(
+    readings: tuple[AcceptedReading, ...], comparison: Comparison | None
+) -> tuple[AcceptedReading, ...]:
+    """``readings`` with the benchmark's headline stated by the settled comparison.
+
+    The record the gate read states the mean of the samples held when the official check was
+    answered, and the runs a close call earns land after it. The comparison, awaited until
+    none is under way, holds them all, so its candidate value is the one figure the round
+    reports, ranks by and labels its gate with. The record's other rows are the answering run's
+    own (a sample holds the headline only), and a comparison of another metric changes nothing.
+    """
+    reading = reading_of(readings, EvidenceKind.BENCHMARK)
+    if comparison is None or reading is None or not reading.metrics:
+        return readings
+    headline, *rest = reading.metrics
+    if headline.name != comparison.metric:
+        return readings
+    stated = headline.model_copy(update={"value": comparison.candidate_value})
+    settled = reading.model_copy(update={"metrics": (stated, *rest)})
+    return tuple(settled if item is reading else item for item in readings)
 
 
 def _noise_of(comparison: Comparison | None, policy: ComparisonPolicy) -> MeasurementNoise | None:
