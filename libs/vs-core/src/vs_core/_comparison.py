@@ -166,6 +166,7 @@ __all__ = [
     "running_baseline",
     "sample_of",
     "samples_of",
+    "scope_samples",
     "stated_comparisons",
     "terms_policy",
     "verdict_unreachable",
@@ -381,7 +382,7 @@ def as_answer(state: EvaluationState, job: OwnedJob, evidence: EvidenceRef) -> E
     measured = Measured(
         evaluation_of(MeasurementIdentity.from_plan(plan, plan.candidate)), plan.measured_input
     )
-    held = tuple(s for s in samples_of(state, measured) if s.scope == job.scope)
+    held = scope_samples(state, job.scope, measured)
     own = sample_of(job, evidence, 0.0)
     if own is not None and all(s.run != own.run for s in held):
         held = (*held, own)
@@ -411,6 +412,18 @@ def samples_of(state: EvaluationState, measured: Measured) -> tuple[Sample, ...]
         if sample.evaluation == measured.evaluation
         and sample.measured_input == measured.measured_input
     )
+
+
+def scope_samples(state: EvaluationState, scope: Scope, measured: Measured) -> tuple[Sample, ...]:
+    """The samples of one measurement that runs in ``scope`` gave, in the order they ended.
+
+    A candidate's side of a comparison is its own scope's samples only (`comparison_of`): each
+    attempt, and each generation of a reopened one, is compared on the runs it made, though
+    another holds samples of the same input. Everything that counts a candidate's samples
+    counts them here, so the comparison, the official answer (`as_answer`) and the sample cap
+    (`official_needs_samples`) never disagree on how many there are.
+    """
+    return tuple(s for s in samples_of(state, measured) if s.scope == scope)
 
 
 def fresh(samples: Iterable[Sample], moment: Moment) -> tuple[Sample, ...]:
@@ -590,7 +603,7 @@ def _anchored(
     state: EvaluationState, scope: Scope, measured: Measured
 ) -> tuple[tuple[Sample, ...], BaseRef | None]:
     """The scope's samples of the input and the base its latest anchored sample names."""
-    mine = tuple(s for s in samples_of(state, measured) if s.scope == scope)
+    mine = scope_samples(state, scope, measured)
     return mine, next((s.base for s in reversed(mine) if s.base is not None), None)
 
 
@@ -995,12 +1008,12 @@ def official_needs_samples(
         held is not None
         and close_call(held)
         and not verdict_unreachable(held, moment.policy)
-        and not _candidate_runs_spoken_for(state, scope, measured, moment)
+        and not _candidate_runs_spoken_for(state, scope, measured, moment.policy)
     )
 
 
 def _candidate_runs_spoken_for(
-    state: EvaluationState, scope: Scope, measured: Measured, moment: Moment
+    state: EvaluationState, scope: Scope, measured: Measured, policy: ComparisonPolicy
 ) -> bool:
     """Whether the candidate's samples and its runs under way already make the sample cap.
 
@@ -1008,9 +1021,10 @@ def _candidate_runs_spoken_for(
     (`remeasures_candidate`). A run of its input still under way, core's last re-run or another
     one, lands a sample of its own, so an official run added beside it would be one too many.
     The official measurement is then answered by the samples held, and the comparison settles
-    when the run under way lands.
+    when the run under way lands. Both counts are the scope's own, as the comparison's are
+    (`scope_samples`): another attempt's samples of the same input are not this candidate's.
     """
-    return not moment.policy.floor_declared and (
-        len(fresh(samples_of(state, measured), moment)) + runs_in_flight(state, measured, scope)
+    return not policy.floor_declared and (
+        len(scope_samples(state, scope, measured)) + runs_in_flight(state, measured, scope)
         >= MIN_SAMPLES_WITHOUT_FLOOR
     )

@@ -46,6 +46,7 @@ from ._comparison import (
     running_baseline,
     sample_of,
     samples_of,
+    scope_samples,
 )
 from ._proofs import (
     Proven,
@@ -624,7 +625,7 @@ def _advance(
     behalf = _Behalf(candidate.request_id, own)
     comparison = comparison_of(state, scope, mine, moment)
     if comparison is None:
-        sampled = any(s.scope == scope for s in samples_of(state, mine))
+        sampled = bool(scope_samples(state, scope, mine))
         if (sampled or base_in_flight(state, mine, scope)) and base_missing(
             state, Measured(evaluation, base.measured_input), moment
         ):

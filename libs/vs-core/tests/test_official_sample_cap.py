@@ -126,7 +126,6 @@ def scope_world(
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="#3186: the cap counts other scopes' samples (MED-3)")
 @settings(max_examples=examples(pr=30, nightly=300))
 @given(
     steps=st.lists(
