@@ -39,7 +39,9 @@ async function alone(page: Page, name: string, shoot: () => Promise<void>): Prom
   const setOthers = (display: string) =>
     page.evaluate(
       ([keep, value]) => {
-        for (const entry of document.querySelectorAll<HTMLElement>('[data-gallery-entry]')) {
+        for (const entry of Array.from(
+          document.querySelectorAll<HTMLElement>('[data-gallery-entry]'),
+        )) {
           if (entry.dataset['galleryEntry'] !== keep) entry.style.display = value ?? '';
         }
         window.scrollTo(0, 0);
