@@ -8,7 +8,6 @@ from vs_core._attempt_track import (
 )
 from vs_core._comparison import (
     BASE_MAX_SAMPLES,
-    CLOSE_CALL_NOISES,
     MIN_SAMPLES_WITHOUT_FLOOR,
     VERDICT_NOISES,
     ComparisonPolicy,
@@ -807,7 +806,6 @@ __all__ = [
     "ADOPTED",
     "BASE_MAX_SAMPLES",
     "CAPTURE_SUFFIX",
-    "CLOSE_CALL_NOISES",
     "ENVELOPE_SCHEMA_VERSION",
     "EVENT_ROUTES",
     "EXPORT_PATCH_SUFFIX",

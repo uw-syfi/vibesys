@@ -15,35 +15,42 @@ The statistic
 
 Let the candidate have ``m`` samples with mean ``c`` and the base ``n`` samples with mean ``b``.
 The ratio is ``r = c / b``. A run's relative deviation is its distance from its own side's mean
-over that mean. The runs' spread is the pooled relative deviation::
-
-    s = sqrt(sum(relative deviations ** 2) / (m + n - 2))        (0 when m + n <= 2)
-
-and it is never taken below the task's declared per-run noise ``relative_noise`` (the floor,
-which is also all there is to go on while each side holds one sample)::
-
-    sigma = max(s, floor)
-    noise = r * sigma * sqrt(1/m + 1/n)
-
-``noise`` is one standard error of the ratio of two means (first order). More samples shrink
-it, a wider spread or a higher floor grow it, and a shared host shows as spread. A verdict
-needs the difference to exceed a critical number of noises: ``better`` when the candidate
-improves on the base by more than that (a ratio above one for a ``max`` metric, below one for
-a ``min`` metric), ``worse`` when it is worse by more than that, and ``within_noise``
+over that mean. ``noise`` is one standard error of the ratio of two means (first order). More
+samples shrink it, a wider spread or a higher floor grow it, and a shared host shows as spread.
+A verdict needs the difference to exceed a critical number of noises: ``better`` when the
+candidate improves on the base by more than that (a ratio above one for a ``max`` metric, below
+one for a ``min`` metric), ``worse`` when it is worse by more than that, and ``within_noise``
 otherwise.
 
-- A task that declares a floor has stated its noise, so the critical number is
-  ``VERDICT_NOISES`` (2, about 95% two-sided for a known noise), from one run a side.
+- A task that declares a floor (``relative_noise``) has stated its noise. The runs' spread is
+  the pooled relative deviation, never taken below the floor (which is also all there is to go
+  on while each side holds one sample)::
+
+      s = sqrt(sum(relative deviations ** 2) / (m + n - 2))        (0 when m + n <= 2)
+      sigma = max(s, floor)
+      noise = r * sigma * sqrt(1/m + 1/n)
+
+  and the critical number is ``VERDICT_NOISES`` (2, about 95% two-sided for a known noise),
+  from one run a side.
 - A task that declares none (``relative_noise`` is 0) has not said its runs are exact: it has
-  said nothing, and the noise is only what the runs show. Its comparison gives a verdict only
-  once each side holds ``MIN_SAMPLES_WITHOUT_FLOOR`` runs whose spread is above zero, and the
-  critical number is then the Student-t quantile for ``m + n - 2`` degrees of freedom
-  (`_t_critical`), so a verdict at equal means stays near the intended 5%. Fewer runs, or
-  identical runs, are no estimate of a noise: identical readings of a quantized or cached
-  benchmark show none, not that there is none. Until then the comparison is ``within_noise``
-  and a close call (`close_call`), which earns the base more samples (below). Any fixed
-  default floor would be a number nobody measured; requiring the key would refuse every task
-  that has a benchmark and no ``[pareto]`` table.
+  said nothing, and the noise is only what the runs show. Each side's spread is its own, since
+  a candidate's code can change how much its runs vary, and the candidate side grows with every
+  run of it while the base stops at three. This is Welch's t test: with ``v_c`` and ``v_b``
+  each side's relative variance (squared relative deviations over ``m - 1`` and ``n - 1``)::
+
+      noise = r * sqrt(v_c/m + v_b/n)
+      df = (v_c/m + v_b/n) ** 2 / ((v_c/m) ** 2 / (m - 1) + (v_b/n) ** 2 / (n - 1))
+
+  (the Welch-Satterthwaite degrees of freedom). The critical number is the two-sided 95%
+  Student-t quantile at the floor of ``df`` (`_t_critical`), conservative because the quantile
+  falls as the degrees grow, so a verdict at equal means stays near the intended 5% whatever
+  the two spreads and counts. The comparison gives a verdict only once each side holds
+  ``MIN_SAMPLES_WITHOUT_FLOOR`` runs and the noise is above zero. Fewer runs, or identical
+  runs, are no estimate of a noise: identical readings of a quantized or cached benchmark show
+  none, not that there is none. Until then the comparison is ``within_noise`` and a close call
+  (`close_call`), which earns the base more samples (below). Any fixed default floor would be a
+  number nobody measured; requiring the key would refuse every task that has a benchmark and no
+  ``[pareto]`` table.
 
 When the base is measured
 -------------------------
@@ -51,8 +58,8 @@ When the base is measured
 The base is measured once per (measured input, evaluation): the first time a candidate is
 compared with it and no run of it is held or running. It is measured again only when its
 samples are stale (older than ``TaskTerms.base_staleness`` on the run clock) or when a
-candidate's result is a close call, within the critical number of noises of the bar, because
-one more base sample narrows the noise. A close call never takes a base past
+candidate's result is a close call (``within_noise``, `close_call`), because one more base
+sample narrows the noise. A close call never takes a base past
 `_base_max_samples` fresh samples: ``BASE_MAX_SAMPLES`` (2, so at most one extra base run)
 under a declared floor, and ``MIN_SAMPLES_WITHOUT_FLOOR`` (3, so at most two extra base runs)
 without one, the fewest that can give a verdict.
@@ -61,7 +68,7 @@ without one, the fewest that can give a verdict.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import sqrt
+from math import floor, inf, sqrt
 from typing import TYPE_CHECKING
 
 from ._values import digest
@@ -92,7 +99,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BASE_MAX_SAMPLES",
-    "CLOSE_CALL_NOISES",
     "MIN_SAMPLES_WITHOUT_FLOOR",
     "VERDICT_NOISES",
     "ComparisonPolicy",
@@ -123,9 +129,6 @@ __all__ = [
 
 VERDICT_NOISES = 2.0
 """How many standard errors a difference must exceed for a verdict under a declared floor."""
-CLOSE_CALL_NOISES = 2.0
-"""A result within this many noises of the bar (or the verdict's critical number, if larger) is
-a close call: another sample is worth it."""
 BASE_MAX_SAMPLES = 2
 """The most fresh samples a close call earns a base under a declared floor: one run, then one
 more, never a chase.
@@ -135,14 +138,26 @@ so a close call narrows the noise with one more base sample and stops there."""
 MIN_SAMPLES_WITHOUT_FLOOR = 3
 """The runs each side needs before a comparison under no declared floor gives a verdict.
 
-Three a side is the fewest whose pooled spread (4 degrees of freedom) keeps the Student-t
-critical number below 3; it is also the most fresh samples a close call earns a base then."""
+Three a side is the fewest that give each side's spread two degrees of freedom, so Welch's
+degrees of freedom are at least 2 and the Student-t critical number at most 4.303; it is also
+the most fresh samples a close call earns a base then."""
+_T_FIRST_DEGREES = MIN_SAMPLES_WITHOUT_FLOOR - 1
+"""The fewest degrees of freedom a comparison that can give a verdict has (Welch's are never
+below the smaller side's runs less one)."""
 _T_975 = (
-    12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228,
+    4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228,
     2.201, 2.179, 2.160, 2.145, 2.131, 2.120, 2.110, 2.101, 2.093, 2.086,
     2.080, 2.074, 2.069, 2.064, 2.060, 2.056, 2.052, 2.048, 2.045, 2.042,
 )  # fmt: skip
-"""The two-sided 95% Student-t quantile for 1 to 30 degrees of freedom."""
+"""The two-sided 95% Student-t quantile for ``_T_FIRST_DEGREES`` (2) to 30 degrees of freedom.
+
+No stdlib or dependency of vs-core computes a Student-t quantile, so this is the standard table
+to three decimals; `test_comparison_statistic` checks every entry against a numerically
+integrated Student-t distribution."""
+_DEGREES_SLACK = 1e-9
+"""Added before taking the floor of Welch's degrees of freedom: degrees that are a whole number
+in exact arithmetic (equal spreads and counts, or one side's runs all alike) can come out a few
+units in the last place below it, and the floor would then drop a whole degree."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -387,18 +402,22 @@ def compare(
         return None
     ratio = c / b
     m, n = len(mine), len(theirs)
-    spread = _pooled_spread(mine, c, theirs, b)
-    sigma = max(spread, policy.noise_floor)
-    noise = abs(ratio) * sigma * sqrt(1 / m + 1 / n)
+    if policy.floor_declared:
+        sigma = max(_pooled_spread(mine, c, theirs, b), policy.noise_floor)
+        noise = abs(ratio) * sigma * sqrt(1 / m + 1 / n)
+        critical = VERDICT_NOISES
+    else:
+        error, degrees = _welch(mine, c, theirs, b)
+        noise = abs(ratio) * error
+        critical = _t_critical(degrees)
     gain = ratio - 1 if direction == "max" else 1 - ratio
-    bar = _t_critical(m, n, policy) * noise
     verdict = (
         ComparisonVerdict.WITHIN_NOISE
         if not _noise_known(m, n, noise, policy)
         else ComparisonVerdict.BETTER
-        if gain > bar
+        if gain > critical * noise
         else ComparisonVerdict.WORSE
-        if gain < -bar
+        if gain < -critical * noise
         else ComparisonVerdict.WITHIN_NOISE
     )
     last = candidate[-1]
@@ -421,22 +440,18 @@ def compare(
     )
 
 
-def _degrees(m: int, n: int) -> int:
-    """The degrees of freedom of the runs' pooled spread: each side's mean takes one."""
-    return m + n - 2
+def _t_critical(degrees: float) -> float:
+    """The two-sided 95% Student-t quantile at the floor of ``degrees`` of freedom.
 
-
-def _t_critical(m: int, n: int, policy: ComparisonPolicy) -> float:
-    """How many noises a difference between ``m`` and ``n`` runs must exceed for a verdict.
-
-    ``VERDICT_NOISES`` under a declared floor (the noise is stated). Without one, the noise is
-    estimated from the runs, so the two-sided 95% Student-t quantile for their degrees of
-    freedom; beyond the table's 30 its last entry, slightly above the normal 1.96.
+    The floor, because the quantile falls as the degrees grow, so rounding down never gives a
+    verdict that the exact degrees would not; beyond the table's 30 its last entry, slightly
+    above the normal 1.96. Below ``_T_FIRST_DEGREES`` there is no verdict (`_noise_known`), so
+    the bar is infinite.
     """
-    degrees = _degrees(m, n)
-    if policy.floor_declared or degrees < 1:
-        return VERDICT_NOISES
-    return _T_975[min(degrees, len(_T_975)) - 1]
+    whole = floor(degrees + _DEGREES_SLACK)
+    if whole < _T_FIRST_DEGREES:
+        return inf
+    return _T_975[min(whole - _T_FIRST_DEGREES, len(_T_975) - 1)]
 
 
 def _noise_known(m: int, n: int, noise: float, policy: ComparisonPolicy) -> bool:
@@ -450,11 +465,40 @@ def _noise_known(m: int, n: int, noise: float, policy: ComparisonPolicy) -> bool
 
 
 def _pooled_spread(mine: tuple[float, ...], c: float, theirs: tuple[float, ...], b: float) -> float:
-    """The pooled relative deviation of the runs from their own side's mean (0 below 3 runs)."""
-    degrees = _degrees(len(mine), len(theirs))
+    """The pooled relative deviation of the runs from their own side's mean (0 below 3 runs).
+
+    Used only under a declared floor, which bounds it from below.
+    """
+    degrees = len(mine) + len(theirs) - 2
     if degrees <= 0 or c == 0 or b == 0:
         return 0.0
     return sqrt((_squares(mine, c) + _squares(theirs, b)) / degrees)
+
+
+def _welch(
+    mine: tuple[float, ...], c: float, theirs: tuple[float, ...], b: float
+) -> tuple[float, float]:
+    """The relative standard error of the ratio and its Welch-Satterthwaite degrees of freedom.
+
+    Each side contributes its own relative variance over its count (module docstring); a side
+    with one run, identical runs or a zero mean contributes none. Zero error has zero degrees.
+    """
+    parts = tuple(
+        (_variance(values, mean) / len(values), len(values) - 1)
+        for values, mean in ((mine, c), (theirs, b))
+    )
+    total = sum(part for part, _ in parts)
+    if total == 0:
+        return 0.0, 0.0
+    return sqrt(total), total**2 / sum(part**2 / free for part, free in parts if part > 0)
+
+
+def _variance(values: tuple[float, ...], mean: float) -> float:
+    """One side's relative variance: squared relative deviations over its runs less one."""
+    free = len(values) - 1
+    if free == 0 or mean == 0:
+        return 0.0
+    return _squares(values, mean) / free
 
 
 def _squares(values: tuple[float, ...], mean: float) -> float:
@@ -476,12 +520,19 @@ def comparison_of(
     Every run of the input in the scope is a sample of it, whoever asked for the run (the
     strategy's own check adds one to the agent's); the base is the one an agent's run named.
     """
-    mine = tuple(s for s in samples_of(state, measured) if s.scope == scope)
-    anchor = next((s.base for s in reversed(mine) if s.base is not None), None)
+    mine, anchor = _anchored(state, scope, measured)
     if anchor is None:
         return None
     base = fresh(samples_of(state, Measured(measured.evaluation, anchor.measured_input)), moment)
     return compare(mine, base, scope=scope, anchor=anchor, policy=moment.policy)
+
+
+def _anchored(
+    state: EvaluationState, scope: Scope, measured: Measured
+) -> tuple[tuple[Sample, ...], BaseRef | None]:
+    """The scope's samples of the input and the base its latest anchored sample names."""
+    mine = tuple(s for s in samples_of(state, measured) if s.scope == scope)
+    return mine, next((s.base for s in reversed(mine) if s.base is not None), None)
 
 
 def comparisons_of(state: EvaluationState, moment: Moment) -> tuple[Comparison, ...]:
@@ -582,19 +633,17 @@ def comparison_of_result(
     return comparison_of(state, scope, Measured(sample.evaluation, sample.measured_input), moment)
 
 
-def close_call(comparison: Comparison, policy: ComparisonPolicy, bar: float = 1.0) -> bool:
-    """Whether the candidate's ratio is within the critical number of noises of ``bar``.
+def close_call(comparison: Comparison) -> bool:
+    """Whether the candidate's result is within the critical number of noises of its base.
 
-    The band is ``CLOSE_CALL_NOISES`` or the verdict's critical number (`_t_critical`),
-    whichever is wider, so a result that is ``within_noise`` of the base is a close call. A
-    comparison with no estimate of its noise (``_noise_known``) is within any noise of any bar:
-    more samples are exactly what it lacks. ``policy`` is the one the comparison was made under.
+    That is exactly a ``within_noise`` verdict: the verdict was taken at the critical number for
+    the comparison's own spreads (`compare`), which the stored comparison does not carry, so
+    the verdict is the only place that bar is known. A comparison with no estimate of its noise
+    (``_noise_known``) is ``within_noise`` whatever its gain: more samples are exactly what it
+    lacks. A verdict, even from a zero noise under a declared floor (a candidate that read 0),
+    is no close call.
     """
-    m, n = comparison.candidate_samples, comparison.base_samples
-    if not _noise_known(m, n, comparison.noise, policy):
-        return True
-    band = max(CLOSE_CALL_NOISES, _t_critical(m, n, policy))
-    return abs(comparison.ratio - bar) <= band * comparison.noise
+    return comparison.verdict is ComparisonVerdict.WITHIN_NOISE
 
 
 def _base_max_samples(policy: ComparisonPolicy) -> int:
@@ -668,7 +717,7 @@ def remeasures_base(
     base = Measured(evaluation, comparison.base_input)
     held = fresh(samples_of(state, base), moment)
     return (
-        close_call(comparison, moment.policy)
+        close_call(comparison)
         and len(held) < _base_max_samples(moment.policy)
         and not base_in_flight(state, base)
     )
@@ -679,9 +728,21 @@ def official_needs_samples(
 ) -> bool:
     """Whether the scope's samples of an input fall short of settling its comparison.
 
-    The official measurement of an input the scope already measured adds a run only then: the
-    samples held are a close call against the base, so one more narrows the noise. With no
-    comparison (no base, or nothing to compare) the samples held are all there is to ask for.
+    The official measurement of an input the scope already measured adds a run only then:
+
+    - the samples held are a close call against the base, so one more narrows the noise;
+    - or the samples name a base but no sample of it is fresh at ``moment`` (its runs went
+      stale, failed or are still running), so they have no verdict at all, and the answer must
+      not rest on the runs the agent happened to make: the official check adds a run of its
+      own.
+
+    With no base named, or samples that cannot be compared (another metric, no direction), the
+    samples held are all there is to ask for.
     """
+    _, anchor = _anchored(state, scope, measured)
+    if anchor is None:
+        return False
+    if not fresh(samples_of(state, Measured(measured.evaluation, anchor.measured_input)), moment):
+        return True
     held = comparison_of(state, scope, measured, moment)
-    return held is not None and close_call(held, moment.policy)
+    return held is not None and close_call(held)
