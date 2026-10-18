@@ -31,6 +31,7 @@ export {
 } from './ideas-view.js';
 export {EMPTY_TRACE_LOG, type RunData, type SessionView, type TraceLog} from './live.js';
 export {
+  objectivesOf,
   type ParetoAxisView,
   type ParetoPointView,
   type ParetoView,

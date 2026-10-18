@@ -1247,6 +1247,13 @@ button.vs-dotlegend-item:focus-visible {
   width: calc(var(--tile-count) * var(--tile-width) + (var(--tile-count) - 1) * var(--space-4));
   max-width: 100%;
 }
+.vs-tiles[data-stacked] {
+  grid-template-columns: 1fr;
+  width: var(--tile-width);
+}
+.vs-tiles[data-stacked] .vs-tile-trend {
+  display: none;
+}
 .vs-tile {
   box-sizing: border-box;
   display: flex;

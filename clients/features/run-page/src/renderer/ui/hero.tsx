@@ -30,6 +30,7 @@ import {
   type IdeaFocusView,
   ideaFocusView,
   type MetricTileView,
+  objectivesOf,
   paretoView,
   type RunModel,
   stripChartView,
@@ -112,8 +113,11 @@ function StandingLine(props: {
   return shown ? line : <Reserve>{line}</Reserve>;
 }
 
-/** One tile: the measure's name, its ratio to the input and what it means, its values, its trend. */
-function Tile(props: {readonly tile: MetricTileView}): JSX.Element {
+/**
+ * One tile: the measure's name, its ratio to the input and what it means, its values, its trend.
+ * Beside a trade-off chart, which already shows how the run advanced, a tile has no trend.
+ */
+function Tile(props: {readonly tile: MetricTileView; readonly trend: boolean}): JSX.Element {
   const {tile} = props;
   return (
     <MetricTile
@@ -123,7 +127,7 @@ function Tile(props: {readonly tile: MetricTileView}): JSX.Element {
       tone={tile.tone}
       detail={tile.detail}
       trend={
-        tile.trend === null ? null : (
+        tile.trend === null || !props.trend ? null : (
           <Sparkline
             label={tile.trend.label}
             steps={tile.trend.steps}
@@ -152,7 +156,8 @@ export function Hero(
     readonly hover?: (idea: string | null) => void;
   },
 ): JSX.Element {
-  const hero = heroView(props.model);
+  const objectives = objectivesOf(props.whole);
+  const hero = heroView(props.model, objectives);
   const scrub = props.model.at === null ? null : (props.model.latest ?? props.clock.start);
   const pareto = paretoView(props.whole, props.clock.start, scrub, props.idea, props.lit);
   const chart = stripChartView(
@@ -166,9 +171,13 @@ export function Hero(
   return (
     <Row gap="space-6" align="center" wrap>
       <Stack gap="space-2">
-        <MetricTiles label="Performance" count={hero.tiles.length}>
+        <MetricTiles
+          label="Performance"
+          count={hero.tiles.length}
+          stacked={objectives.length === 2}
+        >
           {hero.tiles.map(tile => (
-            <Tile key={tile.id} tile={tile} />
+            <Tile key={tile.id} tile={tile} trend={objectives.length !== 2} />
           ))}
         </MetricTiles>
         <StandingLine

@@ -6,16 +6,23 @@ import {Text} from './text.js';
  * A row of metric tiles, one per measure, laid out as a dashboard: every tile the same size on one
  * grid, wrapping to the next row when the width is used up. The row is as wide as its tiles
  * (`count`) up to its container's width, so a single tile is one tile wide and a second one
- * widens the row rather than shrinking the first.
+ * widens the row rather than shrinking the first. `stacked` puts the tiles one above the other,
+ * one tile wide: for a block that sits beside a chart.
  */
 export function MetricTiles(props: {
   readonly label: string;
   readonly count: number;
+  readonly stacked?: boolean;
   readonly children: ReactNode;
 }): JSX.Element {
   const style: StyleWithVars = {'--tile-count': String(Math.max(1, props.count))};
   return (
-    <section className="vs-tiles" aria-label={props.label} style={style}>
+    <section
+      className="vs-tiles"
+      aria-label={props.label}
+      data-stacked={props.stacked === true || undefined}
+      style={style}
+    >
       {props.children}
     </section>
   );

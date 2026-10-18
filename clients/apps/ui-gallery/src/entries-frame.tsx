@@ -534,31 +534,49 @@ export const FRAME_ENTRIES = {
   },
   MetricTiles: {
     render: () => (
-      <MetricTiles label="Performance" count={2}>
-        <MetricTile
-          name="Throughput"
-          figure="3.83×"
-          note="faster than input"
-          tone="ok"
-          detail="6,054,154 ops/s · input 1,581,539 ops/s"
-          trend={
-            <Sparkline
-              label="Throughput, best so far"
-              steps={SPARK}
-              from={0}
-              to={10}
-              reference={1.58}
-            />
-          }
-        />
-        <MetricTile
-          name="p99 latency"
-          figure="0.80×"
-          note="slower than input"
-          tone="err"
-          detail="12.4 ms · input 9.9 ms"
-        />
-      </MetricTiles>
+      <Stack>
+        <MetricTiles label="Performance" count={2}>
+          <MetricTile
+            name="Throughput"
+            figure="3.83×"
+            note="faster than input"
+            tone="ok"
+            detail="6,054,154 ops/s · input 1,581,539 ops/s"
+            trend={
+              <Sparkline
+                label="Throughput, best so far"
+                steps={SPARK}
+                from={0}
+                to={10}
+                reference={1.58}
+              />
+            }
+          />
+          <MetricTile
+            name="p99 latency"
+            figure="0.80×"
+            note="slower than input"
+            tone="err"
+            detail="12.4 ms · input 9.9 ms"
+          />
+        </MetricTiles>
+        <MetricTiles label="Performance, stacked" count={2} stacked>
+          <MetricTile
+            name="Throughput"
+            figure="3.83×"
+            note="faster than input"
+            tone="ok"
+            detail="6,054,154 ops/s · input 1,581,539 ops/s"
+          />
+          <MetricTile
+            name="p99 latency"
+            figure="1.43×"
+            note="faster than input"
+            tone="ok"
+            detail="8.7 ms · input 12.4 ms"
+          />
+        </MetricTiles>
+      </Stack>
     ),
   },
   MetricTile: {

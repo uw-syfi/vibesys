@@ -208,9 +208,15 @@ function objectiveTile(model: RunModel, best: CandidateMeasurement | null): Metr
   };
 }
 
-export function heroView(model: RunModel): HeroView {
+/**
+ * The performance row at `model`. `objectives` are the run's, read from the whole run: a scrubbed
+ * model of the run's first moments has no overview yet, and the row must not change its tiles.
+ */
+export function heroView(
+  model: RunModel,
+  objectives: readonly ObjectiveAxis[] = objectivesOf(model),
+): HeroView {
   const leader = bestCandidate(model);
-  const objectives = objectivesOf(model);
   return {
     // A run that declares several objectives has a tile each (its gates carry a reading per
     // objective); any other run has the one tile of its objective metric.

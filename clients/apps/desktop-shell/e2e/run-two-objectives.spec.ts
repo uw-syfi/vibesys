@@ -22,7 +22,7 @@ test.use({colorScheme: 'dark', viewport: {width: 1440, height: 900}});
 
 const chart = (page: Page) => page.getByRole('group', {name: /of each measured idea over the run/});
 const roleOf = (page: Page, role: string) =>
-  chart(page).locator(`.vs-chart .vs-pareto-point[data-role="${role}"]`);
+  chart(page).locator(`.vs-pareto-point[data-role="${role}"]`);
 
 test('the performance row has a tile per objective, each with its unit and what it means', async ({
   page,
@@ -73,14 +73,15 @@ test('hovering a point names the idea with both values; pressing it opens the id
   await shot(page, 'two-objectives-hover');
   await point.click();
   await expect(page.getByRole('heading', {name: /Pad the slot headers/}).first()).toBeVisible();
-  // The idea is ringed, and the chart is the same one at the idea level.
-  await expect(chart(page).locator('.vs-chart-ring')).toHaveCount(1);
+  // The idea and the ideas it builds on, back to the input, are ringed: five steps in this run.
+  await expect(chart(page).locator('.vs-chart-ring')).toHaveCount(5);
 });
 
 test('the time bar replays the frontier: earlier in the run there are fewer points', async ({
   page,
 }) => {
   await openFixture(page, fixtureNamed('finished-two-objectives'));
+  await expect(roleOf(page, 'input')).toHaveCount(1);
   const all = await chart(page).locator('.vs-pareto-point').count();
   const bar = page.getByRole('slider', {name: 'Run position'});
   await bar.focus();
