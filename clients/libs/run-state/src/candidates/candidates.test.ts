@@ -789,3 +789,55 @@ describe('candidate tree', () => {
     expect(after.candidates[0]?.running.map(s => s.span)).toEqual([working.id]);
   });
 });
+
+describe('what a gate reads on every axis', () => {
+  it('keeps the benchmark readings and the input readings its span carries, and drops a bad row', () => {
+    const idea = workstream(
+      'flow:m1/#1',
+      1,
+      {hypothesis_id: 'h1', revision: 'c1'},
+      {verdict: 'passed'},
+      'done',
+    );
+    const metrics = [
+      {name: 'throughput', value: 120, unit: 'ops/s', direction: 'max'},
+      {name: 'latency', value: 8.5, unit: null, direction: 'min'},
+      {name: 'broken', value: 'x', unit: null, direction: 'min'},
+      {name: 'sideways', value: 1, unit: null, direction: 'both'},
+    ];
+    const input_metrics = [{name: 'throughput', value: 100, unit: 'ops/s', direction: 'max'}];
+    const tree = treeOf(
+      sequenced([
+        [root],
+        [idea],
+        [
+          gate(
+            'op:m1/gate',
+            idea.id,
+            1.5,
+            {metric_value: 120, vs_baseline: 1.2, metrics, input_metrics},
+            'passed',
+          ),
+        ],
+      ]),
+    );
+
+    const measured = tree.candidates[0]?.measurement;
+    expect(measured?.readings).toEqual([
+      {name: 'throughput', value: 120, unit: 'ops/s', direction: 'max'},
+      {name: 'latency', value: 8.5, unit: null, direction: 'min'},
+    ]);
+    expect(measured?.inputReadings).toEqual([
+      {name: 'throughput', value: 100, unit: 'ops/s', direction: 'max'},
+    ]);
+  });
+
+  it('reads none from a span that carries none (a run recorded before they existed)', () => {
+    const idea = workstream('flow:m2/#1', 1, {hypothesis_id: 'h2'}, {verdict: 'passed'}, 'done');
+    const tree = treeOf(
+      sequenced([[root], [idea], [gate('op:m2/gate', idea.id, 1.5, {metric_value: 5}, 'passed')]]),
+    );
+    expect(tree.candidates[0]?.measurement?.readings).toEqual([]);
+    expect(tree.candidates[0]?.measurement?.inputReadings).toEqual([]);
+  });
+});

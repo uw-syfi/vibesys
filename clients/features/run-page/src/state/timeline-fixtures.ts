@@ -39,6 +39,8 @@ export function attempt(id: string, outcome: CandidateOutcome, at: number, took:
             at: at + took,
             metricValue: 40,
             vsBaseline: 1.5,
+            readings: [],
+            inputReadings: [],
             verdict: 'passed',
             failed: null,
           }

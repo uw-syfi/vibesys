@@ -10,6 +10,7 @@ import type {
   CandidateOutcome,
   CandidateStep,
   FailedCheck,
+  MeasuredReading,
 } from './types.js';
 
 type SpanStatus = Span['status'];
@@ -51,9 +52,27 @@ function measurement(span: Span): CandidateMeasurement {
     at: span.ended_at ?? span.started_at,
     metricValue: numberOrNull(attrs['metric_value']),
     vsBaseline: numberOrNull(attrs['vs_baseline']),
+    readings: readings(attrs['metrics']),
+    inputReadings: readings(attrs['input_metrics']),
     verdict: span.label?.verdict ?? null,
     failed: failedCheck(attrs['failed']),
   };
+}
+
+/** The readings a gate's `metrics` or `input_metrics` hold; a row that is not one is left out. */
+function readings(value: unknown): readonly MeasuredReading[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((row: unknown): MeasuredReading[] => {
+    if (typeof row !== 'object' || row === null) return [];
+    const found = row as Record<string, unknown>;
+    const name = stringOrNull(found['name']);
+    const reading = numberOrNull(found['value']);
+    const direction = found['direction'];
+    if (name === null || reading === null || (direction !== 'max' && direction !== 'min')) {
+      return [];
+    }
+    return [{name, value: reading, unit: stringOrNull(found['unit']), direction}];
+  });
 }
 
 function failedCheck(value: unknown): FailedCheck | null {

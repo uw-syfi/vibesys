@@ -21,6 +21,8 @@ function measured(item: Candidate, value: number, at: number, verdict: Verdict):
     at,
     metricValue: value,
     vsBaseline: null,
+    readings: [],
+    inputReadings: [],
     verdict,
     failed:
       verdict === 'failed_check'

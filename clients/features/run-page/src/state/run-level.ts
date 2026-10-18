@@ -6,7 +6,15 @@
  */
 import type {Span} from '@vibesys/contracts';
 import type {AgentNode} from '@vibesys/run-state/agents';
-import type {Candidate, CandidateMeasurement, CandidateStep} from '@vibesys/run-state/candidates';
+import type {
+  Candidate,
+  CandidateMeasurement,
+  CandidateStep,
+  MeasuredReading,
+  ObjectiveAxis,
+} from '@vibesys/run-state/candidates';
+import {metricLabel} from './metric-words.js';
+import {objectivesOf} from './pareto-view.js';
 import {
   type IdeaResult,
   inputValueOf,
@@ -60,32 +68,6 @@ export interface HeroView {
   readonly bestIdea: {readonly id: string; readonly title: string} | null;
 }
 
-/**
- * A metric id in words, for a header a person reads: `TOTAL_OPS_PER_SEC` reads `Total ops/sec`.
- * The run's objective names its metric by id and sends no label, so the words are made from the
- * id: its parts lowercased, "X per Y" joined as `X/Y`, the first letter capitalized.
- */
-function metricLabel(metric: string): string {
-  const parts = metric
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .split(/[\s_-]+/)
-    .filter(part => part !== '')
-    .map(part => part.toLowerCase());
-  const words: string[] = [];
-  for (let at = 0; at < parts.length; at += 1) {
-    const [word, next] = [parts[at] ?? '', parts[at + 1]];
-    const previous = words.at(-1);
-    if (word === 'per' && previous !== undefined && next !== undefined) {
-      words[words.length - 1] = `${previous}/${next}`;
-      at += 1;
-    } else {
-      words.push(word);
-    }
-  }
-  const text = words.join(' ');
-  return text === '' ? text : `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
-}
-
 function bestCandidate(model: RunModel): Candidate | null {
   const id = model.candidates.best?.candidate ?? null;
   return model.candidates.candidates.find(item => item.id === id) ?? null;
@@ -115,8 +97,14 @@ function unitWords(model: RunModel, name: string): string {
   return ` ${typeof unit === 'string' && unit !== '' ? unit : name.toLowerCase()}`;
 }
 
-function trendOf(model: RunModel, name: string, input: number | null): TileTrend | null {
-  const fold = performanceFold(model.candidates.candidates, model.direction, input);
+function trendOf(
+  model: RunModel,
+  name: string,
+  input: number | null,
+  candidates: readonly Candidate[] = model.candidates.candidates,
+  direction: Direction = model.direction,
+): TileTrend | null {
+  const fold = performanceFold(candidates, direction, input);
   const last = fold.best.at(-1);
   if (last === undefined) return null;
   const from = Math.min(...model.candidates.candidates.map(item => item.startedAt));
@@ -128,6 +116,70 @@ function trendOf(model: RunModel, name: string, input: number | null): TileTrend
     from,
     to,
     reference: input,
+  };
+}
+
+/** What `item` read on the axis `name`, when its measurement did. */
+function readingOn(item: Candidate, name: string): MeasuredReading | undefined {
+  return item.measurement?.readings.find(reading => reading.name === name);
+}
+
+/** `candidates` with each measurement's value replaced by its reading on `name` (null when none). */
+function measuredOn(candidates: readonly Candidate[], name: string): Candidate[] {
+  return candidates.map(item =>
+    item.measurement === null
+      ? item
+      : {
+          ...item,
+          measurement: {...item.measurement, metricValue: readingOn(item, name)?.value ?? null},
+        },
+  );
+}
+
+/**
+ * The tile of one objective of a run that has several: the best passed idea on that axis against
+ * the input's value on it, in the same words as the single tile; the trend is the best so far on it.
+ */
+function axisTile(model: RunModel, axis: ObjectiveAxis): MetricTileView {
+  const name = metricLabel(axis.name);
+  const direction: Direction = axis.direction;
+  const all = model.candidates.candidates;
+  const input =
+    all
+      .flatMap(item => item.measurement?.inputReadings ?? [])
+      .find(reading => reading.name === axis.name)?.value ?? null;
+  const unit =
+    all
+      .flatMap(item => [
+        ...(item.measurement?.readings ?? []),
+        ...(item.measurement?.inputReadings ?? []),
+      ])
+      .find(reading => reading.name === axis.name && reading.unit !== null)?.unit ?? null;
+  const words = ` ${unit ?? name.toLowerCase()}`;
+  const passed = all
+    .filter(item => item.outcome === 'passed' && readingOn(item, axis.name) !== undefined)
+    .map(item => (readingOn(item, axis.name) as MeasuredReading).value);
+  const value =
+    passed.length === 0
+      ? null
+      : passed.reduce((best, next) =>
+          (axis.direction === 'min' ? next < best : next > best) ? next : best,
+        );
+  const vs = value === null || input === null || input === 0 ? null : value / input;
+  const better = vs === null ? null : improvement(vs, direction);
+  const verdict = better === null ? null : verdictOf(better);
+  const parts = [
+    value === null ? 'nothing measured yet' : `${formatValue(value)}${words}`,
+    ...(input === null ? [] : [`input ${formatValue(input)}${words}`]),
+  ];
+  return {
+    id: axis.name,
+    name,
+    ratio: better === null ? null : ratio(better),
+    note: verdict?.note ?? null,
+    tone: verdict?.tone ?? 'muted',
+    detail: parts.join(' · '),
+    trend: trendOf(model, name, input, measuredOn(all, axis.name), direction),
   };
 }
 
@@ -158,10 +210,14 @@ function objectiveTile(model: RunModel, best: CandidateMeasurement | null): Metr
 
 export function heroView(model: RunModel): HeroView {
   const leader = bestCandidate(model);
+  const objectives = objectivesOf(model);
   return {
-    // The protocol carries one measure per idea (its gate's `metric_value`), so there is one tile;
-    // a run with several objectives adds a tile per objective here once the events carry them.
-    tiles: [objectiveTile(model, leader?.measurement ?? null)],
+    // A run that declares several objectives has a tile each (its gates carry a reading per
+    // objective); any other run has the one tile of its objective metric.
+    tiles:
+      objectives.length >= 2
+        ? objectives.map(axis => axisTile(model, axis))
+        : [objectiveTile(model, leader?.measurement ?? null)],
     measured: model.candidates.candidates.filter(item => item.measurement?.metricValue != null)
       .length,
     standing: leader === null ? null : model.candidates.best?.adopted === true ? 'adopted' : 'best',

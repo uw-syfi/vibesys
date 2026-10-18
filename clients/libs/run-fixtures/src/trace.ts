@@ -14,11 +14,25 @@ type Label = NonNullable<Span['label']>;
 type Attempts = NonNullable<Span['attempts']>;
 type Json = Record<string, unknown>;
 
+/** One reading of a gate, as its `metrics` rows carry them. */
+export interface GateReading {
+  readonly name: string;
+  readonly value: number;
+  readonly unit: string | null;
+  readonly direction: 'max' | 'min';
+}
+
+/** The readings of a run with several objectives: this gate's, and the input's. */
+interface Readings {
+  readonly readings?: readonly GateReading[];
+  readonly input?: readonly GateReading[];
+}
+
 /** What an idea's gate or end reached. */
 type IdeaEnd =
   | {readonly kind: 'running'; readonly waiting?: boolean}
-  | {readonly kind: 'passed'; readonly value: number; readonly ratio: number}
-  | {readonly kind: 'slower'; readonly value: number; readonly ratio: number}
+  | ({readonly kind: 'passed'; readonly value: number; readonly ratio: number} & Readings)
+  | ({readonly kind: 'slower'; readonly value: number; readonly ratio: number} & Readings)
   | {
       readonly kind: 'failed_check';
       readonly check: 'correctness' | 'benchmark';
@@ -156,7 +170,14 @@ function tried(start: number, reasons: readonly string[], done: number | null): 
 function gateAttrs(end: IdeaEnd): Json {
   const stage = 'correctness,benchmark';
   if (end.kind === 'passed' || end.kind === 'slower') {
-    return {stage, metric_value: end.value, vs_baseline: end.ratio};
+    return {
+      stage,
+      metric_value: end.value,
+      vs_baseline: end.ratio,
+      ...(end.readings === undefined
+        ? {}
+        : {metrics: end.readings, input_metrics: end.input ?? []}),
+    };
   }
   if (end.kind === 'failed_check') {
     return {

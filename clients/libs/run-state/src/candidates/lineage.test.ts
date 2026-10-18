@@ -38,6 +38,8 @@ function candidate(
             at: index,
             metricValue: ratio,
             vsBaseline: ratio,
+            readings: [],
+            inputReadings: [],
             verdict: null,
             failed: null,
           },

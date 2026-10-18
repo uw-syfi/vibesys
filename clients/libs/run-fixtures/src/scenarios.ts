@@ -10,6 +10,7 @@ import {
   addIdea,
   addJudgeTurn,
   adoptionSpan,
+  type GateReading,
   type IdeaSpec,
   planningSpan,
   rootSpan,
@@ -26,7 +27,13 @@ const OBJECTIVE = {
   direction: 'max',
 } as const;
 
-export function runHeader(trace: Trace, runId: string): void {
+/** One axis a run with several objectives ranks its candidates on, as its overview declares it. */
+interface Axis {
+  readonly name: string;
+  readonly direction: 'max' | 'min';
+}
+
+export function runHeader(trace: Trace, runId: string, objectives: readonly Axis[] = []): void {
   trace.event(
     'run_started',
     {
@@ -35,7 +42,13 @@ export function runHeader(trace: Trace, runId: string): void {
       max_rounds: 6,
       expected_roles: ['planner', 'implementer', 'judge'],
       // The run declares what it optimizes, as a real run's first event does.
-      overview: {objective: {...OBJECTIVE, correctness_check: []}},
+      overview: {
+        objective: {
+          ...OBJECTIVE,
+          ...(objectives.length === 0 ? {} : {objectives}),
+          correctness_check: [],
+        },
+      },
     },
     0,
   );
@@ -63,6 +76,8 @@ interface Scenario {
   readonly description: string;
   readonly runId: string;
   readonly state: 'live' | 'finished';
+  /** The axes the run declares when it has several objectives. */
+  readonly objectives?: readonly Axis[];
   readonly build: (trace: Trace) => void;
   readonly liveAfter?: (trace: Trace) => number;
   readonly dropAfter?: (trace: Trace) => number;
@@ -70,7 +85,7 @@ interface Scenario {
 
 function fixture(scenario: Scenario): RunFixture {
   const trace = new Trace(scenario.runId);
-  runHeader(trace, scenario.runId);
+  runHeader(trace, scenario.runId, scenario.objectives);
   scenario.build(trace);
   const finished = scenario.state === 'finished';
   if (finished) {
@@ -658,6 +673,92 @@ function tenIdeas(): RunFixture {
   });
 }
 
+const TWO_INPUT = {throughput: 1_581_539, latency: 12.4} as const;
+
+/** Two objectives: throughput (higher is better) and 99th-percentile latency (lower is better). */
+const TWO_AXES: readonly Axis[] = [
+  {name: 'total_ops_per_sec', direction: 'max'},
+  {name: 'p99_latency', direction: 'min'},
+];
+
+const twoReadings = (throughput: number, latency: number): readonly GateReading[] => [
+  {name: 'total_ops_per_sec', value: throughput, unit: 'ops/s', direction: 'max'},
+  {name: 'p99_latency', value: latency, unit: 'ms', direction: 'min'},
+];
+
+/** A gate that read both objectives, and the input's, for an idea that passed (or was slower). */
+function measuredBoth(
+  kind: 'passed' | 'slower',
+  throughput: number,
+  latency: number,
+): IdeaSpec['end'] {
+  return {
+    kind,
+    value: throughput,
+    ratio: throughput / TWO_INPUT.throughput,
+    readings: twoReadings(throughput, latency),
+    input: twoReadings(TWO_INPUT.throughput, TWO_INPUT.latency),
+  };
+}
+
+/** Thirteen ideas that trade throughput against latency: some on the frontier, some dominated. */
+const TWO: readonly Omit<IdeaSpec, 'at'>[] = [
+  {n: 1, title: 'Preallocate the arena', end: measuredBoth('passed', 2_070_000, 11.8)},
+  {n: 2, title: 'Isolate payload slices', on: 1, end: measuredBoth('passed', 2_850_000, 10.9)},
+  {
+    n: 3,
+    title: 'Replace the mutex with a ticket lock',
+    on: 1,
+    end: {kind: 'failed', reason: 'review-rejected'},
+  },
+  {n: 4, title: 'Separate the producer cursor', on: 2, end: measuredBoth('passed', 3_800_000, 9.6)},
+  {n: 5, title: 'Batch the enqueue', on: 4, end: measuredBoth('passed', 4_900_000, 14.2)},
+  {
+    n: 6,
+    title: 'Park idle consumers',
+    on: 4,
+    end: {kind: 'failed', reason: 'implementation-failed'},
+  },
+  {n: 7, title: 'Pad the slot headers', on: 5, end: measuredBoth('passed', 6_054_154, 15.8)},
+  {n: 8, title: 'Prefetch the next slot', on: 5, end: measuredBoth('passed', 4_600_000, 12.0)},
+  {
+    n: 9,
+    title: 'Widen the batch to sixty-four',
+    on: 5,
+    end: {kind: 'failed_check', check: 'correctness', completed: 93, required: 100, unit: 'trials'},
+  },
+  {n: 10, title: 'Spin before parking', on: 7, end: {kind: 'failed', reason: 'turned_down'}},
+  {n: 11, title: 'Shard the tail pointer', on: 4, end: measuredBoth('passed', 3_500_000, 9.9)},
+  {n: 12, title: 'Keep a free list per core', on: 2, end: measuredBoth('passed', 3_200_000, 8.7)},
+  {n: 13, title: 'Yield on contention', on: 1, end: measuredBoth('slower', 1_450_000, 13.1)},
+];
+
+/**
+ * A finished run with two objectives (throughput and 99th-percentile latency): thirteen ideas, eight
+ * passed, one turned down as slower and four failed. Its passed ideas trade one objective for the
+ * other, so the frontier has several points and some ideas are dominated.
+ */
+function twoObjectives(): RunFixture {
+  const best = TWO.find(idea => idea.n === 7);
+  if (best?.end.kind !== 'passed') throw new Error('the two-objective run has no best idea');
+  const adopted = {n: best.n, ratio: best.end.ratio, value: best.end.value};
+  return fixture({
+    name: 'finished-two-objectives',
+    description:
+      'A finished run with two objectives, throughput and p99 latency: eight ideas passed on a trade-off between them, one was slower, four failed.',
+    runId: '20261017-090000',
+    state: 'finished',
+    objectives: TWO_AXES,
+    build: trace => {
+      plan(trace, 1, 10);
+      for (const idea of TWO) addIdea(trace, {...idea, at: 100 + idea.n * 60});
+      trace.span('span_started', adoptionSpan(adopted, 1000, false), 1000);
+      trace.span('span_ended', adoptionSpan(adopted, 1000, true), 1001);
+      trace.span('span_ended', rootSpan('done', 1005), 1005);
+    },
+  });
+}
+
 /** Every committed synthetic scenario, by name. */
 export function scenarios(): readonly RunFixture[] {
   return [
@@ -669,5 +770,6 @@ export function scenarios(): readonly RunFixture[] {
     liveReconnect(),
     finishedRun(),
     tenIdeas(),
+    twoObjectives(),
   ];
 }

@@ -14,6 +14,15 @@ export interface FailedCheck {
   readonly unit: string | null;
 }
 
+/** One reading of a measurement: a metric's value with its unit and which way is better. */
+export interface MeasuredReading {
+  readonly name: string;
+  readonly value: number;
+  /** The unit the evaluator reported; null when it reported none. */
+  readonly unit: string | null;
+  readonly direction: 'max' | 'min';
+}
+
 /** What a gate of a candidate measured. */
 export interface CandidateMeasurement {
   /** The gate span. */
@@ -23,6 +32,10 @@ export interface CandidateMeasurement {
   readonly metricValue: number | null;
   /** The candidate's value divided by the input's. */
   readonly vsBaseline: number | null;
+  /** Every reading the benchmark reported, headline first; empty when the gate read none. */
+  readonly readings: readonly MeasuredReading[];
+  /** The input's own readings, headline first, as this gate knew them; empty while unmeasured. */
+  readonly inputReadings: readonly MeasuredReading[];
   /** `passed`, `failed_check` or `slower` once the search decided; null before. */
   readonly verdict: string | null;
   /** The first trusted check that rejected the candidate; null when every check passed. */

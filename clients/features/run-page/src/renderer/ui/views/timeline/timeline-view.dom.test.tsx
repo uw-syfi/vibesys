@@ -162,6 +162,8 @@ test('a figure too long for its column is a short form, with the whole on hover'
       at: 300,
       metricValue: null,
       vsBaseline: null,
+      readings: [],
+      inputReadings: [],
       verdict: 'failed_check',
       failed: {check: 'correctness', completed: 93, required: 100, unit: 'trials'},
     },

@@ -5,7 +5,9 @@
  * moves nothing in it: the panes below change, this row does not. The tiles' block has the width of
  * its tiles, so a long title never pushes the chart. With an idea open, the chart singles the
  * idea's point out (the others dimmed, none removed) and the block gains one line, reserved at
- * every level so the block never changes its size, that reads the idea's result.
+ * every level so the block never changes its size, that reads the idea's result. A run with two
+ * objectives has the trade-off chart (its points and the frontier of the best trade-offs, at the
+ * time bar's position) in the chart's place, the same size at every level.
  */
 import {
   Button,
@@ -15,6 +17,7 @@ import {
   MetricTile,
   MetricTiles,
   markdownToPlain,
+  ParetoChart,
   Reserve,
   Row,
   Sparkline,
@@ -27,6 +30,7 @@ import {
   type IdeaFocusView,
   ideaFocusView,
   type MetricTileView,
+  paretoView,
   type RunModel,
   stripChartView,
 } from '../../state/index.js';
@@ -150,6 +154,7 @@ export function Hero(
 ): JSX.Element {
   const hero = heroView(props.model);
   const scrub = props.model.at === null ? null : (props.model.latest ?? props.clock.start);
+  const pareto = paretoView(props.whole, props.clock.start, scrub, props.idea, props.lit);
   const chart = stripChartView(
     props.whole,
     props.clock.start,
@@ -173,7 +178,26 @@ export function Hero(
         />
         <IdeaLine view={ideaFocusView(props.model, props.idea)} />
       </Stack>
-      {chart === null ? null : (
+      {pareto === null ? null : (
+        <Stack gap="space-0" width="chart">
+          <ParetoChart
+            label={pareto.label}
+            size="strip"
+            points={pareto.points}
+            x={pareto.x}
+            y={pareto.y}
+            highlighted={pareto.highlighted}
+            {...(pareto.cursor === undefined ? {} : {cursor: pareto.cursor})}
+            pick={id => {
+              if (id !== 'input') props.zoom({type: 'open-idea', idea: id});
+            }}
+            {...(props.hover === undefined
+              ? {}
+              : {hover: (id: string | null) => props.hover?.(id === 'input' ? null : id)})}
+          />
+        </Stack>
+      )}
+      {pareto !== null || chart === null ? null : (
         <Stack gap="space-0" width="chart">
           <Chart
             label={chart.label}

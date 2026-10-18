@@ -32,6 +32,13 @@ export {
   type MetricDirection,
   type SubtreeStats,
 } from './lineage.js';
+export {
+  type ObjectiveAxis,
+  type Tradeoff,
+  type TradeoffAxis,
+  type TradeoffPoint,
+  tradeoffOf,
+} from './tradeoff.js';
 export type {
   BestCandidate,
   Candidate,
@@ -41,6 +48,7 @@ export type {
   CandidateStep,
   CandidateTree,
   FailedCheck,
+  MeasuredReading,
 } from './types.js';
 
 /** The candidate tree of the run whose spans these are, in the order they started. */
