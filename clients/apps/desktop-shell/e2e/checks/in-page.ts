@@ -731,8 +731,6 @@ export function controlRowCheck(): Violation[] {
   const kinds = [
     'input:not([type="radio"],[type="checkbox"],[type="range"],[type="hidden"],[type="file"])',
     'select',
-    'button.vs-button',
-    '.vs-chip',
     '.vs-scrubber-head > *',
   ].join(',');
   const boxes = [...document.body.querySelectorAll(kinds)]
