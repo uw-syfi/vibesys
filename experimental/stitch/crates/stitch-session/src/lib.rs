@@ -142,6 +142,11 @@ pub fn ingest_with(
     for input in &manifest.inputs {
         observations.extend(importers.import(input)?);
     }
+    if observations.is_empty() {
+        return Err(SessionError::Invalid(
+            "all profiling inputs were empty; no observations to correlate".into(),
+        ));
+    }
     let mut graph = Graph::build(observations)?;
     let mut attributions = Vec::new();
     for activity in &graph.activities {
@@ -198,10 +203,9 @@ pub fn capture_perf(
     runner.run("perf", &record_args)?;
     let script_args = vec![
         "script".into(),
-        "-G".into(),
         "--ns".into(),
         "-F".into(),
-        "pid,tid,time,sym".into(),
+        "pid,tid,time,ip,sym".into(),
         "-i".into(),
         data.display().to_string(),
     ];
@@ -210,6 +214,18 @@ pub fn capture_perf(
         path: script.clone(),
         source,
     })?;
+    let captured = builtin_importers().import(&InputSpec {
+        format: "perf_script".into(),
+        path: script.clone(),
+        clock: "monotonic".into(),
+    })?;
+    if captured.is_empty() {
+        return Err(SessionError::Invalid(format!(
+            "perf recorded no CPU samples for pid {}; artifacts remain in {}",
+            request.pid,
+            request.output_dir.display()
+        )));
+    }
     let manifest = RunManifest {
         schema_version: 1,
         label: format!("perf pid {}", request.pid),

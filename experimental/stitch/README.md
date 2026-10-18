@@ -13,13 +13,18 @@ cargo install --path crates/stitch-cli
 stitch plan examples/small/manifest.json
 stitch ingest examples/small/manifest.json --out /tmp/stitch-graph.json
 stitch explain /tmp/stitch-graph.json example-trace
+stitch costs /tmp/stitch-graph.json
 ```
 
 `stitch capture --pid PID --seconds 10 --out /tmp/stitch-capture` initiates a
 Linux `perf record` capture for a running process, exports leaf CPU samples via
 `perf script`, and writes a manifest. It requires a working `perf` installation
-and the host's permission to profile the selected process. Add OTel and dial9
-inputs to the manifest to correlate them with the perf samples.
+and the host's permission to profile the selected process. It rejects captures
+with no CPU samples and retains the raw perf artifacts for diagnosis. Run
+`stitch ingest /tmp/stitch-capture/manifest.json --out /tmp/graph.json` and
+`stitch costs /tmp/graph.json` to inspect a stack tree. The tree reports
+sample counts, not measured CPU time. Add OTel and dial9 inputs to the manifest
+to correlate them with the perf samples.
 
 ## Workspace
 
@@ -55,7 +60,8 @@ manifest and bridge-record keys are rejected.
 Supported `format` values:
 
 - `otlp_json`: OTLP JSON `resourceSpans` with `service.name` attributes.
-- `perf_script`: `perf script -G --ns -F pid,tid,time,sym` output.
+- `perf_script`: `perf script --ns -F pid,tid,time,ip,sym` output, including
+  indented call-chain frames.
 - `dial9_bridge_jsonl`: one normalized task-poll record per line, with task,
   poll, process, thread, interval, optional trace context, and optional file and
   line. This is a provisional bridge format, **not** native dial9 binary input.
@@ -71,6 +77,9 @@ revision supplied in a manifest is not independently verified. Native dial9
 decoding, GPU vendor capture, distributed capture coordination, binary debug
 symbol resolution, and VibeSys trusted-evidence acceptance are follow-up work.
 
-The draft PR records these gaps. The first intended workload is the Tokio Hotel
-application in Masa, but no Hotel benchmark or optimization result is claimed
-by this prototype yet.
+The first live application check used Masa Hotel's recommendation service with
+gRPC requests. Stitch captured and ingested its perf call chains and produced a
+sample cost tree. This is a one-service integration check, not a distributed
+Hotel run or an optimization result. Hotel currently emits neither OTLP spans
+nor native dial9 traces in that setup, so cross-source correlation on Hotel
+remains unverified.

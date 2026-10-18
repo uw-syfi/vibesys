@@ -104,3 +104,28 @@ fn all_observation_ids_and_intervals_are_checked() {
     invalid.interval.end_ns = invalid.interval.start_ns;
     assert!(Graph::build([Observation::Activity(invalid)]).is_err());
 }
+
+#[test]
+fn cpu_stack_tree_counts_self_and_inclusive_samples() {
+    let mut first = sample("first", "mono");
+    first.frames = vec!["handler".into(), "runtime".into()];
+    let mut second = sample("second", "mono");
+    second.frames = vec!["scheduler".into(), "runtime".into()];
+    let mut third = sample("third", "mono");
+    third.frames = vec!["handler".into(), "runtime".into()];
+    let graph = Graph::build([
+        Observation::CpuSample(first),
+        Observation::CpuSample(second),
+        Observation::CpuSample(third),
+    ])
+    .unwrap();
+    let tree = graph.sample_cost_tree();
+    assert_eq!(tree.samples, 3);
+    assert_eq!(tree.roots.len(), 1);
+    assert_eq!(tree.roots[0].frame, "runtime");
+    assert_eq!(tree.roots[0].inclusive_samples, 3);
+    assert_eq!(tree.roots[0].self_samples, 0);
+    assert_eq!(tree.roots[0].children[0].frame, "handler");
+    assert_eq!(tree.roots[0].children[0].inclusive_samples, 2);
+    assert_eq!(tree.roots[0].children[0].self_samples, 2);
+}

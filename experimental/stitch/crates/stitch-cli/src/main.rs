@@ -31,6 +31,8 @@ enum Commands {
     },
     /// Explain one trace using an ingested graph.
     Explain { graph: PathBuf, trace_id: String },
+    /// Show a CPU sample cost tree for an ingested graph.
+    Costs { graph: PathBuf },
 }
 
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
@@ -84,6 +86,13 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let graph: Graph = serde_json::from_slice(&std::fs::read(graph)?)?;
             let summary = graph.trace(&trace_id);
             println!("{}", serde_json::to_string_pretty(&summary)?);
+        }
+        Commands::Costs { graph } => {
+            let graph: Graph = serde_json::from_slice(&std::fs::read(graph)?)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&graph.sample_cost_tree())?
+            );
         }
     }
     Ok(())

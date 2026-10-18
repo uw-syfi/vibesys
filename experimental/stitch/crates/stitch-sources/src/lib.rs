@@ -136,6 +136,27 @@ fn perf_time_ns(raw: &str) -> Option<u64> {
         .checked_add(nanos * 10_u64.pow((9 - fraction.len()) as u32))
 }
 
+fn finish_perf_sample(
+    out: &mut Vec<Observation>,
+    current: &mut Option<CpuSample>,
+    path: &Path,
+) -> Result<(), ImportError> {
+    if let Some(sample) = current.take() {
+        if sample.frames.is_empty() {
+            return Err(invalid(
+                "perf_script",
+                path,
+                format!(
+                    "sample at line {} has no frames; export with the ip field and call graphs",
+                    sample.origin.record
+                ),
+            ));
+        }
+        out.push(Observation::CpuSample(sample));
+    }
+    Ok(())
+}
+
 impl Importer for OtlpJsonImporter {
     fn format(&self) -> &'static str {
         "otlp_json"
@@ -215,21 +236,52 @@ impl Importer for PerfScriptImporter {
             source,
         })?;
         let mut out = Vec::new();
+        let mut current: Option<CpuSample> = None;
         for (index, line) in BufReader::new(file).lines().enumerate() {
             let line = line.map_err(|source| ImportError::Io {
                 path: input.path.clone(),
                 source,
             })?;
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
+            if line.starts_with('#') {
                 continue;
             }
-            // The capture runner emits: perf script --ns -F pid,tid,time,sym.
+            if line.trim().is_empty() {
+                finish_perf_sample(&mut out, &mut current, &input.path)?;
+                continue;
+            }
+            if line.starts_with(char::is_whitespace) {
+                let sample = current.as_mut().ok_or_else(|| {
+                    invalid(
+                        "perf_script",
+                        &input.path,
+                        format!("line {} has a frame without a sample", index + 1),
+                    )
+                })?;
+                let frame = line.trim();
+                let frame = frame
+                    .split_once(char::is_whitespace)
+                    .map(|(_, symbol)| symbol.trim())
+                    .filter(|symbol| !symbol.is_empty())
+                    .unwrap_or(frame);
+                sample.frames.push(frame.to_owned());
+                continue;
+            }
+            finish_perf_sample(&mut out, &mut current, &input.path)?;
+            // perf script prints pid/tid as one field, followed by a header
+            // and indented call-chain frames. Older one-line exports are also
+            // accepted so existing manifests remain readable.
             let mut fields = line.split_whitespace();
-            let pid = fields.next().and_then(|s| s.parse().ok());
-            let tid = fields.next().and_then(|s| s.parse().ok());
-            let time = fields.next().and_then(perf_time_ns);
-            let symbol = fields.collect::<Vec<_>>().join(" ");
+            let first = fields.next().unwrap_or_default();
+            let (pid, tid, time_token) = if let Some((pid, tid)) = first.split_once('/') {
+                (pid.parse().ok(), tid.parse().ok(), fields.next())
+            } else {
+                (
+                    first.parse().ok(),
+                    fields.next().and_then(|s| s.parse().ok()),
+                    fields.next(),
+                )
+            };
+            let time = time_token.and_then(perf_time_ns);
             let (Some(pid), Some(tid), Some(time)) = (pid, tid, time) else {
                 return Err(invalid(
                     "perf_script",
@@ -237,27 +289,26 @@ impl Importer for PerfScriptImporter {
                     format!("line {} has unexpected perf script fields", index + 1),
                 ));
             };
-            if symbol.is_empty() {
-                return Err(invalid(
-                    "perf_script",
-                    &input.path,
-                    format!("line {} has no symbol", index + 1),
-                ));
-            }
-            out.push(Observation::CpuSample(CpuSample {
+            let symbol = fields.collect::<Vec<_>>().join(" ");
+            current = Some(CpuSample {
                 id: format!("perf:{}:{}", input.path.display(), index + 1),
                 pid,
                 tid,
                 at_ns: time,
                 clock: input.clock.clone(),
-                frames: vec![symbol],
+                frames: if symbol.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![symbol]
+                },
                 origin: Origin {
                     source: "perf".into(),
                     artifact: input.path.display().to_string(),
                     record: (index + 1).to_string(),
                 },
-            }));
+            });
         }
+        finish_perf_sample(&mut out, &mut current, &input.path)?;
         Ok(out)
     }
 }

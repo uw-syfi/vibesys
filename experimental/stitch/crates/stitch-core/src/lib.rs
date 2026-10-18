@@ -124,6 +124,62 @@ pub struct Graph {
     pub unassigned_samples: usize,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SampleCostTree {
+    /// The number of observed CPU samples, not elapsed CPU time.
+    pub samples: usize,
+    pub roots: Vec<SampleCostNode>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SampleCostNode {
+    pub frame: String,
+    pub inclusive_samples: usize,
+    pub self_samples: usize,
+    pub children: Vec<SampleCostNode>,
+}
+
+#[derive(Default)]
+struct CostNodeAccumulator {
+    inclusive_samples: usize,
+    self_samples: usize,
+    children: BTreeMap<String, CostNodeAccumulator>,
+}
+
+fn finish_cost_nodes(nodes: BTreeMap<String, CostNodeAccumulator>) -> Vec<SampleCostNode> {
+    let mut finished: Vec<_> = nodes
+        .into_iter()
+        .map(|(frame, node)| SampleCostNode {
+            frame,
+            inclusive_samples: node.inclusive_samples,
+            self_samples: node.self_samples,
+            children: finish_cost_nodes(node.children),
+        })
+        .collect();
+    finished.sort_by(|a, b| {
+        b.inclusive_samples
+            .cmp(&a.inclusive_samples)
+            .then_with(|| a.frame.cmp(&b.frame))
+    });
+    finished
+}
+
+fn add_sample_stack(nodes: &mut BTreeMap<String, CostNodeAccumulator>, frames: &[String]) {
+    let Some((frame, rest)) = frames.split_last() else {
+        let node = nodes.entry("[unknown]".into()).or_default();
+        node.inclusive_samples += 1;
+        node.self_samples += 1;
+        return;
+    };
+    let node = nodes.entry(frame.clone()).or_default();
+    node.inclusive_samples += 1;
+    if rest.is_empty() {
+        node.self_samples += 1;
+    } else {
+        add_sample_stack(&mut node.children, rest);
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum GraphError {
     #[error("duplicate observation id: {0}")]
@@ -135,6 +191,19 @@ pub enum GraphError {
 }
 
 impl Graph {
+    /// Build a stack tree from all CPU samples. Every sample contributes one
+    /// count along its observed stack, with roots nearest the caller.
+    pub fn sample_cost_tree(&self) -> SampleCostTree {
+        let mut roots = BTreeMap::<String, CostNodeAccumulator>::new();
+        for sample in &self.cpu_samples {
+            add_sample_stack(&mut roots, &sample.frames);
+        }
+        SampleCostTree {
+            samples: self.cpu_samples.len(),
+            roots: finish_cost_nodes(roots),
+        }
+    }
+
     pub fn build(observations: impl IntoIterator<Item = Observation>) -> Result<Self, GraphError> {
         let mut ids = BTreeSet::new();
         let mut activities = Vec::new();

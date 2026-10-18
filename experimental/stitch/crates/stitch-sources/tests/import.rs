@@ -33,6 +33,43 @@ fn otlp_and_perf_import_preserve_identities_and_precise_timestamps() {
 }
 
 #[test]
+fn perf_script_call_chains_from_real_export_are_imported_as_samples() {
+    let dir = tempfile::tempdir().unwrap();
+    let perf = dir.path().join("perf.script");
+    fs::write(
+        &perf,
+        "2673492/2673492 1209324.226453455: \n\tffffffffaee9332b apparmor_file_permission\n\t           f8340 write\n\n2673492/2673492 1209324.228862895: \n\t           f8340 write\n",
+    )
+    .unwrap();
+    let samples = builtin_importers()
+        .import(&InputSpec {
+            format: "perf_script".into(),
+            path: perf,
+            clock: "monotonic".into(),
+        })
+        .unwrap();
+    assert_eq!(samples.len(), 2);
+    assert!(matches!(&samples[0], Observation::CpuSample(s)
+        if s.pid == 2_673_492 && s.tid == 2_673_492
+        && s.at_ns == 1_209_324_226_453_455
+        && s.frames == ["apparmor_file_permission", "write"]));
+}
+
+#[test]
+fn perf_script_without_call_chains_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let perf = dir.path().join("perf.script");
+    fs::write(&perf, "7/8 12.123456789: \n").unwrap();
+    let result = builtin_importers().import(&InputSpec {
+        format: "perf_script".into(),
+        path: perf,
+        clock: "monotonic".into(),
+    });
+    assert!(matches!(result, Err(ImportError::Invalid { detail, .. })
+        if detail.contains("no frames")));
+}
+
+#[test]
 fn malformed_and_unknown_bridge_fields_fail_at_the_import_boundary() {
     let dir = tempfile::tempdir().unwrap();
     let bridge = dir.path().join("dial9.jsonl");
