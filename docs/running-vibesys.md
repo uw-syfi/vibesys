@@ -229,8 +229,10 @@ recorded and its spread shows in the noise, but it is not refused.
 Samples of one input are aggregated: nothing is picked among them and nothing is
 refused because there are several, so re-running an input until a run suits the
 agent gains nothing. The strategy's official measurement of an input the attempt
-already measured is answered from those samples, and runs afresh only when a
-comparison with the base is a close call that one more sample would narrow. Either
+already measured is answered from those samples, and runs afresh when a
+comparison with the base is a close call that one more sample would narrow, or
+when no fresh sample of the base is held (its runs went stale or failed), so there
+is no comparison at all. Either
 way, the official result's headline objective states the mean of the samples of the
 input held when the result is stored, the value its comparison states then, and
 that mean is the candidate's headline value in ranking. A task's other objectives
@@ -249,15 +251,17 @@ measuring (its own measurement of the run's input, still running) is awaited rat
 measured again: core claims that run, and its result becomes the base's samples when it ends. The
 comparison is the ratio of the candidate's mean over the base's mean, its noise,
 and a verdict: `better`, `within_noise` or `worse`. The noise is one standard
-error of the ratio, computed from the runs' relative spread (never below the
-task's declared `relative_noise`) and the sample counts; with a declared
-`relative_noise` a verdict needs two noises. A task that declares none has only
-the runs' spread to go on, so it gets a verdict only once the candidate and the
-base hold three runs each and those runs differ, and then the bar is the
-Student-t quantile for their degrees of freedom (2.78 noises at three runs a
-side), which keeps false verdicts near 5%. Until then the result is
-`within_noise` and a close call: the base takes up to two more runs, and the
-official check runs afresh. The agent's evaluation tool and the resumed turn
+error of the ratio. With a declared `relative_noise` it comes from the runs'
+pooled relative spread, never below that floor, and a verdict needs two noises.
+A task that declares none has only the runs' spread to go on, and a candidate's
+code can change how much its runs vary, so each side keeps its own spread
+(Welch's t test). It gets a verdict only once the candidate and the base hold
+three runs each and those runs differ, and then the bar is the Student-t
+quantile at the floor of the Welch-Satterthwaite degrees of freedom (between
+4.30 noises at the fewest runs and 2.04 with many), which keeps false verdicts
+near 5% whatever the two spreads and counts. Until then the
+result is `within_noise` and a close call: the base takes up to two more runs,
+and the official check runs afresh. The agent's evaluation tool and the resumed turn
 report the comparison the base's fresh samples make, and the run's events carry
 each one logged as `measurement_compared`.
 
