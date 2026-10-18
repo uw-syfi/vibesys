@@ -25,6 +25,293 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "AcceleratorVendor",
       "type": "string"
     },
+    "AccountLogin": {
+      "additionalProperties": false,
+      "description": "Signed in with a person's account (a subscription login).",
+      "properties": {
+        "kind": {
+          "const": "account",
+          "default": "account",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "AccountLogin",
+      "type": "object",
+      "required": [
+        "kind"
+      ]
+    },
+    "AgentLogin": {
+      "additionalProperties": false,
+      "description": "One harness's login on the machine.",
+      "properties": {
+        "provider": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        },
+        "provider_name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Provider Name",
+          "type": "string"
+        },
+        "installed": {
+          "title": "Installed",
+          "type": "boolean"
+        },
+        "state": {
+          "$ref": "#/$defs/LoginState"
+        },
+        "how": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "account": "#/$defs/AccountLogin",
+                  "api_key": "#/$defs/ApiKeyLogin"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/AccountLogin"
+                },
+                {
+                  "$ref": "#/$defs/ApiKeyLogin"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "How"
+        },
+        "api_key_variables": {
+          "default": [],
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Api Key Variables",
+          "type": "array"
+        },
+        "detail": {
+          "default": "",
+          "maxLength": 300,
+          "pattern": "^[^\\n\\r]*$",
+          "title": "Detail",
+          "type": "string"
+        },
+        "can_start_login": {
+          "title": "Can Start Login",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "provider",
+        "provider_name",
+        "installed",
+        "state",
+        "can_start_login"
+      ],
+      "title": "AgentLogin",
+      "type": "object"
+    },
+    "AgentLoginsListReply": {
+      "additionalProperties": false,
+      "description": "The logins, in the order ``harnesses.list`` offers the providers.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "agent_logins.list",
+          "default": "agent_logins.list",
+          "title": "Type",
+          "type": "string"
+        },
+        "logins": {
+          "items": {
+            "$ref": "#/$defs/AgentLogin"
+          },
+          "title": "Logins",
+          "type": "array"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "logins"
+      ],
+      "title": "AgentLoginsListReply",
+      "type": "object"
+    },
+    "AgentLoginsListRequest": {
+      "additionalProperties": false,
+      "description": "Each vetted harness's login on this machine.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "agent_logins.list",
+          "default": "agent_logins.list",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type"
+      ],
+      "title": "AgentLoginsListRequest",
+      "type": "object"
+    },
+    "AgentLoginsStartReply": {
+      "additionalProperties": false,
+      "description": "What starting the login did.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "agent_logins.start",
+          "default": "agent_logins.start",
+          "title": "Type",
+          "type": "string"
+        },
+        "result": {
+          "discriminator": {
+            "mapping": {
+              "started": "#/$defs/LoginStarted",
+              "unavailable": "#/$defs/LoginUnavailable"
+            },
+            "propertyName": "outcome"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LoginStarted"
+            },
+            {
+              "$ref": "#/$defs/LoginUnavailable"
+            }
+          ],
+          "title": "Result"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "result"
+      ],
+      "title": "AgentLoginsStartReply",
+      "type": "object"
+    },
+    "AgentLoginsStartRequest": {
+      "additionalProperties": false,
+      "description": "Start the harness's own login on this machine.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "agent_logins.start",
+          "default": "agent_logins.start",
+          "title": "Type",
+          "type": "string"
+        },
+        "provider": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "provider"
+      ],
+      "title": "AgentLoginsStartRequest",
+      "type": "object"
+    },
+    "ApiKeyLogin": {
+      "additionalProperties": false,
+      "description": "Signed in with an API key; where it is held is named, the key never.",
+      "properties": {
+        "kind": {
+          "const": "api_key",
+          "default": "api_key",
+          "title": "Kind",
+          "type": "string"
+        },
+        "variable": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Variable"
+        },
+        "file": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "File"
+        }
+      },
+      "title": "ApiKeyLogin",
+      "type": "object",
+      "required": [
+        "kind"
+      ]
+    },
     "ArgumentsRejected": {
       "additionalProperties": false,
       "description": "The run's argument parser refused the extra arguments; ``problem`` is its message (raw).",
@@ -2191,6 +2478,7 @@ const hostHelperSchema: Record<string, unknown> = {
         "cluster_invalid",
         "compute_config_unreadable",
         "modal_not_configured",
+        "unknown_provider",
         "internal"
       ],
       "title": "HelperErrorCode",
@@ -2225,7 +2513,8 @@ const hostHelperSchema: Record<string, unknown> = {
         "harness_generations",
         "run_role_agents",
         "measurement_target",
-        "machine_compute"
+        "machine_compute",
+        "agent_logins"
       ],
       "title": "HelperFeature",
       "type": "string"
@@ -3162,6 +3451,77 @@ const hostHelperSchema: Record<string, unknown> = {
       "required": [
         "kind"
       ]
+    },
+    "LoginStarted": {
+      "additionalProperties": false,
+      "description": "The harness's own login was started on the machine.",
+      "properties": {
+        "outcome": {
+          "const": "started",
+          "default": "started",
+          "title": "Outcome",
+          "type": "string"
+        },
+        "instruction": {
+          "anyOf": [
+            {
+              "maxLength": 300,
+              "pattern": "^[^\\n\\r]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Instruction"
+        }
+      },
+      "title": "LoginStarted",
+      "type": "object",
+      "required": [
+        "outcome"
+      ]
+    },
+    "LoginState": {
+      "description": "Whether a harness is signed in, as far as its own tooling can say.",
+      "enum": [
+        "signed_in",
+        "signed_out",
+        "unknown"
+      ],
+      "title": "LoginState",
+      "type": "string"
+    },
+    "LoginUnavailable": {
+      "additionalProperties": false,
+      "description": "The login was not started, and why.",
+      "properties": {
+        "outcome": {
+          "const": "unavailable",
+          "default": "unavailable",
+          "title": "Outcome",
+          "type": "string"
+        },
+        "reason": {
+          "$ref": "#/$defs/LoginUnavailableReason"
+        }
+      },
+      "required": [
+        "outcome",
+        "reason"
+      ],
+      "title": "LoginUnavailable",
+      "type": "object"
+    },
+    "LoginUnavailableReason": {
+      "description": "Why a login could not be started.",
+      "enum": [
+        "not_installed",
+        "no_login_command"
+      ],
+      "title": "LoginUnavailableReason",
+      "type": "string"
     },
     "LogsCancelReply": {
       "additionalProperties": false,
@@ -7055,6 +7415,8 @@ const hostHelperSchema: Record<string, unknown> = {
     "request": {
       "discriminator": {
         "mapping": {
+          "agent_logins.list": "#/$defs/AgentLoginsListRequest",
+          "agent_logins.start": "#/$defs/AgentLoginsStartRequest",
           "checkout.inspect": "#/$defs/CheckoutInspectRequest",
           "compute.add_cluster": "#/$defs/ComputeAddClusterRequest",
           "compute.list": "#/$defs/ComputeListRequest",
@@ -7178,6 +7540,12 @@ const hostHelperSchema: Record<string, unknown> = {
         },
         {
           "$ref": "#/$defs/ComputeRemoveClusterRequest"
+        },
+        {
+          "$ref": "#/$defs/AgentLoginsListRequest"
+        },
+        {
+          "$ref": "#/$defs/AgentLoginsStartRequest"
         }
       ],
       "title": "Request"
@@ -7185,6 +7553,8 @@ const hostHelperSchema: Record<string, unknown> = {
     "message": {
       "discriminator": {
         "mapping": {
+          "agent_logins.list": "#/$defs/AgentLoginsListReply",
+          "agent_logins.start": "#/$defs/AgentLoginsStartReply",
           "checkout.inspect": "#/$defs/CheckoutInspectReply",
           "compute.add_cluster": "#/$defs/ComputeAddClusterReply",
           "compute.list": "#/$defs/ComputeListReply",
@@ -7312,6 +7682,12 @@ const hostHelperSchema: Record<string, unknown> = {
           "$ref": "#/$defs/ComputeRemoveClusterReply"
         },
         {
+          "$ref": "#/$defs/AgentLoginsListReply"
+        },
+        {
+          "$ref": "#/$defs/AgentLoginsStartReply"
+        },
+        {
           "$ref": "#/$defs/InstancesChanged"
         },
         {
@@ -7357,7 +7733,9 @@ const hostHelperSchema: Record<string, unknown> = {
     "compute.list": "machine_compute",
     "compute.test_cluster": "machine_compute",
     "compute.add_cluster": "machine_compute",
-    "compute.remove_cluster": "machine_compute"
+    "compute.remove_cluster": "machine_compute",
+    "agent_logins.list": "agent_logins",
+    "agent_logins.start": "agent_logins"
   },
   "x-vibesys-feature-by-field": {
     "run.start": {

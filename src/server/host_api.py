@@ -39,9 +39,8 @@ machine facts (``server.host_machine_facts``: ``Accelerator``, ``Gpu``, ``Hardwa
 and its members, ``HelperErrorCode``, the harness choice (``HarnessOption``,
 ``HarnessChoice``, ``RoleAgents``, and the run flags ``CLI_PROVIDER_FLAG``, ``MODEL_FLAG``,
 ``ROLE_PROVIDER_FLAG``, ``UNVETTED_MODEL_FLAG``, ``RUN_ENVIRONMENT_FLAG``, ``SLURM_CONFIG_FLAG``),
-where results are measured and the machine's compute settings (``server.host_compute``:
-``MeasurementTarget``, ``SlurmClusterSettings``, ``ComputeSettings``, ``ClusterTestResult`` and
-the ``compute.*`` messages), and a relayed channel's end: ``ChannelEndOutcome``,
+where results are measured, compute settings and agent logins (``server.host_compute``,
+``server.host_agent_logins``), and a relayed channel's end: ``ChannelEndOutcome``,
 ``ChannelEnd``. An undeliverable successful start whose compensating stop cannot
 be proved terminal reports ``RunStartCompensationFailure`` on the helper's
 diagnostic stream.
@@ -78,6 +77,12 @@ from pydantic import (
     model_validator,
 )
 
+from server.host_agent_logins import (
+    AgentLoginsListReply,
+    AgentLoginsListRequest,
+    AgentLoginsStartReply,
+    AgentLoginsStartRequest,
+)
 from server.host_compute import (
     ComputeAddClusterReply,
     ComputeAddClusterRequest,
@@ -793,10 +798,8 @@ RUN_ENVIRONMENT_FLAG: Final = "--run-environment"
 """Selects where evaluation runs; ``run.start`` emits it for ``measure_on``'s Slurm and Modal."""
 SLURM_CONFIG_FLAG: Final = "--slurm-config"
 """The operator file of a Slurm run; ``run.start`` emits it for ``measure_on``'s Slurm cluster."""
-MODAL_FLAG: Final = "--modal"
-"""The older spelling of Modal's run environment; ``measure_on`` refuses it in ``args``."""
-SKYPILOT_FLAG: Final = "--skypilot"
-"""The SkyPilot run environment; ``measure_on`` refuses it in ``args``."""
+ENVIRONMENT_FLAGS: Final = (RUN_ENVIRONMENT_FLAG, SLURM_CONFIG_FLAG, "--modal", "--skypilot")
+"""The flags that choose where a run measures; ``measure_on`` is their only source in ``args``."""
 LOCAL_FLAG: Final = "--local"
 """Keeps the run local; ``run.start`` emits it for ``results: keep``."""
 
@@ -945,9 +948,8 @@ class RunStartRequest(HelperRequestBase):
     """The agent each named role runs; a role without an entry runs ``harness``. Sent only after
     ``hello`` returned ``run_role_agents``."""
     measure_on: MeasurementTarget | None = None
-    """Where results are measured; ``None`` keeps the configuration's environment. ``args`` then
-    carry none of the run-environment flags. Sent only after ``hello`` returned
-    ``measurement_target``."""
+    """Where results are measured; ``args`` then carry no run-environment flag. Sent only after
+    ``hello`` returned ``measurement_target``."""
 
 
 class RunPreflightRequest(HelperRequestBase):
@@ -961,8 +963,7 @@ class RunPreflightRequest(HelperRequestBase):
     options: RunOptions | None = None
     agents: RoleAgents | None = None
     measure_on: MeasurementTarget | None = None
-    """As ``run.start``'s; the reply then holds the ``measurement_target`` check. Sent only after
-    ``hello`` returned ``measurement_target``."""
+    """As ``run.start``'s; the reply then ends with the ``measurement_target`` check."""
     with_roles: bool | None = None
     """Ask for ``roles`` in the reply. Sent only after ``hello`` returned ``run_roles``."""
     with_project_clean: bool | None = None
@@ -1180,6 +1181,8 @@ HELPER_REQUEST_FEATURES: Final[Mapping[type[HelperRequestBase], HelperFeature]] 
     ComputeTestClusterRequest: HelperFeature.MACHINE_COMPUTE,
     ComputeAddClusterRequest: HelperFeature.MACHINE_COMPUTE,
     ComputeRemoveClusterRequest: HelperFeature.MACHINE_COMPUTE,
+    AgentLoginsListRequest: HelperFeature.AGENT_LOGINS,
+    AgentLoginsStartRequest: HelperFeature.AGENT_LOGINS,
 }
 """The feature each gated request needs, exported with the generated wire contract."""
 
@@ -1249,7 +1252,9 @@ HelperRequest = Annotated[
     | ComputeListRequest
     | ComputeTestClusterRequest
     | ComputeAddClusterRequest
-    | ComputeRemoveClusterRequest,
+    | ComputeRemoveClusterRequest
+    | AgentLoginsListRequest
+    | AgentLoginsStartRequest,
     Field(discriminator="type"),
 ]
 """Every message a client sends on a helper channel."""
@@ -1749,8 +1754,7 @@ class HelperErrorCode(StrEnum):
     UNVETTED_HARNESS = "unvetted_harness"
     """``run.start``'s ``harness`` is not one ``harnesses.list`` offers; only sent with ``harnesses``."""
     UNKNOWN_CLUSTER = "unknown_cluster"
-    """``compute.remove_cluster`` named a cluster this machine's settings file does not hold, or
-    ``run.start``'s ``measure_on`` a cluster that is not set up; the message names it."""
+    """``compute.remove_cluster`` or ``measure_on`` named a cluster not set up; the message names it."""
     CLUSTER_EXISTS = "cluster_exists"
     """``compute.add_cluster`` named a cluster already set up on this machine."""
     CLUSTER_READ_ONLY = "cluster_read_only"
@@ -1758,12 +1762,13 @@ class HelperErrorCode(StrEnum):
     CLUSTER_TEST_FAILED = "cluster_test_failed"
     """``compute.add_cluster``'s cluster did not pass its connection test; nothing was saved."""
     CLUSTER_INVALID = "cluster_invalid"
-    """``compute.test_cluster`` or ``compute.add_cluster`` got settings the Slurm configuration
-    rejects; the message names the offending keys."""
+    """A cluster's settings are rejected by the Slurm configuration; the message names the keys."""
     COMPUTE_CONFIG_UNREADABLE = "compute_config_unreadable"
-    """The machine's compute settings file exists and cannot be read or parsed; ``path`` names it."""
+    """The compute settings file cannot be read or parsed; ``path`` names it."""
     MODAL_NOT_CONFIGURED = "modal_not_configured"
     """``run.start``'s ``measure_on`` is Modal and the machine holds no token."""
+    UNKNOWN_PROVIDER = "unknown_provider"
+    """``agent_logins.start`` named a provider with no harness here; the message names it."""
     INTERNAL = "internal"
     """The helper failed; ``message`` says how."""
 
@@ -1816,6 +1821,8 @@ HelperReply = (
     | ComputeTestClusterReply
     | ComputeAddClusterReply
     | ComputeRemoveClusterReply
+    | AgentLoginsListReply
+    | AgentLoginsStartReply
 )
 """A request's result; its ``type`` is the request's."""
 

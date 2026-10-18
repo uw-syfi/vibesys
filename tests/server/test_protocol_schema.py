@@ -220,6 +220,8 @@ def test_host_helper_schema_exports_the_authoritative_request_feature_gates() ->
         "compute.test_cluster": "machine_compute",
         "compute.add_cluster": "machine_compute",
         "compute.remove_cluster": "machine_compute",
+        "agent_logins.list": "agent_logins",
+        "agent_logins.start": "agent_logins",
     }
     request_tags = document["properties"]["request"]["discriminator"]["mapping"]
     assert gates.keys() <= request_tags.keys()

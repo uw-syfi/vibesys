@@ -80,6 +80,8 @@ class HelperFeature(StrEnum):
     MACHINE_COMPUTE = "machine_compute"
     """``compute.list``, ``compute.test_cluster``, ``compute.add_cluster`` and
     ``compute.remove_cluster``: the machine's Slurm clusters and Modal token."""
+    AGENT_LOGINS = "agent_logins"
+    """``agent_logins.list`` and ``agent_logins.start``: each harness's login on the machine."""
 
 
 __all__ = ["HelperFeature"]

@@ -30,7 +30,9 @@ export type Request =
   | ComputeListRequest
   | ComputeTestClusterRequest
   | ComputeAddClusterRequest
-  | ComputeRemoveClusterRequest;
+  | ComputeRemoveClusterRequest
+  | AgentLoginsListRequest
+  | AgentLoginsStartRequest;
 export type RequestId = string;
 export type DeadlineMs = number;
 export type Type = "hello";
@@ -236,6 +238,13 @@ export type RequestId29 = string;
 export type DeadlineMs29 = number;
 export type Type29 = "compute.remove_cluster";
 export type Name1 = string;
+export type RequestId30 = string;
+export type DeadlineMs30 = number;
+export type Type30 = "agent_logins.list";
+export type RequestId31 = string;
+export type DeadlineMs31 = number;
+export type Type31 = "agent_logins.start";
+export type Provider1 = string;
 export type Message =
   | HelloReply
   | InstancesListReply
@@ -267,10 +276,12 @@ export type Message =
   | ComputeTestClusterReply
   | ComputeAddClusterReply
   | ComputeRemoveClusterReply
+  | AgentLoginsListReply
+  | AgentLoginsStartReply
   | InstancesChanged
   | HelperError;
-export type RequestId30 = string;
-export type Type30 = "hello";
+export type RequestId32 = string;
+export type Type32 = "hello";
 export type ProtocolVersion = number;
 /**
  * Optional capabilities negotiated by ``hello``; a closed set per protocol version.
@@ -305,14 +316,15 @@ export type HelperFeature =
   | "harness_generations"
   | "run_role_agents"
   | "measurement_target"
-  | "machine_compute";
+  | "machine_compute"
+  | "agent_logins";
 export type Features1 = HelperFeature[];
 export type VibesysVersion = string;
 export type Root = string;
 export type Commit = string | null;
 export type Dirty = boolean | null;
-export type RequestId31 = string;
-export type Type31 = "instances.list";
+export type RequestId33 = string;
+export type Type33 = "instances.list";
 export type Version = 5;
 export type Version1 = 5;
 export type Id = string;
@@ -386,8 +398,8 @@ export type Id1 = string;
 export type Version2 = number | null;
 export type Unreadable = UnreadableRecord[];
 export type Unverified = string[];
-export type RequestId32 = string;
-export type Type32 = "instances.inspect";
+export type RequestId34 = string;
+export type Type34 = "instances.inspect";
 export type Version3 = 1;
 export type Id2 = string;
 /**
@@ -414,20 +426,20 @@ export type State = "available";
 export type Text = string;
 export type Truncated = boolean;
 export type State1 = "missing";
-export type RequestId33 = string;
-export type Type33 = "instances.watch";
-export type WatchId1 = string;
-export type RequestId34 = string;
-export type Type34 = "instances.unwatch";
-export type WatchId2 = string;
 export type RequestId35 = string;
-export type Type35 = "tasks.list";
+export type Type35 = "instances.watch";
+export type WatchId1 = string;
+export type RequestId36 = string;
+export type Type36 = "instances.unwatch";
+export type WatchId2 = string;
+export type RequestId37 = string;
+export type Type37 = "tasks.list";
 export type Version5 = 1;
 export type ProjectRoot2 = string;
 export type Name2 = string;
 export type Tasks = TaskSummary[];
-export type RequestId36 = string;
-export type Type36 = "runs.list";
+export type RequestId38 = string;
+export type Type38 = "runs.list";
 export type ProjectRoot3 = string;
 export type RunId7 = string;
 export type Task3 = string | null;
@@ -450,8 +462,8 @@ export type RunClosing = "finished" | "failed" | "interrupted";
 export type Kind6 = "unreadable";
 export type Message2 = string;
 export type Runs = RunSummary[];
-export type RequestId37 = string;
-export type Type37 = "run.start";
+export type RequestId39 = string;
+export type Type39 = "run.start";
 export type Launch = LiveInstanceRecord | DetachedLaunchFailure;
 export type Version6 = 1;
 export type Outcome = "failed";
@@ -460,8 +472,8 @@ export type Stage1 = string;
 export type Message3 = string;
 export type ExitCode = number;
 export type LogPath1 = string | null;
-export type RequestId38 = string;
-export type Type38 = "run.stop";
+export type RequestId40 = string;
+export type Type40 = "run.stop";
 export type Version7 = 1;
 export type Id4 = string;
 /**
@@ -472,14 +484,14 @@ export type StopOutcome = "stopped" | "stopping" | "not_running" | "still_runnin
  * How ``vibesys instances stop`` reached the server.
  */
 export type StopRoute = "control_socket" | "signal";
-export type RequestId39 = string;
-export type Type39 = "run.connect";
+export type RequestId41 = string;
+export type Type41 = "run.connect";
 export type RunId8 = string;
 export type ProtocolVersion3 = number;
-export type RequestId40 = string;
-export type Type40 = "ping";
-export type RequestId41 = string;
-export type Type41 = "paths.complete";
+export type RequestId42 = string;
+export type Type42 = "ping";
+export type RequestId43 = string;
+export type Type43 = "paths.complete";
 export type Directory = string;
 export type Name3 = string;
 export type Path1 = string;
@@ -488,8 +500,8 @@ export type VibesysProject = boolean;
 export type GitRepository = boolean;
 export type Entries = PathEntry[];
 export type Truncated1 = boolean;
-export type RequestId42 = string;
-export type Type42 = "logs.list";
+export type RequestId44 = string;
+export type Type44 = "logs.list";
 export type Id5 = string;
 export type JsonValue = unknown;
 export type Command = string;
@@ -500,8 +512,8 @@ export type Size = number;
  */
 export type LogStreamOutcome = "ended" | "failed" | "abandoned";
 export type Streams = LogStream[];
-export type RequestId43 = string;
-export type Type43 = "logs.read";
+export type RequestId45 = string;
+export type Type45 = "logs.read";
 export type Offset2 = number;
 export type Data = string;
 export type NextOffset = number;
@@ -515,12 +527,12 @@ export type Length = number;
  */
 export type LogPipe = "stdout" | "stderr";
 export type Pipes = LogPipeSpan[];
-export type RequestId44 = string;
-export type Type44 = "logs.cancel";
+export type RequestId46 = string;
+export type Type46 = "logs.cancel";
 export type ReadId1 = string;
-export type RequestId45 = string;
-export type Type45 = "harnesses.list";
-export type Provider1 = string;
+export type RequestId47 = string;
+export type Type47 = "harnesses.list";
+export type Provider2 = string;
 export type Model2 = string;
 export type Default = boolean;
 export type ProviderName = string;
@@ -536,8 +548,8 @@ export type Id6 = string;
 export type Name4 = string;
 export type Order = number;
 export type Harnesses = HarnessOption[];
-export type RequestId46 = string;
-export type Type46 = "runs.read_events";
+export type RequestId48 = string;
+export type Type48 = "runs.read_events";
 export type Events = {
   [k: string]: JsonValue;
 }[];
@@ -545,23 +557,23 @@ export type NextSequence = number;
 export type Complete = boolean;
 export type TotalEvents = number | null;
 export type TotalBytes = number | null;
-export type RequestId47 = string;
-export type Type47 = "runs.events_for_span";
+export type RequestId49 = string;
+export type Type49 = "runs.events_for_span";
 export type Events1 = {
   [k: string]: JsonValue;
 }[];
 export type NextSequence1 = number;
 export type Complete1 = boolean;
 export type Total1 = number;
-export type RequestId48 = string;
-export type Type48 = "runs.read_tail";
+export type RequestId50 = string;
+export type Type50 = "runs.read_tail";
 export type Events2 = {
   [k: string]: JsonValue;
 }[];
 export type Complete2 = boolean;
 export type LastSequence = number;
-export type RequestId49 = string;
-export type Type49 = "runs.summary";
+export type RequestId51 = string;
+export type Type51 = "runs.summary";
 export type ThroughSequence = number;
 export type EventCount = number;
 export type JournalBytes = number;
@@ -606,8 +618,8 @@ export type CostUsd = number | null;
 export type DurationMs = number | null;
 export type Records = UsageRecord[];
 export type NextOffset1 = number | null;
-export type RequestId50 = string;
-export type Type50 = "machine.describe";
+export type RequestId52 = string;
+export type Type52 = "machine.describe";
 export type Root1 = string;
 export type Version8 = string;
 export type Commit1 = string | null;
@@ -624,8 +636,8 @@ export type Reason1 = string;
 export type HarnessClis = string[];
 export type Live = number;
 export type EndedToday = number;
-export type RequestId51 = string;
-export type Type51 = "checkout.inspect";
+export type RequestId53 = string;
+export type Type53 = "checkout.inspect";
 export type Inspection = CheckoutFound | CheckoutNotFound | CheckoutTooOld;
 export type State2 = "found";
 export type Root2 = string;
@@ -637,8 +649,8 @@ export type State3 = "not_found";
 export type State4 = "too_old";
 export type Version11 = string;
 export type Min = string;
-export type RequestId52 = string;
-export type Type52 = "run.preflight";
+export type RequestId54 = string;
+export type Type54 = "run.preflight";
 /**
  * What a preflight check is about; closed.
  */
@@ -717,7 +729,7 @@ export type Problem3 = string;
 export type Kind22 = "roles_not_declared";
 export type Roles1 = string[];
 export type Kind23 = "model_not_vetted";
-export type Provider2 = string;
+export type Provider3 = string;
 export type Model5 = string | null;
 export type Vetted = string[];
 export type Role2 = string | null;
@@ -739,8 +751,8 @@ export type Kind29 = "measurement_target_misfit";
 export type Target2 = SameMachine | SlurmTarget | ModalTarget;
 export type Checks = Check[];
 export type Roles2 = string[] | null;
-export type RequestId53 = string;
-export type Type53 = "examples.list";
+export type RequestId55 = string;
+export type Type55 = "examples.list";
 export type Version12 = 1;
 export type Checkout1 = string;
 export type Name5 = string;
@@ -772,14 +784,14 @@ export type Objectives = ExampleObjective[];
 export type Goal = string;
 export type GoalTruncated = boolean;
 export type Examples = ExampleSummary[];
-export type RequestId54 = string;
-export type Type54 = "project.create_from_example";
+export type RequestId56 = string;
+export type Type56 = "project.create_from_example";
 export type Project9 = string;
 export type Tasks2 = string[];
-export type RequestId55 = string;
-export type Type55 = "project.copy_out";
-export type RequestId56 = string;
-export type Type56 = "compute.list";
+export type RequestId57 = string;
+export type Type57 = "project.copy_out";
+export type RequestId58 = string;
+export type Type58 = "compute.list";
 export type ConfigPath = string;
 /**
  * Which file of the machine a listed cluster lives in.
@@ -791,8 +803,8 @@ export type TokenPresent = boolean;
  * Where the machine holds its Modal token.
  */
 export type ModalTokenSource = "environment" | "profile";
-export type RequestId57 = string;
-export type Type57 = "compute.test_cluster";
+export type RequestId59 = string;
+export type Type59 = "compute.test_cluster";
 export type Result = ClusterTestPassed | ClusterTestFailed;
 export type Outcome1 = "passed";
 export type Partitions = string[];
@@ -802,14 +814,42 @@ export type Outcome2 = "failed";
  */
 export type ClusterTestStage = "reach" | "scheduler" | "workspace";
 export type Detail1 = string;
-export type RequestId58 = string;
-export type Type58 = "compute.add_cluster";
-export type RequestId59 = string;
-export type Type59 = "compute.remove_cluster";
-export type Type60 = "instances.changed";
+export type RequestId60 = string;
+export type Type60 = "compute.add_cluster";
+export type RequestId61 = string;
+export type Type61 = "compute.remove_cluster";
+export type RequestId62 = string;
+export type Type62 = "agent_logins.list";
+export type Provider4 = string;
+export type ProviderName1 = string;
+export type Installed = boolean;
+/**
+ * Whether a harness is signed in, as far as its own tooling can say.
+ */
+export type LoginState = "signed_in" | "signed_out" | "unknown";
+export type How = (AccountLogin | ApiKeyLogin) | null;
+export type Kind30 = "account";
+export type Kind31 = "api_key";
+export type Variable = string | null;
+export type File = string | null;
+export type ApiKeyVariables = string[];
+export type Detail2 = string;
+export type CanStartLogin = boolean;
+export type Logins = AgentLogin[];
+export type RequestId63 = string;
+export type Type63 = "agent_logins.start";
+export type Result1 = LoginStarted | LoginUnavailable;
+export type Outcome3 = "started";
+export type Instruction = string | null;
+export type Outcome4 = "unavailable";
+/**
+ * Why a login could not be started.
+ */
+export type LoginUnavailableReason = "not_installed" | "no_login_command";
+export type Type64 = "instances.changed";
 export type WatchId3 = string;
-export type Type61 = "error";
-export type RequestId60 = string | null;
+export type Type65 = "error";
+export type RequestId64 = string | null;
 /**
  * Why a request failed; a closed set.
  */
@@ -849,6 +889,7 @@ export type HelperErrorCode =
   | "cluster_invalid"
   | "compute_config_unreadable"
   | "modal_not_configured"
+  | "unknown_provider"
   | "internal";
 export type Message4 = string;
 export type Path2 = string | null;
@@ -872,7 +913,7 @@ export type ChannelEndOutcome =
   | "client_failed"
   | "server_unresponsive";
 export type ExitStatus = number;
-export type Detail2 = string;
+export type Detail3 = string;
 /**
  * One strict stderr line preserving an undisclosed instance cleanup failure.
  *
@@ -883,26 +924,26 @@ export type Detail2 = string;
  */
 export type RunStartCompensationFailure =
   WorkerStartRefusedCompensationFailure | StopFailedCompensationFailure | StopUnconfirmedCompensationFailure;
-export type Type62 = "run.start_compensation_failed";
+export type Type66 = "run.start_compensation_failed";
 export type ExitStatus1 = 12;
-export type RequestId61 = string;
-export type Detail3 = string;
-export type Kind30 = "worker_start_refused";
-export type InstanceId6 = string;
-export type Type63 = "run.start_compensation_failed";
-export type ExitStatus2 = 12;
-export type RequestId62 = string;
+export type RequestId65 = string;
 export type Detail4 = string;
-export type Kind31 = "stop_failed";
-export type InstanceId7 = string;
-export type Type64 = "run.start_compensation_failed";
-export type ExitStatus3 = 12;
-export type RequestId63 = string;
+export type Kind32 = "worker_start_refused";
+export type InstanceId6 = string;
+export type Type67 = "run.start_compensation_failed";
+export type ExitStatus2 = 12;
+export type RequestId66 = string;
 export type Detail5 = string;
-export type Kind32 = "stop_unconfirmed";
+export type Kind33 = "stop_failed";
+export type InstanceId7 = string;
+export type Type68 = "run.start_compensation_failed";
+export type ExitStatus3 = 12;
+export type RequestId67 = string;
+export type Detail6 = string;
+export type Kind34 = "stop_unconfirmed";
 export type Version13 = 1;
 export type Id7 = string;
-export type Outcome3 = "stopping" | "still_running" | "unsupported";
+export type Outcome5 = "stopping" | "still_running" | "unsupported";
 
 /**
  * Root schema document for the host helper: what a client sends and what it receives.
@@ -1355,11 +1396,28 @@ export interface ComputeRemoveClusterRequest {
   name: Name1;
 }
 /**
+ * Each vetted harness's login on this machine.
+ */
+export interface AgentLoginsListRequest {
+  request_id: RequestId30;
+  deadline_ms: DeadlineMs30;
+  type: Type30;
+}
+/**
+ * Start the harness's own login on this machine.
+ */
+export interface AgentLoginsStartRequest {
+  request_id: RequestId31;
+  deadline_ms: DeadlineMs31;
+  type: Type31;
+  provider: Provider1;
+}
+/**
  * The negotiated version and features, and what will start runs on this host.
  */
 export interface HelloReply {
-  request_id: RequestId30;
-  type: Type30;
+  request_id: RequestId32;
+  type: Type32;
   protocol_version: ProtocolVersion;
   features: Features1;
   vibesys_version: VibesysVersion;
@@ -1377,8 +1435,8 @@ export interface Checkout {
  * The registry's listing.
  */
 export interface InstancesListReply {
-  request_id: RequestId31;
-  type: Type31;
+  request_id: RequestId33;
+  type: Type33;
   listing: InstanceList;
 }
 /**
@@ -1476,8 +1534,8 @@ export interface UnreadableRecord {
  * One coherent inspection of a detached server and its retained artifacts.
  */
 export interface InstancesInspectReply {
-  request_id: RequestId32;
-  type: Type32;
+  request_id: RequestId34;
+  type: Type34;
   inspection: InstanceInspection;
 }
 /**
@@ -1529,24 +1587,24 @@ export interface MissingLogTail {
  * The watch started; ``instances.changed`` for ``watch_id`` follows at once and on change.
  */
 export interface InstancesWatchReply {
-  request_id: RequestId33;
-  type: Type33;
+  request_id: RequestId35;
+  type: Type35;
   watch_id: WatchId1;
 }
 /**
  * The watch ended; no ``instances.changed`` for ``watch_id`` follows.
  */
 export interface InstancesUnwatchReply {
-  request_id: RequestId34;
-  type: Type34;
+  request_id: RequestId36;
+  type: Type36;
   watch_id: WatchId2;
 }
 /**
  * The project's tasks.
  */
 export interface TasksListReply {
-  request_id: RequestId35;
-  type: Type35;
+  request_id: RequestId37;
+  type: Type37;
   tasks: TaskList;
 }
 /**
@@ -1567,8 +1625,8 @@ export interface TaskSummary {
  * The project's runs.
  */
 export interface RunsListReply {
-  request_id: RequestId36;
-  type: Type36;
+  request_id: RequestId38;
+  type: Type38;
   runs: RunList;
 }
 /**
@@ -1639,8 +1697,8 @@ export interface RunDigestUnreadable {
  * The started server's record, or why nothing started.
  */
 export interface RunStartReply {
-  request_id: RequestId37;
-  type: Type37;
+  request_id: RequestId39;
+  type: Type39;
   launch: Launch;
 }
 /**
@@ -1666,8 +1724,8 @@ export interface DetachedLaunchFailure {
  * What the stop observed.
  */
 export interface RunStopReply {
-  request_id: RequestId38;
-  type: Type38;
+  request_id: RequestId40;
+  type: Type40;
   result: InstanceStopResult;
 }
 /**
@@ -1683,8 +1741,8 @@ export interface InstanceStopResult {
  * The channel is now a byte relay carrying the run protocol to this run.
  */
 export interface RunConnectReply {
-  request_id: RequestId39;
-  type: Type39;
+  request_id: RequestId41;
+  type: Type41;
   run_id: RunId8;
   protocol_version: ProtocolVersion3;
 }
@@ -1692,15 +1750,15 @@ export interface RunConnectReply {
  * The channel is alive.
  */
 export interface PingReply {
-  request_id: RequestId40;
-  type: Type40;
+  request_id: RequestId42;
+  type: Type42;
 }
 /**
  * Matching directories of ``directory``, sorted by name, at most ``PATHS_COMPLETE_CAP``.
  */
 export interface PathsCompleteReply {
-  request_id: RequestId41;
-  type: Type41;
+  request_id: RequestId43;
+  type: Type43;
   directory: Directory;
   entries: Entries;
   truncated: Truncated1;
@@ -1719,8 +1777,8 @@ export interface PathEntry {
  * The instance's streams, oldest first.
  */
 export interface LogsListReply {
-  request_id: RequestId42;
-  type: Type42;
+  request_id: RequestId44;
+  type: Type44;
   streams: Streams;
 }
 /**
@@ -1741,8 +1799,8 @@ export interface Owner {
  * One chunk of the stream.
  */
 export interface LogsReadReply {
-  request_id: RequestId43;
-  type: Type43;
+  request_id: RequestId45;
+  type: Type45;
   chunk: LogChunk;
 }
 /**
@@ -1774,23 +1832,23 @@ export interface LogPipeSpan {
  * The withdrawal was taken: a read ``read_id`` named that was still waiting stops waiting.
  */
 export interface LogsCancelReply {
-  request_id: RequestId44;
-  type: Type44;
+  request_id: RequestId46;
+  type: Type46;
   read_id: ReadId1;
 }
 /**
  * The vetted pairs, grouped by provider with each provider's default first.
  */
 export interface HarnessesListReply {
-  request_id: RequestId45;
-  type: Type45;
+  request_id: RequestId47;
+  type: Type47;
   harnesses: Harnesses;
 }
 /**
  * A vetted provider and model pair a run may start with.
  */
 export interface HarnessOption {
-  provider: Provider1;
+  provider: Provider2;
   model: Model2;
   default: Default;
   display?: HarnessDisplay | null;
@@ -1819,8 +1877,8 @@ export interface ModelGeneration {
  * One page of a run's recorded events, oldest first.
  */
 export interface RunsReadEventsReply {
-  request_id: RequestId46;
-  type: Type46;
+  request_id: RequestId48;
+  type: Type48;
   events: Events;
   next_sequence: NextSequence;
   complete: Complete;
@@ -1831,8 +1889,8 @@ export interface RunsReadEventsReply {
  * One page of a span's recorded events, oldest first.
  */
 export interface RunsEventsForSpanReply {
-  request_id: RequestId47;
-  type: Type47;
+  request_id: RequestId49;
+  type: Type49;
   events: Events1;
   next_sequence: NextSequence1;
   complete: Complete1;
@@ -1842,8 +1900,8 @@ export interface RunsEventsForSpanReply {
  * The newest events before the request's ``before_sequence``, oldest first.
  */
 export interface RunsReadTailReply {
-  request_id: RequestId48;
-  type: Type48;
+  request_id: RequestId50;
+  type: Type50;
   events: Events2;
   complete: Complete2;
   last_sequence: LastSequence;
@@ -1875,8 +1933,8 @@ export interface RunsReadTailReply {
  * ``through_sequence``, and a read whose pages disagree starts again.
  */
 export interface RunsSummaryReply {
-  request_id: RequestId49;
-  type: Type49;
+  request_id: RequestId51;
+  type: Type51;
   through_sequence: ThroughSequence;
   event_count: EventCount;
   journal_bytes: JournalBytes;
@@ -1966,8 +2024,8 @@ export interface UsageRecord {
  * The machine's description.
  */
 export interface MachineDescribeReply {
-  request_id: RequestId50;
-  type: Type50;
+  request_id: RequestId52;
+  type: Type52;
   machine: MachineDescription;
 }
 /**
@@ -2033,8 +2091,8 @@ export interface RunCounts {
  * What the path holds.
  */
 export interface CheckoutInspectReply {
-  request_id: RequestId51;
-  type: Type51;
+  request_id: RequestId53;
+  type: Type53;
   inspection: Inspection;
 }
 /**
@@ -2068,8 +2126,8 @@ export interface CheckoutTooOld {
  * Every check, in ``CheckId`` order; Start is enabled exactly when none is ``fail``.
  */
 export interface RunPreflightReply {
-  request_id: RequestId52;
-  type: Type52;
+  request_id: RequestId54;
+  type: Type54;
   checks: Checks;
   roles?: Roles2;
   backend?: Backend | null;
@@ -2204,7 +2262,7 @@ export interface RolesNotDeclared {
  */
 export interface ModelNotVetted {
   kind: Kind23;
-  provider: Provider2;
+  provider: Provider3;
   model: Model5;
   vetted: Vetted;
   role: Role2;
@@ -2258,8 +2316,8 @@ export interface MeasurementTargetMisfit {
  * The checkout's example catalog.
  */
 export interface ExamplesListReply {
-  request_id: RequestId53;
-  type: Type53;
+  request_id: RequestId55;
+  type: Type55;
   listing: ExampleList;
 }
 /**
@@ -2327,8 +2385,8 @@ export interface ExampleObjective {
  * The project made from the example.
  */
 export interface ProjectCreateFromExampleReply {
-  request_id: RequestId54;
-  type: Type54;
+  request_id: RequestId56;
+  type: Type56;
   created: CreatedProject;
 }
 /**
@@ -2342,16 +2400,16 @@ export interface CreatedProject {
  * The project copied out into its own repository.
  */
 export interface ProjectCopyOutReply {
-  request_id: RequestId55;
-  type: Type55;
+  request_id: RequestId57;
+  type: Type57;
   created: CreatedProject;
 }
 /**
  * The machine's compute settings.
  */
 export interface ComputeListReply {
-  request_id: RequestId56;
-  type: Type56;
+  request_id: RequestId58;
+  type: Type58;
   settings: ComputeSettings;
 }
 /**
@@ -2380,8 +2438,8 @@ export interface ModalStatus {
  * What testing the cluster found.
  */
 export interface ComputeTestClusterReply {
-  request_id: RequestId57;
-  type: Type57;
+  request_id: RequestId59;
+  type: Type59;
   result: Result;
 }
 /**
@@ -2404,23 +2462,80 @@ export interface ClusterTestFailed {
  * The settings after the cluster was saved.
  */
 export interface ComputeAddClusterReply {
-  request_id: RequestId58;
-  type: Type58;
+  request_id: RequestId60;
+  type: Type60;
   settings: ComputeSettings;
 }
 /**
  * The settings after the cluster was removed.
  */
 export interface ComputeRemoveClusterReply {
-  request_id: RequestId59;
-  type: Type59;
+  request_id: RequestId61;
+  type: Type61;
   settings: ComputeSettings;
+}
+/**
+ * The logins, in the order ``harnesses.list`` offers the providers.
+ */
+export interface AgentLoginsListReply {
+  request_id: RequestId62;
+  type: Type62;
+  logins: Logins;
+}
+/**
+ * One harness's login on the machine.
+ */
+export interface AgentLogin {
+  provider: Provider4;
+  provider_name: ProviderName1;
+  installed: Installed;
+  state: LoginState;
+  how?: How;
+  api_key_variables?: ApiKeyVariables;
+  detail?: Detail2;
+  can_start_login: CanStartLogin;
+}
+/**
+ * Signed in with a person's account (a subscription login).
+ */
+export interface AccountLogin {
+  kind: Kind30;
+}
+/**
+ * Signed in with an API key; where it is held is named, the key never.
+ */
+export interface ApiKeyLogin {
+  kind: Kind31;
+  variable?: Variable;
+  file?: File;
+}
+/**
+ * What starting the login did.
+ */
+export interface AgentLoginsStartReply {
+  request_id: RequestId63;
+  type: Type63;
+  result: Result1;
+}
+/**
+ * The harness's own login was started on the machine.
+ */
+export interface LoginStarted {
+  outcome: Outcome3;
+  instruction?: Instruction;
+}
+/**
+ * The login was not started, and why.
+ */
+export interface LoginUnavailable {
+  outcome: Outcome4;
+  reason: LoginUnavailableReason;
 }
 /**
  * A push on a watch: the listing as it is now, sent first and then on each change.
  */
 export interface InstancesChanged {
-  type: Type60;
+  type: Type64;
   watch_id: WatchId3;
   listing: InstanceList;
 }
@@ -2428,8 +2543,8 @@ export interface InstancesChanged {
  * A failed request, or a line that was not one (``request_id`` is ``None`` then).
  */
 export interface HelperError {
-  type: Type61;
-  request_id: RequestId60;
+  type: Type65;
+  request_id: RequestId64;
   code: HelperErrorCode;
   message: Message4;
   path?: Path2;
@@ -2442,28 +2557,28 @@ export interface HelperError {
 export interface ChannelEnd {
   outcome: ChannelEndOutcome;
   exit_status: ExitStatus;
-  detail: Detail2;
+  detail: Detail3;
 }
 /**
  * The helper could not start the worker that owns the compensating stop.
  */
 export interface WorkerStartRefusedCompensationFailure {
-  type: Type62;
+  type: Type66;
   exit_status: ExitStatus1;
-  request_id: RequestId61;
-  detail: Detail3;
-  kind: Kind30;
+  request_id: RequestId65;
+  detail: Detail4;
+  kind: Kind32;
   instance_id: InstanceId6;
 }
 /**
  * The registry stop raised before returning typed evidence.
  */
 export interface StopFailedCompensationFailure {
-  type: Type63;
+  type: Type67;
   exit_status: ExitStatus2;
-  request_id: RequestId62;
-  detail: Detail4;
-  kind: Kind31;
+  request_id: RequestId66;
+  detail: Detail5;
+  kind: Kind33;
   instance_id: InstanceId7;
 }
 /**
@@ -2473,11 +2588,11 @@ export interface StopFailedCompensationFailure {
  * so a serialized report cannot carry two identities that disagree.
  */
 export interface StopUnconfirmedCompensationFailure {
-  type: Type64;
+  type: Type68;
   exit_status: ExitStatus3;
-  request_id: RequestId63;
-  detail: Detail5;
-  kind: Kind32;
+  request_id: RequestId67;
+  detail: Detail6;
+  kind: Kind34;
   stop_result: UnconfirmedInstanceStopResult;
 }
 /**
@@ -2486,6 +2601,6 @@ export interface StopUnconfirmedCompensationFailure {
 export interface UnconfirmedInstanceStopResult {
   version?: Version13;
   id: Id7;
-  outcome: Outcome3;
+  outcome: Outcome5;
   route?: StopRoute | null;
 }

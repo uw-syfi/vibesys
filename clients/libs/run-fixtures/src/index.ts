@@ -5,6 +5,7 @@
  * (`scenarios`, `weeksRun`). `catalog` is the committed set, by name.
  */
 
+export {agentLogins, loginStarts} from './agent-logins.js';
 export {
   committedFixtures,
   FIXTURE_NAMES,

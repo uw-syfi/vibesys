@@ -34,15 +34,18 @@ from pydantic import TypeAdapter
 
 from server.host_api import (
     CLI_PROVIDER_FLAG,
+    ENVIRONMENT_FLAGS,
     HELPER_LINE_MAX_BYTES,
     HELPER_PROTOCOL_VERSIONS,
-    MODAL_FLAG,
     MODEL_FLAG,
     PATHS_COMPLETE_CAP,
     RUN_ENVIRONMENT_FLAG,
-    SKYPILOT_FLAG,
     SLURM_CONFIG_FLAG,
     UNVETTED_MODEL_FLAG,
+    AgentLoginsListReply,
+    AgentLoginsListRequest,
+    AgentLoginsStartReply,
+    AgentLoginsStartRequest,
     Checkout,
     CheckoutInspection,
     CheckoutInspectReply,
@@ -154,6 +157,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
     from datetime import tzinfo
 
+    from server.host_agent_logins import AgentLogin, LoginStarted, LoginUnavailable
     from server.host_api import RunDigest, RunDigestUnreadable
     from server.host_examples import CreatedProject, ExampleList
     from server.host_preflight import PreflightReport
@@ -387,6 +391,27 @@ class MachineProbe(Protocol):
         ...
 
 
+class AgentLogins(Protocol):
+    """Each vetted harness's login on this machine, and a request to start one.
+
+    Contract: ``list`` has one entry per provider ``providers`` names, in that order, and never
+    raises for a CLI problem (a missing CLI is a result); ``start`` is for a provider ``providers``
+    names, never raises, and answers ``unavailable`` when it cannot start the login.
+    """
+
+    def providers(self) -> tuple[str, ...]:
+        """The providers this host offers harnesses for, in offer order."""
+        ...
+
+    def list(self) -> tuple[AgentLogin, ...]:
+        """Whether each harness is installed and signed in, and how."""
+        ...
+
+    def start(self, provider: str) -> LoginStarted | LoginUnavailable:
+        """Start ``provider``'s own login on this machine."""
+        ...
+
+
 class ExampleProjects(Protocol):
     """The example catalog of the checkout this helper runs from, and new projects.
 
@@ -447,6 +472,7 @@ class HelperHost:
     logs: HelperLogs | None
     """The run log store; ``None`` on a host that has none, which then does not offer ``logs``."""
     machine: MachineProbe
+    logins: AgentLogins
     compute: MachineCompute
     """The machine's Slurm clusters and Modal token: where a run can measure besides here."""
     preflight: RunPreflight
@@ -661,14 +687,10 @@ def refused_argument(request: RunStartRequest | RunPreflightRequest) -> str | No
                     return f"{token} selects {flag}; runs started here use only vetted harnesses"
                 return f"{token} selects {flag}, which the chosen harness already sets"
         if request.measure_on is not None:
-            for flag in _ENVIRONMENT_FLAGS:
+            for flag in ENVIRONMENT_FLAGS:
                 if abbreviates(token, flag):
                     return f"{token} selects {flag}, which measure_on already sets"
     return repeated_option(request.args, request.options, request.agents)
-
-
-_ENVIRONMENT_FLAGS: Final = (RUN_ENVIRONMENT_FLAG, SLURM_CONFIG_FLAG, MODAL_FLAG, SKYPILOT_FLAG)
-"""The flags that choose where a run measures; ``measure_on`` is their only source."""
 
 
 def environment_arguments(
@@ -820,6 +842,8 @@ def _answer(
             | ComputeTestClusterRequest()
             | ComputeAddClusterRequest()
             | ComputeRemoveClusterRequest()
+            | AgentLoginsListRequest()
+            | AgentLoginsStartRequest()
         ):
             reply = _machine_reply(request, host)
         case RunStartRequest() | RunPreflightRequest():
@@ -873,6 +897,19 @@ def _project_reply(
             return RunsListReply(request_id=request_id, runs=summaries)
 
 
+def _logins_reply(
+    request: AgentLoginsListRequest | AgentLoginsStartRequest, logins: AgentLogins
+) -> AgentLoginsListReply | AgentLoginsStartReply | HelperError:
+    """Answer one read of the harnesses' logins, or a request to start one."""
+    request_id = request.request_id
+    if isinstance(request, AgentLoginsListRequest):
+        return AgentLoginsListReply(request_id=request_id, logins=logins.list())
+    if request.provider not in logins.providers():
+        message = f"this host offers no harness for provider {request.provider!r}"
+        return _error(request_id, HelperErrorCode.UNKNOWN_PROVIDER, message)
+    return AgentLoginsStartReply(request_id=request_id, result=logins.start(request.provider))
+
+
 def _compute_reply(
     request: ComputeListRequest
     | ComputeTestClusterRequest
@@ -924,11 +961,15 @@ def _machine_reply(
     | ComputeListRequest
     | ComputeTestClusterRequest
     | ComputeAddClusterRequest
-    | ComputeRemoveClusterRequest,
+    | ComputeRemoveClusterRequest
+    | AgentLoginsListRequest
+    | AgentLoginsStartRequest,
     host: HelperHost,
-) -> HelperReply:
+) -> HelperReply | HelperError:
     """Answer what this machine offers, what a path on it holds, or make a project on it."""
     match request:
+        case AgentLoginsListRequest() | AgentLoginsStartRequest():
+            return _logins_reply(request, host.logins)
         case (
             ComputeListRequest()
             | ComputeTestClusterRequest()

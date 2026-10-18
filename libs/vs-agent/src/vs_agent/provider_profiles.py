@@ -12,13 +12,15 @@ substitute a profile.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from pathlib import Path
     from types import ModuleType
 
-    from agentshim import ProviderProfile
+    from agentshim import CommandExecutor, ProviderProfile
 
 
 def _agentshim() -> ModuleType:
@@ -107,3 +109,112 @@ def model_display(provider: str, model: str | None) -> ModelDisplay | None:
         tier=spec.tier,
         tier_name=spec.tier_name,
     )
+
+
+class LoginState(StrEnum):
+    """Whether a provider CLI is signed in, as far as its own tooling can say."""
+
+    SIGNED_IN = "signed_in"
+    SIGNED_OUT = "signed_out"
+    #: Not installed, or the CLI offers no cheap check, or the check could not run.
+    UNKNOWN = "unknown"
+
+
+class LoginKind(StrEnum):
+    """What a signed-in CLI uses: a person's account, or a static API key."""
+
+    ACCOUNT = "account"
+    API_KEY = "api_key"
+
+
+@dataclass(frozen=True, slots=True)
+class LoginCredential:
+    """How a CLI is signed in, never the secret: ``variable`` or ``file`` names where an API key is held.
+
+    ``variable`` is an environment variable name and ``file`` a home-relative path; at most one is
+    set, and neither for an account login or a key whose place the CLI did not say.
+    """
+
+    kind: LoginKind
+    variable: str | None = None
+    file: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderLogin:
+    """One provider CLI's login on a machine: installed, signed in, how, and what could sign it in."""
+
+    provider: str
+    installed: bool
+    state: LoginState
+    credential: LoginCredential | None
+    """How it is signed in; ``None`` unless ``state`` is signed in, and when the CLI did not say."""
+    api_key_variables: tuple[str, ...]
+    """The environment variables that sign the CLI in with an API key, in its precedence order."""
+    detail: str
+    """The CLI's own words about its login, one line, for a log or a tooltip."""
+
+
+def provider_login(
+    provider: str,
+    *,
+    env: Mapping[str, str],
+    home: Path,
+    executor: CommandExecutor | None = None,
+    timeout: float = 15.0,
+) -> ProviderLogin:
+    """Probe *provider*'s CLI for whether it is installed and signed in, and how, without a turn.
+
+    agentshim owns every fact: ``probe_provider`` runs the CLI's version and status commands in
+    *env* (on *executor*, the host's by default), and the profile's credential sources say which
+    variable or file the CLI signs in with. No secret is read into the result: a variable's name
+    and a home-relative path only. A missing binary is a result. Raises ``ValueError`` for a
+    provider agentshim does not register.
+    """
+    shim = _agentshim()
+    profile = provider_profile(provider)
+    status = shim.probe_provider(provider, executor=executor, env=env, timeout=timeout)
+    state = {
+        shim.AuthState.KNOWN_OK: LoginState.SIGNED_IN,
+        shim.AuthState.FAILED: LoginState.SIGNED_OUT,
+        shim.AuthState.UNKNOWN: LoginState.UNKNOWN,
+    }[status.auth]
+    variables = tuple(
+        source.name
+        for source in profile.credential_sources
+        if isinstance(source, shim.EnvCredential) and source.kind is shim.CredentialKind.API_KEY
+    )
+    return ProviderLogin(
+        provider=provider,
+        installed=status.binary_found,
+        state=state,
+        credential=_credential(shim, profile, status, env, home)
+        if state is LoginState.SIGNED_IN
+        else None,
+        api_key_variables=variables,
+        detail=status.auth_detail.strip().splitlines()[0] if status.auth_detail.strip() else "",
+    )
+
+
+def _credential(
+    shim: ModuleType,
+    profile: ProviderProfile,
+    status: object,
+    env: Mapping[str, str],
+    home: Path,
+) -> LoginCredential | None:
+    """The kind the CLI reports, with the place agentshim's plan names when it agrees."""
+    reported = getattr(status, "credential", None)
+    try:
+        plan = shim.host_auth_plan(profile, env=env, home=home)
+    except shim.HostAuthUnplannableError:
+        plan = None
+    kind = reported if reported is not None else (None if plan is None else plan.credential)
+    if kind is None:
+        return None
+    login = LoginKind.API_KEY if kind is shim.CredentialKind.API_KEY else LoginKind.ACCOUNT
+    if plan is None or plan.credential is not kind or login is LoginKind.ACCOUNT:
+        return LoginCredential(login)
+    if plan.files:
+        return LoginCredential(login, file=plan.source)
+    return LoginCredential(login, variable=plan.source)

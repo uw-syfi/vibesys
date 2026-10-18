@@ -19,6 +19,12 @@ from tests.support.example_materializer import FakeExampleMaterializer
 from tests.support.task_project import write_task
 
 from entrypoints.examples import HelperExampleProjects
+from server.host_agent_logins import (
+    AgentLogin,
+    LoginStarted,
+    LoginUnavailable,
+    LoginUnavailableReason,
+)
 from server.host_api import (
     Checkout,
     DetachedLaunchFailure,
@@ -66,6 +72,7 @@ from vs_project.api.testing import FakeGitRepositories, run_execution_record
 from vs_sim.api.testing import HANG_GUARD_S, FakeProcessSignaller, ScriptedProbe
 
 if TYPE_CHECKING:
+    import builtins
     from collections.abc import Callable, Mapping
     from pathlib import Path
     from typing import Any
@@ -165,6 +172,27 @@ class FakeRunPreflight:
     def report(self, project: Path, arguments: tuple[str, ...]) -> PreflightReport:
         self.calls.append((project, arguments))
         return self.report_
+
+
+@dataclass
+class FakeAgentLogins:
+    """An ``AgentLogins`` over a fixed list, noting each login started."""
+
+    logins: tuple[AgentLogin, ...] = ()
+    started: builtins.list[str] = field(default_factory=list)
+    outcome: LoginStarted | LoginUnavailable = field(
+        default_factory=lambda: LoginUnavailable(reason=LoginUnavailableReason.NO_LOGIN_COMMAND)
+    )
+
+    def providers(self) -> tuple[str, ...]:
+        return tuple(login.provider for login in self.logins)
+
+    def list(self) -> tuple[AgentLogin, ...]:
+        return self.logins
+
+    def start(self, provider: str) -> LoginStarted | LoginUnavailable:
+        self.started.append(provider)
+        return self.outcome
 
 
 @dataclass
@@ -431,6 +459,7 @@ def fake_host(
         logs=None,
         harnesses=lambda: HARNESSES,
         machine=quiet_machine(),
+        logins=FakeAgentLogins(),
         compute=fake_compute(),
         clock=threads,
         timezone=UTC,

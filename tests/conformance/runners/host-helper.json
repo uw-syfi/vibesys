@@ -14,7 +14,8 @@
       "helper-preflight-causes-gated",
       "helper-harnesses",
       "helper-run-summary-gated",
-      "helper-compute-gated"
+      "helper-compute-gated",
+      "helper-agent-logins-gated"
     ],
     "registry": [
       "helper-instances-empty",

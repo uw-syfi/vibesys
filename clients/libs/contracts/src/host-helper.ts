@@ -20,6 +20,13 @@ import hostHelperSchema from './generated/host-helper.schema.js';
 import {type Schema, type SchemaWalk, validateSchema} from './schema-walker.js';
 
 export type {
+  AccountLogin,
+  AgentLogin,
+  AgentLoginsListReply,
+  AgentLoginsListRequest,
+  AgentLoginsStartReply,
+  AgentLoginsStartRequest,
+  ApiKeyLogin,
   Backend,
   ChannelEnd,
   ChannelEndOutcome,
@@ -64,6 +71,8 @@ export type {
   ListedCluster,
   LiveInstanceRecord,
   LogChunk,
+  LoginStarted,
+  LoginUnavailable,
   LogOffset,
   LogPipe,
   LogPipeSpan,
