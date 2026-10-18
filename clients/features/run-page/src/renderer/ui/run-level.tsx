@@ -162,6 +162,8 @@ function IdeasFace(props: {
   readonly state: RunPageState;
   readonly base: ViewBase;
   readonly outcomes: ImplementerOutcomes;
+  readonly selected: string | null;
+  readonly modeControls: boolean;
   readonly dispatch: Dispatch;
 }): JSX.Element {
   const {state, base, dispatch} = props;
@@ -171,6 +173,7 @@ function IdeasFace(props: {
   }
   return (
     <>
+      {props.modeControls ? <ModeSwitch mode="ideas" options={MODES} zoom={base.zoom} /> : null}
       <IdeasLegend state={state} base={base} dispatch={dispatch} />
       <Row gap="space-3" align="center">
         <Stack gap="space-0" grow>
@@ -197,10 +200,32 @@ function IdeasFace(props: {
         base={base}
         filter={state.ideas}
         sort={sort}
+        selected={props.selected}
         outcomes={props.outcomes}
         dispatch={dispatch}
       />
     </>
+  );
+}
+
+/** The Ideas master pane is the same component and width before and after an idea opens. */
+export function IdeasPane(props: {
+  readonly state: RunPageState;
+  readonly base: ViewBase;
+  readonly core: CoreState | null;
+  readonly selected: string | null;
+  readonly dispatch: Dispatch;
+}): JSX.Element {
+  const outcomes = implementerOutcomes(props.core, props.base.model.candidates);
+  return (
+    <FramedPane
+      kicker="ideas"
+      title={`${props.base.model.candidates.candidates.length}`}
+      width="master"
+      header={{}}
+    >
+      <IdeasFace {...props} outcomes={outcomes} modeControls />
+    </FramedPane>
   );
 }
 
@@ -216,7 +241,7 @@ function nowZoom(item: NowItem): ZoomEvent {
   }
 }
 
-function NowPane(props: {readonly base: ViewBase}): JSX.Element | null {
+export function NowPane(props: {readonly base: ViewBase}): JSX.Element | null {
   const {base} = props;
   const items = nowView(base.model);
   if (items.length === 0) return null;
@@ -286,7 +311,16 @@ function runFace(
     case 'ideas':
       return {
         header: {},
-        body: <IdeasFace state={state} base={base} outcomes={outcomes} dispatch={dispatch} />,
+        body: (
+          <IdeasFace
+            state={state}
+            base={base}
+            outcomes={outcomes}
+            selected={null}
+            modeControls={false}
+            dispatch={dispatch}
+          />
+        ),
       };
   }
 }

@@ -82,7 +82,7 @@ test('ideas stay flat, searchable, sortable and accessible at wide and narrow wi
   await expect(ideas.getByRole('option').first()).toBeVisible();
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
   await ideas.getByRole('option').first().click();
-  await expect(page.getByRole('navigation', {name: 'Zoom'})).toBeVisible();
+  await expect(page.getByRole('button', {name: 'Close idea'})).toBeVisible();
   await expect(page.getByText(/vs base/)).toHaveCount(0);
   await expect(page.getByText(/^from$/)).toHaveCount(0);
 });
@@ -95,6 +95,60 @@ test('six hundred ideas render a window of rows and remain keyboard reachable', 
   await ideas.focus();
   await page.keyboard.press('End');
   await expect(ideas.getByRole('option').last()).toBeFocused();
+  const scrollTop = await ideas.evaluate(list => list.scrollTop);
+  await ideas.evaluate(list => list.setAttribute('data-test-persist', 'yes'));
   await page.keyboard.press('Enter');
-  await expect(page.getByRole('navigation', {name: 'Zoom'})).toBeVisible();
+  await expect(page.getByRole('button', {name: 'Close idea'})).toBeVisible();
+  await expect(ideas).toHaveAttribute('data-test-persist', 'yes');
+  expect(await ideas.evaluate(list => list.scrollTop)).toBe(scrollTop);
+});
+
+test('opening an idea preserves the Ideas list and controls at wide and narrow widths', async ({
+  page,
+}) => {
+  await openRun(page, 10);
+  const ideas = page.getByRole('listbox', {name: 'Ideas'});
+  const controls = page.locator('.vs-pane', {has: ideas});
+  const geometry = () =>
+    ideas.evaluate(list => {
+      const pane = list.closest('.vs-pane');
+      const row = list.querySelector('.vs-pickrow');
+      const figure = row?.querySelector('.vs-pickrow-figure');
+      const bounds = (element: Element | null | undefined) => {
+        const rect = element?.getBoundingClientRect();
+        return rect === undefined ? null : [rect.x, rect.y, rect.width, rect.height];
+      };
+      return {
+        pane: bounds(pane),
+        list: bounds(list),
+        row: bounds(row),
+        figure: bounds(figure),
+        scrollTop: list.scrollTop,
+        text: row?.querySelector('.vs-pickrow-text')?.textContent,
+      };
+    });
+  for (const width of [1440, 1000]) {
+    await page.setViewportSize({width, height: 900});
+    await expect(controls.locator('.vs-dotlegend-item')).toHaveCount(3);
+    await expect(page.getByRole('searchbox', {name: 'Search ideas'})).toBeVisible();
+    await expect(page.getByRole('combobox', {name: 'Sort ideas'})).toBeVisible();
+    await ideas.evaluate(list => list.setAttribute('data-test-persist', 'yes'));
+    const before = await geometry();
+    if (process.env['RUN_SHOTS'] !== undefined) {
+      await page.screenshot({path: `${process.env['RUN_SHOTS']}/ideas-closed-${width}.png`});
+    }
+    await ideas.getByRole('option').first().click();
+    await expect(page.getByRole('button', {name: 'Close idea'})).toBeVisible();
+    await expect(controls.locator('.vs-dotlegend-item')).toHaveCount(3);
+    await expect(ideas).toHaveAttribute('data-test-persist', 'yes');
+    await expect(page.getByRole('searchbox', {name: 'Search ideas'})).toBeVisible();
+    await expect(page.getByRole('combobox', {name: 'Sort ideas'})).toBeVisible();
+    if (process.env['RUN_SHOTS'] !== undefined) {
+      await page.screenshot({path: `${process.env['RUN_SHOTS']}/ideas-open-${width}.png`});
+    }
+    expect(await geometry()).toEqual(before);
+    await page.getByRole('button', {name: 'Close idea'}).click();
+    await expect(ideas).toHaveAttribute('data-test-persist', 'yes');
+    expect(await geometry()).toEqual(before);
+  }
 });

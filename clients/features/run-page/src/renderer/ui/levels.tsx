@@ -8,7 +8,7 @@
 import type {CoreState} from '@vibesys/run-state';
 import type {AgentNode} from '@vibesys/run-state/agents';
 import type {Candidate, CandidateStep} from '@vibesys/run-state/candidates';
-import {Chip, markdownToPlain, Pane, Panes} from '@vibesys/ui';
+import {Button, Chip, markdownToPlain, Pane, Panes, Row} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
   implementerOutcomes,
@@ -22,7 +22,7 @@ import {
 } from '../../state/index.js';
 import {plain, statusWords} from '../../state/span-words.js';
 import {FramedPane} from './framed-pane.js';
-import {agentFolds, IdeasList, ModeSwitch} from './run-level.js';
+import {agentFolds, IdeasList, IdeasPane, ModeSwitch, NowPane} from './run-level.js';
 import {
   AgentPane,
   type AgentPaneProps,
@@ -72,6 +72,52 @@ function logsOptions(main: string): {value: RunMode; label: string}[] {
     {value: 'ideas', label: main},
     {value: 'logs', label: 'Logs'},
   ];
+}
+
+/** Keep the Ideas master mounted while only the neighboring pane changes on selection. */
+export function IdeasWorkspace(props: LevelProps & {readonly idea: Candidate | null}): JSX.Element {
+  const {state, base, mode, idea, dispatch} = props;
+  const outcomes = implementerOutcomes(props.core, base.model.candidates);
+  const view: IdeaViewProps | null =
+    idea === null ? null : {...base, idea, outcome: outcomes.get(idea.id) ?? null};
+  const logs: LogsViewProps | null =
+    idea === null ? null : {...base, state, scope: {kind: 'idea', idea}, dispatch};
+  return (
+    <Panes>
+      <IdeasPane
+        state={state}
+        base={base}
+        core={props.core}
+        selected={idea?.id ?? null}
+        dispatch={dispatch}
+      />
+      {idea === null || view === null || logs === null ? (
+        <NowPane base={base} />
+      ) : (
+        <FramedPane
+          kicker="idea"
+          title={markdownToPlain(idea.title)}
+          width="fill"
+          enterKey={`idea ${idea.id}`}
+          actions={
+            <Row gap="space-2">
+              <Button
+                size="sm"
+                variant="quiet"
+                text="Close idea"
+                press={() => base.zoom({type: 'up'})}
+              />
+              <ModeSwitch mode={mode} options={logsOptions('Steps')} zoom={base.zoom} />
+            </Row>
+          }
+          meta={ideaHeader(view).meta}
+          header={mode === 'logs' ? logsHeader(logs) : {}}
+        >
+          {mode === 'logs' ? <LogsView {...logs} /> : <IdeaView {...view} />}
+        </FramedPane>
+      )}
+    </Panes>
+  );
 }
 
 function IdeaLevel(props: LevelProps & {readonly idea: Candidate}): JSX.Element {

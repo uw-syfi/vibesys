@@ -61,6 +61,7 @@ export function IdeasTable(props: {
   readonly base: ViewBase;
   readonly filter: IdeasFilter;
   readonly sort: IdeasSort;
+  readonly selected: string | null;
   readonly outcomes: ImplementerOutcomes;
   readonly dispatch: (action: RunPageAction) => void;
 }): JSX.Element {
@@ -71,6 +72,7 @@ export function IdeasTable(props: {
       <PickList
         wrapSummary
         label="Ideas"
+        {...(props.selected === null ? {} : {selected: props.selected})}
         header={{
           start: 'idea',
           end: [{label: 'vs input', fixed: 'figure'}],
