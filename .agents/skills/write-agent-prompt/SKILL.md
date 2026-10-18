@@ -67,6 +67,9 @@ explains how the pieces are assembled.
    `reply` holds only fields the run offers, so naming another raises
    `vs_prompts.api.UnknownReplyFieldError`. A field's meaning goes in its
    Pydantic `description`, which the agent also receives.
+   A reply field that makes a choice (a status, a verdict, a bar, a base) declares the
+   prompt context fields it is decided from with `DecidedFrom` in its `Annotated` type,
+   and the prompt must show them (`tests/architecture/test_decision_inputs.py`).
 5. **Domain text goes in role files** that every strategy prints in one shared
    slot. All role files get the same variable set, so read what the
    domain-section renderer passes before using a variable. A modality is

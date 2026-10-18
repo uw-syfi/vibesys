@@ -24,6 +24,7 @@ from vibesys.hypothesis.attempts import (
     recorded_judge_verdict,
 )
 from vibesys.hypothesis.config import HypothesisConfig
+from vibesys.hypothesis.decision_inputs import DecidedFrom, declared_inputs
 from vibesys.hypothesis.ending import RunEnding, derive_ending, ending_of, has_trusted_reading
 from vibesys.hypothesis.history import (
     CandidateDisposition,
@@ -113,6 +114,7 @@ __all__ = [
     "CarryOver",
     "ClosedRound",
     "Continue",
+    "DecidedFrom",
     "ExhaustionNotice",
     "Finished",
     "Hypothesis",
@@ -157,6 +159,7 @@ __all__ = [
     "WorkspaceCheckpoint",
     "attempt_was_reviewed",
     "build_round_record",
+    "declared_inputs",
     "derive_ending",
     "derive_hypothesis_title",
     "ending_of",

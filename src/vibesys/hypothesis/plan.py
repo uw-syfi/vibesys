@@ -9,10 +9,11 @@ here because they are parts of this plan's agent-facing contract.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from vibesys.hypothesis.decision_inputs import DecidedFrom
 from vs_core.api import markdown_prose, plain_line
 from vs_issue_tracker.api import RoadmapItem
 from vs_runtime.api import AgentId
@@ -181,14 +182,16 @@ class OrchestratorPlan(BaseModel):
             "an identifier used earlier in this run."
         ),
     )
-    hypothesis_updates: list[HypothesisStrategyUpdate] = Field(
+    hypothesis_updates: Annotated[
+        list[HypothesisStrategyUpdate], DecidedFrom("history", "roadmap")
+    ] = Field(
         default_factory=list,
         description=(
             "Strategic parked/abandoned updates for previously completed hypotheses. "
             "These are persisted by the framework; roadmap items do not replace them."
         ),
     )
-    roadmap: list[RoadmapItem] = Field(
+    roadmap: Annotated[list[RoadmapItem], DecidedFrom("roadmap", "history")] = Field(
         default_factory=list,
         description=(
             "Roadmap items to create or replace, each by its id; list only new or changed "
@@ -229,7 +232,7 @@ class OrchestratorPlan(BaseModel):
             "hypothesis; this is not an acceptance threshold."
         ),
     )
-    minimum_ratio: float = Field(
+    minimum_ratio: Annotated[float, DecidedFrom("input_value", "history", "passed")] = Field(
         default=1.0,
         gt=0,
         allow_inf_nan=False,
@@ -270,7 +273,7 @@ class OrchestratorPlan(BaseModel):
             "Reference stable trusted gates by path; they run separately when configured."
         )
     )
-    base_round: int | None = Field(
+    base_round: Annotated[int | None, DecidedFrom("passed", "base_revision")] = Field(
         default=None,
         ge=0,
         description=(

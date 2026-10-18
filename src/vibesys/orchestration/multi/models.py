@@ -1,11 +1,12 @@
 """The replies of the multi-agent roles."""
 
-from typing import override
+from typing import Annotated, override
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
 from vibesys.hypothesis import (
     CandidateDisposition,
+    DecidedFrom,
     HypothesisOutcome,
     ImplementerStatus,
     SkillResourceSelection,
@@ -24,7 +25,9 @@ class ImplementerResponse(RevisionReply):
     expected_behavior: str = Field(
         description=markdown_prose("Observable behavior expected from the implementation.")
     )
-    status: ImplementerStatus = Field(
+    status: Annotated[
+        ImplementerStatus, DecidedFrom("plan.pass_criteria", "feedback", "validation_failure")
+    ] = Field(
         default=ImplementerStatus.IMPLEMENTED,
         description=(
             "Implementation status only. implemented: the candidate is complete and ready for "
@@ -61,7 +64,9 @@ class ImplementerResponse(RevisionReply):
         default=None,
         description="Workspace-relative canonical evaluation artifact.",
     )
-    candidate_disposition: CandidateDisposition = Field(
+    candidate_disposition: Annotated[
+        CandidateDisposition, DecidedFrom("plan.minimum_ratio", "pareto_archive_conflict")
+    ] = Field(
         default=CandidateDisposition.UNASSESSED,
         description=(
             "Independent checkpoint retention: pareto_frontier, prerequisite, discard, or unassessed."
@@ -117,7 +122,10 @@ class JudgeResponse(BaseModel):
     feedback: str = Field(
         description=markdown_prose("Specific actionable feedback. Empty string if passing.")
     )
-    verdict: Verdict = Field(
+    verdict: Annotated[
+        Verdict,
+        DecidedFrom("plan.pass_criteria", "plan.invariants", "claims.status", "claims.evidence"),
+    ] = Field(
         description=(
             "PASS when verified evidence supports the declared outcome and checkpoint "
             "disposition under the objective invariants; final success criteria need not "
@@ -138,9 +146,9 @@ class PreRoundDecision(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    need_profile: bool = Field(
-        description="True when a profiler run should happen before planning."
-    )
+    need_profile: Annotated[
+        bool, DecidedFrom("round_number", "regression_kind", "exhaustion_feedback")
+    ] = Field(description="True when a profiler run should happen before planning.")
     profile_focus: str = Field(
         default="",
         description=markdown_prose("Profiler guidance. Empty when need_profile is False."),
