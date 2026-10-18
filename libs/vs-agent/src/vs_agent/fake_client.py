@@ -16,7 +16,7 @@ from __future__ import annotations
 import functools
 import json
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Concatenate, Literal, Self, TypeVar
 from uuid import uuid4
 
@@ -248,6 +248,8 @@ class FakeAgentClient:
         self._refuses_accepted_steers = False
         self._refusals: list[Callable[[], None]] = []
         self._turns_in_flight = 0
+        self._keys_in_flight: list[AgentSessionKey] = []
+        self._refused_ids: dict[AgentSessionKey, list[str]] = {}
         self.threads = threads
         """The simulator this client's locks and events come from; turns run on it."""
         self._steer_lock = threads.lock()
@@ -343,6 +345,22 @@ class FakeAgentClient:
             refusals, self._refusals = self._refusals, []
         for refusal in refusals:
             refusal()
+
+    def steer_session(self, key: AgentSessionKey, text: str, *, steer_id: str) -> SteerOutcome:
+        """Offer *text* to *key*'s turn in flight, answering as scripted.
+
+        Only a turn ``run`` is running under *key* can take it, as with the real client. A
+        message scripted to be refused is named in that turn's ``refused_steers``.
+        """
+        with self._steer_lock:
+            if key not in self._keys_in_flight:
+                return SteerOutcome.NO_RUNNING_TURN
+            outcome = self._steer_outcome
+            if outcome is SteerOutcome.DELIVERED:
+                self.steers.append(text)
+                if self._refuses_accepted_steers:
+                    self._refused_ids.setdefault(key, []).append(steer_id)
+            return outcome
 
     def cancel_session(self, key: AgentSessionKey) -> None:
         """Record a cancellation of one key and release turns waiting for a cancellation."""
@@ -495,7 +513,29 @@ class FakeAgentClient:
         session_key: AgentSessionKey | None = None,
         observer: AgentObserver | None = None,
     ) -> AgentTurnResult:
-        """Execute a raw turn with the same scripts and strict identity fences."""
+        """Execute a raw turn with the same scripts and strict identity fences.
+
+        While it runs, ``steer_session`` reaches it under *session_key*.
+        """
+        if session_key is None:
+            return self._run_raw(session_spec, turn, None, observer)
+        with self._steer_lock:
+            self._keys_in_flight.append(session_key)
+        try:
+            result = self._run_raw(session_spec, turn, session_key, observer)
+        finally:
+            with self._steer_lock:
+                self._keys_in_flight.remove(session_key)
+                refused = tuple(self._refused_ids.pop(session_key, ()))
+        return replace(result, refused_steers=refused) if refused else result
+
+    def _run_raw(
+        self,
+        session_spec: AgentSessionSpec,
+        turn: AgentTurnRequest,
+        session_key: AgentSessionKey | None,
+        observer: AgentObserver | None,
+    ) -> AgentTurnResult:
         fingerprint = session_spec_fingerprint(session_spec)
         if turn.require_provider_checkpoint and (session_key is None or not session_key.durable):
             raise SessionResumeError(

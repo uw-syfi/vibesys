@@ -201,7 +201,12 @@ describe('the ended banner', () => {
       const prefix = [ROOT, ...rounds.slice(0, count).flat()];
       const reading = {
         ...ended('adopted', 'adopted: s', prefix),
-        history: {kind: 'reading', token: 1, from: 1},
+        history: {
+          kind: 'reading',
+          token: 1,
+          from: 1,
+          progress: {events: 0, bytes: 0, total: null},
+        },
       } as const;
       expect(endedView(reading)?.reason).toMatch(/^Reading the run.s history/);
     }

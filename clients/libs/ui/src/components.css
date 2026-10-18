@@ -1681,7 +1681,11 @@ button.vs-stage-head {
 
 /* --- app frame --------------------------------------------------------------------------------- */
 
-.vs-app-frame {
+.vs-app-frame,
+.vs-window-frame {
+  /* The title-bar row: as tall as the window's own controls, and at least one control. */
+  --titlebar-row: max(var(--chrome-inset-height, var(--space-0)), var(--control));
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   height: 100%;
@@ -1697,9 +1701,8 @@ button.vs-stage-head {
   max-width: var(--sidebar);
   max-height: 100%;
   overflow-y: auto;
-  /* The window's own controls (macOS's traffic lights) sit over the column's top: start below them. */
-  padding: calc(var(--space-5) + var(--chrome-inset-height, var(--space-0))) var(--space-4)
-    var(--space-5);
+  /* The title-bar row (the window's own controls and the toggle) sits over the column's top: start below it. */
+  padding: calc(var(--titlebar-row) + var(--space-2)) var(--space-4) var(--space-5);
   /* The column's background moves the window; its controls stay controls. */
   -webkit-app-region: drag;
   border-right: var(--hairline) solid var(--line);
@@ -1762,22 +1765,33 @@ button.vs-stage-head {
   min-height: 0;
 }
 /*
- * With the column hidden, the strip holds its control beside the window's own controls
- * (`--chrome-inset-width`) and keeps the page below them; its background drags the window.
+ * The title-bar row's control floats over the row, after the window's own controls and centered on
+ * them; the same place with the column shown or hidden.
  */
-.vs-app-strip {
+.vs-app-titlebar-control {
+  position: absolute;
+  top: 0;
+  left: max(var(--chrome-inset-width, var(--space-0)), var(--space-4));
+  z-index: 1;
   display: flex;
-  flex: none;
   align-items: center;
-  box-sizing: border-box;
-  min-height: max(var(--chrome-inset-height, var(--space-0)), calc(var(--control) + var(--space-3)));
-  padding: var(--space-2) var(--space-4) var(--space-2)
-    max(var(--chrome-inset-width, var(--space-0)), var(--space-4));
-  -webkit-app-region: drag;
+  height: var(--titlebar-row);
+  -webkit-app-region: no-drag;
+}
+/* A window without a navigation column: the title-bar row, then the page filling the rest. */
+.vs-window-frame {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
   background: var(--bg);
 }
-.vs-app-strip :is(a, button, input, select, textarea, [tabindex]) {
-  -webkit-app-region: no-drag;
+/* With the column hidden, the row stays as an empty drag strip and the page sits below it. */
+.vs-app-strip {
+  flex: none;
+  box-sizing: border-box;
+  height: var(--titlebar-row);
+  -webkit-app-region: drag;
+  background: var(--bg);
 }
 
 /* --- theme swatch ------------------------------------------------------------------------------ */

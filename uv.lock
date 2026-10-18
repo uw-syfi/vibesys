@@ -2906,6 +2906,7 @@ dependencies = [
     { name = "modal" },
     { name = "openevolve" },
     { name = "pydantic" },
+    { name = "pydantic-core" },
     { name = "pygit2" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
@@ -2950,6 +2951,7 @@ requires-dist = [
     { name = "modal", specifier = ">=1.4.2" },
     { name = "openevolve", specifier = "==0.3.1" },
     { name = "pydantic", specifier = ">=2" },
+    { name = "pydantic-core" },
     { name = "pygit2", specifier = ">=1.18,<2" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "pyyaml", specifier = ">=6" },
@@ -2990,6 +2992,7 @@ source = { editable = "libs/vs-agent" }
 dependencies = [
     { name = "agentshim" },
     { name = "pydantic" },
+    { name = "pydantic-core" },
     { name = "vs-decode" },
     { name = "vs-faults" },
     { name = "vs-mcp" },
@@ -3003,6 +3006,7 @@ dependencies = [
 requires-dist = [
     { name = "agentshim", specifier = ">=0.18.3,<0.19" },
     { name = "pydantic", specifier = ">=2" },
+    { name = "pydantic-core" },
     { name = "vs-decode", editable = "libs/vs-decode" },
     { name = "vs-faults", editable = "libs/vs-faults" },
     { name = "vs-mcp", editable = "libs/vs-mcp" },

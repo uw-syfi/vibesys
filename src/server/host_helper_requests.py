@@ -96,6 +96,8 @@ from server.host_api import (
     RunsListRequest,
     RunsReadEventsReply,
     RunsReadEventsRequest,
+    RunsSummaryReply,
+    RunsSummaryRequest,
     RunStartReply,
     RunStartRequest,
     RunStopReply,
@@ -130,6 +132,7 @@ if TYPE_CHECKING:
     from server.host_preflight import PreflightReport
     from server.registry import InstanceInspector, LiveRegistry, StopEffects
     from server.relay import Dialer
+    from server.run_summary import Summarized
     from vs_sim.api import Clock, Connection
 
 SCAN_LIMIT: Final = 10_000
@@ -218,6 +221,14 @@ class Projects(Protocol):
 
         A run that journaled nothing has an empty, complete page. Raises
         ``ProjectLookupError`` with ``unknown_run`` when the project has no such run.
+        """
+        ...
+
+    def run_summary(self, project: Path, run_id: str) -> Summarized:
+        """The fold of run ``run_id``'s whole journal, as it is now (``server.run_summary``).
+
+        A run that journaled nothing has an empty fold. Raises ``ProjectLookupError`` with
+        ``unknown_run`` when the project has no such run.
         """
         ...
 
@@ -652,8 +663,8 @@ def _answer(
             reply = _instances_reply(request, host)
         case TasksListRequest() | RunsListRequest():
             reply = _project_reply(request, host)
-        case RunsReadEventsRequest():
-            reply = _run_events_reply(request, host)
+        case RunsReadEventsRequest() | RunsSummaryRequest():
+            reply = _run_history_reply(request, host)
         case (
             MachineDescribeRequest()
             | CheckoutInspectRequest()
@@ -796,6 +807,36 @@ def run_counts(listing: InstanceList, now: float, timezone: tzinfo) -> RunCounts
         1 for record in listing.ended if record.ended_at is None or record.ended_at >= midnight
     )
     return RunCounts(live=len(listing.instances), ended_today=ended_today)
+
+
+def _run_history_reply(
+    request: RunsReadEventsRequest | RunsSummaryRequest, host: HelperHost
+) -> RunsReadEventsReply | RunsSummaryReply:
+    """Answer one read of a run's recorded history: a page of its events, or of its summary."""
+    if isinstance(request, RunsReadEventsRequest):
+        return _run_events_reply(request, host)
+    return _run_summary_reply(request, host)
+
+
+def _run_summary_reply(request: RunsSummaryRequest, host: HelperHost) -> RunsSummaryReply:
+    """Answer one page of a run's summary."""
+    project = Path(_host_path(request.project, host.directories))
+    summarized = host.projects.run_summary(project, request.run_id)
+    fold = summarized.fold
+    page = fold.page(request.offset)
+    return RunsSummaryReply(
+        request_id=request.request_id,
+        through_sequence=fold.through_sequence,
+        event_count=fold.event_count,
+        journal_bytes=summarized.journal_bytes,
+        span_count=fold.span_count,
+        reply_count=fold.reply_count,
+        overview=fold.overview,
+        spans=page.spans,
+        replies=page.replies,
+        schemas=page.schemas,
+        next_offset=page.next_offset,
+    )
 
 
 def _run_events_reply(request: RunsReadEventsRequest, host: HelperHost) -> RunsReadEventsReply:

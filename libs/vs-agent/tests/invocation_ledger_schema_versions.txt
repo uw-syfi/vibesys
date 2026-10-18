@@ -1,0 +1,2 @@
+# The invocation ledger's schema_version and the digest of its JSON schema.
+2 6dd20b6874d45900b671fbdef96f8e96faa25b243fa5a7c0c2c86741f19d5eb2

@@ -30,7 +30,7 @@ the log streams' ``LogStream``, ``LogStreamOutcome``, ``LogChunk``, ``LogPipeSpa
 ``HELPER_FIELD_FEATURES``, ``request_features``, ``HelperFeature``,
 ``HelperRequest`` (``parse_helper_request``) and its members, the run history
 read's limits (``RUN_EVENTS_READ_MAX``, ``RUN_EVENTS_READ_MAX_BYTES``), ``RUN_EVENTS_FILE`` and
-``RunEventDocument``, the machine facts (``Accelerator``, ``Gpu``, ``Hardware``,
+``RunEventDocument``, the run summary's messages (``server.host_run_summary``), the machine facts (``Accelerator``, ``Gpu``, ``Hardware``,
 ``DockerReachable``, ``DockerUnreachable``, ``MachineCheckout``, ``RunCounts``,
 ``MachineDescription``) and checkout inspection (``MIN_CHECKOUT_VERSION``,
 ``CheckoutFound``, ``CheckoutNotFound``, ``CheckoutTooOld``, ``CheckoutInspection``), ``HelperMessage``
@@ -71,8 +71,15 @@ from pydantic import (
     model_validator,
 )
 
+from server.host_envelope import (
+    HelperReplyBase,
+    HelperRequestBase,
+    RequestId,
+    RunId,
+)
 from server.host_examples import CreatedProject, ExampleList
 from server.host_preflight import Backend, Check, RoleName, RunOptions
+from server.host_run_summary import RunsSummaryReply, RunsSummaryRequest
 from vs_decode.api import Unreadable, decode_json
 
 PROTOCOL_VERSION = 1
@@ -85,9 +92,6 @@ importing the run protocol; the protocol module re-exports it.
 INSTANCE_ID_PATTERN = r"^[0-9a-f]{12}$"
 InstanceId = Annotated[str, StringConstraints(pattern=INSTANCE_ID_PATTERN)]
 """A registry key: 12 lowercase hex digits, so it is never a path fragment."""
-
-RunId = Annotated[str, StringConstraints(min_length=1)]
-"""The durable run a server drives; ``vs_project`` owns its full syntax."""
 
 RECORD_VERSION = 5
 """The registry record version this checkout writes; it also reads versions 3 and 4."""
@@ -758,6 +762,8 @@ class HelperFeature(StrEnum):
     """``logs.list``'s ``span_id``: only the streams whose owner names that run-trace span."""
     RUN_HISTORY = "run_history"
     """``runs.read_events``: a run's recorded events, read from disk in bounded pages."""
+    RUN_SUMMARY = "run_summary"
+    """``runs.summary``: everything the run level shows, from a read model kept beside the journal."""
     MACHINE_DESCRIBE = "machine_describe"
     """``machine.describe``: the host's checkout, hardware, Docker, harness CLIs and run counts."""
     CHECKOUT_INSPECT = "checkout_inspect"
@@ -803,21 +809,7 @@ LOCAL_FLAG: Final = "--local"
 """Keeps the run local; ``run.start`` emits it for ``results: keep``."""
 
 
-RequestId = Annotated[str, StringConstraints(min_length=1, max_length=128)]
-"""Chosen by the client, unique while the channel owns its request or watch worker."""
-
-MAX_DEADLINE_MS = 3_600_000
-
-
-class _HelperRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    request_id: RequestId
-    deadline_ms: Annotated[int, Field(gt=0, le=MAX_DEADLINE_MS)]
-    """How long the client waits for the reply; the helper answers ``deadline_exceeded`` after it."""
-
-
-class HelloRequest(_HelperRequest):
+class HelloRequest(HelperRequestBase):
     """The first message on every channel: which versions and features the client speaks.
 
     Its shape never changes across protocol versions, so any helper can parse
@@ -832,13 +824,13 @@ class HelloRequest(_HelperRequest):
     app_version: str
 
 
-class InstancesListRequest(_HelperRequest):
+class InstancesListRequest(HelperRequestBase):
     """The live and recently ended detached servers on this host."""
 
     type: Literal["instances.list"] = "instances.list"
 
 
-class InstancesInspectRequest(_HelperRequest):
+class InstancesInspectRequest(HelperRequestBase):
     """Inspect one detached server without starting another host process.
 
     ``include_log`` is deprecated: it asks for a tail of ``server.log``, the detached
@@ -853,20 +845,20 @@ class InstancesInspectRequest(_HelperRequest):
     include_log: bool = False
 
 
-class InstancesWatchRequest(_HelperRequest):
+class InstancesWatchRequest(HelperRequestBase):
     """Push the listing now and again whenever it changes, until ``instances.unwatch``."""
 
     type: Literal["instances.watch"] = "instances.watch"
 
 
-class InstancesUnwatchRequest(_HelperRequest):
+class InstancesUnwatchRequest(HelperRequestBase):
     """Stop the watch that ``watch_id`` (its request's id) started."""
 
     type: Literal["instances.unwatch"] = "instances.unwatch"
     watch_id: RequestId
 
 
-class TasksListRequest(_HelperRequest):
+class TasksListRequest(HelperRequestBase):
     """The tasks a project defines under ``.vibesys/tasks/``."""
 
     type: Literal["tasks.list"] = "tasks.list"
@@ -874,7 +866,7 @@ class TasksListRequest(_HelperRequest):
     """The project directory on the host; ``~`` expands to the helper's home."""
 
 
-class RunsListRequest(_HelperRequest):
+class RunsListRequest(HelperRequestBase):
     """A project's runs, with the phase of any server on this host that drives one."""
 
     type: Literal["runs.list"] = "runs.list"
@@ -917,13 +909,13 @@ class HarnessOption(BaseModel):
     """The model a run on ``provider`` uses when nothing names one."""
 
 
-class HarnessesListRequest(_HelperRequest):
+class HarnessesListRequest(HelperRequestBase):
     """The vetted provider and model pairs ``run.start``'s ``harness`` accepts."""
 
     type: Literal["harnesses.list"] = "harnesses.list"
 
 
-class RunStartRequest(_HelperRequest):
+class RunStartRequest(HelperRequestBase):
     """Start a detached run (``vibesys --detach``) in ``project``.
 
     ``args`` never carry ``UNVETTED_MODEL_FLAG`` (or an abbreviation of it): a run
@@ -945,7 +937,7 @@ class RunStartRequest(_HelperRequest):
     Sent only after ``hello`` returned ``run_options``."""
 
 
-class RunPreflightRequest(_HelperRequest):
+class RunPreflightRequest(HelperRequestBase):
     """Whether the run ``run.start`` would launch with these inputs can start, check by check."""
 
     type: Literal["run.preflight"] = "run.preflight"
@@ -966,7 +958,7 @@ class RunPreflightRequest(_HelperRequest):
     that names no flag. Sent only after ``hello`` returned ``run_causes``."""
 
 
-class RunStopRequest(_HelperRequest):
+class RunStopRequest(HelperRequestBase):
     """Stop a live detached server (``vibesys instances stop``)."""
 
     type: Literal["run.stop"] = "run.stop"
@@ -982,7 +974,7 @@ class RunRole(StrEnum):
     CHAT = "chat"
 
 
-class RunConnectRequest(_HelperRequest):
+class RunConnectRequest(HelperRequestBase):
     """Make this channel a byte relay to a live run's control socket."""
 
     type: Literal["run.connect"] = "run.connect"
@@ -990,13 +982,13 @@ class RunConnectRequest(_HelperRequest):
     role: RunRole
 
 
-class PingRequest(_HelperRequest):
+class PingRequest(HelperRequestBase):
     """Liveness of the channel."""
 
     type: Literal["ping"] = "ping"
 
 
-class PathsCompleteRequest(_HelperRequest):
+class PathsCompleteRequest(HelperRequestBase):
     """The directories that complete a typed path on the host."""
 
     type: Literal["paths.complete"] = "paths.complete"
@@ -1059,7 +1051,7 @@ class LogTail(BaseModel):
     tail_bytes: Annotated[int, Field(ge=1, le=LOGS_READ_MAX_BYTES)]
 
 
-class LogsListRequest(_HelperRequest):
+class LogsListRequest(HelperRequestBase):
     """The log streams recorded for one instance, live or ended."""
 
     type: Literal["logs.list"] = "logs.list"
@@ -1068,7 +1060,7 @@ class LogsListRequest(_HelperRequest):
     """Only the streams whose owner names this run-trace span (feature ``logs_by_span``)."""
 
 
-class LogsReadRequest(_HelperRequest):
+class LogsReadRequest(HelperRequestBase):
     """One bounded chunk of a stream; at the end of an open stream, wait up to ``wait_ms`` for more.
 
     A wait ends as soon as bytes arrive or the stream closes, and always before
@@ -1083,7 +1075,7 @@ class LogsReadRequest(_HelperRequest):
     wait_ms: Annotated[int, Field(ge=0, le=LOGS_WAIT_MAX_MS)] = 0
 
 
-class LogsCancelRequest(_HelperRequest):
+class LogsCancelRequest(HelperRequestBase):
     """Withdraw the ``logs.read`` whose request id is ``read_id``: a wait it is in ends now.
 
     The read still answers, with what it holds (an empty chunk at the end of the
@@ -1112,7 +1104,7 @@ RunEventDocument = dict[str, JsonValue]
 with its generated type. The helper passes it through so it never imports the protocol."""
 
 
-class RunsReadEventsRequest(_HelperRequest):
+class RunsReadEventsRequest(HelperRequestBase):
     """A page of one run's recorded events, from its journal on disk, live or ended."""
 
     type: Literal["runs.read_events"] = "runs.read_events"
@@ -1124,13 +1116,13 @@ class RunsReadEventsRequest(_HelperRequest):
     max: Annotated[int, Field(ge=1, le=RUN_EVENTS_READ_MAX)]
 
 
-class MachineDescribeRequest(_HelperRequest):
+class MachineDescribeRequest(HelperRequestBase):
     """What this host offers runs: its checkout, hardware, Docker, harness CLIs and runs."""
 
     type: Literal["machine.describe"] = "machine.describe"
 
 
-class CheckoutInspectRequest(_HelperRequest):
+class CheckoutInspectRequest(HelperRequestBase):
     """Whether ``path`` holds a VibeSys checkout, and whether this app can use it."""
 
     type: Literal["checkout.inspect"] = "checkout.inspect"
@@ -1138,13 +1130,13 @@ class CheckoutInspectRequest(_HelperRequest):
     """A path as typed: ``~`` expands on the host, a relative path is under the home directory."""
 
 
-class ExamplesListRequest(_HelperRequest):
+class ExamplesListRequest(HelperRequestBase):
     """The examples of the checkout this helper runs from, with their tasks."""
 
     type: Literal["examples.list"] = "examples.list"
 
 
-class ProjectCreateFromExampleRequest(_HelperRequest):
+class ProjectCreateFromExampleRequest(HelperRequestBase):
     """Copy ``example`` into its own new Git repository at ``destination`` (absent or empty)."""
 
     type: Literal["project.create_from_example"] = "project.create_from_example"
@@ -1154,7 +1146,7 @@ class ProjectCreateFromExampleRequest(_HelperRequest):
     """A path as typed, as for ``paths.complete``."""
 
 
-class ProjectCopyOutRequest(_HelperRequest):
+class ProjectCopyOutRequest(HelperRequestBase):
     """Copy ``source``, a folder inside another Git repository, into its own new one at ``destination``."""
 
     type: Literal["project.copy_out"] = "project.copy_out"
@@ -1163,7 +1155,7 @@ class ProjectCopyOutRequest(_HelperRequest):
     """Must not exist."""
 
 
-HELPER_REQUEST_FEATURES: Final[Mapping[type[_HelperRequest], HelperFeature]] = {
+HELPER_REQUEST_FEATURES: Final[Mapping[type[HelperRequestBase], HelperFeature]] = {
     InstancesInspectRequest: HelperFeature.INSTANCES_INSPECT,
     InstancesWatchRequest: HelperFeature.INSTANCES_WATCH,
     InstancesUnwatchRequest: HelperFeature.INSTANCES_WATCH,
@@ -1173,6 +1165,7 @@ HELPER_REQUEST_FEATURES: Final[Mapping[type[_HelperRequest], HelperFeature]] = {
     LogsCancelRequest: HelperFeature.LOGS_CANCEL,
     HarnessesListRequest: HelperFeature.HARNESSES,
     RunsReadEventsRequest: HelperFeature.RUN_HISTORY,
+    RunsSummaryRequest: HelperFeature.RUN_SUMMARY,
     MachineDescribeRequest: HelperFeature.MACHINE_DESCRIBE,
     CheckoutInspectRequest: HelperFeature.CHECKOUT_INSPECT,
     RunPreflightRequest: HelperFeature.PREFLIGHT,
@@ -1182,7 +1175,7 @@ HELPER_REQUEST_FEATURES: Final[Mapping[type[_HelperRequest], HelperFeature]] = {
 }
 """The feature each gated request needs, exported with the generated wire contract."""
 
-HELPER_FIELD_FEATURES: Final[Mapping[type[_HelperRequest], Mapping[str, HelperFeature]]] = {
+HELPER_FIELD_FEATURES: Final[Mapping[type[HelperRequestBase], Mapping[str, HelperFeature]]] = {
     RunStartRequest: {"harness": HelperFeature.HARNESSES, "options": HelperFeature.RUN_OPTIONS},
     RunPreflightRequest: {
         "harness": HelperFeature.HARNESSES,
@@ -1197,7 +1190,7 @@ HELPER_FIELD_FEATURES: Final[Mapping[type[_HelperRequest], Mapping[str, HelperFe
 """The feature each gated optional field needs when it is set (not ``None``), exported too."""
 
 
-def request_features(request: _HelperRequest) -> tuple[HelperFeature, ...]:
+def request_features(request: HelperRequestBase) -> tuple[HelperFeature, ...]:
     """The features ``hello`` must have returned for ``request``: its method's and its set fields'."""
     method = HELPER_REQUEST_FEATURES.get(type(request))
     features = [] if method is None else [method]
@@ -1225,6 +1218,7 @@ HelperRequest = Annotated[
     | LogsCancelRequest
     | HarnessesListRequest
     | RunsReadEventsRequest
+    | RunsSummaryRequest
     | MachineDescribeRequest
     | CheckoutInspectRequest
     | RunPreflightRequest
@@ -1259,13 +1253,7 @@ class Checkout(BaseModel):
     """Whether tracked files differ from ``HEAD``; ``None`` when git could not say."""
 
 
-class _HelperReply(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    request_id: RequestId
-
-
-class HelloReply(_HelperReply):
+class HelloReply(HelperReplyBase):
     """The negotiated version and features, and what will start runs on this host."""
 
     type: Literal["hello"] = "hello"
@@ -1276,28 +1264,28 @@ class HelloReply(_HelperReply):
     """``None`` when the helper runs from an installed distribution."""
 
 
-class InstancesListReply(_HelperReply):
+class InstancesListReply(HelperReplyBase):
     """The registry's listing."""
 
     type: Literal["instances.list"] = "instances.list"
     listing: InstanceList
 
 
-class InstancesInspectReply(_HelperReply):
+class InstancesInspectReply(HelperReplyBase):
     """One coherent inspection of a detached server and its retained artifacts."""
 
     type: Literal["instances.inspect"] = "instances.inspect"
     inspection: InstanceInspection
 
 
-class InstancesWatchReply(_HelperReply):
+class InstancesWatchReply(HelperReplyBase):
     """The watch started; ``instances.changed`` for ``watch_id`` follows at once and on change."""
 
     type: Literal["instances.watch"] = "instances.watch"
     watch_id: RequestId
 
 
-class InstancesUnwatchReply(_HelperReply):
+class InstancesUnwatchReply(HelperReplyBase):
     """The watch ended; no ``instances.changed`` for ``watch_id`` follows."""
 
     type: Literal["instances.unwatch"] = "instances.unwatch"
@@ -1314,7 +1302,7 @@ class InstancesChanged(BaseModel):
     listing: InstanceList
 
 
-class TasksListReply(_HelperReply):
+class TasksListReply(HelperReplyBase):
     """The project's tasks."""
 
     type: Literal["tasks.list"] = "tasks.list"
@@ -1345,14 +1333,14 @@ class RunList(BaseModel):
     runs: tuple[RunSummary, ...]
 
 
-class RunsListReply(_HelperReply):
+class RunsListReply(HelperReplyBase):
     """The project's runs."""
 
     type: Literal["runs.list"] = "runs.list"
     runs: RunList
 
 
-class RunsReadEventsReply(_HelperReply):
+class RunsReadEventsReply(HelperReplyBase):
     """One page of a run's recorded events, oldest first."""
 
     type: Literal["runs.read_events"] = "runs.read_events"
@@ -1363,21 +1351,21 @@ class RunsReadEventsReply(_HelperReply):
     """The page reached the end of what the journal holds now."""
 
 
-class RunStartReply(_HelperReply):
+class RunStartReply(HelperReplyBase):
     """The started server's record, or why nothing started."""
 
     type: Literal["run.start"] = "run.start"
     launch: LiveInstanceRecord | DetachedLaunchFailure
 
 
-class RunStopReply(_HelperReply):
+class RunStopReply(HelperReplyBase):
     """What the stop observed."""
 
     type: Literal["run.stop"] = "run.stop"
     result: InstanceStopResult
 
 
-class RunConnectReply(_HelperReply):
+class RunConnectReply(HelperReplyBase):
     """The channel is now a byte relay carrying the run protocol to this run."""
 
     type: Literal["run.connect"] = "run.connect"
@@ -1386,7 +1374,7 @@ class RunConnectReply(_HelperReply):
     """The run protocol version the server speaks."""
 
 
-class PingReply(_HelperReply):
+class PingReply(HelperReplyBase):
     """The channel is alive."""
 
     type: Literal["ping"] = "ping"
@@ -1412,7 +1400,7 @@ PATHS_COMPLETE_CAP = 200
 """The most entries one ``paths.complete`` reply carries."""
 
 
-class PathsCompleteReply(_HelperReply):
+class PathsCompleteReply(HelperReplyBase):
     """Matching directories of ``directory``, sorted by name, at most ``PATHS_COMPLETE_CAP``."""
 
     type: Literal["paths.complete"] = "paths.complete"
@@ -1458,7 +1446,7 @@ class LogPipeSpan(BaseModel):
     pipe: LogPipe
 
 
-class LogsListReply(_HelperReply):
+class LogsListReply(HelperReplyBase):
     """The instance's streams, oldest first."""
 
     type: Literal["logs.list"] = "logs.list"
@@ -1511,21 +1499,21 @@ class LogChunk(BaseModel):
         return self
 
 
-class LogsReadReply(_HelperReply):
+class LogsReadReply(HelperReplyBase):
     """One chunk of the stream."""
 
     type: Literal["logs.read"] = "logs.read"
     chunk: LogChunk
 
 
-class LogsCancelReply(_HelperReply):
+class LogsCancelReply(HelperReplyBase):
     """The withdrawal was taken: a read ``read_id`` named that was still waiting stops waiting."""
 
     type: Literal["logs.cancel"] = "logs.cancel"
     read_id: RequestId
 
 
-class HarnessesListReply(_HelperReply):
+class HarnessesListReply(HelperReplyBase):
     """The vetted pairs, grouped by provider with each provider's default first."""
 
     type: Literal["harnesses.list"] = "harnesses.list"
@@ -1622,7 +1610,7 @@ class MachineDescription(BaseModel):
     runs: RunCounts
 
 
-class MachineDescribeReply(_HelperReply):
+class MachineDescribeReply(HelperReplyBase):
     """The machine's description."""
 
     type: Literal["machine.describe"] = "machine.describe"
@@ -1673,28 +1661,28 @@ CheckoutInspection = Annotated[
 ]
 
 
-class ExamplesListReply(_HelperReply):
+class ExamplesListReply(HelperReplyBase):
     """The checkout's example catalog."""
 
     type: Literal["examples.list"] = "examples.list"
     listing: ExampleList
 
 
-class ProjectCreateFromExampleReply(_HelperReply):
+class ProjectCreateFromExampleReply(HelperReplyBase):
     """The project made from the example."""
 
     type: Literal["project.create_from_example"] = "project.create_from_example"
     created: CreatedProject
 
 
-class ProjectCopyOutReply(_HelperReply):
+class ProjectCopyOutReply(HelperReplyBase):
     """The project copied out into its own repository."""
 
     type: Literal["project.copy_out"] = "project.copy_out"
     created: CreatedProject
 
 
-class RunPreflightReply(_HelperReply):
+class RunPreflightReply(HelperReplyBase):
     """Every check, in ``CheckId`` order; Start is enabled exactly when none is ``fail``."""
 
     type: Literal["run.preflight"] = "run.preflight"
@@ -1711,7 +1699,7 @@ class RunPreflightReply(_HelperReply):
     ``run_backend``), as are the checks' ``cause`` fields."""
 
 
-class CheckoutInspectReply(_HelperReply):
+class CheckoutInspectReply(HelperReplyBase):
     """What the path holds."""
 
     type: Literal["checkout.inspect"] = "checkout.inspect"
@@ -1774,7 +1762,7 @@ class HelperErrorCode(StrEnum):
     PROJECT_CREATE_FAILED = "project_create_failed"
     """Copying or committing failed; nothing is left at the destination, and the message says why."""
     UNKNOWN_RUN = "unknown_run"
-    """``runs.read_events`` named a run the project does not have; the message names it."""
+    """``runs.read_events`` or ``runs.summary`` named a run the project does not have; the message names it."""
     UNVETTED_HARNESS = "unvetted_harness"
     """``run.start``'s ``harness`` is not one ``harnesses.list`` offers; only sent with ``harnesses``."""
     INTERNAL = "internal"
@@ -1816,6 +1804,7 @@ HelperReply = (
     | LogsCancelReply
     | HarnessesListReply
     | RunsReadEventsReply
+    | RunsSummaryReply
     | MachineDescribeReply
     | CheckoutInspectReply
     | RunPreflightReply

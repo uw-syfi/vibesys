@@ -91,13 +91,17 @@ class SteerMode(StrEnum):
     STANDING = "standing"
     """Every turn of the target dispatched from now on takes it, until it is withdrawn
     (``WithdrawRequest``) or the target ends."""
+    INTERRUPT = "interrupt"
+    """Offered to a turn of the target running now, on a provider that takes a message
+    mid-turn; with no such turn, or when the provider refuses it, the next turn takes it."""
 
 
 class SteerRequest(_Request):
     """Free-text guidance for the agent turns of its target, the whole run by default.
 
     With ``mode`` ``next_turn`` the message reaches exactly one turn of the target, once; with
-    ``standing`` it reaches every turn of the target until withdrawn. A target the run cannot
+    ``standing`` it reaches every turn of the target until withdrawn; with ``interrupt`` it
+    reaches a running turn of the target now, or else the next one. A target the run cannot
     resolve (a role the search does not declare, an attempt or item it does not hold, or an
     attempt that has ended) is refused, and the message reaches no one.
     """

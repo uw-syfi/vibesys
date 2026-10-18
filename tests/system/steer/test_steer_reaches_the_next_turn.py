@@ -76,6 +76,11 @@ class MessageResolver(CandidateResolver):
         assert self.messages is not None
         return self.messages.render(turn, inputs)
 
+    def mid_turn_message(self, item: SessionInput) -> RenderedPrompt | None:
+        """The production message that offers ``item`` to a running turn."""
+        assert self.messages is not None
+        return self.messages.render_mid_turn(item)
+
 
 @dataclass
 class StoredSteers:

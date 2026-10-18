@@ -268,6 +268,7 @@ export class FakeHelper {
     'logs',
     'logs_cancel',
     'run_history',
+    'run_summary',
     'machine_describe',
     'checkout_inspect',
     'preflight',
@@ -580,7 +581,8 @@ class HelperSession {
         this.#start(request);
         return;
       case 'runs.read_events':
-        this.#readEvents(request);
+      case 'runs.summary':
+        this.#readRunHistory(request);
         return;
       case 'machine.describe':
         this.#send({type: 'machine.describe', request_id: id, machine: this.#helper.host.machine});
@@ -853,7 +855,9 @@ class HelperSession {
   }
 
   /** The fake host records no runs, so every run of a known project is unknown. */
-  #readEvents(request: Extract<HelperRequest, {type: 'runs.read_events'}>): void {
+  #readRunHistory(
+    request: Extract<HelperRequest, {type: 'runs.read_events' | 'runs.summary'}>,
+  ): void {
     const id = request.request_id;
     if (!this.#helper.host.projects.has(request.project)) {
       this.#send({...this.#error(id, 'project_missing', 'no such project'), path: request.project});

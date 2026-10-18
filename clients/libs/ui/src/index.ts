@@ -5,7 +5,7 @@
  * `./components.css` once.
  */
 export {applyTheme, type ThemeTarget} from './apply-theme.js';
-export {AppFrame} from './components/app-frame.js';
+export {AppFrame, WindowFrame} from './components/app-frame.js';
 export {
   Button,
   type ButtonAction,
@@ -81,6 +81,21 @@ export {
 } from './components/narrative.js';
 export {NewBelow} from './components/new-below.js';
 export {Pane, Panes, type PaneWidth} from './components/panes.js';
+export {
+  type ParetoAxis,
+  ParetoChart,
+  type ParetoPoint,
+  type ParetoSize,
+  type ParetoState,
+} from './components/pareto-chart.js';
+export {
+  type Direction,
+  type Directions,
+  dominates,
+  frontierAt,
+  paretoFrontier,
+  type Tradeoff,
+} from './components/pareto-frontier.js';
 export {type Completion, PathInput} from './components/path-input.js';
 export {
   type HeaderColumn,

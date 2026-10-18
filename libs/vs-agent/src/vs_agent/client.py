@@ -891,6 +891,20 @@ class AgentClient:
         session = active[-1]
         return session.steer(text, on_rejected=on_rejected)
 
+    def steer_session(self, key: AgentSessionKey, text: str, *, steer_id: str) -> SteerOutcome:
+        """Offer *text* to the turn running now in the conversation *key* names.
+
+        A key with no live session runs no turn; otherwise the session answers as
+        :meth:`steer` does, without queuing anything. A ``DELIVERED`` message the
+        provider does not keep is named by *steer_id* in the turn's
+        ``AgentTurnResult.refused_steers``.
+        """
+        cached = self._sessions.get(key)
+        if cached is None:
+            return SteerOutcome.NO_RUNNING_TURN
+        steers = cached.session.steers
+        return cached.session.steer(text, on_rejected=lambda: steers.note_refused(steer_id))
+
     def cancel_session(self, key: AgentSessionKey) -> None:
         """Stop the in-flight turn of one keyed conversation, keeping its checkpoint.
 
@@ -944,6 +958,8 @@ class AgentClient:
         that lands after it keeps the turn from being sent again.
         """
         stops = CapacityStops(self._threads, model=session.spec.model)
+        # A turn call that raised left its refusals behind; they belong to no later turn.
+        session.steers.take_refused()
         with self._active_lock:
             if self._cancelled:
                 msg = "agent client is cancelled"

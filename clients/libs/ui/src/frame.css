@@ -720,6 +720,66 @@ button.vs-crumb:focus-visible {
   stroke-width: 2;
 }
 
+/* The Pareto chart: a staircase for the frontier; marks by role (input, frontier, dominated, turned down). */
+.vs-pareto {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.vs-pareto-frontier {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+.vs-pareto-mark {
+  stroke-width: 2;
+}
+.vs-pareto-point[data-role="frontier"] .vs-pareto-mark {
+  fill: var(--accent);
+  stroke: var(--panel);
+}
+.vs-pareto-point[data-role="dominated"] .vs-pareto-mark {
+  fill: var(--muted);
+  stroke: none;
+  opacity: 0.55;
+}
+.vs-pareto-point[data-role="rejected"] .vs-pareto-mark {
+  fill: var(--panel);
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  opacity: 0.8;
+}
+.vs-pareto-point[data-role="input"] .vs-pareto-mark {
+  fill: var(--text);
+  stroke: var(--panel);
+}
+.vs-pareto-key {
+  flex: none;
+  width: var(--space-5);
+  height: var(--space-5);
+  /* The key's own fill is its mark's color, so the color a legend names is readable from it. */
+  fill: var(--muted);
+}
+.vs-pareto-key[data-role="frontier"] {
+  fill: var(--accent);
+}
+.vs-pareto-key[data-role="input"] {
+  fill: var(--text);
+}
+.vs-pareto-key[data-role="rejected"] {
+  fill: var(--panel);
+}
+.vs-pareto-hover-box {
+  fill: var(--panel);
+  stroke: var(--line);
+}
+.vs-pareto-hover-text {
+  fill: var(--text);
+  font-family: var(--text-section-family);
+  font-size: var(--text-section-size);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .vs-gantt-bar[data-outcome="live"] {
     animation: none;

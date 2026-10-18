@@ -50,6 +50,7 @@ from vs_agent.api import (
     SessionConfigurationError,
     SessionPersistenceError,
     SessionResumeError,
+    SteerOutcome,
     Unknown,
     parse_typed_response,
 )
@@ -57,6 +58,8 @@ from vs_core.api import (
     REPLY_ERROR_MESSAGE_LIMIT,
     DispatchTurn,
     EnsureSession,
+    InputId,
+    InputMidTurnReleased,
     InspectTurn,
     InvocationRef,
     ObservationStatus,
@@ -115,7 +118,14 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_agent.api import AgentSessions, AgentSessionSpec, ClientAgentSessions, InvocationOutcome
-    from vs_core.api import Continuation, DecisionId, InvocationId, Observation, RequestBase
+    from vs_core.api import (
+        Continuation,
+        DecisionId,
+        InvocationId,
+        MidTurnOffer,
+        Observation,
+        RequestBase,
+    )
     from vs_prompts.api import RenderedPrompt
     from vs_runtime._core_requests import OwnerEvent, SessionRoleRequest
     from vs_runtime._receipt_store import ReceiptStore
@@ -128,7 +138,12 @@ _DISPATCHES = "session-dispatches"
 
 def session_binding_key(request: RequestBase, session_id: SessionId) -> str:
     """The one key under which a session's binding and dispatches are stored."""
-    return f"{owner_key(request)}/{session_id.root}"
+    return scope_binding_key(request.scope, session_id)
+
+
+def scope_binding_key(scope: Scope, session_id: SessionId) -> str:
+    """``session_binding_key`` for a session of ``scope``, without a request in hand."""
+    return f"{scope.owner.kind}:{scope.owner.root}:{scope.generation}/{session_id.root}"
 
 
 def load_session_binding(store: ReceiptStore, bkey: str) -> SessionBinding | None:
@@ -232,6 +247,10 @@ class SessionResolver(Protocol):
         """
         ...
 
+    def mid_turn_message(self, item: SessionInput) -> RenderedPrompt | None:
+        """The message offering ``item`` to a turn already running; ``None`` as ``message``."""
+        ...
+
 
 class SessionBinding(BaseModel):
     """Durable identity of one core session: spec, conversation key and resource."""
@@ -296,6 +315,24 @@ class _Facts:
     settles: bool = True
     """False when the answer proves nothing about what the request holds (a reused identity),
     so even a terminal one claims no release and no complete children."""
+    refused_steers: tuple[str, ...] = ()
+    """Interrupt-mode inputs the provider took into the turn and did not keep, by input id."""
+
+
+def _refusals(
+    invocation: InvocationRef, facts: _Facts, now_at: float
+) -> tuple[InputMidTurnReleased, ...]:
+    """The interrupt-mode inputs the turn's provider refused, released ahead of its acceptance.
+
+    They ride in the same result as the turn's end, so the refusal commits with it and core
+    gives each input to the next turn instead of delivering it with this one.
+    """
+    return tuple(
+        InputMidTurnReleased(
+            input_id=InputId(root=steer_id), invocation=invocation, now_at=now_at, refused=True
+        )
+        for steer_id in facts.refused_steers
+    )
 
 
 def _reply_errors(violations: tuple[SchemaViolation, ...]) -> tuple[ReplyError, ...]:
@@ -454,6 +491,35 @@ class RuntimeSessionRequests:
         self._observations = ObservationFactory(store)
         self._locks: dict[str, asyncio.Lock] = {}
 
+    def offer_mid_turn(self, offer: MidTurnOffer) -> SteerOutcome:
+        """Offer an interrupt-mode input to the running turn ``offer`` names.
+
+        Only this instance can reach a turn it runs. A session it never bound, an unreadable
+        binding or input text, or a journal that disowns the invocation leaves no turn here
+        that could take the message: ``NO_RUNNING_TURN``, so core gives it to the next turn.
+        A ``DELIVERED`` message the provider then refuses comes back with the turn's result,
+        which releases it before the turn's acceptance commits.
+        """
+        invocation = offer.invocation
+        try:
+            binding = load_session_binding(
+                self._store, scope_binding_key(offer.scope, invocation.session_id)
+            )
+        except ReceiptCorruptError:
+            return SteerOutcome.NO_RUNNING_TURN
+        message = self._resolver.mid_turn_message(offer.input)
+        if binding is None or message is None:
+            return SteerOutcome.NO_RUNNING_TURN
+        try:
+            return self._sessions.steer(
+                AgentSessionKey.parse(binding.session_key),
+                invocation.invocation_id.root,
+                message,
+                steer_id=offer.input.input_id.root,
+            )
+        except InvocationConflictError:
+            return SteerOutcome.NO_RUNNING_TURN
+
     async def execute(
         self, request: SessionRoleRequest, context: ExecutionContext
     ) -> ExecutionOutcome:
@@ -572,7 +638,10 @@ class RuntimeSessionRequests:
                 and facts.status == ObservationStatus.SUCCEEDED
                 else None
             )
-            events = (self._turn_event(invocation, observation, facts, suspension),)
+            events = (
+                *_refusals(invocation, facts, context.now_at),
+                self._turn_event(invocation, observation, facts, suspension),
+            )
         return ExecutionResult(
             observation=RequestObserved(
                 observation=observation,
@@ -1064,6 +1133,7 @@ class RuntimeSessionRequests:
                         resource_id=resource,
                         diagnostic=f"reply fails its schema: {error.detail}",
                         reply_errors=_reply_errors(error.violations),
+                        refused_steers=outcome.result.refused_steers,
                     )
                 return _Facts(
                     ObservationStatus.SUCCEEDED,
@@ -1071,6 +1141,7 @@ class RuntimeSessionRequests:
                     resource_id=resource,
                     output_schema=ref,
                     output_json=reply.model_dump_json(),
+                    refused_steers=outcome.result.refused_steers,
                 )
             case InvalidResponse():
                 return _Facts(
@@ -1209,7 +1280,10 @@ class RuntimeSessionRequests:
                     reply_errors=target.reply_errors,
                 ),
             ),
-            owner_events=(self._turn_event(request.invocation, seen, target),),
+            owner_events=(
+                *_refusals(request.invocation, target, context.now_at),
+                self._turn_event(request.invocation, seen, target),
+            ),
         )
 
 

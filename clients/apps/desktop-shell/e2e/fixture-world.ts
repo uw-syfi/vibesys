@@ -8,6 +8,7 @@ import {expect} from '@playwright/test';
 import {type EndOutcome, type RunFixture, splitLive} from '@vibesys/run-fixtures';
 import {type FakeBridgeSeed, installFakeBridge, installFakeMachines} from './fake-bridge.js';
 import {installFakeFixtureServer} from './fake-fixture-server.js';
+import {type FakeHistorySeed, installFakeHistory} from './fake-history.js';
 import {installFakeRun} from './fake-run.js';
 
 const PROJECT = '/work/queue-rs';
@@ -20,6 +21,7 @@ interface FixtureWindow extends Window {
     toggleSidebar(): void;
     emit(events: readonly unknown[]): void;
     drop(): void;
+    releaseHistory(): void;
   };
 }
 
@@ -27,6 +29,8 @@ export interface OpenOptions {
   readonly theme?: 'ink' | 'paper';
   /** Whether the sidebar is shown; shown by default. */
   readonly sidebar?: boolean;
+  /** A finished run's history served in small pages, held part-way: see `fake-history.ts`. */
+  readonly historyServing?: Omit<FakeHistorySeed, 'events'>;
 }
 
 /** The registry phase a run that ended with `outcome` stays in. */
@@ -113,6 +117,12 @@ export async function openFixture(
       },
     },
   });
+  if (options.historyServing !== undefined) {
+    await page.addInitScript(installFakeHistory, {
+      ...options.historyServing,
+      events: fixture.events,
+    });
+  }
   await page.goto('./shell.html');
   await page
     .getByRole('navigation', {name: 'VibeSys'})
@@ -138,4 +148,9 @@ export async function playLive(page: Page, fixture: RunFixture): Promise<void> {
     events => (window as unknown as FixtureWindow).fakeHost.emit(events),
     afterDrop,
   );
+}
+
+/** Lets a held history read finish, so the run's screen settles. */
+export async function releaseHistory(page: Page): Promise<void> {
+  await page.evaluate(() => (window as unknown as FixtureWindow).fakeHost.releaseHistory());
 }

@@ -15,6 +15,9 @@ import {
   Markdown,
   Menu,
   type MenuItem,
+  type ParetoAxis,
+  ParetoChart,
+  type ParetoPoint,
   Prose,
   Row,
   Scrubber,
@@ -31,6 +34,7 @@ import {
   Timeline,
   Tree,
   TreeRow,
+  WindowFrame,
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import type {ComponentName, GalleryEntry} from './gallery-entry.js';
@@ -387,6 +391,34 @@ const LARGE_POINTS = [
   {x: 6, y: 22_800_000, filled: false},
 ];
 
+const PARETO_THROUGHPUT: ParetoAxis = {name: 'Throughput', unit: 'ops/s', direction: 'higher'};
+const PARETO_LATENCY: ParetoAxis = {name: 'Latency', unit: 'ms', direction: 'lower'};
+
+/** A run of twenty ideas that trade latency for throughput, measured an hour apart; two turned down. */
+const PARETO_POINTS: readonly ParetoPoint[] = (() => {
+  let seed = 5;
+  const next = (): number => {
+    seed = (seed * 1664525 + 1013904223) % 4294967296;
+    return seed / 4294967296;
+  };
+  const measured = Array.from({length: 20}, (_, index): ParetoPoint => {
+    const throughput = 18_000_000 + index * 450_000 + (next() - 0.4) * 2_600_000;
+    const latency = 52 - index * 0.7 + (next() - 0.5) * 16 + (throughput - 20_000_000) / 400_000;
+    return {
+      id: `p${index + 1}`,
+      label: `Idea ${index + 1}`,
+      x: Math.round(throughput),
+      y: Math.round(latency * 10) / 10,
+      time: index + 1,
+      state: index === 6 || index === 13 ? 'rejected' : 'accepted',
+    };
+  });
+  return [
+    {id: 'input', label: 'Input', x: 18_000_000, y: 52, time: 0, state: 'input'},
+    ...measured,
+  ];
+})();
+
 const POINTS = [
   {x: 1, y: 100, filled: true},
   {x: 2, y: 96, filled: false},
@@ -414,6 +446,15 @@ export const RICH_ENTRIES = {
           <Text>The main area holds a Page.</Text>
         </Card>
       </AppFrame>
+    ),
+  },
+  WindowFrame: {
+    render: () => (
+      <WindowFrame>
+        <Card>
+          <Text>A window that is only a page sits below the title-bar row.</Text>
+        </Card>
+      </WindowFrame>
     ),
   },
   ThemeSwatch: {render: () => <SwatchDemo />},
@@ -575,6 +616,49 @@ export const RICH_ENTRIES = {
             pick={noop}
           />
         </Card>
+      </Stack>
+    ),
+  },
+  ParetoChart: {
+    render: () => (
+      <Stack>
+        <Card>
+          <ParetoChart
+            label="Throughput and latency of each measured idea, with the Pareto frontier"
+            points={PARETO_POINTS}
+            x={PARETO_THROUGHPUT}
+            y={PARETO_LATENCY}
+            highlighted={['p9']}
+            pick={noop}
+          />
+        </Card>
+        <Grid min="tile">
+          <Card>
+            <ParetoChart
+              label="The same run replayed to hour 8: fewer points, an earlier frontier"
+              size="strip"
+              points={PARETO_POINTS}
+              x={PARETO_THROUGHPUT}
+              y={PARETO_LATENCY}
+              cursor={8}
+            />
+          </Card>
+          <Card>
+            <ParetoChart
+              label="Speed-up and memory saved, both higher is better, in one idea's lineage"
+              size="strip"
+              points={[
+                {id: 'in', label: 'Input', x: 1, y: 0, time: 0, state: 'input'},
+                {id: 'a', label: 'Arena', x: 1.2, y: 30, time: 1, state: 'accepted'},
+                {id: 'b', label: 'Pooling', x: 1.5, y: 12, time: 2, state: 'accepted'},
+                {id: 'c', label: 'Packing', x: 1.1, y: 55, time: 3, state: 'accepted'},
+                {id: 'd', label: 'Both', x: 1.6, y: 40, time: 4, state: 'accepted'},
+              ]}
+              x={{name: 'Speed-up', unit: '×', direction: 'higher'}}
+              y={{name: 'Memory saved', unit: '%', direction: 'higher'}}
+            />
+          </Card>
+        </Grid>
       </Stack>
     ),
   },

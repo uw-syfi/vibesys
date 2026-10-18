@@ -69,7 +69,9 @@ export interface RunPageNavigation {
 function historyReply(page: RunHistoryPage): HistoryReply {
   if (page.kind === 'unsupported') return page;
   try {
-    return {...page, events: page.events.map(validateRunEvent)};
+    // The page's size as decoded: the loading screen's "read so far" (the wire carries no count).
+    const bytes = JSON.stringify(page.events).length;
+    return {...page, bytes, events: page.events.map(validateRunEvent)};
   } catch (error) {
     return {
       kind: 'failed',

@@ -74,12 +74,31 @@ export const HISTORY_PAGE_EVENTS = 500;
 export const FIRST_HISTORY_SEQUENCE = 1;
 
 /**
+ * How far an ended run's history read has come: the events and bytes folded so far, and the run's
+ * total number of events once the host has said it (`HistoryReply.totalEvents`); null until then.
+ */
+export interface HistoryProgress {
+  readonly events: number;
+  readonly bytes: number;
+  readonly total: number | null;
+}
+
+const NO_PROGRESS: HistoryProgress = {events: 0, bytes: 0, total: null};
+
+/**
  * An ended run's recorded events, read page by page (`runs.read_events`) into the run fold: not
- * asked yet, a page awaited under a token, all read, not served by this host, or failed.
+ * asked yet, a page awaited under a token, all read, not served by this host, or failed. While it
+ * reads, what is folded is a prefix of the run, never the run: the screen shows the read's
+ * progress instead of it (`historyScreen`).
  */
 type RunHistory =
   | {readonly kind: 'idle'}
-  | {readonly kind: 'reading'; readonly token: number; readonly from: number}
+  | {
+      readonly kind: 'reading';
+      readonly token: number;
+      readonly from: number;
+      readonly progress: HistoryProgress;
+    }
   | {readonly kind: 'read'}
   | {readonly kind: 'unsupported'}
   | {readonly kind: 'failed'; readonly message: string};
@@ -91,6 +110,10 @@ export type HistoryReply =
       readonly events: readonly RunEvent[];
       readonly next: number;
       readonly complete: boolean;
+      /** The page's size on the wire in bytes, when the app measured it. */
+      readonly bytes?: number;
+      /** How many events the run's history holds in all, when the host says. */
+      readonly totalEvents?: number;
     }
   | {readonly kind: 'unsupported'}
   | {readonly kind: 'failed'; readonly message: string};
@@ -382,10 +405,14 @@ function linked(state: RunPageState): RunPageStep {
 }
 
 /** Ask for the next history page from `from`. */
-function readingFrom(state: RunPageState, from: number): RunPageStep {
+function readingFrom(
+  state: RunPageState,
+  from: number,
+  progress: HistoryProgress = NO_PROGRESS,
+): RunPageStep {
   const token = state.next;
   return {
-    state: {...state, next: token + 1, history: {kind: 'reading', token, from}},
+    state: {...state, next: token + 1, history: {kind: 'reading', token, from, progress}},
     requests: [{kind: 'read-history', token, from, max: HISTORY_PAGE_EVENTS}],
   };
 }
@@ -432,9 +459,15 @@ function withRecord(state: RunPageState, record: RunRecord): RunPageStep {
 function withHistory(state: RunPageState, token: number, reply: HistoryReply): RunPageStep {
   const {history} = state;
   if (history.kind !== 'reading' || history.token !== token) return {state, requests: []};
-  if (reply.kind === 'unsupported') return {state: {...state, history: reply}, requests: []};
+  if (reply.kind === 'unsupported') {
+    return {state: {...state, run: EMPTY_RUN_FOLD, history: reply}, requests: []};
+  }
   if (reply.kind === 'failed') {
-    return {state: {...state, history: {kind: 'failed', message: reply.message}}, requests: []};
+    // What was folded is a prefix of the run: drop it rather than leave it to read as the run.
+    return {
+      state: {...state, run: EMPTY_RUN_FOLD, history: {kind: 'failed', message: reply.message}},
+      requests: [],
+    };
   }
   const run: RunFold =
     reply.events.length === 0
@@ -449,7 +482,12 @@ function withHistory(state: RunPageState, token: number, reply: HistoryReply): R
   if (reply.complete || reply.next <= history.from) {
     return {state: {...folded, history: {kind: 'read'}}, requests: []};
   }
-  return readingFrom(folded, reply.next);
+  const before = history.progress;
+  return readingFrom(folded, reply.next, {
+    events: before.events + reply.events.length,
+    bytes: before.bytes + (reply.bytes ?? 0),
+    total: reply.totalEvents ?? before.total,
+  });
 }
 
 function recordStep(next: RunPageState, record: RunRecord): RunPageStep {

@@ -60,8 +60,20 @@ test('every component looks as agreed, and the page has no axe violation, in Ink
       .soft(page.locator('[data-gallery-entry="Button"]'))
       .toHaveScreenshot(`${theme}-focus-ring.png`);
     await screenshotOverlays(page, theme);
+    await screenshotParetoHover(page, theme);
   }
 });
+
+/** Hovering a point of the Pareto chart names it and gives its values. */
+async function screenshotParetoHover(page: Page, theme: string): Promise<void> {
+  const chart = page.locator('[data-gallery-entry="ParetoChart"] .vs-pareto').first();
+  await chart.locator('.vs-pareto-point[data-role="frontier"]').nth(2).hover();
+  await expect(chart.locator('.vs-pareto-hover-text')).toBeVisible();
+  const box = await chart.boundingBox();
+  if (box === null) throw new Error('the Pareto chart is not shown');
+  await expect.soft(page).toHaveScreenshot(`${theme}-ParetoChart-hover.png`, {clip: box});
+  await page.mouse.move(0, 0);
+}
 
 /** The states that only show after a press: an open menu, and the modal dialog. */
 async function screenshotOverlays(page: Page, theme: string): Promise<void> {

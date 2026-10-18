@@ -310,13 +310,23 @@ class RunController:
             self._journal.record(EventType.CONTROL, "/stop", status=EventStatus.CONSUMED)
 
     def record_steer_consumed(
-        self, *, agent_kind: str | None, round_label: str | None, execution_id: str | None
+        self,
+        *,
+        agent_kind: str | None,
+        round_label: str | None,
+        execution_id: str | None,
+        mid_turn: bool = False,
+        note: str = "",
     ) -> None:
-        """Journal that queued steering was spliced into an invocation's prompt."""
+        """Journal that queued steering reached an invocation: in its prompt, or mid-turn.
+
+        ``note`` says why an interrupt-mode steer reached the next turn instead.
+        """
+        command = "/steer --interrupt" if mid_turn else "/steer"
         with self._condition:
             self._journal.record(
                 EventType.CONTROL,
-                "/steer",
+                f"{command}: {note}" if note else command,
                 status=EventStatus.CONSUMED,
                 agent_kind=agent_kind,
                 round_label=round_label,
