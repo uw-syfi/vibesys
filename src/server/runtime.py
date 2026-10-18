@@ -102,6 +102,8 @@ DETACHED_DRAIN_TIMEOUT_SECONDS = 2.0
 _TERMINAL_EVENT_TYPES = frozenset(
     {EventType.RUN_FINISHED, EventType.RUN_FAILED, EventType.RUN_INTERRUPTED}
 )
+_TERMINATING = frozenset({Signals.SIGTERM, Signals.SIGHUP})
+"""The signals that end a run now (the launcher terminating it), unlike a Ctrl-C's stop."""
 _FAILURE_EVENT_TYPES = frozenset(
     {EventType.RUN_FAILED, EventType.RUN_INTERRUPTED, EventType.CONFIGURATION_FAILED}
 )
@@ -461,11 +463,14 @@ class ServerRuntime:
     def shutdown(self, signal: Signals | None = None) -> None:
         """Request a clean shutdown of a detached or read-only server.
 
-        *signal* names the signal that asked for it; the first one names how a run it
-        interrupts ended.
+        *signal* names the signal that asked for it. The first one that ends the run
+        (SIGTERM or SIGHUP, ``_TERMINATING``) names how a run it interrupts ended; a Ctrl-C
+        (SIGINT), which only asked the run to stop, names it when nothing stronger came.
         """
         with self.condition:
-            self._shutdown_signal = self._shutdown_signal or signal
+            held = self._shutdown_signal
+            if held is None or (held not in _TERMINATING and signal in _TERMINATING):
+                self._shutdown_signal = signal
         self._shutdown.set()
 
     def _wait_for_detached_shutdown(self, transport: UnixJsonlServer) -> None:
@@ -560,9 +565,7 @@ class ServerRuntime:
         """
         with self.condition:
             signal = self._shutdown_signal
-        reason = (
-            "launcher_terminated" if signal in {Signals.SIGTERM, Signals.SIGHUP} else "interrupted"
-        )
+        reason = "launcher_terminated" if signal in _TERMINATING else "interrupted"
         launcher_error = RuntimeError(reason if signal is None else f"{reason} ({signal.name})")
         event_diagnostic = exception_to_diagnostic(
             launcher_error,
