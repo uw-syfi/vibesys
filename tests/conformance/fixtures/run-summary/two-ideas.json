@@ -1,5 +1,5 @@
 {
-  "description": "Two ideas on one queue task: the first passes and is adopted, the second fails after a retried turn. Folded as a client folds the journal (foldTrace, foldOverview, the transcript's reply entries); a repeated sequence is skipped whole, and a turn's last reply replaces its first, under its own schema. runs.summary returns exactly summary for this journal.",
+  "description": "Two ideas on one queue task: the first passes and is adopted, the second fails after a retried turn. Folded as a client folds the journal (foldTrace, foldOverview, the transcript's reply entries); a repeated sequence is skipped whole, and a turn's last reply replaces its first, under its own schema. runs.summary returns exactly summary for this journal. Four turn_usage_recorded events at the end add a retried turn's spend, a turn no span names (it counts only in the run's total) and a turn that reported nothing (its counts stay unreported).",
   "events": [
     {
       "protocol_version": 1,
@@ -732,11 +732,100 @@
         "source": "backend",
         "content": "done"
       }
+    },
+    {
+      "protocol_version": 1,
+      "sequence": 19,
+      "run_id": "20261010-120000-11111111-dynamic",
+      "timestamp": "2026-10-10T12:00:29Z",
+      "type": "turn_usage_recorded",
+      "text": "",
+      "diagnostic": null,
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "invocation_id": null,
+      "execution_id": null,
+      "chat_thread_id": null,
+      "data": {
+        "kind": "turn_usage_recorded",
+        "span_id": "op:000001/implementer.1",
+        "input_tokens": 1000,
+        "cache_read_input_tokens": 400,
+        "output_tokens": 200
+      },
+      "span_id": "op:000001/implementer.1"
+    },
+    {
+      "protocol_version": 1,
+      "sequence": 20,
+      "run_id": "20261010-120000-11111111-dynamic",
+      "timestamp": "2026-10-10T12:00:30Z",
+      "type": "turn_usage_recorded",
+      "text": "",
+      "diagnostic": null,
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "invocation_id": null,
+      "execution_id": null,
+      "chat_thread_id": null,
+      "data": {
+        "kind": "turn_usage_recorded",
+        "span_id": "op:000001/implementer.1",
+        "input_tokens": 500,
+        "cache_creation_input_tokens": 50,
+        "output_tokens": 100,
+        "reasoning_output_tokens": 30
+      },
+      "span_id": "op:000001/implementer.1"
+    },
+    {
+      "protocol_version": 1,
+      "sequence": 21,
+      "run_id": "20261010-120000-11111111-dynamic",
+      "timestamp": "2026-10-10T12:00:31Z",
+      "type": "turn_usage_recorded",
+      "text": "",
+      "diagnostic": null,
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "invocation_id": null,
+      "execution_id": null,
+      "chat_thread_id": null,
+      "data": {
+        "kind": "turn_usage_recorded",
+        "span_id": null,
+        "input_tokens": 50,
+        "output_tokens": 5
+      },
+      "span_id": null
+    },
+    {
+      "protocol_version": 1,
+      "sequence": 22,
+      "run_id": "20261010-120000-11111111-dynamic",
+      "timestamp": "2026-10-10T12:00:32Z",
+      "type": "turn_usage_recorded",
+      "text": "",
+      "diagnostic": null,
+      "status": null,
+      "round_label": null,
+      "agent_kind": null,
+      "invocation_id": null,
+      "execution_id": null,
+      "chat_thread_id": null,
+      "data": {
+        "kind": "turn_usage_recorded",
+        "span_id": "op:000002/implementer.1"
+      },
+      "span_id": "op:000002/implementer.1"
     }
   ],
   "summary": {
-    "through_sequence": 18,
-    "event_count": 18,
+    "through_sequence": 22,
+    "event_count": 22,
     "spans": [
       {
         "id": "flow:#1",
@@ -953,6 +1042,35 @@
         "value": {
           "summary": "Built after fixing the lock.",
           "outcome": "needs_review"
+        }
+      }
+    ],
+    "tokens": {
+      "input": 1550,
+      "cache_read": 400,
+      "cache_write": 50,
+      "output": 305,
+      "reasoning": 30
+    },
+    "usage": [
+      {
+        "span_id": "op:000001/implementer.1",
+        "tally": {
+          "input": 1500,
+          "cache_read": 400,
+          "cache_write": 50,
+          "output": 300,
+          "reasoning": 30
+        }
+      },
+      {
+        "span_id": "op:000002/implementer.1",
+        "tally": {
+          "input": null,
+          "cache_read": null,
+          "cache_write": null,
+          "output": null,
+          "reasoning": null
         }
       }
     ]

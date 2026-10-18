@@ -52,3 +52,7 @@ def test_the_helper_folds_a_fixture_journal_to_its_summary(name: str) -> None:
             }
             for reply in state.replies
         ] == fixture["summary"]["replies"]
+        assert state.tokens.model_dump() == fixture["summary"]["tokens"]
+        assert [
+            {"span_id": entry.span_id, "tally": entry.tally.model_dump()} for entry in state.usage
+        ] == fixture["summary"]["usage"]

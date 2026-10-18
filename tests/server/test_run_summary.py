@@ -17,7 +17,7 @@ from tests.server.run_summary_support import (
 from server.run_summary import RunSummaryFold, schema_id
 
 if TYPE_CHECKING:
-    from server.host_run_summary import TurnReply
+    from server.host_run_summary import SpanTokens, TurnReply
 
 
 def _size(document: object) -> int:
@@ -41,6 +41,8 @@ def _summary_of(fold: RunSummaryFold) -> ClientFold:
             }
             for reply in state.replies
         ),
+        tokens=state.tokens.model_dump(),
+        usage={entry.span_id: entry.tally.model_dump() for entry in state.usage},
     )
 
 
@@ -94,11 +96,12 @@ def test_pages_of_any_size_partition_the_summary_and_carry_each_schema_once(
 
     spans: list[dict] = []
     replies: list[TurnReply] = []
+    usage: list[SpanTokens] = []
     schemas: dict[str, dict] = {}
     offset: int | None = 0
     while offset is not None:
         page = fold.page(offset, budget)
-        assert page.spans or page.replies or page.next_offset is None
+        assert page.spans or page.replies or page.usage or page.next_offset is None
         for key in page.schemas:
             assert key not in schemas
         # a page carries the schema of every reply on it that no earlier reply uses
@@ -108,17 +111,23 @@ def test_pages_of_any_size_partition_the_summary_and_carry_each_schema_once(
             sum(_size(span) for span in page.spans)
             + sum(_size(reply.value) for reply in page.replies)
             + sum(_size(schema) for schema in page.schemas.values())
+            + sum(_size(entry.tally.model_dump()) for entry in page.usage)
         )
-        assert len(page.spans) + len(page.replies) == 1 or size <= budget
+        assert len(page.spans) + len(page.replies) + len(page.usage) == 1 or size <= budget
         spans.extend(page.spans)
         replies.extend(page.replies)
+        usage.extend(page.usage)
         schemas.update(page.schemas)
-        assert page.next_offset is None or page.next_offset == len(spans) + len(replies)
+        assert page.next_offset is None or page.next_offset == (
+            len(spans) + len(replies) + len(usage)
+        )
         offset = page.next_offset
 
     assert tuple(spans) == state.spans
     assert tuple(replies) == state.replies
+    assert tuple(usage) == state.usage
     assert schemas == state.schemas
+    assert fold.usage_count == len(usage)
     assert fold.span_count == len(spans)
     assert fold.reply_count == len(replies)
 
@@ -126,7 +135,13 @@ def test_pages_of_any_size_partition_the_summary_and_carry_each_schema_once(
 def test_a_page_past_the_end_is_empty_and_ends_the_summary() -> None:
     page = RunSummaryFold().page(5)
 
-    assert (page.spans, page.replies, page.schemas, page.next_offset) == ((), (), {}, None)
+    assert (page.spans, page.replies, page.schemas, page.usage, page.next_offset) == (
+        (),
+        (),
+        {},
+        (),
+        None,
+    )
 
 
 def test_a_reply_schema_is_identified_by_its_canonical_json() -> None:

@@ -448,6 +448,12 @@ export type EventCount = number;
 export type JournalBytes = number;
 export type SpanCount = number;
 export type ReplyCount = number;
+export type UsageCount = number;
+export type Input = number | null;
+export type CacheRead = number | null;
+export type CacheWrite = number | null;
+export type Output = number | null;
+export type Reasoning = number | null;
 export type Overview = {
   [k: string]: JsonValue;
 } | null;
@@ -458,6 +464,8 @@ export type SpanId1 = string;
 export type Kind = string;
 export type SchemaId = string;
 export type Replies = TurnReply[];
+export type SpanId2 = string;
+export type Usage = SpanTokens[];
 export type NextOffset1 = number | null;
 export type RequestId42 = string;
 export type Type42 = "machine.describe";
@@ -1446,6 +1454,9 @@ export interface RunsReadEventsReply {
  *   (``foldOverview``), with no unit or direction a live server adds from run state;
  * - ``replies``: the last typed reply of each agent-turn span, by ``agent_execution_finished``
  *   events with a ``span_id``, in the order the spans first replied (``implementerOutcomes``);
+ * - ``tokens`` and ``usage``: the run's spend, folded from ``turn_usage_recorded`` events by
+ *   summing (``ledgerWith``): ``tokens`` over every turn, those the trace names and those it
+ *   does not, ``usage`` over each turn span that is named, in the order the spans first spent;
  * - the idea rows, the measurement points and the chart are folds of ``spans`` and ``replies``
  *   the client already owns (``CandidateFold``, ``performanceFold``); nothing duplicates them.
  *
@@ -1463,11 +1474,28 @@ export interface RunsSummaryReply {
   journal_bytes: JournalBytes;
   span_count: SpanCount;
   reply_count: ReplyCount;
+  usage_count: UsageCount;
+  tokens: TokenTally;
   overview: Overview;
   spans: Spans;
   replies: Replies;
   schemas: Schemas;
+  usage: Usage;
   next_offset: NextOffset1;
+}
+/**
+ * Tokens spent, counted as the run protocol's ``turn_usage_recorded`` reports them.
+ *
+ * A count the provider did not report is ``None``, not zero: a sum is ``None`` until some turn
+ * reports the count, and then adds only the turns that did, so a reader can tell "none" from
+ * "zero" and a sum over turns with a missing count is a lower bound.
+ */
+export interface TokenTally {
+  input: Input;
+  cache_read: CacheRead;
+  cache_write: CacheWrite;
+  output: Output;
+  reasoning: Reasoning;
 }
 /**
  * The typed reply an agent turn ended with, its schema named by ``schema_id``.
@@ -1488,6 +1516,13 @@ export interface Schemas {
   [k: string]: {
     [k: string]: JsonValue;
   };
+}
+/**
+ * The tokens the turns of one agent-turn span spent, summed.
+ */
+export interface SpanTokens {
+  span_id: SpanId2;
+  tally: TokenTally;
 }
 /**
  * The machine's description.

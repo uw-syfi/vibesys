@@ -848,10 +848,13 @@ def _run_summary_reply(request: RunsSummaryRequest, host: HelperHost) -> RunsSum
         journal_bytes=summarized.journal_bytes,
         span_count=fold.span_count,
         reply_count=fold.reply_count,
+        usage_count=fold.usage_count,
+        tokens=fold.tokens,
         overview=fold.overview,
         spans=page.spans,
         replies=page.replies,
         schemas=page.schemas,
+        usage=page.usage,
         next_offset=page.next_offset,
     )
 

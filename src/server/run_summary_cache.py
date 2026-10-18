@@ -45,7 +45,7 @@ from pydantic import (
     model_validator,
 )
 
-from server.host_run_summary import RUN_SUMMARY_FILE, TurnReply
+from server.host_run_summary import RUN_SUMMARY_FILE, SpanTokens, TokenTally, TurnReply
 from server.run_summary import RUN_SUMMARY_VERSION, RunSummaryFold, Summarized, SummaryState
 from vs_project.api import ProjectError, atomic_write_bytes
 
@@ -84,6 +84,8 @@ class _CachedState(BaseModel):
     overview: dict[str, Any] | None
     replies: tuple[TurnReply, ...]
     schemas: dict[str, dict[str, Any]]
+    tokens: TokenTally
+    usage: tuple[SpanTokens, ...]
 
     @model_validator(mode="after")
     def _is_a_fold(self) -> _CachedState:
@@ -165,6 +167,8 @@ def _restore(cache: Path, journal: BinaryIO) -> tuple[RunSummaryFold, int] | Non
                 overview=state.overview,
                 replies=state.replies,
                 schemas=state.schemas,
+                tokens=state.tokens,
+                usage=state.usage,
             )
         ),
         covered.boundary,
@@ -191,6 +195,8 @@ def _keep(cache: Path, journal: BinaryIO, fold: RunSummaryFold, boundary: int, c
             "overview": state.overview,
             "replies": [reply.model_dump(mode="json") for reply in state.replies],
             "schemas": state.schemas,
+            "tokens": state.tokens.model_dump(mode="json"),
+            "usage": [entry.model_dump(mode="json") for entry in state.usage],
         },
     }
     contents = json.dumps(document, separators=(",", ":"), ensure_ascii=False).encode()

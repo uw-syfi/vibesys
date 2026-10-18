@@ -4353,7 +4353,7 @@ const hostHelperSchema: Record<string, unknown> = {
     },
     "RunsSummaryReply": {
       "additionalProperties": false,
-      "description": "One page of a run's summary: the client's fold of its journal, to ``through_sequence``.\n\nEvery field equals what a client reading the whole journal up to ``through_sequence`` folds\nitself, which is the contract the helper's tests hold it to:\n\n- ``spans``: the run trace (``foldTrace``): each span as its latest span event left it, in\n  the order the spans started, so each comes after its parent;\n- ``overview``: the ``overview`` of the last ``run_started`` event that declares one\n  (``foldOverview``), with no unit or direction a live server adds from run state;\n- ``replies``: the last typed reply of each agent-turn span, by ``agent_execution_finished``\n  events with a ``span_id``, in the order the spans first replied (``implementerOutcomes``);\n- the idea rows, the measurement points and the chart are folds of ``spans`` and ``replies``\n  the client already owns (``CandidateFold``, ``performanceFold``); nothing duplicates them.\n\nAn event at or before the last folded sequence is skipped whole, as the client skips it. The\nrun level is final at ``through_sequence``. Events after it are the live tail: read them with\n``runs.read_events`` from ``through_sequence + 1``, or subscribe after ``through_sequence``. A\nrun still writing can move between the pages of one read: every page names its\n``through_sequence``, and a read whose pages disagree starts again.",
+      "description": "One page of a run's summary: the client's fold of its journal, to ``through_sequence``.\n\nEvery field equals what a client reading the whole journal up to ``through_sequence`` folds\nitself, which is the contract the helper's tests hold it to:\n\n- ``spans``: the run trace (``foldTrace``): each span as its latest span event left it, in\n  the order the spans started, so each comes after its parent;\n- ``overview``: the ``overview`` of the last ``run_started`` event that declares one\n  (``foldOverview``), with no unit or direction a live server adds from run state;\n- ``replies``: the last typed reply of each agent-turn span, by ``agent_execution_finished``\n  events with a ``span_id``, in the order the spans first replied (``implementerOutcomes``);\n- ``tokens`` and ``usage``: the run's spend, folded from ``turn_usage_recorded`` events by\n  summing (``ledgerWith``): ``tokens`` over every turn, those the trace names and those it\n  does not, ``usage`` over each turn span that is named, in the order the spans first spent;\n- the idea rows, the measurement points and the chart are folds of ``spans`` and ``replies``\n  the client already owns (``CandidateFold``, ``performanceFold``); nothing duplicates them.\n\nAn event at or before the last folded sequence is skipped whole, as the client skips it. The\nrun level is final at ``through_sequence``. Events after it are the live tail: read them with\n``runs.read_events`` from ``through_sequence + 1``, or subscribe after ``through_sequence``. A\nrun still writing can move between the pages of one read: every page names its\n``through_sequence``, and a read whose pages disagree starts again.",
       "properties": {
         "request_id": {
           "maxLength": 128,
@@ -4391,6 +4391,14 @@ const hostHelperSchema: Record<string, unknown> = {
           "minimum": 0,
           "title": "Reply Count",
           "type": "integer"
+        },
+        "usage_count": {
+          "minimum": 0,
+          "title": "Usage Count",
+          "type": "integer"
+        },
+        "tokens": {
+          "$ref": "#/$defs/TokenTally"
         },
         "overview": {
           "anyOf": [
@@ -4433,6 +4441,13 @@ const hostHelperSchema: Record<string, unknown> = {
           "title": "Schemas",
           "type": "object"
         },
+        "usage": {
+          "items": {
+            "$ref": "#/$defs/SpanTokens"
+          },
+          "title": "Usage",
+          "type": "array"
+        },
         "next_offset": {
           "anyOf": [
             {
@@ -4454,10 +4469,13 @@ const hostHelperSchema: Record<string, unknown> = {
         "journal_bytes",
         "span_count",
         "reply_count",
+        "usage_count",
+        "tokens",
         "overview",
         "spans",
         "replies",
         "schemas",
+        "usage",
         "next_offset"
       ],
       "title": "RunsSummaryReply",
@@ -4509,6 +4527,25 @@ const hostHelperSchema: Record<string, unknown> = {
         "run_id"
       ],
       "title": "RunsSummaryRequest",
+      "type": "object"
+    },
+    "SpanTokens": {
+      "additionalProperties": false,
+      "description": "The tokens the turns of one agent-turn span spent, summed.",
+      "properties": {
+        "span_id": {
+          "title": "Span Id",
+          "type": "string"
+        },
+        "tally": {
+          "$ref": "#/$defs/TokenTally"
+        }
+      },
+      "required": [
+        "span_id",
+        "tally"
+      ],
+      "title": "SpanTokens",
       "type": "object"
     },
     "StartDocker": {
@@ -4958,6 +4995,81 @@ const hostHelperSchema: Record<string, unknown> = {
         "project"
       ],
       "title": "TasksListRequest",
+      "type": "object"
+    },
+    "TokenTally": {
+      "additionalProperties": false,
+      "description": "Tokens spent, counted as the run protocol's ``turn_usage_recorded`` reports them.\n\nA count the provider did not report is ``None``, not zero: a sum is ``None`` until some turn\nreports the count, and then adds only the turns that did, so a reader can tell \"none\" from\n\"zero\" and a sum over turns with a missing count is a lower bound.",
+      "properties": {
+        "input": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Input"
+        },
+        "cache_read": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cache Read"
+        },
+        "cache_write": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cache Write"
+        },
+        "output": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Output"
+        },
+        "reasoning": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reasoning"
+        }
+      },
+      "required": [
+        "input",
+        "cache_read",
+        "cache_write",
+        "output",
+        "reasoning"
+      ],
+      "title": "TokenTally",
       "type": "object"
     },
     "TurnReply": {

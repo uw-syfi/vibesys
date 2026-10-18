@@ -30,6 +30,7 @@ from server.host_run_summary import (
     RUN_SUMMARY_PAGE_MAX_BYTES,
     RunsSummaryReply,
     RunsSummaryRequest,
+    TokenTally,
 )
 from vs_core.api import Span, SpanStatus, SpanType
 from vs_decode.api import Unreadable
@@ -222,10 +223,15 @@ def test_the_method_needs_its_feature_and_the_messages_are_strict() -> None:
         journal_bytes=0,
         span_count=0,
         reply_count=0,
+        usage_count=0,
+        tokens=TokenTally(
+            input=None, cache_read=None, cache_write=None, output=None, reasoning=None
+        ),
         overview=None,
         spans=(),
         replies=(),
         schemas={},
+        usage=(),
         next_offset=None,
     )
     assert parse_helper_message(reply.model_dump_json().encode()) == reply

@@ -3,7 +3,7 @@ import {readdirSync, readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import type {RunEvent, RunOverview, Span} from '@vibesys/contracts';
 import {event} from '@vibesys/contracts/testing';
-import {initialCoreState, reduceEventBatch} from '@vibesys/run-state';
+import {initialCoreState, reduceEventBatch, type TokenTally} from '@vibesys/run-state';
 import {CandidateFold, candidateTree} from '@vibesys/run-state/candidates';
 import {foldOverview} from '@vibesys/run-state/overview';
 import {EMPTY_TRACE, foldTrace, traceSpans} from '@vibesys/run-state/trace';
@@ -27,6 +27,15 @@ interface ClientReply {
   readonly value: Readonly<Record<string, unknown>>;
 }
 
+/** A tally as `runs.summary` words it (`TokenTally`). */
+interface WireTally {
+  readonly input: number | null;
+  readonly cache_read: number | null;
+  readonly cache_write: number | null;
+  readonly output: number | null;
+  readonly reasoning: number | null;
+}
+
 interface Fixture {
   readonly events: readonly RunEvent[];
   readonly summary: {
@@ -35,8 +44,18 @@ interface Fixture {
     readonly spans: readonly Span[];
     readonly overview: RunOverview | null;
     readonly replies: readonly ClientReply[];
+    readonly tokens: WireTally;
+    readonly usage: readonly {readonly span_id: string; readonly tally: WireTally}[];
   };
 }
+
+const wire = (tally: TokenTally): WireTally => ({
+  input: tally.input,
+  cache_read: tally.cacheRead,
+  cache_write: tally.cacheWrite,
+  output: tally.output,
+  reasoning: tally.reasoning,
+});
 
 const fixtures: Array<{name: string; fixture: Fixture}> = readdirSync(FIXTURES)
   .filter(name => name.endsWith('.json'))
@@ -104,6 +123,22 @@ describe('the run summary equals the client fold of the same journal', () => {
 
     test(`${name}: each turn's last reply`, () => {
       expect(bySpan(repliesOf(events))).toEqual(bySpan(summary.replies));
+    });
+
+    test(`${name}: the spend, over every turn and over each turn span`, () => {
+      const ledger = reduceEventBatch(initialCoreState(), events).tokens;
+      expect(wire(ledger.total)).toEqual(summary.tokens);
+      const named = Object.entries(ledger.bySpan).map(([span_id, tally]) => ({
+        span_id,
+        tally: wire(tally),
+      }));
+      const bySpanId = (items: readonly {readonly span_id: string}[]) =>
+        [...items].sort((a, b) => a.span_id.localeCompare(b.span_id));
+      expect(bySpanId(named)).toEqual(bySpanId(summary.usage));
+      // The total counts a turn no span names, so it is more than the named turns' sum.
+      expect(summary.tokens.input).toBeGreaterThan(
+        summary.usage.reduce((sum, entry) => sum + (entry.tally.input ?? 0), 0),
+      );
     });
 
     test(`${name}: the idea rows of a run seeded from the summary are the whole journal's`, () => {

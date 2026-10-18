@@ -25,6 +25,7 @@ from server.events import (
     SpanEndedData,
     SpanStartedData,
     SpanUpdatedData,
+    TurnUsageData,
 )
 from vibesys.api import AgentReply, RunOverview
 from vs_core.api import Span, SpanStatus, SpanType
@@ -101,10 +102,20 @@ def _drafts() -> st.SearchStrategy[_Draft]:
     unseen = st.just(
         _Draft(EventType.RUN_STARTED, RunStartedData(outer_loop="dynamic", input="no overview"))
     )
+    counts = st.none() | st.integers(min_value=0, max_value=5000)
+    spent = st.builds(
+        TurnUsageData,
+        input_tokens=counts,
+        cache_creation_input_tokens=counts,
+        cache_read_input_tokens=counts,
+        output_tokens=counts,
+        reasoning_output_tokens=counts,
+        span_id=st.none() | st.sampled_from(_SPAN_IDS),
+    ).map(lambda data: _Draft(EventType.TURN_USAGE_RECORDED, data))
     noise = st.text(max_size=300).map(
         lambda text: _Draft(EventType.OUTPUT, OutputData(stream="stdout", content=text))
     )
-    return st.one_of(span_data, span_data, finished, finished, started, unseen, noise)
+    return st.one_of(span_data, span_data, finished, finished, spent, spent, started, unseen, noise)
 
 
 @st.composite
@@ -152,6 +163,30 @@ class ClientFold:
     overview: dict[str, Any] | None
     replies: tuple[dict[str, Any], ...]
     """Each turn's last reply as ``{span_id, kind, json_schema, value}``, in first-reply order."""
+    tokens: dict[str, int | None]
+    """Every turn's spend summed (``ledgerWith``): input, cache_read, cache_write, output, reasoning."""
+    usage: dict[str, dict[str, int | None]]
+    """The same sum for each turn span a usage event names, in the order the spans first spent."""
+
+
+NO_TOKENS: dict[str, int | None] = {
+    "input": None,
+    "cache_read": None,
+    "cache_write": None,
+    "output": None,
+    "reasoning": None,
+}
+
+
+def _added(a: dict[str, int | None], b: dict[str, int | None]) -> dict[str, int | None]:
+    """``a`` and ``b`` summed count by count, as the client's ``addTokens`` does."""
+
+    def plus(x: int | None, y: int | None) -> int | None:
+        if x is None:
+            return y
+        return x if y is None else x + y
+
+    return {key: plus(a[key], b[key]) for key in a}
 
 
 def client_fold(run_events: Sequence[RunEvent]) -> ClientFold:
@@ -161,6 +196,8 @@ def client_fold(run_events: Sequence[RunEvent]) -> ClientFold:
     spans: dict[str, dict[str, Any]] = {}
     overview: dict[str, Any] | None = None
     replies: dict[str, dict[str, Any]] = {}
+    total = dict(NO_TOKENS)
+    by_span: dict[str, dict[str, int | None]] = {}
     for event in run_events:
         if event.sequence <= last:
             continue
@@ -171,6 +208,17 @@ def client_fold(run_events: Sequence[RunEvent]) -> ClientFold:
             spans[data.span.id] = json.loads(data.span.model_dump_json())
         elif isinstance(data, RunStartedData) and data.overview is not None:
             overview = json.loads(data.overview.model_dump_json())
+        elif isinstance(data, TurnUsageData):
+            spent = {
+                "input": data.input_tokens,
+                "cache_read": data.cache_read_input_tokens,
+                "cache_write": data.cache_creation_input_tokens,
+                "output": data.output_tokens,
+                "reasoning": data.reasoning_output_tokens,
+            }
+            total = _added(total, spent)
+            if data.span_id is not None:
+                by_span[data.span_id] = _added(by_span.get(data.span_id, NO_TOKENS), spent)
         elif (
             isinstance(data, AgentExecutionFinishedData)
             and data.reply is not None
@@ -180,4 +228,6 @@ def client_fold(run_events: Sequence[RunEvent]) -> ClientFold:
                 "span_id": event.span_id,
                 **json.loads(data.reply.model_dump_json()),
             }
-    return ClientFold(last, count, tuple(spans.values()), overview, tuple(replies.values()))
+    return ClientFold(
+        last, count, tuple(spans.values()), overview, tuple(replies.values()), total, by_span
+    )

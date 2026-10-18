@@ -9,7 +9,8 @@ Light: Pydantic, the standard library and ``server.host_envelope``. ``server.hos
 these messages into the helper's request and reply unions and gates them behind
 ``HelperFeature.RUN_SUMMARY``.
 
-Public surface: ``RunsSummaryRequest``, ``RunsSummaryReply``, ``TurnReply``, the documents they
+Public surface: ``RunsSummaryRequest``, ``RunsSummaryReply``, ``TurnReply``, ``TokenTally``,
+``SpanTokens``, the documents they
 pass through (``RunSpanDocument``, ``RunOverviewDocument``, ``ReplySchemaDocument``) and the
 limits and names ``RUN_SUMMARY_FILE``, ``RUN_SUMMARY_PAGE_MAX_BYTES`` and
 ``REPLY_SCHEMA_ID_PATTERN``.
@@ -34,7 +35,7 @@ RUN_SUMMARY_FILE: Final = "run-summary.json"
 """The run's summary read model, beside its journal: a disposable cache of the journal's fold."""
 
 RUN_SUMMARY_PAGE_MAX_BYTES: Final = 512 * 1024
-"""The most bytes of spans, replies and schemas one ``runs.summary`` page carries, so it stays a
+"""The most bytes of spans, replies, schemas and usage one ``runs.summary`` page carries, so it stays a
 helper line; a page always holds at least one item, so every read makes progress."""
 
 REPLY_SCHEMA_ID_PATTERN: Final = r"^[0-9a-f]{64}$"
@@ -87,6 +88,38 @@ class TurnReply(BaseModel):
     """The validated reply."""
 
 
+class TokenTally(BaseModel):
+    """Tokens spent, counted as the run protocol's ``turn_usage_recorded`` reports them.
+
+    A count the provider did not report is ``None``, not zero: a sum is ``None`` until some turn
+    reports the count, and then adds only the turns that did, so a reader can tell "none" from
+    "zero" and a sum over turns with a missing count is a lower bound.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    input: NonNegativeInt | None
+    """Input tokens, cached ones included."""
+    cache_read: NonNegativeInt | None
+    """The part of ``input`` the provider served from its cache."""
+    cache_write: NonNegativeInt | None
+    """The part of ``input`` written to the provider's cache."""
+    output: NonNegativeInt | None
+    """Output tokens, reasoning included."""
+    reasoning: NonNegativeInt | None
+    """The part of ``output`` the provider reports as reasoning."""
+
+
+class SpanTokens(BaseModel):
+    """The tokens the turns of one agent-turn span spent, summed."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    span_id: str
+    """The agent-turn span the turns ran as: the usage event's ``span_id``."""
+    tally: TokenTally
+
+
 class RunsSummaryReply(HelperReplyBase):
     """One page of a run's summary: the client's fold of its journal, to ``through_sequence``.
 
@@ -99,6 +132,9 @@ class RunsSummaryReply(HelperReplyBase):
       (``foldOverview``), with no unit or direction a live server adds from run state;
     - ``replies``: the last typed reply of each agent-turn span, by ``agent_execution_finished``
       events with a ``span_id``, in the order the spans first replied (``implementerOutcomes``);
+    - ``tokens`` and ``usage``: the run's spend, folded from ``turn_usage_recorded`` events by
+      summing (``ledgerWith``): ``tokens`` over every turn, those the trace names and those it
+      does not, ``usage`` over each turn span that is named, in the order the spans first spent;
     - the idea rows, the measurement points and the chart are folds of ``spans`` and ``replies``
       the client already owns (``CandidateFold``, ``performanceFold``); nothing duplicates them.
 
@@ -120,6 +156,10 @@ class RunsSummaryReply(HelperReplyBase):
     """Every span of the run, across all pages."""
     reply_count: NonNegativeInt
     """Every reply of the run, across all pages."""
+    usage_count: NonNegativeInt
+    """Every span with a spend, across all pages."""
+    tokens: TokenTally
+    """The whole run's spend, on every page so a page stands alone."""
     overview: RunOverviewDocument | None
     """On every page, so a page stands alone; ``None`` before a ``run_started`` declared one."""
     spans: tuple[RunSpanDocument, ...]
@@ -128,5 +168,7 @@ class RunsSummaryReply(HelperReplyBase):
     """This page's replies, from index ``max(0, offset - span_count)`` in the run's replies."""
     schemas: dict[str, ReplySchemaDocument]
     """The schemas of this page's replies that no earlier reply uses, by ``TurnReply.schema_id``."""
+    usage: tuple[SpanTokens, ...]
+    """This page's per-span spend, from index ``max(0, offset - span_count - reply_count)``."""
     next_offset: PositiveInt | None
     """The ``offset`` of the next page, or ``None`` when this page ends the summary."""

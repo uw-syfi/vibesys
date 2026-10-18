@@ -34,19 +34,24 @@ from typing import TYPE_CHECKING, Final, cast
 
 from pydantic import JsonValue, TypeAdapter
 
-from server.host_run_summary import RUN_SUMMARY_PAGE_MAX_BYTES, TurnReply
+from server.host_run_summary import RUN_SUMMARY_PAGE_MAX_BYTES, SpanTokens, TokenTally, TurnReply
 
 if TYPE_CHECKING:
     from server.host_run_summary import ReplySchemaDocument, RunOverviewDocument, RunSpanDocument
 
-RUN_SUMMARY_VERSION: Final = 1
+RUN_SUMMARY_VERSION: Final = 2
 """The version of the fold's semantics and of ``SummaryState``'s shape.
 
 A cached state of another version is dropped and recomputed from the journal, so a change to what
 the fold keeps never serves an old fold as the new one: bump it with any such change."""
 
 _SPAN_EVENTS: Final = frozenset({"span_started", "span_updated", "span_ended"})
-_FOLDED_EVENTS: Final = frozenset({*_SPAN_EVENTS, "run_started", "agent_execution_finished"})
+_FOLDED_EVENTS: Final = frozenset(
+    {*_SPAN_EVENTS, "run_started", "agent_execution_finished", "turn_usage_recorded"}
+)
+_NO_TOKENS: Final = TokenTally(
+    input=None, cache_read=None, cache_write=None, output=None, reasoning=None
+)
 
 _PREFIX_BYTES: Final = 512
 _SEQUENCE: Final = re.compile(rb'"sequence":(\d+)[,}]')
@@ -65,15 +70,20 @@ class SummaryState:
     replies: tuple[TurnReply, ...]
     schemas: dict[str, ReplySchemaDocument]
     """The schemas ``replies`` use, by ``TurnReply.schema_id``, and no others."""
+    tokens: TokenTally
+    """The spend of every turn, those a span names and those none does."""
+    usage: tuple[SpanTokens, ...]
+    """The spend of each turn span, in the order the spans first spent."""
 
 
 @dataclass(frozen=True)
 class SummaryPage:
-    """One page of a summary's items: spans first, then replies, then the schemas they need."""
+    """One page of a summary's items: spans, then replies (with the schemas they need), then usage."""
 
     spans: tuple[RunSpanDocument, ...]
     replies: tuple[TurnReply, ...]
     schemas: dict[str, ReplySchemaDocument]
+    usage: tuple[SpanTokens, ...]
     next_offset: int | None
 
 
@@ -106,6 +116,8 @@ class RunSummaryFold:
     _overview: RunOverviewDocument | None = None
     _replies: dict[str, TurnReply] = field(default_factory=dict)
     _schemas: dict[str, ReplySchemaDocument] = field(default_factory=dict)
+    _tokens: TokenTally = _NO_TOKENS
+    _usage: dict[str, TokenTally] = field(default_factory=dict)
 
     @classmethod
     def from_state(cls, state: SummaryState) -> RunSummaryFold:
@@ -117,6 +129,8 @@ class RunSummaryFold:
             _overview=state.overview,
             _replies={reply.span_id: reply for reply in state.replies},
             _schemas=dict(state.schemas),
+            _tokens=state.tokens,
+            _usage={entry.span_id: entry.tally for entry in state.usage},
         )
 
     def state(self) -> SummaryState:
@@ -130,6 +144,8 @@ class RunSummaryFold:
             overview=self._overview,
             replies=replies,
             schemas={key: value for key, value in self._schemas.items() if key in used},
+            tokens=self._tokens,
+            usage=tuple(SpanTokens(span_id=key, tally=value) for key, value in self._usage.items()),
         )
 
     def consume(self, line: bytes, *, complete: bool = True) -> bool:
@@ -164,43 +180,54 @@ class RunSummaryFold:
         return True
 
     def page(self, offset: int, max_bytes: int = RUN_SUMMARY_PAGE_MAX_BYTES) -> SummaryPage:
-        """The items from index ``offset`` (spans, then replies) that fit ``max_bytes``.
+        """The items from index ``offset`` (spans, then replies, then usage) that fit ``max_bytes``.
 
         A page holds at least one item when any remains. It carries the schemas of its replies that
         no earlier reply uses, so the pages of one summary carry each schema once.
         """
         spans = list(self._spans.values())
         replies = list(self._replies.values())
-        total = len(spans) + len(replies)
+        usage = [SpanTokens(span_id=key, tally=value) for key, value in self._usage.items()]
+        replies_from = len(spans)
+        usage_from = replies_from + len(replies)
+        total = usage_from + len(usage)
         taken_spans: list[RunSpanDocument] = []
         taken_replies: list[TurnReply] = []
+        taken_usage: list[SpanTokens] = []
         schemas: dict[str, ReplySchemaDocument] = {}
-        introduced = {reply.schema_id for reply in replies[: max(0, offset - len(spans))]}
+        introduced = {reply.schema_id for reply in replies[: max(0, offset - replies_from)]}
         size = 0
         index = offset
         while index < total:
-            if index < len(spans):
+            new_schema: str | None = None
+            if index < replies_from:
                 cost = _size(spans[index])
-                item_schema = None
+            elif index < usage_from:
+                reply = replies[index - replies_from]
+                if reply.schema_id not in introduced and reply.schema_id not in schemas:
+                    new_schema = reply.schema_id
+                cost = _size(reply.value) + (
+                    _size(self._schemas[new_schema]) if new_schema is not None else 0
+                )
             else:
-                reply = replies[index - len(spans)]
-                new = reply.schema_id not in introduced and reply.schema_id not in schemas
-                item_schema = reply.schema_id if new else None
-                cost = _size(reply.value) + (_size(self._schemas[reply.schema_id]) if new else 0)
+                cost = _size(usage[index - usage_from].tally.model_dump(mode="json"))
             if index > offset and size + cost > max_bytes:
                 break
-            if index < len(spans):
+            if index < replies_from:
                 taken_spans.append(spans[index])
+            elif index < usage_from:
+                taken_replies.append(replies[index - replies_from])
+                if new_schema is not None:
+                    schemas[new_schema] = self._schemas[new_schema]
             else:
-                taken_replies.append(replies[index - len(spans)])
-                if item_schema is not None:
-                    schemas[item_schema] = self._schemas[item_schema]
+                taken_usage.append(usage[index - usage_from])
             size += cost
             index += 1
         return SummaryPage(
             spans=tuple(taken_spans),
             replies=tuple(taken_replies),
             schemas=schemas,
+            usage=tuple(taken_usage),
             next_offset=index if index < total else None,
         )
 
@@ -208,6 +235,16 @@ class RunSummaryFold:
     def overview(self) -> RunOverviewDocument | None:
         """The overview the last ``run_started`` that declares one carried."""
         return self._overview
+
+    @property
+    def tokens(self) -> TokenTally:
+        """The spend of every turn folded so far."""
+        return self._tokens
+
+    @property
+    def usage_count(self) -> int:
+        """Turn spans that have a spend folded so far."""
+        return len(self._usage)
 
     @property
     def span_count(self) -> int:
@@ -242,6 +279,22 @@ class RunSummaryFold:
                 self._overview = overview
         elif kind == "agent_execution_finished" and data.get("kind") == "agent_execution_finished":
             self._fold_reply(event.get("span_id"), data.get("reply"))
+        elif kind == "turn_usage_recorded" and data.get("kind") == "turn_usage_recorded":
+            self._fold_usage(data)
+
+    def _fold_usage(self, data: dict[str, JsonValue]) -> None:
+        """Add one finished turn's spend to the run's, and to its span's when it names one."""
+        spent = TokenTally(
+            input=_count(data.get("input_tokens")),
+            cache_read=_count(data.get("cache_read_input_tokens")),
+            cache_write=_count(data.get("cache_creation_input_tokens")),
+            output=_count(data.get("output_tokens")),
+            reasoning=_count(data.get("reasoning_output_tokens")),
+        )
+        self._tokens = _plus(self._tokens, spent)
+        span_id = data.get("span_id")
+        if isinstance(span_id, str):
+            self._usage[span_id] = _plus(self._usage.get(span_id, _NO_TOKENS), spent)
 
     def _fold_reply(self, span_id: JsonValue, reply: JsonValue) -> None:
         if not isinstance(span_id, str) or not isinstance(reply, dict):
@@ -258,6 +311,28 @@ class RunSummaryFold:
         self._replies[span_id] = TurnReply(
             span_id=span_id, kind=reply_kind, schema_id=key, value=value
         )
+
+
+def _count(value: JsonValue) -> int | None:
+    """A reported token count; anything else (absent, null, malformed) is not reported."""
+    return value if type(value) is int and value >= 0 else None
+
+
+def _sum(a: int | None, b: int | None) -> int | None:
+    if a is None:
+        return b
+    return a if b is None else a + b
+
+
+def _plus(a: TokenTally, b: TokenTally) -> TokenTally:
+    """``a`` and ``b`` summed count by count; a count neither reported stays unreported."""
+    return TokenTally(
+        input=_sum(a.input, b.input),
+        cache_read=_sum(a.cache_read, b.cache_read),
+        cache_write=_sum(a.cache_write, b.cache_write),
+        output=_sum(a.output, b.output),
+        reasoning=_sum(a.reasoning, b.reasoning),
+    )
 
 
 def _decode_event(line: bytes) -> dict[str, JsonValue] | None:
