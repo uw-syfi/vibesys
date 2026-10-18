@@ -280,7 +280,10 @@ class _World:
 
 
 def _attach_until_attached(
-    run: SlurmLedgerAttachment, cluster: FakeCluster | _SteppedCluster, request: SlurmBatchRequest
+    run: SlurmLedgerAttachment,
+    cluster: FakeCluster | _SteppedCluster,
+    request: SlurmBatchRequest,
+    clock: ManualClock,
 ) -> Attached:
     """Attach, asking again while another process holds the request, as the executor does.
 
@@ -289,7 +292,7 @@ def _attach_until_attached(
     mark left by a withdrawer that failed part way holds the request for.
     """
     for pause in _ATTACH_PAUSES:
-        run.clock.advance(pause)
+        clock.advance(pause)
         outcome = run.attach(cluster, request, labels=LedgerLabels())
         if isinstance(outcome, Attached):
             return outcome
@@ -298,12 +301,21 @@ def _attach_until_attached(
 
 
 def _relinquish_until_known(
-    run: SlurmLedgerAttachment, cluster: FakeCluster | _SteppedCluster, key: str
+    run: SlurmLedgerAttachment, cluster: FakeCluster | _SteppedCluster, key: str, clock: ManualClock
 ) -> None:
-    """Stop wanting the request, trying again after an unknown outcome, as the executor does."""
+    """Stop wanting the request, trying again after an unknown outcome, as the executor does.
+
+    The executor tries again at a later cancel or stop. Only another
+    withdrawer's mark, left by one that failed part way, may hold the request
+    for its whole window; a mark of this run's own is its to finish at once.
+    """
     for _ in range(_TRIES):
-        if not isinstance(run.relinquish(cluster, key), WithdrawUnknown):
+        outcome = run.relinquish(cluster, key)
+        if not isinstance(outcome, WithdrawUnknown):
             return
+        withdrawer = outcome.reason.removesuffix(" is withdrawing it")
+        if withdrawer not in {outcome.reason, run.holder}:
+            clock.advance(_WINDOW + 1.0)
     message = "the withdrawal stayed unknown"
     raise AssertionError(message)
 
@@ -320,7 +332,7 @@ def _check_the_live_run_keeps_its_job(
             f"run-2 attached to {attached.operation_id}, whose job was then cancelled"
         )
     if not held:
-        held.append(_attach_until_attached(second, world.cluster, request))
+        held.append(_attach_until_attached(second, world.cluster, request, world.clock))
         assert world.live(held[0].operation_id)
     assert len(world.live_jobs(held[0].key)) == 1
 
@@ -358,10 +370,10 @@ def _race(race: Race, steps: _Steps) -> None:
         request_1, request_2 = world.request("run-1"), world.request("run-2")
         key = first.key(request_1)
         steps_off = world.cluster
-        _attach_until_attached(first, steps_off, request_1)
+        _attach_until_attached(first, steps_off, request_1, world.clock)
         held_by_second: list[Attached] = []
         if race == "relinquish_during_relinquish":
-            held_by_second.append(_attach_until_attached(second, steps_off, request_2))
+            held_by_second.append(_attach_until_attached(second, steps_off, request_2, world.clock))
         if race in {"sweep_during_attach", "attach_during_sweep"}:
             # The first run crashed long ago: its lease lapsed past the grace period.
             world.clock.advance(POLICY.lease_seconds + POLICY.grace_seconds + 1)
@@ -379,7 +391,7 @@ def _race(race: Race, steps: _Steps) -> None:
             ),
             "relinquish_during_attach": (
                 lambda: second.attach(world.stepped_cluster, request_2, labels=LedgerLabels()),
-                lambda: _relinquish_until_known(first, steps_off, key),
+                lambda: _relinquish_until_known(first, steps_off, key, world.clock),
             ),
             "sweep_during_attach": (
                 lambda: second.attach(world.stepped_cluster, request_2, labels=LedgerLabels()),
@@ -391,7 +403,7 @@ def _race(race: Race, steps: _Steps) -> None:
             ),
             "relinquish_during_relinquish": (
                 lambda: first.relinquish(world.stepped_cluster, key),
-                lambda: _relinquish_until_known(second, steps_off, key),
+                lambda: _relinquish_until_known(second, steps_off, key, world.clock),
             ),
         }
         stepped, intruder = actions[race]
@@ -406,15 +418,15 @@ def _race(race: Race, steps: _Steps) -> None:
 
         # Whatever ended unknown is tried again, as the executor does.
         if race in {"attach_during_relinquish", "relinquish_during_relinquish"}:
-            _relinquish_until_known(first, steps_off, key)
+            _relinquish_until_known(first, steps_off, key, world.clock)
         if race == "relinquish_during_relinquish":
             assert world.live_jobs(key) == [], "a job outlived both runs that let go of it"
             return
 
         _check_the_live_run_keeps_its_job(world, second, request_2, held_by_second)
-        _relinquish_until_known(second, steps_off, key)
+        _relinquish_until_known(second, steps_off, key, world.clock)
         if race == "attach_during_relinquish":
-            _relinquish_until_known(first, steps_off, key)
+            _relinquish_until_known(first, steps_off, key, world.clock)
         # A run that crashed (the sweeps) lets go of nothing: its lapsed lease holds nothing.
         assert world.live_jobs(key) == [], "a job outlived every run that wanted it"
 
@@ -527,11 +539,6 @@ _PAUSES = st.lists(st.sampled_from([0.0, 1.0, POLICY.claim_seconds + 1.0]), min_
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(
-    strict=True,
-    reason="#3173 re-review MED-3: a run takes its own live claim for a dead process's "
-    "and submits a second attempt while the first job may still run",
-)
 @settings(max_examples=examples(pr=100, nightly=1000), deadline=None)
 @given(submits=_FATES, inspects=_FATES, cancels=_FATES, pauses=_PAUSES)
 # A lost sbatch answer, then a failed inspect, then a failed scancel.

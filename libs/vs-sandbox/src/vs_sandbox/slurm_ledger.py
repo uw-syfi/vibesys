@@ -145,8 +145,8 @@ class SlurmLedgerAttachment:
     # Which of this run's evaluations use each request, and the request of each.
     _users: dict[str, set[str]] = field(default_factory=dict)
     _used: dict[str, str] = field(default_factory=dict)
-    # The requests this process is submitting a claimed attempt of right now.
-    _submitting: set[str] = field(default_factory=set)
+    # The attempts this process claimed, and when it claimed and first submitted each.
+    _claimed_here: dict[str, float] = field(default_factory=dict)
     _guards: dict[str, asyncio.Lock] = field(default_factory=dict)
     _orphans: OrphanChecks = field(init=False)
     _timing: WithdrawalTiming = field(init=False)
@@ -210,10 +210,8 @@ class SlurmLedgerAttachment:
                 case CheckJob(entry=current):
                     outcome = self._check(cluster, current, request)
                 case ResolveSubmission(entry=current, expired=expired):
-                    # This run's own claim that it is not submitting is a dead
-                    # process's (its renewals above keep it from expiring).
-                    orphaned = current.record.owner == self.holder and key not in self._submitting
-                    outcome = self._resolve(cluster, current, request, expired=expired or orphaned)
+                    lapsed = self._claim_lapsed(current.record, expired=expired)
+                    outcome = self._resolve(cluster, current, request, expired=lapsed)
                 case AwaitWithdrawal(entry=current, expired=expired):
                     outcome = self._await_withdrawal(current, expired=expired)
                 case ClaimAttempt(attempt=attempt):
@@ -406,6 +404,22 @@ class SlurmLedgerAttachment:
         undo_expired_withdrawal(self.ledger, entry, now=self.clock.now())
         return None  # read again: the attempt as it was, or what another process made of it
 
+    def _claim_lapsed(self, record: LedgerRecord, *, expired: bool) -> bool:
+        """Whether the claim of a submitting attempt may be taken over (``ResolveSubmission``).
+
+        Another run's lapses with its renewals (``expired``). This run's lease
+        renews its own claims, so its own lapses by when it was submitted: one
+        an earlier process of this run made is a dead process's at once, and
+        one this process made lapses a claim window after its first submission,
+        which this process submits again meanwhile (``_resolve``).
+        """
+        if record.owner != self.holder:
+            return expired
+        submitted_at = self._claimed_here.get(record.operation_id)
+        if submitted_at is None:
+            return True
+        return self.clock.now() > submitted_at + self.policy.claim_seconds
+
     def _resolve(
         self,
         cluster: Cluster,
@@ -421,8 +435,15 @@ class SlurmLedgerAttachment:
             observed.handle, SlurmBatchHandle
         ):
             return self._record_job(cluster, entry, request, observed.handle)
+        if not expired and record.operation_id in self._claimed_here:
+            # This process's own submission, whose answer was lost: submit it again.
+            # A submit is once per operation id (``Cluster.submit``), so this finds
+            # the job the lost one started, or starts the only one.
+            return self._submit(cluster, request, entry)
         if not expired:
             return AttachPending(record.key, "another process is submitting the request's job")
+        if record.owner == self.holder:
+            return self._take_over_own(cluster, entry)
         # The submitter stopped renewing its claim: it died before sbatch, or hangs.
         # The attempt fails first, by compare-and-swap, so a submitter that recorded
         # its job meanwhile wins and its job is never cancelled here. Only after the
@@ -437,6 +458,26 @@ class SlurmLedgerAttachment:
         if self.ledger.replace(entry, failed):
             cluster.cancel(record.operation_id)
         return None  # read again: a new attempt, or the job the submitter recorded
+
+    def _take_over_own(self, cluster: Cluster, entry: LedgerEntry) -> AttachPending | None:
+        """Fail this run's own lapsed claim, once its job is surely cancelled.
+
+        No submitter of this run is still on its way (an earlier process died;
+        this one submits each attempt once, under ``guard``), so the job, if
+        the lost submission started one, is cancelled first, and only a
+        definite cancel lets the attempt fail: failing it with the job's fate
+        unknown would let the next attempt start a second live job.
+        """
+        record = entry.record
+        cancelled = cluster.cancel(record.operation_id)
+        if isinstance(cancelled, ClusterUnknown):
+            return AttachPending(record.key, f"the lapsed claim's job may run: {cancelled.reason}")
+        failed = transitioned(
+            record, LedgerState.FAILED, reason="its submission's outcome stayed unknown"
+        )
+        if self.ledger.replace(entry, failed):
+            self._claimed_here.pop(record.operation_id, None)
+        return None  # read again: a new attempt, or what another process recorded
 
     def _claim(
         self,
@@ -460,12 +501,9 @@ class SlurmLedgerAttachment:
         )
         if self.ledger.claim(claimed) != claimed:
             return None  # another process claimed this attempt first: read what it recorded
-        self._submitting.add(key)
-        try:
-            self.renew(key)
-            return self._submit(cluster, request, LedgerEntry(claimed))
-        finally:
-            self._submitting.discard(key)
+        self._claimed_here[claimed.operation_id] = now
+        self.renew(key)
+        return self._submit(cluster, request, LedgerEntry(claimed))
 
     def _submit(
         self, cluster: Cluster, request: SlurmBatchRequest, entry: LedgerEntry
