@@ -11,13 +11,14 @@ from __future__ import annotations
 
 from typing import Literal
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
 from vs_sim.api.testing import examples
 
-from .test_measurement_comparison import Lab, ended_with
+from .test_measurement_comparison import FLOOR, Lab, ended_with
 from .test_measurement_reuse import submissions
 from .test_measurements import plan, requested
 
@@ -102,6 +103,45 @@ def test_a_strategy_baseline_that_ends_without_a_reading_leaves_the_base_to_core
     end(lab, own, None)
     asked = lab.call("a", "c2", "input-2")
     assert [r.plan.purpose for r in asked] == ["local-validation", "baseline"]
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    ("floor", "most"),
+    [(FLOOR, core.BASE_MAX_SAMPLES), (0.0, core.MIN_SAMPLES_WITHOUT_FLOOR)],
+    ids=["declared-floor", "no-floor"],
+)
+def test_a_close_call_awaits_the_strategys_running_baseline_and_counts_it(
+    floor: float, most: int
+) -> None:
+    """A close call that earns the base its last run claims the strategy's run under way.
+
+    The candidate lands within noise of its base, and the base's close-call runs (core's own)
+    end one by one. The strategy starts measuring the same revision before the close call
+    that would earn the base its last allowed run. Before, that close call started another
+    base run beside the strategy's; now it claims the strategy's run, whose sample is the one
+    that reaches the bound (`BASE_MAX_SAMPLES` under a declared floor, three without one).
+    """
+    lab = Lab.of("a", floor=floor)
+    candidate, first = lab.call("a", "c1", "input-1")
+    assert first.plan.purpose == "baseline"
+    end(lab, first, 100.0)
+    own: core.SubmitMeasurement | None = None
+    if most == core.BASE_MAX_SAMPLES:
+        own = strategy_baseline(lab)
+    end(lab, candidate, 100.3)
+    while len(base_runs(lab)) < most:
+        (extra,) = running(lab)
+        own = strategy_baseline(lab)
+        end(lab, extra, 100.1)
+    assert own is not None
+    assert core.close_call(lab.comparisons()[-1])
+    assert base_runs(lab)[-1] == own, "the close call awaits the strategy's run"
+    assert running(lab) == [own], "and starts no run of the base beside it"
+    end(lab, own, 100.2)
+    assert running(lab) == [], "the claimed run counts toward the bound"
+    assert len(base_runs(lab)) == most
+    assert lab.comparisons()[-1].base_samples == most
 
 
 @settings(max_examples=examples(pr=40, nightly=400))

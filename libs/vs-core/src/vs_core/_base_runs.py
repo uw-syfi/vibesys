@@ -310,7 +310,11 @@ def _remeasure(
     comparison: Comparison,
     evaluation: str,
 ) -> AreaChange[EvaluationState]:
-    """``change`` plus one more run of the base when ``comparison`` is a close call it would narrow."""
+    """``change`` plus one more run of the base when ``comparison`` is a close call it would narrow.
+
+    A run of the base the strategy already has under way is claimed instead (`with_base`): its
+    sample counts toward the close call's bound when it ends, and no second run is started.
+    """
     state = change.state
     candidate = next(
         (
@@ -326,6 +330,9 @@ def _remeasure(
         return change
     if not remeasures_base(state, comparison, evaluation, moment_of(context.run)):
         return change
+    awaited = running_baseline(state, candidate.base)
+    if awaited is not None:
+        return change.model_copy(update={"state": _claimed(state, awaited, candidate.base)})
     plan = base_plan(candidate.plan, candidate.base)
     return _base_run(
         change,

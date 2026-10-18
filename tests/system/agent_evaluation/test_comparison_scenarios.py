@@ -225,12 +225,15 @@ class Played:
     submissions: tuple[SubmitMeasurement, ...]
 
 
+SEED = 7
+"""The noisy cluster's seed in every scenario."""
+
+
 @asynccontextmanager
 async def play(
     tmp_path: Path,
     script: tuple[Turn, ...],
     *,
-    seed: int = 7,
     commits: CommitObserver | None = None,
     task: TaskTerms = TERMS,
     pace: Pace | None = None,
@@ -242,7 +245,7 @@ async def play(
     writers: list[ScriptedWriter] = []
     resolvers: list[ToolResolver] = []
     bridges: list[AgentEvaluationBridge] = []
-    cluster = NoisyCluster(seed)
+    cluster = NoisyCluster(SEED)
 
     def agents(root: Path) -> SessionHost:
         writer = ScriptedWriter(root, script=script)
