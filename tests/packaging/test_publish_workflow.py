@@ -65,4 +65,4 @@ def test_installed_wheel_check_uses_distinct_clean_install_and_runtime_homes() -
     assert script.count('HOME="$verify_home"') == 1
     assert script.index('find "$install_home"') < script.index('HOME="$install_home"')
     assert script.index('find "$verify_home"') < script.index('HOME="$verify_home"')
-    assert "--constraints \"$RUNNER_TEMP/release-verify-constraints.txt\"" in script
+    assert '--constraints "$RUNNER_TEMP/release-verify-constraints.txt"' in script

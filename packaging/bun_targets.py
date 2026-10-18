@@ -16,7 +16,7 @@ class BunTarget:
 TARGETS: dict[str, BunTarget] = {
     "linux-x86_64": BunTarget(
         asset="bun-linux-x64-baseline.zip",
-        sha256="c678040f14fe0440eb839d37cbd0ce4c051a32da72806ac97de6a6ab6bf728f",
+        sha256="c678040f14fe0440eb839d37cbd0ce4c051a32da72806ac97de6a6aab6bf728f",
     ),
     "linux-aarch64": BunTarget(
         asset="bun-linux-aarch64.zip",

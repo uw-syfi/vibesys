@@ -10,8 +10,8 @@ import zipfile
 from typing import TYPE_CHECKING
 
 import pytest
-from fetch_bun import BunFetchError, _download, fetch_bun
 from bun_targets import TARGETS
+from fetch_bun import BunFetchError, _download, fetch_bun
 
 from vs_sim.api.testing import join_or_fail
 

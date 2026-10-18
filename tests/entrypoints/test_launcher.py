@@ -40,7 +40,9 @@ def test_run_child_status_is_the_launchers(status: int) -> None:
     assert list(children.children[0].argv) == cli.headless_command(["--input", "example.py"])
 
 
-def test_source_checkout_requires_project_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_source_checkout_requires_project_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     launcher = tmp_path / "src" / "entrypoints" / "launcher.py"
     launcher.parent.mkdir(parents=True)
     launcher.write_text("# fixture\n")

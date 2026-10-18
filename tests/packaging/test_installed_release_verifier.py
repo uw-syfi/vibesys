@@ -9,7 +9,6 @@ import pytest
 import verify_installed_release as verifier
 
 
-
 def test_runtime_root_uses_the_resolved_filesystem_path(tmp_path: Path) -> None:
     apparent = tmp_path / "tmp"
     actual = tmp_path / "private" / "tmp"
@@ -63,5 +62,3 @@ def test_required_system_tools_reject_missing_git(
 
     with pytest.raises(verifier.InstalledReleaseError, match="git"):
         verifier.verify_installed_release()
-
-
