@@ -1,0 +1,101 @@
+use std::cell::RefCell;
+use std::fs;
+use std::path::PathBuf;
+use std::process::Output;
+use stitch_session::{
+    capture_perf, ingest, load_manifest, CaptureRequest, CommandRunner, SessionError,
+};
+
+struct FakeRunner {
+    calls: RefCell<Vec<Vec<String>>>,
+}
+
+impl CommandRunner for FakeRunner {
+    fn run(&self, _program: &str, args: &[String]) -> Result<Output, SessionError> {
+        self.calls.borrow_mut().push(args.to_vec());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            Ok(Output {
+                status: std::process::ExitStatus::from_raw(0),
+                stdout: if args[0] == "script" {
+                    b"7 8 12.123456789: hotel::search\n".to_vec()
+                } else {
+                    Vec::new()
+                },
+                stderr: Vec::new(),
+            })
+        }
+        #[cfg(not(unix))]
+        unreachable!("perf capture is Linux-only")
+    }
+}
+
+#[test]
+fn capture_records_a_reopenable_manifest_and_imports_samples() {
+    let dir = tempfile::tempdir().unwrap();
+    let output_dir = dir.path().join("capture");
+    let runner = FakeRunner {
+        calls: RefCell::new(Vec::new()),
+    };
+    capture_perf(
+        &CaptureRequest {
+            pid: 7,
+            seconds: 2,
+            output_dir: output_dir.clone(),
+        },
+        &runner,
+    )
+    .unwrap();
+    let commands = runner.calls.borrow();
+    assert_eq!(commands.len(), 2);
+    assert!(commands[0].contains(&"7".to_string()));
+    drop(commands);
+    let manifest = load_manifest(&output_dir.join("manifest.json")).unwrap();
+    let graph = ingest(&manifest).unwrap();
+    assert_eq!(graph.cpu_samples.len(), 1);
+    assert_eq!(graph.unassigned_samples, 1);
+    assert_eq!(graph.cpu_samples[0].frames, ["hotel::search"]);
+}
+
+#[test]
+fn source_root_is_resolved_relative_to_the_manifest() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir(dir.path().join("src")).unwrap();
+    fs::write(dir.path().join("src/main.rs"), "fn main() {}\n").unwrap();
+    fs::write(
+        dir.path().join("dial9.jsonl"),
+        r#"{"task_id":"t","poll_id":"p","pid":1,"tid":2,"start_ns":10,"end_ns":20,"name":"work","source_file":"src/main.rs","source_line":1,"trace_id":"trace","parent_span_id":"span"}"#,
+    )
+    .unwrap();
+    let manifest = serde_json::json!({
+        "schema_version": 1,
+        "label": "hotel",
+        "source_root": ".",
+        "source_revision": "abc123",
+        "inputs": [{"format": "dial9_bridge_jsonl", "path": "dial9.jsonl", "clock": "mono"}]
+    });
+    let path = dir.path().join("manifest.json");
+    fs::write(&path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    let graph = ingest(&load_manifest(&path).unwrap()).unwrap();
+    assert_eq!(graph.source_attributions.len(), 1);
+    assert_eq!(graph.source_attributions[0].location.path, "src/main.rs");
+}
+
+#[test]
+fn capture_rejects_reusing_an_output_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let runner = FakeRunner {
+        calls: RefCell::new(Vec::new()),
+    };
+    let result = capture_perf(
+        &CaptureRequest {
+            pid: 7,
+            seconds: 1,
+            output_dir: PathBuf::from(dir.path()),
+        },
+        &runner,
+    );
+    assert!(result.is_err());
+    assert!(runner.calls.borrow().is_empty());
+}

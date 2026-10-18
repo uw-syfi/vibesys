@@ -1,0 +1,16 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {"attributes": [{"key": "service.name", "value": {"stringValue": "hotel_frontend"}}]},
+      "scopeSpans": [
+        {"spans": [{
+          "traceId": "example-trace",
+          "spanId": "search-span",
+          "name": "SearchHotels",
+          "startTimeUnixNano": "100",
+          "endTimeUnixNano": "200"
+        }]}
+      ]
+    }
+  ]
+}
