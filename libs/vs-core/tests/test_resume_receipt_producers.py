@@ -1026,6 +1026,7 @@ def _authorized_before_a_late_submission(
 
 
 @pytest.mark.regression
+@example(late=core.ObservationStatus.PENDING)
 @given(late=st.sampled_from((core.ObservationStatus.PENDING, core.ObservationStatus.UNKNOWN)))
 def test_a_submission_made_after_authorization_never_refuses_the_authorized_resume(
     late: core.ObservationStatus,
