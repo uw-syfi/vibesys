@@ -21,10 +21,17 @@ import {
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import {ideaBases} from '../../../../state/idea-bases.js';
-import type {IdeaEffect} from '../../../../state/idea-effects.js';
+import {effectWords, type IdeaEffect} from '../../../../state/idea-effects.js';
 import type {ImplementerOutcome} from '../../../../state/idea-outcomes.js';
 import {outcomeWords} from '../../../../state/ideas-view.js';
-import {spendOf, stepLabel, stepTitle, tokensColumn, turnTokens} from '../../../../state/index.js';
+import {
+  ideaOutcomeLine,
+  spendOf,
+  stepLabel,
+  stepTitle,
+  tokensColumn,
+  turnTokens,
+} from '../../../../state/index.js';
 import {roleSeries} from '../../../../state/role-series.js';
 import {duration} from '../../../../state/span-reading.js';
 import {plain, statusWords} from '../../../../state/span-words.js';
@@ -124,7 +131,9 @@ function BaseAndEffect(props: IdeaViewProps): JSX.Element {
   const from = base?.kind === 'own work' ? 'from its own work' : `from ${base?.label ?? 'input'}`;
   return (
     <Text variant="small" tone="muted">
-      {[from, props.effect].filter(part => part !== null).join(' · ')}
+      {[from, props.effect === null ? null : effectWords(props.effect)]
+        .filter(part => part !== null)
+        .join(' · ')}
     </Text>
   );
 }
@@ -168,7 +177,10 @@ export function IdeaView(props: IdeaViewProps): JSX.Element {
   const number = idea.attempts.indexOf(attempt) + 1;
   return (
     <Stack gap="space-3">
-      <BaseAndEffect {...props} />
+      <Stack gap="space-1">
+        <Text variant="small">{ideaOutcomeLine(props.model, idea)}</Text>
+        <BaseAndEffect {...props} />
+      </Stack>
       {props.outcome === null ? null : <Implemented outcome={props.outcome} idea={idea} />}
       {lines.length > 1 ? (
         <Attempts lines={lines} selected={attempt.span} choose={setChosen} />

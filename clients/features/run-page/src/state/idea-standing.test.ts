@@ -2,7 +2,7 @@ import {describe, expect, test} from 'bun:test';
 import {fixtureNamed} from '@vibesys/run-fixtures';
 import {initialCoreState, reduceEventBatch} from '@vibesys/run-state';
 import {ideaBases} from './idea-bases.js';
-import {ideaEffects} from './idea-effects.js';
+import {effectWords, ideaEffects} from './idea-effects.js';
 import {IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
 import {EMPTY_TRACE_LOG, traceStep} from './live.js';
 import {createRunReader} from './run-model.js';
@@ -66,13 +66,30 @@ describe('the framework verdict on an idea’s effect', () => {
   });
 
   test('an idea nothing compared has none, and a run with no fold has none at all', () => {
-    expect(ideaEffects(CORE, MODEL.candidates).has(titled('Combine adjacent slots').id)).toBe(
-      false,
-    );
-    expect(
-      ideaEffects(CORE, MODEL.candidates).has(titled('Widen the batch to sixty-four').id),
-    ).toBe(false);
+    expect(ideaEffects(CORE, MODEL.candidates).has(titled('Shard the free list').id)).toBe(false);
     expect(ideaEffects(null, MODEL.candidates).size).toBe(0);
+  });
+
+  test('a failed idea that measured nothing has none, though its revision is a measured idea’s', () => {
+    // It kept its base's code, whose revision has a comparison of its own.
+    const failed = titled('Widen the batch to sixty-four');
+    const kept = failed.attempts.at(-1)?.revision;
+    expect(kept).toBeDefined();
+    expect(CORE.comparisons[kept ?? '']).toBeDefined();
+    expect(ideaEffects(CORE, MODEL.candidates).has(failed.id)).toBe(false);
+  });
+
+  test('a running idea is measuring while its comparison takes in runs, then has its verdict', () => {
+    const running = titled('Combine adjacent slots');
+    expect(running.outcome).toBe('running');
+    expect(ideaEffects(CORE, MODEL.candidates).get(running.id)).toBe('measuring');
+  });
+
+  test('the words say the verdict is against the idea’s base', () => {
+    expect(effectWords('within noise')).toBe('within noise of its base');
+    expect(effectWords('supported')).toBe('supported vs its base');
+    expect(effectWords('disproven')).toBe('disproven vs its base');
+    expect(effectWords('measuring')).toBe('measuring');
   });
 
   test('a later comparison of the same commit supersedes an earlier one', () => {

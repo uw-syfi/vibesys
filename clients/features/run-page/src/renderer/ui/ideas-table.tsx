@@ -3,6 +3,7 @@ import {markdownToPlain, PickList, PickRow, type RowBadge, Stack} from '@vibesys
 import {type JSX, useMemo} from 'react';
 import {
   ageWords,
+  effectWords,
   type IdeaEffects,
   type IdeaRow,
   type IdeasFilter,
@@ -24,10 +25,15 @@ function fromWords(row: IdeaRow): string {
   return label === '…' ? '' : `from ${label}`;
 }
 
+function effectOf(id: string, effects: IdeaEffects): string {
+  const effect = effects.get(id);
+  return effect === undefined ? '' : effectWords(effect);
+}
+
 /**
  * The line under an idea's title: what its status badge does not say. What it built on (`from
- * best`), the framework's verdict on its effect (`within noise`), why it failed when the span
- * says, and what the implementer reported.
+ * best`), the framework's verdict on its effect against that base (`within noise of its base`),
+ * why it failed when the span says, and what the implementer reported.
  */
 export function subtitleOf(
   row: IdeaRow,
@@ -38,7 +44,7 @@ export function subtitleOf(
   const reported = outcomes.get(row.id)?.outcome?.label ?? '';
   const parts = [
     fromWords(row),
-    effects.get(row.id) ?? '',
+    effectOf(row.id, effects),
     row.outcome === 'failed' ? why : '',
     reported,
   ];

@@ -56,7 +56,7 @@ test('the line under an idea carries its effect verdict, never its status again'
   expect(from).toMatch(/^From /);
   expect(from.toLowerCase()).not.toContain('passed');
   expect(subtitleOf(passed, new Map(), new Map([[passed.id, 'within noise']]))).toBe(
-    `${from} · within noise`,
+    `${from} · within noise of its base`,
   );
 });
 

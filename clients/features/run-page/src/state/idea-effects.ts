@@ -2,15 +2,36 @@
  * Whether each idea's effect held, as the framework judged it: the verdict of the comparison of
  * the idea's measurement with its base's (`measurement_compared`), worded `supported`, `within
  * noise` or `disproven`. It sits next to passed and failed so a screen never says an idea passed
- * while the run's own history calls its effect inconclusive. An idea with no comparison (not
- * measured, or the backend has not emitted one) has none.
+ * while the run's own history calls its effect inconclusive. The comparison is of the idea's own
+ * measured code with its base's, so only an attempt that measured a value counts: a failed attempt
+ * that kept its base's revision would otherwise borrow the verdict of the idea that made that
+ * revision. While the idea still runs its comparison keeps taking in runs (the first is one
+ * against one), so the verdict is `measuring` until the idea ends. An idea with no comparison
+ * (not measured, or the backend has not emitted one) has none.
  *
  * Pure over the core's comparisons and the candidates; memoized on both.
  */
 import type {CoreState} from '@vibesys/run-state';
 import type {CandidateTree} from '@vibesys/run-state/candidates';
 
-export type IdeaEffect = 'supported' | 'within noise' | 'disproven';
+export type IdeaEffect = 'supported' | 'within noise' | 'disproven' | 'measuring';
+
+/**
+ * The verdict as a screen words it. It is against the idea's base, not the input, so it says so:
+ * `within noise` beside an idea's 6.72x would read as a claim about the input.
+ */
+export function effectWords(effect: IdeaEffect): string {
+  switch (effect) {
+    case 'supported':
+      return 'supported vs its base';
+    case 'within noise':
+      return 'within noise of its base';
+    case 'disproven':
+      return 'disproven vs its base';
+    case 'measuring':
+      return 'measuring';
+  }
+}
 
 export type IdeaEffects = ReadonlyMap<string, IdeaEffect>;
 
@@ -24,9 +45,10 @@ function fold(core: CoreState, tree: CandidateTree): IdeaEffects {
   const found = new Map<string, IdeaEffect>();
   for (const item of tree.candidates) {
     for (const attempt of [...item.attempts].reverse()) {
-      const comparison = attempt.revision === null ? undefined : core.comparisons[attempt.revision];
+      if (attempt.measurement?.metricValue == null || attempt.revision === null) continue;
+      const comparison = core.comparisons[attempt.revision];
       if (comparison === undefined) continue;
-      found.set(item.id, WORDS[comparison.verdict]);
+      found.set(item.id, item.outcome === 'running' ? 'measuring' : WORDS[comparison.verdict]);
       break;
     }
   }

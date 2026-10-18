@@ -90,10 +90,12 @@ test('the list says what each idea built on, marks the leader Best, and says eac
   );
   const rows = lines(screen.container);
   const byTitle = (title: string) => rows.find(row => row.title === title);
-  expect(byTitle('Padded counters')?.line).toBe('From input · supported');
-  expect(byTitle('Batched enqueue on the padded counters')?.line).toBe('From best · supported');
-  expect(byTitle('Per-core free lists')?.line).toBe('From a passed idea · disproven');
-  expect(byTitle('Prefetch the next slot')?.line).toBe('From its own work · supported');
+  expect(byTitle('Padded counters')?.line).toBe('From input · supported vs its base');
+  expect(byTitle('Batched enqueue on the padded counters')?.line).toBe(
+    'From best · supported vs its base',
+  );
+  expect(byTitle('Per-core free lists')?.line).toBe('From a passed idea · disproven vs its base');
+  expect(byTitle('Prefetch the next slot')?.line).toBe('From its own work · supported vs its base');
   expect(rows.filter(row => row.badge === 'Best').map(row => row.title)).toEqual([
     'Prefetch the next slot',
   ]);
@@ -101,13 +103,37 @@ test('the list says what each idea built on, marks the leader Best, and says eac
   for (const row of rows) expect(row.line.toLowerCase()).not.toBe(row.badge.toLowerCase());
   expect(byTitle('Spin before parking')).toMatchObject({
     badge: 'Passed',
-    line: 'From input · within noise',
+    line: 'From input · within noise of its base',
   });
   expect(byTitle('Widen the batch to sixty-four')).toMatchObject({
     badge: 'Failed',
     line: 'From best',
   });
+  // Still taking in runs: no verdict yet, so never a provisional "within noise".
+  expect(byTitle('Combine adjacent slots')?.line).toBe('From its own work · measuring');
   expect(screen.container.textContent).not.toMatch(/turned down/i);
+  await screen.done();
+});
+
+test('an idea that measured nothing claims no verdict in the idea view, only its outcome', async () => {
+  const idea = MODEL.candidates.candidates.find(
+    item => item.title === 'Widen the batch to sixty-four',
+  );
+  if (idea === undefined) throw new Error('fixture needs the idea');
+  const screen = await rendered(
+    <IdeasWorkspace
+      state={STATE}
+      base={BASE}
+      core={CORE}
+      mode="ideas"
+      idea={idea}
+      loading={null}
+      dispatch={() => undefined}
+    />,
+  );
+  const pane = [...screen.container.querySelectorAll('.vs-pane')].at(-1)?.textContent ?? '';
+  expect(pane).toContain('Failed');
+  expect(pane).not.toMatch(/within noise|supported|disproven/);
   await screen.done();
 });
 
@@ -127,7 +153,8 @@ test('the idea view says what the idea built on, its effect, and its outcome', a
   );
   const pane = screen.container.textContent ?? '';
   expect(pane).toContain('Passed');
-  expect(pane).toContain('within noise');
+  expect(pane).toContain('within noise of its base');
+  expect(pane).toContain('Passed · 1.07× the input');
   expect(pane).toContain('from input');
   expect(pane).not.toMatch(/turned down/i);
   await screen.done();

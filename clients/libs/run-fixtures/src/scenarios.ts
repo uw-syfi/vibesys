@@ -344,7 +344,8 @@ function continuationRounds(): RunFixture {
 /**
  * A live run that shows where each idea started from and how the framework judged its effect:
  * one built on the best, one on a passed idea that is no longer the best, one from the input that
- * passed within noise, a continuation of its own work, a failed one and one still running.
+ * passed within noise, a continuation of its own work, a failed one that measured nothing (it kept
+ * its base's revision), one whose comparison is still taking in runs and one just started.
  */
 function basesAndEffects(): RunFixture {
   const ideas: readonly Omit<IdeaSpec, 'at'>[] = [
@@ -389,6 +390,8 @@ function basesAndEffects(): RunFixture {
       baseRound: 2,
       on: 2,
       end: {kind: 'failed', reason: 'turned_down'},
+      // Changed nothing, so it kept idea 2's revision, which has a comparison of its own.
+      keeps: 2,
     },
     {
       n: 6,
@@ -399,7 +402,16 @@ function basesAndEffects(): RunFixture {
       end: {kind: 'passed', value: 1.9e7, ratio: 1.9},
       effect: 'better',
     },
-    {n: 7, title: 'Combine adjacent slots', round: 7, baseRound: 6, on: 6, end: {kind: 'running'}},
+    {
+      n: 7,
+      title: 'Combine adjacent slots',
+      round: 7,
+      baseRound: 7,
+      on: 6,
+      end: {kind: 'measuring', value: 1.95e7, ratio: 1.95},
+      effect: 'within_noise',
+    },
+    {n: 8, title: 'Shard the free list', round: 8, baseRound: 6, on: 6, end: {kind: 'running'}},
   ];
   return fixture({
     name: 'bases-and-effects',

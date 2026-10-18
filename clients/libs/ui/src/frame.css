@@ -98,6 +98,14 @@ button.vs-crumb:focus-visible {
   min-height: 0;
   display: flex;
   gap: var(--space-4);
+  container-type: inline-size;
+}
+/* Too narrow for a list and the idea it opened side by side (the detail would wrap words and clip
+   its tabs): the opened pane takes the row, and its close button brings the list back. */
+@container (max-width: 640px) {
+  .vs-panes > .vs-pane[data-width="master"]:has(+ .vs-pane[data-width="fill"]) {
+    display: none;
+  }
 }
 .vs-pane {
   display: flex;

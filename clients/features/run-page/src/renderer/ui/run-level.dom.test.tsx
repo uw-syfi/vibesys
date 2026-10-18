@@ -266,7 +266,7 @@ test('the performance row is one element whatever idea is open: dots are singled
   await draw('i1');
   expect(kinds()).toEqual(['dim', 'focus', 'dim']);
   // The idea's own result reads under the hero's figure.
-  expect(container.textContent).toContain('this idea');
+  expect(container.textContent).toContain('Selected idea:');
 
   const third = container.querySelectorAll('.vs-chart-pick')[2];
   await act(async () => {

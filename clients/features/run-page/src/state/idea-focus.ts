@@ -53,3 +53,19 @@ export function ideaFocusView(model: RunModel, id: string | null): IdeaFocusView
     tone: toneOf(idea),
   };
 }
+
+/**
+ * The idea's outcome as a sentence with its multiple: `Passed · 3.97× the input (5,739,182 ops/s)`,
+ * `Failed · 0.62× the input`, or the bare outcome words (`failed · not measured`, `running`) when
+ * nothing was measured.
+ */
+export function ideaOutcomeLine(model: RunModel, idea: Candidate): string {
+  const view = ideaFocusView(model, idea.id);
+  const words = outcomeWords(idea);
+  const head = words.charAt(0).toUpperCase() + words.slice(1);
+  if (view === null || view.ratio === null) {
+    return idea.outcome === 'failed' && words === 'failed' ? `${head} · not measured` : head;
+  }
+  const value = view.value === null ? '' : ` (${view.value})`;
+  return `${head} · ${view.ratio} the input${value}`;
+}

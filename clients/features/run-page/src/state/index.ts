@@ -7,8 +7,8 @@
 
 export {type HistoryLoadingView, historyLoadingView} from './history-words.js';
 export {type IdeaBase, type IdeaBases, ideaBases} from './idea-bases.js';
-export {type IdeaEffect, type IdeaEffects, ideaEffects} from './idea-effects.js';
-export {type IdeaFocusView, ideaFocusView, openIdeaId} from './idea-focus.js';
+export {effectWords, type IdeaEffect, type IdeaEffects, ideaEffects} from './idea-effects.js';
+export {type IdeaFocusView, ideaFocusView, ideaOutcomeLine, openIdeaId} from './idea-focus.js';
 export {
   type ImplementerOutcome,
   type ImplementerOutcomes,

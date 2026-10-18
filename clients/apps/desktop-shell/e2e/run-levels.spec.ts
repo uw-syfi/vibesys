@@ -416,13 +416,13 @@ test('an open idea is singled out on the chart: its dot ringed, the rest dimmed,
     related: ['Lock-free ring with per-slot sequence numbers'],
     dim: [],
   });
-  await expect(page.getByText('this idea · running')).toBeVisible();
+  await expect(page.getByText('Selected idea:')).toBeVisible();
 
   // Back at the run nothing is singled out, and the idea line is empty.
   await page.keyboard.press('Escape');
   await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
   expect(await emphasized(page)).toEqual({focus: [], related: [], dim: []});
-  await expect(page.getByText(/this idea/)).toHaveCount(0);
+  await expect(page.getByText(/Selected idea/)).toHaveCount(0);
 });
 
 test('clicking a dot of the chart opens its idea', async ({page}) => {
