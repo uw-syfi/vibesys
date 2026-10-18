@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
+import type {HarnessOffer} from '@vibesys/ipc';
 import {rawTextOf} from './checks/screen-check.js';
 import {installFakeBridge, installFakeMachines, installFakeNewRun} from './fake-bridge.js';
 import {installFakeRun} from './fake-run.js';
@@ -21,6 +22,9 @@ test('New run is prefilled from the last run on its machine and starts once the 
   await expect(page.getByLabel('Project', {exact: true})).toHaveValue(PROJECT);
   await expect(page.getByLabel('Task', {exact: true})).toHaveValue('mpmc');
   await expect(page.getByRole('radio', {name: 'Claude Code'})).toBeChecked();
+  await expect(page.getByRole('slider', {name: 'Model'})).toHaveAttribute('aria-valuetext', 'Opus');
+  await expect(page.getByText('Opus 4.5', {exact: true})).toBeVisible();
+  await page.getByRole('button', {name: 'Show all models'}).click();
   await expect(page.getByLabel('Model', {exact: true})).toHaveValue('claude-opus-4-5');
   await expect(page.getByLabel('Model', {exact: true}).locator('option:checked')).toHaveText(
     'Opus 4.5',
@@ -53,6 +57,40 @@ test('New run is prefilled from the last run on its machine and starts once the 
       args: [],
     },
   ]);
+});
+
+test('the model tiers choose a vetted model, and the full list can choose a version', async ({
+  page,
+}) => {
+  await open(page);
+  const slider = page.getByRole('slider', {name: 'Model'});
+  await expect(slider).toHaveAttribute('aria-valuetext', 'Opus');
+  await slider.press('ArrowLeft');
+  await expect(slider).toHaveAttribute('aria-valuetext', 'Sonnet');
+  await expect(page.getByText('Sonnet 4.5', {exact: true})).toBeVisible();
+  await page.getByRole('button', {name: 'Show all models'}).click();
+  await expect(page.getByLabel('Model', {exact: true})).toHaveValue('claude-sonnet-4-5');
+  await page.getByLabel('Model', {exact: true}).selectOption('claude-opus-4-5');
+  await page.getByRole('button', {name: 'Show model tiers'}).click();
+  await expect(slider).toHaveAttribute('aria-valuetext', 'Opus');
+});
+
+test('a helper without model tiers keeps the full vetted model list', async ({page}) => {
+  const newRun = SEED.newRun;
+  if (newRun === undefined) throw new Error('the seed has no New run helper');
+  await open(page, {
+    ...SEED,
+    newRun: {
+      ...newRun,
+      harnesses: (newRun.harnesses as readonly HarnessOffer[]).map(({display, ...offer}) => ({
+        ...offer,
+        display: display === undefined ? undefined : {providerName: display.providerName},
+      })),
+    },
+  });
+  await expect(page.getByRole('slider', {name: 'Model'})).toHaveCount(0);
+  await expect(page.getByLabel('Model', {exact: true})).toHaveValue('claude-opus-4-5');
+  await expect(page.getByRole('button', {name: 'Show all models'})).toHaveCount(0);
 });
 
 test('a project inside another repository is copied out by its fix, then may start', async ({
@@ -206,7 +244,11 @@ test('Run again prefills the model, rounds and extra arguments the run was start
     .click();
   await page.getByRole('button', {name: 'Run again', exact: true}).click();
   await expect(page.getByRole('heading', {name: 'New run'})).toBeVisible();
-  await expect(page.getByLabel('Model', {exact: true})).toHaveValue('claude-sonnet-4-5');
+  await expect(page.getByRole('slider', {name: 'Model'})).toHaveAttribute(
+    'aria-valuetext',
+    'Sonnet',
+  );
+  await expect(page.getByText('Sonnet 4.5', {exact: true})).toBeVisible();
   await expect(page.getByLabel('Rounds')).toHaveValue('4');
   // Extra arguments are in More options, which says they are set while it is closed.
   await expect(page.getByRole('button', {name: /More options/})).toContainText('extra arguments');

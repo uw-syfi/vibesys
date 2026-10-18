@@ -97,13 +97,25 @@ export const SEED: FakeBridgeSeed = {
         provider: 'claude',
         model: 'claude-opus-4-5',
         default: true,
-        display: {providerName: 'Claude Code', modelName: 'Opus 4.5'},
+        display: {
+          providerName: 'Claude Code',
+          modelName: 'Opus 4.5',
+          family: 'Claude',
+          tier: 3,
+          tierName: 'Opus',
+        },
       },
       {
         provider: 'claude',
         model: 'claude-sonnet-4-5',
         default: false,
-        display: {providerName: 'Claude Code', modelName: 'Sonnet 4.5'},
+        display: {
+          providerName: 'Claude Code',
+          modelName: 'Sonnet 4.5',
+          family: 'Claude',
+          tier: 2,
+          tierName: 'Sonnet',
+        },
       },
       {
         provider: 'codex',

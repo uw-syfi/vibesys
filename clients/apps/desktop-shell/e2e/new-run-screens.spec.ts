@@ -31,7 +31,7 @@ const STATES: readonly State[] = [
   {
     name: 'ready',
     reach: async page => {
-      await expect(page.getByRole('radio', {name: 'claude'})).toBeChecked();
+      await expect(page.getByRole('radio', {name: 'Claude Code'})).toBeChecked();
     },
   },
   {
@@ -44,7 +44,17 @@ const STATES: readonly State[] = [
   {
     name: 'agent',
     reach: async page => {
-      await page.getByRole('radio', {name: 'codex'}).check();
+      await page.getByRole('radio', {name: 'Codex'}).check();
+      await page.getByRole('region', {name: 'Agent'}).scrollIntoViewIfNeeded();
+    },
+  },
+  {
+    name: 'model-tiers',
+    reach: async page => {
+      await expect(page.getByRole('slider', {name: 'Model'})).toHaveAttribute(
+        'aria-valuetext',
+        'Opus',
+      );
       await page.getByRole('region', {name: 'Agent'}).scrollIntoViewIfNeeded();
     },
   },
