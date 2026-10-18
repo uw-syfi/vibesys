@@ -939,6 +939,33 @@ class ProjectState:
         return cls._run_local_directory_for(project_root, run_id, "logs", kind="run log directory")
 
     @classmethod
+    def logged_run_ids_for(cls, project_root: Path | str) -> tuple[str, ...]:
+        """Return the ids of the runs this machine holds logs for under ``project_root``, sorted.
+
+        A run's logs are machine-local and keyed by the project's root path, so this lists
+        runs whose portable record (manifest, branch) may be missing from the checkout.
+        Nothing is created: a project with no logs has none.
+        """
+        root = Path(project_root).expanduser().resolve()
+        state_home = _state_home()
+        local_dir = _external_project_state_directory(state_home, root)
+        runs_dir = local_dir / "runs"
+        if not runs_dir.is_dir():
+            return ()
+        _validate_storage_root(local_dir, state_home, name="local metadata")
+        try:
+            children = tuple(runs_dir.iterdir())
+        except OSError as exc:
+            raise ProjectStateError.metadata_read_failed(runs_dir, exc) from exc
+        return tuple(
+            sorted(
+                child.name
+                for child in children
+                if re.fullmatch(_IDENTIFIER_PATTERN, child.name) and (child / "logs").is_dir()
+            )
+        )
+
+    @classmethod
     def agent_homes_directory_for(cls, project_root: Path | str, run_id: str) -> Path:
         """Return the machine-local root of one run's dedicated agent CLI homes.
 

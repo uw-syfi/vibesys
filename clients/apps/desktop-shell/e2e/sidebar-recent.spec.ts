@@ -142,9 +142,9 @@ for (const width of [1000, 1920]) {
     const headers = await sidebar(page).locator('.vs-sidebar-group-title').allInnerTexts();
     expect(headers.map(text => text.split('\n')[0])).toEqual(['host-b']);
 
-    const problems = sidebar(page).getByText("can't read run state");
-    await expect(problems).toHaveCount(2);
-    await expect(sidebar(page).getByRole('button', {name: 'Retry'})).toHaveCount(2);
+    await expect(sidebar(page).getByText("can't read run state")).toHaveCount(1);
+    await expect(sidebar(page).getByText('this run is gone')).toHaveCount(1);
+    await expect(sidebar(page).getByRole('button', {name: 'Retry'})).toHaveCount(1);
 
     const violations = await screenCheck(page);
     expect(violations.map(each => `[${each.check}] ${each.message} (${each.where})`)).toEqual([]);

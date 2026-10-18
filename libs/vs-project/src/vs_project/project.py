@@ -188,6 +188,15 @@ class Project:
         return ProjectState.log_directory_for(project_root, run_id)
 
     @classmethod
+    def logged_run_ids_for(cls, project_root: Path | str) -> tuple[str, ...]:
+        """Return the ids of the runs with logs on this machine under ``project_root``, sorted.
+
+        The log store is keyed by the project's root path, not by what the checkout
+        records, so a run that never committed its manifest is still named here.
+        """
+        return ProjectState.logged_run_ids_for(project_root)
+
+    @classmethod
     def log_streams_directory_for(cls, project_root: Path | str, run_id: str) -> Path:
         """Return where a run's log store (``vs_logs``) keeps its streams.
 

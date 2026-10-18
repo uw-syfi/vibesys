@@ -182,7 +182,7 @@ describe('Recent rows from run digests', () => {
     expect(recentRows(answered, CLOCK).rows[0]?.look.word).toBe('stopped unexpectedly');
   });
 
-  test('a run that cannot be read says so with a retry, and the retry asks again', () => {
+  test('a run that cannot be read says so with a retry, and one the host has no record of is gone', () => {
     const {state, requests} = open([
       recent('r1', '/p/queue-rs', 'mpmc', 2),
       recent('r2', '/p/queue-rs', 'mpmc', 1),
@@ -194,7 +194,7 @@ describe('Recent rows from run digests', () => {
     );
     const [unreadable, missing] = recentRows(answered, CLOCK).rows;
     expect(unreadable?.problem).toEqual({text: "can't read run state", retry: true});
-    expect(missing?.problem).toEqual({text: "can't read run state", retry: true});
+    expect(missing?.problem).toEqual({text: 'this run is gone', retry: false});
     expect(unreadable?.detail).toBe("11:00 · can't read run state");
     for (const row of [unreadable, missing]) expect(row?.detail).not.toContain('status unknown');
 

@@ -16,11 +16,13 @@ from __future__ import annotations
 
 import asyncio
 import os
+from contextlib import suppress
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO
 
-from pydantic import TypeAdapter
+from pydantic import JsonValue, TypeAdapter
 
 from server.host_api import (
     RUN_EVENTS_FILE,
@@ -79,8 +81,6 @@ from vs_sim.api import ProcessSpec
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from pydantic import JsonValue
-
     from server.run_summary import Summarized
     from server.run_summary_cache import SummaryReader
     from vs_logs.read import LogReader as StoreReader
@@ -94,6 +94,28 @@ _KEPT_INDEXES = 4
 
 
 _TALLY_CHUNK_BYTES = 1 << 20
+_EVENT: TypeAdapter[dict[str, JsonValue]] = TypeAdapter(dict[str, JsonValue])
+
+
+def _journal_began(log_directory: Path) -> datetime:
+    """When the run's journal says it started: its first event's time, else the file's.
+
+    A run with no manifest has no recorded creation time; the journal's first event is
+    the nearest thing, and an unreadable first line leaves the file's modification time.
+    """
+    journal = log_directory / RUN_EVENTS_FILE
+    try:
+        with journal.open("rb") as lines:
+            first = lines.readline(_LAUNCH_RECORD_LIMIT)
+        stamp = journal.stat().st_mtime
+    except OSError:
+        return datetime.fromtimestamp(0, UTC)
+    decoded = decode_json(first, _EVENT, source="journal line", max_bytes=_LAUNCH_RECORD_LIMIT)
+    began = decoded.get("timestamp") if not isinstance(decoded, Unreadable) else None
+    with suppress(ValueError):
+        if isinstance(began, str):
+            return datetime.fromisoformat(began)
+    return datetime.fromtimestamp(stamp, UTC)
 
 
 @dataclass(frozen=True)
@@ -160,16 +182,22 @@ class FileProjects:
         )
 
     def runs(self, project: Path) -> tuple[Path, tuple[ProjectRun, ...]]:
-        """The project's root and its runs, oldest first; runs this VibeSys cannot read are left out."""
+        """The project's root and its runs, oldest first; runs this VibeSys cannot read are left out.
+
+        A run is its identity, not only its portable record: a run with a journal in this
+        machine's log store is listed even when its manifest was never committed or its
+        branch is gone (a run that stopped at start-up), under its id with no task.
+        """
         opened = self._open(project)
         try:
             history = GitRunHistory(opened, self._repositories(opened.root, NullGitTrackerEvents()))
             manifests = history.recorded().runs
+            logged = Project.logged_run_ids_for(opened.root)
         except ProjectError as exc:
             raise ProjectLookupError(
                 HelperErrorCode.TASK_INVALID, str(opened.root), str(exc)
             ) from exc
-        return opened.root, tuple(
+        recorded = [
             ProjectRun(
                 run_id=manifest.run_id,
                 task=manifest.task_name,
@@ -177,7 +205,21 @@ class FileProjects:
                 created_at=manifest.created_at,
             )
             for manifest in manifests
-        )
+        ]
+        known = {run.run_id for run in recorded}
+        journaled = [
+            ProjectRun(
+                run_id=run_id,
+                task=None,
+                display_name=run_id,
+                created_at=_journal_began(Project.log_directory_for(opened.root, run_id)),
+            )
+            for run_id in logged
+            if run_id not in known
+            and (Project.log_directory_for(opened.root, run_id) / RUN_EVENTS_FILE).is_file()
+        ]
+        runs = sorted([*recorded, *journaled], key=lambda run: (run.created_at, run.run_id))
+        return opened.root, tuple(runs)
 
     def run_digest(self, project_root: Path, run_id: str) -> RunDigest | RunDigestUnreadable:
         """What run ``run_id``'s journal says at a glance.

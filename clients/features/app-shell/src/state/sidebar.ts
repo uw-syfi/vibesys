@@ -82,8 +82,10 @@ export type DigestSlot =
   | {readonly kind: 'read'; readonly entry: RunDigestEntry}
   /** The host's VibeSys does not offer digests. */
   | {readonly kind: 'unsupported'}
-  /** The host did not answer for this run (unreachable, or it has no record of it). */
-  | {readonly kind: 'failed'};
+  /** The host did not answer for this run (it was unreachable, or the request failed). */
+  | {readonly kind: 'failed'}
+  /** The host answered and holds no record of this run: asking again cannot change that. */
+  | {readonly kind: 'gone'};
 
 /** What the sidebar's row menus ask of the app. */
 export interface ShellActions {
@@ -328,11 +330,12 @@ function digestsRead(
     const runId = key.slice(key.indexOf(' ') + 1);
     const {reply} = action;
     const entry = reply?.kind === 'digests' ? reply.runs.get(runId) : undefined;
+    const absent: DigestSlot = reply?.kind === 'digests' ? {kind: 'gone'} : {kind: 'failed'};
     digests[key] =
       reply?.kind === 'unsupported'
         ? {kind: 'unsupported'}
         : entry === undefined
-          ? {kind: 'failed'}
+          ? absent
           : {kind: 'read', entry};
   }
   return same({...state, digests});
@@ -518,6 +521,7 @@ function recentProblem(
 ): RowProblem | null {
   if (slot === undefined || slot.kind === 'loading') return null;
   if (slot.kind === 'unsupported') return {text: 'machine needs a newer VibeSys', retry: false};
+  if (slot.kind === 'gone') return {text: 'this run is gone', retry: false};
   if (listing?.kind === 'unavailable') return {text: "can't reach the machine", retry: true};
   return {text: "can't read run state", retry: true};
 }

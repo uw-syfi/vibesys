@@ -376,6 +376,23 @@ def test_same_named_projects_have_distinct_external_state_directories(tmp_path: 
     assert second_log.parent.parent.parent.name.startswith("project-")
 
 
+def test_logged_runs_are_named_per_checkout_without_creating_any_state(tmp_path: Path) -> None:
+    first = tmp_path / "first" / "project"
+    second = tmp_path / "second" / "project"
+    first.mkdir(parents=True)
+    second.mkdir(parents=True)
+
+    assert Project.logged_run_ids_for(first) == ()
+    assert not (Path(os.environ["VIBESYS_STATE_HOME"]) / "projects").exists()
+
+    Project.log_directory_for(first, "run-b").mkdir(parents=True)
+    Project.log_directory_for(first, "run-a").mkdir(parents=True)
+    Project.log_directory_for(second, "run-c").mkdir(parents=True)
+
+    assert Project.logged_run_ids_for(first) == ("run-a", "run-b")
+    assert Project.logged_run_ids_for(second) == ("run-c",)
+
+
 def test_agent_homes_are_machine_local_per_run_and_outside_the_project(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()
