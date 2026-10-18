@@ -19,6 +19,7 @@ import {
   type RunPageState,
   runPageInitial,
   runPageStep,
+  summaryFacts,
   type ZoomEvent,
 } from '../../state/index.js';
 import {idea, modelOf} from '../../state/timeline-fixtures.js';
@@ -275,4 +276,54 @@ test('the performance row is one element whatever idea is open: dots are singled
   expect(opened).toEqual([{type: 'open-idea', idea: 'i2'}]);
   await act(async () => root.unmount());
   container.remove();
+});
+
+/** A saved run whose journal predates the run trace, opened from its summary. */
+function recordedBeforeTrace(): RunPageState {
+  const initial = runPageInitial({
+    identity: {host: 'ssh:host-b', runId: 'run-1'},
+    title: {project: 'queue-rs', task: null},
+    hostLabel: 'host-b',
+    unavailable: {},
+  });
+  const asked = runPageStep(initial, {type: 'record', record: {kind: 'historical', status: null}});
+  const request = asked.requests.find(each => each.kind === 'read-summary');
+  if (request?.kind !== 'read-summary') throw new Error('no summary asked');
+  const none = {input: null, cacheRead: null, cacheWrite: null, output: null, reasoning: null};
+  const summary = {
+    throughSequence: 10,
+    eventCount: 10,
+    journalBytes: 1,
+    trace: 'predates_trace' as const,
+    roundsFinished: 12,
+    overview: null,
+    spans: [],
+    replies: [],
+    tokens: none,
+    usage: [],
+  };
+  return runPageStep(asked.state, {
+    type: 'summary',
+    token: request.token,
+    reply: {kind: 'summary', ...summaryFacts(summary, 'run-1', 'stopped')},
+    wallMs: 0,
+  }).state;
+}
+
+test('regression: a run recorded before the trace says so on every face, never "No ideas yet"', async () => {
+  const state = recordedBeforeTrace();
+  for (const mode of ['ideas', 'timeline', 'agents'] as const) {
+    const read = await face(state, mode);
+    expect(read).toContain('Recorded by an older VibeSys');
+    expect(read).toContain('12 rounds');
+    expect(read).not.toContain('No ideas yet');
+    expect(read).not.toContain('No agents yet');
+    expect(read).not.toContain('Reading the run…');
+  }
+});
+
+test('regression: a saved run’s Logs face ends in a notice, not in "Looking for the run’s logs…"', async () => {
+  const read = await face(recordedBeforeTrace(), 'logs');
+  expect(read).toContain('logs are not available');
+  expect(read).not.toContain('Looking for');
 });

@@ -172,6 +172,21 @@ describe('Recent rows from run digests', () => {
     expect(second?.detail).toBe('10:00 · failed to start');
   });
 
+  test('a finished run recorded before the run trace says its ideas are not recorded, not zero', () => {
+    const {state, requests} = open([recent('r1', '/p/queue-rs', 'mpmc', 1)]);
+
+    const answered = answer(
+      state,
+      requests,
+      new Map([['r1', read({ideas: null, bestRatio: null, outcome: null, closing: 'finished'})]]),
+    );
+    const row = recentRows(answered, CLOCK).rows[0];
+
+    expect(row?.status).toBe('finished');
+    expect(row?.trail).toBe('ideas not recorded · 52m');
+    expect(JSON.stringify(row)).not.toContain('0 ideas');
+  });
+
   test('a run whose journal never says it ended reads as stopped unexpectedly', () => {
     const {state, requests} = open([recent('r1', '/p/queue-rs', 'mpmc', 1)]);
     const answered = answer(

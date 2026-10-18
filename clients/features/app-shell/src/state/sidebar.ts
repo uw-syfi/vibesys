@@ -502,10 +502,15 @@ function recentRow(state: SidebarState, recent: RecentRun, clock: Clock): RunRow
 /** A digest that was read. */
 type ReadDigest = Extract<RunDigestEntry, {kind: 'read'}>;
 
+/** A read digest's ideas as the trail says them; null: the journal predates the run trace. */
+function ideasTrail(ideas: number | null): string {
+  return ideas === null ? 'ideas not recorded' : ideasWord(ideas);
+}
+
 /** What more a read digest says: its ideas (unless the result already does) and how long it ran. */
 function trailWords(read: ReadDigest, kind: EndKind | undefined): string | null {
   const parts = [
-    ...(kind === 'failed' || kind === 'stopped' ? [] : [ideasWord(read.ideas)]),
+    ...(kind === 'failed' || kind === 'stopped' ? [] : [ideasTrail(read.ideas)]),
     ...(read.durationSeconds === null ? [] : [formatDuration(read.durationSeconds)]),
   ];
   return parts.length === 0 ? null : parts.join(' · ');

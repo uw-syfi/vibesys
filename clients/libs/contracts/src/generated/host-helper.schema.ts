@@ -3506,7 +3506,7 @@ const hostHelperSchema: Record<string, unknown> = {
     },
     "RunDigest": {
       "additionalProperties": false,
-      "description": "What a run's journal says at a glance, for a list row; never a replay of the run.\n\n``ideas`` counts the workstreams that ended (probes excluded) and ``best_ratio`` is the\nbest measured candidate that passed its gate, as a multiple of the input's value, by the\nobjective's direction; ``None`` when no gate passed. ``duration_s`` runs from the\njournal's first event to the last step it recorded; ``None`` for a run with no events.\n``ending`` is the run's ending record and ``closing`` its terminal event: both ``None``\nfor a run still going or one whose server died without a word, which is how a run's\nending is known after its registry tombstone expired (a day).",
+      "description": "What a run's journal says at a glance, for a list row; never a replay of the run.\n\n``ideas`` counts the workstreams that ended (probes excluded) and ``best_ratio`` is the\nbest measured candidate that passed its gate, as a multiple of the input's value, by the\nobjective's direction; ``None`` when no gate passed. ``ideas`` is ``None`` for a journal\nthat predates the run trace (``TraceFormat.PREDATES_TRACE``): it records rounds, not ideas,\nso no count is true. ``duration_s`` runs from the\njournal's first event to the last step it recorded; ``None`` for a run with no events.\n``ending`` is the run's ending record and ``closing`` its terminal event: both ``None``\nfor a run still going or one whose server died without a word, which is how a run's\nending is known after its registry tombstone expired (a day).",
       "properties": {
         "kind": {
           "const": "digest",
@@ -3515,9 +3515,16 @@ const hostHelperSchema: Record<string, unknown> = {
           "type": "string"
         },
         "ideas": {
-          "minimum": 0,
-          "title": "Ideas",
-          "type": "integer"
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Ideas"
         },
         "best_ratio": {
           "anyOf": [
@@ -4791,6 +4798,14 @@ const hostHelperSchema: Record<string, unknown> = {
           "title": "Journal Bytes",
           "type": "integer"
         },
+        "trace": {
+          "$ref": "#/$defs/TraceFormat"
+        },
+        "rounds_finished": {
+          "minimum": 0,
+          "title": "Rounds Finished",
+          "type": "integer"
+        },
         "span_count": {
           "minimum": 0,
           "title": "Span Count",
@@ -4876,6 +4891,8 @@ const hostHelperSchema: Record<string, unknown> = {
         "through_sequence",
         "event_count",
         "journal_bytes",
+        "trace",
+        "rounds_finished",
         "span_count",
         "reply_count",
         "usage_count",
@@ -5480,6 +5497,15 @@ const hostHelperSchema: Record<string, unknown> = {
       ],
       "title": "TokenTally",
       "type": "object"
+    },
+    "TraceFormat": {
+      "description": "Whether a journal records the run trace, the spans a run's ideas and measurements are read from.",
+      "enum": [
+        "recorded",
+        "predates_trace"
+      ],
+      "title": "TraceFormat",
+      "type": "string"
     },
     "TurnReply": {
       "additionalProperties": false,

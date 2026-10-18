@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 from hypothesis import given
@@ -31,14 +31,16 @@ from server.host_run_summary import (
     RunsSummaryReply,
     RunsSummaryRequest,
     TokenTally,
+    TraceFormat,
 )
 from vs_core.api import Span, SpanStatus, SpanType
 from vs_decode.api import Unreadable
 from vs_project.api import Project
 from vs_sim.api.testing import SimNetwork, SimThreads
 
-if TYPE_CHECKING:
-    from pathlib import Path
+_LEGACY_FIXTURE = (
+    Path(__file__).parents[1] / "conformance" / "fixtures" / "run-summary" / "predates-trace.json"
+)
 
 
 @pytest.fixture(scope="module")
@@ -76,6 +78,25 @@ def _write(project: Path, run_events: list[RunEvent]) -> None:
     journal = _journal(project)
     journal.parent.mkdir(parents=True, exist_ok=True)
     journal.write_bytes(b"".join(journal_lines(run_events)))
+
+
+def test_a_journal_from_before_the_trace_is_summarized_as_having_none_and_its_rounds_counted(
+    tmp_path: Path,
+) -> None:
+    fixture = json.loads(_LEGACY_FIXTURE.read_text())
+    legacy = project_with_run(tmp_path / "proj", RUN_ID)
+    _journal(legacy).parent.mkdir(parents=True, exist_ok=True)
+    _journal(legacy).write_bytes(
+        b"".join(json.dumps(event).encode() + b"\n" for event in fixture["events"])
+    )
+
+    (page,) = _pages(legacy)
+
+    assert (page.trace, page.rounds_finished, page.span_count) == (
+        TraceFormat.PREDATES_TRACE,
+        fixture["summary"]["rounds_finished"],
+        0,
+    )
 
 
 @given(run_events=events())
@@ -221,6 +242,8 @@ def test_the_method_needs_its_feature_and_the_messages_are_strict() -> None:
         through_sequence=0,
         event_count=0,
         journal_bytes=0,
+        trace=TraceFormat.RECORDED,
+        rounds_finished=0,
         span_count=0,
         reply_count=0,
         usage_count=0,
@@ -237,3 +260,6 @@ def test_the_method_needs_its_feature_and_the_messages_are_strict() -> None:
     assert parse_helper_message(reply.model_dump_json().encode()) == reply
     extra = json.loads(reply.model_dump_json()) | {"unexpected": 1}
     assert isinstance(parse_helper_message(json.dumps(extra).encode()), Unreadable)
+    # A format this helper does not know is refused, never read as a recorded trace.
+    future = json.loads(reply.model_dump_json()) | {"trace": "from_the_future"}
+    assert isinstance(parse_helper_message(json.dumps(future).encode()), Unreadable)

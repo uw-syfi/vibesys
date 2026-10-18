@@ -37,6 +37,8 @@ interface WireTally {
 }
 
 interface Fixture {
+  /** Recorded by an older VibeSys: its events are not today's, so the client's fold does not read them. */
+  readonly legacy?: boolean;
   readonly events: readonly RunEvent[];
   readonly summary: {
     readonly through_sequence: number;
@@ -63,7 +65,8 @@ const fixtures: Array<{name: string; fixture: Fixture}> = readdirSync(FIXTURES)
   .map(name => ({
     name,
     fixture: JSON.parse(readFileSync(resolve(FIXTURES, name), 'utf8')) as Fixture,
-  }));
+  }))
+  .filter(({fixture}) => fixture.legacy !== true);
 
 /** The last reply of each turn span in `events`, as the transcript fold holds it, by span id. */
 function repliesOf(events: readonly RunEvent[]): ClientReply[] {

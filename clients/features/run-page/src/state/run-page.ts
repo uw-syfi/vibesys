@@ -659,6 +659,8 @@ function withSummary(
       through: reply.through,
       eventCount: reply.eventCount,
       journalBytes: reply.journalBytes,
+      trace: reply.trace,
+      roundsFinished: reply.roundsFinished,
     },
     run: {
       core: reduceEventBatch(initialCoreState(), reply.seed),

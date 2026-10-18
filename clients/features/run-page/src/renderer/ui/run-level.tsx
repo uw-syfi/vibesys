@@ -30,9 +30,11 @@ import {
   implementerOutcomes,
   type NowItem,
   nowView,
+  predatesTraceWords,
   type RunMode,
   type RunPageAction,
   type RunPageState,
+  roundsBeforeTrace,
   traceArrival,
   type ZoomEvent,
 } from '../../state/index.js';
@@ -294,6 +296,11 @@ function runFace(
   if (mode !== 'logs' && traceArrival(state) === 'awaited') {
     // Until the run's spans arrive, a face would read as empty: say they are on their way.
     return {header: {}, body: <EmptyState title="Reading the run…" />};
+  }
+  const before = roundsBeforeTrace(state);
+  if (mode !== 'logs' && before !== null) {
+    const words = predatesTraceWords(before);
+    return {header: {}, body: <EmptyState title={words.title} body={words.body} />};
   }
   switch (mode) {
     case 'timeline': {

@@ -34,12 +34,19 @@ from typing import TYPE_CHECKING, Final, cast
 
 from pydantic import JsonValue, TypeAdapter
 
-from server.host_run_summary import RUN_SUMMARY_PAGE_MAX_BYTES, SpanTokens, TokenTally, TurnReply
+from server.host_run_summary import (
+    RUN_SUMMARY_PAGE_MAX_BYTES,
+    SpanTokens,
+    TokenTally,
+    TraceFormat,
+    TurnReply,
+    trace_format,
+)
 
 if TYPE_CHECKING:
     from server.host_run_summary import ReplySchemaDocument, RunOverviewDocument, RunSpanDocument
 
-RUN_SUMMARY_VERSION: Final = 2
+RUN_SUMMARY_VERSION: Final = 3
 """The version of the fold's semantics and of ``SummaryState``'s shape.
 
 A cached state of another version is dropped and recomputed from the journal, so a change to what
@@ -47,7 +54,13 @@ the fold keeps never serves an old fold as the new one: bump it with any such ch
 
 _SPAN_EVENTS: Final = frozenset({"span_started", "span_updated", "span_ended"})
 _FOLDED_EVENTS: Final = frozenset(
-    {*_SPAN_EVENTS, "run_started", "agent_execution_finished", "turn_usage_recorded"}
+    {
+        *_SPAN_EVENTS,
+        "run_started",
+        "round_finished",
+        "agent_execution_finished",
+        "turn_usage_recorded",
+    }
 )
 _NO_TOKENS: Final = TokenTally(
     input=None, cache_read=None, cache_write=None, output=None, reasoning=None
@@ -65,6 +78,8 @@ class SummaryState:
 
     through_sequence: int
     event_count: int
+    rounds_finished: int
+    """The ``round_finished`` events folded."""
     spans: tuple[RunSpanDocument, ...]
     overview: RunOverviewDocument | None
     replies: tuple[TurnReply, ...]
@@ -112,6 +127,7 @@ class RunSummaryFold:
 
     through_sequence: int = 0
     event_count: int = 0
+    rounds_finished: int = 0
     _spans: dict[str, RunSpanDocument] = field(default_factory=dict)
     _overview: RunOverviewDocument | None = None
     _replies: dict[str, TurnReply] = field(default_factory=dict)
@@ -125,6 +141,7 @@ class RunSummaryFold:
         return cls(
             through_sequence=state.through_sequence,
             event_count=state.event_count,
+            rounds_finished=state.rounds_finished,
             _spans={cast("str", span["id"]): span for span in state.spans},
             _overview=state.overview,
             _replies={reply.span_id: reply for reply in state.replies},
@@ -140,6 +157,7 @@ class RunSummaryFold:
         return SummaryState(
             through_sequence=self.through_sequence,
             event_count=self.event_count,
+            rounds_finished=self.rounds_finished,
             spans=tuple(self._spans.values()),
             overview=self._overview,
             replies=replies,
@@ -232,6 +250,11 @@ class RunSummaryFold:
         )
 
     @property
+    def trace(self) -> TraceFormat:
+        """Whether the journal folded so far records a run trace (``trace_format``)."""
+        return trace_format(spans=len(self._spans), rounds=self.rounds_finished)
+
+    @property
     def overview(self) -> RunOverviewDocument | None:
         """The overview the last ``run_started`` that declares one carried."""
         return self._overview
@@ -277,6 +300,8 @@ class RunSummaryFold:
             overview = data.get("overview")
             if isinstance(overview, dict):
                 self._overview = overview
+        elif kind == "round_finished":
+            self.rounds_finished += 1
         elif kind == "agent_execution_finished" and data.get("kind") == "agent_execution_finished":
             self._fold_reply(event.get("span_id"), data.get("reply"))
         elif kind == "turn_usage_recorded" and data.get("kind") == "turn_usage_recorded":

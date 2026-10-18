@@ -27,11 +27,19 @@ export interface WireTokens {
   readonly reasoning: number | null;
 }
 
+/**
+ * Whether a journal records the run trace its ideas and measurements are read from. `predates_trace`:
+ * a VibeSys from before the trace wrote it, so the run's spans are missing, not empty.
+ */
+type TraceFormat = 'recorded' | 'predates_trace';
+
 /** A run's summary as the host's reader returns it (`RunSummary` of `@vibesys/ipc`), pages joined. */
 export interface WireSummary {
   readonly throughSequence: number;
   readonly eventCount: number;
   readonly journalBytes: number;
+  readonly trace: TraceFormat;
+  readonly roundsFinished: number;
   readonly overview: unknown;
   readonly spans: readonly unknown[];
   readonly replies: readonly {
@@ -54,6 +62,8 @@ export interface SummaryFacts {
   readonly through: number;
   readonly eventCount: number;
   readonly journalBytes: number;
+  readonly trace: TraceFormat;
+  readonly roundsFinished: number;
 }
 
 /** What one summary read settled to. */
@@ -75,6 +85,8 @@ export type RunSummaryState =
       readonly through: number;
       readonly eventCount: number;
       readonly journalBytes: number;
+      readonly trace: TraceFormat;
+      readonly roundsFinished: number;
     }
   /** It arrived after a live session had already folded the run; the session's data stands. */
   | {readonly kind: 'superseded'}
@@ -196,5 +208,7 @@ export function summaryFacts(summary: WireSummary, runId: string, status: RunSta
     through: summary.throughSequence,
     eventCount: summary.eventCount,
     journalBytes: summary.journalBytes,
+    trace: summary.trace,
+    roundsFinished: summary.roundsFinished,
   };
 }

@@ -826,6 +826,8 @@
   "summary": {
     "through_sequence": 22,
     "event_count": 22,
+    "trace": "recorded",
+    "rounds_finished": 0,
     "spans": [
       {
         "id": "flow:#1",

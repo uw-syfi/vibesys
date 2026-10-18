@@ -29,6 +29,8 @@ const summary = {
   throughSequence: raw.through_sequence,
   eventCount: raw.event_count,
   journalBytes: 1234,
+  trace: 'recorded' as const,
+  roundsFinished: 0,
   overview: raw.overview,
   spans: raw.spans,
   replies: raw.replies.map(reply => ({

@@ -28,6 +28,7 @@ import {
   historyProblem,
   ideaAncestry,
   type Offer,
+  predatesTraceWords,
   quotaBannerView,
   type ResolvedZoom,
   type Route,
@@ -37,6 +38,7 @@ import {
   type RunPageState,
   resolveZoom,
   roleLabel,
+  roundsBeforeTrace,
   routeLevel,
   runHasEnded,
   runNow,
@@ -436,6 +438,7 @@ export function RunScreen(props: {
   const problem = historyProblem(state);
   const transcript = transcriptLoading(state);
   const zoomed = resolveZoom(model, route);
+  const before = roundsBeforeTrace(state);
   const detail = openedDetail(state, route, props.core);
   // The chain lit on the chart and in the tree: what the pointer is on, else what was pinned or opened.
   const lit = ideaAncestry(
@@ -457,7 +460,7 @@ export function RunScreen(props: {
       header={
         <Stack gap="space-2">
           <Header state={state} dispatch={dispatch} />
-          {traceArrival(state) === 'arrived' ? (
+          {traceArrival(state) === 'arrived' && before === null ? (
             <RunScrubber
               log={state.run.trace}
               view={state.view}
@@ -479,13 +482,17 @@ export function RunScreen(props: {
         <Banner tone="warn" title="The run’s history is not available" body={problem} />
       )}
       <Startup state={state} />
-      <Hero
-        {...base}
-        whole={props.whole}
-        idea={zoomed.idea?.id ?? null}
-        lit={lit}
-        hover={idea => dispatch({type: 'ideas-hover', idea})}
-      />
+      {before === null ? (
+        <Hero
+          {...base}
+          whole={props.whole}
+          idea={zoomed.idea?.id ?? null}
+          lit={lit}
+          hover={idea => dispatch({type: 'ideas-hover', idea})}
+        />
+      ) : (
+        <Banner title={predatesTraceWords(before).title} body={predatesTraceWords(before).body} />
+      )}
       {showsBreadcrumb(route, zoomed) ? (
         <Breadcrumb label="Zoom" items={crumbs(zoomed, route, zoom)} />
       ) : null}

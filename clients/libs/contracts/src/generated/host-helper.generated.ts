@@ -377,7 +377,7 @@ export type CreatedAt = string;
 export type InstanceId5 = string | null;
 export type Digest = (RunDigest | RunDigestUnreadable) | null;
 export type Kind = "digest";
-export type Ideas = number;
+export type Ideas = number | null;
 export type BestRatio = number | null;
 export type DurationS = number | null;
 export type Summary = string;
@@ -498,6 +498,11 @@ export type Type45 = "runs.summary";
 export type ThroughSequence = number;
 export type EventCount = number;
 export type JournalBytes = number;
+/**
+ * Whether a journal records the run trace, the spans a run's ideas and measurements are read from.
+ */
+export type TraceFormat = "recorded" | "predates_trace";
+export type RoundsFinished1 = number;
 export type SpanCount = number;
 export type ReplyCount = number;
 export type UsageCount = number;
@@ -1350,7 +1355,9 @@ export interface RunSummary {
  *
  * ``ideas`` counts the workstreams that ended (probes excluded) and ``best_ratio`` is the
  * best measured candidate that passed its gate, as a multiple of the input's value, by the
- * objective's direction; ``None`` when no gate passed. ``duration_s`` runs from the
+ * objective's direction; ``None`` when no gate passed. ``ideas`` is ``None`` for a journal
+ * that predates the run trace (``TraceFormat.PREDATES_TRACE``): it records rounds, not ideas,
+ * so no count is true. ``duration_s`` runs from the
  * journal's first event to the last step it recorded; ``None`` for a run with no events.
  * ``ending`` is the run's ending record and ``closing`` its terminal event: both ``None``
  * for a run still going or one whose server died without a word, which is how a run's
@@ -1616,6 +1623,8 @@ export interface RunsSummaryReply {
   through_sequence: ThroughSequence;
   event_count: EventCount;
   journal_bytes: JournalBytes;
+  trace: TraceFormat;
+  rounds_finished: RoundsFinished1;
   span_count: SpanCount;
   reply_count: ReplyCount;
   usage_count: UsageCount;

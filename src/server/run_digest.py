@@ -10,6 +10,12 @@ The fold reads the vocabulary the hypothesis search labels its spans with (``wor
 imports none of them, so a host command that lists runs stays light
 (``tests/architecture/test_light_entrypoints.py``).
 
+A journal with finished rounds and no span event predates the run trace
+(``server.host_run_summary.trace_format``): its ideas are not recorded, so the digest says so
+(``ideas`` is ``None``) instead of counting none. Only an ended span is read, which is what an
+idea's count needs; a round and its workstream span end together, so a journal with a finished
+round and no ended span has no spans at all.
+
 Public surface: ``digest_journal``.
 """
 
@@ -22,6 +28,7 @@ from typing import TYPE_CHECKING, Final
 from pydantic import JsonValue, TypeAdapter, ValidationError
 
 from server.host_api import RunClosing, RunDigest, RunEndingFact
+from server.host_run_summary import TraceFormat, trace_format
 from vs_decode.api import Unreadable, decode_json
 
 if TYPE_CHECKING:
@@ -31,6 +38,7 @@ _OBJECT: Final[TypeAdapter[dict[str, JsonValue]]] = TypeAdapter(dict[str, JsonVa
 _LINE_MAX_BYTES: Final = 16 * 1024 * 1024
 _WANTED: Final = (
     b"span_ended",
+    b"round_finished",
     b"run_started",
     b"run_ending",
     b"run_finished",
@@ -81,6 +89,8 @@ class _Fold:
         self.last: float | None = None
         self.minimize = False
         self.ideas: set[str] = set()
+        self.spans = 0
+        self.rounds = 0
         self.best: tuple[float, float | None] | None = None
         self.ending: RunEndingFact | None = None
         self.closing: RunClosing | None = None
@@ -97,7 +107,10 @@ class _Fold:
         self.stamp(event)
         kind = event.get("type")
         data = _object(event.get("data"))
-        if kind == "span_ended":
+        if kind == "round_finished":
+            self.rounds += 1
+        elif kind == "span_ended":
+            self.spans += 1
             self._span(_object(data.get("span")))
         elif kind == "run_started":
             self.minimize = _object(data.get("overview")).get("direction") == "min"
@@ -138,8 +151,9 @@ class _Fold:
 
     def digest(self) -> RunDigest:
         duration = None if self.first is None or self.last is None else self.last - self.first
+        recorded = trace_format(spans=self.spans, rounds=self.rounds) is TraceFormat.RECORDED
         return RunDigest(
-            ideas=len(self.ideas),
+            ideas=len(self.ideas) if recorded else None,
             best_ratio=None if self.best is None else self.best[1],
             duration_s=duration,
             ending=self.ending,

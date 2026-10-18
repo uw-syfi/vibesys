@@ -117,6 +117,8 @@ async function readSummaryPages(
     throughSequence: first.through_sequence,
     eventCount: first.event_count,
     journalBytes: first.journal_bytes,
+    trace: first.trace,
+    roundsFinished: first.rounds_finished,
     overview: first.overview,
     spans,
     replies: replies.map(reply => ({

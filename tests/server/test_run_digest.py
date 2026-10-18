@@ -133,6 +133,17 @@ def test_a_digest_counts_the_ideas_and_takes_the_best_passed_gates_ratio(
     )
 
 
+@given(rounds=st.integers(1, 6), ideas=st.lists(st.booleans(), max_size=4), noise=_NOISE)
+def test_rounds_without_a_trace_have_no_ideas_to_count_and_with_one_they_do(
+    rounds: int, ideas: list[bool], noise: list[str]
+) -> None:
+    finished = [_event(50 + n, "round_finished", 10 + n) for n in range(rounds)]
+    traced = _journal(ideas, [], noise)
+
+    assert digest_journal([*_journal([], [], noise), *finished]).ideas is None
+    assert digest_journal([*traced, *finished]).ideas == (ideas.count(False) if ideas else None)
+
+
 def test_a_digest_reads_when_and_how_the_run_ended() -> None:
     lines = [
         _event(1, "server_started", 0),

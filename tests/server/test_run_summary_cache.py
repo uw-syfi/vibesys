@@ -13,7 +13,7 @@ from tests.server.run_summary_support import RUN_ID, events, journal_lines
 
 from server.events import EventType, OutputData, RunEvent, SpanStartedData
 from server.host_run_summary import RUN_SUMMARY_FILE
-from server.run_summary import RunSummaryFold, Summarized, SummaryState
+from server.run_summary import RUN_SUMMARY_VERSION, RunSummaryFold, Summarized, SummaryState
 from server.run_summary_cache import HEAD_BYTES, TAIL_BYTES, SummaryReader, summarize_journal
 from vs_core.api import Span, SpanStatus, SpanType
 from vs_sim.api.testing import SimThreads
@@ -217,6 +217,23 @@ def test_a_cache_that_is_not_one_is_ignored(run_events: list, damage: bytes) -> 
         (directory / RUN_SUMMARY_FILE).write_bytes(damage)
 
         assert _summarize(directory) == _from_scratch(journal.read_bytes())
+
+
+def test_a_cache_of_the_previous_fold_version_is_dropped_and_the_journal_folded_afresh() -> None:
+    """A version 2 cache holds no round count: serving it would call a legacy run's rounds none."""
+    lines = _padded_journal(10)
+    with tempfile.TemporaryDirectory() as raw:
+        directory = Path(raw)
+        (directory / "run-events.jsonl").write_bytes(_scratch(lines))
+        assert _summarize(directory) == _from_scratch(_scratch(lines))
+        cache = directory / RUN_SUMMARY_FILE
+        written = json.loads(cache.read_bytes())
+        written["version"] = RUN_SUMMARY_VERSION - 1
+        del written["state"]["rounds_finished"]
+        cache.write_bytes(json.dumps(written).encode())
+
+        assert _summarize(directory) == _from_scratch(_scratch(lines))
+        assert json.loads(cache.read_bytes())["version"] == RUN_SUMMARY_VERSION
 
 
 def test_a_cache_that_cannot_be_written_costs_nothing_but_time() -> None:

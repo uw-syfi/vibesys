@@ -13,7 +13,8 @@ export type RunDigestEntry =
       readonly kind: 'read';
       /** When the run was created, in milliseconds. */
       readonly createdAt: number;
-      readonly ideas: number;
+      /** The ideas the run tried; null when its journal predates the run trace and records none. */
+      readonly ideas: number | null;
       /** The best passed candidate's value as a multiple of the input's; null when none passed. */
       readonly bestRatio: number | null;
       readonly durationSeconds: number | null;

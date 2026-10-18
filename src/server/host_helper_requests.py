@@ -947,6 +947,8 @@ def _run_summary_reply(request: RunsSummaryRequest, host: HelperHost) -> RunsSum
         through_sequence=fold.through_sequence,
         event_count=fold.event_count,
         journal_bytes=summarized.journal_bytes,
+        trace=fold.trace,
+        rounds_finished=fold.rounds_finished,
         span_count=fold.span_count,
         reply_count=fold.reply_count,
         usage_count=fold.usage_count,

@@ -1319,7 +1319,9 @@ class RunDigest(BaseModel):
 
     ``ideas`` counts the workstreams that ended (probes excluded) and ``best_ratio`` is the
     best measured candidate that passed its gate, as a multiple of the input's value, by the
-    objective's direction; ``None`` when no gate passed. ``duration_s`` runs from the
+    objective's direction; ``None`` when no gate passed. ``ideas`` is ``None`` for a journal
+    that predates the run trace (``TraceFormat.PREDATES_TRACE``): it records rounds, not ideas,
+    so no count is true. ``duration_s`` runs from the
     journal's first event to the last step it recorded; ``None`` for a run with no events.
     ``ending`` is the run's ending record and ``closing`` its terminal event: both ``None``
     for a run still going or one whose server died without a word, which is how a run's
@@ -1329,7 +1331,7 @@ class RunDigest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     kind: Literal["digest"] = "digest"
-    ideas: NonNegativeInt
+    ideas: NonNegativeInt | None
     best_ratio: float | None
     duration_s: NonNegativeFloat | None
     ending: RunEndingFact | None

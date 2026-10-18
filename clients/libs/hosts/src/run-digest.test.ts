@@ -44,6 +44,20 @@ describe('digestEntries', () => {
     expect(entries.get('b')).toMatchObject({kind: 'unreadable', message: 'could not read'});
   });
 
+  test('a digest that counts no ideas because the journal predates the trace keeps that as null', () => {
+    const entries = digestEntries([
+      summary('a', {
+        kind: 'digest',
+        ideas: null,
+        best_ratio: null,
+        duration_s: 5,
+        ending: null,
+        closing: 'finished',
+      }),
+    ]);
+    expect(entries.get('a')).toMatchObject({kind: 'read', ideas: null, over: true});
+  });
+
   test('a journal with neither an ending nor a terminal event is not over', () => {
     const entries = digestEntries([
       summary('a', {

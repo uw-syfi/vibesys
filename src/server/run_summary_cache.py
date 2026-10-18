@@ -87,6 +87,7 @@ class _CachedState(BaseModel):
 
     through_sequence: NonNegativeInt
     event_count: NonNegativeInt
+    rounds_finished: NonNegativeInt
     spans: tuple[dict[str, Any], ...]
     overview: dict[str, Any] | None
     replies: tuple[TurnReply, ...]
@@ -235,6 +236,7 @@ def _restore(cache: Path, journal: BinaryIO) -> tuple[RunSummaryFold, int] | Non
             SummaryState(
                 through_sequence=state.through_sequence,
                 event_count=state.event_count,
+                rounds_finished=state.rounds_finished,
                 spans=state.spans,
                 overview=state.overview,
                 replies=state.replies,
@@ -263,6 +265,7 @@ def _keep(cache: Path, journal: BinaryIO, fold: RunSummaryFold, boundary: int, c
         "state": {
             "through_sequence": state.through_sequence,
             "event_count": state.event_count,
+            "rounds_finished": state.rounds_finished,
             "spans": list(state.spans),
             "overview": state.overview,
             "replies": [reply.model_dump(mode="json") for reply in state.replies],

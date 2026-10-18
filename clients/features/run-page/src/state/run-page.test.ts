@@ -280,6 +280,8 @@ function summaryAction(random: Seeded, issued: readonly number[]): RunPageAction
             through: 5,
             eventCount: 5,
             journalBytes: 100,
+            trace: 'recorded',
+            roundsFinished: 0,
           };
   return {type: 'summary', token, reply, wallMs: 0};
 }

@@ -10,7 +10,7 @@ these messages into the helper's request and reply unions and gates them behind
 ``HelperFeature.RUN_SUMMARY``.
 
 Public surface: ``RunsSummaryRequest``, ``RunsSummaryReply``, ``TurnReply``, ``TokenTally``,
-``SpanTokens``, the documents they
+``SpanTokens``, ``TraceFormat``, ``trace_format``, the documents they
 pass through (``RunSpanDocument``, ``RunOverviewDocument``, ``ReplySchemaDocument``) and the
 limits and names ``RUN_SUMMARY_FILE``, ``RUN_SUMMARY_PAGE_MAX_BYTES`` and
 ``REPLY_SCHEMA_ID_PATTERN``.
@@ -18,6 +18,7 @@ limits and names ``RUN_SUMMARY_FILE``, ``RUN_SUMMARY_PAGE_MAX_BYTES`` and
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Annotated, Final, Literal
 
 from pydantic import (
@@ -50,6 +51,27 @@ RunOverviewDocument = dict[str, JsonValue]
 
 ReplySchemaDocument = dict[str, JsonValue]
 """The JSON Schema of an agent reply model, as the journal recorded it."""
+
+
+class TraceFormat(StrEnum):
+    """Whether a journal records the run trace, the spans a run's ideas and measurements are read from."""
+
+    RECORDED = "recorded"
+    """The journal holds span events, or no round finished, so it has no trace to miss."""
+    PREDATES_TRACE = "predates_trace"
+    """Rounds finished and no span event was ever recorded: a VibeSys from before the run trace
+    wrote it. It holds round events (a round's verdict, a reading when one was taken), not ideas
+    or measurements, and none can be read from it."""
+
+
+def trace_format(*, spans: int, rounds: int) -> TraceFormat:
+    """The format of a journal in which ``spans`` span events and ``rounds`` finished rounds were seen.
+
+    The one rule both readers of a journal (the summary and the digest) apply, so a list row and
+    the run it opens never disagree. A run records each round's end together with its workstream
+    span, so a journal with finished rounds and no span event is one the trace did not exist for.
+    """
+    return TraceFormat.PREDATES_TRACE if rounds > 0 and spans == 0 else TraceFormat.RECORDED
 
 
 class RunsSummaryRequest(HelperRequestBase):
@@ -152,6 +174,11 @@ class RunsSummaryReply(HelperReplyBase):
     """The events folded: the journal's events, counted as ``runs.read_events`` would return them."""
     journal_bytes: NonNegativeInt
     """The journal bytes those events occupy, for progress and for sizing the full history."""
+    trace: TraceFormat
+    """Whether the journal records a run trace. ``predates_trace``: ``spans`` is empty because the
+    journal predates it, not because the run tried nothing; ``rounds_finished`` is what it says."""
+    rounds_finished: NonNegativeInt
+    """The ``round_finished`` events folded: the rounds the journal records as having ended."""
     span_count: NonNegativeInt
     """Every span of the run, across all pages."""
     reply_count: NonNegativeInt

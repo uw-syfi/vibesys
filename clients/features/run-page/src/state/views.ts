@@ -425,8 +425,10 @@ export function logsNotice(state: RunPageState): string | null {
         : `Could not list the run’s logs: ${state.logs.message}`;
     case 'idle':
     case 'listing':
-      return state.logs.kind === 'listing' && state.logs.streams.length > 0
-        ? null
+      if (state.logs.kind === 'listing' && state.logs.streams.length > 0) return null;
+      // A saved run has no server to list logs from, so nothing is looked for: say so, not "looking".
+      return state.record.kind === 'historical'
+        ? 'This saved run has no running or listed server, so its logs are not available here.'
         : 'Looking for the run’s logs…';
     case 'listed':
       return state.logs.streams.length === 0 ? 'The run has not written any logs yet.' : null;

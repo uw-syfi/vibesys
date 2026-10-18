@@ -64,6 +64,13 @@ export interface RunSummary {
   readonly throughSequence: number;
   readonly eventCount: number;
   readonly journalBytes: number;
+  /**
+   * Whether the journal records a run trace. `predates_trace`: `spans` is empty because a VibeSys
+   * from before the trace wrote the journal, not because the run tried nothing, and
+   * `roundsFinished` is all it says of the run's work.
+   */
+  readonly trace: 'recorded' | 'predates_trace';
+  readonly roundsFinished: number;
   readonly overview: unknown;
   readonly spans: readonly unknown[];
   readonly replies: readonly {

@@ -33,6 +33,8 @@ interface Fixture {
   readonly summary: {
     readonly through_sequence: number;
     readonly event_count: number;
+    readonly trace: 'recorded' | 'predates_trace';
+    readonly rounds_finished: number;
     readonly spans: readonly Span[];
     readonly overview: RunOverview | null;
     readonly replies: readonly {
@@ -61,6 +63,8 @@ function wire(summary: Fixture['summary']): WireSummary {
   return {
     throughSequence: summary.through_sequence,
     eventCount: summary.event_count,
+    trace: summary.trace,
+    roundsFinished: summary.rounds_finished,
     journalBytes: 1234,
     overview: summary.overview,
     spans: summary.spans,
