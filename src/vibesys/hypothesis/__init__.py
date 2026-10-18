@@ -28,6 +28,7 @@ from vibesys.hypothesis.ending import RunEnding, derive_ending, ending_of, has_t
 from vibesys.hypothesis.history import (
     CandidateDisposition,
     HypothesisOutcome,
+    ImplementerStatus,
     JudgeVerdict,
     PerfDeltaReason,
     PerfProvenance,
@@ -125,6 +126,7 @@ __all__ = [
     "HypothesisStrategy",
     "HypothesisStrategyUpdate",
     "ImplementerReply",
+    "ImplementerStatus",
     "InvalidPlanError",
     "JudgeOutcome",
     "JudgeReviewed",

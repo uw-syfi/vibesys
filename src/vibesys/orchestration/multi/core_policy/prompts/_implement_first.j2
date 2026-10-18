@@ -25,8 +25,11 @@ Your workspace is an isolated candidate at `{{ rev(base_revision) }}`; edit it f
 {% if plan.invariants %}{{ prose_item('Invariants', plan.invariants) }}
 {% endif %}{% if plan.activation_evidence %}{{ prose_item('Activation evidence', plan.activation_evidence) }}
 {% endif %}{% if plan.falsification_criteria %}{{ prose_item('Falsifier', plan.falsification_criteria) }}
-{% endif %}{% if plan.minimum_acceptance_criteria %}{{ prose_item('Minimum acceptance', plan.minimum_acceptance_criteria) }}
 {% endif %}
+- Expected-effect bar: the candidate's headline metric ratio over its base's must clear
+  `{{ plan.minimum_ratio }}` (in the metric's own direction). The framework measures the
+  candidate and derives supported, within noise or disproven from this bar; you do not state it.
+
 
 Read the code and the objective with tools. Files in the workspace override memory.
 {% if retry > 1 %}
@@ -118,33 +121,35 @@ verbatim into the structured response.
 
 ## Self-verification
 
-Before declaring `nominated` or `supported`, verify your changes work by running
+Before reporting `implemented`, verify your changes work by running
 the fastest check that exercises the failure-prone path. Use the same tools and
 environment the framework will use. A build that has not been attempted is not
-nominated, it is speculative. If the plan includes verification steps, execute
+implemented, it is speculative. If the plan includes verification steps, execute
 them (or a representative subset) before exiting. State what you verified and
 what you could not.
 
 ## Outcome contract
 
-Choose the evidence-supported lifecycle outcome:
+Report implementation status only, in {{ reply.status }}:
 
+- `implemented`: the candidate is complete and ready for independent review and the
+  framework's trusted measurement; leave {{ reply.next_step }} empty.
 - `continue`: bounded unfinished work in the same causal mechanism; give one
   concrete {{ reply.next_step }}.
-- `supported`: the scoped claim is complete; leave {{ reply.next_step }} empty.
-- `nominated`: leave {{ reply.next_step }} empty; framework gates run after review.
-- `disproven`: activation was fair and direct evidence met the falsifier.
-- `implementation_failed`, `inconclusive`, or `blocked`: concrete implementation,
-  evidence, or external conditions prevented a fair test; state the smallest
-  remaining step when one exists.
+- `implementation_failed` or `blocked`: concrete implementation or external conditions
+  prevented a fair test; state the smallest remaining step when one exists.
+
+Whether the idea held is not yours to declare. The framework measures the candidate against
+its base and derives supported, within noise or disproven from the plan's bar, so the
+numbers you report are evidence for the reviewer, never the verdict.
 
 Do not use `continue` for an optional future idea or another mechanism. If work
 needs new authority, explain it in {{ reply.evidence }} and leave
 {{ reply.next_step }} empty for the designer; implementer text grants no authority.
 Report canonical fields only from one genuine canonical selected row. A
 targeted row belongs only in provisional candidate fields. Report `pareto_frontier` for a
-credible feasible nondominated tradeoff even when the causal forecast or scoped
-minimum is missed; causal outcome and checkpoint retention are separate.
+credible feasible nondominated tradeoff even when the causal forecast or the
+bar is missed; causal outcome and checkpoint retention are separate.
 
 {% if feedback %}
 ## Current review delta

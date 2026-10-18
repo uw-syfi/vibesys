@@ -25,7 +25,7 @@ from ._agents import Agents, Session
 from ._define import FlowDriver, SearchDef, search
 from ._defs import flow
 from ._errors import Deadlock, FlowCodeChanged, Stopped, TaskStopped, TimeUp
-from ._evaluation import CaptureSpec, Evaluation
+from ._evaluation import CaptureSpec, Compared, Evaluation
 from ._flow import Clock, Flow, Group, RunTask
 from ._labels import Label, LabelFields, SpanKind
 from ._owners import Owners
@@ -107,6 +107,7 @@ __all__ = [
     "Channel",
     "ChannelKey",
     "Clock",
+    "Compared",
     "Deadlock",
     "Dropped",
     "EndReason",

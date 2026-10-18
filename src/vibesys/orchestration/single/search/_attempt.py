@@ -85,7 +85,7 @@ class SingleAttempt:
             invariants=plan.invariants,
             activation_evidence=plan.activation_evidence,
             falsification_criteria=plan.falsification_criteria,
-            minimum_acceptance_criteria=plan.minimum_acceptance_criteria,
+            minimum_ratio=plan.minimum_ratio,
             base_revision=self.base,
             feedback=self.feedback,
             no_valid_reply=self.no_valid_reply,

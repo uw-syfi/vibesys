@@ -113,6 +113,17 @@ class ComparisonVerdict(StrEnum):
     WORSE = "worse"
 
 
+class EffectVerdict(StrEnum):
+    """What a comparison says of a plan's expected effect, a minimum ratio over the base.
+
+    The framework derives it (`vs_core._comparison.effect_verdict`); no agent states it.
+    """
+
+    SUPPORTED = "supported"
+    WITHIN_NOISE = "within_noise"
+    DISPROVEN = "disproven"
+
+
 class Comparison(Value):
     """A candidate's samples compared with its base's: the ratio, its noise and the verdict.
 

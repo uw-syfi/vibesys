@@ -17,13 +17,13 @@ from vibesys.hypothesis.transitions import (
     trusted_perf_provenance,
     unmeasured_candidate_retained,
 )
-from vibesys.metrics import Measurement
+from vibesys.metrics import Measurement, MetricComparison
+from vs_core.api import EffectVerdict
 
 if TYPE_CHECKING:
     from vibesys.hypothesis.attempts import AttemptState, PerformanceProjection
     from vibesys.hypothesis.plan import OrchestratorPlan
     from vibesys.hypothesis.state import Hypothesis, HypothesisState
-    from vibesys.metrics import MetricComparison
 
 
 @dataclass(frozen=True)
@@ -53,6 +53,9 @@ class RecordInput:
     # None when no implementer session ran in this process (a resumed run closing a round
     # whose last paid attempt was interrupted): unknown attribution is never official.
     implementer: AgentAttribution | None
+    # What the framework's own comparison of the candidate with its base says of the plan's
+    # typed bar (`vs_core.api.effect_verdict`); None when it had no comparison to derive it from.
+    effect: EffectVerdict | None = None
 
 
 @dataclass(frozen=True)
@@ -79,6 +82,14 @@ class MeasurementEvidence:
     comparison: MetricComparison | None
     delta_pct: float | None
     trusted: bool
+
+
+_EFFECT_COMPARISON = {
+    EffectVerdict.SUPPORTED: MetricComparison.BETTER,
+    EffectVerdict.WITHIN_NOISE: MetricComparison.WITHIN_NOISE,
+    EffectVerdict.DISPROVEN: MetricComparison.WORSE,
+}
+"""How the framework's verdict on the expected effect is recorded as the round's comparison."""
 
 
 def _candidate(data: RecordInput) -> CandidateEvidence:
@@ -149,7 +160,9 @@ def _measurement(
         else None
     )
     comparison = (
-        data.state.metrics.compare(
+        _EFFECT_COMPARISON[data.effect]
+        if data.effect is not None and official and trusted
+        else data.state.metrics.compare(
             reading,
             Measurement(metric=metric_name, value=baseline, direction=direction)
             if metric_name is not None and baseline is not None

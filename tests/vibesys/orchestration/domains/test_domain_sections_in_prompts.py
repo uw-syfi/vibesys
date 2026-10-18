@@ -173,7 +173,7 @@ _STRATEGIES = (
                     claims=multi_api.ImplementerClaims(
                         summary="s",
                         expected_behavior="e",
-                        hypothesis_outcome="nominated",
+                        status="implemented",
                         candidate_disposition="unassessed",
                     ),
                     framework=multi_api.GateFacts(),

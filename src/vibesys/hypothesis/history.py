@@ -51,6 +51,7 @@ __all__ = [
     "CandidateDisposition",
     "HypothesisOutcome",
     "HypothesisResolution",
+    "ImplementerStatus",
     "JudgeVerdict",
     "PerfDeltaReason",
     "PerfProvenance",
@@ -89,6 +90,34 @@ class HypothesisOutcome(StrEnum):
     IMPLEMENTATION_FAILED = "implementation_failed"
     INCONCLUSIVE = "inconclusive"
     BLOCKED = "blocked"
+
+
+class ImplementerStatus(StrEnum):
+    """What an implementer reports of its own work: implementation status and nothing else.
+
+    Whether the idea held (supported, within noise, disproven) is the framework's to derive from
+    its own measurement and the plan's typed bar, so an implementer cannot declare it. The
+    framework records ``IMPLEMENTED`` as the ledger's ``NOMINATED``: a candidate ready for
+    review and the trusted gates, whose measurement then resolves the hypothesis.
+    """
+
+    IMPLEMENTED = "implemented"
+    CONTINUE = "continue"
+    IMPLEMENTATION_FAILED = "implementation_failed"
+    BLOCKED = "blocked"
+
+    @property
+    def outcome(self) -> HypothesisOutcome:
+        """The ledger's declared outcome for this status."""
+        return _DECLARED[self]
+
+
+_DECLARED = {
+    ImplementerStatus.IMPLEMENTED: HypothesisOutcome.NOMINATED,
+    ImplementerStatus.CONTINUE: HypothesisOutcome.CONTINUE,
+    ImplementerStatus.IMPLEMENTATION_FAILED: HypothesisOutcome.IMPLEMENTATION_FAILED,
+    ImplementerStatus.BLOCKED: HypothesisOutcome.BLOCKED,
+}
 
 
 class CandidateDisposition(StrEnum):

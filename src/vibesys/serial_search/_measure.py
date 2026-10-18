@@ -18,6 +18,7 @@ from vibesys.metrics import AcceptedReading, accept_readings, reading_of
 from vibesys.search_spans.api import FAILED_CHECK, GATE, PASSED, SLOWER, GateAttrs
 from vibesys.serial_search._closing import beats_input, failed_gate
 from vs_core.api.search import (
+    Comparison,
     EvidenceKind,
     EvidenceRef,
     Failed,
@@ -37,6 +38,12 @@ class Gated(Value):
     """The gates ran and their readings were decoded; a gate may still have rejected."""
 
     readings: tuple[AcceptedReading, ...]
+    comparison: Comparison | None = None
+    """The candidate compared with its base over every sample core holds of its input.
+
+    The agent's own evaluations of the same input are samples of it, so this is the one
+    comparison the agent was told of and the framework's verdict rests on; None when the
+    candidate has no base's samples (no benchmark stage, or a base that could not be measured)."""
 
 
 class NotMeasured(Value):
@@ -69,11 +76,14 @@ async def measure_gates(
     plan = recipe.plan(revision, purpose="official", now_at=ctx.clock.now(), stages=names)
     stage = ",".join(names)
     label = Label(GATE, title=" + ".join(names), attrs=GateAttrs(stage=stage))
-    found = await ctx.evaluation.measure(
+    compared = await ctx.evaluation.measure_compared(
         plan, workspace=ws, within=recipe.budget(names), label=label
     )
+    found = compared if isinstance(compared, Failed) else compared.result
     gate = ctx.operation_span
     result = await _gated(ctx, ws, revision, found)
+    if isinstance(result, Gated) and not isinstance(compared, Failed):
+        result = result.model_copy(update={"comparison": compared.comparison})
     if gate is not None and isinstance(result, Gated):
         _label_reading(ctx, gate, stage, result.readings, baseline)
     return result

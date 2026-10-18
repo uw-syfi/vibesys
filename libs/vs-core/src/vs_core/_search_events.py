@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from ._comparison import comparison_of_result, moment_of
 from ._registry import ContractError
 from .types.attempts import AttemptExhausted, CheckpointResolved
 from .types.common import Scope
@@ -219,10 +220,13 @@ def _checkpoint(core: CoreState, event: CheckpointResolved) -> Event:
 
 def _measurement(core: CoreState, event: MeasurementResult) -> Event | Discarded:
     source = event.source_request
+    comparison = comparison_of_result(
+        core.evaluation, moment_of(core.run), event.scope, (e.candidate for e in event.evidence)
+    )
     if source is None:
-        return MeasurementFinished(decision=None, result=event)
+        return MeasurementFinished(decision=None, result=event, comparison=comparison)
     return _late(core, source, EventKind.MEASUREMENT_FINISHED) or MeasurementFinished(
-        decision=_decision_of(core, source), result=event
+        decision=_decision_of(core, source), result=event, comparison=comparison
     )
 
 

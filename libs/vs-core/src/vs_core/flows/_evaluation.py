@@ -19,6 +19,7 @@ from vs_core._strategy_operations import (
 )
 from vs_core.types.common import THIS_RUN, DecisionId, RevisionRef, Value
 from vs_core.types.evaluation import EvidenceRef, MeasurementPlan, MeasurementResult
+from vs_core.types.measurement import Comparison
 from vs_core.types.search import MeasurementFinished, OperationFinished
 from vs_core.types.strategy import Measure, Operation
 from vs_core.types.until import Failed, Within
@@ -41,6 +42,13 @@ class CaptureSpec(Value):
     output_argument: str
     """The argument the runtime appends, followed by the temporary path the command writes."""
     timeout_seconds: int
+
+
+class Compared(Value):
+    """A finished measurement and its candidate's comparison with the base, when it has one."""
+
+    result: MeasurementResult
+    comparison: Comparison | None = None
 
 
 def _within(within: Seconds | Within) -> Within:
@@ -66,11 +74,27 @@ class Evaluation:
 
         ``label`` labels the measurement's span.
         """
+        found = await self.measure_compared(plan, workspace=workspace, within=within, label=label)
+        return found if isinstance(found, Failed) else found.result
+
+    async def measure_compared(
+        self,
+        plan: MeasurementPlan,
+        *,
+        workspace: Workspace | None = None,
+        within: Seconds | Within,
+        label: Label | None = None,
+    ) -> Compared | Failed:
+        """Measure ``plan`` as `measure` does, with the candidate's comparison with its base.
+
+        The comparison is the one core holds when the measurement ends, over every sample of the
+        candidate's measured input, including runs the agent asked for; None when it has none.
+        """
         scope = THIS_RUN if workspace is None else workspace.scope
         request = Measure(decision_id=DecisionId(root="measure"), scope=scope, plan=plan)
         match await self._kit.wait(request, _within(within), label):
-            case MeasurementFinished(result=result):
-                return result
+            case MeasurementFinished(result=result, comparison=comparison):
+                return Compared(result=result, comparison=comparison)
             case Failed() as failed:
                 return failed
             case unexpected:

@@ -50,6 +50,17 @@ class InvalidPlanError(ValueError):
         return cls(f"base_round {base_round} names no idea of this run; {_choices(passed)}")
 
     @classmethod
+    def bar_on_wrong_side(cls, ratio: float, direction: str) -> InvalidPlanError:
+        """Report an expected-effect bar that asks for a loss of the metric."""
+        wanted = (
+            "at least 1 (more is better)" if direction == "max" else "at most 1 (less is better)"
+        )
+        return cls(
+            f"minimum_ratio {ratio} is on the wrong side of the base for a {direction} metric: "
+            f"it must be {wanted}"
+        )
+
+    @classmethod
     def failed_base(cls, base_round: int, passed: tuple[int, ...]) -> InvalidPlanError:
         """Report a base that names an idea that did not pass."""
         return cls(f"base_round {base_round} names an idea that did not pass; {_choices(passed)}")
@@ -218,12 +229,19 @@ class OrchestratorPlan(BaseModel):
             "hypothesis; this is not an acceptance threshold."
         ),
     )
-    minimum_acceptance_criteria: str = Field(
-        default="",
-        description=markdown_prose(
-            "Minimum observed end-to-end benefit and allowed tradeoffs that justify "
-            "retaining the change, derived separately from forecast uncertainty, "
-            "benchmark noise, and implementation cost."
+    minimum_ratio: float = Field(
+        default=1.0,
+        gt=0,
+        allow_inf_nan=False,
+        description=(
+            "The expected-effect bar: the smallest ratio of the candidate's headline metric "
+            "over its base's, in the metric's own direction, that justifies keeping the "
+            "change. Above 1 for a metric where more is better (1.05 asks for 5% more), "
+            "below 1 for one where less is better (0.95 asks for 5% less); 1 asks for any "
+            "gain beyond noise. Derive it separately from forecast uncertainty, benchmark "
+            "noise and implementation cost. The framework measures the candidate and derives "
+            "the verdict (supported, within noise or disproven) from this bar; no agent "
+            "states or judges it."
         ),
     )
     invariants: str = Field(

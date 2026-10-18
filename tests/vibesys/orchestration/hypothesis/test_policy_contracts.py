@@ -16,6 +16,7 @@ from vibesys.hypothesis import (
     HypothesisConfig,
     HypothesisOutcome,
     HypothesisSearch,
+    ImplementerStatus,
     RoundRecord,
 )
 from vibesys.hypothesis import cadence as _cadence
@@ -239,7 +240,7 @@ def test_reused_candidate_evidence_does_not_bypass_sparse_review() -> None:
     implementation = ImplementerResponse(
         summary="Rebuilt derived reports without running a benchmark.",
         expected_behavior="The retained raw row is unchanged.",
-        hypothesis_outcome=HypothesisOutcome.INCONCLUSIVE,
+        status=ImplementerStatus.IMPLEMENTATION_FAILED,
         candidate_disposition=CandidateDisposition.PREREQUISITE,
         candidate_metrics=metrics,
         candidate_evaluation_artifact="h37-round77-controller-raw.json",

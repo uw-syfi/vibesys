@@ -15,8 +15,11 @@ freely.
 {{ prose_item('Pass criteria', plan.pass_criteria) }}
 {% if plan.invariants %}{{ prose_item('Invariants', plan.invariants) }}
 {% endif %}{% if plan.falsification_criteria %}{{ prose_item('Falsifier', plan.falsification_criteria) }}
-{% endif %}{% if plan.minimum_acceptance_criteria %}{{ prose_item('Minimum acceptance', plan.minimum_acceptance_criteria) }}
 {% endif %}
+- Expected-effect bar: the candidate's headline metric ratio over its base's must clear
+  `{{ plan.minimum_ratio }}` (in the metric's own direction). The framework measures the
+  candidate and derives supported, within noise or disproven from this bar; you do not state it.
+
 
 {% if retry > 1 %}
 ## Same-round retry boundary
@@ -90,10 +93,10 @@ not a substitute.
 
 ## Self-verification
 
-Before declaring `nominated` or `supported`, verify your changes work by running
+Before reporting `implemented`, verify your changes work by running
 the fastest check that exercises the failure-prone path. Use the same tools and
 environment the framework will use. A build that has not been attempted is not
-nominated, it is speculative. State what you verified and what you could not.
+implemented, it is speculative. State what you verified and what you could not.
 
 Before target work, match exact target-read build/provenance/gate bytes to the
 resolved target package/mount plan; an archive alone is insufficient. A

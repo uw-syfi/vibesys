@@ -117,7 +117,7 @@ _CLAIMS = st.builds(
     ImplementerClaims,
     summary=_TEXT,
     expected_behavior=_TEXT,
-    hypothesis_outcome=st.sampled_from(("nominated", "continue", "disproven")),
+    status=st.sampled_from(("implemented", "continue", "blocked")),
     evidence=st.text(max_size=12),
     next_step=st.text(max_size=12),
     perf_metric=st.none() | st.floats(0, 1e6),
@@ -296,7 +296,7 @@ def _judge_context(plan: HypothesisPlan, prose: str) -> JudgePrompt:
         claims=ImplementerClaims(
             summary=prose,
             expected_behavior=prose,
-            hypothesis_outcome="nominated",
+            status="implemented",
             evidence=prose,
             next_step=prose,
             candidate_disposition="unassessed",

@@ -68,7 +68,7 @@ class ImplementerClaims(Value):
 
     summary: str
     expected_behavior: str
-    hypothesis_outcome: str
+    status: str
     evidence: str = ""
     next_step: str = ""
     perf_metric: float | None = None
@@ -124,7 +124,7 @@ class HypothesisPlan(Value):
     invariants: str = ""
     activation_evidence: str = ""
     falsification_criteria: str = ""
-    minimum_acceptance_criteria: str = ""
+    minimum_ratio: float = 1.0
 
 
 class GateFacts(Value):

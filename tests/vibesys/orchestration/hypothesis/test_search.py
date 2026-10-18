@@ -20,6 +20,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
+from tests.support.declared_reply import DeclaredImplementerResponse
 
 from vibesys.hypothesis import (
     CandidateDisposition,
@@ -45,7 +46,6 @@ from vibesys.hypothesis.attempts import (
 )
 from vibesys.hypothesis.state import Hypothesis, HypothesisState
 from vibesys.metrics import MetricComparison, MetricSpace, Objective
-from vibesys.orchestration.multi.models import ImplementerResponse
 from vs_sim.api.testing import examples
 
 # --- helpers -----------------------------------------------------------
@@ -415,8 +415,8 @@ def _attempt_state(
     next_step: str = "keep going",
     feedback: str | None = None,
 ) -> AttemptState:
-    implementation = ImplementerResponse(
-        hypothesis_outcome=outcome,
+    implementation = DeclaredImplementerResponse(
+        declared=outcome,
         next_step=next_step,
         summary="did the thing",
         expected_behavior="it works",

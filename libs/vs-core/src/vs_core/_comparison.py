@@ -57,7 +57,14 @@ from .types.evaluation import (
     OwnedJob,
     PreparedSubmissionReceipt,
 )
-from .types.measurement import BaseRef, Comparison, ComparisonVerdict, Direction, Sample
+from .types.measurement import (
+    BaseRef,
+    Comparison,
+    ComparisonVerdict,
+    Direction,
+    EffectVerdict,
+    Sample,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -79,7 +86,9 @@ __all__ = [
     "close_call",
     "compare",
     "comparison_of",
+    "comparison_of_result",
     "comparisons_of",
+    "effect_verdict",
     "evaluation_of",
     "fresh",
     "latest_comparisons",
@@ -359,6 +368,50 @@ def latest_comparisons(
         if comparison.scope == scope and comparison.candidate_input in wanted:
             current[(comparison.candidate_input, comparison.base_input)] = comparison
     return tuple(current.values())
+
+
+def effect_verdict(comparison: Comparison, minimum_ratio: float) -> EffectVerdict:
+    """What ``comparison`` says of an expected effect: the smallest ratio that justifies a change.
+
+    ``minimum_ratio`` is the bar over the base in the metric's own direction (above one for a
+    ``max`` metric, below one for ``min``; one asks for any improvement). The candidate's gain
+    over the base is held against the gain the bar asks for, with the comparison's own noise
+    and the same two standard errors a verdict needs::
+
+        margin = gain - required gain
+        supported     if margin >  2 * noise
+        disproven     if margin < -2 * noise
+        within_noise  otherwise
+
+    So a result inside the noise of the bar is never called either way: it is a close call, and
+    with a bar of one this is exactly the comparison's own verdict.
+    """
+    sign = 1.0 if comparison.direction == "max" else -1.0
+    margin = sign * (comparison.ratio - minimum_ratio)
+    if margin > VERDICT_NOISES * comparison.noise:
+        return EffectVerdict.SUPPORTED
+    if margin < -VERDICT_NOISES * comparison.noise:
+        return EffectVerdict.DISPROVEN
+    return EffectVerdict.WITHIN_NOISE
+
+
+def comparison_of_result(
+    state: EvaluationState, moment: Moment, scope: Scope, candidates: Iterable[RevisionRef]
+) -> Comparison | None:
+    """The current comparison of the candidate a finished measurement measured, if it has one.
+
+    The measurement's own run, a re-read of an earlier run, or any other run of the same commit
+    in the scope is a sample of one input, so the input is the latest sample's of the scope at
+    one of the ``candidates`` (the commits the result's evidence names); None when none was
+    sampled or the input has no base's samples.
+    """
+    wanted = tuple(candidates)
+    sample = next(
+        (s for s in reversed(state.samples) if s.scope == scope and s.commit in wanted), None
+    )
+    if sample is None:
+        return None
+    return comparison_of(state, scope, Measured(sample.evaluation, sample.measured_input), moment)
 
 
 def close_call(comparison: Comparison, bar: float = 1.0) -> bool:

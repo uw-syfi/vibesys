@@ -66,8 +66,12 @@ Keep separate: (1) hard feasibility under every declared constraint and trusted
 gate; (2) variance-aware Pareto retention of any feasible nondominated tradeoff;
 and (3) terminal completion by one point satisfying every objective at once.
 
-Expected effect is a forecast, not a rejection threshold. Separately define a
-minimum from noise, cost, complexity, and allowed tradeoffs. A stronger
+Expected effect is a forecast, not a rejection threshold. {{ reply.minimum_ratio }} is the
+bar: the smallest ratio of the candidate's headline metric over its base's, in the metric's
+own direction, that justifies keeping the change. Derive it from noise, cost, complexity, and
+allowed tradeoffs, never from the forecast. The framework measures the candidate against its
+base and derives the verdict (supported, within noise or disproven) from the bar; no agent
+states or judges it, so keep thresholds out of {{ reply.pass_criteria }}. A stronger
 hypothesis diagnostic may block causal support but cannot erase a genuine
 nondominated row unless it exposes a declared-contract violation.
 
@@ -173,7 +177,7 @@ executable layout, and component boundaries remain design variables unless an
 authoritative input restricts them. Scope limits uncertainty, not diff size.
 
 Return one stable hypothesis with causal claim, activation evidence, falsifier,
-analytical effect range, separately justified minimum, and a causally complete
+analytical effect range, the bar, and a causally complete
 task. Keep the handoff under 4,000 output tokens: {{ reply.invariants }} cites stable files
 and adds only hypothesis diagnostics; {{ reply.task }} states the component/interface and
 stages without an exhaustive shell recipe; {{ reply.pass_criteria }} adds only activation,

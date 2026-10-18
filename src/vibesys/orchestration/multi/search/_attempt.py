@@ -54,6 +54,7 @@ from vs_core.api.search import (
     LocalValidationReport,
     RevisionRef,
     Settlement,
+    effect_verdict,
 )
 
 if TYPE_CHECKING:
@@ -62,7 +63,7 @@ if TYPE_CHECKING:
     from vibesys.orchestration.multi.models import ImplementerResponse, JudgeResponse
     from vibesys.orchestration.multi.search._config import MultiConfig
     from vibesys.serial_search.api import GateResult
-    from vs_core.api.search import TaskTerms
+    from vs_core.api.search import EffectVerdict, TaskTerms
 
 UNSETTLED = frozenset({HypothesisOutcome.BLOCKED, HypothesisOutcome.IMPLEMENTATION_FAILED})
 """Implementer outcomes that make a candidate ineligible however well it measures."""
@@ -112,7 +113,7 @@ def hypothesis_plan(plan: OrchestratorPlan) -> HypothesisPlan:
         invariants=plan.invariants,
         activation_evidence=plan.activation_evidence,
         falsification_criteria=plan.falsification_criteria,
-        minimum_acceptance_criteria=plan.minimum_acceptance_criteria,
+        minimum_ratio=plan.minimum_ratio,
     )
 
 
@@ -140,7 +141,7 @@ def claims_of(reply: ImplementerResponse) -> ImplementerClaims:
     return ImplementerClaims(
         summary=reply.summary,
         expected_behavior=reply.expected_behavior,
-        hypothesis_outcome=reply.hypothesis_outcome.value,
+        status=reply.status.value,
         evidence=reply.evidence,
         next_step=reply.next_step,
         perf_metric=reply.perf_metric,
@@ -184,6 +185,8 @@ class MultiAttempt:
     judge_invocation: InvocationRef | None = None
     official_reason: str | None = None
     readings: tuple[AcceptedReading, ...] = ()
+    effect: EffectVerdict | None = None
+    """What the framework's comparison says of the plan's typed bar; None without a comparison."""
     passed: bool = False
     gate_failed: bool = False
     unmeasured: bool = False
@@ -231,6 +234,7 @@ class MultiAttempt:
     def _fresh_attempt(self) -> None:
         """What a new paid turn starts without: the last turn's verdict, validation and gates."""
         self.readings = ()
+        self.effect = None
         self.judge_pass = None
         self.judge_invocation = None
         self.review_skipped = False
@@ -363,8 +367,13 @@ class MultiAttempt:
     def gated(self, result: GateResult) -> Next:
         """Fold the trusted gates: a rejection is feedback, a missing measurement is nobody's fault."""
         match result:
-            case serial.Gated(readings=readings):
+            case serial.Gated(readings=readings, comparison=comparison):
                 self.readings = readings
+                self.effect = (
+                    None
+                    if comparison is None
+                    else effect_verdict(comparison, self.plan.minimum_ratio)
+                )
                 feedback = serial.failed_gate(readings)
                 if feedback is None:
                     self.passed = True
@@ -468,6 +477,7 @@ class MultiAttempt:
                 benchmark_configured="benchmark" in self.terms.measured,
                 implementer=AgentAttribution("core", None, None),
                 revalidation_required=self.revalidation_required,
+                effect=self.effect,
             ),
         )
         return serial.record_round(

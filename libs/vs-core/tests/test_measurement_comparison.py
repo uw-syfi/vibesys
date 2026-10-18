@@ -106,6 +106,13 @@ def ended_with(
     """Accept ``request``'s job and end it passed, its benchmark record reading ``value``.
 
     With None the record carries no reading, as a benchmark that reported no metric does."""
+    return ended_transition(state, request, value).state
+
+
+def ended_transition(
+    state: core.CoreState, request: core.SubmitMeasurement, value: float | None
+) -> core.Transition:
+    """`ended_with`, with the transition that ended the job: its events and its state."""
     started = seen(request, 1)
     state = committed(state, started)
     state = transition(state, core.MeasurementSubmissionObserved(observation=started)).state
@@ -145,7 +152,7 @@ def ended_with(
     )
     state = committed(state, finished, _PASSED)
     state = transition(state, core.MeasurementSubmissionObserved(observation=finished)).state
-    done = transition(
+    return transition(
         state,
         core.JobObserved(
             resource_id=resource,
@@ -154,7 +161,6 @@ def ended_with(
             evaluation_result=_PASSED,
         ),
     )
-    return done.state
 
 
 @dataclass
@@ -633,3 +639,45 @@ def test_a_comparison_is_the_aggregate_of_every_sample_in_any_order(
     assert math.isclose(again.ratio, held.ratio)
     assert math.isclose(again.noise, held.noise)
     assert again.verdict is held.verdict
+
+
+def finished_for_search(
+    state: core.CoreState, done: core.Transition
+) -> list[core.MeasurementFinished]:
+    """What the search that asked sees of a transition: the measurements that finished."""
+    del state
+    return [
+        event
+        for event in core.search_events(done.state, done.events)
+        if isinstance(event, core.MeasurementFinished)
+    ]
+
+
+def test_a_finished_measurement_reaches_the_search_with_the_comparison_of_its_candidate() -> None:
+    """The search that asked is told what the candidate compares to, not only its evidence.
+
+    The agent's own run and the strategy's final check are samples of one input, so the
+    comparison the check's result carries is over both."""
+    lab = Lab.of("a")
+    lab.call("a", "close", "input-1")
+    lab.measure({"input-1": 101.0, "base": 100.0})
+    check = final_check(lab, "a", "close", "input-1")
+    assert check.request_id is not None
+    lab.ended.add(check.request_id.root)
+    done = ended_transition(lab.state, check, 102.0)
+    (finished,) = finished_for_search(lab.state, done)
+    assert finished.comparison is not None
+    assert finished.comparison.candidate_samples == 2
+    assert finished.comparison.ratio == pytest.approx(1.015)
+    assert finished.comparison.base == core.initial_state().run.facts.baseline
+    lab.state = done.state
+    assert finished.comparison == lab.comparisons()[-1]
+
+
+def test_a_measurement_of_an_input_no_agent_evaluated_reaches_the_search_without_one() -> None:
+    lab = Lab.of("a")
+    check = final_check(lab, "a", "unseen", "input-9")
+    assert check.request_id is not None
+    done = ended_transition(lab.state, check, 130.0)
+    (finished,) = finished_for_search(lab.state, done)
+    assert finished.comparison is None

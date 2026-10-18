@@ -61,7 +61,23 @@ def _check(
     if ledger.search.by_id(plan.hypothesis_id) is not None:
         raise InvalidPlanError.reused_id(plan.hypothesis_id)
     _check_base(plan, ledger, start)
+    _check_bar(plan, ledger)
     rounds.validate_plan(config, ledger, plan.hypothesis_updates)
+
+
+def _check_bar(plan: OrchestratorPlan, ledger: rounds.Ledger) -> None:
+    """Raise `InvalidPlanError` for an expected-effect bar that asks for a loss of the metric.
+
+    The bar is a ratio over the base in the headline metric's own direction, so it is above one
+    for a ``max`` metric and below one for a ``min`` metric. A run that declares no metric has
+    no direction to hold it to.
+    """
+    primary = ledger.search.metrics.primary
+    if primary is None:
+        return
+    ratio = plan.minimum_ratio
+    if (primary.direction == "max" and ratio < 1) or (primary.direction == "min" and ratio > 1):
+        raise InvalidPlanError.bar_on_wrong_side(ratio, primary.direction)
 
 
 def _check_base(plan: OrchestratorPlan, ledger: rounds.Ledger, start: RoundStart) -> None:

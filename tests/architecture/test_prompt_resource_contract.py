@@ -672,7 +672,7 @@ def core_policy_context() -> dict[str, object]:
         "claims": ImplementerClaims(
             summary="fixture",
             expected_behavior="fixture",
-            hypothesis_outcome="nominated",
+            status="implemented",
             candidate_disposition="unassessed",
         ),
         "validation_failure": ValidationFailure(recipe="unit", error="boom", output="tail"),
@@ -696,7 +696,7 @@ def core_policy_context() -> dict[str, object]:
         "dominated_by_rounds": (),
         "falsification_criteria": "fixture",
         "invariants": "fixture",
-        "minimum_acceptance_criteria": "fixture",
+        "minimum_ratio": 1.0,
         "no_valid_reply": None,
         "problem": None,
         "agent": "implementer",
@@ -777,7 +777,7 @@ def response_for(path: Path) -> object:
         {
             "summary": "Implemented.",
             "expected_behavior": "Correct.",
-            "hypothesis_outcome": "continue",
+            "status": "continue",
         }
     )
 

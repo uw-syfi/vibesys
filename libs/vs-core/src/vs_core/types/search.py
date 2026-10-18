@@ -30,6 +30,7 @@ from .common import (
     Scope,
     Seconds,
     Value,
+    unset,
 )
 from .evaluation import (
     Continuation,
@@ -39,6 +40,7 @@ from .evaluation import (
 )
 from .evaluation_history import AttemptEvaluationHistory, AttemptTerminalReason
 from .kinds import EventKind
+from .measurement import Comparison
 from .records import OperationResult
 from .session_inputs import InputDelivered, InputDropped
 from .sessions import InterruptCompleted, InterruptFailed, TurnResult, YieldPublicationFailed
@@ -121,6 +123,11 @@ class MeasurementFinished(Value):
     kind: Literal["measurement_finished"] = "measurement_finished"
     decision: DecisionId | None
     result: MeasurementResult
+    comparison: Comparison | None = Field(default=None, exclude_if=unset)
+    """The measured candidate compared with its base over every sample held when it ended.
+
+    None when the candidate has no base's samples (a task without a benchmark stage, a base
+    that could not be measured, or a run no sample came of)."""
 
 
 class OperationFinished(Value):

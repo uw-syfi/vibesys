@@ -300,13 +300,13 @@ def test_every_gate_is_the_framework_s_measurement_of_the_revision_its_round_ret
 
 RUN_3 = [
     # (the implementer's outcome, its advice for the checkpoint, what it evaluated itself)
-    ("inconclusive", "unassessed", []),
-    ("inconclusive", "unassessed", []),
-    ("nominated", "unassessed", []),
-    ("disproven", "discard", [ACCURACY_FAILS]),
-    ("implementation_failed", "discard", [ACCURACY_FAILS]),
+    ("implemented", "unassessed", []),
+    ("implemented", "unassessed", []),
+    ("implemented", "unassessed", []),
+    ("implemented", "discard", [ACCURACY_FAILS]),
+    ("implemented", "discard", [ACCURACY_FAILS]),
     ("continue", "unassessed", []),
-    ("implementation_failed", "discard", [ACCURACY_FAILS]),
+    ("implemented", "discard", [ACCURACY_FAILS]),
 ]
 """The rounds of a live multi run whose every workstream was accepted and none had a gate."""
 
@@ -323,7 +323,7 @@ def play_multi_round(
         multi_host.implemented(outcome, candidate_disposition=disposition),
         checkpoint=Retained(revision=RevisionRef.of_git_commit(f"c{n}")),
     )
-    if outcome == "nominated":  # the only reply the sparse review cadence reviews here
+    if outcome == "implemented":  # the only reply the sparse review cadence reviews here
         host.drain_until_turn(JUDGE)
         host.run.reply(host.run.expect_turn(role=JUDGE), multi_host.reviewed(passed=True))
 
@@ -346,35 +346,38 @@ def settled_workstreams(host: SerialHost) -> list[Span]:
 
 
 @across_restarts
-def test_regression_a_round_that_gave_up_its_work_failed_and_so_did_one_nobody_measured(
+def test_regression_an_implemented_idea_is_measured_whatever_the_implementer_thinks_of_it(
     *, restarting: bool
 ) -> None:
-    # the live run showed all seven rounds as kept and none measured: three implementers asked
-    # to discard code whose accuracy check failed, and the sparse review cadence reviewed (so the
-    # gates measured) only the nominated one
+    # the live run showed all seven rounds as kept and none measured: implementers declared their
+    # ideas inconclusive or disproven, which kept them out of the review and so out of the gates,
+    # and the sparse review cadence reviewed only the one that declared itself ready. An
+    # implementer now reports implementation status only: every candidate it implemented is
+    # reviewed and measured by the gates, and what the measurement says is the framework's to
+    # derive. Only a round that asked to continue has no candidate yet, so it is not measured.
     config = multi_host.config(max_rounds=10, judge_every=100)
     host = multi_host.MultiHost.start(config, restarting=restarting)
     for n, (outcome, disposition, evaluations) in enumerate(RUN_3, start=1):
         play_multi_round(host, n, outcome, disposition, evaluations)
     host.drain_until_turn(PLANNER)
 
-    assert host.measured == ["c3"]
+    assert host.measured == ["c1", "c2", "c3", "c4", "c5", "c7"]
     rounds = settled_workstreams(host)
     assert [(w.label.verdict, w.label.reason) for w in rounds if w.label] == [
-        ("failed", "not_measured"),
+        ("passed", None),
+        ("passed", None),
+        ("passed", None),
+        ("passed", None),
+        ("passed", None),
         ("failed", "not_measured"),
         ("passed", None),
-        ("failed", "turned_down"),
-        ("failed", "turned_down"),
-        ("failed", "not_measured"),
-        ("failed", "turned_down"),
     ]
     # its code is still kept, and its own hypothesis may continue from it
     assert [attrs(w)["revision"] for w in rounds] == [f"c{n}" for n in range(1, 8)]
     for n, workstream in enumerate(rounds, start=1):
         gates = gates_under(host, workstream)
-        # only the round the gates measured has one: what its implementer measured is no gate
-        assert [g.label.verdict for g in gates if g.label] == (["passed"] if n == 3 else [])
+        # only a round the gates measured has one: what its implementer measured is no gate
+        assert [g.label.verdict for g in gates if g.label] == ([] if n == 6 else ["passed"])
 
 
 @across_restarts
@@ -382,7 +385,7 @@ def test_regression_a_round_that_gave_up_its_work_failed_and_so_did_one_nobody_m
 @given(
     rounds=st.lists(
         st.tuples(
-            st.sampled_from(["nominated", "inconclusive", "disproven", "implementation_failed"]),
+            st.sampled_from(["implemented", "implementation_failed"]),
             st.sampled_from(["unassessed", "discard"]),
             st.booleans(),  # the judge passes it, when it reviews it
         ),
@@ -431,7 +434,7 @@ def test_a_multi_round_passed_when_the_gates_measured_it_and_nothing_turned_it_d
             disposition == "discard" or outcome == "implementation_failed" or rejected_review
         )
         measured = f"c{n}" in host.measured
-        eligible = measured and outcome == "nominated" and passes
+        eligible = measured and outcome == "implemented" and passes
         passed = measured and (not turned_down or eligible)
         assert workstream.label.verdict == ("passed" if passed else "failed"), n
         assert attrs(workstream)["revision"] == f"c{n}", "its code is kept either way"

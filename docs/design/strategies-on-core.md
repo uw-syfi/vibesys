@@ -470,7 +470,7 @@ would change what the agent can do. It holds no run state, so it is not a second
 ### 5.6 CLI options
 
 As `single`, plus `--judge-every` with its documented meaning (review every N rounds;
-nominated candidates and the final round always). `profile-guided` takes the same input and
+implemented candidates and the final round always). `profile-guided` takes the same input and
 runs `CaptureCommand` before the pre-round turn.
 
 ### 5.7 Crash and replay

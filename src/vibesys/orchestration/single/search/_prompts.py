@@ -40,7 +40,7 @@ class RoundPrompt(RolePromptContext):
     invariants: str = ""
     activation_evidence: str = ""
     falsification_criteria: str = ""
-    minimum_acceptance_criteria: str = ""
+    minimum_ratio: float = 1.0
     base_revision: RevisionRef
     feedback: str | None = None
     no_valid_reply: str | None = None

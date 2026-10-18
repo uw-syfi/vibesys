@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 from vibesys.hypothesis import (
     CandidateDisposition,
     HypothesisOutcome,
+    ImplementerStatus,
     SkillResourceSelection,
 )
 from vibesys.orchestration.review import Verdict
@@ -23,11 +24,15 @@ class ImplementerResponse(RevisionReply):
     expected_behavior: str = Field(
         description=markdown_prose("Observable behavior expected from the implementation.")
     )
-    hypothesis_outcome: HypothesisOutcome = Field(
-        default=HypothesisOutcome.NOMINATED,
+    status: ImplementerStatus = Field(
+        default=ImplementerStatus.IMPLEMENTED,
         description=(
-            "Hypothesis lifecycle status. Use continue only for bounded unfinished "
-            "same-mechanism work; supported/nominated require review readiness."
+            "Implementation status only. implemented: the candidate is complete and ready for "
+            "independent review and the framework's trusted measurement. continue: bounded "
+            "unfinished work in the same mechanism. implementation_failed or blocked: "
+            "concrete implementation or external conditions prevented a fair test. Whether "
+            "the idea held is derived by the framework from its own measurement; never "
+            "state it."
         ),
     )
     evidence: str = Field(
@@ -87,10 +92,15 @@ class ImplementerResponse(RevisionReply):
         description=VALIDATION_RECIPE_ARTIFACT_DESCRIPTION,
     )
 
+    @property
+    def hypothesis_outcome(self) -> HypothesisOutcome:
+        """The ledger's declared outcome for the reported status (`ImplementerStatus.outcome`)."""
+        return self.status.outcome
+
     @override
     def produces_revision(self) -> bool:
         """A blocked implementer claims no work, so core records no checkpoint for its turn."""
-        return self.hypothesis_outcome is not HypothesisOutcome.BLOCKED
+        return self.status is not ImplementerStatus.BLOCKED
 
 
 class JudgeResponse(BaseModel):

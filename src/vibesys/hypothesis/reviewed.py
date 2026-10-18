@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from vibesys.hypothesis.plan import OrchestratorPlan
     from vibesys.hypothesis.state import Hypothesis
     from vibesys.metrics import FrameworkBenchmarkOutcome
+    from vs_core.api import EffectVerdict
 
 _CODE_OUTCOMES = frozenset({HypothesisOutcome.SUPPORTED, HypothesisOutcome.NOMINATED})
 
@@ -125,6 +126,8 @@ class ReviewedClosing:
     benchmark_configured: bool
     implementer: AgentAttribution | None
     revalidation_required: bool = False
+    effect: EffectVerdict | None = None
+    """The framework's verdict on the plan's typed bar, derived from its own comparison."""
 
 
 def _projection(hypothesis: Hypothesis, state: AttemptState) -> PerformanceProjection:
@@ -221,6 +224,7 @@ def close_reviewed_round(
             accuracy_configured=facts.accuracy_configured,
             candidate_commit=facts.candidate_commit,
             implementer=facts.implementer,
+            effect=facts.effect,
         )
     )
     keeps = keeps_active(config, hypothesis, reply)

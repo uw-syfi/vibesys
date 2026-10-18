@@ -89,7 +89,7 @@ _REPLIES: dict[Search, dict[str, str]] = {
         ),
     },
     "multi": {
-        "agent.implementer.reply": json.dumps({**_IMPLEMENTED, "hypothesis_outcome": "nominated"}),
+        "agent.implementer.reply": json.dumps({**_IMPLEMENTED, "status": "implemented"}),
         "agent.judge.reply": json.dumps({"analysis": "checked", "feedback": "", "verdict": "pass"}),
         "agent.router.reply": json.dumps(
             {"need_profile": False, "profile_focus": "", "reasoning": "because"}

@@ -13,7 +13,8 @@ from tests.vibesys.serial_search._host import TERMS
 
 from vibesys.candidates.api import NotConfigured
 from vibesys.hypothesis import HypothesisConfig, OrchestratorPlan, rounds
-from vibesys.metrics import MetricRow
+from vibesys.hypothesis.state import HypothesisState
+from vibesys.metrics import MetricRow, MetricSpace, Objective
 from vibesys.profile_focus import ProfileAttributionError
 from vibesys.profile_focus.attribution import parse_attribution
 from vibesys.serial_search.api import (
@@ -106,6 +107,37 @@ def test_a_plan_that_updates_itself_twice_or_reuses_an_id_is_refused() -> None:
     )
     assert "more than once" in str(duplicate)
     assert "new hypothesis" in str(selfish)
+
+
+@settings(max_examples=examples(pr=20, nightly=200))
+@given(
+    direction=st.sampled_from(["max", "min"]),
+    ratio=st.floats(min_value=0.2, max_value=3.0, allow_nan=False),
+)
+def test_an_expected_effect_bar_is_accepted_only_on_the_better_side_of_the_base(
+    direction: Literal["max", "min"], ratio: float
+) -> None:
+    """The bar is a ratio over the base in the metric's own direction: never a demanded loss."""
+    space = MetricSpace(objectives=(Objective("throughput", direction),))
+    ledger = rounds.Ledger(HypothesisState(metrics=space))
+    accepted = accept_plan(_CONFIG, ledger, _reply("h1", minimum_ratio=ratio), start=_start())
+    asks_a_loss = ratio < 1 if direction == "max" else ratio > 1
+    assert isinstance(accepted, str) == asks_a_loss
+    if isinstance(accepted, str):
+        assert "minimum_ratio" in accepted
+        assert direction in accepted
+
+
+def test_a_run_without_a_headline_metric_has_no_direction_to_hold_a_bar_to() -> None:
+    ledger = rounds.Ledger(rounds.decode(rounds.EncodedLedger()).search)
+    assert isinstance(
+        accept_plan(_CONFIG, ledger, _reply("h1", minimum_ratio=0.5), start=_start()),
+        OrchestratorPlan,
+    )
+
+
+def test_a_plan_that_states_no_bar_asks_for_any_gain_beyond_noise() -> None:
+    assert _reply("h1").minimum_ratio == 1.0
 
 
 def test_attribution_output_that_is_not_the_protocol_is_refused() -> None:

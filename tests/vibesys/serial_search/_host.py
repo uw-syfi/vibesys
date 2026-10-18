@@ -23,6 +23,8 @@ from vs_core.api import (
     AttemptRef,
     CaptureCommandBase,
     CommandCapture,
+    Comparison,
+    ComparisonVerdict,
     EventId,
     EvidenceId,
     EvidenceKind,
@@ -90,6 +92,7 @@ class World(TypedDict, total=False):
     refusals: dict[str, int]
     refusal_code: RejectionCode
     throughputs: dict[str, float]
+    comparisons: dict[str, tuple[float, float]]
     baseline: Baseline
     validation: Validation
     attribution_output: str
@@ -113,6 +116,10 @@ class SerialHost:
     refusal_code: RejectionCode = RejectionCode.BUDGET
     throughputs: dict[str, float] = field(default_factory=dict)
     """The benchmark throughput of a candidate, by its revision's id; the default is 100."""
+    comparisons: dict[str, tuple[float, float]] = field(default_factory=dict)
+    """For a candidate, by its revision's id, the (ratio, noise) over its base that core's
+    comparison of its measured samples gives; a candidate named here is compared, any other has
+    no base's samples."""
     baseline: Baseline = "measured"
     validation: Validation = "passed"
     attribution_output: str = ""
@@ -283,7 +290,43 @@ class SerialHost:
             evidence=refs,
             status=ObservationStatus.FAILED if failed else ObservationStatus.SUCCEEDED,
         )
-        self.run.answer(asked, MeasurementFinished(decision=asked.decision, result=result))
+        comparison = self._comparison(request.scope, candidate) if not is_input else None
+        self.run.answer(
+            asked,
+            MeasurementFinished(decision=asked.decision, result=result, comparison=comparison),
+        )
+
+    def _comparison(self, scope: Scope, candidate: RevisionRef) -> Comparison | None:
+        """What core's comparison of ``candidate`` with its base says, for a candidate named in
+        `comparisons`: the ratio and noise are the world's, the rest follows from them."""
+        named = self.comparisons.get(candidate.revision_id.root)
+        if named is None:
+            return None
+        ratio, noise = named
+        gain = ratio - 1
+        verdict = (
+            ComparisonVerdict.BETTER
+            if gain > 2 * noise
+            else ComparisonVerdict.WORSE
+            if gain < -2 * noise
+            else ComparisonVerdict.WITHIN_NOISE
+        )
+        return Comparison(
+            scope=scope,
+            metric="throughput",
+            direction="max",
+            candidate=candidate,
+            candidate_input=f"input-{candidate.revision_id.root}",
+            base=FACTS.baseline,
+            base_input="input-base",
+            candidate_value=INPUT_THROUGHPUT * ratio,
+            base_value=INPUT_THROUGHPUT,
+            ratio=ratio,
+            noise=noise,
+            verdict=verdict,
+            candidate_samples=1,
+            base_samples=1,
+        )
 
     def _status_of(self, stage: str, *, is_input: bool) -> ObservationStatus:
         broken = is_input and self.baseline == "failed-workload" and stage == "benchmark"
