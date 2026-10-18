@@ -47,7 +47,6 @@
 {"path": "tests/conformance/test_server_transports.py", "rule": "socket", "count": 3}
 {"path": "tests/conformance/test_server_transports.py", "rule": "socket_io", "count": 1}
 {"path": "tests/conformance/test_server_transports.py", "rule": "threading", "count": 4}
-{"path": "tests/entrypoints/test_launcher_signals.py", "rule": "signal", "count": 11}
 {"path": "tests/entrypoints/test_server.py", "rule": "subprocess", "count": 4}
 {"path": "tests/entrypoints/test_server.py", "rule": "interpreter", "count": 2}
 {"path": "tests/evaluators/test_request_factory_evaluator.py", "rule": "subprocess", "count": 1}
@@ -61,7 +60,6 @@
 {"path": "tests/examples/test_queue_evaluator.py", "rule": "subprocess", "count": 2}
 {"path": "tests/examples/test_qwen35_mi210_bundle.py", "rule": "socket_io", "count": 1}
 {"path": "tests/examples/test_qwen35_mi210_bundle.py", "rule": "interpreter", "count": 1}
-{"path": "tests/headless/test_interrupt.py", "rule": "signal", "count": 2}
 {"path": "tests/packaging/test_fetch_bun.py", "rule": "socket_io", "count": 1}
 {"path": "tests/packaging/test_fetch_bun.py", "rule": "threading", "count": 1}
 {"path": "tests/vibesys/loops/test_profiler_teardown.py", "rule": "signal", "count": 17}

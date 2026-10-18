@@ -16,13 +16,13 @@ signals are in ``tests/e2e/test_launcher_signals.py``.
 from __future__ import annotations
 
 import asyncio
-import signal
 
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
 
 from entrypoints.launcher import run_child
+from vs_sim.api import Signals
 from vs_sim.api.testing import (
     FakeForegroundLauncher,
     FakeSignalSource,
@@ -31,16 +31,16 @@ from vs_sim.api.testing import (
 )
 
 _ENGINE_STATUS = 7
-_HANDLED = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+_HANDLED = (Signals.SIGINT, Signals.SIGTERM, Signals.SIGHUP)
 
 
-def _forwarded(delivered: list[signal.Signals]) -> list[signal.Signals]:
+def _forwarded(delivered: list[Signals]) -> list[Signals]:
     """What the engine receives: each signal as it is, but every SIGINT after the first as SIGTERM."""
-    received: list[signal.Signals] = []
+    received: list[Signals] = []
     interrupted = False
     for number in delivered:
-        if number is signal.SIGINT:
-            received.append(signal.SIGTERM if interrupted else signal.SIGINT)
+        if number is Signals.SIGINT:
+            received.append(Signals.SIGTERM if interrupted else Signals.SIGINT)
             interrupted = True
         else:
             received.append(number)
@@ -53,7 +53,7 @@ def _engine(_argv: tuple[str, ...]) -> ForegroundScript:
 
 
 async def _run_with_signals(
-    delivered: list[signal.Signals],
+    delivered: list[Signals],
 ) -> tuple[int, FakeForegroundLauncher, FakeSignalSource]:
     launcher = FakeForegroundLauncher(_engine)
     signals = FakeSignalSource()
@@ -70,12 +70,12 @@ async def _run_with_signals(
 @pytest.mark.regression
 @given(st.lists(st.sampled_from(_HANDLED), max_size=8))
 # r3: one SIGINT to the launcher alone.
-@example([signal.SIGINT])
+@example([Signals.SIGINT])
 # A repeated Ctrl-C forces the engine to end.
-@example([signal.SIGINT, signal.SIGINT])
+@example([Signals.SIGINT, Signals.SIGINT])
 @pytest.mark.asyncio
 async def test_the_launcher_waits_for_its_engine_and_forwards_every_shutdown_signal(
-    delivered: list[signal.Signals],
+    delivered: list[Signals],
 ) -> None:
     status, launcher, signals = await _run_with_signals(delivered)
 
@@ -84,12 +84,10 @@ async def test_the_launcher_waits_for_its_engine_and_forwards_every_shutdown_sig
     assert not any(signals.handles(number) for number in _HANDLED)
 
 
-@given(
-    st.sampled_from([*signal.Signals]).filter(lambda n: n not in (signal.SIGKILL, signal.SIGSTOP))
-)
+@given(st.sampled_from([*Signals]).filter(lambda n: n not in (Signals.SIGKILL, Signals.SIGSTOP)))
 @pytest.mark.asyncio
 async def test_a_child_ended_by_a_signal_reports_128_plus_the_signal(
-    number: signal.Signals,
+    number: Signals,
 ) -> None:
     launcher = FakeForegroundLauncher(lambda _argv: ForegroundScript())
     launch = asyncio.ensure_future(

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import signal
 from datetime import UTC, datetime
 from io import StringIO
 from typing import cast
@@ -26,6 +25,7 @@ from vibesys.api import (
     StopRequest,
 )
 from vibesys.api.testing import FakeRunHandle
+from vs_sim.api import Signals
 from vs_sim.api.testing import FakeSignalSource, arrival
 
 
@@ -86,7 +86,7 @@ class _SignalledSession(_InterruptibleSession):
 
     async def await_result(self) -> RunResult:
         self.started.set()
-        assert self._signals.deliver(signal.SIGINT), "supervise installed no SIGINT handler"
+        assert self._signals.deliver(Signals.SIGINT), "supervise installed no SIGINT handler"
         await self.stop_requested.wait()
         return RunResult(run_id="signalled", loop="test", succeeded=False, status=RunStatus.STOPPED)
 
@@ -109,7 +109,7 @@ async def test_ctrl_c_stops_the_run_cancelling_its_work_and_returns_its_stopped_
     assert isinstance(stop, StopRequest)
     assert stop.mode is StopMode.CANCEL
     assert session.stop_calls == 0
-    assert not signals.handles(signal.SIGINT)
+    assert not signals.handles(Signals.SIGINT)
 
 
 @pytest.mark.asyncio
@@ -226,7 +226,7 @@ async def test_broken_pipe_during_cancellation_does_not_interrupt_async_cleanup(
 class _EndingSession(_InterruptibleSession):
     """A run that receives the given signals once running, and notes how it was told to end."""
 
-    def __init__(self, signals: FakeSignalSource, delivered: list[signal.Signals]) -> None:
+    def __init__(self, signals: FakeSignalSource, delivered: list[Signals]) -> None:
         super().__init__()
         self._signals = signals
         self._delivered = delivered
@@ -244,16 +244,16 @@ class _EndingSession(_InterruptibleSession):
         return RunResult(run_id="ending", loop="test", succeeded=False, status=RunStatus.STOPPED)
 
 
-_SHUTDOWN = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+_SHUTDOWN = (Signals.SIGINT, Signals.SIGTERM, Signals.SIGHUP)
 
 
 @pytest.mark.regression
 @given(st.lists(st.sampled_from(_SHUTDOWN), min_size=1, max_size=5))
-@example([signal.SIGINT])
-@example([signal.SIGTERM])
+@example([Signals.SIGINT])
+@example([Signals.SIGTERM])
 @pytest.mark.asyncio
 async def test_every_shutdown_signal_ends_the_run_cancelling_its_work_never_draining_it(
-    delivered: list[signal.Signals],
+    delivered: list[Signals],
 ) -> None:
     """SIGINT and SIGTERM end a run the same way: its work in flight is cancelled, not drained.
 
@@ -267,7 +267,7 @@ async def test_every_shutdown_signal_ends_the_run_cancelling_its_work_never_drai
     handle.bind(cast("RunSession", session))
     handle.start()
 
-    if set(delivered) == {signal.SIGINT}:
+    if set(delivered) == {Signals.SIGINT}:
         result = await supervise(handle, signals=signals)
         assert result.status is RunStatus.STOPPED
     else:
