@@ -23,6 +23,7 @@ mode entries share.
 
 from __future__ import annotations
 
+import os
 import secrets
 import sys
 from dataclasses import dataclass
@@ -72,7 +73,7 @@ from vibesys.api.request import (
     with_operator_constraints,
 )
 from vs_project.api import generate_run_id
-from vs_sim.api import MonotonicClock, SystemClock, utc_datetime
+from vs_sim.api import MonotonicClock, SystemClock, follow_launcher, utc_datetime
 
 if TYPE_CHECKING:
     import argparse
@@ -120,7 +121,7 @@ __all__ = [
     "parse_runs_dir",
     "render_configuration_error",
     "run_environment_spec_from_args",
-    "start_boot_trace",
+    "start_process",
 ]
 
 
@@ -206,8 +207,13 @@ def _allocate_run_id(args: argparse.Namespace) -> None:
     args.run_id = generate_run_id(args.exp_name, now=utc_datetime(SystemClock()))
 
 
-def start_boot_trace() -> None:
-    """Time this process's boot stages from here on, on the real clocks."""
+def start_process() -> None:
+    """Begin a run process: follow its launcher, then time its boot stages on the real clocks.
+
+    Started by the ``vibesys`` launcher, the process hangs up when the launcher exits, by
+    any means, and writes to its terminal from its own process group (``follow_launcher``).
+    """
+    follow_launcher(os.environ)
     boot_trace.install(boot_trace.BootTrace(wall=SystemClock(), elapsed=MonotonicClock()))
 
 

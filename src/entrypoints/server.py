@@ -893,7 +893,7 @@ def main(
     has no structured channel to reach a frontend on, and stderr is inherited
     by the launcher and redirected onto the detached startup log.
     """
-    cli.start_boot_trace()
+    cli.start_process()
     try:
         _serve(sys.argv[1:] if argv is None else argv, observer, runs)
     except ConfigurationError as exc:

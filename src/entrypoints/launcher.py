@@ -8,7 +8,14 @@ launcher, and the launcher is the one path by which a signal reaches the run:
 each Ctrl-C reaches it exactly once. The launcher forwards every shutdown signal
 it receives: SIGTERM, SIGHUP and SIGQUIT as they are, the first SIGINT as
 SIGINT, and every later SIGINT as SIGTERM, so a repeated Ctrl-C forces the run
-to end. Ctrl-Z suspends only the launcher; the run goes on.
+to end. It forwards SIGCONT too, so a child stopped by any means continues with
+its launcher. Ctrl-Z suspends only the launcher; the run goes on, and its output
+still reaches the terminal.
+
+If the launcher dies without forwarding anything (SIGKILL, an OOM kill, a
+crash), the child hangs up as a closed terminal used to make it: its lifeline
+from the launcher reaches end-of-file (``vs_sim.api.follow_launcher``, called by
+``entrypoints.cli.start_process``).
 """
 
 from __future__ import annotations
@@ -65,7 +72,7 @@ def headless_command(args: Sequence[str]) -> list[str]:
     return [sys.executable, "-m", module, *arguments]
 
 
-_FORWARDED_SIGNALS = (Signals.SIGTERM, Signals.SIGHUP, Signals.SIGQUIT)
+_FORWARDED_SIGNALS = (Signals.SIGTERM, Signals.SIGHUP, Signals.SIGQUIT, Signals.SIGCONT)
 
 
 def call_child(
@@ -75,7 +82,7 @@ def call_child(
     children: ForegroundLauncher,
     signals: SignalSource,
 ) -> int:
-    """Run a child until it exits, forwarding terminal shutdown signals."""
+    """Run a child until it exits, forwarding terminal shutdown signals and SIGCONT."""
     return asyncio.run(run_child(argv, env=env, children=children, signals=signals))
 
 

@@ -325,11 +325,7 @@ def _call_real_child(argv: list[str]) -> int:
         (signal.SIGQUIT, True),
         # PR #3209 MED-2: the child leads its own group, so a shell's `fg` (SIGCONT to the
         # launcher's group) reaches it only through the launcher.
-        pytest.param(
-            signal.SIGCONT,
-            True,
-            marks=pytest.mark.xfail(strict=True, reason="PR #3209 MED-2: SIGCONT not forwarded"),
-        ),
+        (signal.SIGCONT, True),
     ],
     ids=[
         "sigint-forwarded",
@@ -446,7 +442,6 @@ def _end(launcher: subprocess.Popen[bytes], engine_pid: int | None) -> None:
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="PR #3209 MED-1: a killed launcher orphans its engine")
 def test_an_engine_whose_launcher_is_killed_hangs_up(tmp_path: Path) -> None:
     """PR #3209 MED-1: SIGKILL of the launcher left its engine running, unreachable.
 
@@ -454,7 +449,7 @@ def test_an_engine_whose_launcher_is_killed_hangs_up(tmp_path: Path) -> None:
     launcher is gone. It hears the launcher's death and hangs up (SIGHUP), as a closed
     terminal used to tell it.
     """
-    launcher, environment = _following_launcher(tmp_path, terminal=subprocess.DEVNULL)
+    launcher, environment = _following_launcher(tmp_path, terminal=None)
     engine_pid: int | None = None
     lines = _EngineLines(Path(environment["ENGINE_EVENTS"]))
     try:
@@ -471,7 +466,6 @@ def test_an_engine_whose_launcher_is_killed_hangs_up(tmp_path: Path) -> None:
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="PR #3209 MED-2: the engine stops at a terminal write")
 def test_an_engine_writes_its_terminal_under_stty_tostop(tmp_path: Path) -> None:
     """PR #3209 MED-2: with `stty tostop`, the engine stopped at its first terminal write.
 
