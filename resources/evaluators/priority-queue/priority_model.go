@@ -20,6 +20,14 @@ func checkPriorityHistory(capacity int, history []recordedOperation) bool {
 	return porcupine.CheckOperations(priorityModel(capacity), operations)
 }
 
+func hashPriorityItems(items []priorityItem) uint64 {
+	values := make([]uint64, 0, 2*len(items))
+	for _, item := range items {
+		values = append(values, item.value, item.priority)
+	}
+	return hashValues(values...)
+}
+
 func priorityModel(capacity int) porcupine.Model {
 	return porcupine.Model{
 		Init: func() any { return []priorityItem{} },
@@ -67,6 +75,7 @@ func priorityModel(capacity int) porcupine.Model {
 				return false, state
 			}
 		},
+		Hash: func(state any) uint64 { return hashPriorityItems(state.([]priorityItem)) },
 		Equal: func(first, second any) bool {
 			return slices.Equal(first.([]priorityItem), second.([]priorityItem))
 		},

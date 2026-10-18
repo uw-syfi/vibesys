@@ -126,6 +126,15 @@ func reservationAwareStackModel(capacity int) porcupine.Model {
 				return false, state
 			}
 		},
+		Hash: func(state any) uint64 {
+			current := state.(reservationState)
+			// The reservations are a set, so their combined hash must not depend on map order.
+			var reserved uint64
+			for reservationID, item := range current.Reserved {
+				reserved += hashValues(uint64(reservationID), item.value)
+			}
+			return hashValues(reserved, hashStackItems(current.Published))
+		},
 		Equal: func(first, second any) bool {
 			a := first.(reservationState)
 			b := second.(reservationState)

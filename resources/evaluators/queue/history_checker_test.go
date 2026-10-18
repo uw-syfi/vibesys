@@ -137,27 +137,48 @@ func TestModelsAgreeOnSequentialHistories(t *testing.T) {
 	}
 }
 
+// maxSampledStates bounds the pairs memoCost compares when it checks that equal states hash equal.
+const maxSampledStates = 400
+
 // memoCost decides operations against model and reports how many state comparisons the checker made
-// per transition it tried. Both counts are a function of the history alone, so the ratio does not
-// depend on how fast the machine is.
-func memoCost(model porcupine.Model, operations []porcupine.Operation) (steps, comparisons int) {
+// per transition it tried, and whether two states the model considers equal hash differently. The
+// counts are a function of the history alone, so they do not depend on how fast the machine is.
+func memoCost(model porcupine.Model, operations []porcupine.Operation) (steps, comparisons int, inconsistent bool) {
+	var reached []any
 	step, equal := model.Step, model.Equal
 	model.Step = func(state, input, output any) (bool, any) {
 		steps++
-		return step(state, input, output)
+		ok, next := step(state, input, output)
+		if ok {
+			reached = append(reached, next)
+		}
+		return ok, next
 	}
 	model.Equal = func(first, second any) bool {
 		comparisons++
 		return equal(first, second)
 	}
 	porcupine.CheckOperationsTimeout(model, operations, defaultCheckBudget)
-	return steps, comparisons
+	// Checking every pair is quadratic, so sample the states evenly.
+	stride := len(reached)/maxSampledStates + 1
+	var sampled []any
+	for index := 0; index < len(reached); index += stride {
+		sampled = append(sampled, reached[index])
+	}
+	for index, first := range sampled {
+		for _, second := range sampled[index+1:] {
+			if equal(first, second) && model.Hash(first) != model.Hash(second) {
+				inconsistent = true
+			}
+		}
+	}
+	return steps, comparisons, inconsistent
 }
 
-// unobservableDequeue holds count overlapping enqueues followed by a dequeue of a value nobody
+// unobservableRead holds count overlapping enqueues followed by a dequeue of a value nobody
 // enqueued. The history is rejected, and only after the checker has tried every publication order of
 // the enqueues, so the cost is the number of states the search must tell apart.
-func unobservableDequeue(count int) []recordedOperation {
+func unobservableRead(count int) []recordedOperation {
 	history := make([]recordedOperation, 0, count+1)
 	for index := 0; index < count; index++ {
 		enqueue := enqueueRecord(index, uint64(index+1), true, int64(index+1))
@@ -169,7 +190,7 @@ func unobservableDequeue(count int) []recordedOperation {
 
 func TestModelsMemoizeStatesWithoutComparingAgainstEveryOne(t *testing.T) {
 	for count := 5; count <= 7; count++ {
-		history := unobservableDequeue(count)
+		history := unobservableRead(count)
 		reservation, ok := reservationAwareOperations(history)
 		if !ok {
 			t.Fatal("the generated history is malformed")
@@ -186,7 +207,10 @@ func TestModelsMemoizeStatesWithoutComparingAgainstEveryOne(t *testing.T) {
 			"exact":       {exactFIFOModel(count), exact},
 		}
 		for name, tc := range models {
-			steps, comparisons := memoCost(tc.model, tc.operations)
+			steps, comparisons, inconsistent := memoCost(tc.model, tc.operations)
+			if inconsistent {
+				t.Errorf("%s model: equal states hash differently", name)
+			}
 			if comparisons > steps {
 				t.Errorf("%s model, %d enqueues: %d state comparisons for %d steps; "+
 					"a missing Hash makes each lookup scan every state of a linearized set",

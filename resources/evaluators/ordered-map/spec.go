@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
+	"hash/fnv"
 	"sort"
 )
 
@@ -136,6 +138,23 @@ func specEqual(first, second *orderedMapSpec) bool {
 		}
 	}
 	return true
+}
+
+// hashSpec hashes the entries in key order. Lengths are written before each key and value so that
+// moving a byte between a key and its value changes the hash.
+func hashSpec(spec *orderedMapSpec) uint64 {
+	hash := fnv.New64a()
+	var length [8]byte
+	write := func(data []byte) {
+		binary.LittleEndian.PutUint64(length[:], uint64(len(data)))
+		_, _ = hash.Write(length[:])
+		_, _ = hash.Write(data)
+	}
+	for _, entry := range spec.entries {
+		write(entry.key)
+		write(entry.value)
+	}
+	return hash.Sum64()
 }
 
 func cloneEntry(entry mapEntry) mapEntry {
