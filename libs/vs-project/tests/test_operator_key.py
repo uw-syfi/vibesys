@@ -262,3 +262,72 @@ def test_a_user_dialer_reads_the_key_as_it_connects_and_dials_only_its_runtime_r
     threads.run(main)
 
     assert network.dialed == [str(root.resolve() / "control.sock")]
+
+
+def _user_root(tmp_path: Path) -> tuple[dict[str, str], Path, OperatorKey]:
+    """A user's environment, its runtime root and the key a server made there."""
+    environ = _environ(tmp_path)
+    key = create_operator_key(environ, _UID)
+    return environ, Path(environ["XDG_RUNTIME_DIR"]) / "vibesys", key
+
+
+def _replace_root(root: Path, unsafe: str) -> None:
+    """Make ``root`` unsafe in the way named, with a key and a listener's directory in it."""
+    match unsafe:
+        case "symlink":
+            # The reviewer's probe: the root is a link to a directory anyone can write.
+            planted = root.parent / "planted"
+            planted.mkdir(mode=0o777)
+            planted.chmod(0o777)
+            (root / "control.key").rename(planted / "control.key")
+            root.rmdir()
+            root.symlink_to(planted, target_is_directory=True)
+        case "group-readable":
+            root.chmod(0o750)
+        case "world-writable":
+            root.chmod(0o777)
+        case _:
+            raise AssertionError(unsafe)
+
+
+@pytest.mark.parametrize("unsafe", ["symlink", "group-readable", "world-writable"])
+def test_a_user_dialer_refuses_a_root_that_is_not_a_private_directory(
+    tmp_path: Path, unsafe: str
+) -> None:
+    """Checked on every dial, before the key is read and before anything is connected."""
+    environ, root, _ = _user_root(tmp_path)
+    threads = SimThreads(schedule_seed=0)
+    network = _RecordingNetwork(threads)
+    dialer = OperatorDialer.for_user(network, environ, _UID)
+    address = str(root / "control.sock")
+
+    def main() -> None:
+        network.listen(address)
+        dialer.connect(address, HANG_GUARD_S).close()
+        _replace_root(root, unsafe)
+        with pytest.raises(OperatorKeyError, match="runtime root"):
+            dialer.connect(address, HANG_GUARD_S)
+
+    threads.run(main)
+
+    assert len(network.dialed) == 1
+
+
+def test_a_user_dialer_refuses_a_root_another_uid_owns(tmp_path: Path) -> None:
+    """Owner and mode are read from the opened root; here the dialer's uid is not its owner."""
+    _, root, _ = _user_root(tmp_path)
+    network = _RecordingNetwork(SimThreads(schedule_seed=0))
+    dialer = OperatorDialer(network, root=root, owner=_UID + 1)
+
+    with pytest.raises(OperatorKeyError, match=f"not owned by uid {_UID + 1}"):
+        dialer.connect(str(root / "control.sock"), HANG_GUARD_S)
+
+    assert network.dialed == []
+
+
+def test_a_dialer_takes_a_key_or_an_owner_but_not_both(tmp_path: Path) -> None:
+    network = SimNetwork(SimThreads(schedule_seed=0))
+    with pytest.raises(ValueError, match="not both"):
+        OperatorDialer(network, root=tmp_path)
+    with pytest.raises(ValueError, match="not both"):
+        OperatorDialer(network, OperatorKey.generate(), root=tmp_path, owner=_UID)

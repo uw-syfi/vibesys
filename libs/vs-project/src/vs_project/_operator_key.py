@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING, Final, Self
 from vs_project._private_directory import ensure_private_directory, user_runtime_root
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Mapping
 
     from vs_sim.api import Connection, Network
 
@@ -49,6 +49,13 @@ _SECRET_HEX_CHARACTERS: Final = 2 * _SECRET_BYTES
 _HEX_DIGITS: Final = frozenset("0123456789abcdef")
 _KEY_MODE: Final = 0o600
 _READ_FLAGS: Final = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+_DIRECTORY_FLAGS: Final = (
+    os.O_RDONLY
+    | getattr(os, "O_DIRECTORY", 0)
+    | getattr(os, "O_CLOEXEC", 0)
+    | getattr(os, "O_NOFOLLOW", 0)
+)
+_ROOT_MODE: Final = 0o700
 _CREATE_FLAGS: Final = (
     os.O_WRONLY
     | os.O_CREAT
@@ -67,6 +74,15 @@ class OperatorKeyError(PermissionError):
         return cls(
             f"refusing the operator key {path}: {reason}; remove it and start the server "
             "again to make a new one"
+        )
+
+    @classmethod
+    def unsafe_root(cls, root: Path, reason: str) -> OperatorKeyError:
+        """Name the runtime root a client refuses to read the key from, and why."""
+        return cls(
+            f"refusing the operator's runtime root {root}: {reason}. It must be a directory "
+            "owned by you with mode 0700, not a symlink; remove it if nothing of yours is "
+            "using it and start the server again"
         )
 
     @classmethod
@@ -136,43 +152,61 @@ class OperatorDialer:
     Contract: the key goes only to a socket whose directory, resolved, is ``root`` or lies
     inside it, and the connection is made to that resolved path, so a symlink swapped in
     after the check cannot redirect it. Any other address raises
-    :class:`OperatorSocketOutsideRootError` before anything is connected or sent.
+    :class:`OperatorSocketOutsideRootError` before anything is connected or sent. A dialer
+    that reads its owner's key also refuses, with :class:`OperatorKeyError` and before
+    anything is connected or sent, a root that is a symlink, not a directory, not the
+    owner's, or not mode ``0700``.
     """
 
     def __init__(
-        self, network: Network, key: OperatorKey | Callable[[], OperatorKey], *, root: Path
+        self,
+        network: Network,
+        key: OperatorKey | None = None,
+        *,
+        root: Path,
+        owner: int | None = None,
     ) -> None:
-        """Dial through ``network`` sockets inside ``root``; present ``key``.
+        """Dial through ``network`` sockets inside ``root``, presenting a key.
 
-        ``key`` is the key, or a function that returns it as each connection opens.
+        Give ``key`` to present a key already held; only where the socket is is checked.
+        Give ``owner`` instead to read the key from ``root`` on every connect, after
+        checking that the root itself is a real directory, not a symlink, owned by
+        ``owner`` with mode ``0700``. The key is read through the directory just checked,
+        so a root swapped for a symlink after the check cannot hand the dialer another key
+        or send it to another listener. Raises ``ValueError`` unless exactly one is given.
         """
+        if (key is None) == (owner is None):
+            message = "an OperatorDialer presents a key it holds or reads its owner's, not both"
+            raise ValueError(message)
         self._network = network
         self._key = key
         self._root = root
+        self._owner = owner
 
     @classmethod
     def for_user(cls, network: Network, environ: Mapping[str, str], uid: int) -> Self:
         """A dialer for ``uid``'s servers: sockets in its runtime root, its key read per connect.
 
-        The key is read (:func:`read_operator_key`, never created) as each connection
-        opens, so a client may start before any server has made it.
+        The key is read (never created) as each connection opens, so a client may start
+        before any server has made it.
         """
-        return cls(
-            network,
-            lambda: read_operator_key(environ, uid),
-            root=user_runtime_root(environ, uid),
-        )
+        return cls(network, root=user_runtime_root(environ, uid), owner=uid)
 
     def connect(self, address: str, timeout: float | None = None) -> Connection:
         """Connect to ``address`` and send the hello, both within ``timeout`` each.
 
         Raises :class:`OperatorSocketOutsideRootError` for an address outside the root,
-        :class:`OperatorKeyError` when the key cannot be read, and what ``network``'s
-        ``connect`` and the connection's ``send`` raise; a connection whose hello could
-        not be sent is closed first.
+        :class:`OperatorKeyError` when the root is not the user's private directory or the
+        key cannot be read, and what ``network``'s ``connect`` and the connection's
+        ``send`` raise; a connection whose hello could not be sent is closed first.
         """
-        target = self._inside_root(address)
-        key = self._key if isinstance(self._key, OperatorKey) else self._key()
+        if self._key is not None:
+            key = self._key
+            target = self._inside_root(address, self._root.resolve())
+        elif self._owner is not None:
+            key, target = self._read_key_and_target(address, self._owner)
+        else:  # pragma: no cover - the constructor demands a key or an owner.
+            raise AssertionError(self)
         connection = self._network.connect(target, timeout)
         try:
             connection.send(key.hello(), timeout)
@@ -181,10 +215,40 @@ class OperatorDialer:
             raise
         return connection
 
-    def _inside_root(self, address: str) -> str:
-        """``address`` with its directory resolved, if that directory is inside the root."""
+    def _read_key_and_target(self, address: str, owner: int) -> tuple[OperatorKey, str]:
+        """Check the root, read the key through it, and resolve ``address`` inside it."""
+        root = self._root
+        try:
+            descriptor = os.open(root, _DIRECTORY_FLAGS)
+        except FileNotFoundError:
+            raise OperatorKeyError.missing(root / OPERATOR_KEY_NAME) from None
+        except OSError as error:
+            raise OperatorKeyError.unsafe_root(
+                root,
+                f"it is not a directory one can open without following a link ({error.strerror})",
+            ) from error
+        try:
+            status = os.fstat(descriptor)
+            if status.st_uid != owner:
+                raise OperatorKeyError.unsafe_root(root, f"it is not owned by uid {owner}")
+            if stat.S_IMODE(status.st_mode) != _ROOT_MODE:
+                raise OperatorKeyError.unsafe_root(root, "its mode is not 0700")
+            key = _read(root / OPERATOR_KEY_NAME, owner, directory=descriptor)
+            if key is None:
+                raise OperatorKeyError.missing(root / OPERATOR_KEY_NAME)
+            resolved = root.resolve()
+            # The path the socket is checked against must still name the directory whose
+            # key was read; one swapped in since would be another listener's.
+            current = resolved.stat()
+            if (current.st_dev, current.st_ino) != (status.st_dev, status.st_ino):
+                raise OperatorKeyError.unsafe_root(root, "it was replaced while it was read")
+        finally:
+            os.close(descriptor)
+        return key, self._inside_root(address, resolved)
+
+    def _inside_root(self, address: str, root: Path) -> str:
+        """``address`` with its directory resolved, if that directory is inside ``root``."""
         path = Path(address)
-        root = self._root.resolve()
         directory = path.parent.resolve()
         if directory != root and root not in directory.parents:
             raise OperatorSocketOutsideRootError(address, self._root)
@@ -233,9 +297,14 @@ def create_operator_key(environ: Mapping[str, str], uid: int) -> OperatorKey:
     return published
 
 
-def _read(path: Path, uid: int) -> OperatorKey | None:
+def _read(path: Path, uid: int, *, directory: int | None = None) -> OperatorKey | None:
+    """The key at ``path``, or ``None`` if absent; opened by name in ``directory`` if given."""
     try:
-        descriptor = os.open(path, _READ_FLAGS)
+        descriptor = (
+            os.open(path, _READ_FLAGS)
+            if directory is None
+            else os.open(path.name, _READ_FLAGS, dir_fd=directory)
+        )
     except FileNotFoundError:
         return None
     except OSError as error:
