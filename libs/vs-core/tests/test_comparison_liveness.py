@@ -551,7 +551,13 @@ def charged_within_limit(lab: Lab) -> None:
     limit = core.MAX_SUBMISSIONS_PER_MEASUREMENT
     served = {run.request_id: run.candidate_input for run in lab.state.evaluation.core_runs}
     for budget in lab.state.evaluation.submission_budgets:
-        asked = [served.get(receipt.request_id) for receipt in budget.receipts]
+        # A historical receipt names no request, so it counts toward every comparison.
+        asked = [
+            served.get(receipt.request_id)
+            if isinstance(receipt, core.PreparedSubmissionReceipt)
+            else None
+            for receipt in budget.receipts
+        ]
         for candidate_input in set(asked) - {None}:
             charged = sum(1 for one in asked if one in (None, candidate_input))
             assert charged <= min(budget.limit, limit)

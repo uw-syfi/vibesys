@@ -26,7 +26,7 @@ from hypothesis import strategies as st
 import vs_core.api as core
 from vs_sim.api.testing import examples
 
-from .test_comparison_liveness import Bench, Death, base_runs, compared, end, running, seeded
+from .test_comparison_liveness import Bench, Outcome, base_runs, compared, end, running, seeded
 from .test_measurement_comparison import FLOOR, Lab
 
 Side = Literal["base", "candidate"]
@@ -90,7 +90,7 @@ def out_of_queue(lab: Lab, run: core.SubmitMeasurement) -> None:
 @example(floor=FLOOR, inputs=6, deaths=["infrastructure"])
 @example(floor=FLOOR, inputs=6, deaths=["cancelled"])
 def test_a_base_that_keeps_dying_costs_a_bounded_number_of_runs_whatever_the_inputs(
-    floor: float, inputs: int, deaths: list[Death]
+    floor: float, inputs: int, deaths: list[Outcome]
 ) -> None:
     """Every base run dies; the agent measures ``inputs`` candidate inputs one after another.
 
