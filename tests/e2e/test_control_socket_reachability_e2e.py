@@ -565,6 +565,9 @@ def network_listeners() -> Iterator[_NetworkListeners]:
     """Listeners an agent should not reach, served in the test's own network namespace."""
     abstract = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     tcp = socket.socket()
+    # Nothing accepts: a probe's connect completes on the backlog alone.
+    abstract.settimeout(HANG_GUARD_S)
+    tcp.settimeout(HANG_GUARD_S)
     try:
         name = f"vibesys-probe-{secrets.token_hex(8)}"
         abstract.bind("\0" + name)
