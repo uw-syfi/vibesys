@@ -14,6 +14,7 @@ LOST_TURN_BACKOFF = Backoff(first=5.0, cap=120.0)
 
 ORCHESTRATOR = Role(
     name="orchestrator",
+    title="Planner",
     prompt="plan.j2",
     reply=OrchestratorPlan,
     workspace=None,

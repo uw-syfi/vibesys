@@ -483,6 +483,7 @@ from vs_core.types.kernel import (
 )
 from vs_core.types.kinds import EventKind, WorkKind
 from vs_core.types.measurement import (
+    BaseClaim,
     BaseRef,
     BaseRun,
     Comparison,
@@ -867,6 +868,7 @@ __all__ = [
     "AttemptsEvent",
     "AttemptsState",
     "Backoff",
+    "BaseClaim",
     "BaseRef",
     "BaseRun",
     "BenchmarkFailure",

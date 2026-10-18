@@ -4,6 +4,8 @@
  * that turns untrusted wire text into those types, and the error taxonomy that validator and the
  * transports report through. Runtime neutral: no DOM, no Node.
  */
+
+export {CODE_IDS, roleName, wordsOfId} from './display-names.js';
 export {
   BackendClientError,
   type BackendErrorKind,

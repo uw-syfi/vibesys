@@ -1505,6 +1505,7 @@ const hostHelperSchema: Record<string, unknown> = {
         "logs_by_span",
         "run_history",
         "run_summary",
+        "run_history_pages",
         "machine_describe",
         "checkout_inspect",
         "preflight",
@@ -4433,6 +4434,30 @@ const hostHelperSchema: Record<string, unknown> = {
         "complete": {
           "title": "Complete",
           "type": "boolean"
+        },
+        "total_events": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total Events"
+        },
+        "total_bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total Bytes"
         }
       },
       "required": [
@@ -4482,10 +4507,22 @@ const hostHelperSchema: Record<string, unknown> = {
           "type": "integer"
         },
         "max": {
-          "maximum": 500,
+          "maximum": 2000,
           "minimum": 1,
           "title": "Max",
           "type": "integer"
+        },
+        "with_totals": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "With Totals"
         }
       },
       "required": [
@@ -5534,6 +5571,9 @@ const hostHelperSchema: Record<string, unknown> = {
     },
     "logs.list": {
       "span_id": "logs_by_span"
+    },
+    "runs.read_events": {
+      "with_totals": "run_history_pages"
     },
     "runs.list": {
       "digest_runs": "run_digest"

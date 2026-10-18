@@ -43,6 +43,7 @@ EXCHANGES = Exchanges(
 
 PLANNER = Role(
     name=AgentName.PLANNER.value,
+    title="Planner",
     prompt="portfolio.j2",
     reply=PortfolioPlan,
     workspace=None,
@@ -56,6 +57,7 @@ PLANNER = Role(
 
 OUTLINER = Role(
     name=AgentName.OUTLINER.value,
+    title="Outliner",
     prompt="outline.j2",
     reply=PlanOutline,
     workspace=None,
@@ -75,6 +77,7 @@ not form a plan, and asks again after a lost turn.
 
 IMPLEMENTER = Role(
     name=AgentName.IMPLEMENTER.value,
+    title="Implementer",
     prompt="implement.j2",
     reply=ImplementerResult,
     workspace=WorkspaceMode.ISOLATED_CHILD,
@@ -91,6 +94,7 @@ IMPLEMENTER = Role(
 
 JUDGE = Role(
     name=AgentName.JUDGE.value,
+    title="Judge",
     prompt="review.j2",
     reply=ReviewResult,
     workspace=WorkspaceMode.READ_ONLY_REVISION,
@@ -107,6 +111,7 @@ JUDGE = Role(
 
 PROFILER = Role(
     name=AgentName.PROFILER.value,
+    title="Profiler",
     prompt="profile_request.j2",
     reply=ProfilerResult,
     workspace=WorkspaceMode.READ_ONLY_REVISION,
@@ -124,6 +129,7 @@ CORRECTION = Exchanges(correction="reply_correction.j2")
 
 MERGER = Role(
     name=AgentName.MERGER.value,
+    title="Merger",
     prompt="merge.j2",
     reply=MergeResult,
     workspace=WorkspaceMode.ISOLATED_CHILD,

@@ -450,6 +450,28 @@ describe('Hosts.readEvents', () => {
   });
 });
 
+describe('Hosts.readEvents page size', () => {
+  async function asked(features: 'with' | 'without') {
+    const link = new FakeLink();
+    if (features === 'without') link.helper.features.delete('run_history_pages');
+    link.helper.host.projects.set('/srv/project', ['mpmc']);
+    const subject = completionSubject(link);
+    await using _manager = subject.manager;
+    await subject.hosts.readEvents(LOCAL, '/srv/project', 'run-1', 1, 2000).catch(() => undefined);
+    return link.helper.requests.filter(request => request.type === 'runs.read_events');
+  }
+
+  test('asks a helper with run_history_pages for whole pages and the journal totals', async () => {
+    expect(await asked('with')).toMatchObject([{max: 2000, with_totals: true}]);
+  });
+
+  test('asks one without it for the page size it serves and no totals', async () => {
+    const [request] = await asked('without');
+    expect(request).toMatchObject({max: 500});
+    expect(request).not.toHaveProperty('with_totals');
+  });
+});
+
 describe('Hosts checkout changes', () => {
   test('removing a host fences an older checkout validation before acknowledging removal', async () => {
     const settings = new SettingsStore({

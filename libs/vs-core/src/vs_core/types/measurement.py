@@ -80,6 +80,19 @@ class BaseRun(Value):
     candidate: RequestId
 
 
+class BaseClaim(Value):
+    """A run of the strategy's own that core counts as samples of a base once it ends.
+
+    The strategy measures the run's input before any agent works, from a plan that names no
+    measured input. When an agent's evaluation then needs that base while the run is still
+    going, core starts no second run of it: it claims the running one, so its result becomes the
+    base's samples (``base``) when it ends, and the candidate's comparison follows.
+    """
+
+    request_id: RequestId
+    base: BaseRef
+
+
 class Runaway(Value):
     """An attempt whose agent has asked for an unusual number of evaluations.
 

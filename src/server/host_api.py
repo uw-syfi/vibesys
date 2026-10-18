@@ -30,7 +30,7 @@ the log streams' ``LogStream``, ``LogStreamOutcome``, ``LogChunk``, ``LogPipeSpa
 ``HELPER_PROTOCOL_VERSIONS``, ``HELPER_REQUEST_FEATURES``,
 ``HELPER_FIELD_FEATURES``, ``request_features``, ``HelperFeature``,
 ``HelperRequest`` (``parse_helper_request``) and its members, the run history
-read's limits (``RUN_EVENTS_READ_MAX``, ``RUN_EVENTS_READ_MAX_BYTES``), ``RUN_EVENTS_FILE`` and
+read's limits (``RUN_EVENTS_READ_MAX``, ``RUN_EVENTS_LEGACY_READ_MAX``, ``RUN_EVENTS_READ_MAX_BYTES``), ``RUN_EVENTS_FILE`` and
 ``RunEventDocument``, the run summary's messages (``server.host_run_summary``), the
 machine facts (``server.host_machine_facts``: ``Accelerator``, ``Gpu``, ``Hardware``,
 ``DockerReachable``, ``DockerUnreachable``, ``MachineCheckout``, ``RunCounts``,
@@ -769,6 +769,8 @@ class HelperFeature(StrEnum):
     """``runs.read_events``: a run's recorded events, read from disk in bounded pages."""
     RUN_SUMMARY = "run_summary"
     """``runs.summary``: everything the run level shows, from a read model kept beside the journal."""
+    RUN_HISTORY_PAGES = "run_history_pages"
+    """``runs.read_events``'s pages of up to ``RUN_EVENTS_READ_MAX`` events, and its ``with_totals``."""
     MACHINE_DESCRIBE = "machine_describe"
     """``machine.describe``: the host's checkout, hardware, Docker, harness CLIs and run counts."""
     CHECKOUT_INSPECT = "checkout_inspect"
@@ -1082,9 +1084,11 @@ class LogsCancelRequest(HelperRequestBase):
     read_id: RequestId
 
 
-RUN_EVENTS_READ_MAX: Final = 500
-"""The most events one ``runs.read_events`` may ask for."""
-RUN_EVENTS_READ_MAX_BYTES: Final = 512 * 1024
+RUN_EVENTS_READ_MAX: Final = 2000
+"""The most events one ``runs.read_events`` may ask for; more than the legacy bound needs ``run_history_pages``."""
+RUN_EVENTS_LEGACY_READ_MAX: Final = 500
+"""The most events a helper without ``run_history_pages`` serves in one page."""
+RUN_EVENTS_READ_MAX_BYTES: Final = 2 * 1024 * 1024
 """The most journal bytes one ``runs.read_events`` reply carries, so it stays a helper line.
 
 A page stops before the event that would pass it; an event longer than this alone is
@@ -1108,6 +1112,8 @@ class RunsReadEventsRequest(HelperRequestBase):
     from_sequence: PositiveInt
     """The first sequence to return; a run's first event is sequence 1."""
     max: Annotated[int, Field(ge=1, le=RUN_EVENTS_READ_MAX)]
+    with_totals: bool | None = None
+    """Ask for ``total_events`` and ``total_bytes``. Sent only after ``run_history_pages``."""
 
 
 class MachineDescribeRequest(HelperRequestBase):
@@ -1180,6 +1186,7 @@ HELPER_FIELD_FEATURES: Final[Mapping[type[HelperRequestBase], Mapping[str, Helpe
         "with_project_clean": HelperFeature.PROJECT_CLEAN,
     },
     LogsListRequest: {"span_id": HelperFeature.LOGS_BY_SPAN},
+    RunsReadEventsRequest: {"with_totals": HelperFeature.RUN_HISTORY_PAGES},
     RunsListRequest: {"digest_runs": HelperFeature.RUN_DIGEST},
 }
 """The feature each gated optional field needs when it is set (not ``None``), exported too."""
@@ -1389,6 +1396,10 @@ class RunsReadEventsReply(HelperReplyBase):
     """The ``from_sequence`` of the next page."""
     complete: bool
     """The page reached the end of what the journal holds now."""
+    total_events: Annotated[int | None, Field(exclude_if=lambda total: total is None)] = None
+    """The journal's complete lines when the reply was made; only with ``with_totals``."""
+    total_bytes: Annotated[int | None, Field(exclude_if=lambda total: total is None)] = None
+    """The bytes of those lines. Present with ``total_events``."""
 
 
 class RunStartReply(HelperReplyBase):

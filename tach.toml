@@ -99,7 +99,7 @@ depends_on = ["vibesys.api"]
 
 [[modules]]
 path = "server.api"
-depends_on = ["vs_decode.api", "vs_logs", "vibesys.api", "vibesys.api.hypothesis", "server.control_envelope", "server.host_api", "server.diagnostics", "server.journal", "server.execution", "server.settings", "server.events", "server.controller", "server.chat", "server.integration", "server.run_lifecycle", "vs_sim.api"]
+depends_on = ["vibesys.api.display_catalog", "vs_decode.api", "vs_logs", "vibesys.api", "vibesys.api.hypothesis", "server.control_envelope", "server.host_api", "server.diagnostics", "server.journal", "server.execution", "server.settings", "server.events", "server.controller", "server.chat", "server.integration", "server.run_lifecycle", "vs_sim.api"]
 
 [[modules]]
 path = "server.chat"
@@ -1258,6 +1258,11 @@ depends_on = ["vibesys.api.contracts", "vibesys.api.session"]
 path = "vibesys.api.catalog"
 visibility = ["launch", "tests", "scripts"]
 depends_on = ["vibesys.orchestration.dynamic", "vibesys.orchestration.evolve", "vibesys.orchestration.issue_queue", "vibesys.orchestration.single", "vibesys.orchestration.multi"]
+
+[[modules]]
+path = "vibesys.api.display_catalog"
+visibility = ["server.api", "tests", "scripts"]
+depends_on = ["vs_agent", "vibesys.orchestration.dynamic.search", "vibesys.orchestration.evolve.search", "vibesys.orchestration.issue_queue.search", "vibesys.orchestration.multi.search", "vibesys.orchestration.single.search"]
 
 [[modules]]
 path = "vibesys.api.wiring"

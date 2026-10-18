@@ -34,6 +34,7 @@ EXCHANGES = core.Exchanges(
 )
 WORKER = core.Role(
     name="worker",
+    title="Worker",
     prompt="fake/worker.j2",
     reply=Plan,
     workspace=None,

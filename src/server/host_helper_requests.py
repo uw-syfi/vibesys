@@ -227,11 +227,15 @@ class Projects(Protocol):
         """The project's resolved root, once it is known to define tasks."""
         ...
 
-    def run_events(self, project: Path, run_id: str, from_sequence: int, limit: int) -> EventPage:
+    def run_events(
+        self, project: Path, run_id: str, from_sequence: int, limit: int, *, with_totals: bool
+    ) -> EventPage:
         """A page of run ``run_id``'s journal (``event_page`` under ``RUN_EVENTS_READ_MAX_BYTES``).
 
-        A run that journaled nothing has an empty, complete page. Raises
-        ``ProjectLookupError`` with ``unknown_run`` when the project has no such run.
+        A run that journaled nothing has an empty, complete page. With ``with_totals`` the
+        page names the journal's complete lines and their bytes. Raises
+        ``ProjectLookupError`` with ``unknown_run`` when the project has no such run; a run
+        found once is not looked up again while this helper serves.
         """
         ...
 
@@ -519,6 +523,10 @@ class EventPage:
     events: tuple[RunEventDocument, ...]
     next_sequence: int
     complete: bool
+    total_events: int | None = None
+    """The journal's complete lines when the page was read; ``None`` unless asked for."""
+    total_bytes: int | None = None
+    """The bytes of those lines; ``None`` with ``total_events``."""
 
 
 _EVENT_DOCUMENT: TypeAdapter[RunEventDocument] = TypeAdapter(RunEventDocument)
@@ -875,12 +883,20 @@ def _run_summary_reply(request: RunsSummaryRequest, host: HelperHost) -> RunsSum
 def _run_events_reply(request: RunsReadEventsRequest, host: HelperHost) -> RunsReadEventsReply:
     """Answer one page of a run's recorded events."""
     project = Path(_host_path(request.project, host.directories))
-    page = host.projects.run_events(project, request.run_id, request.from_sequence, request.max)
+    page = host.projects.run_events(
+        project,
+        request.run_id,
+        request.from_sequence,
+        request.max,
+        with_totals=bool(request.with_totals),
+    )
     return RunsReadEventsReply(
         request_id=request.request_id,
         events=page.events,
         next_sequence=page.next_sequence,
         complete=page.complete,
+        total_events=page.total_events,
+        total_bytes=page.total_bytes,
     )
 
 

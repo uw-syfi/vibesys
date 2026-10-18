@@ -223,6 +223,7 @@ def test_a_turn_chains_candidate_is_only_the_current_invocations_outcome(
 EXCHANGES = core.Exchanges(correction="c.j2", resume="r.j2", wait_unrecorded="w.j2")
 WAITER = core.Role(
     name="waiter",
+    title="Waiter",
     prompt="waiter.j2",
     reply=Plan,
     workspace=None,

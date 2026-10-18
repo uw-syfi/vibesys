@@ -18,7 +18,6 @@
  * longer offers it for this run instance (`waitRefused`).
  */
 
-import type {RunEvent} from '@vibesys/contracts';
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun, RunEnd} from '@vibesys/hosts';
 import type {LogListOutcome, LogView} from '@vibesys/logs';
@@ -29,6 +28,7 @@ import {
   reduceEventBatch,
 } from '@vibesys/run-state';
 import type {RunRef} from '@vibesys/runs';
+import {type HistoryPage, type HistoryPager, receivePage, startHistory} from './history-pager.js';
 import type {IdeasLayout} from './ideas-tree.js';
 import {IDEAS_FILTER_DEFAULT, type IdeasFilter} from './ideas-view.js';
 import {
@@ -67,8 +67,11 @@ export type RunPhase =
   | {readonly kind: 'stopping'}
   | {readonly kind: 'ended'; readonly run: HostRun; readonly end: RunEnd};
 
-/** The most events one history page asks for. */
-export const HISTORY_PAGE_EVENTS = 500;
+/**
+ * The most events one history page asks for. The host cuts a page earlier at its byte bound, and
+ * `@vibesys/hosts`' main-process reader asks an older helper for fewer.
+ */
+export const HISTORY_PAGE_EVENTS = 2000;
 
 /** The sequence a run's journal starts at, where a history read starts (`runs.read_events`). */
 export const FIRST_HISTORY_SEQUENCE = 1;
@@ -86,17 +89,16 @@ export interface HistoryProgress {
 const NO_PROGRESS: HistoryProgress = {events: 0, bytes: 0, total: null};
 
 /**
- * An ended run's recorded events, read page by page (`runs.read_events`) into the run fold: not
- * asked yet, a page awaited under a token, all read, not served by this host, or failed. While it
- * reads, what is folded is a prefix of the run, never the run: the screen shows the read's
- * progress instead of it (`historyScreen`).
+ * An ended run's recorded events, read (`runs.read_events`) into the run fold with several pages
+ * in flight, folded in order (`history-pager.ts`): not asked yet, being read, all read, not served
+ * by this host, or failed. While it reads, what is folded is a prefix of the run, never the run:
+ * the screen shows the read's progress instead of it (`historyScreen`).
  */
-type RunHistory =
+export type RunHistory =
   | {readonly kind: 'idle'}
   | {
       readonly kind: 'reading';
-      readonly token: number;
-      readonly from: number;
+      readonly pager: HistoryPager;
       readonly progress: HistoryProgress;
     }
   | {readonly kind: 'read'}
@@ -105,16 +107,7 @@ type RunHistory =
 
 /** What one history read settled to. */
 export type HistoryReply =
-  | {
-      readonly kind: 'page';
-      readonly events: readonly RunEvent[];
-      readonly next: number;
-      readonly complete: boolean;
-      /** The page's size on the wire in bytes, when the app measured it. */
-      readonly bytes?: number;
-      /** How many events the run's history holds in all, when the host says. */
-      readonly totalEvents?: number;
-    }
+  | ({readonly kind: 'page'} & HistoryPage)
   | {readonly kind: 'unsupported'}
   | {readonly kind: 'failed'; readonly message: string};
 
@@ -404,17 +397,25 @@ function linked(state: RunPageState): RunPageStep {
   };
 }
 
-/** Ask for the next history page from `from`. */
-function readingFrom(
-  state: RunPageState,
-  from: number,
-  progress: HistoryProgress = NO_PROGRESS,
-): RunPageStep {
-  const token = state.next;
+/** Read the history from its first event. */
+function startReading(state: RunPageState): RunPageStep {
+  const started = startHistory(FIRST_HISTORY_SEQUENCE, HISTORY_PAGE_EVENTS, state.next);
   return {
-    state: {...state, next: token + 1, history: {kind: 'reading', token, from, progress}},
-    requests: [{kind: 'read-history', token, from, max: HISTORY_PAGE_EVENTS}],
+    state: {
+      ...state,
+      next: started.nextToken,
+      history: {kind: 'reading', pager: started.pager, progress: NO_PROGRESS},
+    },
+    requests: started.requests.map(asked => ({kind: 'read-history', ...asked})),
   };
+}
+
+/** The tokens of the history pages asked and not yet answered. */
+export function historyAwaiting(history: RunHistory): readonly number[] {
+  if (history.kind !== 'reading') return [];
+  return history.pager.spans.flatMap(span =>
+    span.token !== null && span.page === null ? [span.token] : [],
+  );
 }
 
 /**
@@ -437,7 +438,7 @@ function historyFor(state: RunPageState): RunPageStep {
     // (nothing folded yet) reads its recorded history.
     const folded = state.run.core !== null || state.run.trace !== EMPTY_RUN_FOLD.trace;
     if (folded) return {state: {...state, history: {kind: 'read'}}, requests: []};
-    return readingFrom(state, FIRST_HISTORY_SEQUENCE);
+    return startReading(state);
   }
   return {state, requests: []};
 }
@@ -458,7 +459,7 @@ function withRecord(state: RunPageState, record: RunRecord): RunPageStep {
 
 function withHistory(state: RunPageState, token: number, reply: HistoryReply): RunPageStep {
   const {history} = state;
-  if (history.kind !== 'reading' || history.token !== token) return {state, requests: []};
+  if (history.kind !== 'reading') return {state, requests: []};
   if (reply.kind === 'unsupported') {
     return {state: {...state, run: EMPTY_RUN_FOLD, history: reply}, requests: []};
   }
@@ -469,25 +470,32 @@ function withHistory(state: RunPageState, token: number, reply: HistoryReply): R
       requests: [],
     };
   }
+  const step = receivePage(history.pager, token, reply, HISTORY_PAGE_EVENTS, state.next);
+  // A reply for a reading that is over (or one page twice) is dropped.
+  if (step === null) return {state, requests: []};
   const run: RunFold =
-    reply.events.length === 0
+    step.events.length === 0
       ? state.run
       : {
           ...state.run,
-          core: reduceEventBatch(state.run.core ?? initialCoreState(), reply.events),
-          trace: traceStep(state.run.trace, {kind: 'events', events: reply.events}),
+          core: reduceEventBatch(state.run.core ?? initialCoreState(), step.events),
+          trace: traceStep(state.run.trace, {kind: 'events', events: step.events}),
         };
-  const folded = {...state, run};
-  // A page that read nothing new cannot advance: stop rather than ask for the same page again.
-  if (reply.complete || reply.next <= history.from) {
-    return {state: {...folded, history: {kind: 'read'}}, requests: []};
-  }
   const before = history.progress;
-  return readingFrom(folded, reply.next, {
-    events: before.events + reply.events.length,
+  const progress: HistoryProgress = {
+    events: before.events + step.events.length,
     bytes: before.bytes + (reply.bytes ?? 0),
     total: reply.totalEvents ?? before.total,
-  });
+  };
+  return {
+    state: {
+      ...state,
+      run,
+      next: step.nextToken,
+      history: step.done ? {kind: 'read'} : {kind: 'reading', pager: step.pager, progress},
+    },
+    requests: step.requests.map(asked => ({kind: 'read-history', ...asked})),
+  };
 }
 
 function recordStep(next: RunPageState, record: RunRecord): RunPageStep {

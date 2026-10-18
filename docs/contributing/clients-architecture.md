@@ -440,6 +440,22 @@ any difference; `scripts/check_clients.sh` runs it (see "Client checks before a 
 When the job fails on a screenshot, it uploads the actual and the diff as the
 `ui-gallery-test-results` artifact.
 
+## Display names
+
+A screen never shows an id a program matches on (`judge`, `perf-evaluator`, `claude`, a model's
+vendor id). Each vocabulary has one owner of its names:
+
+- an agent role's name is the `title` its search declares on its `Role`; `vibesys.api.display_catalog`
+  gathers them and `pnpm generate:protocol` writes `display-names.generated.ts` from it, which
+  `@vibesys/contracts` serves as `roleName`. The `tui_quality` group regenerates it and fails on a
+  diff; the role `title` pattern and `test_every_role_name_reads_as_words` fail a role with no
+  readable name. A role a plugin declares reads as the words of its id;
+- harness and model names are agentshim's, served by the backend. A client renders the field it
+  receives and never maps or prettifies those ids.
+
+`CODE_IDS` (generated beside the names) lists the harness, model and role ids, so the desktop's
+screen checks fail on any a screen draws as text outside a `data-mono-id` element.
+
 ## State
 
 Client state comes in two kinds, and each has one form.

@@ -132,6 +132,7 @@ export type Project3 = string;
 export type RunId1 = string;
 export type FromSequence = number;
 export type Max = number;
+export type WithTotals = boolean | null;
 export type RequestId17 = string;
 export type DeadlineMs17 = number;
 export type Type17 = "runs.summary";
@@ -214,6 +215,7 @@ export type HelperFeature =
   | "logs_by_span"
   | "run_history"
   | "run_summary"
+  | "run_history_pages"
   | "machine_describe"
   | "checkout_inspect"
   | "preflight"
@@ -453,6 +455,8 @@ export type Events = {
 }[];
 export type NextSequence = number;
 export type Complete = boolean;
+export type TotalEvents = number | null;
+export type TotalBytes = number | null;
 export type RequestId41 = string;
 export type Type41 = "runs.summary";
 export type ThroughSequence = number;
@@ -950,6 +954,7 @@ export interface RunsReadEventsRequest {
   run_id: RunId1;
   from_sequence: FromSequence;
   max: Max;
+  with_totals?: WithTotals;
 }
 /**
  * One page of a run's summary: what its run level shows, as of the journal's end now.
@@ -1482,6 +1487,8 @@ export interface RunsReadEventsReply {
   events: Events;
   next_sequence: NextSequence;
   complete: Complete;
+  total_events?: TotalEvents;
+  total_bytes?: TotalBytes;
 }
 /**
  * One page of a run's summary: the client's fold of its journal, to ``through_sequence``.

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import io
 import json
 from typing import TYPE_CHECKING
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from tests.server.host_helper_support import fake_host, project_with_run
@@ -13,11 +15,15 @@ from server.host_api import (
     RUN_EVENTS_FILE,
     HelperError,
     HelperErrorCode,
+    HelperFeature,
     RunsReadEventsReply,
     RunsReadEventsRequest,
+    request_features,
 )
-from server.host_helper_requests import answer, event_page
-from vs_project.api import Project
+from server.host_helper_os import FileProjects, JournalTally, tally_journal
+from server.host_helper_requests import ProjectLookupError, answer, event_page
+from vs_project.api import GitFaultSink, GitRepository, Project
+from vs_project.api.testing import FakeGitRepositories
 from vs_sim.api.testing import SimNetwork, SimThreads
 
 if TYPE_CHECKING:
@@ -136,3 +142,102 @@ def test_an_unknown_run_is_refused_naming_it(tmp_path: Path) -> None:
     assert isinstance(reply, HelperError)
     assert reply.code is HelperErrorCode.UNKNOWN_RUN
     assert "20261010-120000-22222222-other" in reply.message
+
+
+class _CountingRepositories:
+    """A ``GitRepositoryFactory`` over the Fake that counts the repositories opened."""
+
+    def __init__(self) -> None:
+        self.opened = 0
+        self._fake = FakeGitRepositories()
+
+    def __call__(self, root: Path, faults: GitFaultSink) -> GitRepository:
+        self.opened += 1
+        return self._fake.repository(root, faults)
+
+
+def test_one_channel_looks_a_run_up_once_however_many_pages_it_reads(tmp_path: Path) -> None:
+    project = project_with_run(tmp_path / "proj", _RUN_ID)
+    journal = Project.log_directory_for(project.resolve(), _RUN_ID) / RUN_EVENTS_FILE
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    journal.write_bytes(b"".join(_lines([_event(n) for n in range(1, 8)])))
+    repositories = _CountingRepositories()
+    projects = FileProjects(repositories)
+
+    for from_sequence in (1, 3, 5, 7):
+        projects.run_events(project, _RUN_ID, from_sequence, 2, with_totals=True)
+
+    assert repositories.opened == 1
+
+
+def test_a_run_not_found_is_looked_up_again_so_one_that_starts_later_is_found(
+    tmp_path: Path,
+) -> None:
+    project = project_with_run(tmp_path / "proj", _RUN_ID)
+    repositories = _CountingRepositories()
+    projects = FileProjects(repositories)
+    other = "20261010-120000-22222222-other"
+
+    for _attempt in range(2):
+        with pytest.raises(ProjectLookupError) as refused:
+            projects.run_events(project, other, 1, 2, with_totals=False)
+        assert refused.value.code is HelperErrorCode.UNKNOWN_RUN
+
+    assert repositories.opened == 2
+
+
+def test_totals_are_named_only_for_a_request_that_asked_for_them(tmp_path: Path) -> None:
+    project = project_with_run(tmp_path / "proj", _RUN_ID)
+    journal = Project.log_directory_for(project.resolve(), _RUN_ID) / RUN_EVENTS_FILE
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    body = b"".join(_lines([_event(1), _event(2), _event(3)]))
+    journal.write_bytes(body)
+    projects = FileProjects(FakeGitRepositories().repository)
+
+    plain = projects.run_events(project, _RUN_ID, 1, 2, with_totals=False)
+    totals = projects.run_events(project, _RUN_ID, 1, 2, with_totals=True)
+
+    assert (plain.total_events, plain.total_bytes) == (None, None)
+    assert (totals.total_events, totals.total_bytes) == (3, len(body))
+    reply = RunsReadEventsReply(
+        request_id="h", events=(), next_sequence=1, complete=True,
+        total_events=plain.total_events, total_bytes=plain.total_bytes,
+    )  # fmt: skip
+    # An older desktop validates replies strictly, so an unasked-for total is absent, not null.
+    assert "total_" not in reply.model_dump_json()
+
+
+def test_asking_for_totals_needs_the_page_feature() -> None:
+    request = RunsReadEventsRequest(
+        request_id="h", deadline_ms=5000, project="p", run_id=_RUN_ID,
+        from_sequence=1, max=2, with_totals=True,
+    )  # fmt: skip
+    bare = request.model_copy(update={"with_totals": None})
+
+    assert HelperFeature.RUN_HISTORY_PAGES in request_features(request)
+    assert HelperFeature.RUN_HISTORY_PAGES not in request_features(bare)
+
+
+@given(
+    appended=st.lists(st.binary(max_size=60), max_size=12),
+)
+def test_a_tally_taken_as_a_journal_grows_equals_a_count_of_the_whole(
+    appended: list[bytes],
+) -> None:
+    content = b""
+    tally = JournalTally(0, 0)
+    for chunk in appended:
+        content += chunk
+        tally = tally_journal(io.BytesIO(content), tally)
+        complete = content[: content.rfind(b"\n") + 1]
+        assert tally == JournalTally(len(complete), complete.count(b"\n"))
+    assert tally == tally_journal(io.BytesIO(content), JournalTally(0, 0))
+
+
+@given(content=st.binary(max_size=80), stale=st.integers(0, 200), lines=st.integers(0, 50))
+def test_a_tally_for_a_longer_journal_than_the_file_counts_afresh(
+    content: bytes, stale: int, lines: int
+) -> None:
+    fresh = tally_journal(io.BytesIO(content), JournalTally(0, 0))
+    if stale > len(content):
+        assert tally_journal(io.BytesIO(content), JournalTally(stale, lines)) == fresh

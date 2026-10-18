@@ -269,6 +269,7 @@ export class FakeHelper {
     'logs_cancel',
     'run_history',
     'run_summary',
+    'run_history_pages',
     'machine_describe',
     'checkout_inspect',
     'preflight',

@@ -236,7 +236,9 @@ An agent's evaluation is compared with its base, the revision its workspace
 started from. The base is measured once per (measured input, gates, host) and
 cached in the run's state, and measured again only when its samples are older
 than the task's `base_staleness` on the run clock (6 hours) or a close call earns
-it one more sample (a base holds at most two fresh samples). The
+it one more sample (a base holds at most two fresh samples). A base the strategy is already
+measuring (its own measurement of the run's input, still running) is awaited rather than
+measured again: core claims that run, and its result becomes the base's samples when it ends. The
 comparison is the ratio of the candidate's mean over the base's mean, its noise,
 and a verdict: `better`, `within_noise` or `worse`. The noise is one standard
 error of the ratio, computed from the runs' relative spread (never below the

@@ -16,7 +16,7 @@ export const RUN_CONTROL_CHANNELS = {
 } as const;
 
 /** The most events one history page may ask for. */
-export const HISTORY_PAGE_MAX = 1000;
+export const HISTORY_PAGE_MAX = 2000;
 
 /**
  * One page of a run's recorded events (`runs.read_events`, feature `run_history`): the events from
@@ -30,6 +30,12 @@ export type RunHistoryPage =
       readonly events: readonly unknown[];
       readonly next: number;
       readonly complete: boolean;
+      /**
+       * The journal's events and bytes when the page was read, for progress; absent from a host
+       * that does not name them (`run_history_pages`). A live run's journal grows past them.
+       */
+      readonly totalEvents?: number;
+      readonly totalBytes?: number;
     }
   | {readonly kind: 'unsupported'};
 
