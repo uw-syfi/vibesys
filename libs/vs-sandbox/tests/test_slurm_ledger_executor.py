@@ -16,6 +16,7 @@ the read the core makes, and nothing happens behind its back.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -26,6 +27,7 @@ from vs_evaluation.api import (
     EvaluationRequest,
     EvaluationState,
     EvaluationStep,
+    ExecutorCancellationUnknownError,
     ExecutorObservation,
     PollPhase,
     is_finished,
@@ -33,6 +35,7 @@ from vs_evaluation.api import (
 from vs_evaluation.api.testing import wait_until_executor_started
 from vs_sandbox.api.slurm import (
     AttachPending,
+    SharedSlurmAdmission,
     SlurmEvaluationExecutor,
     SlurmLedgerAttachment,
     SlurmStagePayload,
@@ -40,6 +43,7 @@ from vs_sandbox.api.slurm import (
 from vs_sim.api import yield_now
 from vs_sim.api.testing import ManualClock, yield_until
 from vs_slurm.api import (
+    ClusterCancelOutcome,
     ClusterCollectOutcome,
     ClusterObservation,
     ClusterSubmitOutcome,
@@ -131,6 +135,11 @@ class _Scheduler(FakeCluster):
         # How many collections read nothing, as when the connection drops mid-download.
         self.dropped_collections = 0
         self.collections = 0
+        # How many submissions the scheduler refuses, and how many lose their answer.
+        self.reject_submits = 0
+        self.lose_submit_replies = 0
+        # How many cancels never reach the scheduler, as over a broken connection.
+        self.failing_cancels = 0
 
     def submit(
         self, request: SlurmBatchRequest | SlurmJobRequest, *, operation_id: str
@@ -141,12 +150,20 @@ class _Scheduler(FakeCluster):
             self.crash_submits -= 1
             self.script(operation_id, on_dispatch=_die)
             return super().submit(request, operation_id=operation_id)
+        if isinstance(request, SlurmBatchRequest) and self.reject_submits:
+            self.reject_submits -= 1
+            self.staged = request
+            self.script(operation_id, rejected_reason="QOSMaxSubmitJobPerUserLimit")
+            return super().submit(request, operation_id=operation_id)
         if isinstance(request, SlurmBatchRequest) and operation_id not in self.jobs:
             self.jobs.add(operation_id)
             self.staged = request
             staging, self.on_staging = self.on_staging, None
+            lost = self.lose_submit_replies > 0
+            self.lose_submit_replies -= int(lost)
             self.script(
                 operation_id,
+                lost_submit_reply=lost,
                 on_dispatch=staging or (lambda: None),
                 queue_wait_s=self.queue_s,
                 run_s=self.run_s,
@@ -187,6 +204,12 @@ class _Scheduler(FakeCluster):
                 reason="download of the results did not complete: connection reset by peer",
             )
         return super().collect(target, by_job_id=by_job_id, observed=observed)
+
+    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
+        if self.failing_cancels:
+            self.failing_cancels -= 1
+            return ClusterUnknown(operation_id=None, reason="ssh: connection reset by peer")
+        return super().cancel(target, by_job_id=by_job_id)
 
     def status(self, operation_id: str) -> SlurmJobStatus:
         observed = self.inspect(operation_id)
@@ -259,6 +282,8 @@ class _World:
             service=None,
             support_trees={},
             handle_root=root / "handles",
+            # Room for every evaluation a test runs at once: none waits on another.
+            admission=SharedSlurmAdmission(4),
             cluster=self.scheduler,
             clock=self.clock,
             sleeper=sleeper,
@@ -429,30 +454,46 @@ async def test_a_job_another_run_still_wants_outlives_a_stop_until_that_run_stop
     assert world.scheduler.status(operation) is SlurmJobStatus.CANCELLED
 
 
-async def test_an_attached_run_observes_a_withdrawal_as_cancelled(tmp_path: Path) -> None:
+@pytest.mark.xfail(
+    strict=True, reason="#3173 review finding 1: an unasked withdrawal submits again"
+)
+async def test_an_attached_run_submits_again_a_request_withdrawn_without_its_asking(
+    tmp_path: Path,
+) -> None:
+    """An operator's removal, or a sweep after this run's lease lapsed, is not this run's cancel.
+
+    The evaluation still wants its result: it claims a new attempt and waits on
+    its job, and a stop cancels that job.
+    """
     world = _World()
     run = world.run(tmp_path / "run-1", "run-1")
     await _attached(run, "eval-1")
     (operation,) = world.scheduler.jobs
 
-    outcome = withdraw(world.ledger, world.scheduler, world.only_key(), reason="removed")
+    outcome = withdraw(
+        world.ledger,
+        world.scheduler,
+        world.only_key(),
+        reason="removed",
+        by="vibesys-evals",
+        now=world.clock.now(),
+    )
 
     assert isinstance(outcome, Withdrawn)
     assert world.scheduler.status(operation) is SlurmJobStatus.CANCELLED
     # The run reads the ledger again a third of a lease period after its last renewal.
     world.clock.advance(LEASE_S / 3)
-    settled = await run.executor.poll("eval-1")
-    assert settled.phase is PollPhase.ENDED
-    assert settled.terminal is not None
-    assert settled.terminal.state is EvaluationState.CANCELED
-
-    inspected = await run.executor.inspect("eval-1")
-    inspected_only = await run.executor.inspect_only("eval-1")
-    assert inspected is not None
-    assert inspected_only is not None
-    assert inspected.state is EvaluationState.CANCELED
-    assert inspected_only.state is EvaluationState.CANCELED
+    polled = await yield_until(
+        lambda: run.executor.poll("eval-1"),
+        lambda seen: len(world.scheduler.jobs) == 2 or seen.phase is PollPhase.ENDED,
+        "the evaluation to submit its request again",
+    )
+    assert polled.phase is not PollPhase.ENDED
+    (again,) = world.scheduler.jobs - {operation}
+    assert again == ledger_operation_id(world.only_key(), 1)
+    assert world.scheduler.status(again) is SlurmJobStatus.PENDING
     await run.executor.close()
+    assert world.scheduler.status(again) is SlurmJobStatus.CANCELLED
 
 
 async def test_a_job_no_run_leases_is_cancelled_by_another_runs_sweep_after_its_grace(
@@ -665,4 +706,104 @@ async def test_a_slow_submission_keeps_its_claim_by_renewing_it(tmp_path: Path) 
     assert operation == ledger_operation_id(world.only_key(), 0)
     assert world.entry_state() is LedgerState.SUBMITTED
     assert world.scheduler.status(operation) is SlurmJobStatus.PENDING
+    await run.executor.close()
+
+
+async def _queued(run: _Run, handle_id: str) -> None:
+    """Return once the evaluation's job is queued, as the core's poll reads it."""
+    await yield_until(
+        lambda: run.executor.poll(handle_id),
+        lambda seen: seen.phase is PollPhase.QUEUED,
+        "the evaluation's job to queue",
+    )
+
+
+@pytest.mark.xfail(strict=True, reason="#3173 review finding 2: an ended evaluation keeps its use")
+@pytest.mark.parametrize("ending", ["rejected", "timed_out", "succeeded"])
+async def test_an_evaluation_that_ended_stops_using_its_request(
+    tmp_path: Path, ending: str
+) -> None:
+    """However an evaluation ends, it no longer counts as a user of its request.
+
+    The run drops its lease once no evaluation of it uses the request. A later
+    evaluation of the same content that needs a new job gets one, and a stop
+    cancels that job: a use left behind by the ended evaluation kept it queued.
+    """
+    world = _World()
+    world.scheduler.reject_submits = int(ending == "rejected")
+    world.scheduler.stage_exit = 124 if ending == "timed_out" else 0
+    run = world.run(tmp_path / "run-1", "run-1", sleeper=_ClockSleeper(world.clock))
+    await run.executor.submit(_request(), handle_id="eval-1")
+    ended = await _finished(run.executor, "eval-1")
+    expected = EvaluationState.SUCCEEDED if ending == "succeeded" else EvaluationState.FAILED
+    assert ended.state is expected
+    entry = world.ledger.read(world.only_key())
+    assert entry is not None
+    assert entry.leases == ()
+    if ending == "succeeded":
+        await run.executor.close()
+        return
+
+    earlier = set(world.scheduler.jobs)
+    world.scheduler.queue_s = math.inf
+    await run.executor.submit(_request(), handle_id="eval-2")
+    await _queued(run, "eval-2")
+    (operation,) = world.scheduler.jobs - earlier
+    await run.executor.close()
+    assert world.scheduler.status(operation) is SlurmJobStatus.CANCELLED
+
+
+@pytest.mark.xfail(strict=True, reason="#3173 review finding 3: a resume never registers its use")
+async def test_cancelling_one_of_two_resumed_evaluations_of_one_content_keeps_their_job(
+    tmp_path: Path,
+) -> None:
+    """A restarted run counts every evaluation it resumes as a user of its request."""
+    world = _World()
+    first = world.run(tmp_path / "run-1", "run-1", policy=KEEPING)
+    await _attached(first, "eval-1")
+    first.sleeper.parked.clear()
+    await _attached(first, "eval-2")
+    (operation,) = world.scheduler.jobs
+    await first.executor.close()  # stands for a crash: the job stays
+    assert world.scheduler.status(operation) is SlurmJobStatus.PENDING
+
+    second = world.run(tmp_path / "run-1", "run-1")
+    for handle_id in ("eval-1", "eval-2"):
+        assert await second.executor.inspect(handle_id) is not None
+    await second.parked("eval-2")
+    await second.executor.cancel("eval-1")
+    assert world.scheduler.status(operation) is SlurmJobStatus.PENDING, world.entry_state()
+
+    await second.executor.close()
+    assert world.scheduler.status(operation) is SlurmJobStatus.CANCELLED
+
+
+@pytest.mark.xfail(
+    strict=True, reason="#3173 review finding 5: an unknown withdrawal loses its key"
+)
+async def test_a_cancel_whose_withdrawal_ended_unknown_withdraws_it_when_tried_again(
+    tmp_path: Path,
+) -> None:
+    """The run keeps the request of a cancel it could not finish, so a retry finishes it.
+
+    The submission's answer was lost, so the evaluation waits to find its job by
+    name and has none recorded; the cluster then drops every scancel. A cancel
+    that could not withdraw the request reports that, and a later cancel, with
+    the cluster reachable again, cancels the job instead of forgetting it.
+    """
+    world = _World()
+    world.scheduler.lose_submit_replies = 1
+    run = world.run(tmp_path / "run-1", "run-1")
+    await _attached(run, "eval-1")
+    (operation,) = world.scheduler.jobs
+    assert world.scheduler.status(operation) is SlurmJobStatus.PENDING
+
+    world.scheduler.failing_cancels = 10**6
+    with contextlib.suppress(ExecutorCancellationUnknownError):
+        await run.executor.cancel("eval-1")
+    world.scheduler.failing_cancels = 0
+    await run.executor.cancel("eval-1")
+
+    assert world.scheduler.status(operation) is SlurmJobStatus.CANCELLED
+    assert world.entry_state() is LedgerState.WITHDRAWN
     await run.executor.close()
