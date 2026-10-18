@@ -3,6 +3,7 @@ import {BAD_SCREENS, CLEAN_SCREEN} from './checks/bad-dom.js';
 import {contactSheetHtml} from './checks/contact-sheet.js';
 import {isKnown, KNOWN_FAILURES, type KnownFailure} from './checks/known-failures.js';
 import {report, screenCheck} from './checks/screen-check.js';
+import {settled} from './checks/settle.js';
 import {anchorsOf, RUN_ANCHORS, stabilityViolations} from './checks/stability.js';
 
 /**
@@ -39,6 +40,23 @@ const CHART = `<div id="row" style="position:relative;height:90px">
   <svg id="chart" role="group" aria-label="Metric of each measured idea over the run, with the best so far" width="240" height="80"><circle cx="40" cy="40" r="6" fill="red"/></svg>
   <input id="bar" type="range" aria-label="Run position" style="position:absolute;left:260px;top:10px"/>
 </div>`;
+
+test('settled waits for subpixel movement to finish', async ({page}) => {
+  await show(page, '<div id="moving" style="width:20px;height:20px"></div>');
+  await page.evaluate(() => {
+    const moving = document.getElementById('moving');
+    let frame = 0;
+    const advance = (): void => {
+      frame += 1;
+      if (moving) moving.style.transform = `translateX(${frame * 0.11}px)`;
+      if (frame < 30) requestAnimationFrame(advance);
+    };
+    requestAnimationFrame(advance);
+  });
+  await settled(page);
+  const x = await page.locator('#moving').evaluate(element => element.getBoundingClientRect().x);
+  expect(x).toBeCloseTo(3.3, 1);
+});
 
 test('a chart replaced by a copy on navigation is a remount', async ({page}) => {
   await show(page, CHART);
