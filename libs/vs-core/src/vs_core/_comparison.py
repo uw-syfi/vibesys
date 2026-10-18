@@ -25,6 +25,14 @@ which is also all there is to go on while each side holds one sample)::
     sigma = max(s, floor)
     noise = r * sigma * sqrt(1/m + 1/n)
 
+A task that declares no floor (``relative_noise`` is 0) has not said its runs are exact: it has
+said nothing. While each side holds one sample, the runs have no spread to show either, so
+``sigma`` is 0 because nothing measured the noise, not because there is none. Such a
+comparison gives no verdict (``within_noise``) and is a close call (`close_call`), so the base
+and the official check each take one more sample and the spread becomes measurable. Any fixed
+default floor would be a number nobody measured; requiring the key would refuse every task
+that has a benchmark and no ``[pareto]`` table.
+
 ``noise`` is one standard error of the ratio of two means (first order). More samples shrink
 it, a wider spread or a higher floor grow it, and a shared host shows as spread. A verdict
 needs two standard errors, which is conservative (about 95%): ``better`` when the candidate
@@ -63,6 +71,7 @@ from .types.measurement import (
     ComparisonVerdict,
     Direction,
     EffectVerdict,
+    Reading,
     Sample,
 )
 
@@ -80,6 +89,7 @@ __all__ = [
     "ComparisonPolicy",
     "Measured",
     "Moment",
+    "as_answer",
     "base_in_flight",
     "base_missing",
     "claimed_base",
@@ -96,6 +106,7 @@ __all__ = [
     "official_needs_samples",
     "policy_of",
     "remeasures_base",
+    "run_reading",
     "running_baseline",
     "sample_of",
     "samples_of",
@@ -226,6 +237,51 @@ def sample_of(
     )
 
 
+def as_answer(state: EvaluationState, job: OwnedJob, evidence: EvidenceRef) -> EvidenceRef:
+    """``evidence`` as the official measurement's answer: its reading is the samples' mean.
+
+    The official measurement of an input is answered by every sample the scope holds of it, the
+    run that answers included when it is a new one (`vs_core._measurement_reuse`). The
+    benchmark record that carries the answer through the ledger, and so to every reader that
+    ranks candidates, states the mean of those samples: exactly the candidate value the
+    comparison with the base states (`comparison_of`), never one run's reading. The run's own
+    reading stays in its ``Sample``. Any other record, and a record whose samples read another
+    metric, is returned as it is.
+    """
+    plan = job.plan
+    reading = evidence.reading
+    if (
+        plan.purpose != "official"
+        or reading is None
+        or plan.measured_input is None
+        or not isinstance(plan.candidate, RevisionRef)
+    ):
+        return evidence
+    measured = Measured(
+        evaluation_of(MeasurementIdentity.from_plan(plan, plan.candidate)), plan.measured_input
+    )
+    held = tuple(s for s in samples_of(state, measured) if s.scope == job.scope)
+    own = sample_of(job, evidence, 0.0)
+    if own is not None and all(s.run != own.run for s in held):
+        held = (*held, own)
+    if not held or any(s.reading.metric != reading.metric for s in held):
+        return evidence
+    mean = _mean(tuple(s.reading.value for s in held))
+    return evidence.model_copy(update={"reading": reading.model_copy(update={"value": mean})})
+
+
+def run_reading(state: EvaluationState, job: OwnedJob, evidence: EvidenceRef) -> Reading | None:
+    """The reading ``job``'s own run took for ``evidence``: its sample's, else the record's.
+
+    An official run's ledger record states the measurement's answer (`as_answer`), so what the
+    run itself read is its ``Sample``.
+    """
+    if evidence.reading is None:
+        return None
+    own = next((s for s in state.samples if s.run == job.submission_id), None)
+    return evidence.reading if own is None else own.reading
+
+
 def samples_of(state: EvaluationState, measured: Measured) -> tuple[Sample, ...]:
     """Every sample of one measurement, in the order its runs ended."""
     return tuple(
@@ -289,7 +345,9 @@ def compare(
     noise = abs(ratio) * sigma * sqrt(1 / m + 1 / n)
     gain = ratio - 1 if direction == "max" else 1 - ratio
     verdict = (
-        ComparisonVerdict.BETTER
+        ComparisonVerdict.WITHIN_NOISE
+        if sigma == 0 and _degrees(m, n) <= 0
+        else ComparisonVerdict.BETTER
         if gain > VERDICT_NOISES * noise
         else ComparisonVerdict.WORSE
         if gain < -VERDICT_NOISES * noise
@@ -315,9 +373,14 @@ def compare(
     )
 
 
+def _degrees(m: int, n: int) -> int:
+    """The degrees of freedom of the runs' pooled spread: each side's mean takes one."""
+    return m + n - 2
+
+
 def _pooled_spread(mine: tuple[float, ...], c: float, theirs: tuple[float, ...], b: float) -> float:
     """The pooled relative deviation of the runs from their own side's mean (0 below 3 runs)."""
-    degrees = len(mine) + len(theirs) - 2
+    degrees = _degrees(len(mine), len(theirs))
     if degrees <= 0 or c == 0 or b == 0:
         return 0.0
     squares = sum(((x - c) / c) ** 2 for x in mine) + sum(((x - b) / b) ** 2 for x in theirs)
@@ -355,19 +418,38 @@ def comparisons_of(state: EvaluationState, moment: Moment) -> tuple[Comparison, 
 
 
 def latest_comparisons(
-    state: EvaluationState, scope: Scope, inputs: Iterable[str]
+    state: EvaluationState, scope: Scope, inputs: Iterable[str], moment: Moment
 ) -> tuple[Comparison, ...]:
     """The current comparison, as logged, of each of the scope's candidate ``inputs``.
 
     Each input appears at most once, in the order its comparison was first logged; an input
-    with no comparison yet (its base is not measured) is left out.
+    with no comparison yet (its base is not measured) is left out. The log is append-only, so
+    its newest entry may rest on base samples that have since gone stale: an entry is given
+    only while the samples held at ``moment`` still make exactly it (`comparison_of`), so no
+    reader is told a verdict whose base no longer counts.
     """
     wanted = frozenset(inputs)
     current: dict[tuple[str, str], Comparison] = {}
     for comparison in state.comparisons:
         if comparison.scope == scope and comparison.candidate_input in wanted:
             current[(comparison.candidate_input, comparison.base_input)] = comparison
-    return tuple(current.values())
+    return tuple(item for item in current.values() if _holds(state, item, moment))
+
+
+def _holds(state: EvaluationState, comparison: Comparison, moment: Moment) -> bool:
+    """Whether the samples held at ``moment`` still make ``comparison``."""
+    evaluations = {
+        s.evaluation
+        for s in state.samples
+        if s.scope == comparison.scope and s.measured_input == comparison.candidate_input
+    }
+    return any(
+        comparison_of(
+            state, comparison.scope, Measured(evaluation, comparison.candidate_input), moment
+        )
+        == comparison
+        for evaluation in evaluations
+    )
 
 
 def effect_verdict(comparison: Comparison, minimum_ratio: float) -> EffectVerdict:
@@ -415,8 +497,26 @@ def comparison_of_result(
 
 
 def close_call(comparison: Comparison, bar: float = 1.0) -> bool:
-    """Whether the candidate's ratio is within ``CLOSE_CALL_NOISES`` of ``bar``."""
-    return abs(comparison.ratio - bar) <= CLOSE_CALL_NOISES * comparison.noise
+    """Whether the candidate's ratio is within ``CLOSE_CALL_NOISES`` of ``bar``.
+
+    A comparison with no noise estimate (``_noise_unknown``) is within any noise of any bar: one
+    more sample is exactly what it lacks.
+    """
+    return (
+        _noise_unknown(comparison)
+        or abs(comparison.ratio - bar) <= CLOSE_CALL_NOISES * comparison.noise
+    )
+
+
+def _noise_unknown(comparison: Comparison) -> bool:
+    """Whether the comparison has no estimate of its noise: no declared floor, one run a side.
+
+    Its noise is then zero only because nothing measured it, so it decides nothing.
+    """
+    return (
+        comparison.noise == 0
+        and _degrees(comparison.candidate_samples, comparison.base_samples) <= 0
+    )
 
 
 def base_in_flight(state: EvaluationState, measured: Measured) -> bool:

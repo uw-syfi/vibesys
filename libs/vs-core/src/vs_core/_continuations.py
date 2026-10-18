@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
-from ._comparison import latest_comparisons
+from ._comparison import latest_comparisons, moment_of
 from ._deadlines import bound_to_run, cleanup, limit_to, time_remains
 from ._evaluation_history import attempt_settled, produce_history
 from ._proofs import continues_admitted_work
@@ -626,6 +626,7 @@ def _authorize(
             for job in _jobs(state, continuation)
             if isinstance(job, OwnedJob) and job.plan.measured_input is not None
         ),
+        moment_of(context.run),
     )
     publication = ResumeAuthorizationReceipt(
         continuation_id=continuation.continuation_id,

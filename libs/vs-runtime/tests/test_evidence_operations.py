@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import ClassVar, Literal
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
 
@@ -29,6 +29,7 @@ from vs_core.api import (
     OperationRegistration,
     OperationRequest,
     OperationSchemaRef,
+    Reading,
     RequestId,
     ResourceId,
     RevisionId,
@@ -404,6 +405,36 @@ def _eval_context(request: BaseModel) -> ExecutionContext:
         lease=_Lease(),
         until=Until(at=100.0),
     )
+
+
+@pytest.mark.regression
+@settings(max_examples=examples(pr=10, nightly=80), deadline=None)
+@given(
+    run=st.floats(min_value=1.0, max_value=1e4),
+    stated=st.one_of(st.none(), st.floats(min_value=1.0, max_value=1e4)),
+    metric=st.sampled_from(("throughput", "latency")),
+)
+@example(run=300.0, stated=275.0, metric="throughput")
+@example(run=300.0, stated=None, metric="throughput")
+async def test_the_headline_a_reader_decodes_is_the_one_cores_ledger_states(
+    run: float, stated: float | None, metric: str
+) -> None:
+    """An official record states the mean of its samples; ranking must read that, not one run.
+
+    The runtime's record holds the run's own value. Core's ledger reference states the headline
+    reading (for an official measurement, the comparison's candidate value), and the decoded
+    headline is that reading whenever it names the headline metric, else the run's value.
+    """
+    ledger = FakeEvidenceLedger()
+    evidence = _evidence(0, value=run)
+    ledger.record(RequestId(root=SOURCE), evidence, "official")
+    reading = None if stated is None else Reading(metric=metric, value=stated, direction="max")
+    ref = _ref(evidence).model_copy(update={"reading": reading})
+    outcome = await InterpretEvidenceOwner(ledger).execute(_Interpret(evidence=(ref,)), _context())
+    decoded = _Readings.model_validate(outcome)
+    (headline,) = decoded.readings[0].metrics
+    named = stated is not None and metric == evidence.metrics[0].name
+    assert headline.value == (stated if named else run)
 
 
 @settings(max_examples=examples(pr=5, nightly=40), deadline=None)

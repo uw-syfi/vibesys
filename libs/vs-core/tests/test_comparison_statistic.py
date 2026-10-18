@@ -12,7 +12,8 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING, Literal
 
-from hypothesis import given
+import pytest
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -151,9 +152,16 @@ def test_the_noise_is_never_below_what_the_declared_floor_gives_the_samples_held
 def test_a_higher_floor_never_turns_an_undecided_result_into_a_verdict(
     mine: list[float], theirs: list[float], floor: float, extra: float
 ) -> None:
+    """Among floors a task declares: an undeclared floor (0) with one run a side is no estimate.
+
+    Such a comparison has no noise figure at all, so it gives no verdict whatever a declared
+    floor would allow (`test_one_run_a_side_and_no_declared_floor_decide_nothing`).
+    """
     low = compared(mine, theirs, floor=floor)
     high = compared(mine, theirs, floor=floor + extra)
-    if low.verdict is core.ComparisonVerdict.WITHIN_NOISE:
+    if low.verdict is core.ComparisonVerdict.WITHIN_NOISE and (
+        floor > 0 or len(mine) + len(theirs) > 2
+    ):
         assert high.verdict is core.ComparisonVerdict.WITHIN_NOISE
     assert high.noise >= low.noise - 1e-12
 
@@ -176,3 +184,37 @@ def test_a_measurement_without_a_known_direction_or_a_base_is_not_compared(
         core.compare((), (sample(1.0),), scope=SCOPE, anchor=ANCHOR, policy=core.ComparisonPolicy())
         is None
     )
+
+
+@pytest.mark.regression
+@given(mine=VALUES, theirs=VALUES, direction=st.sampled_from(("max", "min")))
+@example(mine=100.3, theirs=100.0, direction="max")
+@example(mine=50.0, theirs=100.0, direction="min")
+def test_one_run_a_side_and_no_declared_floor_decide_nothing(
+    mine: float, theirs: float, direction: Literal["max", "min"]
+) -> None:
+    """With no declared ``relative_noise`` and one run a side, nothing measured the noise.
+
+    Before, the noise was taken to be zero, so a 0.3% difference between two single runs was
+    ``better``, and only an exact tie was a close call, so no second sample was ever taken.
+    Now the comparison gives no verdict for any gain and is a close call, which earns the base
+    and the official check the samples that measure the noise.
+    """
+    result = compared([mine], [theirs], direction=direction)
+    assert result.verdict is core.ComparisonVerdict.WITHIN_NOISE
+    assert core.close_call(result)
+
+
+@given(
+    mine=st.lists(VALUES, min_size=1, max_size=4),
+    theirs=st.lists(VALUES, min_size=1, max_size=4),
+    gain=st.floats(min_value=0.5, max_value=2.0),
+)
+@example(mine=[100.0, 100.0], theirs=[50.0], gain=1.0)
+def test_a_verdict_without_a_declared_floor_needs_runs_that_show_a_spread(
+    mine: list[float], theirs: list[float], gain: float
+) -> None:
+    """Without a declared floor, a verdict is reached only once three runs give a spread."""
+    result = compared([v * gain for v in mine], theirs)
+    if result.verdict is not core.ComparisonVerdict.WITHIN_NOISE:
+        assert len(mine) + len(theirs) > 2

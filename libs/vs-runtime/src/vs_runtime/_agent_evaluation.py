@@ -104,6 +104,7 @@ from vs_core.api import (
     Transition,
     Within,
     latest_comparisons,
+    moment_of,
     suspension_refusal,
 )
 from vs_decode.api import Unreadable, decode_json
@@ -268,13 +269,14 @@ def _comparison_of(
     """The framework's comparison of a finished candidate with its base, or None while it has none.
 
     Read from core's log of comparisons for the input the submission measured, so the agent is
-    told exactly what core recorded and replays on resume.
+    told exactly what core recorded and replays on resume, and only while its base's samples
+    are still fresh on the run clock.
     """
     job = next((j for j in core.evaluation.jobs if j.submission_id == request_id), None)
     measured = None if job is None else job.plan.measured_input
     if measured is None:
         return None
-    found = latest_comparisons(core.evaluation, scope, [measured])
+    found = latest_comparisons(core.evaluation, scope, [measured], moment_of(core.run))
     return agent_comparison(found[-1]) if found else None
 
 

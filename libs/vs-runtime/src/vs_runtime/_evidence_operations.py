@@ -91,7 +91,12 @@ def _rejected_readings() -> Mapping[str, object]:
 
 
 def reading_mapping(ref: EvidenceRef, evidence: TrustedEvidence) -> Mapping[str, object]:
-    """The one projection of an accepted record into the fields a reader decodes."""
+    """The one projection of an accepted record into the fields a reader decodes.
+
+    The headline metric's value is the one core's ledger states (``ref.reading``): for an
+    official measurement that is the mean of the samples answering it, the value its comparison
+    with the base states, so whoever ranks candidates reads that number and not one run's.
+    """
     partial = evidence.partial_measurement
     progress = None if partial is None else partial.progress
     return {
@@ -103,11 +108,11 @@ def reading_mapping(ref: EvidenceRef, evidence: TrustedEvidence) -> Mapping[str,
         "metrics": tuple(
             {
                 "name": metric.name,
-                "value": metric.value,
+                "value": _stated(ref, metric.name, metric.value, headline=index == 0),
                 "direction": metric.direction or "max",
                 "unit": metric.unit,
             }
-            for metric in evidence.metrics
+            for index, metric in enumerate(evidence.metrics)
         ),
         "partial": None
         if partial is None
@@ -123,6 +128,14 @@ def reading_mapping(ref: EvidenceRef, evidence: TrustedEvidence) -> Mapping[str,
         },
         "feedback": evidence.semantic_summary or "",
     }
+
+
+def _stated(ref: EvidenceRef, name: str, value: float, *, headline: bool) -> float:
+    """A metric's value as core's ledger states it: the headline from ``ref.reading``."""
+    stated = ref.reading
+    if headline and stated is not None and stated.metric == name:
+        return stated.value
+    return value
 
 
 class RetainRevisionOwner:

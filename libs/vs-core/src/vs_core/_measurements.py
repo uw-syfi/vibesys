@@ -7,11 +7,12 @@ receipt. Continuation wakes carry the exact facts before the atomic job update.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from . import _wait_clock
 from ._base_runs import base_of, record_samples, with_base
 from ._comparison import (
+    as_answer,
     moment_of,
 )
 from ._deadlines import resolve_until
@@ -997,34 +998,52 @@ def _side_facts(
     return Proven(job)
 
 
+class _Stored(NamedTuple):
+    """What a job's observation added to the ledger."""
+
+    accepted: tuple[EvidenceRef, ...]
+    """The job's records, as the ledger holds them."""
+    ledger: tuple[EvidenceRef, ...]
+    refused: bool
+    """A repeat of a key came with different content."""
+    measured: tuple[EvidenceRef, ...]
+    """The records new to the ledger as the run reported them, so its samples read the run's
+    own readings and not the answer an official record states (`as_answer`)."""
+
+
 def _store_evidence(
     state: EvaluationState,
     job: OwnedJob | RegisteredOwnedJob,
     event: JobObserved | RegisteredJobObserved,
-) -> tuple[tuple[EvidenceRef, ...], tuple[EvidenceRef, ...], bool]:
+) -> _Stored:
     """Accept evidence keyed by (source request, evidence id).
 
     The same EvidenceId from two jobs is two records. A repeat of one key with
     different content is refused, and the caller reports that refusal instead of
-    dropping it silently.
+    dropping it silently. An official job's benchmark record enters the ledger as the
+    measurement's answer (`as_answer`), and a repeat is compared in that form.
     """
     accepted = list(job.evidence)
     ledger = list(state.evidence)
+    measured: list[EvidenceRef] = []
     refused = False
     for evidence in event.evidence:
         verdict = _evidence(job, event, evidence)
         if not isinstance(verdict, Proven) or not reused_record(state, job, evidence):
             continue
-        incoming = verdict.value
+        reported = verdict.value
+        incoming = as_answer(state, job, reported) if isinstance(job, OwnedJob) else reported
         previous = next((e for e in ledger if e.key == incoming.key), None)
         if previous is None:
             ledger.append(incoming)
             accepted.append(incoming)
+            measured.append(reported)
         elif previous != incoming:
             refused = True
         elif incoming not in accepted:
             accepted.append(incoming)
-    return tuple(accepted), tuple(ledger), refused
+            measured.append(reported)
+    return _Stored(tuple(accepted), tuple(ledger), refused, tuple(measured))
 
 
 def _job_observed(
@@ -1041,7 +1060,7 @@ def _job_observed(
     observation = event.observation
     if observation.resource_id is None:
         return AreaChange(state=state)
-    accepted, ledger, refused = _store_evidence(state, job, event)
+    accepted, ledger, refused, measured = _store_evidence(state, job, event)
     incomplete = not reused_evidence_complete(
         state, job, accepted, terminal=event.observation.terminal
     )
@@ -1088,13 +1107,7 @@ def _job_observed(
         has_facts=event.evaluation_result is not None,
     )
     state = job_budget(state, context, updated, claim, reuse_incomplete=incomplete)
-    state, requests = record_samples(
-        state,
-        context,
-        updated,
-        tuple(e for e in accepted if e not in job.evidence),
-        observation.observed_at,
-    )
+    state, requests = record_samples(state, context, updated, measured, observation.observed_at)
     wake = ContinuationJobsChanged(
         resource_id=observation.resource_id, observation=observation, previous=previous
     )
