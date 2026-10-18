@@ -87,7 +87,7 @@ function ReadyPanel(props: {
     null,
   );
   // A choice is for the kind of line it was made on: a check that starts failing opens it again.
-  const open = chosen?.for === status.open ? chosen.open : status.open;
+  const open = chosen?.for === status.open ? chosen.open : true;
   const blocked = startBlocked(snapshot);
   const line = summary(snapshot.context);
   return (
@@ -127,7 +127,8 @@ export function NewRunScreen(props: {
   const offers = context.harnesses?.for === context.form.machine ? context.harnesses.list : null;
   return (
     <Page
-      width="narrow"
+      width="wide"
+      sideAction
       header={
         <>
           {/* The wordmark sizes to its container's width, so it is not in the centered stack. */}

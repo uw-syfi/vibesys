@@ -36,10 +36,10 @@ test('New run is prefilled from the last run on its machine and starts once the 
   ]) {
     await expect(page.getByText(oldHint, {exact: true})).toHaveCount(0);
   }
-  // All is well: the checks fold into one line, which opens to show each of them.
+  // The checks are visible in the side panel and can be opened on narrow screens.
   await expect(ready(page)).toContainText(/Ready · \d+ checks passed/);
-  await expect(ready(page)).not.toContainText('Agent image');
-  await ready(page).getByRole('button', {name: /Ready/}).click();
+  const toggle = ready(page).getByRole('button', {name: /Ready/});
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
   await expect(ready(page)).toContainText('Agent image');
   await expect(start(page)).not.toHaveAttribute('aria-disabled', 'true');
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);

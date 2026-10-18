@@ -16,6 +16,7 @@ const sheet: SheetEntry[] = [];
 
 const THEMES = ['paper', 'ink'] as const;
 const SIZES = [
+  {width: 800, height: 700},
   {width: 1000, height: 700},
   {width: 1440, height: 900},
 ] as const;
@@ -37,7 +38,8 @@ const STATES: readonly State[] = [
   {
     name: 'checks-open',
     reach: async page => {
-      await ready(page).getByRole('button', {name: /Ready/}).click();
+      const toggle = ready(page).getByRole('button', {name: /Ready/});
+      if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
       await expect(ready(page)).toContainText('Agent image');
     },
   },

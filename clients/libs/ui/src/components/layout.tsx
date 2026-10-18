@@ -69,6 +69,8 @@ export function Reserve(props: {readonly children: ReactNode}): JSX.Element {
  */
 export function Page(props: {
   readonly width?: PageWidth;
+  /** Keep the primary action beside a long form on wide screens. */
+  readonly sideAction?: boolean;
   /** What stays in view above a body that scrolls. */
   readonly header?: ReactNode;
   /** What stays in view below a body that scrolls: the page's primary action. */
@@ -86,7 +88,7 @@ export function Page(props: {
     );
   }
   return (
-    <main className="vs-page" data-fixed-header="">
+    <main className="vs-page" data-fixed-header="" data-side-action={props.sideAction || undefined}>
       <div className="vs-page-content" data-width={width}>
         {props.header === undefined ? null : <div className="vs-page-header">{props.header}</div>}
         <div className="vs-page-scroll">
