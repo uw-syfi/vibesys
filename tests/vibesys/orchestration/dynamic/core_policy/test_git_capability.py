@@ -109,7 +109,8 @@ def test_a_writable_git_workspace_is_told_the_three_way_apply(name: str) -> None
 
 @settings(max_examples=examples(pr=20, nightly=200), deadline=None)
 @given(data=st.data(), template=st.sampled_from(_TEMPLATES))
-@example(data=None, template=PromptTemplate.IMPLEMENT).via("rebase onto a moved main")
+# The reported input: a continued hypothesis told to rebase onto a moved main.
+@example(data=None, template=PromptTemplate.IMPLEMENT)
 @pytest.mark.regression
 def test_no_dynamic_prompt_tells_a_read_only_workspace_to_write_git(
     data: st.DataObject | None, template: PromptTemplate
