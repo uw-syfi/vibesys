@@ -76,7 +76,10 @@ _SCENARIOS = tuple(
 # loading neither hmac nor secrets; main already loaded 355 before it.
 # server.host_run_dashboard (the run tile's contracts, split from host_api to hold its file-length
 # ceiling) adds 1: Pydantic and the standard library only.
-_MODULE_CEILING = 357
+# server.host_run_reader (the run.reader messages) and server.host_helper_readers (finding or
+# starting the read-only server Chat reads an ended run through) add 2: the standard library,
+# Pydantic and light server modules only.
+_MODULE_CEILING = 359
 """The most modules a helper may load to answer ``hello``; lower it as the helper sheds imports."""
 _HELLO = {
     "type": "hello",
