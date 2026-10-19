@@ -16,7 +16,8 @@
       "helper-run-summary-gated",
       "helper-compute-gated",
       "helper-agent-logins-gated",
-      "helper-usage-window-gated"
+      "helper-usage-window-gated",
+      "helper-examples-destination-gated"
     ],
     "registry": [
       "helper-instances-empty",
@@ -34,7 +35,8 @@
       "helper-run-history-skips"
     ],
     "examples": [
-      "helper-examples-unavailable"
+      "helper-examples-unavailable",
+      "helper-examples-destination-unavailable"
     ],
     "logs": [
       "helper-logs-list",
