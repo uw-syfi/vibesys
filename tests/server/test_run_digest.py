@@ -16,7 +16,6 @@ from tests.server.host_helper_support import RUN_ID, fake_host, project_with_run
 from server.host_api import (
     RUN_EVENTS_FILE,
     RunClosing,
-    RunDashboard,
     RunDigest,
     RunDigestUnreadable,
     RunEndingFact,
@@ -27,6 +26,7 @@ from server.host_api import (
 )
 from server.host_helper_os import FileProjects
 from server.host_helper_requests import answer
+from server.host_run_dashboard import RunDashboard
 from server.run_digest import digest_journal
 from vs_project.api import Project
 from vs_project.api.testing import FakeGitRepositories

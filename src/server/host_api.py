@@ -18,8 +18,7 @@ Public surface: ``PROTOCOL_VERSION``, ``RECORD_VERSION``,
 ``INSTANCE_ID_PATTERN``, ``InstanceId``, ``RunId``, ``RunStatus``,
 ``StartupStage``, ``StartupProgress``, ``StartupFact``, ``FailureReason``,
 ``RunPhase``, ``InstanceStatus``, ``RunEndOutcome``, ``EndRecord``, ``RunEndingFact``, ``RunClosing``,
-``RunDigest``, ``RunDigestUnreadable``, ``RunDashboard``, ``IdeaPoint``, ``IdeaVerdict``,
-``RunAttention``, ``DASHBOARD_MAX_POINTS``, ``REPEATED_FAILURE_AFTER``, ``STALLED_AFTER_S``, ``one_line``,
+``RunDigest``, ``RunDigestUnreadable``, ``one_line``,
 ``END_REASON_MAX_CHARACTERS``, ``PauseCause``,
 ``LiveInstanceRecord``, ``UnreadableRecord``, ``parse_record``,
 ``InstanceList``, ``StopOutcome``, ``StopRoute``, ``InstanceStopResult``,
@@ -28,23 +27,22 @@ Public surface: ``PROTOCOL_VERSION``, ``RECORD_VERSION``,
 the log streams' ``LogStream``, ``LogStreamOutcome``, ``LogChunk``, ``LogPipeSpan``,
 ``LogPipe``, ``LogOffset``, ``LogTail`` and limits
 (``LOGS_READ_MAX_BYTES``, ``LOGS_READ_MIN_BYTES``, ``LOGS_WAIT_MAX_MS``),
-``HELPER_PROTOCOL_VERSIONS``, ``HELPER_REQUEST_FEATURES``,
-``HELPER_FIELD_FEATURES``, ``request_features``, ``HelperFeature``,
-``HelperRequest`` (``parse_helper_request``) and its members, the run history
-read's limit (``RUN_EVENTS_READ_MAX_BYTES``), ``RUN_EVENTS_FILE``, the run history's messages
-(``server.host_run_events``), the run summary's messages (``server.host_run_summary``), the
+``HELPER_PROTOCOL_VERSIONS``, ``HELPER_REQUEST_FEATURES``, ``HELPER_FIELD_FEATURES``,
+``request_features``, ``HelperFeature``, ``HelperRequest`` (``parse_helper_request``) and its
+members, the run history read's limit (``RUN_EVENTS_READ_MAX_BYTES``), ``RUN_EVENTS_FILE``, the run
+history's messages (``server.host_run_events``), the run summary's messages
+(``server.host_run_summary``), the run tile's dashboard (``server.host_run_dashboard``), the
 machine facts (``server.host_machine_facts``: ``Accelerator``, ``Gpu``, ``Hardware``,
 ``DockerReachable``, ``DockerUnreachable``, ``MachineCheckout``, ``RunCounts``,
-``MachineDescription``) and checkout inspection (``MIN_CHECKOUT_VERSION``,
-``CheckoutFound``, ``CheckoutNotFound``, ``CheckoutTooOld``, ``CheckoutInspection``), ``HelperMessage``
-and its members, ``HelperErrorCode``, the harness choice (``HarnessOption``,
-``HarnessChoice``, ``RoleAgents``, and the run flags ``CLI_PROVIDER_FLAG``, ``MODEL_FLAG``,
-``ROLE_PROVIDER_FLAG``, ``UNVETTED_MODEL_FLAG``, ``RUN_ENVIRONMENT_FLAG``, ``SLURM_CONFIG_FLAG``),
-where results are measured, compute settings and agent logins (``server.host_compute``,
-``server.host_agent_logins``), and a relayed channel's end: ``ChannelEndOutcome``,
-``ChannelEnd``. An undeliverable successful start whose compensating stop cannot
-be proved terminal reports ``RunStartCompensationFailure`` on the helper's
-diagnostic stream.
+``MachineDescription``) and checkout inspection (``MIN_CHECKOUT_VERSION``, ``CheckoutFound``,
+``CheckoutNotFound``, ``CheckoutTooOld``, ``CheckoutInspection``), ``HelperMessage`` and its
+members, ``HelperErrorCode``, the harness choice (``HarnessOption``, ``HarnessChoice``,
+``RoleAgents``, and the run flags ``CLI_PROVIDER_FLAG``, ``MODEL_FLAG``, ``ROLE_PROVIDER_FLAG``,
+``UNVETTED_MODEL_FLAG``, ``RUN_ENVIRONMENT_FLAG``, ``SLURM_CONFIG_FLAG``), where results are
+measured, compute settings and agent logins (``server.host_compute``,
+``server.host_agent_logins``), and a relayed channel's end: ``ChannelEndOutcome``, ``ChannelEnd``.
+An undeliverable successful start whose compensating stop cannot be proved terminal reports
+``RunStartCompensationFailure`` on the helper's diagnostic stream.
 
 The helper's messages follow ``docs/contributing/desktop-connection.md``
 ("Handshake and versioning"): strict within a negotiated version, additive
@@ -63,7 +61,6 @@ if TYPE_CHECKING:
 
 from pydantic import (
     AfterValidator,
-    AwareDatetime,
     BaseModel,
     ConfigDict,
     Field,
@@ -108,6 +105,7 @@ from server.host_examples import CreatedProject, ExampleList
 from server.host_harness import HarnessChoice, HarnessOption, generation_conflict
 from server.host_machine_facts import MachineDescription
 from server.host_preflight import Backend, Check, RoleName, RunOptions
+from server.host_run_dashboard import RunAttention, RunClosing, RunDashboard
 from server.host_run_events import (
     RunsEventsForSpanReply,
     RunsEventsForSpanRequest,
@@ -873,11 +871,10 @@ class RunsListRequest(HelperRequestBase):
     type: Literal["runs.list"] = "runs.list"
     project: str
     digest_runs: Annotated[tuple[RunId, ...], Field(max_length=RUN_DIGEST_MAX_RUNS)] | None = None
-    """The runs to read a ``digest`` of, which costs a pass over each one's journal, so a
-    client names only the runs it shows. Sent only after ``hello`` returned ``run_digest``."""
+    """The runs to read a ``digest`` of (a pass over each journal), so a client names only the runs
+    it shows. Sent only after ``hello`` returned ``run_digest``."""
     with_dashboard: bool | None = None
-    """With ``digest_runs``: also each digest's ``dashboard`` and each run's ``attention``, read in
-    the same pass. Sent only after ``hello`` returned ``run_dashboard``."""
+    """Also each digest's ``dashboard`` and run's ``attention``; needs ``run_dashboard``."""
 
 
 class ResumeRun(BaseModel):
@@ -1347,88 +1344,6 @@ class TasksListReply(HelperReplyBase):
     tasks: TaskList
 
 
-class RunClosing(StrEnum):
-    """The journal's last word on a run: the terminal event it ends with, if it has one."""
-
-    FINISHED = "finished"
-    FAILED = "failed"
-    INTERRUPTED = "interrupted"
-
-
-class IdeaVerdict(StrEnum):
-    """What a run's idea came to, as the run page's chart marks it."""
-
-    KEPT = "kept"
-    """It passed and beat every passed idea before it and the input: it sits on the step line."""
-    NOT_BETTER = "not_better"
-    """It passed and did not beat the best so far."""
-    FAILED = "failed"
-    """Every attempt of the idea failed."""
-    RUNNING = "running"
-    """An attempt of the idea is still going: its verdict is not decided."""
-
-
-class IdeaPoint(BaseModel):
-    """One idea of a run on the performance chart: its result against the input and its verdict.
-
-    ``ratio`` is worded like ``RunDigest.adopted_ratio`` (an improvement over the input, for a
-    ``min`` objective the input's value over the result's); ``None`` when the idea has no
-    measurement against the input (it failed before one, or still works).
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    ratio: float | None
-    verdict: IdeaVerdict
-
-
-DASHBOARD_MAX_POINTS: Final = 64
-"""The most ideas one ``RunDashboard`` carries, so a ``runs.list`` of ``RUN_DIGEST_MAX_RUNS`` runs
-stays far under ``HELPER_LINE_MAX_BYTES``."""
-
-
-class RunDashboard(BaseModel):
-    """What a run's tile draws, folded from the journal in the digest's pass.
-
-    ``points`` are the run page's chart (``performanceFold``): the ideas in the order their results
-    landed (the idea's measurement time, else when its last attempt ended or began; ties in the
-    order the ideas began), each with its verdict. A run with more than ``DASHBOARD_MAX_POINTS``
-    ideas keeps the newest points of the verdicts that matter to the line: the oldest ideas that
-    are not ``kept`` go first, then the oldest ``kept`` ones, and ``points_omitted`` counts the
-    ideas left out (the ideas count is ``len(points) + points_omitted``). ``failed_streak`` counts
-    the ideas at the end of the order that failed, with none passing since (a running idea is
-    skipped), over every idea and not only the ones kept. ``last_event_at`` is the journal's last
-    event, the only time fact a stalled run is judged from (``RunAttention``).
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    points: Annotated[tuple[IdeaPoint, ...], Field(max_length=DASHBOARD_MAX_POINTS)]
-    points_omitted: NonNegativeInt
-    failed_streak: NonNegativeInt
-    last_event_at: AwareDatetime | None
-
-
-class RunAttention(StrEnum):
-    """Why a run needs its user, judged from its journal, its server and the time now."""
-
-    NONE = "none"
-    FAILED = "failed"
-    """The run ended in failure: its terminal event, or its server's phase, says so."""
-    REPEATED_FAILURE = "repeated_failure"
-    """The run still works and its last ``REPEATED_FAILURE_AFTER`` ideas all failed."""
-    STALLED = "stalled"
-    """A server drives the run and its journal has not moved for ``STALLED_AFTER_S``."""
-
-
-REPEATED_FAILURE_AFTER: Final = 3
-"""The ideas in a row that fail before a working run needs its user."""
-
-STALLED_AFTER_S: Final = 30 * 60
-"""The seconds a run's live server may leave its journal silent before the run is stalled: a
-benchmark or a long agent turn keeps writing output, so half an hour of silence is not work."""
-
-
 class RunDigest(BaseModel):
     """What a run's journal says at a glance, for a list row; never a replay of the run.
 
@@ -1438,13 +1353,12 @@ class RunDigest(BaseModel):
     ``None`` when the run adopted nothing. The best raw reading of a gate is not it: that may be
     an idea that later failed. ``best_so_far_ratio`` is what the page headlines before the run has
     opened an adoption (while it works): the best idea that passed and beat the input, worded as an
-    improvement the same way; ``None`` before one does and once an adoption exists. ``ideas`` is ``None`` for a journal
-    that predates the run trace (``TraceFormat.PREDATES_TRACE``): it records rounds, not ideas,
-    so no count is true. ``duration_s`` runs from the
-    journal's first event to the last step it recorded; ``None`` for a run with no events.
-    ``ending`` is the run's ending record and ``closing`` its terminal event: both ``None``
-    for a run still going or one whose server died without a word, which is how a run's
-    ending is known after its registry tombstone expired (a day).
+    improvement the same way; ``None`` before one does and once an adoption exists. ``ideas`` is
+    ``None`` for a journal that predates the run trace (``TraceFormat.PREDATES_TRACE``): it
+    records rounds, not ideas, so no count is true. ``duration_s`` runs from the journal's first
+    event to the last step it recorded; ``None`` for a run with no events. ``ending`` is the run's
+    ending record and ``closing`` its terminal event: both ``None`` for a run still going or one
+    whose server died without a word; they are how an ending is known once its tombstone expired.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -1457,8 +1371,7 @@ class RunDigest(BaseModel):
     ending: RunEndingFact | None
     closing: RunClosing | None
     dashboard: Annotated[RunDashboard | None, Field(exclude_if=lambda each: each is None)] = None
-    """The tile's data, present when ``runs.list`` asked ``with_dashboard`` (feature ``run_dashboard``);
-    absent otherwise, so a strict client that did not ask never sees it."""
+    """The tile's data when ``runs.list`` asked ``with_dashboard``; absent otherwise."""
 
 
 class RunDigestUnreadable(BaseModel):
@@ -1487,11 +1400,10 @@ class RunSummary(BaseModel):
         Annotated[RunDigest | RunDigestUnreadable, Field(discriminator="kind")] | None,
         Field(exclude_if=lambda digest: digest is None),
     ] = None
-    """What the run's journal says, for each run the request named in ``digest_runs`` (feature
-    ``run_digest``); absent for the others, so a strict client that did not ask never sees it."""
+    """What the journal says of each run named in ``digest_runs`` (feature ``run_digest``); absent for
+    the others, so a strict client that did not ask never sees it."""
     attention: Annotated[RunAttention | None, Field(exclude_if=lambda each: each is None)] = None
-    """Why the run needs its user, for each digested run when the request asked ``with_dashboard``
-    (feature ``run_dashboard``); absent otherwise."""
+    """Why the run needs its user when ``runs.list`` asked ``with_dashboard``; absent otherwise."""
 
 
 class RunList(BaseModel):

@@ -1677,13 +1677,12 @@ export interface RunSummary {
  * ``None`` when the run adopted nothing. The best raw reading of a gate is not it: that may be
  * an idea that later failed. ``best_so_far_ratio`` is what the page headlines before the run has
  * opened an adoption (while it works): the best idea that passed and beat the input, worded as an
- * improvement the same way; ``None`` before one does and once an adoption exists. ``ideas`` is ``None`` for a journal
- * that predates the run trace (``TraceFormat.PREDATES_TRACE``): it records rounds, not ideas,
- * so no count is true. ``duration_s`` runs from the
- * journal's first event to the last step it recorded; ``None`` for a run with no events.
- * ``ending`` is the run's ending record and ``closing`` its terminal event: both ``None``
- * for a run still going or one whose server died without a word, which is how a run's
- * ending is known after its registry tombstone expired (a day).
+ * improvement the same way; ``None`` before one does and once an adoption exists. ``ideas`` is
+ * ``None`` for a journal that predates the run trace (``TraceFormat.PREDATES_TRACE``): it
+ * records rounds, not ideas, so no count is true. ``duration_s`` runs from the journal's first
+ * event to the last step it recorded; ``None`` for a run with no events. ``ending`` is the run's
+ * ending record and ``closing`` its terminal event: both ``None`` for a run still going or one
+ * whose server died without a word; they are how an ending is known once its tombstone expired.
  */
 export interface RunDigest {
   kind: Kind5;

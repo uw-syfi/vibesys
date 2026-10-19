@@ -23,16 +23,10 @@ from pydantic import BaseModel
 from tests.server.host_helper_support import RUN_ID, fake_host, project_with_run
 
 from server.host_api import (
-    DASHBOARD_MAX_POINTS,
     HELPER_LINE_MAX_BYTES,
-    REPEATED_FAILURE_AFTER,
     RUN_EVENTS_FILE,
-    STALLED_AFTER_S,
     FailureReason,
-    IdeaVerdict,
-    RunAttention,
     RunClosing,
-    RunDashboard,
     RunDigest,
     RunEndingFact,
     RunEndOutcome,
@@ -43,6 +37,14 @@ from server.host_api import (
     request_features,
 )
 from server.host_helper_requests import answer
+from server.host_run_dashboard import (
+    DASHBOARD_MAX_POINTS,
+    REPEATED_FAILURE_AFTER,
+    STALLED_AFTER_S,
+    IdeaVerdict,
+    RunAttention,
+    RunDashboard,
+)
 from server.run_digest import digest_journal, run_attention
 from vs_project.api import Project
 from vs_sim.api.testing import SimNetwork, SimThreads
@@ -246,8 +248,10 @@ def test_every_kept_idea_beats_the_kept_ideas_before_it(ideas: list[_Idea]) -> N
 
     assert digest.dashboard is not None
     kept = [p.ratio for p in digest.dashboard.points if p.verdict is IdeaVerdict.KEPT]
-    assert all(ratio is not None and ratio > 1.0 for ratio in kept)
-    assert kept == sorted(set(kept))
+    ratios = [ratio for ratio in kept if ratio is not None]
+    assert len(ratios) == len(kept)
+    assert all(ratio > 1.0 for ratio in ratios)
+    assert ratios == sorted(set(ratios))
 
 
 @given(

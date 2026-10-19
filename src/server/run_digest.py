@@ -34,19 +34,21 @@ from typing import TYPE_CHECKING, Final, NamedTuple
 from pydantic import JsonValue, TypeAdapter, ValidationError
 
 from server.host_api import (
+    RunClosing,
+    RunDigest,
+    RunEndingFact,
+    RunEndOutcome,
+    RunPhase,
+    RunStatus,
+)
+from server.host_run_dashboard import (
     DASHBOARD_MAX_POINTS,
     REPEATED_FAILURE_AFTER,
     STALLED_AFTER_S,
     IdeaPoint,
     IdeaVerdict,
     RunAttention,
-    RunClosing,
     RunDashboard,
-    RunDigest,
-    RunEndingFact,
-    RunEndOutcome,
-    RunPhase,
-    RunStatus,
 )
 from server.host_run_summary import TraceFormat, trace_format
 from vs_decode.api import Unreadable, decode_json
