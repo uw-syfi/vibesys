@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -169,6 +170,83 @@ def test_slow_commits_in_one_settle_do_not_starve_the_lease(cost: float) -> None
     )
     store = _SlowStateStore(cost)
     host = scripted_host(Launch(one_step, OneStepConfig()), _answer, harness, {}, store=store)
+    store.clock = host.clock
+
+    run = host.run()
+
+    assert run.halted is None
+    assert run.core.run.status == RunStatus.TERMINAL
+
+
+class FanOutConfig(Value):
+    """How many workspaces the fan-out search opens at once."""
+
+    width: int
+
+
+@search("fan-out", config=FanOutConfig)
+async def fan_out(ctx: Flow, config: FanOutConfig) -> None:
+    """Open ``width`` workspaces at once, so their requests are all prepared in one step."""
+
+    async def open_one(task: Flow, index: int) -> None:
+        async with task.workspaces.open(
+            attempt=AttemptId(root=f"attempt:{index}"),
+            item=ItemId(root=f"item:{index}"),
+            plan=WorkspacePlan(mode=WorkspaceMode.ISOLATED_CHILD, base=task.facts.baseline),
+            budget=AttemptBudget(),
+        ):
+            pass
+
+    async with ctx.group() as tasks:
+        for index in range(config.width):
+            tasks.start(f"open:{index}", open_one, index)
+
+
+def _answer_each(request: object, core: object) -> Succeeded:
+    """Answer as `_answer`, with a workspace of its own for every request."""
+    del core
+    if isinstance(request, EnsureWorkspace):
+        identity = request.request_id.root if request.request_id is not None else "workspace"
+        return Succeeded(resource_id=ResourceId(root=identity), revision=request.plan.base)
+    return Succeeded()
+
+
+_WIDTH = 8
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="the starts of one settle commit back to back with no lease upkeep between them",
+)
+@settings(max_examples=examples(pr=3, nightly=20), deadline=None, derandomize=True, database=None)
+@given(cost=st.floats(min_value=LEASE / 5, max_value=LEASE / 4))
+def test_a_burst_of_slow_dispatch_commits_does_not_starve_the_lease(cost: float) -> None:
+    """``_WIDTH`` requests started in one settle, each start a quarter-lease commit, keep the lease.
+
+    Each start commits its authorization before its executor runs, and starts run back to back
+    while slots are free (a cancellation needs no slot at all), so the starts alone hold the loop
+    for longer than the lease unless it is renewed between them.
+    """
+    harness = Harness(
+        registry=OperationRegistry(()),
+        facts=FACTS,
+        limits=sample_limits(
+            max_attempts=_WIDTH + 1,
+            max_turns=2,
+            max_parallel=_WIDTH,
+            request_retries=sample_retries(2),
+        ),
+        envelope_type=RunEnvelope[FlowState],
+    )
+    store = _SlowStateStore(cost)
+    host = scripted_host(
+        Launch(fan_out, FanOutConfig(width=_WIDTH)),
+        _answer_each,
+        harness,
+        {},
+        HostOptions(max_concurrent=_WIDTH),
+        store=store,
+    )
     store.clock = host.clock
 
     run = host.run()
