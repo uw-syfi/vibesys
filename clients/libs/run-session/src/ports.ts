@@ -63,6 +63,20 @@ export interface WebChatOptions {
 
 export type ChatResult = NonNullable<ProtocolResponse['chat']>;
 
+/** The provider and model a new chat thread runs, a pair from the host's harness catalogue. */
+export interface ChatHarness {
+  readonly provider: string;
+  readonly model: string;
+}
+
+export type ChatThreadResult = NonNullable<ProtocolResponse['chat_thread']>;
+
+/** The created thread and its authoritative response events, before the session folds them. */
+export interface ChatThreadResponse {
+  readonly thread: ChatThreadResult;
+  readonly events: readonly RunEvent[];
+}
+
 /** The answer and its authoritative response events, before the session folds them. */
 export interface ChatResponse {
   readonly chat: ChatResult;
@@ -84,6 +98,11 @@ export interface RunConnection {
   ): Promise<IterationLoad>;
   /** Ask the run's experiment-chat agent, retaining events for the session fold. */
   ask(text: string, options?: WebChatOptions): Promise<ChatResponse>;
+  /** Create a chat thread; `harness` null runs the run's own provider and model. */
+  createChatThread(
+    harness: ChatHarness | null,
+    options?: {readonly signal?: AbortSignalLike},
+  ): Promise<ChatThreadResponse>;
   /** Deliver one lifecycle command and resolve its wire response to a semantic outcome. */
   command(input: RunCommand): Promise<RunCommandOutcome>;
   /** Subscribe once; settles when the first subscription does. */

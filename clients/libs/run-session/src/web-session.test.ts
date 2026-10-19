@@ -79,6 +79,10 @@ class PendingHandleConnection implements RunConnection {
     return 'current';
   }
   redialControls(): void {}
+  createChatThread(): Promise<never> {
+    return Promise.reject(new Error('unused'));
+  }
+
   ask(): Promise<never> {
     return Promise.reject(new Error('Chat is not used in this lifecycle scenario'));
   }
@@ -135,6 +139,10 @@ class FaultBeforeSnapshotConnection implements RunConnection {
     return 'transitioning';
   }
   redialControls(): void {}
+  createChatThread(): Promise<never> {
+    return Promise.reject(new Error('unused'));
+  }
+
   ask(): Promise<never> {
     return Promise.reject(new Error('Chat is not used in this lifecycle scenario'));
   }
@@ -210,6 +218,10 @@ class FailingRecoveryConnection implements RunConnection {
     const failure = this.redialFailures.shift();
     if (failure !== undefined) throw failure;
   }
+  createChatThread(): Promise<never> {
+    return Promise.reject(new Error('unused'));
+  }
+
   ask(): Promise<never> {
     return Promise.reject(new Error('Chat is not used in this lifecycle scenario'));
   }

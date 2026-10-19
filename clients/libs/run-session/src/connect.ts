@@ -107,6 +107,19 @@ function openRunConnection(
       }
     },
     ask: (text, options = {}) => askRun(transport, text, options),
+    async createChatThread(harness, options = {}) {
+      const response = await transport.request(
+        {type: 'query.chat_thread_create', ...(harness === null ? {} : {harness})},
+        options.signal === undefined ? undefined : {signal: options.signal},
+      );
+      if (response.ok !== true || response.chat_thread == null) {
+        throw new ServerError(
+          response.error ?? 'Server did not return the new chat thread',
+          response.diagnostic ?? null,
+        );
+      }
+      return {thread: response.chat_thread, events: response.events ?? []};
+    },
     async command(input) {
       const response = await transport.request(input);
       const acknowledgement = response.ack;
