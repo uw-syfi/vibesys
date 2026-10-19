@@ -60,7 +60,7 @@ clients/
                                                                                     machine
   libs/settings/    @vibesys/settings         settings store, atomic files       -> hosts, runs
   features/<x>/     @vibesys/feature-<x>      hosts, run-control (main process only), app-shell,
-                                              settings, machines, new-run, run-page
+                                              settings, machines, new-run, run-page, usage
   apps/desktop-main      @vibesys/app-desktop-main      composition only (Electron main), and the
                                                         sandboxed preloads
   apps/desktop-shell     @vibesys/app-desktop-shell     composition only: the desktop

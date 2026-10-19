@@ -37,6 +37,12 @@
       "path": "../../features/new-run/tsconfig.state.json"
     },
     {
+      "path": "../../features/usage/tsconfig.renderer.json"
+    },
+    {
+      "path": "../../features/usage/tsconfig.state.json"
+    },
+    {
       "path": "../../features/run-page/tsconfig.renderer.json"
     },
     {

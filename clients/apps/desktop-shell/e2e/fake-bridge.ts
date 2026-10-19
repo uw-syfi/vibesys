@@ -61,6 +61,9 @@ export type NewRunMethods =
   | 'copyOut'
   | 'startRun';
 
+/** What `installFakeUsage` provides: what a project's runs spent in a window. */
+export type UsageMethods = 'usageWindow';
+
 /** What `installFakeMachineSettings` provides: each machine's clusters, clouds and agent logins. */
 export type MachineSettingsMethods =
   | 'compute'
@@ -93,6 +96,13 @@ export interface FakeBridgeSeed {
    * `<host>|<project>`; a project not named is one the machine cannot list.
    */
   readonly projectRuns?: Readonly<Record<string, readonly unknown[]>>;
+  /**
+   * What each project's helper answers a usage question with (`usage.window`), by `<host>|<project>`:
+   * the figures as the app reads them (`UsageWindowEntry`), `'unsupported'` for a helper that
+   * predates the question, or `'failed'` for one that cannot answer. A project not named, and a
+   * world without `usage`, answer as a helper that predates it.
+   */
+  readonly usage?: Readonly<Record<string, unknown>>;
   /** The saved machines, as `hosts.json` and This Mac list them. */
   readonly machines?: readonly {host: string; label: string; checkout: string}[];
   /** What each machine's facts say, by host; a machine not named here is ready with `facts`. */
@@ -303,6 +313,35 @@ export function installFakeProjectRuns(seed: FakeBridgeSeed): void {
       );
     },
   });
+}
+
+/**
+ * The usage part of the Fake, as a further init script after `installFakeBridge`: each project's
+ * answer to what its runs spent (`seed.usage`), and the questions asked, in `fakeHost.usageAsked`.
+ */
+export function installFakeUsage(seed: FakeBridgeSeed): void {
+  const answers = seed.usage ?? {};
+  const asked: unknown[] = [];
+  Object.assign((window as unknown as {fakeHost: object}).fakeHost, {usageAsked: asked});
+  Object.assign((window as unknown as {vibesysWelcome: object}).vibesysWelcome, {
+    usageWindow: (
+      host: string,
+      project: string,
+      runIds: readonly string[],
+      since: number,
+      until: number,
+    ) => {
+      asked.push({host, project, runIds, since, until});
+      const answer = answers[`${host}|${project}`] ?? 'unsupported';
+      if (answer === 'failed') {
+        return Promise.resolve({ok: false, error: 'Could not read usage', authNeeded: false});
+      }
+      return Promise.resolve({
+        ok: true,
+        value: answer === 'unsupported' ? {kind: 'unsupported'} : {kind: 'usage', usage: answer},
+      });
+    },
+  } satisfies FakeProvides<UsageMethods>);
 }
 
 /**

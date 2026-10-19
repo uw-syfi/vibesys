@@ -13,6 +13,7 @@ import {roleName} from '@vibesys/contracts';
 import type {UsageRecord} from '@vibesys/contracts/host-helper';
 import {totalTokens} from '@vibesys/run-state';
 import {
+  compactTokens,
   dimensionValue,
   foldUsage,
   type UsageDimension,
@@ -23,7 +24,7 @@ import {
 import {type IdeaRow, ideaRowsById} from './ideas-view.js';
 import {roleSeries, SERIES_SLOTS} from './role-series.js';
 import type {RunModel} from './run-model.js';
-import {compactTokens, type TokensReading, tokensReading, tokensTitle} from './token-words.js';
+import {type TokensReading, tokensReading, tokensTitle} from './token-words.js';
 
 /** What the chart and the table's share count: the cost, or the chosen kinds of tokens. */
 export type UsageMetric = 'cost' | 'tokens';

@@ -22,11 +22,13 @@ import {
   installFakeMachines,
   installFakeNewRun,
   installFakeProjectRuns,
+  installFakeUsage,
   installFakeWindows,
   installRequestBound,
   type MachineSettingsMethods,
   type MachinesMethods,
   type NewRunMethods,
+  type UsageMethods,
   type WindowsMethods,
 } from './fake-bridge.js';
 import {type FixtureServerMethods, installFakeFixtureServer} from './fake-fixture-server.js';
@@ -55,6 +57,7 @@ type ProvidedByWorld =
   | MachinesMethods
   | MachineSettingsMethods
   | NewRunMethods
+  | UsageMethods
   | WindowsMethods
   | RunMethods
   | FixtureServerMethods;
@@ -194,6 +197,7 @@ export function fixtureScripts(fixture: RunFixture, options: OpenOptions = {}): 
     script(installFakeMachineSettings, seed),
     script(installFakeProjectRuns, seed),
     script(installFakeNewRun, seed),
+    script(installFakeUsage, seed),
     script(installFakeWindows, undefined),
     script(installFakeRun, {streams: [], text: {}}),
     script(installFakeFixtureServer, {

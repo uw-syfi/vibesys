@@ -4,6 +4,7 @@
  */
 export {isInstanceId, isRunId, isTaskName} from './ids.js';
 export {
+  knownProjects,
   type RecentRun,
   type RecentStatus,
   recentRunKey,

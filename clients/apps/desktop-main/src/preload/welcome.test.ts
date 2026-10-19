@@ -145,6 +145,10 @@ function cases(random: Seeded): Case[] {
     ],
     [bridge => bridge.projectRuns(key, path), {kind: 'project-runs', host, project: path}],
     [
+      bridge => bridge.usageWindow(key, path, [name], 1_000, 2_000),
+      {kind: 'usage-window', host, project: path, runIds: [name], since: 1_000, until: 2_000},
+    ],
+    [
       bridge => bridge.readSpan(key, path, name, 'op:turn', 1, 100),
       {kind: 'read-span', host, project: path, runId: name, spanId: 'op:turn', from: 1, max: 100},
     ],

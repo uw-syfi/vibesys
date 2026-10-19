@@ -2,7 +2,7 @@ import {describe, expect, test} from 'bun:test';
 import type {HostListing, HostRun} from '@vibesys/hosts';
 import {type RecentRun, recentRunKey} from '@vibesys/runs';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
-import {recentStatus} from './recent-status.js';
+import {knownProjects, recentStatus} from './recent-status.js';
 
 const RECENT: RecentRun = {
   host: 'ssh:gpu',
@@ -157,5 +157,29 @@ describe('recentStatus', () => {
       status: null,
       reason: null,
     });
+  });
+});
+
+describe('knownProjects', () => {
+  test('names each project once: live servers, ended ones, then recent runs on the host', () => {
+    const at = (projectRoot: string, id: number): HostRun => ({
+      ...server(id, id, 'running'),
+      projectRoot,
+    });
+    const listing: HostListing = {
+      kind: 'listed',
+      host: 'ssh:gpu',
+      live: [at('/a', 1), at('/b', 2)],
+      ended: [at('/b', 3), at('/c', 4), at('', 5)],
+      unreadable: [],
+      unverified: [],
+    };
+    const recent: RecentRun[] = [
+      {...RECENT, project: '/d'},
+      {...RECENT, host: 'local', project: '/elsewhere'},
+      {...RECENT, project: '/a'},
+    ];
+    expect(knownProjects(listing, recent, 'ssh:gpu')).toEqual(['/a', '/b', '/c', '/d']);
+    expect(knownProjects(undefined, recent, 'local')).toEqual(['/elsewhere']);
   });
 });

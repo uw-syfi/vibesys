@@ -102,3 +102,22 @@ export function suggestProjects(
   for (const run of recent) if (run.host === host) add(run.project);
   return projects;
 }
+
+/**
+ * Every project directory the app has met on `host`, each once: those of its live servers, its
+ * ended ones the registry still keeps, then its recent runs. A machine lists runs project by
+ * project, so these are the projects a question across runs asks of it.
+ */
+export function knownProjects(
+  listing: HostListing | undefined,
+  recent: readonly RecentRun[],
+  host: HostKey,
+): string[] {
+  const projects = new Set<string>();
+  if (listing?.kind === 'listed') {
+    for (const run of [...listing.live, ...listing.ended]) projects.add(run.projectRoot);
+  }
+  for (const run of recent) if (run.host === host) projects.add(run.project);
+  projects.delete('');
+  return [...projects];
+}

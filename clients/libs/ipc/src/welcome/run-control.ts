@@ -10,6 +10,8 @@ import {
   hostFromKey,
   type ListedRun,
   type RunDigestsReply,
+  type UsageWindowOutcome,
+  usageWindowRefusal,
 } from '@vibesys/hosts';
 import {exactResumeRunId, type ResumeRunId} from '@vibesys/runs';
 import type {WelcomeResult} from './types.js';
@@ -25,6 +27,7 @@ export const RUN_CONTROL_CHANNELS = {
   readSpan: 'vibesys:welcome:read-span',
   runDigests: 'vibesys:welcome:run-digests',
   projectRuns: 'vibesys:welcome:project-runs',
+  usageWindow: 'vibesys:welcome:usage-window',
 } as const;
 
 /** The most runs one digest request may name (the helper's bound). */
@@ -172,6 +175,18 @@ export interface RunControlWelcomeBridge {
   ): Promise<WelcomeResult<RunDigestsReply>>;
   /** Every run of `project` on `host`, newest first, before any digest is read. */
   projectRuns(host: HostKey, project: string): Promise<WelcomeResult<readonly ListedRun[]>>;
+  /**
+   * What `runIds` of `project` on `host` spent in `[since, until)`, both in milliseconds
+   * (`usage.window`, feature `usage_window`); or that this host's VibeSys does not offer it.
+   * `until` is "now" for the rate: the view names it.
+   */
+  usageWindow(
+    host: HostKey,
+    project: string,
+    runIds: readonly string[],
+    since: number,
+    until: number,
+  ): Promise<WelcomeResult<UsageWindowOutcome>>;
 }
 
 export type RunControlRequest =
@@ -219,7 +234,15 @@ export type RunControlRequest =
       readonly project: string;
       readonly runIds: readonly string[];
     }
-  | {readonly kind: 'project-runs'; readonly host: HostId; readonly project: string};
+  | {readonly kind: 'project-runs'; readonly host: HostId; readonly project: string}
+  | {
+      readonly kind: 'usage-window';
+      readonly host: HostId;
+      readonly project: string;
+      readonly runIds: readonly string[];
+      readonly since: number;
+      readonly until: number;
+    };
 
 function forceStop(value: unknown): boolean {
   if (typeof value !== 'boolean') throw new Error('force stop must be a boolean');
@@ -259,6 +282,13 @@ function runIds(value: unknown): string[] {
     throw new Error(`name at most ${RUN_DIGESTS_MAX} runs`);
   }
   return value.map(each => exactResumeRunId(each));
+}
+
+function instant(value: unknown, which: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error(`the usage window's ${which} must be a time in milliseconds`);
+  }
+  return value;
 }
 
 /** The typed request on `channel` with `args`; throws naming the first invalid value. */
@@ -321,5 +351,20 @@ export function parseRunControlRequest(
       };
     case RUN_CONTROL_CHANNELS.projectRuns:
       return {kind: 'project-runs', host: hostFromKey(first), project: project(second)};
+    case RUN_CONTROL_CHANNELS.usageWindow: {
+      const ids = runIds(third);
+      const since = instant(fourth, 'start');
+      const until = instant(fifth, 'end');
+      const refusal = usageWindowRefusal(ids, since, until);
+      if (refusal !== null) throw new Error(refusal);
+      return {
+        kind: 'usage-window',
+        host: hostFromKey(first),
+        project: project(second),
+        runIds: ids,
+        since,
+        until,
+      };
+    }
   }
 }

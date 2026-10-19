@@ -206,6 +206,10 @@ function desktopWorld(cleanups: RetirementCleanups = {}, skipped: SkippedRecent[
     readSpan: async () => ({kind: 'unsupported'}),
     runDigests: async () => ({kind: 'unsupported'}),
     projectRuns: async () => [],
+    usageWindow: async (id, project, runIds, since, until) => {
+      events.push(`usage-window:${JSON.stringify([id, project, runIds, since, until])}`);
+      return {kind: 'unsupported'};
+    },
     logs: async () => ({ok: true, instanceId: '000000000001', streams: []}),
     recent: async () => undefined,
     releaseLogs: () => undefined,
@@ -410,6 +414,40 @@ describe('Desktop external addresses', () => {
       ),
     ).resolves.toMatchObject({ok: false});
     expect(w.opened).toEqual([]);
+  });
+});
+
+describe('Desktop usage reads', () => {
+  test('a usage question reaches the host with its machine, project, runs and window', async () => {
+    const w = desktopWorld();
+    const reply = await w.ipc.invoke(
+      '10:100',
+      WELCOME_CHANNELS.usageWindow,
+      'ssh:host-b',
+      '/p',
+      ['run-1'],
+      1_000,
+      2_000,
+    );
+    expect(reply).toEqual({ok: true, value: {kind: 'unsupported'}});
+    expect(w.events).toContain(
+      `usage-window:${JSON.stringify([{kind: 'ssh', alias: 'host-b'}, '/p', ['run-1'], 1000, 2000])}`,
+    );
+  });
+
+  test('a window the helper would refuse is refused before it reaches the host', async () => {
+    const w = desktopWorld();
+    const reply = await w.ipc.invoke(
+      '10:100',
+      WELCOME_CHANNELS.usageWindow,
+      'local',
+      '/p',
+      [],
+      2_000,
+      1_000,
+    );
+    expect(reply).toMatchObject({ok: false});
+    expect(w.events.filter(event => event.startsWith('usage-window:'))).toEqual([]);
   });
 });
 

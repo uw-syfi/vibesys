@@ -25,6 +25,8 @@ export default defineConfig({
         fileURLToPath(new URL('./shell.html', import.meta.url)),
         // The Machines page alone, for the screens checks until the shell routes to it.
         fileURLToPath(new URL('./machines-preview.html', import.meta.url)),
+        // The Usage page on its own, for the screen checks; `copy-ui.mjs` does not ship it.
+        fileURLToPath(new URL('./usage.html', import.meta.url)),
       ],
     },
   },

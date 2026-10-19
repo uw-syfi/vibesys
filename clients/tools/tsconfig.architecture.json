@@ -26,6 +26,8 @@
       "@vibesys/feature-settings/main": ["features/settings/src/main/index.ts"],
       "@vibesys/feature-settings/renderer": ["features/settings/src/renderer/index.ts"],
       "@vibesys/feature-settings/state": ["features/settings/src/state/index.ts"],
+      "@vibesys/feature-usage/renderer": ["features/usage/src/renderer/index.ts"],
+      "@vibesys/feature-usage/state": ["features/usage/src/state/index.ts"],
       "@vibesys/hosts": ["libs/hosts/src/index.ts"],
       "@vibesys/ipc": ["libs/ipc/src/index.ts"],
       "@vibesys/logs": ["libs/logs/src/index.ts"],

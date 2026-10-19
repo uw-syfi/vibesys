@@ -99,6 +99,7 @@ const WELCOME_ARGUMENT_COUNTS = {
   [WELCOME_CHANNELS.readSpan]: 6,
   [WELCOME_CHANNELS.runDigests]: 3,
   [WELCOME_CHANNELS.projectRuns]: 2,
+  [WELCOME_CHANNELS.usageWindow]: 5,
   [WELCOME_CHANNELS.preferences]: 0,
   [WELCOME_CHANNELS.setAppearance]: 1,
   [WELCOME_CHANNELS.setNotifications]: 1,

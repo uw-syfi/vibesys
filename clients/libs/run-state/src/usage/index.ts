@@ -18,3 +18,4 @@ export {
   type UsageTotals,
   usageOverTime,
 } from './fold.js';
+export {compactTokens} from './words.js';
