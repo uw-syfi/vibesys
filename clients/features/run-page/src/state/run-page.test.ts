@@ -6,8 +6,6 @@ import {emptyLogView, foldChunk} from '@vibesys/logs';
 import type {RunTracePublication} from '@vibesys/run-session';
 import {type CoreState, initialCoreState, reduceEvent} from '@vibesys/run-state';
 import {checkModel, type Seeded} from '@vibesys/store/testing';
-import {clockCarried} from './run-level.js';
-import {createRunReader} from './run-model.js';
 import {
   FIRST_HISTORY_SEQUENCE,
   FORCE_STOP_BOUND_MS,
@@ -23,6 +21,7 @@ import {
   runPageInvariants,
   runPageStep,
   runPhase,
+  runWallNow,
   type Unavailable,
 } from './run-page.js';
 import type {SummaryReply} from './run-summary.js';
@@ -698,9 +697,9 @@ describe('the run page store', () => {
     const gates = logGroups(state).find(group => group.name === 'Gates');
 
     expect(gates?.streams.map(item => item.label)).toEqual([
-      'candidate build · w5 · attempt 1',
-      'accuracy · w5 · attempt 1',
-      'benchmark · w5 · attempt 1',
+      'candidate build · input · attempt 1',
+      'accuracy · input · attempt 1',
+      'benchmark · input · attempt 1',
     ]);
   });
 
@@ -977,8 +976,7 @@ describe('the live run clock', () => {
       const state = heard(batches);
       const now = runNow(state);
       expect(now).toBe(NOW);
-      const model = createRunReader().read(state.run.trace, null);
-      const shown = scrubberView(state.run.trace, state.view, false, clockCarried(model, now));
+      const shown = scrubberView(state.run.trace, state.view, false, runWallNow(state));
       expect(shown?.position).toStartWith('01:28:00');
     }
   });
@@ -1008,8 +1006,7 @@ describe('the live run clock', () => {
       ]).state;
       const now = runNow(state);
       expect(now).toBe(AT_012331 + 17);
-      const model = createRunReader().read(state.run.trace, null);
-      const shown = scrubberView(state.run.trace, state.view, false, clockCarried(model, now));
+      const shown = scrubberView(state.run.trace, state.view, false, runWallNow(state));
       expect(shown).toMatchObject({last: 0, value: 0, latest: true});
       expect(shown?.position).toStartWith('01:23:48');
       // Once the run has ended, the same position reads the snapshot's own time.

@@ -37,29 +37,30 @@ function indexOf(positions: AppendLog<number>, at: number): number {
   return Math.max(0, positions.countWhile(position => position <= at) - 1);
 }
 
-/** The event's time of day, `carried` seconds later (the run clock carried past its last event). */
-function clock(event: RunEvent | undefined, carried: number): string | null {
+/** The event's time of day (UTC), from its timestamp. */
+function clock(event: RunEvent | undefined): string | null {
   const stamp = event?.timestamp;
-  if (typeof stamp !== 'string' || stamp.length < 19) return null;
-  const ms = carried > 0 ? Date.parse(stamp) : Number.NaN;
-  return Number.isNaN(ms)
-    ? stamp.slice(11, 19)
-    : new Date(ms + carried * 1000).toISOString().slice(11, 19);
+  return typeof stamp !== 'string' || stamp.length < 19 ? null : stamp.slice(11, 19);
 }
 
-/** The run-clock time `seconds` (host epoch seconds), `carried` seconds later, as a time of day. */
-function timeOfDay(seconds: number | null, carried: number): string | null {
+/** The run-clock time `seconds` (epoch seconds on the run's host) as a time of day (UTC). */
+function timeOfDay(seconds: number | null): string | null {
   if (seconds === null) return null;
-  const ms = (seconds + carried) * 1000;
+  const ms = seconds * 1000;
   return Number.isFinite(ms) ? new Date(ms).toISOString().slice(11, 19) : null;
 }
 
-function positionWords(log: TraceLog, at: number, carried: number): string {
-  if (log.earlier !== null && at < log.handoff) return positionWords(log.earlier, at, carried);
+function positionWords(log: TraceLog, at: number, wall: number | null): string {
+  if (log.earlier !== null && at < log.handoff) return positionWords(log.earlier, at, wall);
   const event = log.events.lastWhile(each => sequenceOf(each) <= at);
-  // At the base the time is the snapshot's: the latest its spans carry.
+  // At the live end the time is the host's wall time now; at the base it is the snapshot's (the
+  // latest its spans carry); anywhere else it is the time of the event.
   const time =
-    at === log.base.sequence ? timeOfDay(log.baseLatest, carried) : clock(event, carried);
+    wall !== null
+      ? timeOfDay(wall)
+      : at === log.base.sequence
+        ? timeOfDay(log.baseLatest)
+        : clock(event);
   const call = log.calls.countWhile(start => start <= at);
   const when = time ?? (log.base.sequence === 0 ? 'Start' : 'When the page connected');
   return call === 0 ? when : `${when} · planning call ${call}`;
@@ -70,15 +71,15 @@ function positionWords(log: TraceLog, at: number, carried: number): string {
  * page opened on a snapshot with no event since still shows the row: one position, at the
  * snapshot's time. On an ended run the newest position reads as the end rather than live. It
  * reads the positions and planning calls the log keeps, so its work is in the planning calls, not
- * the run's events. While a live run says nothing, its newest position reads its last event's (or
- * the snapshot's) time `carried` seconds later (the run clock carried forward on this window's
- * clock, `clockCarried`), so it follows real time.
+ * the run's events. A live run's newest position reads the host's wall time now (`wall`, epoch
+ * seconds, `runWallNow`), not an event's time: a step that runs for minutes says nothing, and the
+ * clock must still follow real time.
  */
 export function scrubberView(
   log: TraceLog,
   view: RunView,
   ended: boolean,
-  carried = 0,
+  wall: number | null = null,
 ): ScrubberView | null {
   const {positions} = log;
   const last = positions.length - 1;
@@ -94,7 +95,7 @@ export function scrubberView(
     position: positionWords(
       log,
       positions.at(value) ?? 0,
-      view.at === 'live' && !ended ? carried : 0,
+      view.at === 'live' && !ended ? wall : null,
     ),
     ticks: [...log.calls].map((start, index) => ({
       at: indexOf(positions, start),

@@ -41,6 +41,7 @@ import {
   type SessionView,
   traceProblems,
   traceStep,
+  withInputGates,
 } from './live.js';
 import type {RunSummaryState, SummaryReply} from './run-summary.js';
 import {USAGE_CONTROLS_DEFAULT, type UsageControls} from './usage-view.js';
@@ -438,6 +439,16 @@ export function runNow(state: RunPageState): number | null {
   return heard.run + Math.max(0, (state.clockMs ?? heard.wallMs) - heard.wallMs) / 1000;
 }
 
+/**
+ * The host's wall time (epoch seconds) at the run clock's time now, for the clock the scrubber
+ * shows: the run clock mapped onto the events' timestamps, or the run clock itself while no event
+ * has told how they differ. Null where `runNow` is.
+ */
+export function runWallNow(state: RunPageState): number | null {
+  const now = runNow(state);
+  return now === null ? null : now + (state.run.heard?.offset?.seconds ?? 0);
+}
+
 /** The run's phase as the screen shows it. */
 export function runPhase(state: RunPageState): RunPhase {
   const phase = recordPhase(state.record);
@@ -561,7 +572,9 @@ function historyFor(state: RunPageState): RunPageStep {
       const idle: RunHistory = {kind: 'idle'};
       const cleared: RunPageState =
         state.history.kind === 'idle' ? state : {...state, history: idle};
-      return cleared.summary.kind === 'idle' && !folded(cleared)
+      // Asked even when the session folded the run first: only the summary knows the gates that
+      // failed before the first idea.
+      return cleared.summary.kind === 'idle'
         ? startSummary(cleared, state.record.run.phase)
         : {state: cleared, requests: []};
     }
@@ -690,6 +703,18 @@ function withHistory(state: RunPageState, token: number, reply: HistoryReply): R
   };
 }
 
+/**
+ * The state when the summary arrives after the page's own data: that data stands. A live session's
+ * snapshot knows nothing of the gates that failed before the first idea, which the summary does, so
+ * those join the trace.
+ */
+function supersededByData(state: RunPageState, gates: readonly RunEvent[]): RunPageState {
+  const run = isLive(state)
+    ? {...state.run, trace: withInputGates(state.run.trace, gates)}
+    : state.run;
+  return {...state, run, summary: {kind: 'superseded'}};
+}
+
 /** The run's summary arrived: seed the run fold from it, unless something else already did. */
 function withSummary(
   state: RunPageState,
@@ -714,7 +739,7 @@ function withSummary(
       ? startReading(failed)
       : {state: failed, requests: []};
   }
-  if (folded(state)) return {state: {...state, summary: {kind: 'superseded'}}, requests: []};
+  if (folded(state)) return {state: supersededByData(state, reply.gates), requests: []};
   const data: RunData = {kind: 'snapshot', snapshot: reply.snapshot, gates: reply.gates};
   const ready: RunPageState = {
     ...state,

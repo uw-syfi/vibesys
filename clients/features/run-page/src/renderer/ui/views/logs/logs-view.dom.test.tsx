@@ -93,8 +93,8 @@ function gate(id: string, span: string | null, closed = true): LogStream {
     owner: {
       kind: 'gate_stage',
       gate: 'build',
-      execution_id: id,
-      attempt: 0,
+      execution_id: 'e1',
+      attempt: Number(id.slice(1)),
       ...(span === null ? {} : {span_id: span}),
     },
     command: 'cmd',
@@ -149,9 +149,10 @@ interface Shown {
   readonly selects: readonly string[];
 }
 
-/** The id a gate stream's row is titled with: `gate()` puts it in the middle of the label. */
+/** The id a gate stream's row is titled with: `gate()` makes its attempt the number in its id. */
 function idOfRow(title: string): string {
-  return title.split(' · ')[1] ?? title;
+  const attempt = /attempt (\d+)/.exec(title)?.[1];
+  return attempt === undefined ? title : `s${attempt}`;
 }
 
 async function show(state: RunPageState, scope: LogScope, click?: string): Promise<Shown> {

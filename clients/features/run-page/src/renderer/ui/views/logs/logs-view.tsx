@@ -5,9 +5,10 @@
  * (`state/scoped-logs.ts`). The shell follows the shown stream (`streamToFollow`): a view runs no effects.
  */
 import {EmptyState, LogPane, PickList, PickRow} from '@vibesys/ui';
-import type {JSX} from 'react';
+import {type JSX, useMemo} from 'react';
 import {type RunPageAction, type RunPageState, stepKicker} from '../../../../state/index.js';
 import {
+  ideaTitlesBySpan,
   type LogScope,
   paneLines,
   type ScopedLogs,
@@ -34,7 +35,10 @@ function liveState(live: boolean): {tone: 'live' | 'neutral'; label: string} {
   return live ? {tone: 'live', label: 'Writing'} : {tone: 'neutral', label: 'Closed'};
 }
 
-/** The repeats of a startup step in one row: choosing it shows the newest, and opens it. */
+/**
+ * The repeats of a startup step in one row: how long the step took in all, when the run reported
+ * it, and how many times it ran. Choosing the row shows the newest and lists them all.
+ */
 function FoldRow(props: {
   readonly id: string;
   readonly row: Extract<Row, {kind: 'fold'}>;
@@ -46,7 +50,7 @@ function FoldRow(props: {
     <PickRow
       id={row.id}
       title={row.label}
-      figure={`${row.open ? '▾' : '▸'} ×${row.count}`}
+      figure={[row.took, `×${row.count}`].filter(part => part !== null).join(' ')}
       figureTone="muted"
       {...(row.lastLine === null ? {} : {summary: row.lastLine})}
       {...(props.byOwner ? {lead: 'Startup'} : {})}
@@ -71,6 +75,7 @@ function StreamRow(props: {
       {...(stream.lastLine === null ? {} : {summary: stream.lastLine})}
       {...(props.byOwner && !row.nested && stream.lead !== null ? {lead: stream.lead} : {})}
       {...(row.nested ? {guides: ['tee']} : {})}
+      {...(row.nested || stream.took === null ? {} : {figure: stream.took, figureTone: 'muted'})}
       state={liveState(stream.live)}
       select={() => dispatch({type: 'select-stream', streamId: stream.id})}
     />
@@ -107,7 +112,11 @@ function StreamRows(props: {
 
 export function LogsView(props: LogsViewProps): JSX.Element {
   const {state, scope, dispatch} = props;
-  const logs = scopedLogs(state, scope);
+  const ideas = useMemo(
+    () => ideaTitlesBySpan(props.model.candidates.candidates),
+    [props.model.candidates],
+  );
+  const logs = scopedLogs(state, scope, ideas);
   const {shown} = logs;
   if (logs.notice !== null) return <EmptyState title="No logs to show" body={logs.notice} />;
   const stream = logs.streams.find(item => item.id === shown);

@@ -15,6 +15,7 @@ import type {
 } from '@vibesys/run-state/candidates';
 import {figureOf, vsInputCell} from './idea-words.js';
 import {stepLabel, stepTitle} from './names.js';
+import {inputValueOf} from './performance.js';
 import {roleSeries} from './role-series.js';
 import type {Direction, RunModel} from './run-model.js';
 import {duration, formatValue, ratio, TURNED_DOWN} from './span-reading.js';
@@ -139,7 +140,7 @@ export function stepSegments(
   });
 }
 
-function rowOf(item: Candidate, now: number | null): TimelineRow {
+function rowOf(item: Candidate, now: number | null, inputKnown: boolean): TimelineRow {
   const steps = item.attempts.flatMap(attempt => attempt.steps);
   return {
     id: item.id,
@@ -147,7 +148,7 @@ function rowOf(item: Candidate, now: number | null): TimelineRow {
     start: item.startedAt,
     end: endOf(item.startedAt, item.endedAt, now),
     outcome: OUTCOME[item.outcome],
-    figure: item.outcome === 'running' ? '' : vsInputCell(figureOf(item)).figure,
+    figure: item.outcome === 'running' ? '' : vsInputCell(figureOf(item, inputKnown)).figure,
     segments: stepSegments(steps, now),
     lane: false,
   };
@@ -262,6 +263,7 @@ export function timelineRows(
   expanded: boolean,
 ): TimelineRows {
   const all = model.candidates.candidates;
+  const inputKnown = inputValueOf(all) !== null;
   const reached = Math.max(
     clock.now ?? clock.start,
     ...all.map(item => endOf(item.startedAt, item.endedAt, clock.now)),
@@ -270,7 +272,7 @@ export function timelineRows(
   const to = Math.max(reached, from + 1);
   const view = range === 'all' ? {from, to} : {from: Math.max(from, to - RANGE_SECONDS[range]), to};
   const inRange = ordered(all)
-    .map(item => rowOf(item, clock.now))
+    .map(item => rowOf(item, clock.now, inputKnown))
     .filter(row => row.end >= view.from && row.start <= view.to);
   const failed = inRange.filter(row => row.outcome === 'err');
   const fold = !expanded && failed.length > FAILED_DENSE;

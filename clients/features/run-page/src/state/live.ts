@@ -18,7 +18,7 @@ import {
   type WorkMeter,
 } from '@vibesys/run-state/trace';
 import {AppendLog} from './append-log.js';
-import {foldInputGates, type InputGates, NO_INPUT_GATES} from './input-gates.js';
+import {foldInputGates, type GateFailure, type InputGates, NO_INPUT_GATES} from './input-gates.js';
 import {latestTime} from './span-reading.js';
 
 /** The window's hold on the live run: none, being attached under a token, attached, or refused. */
@@ -224,23 +224,22 @@ function appended(log: TraceLog, events: readonly RunEvent[], meter?: WorkMeter)
   return added.length === 0 ? log : extended(log, added, meter);
 }
 
+/** `log` with `failures` among its input gate failures, each once, in sequence order. */
+function withInputFailures(log: TraceLog, failures: readonly GateFailure[]): TraceLog {
+  const known = new Set(log.inputGates.failures.map(failure => failure.sequence));
+  const added = failures.filter(failure => !known.has(failure.sequence));
+  if (added.length === 0) return log;
+  const merged = [...log.inputGates.failures, ...added].sort((a, b) => a.sequence - b.sequence);
+  return {...log, inputGates: {...log.inputGates, failures: merged}};
+}
+
 /**
  * `log` with the input gates `gates` hold: failures read by `foldInputGates` from before any idea
- * began, whatever the snapshot's spans say (they say whether an idea began, not what the gates
- * before it did).
+ * began, whatever the spans say (they say whether an idea began, not what the gates before it did).
+ * A summary of the run, or its journal, is where they come from once the page joined a run late.
  */
-function withInputGates(log: TraceLog, gates: readonly RunEvent[] | undefined): TraceLog {
-  if (gates === undefined || gates.length === 0) return log;
-  const folded = gates.reduce(foldInputGates, NO_INPUT_GATES);
-  // The events after the snapshot have been read on top of `log.inputGates`; they follow the gates.
-  const after = log.inputGates.failures;
-  return {
-    ...log,
-    inputGates: {
-      failures: [...folded.failures, ...after],
-      settled: log.inputGates.settled,
-    },
-  };
+export function withInputGates(log: TraceLog, gates: readonly RunEvent[]): TraceLog {
+  return withInputFailures(log, gates.reduce(foldInputGates, NO_INPUT_GATES).failures);
 }
 
 /** The trace slice after `data`; `meter` counts the spans the live fold writes and copies. */
@@ -251,8 +250,12 @@ export function traceStep(log: TraceLog, data: RunData, meter?: WorkMeter): Trac
       const after = log.events.slice(
         log.events.countWhile(event => (event.sequence ?? 0) <= base.sequence),
       );
+      // A snapshot says nothing of the gates before the first idea: those the page already holds
+      // (and those a summary brings) stay, whichever came first.
+      const kept = log.inputGates.failures.filter(failure => failure.sequence <= base.sequence);
+      const fresh = traceLog(base, overviewFromSnapshot(data.snapshot), after);
       return replacing(
-        withInputGates(traceLog(base, overviewFromSnapshot(data.snapshot), after), data.gates),
+        withInputFailures(withInputGates(fresh, data.gates ?? []), kept),
         log,
         base.sequence,
       );
@@ -261,7 +264,10 @@ export function traceStep(log: TraceLog, data: RunData, meter?: WorkMeter): Trac
       return appended(log, data.events, meter);
     case 'rebootstrap': {
       if (data.base === 'reset') return appended(EMPTY_TRACE_LOG, data.events, meter);
-      const replayed = appended(traceLog(log.base, log.baseOverview, []), data.events, meter);
+      const replayed = withInputFailures(
+        appended(traceLog(log.base, log.baseOverview, []), data.events, meter),
+        log.inputGates.failures,
+      );
       // What the replay does not replace stays reachable: the page's own earlier fold.
       return replacing(replayed, log, replayed.positions.at(1) ?? log.base.sequence);
     }
@@ -295,68 +301,110 @@ export function overviewAt(log: TraceLog, at: number | null): RunOverview | null
 }
 
 /**
- * Where the run clock stood when this window last heard the run say anything, and the window's
- * clock then (epoch ms). The run's own clock is read from its spans, which change when a step
- * does, so a step that runs for minutes shows no time passing; this lets the page carry the run
- * clock forward on its own clock. Events that change no span time (a status change, a control, a
- * span's new label) still move it: by how far their timestamps are past the timestamp of the event
- * that last moved it. Only differences between the run's own timestamps enter, never their value
- * against this window's clock, so a remote host's clock that runs ahead or behind does no harm.
+ * How the run's own clock relates to its events' timestamps (`stamp`, the host's wall time): a
+ * span that began or ended at run time `t` in an event stamped `s` says the two differ by `s - t`.
+ * Both come from the run's host, so the difference is the host's alone, and it never involves this
+ * machine's clock. The newest such event gives it.
+ */
+interface ClockOffset {
+  /** Seconds: a stamp minus the run time it was stamped at. */
+  readonly seconds: number;
+  /** The stamp (epoch seconds) of the event that told it, so a replayed older event cannot undo it. */
+  readonly at: number;
+}
+
+/**
+ * Where the run clock stood when this window last heard it advance, and this window's clock
+ * (epoch ms) then. The run's own clock is read from its spans, which change when a step does, so a
+ * step that runs for minutes shows no time passing; the events' timestamps, mapped onto the run
+ * clock by `offset`, carry it forward, and `runNow` carries it on this window's clock from there.
+ * Only the run's own times and their differences enter, never their value against this window's
+ * clock, so a host whose clock runs ahead or behind does no harm; and the newest time wins, so
+ * events heard late or replayed (history, a reconnect's tail) move nothing.
  */
 export interface Heard {
   readonly run: number;
-  /** The timestamp (epoch ms) of the event that last moved `run`; null when it came from none. */
-  readonly stampMs: number | null;
+  readonly offset: ClockOffset | null;
   readonly wallMs: number;
 }
 /** The run fold and trace a live or recorded run has produced so far. */
 export interface RunFold {
   readonly core: CoreState | null;
   readonly trace: TraceLog;
-  /** The run clock when the live run's spans last changed here; null before they did. */
+  /** Where the live run's own clock stood when this window last heard it advance; null before. */
   readonly heard: Heard | null;
 }
 
 export const EMPTY_RUN_FOLD: RunFold = {core: null, trace: EMPTY_TRACE_LOG, heard: null};
 
-function stampOf(event: RunEvent): number | null {
+/** An event's timestamp as epoch seconds, or null when it carries none. */
+function stampSeconds(event: RunEvent): number | null {
   const ms = typeof event.timestamp === 'string' ? Date.parse(event.timestamp) : Number.NaN;
-  return Number.isNaN(ms) ? null : ms;
+  return Number.isNaN(ms) ? null : ms / 1000;
 }
 
-/** The run clock after `event`: a later span time, else carried by its timestamp's advance. */
-function heardEvent(
-  heard: {run: number | null; stampMs: number | null},
-  event: RunEvent,
-): {run: number | null; stampMs: number | null} {
+/** What the window knows of the run clock while it folds events: its time, and its offset. */
+interface HeardClock {
+  readonly run: number | null;
+  readonly offset: ClockOffset | null;
+}
+
+/**
+ * The run time a span event stamped at `stamp` happened at, when its span says so: a span that
+ * began or ended in it did so then, and so did any change that brings a time later than the run
+ * clock held. A change with no such time (a label, a token count) says nothing of when it was.
+ */
+function stampedAt(event: RunEvent, span: Span, run: number | null): number | null {
+  if (event.type === 'span_started') return span.started_at;
+  if (event.type === 'span_ended' && span.ended_at != null) return span.ended_at;
+  const time = latestTime([span]);
+  return time !== null && (run === null || time > run) ? time : null;
+}
+
+/** The run clock after `event`: a later span time, else the event's stamp on the run clock. */
+function heardEvent(heard: HeardClock, event: RunEvent): HeardClock {
   const span = spanOf(event);
+  const stamp = stampSeconds(event);
+  let {run, offset} = heard;
+  const at = span === null || stamp === null ? null : stampedAt(event, span, run);
+  if (stamp !== null && at !== null && (offset === null || stamp >= offset.at)) {
+    offset = {seconds: stamp - at, at: stamp};
+  }
   const time = span === null ? null : latestTime([span]);
-  const stamp = stampOf(event);
-  if (time !== null && (heard.run === null || time > heard.run)) return {run: time, stampMs: stamp};
-  if (heard.run === null || stamp === null) return heard;
-  if (heard.stampMs === null) return {run: heard.run, stampMs: stamp};
-  if (stamp <= heard.stampMs) return heard;
-  return {run: heard.run + (stamp - heard.stampMs) / 1000, stampMs: stamp};
+  if (time !== null && (run === null || time > run)) run = time;
+  if (stamp !== null && offset !== null) {
+    const stampedRun = stamp - offset.seconds;
+    if (run === null || stampedRun > run) run = stampedRun;
+  }
+  return {run, offset};
+}
+
+/** What the window heard from a snapshot: the latest time its spans carry, when that is later. */
+function heardSnapshot(heard: Heard | null, snapshot: RunSnapshot, wallMs: number): Heard | null {
+  const run = latestTime(snapshot.spans ?? []);
+  if (run === null || (heard !== null && run <= heard.run)) return heard;
+  return {run, offset: heard?.offset ?? null, wallMs};
+}
+
+/** What the window heard from `events`: the run clock after each, moving only forward. */
+function heardEvents(heard: Heard | null, events: readonly RunEvent[], wallMs: number) {
+  let next: HeardClock = heard ?? {run: null, offset: null};
+  for (const event of events) next = heardEvent(next, event);
+  if (next.run === null) return heard;
+  if (heard !== null && next.run === heard.run) {
+    return next.offset === heard.offset ? heard : {...heard, offset: next.offset};
+  }
+  return {run: next.run, offset: next.offset, wallMs};
 }
 
 /**
  * What the window heard after `data` arrived at `wallMs`: the run clock moves only forward, by the
- * span times the data carries and by how far its events' timestamps advance.
+ * span times the data carries and by its events' stamps on the run clock.
  */
 export function heardAfter(heard: Heard | null, data: RunData, wallMs: number): Heard | null {
   if (data.kind === 'rebootstrap' && data.base === 'reset') return null;
-  if (data.kind === 'snapshot') {
-    const run = latestTime(data.snapshot.spans ?? []);
-    if (run === null || (heard !== null && run <= heard.run)) return heard;
-    return {run, stampMs: null, wallMs};
-  }
-  let next: {run: number | null; stampMs: number | null} = heard ?? {run: null, stampMs: null};
-  for (const event of data.events) next = heardEvent(next, event);
-  if (next.run === null) return heard;
-  if (heard !== null && next.run === heard.run) {
-    return next.stampMs === heard.stampMs ? heard : {...heard, stampMs: next.stampMs};
-  }
-  return {run: next.run, stampMs: next.stampMs, wallMs};
+  if (data.kind === 'snapshot') return heardSnapshot(heard, data.snapshot, wallMs);
+  return heardEvents(heard, data.events, wallMs);
 }
 
 /** What must hold of the trace slice: its events are span events, in increasing sequence. */

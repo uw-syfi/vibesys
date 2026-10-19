@@ -52,7 +52,6 @@ export {runRecord, sameRecord} from './record.js';
 export {roleSeries} from './role-series.js';
 export {
   clockAt,
-  clockCarried,
   clockStart,
   heroView,
   logStreamToFollow,
@@ -79,6 +78,7 @@ export {
   runPageInitial,
   runPageStep,
   runPhase,
+  runWallNow,
   type SpanDetailReply,
 } from './run-page.js';
 export {type SummaryReply, summaryFacts, type WireSummary} from './run-summary.js';

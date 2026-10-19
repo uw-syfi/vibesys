@@ -47,7 +47,11 @@ export function foldInputGates(gates: InputGates, event: RunEvent): InputGates {
     return kind === 'workstream' ? {...gates, settled: true} : gates;
   }
   const failure = gateFailureOf(event);
-  return failure === null ? gates : {...gates, failures: [...gates.failures, failure]};
+  // A replayed event is the same failure, not another.
+  if (failure === null || gates.failures.some(known => known.sequence === failure.sequence)) {
+    return gates;
+  }
+  return {...gates, failures: [...gates.failures, failure]};
 }
 
 /** The failures a view at sequence `at` holds (null: all of them). */

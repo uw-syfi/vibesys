@@ -13,7 +13,7 @@ import type {
   MeasuredReading,
   ObjectiveAxis,
 } from '@vibesys/run-state/candidates';
-import {metricLabel} from './metric-words.js';
+import {metricLabel, unitLabel} from './metric-words.js';
 import {stepLabel, stepTitle} from './names.js';
 import {objectivesOf} from './pareto-view.js';
 import {
@@ -48,7 +48,15 @@ export interface MetricTileView {
   readonly name: string;
   /** The best's ratio to the input as an improvement (`3.83×`); null before anything passed. */
   readonly ratio: string | null;
-  /** What the ratio says: `faster than input`, `slower than input`, `same as input`; null with no ratio. */
+  /**
+   * The tile's headline: the ratio; else the best's value when the input has none to compare with
+   * (`287`); else a dash.
+   */
+  readonly figure: string;
+  /**
+   * What the headline says: with a ratio, `faster than input`, `slower than input`, `same as input`;
+   * with only a value, its unit; null with neither.
+   */
   readonly note: string | null;
   readonly tone: 'ok' | 'err' | 'muted';
   /** The best's value and the input's, with the unit: `6,054,154 ops/s · input 1,581,539 ops/s`. */
@@ -95,7 +103,7 @@ function verdictOf(better: number): {note: string; tone: MetricTileView['tone']}
 /** The unit as a suffix (` ops/s`); the metric's name in lower case when the run names no unit. */
 function unitWords(model: RunModel, name: string): string {
   const unit = model.overview?.objective.unit;
-  return ` ${typeof unit === 'string' && unit !== '' ? unit : name.toLowerCase()}`;
+  return ` ${typeof unit === 'string' && unit !== '' ? unitLabel(unit) : name.toLowerCase()}`;
 }
 
 function trendOf(
@@ -111,9 +119,12 @@ function trendOf(
   const from = Math.min(...model.candidates.candidates.map(item => item.startedAt));
   const to = Math.max(from + 1, last.at, model.latest ?? 0);
   const start = input === null ? [] : [{x: from, y: input}];
+  const steps = [...start, ...fold.best.map(step => ({x: step.at, y: step.value}))];
+  // One step is a value, not a trend: it would draw as a stray dot.
+  if (steps.length < 2) return null;
   return {
     label: `${name}: best so far over the run`,
-    steps: [...start, ...fold.best.map(step => ({x: step.at, y: step.value}))],
+    steps,
     from,
     to,
     reference: input,
@@ -156,7 +167,7 @@ function axisTile(model: RunModel, axis: ObjectiveAxis): MetricTileView {
         ...(item.measurement?.inputReadings ?? []),
       ])
       .find(reading => reading.name === axis.name && reading.unit !== null)?.unit ?? null;
-  const words = ` ${unit ?? name.toLowerCase()}`;
+  const words = ` ${unit === null ? name.toLowerCase() : unitLabel(unit)}`;
   const passed = all
     .filter(item => item.outcome === 'passed' && readingOn(item, axis.name) !== undefined)
     .map(item => (readingOn(item, axis.name) as MeasuredReading).value);
@@ -168,18 +179,10 @@ function axisTile(model: RunModel, axis: ObjectiveAxis): MetricTileView {
         );
   const vs = value === null || input === null || input === 0 ? null : value / input;
   const better = vs === null ? null : improvement(vs, direction);
-  const verdict = better === null ? null : verdictOf(better);
-  const parts = [
-    value === null ? notMeasured(model) : `${formatValue(value)}${words}`,
-    ...(input === null ? [] : [`input ${formatValue(input)}${words}`]),
-  ];
   return {
     id: axis.name,
     name,
-    ratio: better === null ? null : ratio(better),
-    note: verdict?.note ?? null,
-    tone: verdict?.tone ?? 'muted',
-    detail: parts.join(' · '),
+    ...tileWords(model, value, input, words, better),
     trend: trendOf(model, name, input, measuredOn(all, axis.name), direction),
   };
 }
@@ -189,27 +192,70 @@ function notMeasured(model: RunModel): string {
   return model.inputGates.length > 0 ? 'input not measured' : 'nothing measured yet';
 }
 
+/**
+ * The words of a tile whose best read `value` against `input`, `unit` the suffix of both and
+ * `better` the multiple over the input (null when there is none). With a multiple, the multiple is
+ * the headline and the values its detail. Without one the value itself is the headline, its unit the
+ * note, and the detail says why there is no multiple: the input's own value if it has one (a zero
+ * has no ratio), else that the input was not measured, or has no baseline.
+ */
+function tileWords(
+  model: RunModel,
+  value: number | null,
+  input: number | null,
+  unit: string,
+  better: number | null,
+): Pick<MetricTileView, 'ratio' | 'figure' | 'note' | 'tone' | 'detail'> {
+  const inputPart = input === null ? [] : [`input ${formatValue(input)}${unit}`];
+  if (value === null) {
+    return {
+      ratio: null,
+      figure: '\u2013',
+      note: null,
+      tone: 'muted',
+      detail: [notMeasured(model), ...inputPart].join(' \u00b7 '),
+    };
+  }
+  if (better === null) {
+    return {
+      ratio: null,
+      figure: formatValue(value),
+      note: unit.trim() === '' ? null : unit.trim(),
+      tone: 'muted',
+      detail: input === null ? noInputWords(model) : inputPart.join(''),
+    };
+  }
+  const verdict = verdictOf(better);
+  return {
+    ratio: ratio(better),
+    figure: ratio(better),
+    note: verdict.note,
+    tone: verdict.tone,
+    detail: [`${formatValue(value)}${unit}`, ...inputPart].join(' \u00b7 '),
+  };
+}
+
+/** Why a measured best has no multiple: the input's measurement failed, or the run has none. */
+function noInputWords(model: RunModel): string {
+  return model.inputGates.length > 0 ? 'input not measured' : 'no input';
+}
+
 /** The tile of the run's objective metric. */
 function objectiveTile(model: RunModel, best: CandidateMeasurement | null): MetricTileView {
   const metric = model.overview?.objective.metric;
-  const name = typeof metric === 'string' && metric !== '' ? metricLabel(metric) : 'Metric';
+  const named = typeof metric === 'string' && metric !== '';
+  const name = named ? metricLabel(metric) : 'Metric';
   const input = inputValue(model);
-  const words = unitWords(model, name);
   const vs = best?.vsBaseline ?? null;
   const better = vs === null ? null : improvement(vs, model.direction);
-  const verdict = better === null ? null : verdictOf(better);
-  const value = best?.metricValue ?? null;
-  const parts = [
-    value === null ? notMeasured(model) : `${formatValue(value)}${words}`,
-    ...(input === null ? [] : [`input ${formatValue(input)}${words}`]),
-  ];
+  // The objective's own reading when the benchmark reported it, else its headline: the first
+  // reading, which is not always the objective's.
+  const reading = named ? best?.readings.find(each => each.name === metric) : undefined;
+  const value = reading?.value ?? best?.metricValue ?? null;
   return {
-    id: typeof metric === 'string' && metric !== '' ? metric : 'metric',
+    id: named ? metric : 'metric',
     name,
-    ratio: better === null ? null : ratio(better),
-    note: verdict?.note ?? null,
-    tone: verdict?.tone ?? 'muted',
-    detail: parts.join(' · '),
+    ...tileWords(model, value, input, unitWords(model, name), better),
     trend: trendOf(model, name, input),
   };
 }
@@ -503,14 +549,6 @@ function agentNow(agent: AgentNode): NowItem {
 /** The run clock now: the live clock when the page carries one, else the latest the spans say. */
 export function clockAt(model: RunModel, live: number | null): number | null {
   return live ?? model.latest;
-}
-
-/**
- * How far the run clock now (`live`, carried on this window's clock) is past the latest time the
- * spans carry: what has passed since the run last said anything. 0 without a live clock.
- */
-export function clockCarried(model: RunModel, live: number | null): number {
-  return live === null || model.latest === null ? 0 : Math.max(0, live - model.latest);
 }
 
 /** The run clock's start: the first span's start. */

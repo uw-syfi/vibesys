@@ -7,6 +7,8 @@ import {
   Chip,
   type Crumb,
   Dock,
+  Fact,
+  FactLine,
   LogPane,
   Menu,
   type MenuItem,
@@ -21,7 +23,6 @@ import {
 import type {JSX, ReactNode} from 'react';
 import {
   clockAt,
-  clockCarried,
   clockStart,
   endedView,
   type HistoryProgress,
@@ -49,6 +50,7 @@ import {
   runHasEnded,
   runNow,
   runPhase,
+  runWallNow,
   stepLabel,
   stopBannerView,
   streamLines,
@@ -145,28 +147,35 @@ function Header(props: {
         <Text as="h1" variant="heading">
           {header.title}
         </Text>
-        <Row gap="space-3" wrap>
-          <Chip label={header.status.label} tone={header.status.tone} dot />
-          <Text variant="code" tone="muted">
-            {header.subtitle}
-          </Text>
-          {header.spent === null ? null : (
-            <Text variant="code" tone="muted" title={header.spent.title}>
-              {`· ${header.spent.label}`}
+        {/* One line: the long run id gives way (its whole text on hover), the figures never wrap. */}
+        <FactLine fit="parent" wrap={false}>
+          <Fact>
+            <Chip label={header.status.label} tone={header.status.tone} dot />
+          </Fact>
+          <Fact shrink title={header.subtitle}>
+            <Text variant="code" tone="muted">
+              {header.subtitle}
             </Text>
+          </Fact>
+          {header.spent === null ? null : (
+            <Fact>
+              <Text variant="code" tone="muted" title={header.spent.title}>
+                {`· ${header.spent.label}`}
+              </Text>
+            </Fact>
           )}
-        </Row>
+        </FactLine>
         {header.agents.length === 0 ? null : (
-          <Row gap="space-4" wrap>
+          <FactLine>
             {header.agents.map(agent => (
-              <Row key={agent.role} gap="space-2" align="baseline">
+              <Fact key={agent.role}>
                 <Text variant="small" tone="muted">
                   {agent.role}
                 </Text>
                 <Text variant="code">{agent.ran.join(', ')}</Text>
-              </Row>
+              </Fact>
             ))}
-          </Row>
+          </FactLine>
         )}
       </Stack>
       <Row gap="space-2">
@@ -543,7 +552,7 @@ function RunScreenBody(props: {
     model,
     clock: {start: clockStart(model), now: clockAt(model, runNow(state))},
     tokens: props.core?.tokens ?? EMPTY_LEDGER,
-    who: whoBySpan(usageRecords(state)),
+    who: whoBySpan(usageRecords(state), names),
     zoom,
   };
   const pending = pendingRunScreen(state, dispatch, zoom, route, props.chat, names);
@@ -578,7 +587,7 @@ function RunScreenBody(props: {
               log={state.run.trace}
               view={state.view}
               ended={runHasEnded(state)}
-              carried={clockCarried(model, runNow(state))}
+              wall={runWallNow(state)}
               change={view => dispatch({type: 'view', view})}
             />
           ) : null}

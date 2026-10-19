@@ -165,7 +165,7 @@ test('a run starts, writes its logs, stops with Force stop after the bound, and 
     await expect(streams.getByRole('option', {name: group}).first()).toBeVisible();
   }
   // A measurement's candidate build is its own gate stream, before the gates after it.
-  await streams.getByRole('option', {name: /candidate build · w5 · attempt 1/}).click();
+  await streams.getByRole('option', {name: /candidate build · input · attempt 1/}).click();
   await expect(page.getByRole('log').getByText('Finished release profile')).toBeVisible();
   await streams
     .getByRole('option', {name: /Run narration/})

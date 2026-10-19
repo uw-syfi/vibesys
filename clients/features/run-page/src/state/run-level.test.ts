@@ -4,14 +4,7 @@ import {EMPTY_TRACE} from '@vibesys/run-state/trace';
 import {bestLine} from './ideas-tree.js';
 import {IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
 import {EMPTY_TRACE_LOG, type TraceLog, traceAt, traceLog, traceStep} from './live.js';
-import {
-  clockCarried,
-  heroView,
-  logStreamToFollow,
-  nowView,
-  resolveZoom,
-  shownLogScope,
-} from './run-level.js';
+import {heroView, logStreamToFollow, nowView, resolveZoom, shownLogScope} from './run-level.js';
 import {createRunReader} from './run-model.js';
 import {type RunPageState, runPageInitial, runPageStep} from './run-page.js';
 import {scopedLogs} from './scoped-logs.js';
@@ -221,20 +214,16 @@ describe('the run reader', () => {
 });
 
 describe('the run clock between events', () => {
-  test('carries the live position past the last event on the window clock, not a past one', () => {
+  test('reads the live position from the run clock now, and a past one from its event', () => {
     const log = logOf(run());
     const model = createRunReader().read(log, null);
-    const latest = model.latest ?? 0;
-    expect(clockCarried(model, null)).toBe(0);
-    expect(clockCarried(model, latest - 5)).toBe(0);
-    // Two minutes and five seconds after the run's last word, the live position says so.
-    const carried = clockCarried(model, latest + 125);
-    expect(carried).toBe(125);
-    expect(scrubberView(log, {at: 'live'}, false, carried)?.position).toStartWith('00:02:05');
-    expect(scrubberView(log, {at: 'live'}, false, 0)?.position).toStartWith('00:00:00');
+    const now = (model.latest ?? 0) + 125;
+    const timeOfDay = new Date(now * 1000).toISOString().slice(11, 19);
+    expect(scrubberView(log, {at: 'live'}, false, now)?.position).toStartWith(timeOfDay);
+    expect(scrubberView(log, {at: 'live'}, false, null)?.position).toStartWith('00:00:00');
     // An ended run's end and a past position read their event's own time.
-    expect(scrubberView(log, {at: 'live'}, true, carried)?.position).toStartWith('00:00:00');
-    expect(scrubberView(log, {at: 3}, false, carried)?.position).toStartWith('00:00:00');
+    expect(scrubberView(log, {at: 'live'}, true, now)?.position).toStartWith('00:00:00');
+    expect(scrubberView(log, {at: 3}, false, now)?.position).toStartWith('00:00:00');
   });
 });
 

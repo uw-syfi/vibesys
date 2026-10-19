@@ -25,3 +25,12 @@ export function metricLabel(metric: string): string {
   const text = words.join(' ');
   return text === '' ? text : `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 }
+
+/**
+ * A unit as a person reads it. An evaluator may report its metric's own key as the unit
+ * (`output_tokens_per_s`); that reads as words like the metric does (`output tokens/s`). A unit
+ * already written for people (`ops/s`, `ms`) is kept.
+ */
+export function unitLabel(unit: string): string {
+  return unit.includes('_') ? metricLabel(unit).toLowerCase() : unit;
+}

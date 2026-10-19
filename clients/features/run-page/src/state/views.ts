@@ -385,13 +385,35 @@ function gateWords(gate: unknown): string {
   return isGateKind(gate) ? GATE_WORDS[gate] : words(gate);
 }
 
-function streamLabel(stream: LogStream): string {
+/** The idea each span belongs to, by the span's id: how a stream that names its span names its idea. */
+export type IdeaOfSpan = ReadonlyMap<string, string>;
+
+export const NO_IDEAS: IdeaOfSpan = new Map();
+
+/**
+ * Whose measurement a gate stage's stream is: the idea that owns the span it names, or the input
+ * when it names none (the input's measurement has no decision of its own); nothing when it names
+ * a span no idea holds, rather than a guess.
+ */
+function gateTarget(owner: LogStream['owner'], ideas: IdeaOfSpan): string | null {
+  const span = owner['span_id'];
+  if (typeof span !== 'string') return 'input';
+  return ideas.get(span) ?? null;
+}
+
+function streamLabel(stream: LogStream, ideas: IdeaOfSpan): string {
   const {owner} = stream;
   switch (owner['kind']) {
     case 'startup_step':
       return STAGES.find(stage => stage.id === owner['stage'])?.label ?? words(owner['stage']);
     case 'gate_stage':
-      return `${gateWords(owner['gate'])} · ${String(owner['execution_id'])} · attempt ${String(owner['attempt'])}`;
+      return [
+        gateWords(owner['gate']),
+        gateTarget(owner, ideas),
+        `attempt ${String(owner['attempt'])}`,
+      ]
+        .filter(part => part !== null)
+        .join(' \u00b7 ');
     case 'tool_build':
       return `Building ${String(owner['name'])}`;
     case 'run_narration':
@@ -402,12 +424,16 @@ function streamLabel(stream: LogStream): string {
 }
 
 /** The run's streams by owner (startup steps, gate stages, tool builds, narration), oldest first. */
-export function logGroups(state: RunPageState): readonly LogGroup[] {
+export function logGroups(state: RunPageState, ideas: IdeaOfSpan = NO_IDEAS): readonly LogGroup[] {
   const streams = streamsOf(state);
   return GROUP_ORDER.map(name => {
     const items = streams
       .filter(stream => streamGroup(stream) === name)
-      .map(stream => ({id: stream.id, label: streamLabel(stream), live: stream.outcome === null}));
+      .map(stream => ({
+        id: stream.id,
+        label: streamLabel(stream, ideas),
+        live: stream.outcome === null,
+      }));
     // A step the run repeated (a restart, a resume) is numbered in order, oldest first.
     const seen = new Map<string, number>();
     const numbered = items.map(item => {

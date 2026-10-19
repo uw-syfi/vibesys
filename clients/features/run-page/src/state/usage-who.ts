@@ -9,6 +9,7 @@ import type {Span} from '@vibesys/contracts';
 import type {UsageRecord} from '@vibesys/contracts/host-helper';
 import type {AgentNode} from '@vibesys/run-state/agents';
 import {agentTurns} from './agent-turns.js';
+import {type ModelNames, modelLabel, NO_MODEL_NAMES} from './model-names.js';
 
 /** What ran a turn; a part the journal does not name is `null`. */
 export interface Who {
@@ -19,12 +20,21 @@ export interface Who {
 /** The harnesses and models by turn span. */
 export type WhoBySpan = ReadonlyMap<string, Who>;
 
-/** Who ran each turn the records name by span. */
-export function whoBySpan(records: readonly UsageRecord[]): WhoBySpan {
+/**
+ * Who ran each turn the records name by span, each model by the name the host's catalogue gives it
+ * (its id when the catalogue lacks it), so every face that words who ran a turn says the same.
+ */
+export function whoBySpan(
+  records: readonly UsageRecord[],
+  names: ModelNames = NO_MODEL_NAMES,
+): WhoBySpan {
   const by = new Map<string, Who>();
   for (const record of records) {
     if (record.span_id === null || (record.harness === null && record.model === null)) continue;
-    by.set(record.span_id, {harness: record.harness, model: record.model});
+    by.set(record.span_id, {
+      harness: record.harness,
+      model: record.model === null ? null : modelLabel(names, record.model),
+    });
   }
   return by;
 }

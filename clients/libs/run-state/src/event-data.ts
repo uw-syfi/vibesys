@@ -257,7 +257,15 @@ function applyRunStartupProgressData(state: CoreState, event: RunEvent): CoreSta
   const previous = state.startup;
   const sameStage = previous !== null && previous.stage === data.stage;
   const stepState = data.state ?? 'running';
+  const took =
+    stepState === 'finished' && data.elapsed_seconds != null
+      ? {
+          ...state.startupTook,
+          [data.stage]: (state.startupTook[data.stage] ?? 0) + data.elapsed_seconds,
+        }
+      : state.startupTook;
   return cloneCoreStateWith(state, {
+    startupTook: took,
     startup: {
       stage: data.stage,
       state: stepState,

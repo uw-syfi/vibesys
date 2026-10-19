@@ -128,7 +128,7 @@ function Tile(props: {readonly tile: MetricTileView; readonly trend: boolean}): 
   return (
     <MetricTile
       name={tile.name}
-      figure={tile.ratio ?? '–'}
+      figure={tile.figure}
       {...(tile.note === null ? {} : {note: tile.note})}
       tone={tile.tone}
       detail={tile.detail}

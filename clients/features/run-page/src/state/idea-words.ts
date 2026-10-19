@@ -40,11 +40,14 @@ export function outcomeWords(item: Candidate): string {
   return reason === null ? item.outcome : `failed · ${reason}`;
 }
 
+/** What a measured idea's `vs input` cell says when the run has no measurement of its input. */
+const NO_INPUT = 'no input';
+
 /** The tone of a figure: a good result, a bad one, or a quiet one. */
 export type IdeaTone = 'ok' | 'err' | 'muted';
 
 /** The figure at the right of an idea's row: its ratio, its failed check's progress, or why not. */
-export function figureOf(item: Candidate): {figure: string; tone: IdeaTone} {
+export function figureOf(item: Candidate, inputKnown = true): {figure: string; tone: IdeaTone} {
   if (item.outcome === 'running') return {figure: '', tone: 'muted'};
   const measured = item.measurement;
   const failed = measured?.failed ?? null;
@@ -59,7 +62,7 @@ export function figureOf(item: Candidate): {figure: string; tone: IdeaTone} {
     return {figure: ratio(measured.vsBaseline), tone: item.outcome === 'passed' ? 'ok' : 'err'};
   }
   if (item.outcome === 'failed') return {figure: capitalized(outcomeWords(item)), tone: 'err'};
-  return {figure: '–', tone: 'muted'};
+  return inputKnown ? {figure: '–', tone: 'muted'} : {figure: NO_INPUT, tone: 'muted'};
 }
 
 /** What an idea measured, against the input; null when it measured nothing. */
@@ -118,13 +121,16 @@ export function selectedWords(item: Candidate, measured: boolean): string {
 }
 
 /**
- * The `vs input` column's cell, from an idea's figure: its multiple when it has one, else a dash,
- * the same on every face that has the column (a failed check's progress or reason is not a
+ * The `vs input` column's cell, from an idea's figure: its multiple when it has one, `no input`
+ * when the run has no measurement of its input to compare with, else a dash, the same on every
+ * face that has the column (a failed check's progress or reason is not a
  * comparison with the input).
  */
 export function vsInputCell(figure: {readonly figure: string; readonly tone: IdeaTone}): {
   readonly figure: string;
   readonly tone: IdeaTone;
 } {
-  return figure.figure.endsWith('×') ? figure : {figure: '–', tone: 'muted'};
+  return figure.figure.endsWith('×') || figure.figure === NO_INPUT
+    ? figure
+    : {figure: '–', tone: 'muted'};
 }

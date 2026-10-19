@@ -3609,6 +3609,21 @@ describe('run startup progress state', () => {
     });
   });
 
+  it('keeps how long every stage took, summed over the times it finished, as the stages move on', () => {
+    const events = [
+      progressEvent(1, {stage: 'building_image'}),
+      progressEvent(2, {stage: 'building_image', state: 'finished', elapsed_seconds: 12.5}),
+      progressEvent(3, {stage: 'starting_container'}),
+      progressEvent(4, {stage: 'starting_container', state: 'waiting', elapsed_seconds: 3}),
+      progressEvent(5, {stage: 'starting_container', state: 'finished', elapsed_seconds: 4}),
+      progressEvent(6, {stage: 'starting_container', state: 'finished', elapsed_seconds: 6}),
+    ];
+    const state = events.reduce(reduceEvent, initialCoreState());
+    // A wait is not a finish, and a stage that never finished is absent.
+    expect(state.startupTook).toEqual({building_image: 12.5, starting_container: 10});
+    expect(initialCoreState().startupTook).toEqual({});
+  });
+
   it('resets again when an earlier stage recurs, and a replay yields the same fact', () => {
     const events = [
       progressEvent(1, {stage: 'building_image'}),

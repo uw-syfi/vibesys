@@ -8,14 +8,30 @@ import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {LogView} from '@vibesys/logs';
 import type {Candidate, CandidateStep} from '@vibesys/run-state/candidates';
 import {type RunPageState, runHasEnded} from './run-page.js';
+import {duration} from './span-reading.js';
 import {
+  type IdeaOfSpan,
   type LogGroupName,
   type LogLineView,
   logGroups,
   logsNotice,
+  NO_IDEAS,
   shownStream,
   streamLines,
 } from './views.js';
+
+/** Every span of an idea (its attempts and their steps) to the idea's title, for naming streams. */
+export function ideaTitlesBySpan(candidates: readonly Candidate[]): IdeaOfSpan {
+  const titles = new Map<string, string>();
+  for (const item of candidates) {
+    titles.set(item.id, item.title);
+    for (const attempt of item.attempts) {
+      titles.set(attempt.span, item.title);
+      for (const step of attempt.steps) titles.set(step.span, item.title);
+    }
+  }
+  return titles;
+}
 
 /** Whose logs: the run's, one idea's, or one step's. */
 export type LogScope =
@@ -48,6 +64,8 @@ interface ScopedStream {
   readonly lead: LogGroupName | null;
   /** What repeats: the startup step a stream ran (a restart or a resume runs it again), else null. */
   readonly repeats: string | null;
+  /** How long its startup step took in all, in words, when the run reported it; else null. */
+  readonly took: string | null;
   readonly owner: LogGroupName;
   readonly label: string;
   readonly live: boolean;
@@ -66,6 +84,8 @@ type ScopedRow =
       readonly id: string;
       readonly label: string;
       readonly count: number;
+      /** How long the step took in all, in words, when the run reported it; else null. */
+      readonly took: string | null;
       readonly live: boolean;
       readonly lastLine: string | null;
       /** The newest of its streams: what choosing the fold shows. */
@@ -179,6 +199,7 @@ function foldRows(streams: readonly ScopedStream[], shown: string | null): Scope
       id: `fold ${repeats}`,
       label: stream.label.replace(/ · \d+$/, ''),
       count: same.length,
+      took: stream.took,
       live: same.some(other => other.live),
       lastLine: latest.lastLine,
       latest: latest.id,
@@ -189,8 +210,18 @@ function foldRows(streams: readonly ScopedStream[], shown: string | null): Scope
   return rows;
 }
 
+/** How long startup step `stage` took, from what the run reported (`CoreState.startupTook`). */
+function tookWords(took: Readonly<Record<string, number | undefined>>, stage: string | null) {
+  const seconds = stage === null ? undefined : took[stage];
+  return seconds === undefined ? null : duration(seconds);
+}
+
 /** The scope's streams, the one shown, and the notice for an empty scope. */
-export function scopedLogs(state: RunPageState, scope: LogScope): ScopedLogs {
+export function scopedLogs(
+  state: RunPageState,
+  scope: LogScope,
+  ideas: IdeaOfSpan = NO_IDEAS,
+): ScopedLogs {
   const owned = ownedStreams(state, scopeSpans(scope));
   const listed = listedStreams(state);
   const stage = new Map(
@@ -199,12 +230,14 @@ export function scopedLogs(state: RunPageState, scope: LogScope): ScopedLogs {
       stream.owner['kind'] === 'startup_step' ? String(stream.owner['stage']) : null,
     ]),
   );
-  const unordered: ScopedStream[] = logGroups(state).flatMap(group =>
+  const took = state.run.core?.startupTook ?? {};
+  const unordered: ScopedStream[] = logGroups(state, ideas).flatMap(group =>
     group.streams
       .filter(stream => owned === null || owned.has(stream.id))
       .map(stream => ({
         id: stream.id,
         repeats: stage.get(stream.id) ?? null,
+        took: tookWords(took, stage.get(stream.id) ?? null),
         lead: stream.label.replace(/ · \d+$/, '') === group.name ? null : group.name,
         owner: group.name,
         label: stream.label,

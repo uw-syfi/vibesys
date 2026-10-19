@@ -328,6 +328,12 @@ export interface CoreState {
   readonly foldedOutOfBand: readonly number[];
   readonly status: CoreRunStatus;
   readonly startup: RunStartupState | null;
+  /**
+   * Seconds each startup stage took, summed over its `finished` reports (a stage runs again after
+   * a restart); a stage that never reported finishing is absent. Unlike `startup`, it keeps every
+   * stage the run opened its environment with.
+   */
+  readonly startupTook: Readonly<Partial<Record<RunStartupState['stage'], number>>>;
   /** @deprecated Last event cursor; use `activeRunFocus` for current work. */
   readonly agentKind: string | null;
   /** @deprecated Last event cursor; use `activeRunFocus` for current work. */
@@ -423,6 +429,7 @@ export function initialCoreState(): CoreState {
     foldedOutOfBand: [],
     status: 'connecting',
     startup: null,
+    startupTook: {},
     agentKind: null,
     roundLabel: null,
     outerLoop: null,

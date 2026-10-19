@@ -10,6 +10,7 @@
 import type {Candidate, CandidateOutcome, CandidateTree} from '@vibesys/run-state/candidates';
 import {type IdeaBase, type IdeaBases, ideaBases} from './idea-bases.js';
 import {figureOf, type IdeaTone, outcomeWords} from './idea-words.js';
+import {inputValueOf} from './performance.js';
 import type {Direction, RunModel} from './run-model.js';
 import {duration, formatValue} from './span-reading.js';
 
@@ -141,6 +142,8 @@ interface RowContext {
   readonly best: number | null;
   readonly direction: Direction;
   readonly unit: string;
+  /** The run measured its input: a multiple over it can be told. */
+  readonly inputKnown: boolean;
   readonly changed: ReadonlySet<string>;
   readonly bases: IdeaBases;
 }
@@ -176,7 +179,7 @@ function summaryOf(item: Candidate): string | null {
 }
 
 function rowOf(item: Candidate, context: RowContext): IdeaRow {
-  const {figure, tone} = figureOf(item);
+  const {figure, tone} = figureOf(item, context.inputKnown);
   const attempts = item.attempts.length;
   return {
     id: item.id,
@@ -232,6 +235,7 @@ export function ideaRowsById(model: RunModel): ReadonlyMap<string, IdeaRow> {
     best: bestValue(tree),
     direction: model.direction,
     unit: unitOf(model),
+    inputKnown: inputValueOf(tree.candidates) !== null,
     changed: model.changed,
     bases: ideaBases(tree, model.direction),
   };
