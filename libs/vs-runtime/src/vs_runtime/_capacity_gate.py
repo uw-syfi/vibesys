@@ -13,6 +13,7 @@ from vs_runtime._quota_policy import (
     GiveUp,
     Hold,
     OutagePolicy,
+    PauseFor,
     QuotaAction,
     QuotaPolicy,
     Switch,
@@ -316,8 +317,8 @@ class PolicyCapacityGate:
     and ``wait``, one backoff step under ``fail`` and ``fallback``), and without pausing
     the run: only the stopped turn waits, on its own thread, while the run goes on
     dispatching measurements and other turns. The turn is sent again with backoff
-    until the outage budget is spent, then, under ``pause`` and ``wait``, the run
-    pauses for the operator as for a quota (under ``fail`` the turn fails, under
+    until the outage budget is spent, then the run pauses as for a quota: under ``pause``
+    for the operator, under ``wait`` until it resumes by itself (under ``fail`` the turn fails, under
     ``fallback`` the run switches); the run's deadline ends the wait, and a stop
     request or a cancellation of the turn ends it at once. A run left unattended
     overnight must not end on an outage (S179). A stop is not an outage
@@ -473,7 +474,7 @@ class PolicyCapacityGate:
         """Hold this turn through one outage backoff, without touching the run's pause.
 
         Returns when the turn should be sent again. Once the budget is spent under a policy
-        that waits for capacity, pauses the run for the operator instead (``_park_outage``).
+        that waits for capacity, pauses the run instead (``_park_outage``).
         Raises ``RunStopped`` on a stop request, and the quota error when the turn was
         cancelled, the run reached its deadline, the budget is spent under ``fail``, or the
         route served other turns while this turn's latest send was failing and no other
@@ -506,8 +507,8 @@ class PolicyCapacityGate:
             self._abandon(error, decision.reason, context)
         if isinstance(decision, Switch):
             self._switch_or_abandon(error, "policy", decision.reason, context)
-        if isinstance(decision, Hold):
-            self._park_outage(error, stops, context)
+        if isinstance(decision, Hold | PauseFor):
+            self._park_outage(error, stops, context, decision)
             return
         plan = QuotaPlan(QuotaAction.WAIT.value, now + decision.seconds, None, None)
         self._events.quota_paused(error, plan, context)
@@ -535,24 +536,36 @@ class PolicyCapacityGate:
         self._events.quota_resumed(error, "wait_elapsed", waited, context)
 
     def _park_outage(
-        self, error: AgentQuotaError, stops: CapacityStops, context: Attribution
+        self,
+        error: AgentQuotaError,
+        stops: CapacityStops,
+        context: Attribution,
+        decision: Hold | PauseFor,
     ) -> None:
-        """Pause the run for the operator: the turn waited out the whole outage budget.
+        """Pause the run: the turn waited out the whole outage budget.
 
-        The provider may never come back (a revoked account, a removed model), which only
-        the operator can tell, so the run waits for them as for a quota instead of ending
-        (S179). The turn stays parked, its limit uncharged, until the operator resumes the
-        run or asks to wait for capacity; then it is sent again and its next outage stop
-        starts a new streak and budget. A cancellation of the turn ends only its park.
+        Under ``pause`` (``Hold``) the run waits for the operator: the provider may never
+        come back (a revoked account, a removed model), which only the operator can tell, so
+        the run waits for them as for a quota instead of ending (S179). Under ``wait``
+        (``PauseFor``) the run resumes by itself after the policy's retry interval, as ``wait``
+        promises, so an unattended run goes on once the provider is back. The turn stays
+        parked, its limit uncharged, until the run resumes; then it is sent again and its
+        next outage stop starts a new streak and budget. A cancellation of the turn ends only
+        its park.
         """
         target = self._fallback.target
+        if isinstance(decision, PauseFor):
+            action, resumes_at = QuotaAction.WAIT, self._timer.now() + decision.seconds
+            wait: Hold | WaitFor = WaitFor(decision.seconds)
+        else:
+            action, resumes_at, wait = QuotaAction.PAUSE, None, Hold()
         plan = QuotaPlan(
-            QuotaAction.PAUSE.value,
-            None,
+            action.value,
+            resumes_at,
             None if target is None else target.provider,
             None if target is None else target.model,
         )
-        self._pause_run(error, stops, context, plan, Hold())
+        self._pause_run(error, stops, context, plan, wait)
         _memory(stops).outage = None
 
     def _route_up(self, route: Route, released: RouteHealth) -> bool:

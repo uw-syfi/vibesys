@@ -85,6 +85,7 @@ class _Sink(NullAgentEventSink):
     def __init__(self, now: Callable[[], float]) -> None:
         self._now = now
         self.paused: list[tuple[AgentQuotaError, QuotaPlan]] = []
+        self.paused_at: list[float] = []
         self.resumed: list[tuple[str, str, float]] = []
         self.abandoned: list[tuple[AgentQuotaError, str, float]] = []
         self.abandoned_waits: list[float] = []
@@ -94,6 +95,7 @@ class _Sink(NullAgentEventSink):
     def quota_paused(self, error: AgentQuotaError, plan: QuotaPlan, where: Attribution) -> None:
         del where
         self.paused.append((error, plan))
+        self.paused_at.append(self._now())
 
     def quota_resumed(
         self, error: AgentQuotaError, reason: str, waited_seconds: float, where: Attribution
@@ -461,6 +463,10 @@ def test_an_outage_is_waited_out_only_within_its_budget(failures: int) -> None:
         [(error, plan)] = [(e, p) for e, p in run.sink.paused if p.policy == "pause"]
         assert error.condition is QuotaCondition.UNAVAILABLE
         assert plan.resumes_at is None
+        # The run paused at the stop that found the budget spent, within the budget, and the
+        # turn waited for nothing else before it (sends take no time here).
+        assert run.sink.paused_at[-1] == START + sum(waits)
+        assert sum(waits) <= BUDGET
 
     assert run.sink.abandoned == []
     assert [waited for _, _, waited in run.sink.resumed] == waits[: len(run.sink.resumed)]

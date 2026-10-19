@@ -270,8 +270,8 @@ def test_an_outage_late_in_a_turn_never_fails_it(
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="MED-3: a spent outage budget under wait never resumes")
-@given(outage_past=st.floats(min_value=60.0, max_value=3 * 3600.0))
+# Past the budget by more than one backoff and send, so the budget is spent while it lasts.
+@given(outage_past=st.floats(min_value=1800.0, max_value=3 * 3600.0))
 def test_under_wait_a_spent_outage_budget_resumes_the_run_by_itself(outage_past: float) -> None:
     """``wait`` is documented to resume the run by itself: with no operator, a spent outage
     budget pauses the run on a timed resume, and the turn ends once the provider is back.

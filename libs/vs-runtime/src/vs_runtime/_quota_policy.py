@@ -90,6 +90,17 @@ class WaitFor:
 
 
 @dataclass(frozen=True, slots=True)
+class PauseFor:
+    """Pause the run, and resume it by itself this many seconds later (or when the operator does).
+
+    An outage that outlasted its budget under ``wait``: the run waits for capacity on its own,
+    as ``wait`` promises, probing the provider once per resume.
+    """
+
+    seconds: float
+
+
+@dataclass(frozen=True, slots=True)
 class GiveUp:
     """Do not wait: end the turn with the quota error."""
 
@@ -115,7 +126,8 @@ class OutagePolicy:
     anything about it, so unlike a quota it holds only the turn, not the run. The turn is
     sent again after ``first_wait_seconds``, then after waits that double up to
     ``max_wait_seconds``, until ``budget_seconds`` have passed since the turn's first stop.
-    Then, with ``pause_when_spent``, the run pauses for the operator, as for a quota; with
+    Then, with ``pause_when_spent``, the run pauses, as for a quota: for the operator, or with
+    ``resume_after_seconds`` until it resumes by itself that much later; with
     ``switch_when_spent`` the run switches to its fallback provider; with neither the turn
     fails with the error. :func:`outage_policy_for` derives the policy a run's quota
     policy asks for.
@@ -145,6 +157,10 @@ class OutagePolicy:
     an outage must never end a run that asked to wait). The turn stays held, its limit
     uncharged, until the operator resumes the run; then it is sent again and a new budget
     starts. ``switch_when_spent`` takes precedence."""
+    resume_after_seconds: float | None = None
+    """With ``pause_when_spent``, the run's pause resumes by itself after this many seconds
+    (``wait``'s ``retry_seconds``), and the turn is sent again; None waits for the operator
+    (``pause``)."""
     resend_grace_seconds: float = 600.0
     """Ten minutes: the least time the send after a capacity wait has before core may end the
     turn, whatever own time the turn had left (core's ``CapacityHold.resend_grace``). A failing
@@ -167,6 +183,10 @@ class OutagePolicy:
         if self.first_wait_seconds > self.max_wait_seconds:
             message = "first_wait_seconds must not exceed max_wait_seconds"
             raise ValueError(message)
+        resume = self.resume_after_seconds
+        if resume is not None and not (math.isfinite(resume) and resume > 0):
+            message = f"resume_after_seconds must be a positive number, got {resume!r}"
+            raise ValueError(message)
 
 
 PROVIDER_OUTAGE = OutagePolicy()
@@ -175,14 +195,19 @@ PROVIDER_OUTAGE = OutagePolicy()
 def outage_policy_for(quota: QuotaPolicy, base: OutagePolicy = PROVIDER_OUTAGE) -> OutagePolicy:
     """The outage policy a run with quota policy ``quota`` follows.
 
-    ``pause`` and ``wait`` wait an outage out for the whole budget, then pause the run for
-    the operator, so an outage never ends a run that chose to wait for capacity. ``fail`` and
+    ``pause`` and ``wait`` wait an outage out for the whole budget, then pause the run, so an
+    outage never ends a run that chose to wait for capacity: ``pause`` until the operator
+    resumes it, ``wait`` until it resumes by itself ``retry_seconds`` later (the interval
+    between attempts when the provider names no reset time, as an outage never does), as
+    ``wait`` does for a quota. ``fail`` and
     ``fallback`` say the run should not sit on a provider that cannot serve it, so
     they allow one backoff step (``first_wait_seconds``, enough for a blip to pass);
     then ``fail`` fails the turn and ``fallback`` switches to the fallback provider.
     """
-    if quota.action in (QuotaAction.PAUSE, QuotaAction.WAIT):
+    if quota.action is QuotaAction.PAUSE:
         return replace(base, pause_when_spent=True)
+    if quota.action is QuotaAction.WAIT:
+        return replace(base, pause_when_spent=True, resume_after_seconds=quota.retry_seconds)
     return replace(
         base,
         budget_seconds=base.first_wait_seconds,
@@ -192,22 +217,24 @@ def outage_policy_for(quota: QuotaPolicy, base: OutagePolicy = PROVIDER_OUTAGE) 
 
 def decide_outage(
     policy: OutagePolicy, *, stop: int, elapsed: float, run_left: float | None
-) -> Hold | WaitFor | GiveUp | Switch:
+) -> Hold | PauseFor | WaitFor | GiveUp | Switch:
     """Decide what to do about the ``stop``-th outage stop of one turn (the first is 1).
 
     ``elapsed`` is the time since the turn's first outage stop and ``run_left`` the time
     to the run's deadline (``None`` for a run without one). A wait never runs past the
     budget nor past the deadline, so the time from the first stop to the last attempt is
     at most the budget, and a turn never waits once the run is out of time. A spent
-    budget switches providers under ``switch_when_spent``, else holds for the operator
-    under ``pause_when_spent``; a deadline does neither.
+    budget switches providers under ``switch_when_spent``, else pauses the run under
+    ``pause_when_spent``: for ``resume_after_seconds`` when set, else for the operator; a
+    deadline does neither.
     """
     if run_left is not None and run_left <= 0:
         return GiveUp("the run reached its deadline while the provider was unavailable")
     remaining = policy.budget_seconds - elapsed
     if remaining <= 0:
         if not policy.switch_when_spent and policy.pause_when_spent:
-            return Hold()
+            resume = policy.resume_after_seconds
+            return Hold() if resume is None else PauseFor(resume)
         end = Switch if policy.switch_when_spent else GiveUp
         return end(
             f"the provider stayed unavailable for {describe_seconds(elapsed)}, "
