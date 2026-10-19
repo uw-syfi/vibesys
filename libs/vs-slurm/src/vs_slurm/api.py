@@ -237,6 +237,7 @@ from .workspace_proof import (
     WorkspaceRootProbeFailed,
     WorkspaceRootProbeProven,
     WorkspaceRootProbeReport,
+    WorkspaceRootProbeRetrying,
     WorkspaceRootProof,
 )
 
@@ -395,6 +396,7 @@ __all__ = [
     "WorkspaceRootProbeProven",
     "WorkspaceRootProbeQueued",
     "WorkspaceRootProbeReport",
+    "WorkspaceRootProbeRetrying",
     "WorkspaceRootProbeWatch",
     "WorkspaceRootProof",
     "advance",

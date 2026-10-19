@@ -17,7 +17,6 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-import vs_slurm.api as slurm_api
 from vs_sim.api.testing import SimThreads, VirtualClock, examples
 from vs_slurm.api import (
     FakeConnector,
@@ -30,6 +29,7 @@ from vs_slurm.api import (
     WorkspaceRootProbeProven,
     WorkspaceRootProbeQueued,
     WorkspaceRootProbeReport,
+    WorkspaceRootProbeRetrying,
     WorkspaceRootProof,
 )
 
@@ -67,6 +67,8 @@ def _runner(root: Path, connector: FakeConnector, threads: SimThreads) -> SlurmJ
         ),
         poll_interval_seconds=_POLL_SECONDS,
         queue_timeout_seconds=int(_QUEUE_SECONDS),
+        # One attempt's queue wait: a never-scheduled probe fails after its first attempt.
+        workspace_root_probe_deadline_seconds=int(_QUEUE_SECONDS),
     )
     return SlurmJobRunner(
         config, processes=connector, scratch_root=root / "probe-state", clock=threads.clock
@@ -387,7 +389,6 @@ def _hide_staging_from_the_node(
     return hide
 
 
-@pytest.mark.xfail(strict=True, reason="F1: a never-scheduled probe is not retried in the run")
 def test_a_probe_the_queue_never_scheduled_is_retried_and_slurm_work_waits_for_it(
     tmp_path: Path,
 ) -> None:
@@ -417,9 +418,7 @@ def test_a_probe_the_queue_never_scheduled_is_retried_and_slurm_work_waits_for_i
     finally:
         threads.close()
 
-    retries = [
-        report for report in reports if isinstance(report, slurm_api.WorkspaceRootProbeRetrying)
-    ]
+    retries = [report for report in reports if isinstance(report, WorkspaceRootProbeRetrying)]
     assert len(retries) == 1
     assert "was never scheduled" in retries[0].failure
     assert retries[0].retry_in_seconds > 0
@@ -429,7 +428,6 @@ def test_a_probe_the_queue_never_scheduled_is_retried_and_slurm_work_waits_for_i
     _assert_cleaned(tmp_path)
 
 
-@pytest.mark.xfail(strict=True, reason="F1: the probe has no run-level deadline yet")
 @given(deadline_hours=st.integers(min_value=1, max_value=4))
 @settings(max_examples=examples(pr=2, nightly=8), deadline=None)
 def test_a_probe_that_is_never_scheduled_fails_only_once_its_deadline_passed(
@@ -501,7 +499,6 @@ def test_a_probe_job_that_failed_ends_the_proof_at_once_without_a_retry(tmp_path
     assert isinstance(reports[-1], WorkspaceRootProbeFailed)
 
 
-@pytest.mark.xfail(strict=True, reason="F4: a raising report sink fails the probe")
 @pytest.mark.parametrize("raising_on", ["queued", "outcome"])
 def test_a_report_sink_that_raises_never_fails_the_probe(tmp_path: Path, raising_on: str) -> None:
     connector = FakeConnector(tmp_path / "cluster")
