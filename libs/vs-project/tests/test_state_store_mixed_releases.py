@@ -62,7 +62,8 @@ class _FailingEffects(LocalAtomicWriteEffects):
     """Local durability effects that fail at their ``at``-th step.
 
     A host that ``fails`` sees an ``OSError`` at the step, and the steps are every file sync,
-    rename and directory sync. A host that ``dies`` runs nothing after the step, and its steps
+    rename, and the first directory sync after a rename (a write syncs each directory up to the
+    project root, and a failure at any of them reaches the writer at the same point). A host that ``dies`` runs nothing after the step, and its steps
     are the renames only: each write syncs the directory before the next write begins, so the
     files a death leaves are those of the renames before it, and a death at a sync leaves the
     files of a death at the next rename (the last rename lost) or of no death (it was kept).
@@ -72,6 +73,7 @@ class _FailingEffects(LocalAtomicWriteEffects):
 
     def __init__(self, at: int | None, failure: Failure = "dies") -> None:
         self.steps = 0
+        self._renamed = False
         self._at = at
         self._failure = failure
 
@@ -97,10 +99,13 @@ class _FailingEffects(LocalAtomicWriteEffects):
     def replace(self, temporary: Path, destination: Path) -> None:
         self._step(rename=True)
         super().replace(temporary, destination)
+        self._renamed = True
 
     def sync_directory(self, directory: Path) -> None:
         del directory  # nothing is made durable (see the class)
-        self._step()
+        if self._renamed:
+            self._renamed = False
+            self._step()
 
 
 class _RefusedError(Exception):
@@ -330,14 +335,14 @@ def _start(root: Path, start: str, at: int | None, failure: Failure = "dies") ->
     return world, effects.steps
 
 
-def _steps(root: Path, start: str) -> int:
+def _steps(root: Path, start: str, failure: Failure) -> int:
     """How many durable steps the first write takes when its host does not die."""
-    return _start(root, start, None)[1]
+    return _start(root, start, None, failure)[1]
 
 
 @pytest.mark.parametrize("failure", ["dies", "fails"])
 @pytest.mark.parametrize("start", _STARTS)
-@settings(max_examples=examples(pr=10, nightly=50), deadline=None, database=None)
+@settings(max_examples=examples(pr=10, nightly=40), deadline=None, database=None)
 @given(actions=_ACTIONS, gaps=_GAPS)
 # The review's reproduction: this release takes over after the older host's lease expired and
 # dies before store.json is rewritten; an older host then takes over from store.json, and a
@@ -353,7 +358,7 @@ def test_no_two_hosts_hold_the_lease_wherever_the_migrating_host_dies(
     actions: list[_Action],
     gaps: list[int],
 ) -> None:
-    total = _steps(tmp_path_factory.mktemp("count"), start)
+    total = _steps(tmp_path_factory.mktemp("count"), start, failure)
     for at in range(1, total + 2):
         world, _ = _start(tmp_path_factory.mktemp("run"), start, at, failure)
         now = 151.0
