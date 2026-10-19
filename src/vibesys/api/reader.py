@@ -49,7 +49,7 @@ def open_run_reader(
 
     Application assembly seam, as ``create_session`` is: use ``launch.default_run_readers``.
     """
-    # lint-waiver: LW-020012 [PLC0415]; keep importing the public facade independent of session execution machinery and built-in plugins.
+    # lint-waiver: LW-020013 [PLC0415]; keep importing the public facade independent of session execution machinery and built-in plugins.
     from vibesys.api._reader import _LocalRunReader  # noqa: PLC0415
 
     return _LocalRunReader(request, registry=registry, implementations=implementations)

@@ -450,7 +450,7 @@ class ServerRuntime:
         """Give the finished run's chat an agent; a run that cannot be opened keeps its summary answers."""
         try:
             reader = open_reader()
-        except Exception:  # noqa: BLE001  # lint-waiver: LW-101051 [BLE001]; a finished run that cannot be opened for conversation is still served for reading, so the failure is logged, not raised
+        except Exception:  # noqa: BLE001  # lint-waiver: LW-101299 [BLE001]; a finished run that cannot be opened for conversation is still served for reading, so the failure is logged, not raised
             _LOG.warning("chat cannot read the finished run", exc_info=True)
             return
         self.integration.attach_reader(reader)
