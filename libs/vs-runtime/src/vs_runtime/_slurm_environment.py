@@ -318,6 +318,7 @@ def _mode(settings: SlurmOperatorSettings) -> _Mode:
     return _ClusterOnly(remote_capture=slurm_transport_broker_available(settings.config))
 
 
+@dataclass(frozen=True, slots=True)
 class _ClusterPlans:
     """The evaluation and capture plans the run wrote, and the paths they name."""
 
