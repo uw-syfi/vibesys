@@ -115,6 +115,18 @@ def _seconds(event: dict[str, JsonValue]) -> float | None:
     return (parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)).timestamp()
 
 
+def _span_time(span: dict[str, JsonValue]) -> float:
+    """When a span ended, else when it began, else 0: the run page's ``ended_at ?? started_at``.
+
+    A time of exactly 0 is a time (the run clock's first instant), so it is never skipped as falsy.
+    """
+    ended = _number(span.get("ended_at"))
+    if ended is not None:
+        return ended
+    began = _number(span.get("started_at"))
+    return 0.0 if began is None else began
+
+
 class _Gate(NamedTuple):
     """A gate span's verdict, measured value, ratio to the input, and when it ended (or began)."""
 
@@ -225,7 +237,7 @@ class _Fold:
                 self.attempts[span_id] = _Attempt(
                     idea,
                     _outcome(label, span),
-                    _number(span.get("ended_at")) or _number(span.get("started_at")) or 0.0,
+                    _span_time(span),
                 )
         elif label.get("kind") == "gate":
             verdict = label.get("verdict")
@@ -233,7 +245,7 @@ class _Fold:
                 verdict if isinstance(verdict, str) else None,
                 _number(attrs.get("metric_value")),
                 _number(attrs.get("vs_baseline")),
-                _number(span.get("ended_at")) or _number(span.get("started_at")) or 0.0,
+                _span_time(span),
             )
         elif label.get("kind") == "adoption":
             verdict = label.get("verdict")

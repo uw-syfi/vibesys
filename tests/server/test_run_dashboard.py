@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from pydantic import BaseModel
 from tests.server.host_helper_support import RUN_ID, fake_host, project_with_run
@@ -181,6 +181,8 @@ _IDEAS = st.lists(
 _DIRECTIONS = st.sampled_from(["max", "min"])
 
 
+@example(ideas=[_Idea("running", None, 0.0), _Idea("running", 10.0, 0.0)], direction="max")
+@example(ideas=[_Idea("running", None, 0.0), _Idea("passed", 10.0, 0.0)], direction="max")
 @given(ideas=_IDEAS, direction=_DIRECTIONS)
 def test_the_digests_points_are_the_run_pages_chart_over_any_run(
     ideas: list[_Idea], direction: str
