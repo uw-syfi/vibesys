@@ -280,3 +280,33 @@ def test_the_reader_request_needs_its_feature_and_hello_offers_it() -> None:
 
     assert request_features(request) == (HelperFeature.CHAT_ENDED_RUNS,)
     assert HelperFeature.CHAT_ENDED_RUNS in host.offered_features()
+
+
+def test_a_client_that_asks_is_told_the_reader_answers_chat(tmp_path: Path) -> None:
+    threads = SimThreads()
+    project = _ended_project(tmp_path / "p")
+    host = _Readers(threads, SimNetwork(threads)).host()
+
+    def ask(*, with_chat: bool | None) -> object:
+        request = RunReaderRequest(
+            request_id="r",
+            deadline_ms=5000,
+            project=str(project),
+            run_id=_RUN,
+            with_chat=with_chat,
+        )
+        return answer(request, host, threads.event())
+
+    asked, unasked = ask(with_chat=True), ask(with_chat=None)
+
+    assert isinstance(asked, RunReaderReply)
+    assert asked.chat is True
+    assert isinstance(unasked, RunReaderReply)
+    assert unasked.chat is None
+    request = RunReaderRequest(
+        request_id="r", deadline_ms=1000, project="/p", run_id=_RUN, with_chat=True
+    )
+    assert request_features(request) == (
+        HelperFeature.CHAT_ENDED_RUNS,
+        HelperFeature.CHAT_ENDED_RUN_QUESTIONS,
+    )

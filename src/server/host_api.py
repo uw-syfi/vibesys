@@ -1209,6 +1209,7 @@ HELPER_FIELD_FEATURES: Final[Mapping[type[HelperRequestBase], Mapping[str, Helpe
         "with_dashboard": HelperFeature.RUN_DASHBOARD,
     },
     ExamplesListRequest: {"with_catalogue": HelperFeature.EXAMPLE_CATALOGUE},
+    RunReaderRequest: {"with_chat": HelperFeature.CHAT_ENDED_RUN_QUESTIONS},
 }
 """The feature each gated optional field needs when it is set (not ``None``), exported too."""
 

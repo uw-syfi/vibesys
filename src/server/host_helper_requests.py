@@ -1337,7 +1337,12 @@ def _reader(request: RunReaderRequest, host: HelperHost) -> RunReaderReply | Hel
     """
     live = driving(host.registry.list(), request.run_id)
     if live is not None:
-        return RunReaderReply(request_id=request.request_id, instance_id=live.id, read_only=False)
+        return RunReaderReply(
+            request_id=request.request_id,
+            instance_id=live.id,
+            read_only=False,
+            chat=_chat_answer(request),
+        )
     project = host.projects.require_initialized(Path(_host_path(request.project, host.directories)))
     journal = host.projects.run_journal(project, request.run_id)
     started = host.readers.serve(
@@ -1346,7 +1351,17 @@ def _reader(request: RunReaderRequest, host: HelperHost) -> RunReaderReply | Hel
     )
     if isinstance(started, DetachedLaunchFailure):
         return _error(request.request_id, HelperErrorCode.READER_FAILED, started.message)
-    return RunReaderReply(request_id=request.request_id, instance_id=started.id, read_only=True)
+    return RunReaderReply(
+        request_id=request.request_id,
+        instance_id=started.id,
+        read_only=True,
+        chat=_chat_answer(request),
+    )
+
+
+def _chat_answer(request: RunReaderRequest) -> bool | None:
+    """Every server this helper reads a run through answers chat: said when the client asked."""
+    return True if request.with_chat else None
 
 
 def _unconfigured_target(request_id: str | None, target: SlurmTarget | ModalTarget) -> HelperError:

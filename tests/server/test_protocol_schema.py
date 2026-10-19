@@ -263,6 +263,7 @@ def test_host_helper_schema_exports_the_authoritative_field_feature_gates() -> N
         "runs.summary": {"offset": "run_summary", "with_ending": "run_ending"},
         "runs.list": {"digest_runs": "run_digest", "with_dashboard": "run_dashboard"},
         "examples.list": {"with_catalogue": "example_catalogue"},
+        "run.reader": {"with_chat": "chat_ended_run_questions"},
     }
     request_refs = document["properties"]["request"]["discriminator"]["mapping"]
     for tag, fields in gates.items():

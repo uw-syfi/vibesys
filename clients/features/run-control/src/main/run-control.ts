@@ -268,7 +268,14 @@ export class RunControl {
       await connection.ready();
       if (connection.features?.includes('chat_ended_runs') !== true) return {kind: 'unsupported'};
       if (claim.cancelled) return {kind: 'attached'};
-      const reply = await connection.request({type: 'run.reader', project, run_id: runId});
+      const reply = await connection.request({
+        type: 'run.reader',
+        project,
+        run_id: runId,
+        ...(connection.features?.includes('chat_ended_run_questions') === true
+          ? {with_chat: true}
+          : {}),
+      });
       if (claim.cancelled) return {kind: 'attached'};
       this.#claimTarget(id, reply.instance_id, claim);
       const bindingLease = lease;

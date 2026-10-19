@@ -28,6 +28,9 @@ class RunReaderRequest(HelperRequestBase):
     project: str
     """The project directory on the host; ``~`` expands to the helper's home."""
     run_id: RunId
+    with_chat: bool | None = None
+    """Also say whether the server answers chat questions (``chat`` of the reply); needs feature
+    ``chat_ended_run_questions``."""
 
 
 class RunReaderReply(HelperReplyBase):
@@ -36,4 +39,6 @@ class RunReaderReply(HelperReplyBase):
     type: Literal["run.reader"] = "run.reader"
     instance_id: InstanceId
     read_only: bool
+    chat: bool | None = None
+    """The server answers chat questions and opens chats, on a finished run too: set when asked."""
     """The server serves a finished run: it answers reads and refuses every command."""
