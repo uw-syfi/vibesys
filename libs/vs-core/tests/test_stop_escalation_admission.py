@@ -57,7 +57,7 @@ class _Run:
         self.now = 1.0
         self.closures: list[core.AttemptId] = []
 
-    def feed(self, event: core.Event) -> None:
+    def feed(self, event: core.CoreEvent) -> None:
         result = core.step(self.state, event)
         self.state = result.state
         self.closures.extend(_closed(result.requests))

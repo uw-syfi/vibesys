@@ -124,6 +124,7 @@ class _Scheduler(FakeCluster):
 
     def __init__(self, clock: ManualClock) -> None:
         super().__init__(clock=clock)
+        self.manual = clock
         self.jobs: set[str] = set()
         self.queue_s = 100.0
         self.run_s = 100.0
@@ -219,7 +220,7 @@ class _Scheduler(FakeCluster):
         observed: ClusterObservation | None = None,
     ) -> ClusterCancelOutcome:
         self.cancels += 1
-        self.clock.advance(self.cancel_s)
+        self.manual.advance(self.cancel_s)
         if self.failing_cancels:
             self.failing_cancels -= 1
             return ClusterUnknown(operation_id=None, reason="ssh: connection reset by peer")
