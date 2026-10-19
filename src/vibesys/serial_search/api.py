@@ -67,6 +67,7 @@ from vibesys.serial_search._prompts import (
     correction_of,
     plan_prompt,
 )
+from vibesys.serial_search._resume import Saved, open_run, rebuilt
 from vibesys.serial_search._roadmap import (
     ROADMAP,
     ROADMAP_TRIES,
@@ -81,6 +82,7 @@ from vibesys.serial_search._run import (
     RoundDone,
     RoundStart,
     SerialRun,
+    SerialState,
     round_done,
 )
 from vibesys.serial_search._spans import round_passed
@@ -126,7 +128,9 @@ __all__ = [
     "RoundDone",
     "RoundRow",
     "RoundStart",
+    "Saved",
     "SerialRun",
+    "SerialState",
     "Turn",
     "Unreadable",
     "accept_plan",
@@ -148,10 +152,12 @@ __all__ = [
     "focus_policy",
     "measure_gates",
     "observe",
+    "open_run",
     "plan_evidence",
     "plan_prompt",
     "put_roadmap",
     "read_roadmap",
+    "rebuilt",
     "record_round",
     "revision_of",
     "round_done",

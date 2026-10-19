@@ -54,14 +54,14 @@ from vs_core.api import (
     ValidateLocalBase,
     Withdraw,
 )
-from vs_core.api.search import TaskStage, TaskTerms, effect_verdict, terms_policy
+from vs_core.api.search import TaskObjective, TaskStage, TaskTerms, effect_verdict, terms_policy
 from vs_core.testing.builders import initial_state
 from vs_issue_tracker.api import FakeRoadmap, PutRoadmapItems, ReadRoadmap
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vs_core.api import SearchDef
+    from vs_core.api import SearchDef, Settlement
     from vs_core.api.testing import Asked, FakeView, FlowRun
 
 TERMS = TaskTerms(
@@ -76,6 +76,7 @@ TERMS = TaskTerms(
     accuracy_stage="accuracy",
     accuracy_gated=(EvidenceKind.BENCHMARK,),
     operation_seconds=30,
+    objectives=(TaskObjective(name="throughput", direction="max"),),
 )
 FACTS = initial_state().run.facts.model_copy(update={"task": TERMS})
 """The run facts every story starts from: the core's sample facts plus a task that measures."""
@@ -165,6 +166,10 @@ class SerialHost:
         """Start ``search`` of ``config`` under a host; ``world`` sets how the far side behaves."""
         run = start_flow(search, config, facts=FACTS, restarting=restarting, view=view)
         return cls(cast("FlowRun[object]", run), **world)
+
+    def change_code[C](self, search: SearchDef[C]) -> None:
+        """The code changed: the next event finds a journal that no longer replays."""
+        self.run.swap(cast("SearchDef[object]", search))
 
     @property
     def record(self) -> HypothesisState | None:
@@ -295,7 +300,9 @@ class SerialHost:
             self._refuse(asked)  # core takes the plain close instead
             return
         self.settled.add(target.attempt_id.root)
-        self.run.close_workspace(asked)
+        settlement = self.run.close_workspace(asked)
+        known = cast("tuple[Settlement, ...]", self.run.view.changes.get("settlements", ()))
+        self.run.view.changes["settlements"] = (*known, settlement)  # core's record of it
 
     # -- evaluator and operations --------------------------------------------------------------
 

@@ -5,9 +5,11 @@ from __future__ import annotations
 from collections import deque
 from typing import TYPE_CHECKING, Any, Self, Unpack, overload
 
+from pydantic import TypeAdapter
+
 from vs_core._registry import ContractError
 from vs_core.types.common import Capabilities, Limits, RevisionRef, Seconds, TaskTerms, Value
-from vs_core.types.settlement import RetainedCandidate, TrustedBaseline
+from vs_core.types.settlement import RetainedCandidate, Settlement, TrustedBaseline
 
 from ._agents import Agents
 from ._defs import UNBOUNDED, _Task
@@ -27,7 +29,7 @@ from ._sources import (
     Task,
     Timer,
 )
-from ._spans import AttemptOutcome
+from ._spans import AttemptOutcome, RunTrace
 from ._winner import INPUT, Input, Kept
 from ._workspaces import Workspaces
 
@@ -41,6 +43,9 @@ if TYPE_CHECKING:
     from ._labels import Label, LabelFields, SpanKind
     from ._run import _Run
     from ._spans import SpanId
+
+
+_SETTLEMENTS = TypeAdapter(tuple[Settlement, ...])
 
 
 class Clock:
@@ -264,7 +269,27 @@ class Flow:
         """Replace the flow's published record: what status views and tests read of a run."""
         self._run.published = record.model_dump_json()
 
+    def published[M: BaseModel](self, model: type[M]) -> M | None:
+        """What the run last published (`publish`), as ``model``; None before any publish.
+
+        A restart keeps it, so a root that resumes on changed code reads there what the run had
+        published before. It is not a journaled read: the published record is part of the
+        replayed state.
+        """
+        text = self._run.published
+        return None if text is None else model.model_validate_json(text)
+
+    @property
+    def spans(self) -> RunTrace:
+        """The run's spans so far (not a journaled read: the trace is replayed state)."""
+        return self._run.trace.snapshot()
+
     # journaled reads
+
+    @property
+    def settlements(self) -> tuple[Settlement, ...]:
+        """Every settlement core recorded for the run, oldest first (a journaled read)."""
+        return self._kit.read(lambda view: view.settlements, _SETTLEMENTS)
 
     @property
     def capabilities(self) -> Capabilities:

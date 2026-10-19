@@ -11,6 +11,7 @@ its own hypothesis builds on its own work in progress.
 """
 
 from dataclasses import dataclass, field
+from typing import Self
 
 from pydantic import Field
 
@@ -148,6 +149,27 @@ def round_done(  # noqa: PLR0913  # LW-641205 [PLR0913]; the record joins indepe
     )
 
 
+class SerialState(Value):
+    """What a serial search knows between rounds, as its root checkpoints it.
+
+    After a code change the root resumes from it (`SerialRun.resumed`): the ledger, the rounds
+    folded so far, the best, and the input's measurement, so no round is played again and nothing
+    measured is measured again.
+    """
+
+    baseline: candidates.Baseline
+    """The input's measurement: not asked for again once it landed."""
+    ledger: LedgerJson
+    counted: int = 0
+    work_in_progress: RevisionRef | None = None
+    last_profile: LastProfile | None = None
+    measurement_noise: MeasurementNoise | None = None
+    closed: tuple[Closed, ...] = ()
+    retained: tuple[Retained, ...] = ()
+    failure: str | None = None
+    stopped: bool = False
+
+
 @dataclass
 class SerialRun:
     """The record of a serial search: the ledger, the ideas' results and why it might end."""
@@ -165,6 +187,46 @@ class SerialRun:
     retained: list[Retained] = field(default_factory=list)
     failure: str | None = None
     stopped: bool = False
+
+    def state(self) -> SerialState:
+        """What the root checkpoints (`SerialState`)."""
+        return SerialState(
+            baseline=self.baseline,
+            ledger=self.ledger,
+            counted=self.counted,
+            work_in_progress=self.work_in_progress,
+            last_profile=self.last_profile,
+            measurement_noise=self.measurement_noise,
+            closed=tuple(self.closed),
+            retained=tuple(self.retained),
+            failure=self.failure,
+            stopped=self.stopped,
+        )
+
+    @classmethod
+    def resumed(
+        cls,
+        hypotheses: HypothesisConfig,
+        input_revision: RevisionRef,
+        terms: TaskTerms,
+        state: SerialState,
+    ) -> Self:
+        """The run as ``state`` saved it, on the input revision and terms the run was given."""
+        return cls(
+            hypotheses=hypotheses,
+            input=input_revision,
+            terms=terms,
+            baseline=state.baseline,
+            ledger=state.ledger,
+            counted=state.counted,
+            work_in_progress=state.work_in_progress,
+            last_profile=state.last_profile,
+            measurement_noise=state.measurement_noise,
+            closed=list(state.closed),
+            retained=list(state.retained),
+            failure=state.failure,
+            stopped=state.stopped,
+        )
 
     def over(self, *, stopping: bool) -> bool:
         """Whether no round will begin: stopped, failed, out of rounds or out of hypotheses."""

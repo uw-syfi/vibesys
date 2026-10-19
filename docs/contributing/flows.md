@@ -395,7 +395,16 @@ async def worker(ctx: Flow, job: Job) -> Done:
 
 The root may declare its own snapshot (`search(..., snapshot=S)`); it then takes `config | S`
 and resumes from its latest `ctx.checkpoint(S(...))`, holding what it had learned (the dynamic
-search's `DynamicResume`: its record and the input's measurement once it landed). A root without
+search's `DynamicResume`: its record and the input's measurement once it landed). The serial
+searches do the same (`MultiResume`, `SingleResume`: the config and a `SerialState`, which the
+root checkpoints before each wait): after a code change the search resumes at the round after the
+last it finished, with its ledger, best and input measurement, and plays no round again. A run
+saved before its root checkpointed that state has only its config as a snapshot; its root then
+rebuilds the state from what the run recorded (`vibesys.serial_search.rebuilt`: the ledger it
+published, `ctx.published`; the settlements core recorded, `ctx.settlements`; the spans of the
+rounds, `ctx.spans`). The previous round's profile summary and the noise its comparison stated are
+not in that record, so the next design turn goes without them, and a kept candidate that was not
+eligible reads as not passed. A root without
 one resumes from its config. A snapshot type may be a union of versions (`snapshot=V1 | V2`):
 give each model a `version` literal, and a checkpoint that decodes as none of them raises
 `FlowCodeChanged` as any other unresumable change does. The restart resolves each flow
