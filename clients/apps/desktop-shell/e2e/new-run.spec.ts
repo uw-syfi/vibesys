@@ -232,22 +232,58 @@ test('a machine whose VibeSys cannot read a goal says Needs an update, not that 
 });
 
 for (const width of [1440, 1000, 660]) {
-  test(`Back and the way on start at one top edge at ${width}px, a reason hanging below`, async ({
-    page,
-  }) => {
-    await page.setViewportSize({width, height: 900});
-    // A page whose Continue is blocked (it gives a reason under it) and Review's Start run.
-    for (const name of ['domain', 'review']) {
-      await openAt(page, pageNamed(name));
-      expect(await page.evaluate(() => window.innerWidth)).toBe(width);
-      const forward = name === 'domain' ? 'Continue' : 'Start run';
-      const top = async (label: string) =>
-        (await main(page).getByRole('button', {name: label, exact: true}).boundingBox())?.y;
-      expect(await top('Back')).toBeDefined();
-      expect(await top('Back')).toBe(await top(forward));
-    }
-  });
+  for (const height of [900, 480]) {
+    test(`Back and Continue sit in one place on every step at ${width}px, ${height}px high`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({width, height});
+      // Five steps of different lengths: a short question, a list, the hardware tiles, Where
+      // (long) and Agent (long); the tall window leaves room, the low one makes them scroll.
+      const boxes: {back: unknown; next: unknown}[] = [];
+      for (const name of ['domain', 'model', 'hardware', 'where', 'agent', 'review']) {
+        await openAt(page, pageNamed(name));
+        expect(await page.evaluate(() => window.innerWidth)).toBe(width);
+        const back = await main(page)
+          .getByRole('button', {name: 'Back', exact: true})
+          .boundingBox();
+        // Review's way on is Start run, as wide as its words: only its edge is the same.
+        const next = await main(page)
+          .getByRole('button', {name: name === 'review' ? 'Start run' : 'Continue', exact: true})
+          .boundingBox();
+        expect(back).not.toBeNull();
+        expect(next).not.toBeNull();
+        boxes.push({
+          back,
+          next: name === 'review' ? {y: next?.y, height: next?.height} : next,
+        });
+        // Pinned inside the window, below the content, even when the content scrolls.
+        expect((next?.y ?? 0) + (next?.height ?? 0)).toBeLessThanOrEqual(height);
+      }
+      const [first, ...rest] = boxes;
+      for (const each of rest.slice(0, -1)) expect(each).toEqual(first);
+      const review = rest.at(-1);
+      expect(review?.back).toEqual(first?.back);
+      expect(review?.next).toEqual({
+        y: (first?.next as {y: number}).y,
+        height: (first?.next as {height: number}).height,
+      });
+    });
+  }
 }
+
+test('a step draws no explanatory sentence under its question, and a blocked Continue no caption', async ({
+  page,
+}) => {
+  await openAt(page, pageNamed('start'));
+  await expect(main(page)).not.toContainText('Start from one of our examples');
+  await expect(main(page)).not.toContainText('A ready-made task');
+  await expect(main(page)).not.toContainText('Your own repository');
+  await expect(main(page)).not.toContainText('Answer the question above');
+  await expect(main(page).getByRole('button', {name: 'Continue'})).toHaveAttribute(
+    'aria-disabled',
+    'true',
+  );
+});
 
 test('the steps show their answers and go back to them; a later question waits for the earlier', async ({
   page,

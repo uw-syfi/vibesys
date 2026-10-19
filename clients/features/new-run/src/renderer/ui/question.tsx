@@ -9,9 +9,7 @@ export function Question(props: {
   /** Where the form stands ("Step 3 of 8"), above the question. */
   readonly kicker: string;
   readonly title: string;
-  readonly lede?: string;
   readonly children: ReactNode;
-  readonly nav: ReactNode;
 }): JSX.Element {
   return (
     <Stack gap="space-5">
@@ -20,10 +18,8 @@ export function Question(props: {
         <Text as="h1" variant="title">
           {props.title}
         </Text>
-        {props.lede === undefined ? null : <Text tone="muted">{props.lede}</Text>}
       </Stack>
       {props.children}
-      {props.nav}
     </Stack>
   );
 }
@@ -47,7 +43,7 @@ export function Nav(props: {
         variant="primary"
         text={props.next.text}
         press={props.next.press}
-        {...(blocked === undefined ? {} : {disabledReason: blocked})}
+        {...(blocked === undefined ? {} : {disabledReason: blocked, quietReason: blocked === ''})}
       />
     </Row>
   );

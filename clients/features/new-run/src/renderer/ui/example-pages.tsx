@@ -76,7 +76,6 @@ export function StartPage(props: CardProps): JSX.Element {
     {
       value: 'example',
       label: 'An example',
-      note: 'A ready-made task. Its workload, benchmark and goal are included, so you only choose what to optimize and for which hardware.',
       ...(none
         ? {unavailable: `No examples on ${machineLabel(context.form.machine)}.`}
         : {meta: examples === 0 ? 'Listing the examples.' : `${examples} examples`}),
@@ -84,7 +83,6 @@ export function StartPage(props: CardProps): JSX.Element {
     {
       value: 'project',
       label: 'Your project',
-      note: 'Your own repository with a task in it. Recent folders are listed first.',
       meta: recents === 0 ? 'No recent projects yet.' : `${recents} recent`,
     },
   ];
@@ -104,7 +102,6 @@ export function DomainPage(props: CardProps): JSX.Element {
   const options = domainOptions(entriesIn(props.context)).map(({domain, count}) => ({
     value: domain,
     label: DOMAIN_WORDS[domain].name,
-    note: DOMAIN_WORDS[domain].note,
     meta: `${count} ${count === 1 ? 'example' : 'examples'}`,
   }));
   return (
@@ -210,7 +207,6 @@ export function WorkloadPage(props: CardProps): JSX.Element {
       options={entries.map(entry => ({
         value: entry.task,
         label: entry.details?.workload?.name ?? entry.task,
-        ...(entry.details?.workload == null ? {} : {note: entry.details.workload.description}),
         meta: entry.task,
       }))}
       value={answers.workload}
