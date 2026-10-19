@@ -1,5 +1,5 @@
-/** The app's ASCII wordmark, as the New run hero shows it. */
-export const WORDMARK = [
+/** The app's ASCII wordmark: the one copy, drawn by the UI library's `Wordmark`. */
+export const VIBESYS_WORDMARK = [
   '██╗   ██╗██╗██████╗ ███████╗███████╗██╗   ██╗███████╗',
   '██║   ██║██║██╔══██╗██╔════╝██╔════╝╚██╗ ██╔╝██╔════╝',
   '██║   ██║██║██████╔╝█████╗  ███████╗ ╚████╔╝ ███████╗',

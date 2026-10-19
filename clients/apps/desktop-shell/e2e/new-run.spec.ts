@@ -327,12 +327,15 @@ for (const {width, height} of WINDOWS) {
     };
     const backs: unknown[] = [];
     const nexts: unknown[] = [];
-    for (const name of ['domain', 'model', 'review']) {
+    for (const name of ['start', 'domain', 'model', 'review']) {
       await openAt(page, pageNamed(name), seed);
       expect(page.viewportSize()).toEqual({width, height});
       const forward = name === 'review' ? 'Start run' : 'Continue';
-      const before = {back: await boxOf('Back'), next: await boxOf(forward)};
-      inside(before.back);
+      const hasBack = name !== 'start';
+      const backBox = async () => (hasBack ? boxOf('Back') : null);
+      const before = {back: await backBox(), next: await boxOf(forward)};
+      // The first step has no Back.
+      if (hasBack) inside(before.back);
       inside(before.next);
       const region = main(page).locator('.vs-page-scroll');
       if (name === 'model') {
@@ -342,9 +345,9 @@ for (const {width, height} of WINDOWS) {
         );
       }
       await region.evaluate(element => element.scrollTo(0, element.scrollHeight));
-      const after = {back: await boxOf('Back'), next: await boxOf(forward)};
+      const after = {back: await backBox(), next: await boxOf(forward)};
       expect(after).toEqual(before);
-      backs.push(before.back);
+      if (hasBack) backs.push(before.back);
       // Review's Start run is as wide as its words; the edge it sits on is the same.
       nexts.push({y: before.next?.y, height: before.next?.height});
     }
@@ -352,6 +355,25 @@ for (const {width, height} of WINDOWS) {
     for (const each of nexts) expect(each).toEqual(nexts[0]);
   });
 }
+
+test('step 1 shows the wordmark, small and decorative, above its question; step 2 does not', async ({
+  page,
+}) => {
+  await openAt(page, pageNamed('start'));
+  const art = main(page).locator('.vs-wordmark-art');
+  await expect(art).toBeVisible();
+  await expect(art).toHaveAttribute('aria-hidden', 'true');
+  const box = await art.boundingBox();
+  const heading = await question(page, 'What do you want to optimize?').boundingBox();
+  expect(box?.height).toBeCloseTo(40, 0);
+  expect((box?.y ?? 1e9) + (box?.height ?? 0)).toBeLessThanOrEqual(heading?.y ?? 0);
+  // Nothing with it but the question's own text.
+  await expect(main(page).locator('.vs-wordmark')).toHaveText(/^[\u2500-\u259f\s]+$/);
+  await choose(page, 'Start from', 'An example');
+  await proceed(page);
+  await expect(question(page, 'Which domain?')).toBeVisible();
+  await expect(main(page).locator('.vs-wordmark')).toHaveCount(0);
+});
 
 test('a model is one card however many kinds of hardware it has examples for, and hardware follows', async ({
   page,

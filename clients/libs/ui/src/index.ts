@@ -147,6 +147,7 @@ export {
   type TextElement,
   type TextTone,
   Wordmark,
+  type WordmarkSize,
   type WordmarkTone,
 } from './components/text.js';
 export {ThemeSwatch} from './components/theme-swatch.js';

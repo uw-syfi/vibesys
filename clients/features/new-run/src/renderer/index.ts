@@ -15,3 +15,4 @@ export {
 export {NewRunScreen} from './ui/new-run-screen.js';
 export {draftWords} from './ui/steps.js';
 export {type MachineOption, machineOptions} from './ui/view.js';
+export {VIBESYS_WORDMARK} from './ui/wordmark-art.js';

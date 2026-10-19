@@ -179,6 +179,9 @@ importers:
 
   apps/ui-gallery:
     dependencies:
+      '@vibesys/feature-new-run':
+        specifier: workspace:*
+        version: link:../../features/new-run
       '@vibesys/ui':
         specifier: workspace:*
         version: link:../../libs/ui

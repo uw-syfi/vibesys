@@ -1,3 +1,4 @@
+import {VIBESYS_WORDMARK} from '@vibesys/feature-new-run/renderer';
 import {
   ActionPanel,
   Banner,
@@ -33,7 +34,6 @@ import {
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import type {ComponentName, GalleryEntry} from './gallery-entry.js';
-import {WORDMARK} from './wordmark.js';
 
 const STYLES: readonly TextStyle[] = [
   'title',
@@ -292,8 +292,9 @@ export const BASIC_ENTRIES = {
   Wordmark: {
     render: () => (
       <Stack>
-        <Wordmark art={WORDMARK} label="VibeSys" align="center" tone="accent" />
-        <Wordmark art={WORDMARK} label="VibeSys, as a gradient" tone="gradient" />
+        <Wordmark art={VIBESYS_WORDMARK} label="VibeSys" align="center" tone="accent" />
+        <Wordmark art={VIBESYS_WORDMARK} label="VibeSys, as a gradient" tone="gradient" />
+        <Wordmark art={VIBESYS_WORDMARK} size="compact" />
       </Stack>
     ),
   },

@@ -2,10 +2,11 @@
  * New run as a guided form: one question to a page, in the order a run is decided. The steps sit
  * in a list beside the page (each shows its answer and takes you back to it) that, in a narrower
  * pane, is one line ("4 of 8 · Hardware") which opens the list. Every answer is kept, so leaving
- * New run and coming back finds the page where it was left.
+ * New run and coming back finds the page where it was left. The first page opens with the
+ * wordmark above its question; the others do not.
  */
 import type {HostKey} from '@vibesys/hosts';
-import {Button, Page, Row, SectionLayout, SidebarItem, Stack, Text} from '@vibesys/ui';
+import {Button, Page, Row, SectionLayout, SidebarItem, Stack, Text, Wordmark} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {isDone, type NewRunEvent, type NewRunSnapshot, type StepId} from '../../state/index.js';
 import {AgentPage} from './agent-page.js';
@@ -26,6 +27,7 @@ import {ProblemBanner, ReviewPage, StartButton} from './review-page.js';
 import {progressLine, type StepView, stepViews} from './steps.js';
 import {entriesIn, type MachineOption} from './view.js';
 import {WherePage} from './where-page.js';
+import {VIBESYS_WORDMARK} from './wordmark-art.js';
 
 type Dispatch = (event: NewRunEvent) => void;
 
@@ -216,6 +218,7 @@ export function NewRunScreen(props: ScreenProps): JSX.Element {
         }
       >
         <Stack gap="space-5">
+          {at === 'start' ? <Wordmark art={VIBESYS_WORDMARK} size="compact" /> : null}
           <ProblemBanner context={context} dispatch={dispatch} />
           {at === null || copy === null ? (
             <Text tone="muted">Listing</Text>

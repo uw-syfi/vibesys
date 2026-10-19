@@ -425,6 +425,14 @@ body > div:first-child {
     font-size: min(calc(var(--text-display-size) * 0.32), calc(100cqi / var(--wordmark-columns)));
   }
 }
+/*
+ * Compact: the art's lines add up to `--wordmark-compact` whatever the window, so the box is its final height
+ * before the font loads. The more specific selector outranks the short-window sizes above.
+ */
+.vs-wordmark[data-size="compact"] .vs-wordmark-art {
+  font-size: calc(var(--wordmark-compact) / var(--wordmark-lines) / (var(--text-display-line) / var(--text-display-size)));
+  height: var(--wordmark-compact);
+}
 .vs-wordmark[data-align="center"] .vs-wordmark-art {
   margin: 0 auto;
 }
