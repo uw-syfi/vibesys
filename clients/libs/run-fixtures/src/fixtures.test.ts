@@ -147,6 +147,20 @@ describe('each scenario shows its case', () => {
     expect(tree.candidates.filter(c => c.outcome === 'passed')).toHaveLength(8);
   });
 
+  it('crashed after a turn: a recorded run whose idea, turn and round never ended, and whose baseline gates failed', () => {
+    const fixture = fixtureNamed('crashed-after-turn');
+    expect(fixture.state).toBe('finished');
+    expect(fixture.events.at(-1)?.type).toBe('run_failed');
+    const tree = treeOf(fixture);
+    expect(tree.candidates.map(candidate => candidate.outcome)).toEqual(['running']);
+    const failed = fixture.events.filter(
+      event => event.type === 'gate_finished' && event.status === 'failed',
+    );
+    expect(failed).toHaveLength(2);
+    // The reason runs past the registry's cut.
+    expect((fixture.end?.reason ?? '').length).toBeGreaterThan(200);
+  });
+
   it('14 days: 600 ideas, about 40 passed, three running, a long winning path', () => {
     const tree = treeOf(weeksRun());
     const passed = tree.candidates.filter(candidate => candidate.outcome === 'passed').length;

@@ -22,7 +22,7 @@ export {
   operatorCluster,
   sshCluster,
 } from './compute.js';
-export {exampleCatalogue, exampleCatalogueWithoutDetails} from './examples.js';
+export {exampleCatalogue, exampleCatalogueWithoutDetails, queueRsCatalogue} from './examples.js';
 export {
   END_OUTCOMES,
   type EndOutcome,

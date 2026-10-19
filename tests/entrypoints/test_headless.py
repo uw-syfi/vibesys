@@ -513,6 +513,36 @@ def test_dynamic_builds_an_independent_descriptor_with_parallelism(
     assert request.orchestration.options["profile_guided"] is None
 
 
+@pytest.mark.parametrize(
+    ("declared", "flag", "expected"),
+    [
+        (None, None, "inprocess"),
+        ("service", None, "service"),
+        ("inprocess", None, "inprocess"),
+        ("service", "inprocess", "inprocess"),
+        (None, "service", "service"),
+    ],
+)
+def test_the_evaluation_interface_is_the_flag_else_the_inputs_declaration_else_inprocess(
+    tmp_path: Path, declared: str | None, flag: str | None, expected: str
+) -> None:
+    project = _write_input_project(tmp_path)
+    if declared is not None:
+        manifest = project / ".vibesys" / "tasks" / "default" / "vibesys.input.toml"
+        manifest.write_text(
+            manifest.read_text().replace(
+                'domain = "generic"', f'domain = "generic"\ninterface = "{declared}"'
+            )
+        )
+    argv = ["--outer-loop", "dynamic", "--input", str(project)]
+    if flag is not None:
+        argv += ["--interface", flag]
+
+    request = build_run_request(parse_cli_invocation(argv))
+
+    assert request.orchestration.options["interface"] == expected
+
+
 def test_current_directory_is_the_default_direct_project(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

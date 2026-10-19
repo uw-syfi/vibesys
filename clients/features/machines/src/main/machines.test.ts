@@ -1,7 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import {ConnectionManager} from '@vibesys/connection';
 import {FakeLink} from '@vibesys/connection/testing';
-import {type HostId, hostKey} from '@vibesys/hosts';
+import {type HostId, hostKey, REQUIRED_HELPER_FEATURES} from '@vibesys/hosts';
 import {SettingsStore, withHostSettings, withoutHost} from '@vibesys/settings';
 import {FakeSettingsFilesystem} from '@vibesys/settings/testing';
 import {FakeClock} from '@vibesys/transport/testing';
@@ -67,6 +67,21 @@ describe('MachinesMain', () => {
       {host: 'ssh:host-a', label: 'host-a', checkout: '/mnt/data/vibesys'},
       {host: 'ssh:host-b', label: 'host-b', checkout: '~/vibesys'},
     ]);
+  });
+
+  test('a machine whose helper lacks a feature the app needs is "needs-update", not ready', async () => {
+    for (const lacking of REQUIRED_HELPER_FEATURES) {
+      const link = new FakeLink();
+      link.helper.features.delete(lacking);
+      const {machines, manager} = await subject(new Map([['ssh:host-b', link]]));
+      await using _ = manager;
+      const report = await machines.report(HOST_B);
+      expect(report.kind).toBe('needs-update');
+      expect(report.kind === 'needs-update' && report.facts !== null).toBe(true);
+    }
+    const {machines, manager} = await subject(new Map([['ssh:host-b', new FakeLink()]]));
+    await using _ = manager;
+    expect((await machines.report(HOST_B)).kind).toBe('ready');
   });
 
   test('a machine’s status follows from its connection and its helper’s description', async () => {

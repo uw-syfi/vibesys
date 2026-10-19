@@ -32,9 +32,11 @@ server when valid.
 
 Isolated-request profiles miss costs that appear only under load. Before
 tuning kernels, compare isolated-request throughput with throughput under the
-benchmark workload and attribute any gap. Profile with nsys or the torch
-profiler, with NVTX ranges per step and per pipeline stage, over a short
-post-warmup window of the real benchmark workload. Report per-stage busy share,
+benchmark workload and attribute any gap. Profile over a short post-warmup
+window of the real benchmark workload{% if profiler_id == "nsys" %}, with nsys and NVTX ranges per step
+and per pipeline stage{% elif profiler_id == "torch" %}, with the torch profiler and a
+`record_function` range per step and per pipeline stage{% elif profiler_id == "none" %}, timing each
+step and pipeline stage inside the server{% else %}, with the run's profiler (`{{ profiler_id }}`){% endif %}. Report per-stage busy share,
 host gaps by cause, batch token fill and sequences per batch, and kernel time
 against context length. Size each change in ms per step against the
 measurement noise, and batch changes too small to confirm one at a time.

@@ -41,7 +41,7 @@ describe('the example catalogue as the questions read it', () => {
     expect(offered.find(option => option.domain === 'data-structures')?.count).toBe(1);
   });
 
-  test('models are grouped by maker with the hardware each has an example for', () => {
+  test('models are grouped by maker, one option per distinct model whatever hardware it has examples for', () => {
     const groups = modelGroups(ENTRIES);
     const meta = groups.find(group => group.maker === 'meta');
     expect(meta?.models.map(model => model.name)).toContain('Llama 3 8B Instruct');
@@ -75,27 +75,40 @@ describe('the example catalogue as the questions read it', () => {
         ];
       }),
     });
-    expect(modelGroups(twice)[0]?.models[0]?.hardware).toEqual([
-      '1\u00d7 AWS Trainium2',
-      '1\u00d7 AMD MI210',
-    ]);
+    const llama = modelGroups(twice).flatMap(group => group.models);
+    expect(llama).toEqual([{name: 'Llama 3 8B Instruct'}]);
+    // The two hardware are the model's next question, not the model's own card.
+    expect(
+      hardwareGroups(twice, 'Llama 3 8B Instruct').flatMap(group =>
+        group.options.map(option => option.label),
+      ),
+    ).toEqual(['1\u00d7 AMD MI210', '1\u00d7 AWS Trainium2']);
     // Each model appears once, under one maker.
     const names = groups.flatMap(group => group.models.map(model => model.name));
     expect(new Set(names).size).toBe(names.length);
   });
 
-  test('every hardware the catalogue targets is offered once, by vendor, even where a model has none', () => {
-    const groups = hardwareGroups(ENTRIES);
-    const keys = groups.flatMap(group => group.options.map(option => option.key));
-    expect(new Set(keys).size).toBe(keys.length);
-    for (const entry of ENTRIES) {
-      if (entry.details?.domain !== 'llm-serving') continue;
-      expect(keys).toContain(hardwareKey(entry.details.hardware));
+  test('the hardware offered is the hardware the chosen model has an example for, once each, by vendor', () => {
+    const everyKey = new Set(
+      ENTRIES.flatMap(entry =>
+        entry.details?.domain === 'llm-serving' ? [hardwareKey(entry.details.hardware)] : [],
+      ),
+    );
+    const models = modelGroups(ENTRIES).flatMap(group => group.models.map(model => model.name));
+    let narrower = false;
+    for (const model of models) {
+      const keys = hardwareGroups(ENTRIES, model).flatMap(group =>
+        group.options.map(option => option.key),
+      );
+      expect(new Set(keys).size).toBe(keys.length);
+      expect(keys.length).toBeGreaterThan(0);
+      for (const key of everyKey) {
+        expect(keys.includes(key)).toBe(entriesFor(ENTRIES, model, key).length > 0);
+      }
+      if (keys.length < everyKey.size) narrower = true;
     }
-    const model = 'Qwen3.5 9B';
-    const has = keys.filter(key => entriesFor(ENTRIES, model, key).length > 0);
-    expect(has.length).toBeLessThan(keys.length);
-    expect(has.length).toBeGreaterThan(0);
+    expect(narrower).toBe(true);
+    expect(hardwareGroups(ENTRIES, 'No such model')).toEqual([]);
   });
 
   test('an example is named by its own name, not its category directory', () => {

@@ -530,6 +530,34 @@ def test_a_task_whose_backend_the_host_cannot_run_fails_preflight_with_a_typed_f
     assert report.backend is Backend.CUDA
 
 
+def _slurm_flags(tmp_path: Path) -> list[str]:
+    """The flags ``run.preflight`` adds for a run measured on a cluster, over a minimal operator file."""
+    config = tmp_path / "operator-slurm.toml"
+    config.write_text(
+        '[slurm]\nname = "cluster-m"\nremote_workspace_root = "/remote/runs"\n'
+        '[slurm.transport]\nkind = "ssh"\nhost = "host-a"\n',
+        encoding="utf-8",
+    )
+    return ["--run-environment", "slurm", "--slurm-config", str(config)]
+
+
+@pytest.mark.parametrize("backend", ["cuda", "rocm", "metal"])
+@pytest.mark.parametrize("environment", ["slurm", "modal"])
+def test_a_gpu_task_measured_on_a_cluster_or_cloud_needs_no_gpu_on_the_agents_machine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: str, environment: str
+) -> None:
+    """Regression: the agent's machine is not where results are measured, so it needs no GPU."""
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    flags = _slurm_flags(tmp_path) if environment == "slurm" else ["--run-environment", "modal"]
+
+    report = _preflight_of(
+        tmp_path, _project_declaring(tmp_path, f'"{backend}"'), _nvidia_smi(None), *flags
+    )
+
+    assert isinstance(report.settings, SettingsValid)
+    assert report.backend is Backend(backend)
+
+
 @pytest.mark.parametrize(
     ("answer", "expected"),
     [(None, Backend.CPU), (ProbeResult(0, _GPU_ROW), Backend.CUDA)],

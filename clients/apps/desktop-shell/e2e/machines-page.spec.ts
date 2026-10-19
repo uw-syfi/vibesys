@@ -152,8 +152,9 @@ test("a machine's Settings opens on its clusters, and Back returns to Machines",
   await expect(page.getByRole('heading', {level: 1, name: 'Machines'})).toBeVisible();
 });
 
-/** The rail's Machines button carries its warning in its name. */
-const warning = (page: Page) => rail(page).getByRole('button', {name: 'A machine is unreachable'});
+/** The rail's Machines button carries its warning in its name: the word the machine's card uses. */
+const warning = (page: Page, word = 'Unreachable') =>
+  rail(page).getByRole('button', {name: new RegExp(`^Machines, ${word}$`)});
 
 test('the rail warns of nothing while every machine and cluster is fine', async ({page}) => {
   await openMachines(page, 1440, world('one machine'));
@@ -169,6 +170,36 @@ test('the rail warns while a machine is unreachable, and signing one in clears o
   await expect(card(page, 'host-b').getByText('Online', {exact: true})).toBeVisible();
   // host-a still does not answer.
   await expect(warning(page)).toBeVisible();
+});
+
+test('the rail says Needs an update, not unreachable, for a machine whose VibeSys is too old', async ({
+  page,
+}) => {
+  const one = world('one machine');
+  const old: MachinesWorld = {
+    ...one,
+    seed: {...one.seed, reports: {local: {kind: 'needs-update', facts: null}}},
+  };
+  await openMachines(page, 1440, old);
+  await expect(card(page, 'This Mac').getByText('Needs an update', {exact: true})).toBeVisible();
+  await expect(warning(page, 'Needs an update')).toBeVisible();
+  await expect(warning(page)).toHaveCount(0);
+});
+
+test('the rail names the most urgent of the problems machines have', async ({page}) => {
+  const several = world('several machines');
+  const mixed: MachinesWorld = {
+    ...several,
+    seed: {
+      ...several.seed,
+      reports: {
+        local: {kind: 'needs-update', facts: null},
+        'ssh:host-a': {kind: 'sign-in', detail: 'passphrase'},
+      },
+    },
+  };
+  await openMachines(page, 1440, mixed);
+  await expect(warning(page, 'Sign in')).toBeVisible();
 });
 
 test('the rail warns when a cluster test finds it unreachable', async ({page}) => {

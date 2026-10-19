@@ -5,15 +5,16 @@
  */
 import type {LogOwner, RunEvent, RunOverview, Span} from '@vibesys/contracts';
 import type {LogStream, UsageRecord} from '@vibesys/contracts/host-helper';
-import {endedLook, type HostRun, RUN_GONE_WORDS, type RunEnd} from '@vibesys/hosts';
+import {endedLook, type HostRun, problemWord, RUN_GONE_WORDS, type RunEnd} from '@vibesys/hosts';
 import {decodeNarrationLine, type LogView, logViewRecords} from '@vibesys/logs';
 import type {CoreState} from '@vibesys/run-state';
-import {type RunTrace, traceSpans} from '@vibesys/run-state/trace';
-import {type AdoptedCandidate, adoptedCandidate, endReason} from './end-words.js';
+import {type RunEnding, type RunTrace, traceSpans} from '@vibesys/run-state/trace';
+import {type AdoptedCandidate, adoptedCandidate, endReason, unclipped} from './end-words.js';
 import {overviewAt, traceAt} from './live.js';
 import {
   commandable,
   type HistoryProgress,
+  type MachineBlock,
   quotaPause,
   type RunPageState,
   runPhase,
@@ -57,10 +58,39 @@ function endedStatus(phase: HostRun['phase'], end: RunEnd): {label: string; tone
   return look === null ? {label: 'Finished', tone: 'ok'} : {label: look.label, tone: look.tone};
 }
 
+const BLOCK_STATUS: Readonly<Record<MachineBlock, string>> = {
+  'needs-update': problemWord('needs-update'),
+  'sign-in': problemWord('sign-in'),
+  offline: problemWord('unavailable'),
+  closed: 'Disconnected',
+};
+
+/**
+ * Why the run cannot be found because its machine will not answer (it needs an update, a sign-in,
+ * or cannot be reached), else null while it is only being looked for. Typed from the machine's
+ * connection, never from the failure text, which may name a path or a user.
+ */
+export function machineBlockWords(state: RunPageState): string | null {
+  if (state.record.kind !== 'unlisted' || state.record.block === undefined) return null;
+  const machine = state.hostLabel;
+  switch (state.record.block) {
+    case 'needs-update':
+      return `VibeSys on ${machine} needs an update`;
+    case 'sign-in':
+      return `Sign in to ${machine}`;
+    case 'offline':
+      return `Can’t reach ${machine}`;
+    case 'closed':
+      return `Disconnected from ${machine}`;
+  }
+}
+
 function status(state: RunPageState): {label: string; tone: Tone} {
   const phase = runPhase(state);
   switch (phase.kind) {
     case 'unlisted': {
+      const block = state.record.kind === 'unlisted' ? state.record.block : undefined;
+      if (block !== undefined) return {label: BLOCK_STATUS[block], tone: 'warn'};
       const unplaced = unplacedRun(state);
       return unplaced === null
         ? {label: 'Looking for the run', tone: 'neutral'}
@@ -600,7 +630,7 @@ export function endedView(state: RunPageState): EndedView | null {
       ? (phase.run.reason ?? 'The run’s record does not say why it ended.')
       : loading && end.outcome === 'adopted'
         ? HISTORY_PENDING
-        : endReason(end.outcome, end.reason, adopted, direction);
+        : endReason(end.outcome, unclipped(end.reason, phase.run.reason), adopted, direction);
   const round = end?.resume_from_round ?? null;
   const resume =
     end?.resumable === true ? (round === null ? 'Resume' : `Resume from round ${round}`) : null;
@@ -637,6 +667,43 @@ export function viewedRun(state: RunPageState): ViewedRun {
 }
 
 const NO_RECORDS: readonly UsageRecord[] = [];
+
+/** The span status a run's registry status settles open spans with; null for a status not final. */
+function endedSpanStatus(status: HostRun['phase']): RunEnding['status'] | null {
+  switch (status) {
+    case 'failed':
+      return 'failed';
+    case 'stopped':
+      return 'stopped';
+    case 'completed':
+      return 'done';
+    default:
+      return null;
+  }
+}
+
+/**
+ * How the run's end settles the spans it left open, from what the page knows of the run: its
+ * registry status and failure, the time the run was last heard, and the turns that recorded their
+ * spend. Null while the run is not over, when the registry gives no final status, or while the
+ * history is still being read (the fold is then a prefix and no pane draws it).
+ */
+export function runEnding(state: RunPageState): RunEnding | null {
+  if (historyLoading(state) !== null) return null;
+  const {record} = state;
+  let status: RunEnding['status'] | null = null;
+  let reason: string | null = null;
+  if (record.kind === 'ended') {
+    status = endedSpanStatus(record.run.phase);
+    reason = record.run.reason;
+  } else if (record.kind === 'historical') {
+    // A saved run whose tombstone expired may not say how it ended: it was not finished, and the
+    // page does not claim it failed.
+    status = record.status === null ? 'stopped' : endedSpanStatus(record.status);
+  }
+  if (status === null) return null;
+  return {status, reason, heardAt: state.run.heard?.run ?? null, turns: usageRecords(state)};
+}
 
 /**
  * The run's usage records, one per finished turn: the summary's while the run is opened from it

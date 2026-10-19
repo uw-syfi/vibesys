@@ -256,7 +256,7 @@ export function StartButton(props: {
       variant="primary"
       text="Start run"
       press={() => props.dispatch({type: 'start'})}
-      {...(blocked === undefined ? {} : {disabledReason: blocked})}
+      {...(blocked === undefined ? {} : {disabledReason: blocked, quietReason: true})}
     />
   );
 }

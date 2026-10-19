@@ -663,6 +663,22 @@ describe('Hosts.readSummary', () => {
     expect(link.helper.requests.filter(request => request.type === 'runs.summary')).toEqual([]);
   });
 
+  test('is unsupported, and sends nothing, on a helper whose summary predates its trace', async () => {
+    // The pages are what such a helper writes: no `trace` and no `rounds_finished`. Reading one
+    // would end the channel, so the machine would look unreachable for good.
+    const {trace: _trace, rounds_finished: _rounds, ...before} = page(1, {});
+    const {hosts, link, manager} = await subject([{offset: 0, page: before}]);
+    link.helper.features.delete('run_trace');
+    await using _manager = manager;
+
+    await expect(hosts.readSummary(LOCAL, '/srv/project', 'run-1')).resolves.toEqual({
+      kind: 'unsupported',
+    });
+    expect(link.helper.requests.filter(request => request.type === 'runs.summary')).toEqual([]);
+    // The machine is still usable for what that helper serves.
+    await expect(hosts.projectRuns(LOCAL, '/srv/project')).resolves.toBeDefined();
+  });
+
   test('says the run is gone when the host holds no record of it', async () => {
     const {hosts, manager} = await subject([]);
     await using _manager = manager;
@@ -715,6 +731,7 @@ describe('Hosts.runDigests', () => {
       outcome: null,
       closing: 'finished',
       over: true,
+      endSummary: null,
       dashboard: null,
     });
   });

@@ -136,6 +136,57 @@ test('Archive takes a run off the dashboard', async ({page}) => {
   await expect(page.getByRole('region', {name: 'Stopped', exact: true})).toHaveCount(0);
 });
 
+interface Box {
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+}
+
+/** Each tile of the group named `name`, as the page lays it out. */
+async function boxes(page: Page, name: string): Promise<Box[]> {
+  return tiles(page, name).evaluateAll(each =>
+    each.map(tile => {
+      const {left, top, right, bottom} = tile.getBoundingClientRect();
+      return {left, top, right, bottom};
+    }),
+  );
+}
+
+/** Eight runs of one machine, so one group holds more tiles than any row can. */
+const CROWD: readonly RunCase[] = Array.from({length: 8}, (_, index) => ({
+  ...ONE_RUN[0],
+  runId: `r-crowd-${10 + index}`,
+  name: `queue-rs-crowd${index}`,
+  ago: 1 + index,
+})) as readonly RunCase[];
+
+test('tiles are dense: at 1440 four or more share a row, and at 660 none overlap', async ({
+  page,
+}) => {
+  await open(page, dashboardWorld(CROWD));
+
+  const wide = await boxes(page, 'Running');
+  expect(wide).toHaveLength(8);
+  const first = Math.min(...wide.map(box => box.top));
+  expect(wide.filter(box => box.top === first).length).toBeGreaterThanOrEqual(4);
+  for (const box of wide) expect(box.bottom - box.top).toBeLessThanOrEqual(160);
+
+  await page.setViewportSize({width: 660, height: 900});
+  const narrow = await boxes(page, 'Running');
+  for (const [index, a] of narrow.entries()) {
+    for (const b of narrow.slice(index + 1)) {
+      const apart =
+        a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top;
+      expect(apart, 'two tiles overlap').toBe(true);
+    }
+  }
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(0);
+});
+
 test('a machine that cannot list its runs leaves the other machine’s tiles', async ({page}) => {
   const world = dashboardWorld(MANY_RUNS);
   const {[`ssh:host-b|${'/home/me/projects/queue-rs'}`]: _lost, ...rest} = world.projectRuns ?? {};
@@ -167,7 +218,7 @@ test('Machines carries a warning dot while a machine cannot be reached', async (
   await open(page, {...world, reports: {'ssh:host-b': {kind: 'unavailable', detail: 'down'}}});
   const rail = page.getByRole('navigation', {name: 'VibeSys'});
 
-  await expect(rail.getByRole('button', {name: /^Machines/})).toHaveAccessibleName(/unreachable/);
+  await expect(rail.getByRole('button', {name: /^Machines/})).toHaveAccessibleName(/Unreachable/);
 });
 
 test('a run that ends moves from Running to Finished', async ({page}) => {
@@ -206,5 +257,5 @@ test('on a machine whose VibeSys is too old for digests, a run still says its ow
   // A run only a digest could place is unknown, with the machine's trouble beside it.
   const unknown = tiles(page, 'Unknown').first();
   await expect(unknown).toContainText('unknown');
-  await expect(unknown).toContainText('machine needs a newer VibeSys');
+  await expect(unknown).toContainText('needs an update');
 });

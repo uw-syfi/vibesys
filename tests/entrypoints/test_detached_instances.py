@@ -5,12 +5,13 @@ from __future__ import annotations
 import json
 import os
 import stat
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from tests.server.support import operator_dialer
 from tests.support.task_project import write_task
@@ -168,7 +169,15 @@ class _ChildEffects(_DetachedGatewayEffects):
     (``--run-id``) in the first record it publishes.
     """
 
-    def __init__(self, root: Path, *, serves: bool, exit_status: int | None = None) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        serves: bool,
+        exit_status: int | None = None,
+        output: bytes = b"child output\n",
+    ) -> None:
+        self.output = output
         self.root = root
         self.serves = serves
         self.child = _Child(exit_status)
@@ -180,7 +189,7 @@ class _ChildEffects(_DetachedGatewayEffects):
     def spawn(self, command: list[str], environment: dict[str, str], output: BinaryIO) -> _Child:
         self.command = command
         self.environment = environment
-        output.write(b"child output\n")
+        output.write(self.output)
         output.flush()
         instance_id = command[command.index("--instance-id") + 1]
         socket_path = command[command.index("--control-socket") + 1]
@@ -234,6 +243,72 @@ def test_a_detached_launch_reports_a_child_that_exits_before_serving(tmp_path: P
     effects = _ChildEffects(tmp_path, serves=False, exit_status=3)
 
     with pytest.raises(RuntimeError, match=r"(?s)child output.*exited with status 3"):
+        _spawn_detached_instance(["--local", "--run-id", _RUN_ID], tmp_path, effects)
+
+
+class _SlowStartEffects(_ChildEffects):
+    """A child that is alive from the start but publishes its record only after *delay* seconds."""
+
+    def __init__(self, root: Path, *, delay: float) -> None:
+        super().__init__(root, serves=False)
+        self.delay = delay
+        self.ready_at: float | None = None
+
+    def spawn(self, command: list[str], environment: dict[str, str], output: BinaryIO) -> _Child:
+        child = super().spawn(command, environment, output)
+        self.ready_at = self.clock.now() + self.delay
+        self._command_arguments = command
+        return child
+
+    def sleep(self, seconds: float) -> None:
+        super().sleep(seconds)
+        if self.ready_at is not None and self.clock.now() >= self.ready_at:
+            command = self._command_arguments
+            self.ready_at = None
+            instance_id = command[command.index("--instance-id") + 1]
+            self.holds[0].publish(
+                _record(
+                    instance_id,
+                    command[command.index("--control-socket") + 1],
+                    InstanceStatus.SERVING,
+                    command[command.index("--run-id") + 1],
+                )
+            )
+
+
+@pytest.mark.regression
+@given(delay=st.floats(min_value=0, max_value=120, allow_nan=False))
+@example(delay=26.0)
+def test_a_cold_start_that_is_slow_but_alive_is_not_given_up_on(delay: float) -> None:
+    """A first start after an install took 26 s and a 10 s bound failed it with an empty log."""
+    with tempfile.TemporaryDirectory() as directory:
+        effects = _SlowStartEffects(Path(directory), delay=delay)
+
+        record = _spawn_detached_instance(
+            ["--local", "--run-id", _RUN_ID], Path(directory), effects
+        )
+
+        assert record.status is InstanceStatus.SERVING
+        assert effects.child.terminated is False
+        effects.holds[0].release()
+
+
+def test_a_start_that_hangs_says_in_its_log_and_error_that_it_was_alive(tmp_path: Path) -> None:
+    effects = _ChildEffects(tmp_path, serves=False)
+
+    with pytest.raises(RuntimeError, match=r"(?s)did not become ready.*still running, not crashed"):
+        _spawn_detached_instance(["--local", "--run-id", _RUN_ID], tmp_path, effects)
+
+    log = next(tmp_path.glob("runs/*/server.log")).read_text()
+    assert log.startswith("child output\n")
+    assert "launcher stopped this server" in log
+    effects.holds[0].release()
+
+
+def test_a_child_that_crashes_without_output_says_its_log_was_empty(tmp_path: Path) -> None:
+    effects = _ChildEffects(tmp_path, serves=False, exit_status=1, output=b"")
+
+    with pytest.raises(RuntimeError, match=r"exited with status 1.*wrote nothing"):
         _spawn_detached_instance(["--local", "--run-id", _RUN_ID], tmp_path, effects)
 
 

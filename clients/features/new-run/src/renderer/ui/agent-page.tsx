@@ -120,12 +120,7 @@ function ModelChoice(props: {
           choose={generation => within({family: scope?.family ?? null, generation})}
         />
       )}
-      <Field
-        label="Model"
-        {...(tiers.length === 0
-          ? {}
-          : {help: 'Faster and cheaper on the left, stronger and slower on the right.'})}
-      >
+      <Field label="Model">
         {tiers.length > 0 ? (
           <Slider
             options={tiers.map(tier => tier.name)}
@@ -155,12 +150,12 @@ export function AgentPage(props: CardProps): JSX.Element {
   const {context, dispatch} = props;
   const {agent, machine} = context.form;
   const offers = context.harnesses?.for === machine ? context.harnesses.list : null;
-  if (offers === null) return <Text tone="muted">Asking the machine which agents it runs.</Text>;
+  if (offers === null) return <Text tone="muted">Listing</Text>;
   const groups = agentGroups(offers);
   const group =
     agent === null ? undefined : (groupOf(offers, agent.provider, agent.model) ?? groups[0]);
   if (agent === null || group === undefined) {
-    return <Text tone="warn">This machine offers no vetted agent harness.</Text>;
+    return <Text tone="warn">No agents</Text>;
   }
   const pick: Pick = (provider, model) => dispatch({type: 'agent', provider, model});
   const installed =

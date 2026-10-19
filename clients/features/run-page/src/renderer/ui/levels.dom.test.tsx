@@ -41,6 +41,7 @@ async function paneOf(
   const model = {
     ...modelOf([opened]),
     overview: null,
+    inputGates: [],
     changed: new Set<string>(),
     agents: {agents: []},
     trace: {spans: new Map()},

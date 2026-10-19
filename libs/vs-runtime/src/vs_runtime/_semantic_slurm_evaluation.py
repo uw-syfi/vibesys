@@ -45,6 +45,7 @@ from vs_evaluation.api import (
 from vs_redaction.api import redact_diagnostic_tail
 from vs_runtime._evaluation_failure_text import render_stage_output_with_service_log
 from vs_runtime._failure_classification import RecordState, classify, is_unsettled, signal_of
+from vs_runtime._host_path_masking import mask_observation, private_paths
 from vs_runtime._measurement_progress import StageRun
 from vs_runtime._trusted_evaluation import (
     TrustedEvaluationPlan,
@@ -173,6 +174,7 @@ class SemanticSlurmEvaluationExecutor:
         self._sleeper = sleeper
         self._config = config
         self._policy = policy
+        self._private_paths = private_paths(config, policy.private_paths())
         self._plan = plan
         self._trusted_plan = trusted_plan
         self._workspaces = workspaces
@@ -487,6 +489,7 @@ class SemanticSlurmEvaluationExecutor:
     def _semantic_observation(
         self, handle_id: str, request: EvaluationRequest, observed: ExecutorObservation
     ) -> ExecutorObservation:
+        observed = mask_observation(observed, self._private_paths)
         results: list[EvaluationStepResult] = []
         failed_checks: list[tuple[str | None, EvidenceKind]] = []
         operator_failed_checks: list[tuple[str | None, EvidenceKind]] = []

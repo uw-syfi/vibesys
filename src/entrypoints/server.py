@@ -62,7 +62,15 @@ from vs_sim.api import (
 )
 
 _WEB_PORT_MAX = 65_535
-_DETACHED_START_TIMEOUT_SECONDS = 10.0
+_DETACHED_START_HANG_GUARD_SECONDS = 600.0
+"""How long a detached server that is still running may take to publish its record.
+
+Readiness is the child's to announce, and a child that exits is seen at once, so
+this bound never decides how long a start takes: it only ends a child that is alive
+and will not publish. It is generous because the first start after an install
+compiles bytecode and loads every module (tens of seconds on a slow disk), and
+a guess near that time fails a healthy start.
+"""
 _DETACHED_STOP_TIMEOUT_SECONDS = 2.0
 _GATEWAY_STOP_GRACE_SECONDS = 2.0
 GATEWAY_STOP_TIMEOUT_SECONDS = WEBSOCKET_CLOSE_TIMEOUT_SECONDS + _GATEWAY_STOP_GRACE_SECONDS
@@ -397,8 +405,11 @@ class _DetachedLaunch[T]:
         return self._failure(f"{self.name} exited with status {status}")
 
     def not_ready(self) -> _DetachedStartError:
+        """The server was still running, so it hung or was still loading, but it did not crash."""
         return self._failure(
-            f"{self.name} did not become ready within {_DETACHED_START_TIMEOUT_SECONDS:g} seconds"
+            f"{self.name} did not become ready within {_DETACHED_START_HANG_GUARD_SECONDS:g} "
+            "seconds and was stopped. It was still running, not crashed: it hung, or it "
+            "was still loading"
         )
 
     def _failure(self, summary: str) -> _DetachedStartError:
@@ -420,7 +431,7 @@ def _start_detached_child[T](launch: _DetachedLaunch[T], effects: _DetachedGatew
         environment,
         launch.output,
     )
-    deadline = effects.monotonic() + _DETACHED_START_TIMEOUT_SECONDS
+    deadline = effects.monotonic() + _DETACHED_START_HANG_GUARD_SECONDS
     while effects.monotonic() < deadline:
         value = launch.ready()
         if value is not None:
@@ -429,6 +440,14 @@ def _start_detached_child[T](launch: _DetachedLaunch[T], effects: _DetachedGatew
         if status is not None:
             raise launch.exited(status)
         effects.sleep(_DETACHED_POLL_SECONDS)
+    # Say in the log itself what ended the start, so a log the server never wrote to
+    # is not left blank. The child shares this file's offset, so append at its end.
+    launch.output.seek(0, os.SEEK_END)
+    launch.output.write(
+        f"vibesys: launcher stopped this server: it published no record within "
+        f"{_DETACHED_START_HANG_GUARD_SECONDS:g} s of starting\n".encode()
+    )
+    launch.output.flush()
     _stop_detached(process)
     raise launch.not_ready()
 
@@ -757,6 +776,8 @@ def _detached_failure(summary: str, log_path: Path, output: BinaryIO) -> str:
     output.seek(max(0, length - _DETACHED_LOG_TAIL_BYTES))
     tail = output.read().decode("utf-8", errors="replace").strip()
     message = f"{summary}. Startup log: {log_path}"
+    if not tail:
+        message += " (the server wrote nothing to it before it ended)"
     return f"{tail}\n{message}" if tail else message
 
 

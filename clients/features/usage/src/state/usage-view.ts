@@ -53,6 +53,8 @@ export interface RunSpendRow {
   readonly runId: string;
   /** The task the run was started for, else its id. */
   readonly name: string;
+  /** The run id, when another row has the same name, to tell the rows apart; else null. */
+  readonly detail: string | null;
   readonly costUsd: number;
   readonly cost: string;
   /** The row's cost against the costliest row's, from 0 to 1. */
@@ -187,7 +189,14 @@ function runRows(sources: readonly UsageSource[]): readonly RunSpendRow[] {
   );
   rows.sort(byCost);
   const top = rows[0]?.costUsd ?? 0;
-  return rows.map(row => ({...row, cost: dollars(row.costUsd), share: shareOf(row.costUsd, top)}));
+  const sharing = new Map<string, number>();
+  for (const {name} of rows) sharing.set(name, (sharing.get(name) ?? 0) + 1);
+  return rows.map(row => ({
+    ...row,
+    detail: (sharing.get(row.name) ?? 0) > 1 ? row.runId : null,
+    cost: dollars(row.costUsd),
+    share: shareOf(row.costUsd, top),
+  }));
 }
 
 interface AgentSum {

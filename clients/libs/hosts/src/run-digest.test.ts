@@ -47,6 +47,25 @@ describe('digestEntries', () => {
     expect(entries.get('b')).toMatchObject({kind: 'unreadable', message: 'could not read'});
   });
 
+  test('keeps the account of how the run ended, and none when it has none', () => {
+    const digest = (summary: string) =>
+      ({
+        kind: 'digest',
+        ideas: 1,
+        adopted_ratio: null,
+        best_so_far_ratio: null,
+        duration_s: 5,
+        ending: {outcome: null, summary, resumable: false, rounds_finished: 0},
+        closing: null,
+      }) as const;
+    const entries = digestEntries([
+      summary('a', digest('the agent crashed')),
+      summary('b', digest(' ')),
+    ]);
+    expect(entries.get('a')).toMatchObject({kind: 'read', endSummary: 'the agent crashed'});
+    expect(entries.get('b')).toMatchObject({kind: 'read', endSummary: null});
+  });
+
   test('a digest that counts no ideas because the journal predates the trace keeps that as null', () => {
     const entries = digestEntries([
       summary('a', {

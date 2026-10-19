@@ -1448,6 +1448,15 @@ button.vs-dotlegend-item:focus-visible {
   flex-wrap: wrap;
   gap: var(--space-3);
 }
+/* A value is one token: it never breaks inside itself (a `Text` breaks anywhere by default), and
+   the note beside it breaks only between words. */
+.vs-tile-figure > .vs-text {
+  overflow-wrap: normal;
+  white-space: nowrap;
+}
+.vs-tile-figure > .vs-text:not(:first-child) {
+  white-space: normal;
+}
 .vs-tile-detail {
   overflow: hidden;
   font-variant-numeric: tabular-nums;

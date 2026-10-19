@@ -82,6 +82,7 @@ use any of these in any file without tracking which role you're in:
 | `accuracy_command` | Accuracy-checker command declared by the input manifest, or falsy if not attached. |
 | `runtime_notes` | Runtime-environment notes for the round. |
 | `profile_execution` | Where profiling must run to observe the production hot path: `local` or `remote`. |
+| `profiler_id` | The run's profiler (`nsys`, `rocprof`, `torch`, ..., or `none`). A pack names a profiler's own tooling only for the profiler the run has. |
 | `workspace_sources` | Tuple of the manifest's `[[workspace.sources]]` entries (pinned starting-point checkouts materialized into the workspace; each has `name`, `repo`, `commit`, `dest`), or empty when the input bundle declares none. Branch on it to swap from-scratch guidance for build-on-the-seed guidance. |
 
 A domain that supports modalities declares them on its `DomainDefinition` (`modalities`,

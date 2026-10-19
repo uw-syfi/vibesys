@@ -139,6 +139,7 @@ function measuredRun(scrub: number | null): RunModel {
     at: scrub === null ? null : scrub + 1,
     latest: scrub,
     overview: null,
+    inputGates: [],
     changed: new Set<string>(),
     agents: {agents: []},
     trace: {spans: new Map()},
@@ -199,6 +200,7 @@ function namedRun(adopted: boolean): RunModel {
   return {
     ...modelOf(items, {candidate: 'good', adopted}),
     overview: null,
+    inputGates: [],
     changed: new Set<string>(),
     agents: {agents: []},
     trace: {spans: new Map()},

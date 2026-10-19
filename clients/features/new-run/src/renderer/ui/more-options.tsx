@@ -126,11 +126,7 @@ function ExampleDestination(props: CardProps): JSX.Element | null {
   const project = context.form.project;
   if (project?.source !== 'example') return null;
   return (
-    <Field
-      label="Create the example at"
-      help="A new Git repository the run works in."
-      {...(destinationTaken(context) ? {error: 'Taken'} : {})}
-    >
+    <Field label="Create the example at" {...(destinationTaken(context) ? {error: 'Taken'} : {})}>
       <TextInput
         mono
         value={project.destination}
@@ -167,11 +163,7 @@ export function MoreOptions(props: CardProps): JSX.Element {
         </Stack>
         <RolesSection {...props} />
         <ExampleDestination {...props} />
-        <Field
-          label="Extra arguments"
-          help="Passed to vibesys run as typed; options set above may not be repeated."
-          {...(problem === null ? {} : {error: problem})}
-        >
+        <Field label="Extra arguments" {...(problem === null ? {} : {error: problem})}>
           <TextInput
             mono
             value={advanced}

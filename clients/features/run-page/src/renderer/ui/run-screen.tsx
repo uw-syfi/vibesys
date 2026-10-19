@@ -29,6 +29,7 @@ import {
   historyLoading,
   historyProblem,
   ideaAncestry,
+  machineBlockWords,
   type Offer,
   predatesTraceWords,
   quotaBannerView,
@@ -56,6 +57,7 @@ import {
   usageRecords,
   whoBySpan,
 } from '../../state/index.js';
+import {GateFailures} from './gate-failures.js';
 import {Hero} from './hero.js';
 import {
   HistoryLoading,
@@ -432,10 +434,13 @@ function pendingRunScreen(
 ): JSX.Element | null {
   const header = <Header state={state} dispatch={dispatch} chat={chat} />;
   if (state.record.kind === 'unlisted') {
+    const blocked = machineBlockWords(state);
     const unplaced = unplacedRun(state);
     return (
       <Screen density="compact" header={header}>
-        {unplaced === null ? (
+        {blocked !== null ? (
+          <RunGone words={blocked} />
+        ) : unplaced === null ? (
           <InitialRunLoading stage="locating" />
         ) : (
           <RunUnplaced label={unplaced.label} words={unplaced.words} />
@@ -577,6 +582,7 @@ function RunScreenBody(props: {
         <Banner tone="err" title="The run did not take the command" body={state.notice} />
       )}
       <EndedBanner state={state} dispatch={dispatch} zoom={zoom} />
+      <GateFailures model={props.whole} />
       {problem === null ? null : (
         <Banner tone="warn" title="The run’s history is not available" body={problem} />
       )}

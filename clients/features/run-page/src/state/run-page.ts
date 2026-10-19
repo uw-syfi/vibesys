@@ -73,9 +73,16 @@ type Locate =
   | {readonly kind: 'waiting'; readonly bound: number}
   | {readonly kind: 'unresolved'};
 
-/** The run as the host's registry lists it: live, ended, or not (yet) listed. */
+/** Why a machine's registry cannot be read, so no run on it can be found: it will not answer. */
+export type MachineBlock = 'needs-update' | 'sign-in' | 'offline' | 'closed';
+
+/**
+ * The run as the host's registry lists it: live, ended, or not (yet) listed. `unlisted` names the
+ * machine's `block` when the registry cannot be read for a reason that waiting does not end; it is
+ * absent while the machine is only connecting.
+ */
 export type RunRecord =
-  | {readonly kind: 'unlisted'; readonly why: UnlistedWhy}
+  | {readonly kind: 'unlisted'; readonly why: UnlistedWhy; readonly block?: MachineBlock}
   /** A recent run whose server tombstone expired; its journal may still be readable. */
   | {
       readonly kind: 'historical';

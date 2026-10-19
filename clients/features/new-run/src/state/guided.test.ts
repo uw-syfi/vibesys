@@ -20,7 +20,6 @@ import {
   allExamples,
   type CatalogueEntry,
   domainOptions,
-  entriesFor,
   entriesOf,
   examplesOf,
   hardwareGroups,
@@ -80,9 +79,8 @@ function options(
         group.models.map(model => ({kind: 'model' as const, model: model.name})),
       );
     case 'hardware':
-      return hardwareGroups(entries)
+      return hardwareGroups(entries, answers.model ?? '')
         .flatMap(group => group.options)
-        .filter(option => entriesFor(entries, answers.model ?? '', option.key).length > 0)
         .map(option => ({kind: 'hardware', hardware: option.key}));
     case 'structure':
       return examplesOf(entries, 'data-structures').map(example => ({kind: 'structure', example}));

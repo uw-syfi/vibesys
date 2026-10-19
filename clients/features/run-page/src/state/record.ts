@@ -7,9 +7,25 @@
  * found in neither of the listing's two lists; the listing proves it is not live when it holds no
  * row that could be its server (`unverified`, `unreadable`).
  */
-import type {HostListing, HostRun} from '@vibesys/hosts';
+import type {ConnectionStatus, HostListing, HostRun} from '@vibesys/hosts';
 import {type RecentRun, type RunRef, recentStatus} from '@vibesys/runs';
-import type {RunRecord} from './run-page.js';
+import type {MachineBlock, RunRecord} from './run-page.js';
+
+/** Why `connection` will not list runs without someone acting, or null while it may yet. */
+function blockOf(connection: ConnectionStatus): MachineBlock | null {
+  switch (connection.kind) {
+    case 'incompatible':
+      return 'needs-update';
+    case 'auth-needed':
+      return 'sign-in';
+    case 'offline':
+      return 'offline';
+    case 'closed':
+      return 'closed';
+    default:
+      return null;
+  }
+}
 
 const MACHINE: RunRecord = {kind: 'unlisted', why: 'machine'};
 const UNCONFIRMED: RunRecord = {kind: 'unlisted', why: 'unconfirmed'};
@@ -29,7 +45,10 @@ export function runRecord(
   recent?: RecentRun,
 ): RunRecord {
   const listing = listings.find(each => each.host === run.host);
-  if (listing?.kind !== 'listed') return MACHINE;
+  if (listing?.kind !== 'listed') {
+    const block = listing === undefined ? null : blockOf(listing.connection);
+    return block === null ? MACHINE : {kind: 'unlisted', why: 'machine', block};
+  }
   const live = newest(listing.live, run.runId, recent?.project);
   if (live !== undefined) return {kind: 'live', run: live};
   const ended = newest(listing.ended, run.runId, recent?.project);
@@ -47,7 +66,8 @@ export function runRecord(
 
 /** Whether two records say the same thing, so an unchanged listing is not folded again. */
 export function sameRecord(left: RunRecord, right: RunRecord): boolean {
-  if (left.kind === 'unlisted') return right.kind === 'unlisted' && left.why === right.why;
+  if (left.kind === 'unlisted')
+    return right.kind === 'unlisted' && left.why === right.why && left.block === right.block;
   if (right.kind === 'unlisted') return false;
   if (left.kind === 'historical')
     return right.kind === 'historical' && left.status === right.status;

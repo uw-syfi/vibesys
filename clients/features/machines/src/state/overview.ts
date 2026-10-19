@@ -3,28 +3,25 @@
  * the rows nested under it, one per cluster or cloud its own settings name. Labels, numbers and
  * status words only; each is a function of the store's state, never stored.
  */
-import {acceleratorName} from '@vibesys/hosts';
+import {acceleratorName, type MachineProblem, mostUrgentProblem, problemWord} from '@vibesys/hosts';
 import type {SlurmClusterSettings} from '@vibesys/ipc';
 import {gpuLine} from './hardware.js';
 import {type Machine, type MachinesState, machineStatus} from './machines.js';
 import {clustersOf, type LastCheck, type Places, unreachableClusters} from './places.js';
-import type {StatusTone} from './words.js';
+import {type StatusTone, statusTone} from './words.js';
 
 type Hardware = NonNullable<SlurmClusterSettings['hardware']>;
 
 /** The word and tone a machine's card carries: online, unreachable, or what it waits on. */
 export function cardStatus(machine: Machine): {readonly word: string; readonly tone: StatusTone} {
-  switch (machineStatus(machine)) {
+  const status = machineStatus(machine);
+  switch (status) {
     case 'ready':
       return {word: 'Online', tone: 'ok'};
-    case 'unavailable':
-      return {word: 'Unreachable', tone: 'err'};
-    case 'sign-in':
-      return {word: 'Sign in', tone: 'warn'};
-    case 'checkout-not-found':
-      return {word: 'Checkout not found', tone: 'warn'};
     case 'checking':
       return {word: 'Checking', tone: 'neutral'};
+    default:
+      return {word: problemWord(status), tone: statusTone(status)};
   }
 }
 
@@ -53,6 +50,7 @@ export function cardAction(machine: Machine): 'sign-in' | 'reconnect' | null {
       return 'reconnect';
     case 'ready':
     case 'checking':
+    case 'needs-update':
     case 'checkout-not-found':
       return null;
   }
@@ -170,13 +168,16 @@ export function placesReading(
 }
 
 /**
- * Whether anything the page lists needs the user: a machine that is not online (and not being
- * checked), or a cluster whose last test found it unreachable. The rail's warning dot.
+ * What the page lists that needs the user, as the most urgent problem: a machine that is not online
+ * (and not being checked) names its own status, and a cluster whose last test found it unreachable
+ * is `unavailable`. Null when nothing needs the user. The rail's warning dot, worded by
+ * `problemWord`, so an old machine reads "Needs an update" there as it does on the page.
  */
-export function machinesNeedAttention(state: MachinesState): boolean {
-  const machine = state.machines.some(each => {
+export function machinesAttention(state: MachinesState): MachineProblem | null {
+  const problems = state.machines.flatMap(each => {
     const status = machineStatus(each);
-    return status !== 'ready' && status !== 'checking';
+    return status === 'ready' || status === 'checking' ? [] : [status];
   });
-  return machine || unreachableClusters({places: state.places, lastToken: state.lastToken}) > 0;
+  const clusters = unreachableClusters({places: state.places, lastToken: state.lastToken}) > 0;
+  return mostUrgentProblem(clusters ? [...problems, 'unavailable'] : problems);
 }

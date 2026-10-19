@@ -490,10 +490,9 @@ export class Hosts {
   async readSummary(id: HostId, project: string, runId: string): Promise<RunSummaryResult> {
     await using lease = await this.connection(id);
     try {
+      // A helper without the features `runs.summary` is gated by (`run_summary`, `run_trace`) is
+      // refused by the channel before it is asked: `unsupported` below.
       await lease.connection.ready();
-      if (lease.connection.features?.includes('run_summary') !== true) {
-        return {kind: 'unsupported'};
-      }
       for (let attempt = 0; attempt < SUMMARY_READ_ATTEMPTS; attempt += 1) {
         const summary = await readSummaryPages(lease.connection, project, runId);
         if (summary !== null) return {kind: 'summary', summary};

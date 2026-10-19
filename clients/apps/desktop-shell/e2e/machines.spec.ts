@@ -61,10 +61,10 @@ const SEED: FakeBridgeSeed = {
 const machineList = (page: Page) => page.getByRole('tree', {name: 'Machines'});
 const row = (page: Page, name: string) => machineList(page).getByRole('treeitem', {name});
 
-async function openMachines(page: Page): Promise<void> {
-  await page.addInitScript(installFakeBridge, SEED);
-  await page.addInitScript(installFakeMachines, SEED);
-  await page.addInitScript(installFakeNewRun, SEED);
+async function openMachines(page: Page, seed: FakeBridgeSeed = SEED): Promise<void> {
+  await page.addInitScript(installFakeBridge, seed);
+  await page.addInitScript(installFakeMachines, seed);
+  await page.addInitScript(installFakeNewRun, seed);
   await page.goto('./shell.html');
   await page
     .getByRole('navigation', {name: 'VibeSys'})
@@ -119,7 +119,7 @@ test('machines show their status from their facts, and each problem carries its 
     page.getByText('The app couldn’t connect: your SSH key needs its passphrase.'),
   ).toBeVisible();
   await shoot(page, 'ink-sign-in');
-  await page.getByRole('button', {name: 'Sign in'}).click();
+  await page.getByRole('button', {name: 'Sign in', exact: true}).click();
   await expect(row(page, 'host-a')).toContainText('Ready');
 
   const axe = await new AxeBuilder({page}).analyze();
@@ -173,6 +173,20 @@ test('add a machine, change a checkout from labelled suggestions, and remove a m
   // New run here opens New run.
   await page.getByRole('button', {name: 'New run here'}).click();
   await expect(page.getByRole('heading', {name: 'What do you want to optimize?'})).toBeVisible();
+});
+
+test('a machine whose VibeSys lacks what the app needs shows Needs an update, not Ready', async ({
+  page,
+}) => {
+  await openMachines(page, {
+    ...SEED,
+    reports: {...SEED.reports, 'ssh:host-a': {kind: 'needs-update', facts: null}},
+  });
+  await expect(row(page, 'host-a')).toContainText('Needs an update');
+  await expect(row(page, 'host-a')).not.toContainText('Ready');
+  await row(page, 'host-a').click();
+  await expect(page.getByText('VibeSys on host-a needs an update')).toBeVisible();
+  expect(await rawTextOf(page)).toEqual([]);
 });
 
 test('the machines screen names its harnesses and hardware, never their ids', async ({page}) => {

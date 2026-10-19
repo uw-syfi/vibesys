@@ -10,6 +10,7 @@ import {
   type CompletionResult,
   type HostKey,
   hostKey,
+  type MachineStatus,
   validAlias,
   validHostPath,
 } from '@vibesys/hosts';
@@ -36,8 +37,8 @@ import {
   readPlaces,
 } from './places.js';
 
-/** A machine's status, from its facts: the three the screen names, one it cannot reach, or checking. */
-export type MachineStatus = MachineReport['kind'] | 'checking';
+/** A machine's status, from its facts: `@vibesys/hosts`' one vocabulary, a report's kinds and checking. */
+export type {MachineStatus};
 
 export interface Machine extends MachineEntry {
   /** What its facts said last, or null before the first check answered. */

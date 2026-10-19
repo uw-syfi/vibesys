@@ -24,49 +24,41 @@ import {type FolderCompletion, ProjectPage, TaskPage} from './project-pages.js';
 import {Nav, Question} from './question.js';
 import {ProblemBanner, ReviewPage, StartButton} from './review-page.js';
 import {progressLine, type StepView, stepViews} from './steps.js';
-import {entriesIn, type MachineOption, machineLabel} from './view.js';
+import {entriesIn, type MachineOption} from './view.js';
 import {WherePage} from './where-page.js';
 
 type Dispatch = (event: NewRunEvent) => void;
 
-/** The question of each page, and the line under it. */
-const COPY: Readonly<Record<StepId, {readonly title: string; readonly lede?: string}>> = {
+/** The question of each page. */
+const COPY: Readonly<Record<StepId, {readonly title: string}>> = {
   start: {
     title: 'What do you want to optimize?',
-    lede: 'Start from one of our examples, or from your own code.',
   },
   domain: {title: 'Which domain?'},
   model: {
     title: 'Which model do you want to serve?',
-    lede: 'Each model lists the hardware it has an example for.',
   },
   hardware: {
     title: 'Which hardware are you optimizing for?',
-    lede: 'The result is tuned for this hardware. Where it runs is a later step.',
   },
   structure: {title: 'Which structure?'},
   workload: {
     title: 'Which workload?',
-    lede: 'The benchmark drives the structure with this access pattern.',
   },
   example: {title: 'Which example?'},
-  variant: {title: 'Which task?', lede: 'This example has more than one task.'},
+  variant: {title: 'Which task?'},
   project: {
     title: 'Which project?',
-    lede: 'A repository with tasks under .vibesys/tasks, on one of your machines.',
   },
   task: {title: 'Which task?'},
   goal: {
     title: 'This is what the agent will work toward',
-    lede: 'Check the goal before you choose where it runs and which agent does the work.',
   },
   where: {
     title: 'Where does the agent work, and where are results measured?',
-    lede: 'Measure on the agent’s machine, or on a cluster or cloud once those are set up.',
   },
   agent: {
     title: 'Which agent does the work?',
-    lede: 'Pick a model line and its model, then the harness that runs it.',
   },
   review: {title: 'Ready to start?'},
 };
@@ -153,7 +145,7 @@ function StepNav(props: ScreenProps & {readonly at: StepId; readonly first: bool
             ? dispatch({type: 'answer', change: {kind: 'goal'}, advance: true})
             : dispatch({type: 'next'}),
         // The goal is answered by accepting it, which is what its button does.
-        blocked: done || at === 'goal' ? undefined : 'Answer the question above to continue.',
+        blocked: done || at === 'goal' ? undefined : '',
       }}
     />
   );
@@ -207,7 +199,10 @@ export function NewRunScreen(props: ScreenProps): JSX.Element {
   const index = views.findIndex(view => view.id === at);
   const copy = at === null ? null : COPY[at];
   return (
-    <Page width="wide">
+    <Page
+      width="wide"
+      {...(at === null ? {} : {footer: <StepNav {...props} at={at} first={index === 0} />})}
+    >
       <SectionLayout
         label="New run steps"
         summary={at === null ? 'Listing the examples' : progressLine(views, at)}
@@ -223,13 +218,11 @@ export function NewRunScreen(props: ScreenProps): JSX.Element {
         <Stack gap="space-5">
           <ProblemBanner context={context} dispatch={dispatch} />
           {at === null || copy === null ? (
-            <Text tone="muted">Listing the examples on {machineLabel(context.form.machine)}.</Text>
+            <Text tone="muted">Listing</Text>
           ) : (
             <Question
               kicker={`New run \u00b7 step ${index + 1} of ${views.length}`}
               title={copy.title}
-              {...(copy.lede === undefined ? {} : {lede: copy.lede})}
-              nav={<StepNav {...props} at={at} first={index === 0} />}
             >
               <StepBody {...props} at={at} />
             </Question>

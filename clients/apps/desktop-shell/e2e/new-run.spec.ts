@@ -1,6 +1,12 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
-import {exampleCatalogueWithoutDetails} from '@vibesys/run-fixtures';
+import type {ExampleList} from '@vibesys/contracts/host-helper';
+import {REQUIRED_HELPER_FEATURES} from '@vibesys/hosts';
+import {
+  exampleCatalogue,
+  exampleCatalogueWithoutDetails,
+  queueRsCatalogue,
+} from '@vibesys/run-fixtures';
 import {rawTextOf} from './checks/screen-check.js';
 import {
   installFakeBridge,
@@ -41,17 +47,17 @@ test('an example of LLM serving: its model, its hardware, its goal, then the run
   await expect(question(page, 'Which model do you want to serve?')).toBeVisible();
   await expect(main(page).getByRole('radiogroup', {name: 'Meta'})).toBeVisible();
   await expect(main(page).getByRole('radiogroup', {name: 'Qwen'})).toBeVisible();
+  // A model card names the model only: its hardware is the next question's.
+  await expect(main(page).getByRole('radio', {name: /Qwen3\.5 9B/})).not.toContainText('MI210');
+  await expect(main(page)).not.toContainText('H100');
   await choose(page, 'Qwen', /Qwen3\.5 9B/);
   await proceed(page);
 
-  // Hardware is grouped by vendor; one with no example for this model is dimmed and says so.
+  // Hardware is grouped by vendor and lists only what this model has an example for.
   await expect(question(page, 'Which hardware are you optimizing for?')).toBeVisible();
-  await expect(main(page).getByRole('radiogroup', {name: 'NVIDIA'})).toBeVisible();
-  const h100 = main(page).getByRole('radiogroup', {name: 'NVIDIA'}).getByRole('radio').first();
-  await expect(h100).toBeDisabled();
-  await expect(main(page).getByRole('radiogroup', {name: 'NVIDIA'})).toContainText(
-    'No example yet',
-  );
+  await expect(main(page).getByRole('radiogroup', {name: 'AMD'})).toBeVisible();
+  await expect(main(page).getByRole('radiogroup', {name: 'NVIDIA'})).toHaveCount(0);
+  await expect(main(page)).not.toContainText('No example yet');
   await choose(page, 'AMD', /MI210/);
   await proceed(page);
 
@@ -131,9 +137,6 @@ test('an example data structure: its structure, its workload, a goal with no dir
     main(page).getByText('Optimize a multi-producer, multi-consumer bounded stack.'),
   ).toBeVisible();
   // The task declares no objectives: no direction is shown for its metric.
-  await expect(main(page)).toContainText(
-    'This task declares no objectives, so no direction is shown.',
-  );
   await expect(main(page).getByText(/Higher is better|Lower is better/)).toHaveCount(0);
   await proceed(page, 'Looks right');
   await proceed(page);
@@ -144,6 +147,29 @@ test('an example data structure: its structure, its workload, a goal with no dir
   await expect(page.getByRole('radiogroup', {name: 'Show'})).toBeVisible();
   const {started} = await fakeNewRun(page);
   expect(started).toMatchObject([{project: '~/vibesys-projects/stack', task: 'mpmc'}]);
+});
+
+test('an example of the real catalogue shows its goal like a project of the user: the file, the text, what it optimizes', async ({
+  page,
+}) => {
+  const newRun = SEED.newRun;
+  if (newRun === undefined) throw new Error('the seed has no New run helper');
+  await open(page, {...SEED, newRun: {...newRun, examples: queueRsCatalogue}});
+  await choose(page, 'Start from', 'An example');
+  await proceed(page);
+  await choose(page, 'Domain', 'Data structures');
+  await proceed(page);
+  await choose(page, 'Structure', /queue-rs/);
+  await proceed(page);
+  await choose(page, 'Workload', /Multiple producers, multiple consumers/);
+  await proceed(page);
+  await expect(main(page)).toContainText('.vibesys/tasks/mpmc/OBJECTIVE.md');
+  await expect(main(page)).toContainText(
+    'Optimize a multi-producer, multi-consumer bounded FIFO queue',
+  );
+  await expect(main(page)).toContainText('Higher is better');
+  await expect(main(page)).toContainText('total_ops_per_sec');
+  await expect(main(page)).not.toContainText('Goal not shown here');
 });
 
 test('your own project: a recent one, its task, the agent on its machine, and the run starts', async ({
@@ -167,7 +193,7 @@ test('your own project: a recent one, its task, the agent on its machine, and th
   await proceed(page, 'Looks right');
   // The project is on host-b, so that is where the agent works.
   await expect(main(page).getByRole('radio', {name: /This Mac/})).toBeDisabled();
-  await expect(main(page)).toContainText('Your project is on host-b.');
+  await expect(main(page)).toContainText('Project on host-b');
   await proceed(page);
   await proceed(page);
   await expect(main(page)).toContainText(/Ready · \d+ checks passed/);
@@ -189,7 +215,7 @@ test('your own project: a recent one, its task, the agent on its machine, and th
   ]);
 });
 
-test('a machine whose VibeSys cannot read a goal says it is read when the run starts', async ({
+test('a machine whose VibeSys cannot read a goal says Needs an update, not that the goal is hidden', async ({
   page,
 }) => {
   const newRun = SEED.newRun;
@@ -198,30 +224,167 @@ test('a machine whose VibeSys cannot read a goal says it is read when the run st
     ...SEED,
     newRun: {
       ...newRun,
-      features: ['run_options', 'preflight', 'examples', 'run_roles', 'example_catalogue'],
+      features: [...REQUIRED_HELPER_FEATURES, 'run_roles', 'example_catalogue'],
     },
   });
-  await expect(main(page)).toContainText('Goal not shown here');
+  await expect(main(page)).toContainText('Needs an update');
+  await expect(main(page)).toContainText('.vibesys/tasks/mpmc/OBJECTIVE.md');
+  await expect(main(page)).not.toContainText('Goal not shown here');
   await expect(main(page)).not.toContainText('Higher is better');
 });
 
 for (const width of [1440, 1000, 660]) {
-  test(`Back and the way on start at one top edge at ${width}px, a reason hanging below`, async ({
+  for (const height of [900, 480]) {
+    test(`Back and Continue sit in one place on every step at ${width}px, ${height}px high`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({width, height});
+      // Five steps of different lengths: a short question, a list, the hardware tiles, Where
+      // (long) and Agent (long); the tall window leaves room, the low one makes them scroll.
+      const boxes: {back: unknown; next: unknown}[] = [];
+      for (const name of ['domain', 'model', 'hardware', 'where', 'agent', 'review']) {
+        await openAt(page, pageNamed(name));
+        expect(await page.evaluate(() => window.innerWidth)).toBe(width);
+        const back = await main(page)
+          .getByRole('button', {name: 'Back', exact: true})
+          .boundingBox();
+        // Review's way on is Start run, as wide as its words: only its edge is the same.
+        const next = await main(page)
+          .getByRole('button', {name: name === 'review' ? 'Start run' : 'Continue', exact: true})
+          .boundingBox();
+        expect(back).not.toBeNull();
+        expect(next).not.toBeNull();
+        boxes.push({
+          back,
+          next: name === 'review' ? {y: next?.y, height: next?.height} : next,
+        });
+        // Pinned inside the window, below the content, even when the content scrolls.
+        expect((next?.y ?? 0) + (next?.height ?? 0)).toBeLessThanOrEqual(height);
+      }
+      const [first, ...rest] = boxes;
+      const review = rest.pop();
+      for (const each of rest) expect(each).toEqual(first);
+      expect(review?.back).toEqual(first?.back);
+      const forward = first?.next as {y: number; height: number} | null;
+      expect(review?.next).toEqual({y: forward?.y, height: forward?.height});
+    });
+  }
+}
+
+/** The example catalogue with `extra` models, and Qwen3.5 9B also served on an NVIDIA H100. */
+function longCatalogue(extra: number): ExampleList {
+  const base = exampleCatalogue.examples;
+  const qwen = base.find(each => each.name === 'model-serving/qwen3.5-9b-mi210');
+  if (qwen === undefined) throw new Error('the fixture has no Qwen example');
+  const served = (name: string, model: string, accelerator: string) => ({
+    ...qwen,
+    name,
+    task_details: (qwen.task_details ?? []).map(task => ({
+      ...task,
+      model: {name: model, maker: 'other' as const},
+      hardware: {accelerator, count: 1, vendor: 'nvidia' as const, backend: 'cuda' as const},
+    })),
+  });
+  const twin = {
+    ...served('model-serving/qwen3.5-9b-h100', 'Qwen3.5 9B', 'NVIDIA H100'),
+    task_details: (qwen.task_details ?? []).map(task => ({
+      ...task,
+      hardware: {
+        accelerator: 'NVIDIA H100',
+        count: 1,
+        vendor: 'nvidia' as const,
+        backend: 'cuda' as const,
+      },
+    })),
+  };
+  const many = Array.from({length: extra}, (_, index) =>
+    served(`model-serving/long-${index}`, `Model ${index}`, 'NVIDIA L4'),
+  );
+  return {...exampleCatalogue, examples: [...base, twin, ...many]};
+}
+
+const WINDOWS = [
+  {width: 1440, height: 1100},
+  {width: 1000, height: 700},
+] as const;
+
+for (const {width, height} of WINDOWS) {
+  test(`Back and Continue stay inside the ${width}x${height} window, in one place, whatever the content does`, async ({
     page,
   }) => {
-    await page.setViewportSize({width, height: 900});
-    // A page whose Continue is blocked (it gives a reason under it) and Review's Start run.
-    for (const name of ['domain', 'review']) {
-      await openAt(page, pageNamed(name));
-      expect(await page.evaluate(() => window.innerWidth)).toBe(width);
-      const forward = name === 'domain' ? 'Continue' : 'Start run';
-      const top = async (label: string) =>
-        (await main(page).getByRole('button', {name: label, exact: true}).boundingBox())?.y;
-      expect(await top('Back')).toBeDefined();
-      expect(await top('Back')).toBe(await top(forward));
+    const newRun = SEED.newRun;
+    if (newRun === undefined) throw new Error('the seed has no New run helper');
+    await page.setViewportSize({width, height});
+    const seed = {...SEED, newRun: {...newRun, examples: longCatalogue(40)}};
+    const boxOf = async (name: string) =>
+      main(page).getByRole('button', {name, exact: true}).boundingBox();
+    const inside = (box: {x: number; y: number; width: number; height: number} | null) => {
+      expect(box).not.toBeNull();
+      expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+      expect(box?.y ?? -1).toBeGreaterThanOrEqual(0);
+      expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(width);
+      expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(height);
+    };
+    const backs: unknown[] = [];
+    const nexts: unknown[] = [];
+    for (const name of ['domain', 'model', 'review']) {
+      await openAt(page, pageNamed(name), seed);
+      expect(page.viewportSize()).toEqual({width, height});
+      const forward = name === 'review' ? 'Start run' : 'Continue';
+      const before = {back: await boxOf('Back'), next: await boxOf(forward)};
+      inside(before.back);
+      inside(before.next);
+      const region = main(page).locator('.vs-page-scroll');
+      if (name === 'model') {
+        // The long list outgrows the window, so it scrolls in its own region.
+        expect(await region.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(
+          true,
+        );
+      }
+      await region.evaluate(element => element.scrollTo(0, element.scrollHeight));
+      const after = {back: await boxOf('Back'), next: await boxOf(forward)};
+      expect(after).toEqual(before);
+      backs.push(before.back);
+      // Review's Start run is as wide as its words; the edge it sits on is the same.
+      nexts.push({y: before.next?.y, height: before.next?.height});
     }
+    for (const each of backs) expect(each).toEqual(backs[0]);
+    for (const each of nexts) expect(each).toEqual(nexts[0]);
   });
 }
+
+test('a model is one card however many kinds of hardware it has examples for, and hardware follows', async ({
+  page,
+}) => {
+  const newRun = SEED.newRun;
+  if (newRun === undefined) throw new Error('the seed has no New run helper');
+  await openAt(page, pageNamed('model'), {
+    ...SEED,
+    newRun: {...newRun, examples: longCatalogue(0)},
+  });
+  const qwen = main(page).getByRole('radiogroup', {name: 'Qwen'}).getByRole('radio');
+  await expect(qwen).toHaveCount(1);
+  await expect(qwen).toHaveAccessibleName(/^Qwen3\.5 9B$/);
+  await choose(page, 'Qwen', /Qwen3\.5 9B/);
+  await proceed(page);
+  await expect(main(page).getByRole('radio')).toHaveCount(2);
+  await expect(main(page).getByRole('radiogroup', {name: 'AMD'})).toContainText('MI210');
+  await expect(main(page).getByRole('radiogroup', {name: 'NVIDIA'})).toContainText('H100');
+});
+
+test('a step draws no explanatory sentence under its question, and a blocked Continue no caption', async ({
+  page,
+}) => {
+  await openAt(page, pageNamed('start'));
+  await expect(main(page)).not.toContainText('Start from one of our examples');
+  await expect(main(page)).not.toContainText('A ready-made task');
+  await expect(main(page)).not.toContainText('Your own repository');
+  await expect(main(page)).not.toContainText('Answer the question above');
+  await expect(main(page).getByRole('button', {name: 'Continue'})).toHaveAttribute(
+    'aria-disabled',
+    'true',
+  );
+});
 
 test('the steps show their answers and go back to them; a later question waits for the earlier', async ({
   page,
@@ -370,7 +533,7 @@ test('a helper without the catalogue lists examples and their tasks, with no dom
     newRun: {
       ...newRun,
       examples: exampleCatalogueWithoutDetails,
-      features: ['run_options', 'preflight', 'examples', 'run_roles'],
+      features: [...REQUIRED_HELPER_FEATURES, 'run_roles'],
     },
   });
   await choose(page, 'Start from', 'An example');
@@ -381,7 +544,9 @@ test('a helper without the catalogue lists examples and their tasks, with no dom
   await expect(question(page, 'Which task?')).toBeVisible();
   await choose(page, 'Task', 'vllm');
   await proceed(page);
-  await expect(main(page)).toContainText('Goal not shown here');
+  await expect(main(page)).toContainText('Needs an update');
+  await expect(main(page)).toContainText('.vibesys/tasks/vllm/OBJECTIVE.md');
+  await expect(main(page)).not.toContainText('Goal not shown here');
 });
 
 test('a machine with no examples dims that start, and says so', async ({page}) => {
@@ -393,7 +558,7 @@ test('a machine with no examples dims that start, and says so', async ({page}) =
   });
   const example = main(page).getByRole('radio', {name: /An example/});
   await expect(example).toBeDisabled();
-  await expect(main(page)).toContainText('No examples on host-b.');
+  await expect(main(page)).toContainText('No examples');
 });
 
 test('a machine whose VibeSys predates New run says so and is never asked to start', async ({
@@ -405,15 +570,44 @@ test('a machine whose VibeSys predates New run says so and is never asked to sta
     ...SEED,
     newRun: {...newRun, features: ['harnesses']},
   });
-  await expect(main(page)).toContainText(
-    'VibeSys on host-b is older than this app: update its checkout to start runs from here ' +
-      '(it lacks run_options, preflight, examples).',
-  );
+  await expect(main(page)).toContainText('VibeSys on host-b');
+  await expect(main(page)).toContainText('Needs an update');
   await expect(start(page)).toHaveAttribute('aria-disabled', 'true');
   await start(page).click({force: true});
   const {started, preflights} = await fakeNewRun(page);
   expect(started).toEqual([]);
   expect(preflights).toEqual([]);
+});
+
+function withoutRunTrace() {
+  const newRun = SEED.newRun;
+  if (newRun === undefined) throw new Error('the seed has no New run helper');
+  return {
+    ...SEED,
+    newRun: {
+      ...newRun,
+      features: REQUIRED_HELPER_FEATURES.filter(feature => feature !== 'run_trace'),
+    },
+  };
+}
+
+test('a machine that serves everything but the run trace says Needs an update on Where', async ({
+  page,
+}) => {
+  await openAt(page, pageNamed('where'), withoutRunTrace());
+  await expect(main(page).getByText('Needs an update')).toBeVisible();
+});
+
+test('a machine that serves everything but the run trace says Needs an update on Review and never starts', async ({
+  page,
+}) => {
+  await openAt(page, pageNamed('review project'), withoutRunTrace());
+  await expect(main(page)).toContainText('VibeSys on host-b');
+  await expect(main(page)).toContainText('Needs an update');
+  await expect(start(page)).toHaveAttribute('aria-disabled', 'true');
+  await start(page).click({force: true});
+  const {started} = await fakeNewRun(page);
+  expect(started).toEqual([]);
 });
 
 test('Run again opens Review with the run as it was started', async ({page}) => {
@@ -548,7 +742,7 @@ test('a machine whose VibeSys does not report its roles says every role runs as 
   if (newRun === undefined) throw new Error('the seed has no New run helper');
   await openAt(page, pageNamed('review project'), {
     ...SEED,
-    newRun: {...newRun, features: ['run_options', 'preflight', 'examples']},
+    newRun: {...newRun, features: REQUIRED_HELPER_FEATURES},
   });
   await main(page).getByRole('button', {name: 'More options'}).click();
   await expect(page.getByText(/does not report its agent roles/)).toBeVisible();
@@ -596,16 +790,22 @@ test('an agent for a role: closed until opened, chosen from the run harness, lis
   ]);
 });
 
-test('a machine whose VibeSys cannot run an agent per role says so on the Agent page', async ({
+test('a machine whose VibeSys cannot run an agent per role says Needs an update on that row, never beside an installed harness', async ({
   page,
 }) => {
   const newRun = SEED.newRun;
   if (newRun === undefined) throw new Error('the seed has no New run helper');
   await openAt(page, pageNamed('agent project'), {
     ...SEED,
-    newRun: {...newRun, features: ['run_options', 'preflight', 'examples', 'run_roles']},
+    newRun: {...newRun, features: [...REQUIRED_HELPER_FEATURES, 'run_roles']},
   });
-  await expect(main(page).getByText('Not supported on this machine')).toBeVisible();
+  // One status for the row that cannot be used; the harness card keeps saying it is installed.
+  const row = main(page).getByText('Use a different agent for a role').locator('..');
+  await expect(row).toContainText('Needs an update');
+  await expect(main(page).getByRole('radiogroup', {name: 'Harness'})).toContainText(
+    'Installed on host-b',
+  );
+  await expect(main(page).getByText('Not supported on this machine')).toHaveCount(0);
   await expect(main(page).getByRole('button', {name: /different agent for a role/})).toHaveCount(0);
 });
 
@@ -664,6 +864,32 @@ test('Where: only what the machine has set up is offered, and the choice is the 
   await expect(page.getByRole('radiogroup', {name: 'Show'})).toBeVisible();
   const {started} = await fakeNewRun(page);
   expect(started).toMatchObject([{measure_on: {kind: 'slurm', cluster: 'lab-h100'}}]);
+});
+
+test('Where: a GPU task the agent machine lacks is a misfit only when results are measured there', async ({
+  page,
+}) => {
+  const where = pageNamed('where');
+  await openAt(page, {
+    ...where,
+    answers: {
+      ...where.answers,
+      model: 'Olmo Hybrid 7B',
+      hardware: 'nvidia|NVIDIA L4|1',
+      variant: 'from-scratch',
+    },
+    machine: 'local',
+  });
+  const measured = main(page).getByRole('radiogroup', {name: 'Measured on'});
+  const misfit = main(page).getByText('The hardware may not fit.');
+  await expect(misfit).toBeVisible();
+  for (const name of ['Slurm · lab-h100', 'Slurm · campus', 'Modal']) {
+    await measured.getByRole('radio', {name: new RegExp(name)}).check();
+    await expect(misfit).toHaveCount(0);
+    await expect(main(page).getByText(/^The hardware fits\.$/)).toHaveCount(0);
+  }
+  await measured.getByRole('radio', {name: /Same machine/}).check();
+  await expect(misfit).toBeVisible();
 });
 
 test('More options starts closed, says what it holds, and stays as left on each machine', async ({

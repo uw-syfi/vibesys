@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict
 
 from vs_core.api import Scope, WorkspaceRef
+from vs_project.api import NestedRepositoryError
 from vs_runtime._session_operation import await_session_operation
 from vs_runtime._workspace_access import (
     AccessGrant,
@@ -49,7 +50,10 @@ class AccessSettlementError(RuntimeContractError):
 
 
 class AccessUnrestorableError(AccessSettlementError):
-    """A turn's writes outside its access survived a complete revert; retrying cannot help.
+    """A turn's writes cannot be judged or undone; retrying cannot help.
+
+    Either they survived a complete revert, or the workspace holds a nested repository
+    that host Git refuses to read, so no snapshot or diff of it can be taken.
 
     The workspace stays fenced, so no later turn can take those writes as its baseline,
     and every turn that needs the workspace is refused for good, naming the paths.
@@ -194,6 +198,8 @@ class AccessSettlement:
                 baseline = await await_session_operation(
                     asyncio.create_task(workspace.snapshot(f"{key.text}-input"))
                 )
+            except NestedRepositoryError as error:
+                raise AccessUnrestorableError(_nested_message(error)) from error
             except RuntimeContractError as error:
                 raise AccessSettlementError(str(error)) from error
             receipt = AccessReceipt(
@@ -271,6 +277,19 @@ class AccessSettlement:
             )
             message = f"workspace access could not be restored: {error}"
             raise AccessUnrestorableError(message) from error
+        except NestedRepositoryError as error:
+            # The turn ended and left a repository host Git must not read, so its writes
+            # can be neither read nor reverted, and reading again finds the same tree:
+            # this workspace is fenced for good, and the turn alone fails.
+            self._store.replace(
+                _ACCESS,
+                "access",
+                key.text,
+                (self.receipt(key) or receipt).model_copy(
+                    update={"unrestorable": error.paths or (_UNCHECKABLE_TREE,)}
+                ),
+            )
+            raise AccessUnrestorableError(_nested_message(error)) from error
         except RuntimeContractError as error:
             message = f"workspace access is not restored: {error}"
             raise AccessSettlementError(message) from error
@@ -313,6 +332,13 @@ def access_unproven(store: ReceiptStore, key: AccessKey) -> str | None:
     if not receipt.settled:
         return "the turn's workspace access has not been settled yet"
     return None
+
+
+_UNCHECKABLE_TREE = "(the work tree is too large to check)"
+
+
+def _nested_message(error: NestedRepositoryError) -> str:
+    return f"the workspace cannot be read by host Git: {error}"
 
 
 def _workspace_key(workspace: Path) -> str:

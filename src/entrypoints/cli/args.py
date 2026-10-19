@@ -796,9 +796,10 @@ def _build_agent_parser() -> _RunArgumentParser:
     parser.add_argument(
         "--interface",
         choices=["inprocess", "service"],
-        default="inprocess",
+        default=None,
         help=(
-            "Process boundary used by the evaluator. 'inprocess' (default): "
+            "Process boundary used by the evaluator; defaults to the input's "
+            "[agent].interface, else 'inprocess'. 'inprocess': "
             "the evaluator invokes the candidate directly using the input-defined "
             "contract. 'service': the evaluator communicates with a running "
             "service over its network interface. Language, tooling, and artifact "

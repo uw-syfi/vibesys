@@ -4,7 +4,7 @@
  * or family, then model) and a harness select; a role stays on the run's agent until changed.
  */
 import type {HarnessOffer} from '@vibesys/ipc';
-import {Collapsible, Field, Grid, Select, Stack, Text} from '@vibesys/ui';
+import {Collapsible, Field, Grid, Row, Select, Stack, Text} from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import {
   AGENT_ENVIRONMENT,
@@ -22,7 +22,7 @@ import {
   roleSummary,
 } from '../../state/index.js';
 import type {CardProps} from './card-props.js';
-import {roleAgentsChanged, rolesView} from './view.js';
+import {NEEDS_UPDATE, roleAgentsChanged, rolesView} from './view.js';
 
 /** The select's value for a role that follows the run. */
 const RUN = '';
@@ -88,7 +88,25 @@ function RoleRow(
   );
 }
 
-/** The roles' toggle and rows, or the plain reason there are none to show. */
+const HEADING = 'Use a different agent for a role';
+const CHECKING = 'Checking';
+
+/**
+ * The roles' heading with one short status, in place of the roles a machine cannot offer: the
+ * status belongs to this row, never to the harness tiles above it.
+ */
+function RoleStatus(props: {readonly status: string}): JSX.Element {
+  return (
+    <Row justify="between" wrap>
+      <Text variant="small">{HEADING}</Text>
+      <Text variant="small" tone="muted">
+        {props.status}
+      </Text>
+    </Row>
+  );
+}
+
+/** The roles' toggle and rows, or the status of why there are none to show. */
 export function RoleAgents(
   props: CardProps & {readonly offers: readonly HarnessOffer[]; readonly agent: AgentChoice},
 ): JSX.Element {
@@ -97,26 +115,15 @@ export function RoleAgents(
   const [open, setOpen] = useState(changed > 0);
   const view = rolesView(context);
   const machine = context.form.machine;
-  const heading = 'Use a different agent for a role';
   if (!helperOffers(context.helper, machine, 'run_role_agents')) {
-    return (
-      <Text variant="small" tone="muted">
-        {context.helper?.for === machine ? 'Not supported on this machine' : 'Checking the machine'}
-      </Text>
-    );
+    return <RoleStatus status={context.helper?.for === machine ? NEEDS_UPDATE : CHECKING} />;
   }
   if (view.kind !== 'ready') {
-    return (
-      <Text variant="small" tone="muted">
-        {view.kind === 'unsupported'
-          ? 'Roles not reported by this machine'
-          : 'Waiting for the first check'}
-      </Text>
-    );
+    return <RoleStatus status={view.kind === 'unsupported' ? NEEDS_UPDATE : CHECKING} />;
   }
   return (
     <Collapsible
-      label={heading}
+      label={HEADING}
       open={open}
       toggle={setOpen}
       {...(open

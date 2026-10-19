@@ -2,23 +2,16 @@
  * How the Machines screen words a machine: its status, the one line under its name, and its facts,
  * each a function of what its last report said.
  */
-import {acceleratorName, type MachineDescription} from '@vibesys/hosts';
+import {acceleratorName, type MachineDescription, problemWord} from '@vibesys/hosts';
 import {gpuLine} from './hardware.js';
 import {type Machine, type MachineStatus, machineStatus} from './machines.js';
 
 /** The tones the screen draws a status in (the design system's status tones). */
 export type StatusTone = 'neutral' | 'ok' | 'warn' | 'err';
 
-const WORDS: Readonly<Record<MachineStatus, string>> = {
-  ready: 'Ready',
-  'checkout-not-found': 'Checkout not found',
-  'sign-in': 'Sign in',
-  unavailable: 'Can’t connect',
-  checking: 'Checking',
-};
-
 const TONES: Readonly<Record<MachineStatus, StatusTone>> = {
   ready: 'ok',
+  'needs-update': 'warn',
   'checkout-not-found': 'warn',
   'sign-in': 'warn',
   unavailable: 'err',
@@ -26,7 +19,14 @@ const TONES: Readonly<Record<MachineStatus, StatusTone>> = {
 };
 
 export function statusWord(status: MachineStatus): string {
-  return WORDS[status];
+  switch (status) {
+    case 'ready':
+      return 'Ready';
+    case 'checking':
+      return 'Checking';
+    default:
+      return problemWord(status);
+  }
 }
 
 export function statusTone(status: MachineStatus): StatusTone {
@@ -34,13 +34,16 @@ export function statusTone(status: MachineStatus): StatusTone {
 }
 
 function facts(machine: Machine): MachineDescription | null {
-  return machine.report?.kind === 'ready' ? machine.report.facts : null;
+  const report = machine.report;
+  return report?.kind === 'ready' || report?.kind === 'needs-update' ? report.facts : null;
 }
 
 /** The line under a machine's name: its checkout, then what is most worth knowing. */
 export function machineSummary(machine: Machine): string {
   const described = facts(machine);
   switch (machineStatus(machine)) {
+    case 'needs-update':
+      return `${machine.checkout} · needs an update`;
     case 'ready': {
       if (described === null) return machine.checkout;
       const version = described.checkout?.version;
@@ -126,7 +129,12 @@ export function machineFacts(machine: Machine): MachineFact[] {
   }
   if (missing) return [checkout, {key: 'Version', value: '–', mono: true}];
   const report = machine.report;
-  if (report !== null && report.kind !== 'ready' && machine.checking === null) {
+  if (
+    report !== null &&
+    report.kind !== 'ready' &&
+    report.kind !== 'needs-update' &&
+    machine.checking === null
+  ) {
     const connection = report.kind === 'sign-in' ? 'waiting for sign-in' : report.detail;
     return [checkout, {key: 'Connection', value: connection, mono: false}];
   }
@@ -140,6 +148,8 @@ export function machineProblem(machine: Machine): string | null {
   switch (report.kind) {
     case 'ready':
       return null;
+    case 'needs-update':
+      return `VibeSys on ${machine.label} needs an update`;
     case 'checkout-not-found':
       return `Nothing is at ${machine.checkout} on ${machine.label} any more. Point the app at your VibeSys checkout there.`;
     case 'sign-in':

@@ -92,6 +92,20 @@ function adoptedWords(
   return `Adopted the candidate${from}${better === null ? '' : `, ${better} than the input`}.`;
 }
 
+const ELLIPSIS = '\u2026';
+
+/**
+ * The end record's `reason` whole. The registry cuts the reason it keeps with the end record at a
+ * fixed length and ends the cut with an ellipsis; `full` is the failure the run's phase carries,
+ * which is not cut. When `reason` is that cut of `full`, `full` is the reason; otherwise `reason`.
+ */
+export function unclipped(reason: string, full: string | null): string {
+  if (full === null || !reason.endsWith(ELLIPSIS)) return reason;
+  return full.startsWith(reason.slice(0, -ELLIPSIS.length)) && full.length > reason.length - 1
+    ? full
+    : reason;
+}
+
 /**
  * The ended banner's line, for an end record's `outcome` and `reason`. `adopted` and `direction` come
  * from the run's trace and declared objective; null when the page has not read them.

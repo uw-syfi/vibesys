@@ -10,6 +10,8 @@
  */
 import type {RunEvent, RunSnapshot, Span} from '@vibesys/contracts';
 
+export {closeSpans, isOpen, type RunEnding} from './closing.js';
+
 /** The spans folded so far, in the order they started, and the last sequence folded. */
 export interface RunTrace {
   readonly spans: ReadonlyMap<string, Span>;

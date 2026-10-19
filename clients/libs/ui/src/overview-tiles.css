@@ -3,18 +3,18 @@
 .vs-overview-group {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-3);
   min-width: 0;
 }
 .vs-overview-group-head {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 .vs-overview-tiles {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(var(--column-chart), 1fr));
-  gap: var(--space-4);
+  gap: var(--space-3);
 }
 .vs-overview-tile {
   position: relative;
@@ -37,10 +37,10 @@
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-2);
   min-width: 0;
   margin: 0;
-  padding: var(--space-4) var(--space-5);
+  padding: var(--space-3) var(--space-4);
   border: 0;
   border-radius: var(--radius-lg);
   background: transparent;
@@ -55,15 +55,16 @@
 }
 .vs-overview-tile-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
   min-width: 0;
-  /* A tile with no result keeps the head a result gives, so charts line up across a row. */
-  min-height: var(--control-sm);
+  /* A tile with no result keeps the head a result gives, so rows line up across a row of tiles. */
+  min-height: var(--row-dense);
 }
+/* The menu button sits in the head's row, in the corner: the head leaves it room. */
 .vs-overview-tile[data-menu] .vs-overview-tile-head {
-  padding-right: var(--control-sm);
+  padding-right: calc(var(--control-sm) - var(--space-4));
 }
 .vs-overview-tile-head > :first-child {
   overflow: hidden;
@@ -84,14 +85,24 @@
 .vs-overview-tile-foot {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
+  gap: var(--space-2);
   min-width: 0;
+}
+/* The figures keep their width; the note, then the pill's neighbour, gives way with an ellipsis. */
+.vs-overview-tile-figures {
+  flex: none;
+}
+.vs-overview-tile-foot > .vs-overview-tile-line {
+  flex: 1;
+}
+.vs-overview-tile-foot > :last-child {
+  flex: none;
+  margin-left: auto;
 }
 .vs-overview-tile-menu {
   position: absolute;
-  top: var(--space-3);
-  right: var(--space-3);
+  top: 0;
+  right: 0;
 }
 .vs-result-chart {
   position: relative;
@@ -101,7 +112,7 @@
 }
 .vs-result-chart-plot {
   position: absolute;
-  inset: var(--space-4);
+  inset: var(--space-2) var(--space-3);
 }
 .vs-result-chart-lines {
   position: absolute;
@@ -149,6 +160,11 @@
 .vs-result-chart-mark[data-mark="pending"] {
   background: var(--accent);
   box-shadow: 0 0 0 var(--dot-ring) var(--chip-accent-border);
+}
+.vs-result-key {
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 .vs-result-key-mark {
   flex: none;

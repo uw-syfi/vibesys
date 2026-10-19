@@ -14,11 +14,14 @@ import {
   hardwareLabel,
   MAKER_NAMES,
   type NewRunContext,
+  offers,
   projectPath,
 } from '../../state/index.js';
 import type {CardProps} from './card-props.js';
 import {backendLabel} from './cause-words.js';
-import {entriesIn} from './view.js';
+import {entriesIn, NEEDS_UPDATE} from './view.js';
+
+const READING = 'Reading the goal';
 
 function taskFile(task: string): string {
   return `.vibesys/tasks/${task}/OBJECTIVE.md`;
@@ -42,10 +45,7 @@ function Objectives(props: {readonly objectives: readonly Objective[]}): JSX.Ele
   return (
     <Card section="Optimizes">
       {objectives.length === 0 ? (
-        <Text tone="muted">
-          The goal names the headline metric. This task declares no objectives, so no direction is
-          shown.
-        </Text>
+        <Text tone="muted">None</Text>
       ) : (
         <Stack gap="space-3">
           {objectives.map(objective => (
@@ -90,7 +90,7 @@ function GoalText(props: {readonly goal: Goal}): JSX.Element {
         <Markdown text={goal.goal} />
         {goal.goal_truncated ? (
           <Text variant="small" tone="muted">
-            Shortened here. The whole goal is in the file.
+            Shortened
           </Text>
         ) : null}
       </Stack>
@@ -108,11 +108,27 @@ function ownGoal(context: NewRunContext): Goal | null {
   return read.value.kind === 'offered' ? read.value.value : null;
 }
 
-function Unread(props: {readonly task: string; readonly reading: boolean}): JSX.Element {
+/**
+ * What stands in place of a goal that is not read: one short status, then the file it is in. The
+ * machine's VibeSys that cannot read it (it lacks `feature`, which reads the goal) needs an update;
+ * one not heard from yet is being asked.
+ */
+function unreadStatus(
+  context: NewRunContext,
+  feature: 'project_goal' | 'example_catalogue',
+  reading: boolean,
+): string {
+  const {helper, form} = context;
+  if (helper?.for !== form.machine) return READING;
+  if (!offers(helper, form.machine, feature)) return NEEDS_UPDATE;
+  return reading ? READING : 'Not available';
+}
+
+function Unread(props: {readonly task: string; readonly status: string}): JSX.Element {
   return (
     <Card>
       <Stack gap="space-2">
-        <Text>{props.reading ? 'Reading the goal' : 'Goal not shown here'}</Text>
+        <Text>{props.status}</Text>
         <Text variant="code" tone="muted">
           {taskFile(props.task)}
         </Text>
@@ -127,9 +143,12 @@ function OwnGoalPage(props: CardProps): JSX.Element {
   const task = context.answers.task ?? 'default';
   if (goal === null) {
     // Reading while the helper can read it and has not answered or failed.
-    const reading =
-      context.helper?.features.includes('project_goal') === true && context.problem === null;
-    return <Unread task={task} reading={reading} />;
+    return (
+      <Unread
+        task={task}
+        status={unreadStatus(context, 'project_goal', context.problem === null)}
+      />
+    );
   }
   return (
     <Split
@@ -157,7 +176,9 @@ export function GoalPage(props: CardProps): JSX.Element {
   const entry = chosenEntry(context.answers, entriesIn(context));
   const details = entry?.details ?? null;
   const task = context.form.task ?? entry?.task ?? 'default';
-  if (entry === null || details === null) return <Unread task={task} reading={false} />;
+  if (entry === null || details === null) {
+    return <Unread task={task} status={unreadStatus(context, 'example_catalogue', false)} />;
+  }
   return (
     <Split
       main={<GoalText goal={{...details, task: entry.task}} />}

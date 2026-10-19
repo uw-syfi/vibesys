@@ -5,6 +5,7 @@ import json
 import shlex
 import subprocess
 import sys
+from dataclasses import replace
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -54,6 +55,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.testing import idle_environment_system, unconfined_host_environment
 from vs_sandbox.api import (
+    CommandResult,
     EnvironmentBindMount,
     HostResource,
     HostResourceAccess,
@@ -884,7 +886,7 @@ def test_docker_environment_opens_one_started_sandbox_with_agent_paths(
     assert session.view.profile_execution == "local"
     assert session.view.paths.accuracy_command == "uv run python accuracy_checker/checker.py"
     assert session.view.paths.benchmark_command == "uv run python benchmark/benchmark.py"
-    assert backend.calls[0][1]["extra_env"]["UV_CACHE_DIR"] == "/workspace/.cache/uv"
+    assert backend.calls[0][1]["extra_env"]["UV_CACHE_DIR"] == "/home/agent/.cache/uv"
     assert backend.calls[0][1]["lifecycle_hooks"] == []
     # The container always starts from a resolved agent image, built from the
     # backend's own base image, even when the run needs no evaluator tools.
@@ -1119,6 +1121,44 @@ def test_local_environment_prepares_and_translates_evaluator_tool(
         "--dry-run",
     ]
     assert "${TOOL:" not in (session.view.paths.benchmark_command or "")
+
+
+def test_local_environment_installs_tools_with_the_login_shells_path(tmp_path: Path) -> None:
+    """A run started by a non-login shell still finds the user's cargo, as a login shell would."""
+    backend = FakeBackend()
+    backend.sandbox.execute.return_value = CommandResult(exit_code=0, output="", truncated=False)
+    package = resolve_evaluator_package(
+        EvaluatorPackageRequirement(name="vibesys-evaluator-request-factory", version="0.1.0")
+    )
+    tools_root = tmp_path / "operator-tools"
+    reads: list[str] = []
+
+    def login_environment() -> dict[str, str]:
+        reads.append("read")
+        return {"PATH": "/login/cargo/bin:/usr/bin", "HOME": "/home/user"}
+
+    request = _request(
+        tmp_path,
+        backend,
+        accuracy_command="true",
+        benchmark_command=shlex.join(package.command("request-factory-engine")),
+        evaluator_package_root=package.root,
+        evaluator_tools_root=tools_root,
+        system=replace(idle_environment_system(), login_environment=login_environment),
+    )
+    assert reads == []
+
+    _open(unconfined_host_environment(), request)
+
+    SandboxLifecycle(backend.calls[0][1]["lifecycle_hooks"]).before_ready(backend.sandbox)
+    backend.sandbox.execute.assert_called_once_with(
+        evaluator_tools_install_command(
+            package.metadata.tools, tools_root, search_path="/login/cargo/bin:/usr/bin"
+        ),
+        timeout=660,
+        output=DISCARD,
+    )
+    assert reads == ["read"]
 
 
 def test_local_environment_rejects_evaluator_tools_root_inside_workspace(
@@ -1915,6 +1955,41 @@ def test_modal_environment_wraps_custom_deployment_entrypoint(tmp_path: Path) ->
     assert session.view.paths.benchmark_command == f"{prefix} trusted-benchmark"
 
 
+_TOOL_CACHE_VARIABLES = ("UV_CACHE_DIR", "CARGO_HOME")
+
+
+@pytest.mark.parametrize("environment", ["docker", "modal"])
+@pytest.mark.parametrize("workspace_kind", ["candidate", "worktrees/m-attempt-1/workspace"])
+def test_a_tool_cache_never_lives_inside_the_candidate_workspace(
+    tmp_path: Path, environment: str, workspace_kind: str
+) -> None:
+    """Regression: uv and Cargo caches hold Git checkouts, so inside a workspace they poison it.
+
+    The workspace is one of the host paths a candidate or an attempt gets, mounted at
+    ``/workspace``; the cache is the container's, whichever path the workspace has.
+    """
+    backend = FakeBackend()
+    workspace = tmp_path / workspace_kind
+    workspace.mkdir(parents=True)
+    _open(
+        build_run_environment(RunEnvironmentSpec(environment)),
+        _request(
+            tmp_path,
+            backend,
+            workspace=workspace,
+            agent_backend="cli",
+            cli_provider="codex",
+        ),
+    )
+
+    extra_env = backend.calls[0][1]["extra_env"]
+    roots = [workspace, Path("/workspace")]
+    for name in _TOOL_CACHE_VARIABLES:
+        location = Path(extra_env[name])
+        assert location.is_absolute()
+        assert not any(location.is_relative_to(root) for root in roots), (name, location)
+
+
 def test_modal_environment_installs_nothing_at_container_start(tmp_path: Path) -> None:
     """The local Docker container starts from a prebuilt, pushed agent image
     and installs nothing at start, including the Modal Python SDK an earlier
@@ -1927,7 +2002,7 @@ def test_modal_environment_installs_nothing_at_container_start(tmp_path: Path) -
     _open(env, _request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
 
     assert "extra_init_commands" not in backend.calls[0][1]
-    assert backend.calls[0][1]["extra_env"]["UV_CACHE_DIR"] == "/workspace/.cache/uv"
+    assert backend.calls[0][1]["extra_env"]["UV_CACHE_DIR"] == "/home/agent/.cache/uv"
 
 
 def test_modal_environment_mounts_modal_auth_under_the_agent_home(
@@ -2154,15 +2229,18 @@ def test_modal_environment_runtime_notes_describe_profile_contract(tmp_path: Pat
     assert "from torch.autograd import DeviceType" not in notes
 
 
-def test_modal_environment_prompt_notes_reuse_workspace_uv_cache(tmp_path: Path) -> None:
+def test_modal_environment_prompt_notes_keep_the_uv_cache_out_of_the_workspace(
+    tmp_path: Path,
+) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
 
     _open(env, _request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
     notes = _modal_runtime_document(tmp_path)
 
-    assert "UV_CACHE_DIR=/workspace/.cache/uv" in notes
-    assert "persist outside Git checkpoints" in notes
+    assert "UV_CACHE_DIR" not in notes
+    assert "uv cache lives in the container home, never in the workspace" in notes
+    assert "persists outside Git checkpoints" in notes
     assert "do not delete or recreate `.venv`" in notes
     assert ".venv/bin/python -m ..." in notes
     assert "excluding `.venv` and `.cache`" in notes

@@ -383,3 +383,17 @@ def test_every_reply_prompt_tells_the_agent_its_prose_fields_are_markdown(
         PromptTemplate.JUDGE: _judge_context(plan, "claim"),
     }
     assert "as Markdown" in _render(template, contexts[template])
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(context=_IMPLEMENT, offered=st.booleans())
+def test_the_implementer_is_told_about_the_evaluation_tool_exactly_when_it_is_offered(
+    context: ImplementPrompt, *, offered: bool
+) -> None:
+    """The role holds the tool; without its prompt naming it, no agent ever calls it."""
+    text = _RENDERER.render_template(
+        f"{PromptTemplate.IMPLEMENT.value}.j2",
+        **_variables(context, agent_evaluation=offered),
+    )
+    assert ("submit_evaluation" in text) is offered
+    assert ("Measure early, on the target" in text) is offered

@@ -3,6 +3,7 @@ backends = ["rocm"]
 
 [agent]
 domain = "llm-serving"
+interface = "service"
 
 [evaluator]
 name = "vibesys-evaluator-request-factory"

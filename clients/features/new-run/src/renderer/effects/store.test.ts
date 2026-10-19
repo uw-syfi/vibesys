@@ -1,7 +1,8 @@
 import {expect, test} from 'bun:test';
 import type {Check, HelperFeature} from '@vibesys/contracts/host-helper';
-import type {DestinationFound, Offered} from '@vibesys/ipc';
-import {exampleCatalogue} from '@vibesys/run-fixtures';
+import {REQUIRED_HELPER_FEATURES} from '@vibesys/hosts';
+import type {DestinationFound, MeasureTarget, Offered} from '@vibesys/ipc';
+import {computeSettings, exampleCatalogue} from '@vibesys/run-fixtures';
 import type {RecentRun, RunRef} from '@vibesys/runs';
 import type {Draft} from '../../state/index.js';
 import {
@@ -19,7 +20,7 @@ const ok = <T>(value: T) => Promise.resolve({ok: true as const, value});
 
 /** The bridge calls New run makes, answering at once from memory, from a helper with `features`. */
 function fakeBridge(
-  features: readonly string[] = ['run_options', 'preflight', 'examples'],
+  features: readonly string[] = REQUIRED_HELPER_FEATURES,
   asked: string[] = [],
   roles: readonly string[] | null = null,
 ): NewRunBridge {
@@ -233,21 +234,47 @@ test('a helper older than New run is never asked to check or start, and Start sa
   await settle();
   const [first] = readiness(store.getState());
   expect(first).toMatchObject({id: 'helper', state: 'fail', label: 'VibeSys on host-b'});
-  expect(first?.detail).toBe(
-    'VibeSys on host-b is older than this app: update its checkout to start runs from here ' +
-      '(it lacks run_options, examples).',
-  );
-  expect(startBlocked(store.getState())).toBe('Fix the items marked above to start.');
+  expect(first?.detail).toBe('Needs an update');
+  expect(startBlocked(store.getState())).toBe('VibeSys on host-b needs an update');
   store.dispatch({type: 'start'});
   await settle();
   expect(asked).toEqual([]);
   expect(store.getState().context.examples?.value).toEqual({kind: 'unsupported'});
 });
 
+test('a helper that serves everything New run asks but the run trace needs an update: Start says so and never starts', async () => {
+  const clock = manualSchedule();
+  const asked: string[] = [];
+  const stale = REQUIRED_HELPER_FEATURES.filter(feature => feature !== 'run_trace');
+  const {store} = runAgain(fakeBridge(stale, asked), recentRun('ssh:host-b', '/p', 2), {
+    schedule: clock.schedule,
+  });
+  await settle();
+  clock.runDue();
+  await settle();
+  const [first] = readiness(store.getState());
+  expect(first).toMatchObject({id: 'helper', state: 'fail', detail: 'Needs an update'});
+  expect(startBlocked(store.getState())).toBe('VibeSys on host-b needs an update');
+  store.dispatch({type: 'start'});
+  await settle();
+  expect(asked).not.toContain('startRun');
+});
+
+test('a helper with every feature the app needs raises no update item', async () => {
+  const clock = manualSchedule();
+  const {store} = runAgain(fakeBridge(), recentRun('ssh:host-b', '/p', 2), {
+    schedule: clock.schedule,
+  });
+  await settle();
+  clock.runDue();
+  await settle();
+  expect(readiness(store.getState()).some(item => item.id === 'helper')).toBe(false);
+});
+
 test('the role table is read from the run: pending, then its roles, from a helper that reports them', async () => {
   const clock = manualSchedule();
   const roles = ['multi-orchestrator', 'multi-judge'];
-  const features = ['run_options', 'preflight', 'examples', 'run_roles'];
+  const features = [...REQUIRED_HELPER_FEATURES, 'run_roles'];
   const {store} = runAgain(fakeBridge(features, [], roles), recentRun('ssh:gpu', '/p', 2), {
     schedule: clock.schedule,
   });
@@ -275,7 +302,7 @@ test('a helper that does not report roles gets an empty state, not the roles of 
 function backendBridge(
   backend: 'cpu' | 'cuda',
   failing: boolean,
-  features: readonly string[] = ['run_options', 'preflight', 'examples', 'run_backend'],
+  features: readonly string[] = [...REQUIRED_HELPER_FEATURES, 'run_backend'],
 ): NewRunBridge {
   return {
     ...fakeBridge(features),
@@ -711,7 +738,7 @@ test('a retry does not touch a step that did not fail', async () => {
   const clock = manualSchedule();
   const asked: string[] = [];
   const failing: NewRunBridge = {
-    ...fakeBridge(['run_options', 'preflight', 'examples'], asked),
+    ...fakeBridge(REQUIRED_HELPER_FEATURES, asked),
     tasks: () =>
       Promise.resolve({ok: false as const, error: 'No such project.', authNeeded: false}),
   };
@@ -849,8 +876,8 @@ async function chooseExample(
   const clock = manualSchedule();
   const features =
     answer === 'not_offered'
-      ? ['run_options', 'preflight', 'examples']
-      : ['run_options', 'preflight', 'examples', 'example_destination'];
+      ? [...REQUIRED_HELPER_FEATURES]
+      : [...REQUIRED_HELPER_FEATURES, 'example_destination'];
   const bridge: NewRunBridge = {
     ...fakeBridge(features, asked),
     examples: () => ok({kind: 'offered' as const, value: exampleCatalogue}),
@@ -971,3 +998,72 @@ test('typing another destination asks again, and a free name offers Create', asy
   });
   expect(destinationTaken(store.getState().context)).toBe(false);
 });
+
+const MACHINES = {
+  cpu: {accelerator: 'cpu' as const, gpus: []},
+  rocm: {accelerator: 'rocm' as const, gpus: [{vendor: 'amd', model: 'MI210'}]},
+};
+
+/** A store on a machine with `hardware`, the MI210 example chosen and results measured on `target`. */
+async function measuredOn(hardware: keyof typeof MACHINES, target: MeasureTarget) {
+  const clock = manualSchedule();
+  const bridge: NewRunBridge = {
+    ...fakeBridge(),
+    examples: () => ok({kind: 'offered' as const, value: exampleCatalogue}),
+    describeMachine: () =>
+      ok({
+        kind: 'offered' as const,
+        value: {
+          checkout: null,
+          hardware: {cpu_cores: 64, ...MACHINES[hardware]},
+          docker: {reachable: true, version: '27'},
+          harness_clis: [],
+          runs: {live: 0, ended_today: 0},
+        },
+      }),
+  };
+  const {store} = createNewRunStore(bridge, {
+    recent: [],
+    schedule: clock.schedule,
+    started: () => undefined,
+  });
+  await settle();
+  store.dispatch({
+    type: 'compute',
+    machine: store.getState().context.form.machine,
+    compute: {kind: 'offered', value: computeSettings},
+  });
+  for (const change of [
+    {kind: 'from', from: 'example'},
+    {kind: 'domain', domain: 'llm-serving'},
+    {kind: 'model', model: 'Qwen3.5 9B'},
+    {kind: 'hardware', hardware: 'amd|AMD MI210|1'},
+  ] as const) {
+    store.dispatch({type: 'answer', change, advance: true});
+  }
+  store.dispatch({type: 'measure', target});
+  await settle();
+  return hardwareItem(store);
+}
+
+const hardwareItem = (store: ReturnType<typeof createNewRunStore>['store']) =>
+  readiness(store.getState()).find(item => item.id === 'hardware_fit');
+
+const MEASURED_ON: readonly (readonly [string, MeasureTarget])[] = [
+  ['a cluster', {kind: 'slurm', cluster: 'cluster-m'}],
+  ['a cluster that states no hardware', {kind: 'slurm', cluster: 'campus'}],
+  ['Modal', {kind: 'modal'}],
+];
+
+test('on the same machine, a GPU task on a machine without one is a warning on Review', async () => {
+  expect((await measuredOn('cpu', {kind: 'same_machine'}))?.state).toBe('warn');
+  expect((await measuredOn('rocm', {kind: 'same_machine'}))?.state).toBe('ok');
+});
+
+for (const [name, target] of MEASURED_ON) {
+  test(`measured on ${name}, the agent's machine is not judged against the task's GPU`, async () => {
+    for (const hardware of ['cpu', 'rocm'] as const) {
+      expect(await measuredOn(hardware, target)).toBeUndefined();
+    }
+  });
+}

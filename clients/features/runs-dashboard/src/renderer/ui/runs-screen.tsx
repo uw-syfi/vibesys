@@ -4,7 +4,6 @@ import {
   Card,
   type ChartKeyItem,
   Chip,
-  EmptyState,
   Field,
   type MenuItem,
   OverviewGroup,
@@ -17,11 +16,9 @@ import {
   type SelectOption,
   Stack,
   Text,
-  Wordmark,
 } from '@vibesys/ui';
 import type {JSX} from 'react';
 import {BASE, type GroupBy, groupTiles, onMachine, type Tile} from '../../state/index.js';
-import {WORDMARK} from './wordmark.js';
 
 /** An unfinished New run, as the dashboard offers it: what it is of so far, and where it stands. */
 export interface RunsDraft {
@@ -56,6 +53,7 @@ function TileOf(props: {
   return (
     <OverviewTile
       title={tile.title}
+      hint={tile.hint}
       result={tile.result}
       facts={tile.facts}
       chart={
@@ -100,9 +98,10 @@ function Draft(props: {readonly draft: RunsDraft}): JSX.Element {
 }
 
 /**
- * The Runs dashboard, the app's home: a title and a Group by select, then every run's tile in
- * groups, the runs that need their user first, each run in one group. With no run it shows the wordmark over New run.
- * Pressing a tile opens its run (`open` is handed the tile's id); `menu` is a tile's row menu.
+ * The Runs dashboard: a header row with the title, the chart key and a Group by select, then every
+ * run's tile in groups on a grid that fills the width, the runs that need their user first, each
+ * run in one group. With no run it is the header alone. Pressing a tile opens its run (`open` is
+ * handed the tile's id); `menu` is a tile's row menu.
  */
 export function RunsScreen(props: {
   readonly tiles: readonly Tile[];
@@ -113,8 +112,6 @@ export function RunsScreen(props: {
   readonly group: (by: GroupBy) => void;
   readonly open: (id: string) => void;
   readonly menu: (id: string) => readonly MenuItem[];
-  /** Offered by the empty screen; the app's home is New run while there is no run, so it leaves it out. */
-  readonly newRun?: () => void;
   readonly draft: RunsDraft | null;
   /** What to say when saved runs could not be read; none when all were. */
   readonly notice: {readonly title: string; readonly body: string} | null;
@@ -126,13 +123,13 @@ export function RunsScreen(props: {
   );
   return (
     <Page
-      width="wide"
+      width="fill"
       header={
-        <Row justify="between" wrap>
+        <Row justify="between" gap="space-4" wrap>
           <Text as="h1" variant="title">
             Runs
           </Text>
-          <Row gap="space-4" wrap>
+          <Row gap="space-5" wrap>
             {machine === null ? null : (
               <Row gap="space-1">
                 <Chip label={machine} />
@@ -145,46 +142,33 @@ export function RunsScreen(props: {
                 />
               </Row>
             )}
-            {props.tiles.length === 0 ? null : (
-              <Field label="Group by">
-                <Select value={by} options={GROUP_OPTIONS} change={props.group} size="sm" />
-              </Field>
+            {tiles.length === 0 ? null : (
+              <>
+                <ResultChartKey label="Chart key" items={CHART_KEY} />
+                <Field label="Group by" hideLabel>
+                  <Select value={by} options={GROUP_OPTIONS} change={props.group} size="sm" />
+                </Field>
+              </>
             )}
           </Row>
         </Row>
       }
     >
-      <Stack gap="space-6">
+      <Stack gap="space-5">
         {props.notice === null ? null : (
           <Banner tone="warn" title={props.notice.title} body={props.notice.body} />
         )}
         {props.draft === null ? null : <Draft draft={props.draft} />}
-        {props.tiles.length > 0 && tiles.length === 0 ? (
-          <EmptyState title="No runs" />
-        ) : tiles.length === 0 ? (
-          <Stack gap="space-6">
-            <Wordmark art={WORDMARK} label="VibeSys" align="center" />
-            {props.newRun === undefined ? null : (
-              <Row justify="center">
-                <Button variant="primary" icon="plus" text="New run" press={props.newRun} />
-              </Row>
-            )}
-          </Stack>
-        ) : (
-          <>
-            <ResultChartKey label="Chart key" items={CHART_KEY} />
-            {groupTiles(tiles, by).map(group => (
-              <OverviewGroup
-                key={group.key}
-                title={group.title}
-                count={group.tiles.length}
-                {...(group.tone === null ? {} : {tone: group.tone})}
-              >
-                {group.tiles.map(tile)}
-              </OverviewGroup>
-            ))}
-          </>
-        )}
+        {groupTiles(tiles, by).map(group => (
+          <OverviewGroup
+            key={group.key}
+            title={group.title}
+            count={group.tiles.length}
+            {...(group.tone === null ? {} : {tone: group.tone})}
+          >
+            {group.tiles.map(tile)}
+          </OverviewGroup>
+        ))}
       </Stack>
     </Page>
   );

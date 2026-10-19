@@ -88,6 +88,10 @@ body > div:first-child {
 .vs-page-content[data-width="narrow"] {
   max-width: var(--content-narrow);
 }
+/* `fill`: the whole area, for a page whose content is a grid that wraps to the width. */
+.vs-page-content[data-width="fill"] {
+  max-width: none;
+}
 
 /*
  * A page with a header or a footer never scrolls itself: they are fixed and the body scrolls
@@ -530,6 +534,9 @@ body > div:first-child {
   flex-direction: column;
   align-items: flex-start;
   gap: var(--space-2);
+}
+.vs-button-disabled .vs-help[data-quiet] {
+  display: none;
 }
 .vs-button-disabled[data-full] {
   display: flex;

@@ -65,6 +65,8 @@ export type RunDigestEntry =
       readonly closing: RunClosing | null;
       /** Whether the journal says the run is over (an ending record or a terminal event). */
       readonly over: boolean;
+      /** Core's account of how the run ended, from its ending record; null or absent when it has none. */
+      readonly endSummary?: string | null;
       /** The tile's data; null when the host's VibeSys does not offer `run_dashboard`. */
       readonly dashboard?: RunDashboardEntry | null;
     }
@@ -91,6 +93,11 @@ function dashboardOf(summary: RunSummary, digest: RunDigest): RunDashboardEntry 
   };
 }
 
+/** `text` unless it is absent or blank. */
+function nonEmpty(text: string | undefined): string | null {
+  return text === undefined || text.trim() === '' ? null : text;
+}
+
 function read(summary: RunSummary, digest: RunDigest, createdAt: number): RunDigestEntry {
   const {ending, closing} = digest;
   return {
@@ -103,6 +110,7 @@ function read(summary: RunSummary, digest: RunDigest, createdAt: number): RunDig
     outcome: ending?.outcome ?? null,
     closing,
     over: ending !== null || closing !== null,
+    endSummary: nonEmpty(ending?.summary),
     dashboard: dashboardOf(summary, digest),
   };
 }

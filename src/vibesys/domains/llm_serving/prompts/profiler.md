@@ -9,8 +9,9 @@ profiler, run the server under it and drive load from another shell. Discover
 flags with `--help`; benchmark CLIs need not share token/request/rate flags.
 
 Profile under the benchmark's real load, not only isolated requests: use a
-short post-warmup window of the real workload, with NVTX ranges per step and
-per pipeline stage. Report per-stage busy share, host gaps by cause, batch
+short post-warmup window of the real workload{% if profiler_id == "nsys" %}, with NVTX ranges per step and
+per pipeline stage{% elif profiler_id == "torch" %}, with a `record_function` range per step and per
+pipeline stage{% endif %}. Report per-stage busy share, host gaps by cause, batch
 token fill and sequences per batch, and kernel time against context length,
 for prefill-bound as well as decode-bound workloads.
 

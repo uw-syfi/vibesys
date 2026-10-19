@@ -11,6 +11,7 @@ interface contract.
 ```
 qwen3.5-9b-mi210/
 ├── pyproject.toml            # uv environment for the checker and reference engine
+├── engine/                   # the candidate: starts as a copy of reference/ (the measured input)
 └── .vibesys/tasks/default/   # trusted task files; read-only for the agent
     ├── vibesys.input.toml    # manifest: request-factory-adapter entrypoint, headline metric
     ├── OBJECTIVE.md          # what to optimize, hardware facts, interface contract

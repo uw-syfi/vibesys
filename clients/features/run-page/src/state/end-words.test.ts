@@ -2,7 +2,8 @@ import {describe, expect, test} from 'bun:test';
 import type {RunOverview, Span} from '@vibesys/contracts';
 import type {HostRun, RunEnd} from '@vibesys/hosts';
 import {EMPTY_TRACE, foldTrace} from '@vibesys/run-state/trace';
-import {adoptedCandidate, endReason} from './end-words.js';
+import {SEEDS, Seeded} from '@vibesys/store/testing';
+import {adoptedCandidate, endReason, unclipped} from './end-words.js';
 import {startHistory} from './history-pager.js';
 import {EMPTY_RUN_FOLD, traceLog} from './live.js';
 import {type RunPageState, runPageInitial} from './run-page.js';
@@ -219,5 +220,28 @@ describe('the ended banner', () => {
     expect(endReason('failed', 'W6’s benchmark timed out after 300 s.', null, 'max')).toBe(
       'W6’s benchmark timed out after 300 s.',
     );
+  });
+});
+
+describe('unclipped', () => {
+  const CUT = 200;
+
+  /** The registry's cut of `full`: its first 199 characters and an ellipsis, when it is longer. */
+  function cut(full: string): string {
+    return full.length <= CUT ? full : `${full.slice(0, CUT - 1)}\u2026`;
+  }
+
+  test('gives the whole failure when the end record holds only the registry’s cut of it', () => {
+    for (const seed of SEEDS) {
+      const random = new Seeded(seed);
+      const full = `Failure ${'w'.repeat(random.int(500))}: ${seed}`;
+      expect(unclipped(cut(full), full), `seed ${seed}`).toBe(full);
+    }
+  });
+
+  test('keeps the end record’s reason when the failure is not the same account', () => {
+    expect(unclipped('stopped by you', 'something else')).toBe('stopped by you');
+    expect(unclipped(`${'a'.repeat(199)}\u2026`, 'b'.repeat(300))).toBe(`${'a'.repeat(199)}\u2026`);
+    expect(unclipped(`${'a'.repeat(199)}\u2026`, null)).toBe(`${'a'.repeat(199)}\u2026`);
   });
 });

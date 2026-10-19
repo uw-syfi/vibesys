@@ -34,11 +34,13 @@ export interface MachineEntry {
  * What a machine's facts say now, from which its status follows (no status is stored): `sign-in`
  * when its connection waits for credentials, `checkout-not-found` when no VibeSys checkout is at
  * its path, `unavailable` when it cannot be reached for another reason (offline, no `uv`, a
- * checkout too old for the app), and otherwise `ready` with what `machine.describe` says, or null
- * from a helper that predates it.
+ * checkout of another protocol version), `needs-update` when its helper lacks a feature this app
+ * needs (`REQUIRED_HELPER_FEATURES`), and otherwise `ready`; both carry what `machine.describe`
+ * says, or null from a helper that predates it.
  */
 export type MachineReport =
   | {readonly kind: 'ready'; readonly facts: MachineDescription | null}
+  | {readonly kind: 'needs-update'; readonly facts: MachineDescription | null}
   | {readonly kind: 'sign-in'; readonly detail: string}
   | {readonly kind: 'checkout-not-found'; readonly detail: string}
   | {readonly kind: 'unavailable'; readonly detail: string};

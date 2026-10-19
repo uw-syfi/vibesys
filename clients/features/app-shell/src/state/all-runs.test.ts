@@ -137,6 +137,51 @@ describe('the Runs dashboard', () => {
     expect(sidebarInvariants(answered)).toEqual([]);
   });
 
+  test('names a run the machine lists without a task by the task its Recent record has', () => {
+    const {state, requests} = open(
+      [listed('ssh:host-a')],
+      [{...opened('ssh:host-a', '/p/q', 'crashed'), task: 'spsc'}],
+    );
+    const answered = sidebarStep(
+      state,
+      listedAction(listsOf(requests)[0]?.[2] as number, 'ssh:host-a', '/p/q', [
+        run('crashed', 1, null),
+        run('unknown', 2, null),
+      ]),
+    ).state;
+
+    const rows = dashboardRows(answered, CLOCK);
+
+    expect(rows.map(each => [each.row.run.runId, each.task])).toEqual([
+      ['crashed', 'spsc'],
+      ['unknown', null],
+    ]);
+  });
+
+  test('says why a failed run ended from its journal, which the registry no longer holds', () => {
+    const {state, requests} = open([listed('ssh:host-a')], [opened('ssh:host-a', '/p/q', 'r')]);
+    const step = sidebarStep(
+      state,
+      listedAction(listsOf(requests)[0]?.[2] as number, 'ssh:host-a', '/p/q', [run('boom', 1)]),
+    );
+    const asked = digestsOf(step.requests);
+    const answered = sidebarStep(step.state, {
+      type: 'digests-read',
+      token: asked[0]?.token as number,
+      reply: {
+        kind: 'digests',
+        runs: new Map([
+          ['boom', read({outcome: 'failed', closing: 'failed', endSummary: 'the agent crashed'})],
+        ]),
+      },
+    }).state;
+
+    const [row] = dashboardRows(answered, CLOCK);
+
+    expect(row?.row.status).toBe('failed');
+    expect(row?.row.now).toBe('the agent crashed');
+  });
+
   test('shows only the newest runs, and reads the digest of those alone', () => {
     const {state, requests} = open([listed('ssh:host-a')], [opened('ssh:host-a', '/p/q', 'seen')]);
     const many = Array.from({length: 230}, (_, index) => run(`r${index}`, index));

@@ -19,7 +19,7 @@ from vibesys.api.request import validate_run_request as _validate_run_request
 from vibesys.api.store import open_run_store as _open_run_store
 from vibesys.api.wiring import NativeProfilerPreflight, SessionImplementations
 from vibesys.api.wiring import create_session as _create_session
-from vs_agent.api import SHIPPED_PROVIDERS, AgentInvocationState
+from vs_agent.api import SHIPPED_PROVIDERS, AgentInvocationState, launch_shell_environment
 from vs_github.api import GitHubCLI
 from vs_project.api import Git, generate_run_id
 from vs_runtime.api.infrastructure import EnvironmentSystem
@@ -28,7 +28,7 @@ from vs_sandbox.api import SubprocessDockerCli, create_compute_backend
 from vs_sim.api import ProcessesProbe, utc_datetime
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from vibesys.api import (
         CoreEvent,
@@ -81,6 +81,8 @@ class LaunchSettings:
     """Opens each run's ``StateStore``; ``None`` is the local crash-atomic one."""
     profiler_preflight: ProfilerPreflight | None = None
     """Checks native profiler availability; ``None`` probes the host through ``processes``."""
+    login_environment: Callable[[], Mapping[str, str]] | None = None
+    """Reads the user's login shell environment; ``None`` reads it as provider CLIs are found."""
 
 
 def create_session(
@@ -146,6 +148,11 @@ def create_session(
             github=GitHubCLI(settings.processes),
             git_repository=settings.git_repository,
             system=EnvironmentSystem(
+                login_environment=(
+                    launch_shell_environment
+                    if settings.login_environment is None
+                    else settings.login_environment
+                ),
                 threads=timing.threads,
                 network=settings.network,
                 processes=settings.processes,

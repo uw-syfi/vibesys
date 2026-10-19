@@ -48,6 +48,15 @@ export {
   type RunPause,
 } from './listing.js';
 export {
+  connectionProblem,
+  MACHINE_PROBLEMS,
+  type MachineProblem,
+  type MachineStatus,
+  mostUrgentProblem,
+  problemWord,
+} from './machine-status.js';
+export {missingRequiredFeatures, REQUIRED_HELPER_FEATURES} from './required-features.js';
+export {
   digestEntries,
   digestLook,
   type IdeaPoint,

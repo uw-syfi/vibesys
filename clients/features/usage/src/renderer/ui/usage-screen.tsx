@@ -51,12 +51,23 @@ const RUN_COLUMNS: readonly TableColumn<RunSpendRow>[] = [
     key: 'run',
     header: 'Run',
     lead: true,
-    cell: row => <Text variant="body-strong">{row.name}</Text>,
+    cell: row => (
+      <Stack gap="space-0">
+        <Text variant="body-strong">{row.name}</Text>
+        {row.detail === null ? null : (
+          <Text variant="small" tone="muted">
+            {row.detail}
+          </Text>
+        )}
+      </Stack>
+    ),
   },
   {
     key: 'share',
     header: 'Share',
-    cell: row => <Meter label={`${row.name}: ${row.cost}`} value={row.share} inline />,
+    cell: row => (
+      <Meter label={`${row.detail ?? row.name}: ${row.cost}`} value={row.share} inline />
+    ),
   },
   {key: 'cost', header: 'Cost', mono: true, align: 'end', cell: row => row.cost},
 ];

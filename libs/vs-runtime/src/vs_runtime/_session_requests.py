@@ -907,6 +907,10 @@ class RuntimeSessionRequests:
             await self.settlement.begin(
                 access_key, turn.workspace, dispatch.workspace, dispatch.grant
             )
+        except AccessUnrestorableError as error:
+            # The workspace cannot be read by host Git, so no baseline exists and asking
+            # again finds the same tree: refuse for good. No provider call began.
+            return _rejected(str(error), binding.resource_id)
         except AccessSettlementError as error:
             # The baseline was refused, so no provider call began: ask again, do not inspect.
             return _retryable(str(error), binding.resource_id)

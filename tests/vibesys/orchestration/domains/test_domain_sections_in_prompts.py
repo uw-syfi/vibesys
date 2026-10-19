@@ -232,7 +232,7 @@ _STRATEGIES = (
 _DOMAINS = tuple(DomainName)
 
 
-def _sections(domain: DomainName) -> dict[DomainRole, str]:
+def _sections(domain: DomainName, profiler_id: str = "none") -> dict[DomainRole, str]:
     """What the pack of ``domain`` renders for the plan's default context."""
     return render_domain_sections(
         resolve_domain(domain),
@@ -243,6 +243,7 @@ def _sections(domain: DomainName) -> dict[DomainRole, str]:
         accuracy_command=None,
         runtime_notes="",
         profile_execution="local",
+        profiler_id=profiler_id,
         workspace_sources=(),
     )
 
@@ -319,12 +320,13 @@ def test_every_role_prompt_carries_its_domains_section_and_no_other_domains_text
     strategy: _Strategy, domain: DomainName, tmp_path: Path
 ) -> None:
     plan = _plan(strategy, domain, tmp_path)
-    own = _sections(domain)
+    profiler_id = "torch" if strategy.name == "multi" else "none"
+    own = _sections(domain, profiler_id)
     foreign = {
         _own_text(text)
         for other in _DOMAINS
         if other is not domain
-        for text in _sections(other).values()
+        for text in _sections(other, profiler_id).values()
         if text
     } - {_own_text(text) for text in own.values() if text}
     for role, context in strategy.prompts:

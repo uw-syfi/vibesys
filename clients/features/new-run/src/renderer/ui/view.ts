@@ -375,26 +375,25 @@ function missing(context: NewRunContext): Readiness[] {
   return items;
 }
 
-/** The failed item for a helper older than New run, naming what it lacks; null when it is not. */
+/** Said wherever a machine lacks a feature this app needs: its VibeSys is too old. */
+export const NEEDS_UPDATE = 'Needs an update';
+
+/** The failed item for a helper without a feature this app needs; null when it has them all. */
 function helperItem(context: NewRunContext): Readiness | null {
   const {machine} = context.form;
-  const missing = missingFeatures(context.helper, machine);
-  if (missing.length === 0) return null;
-  const label = machineLabel(machine);
+  if (missingFeatures(context.helper, machine).length === 0) return null;
   return {
     id: 'helper',
     state: 'fail',
-    label: `VibeSys on ${label}`,
-    detail:
-      `VibeSys on ${label} is older than this app: update its checkout to start runs from here ` +
-      `(it lacks ${missing.join(', ')}).`,
+    label: `VibeSys on ${machineLabel(machine)}`,
+    detail: NEEDS_UPDATE,
   };
 }
 
 function hardwareItem(context: NewRunContext, machine: MachineDescription): Readiness | null {
   const needs = chosenEntry(context.answers, entriesIn(context))?.details?.hardware ?? null;
   if (needs === null) return null;
-  const fit = fitOf(needs, machine, machineLabel(context.form.machine));
+  const fit = fitOf(needs, machine, machineLabel(context.form.machine), context.form.measure);
   if (fit.kind === 'unknown') return null;
   return {
     id: 'hardware_fit',
@@ -457,6 +456,9 @@ export function startBlocked(snapshot: NewRunSnapshot): string | undefined {
   const {context} = snapshot;
   if (snapshot.matches({editing: {action: 'starting'}})) return 'Starting the run.';
   if (snapshot.matches({editing: {action: 'fixing'}})) return 'Making the project.';
+  if (missingFeatures(context.helper, context.form.machine).length > 0) {
+    return `VibeSys on ${machineLabel(context.form.machine)} needs an update`;
+  }
   if (checksPass(context.form, context.checks)) return undefined;
   if (readiness(snapshot).some(item => item.state === 'fail')) {
     return 'Fix the items marked above to start.';

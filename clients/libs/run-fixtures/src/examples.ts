@@ -7,6 +7,7 @@
  * `examples.test.ts` holds it valid against the helper contract.
  */
 import type {ExampleList, ExampleTask} from '@vibesys/contracts/host-helper';
+import queueRsListing from './data/queue-rs-catalogue.json' with {type: 'json'};
 
 const MAX_THROUGHPUT = {metric: 'output_token_throughput_per_s', direction: 'max'} as const;
 const MIN_P90_LATENCY = {metric: 'p90_latency_ms', direction: 'min'} as const;
@@ -251,3 +252,10 @@ export const exampleCatalogueWithoutDetails: ExampleList = {
   ...exampleCatalogue,
   examples: exampleCatalogue.examples.map(({task_details: _details, ...example}) => example),
 };
+
+/**
+ * What a current helper answers `examples.list` with for the `queue-rs` example, verbatim: read
+ * from the example's real task files (`tests/entrypoints/test_example_catalog_fixture.py` holds it
+ * equal to what the catalogue reads there), so a screen is checked on real goals, not invented ones.
+ */
+export const queueRsCatalogue: ExampleList = queueRsListing as ExampleList;

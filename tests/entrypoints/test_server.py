@@ -572,7 +572,7 @@ def test_detached_startup_reports_a_published_record(
 
 def test_detached_startup_terminates_a_child_that_never_becomes_ready(tmp_path: Path) -> None:
     process = RecordingDetachedProcess(status=None)
-    effects = RecordingDetachedEffects(process, times=[0.0, 0.0, 11.0])
+    effects = RecordingDetachedEffects(process, times=[0.0, 0.0, 1e9])
 
     with pytest.raises(RuntimeError, match=r"(?s)Address already in use.*did not become ready"):
         _spawn_detached(["--web", "--detach"], tmp_path / "web-gateway.json", effects)
