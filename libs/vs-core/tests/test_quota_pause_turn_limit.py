@@ -12,6 +12,8 @@ counts again from the resume.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -34,9 +36,13 @@ def _dispatched(limit: float) -> tuple[core.CoreState, core.RequestId]:
 
 
 def _control(
-    state: core.CoreState, name: str, action: str, at: float, owner: core.PauseOwner | None = None
+    state: core.CoreState,
+    name: str,
+    action: Literal["pause", "resume"],
+    at: float,
+    owner: core.PauseOwner | None = None,
 ) -> core.CoreState:
-    when = "now" if action == "resume" else None
+    when: Literal["now"] | None = "now" if action == "resume" else None
     control = core.ControlInput(
         control_id=core.ControlId(root=name), action=action, owner=owner, when=when
     )
