@@ -243,13 +243,18 @@ class ExecutorObservation(BaseModel):
     failure: str | None = None
     operator_failure: str | None = None
     """Credential-safe terminal failure projection for hosts, separate from raw failure."""
+    run_environment_unavailable: bool = False
+    """The run environment refused the evaluation because it can run no such work at all
+    (its workspace root failed its probe for good); no retry can succeed."""
 
     @model_validator(mode="after")
     def _terminal_failure_matches_state(self) -> ExecutorObservation:
         if self.state is EvaluationState.FAILED and not self.failure:
             raise ValueError("failed evaluation requires failure")  # noqa: TRY003  # lint-waiver: LW-930024 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
         if self.state is not EvaluationState.FAILED and (
-            self.failure is not None or self.operator_failure is not None
+            self.failure is not None
+            or self.operator_failure is not None
+            or self.run_environment_unavailable
         ):
             raise ValueError("only failed evaluation may include failure")  # noqa: TRY003  # lint-waiver: LW-930025 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
         if (

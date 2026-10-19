@@ -91,6 +91,8 @@ def _proof(
             ),
             poll_interval_seconds=_POLL_SECONDS,
             queue_timeout_seconds=_QUEUE_SECONDS,
+            # One attempt's queue wait: a never-scheduled probe fails after its first attempt.
+            workspace_root_probe_deadline_seconds=_QUEUE_SECONDS,
         ),
         processes=connector,
         scratch_root=root / "probe-state",
@@ -387,7 +389,6 @@ def test_an_evaluation_dispatched_before_a_restart_reconciles_without_waiting_fo
     assert cluster.submissions == [handle_id]
 
 
-@pytest.mark.xfail(strict=True, reason="F1: a refusal does not say the run environment is down")
 def test_an_evaluation_refused_by_a_failed_proof_says_the_run_environment_is_unavailable(
     tmp_path: Path,
 ) -> None:
