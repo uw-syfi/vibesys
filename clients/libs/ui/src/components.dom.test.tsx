@@ -761,13 +761,11 @@ describe('Text', () => {
     const css = readFileSync(new URL('./tokens.css', import.meta.url), 'utf8');
     const roles = Object.keys(TYPE) as TextStyle[];
     const container = await mount(
-      <>
-        {roles.map(role => (
-          <Text key={role} variant={role}>
-            {role}
-          </Text>
-        ))}
-      </>,
+      roles.map(role => (
+        <Text key={role} variant={role}>
+          {role}
+        </Text>
+      )),
     );
     const drawn = [...container.querySelectorAll<HTMLElement>('.vs-text')];
     expect(drawn).toHaveLength(roles.length);
