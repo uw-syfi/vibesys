@@ -37,7 +37,7 @@ from vibesys.orchestration.multi.search.api import (
 from vibesys.search_spans.api import SPANS, adoption_label
 from vibesys.serial_search.api import ROADMAP, RoundDone, SerialRun
 from vs_core.api import RequestTurn, Retained, RevisionRef
-from vs_core.api.search import INPUT, Flow, NoWinner, TaskStopped, search
+from vs_core.api.search import INPUT, Flow, NoWinner, TaskStopped, Uncompared, search
 from vs_core.api.testing import code_changed
 from vs_sim.api.testing import examples
 
@@ -157,7 +157,7 @@ def test_a_run_resumed_on_changed_code_continues_at_the_next_round_with_the_same
 
 
 @search("multi", config=MultiConfig, operations=OPERATIONS, roles=ROLES, owned=ROADMAP, spans=SPANS)
-async def _saved_before_snapshots(ctx: Flow, config: MultiConfig) -> NoWinner | None:
+async def _saved_before_snapshots(ctx: Flow, config: MultiConfig) -> NoWinner | Uncompared | None:
     """The multi root as it was before it checkpointed what it knows: only its config."""
     ctx.checkpoint(config)
     ctx.fall_back_to_input(adoption_label(INPUT, None, None))

@@ -1667,7 +1667,7 @@ const hostHelperSchema: Record<string, unknown> = {
     },
     "EndRecord": {
       "additionalProperties": false,
-      "description": "How a run ended, as its tombstone reports it: the sidebar's Recent row and the ended banner.\n\n``resumable`` says whether a resume continues the run: its durable record exists and\nis not terminal. ``resume_from_round`` is the round that resume starts at, when the\nserver knew it (a crashed server did not say).",
+      "description": "How a run ended, as its tombstone reports it: the sidebar's Recent row and the ended banner.\n\n``resumable`` says whether a resume continues the run: its durable record exists and is not\nterminal. ``resume_from_round`` is the round that resume starts at, when the server knew it\n(a crashed server did not say). ``uncompared``: the run adopted a candidate never compared\nwith the input (it failed its own measurement), whichever ``outcome`` ended it.",
       "properties": {
         "outcome": {
           "$ref": "#/$defs/RunEndOutcome"
@@ -5408,7 +5408,7 @@ const hostHelperSchema: Record<string, unknown> = {
     },
     "RunEndingFact": {
       "additionalProperties": false,
-      "description": "How a run's durable record stood as it ended, as its server reports it to the record.\n\n``outcome`` is core's end reason when the run recorded a result, ``None`` when it ended\nwithout one; ``summary`` is core's account of that result.",
+      "description": "How a run's durable record stood as it ended, as its server reports it to the record.\n\n``outcome`` is core's end reason when the run recorded a result, ``None`` when it ended\nwithout one; ``summary`` is core's account of that result and ``uncompared`` its fact that\nthe adopted candidate was never compared with the input.",
       "properties": {
         "outcome": {
           "anyOf": [
@@ -5539,7 +5539,7 @@ const hostHelperSchema: Record<string, unknown> = {
     },
     "RunPhase": {
       "additionalProperties": false,
-      "description": "A run's lifecycle status with the detail its status needs.\n\n``stage`` (and, when the stage reports it, ``progress``) says where a\n``starting`` run is; ``reason`` says why a ``failed`` one ended. None of\nthem is present for any other status.",
+      "description": "A run's lifecycle status with the detail its status needs.\n\n``stage`` (and, when the stage reports it, ``progress``) says where a ``starting`` run is;\n``reason`` says why a ``failed`` one ended. None of them is present for any other status.",
       "properties": {
         "status": {
           "$ref": "#/$defs/RunStatus"

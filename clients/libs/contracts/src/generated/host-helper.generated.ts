@@ -1664,9 +1664,8 @@ export interface LiveInstanceRecord {
 /**
  * A run's lifecycle status with the detail its status needs.
  *
- * ``stage`` (and, when the stage reports it, ``progress``) says where a
- * ``starting`` run is; ``reason`` says why a ``failed`` one ended. None of
- * them is present for any other status.
+ * ``stage`` (and, when the stage reports it, ``progress``) says where a ``starting`` run is;
+ * ``reason`` says why a ``failed`` one ended. None of them is present for any other status.
  */
 export interface RunPhase {
   status: RunStatus;
@@ -1696,9 +1695,10 @@ export interface FailureReason {
 /**
  * How a run ended, as its tombstone reports it: the sidebar's Recent row and the ended banner.
  *
- * ``resumable`` says whether a resume continues the run: its durable record exists and
- * is not terminal. ``resume_from_round`` is the round that resume starts at, when the
- * server knew it (a crashed server did not say).
+ * ``resumable`` says whether a resume continues the run: its durable record exists and is not
+ * terminal. ``resume_from_round`` is the round that resume starts at, when the server knew it
+ * (a crashed server did not say). ``uncompared``: the run adopted a candidate never compared
+ * with the input (it failed its own measurement), whichever ``outcome`` ended it.
  */
 export interface EndRecord {
   outcome: RunEndOutcome;
@@ -1863,7 +1863,8 @@ export interface RunDigest {
  * How a run's durable record stood as it ended, as its server reports it to the record.
  *
  * ``outcome`` is core's end reason when the run recorded a result, ``None`` when it ended
- * without one; ``summary`` is core's account of that result.
+ * without one; ``summary`` is core's account of that result and ``uncompared`` its fact that
+ * the adopted candidate was never compared with the input.
  */
 export interface RunEndingFact {
   outcome: RunEndOutcome | null;

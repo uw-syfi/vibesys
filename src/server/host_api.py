@@ -242,9 +242,8 @@ class StartupFact(BaseModel):
 class RunPhase(BaseModel):
     """A run's lifecycle status with the detail its status needs.
 
-    ``stage`` (and, when the stage reports it, ``progress``) says where a
-    ``starting`` run is; ``reason`` says why a ``failed`` one ended. None of
-    them is present for any other status.
+    ``stage`` (and, when the stage reports it, ``progress``) says where a ``starting`` run is;
+    ``reason`` says why a ``failed`` one ended. None of them is present for any other status.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -276,14 +275,12 @@ class RunPhase(BaseModel):
     ) -> RunPhase:
         """Return the phase after one observed fact: a status change, a failure, or a startup step.
 
-        The fold is monotone: an ended phase absorbs every fact, and ``failed``
-        is entered only with its reason, from the failure's diagnostic, so a
-        status change to ``failed`` waits for the event that says why. A
-        failure while the run is past ``resolving`` names the startup stage it
-        failed in. ``starting`` only moves to a later stage (a startup fact of
-        an earlier stage, or after ``starting``, changes nothing), and keeps
-        its stage until the run leaves it. The statuses themselves move by
-        ``server.run_lifecycle``'s rules; this projects them.
+        The fold is monotone: an ended phase absorbs every fact, and ``failed`` is entered only with
+        its reason, from the failure's diagnostic, so a status change to ``failed`` waits for the
+        event that says why. A failure while the run is past ``resolving`` names the startup stage
+        it failed in. ``starting`` only moves to a later stage (a startup fact of an earlier stage,
+        or after ``starting``, changes nothing), and keeps its stage until the run leaves it. The
+        statuses themselves move by ``server.run_lifecycle``'s rules; this projects them.
         """
         if self.status.has_ended:
             return self
@@ -362,9 +359,10 @@ def one_line(text: str) -> str | None:
 class EndRecord(BaseModel):
     """How a run ended, as its tombstone reports it: the sidebar's Recent row and the ended banner.
 
-    ``resumable`` says whether a resume continues the run: its durable record exists and
-    is not terminal. ``resume_from_round`` is the round that resume starts at, when the
-    server knew it (a crashed server did not say).
+    ``resumable`` says whether a resume continues the run: its durable record exists and is not
+    terminal. ``resume_from_round`` is the round that resume starts at, when the server knew it
+    (a crashed server did not say). ``uncompared``: the run adopted a candidate never compared
+    with the input (it failed its own measurement), whichever ``outcome`` ended it.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -374,8 +372,6 @@ class EndRecord(BaseModel):
     resumable: bool
     resume_from_round: PositiveInt | None = None
     uncompared: bool = False
-    """The run adopted a candidate never compared with the input (the input failed its own
-    measurement), whichever ``outcome`` ended it: adopted, the deadline or a stop."""
 
     @model_validator(mode="after")
     def _round_only_when_resumable(self) -> EndRecord:
@@ -389,7 +385,8 @@ class RunEndingFact(BaseModel):
     """How a run's durable record stood as it ended, as its server reports it to the record.
 
     ``outcome`` is core's end reason when the run recorded a result, ``None`` when it ended
-    without one; ``summary`` is core's account of that result.
+    without one; ``summary`` is core's account of that result and ``uncompared`` its fact that
+    the adopted candidate was never compared with the input.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -399,7 +396,6 @@ class RunEndingFact(BaseModel):
     resumable: bool
     rounds_finished: NonNegativeInt
     uncompared: bool = False
-    """The run adopted a candidate never compared with the input, however it ended."""
 
 
 class PauseCause(StrEnum):
@@ -456,9 +452,8 @@ class LiveInstanceRecord(BaseModel):
     vibesys_root: str | None = None
     """Absolute path of the VibeSys source checkout this server runs from.
 
-    ``None`` when the server runs from an installed distribution rather than a
-    checkout. A client uses it to suggest the checkout it should run
-    ``vibesys`` from on this host.
+    ``None`` when the server runs from an installed distribution rather than a checkout. A client
+    uses it to suggest the checkout it should run ``vibesys`` from on this host.
     """
 
     @model_validator(mode="after")
