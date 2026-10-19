@@ -175,6 +175,7 @@ export type Type19 = "runs.summary";
 export type Project6 = string;
 export type RunId4 = string;
 export type Offset1 = number;
+export type WithEnding = boolean | null;
 export type RequestId20 = string;
 export type DeadlineMs20 = number;
 export type Type20 = "machine.describe";
@@ -349,7 +350,8 @@ export type HelperFeature =
   | "project_goal"
   | "example_destination"
   | "usage_window"
-  | "run_trace";
+  | "run_trace"
+  | "run_ending";
 export type Features1 = HelperFeature[];
 export type VibesysVersion = string;
 export type Root = string;
@@ -643,6 +645,18 @@ export type Reasoning = number | null;
 export type Overview = {
   [k: string]: JsonValue;
 } | null;
+export type InputGates = InputGate[] | null;
+export type Sequence = number;
+export type Gate = string;
+export type Recipe = string | null;
+export type Passed = boolean;
+export type OutputTail = string | null;
+export type Sequence1 = number;
+/**
+ * Which terminal event ended a run's journal.
+ */
+export type RunTerminalKind = "finished" | "failed" | "interrupted";
+export type Message4 = string | null;
 export type Spans = {
   [k: string]: JsonValue;
 }[];
@@ -987,7 +1001,7 @@ export type HelperErrorCode =
   | "modal_not_configured"
   | "unknown_provider"
   | "internal";
-export type Message4 = string;
+export type Message5 = string;
 export type Path2 = string | null;
 export type SupportedVersions = [unknown, unknown] | null;
 export type VibesysVersion3 = string | null;
@@ -1357,6 +1371,7 @@ export interface RunsSummaryRequest {
   project: Project6;
   run_id: RunId4;
   offset?: Offset1;
+  with_ending?: WithEnding;
 }
 /**
  * What this host offers runs: its checkout, hardware, Docker, harness CLIs and runs.
@@ -2094,6 +2109,9 @@ export interface RunsReadTailReply {
  *   does not, ``usage`` over each turn span that is named, in the order the spans first spent;
  * - ``records``: one ``UsageRecord`` per ``turn_usage_recorded`` event, in journal order, whose
  *   tokens sum to ``tokens`` (``server.run_usage``);
+ * - ``input_gates``: the ``gate_finished`` events before the first ``span_started`` of a
+ *   workstream span (``foldInputGates``), a client's reading of how the run's input measured;
+ * - ``terminal``: the last ``run_finished``, ``run_failed`` or ``run_interrupted`` event;
  * - the idea rows, the measurement points and the chart are folds of ``spans`` and ``replies``
  *   the client already owns (``CandidateFold``, ``performanceFold``); nothing duplicates them.
  *
@@ -2117,6 +2135,8 @@ export interface RunsSummaryReply {
   record_count: RecordCount;
   tokens: TokenTally;
   overview: Overview;
+  input_gates?: InputGates;
+  terminal?: RunTerminal | null;
   spans: Spans;
   replies: Replies;
   schemas: Schemas;
@@ -2137,6 +2157,28 @@ export interface TokenTally {
   cache_write: CacheWrite;
   output: Output;
   reasoning: Reasoning;
+}
+/**
+ * One gate that finished before the run's first idea began: how the run's input measured.
+ *
+ * A projection of the journal's ``gate_finished`` events that come before the first workstream
+ * span (a gate under an idea belongs to the idea, and its span carries it). The client reads a
+ * gate's short reason from ``output_tail`` itself, as it does for a journal it folds.
+ */
+export interface InputGate {
+  sequence: Sequence;
+  gate: Gate;
+  recipe: Recipe;
+  passed: Passed;
+  output_tail: OutputTail;
+}
+/**
+ * How the run's journal ended: the last terminal event it records, and what it said.
+ */
+export interface RunTerminal {
+  sequence: Sequence1;
+  kind: RunTerminalKind;
+  message: Message4;
 }
 /**
  * The typed reply an agent turn ended with, its schema named by ``schema_id``.
@@ -2794,7 +2836,7 @@ export interface HelperError {
   type: Type71;
   request_id: RequestId70;
   code: HelperErrorCode;
-  message: Message4;
+  message: Message5;
   path?: Path2;
   supported_versions?: SupportedVersions;
   vibesys_version?: VibesysVersion3;

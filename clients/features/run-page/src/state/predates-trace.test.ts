@@ -42,6 +42,8 @@ function wire(name: string): WireSummary {
     tokens: none,
     usage: [],
     records: [],
+    inputGates: [],
+    terminal: null,
   };
 }
 

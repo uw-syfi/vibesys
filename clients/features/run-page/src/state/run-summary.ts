@@ -17,7 +17,7 @@
  */
 import type {RunEvent, RunSnapshot, RunStatus} from '@vibesys/contracts';
 import {validateRunEvent, validateRunSnapshot} from '@vibesys/contracts';
-import type {UsageRecord} from '@vibesys/contracts/host-helper';
+import type {RunTerminal, UsageRecord} from '@vibesys/contracts/host-helper';
 
 /** A count of tokens as a summary words it; `null`: not reported. */
 export interface WireTokens {
@@ -53,6 +53,26 @@ export interface WireSummary {
   readonly usage: readonly {readonly spanId: string; readonly tokens: WireTokens}[];
   /** One record per finished turn: their tokens sum to `tokens`. */
   readonly records: readonly UsageRecord[];
+  /** The gates that finished before the first idea began, in journal order. */
+  readonly inputGates: readonly WireGate[];
+  /** The terminal event that ended the journal, when one did. */
+  readonly terminal: WireTerminal | null;
+}
+
+/** One input gate as a summary words it (`SummaryGate` of `@vibesys/ipc`). */
+export interface WireGate {
+  readonly sequence: number;
+  readonly gate: string;
+  readonly recipe: string | null;
+  readonly passed: boolean;
+  readonly outputTail: string | null;
+}
+
+/** The terminal event as a summary words it (`SummaryTerminal` of `@vibesys/ipc`). */
+export interface WireTerminal {
+  readonly sequence: number;
+  readonly kind: RunTerminal['kind'];
+  readonly message: string | null;
 }
 
 /** What the screen takes from a summary: the host's snapshot of the run, and the seed events. */
@@ -69,6 +89,13 @@ export interface SummaryFacts {
   readonly roundsFinished: number;
   /** The run's usage records through `through`. */
   readonly records: readonly UsageRecord[];
+  /**
+   * The input gates as the `gate_finished` events they were, at their own journal sequences: the
+   * events `foldInputGates` reads, so the page folds them with the reducer a journal's events take.
+   */
+  readonly gates: readonly RunEvent[];
+  /** How the journal ended, when it did: the run's whole failure message lives here. */
+  readonly terminal: WireTerminal | null;
 }
 
 /** What one summary read settled to. */
@@ -94,6 +121,7 @@ export type RunSummaryState =
       readonly trace: TraceFormat;
       readonly roundsFinished: number;
       readonly records: readonly UsageRecord[];
+      readonly terminal: WireTerminal | null;
     }
   /** It arrived after a live session had already folded the run; the session's data stands. */
   | {readonly kind: 'superseded'}
@@ -155,6 +183,30 @@ function unnamedSpend(summary: WireSummary): WireTokens | null {
     reasoning: rest(tokens => tokens.reasoning),
   };
   return Object.values(left).every(count => count === null) ? null : left;
+}
+
+/**
+ * The `gate_finished` events `summary`'s input gates were. Each keeps its journal sequence, so a
+ * view of the run at an earlier sequence holds the gates it would hold from the journal.
+ */
+function gateEvents(summary: WireSummary, runId: string): readonly RunEvent[] {
+  return summary.inputGates.map(gate =>
+    validateRunEvent({
+      protocol_version: 1,
+      run_id: runId,
+      timestamp: SEED_TIME,
+      text: '',
+      sequence: gate.sequence,
+      type: 'gate_finished',
+      status: gate.passed ? 'completed' : 'failed',
+      data: {
+        kind: 'gate_finished',
+        gate: gate.gate,
+        recipe: gate.recipe,
+        output_tail: gate.outputTail,
+      },
+    }),
+  );
 }
 
 /** The events that fold `summary`'s replies and spend into a core, in a sequence of their own. */
@@ -220,5 +272,7 @@ export function summaryFacts(summary: WireSummary, runId: string, status: RunSta
     trace: summary.trace,
     roundsFinished: summary.roundsFinished,
     records: summary.records,
+    gates: gateEvents(summary, runId),
+    terminal: summary.terminal,
   };
 }

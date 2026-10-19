@@ -51,6 +51,8 @@ from pydantic import (
 
 from server.host_run_summary import (
     RUN_SUMMARY_FILE,
+    InputGate,
+    RunTerminal,
     SpanTokens,
     TokenTally,
     TurnReply,
@@ -103,6 +105,9 @@ class _CachedState(BaseModel):
     usage: tuple[SpanTokens, ...]
     executions: tuple[ExecutionStart, ...]
     records: tuple[UsageRecord, ...]
+    input_gates: tuple[InputGate, ...]
+    gates_settled: bool
+    terminal: RunTerminal | None
 
     @model_validator(mode="after")
     def _is_a_fold(self) -> _CachedState:
@@ -254,6 +259,9 @@ def _restore(cache: Path, journal: BinaryIO) -> tuple[RunSummaryFold, int] | Non
                 usage=state.usage,
                 executions=state.executions,
                 records=state.records,
+                input_gates=state.input_gates,
+                gates_settled=state.gates_settled,
+                terminal=state.terminal,
             )
         ),
         covered.boundary,
@@ -285,6 +293,9 @@ def _keep(cache: Path, journal: BinaryIO, fold: RunSummaryFold, boundary: int, c
             "usage": [entry.model_dump(mode="json") for entry in state.usage],
             "executions": [start.model_dump(mode="json") for start in state.executions],
             "records": [record.model_dump(mode="json") for record in state.records],
+            "input_gates": [gate.model_dump(mode="json") for gate in state.input_gates],
+            "gates_settled": state.gates_settled,
+            "terminal": None if state.terminal is None else state.terminal.model_dump(mode="json"),
         },
     }
     contents = json.dumps(document, separators=(",", ":"), ensure_ascii=False).encode()

@@ -115,6 +115,10 @@ class HelperFeature(StrEnum):
     RUN_TRACE = "run_trace"
     """``runs.summary``: its reply names ``trace`` and ``rounds_finished``, so a client that reads
     them (a journal that predates the run trace has no ideas, not zero) needs this to send it."""
+    RUN_ENDING = "run_ending"
+    """``runs.summary``'s ``with_ending``: the reply names ``input_gates`` and ``terminal``, the gates
+    that finished before the first idea and the run's whole failure message, which a run opened
+    from its summary has no events to read them from."""
 
 
 class HelperRequestBase(BaseModel):

@@ -110,6 +110,7 @@ export type {
   RunSummary,
   RunsSummaryReply,
   RunsSummaryRequest,
+  RunTerminal,
   SameMachine,
   SlurmClusterSettings,
   SlurmTarget,

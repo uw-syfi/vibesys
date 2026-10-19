@@ -447,6 +447,7 @@ export class FakeHelper {
     'run_tail',
     'run_summary',
     'run_trace',
+    'run_ending',
     'run_history_pages',
     'machine_describe',
     'checkout_inspect',

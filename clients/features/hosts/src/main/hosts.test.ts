@@ -568,6 +568,8 @@ describe('Hosts.readSummary', () => {
     record_count: 2,
     tokens: tally(7),
     overview: null,
+    input_gates: [],
+    terminal: null,
     spans: [],
     replies: [],
     schemas: {},
@@ -634,8 +636,58 @@ describe('Hosts.readSummary', () => {
           },
         ],
         records: [record('inv:a', 3), record('inv:b', 4)],
+        inputGates: [],
+        terminal: null,
       },
     });
+  });
+
+  test('carries the input gates and the terminal event, from any page, as the page words them', async () => {
+    const gate = {
+      sequence: 43,
+      gate: 'accuracy',
+      recipe: null,
+      passed: false,
+      output_tail: 'ModuleNotFoundError: No module named x\n',
+    };
+    const terminal = {
+      sequence: 549,
+      kind: 'failed' as const,
+      message: 'NestedRepositoryError: whole text',
+    };
+    const {hosts, manager} = await subject([
+      {offset: 0, page: page(600, {next_offset: 1, input_gates: [gate], terminal})},
+      {offset: 1, page: page(600, {input_gates: [gate], terminal})},
+    ]);
+    await using _manager = manager;
+
+    const result = await hosts.readSummary(LOCAL, '/srv/project', 'run-1');
+
+    expect(result.kind === 'summary' ? result.summary.inputGates : null).toEqual([
+      {
+        sequence: 43,
+        gate: 'accuracy',
+        recipe: null,
+        passed: false,
+        outputTail: 'ModuleNotFoundError: No module named x\n',
+      },
+    ]);
+    expect(result.kind === 'summary' ? result.summary.terminal : null).toEqual(terminal);
+  });
+
+  test('asks for the ending only of a helper with run_ending, and reads a summary without one', async () => {
+    const {hosts, link, manager} = await subject([{offset: 0, page: page(1, {})}]);
+    await using _manager = manager;
+    await hosts.readSummary(LOCAL, '/srv/project', 'run-1');
+    link.helper.features.delete('run_ending');
+    const before = await hosts.readSummary(LOCAL, '/srv/project', 'run-1');
+
+    const asked = link.helper.requests.filter(request => request.type === 'runs.summary');
+    expect(asked).toMatchObject([{with_ending: true}, {}]);
+    expect(asked[1]).not.toHaveProperty('with_ending');
+    expect(
+      before.kind === 'summary' ? [before.summary.inputGates, before.summary.terminal] : null,
+    ).toEqual([[], null]);
   });
 
   test('reads again from the start when the run moved between two pages, and gives up after a few', async () => {

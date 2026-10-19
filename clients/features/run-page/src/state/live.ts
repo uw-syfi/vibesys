@@ -190,7 +190,15 @@ const SPAN_EVENTS: ReadonlySet<string> = new Set([
 
 /** What the session folded into its run, as the trace slice needs it. */
 export type RunData =
-  | {readonly kind: 'snapshot'; readonly snapshot: RunSnapshot}
+  | {
+      readonly kind: 'snapshot';
+      readonly snapshot: RunSnapshot;
+      /**
+       * The `gate_finished` events before the snapshot's first idea, when the snapshot comes from
+       * a summary: its spans hold no gate event, so the page folds these as a journal's are.
+       */
+      readonly gates?: readonly RunEvent[];
+    }
   | {readonly kind: 'events'; readonly events: readonly RunEvent[]}
   /** The stream replaced its replay; a proven new store also replaces the trace base. */
   | {
@@ -216,6 +224,25 @@ function appended(log: TraceLog, events: readonly RunEvent[], meter?: WorkMeter)
   return added.length === 0 ? log : extended(log, added, meter);
 }
 
+/**
+ * `log` with the input gates `gates` hold: failures read by `foldInputGates` from before any idea
+ * began, whatever the snapshot's spans say (they say whether an idea began, not what the gates
+ * before it did).
+ */
+function withInputGates(log: TraceLog, gates: readonly RunEvent[] | undefined): TraceLog {
+  if (gates === undefined || gates.length === 0) return log;
+  const folded = gates.reduce(foldInputGates, NO_INPUT_GATES);
+  // The events after the snapshot have been read on top of `log.inputGates`; they follow the gates.
+  const after = log.inputGates.failures;
+  return {
+    ...log,
+    inputGates: {
+      failures: [...folded.failures, ...after],
+      settled: log.inputGates.settled,
+    },
+  };
+}
+
 /** The trace slice after `data`; `meter` counts the spans the live fold writes and copies. */
 export function traceStep(log: TraceLog, data: RunData, meter?: WorkMeter): TraceLog {
   switch (data.kind) {
@@ -225,7 +252,7 @@ export function traceStep(log: TraceLog, data: RunData, meter?: WorkMeter): Trac
         log.events.countWhile(event => (event.sequence ?? 0) <= base.sequence),
       );
       return replacing(
-        traceLog(base, overviewFromSnapshot(data.snapshot), after),
+        withInputGates(traceLog(base, overviewFromSnapshot(data.snapshot), after), data.gates),
         log,
         base.sequence,
       );

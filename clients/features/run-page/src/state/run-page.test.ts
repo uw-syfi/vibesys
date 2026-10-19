@@ -278,6 +278,8 @@ function summaryOf(): SummaryReply {
     trace: 'recorded',
     roundsFinished: 0,
     records: [],
+    gates: [],
+    terminal: null,
   };
 }
 

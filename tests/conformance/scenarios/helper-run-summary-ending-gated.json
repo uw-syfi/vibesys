@@ -1,0 +1,61 @@
+{
+  "id": "helper-run-summary-ending-gated",
+  "protocol": "host-helper",
+  "title": "runs.summary's with_ending needs the run ending feature",
+  "description": "After a hello that negotiated run_summary and run_trace but not run_ending (a client from before the reply named its input gates and terminal event), a runs.summary asking with_ending is answered feature_not_negotiated, and nothing is read.",
+  "role": "control",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [
+          "run_summary",
+          "run_trace"
+        ],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": [
+          "run_summary",
+          "run_trace"
+        ]
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "runs.summary",
+        "request_id": "m",
+        "deadline_ms": 10000,
+        "project": "/nonexistent-vibesys-conformance/project",
+        "run_id": "20261010-120000-11111111-run",
+        "offset": 0,
+        "with_ending": true
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "m",
+        "code": "feature_not_negotiated"
+      }
+    }
+  ]
+}

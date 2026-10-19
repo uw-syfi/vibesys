@@ -101,6 +101,7 @@ async function readSummaryPages(
   },
   project: string,
   runId: string,
+  withEnding: boolean,
 ): Promise<RunSummary | null> {
   const spans: unknown[] = [];
   const replies: SummaryReply['replies'][number][] = [];
@@ -115,6 +116,8 @@ async function readSummaryPages(
       project,
       run_id: runId,
       offset,
+      // A helper without `run_ending` is not asked: its summary has no gates or terminal event.
+      ...(withEnding ? {with_ending: true} : {}),
     });
     if (first !== null && page.through_sequence !== first.through_sequence) return null;
     first ??= page;
@@ -143,6 +146,14 @@ async function readSummaryPages(
     tokens: tokens(first.tokens),
     usage: usage.map(entry => ({spanId: entry.span_id, tokens: tokens(entry.tally)})),
     records,
+    inputGates: (first.input_gates ?? []).map(gate => ({
+      sequence: gate.sequence,
+      gate: gate.gate,
+      recipe: gate.recipe,
+      passed: gate.passed,
+      outputTail: gate.output_tail,
+    })),
+    terminal: first.terminal ?? null,
   };
 }
 
@@ -493,8 +504,9 @@ export class Hosts {
       // A helper without the features `runs.summary` is gated by (`run_summary`, `run_trace`) is
       // refused by the channel before it is asked: `unsupported` below.
       await lease.connection.ready();
+      const withEnding = lease.connection.features?.includes('run_ending') === true;
       for (let attempt = 0; attempt < SUMMARY_READ_ATTEMPTS; attempt += 1) {
-        const summary = await readSummaryPages(lease.connection, project, runId);
+        const summary = await readSummaryPages(lease.connection, project, runId, withEnding);
         if (summary !== null) return {kind: 'summary', summary};
       }
       throw new Error('the run kept changing while its summary was read');

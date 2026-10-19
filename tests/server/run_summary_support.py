@@ -20,17 +20,20 @@ from server.events import (
     AgentExecutionActivityData,
     AgentExecutionFinishedData,
     AgentExecutionStartedData,
+    EventStatus,
     EventType,
+    GateFinishedData,
     OutputData,
     RunEvent,
+    RunInterruptedData,
     RunStartedData,
     SpanEndedData,
     SpanStartedData,
     SpanUpdatedData,
     TurnUsageData,
 )
-from vibesys.api import AgentReply, RunOverview
-from vs_core.api import Span, SpanStatus, SpanType
+from vibesys.api import AgentReply, GateKind, RunOverview
+from vs_core.api import Span, SpanLabel, SpanStatus, SpanType
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -85,6 +88,8 @@ class _Draft:
     span_id: str | None = None
     execution_id: str | None = None
     agent_kind: str | None = None
+    text: str = ""
+    status: EventStatus | None = None
 
 
 def _drafts() -> st.SearchStrategy[_Draft]:
@@ -143,11 +148,63 @@ def _drafts() -> st.SearchStrategy[_Draft]:
             agent_kind=ROLES[parts[0]],
         )
     )
+    tails = st.none() | st.text(max_size=40) | st.integers(3990, 4010).map(lambda n: "x" * n)
+    gate = st.tuples(
+        st.sampled_from(GateKind),
+        st.none() | st.sampled_from(["unit", "lint"]),
+        tails,
+        st.sampled_from([EventStatus.FAILED, EventStatus.COMPLETED]),
+    ).map(
+        lambda parts: _Draft(
+            EventType.GATE_FINISHED,
+            GateFinishedData(gate=parts[0], recipe=parts[1], output_tail=parts[2]),
+            status=parts[3],
+        )
+    )
+    workstream = st.just(
+        _Draft(
+            EventType.SPAN_STARTED,
+            SpanStartedData(
+                span=Span(
+                    id="flow:search/idea#1",
+                    parent=None,
+                    type=SpanType.FLOW,
+                    name="idea",
+                    status=SpanStatus.RUNNING,
+                    started_at=1.0,
+                    label=SpanLabel(kind="workstream"),
+                )
+            ),
+        )
+    )
+    message = st.text(max_size=60)
+    terminal = st.one_of(
+        message.map(lambda text: _Draft(EventType.RUN_FAILED, None, text=text)),
+        message.map(lambda text: _Draft(EventType.RUN_FINISHED, None, text=text)),
+        message.map(
+            lambda text: _Draft(
+                EventType.RUN_INTERRUPTED, RunInterruptedData(reason="stop"), text=text
+            )
+        ),
+    )
     noise = st.text(max_size=300).map(
         lambda text: _Draft(EventType.OUTPUT, OutputData(stream="stdout", content=text))
     )
     return st.one_of(
-        span_data, span_data, finished, finished, spent, spent, begun, started, unseen, noise
+        span_data,
+        span_data,
+        finished,
+        finished,
+        spent,
+        spent,
+        begun,
+        started,
+        unseen,
+        noise,
+        gate,
+        gate,
+        workstream,
+        terminal,
     )
 
 
@@ -178,6 +235,8 @@ def events(draw: st.DrawFn, max_size: int = 40) -> list[RunEvent]:
                 span_id=draft.span_id,
                 execution_id=draft.execution_id,
                 agent_kind=draft.agent_kind,
+                text=draft.text,
+                status=draft.status,
             )
         )
     return made
@@ -202,6 +261,17 @@ class ClientFold:
     """Every turn's spend summed (``ledgerWith``): input, cache_read, cache_write, output, reasoning."""
     usage: dict[str, dict[str, int | None]]
     """The same sum for each turn span a usage event names, in the order the spans first spent."""
+    input_gates: tuple[dict[str, Any], ...]
+    """The ``gate_finished`` events before the first workstream span (``foldInputGates``), at most 32."""
+    terminal: dict[str, Any] | None
+    """The last ``run_finished``, ``run_failed`` or ``run_interrupted`` event: its sequence, kind, text."""
+
+
+_TERMINAL_KINDS = {
+    EventType.RUN_FINISHED: "finished",
+    EventType.RUN_FAILED: "failed",
+    EventType.RUN_INTERRUPTED: "interrupted",
+}
 
 
 NO_TOKENS: dict[str, int | None] = {
@@ -222,6 +292,43 @@ def _added(a: dict[str, int | None], b: dict[str, int | None]) -> dict[str, int 
         return x if y is None else x + y
 
     return {key: plus(a[key], b[key]) for key in a}
+
+
+def _ending_fold(
+    run_events: Sequence[RunEvent],
+) -> tuple[tuple[dict[str, Any], ...], dict[str, Any] | None]:
+    """The input gates and the terminal event, as ``foldInputGates`` and the run's last terminal event read them."""
+    gates: list[dict[str, Any]] = []
+    settled = False
+    terminal: dict[str, Any] | None = None
+    last = 0
+    for event in run_events:
+        if event.sequence <= last:
+            continue
+        last = event.sequence
+        data = event.data
+        if event.type in _TERMINAL_KINDS:
+            text = event.text.strip()
+            terminal = {
+                "sequence": event.sequence,
+                "kind": _TERMINAL_KINDS[event.type],
+                "message": text or None,
+            }
+        if isinstance(data, GateFinishedData) and not settled and len(gates) < 32:
+            gates.append(
+                {
+                    "sequence": event.sequence,
+                    "gate": data.gate.value,
+                    "recipe": data.recipe,
+                    "passed": event.status is not EventStatus.FAILED,
+                    "output_tail": None if data.output_tail is None else data.output_tail[-4000:],
+                }
+            )
+        if isinstance(data, SpanStartedData) and event.type is EventType.SPAN_STARTED:
+            settled = settled or (
+                data.span.label is not None and data.span.label.kind == "workstream"
+            )
+    return tuple(gates), terminal
 
 
 def client_fold(run_events: Sequence[RunEvent]) -> ClientFold:
@@ -264,5 +371,12 @@ def client_fold(run_events: Sequence[RunEvent]) -> ClientFold:
                 **json.loads(data.reply.model_dump_json()),
             }
     return ClientFold(
-        last, count, tuple(spans.values()), overview, tuple(replies.values()), total, by_span
+        last,
+        count,
+        tuple(spans.values()),
+        overview,
+        tuple(replies.values()),
+        total,
+        by_span,
+        *_ending_fold(run_events),
     )

@@ -609,6 +609,17 @@ export interface EndedView {
   readonly resume: string | null;
 }
 
+/**
+ * The run's whole failure message, when the page holds it: the registry's own (`run.reason`), else
+ * the terminal event a summary carries. The end record's `reason` is one line cut to a fixed
+ * length, so a run opened from its summary (which has no events to read the message from) takes
+ * it here.
+ */
+function wholeReason(state: RunPageState, registry: string | null): string | null {
+  if (registry !== null) return registry;
+  return state.summary.kind === 'ready' ? (state.summary.terminal?.message ?? null) : null;
+}
+
 /** What the ended banner says while the history that settles its verdict is still being read. */
 const HISTORY_PENDING = 'Reading the run’s history…';
 
@@ -630,7 +641,12 @@ export function endedView(state: RunPageState): EndedView | null {
       ? (phase.run.reason ?? 'The run’s record does not say why it ended.')
       : loading && end.outcome === 'adopted'
         ? HISTORY_PENDING
-        : endReason(end.outcome, unclipped(end.reason, phase.run.reason), adopted, direction);
+        : endReason(
+            end.outcome,
+            unclipped(end.reason, wholeReason(state, phase.run.reason)),
+            adopted,
+            direction,
+          );
   const round = end?.resume_from_round ?? null;
   const resume =
     end?.resumable === true ? (round === null ? 'Resume' : `Resume from round ${round}`) : null;
@@ -695,7 +711,7 @@ export function runEnding(state: RunPageState): RunEnding | null {
   let reason: string | null = null;
   if (record.kind === 'ended') {
     status = endedSpanStatus(record.run.phase);
-    reason = record.run.reason;
+    reason = wholeReason(state, record.run.reason);
   } else if (record.kind === 'historical') {
     // A saved run whose tombstone expired may not say how it ended: it was not finished, and the
     // page does not claim it failed.

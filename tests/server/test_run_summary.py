@@ -43,6 +43,8 @@ def _summary_of(fold: RunSummaryFold) -> ClientFold:
         ),
         tokens=state.tokens.model_dump(),
         usage={entry.span_id: entry.tally.model_dump() for entry in state.usage},
+        input_gates=tuple(gate.model_dump(mode="json") for gate in state.input_gates),
+        terminal=None if state.terminal is None else state.terminal.model_dump(mode="json"),
     )
 
 

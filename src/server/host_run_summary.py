@@ -15,9 +15,11 @@ these messages into the helper's request and reply unions and gates them behind
 ``HelperFeature.RUN_SUMMARY`` (and ``usage.window`` behind ``HelperFeature.USAGE_WINDOW``).
 
 Public surface: ``RunsSummaryRequest``, ``RunsSummaryReply``, ``TurnReply``, ``TokenTally``,
-``SpanTokens``, ``UsageRecord``, ``NO_TOKENS``, ``add_tokens``, ``TraceFormat``, ``trace_format``, the documents they
+``SpanTokens``, ``UsageRecord``, ``NO_TOKENS``, ``add_tokens``, ``InputGate``, ``InputGates``, ``RunTerminal``,
+``RunTerminalKind``, ``TraceFormat``, ``trace_format``, the documents they
 pass through (``RunSpanDocument``, ``RunOverviewDocument``, ``ReplySchemaDocument``) and the
-limits and names ``RUN_SUMMARY_FILE``, ``RUN_SUMMARY_PAGE_MAX_BYTES`` and
+limits and names ``RUN_SUMMARY_FILE``, ``RUN_SUMMARY_PAGE_MAX_BYTES``, ``INPUT_GATES_MAX``,
+``INPUT_GATE_TAIL_MAX_CHARS``, ``RUN_TERMINAL_MESSAGE_MAX_CHARS`` and
 ``REPLY_SCHEMA_ID_PATTERN``; and the usage window's ``UsageWindowRequest``, ``UsageWindowReply``,
 ``RunSpend``, ``AgentSpend`` and the limits ``USAGE_WINDOW_MAX_RUNS``, ``USAGE_WINDOW_MAX_AGENTS``,
 ``USAGE_WINDOW_MAX_HOURS`` and ``RATE_WINDOW_S``.
@@ -50,6 +52,17 @@ RUN_SUMMARY_FILE: Final = "run-summary.json"
 RUN_SUMMARY_PAGE_MAX_BYTES: Final = 512 * 1024
 """The most bytes of spans, replies, schemas and usage one ``runs.summary`` page carries, so it stays a
 helper line; a page always holds at least one item, so every read makes progress."""
+
+INPUT_GATES_MAX: Final = 32
+"""The most input gate outcomes a summary carries; a run has a handful (build, accuracy, benchmark,
+one per validation recipe), so the bound only guards a journal that records a gate in a loop."""
+
+INPUT_GATE_TAIL_MAX_CHARS: Final = 4000
+"""The most characters of a gate's output a summary keeps, the end of it: where the error is."""
+
+RUN_TERMINAL_MESSAGE_MAX_CHARS: Final = 16000
+"""The most characters of a run's failure message a summary carries. A message is a few lines
+(an exception and its cause), so this is far above any real one; a longer one ends in an ellipsis."""
 
 REPLY_SCHEMA_ID_PATTERN: Final = r"^[0-9a-f]{64}$"
 """A reply schema's identity: the SHA-256 of its canonical JSON (sorted keys, compact)."""
@@ -86,6 +99,54 @@ def trace_format(*, spans: int, rounds: int) -> TraceFormat:
     return TraceFormat.PREDATES_TRACE if rounds > 0 and spans == 0 else TraceFormat.RECORDED
 
 
+class InputGate(BaseModel):
+    """One gate that finished before the run's first idea began: how the run's input measured.
+
+    A projection of the journal's ``gate_finished`` events that come before the first workstream
+    span (a gate under an idea belongs to the idea, and its span carries it). The client reads a
+    gate's short reason from ``output_tail`` itself, as it does for a journal it folds.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    sequence: NonNegativeInt
+    """The event's sequence: a view of the run at an earlier sequence does not hold the gate yet."""
+    gate: str
+    """The gate's kind (``build``, ``accuracy``, ``benchmark``, ``validation``), an open set owned
+    by the run protocol."""
+    recipe: str | None
+    """The validation recipe the gate ran, else ``None``."""
+    passed: bool
+    output_tail: Annotated[str, StringConstraints(max_length=INPUT_GATE_TAIL_MAX_CHARS)] | None
+    """The end of what the gate printed, credentials redacted; ``None`` when it kept nothing."""
+
+
+InputGates = Annotated[tuple[InputGate, ...], Field(max_length=INPUT_GATES_MAX)]
+"""A summary's input gates, at most ``INPUT_GATES_MAX``."""
+
+
+class RunTerminalKind(StrEnum):
+    """Which terminal event ended a run's journal."""
+
+    FINISHED = "finished"
+    """``run_finished``: the run ran to its end."""
+    FAILED = "failed"
+    """``run_failed``: the run failed."""
+    INTERRUPTED = "interrupted"
+    """``run_interrupted``: the run was stopped before it ended."""
+
+
+class RunTerminal(BaseModel):
+    """How the run's journal ended: the last terminal event it records, and what it said."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    sequence: NonNegativeInt
+    kind: RunTerminalKind
+    message: Annotated[str, StringConstraints(max_length=RUN_TERMINAL_MESSAGE_MAX_CHARS)] | None
+    """The event's whole account of why, not cut to a line; ``None`` when it said nothing."""
+
+
 class RunsSummaryRequest(HelperRequestBase):
     """One page of a run's summary: what its run level shows, as of the journal's end now.
 
@@ -101,6 +162,8 @@ class RunsSummaryRequest(HelperRequestBase):
     run_id: RunId
     offset: NonNegativeInt = 0
     """The index of the first item to return, counting spans, then replies, usage, then records."""
+    with_ending: bool | None = None
+    """Ask for ``input_gates`` and ``terminal``. Sent only after ``run_ending``."""
 
 
 class TurnReply(BaseModel):
@@ -233,6 +296,9 @@ class RunsSummaryReply(HelperReplyBase):
       does not, ``usage`` over each turn span that is named, in the order the spans first spent;
     - ``records``: one ``UsageRecord`` per ``turn_usage_recorded`` event, in journal order, whose
       tokens sum to ``tokens`` (``server.run_usage``);
+    - ``input_gates``: the ``gate_finished`` events before the first ``span_started`` of a
+      workstream span (``foldInputGates``), a client's reading of how the run's input measured;
+    - ``terminal``: the last ``run_finished``, ``run_failed`` or ``run_interrupted`` event;
     - the idea rows, the measurement points and the chart are folds of ``spans`` and ``replies``
       the client already owns (``CandidateFold``, ``performanceFold``); nothing duplicates them.
 
@@ -267,6 +333,13 @@ class RunsSummaryReply(HelperReplyBase):
     """The whole run's spend, on every page so a page stands alone."""
     overview: RunOverviewDocument | None
     """On every page, so a page stands alone; ``None`` before a ``run_started`` declared one."""
+    input_gates: Annotated[InputGates | None, Field(exclude_if=lambda gates: gates is None)] = None
+    """The gates that finished before the first idea began, in journal order, on every page; only
+    with ``with_ending``."""
+    terminal: Annotated[RunTerminal | None, Field(exclude_if=lambda ended: ended is None)] = None
+    """The last terminal event of the journal, on every page; only with ``with_ending``, and absent
+    while the run has not ended (or crashed without writing one), which a client then reads from
+    the run's registry record."""
     spans: tuple[RunSpanDocument, ...]
     """This page's spans, from index ``offset`` (a span's index is its place in the run trace)."""
     replies: tuple[TurnReply, ...]

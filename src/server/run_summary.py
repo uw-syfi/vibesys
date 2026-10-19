@@ -3,7 +3,8 @@
 ``RunSummaryFold`` reads journal lines in order and keeps what a client reading the whole journal
 would fold for the run level: the run trace (every span as its latest span event left it), the
 overview a ``run_started`` event declares, the last typed reply of each agent turn, and the usage
-record of each finished turn (``server.run_usage``). It is a pure read model over documents: it
+record of each finished turn (``server.run_usage``), the input gates (the gates that finished before
+the first idea began) and the terminal event that ended the journal. It is a pure read model over documents: it
 opens no file and reads no clock, so a property test can feed it every prefix of a journal. ``server.host_helper_os`` owns where its state lives (beside the
 journal, as a disposable cache) and when it is valid.
 
@@ -35,8 +36,14 @@ from typing import TYPE_CHECKING, Final, cast
 from pydantic import JsonValue, TypeAdapter
 
 from server.host_run_summary import (
+    INPUT_GATE_TAIL_MAX_CHARS,
+    INPUT_GATES_MAX,
     NO_TOKENS,
     RUN_SUMMARY_PAGE_MAX_BYTES,
+    RUN_TERMINAL_MESSAGE_MAX_CHARS,
+    InputGate,
+    RunTerminal,
+    RunTerminalKind,
     SpanTokens,
     TokenTally,
     TraceFormat,
@@ -46,23 +53,32 @@ from server.host_run_summary import (
     trace_format,
 )
 from server.run_usage import USAGE_EVENTS, ExecutionStart, UsageFold
+from vs_redaction.api import redact_diagnostic_tail
 
 if TYPE_CHECKING:
     from server.host_run_summary import ReplySchemaDocument, RunOverviewDocument, RunSpanDocument
 
-RUN_SUMMARY_VERSION: Final = 4
+RUN_SUMMARY_VERSION: Final = 5
 """The version of the fold's semantics and of ``SummaryState``'s shape.
 
 A cached state of another version is dropped and recomputed from the journal, so a change to what
 the fold keeps never serves an old fold as the new one: bump it with any such change."""
 
 _SPAN_EVENTS: Final = frozenset({"span_started", "span_updated", "span_ended"})
+_TERMINAL_KINDS: Final = {
+    "run_finished": RunTerminalKind.FINISHED,
+    "run_failed": RunTerminalKind.FAILED,
+    "run_interrupted": RunTerminalKind.INTERRUPTED,
+}
+_ELLIPSIS: Final = "\u2026"
 _FOLDED_EVENTS: Final = frozenset(
     {
         *_SPAN_EVENTS,
         "run_started",
         "round_finished",
         "agent_execution_finished",
+        "gate_finished",
+        *_TERMINAL_KINDS,
         *USAGE_EVENTS,
     }
 )
@@ -94,6 +110,12 @@ class SummaryState:
     """The agent executions that started, which a turn's record joins to by execution id."""
     records: tuple[UsageRecord, ...]
     """One record per finished turn, in journal order."""
+    input_gates: tuple[InputGate, ...]
+    """The gates that finished before the first workstream span began."""
+    gates_settled: bool
+    """Whether a workstream span has begun: a later gate is an idea's, not the input's."""
+    terminal: RunTerminal | None
+    """The last terminal event folded."""
 
 
 @dataclass(frozen=True)
@@ -141,6 +163,9 @@ class RunSummaryFold:
     _tokens: TokenTally = NO_TOKENS
     _usage: dict[str, TokenTally] = field(default_factory=dict)
     _turns: UsageFold = field(default_factory=UsageFold)
+    _gates: list[InputGate] = field(default_factory=list)
+    _gates_settled: bool = False
+    _terminal: RunTerminal | None = None
 
     @classmethod
     def from_state(cls, state: SummaryState) -> RunSummaryFold:
@@ -156,6 +181,9 @@ class RunSummaryFold:
             _tokens=state.tokens,
             _usage={entry.span_id: entry.tally for entry in state.usage},
             _turns=UsageFold.from_state(state.executions, state.records),
+            _gates=list(state.input_gates),
+            _gates_settled=state.gates_settled,
+            _terminal=state.terminal,
         )
 
     def state(self) -> SummaryState:
@@ -174,6 +202,9 @@ class RunSummaryFold:
             usage=tuple(SpanTokens(span_id=key, tally=value) for key, value in self._usage.items()),
             executions=self._turns.starts,
             records=self._turns.records,
+            input_gates=tuple(self._gates),
+            gates_settled=self._gates_settled,
+            terminal=self._terminal,
         )
 
     def consume(self, line: bytes, *, complete: bool = True) -> bool:
@@ -258,6 +289,16 @@ class RunSummaryFold:
         )
 
     @property
+    def input_gates(self) -> tuple[InputGate, ...]:
+        """The gates that finished before the first idea began, folded so far."""
+        return tuple(self._gates)
+
+    @property
+    def terminal(self) -> RunTerminal | None:
+        """The last terminal event folded so far."""
+        return self._terminal
+
+    @property
     def trace(self) -> TraceFormat:
         """Whether the journal folded so far records a run trace (``trace_format``)."""
         return trace_format(spans=len(self._spans), rounds=self.rounds_finished)
@@ -308,12 +349,19 @@ class RunSummaryFold:
     def _fold(self, event: dict[str, JsonValue]) -> None:
         kind = event.get("type")
         data = event.get("data")
-        if not isinstance(data, dict):
-            return
-        if kind in _SPAN_EVENTS:
-            span = data.get("span")
-            if isinstance(span, dict) and isinstance(span.get("id"), str):
-                self._spans[cast("str", span["id"])] = span
+        if isinstance(kind, str) and kind in _TERMINAL_KINDS:
+            # A terminal event may carry no data: its text is the account.
+            self._terminal = _terminal_of(event, _TERMINAL_KINDS[kind])
+        elif isinstance(data, dict) and isinstance(kind, str):
+            self._fold_data(kind, event, data)
+
+    def _fold_data(
+        self, kind: str, event: dict[str, JsonValue], data: dict[str, JsonValue]
+    ) -> None:
+        if kind == "gate_finished":
+            self._fold_gate(event, data)
+        elif kind in _SPAN_EVENTS:
+            self._fold_span(kind, data.get("span"))
         elif kind == "run_started" and data.get("kind") == "run_started":
             overview = data.get("overview")
             if isinstance(overview, dict):
@@ -326,6 +374,34 @@ class RunSummaryFold:
             record = self._turns.consume(event)
             if record is not None:
                 self._fold_usage(record)
+
+    def _fold_span(self, kind: str, span: JsonValue) -> None:
+        """Keep the latest event of a span; the first workstream span to begin ends the input's gates."""
+        if isinstance(span, dict) and isinstance(span.get("id"), str):
+            self._spans[cast("str", span["id"])] = span
+        if kind == "span_started" and _is_workstream(span):
+            self._gates_settled = True
+
+    def _fold_gate(self, event: dict[str, JsonValue], data: dict[str, JsonValue]) -> None:
+        """Keep a gate that finished before the first idea began (``foldInputGates``)."""
+        gate = data.get("gate")
+        if self._gates_settled or len(self._gates) >= INPUT_GATES_MAX or not isinstance(gate, str):
+            return
+        recipe = data.get("recipe")
+        tail = data.get("output_tail")
+        self._gates.append(
+            InputGate(
+                sequence=cast("int", event["sequence"]),
+                gate=gate,
+                recipe=recipe if isinstance(recipe, str) else None,
+                passed=event.get("status") != "failed",
+                output_tail=(
+                    redact_diagnostic_tail(tail, max_chars=INPUT_GATE_TAIL_MAX_CHARS)
+                    if isinstance(tail, str)
+                    else None
+                ),
+            )
+        )
 
     def _fold_usage(self, record: UsageRecord) -> None:
         """Add one finished turn's spend to the run's, and to its span's when it names one."""
@@ -350,6 +426,25 @@ class RunSummaryFold:
         self._replies[span_id] = TurnReply(
             span_id=span_id, kind=reply_kind, schema_id=key, value=value
         )
+
+
+def _is_workstream(span: JsonValue) -> bool:
+    """Whether ``span`` is an idea's workstream (the client's ``label.kind === 'workstream'``)."""
+    label = span.get("label") if isinstance(span, dict) else None
+    return isinstance(label, dict) and label.get("kind") == "workstream"
+
+
+def _terminal_of(event: dict[str, JsonValue], kind: RunTerminalKind) -> RunTerminal:
+    """The terminal ``event`` as the summary carries it: its text (else its diagnostic's summary), whole."""
+    text = event.get("text")
+    diagnostic = event.get("diagnostic")
+    summary = diagnostic.get("summary") if isinstance(diagnostic, dict) else None
+    message = next(
+        (each.strip() for each in (text, summary) if isinstance(each, str) and each.strip()), None
+    )
+    if message is not None and len(message) > RUN_TERMINAL_MESSAGE_MAX_CHARS:
+        message = message[: RUN_TERMINAL_MESSAGE_MAX_CHARS - 1] + _ELLIPSIS
+    return RunTerminal(sequence=cast("int", event["sequence"]), kind=kind, message=message)
 
 
 def _decode_event(line: bytes) -> dict[str, JsonValue] | None:

@@ -259,7 +259,7 @@ def test_host_helper_schema_exports_the_authoritative_field_feature_gates() -> N
         "harnesses.list": {"with_generations": "harness_generations"},
         "logs.list": {"span_id": "logs_by_span"},
         "runs.read_events": {"with_totals": "run_history_pages"},
-        "runs.summary": {"offset": "run_summary"},
+        "runs.summary": {"offset": "run_summary", "with_ending": "run_ending"},
         "runs.list": {"digest_runs": "run_digest", "with_dashboard": "run_dashboard"},
         "examples.list": {"with_catalogue": "example_catalogue"},
     }

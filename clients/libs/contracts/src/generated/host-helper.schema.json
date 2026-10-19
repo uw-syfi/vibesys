@@ -2671,7 +2671,8 @@
         "project_goal",
         "example_destination",
         "usage_window",
-        "run_trace"
+        "run_trace",
+        "run_ending"
       ],
       "title": "HelperFeature",
       "type": "string"
@@ -2725,6 +2726,57 @@
       ],
       "title": "IdeaVerdict",
       "type": "string"
+    },
+    "InputGate": {
+      "additionalProperties": false,
+      "description": "One gate that finished before the run's first idea began: how the run's input measured.\n\nA projection of the journal's ``gate_finished`` events that come before the first workstream\nspan (a gate under an idea belongs to the idea, and its span carries it). The client reads a\ngate's short reason from ``output_tail`` itself, as it does for a journal it folds.",
+      "properties": {
+        "sequence": {
+          "minimum": 0,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "gate": {
+          "title": "Gate",
+          "type": "string"
+        },
+        "recipe": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Recipe"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "output_tail": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Output Tail"
+        }
+      },
+      "required": [
+        "sequence",
+        "gate",
+        "recipe",
+        "passed",
+        "output_tail"
+      ],
+      "title": "InputGate",
+      "type": "object"
     },
     "InspectionState": {
       "description": "What one coherent registry observation proved about an instance.",
@@ -6130,6 +6182,49 @@
       "title": "RunSummary",
       "type": "object"
     },
+    "RunTerminal": {
+      "additionalProperties": false,
+      "description": "How the run's journal ended: the last terminal event it records, and what it said.",
+      "properties": {
+        "sequence": {
+          "minimum": 0,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/$defs/RunTerminalKind"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "maxLength": 16000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Message"
+        }
+      },
+      "required": [
+        "sequence",
+        "kind",
+        "message"
+      ],
+      "title": "RunTerminal",
+      "type": "object"
+    },
+    "RunTerminalKind": {
+      "description": "Which terminal event ended a run's journal.",
+      "enum": [
+        "finished",
+        "failed",
+        "interrupted"
+      ],
+      "title": "RunTerminalKind",
+      "type": "string"
+    },
     "RunsEventsForSpanReply": {
       "additionalProperties": false,
       "description": "One page of a span's recorded events, oldest first.",
@@ -6583,7 +6678,7 @@
     },
     "RunsSummaryReply": {
       "additionalProperties": false,
-      "description": "One page of a run's summary: the client's fold of its journal, to ``through_sequence``.\n\nEvery field equals what a client reading the whole journal up to ``through_sequence`` folds\nitself, which is the contract the helper's tests hold it to:\n\n- ``spans``: the run trace (``foldTrace``): each span as its latest span event left it, in\n  the order the spans started, so each comes after its parent;\n- ``overview``: the ``overview`` of the last ``run_started`` event that declares one\n  (``foldOverview``), with no unit or direction a live server adds from run state;\n- ``replies``: the last typed reply of each agent-turn span, by ``agent_execution_finished``\n  events with a ``span_id``, in the order the spans first replied (``implementerOutcomes``);\n- ``tokens`` and ``usage``: the run's spend, folded from ``turn_usage_recorded`` events by\n  summing (``ledgerWith``): ``tokens`` over every turn, those the trace names and those it\n  does not, ``usage`` over each turn span that is named, in the order the spans first spent;\n- ``records``: one ``UsageRecord`` per ``turn_usage_recorded`` event, in journal order, whose\n  tokens sum to ``tokens`` (``server.run_usage``);\n- the idea rows, the measurement points and the chart are folds of ``spans`` and ``replies``\n  the client already owns (``CandidateFold``, ``performanceFold``); nothing duplicates them.\n\nAn event at or before the last folded sequence is skipped whole, as the client skips it. The\nrun level is final at ``through_sequence``. Events after it are the live tail: read them with\n``runs.read_events`` from ``through_sequence + 1``, or subscribe after ``through_sequence``. A\nrun still writing can move between the pages of one read: every page names its\n``through_sequence``, and a read whose pages disagree starts again.",
+      "description": "One page of a run's summary: the client's fold of its journal, to ``through_sequence``.\n\nEvery field equals what a client reading the whole journal up to ``through_sequence`` folds\nitself, which is the contract the helper's tests hold it to:\n\n- ``spans``: the run trace (``foldTrace``): each span as its latest span event left it, in\n  the order the spans started, so each comes after its parent;\n- ``overview``: the ``overview`` of the last ``run_started`` event that declares one\n  (``foldOverview``), with no unit or direction a live server adds from run state;\n- ``replies``: the last typed reply of each agent-turn span, by ``agent_execution_finished``\n  events with a ``span_id``, in the order the spans first replied (``implementerOutcomes``);\n- ``tokens`` and ``usage``: the run's spend, folded from ``turn_usage_recorded`` events by\n  summing (``ledgerWith``): ``tokens`` over every turn, those the trace names and those it\n  does not, ``usage`` over each turn span that is named, in the order the spans first spent;\n- ``records``: one ``UsageRecord`` per ``turn_usage_recorded`` event, in journal order, whose\n  tokens sum to ``tokens`` (``server.run_usage``);\n- ``input_gates``: the ``gate_finished`` events before the first ``span_started`` of a\n  workstream span (``foldInputGates``), a client's reading of how the run's input measured;\n- ``terminal``: the last ``run_finished``, ``run_failed`` or ``run_interrupted`` event;\n- the idea rows, the measurement points and the chart are folds of ``spans`` and ``replies``\n  the client already owns (``CandidateFold``, ``performanceFold``); nothing duplicates them.\n\nAn event at or before the last folded sequence is skipped whole, as the client skips it. The\nrun level is final at ``through_sequence``. Events after it are the live tail: read them with\n``runs.read_events`` from ``through_sequence + 1``, or subscribe after ``through_sequence``. A\nrun still writing can move between the pages of one read: every page names its\n``through_sequence``, and a read whose pages disagree starts again.",
       "properties": {
         "request_id": {
           "maxLength": 128,
@@ -6656,6 +6751,33 @@
             }
           ],
           "title": "Overview"
+        },
+        "input_gates": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/InputGate"
+              },
+              "maxItems": 32,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Input Gates"
+        },
+        "terminal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunTerminal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "spans": {
           "items": {
@@ -6771,6 +6893,18 @@
           "minimum": 0,
           "title": "Offset",
           "type": "integer"
+        },
+        "with_ending": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "With Ending"
         }
       },
       "required": [
@@ -8430,7 +8564,8 @@
       "with_totals": "run_history_pages"
     },
     "runs.summary": {
-      "offset": "run_summary"
+      "offset": "run_summary",
+      "with_ending": "run_ending"
     },
     "runs.list": {
       "digest_runs": "run_digest",

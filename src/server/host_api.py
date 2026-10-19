@@ -1197,7 +1197,10 @@ HELPER_FIELD_FEATURES: Final[Mapping[type[HelperRequestBase], Mapping[str, Helpe
     HarnessesListRequest: {"with_generations": HelperFeature.HARNESS_GENERATIONS},
     LogsListRequest: {"span_id": HelperFeature.LOGS_BY_SPAN},
     RunsReadEventsRequest: {"with_totals": HelperFeature.RUN_HISTORY_PAGES},
-    RunsSummaryRequest: {"offset": HelperFeature.RUN_SUMMARY},
+    RunsSummaryRequest: {
+        "offset": HelperFeature.RUN_SUMMARY,
+        "with_ending": HelperFeature.RUN_ENDING,
+    },
     RunsListRequest: {
         "digest_runs": HelperFeature.RUN_DIGEST,
         "with_dashboard": HelperFeature.RUN_DASHBOARD,

@@ -40,6 +40,8 @@ function summaryPage(records: UsageRecord[]): string {
     record_count: records.length,
     tokens: none,
     overview: null,
+    input_gates: [],
+    terminal: null,
     spans: [],
     replies: [],
     schemas: {},

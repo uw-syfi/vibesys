@@ -198,6 +198,8 @@ describe('the run’s records and the run’s spend', () => {
     tokens: total.tokens,
     usage: [],
     records: fixture.records,
+    inputGates: [],
+    terminal: null,
   };
   const ended = {
     type: 'record',

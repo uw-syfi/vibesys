@@ -1251,6 +1251,8 @@ def _run_summary_reply(request: RunsSummaryRequest, host: HelperHost) -> RunsSum
         record_count=fold.record_count,
         tokens=fold.tokens,
         overview=fold.overview,
+        input_gates=fold.input_gates if request.with_ending else None,
+        terminal=fold.terminal if request.with_ending else None,
         spans=page.spans,
         replies=page.replies,
         schemas=page.schemas,

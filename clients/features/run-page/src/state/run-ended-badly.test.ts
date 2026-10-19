@@ -7,7 +7,7 @@ import {EMPTY_TRACE, foldTrace, traceSpans} from '@vibesys/run-state/trace';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {outcomeWords} from './idea-words.js';
 import {ageWords, IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
-import {gateFailureView} from './input-gates.js';
+import {failuresAt, gateFailureView} from './input-gates.js';
 import {clockAt, clockStart, heroView, nowView} from './run-level.js';
 import {createRunReader, type RunModel} from './run-model.js';
 import {
@@ -17,7 +17,13 @@ import {
   runPageInitial,
   runPageStep,
 } from './run-page.js';
-import type {SummaryReply} from './run-summary.js';
+import {
+  type SummaryReply,
+  summaryFacts,
+  type WireGate,
+  type WireSummary,
+  type WireTerminal,
+} from './run-summary.js';
 import {endedView, runEnding} from './views.js';
 
 /**
@@ -92,26 +98,71 @@ function fold(record: RunRecord, batches: readonly (readonly RunEvent[])[]): Run
   return step.state;
 }
 
-/** An ended run opened from its summary: the host's snapshot of its spans and its usage records. */
-function summarized(record: RunRecord, events: readonly RunEvent[]): RunPageState {
-  const first = opened(record);
-  const trace = foldTrace(EMPTY_TRACE, events);
-  const through = events.at(-1)?.sequence ?? 0;
-  const reply: SummaryReply = {
-    kind: 'summary',
-    snapshot: {
-      run_id: fixture.runId,
-      sequence: through,
-      status: 'failed',
-      spans: [...traceSpans(trace)],
-    },
-    seed: [],
-    through,
+/** The gates that finished before the first idea began, as a host words them. */
+function inputGatesOf(events: readonly RunEvent[]): WireGate[] {
+  const isIdea = (event: RunEvent): boolean => {
+    const data = event.data;
+    return (
+      event.type === 'span_started' &&
+      data !== null &&
+      data !== undefined &&
+      'span' in data &&
+      data.span.label?.kind === 'workstream'
+    );
+  };
+  const idea = events.findIndex(isIdea);
+  const gates: WireGate[] = [];
+  for (const event of idea === -1 ? events : events.slice(0, idea)) {
+    const data = event.data;
+    if (data?.kind !== 'gate_finished') continue;
+    gates.push({
+      sequence: event.sequence ?? 0,
+      gate: data.gate,
+      recipe: data.recipe ?? null,
+      passed: event.status !== 'failed',
+      outputTail: data.output_tail ?? null,
+    });
+  }
+  return gates;
+}
+
+/** The event that ended the fixture's journal, as a host words it. */
+function terminalOf(events: readonly RunEvent[]): WireTerminal | null {
+  const failed = events.filter(event => event.type === 'run_failed').at(-1);
+  return failed === undefined
+    ? null
+    : {sequence: failed.sequence ?? 0, kind: 'failed', message: failed.text || null};
+}
+
+/**
+ * The summary a host would send for the fixture's journal: the run's spans as its fold left them,
+ * its usage records, the gates that finished before the first idea, and the event that ended it.
+ */
+function wireSummaryOf(events: readonly RunEvent[]): WireSummary {
+  const none = {input: null, cacheRead: null, cacheWrite: null, output: null, reasoning: null};
+  return {
+    throughSequence: events.at(-1)?.sequence ?? 0,
     eventCount: events.length,
     journalBytes: 0,
     trace: 'recorded',
     roundsFinished: 0,
+    overview: null,
+    spans: [...traceSpans(foldTrace(EMPTY_TRACE, events))],
+    replies: [],
+    tokens: none,
+    usage: [],
     records: reduceEventBatch(initialCoreState(), events).usageRecords,
+    inputGates: inputGatesOf(events),
+    terminal: terminalOf(events),
+  };
+}
+
+/** An ended run opened from its summary, as a remote run is: the host's summary and its registry record. */
+function summarized(record: RunRecord, events: readonly RunEvent[]): RunPageState {
+  const first = opened(record);
+  const reply: SummaryReply = {
+    kind: 'summary',
+    ...summaryFacts(wireSummaryOf(events), fixture.runId, 'failed'),
   };
   return runPageStep(first.state, {
     type: 'summary',
@@ -210,6 +261,27 @@ describe('the same run opened from its summary', () => {
     expect(from.agents.agents).toEqual(whole.agents.agents);
     expect(from.latest).toBe(whole.latest);
     expect(nowView(from)).toEqual([]);
+  });
+
+  test('lists the failed input gates as the whole history does', () => {
+    expect(from.inputGates).toEqual(whole.inputGates);
+    const view = gateFailureView(from.inputGates);
+    expect(view?.label).toBe('Accuracy \u00b7 Benchmark');
+    expect(view?.reason).toBe("ModuleNotFoundError: No module named 'engine'");
+    expect(heroView(from).tiles[0]?.detail).toBe('input not measured');
+  });
+
+  test('says the whole reason when the registry record carries only its cut', () => {
+    const state = summarized(ended('failed'), fixture.events);
+    expect(endedView(state)?.reason).toBe(FULL_REASON);
+  });
+
+  test('a view at an earlier sequence holds the gates the journal would hold then', () => {
+    const state = summarized(ended('failed'), fixture.events);
+    const gates = state.run.trace.inputGates;
+    const first = gates.failures[0]?.sequence ?? 0;
+    expect(failuresAt(gates, first - 1)).toEqual([]);
+    expect(failuresAt(gates, first)).toHaveLength(1);
   });
 });
 

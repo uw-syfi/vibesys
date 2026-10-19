@@ -97,6 +97,30 @@ export interface RunSummary {
   readonly usage: readonly {readonly spanId: string; readonly tokens: SummaryTokens}[];
   /** One record per finished turn, as the helper words it: its tokens sum to `tokens`. */
   readonly records: readonly UsageRecord[];
+  /** The gates that finished before the first idea began, in journal order. */
+  readonly inputGates: readonly SummaryGate[];
+  /** How the journal ended, when a terminal event ended it; null while it has not. */
+  readonly terminal: SummaryTerminal | null;
+}
+
+/** One gate that finished before the run's first idea, as a summary words it. */
+interface SummaryGate {
+  /** The gate event's journal sequence. */
+  readonly sequence: number;
+  /** The gate's kind: `build`, `accuracy`, `benchmark` or `validation`. */
+  readonly gate: string;
+  readonly recipe: string | null;
+  readonly passed: boolean;
+  /** The end of what the gate printed, credentials redacted; null when it kept nothing. */
+  readonly outputTail: string | null;
+}
+
+/** The terminal event that ended a run's journal, with its whole message. */
+interface SummaryTerminal {
+  readonly sequence: number;
+  readonly kind: 'finished' | 'failed' | 'interrupted';
+  /** The event's whole account of why, not cut to a line; null when it said nothing. */
+  readonly message: string | null;
 }
 
 /**

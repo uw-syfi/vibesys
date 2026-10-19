@@ -47,6 +47,8 @@ const summary = {
     tokens: tally(entry.tally),
   })),
   records: [],
+  inputGates: [],
+  terminal: null,
 };
 const fixture: RunFixture = {
   format: 1,

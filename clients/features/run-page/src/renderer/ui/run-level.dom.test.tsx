@@ -322,6 +322,8 @@ function recordedBeforeTrace(): RunPageState {
     tokens: none,
     usage: [],
     records: [],
+    inputGates: [],
+    terminal: null,
   };
   return runPageStep(asked.state, {
     type: 'summary',

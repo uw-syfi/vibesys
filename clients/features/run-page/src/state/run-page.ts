@@ -715,7 +715,7 @@ function withSummary(
       : {state: failed, requests: []};
   }
   if (folded(state)) return {state: {...state, summary: {kind: 'superseded'}}, requests: []};
-  const data: RunData = {kind: 'snapshot', snapshot: reply.snapshot};
+  const data: RunData = {kind: 'snapshot', snapshot: reply.snapshot, gates: reply.gates};
   const ready: RunPageState = {
     ...state,
     summary: {
@@ -726,6 +726,7 @@ function withSummary(
       trace: reply.trace,
       roundsFinished: reply.roundsFinished,
       records: reply.records,
+      terminal: reply.terminal,
     },
     run: {
       core: reduceEventBatch(initialCoreState(), reply.seed),
