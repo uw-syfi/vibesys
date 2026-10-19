@@ -27,18 +27,63 @@ test('each machine is a card with its clusters and clouds nested under it', asyn
   expect(await names('This Mac')).toEqual(['lab-h100', 'campus', 'amd-hpc', 'Modal']);
   expect(await names('host-a')).toEqual(['lab-h100']);
   expect(await names('host-b')).toEqual([]);
-  await expect(card(page, 'host-b').getByText('None', {exact: true})).toBeVisible();
+  // A machine with nothing set up shows nothing under it, not a word for nothing.
+  await expect(card(page, 'host-b').getByRole('table')).toHaveCount(0);
+  await expect(card(page, 'host-b').getByText('None', {exact: true})).toHaveCount(0);
   // A helper that predates compute settings lists nothing, and says so in a word.
   await expect(card(page, 'host-c').getByText('Unavailable', {exact: true})).toBeVisible();
   await expect(card(page, 'This Mac').getByText('Online', {exact: true})).toBeVisible();
   await expect(card(page, 'This Mac').getByText('64 CPU · 8× H100')).toBeVisible();
   await expect(card(page, 'This Mac').getByText('2 live', {exact: true})).toBeVisible();
-  await expect(card(page, 'This Mac').getByText('3 runs', {exact: true})).toBeVisible();
-  await expect(card(page, 'host-a').getByText('1 run', {exact: true})).toBeVisible();
+  // The count is the link to the runs, and it is not there at zero.
+  await expect(
+    card(page, 'This Mac').getByRole('button', {name: '3 runs', exact: true}),
+  ).toBeVisible();
+  await expect(
+    card(page, 'host-a').getByRole('button', {name: '1 run', exact: true}),
+  ).toBeVisible();
+  await expect(card(page, 'host-b').getByRole('button', {name: /run/})).toHaveCount(0);
+  await expect(page.getByText('Show runs')).toHaveCount(0);
+  // An online machine has nothing to reconnect.
+  await expect(card(page, 'This Mac').getByRole('button', {name: 'Reconnect'})).toHaveCount(0);
   await expect(page.getByRole('button', {name: 'Add machine'})).toBeVisible();
   expect(await rawTextOf(page)).toEqual([]);
   const axe = await new AxeBuilder({page}).analyze();
   expect(axe.violations).toEqual([]);
+});
+
+test('a GPU reads one way, on the machine and in every cluster row', async ({page}) => {
+  await openMachines(page, 1440, world('several machines'));
+  const text = await card(page, 'This Mac').innerText();
+  expect(text).toContain('64 CPU · 8× H100');
+  expect(text).toContain('8× H100');
+  expect(text).toContain('8× MI300X');
+  expect(text).not.toMatch(/nvidia_|× (h100|mi300x)/);
+});
+
+test('the Test column has no header word, and each Test button is centred on its row', async ({
+  page,
+}) => {
+  await openMachines(page, 1440, world('several machines'));
+  const mac = card(page, 'This Mac');
+  const header = mac.getByRole('columnheader', {name: 'Test'}).locator('span');
+  expect((await header.boundingBox())?.width).toBeLessThanOrEqual(1);
+  const name = mac
+    .getByRole('row', {name: /lab-h100/})
+    .getByRole('cell')
+    .first();
+  const button = testOf(page, 'This Mac', 'lab-h100');
+  const buttonBox = await button.boundingBox();
+  const middle = (box: {y: number; height: number} | null) =>
+    (box?.y ?? 0) + (box?.height ?? 0) / 2;
+  // The button's middle is the row text's middle, to within a pixel.
+  const text = await name.evaluate(el => {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const rect = range.getBoundingClientRect();
+    return rect.y + rect.height / 2;
+  });
+  expect(Math.abs(middle(buttonBox) - text)).toBeLessThanOrEqual(1);
 });
 
 test('Test says when a cluster was checked, or since when it is unreachable', async ({page}) => {
@@ -68,23 +113,30 @@ test('a test under way says so until it answers', async ({page}) => {
   );
 });
 
-test('an unreachable machine lists nothing under it, and Reconnect signs a machine in', async ({
+test('an unreachable machine offers Reconnect, one to sign in offers Sign in, and neither lists anything', async ({
   page,
 }) => {
   await openMachines(page, 1440, world('an unreachable machine'));
-  await expect(card(page, 'host-a').getByText('Unreachable', {exact: true})).toBeVisible();
-  await expect(card(page, 'host-a').getByRole('row')).toHaveCount(0);
-  await expect(card(page, 'host-b').getByText('Sign in', {exact: true})).toBeVisible();
-  await card(page, 'host-b').getByRole('button', {name: 'Reconnect'}).click();
-  await expect(card(page, 'host-b').getByText('Online', {exact: true})).toBeVisible();
-  await expect(card(page, 'host-b').getByText('None', {exact: true})).toBeVisible();
+  const down = card(page, 'host-a');
+  await expect(down.getByText('Unreachable', {exact: true})).toBeVisible();
+  await expect(down.getByRole('row')).toHaveCount(0);
+  await expect(down.getByRole('button', {name: 'Reconnect'})).toBeVisible();
+  // Nothing is known of its hardware: no placeholder dash stands in for it.
+  await expect(down.getByText(/^[–-]$/)).toHaveCount(0);
+  const waiting = card(page, 'host-b');
+  await expect(waiting.getByText('Sign in', {exact: true}).first()).toBeVisible();
+  await expect(waiting.getByRole('button', {name: 'Reconnect'})).toHaveCount(0);
+  await waiting.getByRole('button', {name: 'Sign in'}).click();
+  await expect(waiting.getByText('Online', {exact: true})).toBeVisible();
+  await expect(waiting.getByRole('button', {name: 'Sign in'})).toHaveCount(0);
+  await expect(waiting.getByText('None', {exact: true})).toHaveCount(0);
 });
 
 test('Show runs and Settings name their machine, and Add machine opens its form', async ({
   page,
 }) => {
   await openMachines(page, 1440, world('several machines'));
-  await card(page, 'host-a').getByRole('button', {name: 'Show runs'}).click();
+  await card(page, 'host-a').getByRole('button', {name: '1 run'}).click();
   await card(page, 'This Mac').getByRole('button', {name: 'Settings'}).click();
   expect(await recorded(page)).toEqual({shown: ['ssh:host-a'], settings: ['local']});
   await page.getByRole('button', {name: 'Add machine'}).click();

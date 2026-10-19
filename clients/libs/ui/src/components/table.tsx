@@ -13,6 +13,11 @@ export interface TableColumn<Row> {
   readonly wide?: boolean;
   /** The column that names the row: it keeps a readable width, and the table scrolls instead. */
   readonly lead?: boolean;
+  /**
+   * A column of buttons: its header is not drawn (it stays the column's accessible name) and each
+   * cell is centred on the text of its row.
+   */
+  readonly control?: boolean;
 }
 
 /** What a row's first cell offers to fold or unfold what the row stands for. */
@@ -66,7 +71,11 @@ export function Table<Row>(props: {
                 data-align={column.align}
                 data-wide={column.wide === true || undefined}
               >
-                {column.header}
+                {column.control === true ? (
+                  <span className="vs-table-hidden-header">{column.header}</span>
+                ) : (
+                  column.header
+                )}
               </th>
             ))}
           </tr>
@@ -94,6 +103,7 @@ export function Table<Row>(props: {
                     data-align={column.align}
                     data-wide={column.wide === true || undefined}
                     data-lead={column.lead === true || undefined}
+                    data-control={column.control === true || undefined}
                   >
                     {at === 0 && props.fold !== undefined ? (
                       <span className="vs-table-lead">

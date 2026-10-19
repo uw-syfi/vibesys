@@ -5,6 +5,7 @@
  */
 import {acceleratorName} from '@vibesys/hosts';
 import type {SlurmClusterSettings} from '@vibesys/ipc';
+import {gpuLine} from './hardware.js';
 import {type Machine, type MachinesState, machineStatus} from './machines.js';
 import {clustersOf, type LastCheck, type Places, unreachableClusters} from './places.js';
 import type {StatusTone} from './words.js';
@@ -31,15 +32,30 @@ function facts(machine: Machine) {
   return machine.report?.kind === 'ready' ? machine.report.facts : null;
 }
 
-/** A machine's processors as one line: the cores, then each GPU model with its count. */
-export function machineHardware(machine: Machine): string {
+/** A machine's processors as one line: the cores, then each GPU model with its count; null until known. */
+export function machineHardware(machine: Machine): string | null {
   const described = facts(machine);
-  if (described === null) return '–';
+  if (described === null) return null;
   const counts = new Map<string, number>();
-  for (const gpu of described.hardware.gpus)
+  for (const gpu of described.hardware.gpus) {
     counts.set(gpu.model, (counts.get(gpu.model) ?? 0) + 1);
-  const gpus = [...counts].map(([model, count]) => (count > 1 ? `${count}× ${model}` : model));
+  }
+  const gpus = [...counts].map(([model, count]) => gpuLine(count, [model]));
   return [`${described.hardware.cpu_cores} CPU`, ...gpus].join(' · ');
+}
+
+/** What a machine's card offers to fix its connection: Sign in, Reconnect, or nothing. */
+export function cardAction(machine: Machine): 'sign-in' | 'reconnect' | null {
+  switch (machineStatus(machine)) {
+    case 'sign-in':
+      return 'sign-in';
+    case 'unavailable':
+      return 'reconnect';
+    case 'ready':
+    case 'checking':
+    case 'checkout-not-found':
+      return null;
+  }
 }
 
 /** How busy a machine is: its live runs against a slot for each GPU (one for a machine without). */
@@ -72,9 +88,9 @@ export function clockWord(at: number): string {
 /** What a cluster's nodes offer in a few characters: GPUs per node and their models, else the accelerator. */
 export function hardwareLine(hardware: Hardware | null | undefined): string {
   if (hardware === null || hardware === undefined) return '–';
-  const models = (hardware.gpu_models ?? []).join(', ');
+  const models = hardware.gpu_models ?? [];
   const perNode = hardware.gpus_per_node ?? 0;
-  if (models !== '') return perNode > 0 ? `${perNode}× ${models}` : models;
+  if (models.length > 0) return gpuLine(perNode, models);
   if (perNode > 0) return `${perNode} GPU`;
   return hardware.accelerator === null || hardware.accelerator === undefined
     ? '–'

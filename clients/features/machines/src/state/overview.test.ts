@@ -9,12 +9,16 @@ import type {
 } from '@vibesys/ipc';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {
+  cardAction,
   cardStatus,
   clockWord,
+  hardwareLine,
   initialMachines,
+  type Machine,
   type MachinesAction,
   type MachinesRequest,
   type MachinesState,
+  machineHardware,
   machineLoad,
   machineStatus,
   machinesNeedAttention,
@@ -223,7 +227,7 @@ describe('the places under each machine', () => {
     let state = withCompute(ready(['local']), 'local', offered(['gamma']));
     expect(placeRows(state, state.machines[0] as never)[0]?.hardware).toBe('–');
     state = tested(state, 'local', 'gamma', PASSED, 1);
-    expect(placeRows(state, state.machines[0] as never)[0]?.hardware).toBe('8× mi300x');
+    expect(placeRows(state, state.machines[0] as never)[0]?.hardware).toBe('8× MI300X');
   });
 
   test('a removed cluster takes its test with it, and the reply of a test of it is dropped', () => {
@@ -253,6 +257,27 @@ describe('the places under each machine', () => {
 });
 
 describe('reconnect and load', () => {
+  test('the card offers Sign in, Reconnect or nothing, by the machine status', () => {
+    const state = ready(['ssh:host-a']);
+    const machine = state.machines[0] as never as Machine;
+    expect(cardAction(machine)).toBeNull();
+    const withReport = (report: Machine['report']): Machine => ({...machine, report});
+    expect(cardAction(withReport({kind: 'unavailable', detail: 'timed out'}))).toBe('reconnect');
+    expect(cardAction(withReport({kind: 'sign-in', detail: 'passphrase'}))).toBe('sign-in');
+    expect(cardAction(withReport({kind: 'checkout-not-found', detail: 'gone'}))).toBeNull();
+    expect(cardAction({...machine, checking: 1})).toBeNull();
+  });
+
+  test('a machine and a cluster write the same GPU the same way, and an unknown machine has no line', () => {
+    const state = ready(['local']);
+    const machine = state.machines[0] as never as Machine;
+    expect(machineHardware(machine)).toBe('32 CPU · 2× H100');
+    expect(machineHardware({...machine, report: null})).toBeNull();
+    expect(hardwareLine({accelerator: 'cuda', gpu_models: ['nvidia_h100'], gpus_per_node: 2})).toBe(
+      '2× H100',
+    );
+  });
+
   test('Reconnect signs a machine in when it waits for that, and checks it again otherwise', () => {
     let state = ready(['ssh:host-a']);
     const again = machinesStep(state, {type: 'reconnect', host: 'ssh:host-a'});

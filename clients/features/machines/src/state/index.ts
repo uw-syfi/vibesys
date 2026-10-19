@@ -3,6 +3,8 @@
  * status from its facts, the Add form and the checkout form with path suggestions) and the words
  * and facts the screen shows.
  */
+
+export {gpuLine, gpuName} from './hardware.js';
 export {
   type FormName,
   initialMachines,
@@ -20,6 +22,7 @@ export {
   selectedMachine,
 } from './machines.js';
 export {
+  cardAction,
   cardStatus,
   clockWord,
   hardwareLine,

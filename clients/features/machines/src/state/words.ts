@@ -3,6 +3,7 @@
  * each a function of what its last report said.
  */
 import {acceleratorName, type MachineDescription} from '@vibesys/hosts';
+import {gpuLine} from './hardware.js';
 import {type Machine, type MachineStatus, machineStatus} from './machines.js';
 
 /** The tones the screen draws a status in (the design system's status tones). */
@@ -69,7 +70,7 @@ function hardwareText(described: MachineDescription): string {
   const {cpu_cores, gpus, accelerator} = described.hardware;
   const counts = new Map<string, number>();
   for (const gpu of gpus) counts.set(gpu.model, (counts.get(gpu.model) ?? 0) + 1);
-  const shown = [...counts].map(([model, count]) => (count > 1 ? `${count}× ${model}` : model));
+  const shown = [...counts].map(([model, count]) => gpuLine(count, [model]));
   const graphics =
     shown.length === 0 ? 'no GPU' : `${shown.join(', ')} (${acceleratorName(accelerator)})`;
   return `${cpu_cores} CPU cores · ${graphics}`;

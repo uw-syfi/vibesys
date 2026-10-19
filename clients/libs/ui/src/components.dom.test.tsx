@@ -872,3 +872,25 @@ describe('Table folds and kinds', () => {
     expect(picked).toEqual(['a']);
   });
 });
+
+describe('Table control column', () => {
+  test('keeps its header as the accessible name in a hidden span and marks its cells', async () => {
+    const container = await mount(
+      <Table
+        label="Rows"
+        columns={[
+          {key: 'id', header: 'id', cell: row => row.id},
+          {key: 'go', header: 'Go', control: true, cell: () => <button type="button">Go</button>},
+        ]}
+        rows={[{id: 'a'}]}
+        rowKey={row => row.id}
+      />,
+    );
+    const headers = [...container.querySelectorAll('th')];
+    expect(headers.map(th => th.textContent)).toEqual(['id', 'Go']);
+    expect(headers[1]?.querySelector('.vs-table-hidden-header')?.textContent).toBe('Go');
+    expect(headers[0]?.querySelector('.vs-table-hidden-header')).toBeNull();
+    expect(container.querySelector('td[data-control]')?.textContent).toBe('Go');
+    expect(container.querySelectorAll('td[data-control]')).toHaveLength(1);
+  });
+});

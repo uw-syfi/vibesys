@@ -22,6 +22,7 @@ import {
 } from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
+  cardAction,
   cardStatus,
   type Machine,
   type MachinesAction,
@@ -67,18 +68,17 @@ function Places(props: {
       case 'loading':
         return <Text tone="muted">Reading</Text>;
       case 'ready':
-        return <Text tone="muted">None</Text>;
+      case 'none':
+        return null;
       case 'unsupported':
       case 'failed':
         return <Text tone="muted">Unavailable</Text>;
-      case 'none':
-        return null;
     }
   }
   const columns: readonly TableColumn<PlaceRow>[] = [
     {key: 'name', header: 'Name', lead: true, cell: row => row.name},
     {key: 'reach', header: 'Reached', mono: true, wide: true, cell: row => row.reach},
-    {key: 'hardware', header: 'Hardware', mono: true, wide: true, cell: row => row.hardware},
+    {key: 'hardware', header: 'Hardware', wide: true, cell: row => row.hardware},
     {
       key: 'checked',
       header: 'Checked',
@@ -92,6 +92,7 @@ function Places(props: {
     {
       key: 'test',
       header: 'Test',
+      control: true,
       align: 'end',
       cell: row =>
         row.testable ? (
@@ -115,6 +116,32 @@ function Places(props: {
   );
 }
 
+/** The one press that mends a connection: Reconnect when unreachable, Sign in when waiting for it. */
+function Fix(props: {
+  readonly state: MachinesState;
+  readonly machine: Machine;
+  readonly dispatch: Dispatch;
+}): JSX.Element | null {
+  const {state, machine, dispatch} = props;
+  const action = cardAction(machine);
+  if (action === null) return null;
+  const busy = machine.checking !== null || state.pending?.host === machine.host;
+  const words =
+    action === 'sign-in'
+      ? {idle: 'Sign in', busy: 'Signing in…'}
+      : {idle: 'Reconnect', busy: 'Reconnecting…'};
+  return (
+    <Button
+      size="sm"
+      text={busy ? words.busy : words.idle}
+      {...(busy ? {disabledReason: CHECKING} : {})}
+      press={() =>
+        dispatch({type: action === 'sign-in' ? 'sign-in' : 'reconnect', host: machine.host})
+      }
+    />
+  );
+}
+
 function MachineCard(props: {
   readonly state: MachinesState;
   readonly machine: Machine;
@@ -125,7 +152,7 @@ function MachineCard(props: {
 }): JSX.Element {
   const {state, machine, dispatch, runs} = props;
   const status = cardStatus(machine);
-  const busy = machine.checking !== null || state.pending?.host === machine.host;
+  const hardware = machineHardware(machine);
   return (
     <Card>
       <Stack gap="space-4">
@@ -136,27 +163,23 @@ function MachineCard(props: {
             </Text>
           </Stack>
           <Chip dot label={status.word} tone={status.tone} />
-          <Button
-            size="sm"
-            text={busy ? 'Reconnecting…' : 'Reconnect'}
-            {...(busy ? {disabledReason: CHECKING} : {})}
-            press={() => dispatch({type: 'reconnect', host: machine.host})}
-          />
+          <Fix state={state} machine={machine} dispatch={dispatch} />
           <Button size="sm" text="Settings" press={() => props.openSettings(machine.host)} />
         </Row>
-        <Row gap="space-5" wrap>
-          <Text>{machineHardware(machine)}</Text>
-          <Busy machine={machine} />
-          <Row gap="space-2">
-            <Text>{runs === 1 ? '1 run' : `${runs} runs`}</Text>
-            <Button
-              variant="quiet"
-              size="sm"
-              text="Show runs"
-              press={() => props.showRuns(machine.host)}
-            />
+        {hardware === null && runs === 0 ? null : (
+          <Row gap="space-5" wrap>
+            {hardware === null ? null : <Text>{hardware}</Text>}
+            <Busy machine={machine} />
+            {runs === 0 ? null : (
+              <Button
+                variant="quiet"
+                size="sm"
+                text={runs === 1 ? '1 run' : `${runs} runs`}
+                press={() => props.showRuns(machine.host)}
+              />
+            )}
           </Row>
-        </Row>
+        )}
         <Places state={state} machine={machine} dispatch={dispatch} />
       </Stack>
     </Card>

@@ -148,6 +148,14 @@ function holdTests(): void {
   };
 }
 
+/** Sets the window to `width` and reads the page's own `innerWidth` back. */
+export async function resizeTo(page: Page, width: number): Promise<void> {
+  await page.setViewportSize({width, height: 900});
+  await expect
+    .poll(() => page.evaluate(() => window.innerWidth), {message: 'the window is as wide as asked'})
+    .toBe(width);
+}
+
 /** Opens the page at `width` (measured) over `world`; clusters tested by press stay under way. */
 export async function openMachines(page: Page, width: number, world: MachinesWorld): Promise<void> {
   const {seed} = world;

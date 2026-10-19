@@ -1097,6 +1097,18 @@ body > div:first-child {
 .vs-table tr[data-kind="total"] td {
   font-weight: var(--text-body-strong-weight);
 }
+.vs-table td[data-control] {
+  padding-block: 0;
+  vertical-align: middle;
+}
+.vs-table-hidden-header {
+  position: absolute;
+  width: var(--hairline);
+  height: var(--hairline);
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 .vs-table td[data-lead] {
   min-width: calc(var(--space-8) * 3);
 }
