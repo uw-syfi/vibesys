@@ -102,7 +102,7 @@ test('a run opens in a window of its own, shown alone and live there', async ({p
   await runWindow.keyboard.press('Escape');
 
   // Asking again, from the tile's menu, focuses that window rather than opening another.
-  await page.getByRole('button', {name: 'More for mpmc'}).click();
+  await page.getByRole('button', {name: 'More for queue-rs · mpmc'}).click();
   await page.getByRole('menuitem', {name: 'Open in new window'}).click();
   await expect
     .poll(async () => (await windows(page)).opened)
