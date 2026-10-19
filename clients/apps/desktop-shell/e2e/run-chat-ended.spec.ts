@@ -119,7 +119,7 @@ test('an older helper shows Chat off for an ended run, and nothing is attached',
       'Object.assign(window.vibesysWelcome, {helperFeatures: () => Promise.resolve({ok: true, value: []})});',
   });
   await page.goto('./shell.html');
-  await page.getByRole('main').getByRole('button', {name: /^mpmc/}).first().click();
+  await page.getByRole('main').getByRole('button', {name: /^queue-rs · mpmc/}).first().click();
   await expect(page.getByRole('button', {name: 'Chat', exact: true})).toBeDisabled();
   await expect(page.getByText('Needs an update')).toBeVisible();
   expect(
