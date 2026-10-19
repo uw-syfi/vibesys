@@ -3616,6 +3616,27 @@ const hostHelperSchema: Record<string, unknown> = {
         },
         "reason": {
           "$ref": "#/$defs/LoginUnavailableReason"
+        },
+        "command": {
+          "anyOf": [
+            {
+              "maxLength": 300,
+              "pattern": "^[^\\n\\r]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Command"
+        },
+        "detail": {
+          "default": "",
+          "maxLength": 300,
+          "pattern": "^[^\\n\\r]*$",
+          "title": "Detail",
+          "type": "string"
         }
       },
       "required": [
@@ -3629,7 +3650,9 @@ const hostHelperSchema: Record<string, unknown> = {
       "description": "Why a login could not be started.",
       "enum": [
         "not_installed",
-        "no_login_command"
+        "no_login_command",
+        "needs_terminal",
+        "start_failed"
       ],
       "title": "LoginUnavailableReason",
       "type": "string"

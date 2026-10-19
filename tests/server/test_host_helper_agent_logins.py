@@ -37,11 +37,17 @@ from server.host_api import (
     parse_helper_request,
     request_features,
 )
+from server.host_helper_login import LoginBounds, LoginStarter
 from server.host_helper_requests import answer
-from vs_agent.api import LoginCredential, LoginKind, ProviderLogin
+from vs_agent.api import LoginCommand, LoginCredential, LoginKind, ProviderLogin
 from vs_agent.api import LoginState as ProviderLoginState
 from vs_decode.api import Unreadable
-from vs_sim.api.testing import SimNetwork, SimThreads
+from vs_sim.api.testing import (
+    FakePipedProcessLauncher,
+    ScriptedPipedProcess,
+    SimNetwork,
+    SimThreads,
+)
 
 _NAME = st.from_regex(r"[a-z][a-z0-9_]{0,12}", fullmatch=True)
 _VARIABLE = st.from_regex(r"[A-Z][A-Z0-9_]{0,20}", fullmatch=True)
@@ -171,12 +177,27 @@ def _found(
     )
 
 
-def _adapter(**by_provider: ProviderLogin) -> AgentLibraryLogins:
-    """Providers not given are absent from the machine."""
+_COMMANDS = {
+    "claude": LoginCommand(("claude", "auth", "login"), needs_terminal=True),
+    "codex": LoginCommand(("codex", "login", "--device-auth"), needs_terminal=False),
+}
+"""The commands the agent library names in these tests: one needs a terminal, one does not."""
+
+
+def _adapter(
+    launcher: FakePipedProcessLauncher | None = None,
+    threads: SimThreads | None = None,
+    commands: dict[str, LoginCommand] | None = None,
+    **by_provider: ProviderLogin,
+) -> AgentLibraryLogins:
+    """Providers not given are absent from the machine; a launcher not given refuses any start."""
+    threads = threads or SimThreads()
     return AgentLibraryLogins(
         lambda provider: by_provider.get(
             provider, _found(provider, installed=False, state=ProviderLoginState.UNKNOWN)
-        )
+        ),
+        (_COMMANDS if commands is None else commands).get,
+        LoginStarter(launcher or FakePipedProcessLauncher(), threads, dict, LoginBounds()),
     )
 
 
@@ -193,7 +214,6 @@ def test_a_signed_in_account_and_an_api_key_are_told_apart_without_the_secret() 
     assert listed["claude"].how == AccountLogin()
     assert listed["codex"].how == ApiKeyLogin(variable="CODEX_API_KEY")
     assert _listed(_adapter(codex=filed))["codex"].how == ApiKeyLogin(file=".codex/k.json")
-    assert all(not login.can_start_login for login in listed.values())
     assert all(login.api_key_variables == ("SOME_API_KEY",) for login in listed.values())
 
 
@@ -209,18 +229,60 @@ def test_a_login_state_is_carried_over_and_a_missing_cli_is_unknown(
     assert all(not login.installed and login.state is LoginState.UNKNOWN for login in missing)
 
 
-@pytest.mark.parametrize(
-    ("installed", "reason"),
-    [
-        (True, LoginUnavailableReason.NO_LOGIN_COMMAND),
-        (False, LoginUnavailableReason.NOT_INSTALLED),
-    ],
-)
-def test_agentshim_names_no_login_command_so_starting_one_says_why_not(
-    *, installed: bool, reason: LoginUnavailableReason
-) -> None:
+def test_a_login_can_be_started_only_for_an_installed_cli_whose_command_needs_no_terminal() -> None:
+    listed = _listed(_adapter(claude=_found("claude"), codex=_found("codex")))
+    uninstalled = _listed(_adapter())
+    commandless = _listed(_adapter(commands={}, codex=_found("codex")))
+
+    assert not listed["claude"].can_start_login  # prompts the person
+    assert listed["codex"].can_start_login
+    assert not commandless["codex"].can_start_login  # agentshim names no command for it
+    assert all(not login.can_start_login for login in uninstalled.values())
+
+
+def test_a_missing_cli_is_reported_before_anything_else_and_starts_nothing() -> None:
+    launcher = FakePipedProcessLauncher()
     adapter = _adapter(
-        claude=_found("claude", installed=installed, state=ProviderLoginState.UNKNOWN)
+        launcher, codex=_found("codex", installed=False, state=ProviderLoginState.UNKNOWN)
     )
 
-    assert adapter.start("claude") == LoginUnavailable(reason=reason)
+    assert adapter.start("codex") == LoginUnavailable(reason=LoginUnavailableReason.NOT_INSTALLED)
+    assert launcher.started == []
+
+
+def test_a_cli_with_no_login_command_says_so() -> None:
+    launcher = FakePipedProcessLauncher()
+    adapter = _adapter(launcher, commands={}, codex=_found("codex"))
+
+    assert adapter.start("codex") == LoginUnavailable(
+        reason=LoginUnavailableReason.NO_LOGIN_COMMAND
+    )
+    assert launcher.started == []
+
+
+def test_a_login_that_prompts_is_named_for_a_terminal_and_not_run() -> None:
+    launcher = FakePipedProcessLauncher()
+    adapter = _adapter(launcher, claude=_found("claude", state=ProviderLoginState.SIGNED_OUT))
+
+    assert adapter.start("claude") == LoginUnavailable(
+        reason=LoginUnavailableReason.NEEDS_TERMINAL, command="claude auth login"
+    )
+    assert launcher.started == []
+
+
+@given(url=st.from_regex(r"https://[a-z]{3,10}\.example/[a-z]{1,8}", fullmatch=True))
+def test_a_login_that_needs_no_terminal_is_run_with_the_command_the_agent_library_names(
+    url: str,
+) -> None:
+    threads = SimThreads()
+    process = ScriptedPipedProcess(threads, merge_stderr=True)
+    process.write(stdout=f"Open {url}\nCode ABCD-EFGH1\n")
+    launcher = FakePipedProcessLauncher(lambda _start: process)
+    adapter = _adapter(
+        launcher, threads, codex=_found("codex", state=ProviderLoginState.SIGNED_OUT)
+    )
+
+    result = threads.run(lambda: adapter.start("codex"))
+
+    assert result == LoginStarted(instruction=f"Open {url} and enter the code ABCD-EFGH1")
+    assert [started.argv for started in launcher.started] == [("codex", "login", "--device-auth")]

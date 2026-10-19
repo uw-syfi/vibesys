@@ -64,6 +64,7 @@ ALLOWED_FIRST_PARTY = (
     "server.host_api",
     "server.host_helper",
     "server.host_helper_logs",
+    "server.host_helper_login",
     "server.host_helper_machine",
     "server.host_helper_compute",
     "server.host_compute",

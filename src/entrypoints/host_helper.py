@@ -33,9 +33,10 @@ from server.host_agent_logins import (
     LoginUnavailableReason,
 )
 from server.host_api import HarnessOption
-from server.host_harness import HarnessDisplay, Maker
+from server.host_harness import HarnessDisplay, Maker, ModelGeneration
 from server.host_helper import serve_channel
 from server.host_helper_compute import MachineCompute
+from server.host_helper_login import LoginBounds, LoginStarter
 from server.host_helper_logs import HelperLogs, run_location
 from server.host_helper_machine import HostMachineProbe
 from server.host_helper_os import (
@@ -68,6 +69,7 @@ from vs_sim.api import (
     OsThreads,
     PidfdProcessSignaller,
     SubprocessLauncher,
+    SubprocessPipedProcessLauncher,
     SubprocessProbe,
     SystemClock,
     UnixNetwork,
@@ -78,7 +80,7 @@ if TYPE_CHECKING:
 
     from server.host_examples import CreatedProject, ExampleList
     from server.host_helper_requests import ExampleProjects
-    from vs_agent.api import ProviderLogin
+    from vs_agent.api import LoginCommand, ModelDisplay, ProviderLogin
     from vs_sim.api import Threads
 
 _STDIN_FD = 0
@@ -89,6 +91,15 @@ _STDERR_FD = 2
 def _maker(vendor: str) -> Maker | None:
     """The maker agentshim's ``vendor`` names, or ``None`` for a vendor this contract lacks."""
     return next((maker for maker in Maker if maker.value == vendor), None)
+
+
+def _generation(shown: ModelDisplay | None) -> ModelGeneration | None:
+    """The generation agentshim ranks the model in, or ``None`` when it names none."""
+    if shown is None or shown.generation is None:
+        return None
+    return ModelGeneration(
+        id=shown.generation.id, name=shown.generation.name, order=shown.generation.rank
+    )
 
 
 @cache
@@ -121,9 +132,7 @@ def vetted_harnesses() -> tuple[HarnessOption, ...]:
                     tier=None if shown is None else shown.tier,
                     tier_name=None if shown is None else shown.tier_name,
                     maker=None if shown is None else _maker(shown.vendor),
-                    # agentshim (ModelSpec) names no generation yet, so none is sent: the screen
-                    # then groups a model by its family alone. It needs the generation's id, name
-                    # and rank among its vendor's, as data beside `tier`.
+                    generation=_generation(shown),
                 ),
             )
         )
@@ -165,6 +174,16 @@ def provider_login_here(provider: str) -> ProviderLogin:
     return provider_login(provider, env=launch_environment(), home=Path.home())
 
 
+def provider_login_command_here(provider: str) -> LoginCommand | None:
+    """The command that signs ``provider``'s CLI in, or ``None`` when its CLI has none."""
+    # lint-waiver: LW-271509 [PLC0415]; the helper answers hello without loading the agent library.
+    # > The same deferral as `provider_login_here`: `vs_agent.api` owns the provider facts and
+    # > importing it at module level would make every channel pay half a second before `hello`.
+    from vs_agent.api import provider_login_command  # noqa: PLC0415
+
+    return provider_login_command(provider)
+
+
 class AgentLibraryLogins:
     """Each vetted harness's login, read through the agent library (agentshim's facts).
 
@@ -172,9 +191,19 @@ class AgentLibraryLogins:
     for ``hello``.
     """
 
-    def __init__(self, login_of: Callable[[str], ProviderLogin]) -> None:
-        """Bind how one provider's CLI is probed (``provider_login_here`` on a real host)."""
+    def __init__(
+        self,
+        login_of: Callable[[str], ProviderLogin],
+        command_of: Callable[[str], LoginCommand | None],
+        starter: LoginStarter,
+    ) -> None:
+        """Bind how a CLI is probed, which command signs it in, and how that command is run.
+
+        ``provider_login_here`` and ``provider_login_command_here`` on a real host.
+        """
         self._login_of = login_of
+        self._command_of = command_of
+        self._starter = starter
 
     def providers(self) -> tuple[str, ...]:
         """The providers the vetted harnesses come from, in offer order."""
@@ -185,16 +214,21 @@ class AgentLibraryLogins:
         return tuple(self._login(provider) for provider in self.providers())
 
     def start(self, provider: str) -> LoginStarted | LoginUnavailable:
-        """Agentshim names no command that starts a harness's own login, so none is started.
+        """Run the harness's own login command, or say why it cannot be run from here.
 
-        A harness that is not installed is reported as that first.
+        A harness that is not installed is reported as that first. A command that prompts the
+        person is not run: it is named, for a terminal.
         """
-        reason = (
-            LoginUnavailableReason.NO_LOGIN_COMMAND
-            if self._login(provider).installed
-            else LoginUnavailableReason.NOT_INSTALLED
-        )
-        return LoginUnavailable(reason=reason)
+        if not self._login_of(provider).installed:
+            return LoginUnavailable(reason=LoginUnavailableReason.NOT_INSTALLED)
+        command = self._command_of(provider)
+        if command is None:
+            return LoginUnavailable(reason=LoginUnavailableReason.NO_LOGIN_COMMAND)
+        if command.needs_terminal:
+            return LoginUnavailable(
+                reason=LoginUnavailableReason.NEEDS_TERMINAL, command=command.line
+            )
+        return self._starter.start(command.argv)
 
     def _login(self, provider: str) -> AgentLogin:
         # lint-waiver: LW-271507 [PLC0415]; the helper answers hello without loading the agent library.
@@ -203,6 +237,7 @@ class AgentLibraryLogins:
         from vs_agent import api as agents  # noqa: PLC0415
 
         found = self._login_of(provider)
+        command = self._command_of(provider)
         credential = found.credential
         how: AccountLogin | ApiKeyLogin | None = None
         if credential is not None:
@@ -224,7 +259,7 @@ class AgentLibraryLogins:
             how=how,
             api_key_variables=found.api_key_variables,
             detail=found.detail,
-            can_start_login=False,
+            can_start_login=found.installed and command is not None and not command.needs_terminal,
         )
 
 
@@ -303,7 +338,13 @@ def real_host(environ: Mapping[str, str], uid: int, threads: Threads) -> HelperH
             harness_binaries=harness_binaries,
             launch_environment=launch_environment,
         ),
-        logins=AgentLibraryLogins(provider_login_here),
+        logins=AgentLibraryLogins(
+            provider_login_here,
+            provider_login_command_here,
+            LoginStarter(
+                SubprocessPipedProcessLauncher(), threads, launch_environment, LoginBounds()
+            ),
+        ),
         compute=MachineCompute(
             OsConfigFiles(), SubprocessProbe(), home=str(Path.home()), environ=environ
         ),

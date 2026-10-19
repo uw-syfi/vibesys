@@ -16,6 +16,7 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 from tests.server.host_helper_support import fake_host
 
+from entrypoints.host_helper import vetted_harnesses
 from server.host_api import (
     HarnessesListReply,
     HarnessesListRequest,
@@ -166,3 +167,14 @@ def test_asking_for_generations_needs_the_harness_generations_feature() -> None:
     assert request_features(HarnessesListRequest(request_id="l", deadline_ms=1)) == (
         HelperFeature.HARNESSES,
     )
+
+
+def test_the_vetted_list_names_a_maker_and_a_consistent_generation_for_every_model() -> None:
+    options = vetted_harnesses()
+
+    assert options
+    for option in options:
+        assert option.display is not None, option
+        assert option.display.maker is not None, option
+        assert option.display.generation is not None, option
+    assert generation_conflict(options) is None

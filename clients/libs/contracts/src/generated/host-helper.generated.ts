@@ -885,7 +885,9 @@ export type Outcome4 = "unavailable";
 /**
  * Why a login could not be started.
  */
-export type LoginUnavailableReason = "not_installed" | "no_login_command";
+export type LoginUnavailableReason = "not_installed" | "no_login_command" | "needs_terminal" | "start_failed";
+export type Command1 = string | null;
+export type Detail3 = string;
 export type RequestId66 = string;
 export type Type66 = "project.task_goal";
 export type Task12 = string;
@@ -991,7 +993,7 @@ export type ChannelEndOutcome =
   | "client_failed"
   | "server_unresponsive";
 export type ExitStatus = number;
-export type Detail3 = string;
+export type Detail4 = string;
 /**
  * One strict stderr line preserving an undisclosed instance cleanup failure.
  *
@@ -1005,19 +1007,19 @@ export type RunStartCompensationFailure =
 export type Type70 = "run.start_compensation_failed";
 export type ExitStatus1 = 12;
 export type RequestId69 = string;
-export type Detail4 = string;
+export type Detail5 = string;
 export type Kind32 = "worker_start_refused";
 export type InstanceId6 = string;
 export type Type71 = "run.start_compensation_failed";
 export type ExitStatus2 = 12;
 export type RequestId70 = string;
-export type Detail5 = string;
+export type Detail6 = string;
 export type Kind33 = "stop_failed";
 export type InstanceId7 = string;
 export type Type72 = "run.start_compensation_failed";
 export type ExitStatus3 = 12;
 export type RequestId71 = string;
-export type Detail6 = string;
+export type Detail7 = string;
 export type Kind34 = "stop_unconfirmed";
 export type Version13 = 1;
 export type Id7 = string;
@@ -2673,6 +2675,8 @@ export interface LoginStarted {
 export interface LoginUnavailable {
   outcome: Outcome4;
   reason: LoginUnavailableReason;
+  command?: Command1;
+  detail?: Detail3;
 }
 /**
  * The task's goal and objectives.
@@ -2766,7 +2770,7 @@ export interface HelperError {
 export interface ChannelEnd {
   outcome: ChannelEndOutcome;
   exit_status: ExitStatus;
-  detail: Detail3;
+  detail: Detail4;
 }
 /**
  * The helper could not start the worker that owns the compensating stop.
@@ -2775,7 +2779,7 @@ export interface WorkerStartRefusedCompensationFailure {
   type: Type70;
   exit_status: ExitStatus1;
   request_id: RequestId69;
-  detail: Detail4;
+  detail: Detail5;
   kind: Kind32;
   instance_id: InstanceId6;
 }
@@ -2786,7 +2790,7 @@ export interface StopFailedCompensationFailure {
   type: Type71;
   exit_status: ExitStatus2;
   request_id: RequestId70;
-  detail: Detail5;
+  detail: Detail6;
   kind: Kind33;
   instance_id: InstanceId7;
 }
@@ -2800,7 +2804,7 @@ export interface StopUnconfirmedCompensationFailure {
   type: Type72;
   exit_status: ExitStatus3;
   request_id: RequestId71;
-  detail: Detail6;
+  detail: Detail7;
   kind: Kind34;
   stop_result: UnconfirmedInstanceStopResult;
 }
