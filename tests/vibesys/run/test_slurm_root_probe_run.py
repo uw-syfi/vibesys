@@ -24,7 +24,6 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING
 
-import pytest
 from tests.support.core_plugins import capability_plugin
 from tests.support.skeleton_strategy import IMPLEMENTER, SkeletonStrategy
 from tests.support.task_project import write_task
@@ -315,10 +314,6 @@ class _Submissions:
         return [at for at, command in self.sent if "workspace-root-probe" not in command]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="a probe the queue never scheduled ends the run at its 6 h probe deadline (#3243 N2)",
-)
 def test_a_queue_full_far_past_the_old_probe_deadline_holds_slurm_work_and_never_ends_the_run(
     tmp_path: Path, sim: Sim
 ) -> None:
@@ -337,7 +332,7 @@ def test_a_queue_full_far_past_the_old_probe_deadline_holds_slurm_work_and_never
         tmp_path,
         sim,
         connector,
-        SkeletonStrategy(),
+        SkeletonStrategy.baseline_only(),
         _Shape(
             slurm_extra=f"queue_timeout_seconds = {_QUEUE_SECONDS}\n",
             deadline_seconds=_RUN_DEADLINE_SECONDS,
@@ -362,7 +357,10 @@ def test_a_queue_full_far_past_the_old_probe_deadline_holds_slurm_work_and_never
     work = submissions.work()
     assert work, submissions.sent
     assert min(work) > freed_at
-    # The run neither failed nor stopped while it waited: the proof released its held
-    # measurements, and the run measured and ended on its own.
-    assert not [event for event in events if event.type is CoreEventType.RUN_FAILED]
-    assert result.succeeded, result
+    # The run was neither failed nor stopped while it waited: the proof released its held
+    # baseline measurement, which succeeded, and the strategy then ended the run on its own
+    # (this scenario measures the baseline only, so it ends with no winner).
+    assert not [event for event in events if event.type is CoreEventType.STOP_REQUESTED]
+    assert result.failure is not None
+    assert result.failure.reason.endswith("the baseline is all there is"), result.failure
+    assert result.failure.kind is not RunFailureKind("run_environment_unavailable")

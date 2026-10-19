@@ -70,7 +70,11 @@ _TERMINAL = {EvaluationState.SUCCEEDED, EvaluationState.FAILED, EvaluationState.
 def _proof(
     root: Path, threads: SimThreads, *, scheduled: bool, job_fails: bool = False
 ) -> WorkspaceRootProof:
-    """A proof whose probe job runs at once, waits in the queue past its deadline, or fails."""
+    """A proof whose probe job runs at once, or is first never scheduled; then it may fail.
+
+    Unscheduled, the first attempt waits out its queue limit and the proof retries; the
+    retry is scheduled. With ``job_fails`` every job that runs fails, a lasting failure.
+    """
     remote = root / "remote"
     remote.mkdir(parents=True, exist_ok=True)
     connector = FakeConnector(root / "probe-cluster")
@@ -91,8 +95,6 @@ def _proof(
             ),
             poll_interval_seconds=_POLL_SECONDS,
             queue_timeout_seconds=_QUEUE_SECONDS,
-            # One attempt's queue wait: a never-scheduled probe fails after its first attempt.
-            workspace_root_probe_deadline_seconds=_QUEUE_SECONDS,
         ),
         processes=connector,
         scratch_root=root / "probe-state",
@@ -187,11 +189,11 @@ def _executor(
     )
 
 
-def test_a_first_evaluation_waits_for_a_queued_probe_and_is_refused_with_its_error(
+def test_a_first_evaluation_waits_for_a_queued_probe_and_its_retry_then_is_refused_with_its_error(
     tmp_path: Path,
 ) -> None:
     threads = SimThreads(VirtualClock(limit=_VIRTUAL_LIMIT_SECONDS))
-    proof = _proof(tmp_path, threads, scheduled=False)
+    proof = _proof(tmp_path, threads, scheduled=False, job_fails=True)
     cluster = _RecordingCluster()
     executor = _executor(tmp_path, cluster, threads.clock, proof)
     coordinator = EvaluationCoordinator(
@@ -204,9 +206,12 @@ def test_a_first_evaluation_waits_for_a_queued_probe_and_is_refused_with_its_err
     async def main() -> tuple[list[str], EvaluationState, str | None]:
         proof.start()
         handle = await coordinator.submit(_evaluation())
-        await threads.clock.sleep(_QUEUE_SECONDS / 2)
+        # Past the first attempt's queue limit: that attempt said nothing about the root,
+        # so the evaluation is neither sent nor refused while the proof retries.
+        await threads.clock.sleep(_QUEUE_SECONDS + 30)
         sent_while_waiting = list(cluster.submissions)
         record = await coordinator.snapshot(handle.id)
+        assert record.state not in _TERMINAL, record
         while record.state not in _TERMINAL:
             await threads.clock.sleep(_POLL_SECONDS)
             record = await coordinator.snapshot(handle.id)
@@ -219,7 +224,7 @@ def test_a_first_evaluation_waits_for_a_queued_probe_and_is_refused_with_its_err
     assert sent_while_waiting == []
     assert state is EvaluationState.FAILED
     assert failure is not None
-    assert "probe job 5000 was never scheduled" in failure
+    assert "exited with code" in failure
     assert cluster.submissions == []
 
 
@@ -274,7 +279,7 @@ def test_an_agent_gpu_job_waits_for_the_proof_and_is_refused_once_it_failed(
     tmp_path: Path,
 ) -> None:
     threads = SimThreads(VirtualClock(limit=_VIRTUAL_LIMIT_SECONDS))
-    proof = _proof(tmp_path, threads, scheduled=False)
+    proof = _proof(tmp_path, threads, scheduled=False, job_fails=True)
     inner = _CountingLauncher()
     launcher = RootGatedGpuLauncher(inner, proof)
 
@@ -296,7 +301,7 @@ def test_an_agent_gpu_job_waits_for_the_proof_and_is_refused_once_it_failed(
 
     assert stopped.exit_code == CANCELLED_BEFORE_SUBMISSION
     assert refused.exit_code != 0
-    assert "probe job 5000 was never scheduled" in str(refused.failure)
+    assert "exited with code" in str(refused.failure)
     assert inner.submitted == []
 
 

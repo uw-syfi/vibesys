@@ -272,8 +272,8 @@ def test_a_probe_still_queued_at_its_deadline_says_so_and_a_resume_retries_it(
         match=(
             rf"probe job {_FIRST_JOB_ID} was never scheduled\. It waited {waited} s in the "
             rf"queue{why} for 1 CPU, 1G of memory and 4 min without GPUs, in the partition "
-            rf"`sbatch_arguments` names.*The run retries the probe until "
-            rf"`workspace_root_probe_deadline_seconds`; raise {setting}"
+            rf"`sbatch_arguments` names.*The run retries the probe, and its Slurm work "
+            rf"waits for it; raise {setting}"
         ),
     ) as never_scheduled:
         _probe(config, connector, root)

@@ -10,9 +10,11 @@ probe's own error. The probe keeps every durable guarantee it had when it ran
 inline: exactly one job per attempt, restart reconciliation, cleanup on every path.
 
 A probe the queue never scheduled says nothing about the root, so the proof tries it
-again after an exponential backoff until ``workspace_root_probe_deadline_seconds``
-passes; Slurm work keeps waiting meanwhile. Any other failure is lasting and settles
-the proof at once.
+again after an exponential backoff, capped at 30 minutes, for as long as the run goes
+on; Slurm work keeps waiting meanwhile. No probe budget ends the run on a full queue:
+only the run's own deadline (which closes the proof) bounds the wait. Any other failure
+is lasting (the job failed, a node token is missing or wrong, the infrastructure
+failed) and settles the proof at once.
 """
 
 from __future__ import annotations
@@ -43,7 +45,7 @@ _CANCEL_POLL_SECONDS = 0.5
 # it the run's exit goes on; the probe's durable record lets a resume finish the job.
 _CLOSE_BOUND_SECONDS = 120.0
 # The wait before the first retry of a probe the queue never scheduled; each later wait
-# doubles, up to the cap, and never runs past the probe's deadline.
+# doubles, up to the cap.
 _FIRST_RETRY_SECONDS = 60.0
 _RETRY_CAP_SECONDS = 1800.0
 
@@ -137,8 +139,9 @@ class WorkspaceRootProof:
     def require(self, cancel: Event) -> bool:
         """Block until the root is proven (True) or ``cancel`` is set first (False).
 
-        Raises the probe's error once it failed. The wait is bounded by the probe's
-        own queue and run limits, and by the caller's ``cancel``.
+        Raises the probe's error once it failed. The wait is bounded by the caller's
+        ``cancel`` and by ``close``: a probe the queue never schedules is retried for as
+        long as the run goes on.
         """
         while not self.check():
             if cancel.is_set():
@@ -160,7 +163,7 @@ class WorkspaceRootProof:
     def _prove(self) -> None:
         outcome: WorkspaceRootProbeProven | WorkspaceRootProbeFailed
         try:
-            self._prove_within_deadline()
+            self._prove_until_settled()
             outcome = WorkspaceRootProbeProven()
         except SlurmWorkspaceRootProbeError as error:
             outcome = WorkspaceRootProbeFailed(failure=str(error))
@@ -180,10 +183,8 @@ class WorkspaceRootProof:
             self._failure = outcome.failure
         self._settled.set()
 
-    def _prove_within_deadline(self) -> None:
-        """Probe until proven, a lasting failure, a stop, or the deadline (each raises)."""
-        deadline_seconds = self._runner.config.workspace_root_probe_deadline_seconds
-        started = self._threads.now()
+    def _prove_until_settled(self) -> None:
+        """Probe until proven, or until a lasting failure or a stop (each raises)."""
         delay = _FIRST_RETRY_SECONDS
         attempt = 1
         while True:
@@ -198,16 +199,7 @@ class WorkspaceRootProof:
             except SlurmWorkspaceRootProbeError as error:
                 if not error.retryable or self._stop.is_set():
                     raise
-                waited = self._threads.now() - started
-                remaining = deadline_seconds - waited
-                if remaining <= 0:
-                    raise SlurmWorkspaceRootProbeError.deadline_passed(
-                        error,
-                        attempts=attempt,
-                        waited_seconds=waited,
-                        deadline_seconds=deadline_seconds,
-                    ) from error
-                wait = min(delay, remaining)
+                wait = delay
                 attempt += 1
                 self._tell(
                     WorkspaceRootProbeRetrying(

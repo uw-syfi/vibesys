@@ -257,11 +257,6 @@ class SlurmConfig(BaseModel):
     job_timeout_seconds: Annotated[int, Field(gt=0)] = 3600
     # Bounds a job's wait in the queue, per scheduler attempt; None leaves it unbounded.
     queue_timeout_seconds: Annotated[int, Field(gt=0)] | None = None
-    # Bounds how long a run keeps retrying its workspace-root probe (a 1-CPU job proving a
-    # local root shared) while the queue never schedules it, from the run's start. Slurm
-    # work waits meanwhile; past it the run fails. An attempt under way at the deadline
-    # finishes its own queue wait first, and the run's own deadline ends the probe sooner.
-    workspace_root_probe_deadline_seconds: Annotated[int, Field(gt=0)] = 6 * 3600
     transport_timeout_seconds: Annotated[int, Field(gt=0)] = 110
     evaluation_capacity: Annotated[int, Field(gt=0)] = 1
     # When a job ends, the processes it started (its service's and its command's sessions)

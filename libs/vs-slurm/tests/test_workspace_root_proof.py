@@ -14,7 +14,7 @@ import shutil
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from vs_sim.api.testing import SimThreads, VirtualClock, examples
@@ -50,6 +50,7 @@ _NOTICE_INTERVAL_SECONDS = 300.0  # an unchanged reason is repeated this often
 _NOTICE_SPACING_SECONDS = 60.0  # a changed reason is reported at most this often
 # Guards against a hang only; every scenario settles within the probe's own bounds.
 _VIRTUAL_LIMIT_SECONDS = 100_000.0
+_RETRY_CAP_SECONDS = 1800.0  # the longest wait between two attempts
 
 type _Answer = Callable[[dict[str, object]], dict[str, object]]
 
@@ -67,8 +68,6 @@ def _runner(root: Path, connector: FakeConnector, threads: SimThreads) -> SlurmJ
         ),
         poll_interval_seconds=_POLL_SECONDS,
         queue_timeout_seconds=int(_QUEUE_SECONDS),
-        # One attempt's queue wait: a never-scheduled probe fails after its first attempt.
-        workspace_root_probe_deadline_seconds=int(_QUEUE_SECONDS),
     )
     return SlurmJobRunner(
         config, processes=connector, scratch_root=root / "probe-state", clock=threads.clock
@@ -112,11 +111,16 @@ def _assert_cleaned(root: Path) -> None:
     assert not [path for path in cluster.iterdir() if path.name != ".vibesys-content-cache"]
 
 
-def test_a_never_scheduled_probe_reports_its_wait_and_refuses_slurm_work_with_its_error(
+def test_a_never_scheduled_probe_reports_its_wait_and_keeps_slurm_work_waiting_while_it_retries(
     tmp_path: Path,
 ) -> None:
     connector = FakeConnector(tmp_path / "cluster")
-    connector.script(_OPERATION_ID, states=(SlurmJobStatus.PENDING,), pending_reason="Resources")
+    for generation in range(3):
+        connector.script(
+            _generation_operation(generation),
+            states=(SlurmJobStatus.PENDING,),
+            pending_reason="Resources",
+        )
     threads = _threads()
     reports: list[WorkspaceRootProbeReport] = []
     proof = _proof(tmp_path, connector, threads, reports)
@@ -132,13 +136,10 @@ def test_a_never_scheduled_probe_reports_its_wait_and_refuses_slurm_work_with_it
             waited_seconds=_queued(reports)[0].waited_seconds,
             queue_timeout_seconds=_QUEUE_SECONDS,
         )
-        with pytest.raises(SlurmWorkspaceRootProbeError, match="was never scheduled") as failure:
-            proof.require(threads.event())
-        # Every later Slurm submission is refused with the same error.
-        with pytest.raises(SlurmWorkspaceRootProbeError) as again:
-            proof.check()
-        assert str(again.value) == str(failure.value)
-        assert reports[-1] == WorkspaceRootProbeFailed(failure=str(failure.value))
+        # Past two attempts' queue limits: each said nothing about the root, so Slurm work
+        # still waits (neither allowed nor refused) and the proof tries again.
+        threads.sleep(2 * _QUEUE_SECONDS + 600)
+        assert proof.check() is False
         proof.close()
 
     try:
@@ -146,8 +147,13 @@ def test_a_never_scheduled_probe_reports_its_wait_and_refuses_slurm_work_with_it
     finally:
         threads.close()
 
-    # One notice at the first reading, then one per interval: never one per poll.
-    assert len(_queued(reports)) <= 1 + _QUEUE_SECONDS // _NOTICE_INTERVAL_SECONDS
+    assert not [report for report in reports if isinstance(report, WorkspaceRootProbeFailed)]
+    retries = [report for report in reports if isinstance(report, WorkspaceRootProbeRetrying)]
+    assert [retry.attempt for retry in retries] == [2, 3]
+    assert all("was never scheduled" in retry.failure for retry in retries)
+    # One notice at each attempt's first reading, then one per interval: never one per poll.
+    first = [notice for notice in _queued(reports) if notice.job_id == _FIRST_JOB_ID]
+    assert len(first) <= 1 + _QUEUE_SECONDS // _NOTICE_INTERVAL_SECONDS
     assert f"scancel {_FIRST_JOB_ID}" in recorded_commands(connector.state)
     _assert_cleaned(tmp_path)
 
@@ -186,8 +192,8 @@ def test_queued_notices_follow_reason_changes_without_flooding(
 
     def run() -> None:
         proof.start()
-        with pytest.raises(SlurmWorkspaceRootProbeError, match="was never scheduled"):
-            proof.require(threads.event())
+        # The first attempt waits out its queue limit; the retry is scheduled and proves.
+        assert proof.require(threads.event()) is True
         proof.close()
 
     try:
@@ -361,18 +367,6 @@ def _generation_operation(generation: int) -> str:
     return "workspace-root-probe-" + hashlib.sha256(key.encode()).hexdigest()[:32]
 
 
-def _deadline_runner(
-    root: Path, connector: FakeConnector, threads: SimThreads, deadline_seconds: int
-) -> SlurmJobRunner:
-    runner = _runner(root, connector, threads)
-    config = runner.config.model_copy(
-        update={"workspace_root_probe_deadline_seconds": deadline_seconds}
-    )
-    return SlurmJobRunner(
-        config, processes=connector, scratch_root=root / "probe-state", clock=threads.clock
-    )
-
-
 def _hide_staging_from_the_node(
     remote: Path,
 ) -> Callable[[dict[str, object], _Answer], dict[str, object]]:
@@ -401,13 +395,7 @@ def test_a_probe_the_queue_never_scheduled_is_retried_and_slurm_work_waits_for_i
     )
     threads = _threads()
     reports: list[WorkspaceRootProbeReport] = []
-    proof = WorkspaceRootProof(
-        _deadline_runner(tmp_path, connector, threads, 6 * 3600),
-        state_root=tmp_path / "probe-state",
-        run_id=_RUN_ID,
-        threads=threads,
-        report=reports.append,
-    )
+    proof = _proof(tmp_path, connector, threads, reports)
 
     def run() -> None:
         proof.start()
@@ -430,37 +418,35 @@ def test_a_probe_the_queue_never_scheduled_is_retried_and_slurm_work_waits_for_i
     _assert_cleaned(tmp_path)
 
 
-@given(deadline_hours=st.integers(min_value=1, max_value=4))
-@settings(max_examples=examples(pr=2, nightly=8), deadline=None)
-def test_a_probe_that_is_never_scheduled_fails_only_once_its_deadline_passed(
-    tmp_path_factory: pytest.TempPathFactory, deadline_hours: int
+@given(outage_hours=st.integers(min_value=1, max_value=12))
+# Past the 6 h probe deadline the run used to end at.
+@example(outage_hours=7)
+@settings(max_examples=examples(pr=1, nightly=8), deadline=None)
+def test_a_probe_that_is_never_scheduled_never_fails_and_retries_at_its_capped_backoff(
+    tmp_path_factory: pytest.TempPathFactory, outage_hours: int
 ) -> None:
-    root = tmp_path_factory.mktemp("deadline")
+    """Regression: a full queue past a 6 h probe deadline ended the run for good (#3243 N2).
+
+    However long the queue stays full, the proof neither proves nor fails: it retries,
+    each wait doubling to a 30-minute cap, until the run closes it.
+    """
+    root = tmp_path_factory.mktemp("outage")
     connector = FakeConnector(root / "cluster")
-    for generation in range(64):
+    # More generations than any outage drawn here reaches: each attempt takes over 30 min.
+    for generation in range(2 * 12 + 2):
         connector.script(
             _generation_operation(generation),
             states=(SlurmJobStatus.PENDING,),
             pending_reason="Resources",
         )
-    deadline = deadline_hours * 3600
     threads = _threads()
     reports: list[WorkspaceRootProbeReport] = []
-    proof = WorkspaceRootProof(
-        _deadline_runner(root, connector, threads, deadline),
-        state_root=root / "probe-state",
-        run_id=_RUN_ID,
-        threads=threads,
-        report=reports.append,
-    )
-    started = threads.clock.now()
-    failed_at: list[float] = []
+    proof = _proof(root, connector, threads, reports)
 
     def run() -> None:
         proof.start()
-        with pytest.raises(SlurmWorkspaceRootProbeError, match="never scheduled"):
-            proof.require(threads.event())
-        failed_at.append(threads.clock.now() - started)
+        threads.sleep(outage_hours * 3600.0)
+        assert proof.check() is False
         proof.close()
 
     try:
@@ -468,11 +454,12 @@ def test_a_probe_that_is_never_scheduled_fails_only_once_its_deadline_passed(
     finally:
         threads.close()
 
-    # It never gives up early, and overruns the deadline by at most one queue wait.
-    assert deadline <= failed_at[0] <= deadline + _QUEUE_SECONDS + 10 * _POLL_SECONDS
-    assert isinstance(reports[-1], WorkspaceRootProbeFailed)
+    assert not [report for report in reports if isinstance(report, WorkspaceRootProbeFailed)]
+    waits = [r.retry_in_seconds for r in reports if isinstance(r, WorkspaceRootProbeRetrying)]
+    assert waits == sorted(waits)
+    assert all(0 < wait <= _RETRY_CAP_SECONDS for wait in waits)
     names = _job_names(connector)
-    assert len(names) == len(set(names)) >= 2
+    assert len(names) == len(set(names)) >= outage_hours // 2
     _assert_cleaned(root)
 
 
