@@ -127,6 +127,8 @@ class _Turn:
     sink: _Sink = field(default_factory=_Sink)
     ended: list[str] = field(default_factory=list)
     holds: list[CapacityHold] = field(default_factory=list)
+    cut_at: list[float] = field(default_factory=list)
+    """When the modelled core cancelled the turn at its limit (the Fake send runs on regardless)."""
     threads: SimThreads = field(init=False)
     control: RunControlChannel = field(init=False)
     client: AgentClient = field(init=False)
@@ -165,14 +167,22 @@ class _Turn:
             self.holds.append(reported)
         return self.holds[-1] if self.holds else None
 
-    def play(self, turn_time: float, *, operator_resumes: bool = False) -> None:
+    def play(self, turn_time: float, *, operator_resumes_after: float | None = None) -> None:
+        """Run the turn; the operator resumes a paused run ``operator_resumes_after`` s later."""
+
         def core_turn_limit() -> None:
+            paused_at: float | None = None
             while not self.ended:
-                if self.clock.now() >= credited_limit(START + turn_time, self.latest()):
+                now = self.clock.now()
+                if now >= credited_limit(START + turn_time, self.latest()):
+                    self.cut_at.append(now)
                     self.client.cancel_session(AgentSessionKey(SessionScope.ROLE, ROLE))
                     return
-                if operator_resumes and self.control.pause_requested():
-                    self.control.resume()
+                if operator_resumes_after is not None and self.control.pause_requested():
+                    paused_at = now if paused_at is None else paused_at
+                    if now - paused_at >= operator_resumes_after:
+                        self.control.resume()
+                        paused_at = None
                 self.threads.sleep(_CORE_POLL_S)
 
         def main() -> None:
@@ -217,6 +227,7 @@ def test_an_outage_shorter_than_the_budget_never_fails_a_turn(
     turn.play(turn_time)
 
     assert turn.ended == ["plan"]
+    assert turn.cut_at == []
     assert turn.sink.abandoned == []
     if outage <= send_s:  # the first send outlasted the outage: the turn never stopped
         assert turn.holds == []
@@ -228,16 +239,19 @@ def test_an_outage_shorter_than_the_budget_never_fails_a_turn(
     assert final.released_at >= START + outage - send_s
 
 
+@pytest.mark.parametrize("operator_after", [0.0, 2 * 3600.0], ids=["at-once", "hours-later"])
 @pytest.mark.parametrize("action", [QuotaAction.PAUSE, QuotaAction.WAIT], ids=str)
 def test_an_outage_past_its_budget_pauses_the_run_until_the_operator_resumes(
-    action: QuotaAction,
+    action: QuotaAction, operator_after: float
 ) -> None:
     """A spent budget no longer gives the turn up: the run pauses, and on resume it is sent
-    again. Before, the gate abandoned the turn and the strategy saw a failed turn."""
+    again. Before, the gate abandoned the turn and the strategy saw a failed turn. However
+    long the operator takes, the pause is credited whole, so the resumed send is not cut."""
     turn = _Turn(QuotaPolicy(action), outage=BUDGET + 3600.0, send_s=60.0)
-    turn.play(1800.0, operator_resumes=True)
+    turn.play(1800.0, operator_resumes_after=operator_after)
 
     assert turn.ended == ["plan"]
+    assert turn.cut_at == []
     assert turn.sink.abandoned == []
     assert RunControlTransitionKind.PAUSED in [t.kind for t in turn.transitions]
     assert any(hold.parked for hold in turn.holds)
