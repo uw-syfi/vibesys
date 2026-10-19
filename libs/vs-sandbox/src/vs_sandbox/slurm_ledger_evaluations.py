@@ -260,6 +260,9 @@ class LedgerEvaluations:
         if attached and known is None:
             # Even past a close's bound: with no ledger entry, no sweep would withdraw it.
             return Released.CANCEL_HERE
+        if self._gave_up():
+            # Nor wait out another evaluation's guard on the request into a try.
+            return Released.DETACHED
         ledger = self.ledger
         key = known if known is not None else ledger.request_of(handle_id)
         if key is None:
