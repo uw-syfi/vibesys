@@ -10,7 +10,6 @@
  * through `window.fakeHost`.
  */
 import type {ExampleList} from '@vibesys/contracts/host-helper';
-import {REQUIRED_HELPER_FEATURES} from '@vibesys/hosts';
 import type {WelcomeBridge} from '@vibesys/ipc';
 
 /**
@@ -569,10 +568,12 @@ export function installFakeNewRun(seed: FakeBridgeSeed): void {
   };
   const insideRepository = (project: string) => project.includes('/vibesys/');
   const words = (text: string) => text.split(' ');
-  const features = catalog?.features ?? [
-    ...REQUIRED_HELPER_FEATURES,
-    ...words('run_roles example_catalogue run_role_agents project_goal'),
-  ];
+  // Serialized into the page: it cannot name an import. Includes `REQUIRED_HELPER_FEATURES`.
+  const features =
+    catalog?.features ??
+    words(
+      'run_options preflight examples run_history run_summary run_trace run_roles example_catalogue run_role_agents project_goal',
+    );
   const roles =
     catalog?.roles ?? words('multi-orchestrator multi-profiler multi-implementer multi-judge');
   const check = (id: string, state: string, detail: string) => ({id, state, detail, fix: null});

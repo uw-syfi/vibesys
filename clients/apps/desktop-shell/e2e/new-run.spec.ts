@@ -415,6 +415,37 @@ test('a machine whose VibeSys predates New run says so and is never asked to sta
   expect(preflights).toEqual([]);
 });
 
+function withoutRunTrace() {
+  const newRun = SEED.newRun;
+  if (newRun === undefined) throw new Error('the seed has no New run helper');
+  return {
+    ...SEED,
+    newRun: {
+      ...newRun,
+      features: REQUIRED_HELPER_FEATURES.filter(feature => feature !== 'run_trace'),
+    },
+  };
+}
+
+test('a machine that serves everything but the run trace says Needs an update on Where', async ({
+  page,
+}) => {
+  await openAt(page, pageNamed('where'), withoutRunTrace());
+  await expect(main(page).getByText('Needs an update')).toBeVisible();
+});
+
+test('a machine that serves everything but the run trace says Needs an update on Review and never starts', async ({
+  page,
+}) => {
+  await openAt(page, pageNamed('review project'), withoutRunTrace());
+  await expect(main(page)).toContainText('VibeSys on host-b');
+  await expect(main(page)).toContainText('Needs an update');
+  await expect(start(page)).toHaveAttribute('aria-disabled', 'true');
+  await start(page).click({force: true});
+  const {started} = await fakeNewRun(page);
+  expect(started).toEqual([]);
+});
+
 test('Run again opens Review with the run as it was started', async ({page}) => {
   const run = {
     harness: {provider: 'claude', model: 'claude-sonnet-4-5'},
