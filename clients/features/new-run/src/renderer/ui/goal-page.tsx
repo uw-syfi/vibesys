@@ -4,7 +4,6 @@
  * goal of a task in the user's own project, read from the machine. A task with no objectives file
  * shows its goal with no direction: none is made up.
  */
-import type {HelperFeature} from '@vibesys/contracts/host-helper';
 import {Card, KeyValue, type KeyValueItem, Markdown, Split, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
@@ -117,7 +116,11 @@ function ownGoal(context: NewRunContext): Goal | null {
  * machine's VibeSys that cannot read it (it lacks `feature`, which reads the goal) needs an update;
  * one not heard from yet is being asked.
  */
-function unreadStatus(context: NewRunContext, feature: HelperFeature, reading: boolean): string {
+function unreadStatus(
+  context: NewRunContext,
+  feature: 'project_goal' | 'example_catalogue',
+  reading: boolean,
+): string {
   const {helper, form} = context;
   if (helper?.for !== form.machine) return READING;
   if (!offers(helper, form.machine, feature)) return NEEDS_UPDATE;
