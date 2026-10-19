@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from vs_sim.api import ProcessTimeoutError
 
 from .ledger import (
+    FirstReads,
     LedgerEntry,
     LedgerError,
     LedgerLease,
@@ -38,7 +39,7 @@ from .runner import SlurmError, _make_transport
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
-    from vs_sim.api import Processes
+    from vs_sim.api import Clock, Processes
 
     from .config import SlurmConfig
 
@@ -60,16 +61,25 @@ class RemoteEvaluationLedger:
     reader never sees a partial document and a revision is never overwritten.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-320601 [PLR0913]; each argument is an independent operator setting, injected effect or local resource.
+        # > A carrier type would only rename this signature, and vs_sim's Platform is for
+        # > components that use more than three interfaces; this one uses two.
         self,
         config: SlurmConfig,
         *,
         project: str,
         processes: Processes,
+        clock: Clock,
         scratch_root: Path | None = None,
         host_environment: Callable[[], Mapping[str, str]] | None = None,
     ) -> None:
-        """Bind the project's ledger directory on the cluster."""
+        """Bind the project's ledger directory on the cluster.
+
+        ``clock`` is this reader's wall clock: a withdrawal revision whose file
+        time the cluster cannot read is held from when this object first read
+        it (``FirstReads``).
+        """
+        self._first_reads = FirstReads(clock)
         self._transport = _make_transport(
             config,
             processes=processes,
@@ -93,15 +103,17 @@ class RemoteEvaluationLedger:
         is there but cannot be decoded is reported in ``unreadable_leases``,
         with its file's modification time; it never fails the read. A
         withdrawal revision that cannot be decoded is a withdrawal under way
-        (``read_withdrawal_revision``). A time ``date -r`` cannot read is
-        infinite: the lease holds, and the withdrawal is expired.
+        (``read_withdrawal_revision``). A file's time is read by ``stat``, or
+        by ``date -r`` where ``stat`` has no ``-c`` (BSD); one neither reads is
+        infinite: the lease holds, and the withdrawal holds from when this
+        reader first read it (``FirstReads``).
         """
         directory = self._key_directory(key)
         quoted = shlex.quote(directory.as_posix())
         listing = (
             f"for f in {quoted}/attempt-*.json {quoted}/withdrawal-*.json {quoted}/leases/*.json; do "
             f'if b=$(base64 < "$f" 2>/dev/null); then '
-            f'm=$(date -r "$f" +%s 2>/dev/null) || m=inf; '
+            f'm=$(stat -c %Y "$f" 2>/dev/null) || m=$(date -r "$f" +%s 2>/dev/null) || m=inf; '
             f'printf "%s %s %s\\n" "$m" "$f" "$(printf %s "$b" | tr -d "\\n")"; fi; done; '
             f"printf '%s\\n' {_END}"
         )
@@ -129,7 +141,11 @@ class RemoteEvaluationLedger:
             attempt, revision = int(numbered["attempt"]), int(numbered["revision"])
             if numbered["kind"] == "withdrawal":
                 withdrawal = read_withdrawal_revision(
-                    document, path=path, attempt=attempt, written_at=_written_at(written)
+                    document,
+                    path=path,
+                    attempt=attempt,
+                    file_time=_written_at(written),
+                    first_reads=self._first_reads,
                 )
                 withdrawals.append((attempt, revision, withdrawal))
                 continue
@@ -257,7 +273,7 @@ def _document(field: str) -> str:
 
 
 def _written_at(field: str) -> float:
-    """A file's modification time as ``date -r`` printed it; a reply that is not one is malformed."""
+    """A file's modification time as the listing printed it; a reply that is not one is malformed."""
     try:
         return float(field)
     except ValueError:

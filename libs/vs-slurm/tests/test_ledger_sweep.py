@@ -115,7 +115,7 @@ class _Unleased:
 
     def __init__(self, root: Path) -> None:
         self.cluster = FakeCluster(clock=ManualClock())
-        self.ledger = FakeEvaluationLedger(project=PROJECT)
+        self.ledger = FakeEvaluationLedger(project=PROJECT, clock=ManualClock())
         workspace = root / "workspace"
         workspace.mkdir()
         request = SlurmBatchRequest(
@@ -230,7 +230,7 @@ WINDOW = 900.0
 
 def _jobless_failures(root: Path, attempts: int) -> tuple[FakeEvaluationLedger, SlurmBatchRequest]:
     """A request whose ``attempts`` attempts all failed before naming a job."""
-    ledger = FakeEvaluationLedger(project=PROJECT)
+    ledger = FakeEvaluationLedger(project=PROJECT, clock=ManualClock())
     workspace = root / "workspace"
     workspace.mkdir(exist_ok=True)
     request = SlurmBatchRequest(

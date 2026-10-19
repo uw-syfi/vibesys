@@ -52,7 +52,7 @@ class _World:
         self.root = root
         self.clock = ManualClock(1000.0)
         self.cluster = FakeCluster(clock=self.clock)
-        self.ledger = FakeEvaluationLedger(project=PROJECT)
+        self.ledger = FakeEvaluationLedger(project=PROJECT, clock=self.clock)
         self.run = SlurmLedgerAttachment(
             ledger=self.ledger.reopen(),
             config=CONFIG,
@@ -95,7 +95,7 @@ class _World:
     ) -> tuple[int, str]:
         host = EvalsHost(
             ledger=lambda project: (
-                FakeEvaluationLedger(project=project)
+                FakeEvaluationLedger(project=project, clock=ManualClock())
                 if project != PROJECT
                 else self.ledger.reopen()
             ),
@@ -263,9 +263,6 @@ def test_remove_withdraws_exactly_the_named_entries(
         assert phases[attached.key] is expected
 
 
-@pytest.mark.xfail(
-    strict=True, reason="r3206 recheck LOW-2: the timeout was refused after the confirmation"
-)
 def test_remove_refuses_a_transport_timeout_whose_mark_is_over_the_bound_before_asking(
     tmp_path: Path,
 ) -> None:

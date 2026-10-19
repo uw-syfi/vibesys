@@ -336,6 +336,10 @@ def test_cancel_acknowledges_a_tombstoned_dispatch_with_no_scheduler_job(
         operation_id="never-accepted",
     )
     assert isinstance(submitted, ClusterUnknown)
+    # Every read succeeded and found no job under the name: absent, not merely unknown.
+    observed = cluster.inspect("never-accepted")
+    assert isinstance(observed, ClusterUnknown)
+    assert observed.job_absent
 
     cancelled = cluster.cancel("never-accepted")
     assert isinstance(cancelled, ClusterCancelRequested)
@@ -412,6 +416,7 @@ def test_unknown_identity_stays_unknown(case: _Case) -> None:
     observed = case.cluster.inspect("absent")
     assert isinstance(observed, ClusterUnknown)
     assert observed.operation_id == "absent"
+    assert observed.job_absent
 
 
 @pytest.mark.parametrize("state", [SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING])
@@ -1037,6 +1042,7 @@ def test_fresh_operation_transport_failures_are_typed_unknown(
     assert isinstance(outcome, ClusterUnknown)
     assert outcome.operation_id == "fresh"
     assert outcome.reason
+    assert not outcome.job_absent  # a failed read never says that no job runs
 
 
 def test_artifact_destination_failure_preserves_typed_unknown_evidence(case: _Case) -> None:
@@ -1181,6 +1187,7 @@ def _observable(outcome: object) -> tuple[object, ...]:
         return (*values, outcome.status, outcome.pending_reason, outcome.estimated_start)
     if isinstance(outcome, ClusterUnknown):
         assert outcome.reason
+        values = (*values, outcome.job_absent)
     if isinstance(outcome, ClusterUnknown | ClusterCollected):
         result = outcome.result
         if isinstance(result, SlurmJobResult):

@@ -73,7 +73,7 @@ class _World:
         self.root = root
         self.clock = ManualClock(1000.0)
         self.cluster = FakeCluster(clock=self.clock)
-        self.ledger = FakeEvaluationLedger(project=PROJECT)
+        self.ledger = FakeEvaluationLedger(project=PROJECT, clock=ManualClock())
 
     def attachment(self, holder: str) -> SlurmLedgerAttachment:
         return SlurmLedgerAttachment(
@@ -541,17 +541,7 @@ class _Transport:
 
 @pytest.mark.parametrize(
     "submitter",
-    [
-        pytest.param(
-            "run-a",
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason="r3206 LOW-C: a failed inspect failed another run's lapsed claim",
-            ),
-            id="another-run",
-        ),
-        pytest.param("run-b", id="this-run-earlier-process"),
-    ],
+    [pytest.param("run-a", id="another-run"), pytest.param("run-b", id="this-run-earlier-process")],
 )
 def test_a_failed_inspect_of_a_lapsed_claim_never_starts_a_second_live_job(
     tmp_path: Path, submitter: str

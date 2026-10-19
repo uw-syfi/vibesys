@@ -144,6 +144,14 @@ def _remove(
         keys = resolved.keys
     if not keys:
         return 0, f"Project {listing.project} has no live evaluations to remove.\n"
+    # One withdrawer, so one writer id, for the whole command, as a run keeps one. Built
+    # before the question: a transport timeout whose mark is over the bound is refused
+    # (``WithdrawalTiming``) before the operator is asked to confirm a removal it cannot do.
+    remover = Withdrawer(
+        by=_WITHDRAWER,
+        reason=_REMOVED_REASON,
+        timing=WithdrawalTiming(clock=host.clock, call_seconds=host.call_seconds),
+    )
     targets = [row for row in listing.rows if row.key in keys]
     question = (
         f"Withdraw {len(keys)} evaluation(s) from project {listing.project}?\n"
@@ -152,12 +160,6 @@ def _remove(
     )
     if not args.yes and not host.confirm(question):
         return 1, "Nothing removed.\n"
-    # One withdrawer, so one writer id, for the whole command, as a run keeps one.
-    remover = Withdrawer(
-        by=_WITHDRAWER,
-        reason=_REMOVED_REASON,
-        timing=WithdrawalTiming(clock=host.clock, call_seconds=host.call_seconds),
-    )
     outcomes = [withdraw(ledger, host.cluster, key, remover) for key in keys]
     code = 1 if any(isinstance(outcome, WithdrawUnknown) for outcome in outcomes) else 0
     return code, "\n".join(format_withdrawal(outcome) for outcome in outcomes) + "\n"
@@ -263,7 +265,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         host = EvalsHost(
             ledger=lambda project: RemoteEvaluationLedger(
-                config, project=project, processes=processes, scratch_root=state_root
+                config, project=project, processes=processes, clock=clock, scratch_root=state_root
             ),
             cluster=cluster,
             clock=clock,

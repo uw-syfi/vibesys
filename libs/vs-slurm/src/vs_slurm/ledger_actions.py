@@ -18,9 +18,10 @@ outcome is unknown also undoes the mark, so the attempt is never left marked by
 a live withdrawer. A crash leaves the mark, or a cancelled job under a live
 record, which the next withdrawal or a run attaching to it undoes or settles
 once the mark outlived its window (``undo_expired_withdrawal``): never a
-withdrawn record over a job seen live. A submitting attempt with no job seen is
-the one exception: it is withdrawn first, and a job its submitter starts late
-is cancelled by that submitter or by the sweep's orphan check.
+withdrawn record over a job seen live. A submitting attempt whose inspect found
+no job under its name is the one exception: it is withdrawn first, and a job
+its submitter starts late is cancelled by that submitter or by the sweep's
+orphan check (``take_over_jobless``).
 """
 
 from __future__ import annotations
@@ -59,7 +60,8 @@ if TYPE_CHECKING:
     from vs_sim.api import Clock
 
     from .api import Cluster, EvaluationLedger
-    from .cluster_types import ClusterCollectOutcome
+    from .cluster_types import ClusterCancelOutcome, ClusterCollectOutcome, ClusterInspectOutcome
+    from .ledger import LedgerRecord
     from .scheduler_states import SlurmJobStatus
 
 
@@ -361,7 +363,7 @@ def _cancel_while_marked(
         observed = None if record.state.settled else cluster.inspect(record.operation_id)
         if isinstance(observed, ClusterUnknown):
             if record.state is LedgerState.SUBMITTING:
-                return _withdraw_unseen(ledger, cluster, entry, mark)
+                return _withdraw_unseen(ledger, cluster, entry, mark, observed)
             reason = observed.reason
         elif (live := live_observation(observed)) is None:
             return _Cancelled(None)  # its job ended, or is ending: nothing to stop
@@ -375,33 +377,88 @@ def _cancel_while_marked(
 
 
 def _withdraw_unseen(
-    ledger: EvaluationLedger, cluster: Cluster, entry: LedgerEntry, mark: WithdrawalMark
+    ledger: EvaluationLedger,
+    cluster: Cluster,
+    entry: LedgerEntry,
+    mark: WithdrawalMark,
+    observed: ClusterUnknown,
 ) -> WithdrawOutcome | None:
-    """Withdraw a submitting attempt no job was seen under, then cancel its identity.
+    """Withdraw a submitting attempt whose inspect found no job under its name, then cancel that name.
 
-    With no job seen, there is none to cancel while the mark holds. The attempt
-    is withdrawn first, by compare-and-swap, as a run taking over a lapsed claim
-    fails it: a submitter that recorded its job meanwhile wins, and its job is
-    never cancelled here. Once withdrawn, no run attaches to the attempt, so the
-    cancel that follows has no deadline, however many calls it makes. It
-    leaves a tombstone that keeps a late submitter from starting a job under the
-    attempt's name; one that started a job anyway cancels it when its record
-    write loses, and one that died first leaves it to the sweep's orphan check
-    (``sweep_unleased``).
+    With no job, there is none to cancel while the mark holds: the attempt is
+    withdrawn first, and the cancel that follows has no deadline
+    (``take_over_jobless``). An inspect that could not tell whether a job runs
+    (a transport failure) undoes the mark and withdraws nothing, so the next
+    ask resolves the attempt rather than starting a second job beside it.
     """
     record = entry.record
-    if not ledger.replace(entry, transitioned(record, LedgerState.WITHDRAWN, reason=mark.reason)):
+    withdrawn = transitioned(record, LedgerState.WITHDRAWN, reason=mark.reason)
+    taken = take_over_jobless(ledger, cluster, entry, observed, withdrawn)
+    if isinstance(taken, JobMayRun):
+        _undo(ledger, entry)
+        return WithdrawUnknown(record.key, taken.reason)
+    if taken is None:
         return None
-    cancelled = cluster.cancel(record.operation_id)
-    if isinstance(cancelled, ClusterUnknown):
+    if isinstance(taken.cancel, ClusterUnknown):
         _LOG.info(
             "evaluation ledger request %s is withdrawn; a job its submitter may yet start "
             "under it is left to the orphan check: %s",
             entry_id(record.key),
-            cancelled.reason,
+            taken.cancel.reason,
         )
         return Withdrawn(record.key, record.operation_id, None)
-    return Withdrawn(record.key, record.operation_id, cancelled.job_id)
+    return Withdrawn(record.key, record.operation_id, taken.cancel.job_id)
+
+
+@dataclass(frozen=True, slots=True)
+class EndedJobless:
+    """The attempt ended by this call's swap; ``cancel`` is how the cancel of its name went."""
+
+    cancel: ClusterCancelOutcome
+
+
+@dataclass(frozen=True, slots=True)
+class JobMayRun:
+    """The inspect could not tell whether a job runs under the attempt's name; nothing changed."""
+
+    reason: str
+
+
+def take_over_jobless(
+    ledger: EvaluationLedger,
+    cluster: Cluster,
+    entry: LedgerEntry,
+    observed: ClusterInspectOutcome,
+    ended: LedgerRecord,
+) -> EndedJobless | JobMayRun | None:
+    """End a submitting attempt no job runs under, by compare-and-swap, then cancel its name.
+
+    ``observed`` is the inspect of the attempt's operation just taken; only
+    one that found no job under its name (``ClusterUnknown.job_absent``) lets
+    the attempt end as ``ended`` (failed, by a run taking over a lapsed claim;
+    withdrawn, by a withdrawal). Any other reading is ``JobMayRun``, and the
+    attempt stays: ending it while a job may run would let the next attempt
+    start a second live job.
+
+    The swap comes first, so a submitter that recorded its job meanwhile
+    wins (None: read again) and its job is never cancelled here. Once the
+    swap won, no run attaches to the attempt, and the cancel leaves a
+    tombstone that keeps a late submitter from starting a job under its name;
+    one that started a job anyway cancels it when its record write loses, and
+    one that died first leaves it to the sweep's orphan check
+    (``sweep_unleased``). Raises ``LedgerError`` when the ledger cannot be
+    written.
+    """
+    if not isinstance(observed, ClusterUnknown) or not observed.job_absent:
+        reason = (
+            observed.reason
+            if isinstance(observed, ClusterUnknown)
+            else "a job runs under the attempt's name"
+        )
+        return JobMayRun(reason)
+    if not ledger.replace(entry, ended):
+        return None
+    return EndedJobless(cluster.cancel(entry.record.operation_id))
 
 
 def undo_expired_withdrawal(ledger: EvaluationLedger, entry: LedgerEntry, *, now: float) -> bool:
@@ -690,6 +747,8 @@ def _sweep_one(
 __all__ = [
     "CLOCK_SKEW_SECONDS",
     "SWEEP_WITHDRAWER",
+    "EndedJobless",
+    "JobMayRun",
     "Kept",
     "NotInLedger",
     "OrphanChecks",
@@ -702,6 +761,7 @@ __all__ = [
     "settle",
     "sweep_unleased",
     "sweep_withdrawer",
+    "take_over_jobless",
     "undo_expired_withdrawal",
     "withdraw",
     "withdrawal_window_seconds",

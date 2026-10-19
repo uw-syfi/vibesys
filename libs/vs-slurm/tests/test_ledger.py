@@ -491,7 +491,7 @@ class _World:
     def __init__(self, tmp_path: Path, *, status: SlurmJobStatus) -> None:
         self.clock = ManualClock()
         self.cluster = FakeCluster(clock=self.clock)
-        self.ledger = FakeEvaluationLedger(project=PROJECT)
+        self.ledger = FakeEvaluationLedger(project=PROJECT, clock=ManualClock())
         workspace = tmp_path / "workspace"
         workspace.mkdir()
         request = _request(workspace)
@@ -743,7 +743,7 @@ def test_the_sweep_cancels_every_live_job_named_for_a_failed_or_withdrawn_attemp
     with TemporaryDirectory() as directory:
         workspace = Path(directory)
         cluster = FakeCluster(clock=ManualClock())
-        ledger = FakeEvaluationLedger(project=PROJECT)
+        ledger = FakeEvaluationLedger(project=PROJECT, clock=ManualClock())
         request = _request(workspace)
         key = evaluation_key(PROJECT, request, CONFIG, setup_script_sha256=None)
         live: set[str] = set()

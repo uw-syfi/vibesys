@@ -69,9 +69,10 @@ class _Case:
 
 
 def _make(implementation: str, root: Path, clock: ManualClock | None = None) -> _Case:
-    reader = {} if clock is None else {"clock": clock}
+    """The case of ``implementation``; ``clock`` is its readers' clock (a fixed one by default)."""
+    clock = clock if clock is not None else ManualClock(_WRITTEN_AT)
     if implementation == "fake":
-        fake = FakeEvaluationLedger(project=PROJECT, **reader)
+        fake = FakeEvaluationLedger(project=PROJECT, clock=clock)
 
         def put_fake(name: str, content: bytes) -> str:
             path = f"/site/{name}"
@@ -102,7 +103,7 @@ def _make(implementation: str, root: Path, clock: ManualClock | None = None) -> 
 
     def open_ledger() -> EvaluationLedger:
         return RemoteEvaluationLedger(
-            config, project=PROJECT, processes=connector, scratch_root=scratch, **reader
+            config, project=PROJECT, processes=connector, clock=clock, scratch_root=scratch
         )
 
     def plant(key: str, attempt: int, document: str) -> None:
@@ -628,28 +629,6 @@ def test_an_unreadable_withdrawal_holds_for_at_least_any_withdrawers_window(
     assert not undo_expired_withdrawal(case.reopen(), entry, now=_WRITTEN_AT + window)
 
 
-def test_an_unreadable_withdrawal_whose_file_time_is_unknown_is_expired_at_once() -> None:
-    """``date -r`` failed: it never blocks the request, so the first asker undoes it.
-
-    On the remote ledger a time ``date -r`` cannot read is infinite; the Fake
-    plants that reading directly.
-    """
-    ledger = FakeEvaluationLedger(project=PROJECT)
-    planted = _record(state=LedgerState.SUBMITTED)
-    ledger.store_raw(KEY, 0, encode_ledger_document(planted))
-    ledger.store_raw_withdrawal(KEY, 0, 0, _UNREADABLE_WITHDRAWALS[0], written_at=math.inf)
-
-    entry = ledger.read(KEY)
-
-    assert entry is not None
-    now = planted.claim_expires_at + 1.0
-    assert submit_step(entry, now=now) == AwaitWithdrawal(entry, expired=True)
-    assert undo_expired_withdrawal(ledger, entry, now=now)
-    undone = ledger.read(KEY)
-    assert undone is not None
-    assert isinstance(submit_step(undone, now=now), CheckJob | AttachJob)
-
-
 def _fail_on_the_cluster(connector: FakeConnector, *programs: str) -> None:
     """Make each of ``programs`` fail in the ledger's reads on the cluster, as on a host without it.
 
@@ -668,9 +647,6 @@ def _fail_on_the_cluster(connector: FakeConnector, *programs: str) -> None:
     connector.intercept(intercept)
 
 
-@pytest.mark.xfail(
-    strict=True, reason="r3206 recheck LOW-1: only date -r reads a file's time; stat is not tried"
-)
 def test_an_unreadable_withdrawal_is_held_by_its_file_time_on_a_host_whose_date_cannot_read_it(
     tmp_path: Path,
 ) -> None:
@@ -689,9 +665,6 @@ def test_an_unreadable_withdrawal_is_held_by_its_file_time_on_a_host_whose_date_
     assert submit_step(entry, now=held_until + 1) == AwaitWithdrawal(entry, expired=True)
 
 
-@pytest.mark.xfail(
-    strict=True, reason="r3206 recheck LOW-1: a mark whose file time is unknown expired at once"
-)
 @pytest.mark.parametrize("implementation", IMPLEMENTATIONS)
 @given(
     document=st.sampled_from(_UNREADABLE_WITHDRAWALS),

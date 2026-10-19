@@ -213,7 +213,7 @@ def test_a_slow_multi_call_cancel_never_kills_a_job_a_run_attached_to_after_the_
     """
     with TemporaryDirectory() as directory:
         clock = ManualClock(NOW)
-        ledger = _SlowAfterMark(project=PROJECT)
+        ledger = _SlowAfterMark(project=PROJECT, clock=ManualClock())
         ledger.clock = clock
         ledger.seconds = slowness
         cluster, connector, key = _world(Path(directory), ledger, clock)
@@ -239,7 +239,7 @@ def test_the_fake_cluster_cancel_spends_the_same_calls_and_never_kills_a_held_jo
     """r3173-recheck MED-1, on the Fake cluster: its cancel makes the production client's calls."""
     with TemporaryDirectory() as directory:
         clock = ManualClock(NOW)
-        ledger = _SlowAfterMark(project=PROJECT)
+        ledger = _SlowAfterMark(project=PROJECT, clock=ManualClock())
         ledger.clock = clock
         ledger.seconds = slowness
         workspace = Path(directory)
@@ -281,7 +281,7 @@ def test_a_submitting_attempt_with_no_job_seen_is_withdrawn_first_however_slow_i
     """
     with TemporaryDirectory() as directory:
         clock = ManualClock(NOW)
-        ledger = _SlowAfterMark(project=PROJECT)
+        ledger = _SlowAfterMark(project=PROJECT, clock=ManualClock())
         ledger.clock = clock
         ledger.seconds = slowness
         request = SlurmBatchRequest(
@@ -333,10 +333,6 @@ class _Transport:
             raise SlurmError.transport_timed_out("exec")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="r3206 LOW-C: a failed inspect withdrew the attempt with its job's fate unknown",
-)
 @pytest.mark.parametrize("state", [SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING])
 def test_a_failed_inspect_and_a_failed_cancel_never_leave_a_live_job_beside_the_next_attempts(
     state: SlurmJobStatus,
@@ -350,7 +346,7 @@ def test_a_failed_inspect_and_a_failed_cancel_never_leave_a_live_job_beside_the_
         clock = ManualClock(NOW)
         transport = _Transport()
         cluster = FakeCluster(clock=clock, on_call=transport)
-        ledger = FakeEvaluationLedger(project=PROJECT)
+        ledger = FakeEvaluationLedger(project=PROJECT, clock=ManualClock())
         request = SlurmBatchRequest(
             workspace=Path(directory), stages=(SlurmBatchStage(name="bench", command=("true",)),)
         )

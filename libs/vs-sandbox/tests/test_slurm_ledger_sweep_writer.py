@@ -14,8 +14,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-import pytest
-
 from vs_sandbox.api.slurm import SlurmLedgerAttachment
 from vs_sim.api.testing import ManualClock
 from vs_slurm.api import (
@@ -87,7 +85,7 @@ def test_a_sweep_takes_up_the_mark_an_earlier_sweep_of_its_process_left_standing
         workspace = Path(directory)
         clock = ManualClock(NOW)
         cluster = FakeCluster(clock=clock)
-        ledger = _LosesTheFirstMark(project=PROJECT)
+        ledger = _LosesTheFirstMark(project=PROJECT, clock=ManualClock())
         request = SlurmBatchRequest(
             workspace=workspace, stages=(SlurmBatchStage(name="bench", command=("true",)),)
         )
@@ -217,9 +215,6 @@ def _submitted(
     return key, operation
 
 
-@pytest.mark.xfail(
-    strict=True, reason="r3206 LOW-D: two sweeps of one process overlap with one writer id"
-)
 def test_a_heartbeat_during_a_sweep_starts_no_second_sweep_of_the_process() -> None:
     """r3206 LOW-D: a later heartbeat's sweep undid the first sweep's mark as its own.
 
@@ -233,7 +228,7 @@ def test_a_heartbeat_during_a_sweep_starts_no_second_sweep_of_the_process() -> N
     with TemporaryDirectory() as directory:
         workspace = Path(directory)
         clock = ManualClock(NOW)
-        ledger = _LeasedAfterTheNextRead(project=PROJECT)
+        ledger = _LeasedAfterTheNextRead(project=PROJECT, clock=ManualClock())
         hooks: list[_Interleaving] = []
 
         def on_call(kind: ClusterCall) -> None:

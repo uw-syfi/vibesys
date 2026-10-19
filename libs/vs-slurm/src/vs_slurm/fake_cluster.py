@@ -493,10 +493,14 @@ class FakeCluster:
             return ClusterUnknown(
                 operation_id=target if isinstance(target, str) and not by_job_id else None,
                 reason="operation not found",
+                job_absent=self._absent_by_name(target, by_job_id=by_job_id),
             )
         if job.operation_id in self._expired_names and not job.accepted_published and not by_job_id:
+            # The name lookup forgot the job; a queued or running one is still found by it.
             return ClusterUnknown(
-                operation_id=job.operation_id, reason="submission acceptance unresolved"
+                operation_id=job.operation_id,
+                reason="submission acceptance unresolved",
+                job_absent=not isinstance(self._peek(job), Queued | Running),
             )
         job.acceptance_observed = True
         job.accepted_published = True
@@ -778,6 +782,20 @@ class FakeCluster:
             except OSError as error:
                 failures.append(f"{target.remote_path}: {error}")
         return tuple(recovered), "; ".join(failures) or None
+
+    def _absent_by_name(self, target: ClusterTarget, *, by_job_id: bool) -> bool:
+        """Whether a name lookup proves that no job of this name exists, as in production.
+
+        A rejected name, or one cancelled before its dispatch, keeps a record in
+        production that was never dispatched, and production does not call it absent.
+        A dispatched name that the scheduler never accepted is absent in both.
+        """
+        return (
+            isinstance(target, str)
+            and not by_job_id
+            and target not in self._rejections
+            and target not in self._cancelled
+        )
 
     def _find(self, target: ClusterTarget, *, by_job_id: bool) -> _Job | None:
         if not isinstance(target, str):

@@ -69,7 +69,11 @@ class _World:
 
     def run(self, holder: str) -> SlurmLedgerAttachment:
         ledger = RemoteEvaluationLedger(
-            self.config, project=PROJECT, processes=self.connector, scratch_root=self.scratch
+            self.config,
+            project=PROJECT,
+            processes=self.connector,
+            clock=self.clock,
+            scratch_root=self.scratch,
         )
         return SlurmLedgerAttachment(
             ledger=ledger,

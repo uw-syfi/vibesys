@@ -436,9 +436,12 @@ class SlurmCluster:
                 ) as exc:
                     return ClusterUnknown(operation_id=None, job_id=target, reason=str(exc))
                 return self._observation(None, target, reading, None)
+            # Neither this host's store nor the cluster holds the operation's intent,
+            # which every submission publishes before its sbatch: no job has its name.
             return ClusterUnknown(
                 operation_id=target if isinstance(target, str) else None,
                 reason="operation not found",
+                job_absent=True,
             )
 
     def cancel(
@@ -719,6 +722,7 @@ class SlurmCluster:
             return ClusterUnknown(
                 operation_id=observed.operation_id,
                 reason="submission acceptance unresolved",
+                job_absent=True,
             )
         return observed
 

@@ -58,6 +58,7 @@ Phase 2 (slot jobs, #2757) adds states and a second job kind to this record;
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import math
@@ -89,6 +90,8 @@ from .scheduler_states import SlurmJobStatus
 if TYPE_CHECKING:
     from collections.abc import Iterable
     from pathlib import Path
+
+    from vs_sim.api import Clock
 
     from .cluster_types import ClusterCollectOutcome
     from .config import SlurmConfig
@@ -527,14 +530,21 @@ class UnreadableLease:
 
 @dataclass(frozen=True, slots=True)
 class UnreadableWithdrawal:
-    """A withdrawal revision this build cannot decode, and when its file was last written.
+    """A withdrawal revision this build cannot decode, and when it was written, at the latest.
 
     ``written_at`` is the file's modification time on the ledger's filesystem,
-    in epoch seconds, infinite when it cannot be read. A revision is created
-    once and never changed, so that is when it was written.
+    in epoch seconds: a revision is created once and never changed, so that is
+    when it was written. When that time cannot be read, it is when this reader
+    first read the revision, by its own clock (``FirstReads``), which is later.
     """
 
     written_at: float
+
+    def __post_init__(self) -> None:
+        """Refuse a time that is not one: the revision would hold for ever, or not at all."""
+        if not math.isfinite(self.written_at):
+            message = "an unreadable withdrawal revision needs a finite time it was written by"
+            raise ValueError(message)
 
 
 WithdrawalRevision = WithdrawalMark | WithdrawalUndone | UnreadableWithdrawal
@@ -558,20 +568,17 @@ def _unreadable_withdrawal_mark(
     """The withdrawal under way that an unreadable newest withdrawal revision of ``record`` counts as. Pure.
 
     It may be a newer build's mark of a withdrawal still cancelling the job, so
-    no run attaches while it may hold: it holds after its file was written for
-    the attempt's claim window, as an unreadable lease does, and at least
-    ``MAX_WITHDRAWAL_WINDOW_SECONDS``, the longest any withdrawer's mark holds;
-    then anyone may undo it as an expired mark. Ignoring it instead could
-    attach a run to a job that newer build is about to cancel, and would hand
-    the next withdrawal revision's number to a file that already exists. A
-    file whose time cannot be read (``written_at`` not finite) is expired at
-    once: it would otherwise block the request for ever.
+    no run attaches while it may hold: it holds after it was written
+    (``UnreadableWithdrawal.written_at``, its file's time, or this reader's
+    first read of it when that is unknown) for the attempt's claim window, as
+    an unreadable lease does, and at least ``MAX_WITHDRAWAL_WINDOW_SECONDS``,
+    the longest any withdrawer's mark holds; then anyone may undo it as an
+    expired mark. Ignoring it instead could attach a run to a job that newer
+    build is about to cancel, and would hand the next withdrawal revision's
+    number to a file that already exists.
     """
-    if math.isfinite(revision.written_at):
-        since = revision.written_at
-        window = max(record.claim_expires_at - record.created_at, MAX_WITHDRAWAL_WINDOW_SECONDS)
-    else:
-        since, window = 0.0, 0.0
+    since = revision.written_at
+    window = max(record.claim_expires_at - record.created_at, MAX_WITHDRAWAL_WINDOW_SECONDS)
     return WithdrawalMark(
         attempt=record.attempt,
         by=UNREADABLE_WITHDRAWER,
@@ -805,20 +812,45 @@ def decode_withdrawal(text: str, *, path: str) -> WithdrawalMark | WithdrawalUnd
 
 
 def read_withdrawal_revision(
-    text: str, *, path: str, attempt: int, written_at: float
+    text: str, *, path: str, attempt: int, file_time: float, first_reads: FirstReads
 ) -> WithdrawalRevision:
     """The withdrawal revision stored for ``attempt``; one this build cannot decode is never an error.
 
     A newer format, a damaged file, or a document naming another attempt than
-    its file is ``UnreadableWithdrawal``, written at ``written_at``; the entry
-    counts it as a withdrawal under way (``_unreadable_withdrawal_mark``).
-    Records stay strict (``decode_record``).
+    its file is ``UnreadableWithdrawal``, written at its file's modification
+    time ``file_time``, or, when that is unknown (not finite), when this reader
+    first read it (``first_reads``); the entry counts it as a withdrawal under
+    way (``_unreadable_withdrawal_mark``). Records stay strict (``decode_record``).
     """
     try:
         document = decode_withdrawal(text, path=path)
     except LedgerError:
-        return UnreadableWithdrawal(written_at)
-    return document if document.attempt == attempt else UnreadableWithdrawal(written_at)
+        document = None
+    if document is not None and document.attempt == attempt:
+        return document
+    return UnreadableWithdrawal(first_reads.written_at(path, file_time))
+
+
+@dataclass
+class FirstReads:
+    """When one reader of a ledger first read each withdrawal revision whose file time it cannot read.
+
+    A file time can be unknown: the cluster's ``stat`` and ``date`` could not
+    read it. That revision still came into being before this reader first
+    read it, so holding it from that read, on the reader's own ``clock``, is
+    never too early, and it ends, so the request is not blocked for ever
+    (``_unreadable_withdrawal_mark``). Each ledger object keeps one; another
+    process's ledger has its own.
+    """
+
+    clock: Clock
+    _first: dict[str, float] = dataclasses.field(default_factory=dict)
+
+    def written_at(self, path: str, file_time: float) -> float:
+        """``file_time`` when it is known; otherwise when this reader first read ``path``."""
+        if math.isfinite(file_time):
+            return file_time
+        return self._first.setdefault(path, self.clock.now())
 
 
 # A record or lease is a few hundred bytes; anything near this bound is not one.

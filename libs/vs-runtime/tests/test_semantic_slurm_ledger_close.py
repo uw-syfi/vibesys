@@ -22,7 +22,7 @@ from vs_evaluation.api import (
 )
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster, build_stack
 from vs_sandbox.api.slurm import SlurmLedgerAttachment
-from vs_sim.api.testing import SimThreads, VirtualClock, run_virtual
+from vs_sim.api.testing import ManualClock, SimThreads, VirtualClock, run_virtual
 from vs_slurm.api import (
     ClusterObservation,
     FakeEvaluationLedger,
@@ -71,7 +71,7 @@ def test_closing_the_run_cancels_the_shared_job_unless_another_run_wants_it(
     tmp_path: Path, *, another_run_wants_it: bool
 ) -> None:
     clock = VirtualClock(1000.0)
-    ledger = FakeEvaluationLedger(project=PROJECT)
+    ledger = FakeEvaluationLedger(project=PROJECT, clock=ManualClock())
     attachment = SlurmLedgerAttachment(
         ledger=ledger.reopen(),
         config=CONFIG,

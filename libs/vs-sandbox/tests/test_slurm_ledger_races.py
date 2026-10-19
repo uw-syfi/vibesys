@@ -249,7 +249,7 @@ class _World:
         self.clock = ManualClock(1000.0)
         # Every job queues until it is cancelled: a job that ends on its own wants nothing.
         self.cluster = FakeCluster(clock=self.clock, timing=_QUEUED_FOREVER)
-        self.ledger = FakeEvaluationLedger(project=PROJECT)
+        self.ledger = FakeEvaluationLedger(project=PROJECT, clock=ManualClock())
         self.steps = steps
         steps.clock = self.clock
         self.stepped_cluster = _SteppedCluster(self.cluster, steps)

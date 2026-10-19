@@ -38,6 +38,7 @@ from vs_slurm.api import (
     ClusterRejected,
     ClusterSubmitted,
     ClusterUnknown,
+    JobMayRun,
     LedgerEntry,
     LedgerError,
     LedgerLabels,
@@ -60,6 +61,7 @@ from vs_slurm.api import (
     submit_step,
     sweep_unleased,
     sweep_withdrawer,
+    take_over_jobless,
     transitioned,
     undo_expired_withdrawal,
     validate_holder,
@@ -127,6 +129,10 @@ class LedgerAttachError(RuntimeError):
         )
 
 
+_SWEEP = "sweep"
+"""The key of ``SlurmLedgerAttachment._sweeping``."""
+
+
 @dataclass
 class SlurmLedgerAttachment:
     """One run's attachment to its project's ledger, shared by all its Slurm executors.
@@ -143,6 +149,8 @@ class SlurmLedgerAttachment:
     clock: Clock
     _renewed: dict[str, float] = field(default_factory=dict)
     _swept_at: float | None = None
+    # Holds the token of the sweep under way, if any (``sweep_if_due``).
+    _sweeping: dict[str, object] = field(default_factory=dict, repr=False)
     # Which of this run's evaluations use each request, and the request of each.
     _users: dict[str, set[str]] = field(default_factory=dict)
     _used: dict[str, str] = field(default_factory=dict)
@@ -357,18 +365,36 @@ class SlurmLedgerAttachment:
                 return  # nothing to record yet: not a lost swap, so do not read again
 
     def sweep_if_due(self, cluster: Cluster) -> tuple[WithdrawOutcome, ...]:
-        """Withdraw unleased requests, at most once per lease period per run."""
-        now = self.clock.now()
-        if self._swept_at is not None and now - self._swept_at < self.policy.lease_seconds:
+        """Withdraw unleased requests, at most once per lease period per run, one sweep at a time.
+
+        All this process's sweeps share one writer id (``sweep_withdrawer``),
+        so a second sweep running beside the first would take the first's mark
+        for its own and could undo it while the first is about to cancel. A
+        sweep that finds another under way, on any thread or within it,
+        returns at once: the one under way covers the project.
+
+        The executor calls in from its worker threads. A sweep claims its turn
+        with one ``dict.setdefault`` on a string key, which is atomic (with the
+        GIL, and under free-threading's per-object locking, it runs no Python
+        code), so no lock, and no ``Threads`` to make one, is needed.
+        """
+        token = object()
+        if self._sweeping.setdefault(_SWEEP, token) is not token:
             return ()
-        self._swept_at = now
-        return sweep_unleased(
-            self.ledger,
-            cluster,
-            sweeper=self._sweeper,
-            grace_seconds=self.policy.grace_seconds,
-            orphans=self._orphans,
-        )
+        try:
+            now = self.clock.now()
+            if self._swept_at is not None and now - self._swept_at < self.policy.lease_seconds:
+                return ()
+            self._swept_at = now
+            return sweep_unleased(
+                self.ledger,
+                cluster,
+                sweeper=self._sweeper,
+                grace_seconds=self.policy.grace_seconds,
+                orphans=self._orphans,
+            )
+        finally:
+            del self._sweeping[_SWEEP]
 
     def _attached(self, record: LedgerRecord, request: SlurmBatchRequest) -> Attached:
         job = record.job
@@ -447,19 +473,17 @@ class SlurmLedgerAttachment:
             return AttachPending(record.key, "another process is submitting the request's job")
         if record.owner == self.holder:
             return self._take_over_own(cluster, entry)
-        # The submitter stopped renewing its claim: it died before sbatch, or hangs.
-        # The attempt fails first, by compare-and-swap, so a submitter that recorded
-        # its job meanwhile wins and its job is never cancelled here. Only after the
-        # swap won does a tombstone keep a late submitter from starting a job under
-        # this name; one that gets through loses its record write and cancels its
-        # job, and one that dies first leaves it to the sweep (``sweep_unleased``).
+        # The submitter stopped renewing its claim: it died, or hangs. The attempt
+        # fails only if no job runs under its name, first, by compare-and-swap, so a
+        # submitter that recorded its job meanwhile wins (``take_over_jobless``).
         failed = transitioned(
             record,
             LedgerState.FAILED,
             reason="its submitter's claim expired before it recorded a job",
         )
-        if self.ledger.replace(entry, failed):
-            cluster.cancel(record.operation_id)
+        taken = take_over_jobless(self.ledger, cluster, entry, observed, failed)
+        if isinstance(taken, JobMayRun):
+            return AttachPending(record.key, f"the lapsed claim's job may run: {taken.reason}")
         return None  # read again: a new attempt, or the job the submitter recorded
 
     def _take_over_own(self, cluster: Cluster, entry: LedgerEntry) -> AttachPending | None:
@@ -574,10 +598,15 @@ def open_ledger_attachment(  # noqa: PLR0913  # lint-waiver: LW-275701 [PLR0913]
 ) -> SlurmLedgerAttachment:
     """Attach run ``holder`` to the ledger of ``project`` on the configured cluster."""
     ledger = make_evaluation_ledger(
-        config, project=project, state_root=state_root, processes=processes
+        config, project=project, state_root=state_root, processes=processes, clock=clock
     )
     return SlurmLedgerAttachment(
-        ledger=ledger, config=config, project=project, holder=holder, policy=policy, clock=clock
+        ledger=ledger,
+        config=config,
+        project=project,
+        holder=holder,
+        policy=policy,
+        clock=clock,
     )
 
 

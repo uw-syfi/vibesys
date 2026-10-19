@@ -72,7 +72,9 @@ def _submitted(
 ) -> tuple[FakeEvaluationLedger, FakeCluster, str, str]:
     """A request whose job is queued, claimed by ``owner`` and leased by this run."""
     cluster = FakeCluster(clock=ManualClock(NOW))
-    ledger = ledger if ledger is not None else FakeEvaluationLedger(project=PROJECT)
+    ledger = (
+        ledger if ledger is not None else FakeEvaluationLedger(project=PROJECT, clock=ManualClock())
+    )
     workspace = root / "workspace"
     workspace.mkdir()
     request = SlurmBatchRequest(
@@ -242,7 +244,7 @@ def test_a_lease_written_just_after_the_withdrawal_mark_keeps_the_job() -> None:
     the mark (or the withdrawn record) and waits, then submits again.
     """
     with TemporaryDirectory() as directory:
-        ledger = _LeasedOnceMarked(project=PROJECT)
+        ledger = _LeasedOnceMarked(project=PROJECT, clock=ManualClock())
         _, cluster, key, operation = _submitted(Path(directory), SELF, ledger)
         before = ledger.read(key)
         assert before is not None
@@ -314,7 +316,7 @@ def test_a_withdrawer_left_too_little_of_its_window_cancels_nothing_and_undoes_i
     """
     with TemporaryDirectory() as directory:
         clock = ManualClock(NOW)
-        ledger = _SlowAfterMark(project=PROJECT)
+        ledger = _SlowAfterMark(project=PROJECT, clock=ManualClock())
         ledger.clock = clock
         _, cluster, key, operation = _submitted(Path(directory), SELF, ledger)
         timing = WithdrawalTiming(clock=clock, call_seconds=call_seconds)
@@ -363,7 +365,7 @@ def test_a_withdrawer_whose_mark_answer_was_lost_knows_the_mark_for_its_own() ->
     still waits on it.
     """
     with TemporaryDirectory() as directory:
-        ledger = _MarkAnswerLost(project=PROJECT)
+        ledger = _MarkAnswerLost(project=PROJECT, clock=ManualClock())
         _, cluster, key, operation = _submitted(Path(directory), SELF, ledger)
         stopping = _withdrawer(SELF)
 

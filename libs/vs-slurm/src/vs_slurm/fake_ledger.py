@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+from typing import TYPE_CHECKING
 
 from .ledger import (
+    FirstReads,
     LedgerEntry,
     LedgerError,
     LedgerLease,
@@ -24,6 +26,9 @@ from .ledger import (
     validate_key,
     validate_project,
 )
+
+if TYPE_CHECKING:
+    from vs_sim.api import Clock
 
 
 class _Store:
@@ -51,16 +56,23 @@ class FakeEvaluationLedger:
 
     ``reopen`` gives another process's view of the same storage; ``store_raw``
     and its siblings plant a document as another build would have written it.
+    ``clock`` is this reader's wall clock, as the remote ledger's: a planted
+    withdrawal revision whose file time is unknown is held from when this
+    object first read it (``FirstReads``).
     """
 
-    def __init__(self, *, project: str, _store: _Store | None = None) -> None:
+    def __init__(self, *, project: str, clock: Clock, _store: _Store | None = None) -> None:
         """Create an empty ledger for ``project``."""
         self._project = validate_project(project)
         self._store = _store if _store is not None else _Store()
+        self._clock = clock
+        self._first_reads = FirstReads(clock)
 
     def reopen(self, *, project: str | None = None) -> FakeEvaluationLedger:
-        """Another process's ledger over the same storage."""
-        return FakeEvaluationLedger(project=project or self._project, _store=self._store)
+        """Another process's ledger over the same storage, on the same clock."""
+        return FakeEvaluationLedger(
+            project=project or self._project, clock=self._clock, _store=self._store
+        )
 
     def store_raw(self, key: str, attempt: int, document: str, revision: int = 0) -> None:
         """Plant a record revision's stored bytes, for format compatibility tests."""
@@ -96,7 +108,11 @@ class FakeEvaluationLedger:
         for (attempt, revision), (text, written_at) in withdrawals.items():
             path = f"{key}/withdrawal-{attempt}.{revision}.json"
             document = read_withdrawal_revision(
-                text, path=path, attempt=attempt, written_at=written_at
+                text,
+                path=path,
+                attempt=attempt,
+                file_time=written_at,
+                first_reads=self._first_reads,
             )
             marks.append((attempt, revision, document))
         readable: list[LedgerLease] = []

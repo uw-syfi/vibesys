@@ -123,7 +123,7 @@ def _executor(
     workspace.mkdir(exist_ok=True)
     (workspace / "bench.py").write_text("print('bench')", encoding="utf-8")
     attachment = SlurmLedgerAttachment(
-        ledger=FakeEvaluationLedger(project=PROJECT),
+        ledger=FakeEvaluationLedger(project=PROJECT, clock=ManualClock()),
         config=config,
         project=PROJECT,
         holder="run-1",

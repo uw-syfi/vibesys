@@ -98,13 +98,30 @@ class ClusterRejected(_Outcome):
 
 
 class ClusterUnknown(_Outcome):
-    """Ambiguous observation with identity and preserved evidence."""
+    """Ambiguous observation with identity and preserved evidence.
+
+    ``job_absent`` is True only on an inspection whose reads all succeeded and
+    found no job under the operation's name: none is queued or running now,
+    though a submission still in flight may yet start one. It is False for
+    every other Unknown (a failed transport call, a scheduler state it cannot
+    read, an ambiguous name), whose job may be live. A caller that would end
+    an attempt as jobless, and so let the next attempt start a job of its own,
+    does so only when it is True (``take_over_jobless``).
+    """
 
     kind: Literal["unknown"] = "unknown"
     operation_id: str | None
     reason: str
     job_id: str | None = None
     result: ClusterResult | None = None
+    job_absent: bool = False
+
+    @model_validator(mode="after")
+    def _absent_names_no_job(self) -> ClusterUnknown:
+        if self.job_absent and (self.job_id is not None or self.result is not None):
+            message = "an Unknown that found no job names no job and carries no result"
+            raise ValueError(message)
+        return self
 
 
 class ClusterObservation(_Outcome):

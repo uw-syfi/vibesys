@@ -39,7 +39,7 @@ from vs_sandbox.api.slurm import (
     SlurmStagePayload,
 )
 from vs_sim.api import yield_now
-from vs_sim.api.testing import SimThreads, VirtualClock, examples, run_virtual
+from vs_sim.api.testing import ManualClock, SimThreads, VirtualClock, examples, run_virtual
 from vs_slurm.api import (
     ClusterObservation,
     ClusterSubmitOutcome,
@@ -175,7 +175,7 @@ class _Shutdown:
         ledger = None
         if self.mode == "ledger":
             ledger = SlurmLedgerAttachment(
-                ledger=FakeEvaluationLedger(project=PROJECT),
+                ledger=FakeEvaluationLedger(project=PROJECT, clock=ManualClock()),
                 config=CONFIG,
                 project=PROJECT,
                 holder="run-1",
@@ -527,7 +527,7 @@ class _TwoRuns:
     def __post_init__(self) -> None:
         self.sim = SimThreads(self.clock, schedule_seed=self.seed)
         self.scheduler = _SharedScheduler(self.clock, self.sim, self.faults)
-        self.ledger = FakeEvaluationLedger(project=PROJECT)
+        self.ledger = FakeEvaluationLedger(project=PROJECT, clock=ManualClock())
         self.runs = [
             _LedgerRun(index, self.root / f"run-{index}", contents, self._executor(index))
             for index, contents in enumerate(self.contents)
@@ -771,7 +771,7 @@ def test_a_run_never_leases_a_request_it_is_withdrawing(
             super().renew(key, lease)
 
     scheduler = _SlowCancel(clock, sim, frozenset())
-    ledger = FakeEvaluationLedger(project=PROJECT)
+    ledger = FakeEvaluationLedger(project=PROJECT, clock=ManualClock())
     root = tmp_path_factory.mktemp("run")
     (root / "workspace").mkdir()
     (root / "workspace" / "bench.py").write_text("print('bench')\n", encoding="utf-8")

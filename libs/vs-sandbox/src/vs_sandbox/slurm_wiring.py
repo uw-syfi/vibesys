@@ -38,9 +38,10 @@ def make_evaluation_ledger(
     project: str,
     state_root: Path,
     processes: Processes,
+    clock: Clock,
 ) -> EvaluationLedger:
     """The project's evaluation ledger, on the cluster's filesystem beside its jobs (#2757)."""
     state_root.mkdir(parents=True, exist_ok=True)
     return RemoteEvaluationLedger(
-        config, project=project, processes=processes, scratch_root=state_root
+        config, project=project, processes=processes, clock=clock, scratch_root=state_root
     )
