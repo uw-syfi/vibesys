@@ -51,6 +51,7 @@ export function RunWithChat(props: {
       route={page.route}
       zoom={page.zoom}
       dispatch={page.dispatch}
+      modelNames={page.modelNames}
       chat={{
         open: chat.open,
         toggle: chat.toggle,

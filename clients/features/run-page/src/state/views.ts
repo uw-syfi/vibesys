@@ -11,6 +11,7 @@ import type {CoreState} from '@vibesys/run-state';
 import {type RunEnding, type RunTrace, traceSpans} from '@vibesys/run-state/trace';
 import {type AdoptedCandidate, adoptedCandidate, endReason, unclipped} from './end-words.js';
 import {overviewAt, traceAt} from './live.js';
+import {type ModelNames, NO_MODEL_NAMES} from './model-names.js';
 import {
   commandable,
   type HistoryProgress,
@@ -130,7 +131,7 @@ function providerName(provider: string): string {
   return provider.charAt(0).toUpperCase() + provider.slice(1);
 }
 
-export function headerView(state: RunPageState): HeaderView {
+export function headerView(state: RunPageState, names: ModelNames = NO_MODEL_NAMES): HeaderView {
   const phase = runPhase(state);
   const {project, task} = state.title;
   const name = projectName(project);
@@ -141,7 +142,7 @@ export function headerView(state: RunPageState): HeaderView {
     status: status(state),
     // Tokens counted over a prefix of the history are not what the run spent.
     spent: historyLoading(state) === null ? tokensReading(state.run.core?.tokens.total) : null,
-    agents: roleAgents(usageRecords(state)).map(each => ({
+    agents: roleAgents(usageRecords(state), names).map(each => ({
       role: each.role,
       ran: each.ran.flatMap(who => whoWords(who) ?? []),
     })),

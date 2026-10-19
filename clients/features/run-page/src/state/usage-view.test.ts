@@ -70,7 +70,7 @@ function randomRecords(random: Seeded): UsageRecord[] {
   });
 }
 
-const NO_CONTEXT: UsageContext = {ideaOfSpan: new Map(), ideas: new Map()};
+const NO_CONTEXT: UsageContext = {ideaOfSpan: new Map(), ideas: new Map(), models: new Map()};
 
 /** A context in which every span with a number belongs to one of three ideas. */
 function ideaContext(): UsageContext {
@@ -79,6 +79,7 @@ function ideaContext(): UsageContext {
       ['s0', 's1', 's2', 's3', 's4', 's5'].map((span, at) => [span, `idea-${at % 3}`]),
     ),
     ideas: new Map(),
+    models: new Map(),
   };
 }
 
@@ -244,6 +245,19 @@ describe('the run’s records and the run’s spend', () => {
     const agents = headerView(opened()).agents;
 
     expect(agents).toContainEqual({role: 'Planner', ran: ['gpt-6-luna on codex']});
+  });
+
+  test('the header names a model by its display name, and an unnamed one by its id', () => {
+    const names = new Map([['gpt-6-luna', 'GPT-6 Luna']]);
+
+    expect(headerView(opened(), names).agents).toContainEqual({
+      role: 'Planner',
+      ran: ['GPT-6 Luna on codex'],
+    });
+    expect(headerView(opened(), new Map()).agents).toContainEqual({
+      role: 'Planner',
+      ran: ['gpt-6-luna on codex'],
+    });
   });
 
   test('a run folded from its events: the face totals say what the header says', () => {

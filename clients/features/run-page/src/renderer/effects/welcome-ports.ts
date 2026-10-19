@@ -47,6 +47,7 @@ export type RunPageBridge = Pick<
   | 'readEvents'
   | 'readSummary'
   | 'readSpan'
+  | 'harnesses'
 >;
 
 /** The page the session runs in: where the preload's ports arrive, and the app's session wiring. */

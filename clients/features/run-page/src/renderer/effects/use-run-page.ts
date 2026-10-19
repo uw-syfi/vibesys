@@ -3,12 +3,16 @@
  * run's record as the host's watch pushes it, and disposed (followers stopped, the bound cancelled,
  * the logs channel let go) when it unmounts or shows another run.
  */
+import {settled} from '@vibesys/ipc';
 import type {ScheduleTimeout} from '@vibesys/machine';
 import type {CoreState} from '@vibesys/run-state';
 import {useEffect, useMemo, useState, useSyncExternalStore} from 'react';
 import {
   createRunReader,
   logStreamToFollow,
+  type ModelNames,
+  modelNamesOf,
+  NO_MODEL_NAMES,
   type Route,
   type RunModel,
   type RunPageAction,
@@ -59,6 +63,8 @@ export function useRunPage(options: RunPageOptions): {
   readonly zoom: (event: ZoomEvent) => void;
   /** The attached run's chat over its session. */
   readonly chat: LiveChat;
+  /** The host's names for the run's models. */
+  readonly modelNames: ModelNames;
 } | null {
   const {seed, record, bridge, navigation, schedule, page} = options;
   const [store, setStore] = useState<RunPageStore | null>(null);
@@ -85,6 +91,20 @@ export function useRunPage(options: RunPageOptions): {
       owned.dispose();
       ports.releaseLogs();
       setStore(null);
+    };
+  }, [key]);
+  // The host's names for its models, asked once per run; until they arrive (or if the host cannot
+  // say) every model reads as its id.
+  const [modelNames, setModelNames] = useState<ModelNames>(NO_MODEL_NAMES);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the names belong to the run's host (`key`); a new but equal bridge must not ask again.
+  useEffect(() => {
+    let live = true;
+    setModelNames(NO_MODEL_NAMES);
+    void settled(bridge.harnesses(seed.identity.host)).then(result => {
+      if (live && result.ok) setModelNames(modelNamesOf(result.value));
+    });
+    return () => {
+      live = false;
     };
   }, [key]);
   useEffect(() => {
@@ -131,5 +151,6 @@ export function useRunPage(options: RunPageOptions): {
     route,
     zoom,
     chat: store.chat,
+    modelNames,
   };
 }

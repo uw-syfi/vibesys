@@ -29,7 +29,9 @@ import {
   historyLoading,
   historyProblem,
   ideaAncestry,
+  type ModelNames,
   machineBlockWords,
+  NO_MODEL_NAMES,
   type Offer,
   predatesTraceWords,
   quotaBannerView,
@@ -121,11 +123,12 @@ export interface RunChatSlot {
 
 function Header(props: {
   readonly state: RunPageState;
+  readonly names: ModelNames;
   readonly dispatch: Dispatch;
   readonly chat: RunChatSlot | undefined;
 }): JSX.Element {
   const {state, dispatch, chat} = props;
-  const header = headerView(state);
+  const header = headerView(state, props.names);
   const items: MenuItem[] = [
     ...(header.openWindow.disabledReason === null
       ? [{id: 'window', label: 'Open in new window', press: () => dispatch({type: 'open-window'})}]
@@ -431,8 +434,9 @@ function pendingRunScreen(
   zoom: Zoom,
   route: Route,
   chat: RunChatSlot | undefined,
+  names: ModelNames,
 ): JSX.Element | null {
-  const header = <Header state={state} dispatch={dispatch} chat={chat} />;
+  const header = <Header state={state} names={names} dispatch={dispatch} chat={chat} />;
   if (state.record.kind === 'unlisted') {
     const blocked = machineBlockWords(state);
     const unplaced = unplacedRun(state);
@@ -509,6 +513,8 @@ export function RunScreen(props: {
   readonly dispatch: Dispatch;
   /** The chat panel the app hosts; absent: no Chat button. */
   readonly chat?: RunChatSlot;
+  /** The host's names for the run's models; absent or without a model: its id shows. */
+  readonly modelNames?: ModelNames;
 }): JSX.Element {
   const {chat, ...rest} = props;
   return (
@@ -528,16 +534,19 @@ function RunScreenBody(props: {
   readonly zoom: Zoom;
   readonly dispatch: Dispatch;
   readonly chat: RunChatSlot | undefined;
+  readonly modelNames?: ModelNames;
 }): JSX.Element {
   const {state, model, route, zoom, dispatch} = props;
+  const names = props.modelNames ?? NO_MODEL_NAMES;
   const base: ViewBase = {
+    names,
     model,
     clock: {start: clockStart(model), now: clockAt(model, runNow(state))},
     tokens: props.core?.tokens ?? EMPTY_LEDGER,
     who: whoBySpan(usageRecords(state)),
     zoom,
   };
-  const pending = pendingRunScreen(state, dispatch, zoom, route, props.chat);
+  const pending = pendingRunScreen(state, dispatch, zoom, route, props.chat, names);
   if (pending !== null) return pending;
   const problem = historyProblem(state);
   const transcript = transcriptLoading(state);
@@ -563,7 +572,7 @@ function RunScreenBody(props: {
       density="compact"
       header={
         <Stack gap="space-2">
-          <Header state={state} dispatch={dispatch} chat={props.chat} />
+          <Header state={state} names={names} dispatch={dispatch} chat={props.chat} />
           {traceArrival(state) === 'arrived' && before === null ? (
             <RunScrubber
               log={state.run.trace}

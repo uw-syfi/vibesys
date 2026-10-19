@@ -22,6 +22,7 @@ import {
   usageOverTime,
 } from '@vibesys/run-state/usage';
 import {type IdeaRow, ideaRowsById} from './ideas-view.js';
+import {type ModelNames, modelLabel} from './model-names.js';
 import {roleSeries, SERIES_SLOTS} from './role-series.js';
 import type {RunModel} from './run-model.js';
 import {type TokensReading, tokensReading, tokensTitle} from './token-words.js';
@@ -131,10 +132,12 @@ export interface UsageContext {
   readonly ideaOfSpan: ReadonlyMap<string, string>;
   /** Each idea's row of the Ideas list, in the order the ideas started. */
   readonly ideas: ReadonlyMap<string, IdeaRow>;
+  /** The names of the models the run used; a model without one reads as its id. */
+  readonly models: ModelNames;
 }
 
-/** The ideas of `model` and the turns each one ran. */
-export function usageContext(model: RunModel): UsageContext {
+/** The ideas of `model` and the turns each one ran, with the names of the models `names` gives. */
+export function usageContext(model: RunModel, names: ModelNames): UsageContext {
   const ideaOfSpan = new Map<string, string>();
   for (const idea of model.candidates.candidates) {
     for (const attempt of idea.attempts) {
@@ -148,7 +151,7 @@ export function usageContext(model: RunModel): UsageContext {
       return row === undefined ? [] : [[idea.id, row] as const];
     }),
   );
-  return {ideaOfSpan, ideas};
+  return {ideaOfSpan, ideas, models: names};
 }
 
 const UNKNOWN = 'unknown';
@@ -199,6 +202,11 @@ function labelOf(dimension: UsageDimension, value: string | null, ctx: UsageCont
     case 'idea':
       if (value === null) return {text: RUN_SETUP, id: false};
       return {text: ctx.ideas.get(value)?.title ?? value, id: false};
+    case 'model': {
+      if (value === null) return {text: UNKNOWN, id: false};
+      const name = ctx.models.get(value);
+      return name === undefined ? {text: value, id: true} : {text: name, id: false};
+    }
     default:
       return value === null ? {text: UNKNOWN, id: false} : {text: value, id: true};
   }
@@ -555,7 +563,10 @@ export function usageView(
  * turns ran on, in the order the roles first spent. A turn whose execution start the journal
  * lacks names nothing, so it adds no pair.
  */
-export function roleAgents(records: readonly UsageRecord[]): readonly {
+export function roleAgents(
+  records: readonly UsageRecord[],
+  names: ModelNames,
+): readonly {
   readonly role: string;
   readonly ran: readonly {harness: string | null; model: string | null}[];
 }[] {
@@ -568,6 +579,9 @@ export function roleAgents(records: readonly UsageRecord[]): readonly {
   }
   return [...by.entries()].map(([role, pairs]) => ({
     role: roleName(role),
-    ran: [...pairs.values()],
+    ran: [...pairs.values()].map(({harness, model}) => ({
+      harness,
+      model: model === null ? null : modelLabel(names, model),
+    })),
   }));
 }

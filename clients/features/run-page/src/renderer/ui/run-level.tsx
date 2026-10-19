@@ -31,6 +31,7 @@ import {
   ideaEffects,
   ideasView,
   implementerOutcomes,
+  NO_MODEL_NAMES,
   type NowItem,
   noIdeasWords,
   nowView,
@@ -325,7 +326,7 @@ function runFace(
         body: (
           <UsageView
             records={usageRecords(state)}
-            context={usageContext(base.model)}
+            context={usageContext(base.model, base.names ?? NO_MODEL_NAMES)}
             controls={state.usage}
             change={controls => dispatch({type: 'usage-controls', controls})}
           />

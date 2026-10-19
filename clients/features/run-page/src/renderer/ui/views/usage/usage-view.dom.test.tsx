@@ -69,7 +69,11 @@ const RECORDS = [
   record('implementer', 'claude', 'sonnet-5', 1000, 3, 'turn-b'),
 ];
 
-const CONTEXT: UsageContext = {ideaOfSpan: new Map([['turn-a', 'idea-1']]), ideas: new Map()};
+const CONTEXT: UsageContext = {
+  ideaOfSpan: new Map([['turn-a', 'idea-1']]),
+  ideas: new Map(),
+  models: new Map([['gpt-6-luna', 'GPT-6 Luna']]),
+};
 
 async function mount(
   controls: UsageControls,
@@ -115,10 +119,17 @@ describe('UsageView', () => {
     ]);
   });
 
+  test('a model the catalogue names shows its name, and one it does not shows its id', async () => {
+    const view = await mount({...USAGE_CONTROLS_DEFAULT, by: 'model'}, []);
+    expect(view.textContent).toContain('GPT-6 Luna');
+    expect(view.textContent).not.toContain('gpt-6-luna');
+    expect(view.textContent).toContain('sonnet-5');
+  });
+
   test('groups by the model, and by the idea with the turns before any idea as Run setup', async () => {
     const byModel = await mount({...USAGE_CONTROLS_DEFAULT, by: 'model'}, []);
     expect(rows(byModel).slice(0, 2)).toEqual([
-      expect.stringMatching(/^gpt-6-luna/),
+      expect.stringMatching(/^GPT-6 Luna/),
       expect.stringMatching(/^sonnet-5/),
     ]);
     const byIdea = await mount({...USAGE_CONTROLS_DEFAULT, by: 'idea'}, []);
@@ -134,7 +145,7 @@ describe('UsageView', () => {
     expect(rows(open).map(row => row.slice(0, 12))).toEqual([
       expect.stringMatching(/^Planner/),
       expect.stringMatching(/^Implementer/),
-      expect.stringMatching(/^gpt-6-luna/),
+      expect.stringMatching(/^GPT-6 Luna/),
       expect.stringMatching(/^sonnet-5/),
       expect.stringMatching(/^Run total/),
     ]);
