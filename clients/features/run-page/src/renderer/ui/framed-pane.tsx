@@ -24,6 +24,10 @@ export function FramedPane(props: {
   readonly meta?: ReactNode;
   readonly actions?: ReactNode;
   readonly enterKey?: string;
+  /** The body does not scroll: its view scrolls its own list. */
+  readonly fixed?: boolean;
+  /** The title is a name (an idea's). */
+  readonly mono?: boolean;
   readonly header: PaneHeader;
   readonly children: ReactNode;
 }): JSX.Element {
@@ -38,6 +42,8 @@ export function FramedPane(props: {
       {...(meta === undefined ? {} : {meta})}
       {...(actions === undefined ? {} : {actions})}
       {...(props.enterKey === undefined ? {} : {enterKey: props.enterKey})}
+      {...(props.fixed === true ? {fixed: true} : {})}
+      {...(props.mono === true ? {mono: true} : {})}
     >
       {props.children}
     </Pane>

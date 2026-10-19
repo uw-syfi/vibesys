@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Literal
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 from tests.server.support import (
@@ -53,6 +53,7 @@ from vibesys.api import (
     SteerRequest,
     SteerTarget,
     SteerTargetKind,
+    StopRequest,
     WithdrawRequest,
 )
 from vibesys.events import CoreEventType
@@ -413,16 +414,15 @@ def test_stop_releases_the_pause_wait_and_ends_the_run(tmp_path: Path) -> None:
     ]
 
 
-def test_resume_before_the_boundary_cancels_the_pending_stop(tmp_path: Path) -> None:
-    """A resume that beats the stop boundary keeps the run going."""
+def test_a_resume_before_the_boundary_leaves_the_stop_pending(tmp_path: Path) -> None:
+    """A stop only escalates: a resume that beats the stop boundary does not cancel it."""
     parts = build_server_parts(tmp_path)
     execution = parts.start_execution("implementer", "round 1", "work")
     parts.controller.stop_after_call()
     parts.controller.resume()
     parts.controller.after_agent("implementer", "round 1", execution_id=execution.execution_id)
 
-    assert parts.api.snapshot().status is RunStatus.RUNNING
-    assert parts.controller.before_agent("judge", "round 1", "review") == "review"
+    assert parts.api.snapshot().status is RunStatus.STOPPED
 
 
 def test_finish_after_a_landed_stop_records_no_terminal_event(tmp_path: Path) -> None:
@@ -599,6 +599,50 @@ class _RefusingControl(ChannelRunControl):
             status=ControlStatus.REFUSED,
             reason=self.reason,
         )
+
+
+@pytest.mark.regression
+@example(before=[StopMode.CANCEL, StopMode.DRAIN], after=[])
+@example(before=[StopMode.DRAIN], after=[StopMode.CANCEL, StopMode.DRAIN])
+@example(before=[], after=[StopMode.CANCEL, "resume"])
+@given(
+    before=st.lists(st.sampled_from(StopMode), max_size=3),
+    after=st.lists(st.one_of(st.sampled_from(StopMode), st.just("resume")), max_size=4),
+)
+def test_a_runs_stop_is_the_strongest_asked_before_or_after_its_control_is_installed(
+    before: list[StopMode], after: list[StopMode | Literal["resume"]]
+) -> None:
+    """periodic-1330 MED-2: the slot kept the last stop sent before the run started, so a
+    drain after a cancel weakened it; and a Ctrl-C reached the run by no single path.
+
+    Stops sent before the run's control is installed (operator commands) and after it
+    (operator commands or the server's Ctrl-C, ``stop``) leave the run's stop at the
+    strongest asked for: a cancel anywhere is a cancel.
+    """
+    threads = SimThreads()
+    channel = create_run_control_channel(_ignore, threads=threads)
+    slot = RunControlSlot(threads.condition(threads.rlock()))
+    assert not slot.stop(StopMode.CANCEL)
+    for index, mode in enumerate(before):
+        stop = StopRequest(control_id=f"before-{index}", mode=mode)
+        slot.execute(ControlCommand(timestamp=REQUEST_TIME, control=stop))
+    slot.install(ChannelRunControl(channel, threads))
+    for item in after:
+        if item == "resume":
+            # PR #3209 MED-3: a resume never weakens a pending stop; it is refused.
+            if channel.stop_mode() is None:
+                slot.execute(ResumeCommand(timestamp=REQUEST_TIME))
+            else:
+                with pytest.raises(RunStoppingError):
+                    slot.execute(ResumeCommand(timestamp=REQUEST_TIME))
+        else:
+            assert slot.stop(item)
+
+    asked = [*before, *(item for item in after if item != "resume")]
+    expected = (
+        None if not asked else StopMode.CANCEL if StopMode.CANCEL in asked else StopMode.DRAIN
+    )
+    assert channel.stop_mode() == expected
 
 
 @pytest.mark.parametrize("reason", list(RefusalReason))

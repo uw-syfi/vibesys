@@ -25,6 +25,7 @@ from vs_core.api import (
     CaptureCommandBase,
     CommandCapture,
     Comparison,
+    ComparisonSettled,
     ComparisonVerdict,
     EffectVerdict,
     EventId,
@@ -41,6 +42,7 @@ from vs_core.api import (
     ObservationStatus,
     Operation,
     ParentVerification,
+    Reading,
     RejectionCode,
     RequestId,
     RequestTurn,
@@ -134,6 +136,8 @@ class SerialHost:
     landing: dict[str, Comparison] = field(default_factory=dict)
     """The settled comparison of each measured candidate input, which core's close-call runs make
     when they land; until the clock moves the view holds the provisional one."""
+    ledger: list[EvidenceRef] = field(default_factory=list)
+    """Core's ledger of the official records the host answered, as the run's view states it."""
     baseline: Baseline = "measured"
     validation: Validation = "passed"
     attribution_output: str = ""
@@ -221,8 +225,9 @@ class SerialHost:
         if answerable:
             self.answer(answerable[pick % len(answerable)], variant)
             return True
+        if self._land():
+            return True
         if self.run.sleeping_until:
-            self._land()
             self.run.advance_to(min(self.run.sleeping_until))
             return True
         return False
@@ -295,10 +300,12 @@ class SerialHost:
                     environment_digest=plan.environment_digest,
                     provenance="trusted",
                     status=self._status_of(stage.stage_id, is_input=is_input),
+                    reading=self._answer(candidate, stage.stage_id, is_input=is_input),
                 )
                 for index, stage in enumerate(plan.stages)
             )
         )
+        self._record(refs)
         failed = not refs
         result = MeasurementResult(
             scope=request.scope,
@@ -311,6 +318,23 @@ class SerialHost:
             asked,
             MeasurementFinished(decision=asked.decision, result=result, comparison=comparison),
         )
+
+    def _answer(self, candidate: RevisionRef, stage: str, *, is_input: bool) -> Reading | None:
+        """The headline core's ledger states for an official benchmark record when it is stored.
+
+        For a compared candidate that is the mean of the one run held: its first run's
+        throughput. Core restates it when the close call's runs land (`_land`).
+        """
+        compared = candidate.revision_id.root in self.comparisons
+        if is_input or KINDS[stage] is not EvidenceKind.BENCHMARK or not compared:
+            return None
+        value = self.throughputs.get(candidate.revision_id.root, CANDIDATE_THROUGHPUT)
+        return Reading(metric="throughput", value=value, direction="max")
+
+    def _record(self, refs: tuple[EvidenceRef, ...]) -> None:
+        """Core's ledger takes ``refs``; the run's view states it."""
+        self.ledger.extend(refs)
+        self.run.view.changes["measurements"] = tuple(self.ledger)
 
     def _provisional(self, settled: Comparison) -> Comparison:
         """What core holds when the measurement ends: one run a side, a close call, still settling.
@@ -330,10 +354,36 @@ class SerialHost:
         self._show(StatedComparison(comparison=provisional, settling=True))
         return provisional
 
-    def _land(self) -> None:
-        """Core's close-call runs end: the view holds each comparison settled."""
-        for settled in self.landing.values():
+    def _land(self) -> bool:
+        """Core's close-call runs end; whether any was still under way.
+
+        As core does, the view then holds each comparison settled, the ledger's official record
+        of its candidate states the settled mean, and core reports the comparison settled.
+        """
+        landing, self.landing = self.landing, {}
+        for settled in landing.values():
             self._show(StatedComparison(comparison=settled, settling=False))
+            self.ledger = [
+                ref.model_copy(
+                    update={
+                        "reading": ref.reading.model_copy(update={"value": settled.candidate_value})
+                    }
+                )
+                if ref.reading is not None
+                and ref.candidate == settled.candidate
+                and ref.scope == settled.scope
+                else ref
+                for ref in self.ledger
+            ]
+            self.run.view.changes["measurements"] = tuple(self.ledger)
+            self.run.send(
+                ComparisonSettled(
+                    scope=settled.scope,
+                    candidate_input=settled.candidate_input,
+                    base_input=settled.base_input,
+                )
+            )
+        return bool(landing)
 
     def _show(self, stated: StatedComparison) -> None:
         """The run's view holds ``stated`` as its candidate input's comparison."""
@@ -428,6 +478,8 @@ class SerialHost:
             value = (
                 INPUT_THROUGHPUT
                 if ref.purpose == "baseline"
+                else ref.reading.value  # the headline is the ledger's, as production decodes it
+                if ref.reading is not None
                 else self.throughputs.get(ref.candidate.revision_id.root, CANDIDATE_THROUGHPUT)
             )
             metrics = (MetricRow(name="throughput", value=value, direction="max", unit="tokens/s"),)

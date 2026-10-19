@@ -106,9 +106,11 @@ export function headerView(state: RunPageState): HeaderView {
     pause: offer(phase.kind === 'running' && !phase.pausing, commandReason(state)),
     // A run paused by a usage limit is resumed from its banner, which also offers to wait.
     resume: offer(phase.kind === 'paused' && phase.by === 'user', commandReason(state)),
+    // Stop stays while its confirmation is open, unavailable, so the header does not lose a control.
     stop: offer(
       (phase.kind === 'starting' || phase.kind === 'running' || phase.kind === 'paused') &&
-        state.stop.kind === 'idle',
+        (state.stop.kind === 'idle' || state.stop.kind === 'confirming'),
+      state.stop.kind === 'confirming' ? 'Confirm or cancel in the banner below' : undefined,
     ),
     openWindow: offer(true, unavailable['open-window']),
     archive: offer(phase.kind === 'ended'),

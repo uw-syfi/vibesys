@@ -11,14 +11,15 @@ from .ledger import (
     LedgerRecord,
     UnreadableLease,
     WithdrawalMark,
+    WithdrawalRevision,
     WithdrawalUndone,
     check_transition,
     check_withdrawal,
     decode_lease,
     decode_record,
-    decode_withdrawal,
     encode,
     entry_of,
+    read_withdrawal_revision,
     validate_holder,
     validate_key,
     validate_project,
@@ -37,8 +38,8 @@ class _Store:
     def __init__(self) -> None:
         # (project, key) -> (attempt, revision) -> encoded record
         self.records: dict[tuple[str, str], dict[tuple[int, int], str]] = {}
-        # (project, key) -> (attempt, revision) -> encoded withdrawal document
-        self.withdrawals: dict[tuple[str, str], dict[tuple[int, int], str]] = {}
+        # (project, key) -> (attempt, revision) -> (encoded withdrawal document, when written)
+        self.withdrawals: dict[tuple[str, str], dict[tuple[int, int], tuple[str, float]]] = {}
         # (project, key) -> holder -> (encoded lease, when its file was last written)
         self.leases: dict[tuple[str, str], dict[str, tuple[str, float]]] = {}
         # The cluster's filesystem outside the ledger: absolute path -> bytes.
@@ -49,7 +50,7 @@ class FakeEvaluationLedger:
     """Faithful in-memory ledger: documents are stored encoded and decoded on read.
 
     ``reopen`` gives another process's view of the same storage; ``store_raw``
-    plants a document as an older build would have written it.
+    and its siblings plant a document as another build would have written it.
     """
 
     def __init__(self, *, project: str, _store: _Store | None = None) -> None:
@@ -71,6 +72,13 @@ class FakeEvaluationLedger:
         slot = (self._project, validate_key(key))
         self._store.leases.setdefault(slot, {})[holder] = (document, written_at)
 
+    def store_raw_withdrawal(
+        self, key: str, attempt: int, revision: int, document: str, *, written_at: float
+    ) -> None:
+        """Plant a withdrawal revision's stored bytes, as another build would have written them."""
+        slot = (self._project, validate_key(key))
+        self._store.withdrawals.setdefault(slot, {})[(attempt, revision)] = (document, written_at)
+
     def read(self, key: str) -> LedgerEntry | None:
         """The request's current attempt, the revision it was read at, and its leases."""
         slot = (self._project, validate_key(key))
@@ -84,12 +92,12 @@ class FakeEvaluationLedger:
             if record.key != key or record.attempt != attempt:
                 raise LedgerError.unreadable(path, "the record names another key or attempt")
             records.append((attempt, revision, record))
-        marks: list[tuple[int, int, WithdrawalMark | WithdrawalUndone]] = []
-        for (attempt, revision), text in withdrawals.items():
+        marks: list[tuple[int, int, WithdrawalRevision]] = []
+        for (attempt, revision), (text, written_at) in withdrawals.items():
             path = f"{key}/withdrawal-{attempt}.{revision}.json"
-            document = decode_withdrawal(text, path=path)
-            if document.attempt != attempt:
-                raise LedgerError.unreadable(path, "the withdrawal names another attempt")
+            document = read_withdrawal_revision(
+                text, path=path, attempt=attempt, written_at=written_at
+            )
             marks.append((attempt, revision, document))
         readable: list[LedgerLease] = []
         unreadable: list[UnreadableLease] = []
@@ -121,9 +129,10 @@ class FakeEvaluationLedger:
         check_withdrawal(current, document)
         slot = (self._project, validate_key(current.record.key))
         revisions = self._store.withdrawals.setdefault(slot, {})
-        encoded = encode(document)
+        # This build reads what it writes, so when the file was written is never consulted.
+        stored = (encode(document), float("inf"))
         position = (document.attempt, current.withdrawal_revision + 1)
-        return revisions.setdefault(position, encoded) is encoded
+        return revisions.setdefault(position, stored) is stored
 
     def renew(self, key: str, lease: LedgerLease) -> None:
         """Write this holder's lease; its file is written when the lease was renewed."""

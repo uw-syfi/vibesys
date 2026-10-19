@@ -1,9 +1,10 @@
 /**
  * The performance row: a tile per performance measure (its best ratio to the input, large, with
- * what it means, the value and the input's, and a small trend) sharing a row with the strip chart.
+ * what it means, the value and the input's, and a small trend) sharing a row with the strip chart,
+ * and under both, across the whole width, the lines that name the idea the figures belong to.
  * The Run screen draws it above the level, so it is the same element at every level and navigating
- * moves nothing in it: the panes below change, this row does not. The tiles' block has the width of
- * its tiles, so a long title never pushes the chart. With an idea open, the chart singles the
+ * moves nothing in it: the panes below change, this row does not. The lines are as wide as the row,
+ * so a long idea name is cut only where the row ends, and never pushes the chart. With an idea open, the chart singles the
  * idea's point out (the others dimmed, none removed) and the block gains one line, reserved at
  * every level so the block never changes its size, that reads the idea's result. A run with two
  * objectives has the trade-off chart (its points and the frontier of the best trade-offs, at the
@@ -174,8 +175,8 @@ export function Hero(
     props.lit,
   );
   return (
-    <Row gap="space-6" align="center" wrap>
-      <Stack gap="space-2">
+    <Stack gap="space-2">
+      <Row gap="space-6" align="center" wrap>
         <MetricTiles
           label="Performance"
           count={hero.tiles.length}
@@ -185,50 +186,50 @@ export function Hero(
             <Tile key={tile.id} tile={tile} trend={objectives.length !== 2} />
           ))}
         </MetricTiles>
-        <StandingLine
-          standing={hero.standing}
-          idea={hero.bestIdea}
-          open={id => props.zoom({type: 'open-idea', idea: id})}
-        />
-        <IdeaLine view={ideaFocusView(props.model, props.idea)} />
-      </Stack>
-      {pareto === null ? null : (
-        <Stack gap="space-0" width="chart">
-          <ParetoChart
-            label={pareto.label}
-            size="strip"
-            points={pareto.points}
-            x={pareto.x}
-            y={pareto.y}
-            highlighted={pareto.highlighted}
-            {...(pareto.cursor === undefined ? {} : {cursor: pareto.cursor})}
-            pick={id => {
-              if (id !== 'input') props.zoom({type: 'open-idea', idea: id});
-            }}
-            {...(props.hover === undefined
-              ? {}
-              : {hover: (id: string | null) => props.hover?.(id === 'input' ? null : id)})}
-          />
-        </Stack>
-      )}
-      {pareto !== null || chart === null ? null : (
-        <Stack gap="space-0" width="chart">
-          <Chart
-            label={chart.label}
-            size="strip"
-            points={chart.points}
-            spans={chart.spans}
-            yDomain={chart.yDomain}
-            steps={chart.steps}
-            {...(chart.reference === null ? {} : {reference: chart.reference})}
-            {...(chart.playhead === null ? {} : {playhead: chart.playhead})}
-            xTicks={chart.xTicks}
-            yTicks={chart.yTicks}
-            pick={id => props.zoom({type: 'open-idea', idea: id})}
-            {...(props.hover === undefined ? {} : {hover: props.hover})}
-          />
-        </Stack>
-      )}
-    </Row>
+        {pareto === null ? null : (
+          <Stack gap="space-0" width="chart">
+            <ParetoChart
+              label={pareto.label}
+              size="strip"
+              points={pareto.points}
+              x={pareto.x}
+              y={pareto.y}
+              highlighted={pareto.highlighted}
+              {...(pareto.cursor === undefined ? {} : {cursor: pareto.cursor})}
+              pick={id => {
+                if (id !== 'input') props.zoom({type: 'open-idea', idea: id});
+              }}
+              {...(props.hover === undefined
+                ? {}
+                : {hover: (id: string | null) => props.hover?.(id === 'input' ? null : id)})}
+            />
+          </Stack>
+        )}
+        {pareto !== null || chart === null ? null : (
+          <Stack gap="space-0" width="chart">
+            <Chart
+              label={chart.label}
+              size="strip"
+              points={chart.points}
+              spans={chart.spans}
+              yDomain={chart.yDomain}
+              steps={chart.steps}
+              {...(chart.reference === null ? {} : {reference: chart.reference})}
+              {...(chart.playhead === null ? {} : {playhead: chart.playhead})}
+              xTicks={chart.xTicks}
+              yTicks={chart.yTicks}
+              pick={id => props.zoom({type: 'open-idea', idea: id})}
+              {...(props.hover === undefined ? {} : {hover: props.hover})}
+            />
+          </Stack>
+        )}
+      </Row>
+      <StandingLine
+        standing={hero.standing}
+        idea={hero.bestIdea}
+        open={id => props.zoom({type: 'open-idea', idea: id})}
+      />
+      <IdeaLine view={ideaFocusView(props.model, props.idea)} />
+    </Stack>
   );
 }

@@ -340,10 +340,16 @@ class _SharedScheduler(FakeCluster):
             return ClusterUnknown(operation_id=None, reason="ssh: connection reset by peer")
         return super().inspect(target, by_job_id=by_job_id)
 
-    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
+    def cancel(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCancelOutcome:
         if self._fails():
             return ClusterUnknown(operation_id=None, reason="ssh: connection reset by peer")
-        return super().cancel(target, by_job_id=by_job_id)
+        return super().cancel(target, by_job_id=by_job_id, observed=observed)
 
     def _fails(self) -> bool:
         self.sim.sleep(0)
@@ -743,11 +749,17 @@ def test_a_run_never_leases_a_request_it_is_withdrawing(
     held = {"armed": False}
 
     class _SlowCancel(_SharedScheduler):
-        def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
+        def cancel(
+            self,
+            target: ClusterTarget,
+            *,
+            by_job_id: bool = False,
+            observed: ClusterObservation | None = None,
+        ) -> ClusterCancelOutcome:
             if held["armed"]:
                 held["armed"] = False
                 self.sim.sleep(10.0)
-            return super().cancel(target, by_job_id=by_job_id)
+            return super().cancel(target, by_job_id=by_job_id, observed=observed)
 
     renewals: list[tuple[float, str]] = []
     withdrawing: list[tuple[float, float]] = []

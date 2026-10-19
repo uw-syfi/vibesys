@@ -18,6 +18,7 @@ import select
 import signal
 import subprocess
 import sys
+import termios
 import threading
 from contextlib import suppress
 from functools import partial
@@ -45,7 +46,7 @@ handled = {{signal.SIGINT, signal.SIGTERM, signal.SIGHUP}}
 signal.pthread_sigmask(signal.SIG_BLOCK, handled)
 release = os.open(os.environ["ENGINE_RELEASE"], os.O_RDWR)
 events = open(os.environ["ENGINE_EVENTS"], "w", buffering=1)
-events.write(f"ready {{os.getpid()}}\\n")
+events.write(f"ready {{os.getpid()}} {{os.getpgrp()}}\\n")
 events.write(f"signal {{signal.sigwait(handled)}}\\n")
 os.read(release, 1)
 sys.exit({_ENGINE_STATUS})
@@ -117,8 +118,8 @@ def _drive_engine(
     launcher_alive: int,
     send: Callable[[], None],
     number: signal.Signals,
-) -> int:
-    """Signal the launcher once its engine is ready; return the engine's pid.
+) -> tuple[int, int]:
+    """Signal the launcher once its engine is ready; return the engine's pid and process group.
 
     Asserts the engine sees the signal while the launcher still waits, then releases the
     engine. ``launcher_alive`` reaches end-of-file when the launcher exits.
@@ -135,7 +136,8 @@ def _drive_engine(
             stream.write(b"x")
     finally:
         engine.close()
-    return int(ready.split()[1])
+    _, pid, group = ready.split()
+    return int(pid), int(group)
 
 
 def _launch_in_child(
@@ -161,7 +163,7 @@ def _launch_in_child(
 
     def drive() -> None:
         try:
-            pids.append(_drive_engine(environment, launcher_alive, send, number))
+            pids.append(_drive_engine(environment, launcher_alive, send, number)[0])
         except AssertionError as error:
             failures.append(repr(error))
 
@@ -242,7 +244,7 @@ def test_the_launcher_process_waits_for_its_engine_to_finish_tearing_down(
             os.kill(launcher.pid, number)
 
     try:
-        engine_pid = _drive_engine(environment, launcher_alive, send, number)
+        engine_pid, _ = _drive_engine(environment, launcher_alive, send, number)
         assert launcher.wait(timeout=HANG_GUARD_S) == _ENGINE_STATUS
     finally:
         if launcher.poll() is None:
@@ -250,6 +252,44 @@ def test_the_launcher_process_waits_for_its_engine_to_finish_tearing_down(
             launcher.wait(timeout=HANG_GUARD_S)
         if engine_pid is not None:
             # At the merge base the engine outlives a SIGTERMed launcher.
+            with suppress(ProcessLookupError):
+                os.kill(engine_pid, signal.SIGKILL)
+
+
+@pytest.mark.regression
+def test_a_ctrl_c_reaches_the_engine_only_through_the_launcher(tmp_path: Path) -> None:
+    """periodic-1330 MED-1: one Ctrl-C reached the engine twice, from the terminal and the launcher.
+
+    The engine leads a process group of its own, so a terminal's Ctrl-C (sent to the
+    launcher's group) does not reach it directly: it arrives once, as the launcher's copy.
+    """
+    environment = _write_engine(tmp_path)
+    launcher_alive, held_by_launcher = os.pipe()
+    # lint-waiver: LW-133001 [S603]; the test runs the real launcher process.
+    # > Calling `main` in the test's process would signal pytest itself; a fixed argv is the boundary.
+    launcher = subprocess.Popen(  # noqa: S603
+        [sys.executable, "-c", _launcher_script(tmp_path / "stub")],
+        cwd=tmp_path,
+        env={**os.environ, **environment},
+        start_new_session=True,
+        pass_fds=(held_by_launcher,),
+    )
+    os.close(held_by_launcher)
+    engine_pid: int | None = None
+    try:
+        engine_pid, engine_group = _drive_engine(
+            environment,
+            launcher_alive,
+            partial(os.killpg, launcher.pid, signal.SIGINT),
+            signal.SIGINT,
+        )
+        assert launcher.wait(timeout=HANG_GUARD_S) == _ENGINE_STATUS
+        assert engine_group == engine_pid != launcher.pid
+    finally:
+        if launcher.poll() is None:
+            launcher.kill()
+            launcher.wait(timeout=HANG_GUARD_S)
+        if engine_pid is not None:
             with suppress(ProcessLookupError):
                 os.kill(engine_pid, signal.SIGKILL)
 
@@ -278,8 +318,22 @@ def _call_real_child(argv: list[str]) -> int:
 
 @pytest.mark.parametrize(
     ("number", "forwarded"),
-    [(signal.SIGINT, True), (signal.SIGTERM, True), (signal.SIGHUP, True)],
-    ids=["sigint-forwarded", "sigterm-forwarded", "sighup-forwarded"],
+    [
+        (signal.SIGINT, True),
+        (signal.SIGTERM, True),
+        (signal.SIGHUP, True),
+        (signal.SIGQUIT, True),
+        # PR #3209 MED-2: the child leads its own group, so a shell's `fg` (SIGCONT to the
+        # launcher's group) reaches it only through the launcher.
+        (signal.SIGCONT, True),
+    ],
+    ids=[
+        "sigint-forwarded",
+        "sigterm-forwarded",
+        "sighup-forwarded",
+        "sigquit-forwarded",
+        "sigcont-forwarded",
+    ],
 )
 def test_call_child_forwards_every_shutdown_signal(
     number: signal.Signals, *, forwarded: bool
@@ -310,3 +364,132 @@ def test_call_child_from_a_worker_thread_only_waits() -> None:
     join_or_fail(worker)
 
     assert statuses == [3]
+
+
+# An engine that hands its launcher's lifeline to the product (``follow_launcher``), then
+# reports the first stop signal it receives.
+_FOLLOWING_ENGINE = """
+import os, signal, sys
+handled = {signal.SIGINT, signal.SIGTERM, signal.SIGHUP}
+signal.pthread_sigmask(signal.SIG_BLOCK, handled)
+events = open(os.environ["ENGINE_EVENTS"], "w", buffering=1)
+from vs_sim.api import follow_launcher
+follow_launcher(os.environ)
+events.write(f"ready {os.getpid()}\\n")
+sys.stdout.write("the engine writes to its terminal\\n")
+sys.stdout.flush()
+events.write("wrote\\n")
+events.write(f"signal {signal.sigwait(handled)}\\n")
+sys.exit(7)
+"""
+
+
+class _EngineLines:
+    """The following engine's event lines, each awaited under the hang guard only."""
+
+    def __init__(self, events: Path) -> None:
+        self._events = os.open(events, os.O_RDONLY | os.O_NONBLOCK)
+        self._buffer = b""
+
+    def next_line(self) -> str:
+        while b"\n" not in self._buffer:
+            readable, _, _ = select.select([self._events], [], [], HANG_GUARD_S)
+            assert readable, "the engine went quiet"
+            chunk = os.read(self._events, 4096)
+            assert chunk, "the engine exited"
+            self._buffer += chunk
+        line, self._buffer = self._buffer.split(b"\n", 1)
+        return line.decode()
+
+    def close(self) -> None:
+        os.close(self._events)
+
+
+def _following_launcher(
+    base: Path, *, terminal: int | None
+) -> tuple[subprocess.Popen[bytes], dict[str, str]]:
+    """Start the real launcher, as a session of its own, over the following engine.
+
+    With *terminal* (a pty's follower side), the launcher takes it as its controlling
+    terminal and its standard streams, and so is the terminal's foreground process group.
+    """
+    environment = _write_engine(base)
+    (base / "fake" / "entrypoints" / "headless.py").write_text(_FOLLOWING_ENGINE, encoding="utf-8")
+    script = _launcher_script(base / "stub")
+    if terminal is not None:
+        script = "import fcntl, termios\nfcntl.ioctl(0, termios.TIOCSCTTY, 0)\n" + script
+    # lint-waiver: LW-320901 [S603]; the test runs the real launcher process.
+    # > Calling `main` in the test's process would signal pytest itself; a fixed argv is the boundary.
+    launcher = subprocess.Popen(  # noqa: S603
+        [sys.executable, "-c", script],
+        cwd=base,
+        env={**os.environ, **environment},
+        start_new_session=True,
+        stdin=terminal,
+        stdout=terminal,
+        stderr=terminal,
+    )
+    return launcher, environment
+
+
+def _end(launcher: subprocess.Popen[bytes], engine_pid: int | None) -> None:
+    if launcher.poll() is None:
+        launcher.kill()
+        launcher.wait(timeout=HANG_GUARD_S)
+    if engine_pid is not None:
+        with suppress(ProcessLookupError):
+            os.kill(engine_pid, signal.SIGKILL)
+
+
+@pytest.mark.regression
+def test_an_engine_whose_launcher_is_killed_hangs_up(tmp_path: Path) -> None:
+    """PR #3209 MED-1: SIGKILL of the launcher left its engine running, unreachable.
+
+    The engine leads its own process group, so no terminal signal reaches it once its
+    launcher is gone. It hears the launcher's death and hangs up (SIGHUP), as a closed
+    terminal used to tell it.
+    """
+    launcher, environment = _following_launcher(tmp_path, terminal=None)
+    engine_pid: int | None = None
+    lines = _EngineLines(Path(environment["ENGINE_EVENTS"]))
+    try:
+        ready = lines.next_line()
+        assert ready.startswith("ready ")
+        engine_pid = int(ready.split()[1])
+        assert lines.next_line() == "wrote"
+        launcher.kill()
+        launcher.wait(timeout=HANG_GUARD_S)
+        assert lines.next_line() == f"signal {int(signal.SIGHUP)}"
+    finally:
+        lines.close()
+        _end(launcher, engine_pid)
+
+
+@pytest.mark.regression
+def test_an_engine_writes_its_terminal_under_stty_tostop(tmp_path: Path) -> None:
+    """PR #3209 MED-2: with `stty tostop`, the engine stopped at its first terminal write.
+
+    The engine is a background process group on the launcher's terminal, so the kernel
+    stops it with SIGTTOU when ``tostop`` is set. It writes on, and still hears the
+    launcher's Ctrl-C.
+    """
+    leader, follower = os.openpty()
+    attributes = termios.tcgetattr(follower)
+    attributes[3] |= termios.TOSTOP
+    termios.tcsetattr(follower, termios.TCSANOW, attributes)
+    launcher, environment = _following_launcher(tmp_path, terminal=follower)
+    os.close(follower)
+    engine_pid: int | None = None
+    lines = _EngineLines(Path(environment["ENGINE_EVENTS"]))
+    try:
+        ready = lines.next_line()
+        assert ready.startswith("ready ")
+        engine_pid = int(ready.split()[1])
+        assert lines.next_line() == "wrote"
+        os.killpg(launcher.pid, signal.SIGINT)
+        assert lines.next_line() == f"signal {int(signal.SIGINT)}"
+        assert launcher.wait(timeout=HANG_GUARD_S) == _ENGINE_STATUS
+    finally:
+        lines.close()
+        _end(launcher, engine_pid)
+        os.close(leader)

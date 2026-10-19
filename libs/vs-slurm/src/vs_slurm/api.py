@@ -13,6 +13,8 @@ from vs_sim.api import ByteSource, OutputStream
 
 from .cluster import SlurmCluster, recorded_job_ids
 from .cluster_types import (
+    OBSERVED_CANCEL_CALLS,
+    ClusterCall,
     ClusterCancelOutcome,
     ClusterCancelRequested,
     ClusterCollected,
@@ -72,6 +74,7 @@ from .job_teardown import PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE
 from .ledger import (
     BATCH_RESULT_LAYOUT,
     LEDGER_FORMAT_VERSION,
+    MAX_WITHDRAWAL_WINDOW_SECONDS,
     AttachJob,
     AwaitWithdrawal,
     CheckJob,
@@ -125,8 +128,10 @@ from .ledger_actions import (
     relinquish,
     settle,
     sweep_unleased,
+    sweep_withdrawer,
     undo_expired_withdrawal,
     withdraw,
+    withdrawal_window_seconds,
 )
 from .ledger_listing import (
     ENTRY_ID_LENGTH,
@@ -235,6 +240,8 @@ __all__ = [
     "MAX_CONNECTOR_RESPONSE_BYTES",
     "MAX_REMOTE_READ_BYTES",
     "MAX_TRANSPORT_STREAM_BYTES",
+    "MAX_WITHDRAWAL_WINDOW_SECONDS",
+    "OBSERVED_CANCEL_CALLS",
     "PORT_PLACEHOLDER",
     "PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE",
     "REQUESTS_FILE",
@@ -248,6 +255,7 @@ __all__ = [
     "CheckJob",
     "ClaimAttempt",
     "Cluster",
+    "ClusterCall",
     "ClusterCancelOutcome",
     "ClusterCancelRequested",
     "ClusterCollectOutcome",
@@ -410,6 +418,7 @@ __all__ = [
     "status_of",
     "submit_step",
     "sweep_unleased",
+    "sweep_withdrawer",
     "transitioned",
     "tree_content_identity",
     "undo_expired_withdrawal",
@@ -418,6 +427,7 @@ __all__ = [
     "validate_holder",
     "validate_project",
     "withdraw",
+    "withdrawal_window_seconds",
 ]
 
 
@@ -447,8 +457,21 @@ class Cluster(Protocol):
         """Observe scheduler evidence without submitting work."""
         ...
 
-    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
-        """Record cancellation intent, leaving confirmation to inspect."""
+    def cancel(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCancelOutcome:
+        """Record cancellation intent, leaving confirmation to inspect.
+
+        ``observed`` is a reading the caller just took of this target. When it
+        shows the job queued or running, the scancel is the cancel's first
+        transport call (``OBSERVED_CANCEL_CALLS``), with no fresh scheduler read
+        before it; the rest of the cancel follows as without it. A reading of
+        another job is Unknown, and nothing is cancelled.
+        """
         ...
 
     def collect(

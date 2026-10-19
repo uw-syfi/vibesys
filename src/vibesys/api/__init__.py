@@ -151,6 +151,7 @@ from vs_runtime.api.infrastructure import (
     WithdrawRequest,
     check_one_way_to_resume,
     describe_seconds,
+    escalate_stop,
     recorded_ending,
 )
 
@@ -288,6 +289,7 @@ __all__ = [
     "create_session",
     "describe_seconds",
     "domain_modalities",
+    "escalate_stop",
     "harnesses",
     "load_config",
     "open_run_store",

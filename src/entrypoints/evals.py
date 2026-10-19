@@ -152,19 +152,13 @@ def _remove(
     )
     if not args.yes and not host.confirm(question):
         return 1, "Nothing removed.\n"
-    outcomes = [
-        withdraw(
-            ledger,
-            host.cluster,
-            key,
-            Withdrawer(
-                by=_WITHDRAWER,
-                reason=_REMOVED_REASON,
-                timing=WithdrawalTiming(clock=host.clock, call_seconds=host.call_seconds),
-            ),
-        )
-        for key in keys
-    ]
+    # One withdrawer, so one writer id, for the whole command, as a run keeps one.
+    remover = Withdrawer(
+        by=_WITHDRAWER,
+        reason=_REMOVED_REASON,
+        timing=WithdrawalTiming(clock=host.clock, call_seconds=host.call_seconds),
+    )
+    outcomes = [withdraw(ledger, host.cluster, key, remover) for key in keys]
     code = 1 if any(isinstance(outcome, WithdrawUnknown) for outcome in outcomes) else 0
     return code, "\n".join(format_withdrawal(outcome) for outcome in outcomes) + "\n"
 

@@ -9,8 +9,8 @@ import {
   AppShell,
   createSidebarStore,
   PlaceholderScreen,
+  type SidebarDraft,
   type SidebarPreference,
-  WORDMARK,
 } from '@vibesys/feature-app-shell/renderer';
 import {
   allRunsGroups,
@@ -23,9 +23,12 @@ import {createMachinesStore, MachinesScreen} from '@vibesys/feature-machines/ren
 import {machineCounts} from '@vibesys/feature-machines/state';
 import {
   createNewRunStore,
+  type DraftMemory,
+  draftWords,
   type MoreOptionsMemory,
   machineOptions,
   NewRunScreen,
+  type NewRunSnapshot,
 } from '@vibesys/feature-new-run/renderer';
 import {
   type RunPageNavigation,
@@ -45,15 +48,7 @@ import {settled, type WelcomeBridge} from '@vibesys/ipc';
 import type {RecentRun, RunRef} from '@vibesys/runs';
 import {sameRun} from '@vibesys/runs';
 import type {Store} from '@vibesys/store';
-import {
-  applyTheme,
-  Card,
-  EmptyState,
-  Page,
-  type ThemeTarget,
-  WindowFrame,
-  Wordmark,
-} from '@vibesys/ui';
+import {applyTheme, Card, EmptyState, Page, type ThemeTarget, WindowFrame} from '@vibesys/ui';
 import {type JSX, useMemo, useSyncExternalStore} from 'react';
 
 /** The clock the shell's screens time their bounds on: the window's own timers, in `main.tsx`. */
@@ -110,6 +105,8 @@ export interface ShellPreferences {
   readonly sidebar: SidebarPreference;
   /** What the user chose for New run's More options on each machine; none keeps it this run only. */
   readonly moreOptions?: MoreOptionsMemory;
+  /** This window's unfinished New run, so leaving and coming back finds it; none keeps it this run only. */
+  readonly draft?: DraftMemory;
 }
 
 /**
@@ -136,6 +133,7 @@ export function createShellStores(
     recent: sidebar.store.getState().recent,
     schedule,
     ...(preferences.moreOptions === undefined ? {} : {moreOptions: preferences.moreOptions}),
+    ...(preferences.draft === undefined ? {} : {draft: preferences.draft}),
     started: run => sidebar.store.dispatch({type: 'select', screen: {kind: 'run', run}}),
   });
   let {recent, selection} = sidebar.store.getState();
@@ -261,6 +259,21 @@ function AllRuns(props: {
   );
 }
 
+/** The unfinished New run the sidebar lists, or null when there is not one. */
+function sidebarDraft(
+  state: NewRunSnapshot,
+  select: (screen: Screen) => void,
+  dispatch: ShellStores['newRun']['dispatch'],
+): SidebarDraft | null {
+  const words = draftWords(state.context);
+  if (words === null) return null;
+  return {
+    ...words,
+    open: () => select({kind: 'new-run'}),
+    discard: () => dispatch({type: 'reset'}),
+  };
+}
+
 /** The window: the sidebar and the selected screen. */
 export function Shell(props: {
   readonly stores: ShellStores;
@@ -273,6 +286,7 @@ export function Shell(props: {
   const newRunState = useStore(newRun);
   const completionState = useStore(newRunCompletion);
   const select = (screen: Screen): void => sidebar.store.dispatch({type: 'select', screen});
+  const draft = sidebarDraft(newRunState, select, newRun.dispatch);
   const screen = (selected: Screen): JSX.Element => {
     switch (selected.kind) {
       case 'new-run':
@@ -285,7 +299,6 @@ export function Shell(props: {
               ...sidebarState.listings.map(listing => listing.host),
             ])}
             completion={{state: completionState, dispatch: newRunCompletion.dispatch}}
-            hero={<Wordmark art={WORDMARK} label="VibeSys" align="center" tone="accent" />}
             chooseCheckout={() => select({kind: 'machines'})}
           />
         );
@@ -340,6 +353,7 @@ export function Shell(props: {
       version={props.version}
       shortcut={sidebarShortcutLabel(props.stores.bridge.platform === 'darwin')}
       clock={viewerClock}
+      draft={draft}
       screen={screen}
     />
   );

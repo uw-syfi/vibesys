@@ -114,7 +114,7 @@ function AgentLine(props: {
 /** The fan-in chip: the roles that also started the agent, or only how many in a narrow list. */
 function alsoBadge(roles: readonly string[], compact: boolean): RowBadge {
   const count = `+${roles.length} parent`;
-  const whole = `+ also under ${roles.join(', ')}`;
+  const whole = `also started by ${roles.join(', ')}`;
   return compact ? {label: count, tone: 'neutral'} : {label: whole, short: count, tone: 'neutral'};
 }
 
@@ -158,7 +158,7 @@ export function AgentsView(props: AgentsViewProps): JSX.Element {
         ? {}
         : {
             header: {
-              start: 'agent · started by the row above · now',
+              start: 'agent · what it is doing',
               end: [
                 {label: 'turns', fixed: 'figure' as const},
                 ...(hasTokens

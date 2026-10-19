@@ -28,6 +28,8 @@ export function Screen(props: {
 export interface Crumb {
   readonly id: string;
   readonly label: string;
+  /** The label is a name (an idea's), drawn in the mono face names use everywhere. */
+  readonly mono?: boolean;
   readonly press?: () => void;
 }
 
@@ -53,11 +55,16 @@ export function Breadcrumb(props: {
               </span>
             )}
             {item.press === undefined ? (
-              <span className="vs-crumb" aria-current="location">
+              <span className="vs-crumb" data-mono={item.mono || undefined} aria-current="location">
                 {item.label}
               </span>
             ) : (
-              <button type="button" className="vs-crumb" onClick={item.press}>
+              <button
+                type="button"
+                className="vs-crumb"
+                data-mono={item.mono || undefined}
+                onClick={item.press}
+              >
                 {item.label}
               </button>
             )}

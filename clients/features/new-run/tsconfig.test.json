@@ -36,6 +36,9 @@
     },
     {
       "path": "../../libs/transport/tsconfig.testing.json"
+    },
+    {
+      "path": "../../libs/run-fixtures/tsconfig.lib.json"
     }
   ]
 }

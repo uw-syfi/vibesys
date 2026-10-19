@@ -32,7 +32,7 @@ type Role = 'input' | 'frontier' | 'dominated' | 'failed';
  * whatever the width (`FALLBACK_WIDTH` until measured), and `HEIGHT` is fixed.
  */
 const FALLBACK_WIDTH = 1000;
-const MIN_WIDTH = 320;
+const MIN_WIDTH = 288;
 const HEIGHT = {default: 380, strip: 260} as const;
 export type ParetoSize = keyof typeof HEIGHT;
 /** Bands for the axis titles, above and below the plot, and the gutter around it. */
@@ -248,9 +248,9 @@ export function ParetoChart(props: {
         aria-label={`${props.label}. ${frontier.length} of ${competing.length} passed points are on the frontier.`}
       >
         <Axes frame={frame} x={x} y={y} height={height} />
-        {frontier.length === 0 ? null : (
+        {frontier.some(point => point.state !== 'input') ? (
           <path className="vs-pareto-frontier" d={staircase(placed, plot)} />
-        )}
+        ) : null}
         {drawn.map(point => (
           <PointMark
             key={point.id}
@@ -269,8 +269,13 @@ export function ParetoChart(props: {
         )}
       </svg>
       <ul className="vs-dotlegend vs-serieslegend" aria-label="Points">
-        {KEY_ORDER.filter(role => roles.has(role)).map(role => (
-          <li key={role} className="vs-dotlegend-item">
+        {KEY_ORDER.map(role => (
+          // A role not drawn yet keeps its place, unseen, so the legend is one height at every cursor.
+          <li
+            key={role}
+            className="vs-dotlegend-item"
+            {...(roles.has(role) ? {} : {'aria-hidden': true, 'data-absent': ''})}
+          >
             <svg
               className="vs-pareto-key"
               data-role={role}

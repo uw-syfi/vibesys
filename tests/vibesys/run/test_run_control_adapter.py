@@ -18,6 +18,8 @@ from vs_sim.api.testing import ManualClock, SimThreads
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from vibesys.api import CoreEvent
+
 
 def test_control_transitions_keep_the_existing_persisted_event_format(
     tmp_path: Path,
@@ -30,9 +32,12 @@ def test_control_transitions_keep_the_existing_persisted_event_format(
         system=idle_environment_system(),
     )
     integration.attach(tmp_path, run_id="run-1")
-    unsubscribe = integration.events.subscribe(
-        lambda event: integration.control.resume() if event.type is CoreEventType.PAUSED else None
-    )
+
+    def resume_when_paused(event: CoreEvent) -> None:
+        if event.type is CoreEventType.PAUSED:
+            integration.control.resume()
+
+    unsubscribe = integration.events.subscribe(resume_when_paused)
     try:
         integration.control.queue_steer("focus on latency")
         assert [steer.text for steer in integration.control.take_pending_steer()] == [

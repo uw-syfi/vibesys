@@ -7,6 +7,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from . import _continuations, _job_releases, _measurements
+from ._comparison import closed_answers, comparisons_settled, moment_of
 from .types.evaluation import (
     AgentMeasurementRequested,
     ContinuationJobsChanged,
@@ -19,6 +20,7 @@ from .types.evaluation import (
     JobTerminationRequested,
     JobWaitLapsed,
     MeasurementRequested,
+    MeasurementSubmissionEnded,
     MeasurementSubmissionObserved,
     ObservationsDue,
     RegisteredJobObserved,
@@ -43,6 +45,7 @@ EVENT_TO_SUBAREA: Mapping[type[EvaluationEvent], Reducer] = MappingProxyType(
         JobsDrainRequested: _measurements.advance,
         RunJobsCancelRequested: _measurements.advance,
         MeasurementSubmissionObserved: _measurements.advance,
+        MeasurementSubmissionEnded: _measurements.submission_ended,
         ContinuationJobsChanged: _continuations.advance,
         ContinuationRetireRequested: _continuations.advance,
         ContinuationReopenRequested: _continuations.advance,
@@ -75,11 +78,16 @@ def advance_evaluation(
     after = _continuations.reach_deadlines(change.state, context)
     # A job's release is announced to its closing attempt here, whichever subarea recorded it.
     announced = _job_releases.job_release_signals(state, after.state, context)
+    # So is every comparison the step settled, however the run that fed it ended, after the
+    # step's own results.
+    moment = moment_of(context.run)
+    settled = comparisons_settled(state, after.state, moment)
     return after.model_copy(
         update={
+            "state": closed_answers(after.state, moment),
             "signals": (*due.signals, *change.signals, *after.signals, *announced),
             "requests": (*due.requests, *change.requests, *after.requests),
-            "events": (*due.events, *change.events, *after.events),
+            "events": (*due.events, *change.events, *after.events, *settled),
         }
     )
 

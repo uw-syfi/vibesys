@@ -3,6 +3,7 @@
  * machine's description, its vetted harnesses and the bundled examples. A world adds its own
  * `projects` (each project's tasks) to make the `newRun` seed of `FakeBridgeSeed`.
  */
+import {exampleCatalogue} from '@vibesys/run-fixtures';
 import type {FakeBridgeSeed} from './fake-bridge.js';
 
 type Offer = NonNullable<FakeBridgeSeed['newRun']>;
@@ -31,6 +32,7 @@ export const FAKE_OFFER: Pick<Offer, 'machine' | 'harnesses' | 'examples'> = {
         family: 'Claude',
         tier: 3,
         tierName: 'Opus',
+        maker: 'anthropic',
       },
     },
     {
@@ -43,20 +45,15 @@ export const FAKE_OFFER: Pick<Offer, 'machine' | 'harnesses' | 'examples'> = {
         family: 'Claude',
         tier: 2,
         tierName: 'Sonnet',
+        maker: 'anthropic',
       },
     },
     {
       provider: 'codex',
       model: 'gpt-5-codex',
       default: true,
-      display: {providerName: 'Codex', modelName: 'GPT-5 Codex'},
+      display: {providerName: 'Codex', modelName: 'GPT-5 Codex', maker: 'openai'},
     },
   ],
-  examples: {
-    checkout: '/home/me/vibesys',
-    examples: [
-      {name: 'queue-rs', category: 'rust', tasks: ['mpmc', 'mpsc', 'spsc'], external_repo: false},
-      {name: 'kv-store', category: 'rust', tasks: ['get-put'], external_repo: false},
-    ],
-  },
+  examples: exampleCatalogue,
 };

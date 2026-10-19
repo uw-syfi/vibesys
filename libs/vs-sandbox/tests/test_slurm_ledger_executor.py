@@ -207,11 +207,17 @@ class _Scheduler(FakeCluster):
             )
         return super().collect(target, by_job_id=by_job_id, observed=observed)
 
-    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
+    def cancel(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCancelOutcome:
         if self.failing_cancels:
             self.failing_cancels -= 1
             return ClusterUnknown(operation_id=None, reason="ssh: connection reset by peer")
-        return super().cancel(target, by_job_id=by_job_id)
+        return super().cancel(target, by_job_id=by_job_id, observed=observed)
 
     def status(self, operation_id: str) -> SlurmJobStatus:
         observed = self.inspect(operation_id)

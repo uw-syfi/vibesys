@@ -51,6 +51,58 @@
   display: flex;
   flex: none;
 }
+.vs-choice-tile-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+/* Cards: roomier tiles in a wrapping grid; what a tile says under its name wraps, never clips. */
+.vs-choice-tiles[data-layout='cards'] {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--column-field)), 1fr));
+  align-items: stretch;
+}
+.vs-choice-tiles[data-layout='cards'] .vs-choice-tile {
+  align-items: flex-start;
+  padding: var(--space-4) var(--space-5);
+  color: var(--text);
+  white-space: normal;
+}
+.vs-choice-tiles[data-layout='cards'] .vs-choice-tile-label {
+  font-family: var(--text-item-family);
+  font-size: var(--text-item-size);
+  line-height: var(--text-item-line);
+  font-weight: var(--text-item-weight);
+  overflow-wrap: anywhere;
+}
+.vs-choice-tiles[data-layout='cards'] .vs-choice-tile-label[data-mono] {
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  font-weight: var(--text-body-strong-weight);
+}
+.vs-choice-tile-note,
+.vs-choice-tile-meta {
+  color: var(--muted);
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+  font-weight: var(--text-small-weight);
+  overflow-wrap: anywhere;
+}
+.vs-choice-tile-meta {
+  margin-top: var(--space-2);
+}
+.vs-choice-tile[data-unavailable] {
+  background: transparent;
+  color: var(--muted);
+  cursor: not-allowed;
+}
+.vs-choice-tiles[data-layout='cards'] .vs-choice-tile[data-unavailable] {
+  color: var(--muted);
+}
+.vs-choice-tiles[data-layout='cards'] .vs-choice-tile:has(:checked) {
+  background: var(--selection);
+}
 
 /* --- model tiers ------------------------------------------------------------------------------- */
 

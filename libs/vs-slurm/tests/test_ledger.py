@@ -63,6 +63,7 @@ from vs_slurm.api import (
     settlement,
     submit_step,
     sweep_unleased,
+    sweep_withdrawer,
     transitioned,
     withdraw,
 )
@@ -551,7 +552,7 @@ def test_an_unleased_job_is_cancelled_only_after_its_grace_period(
         outcomes = sweep_unleased(
             world.ledger,
             world.cluster,
-            timing=_timing(now),
+            sweeper=sweep_withdrawer(_timing(now), grace_seconds=grace),
             grace_seconds=grace,
             orphans=OrphanChecks(900.0),
         )
@@ -574,7 +575,7 @@ def test_the_sweep_settles_an_unsuccessful_job_and_never_asks_the_cluster_about_
         sweep_unleased(
             world.ledger,
             world.cluster,
-            timing=_timing(1e9),
+            sweeper=sweep_withdrawer(_timing(1e9), grace_seconds=0.0),
             grace_seconds=0.0,
             orphans=OrphanChecks(900.0),
         )
@@ -589,7 +590,7 @@ def test_the_sweep_settles_an_unsuccessful_job_and_never_asks_the_cluster_about_
         sweep_unleased(
             world.ledger,
             forgetful,
-            timing=_timing(2e9),
+            sweeper=sweep_withdrawer(_timing(2e9), grace_seconds=0.0),
             grace_seconds=0.0,
             orphans=OrphanChecks(900.0),
         )
@@ -610,7 +611,7 @@ def test_a_lease_this_build_cannot_read_holds_the_request_and_blocks_no_removal(
         sweep_unleased(
             world.ledger,
             world.cluster,
-            timing=_timing(1e9),
+            sweeper=sweep_withdrawer(_timing(1e9), grace_seconds=0.0),
             grace_seconds=0.0,
             orphans=OrphanChecks(900.0),
         )
@@ -649,7 +650,7 @@ def test_a_request_being_withdrawn_lists_as_its_job_and_the_sweep_leaves_it_to_i
     swept = sweep_unleased(
         world.ledger,
         world.cluster,
-        timing=_timing(now + 1.0),
+        sweeper=sweep_withdrawer(_timing(now + 1.0), grace_seconds=0.0),
         grace_seconds=0.0,
         orphans=OrphanChecks(900.0),
     )
@@ -671,7 +672,7 @@ def test_a_lease_left_unreadable_by_a_crashed_build_is_swept_and_named_in_a_warn
         outcomes = sweep_unleased(
             world.ledger,
             world.cluster,
-            timing=_timing(1e9),
+            sweeper=sweep_withdrawer(_timing(1e9), grace_seconds=0.0),
             grace_seconds=0.0,
             orphans=OrphanChecks(900.0),
         )
@@ -691,7 +692,7 @@ def test_the_sweep_leaves_a_completed_job_for_a_run_to_collect(tmp_path: Path) -
         sweep_unleased(
             world.ledger,
             world.cluster,
-            timing=_timing(1e9),
+            sweeper=sweep_withdrawer(_timing(1e9), grace_seconds=0.0),
             grace_seconds=0.0,
             orphans=OrphanChecks(900.0),
         )
@@ -710,7 +711,7 @@ def test_the_sweep_never_touches_a_job_outside_the_ledger(tmp_path: Path) -> Non
     sweep_unleased(
         world.ledger,
         world.cluster,
-        timing=_timing(1e9),
+        sweeper=sweep_withdrawer(_timing(1e9), grace_seconds=0.0),
         grace_seconds=0.0,
         orphans=OrphanChecks(900.0),
     )
@@ -792,7 +793,11 @@ def test_the_sweep_cancels_every_live_job_named_for_a_failed_or_withdrawn_attemp
         ledger.renew(key, LedgerLease(holder="run-a", renewed_at=0.0, expires_at=1e12))
 
         outcomes = sweep_unleased(
-            ledger, cluster, timing=_timing(1.0), grace_seconds=0.0, orphans=OrphanChecks(900.0)
+            ledger,
+            cluster,
+            sweeper=sweep_withdrawer(_timing(1.0), grace_seconds=0.0),
+            grace_seconds=0.0,
+            orphans=OrphanChecks(900.0),
         )
 
         assert {o.operation_id for o in outcomes if isinstance(o, Withdrawn)} == live
@@ -806,7 +811,28 @@ def test_the_sweep_cancels_every_live_job_named_for_a_failed_or_withdrawn_attemp
                 assert observed.status.terminal
         assert (
             sweep_unleased(
-                ledger, cluster, timing=_timing(2.0), grace_seconds=0.0, orphans=OrphanChecks(900.0)
+                ledger,
+                cluster,
+                sweeper=sweep_withdrawer(_timing(2.0), grace_seconds=0.0),
+                grace_seconds=0.0,
+                orphans=OrphanChecks(900.0),
             )
             == ()
         )
+
+
+@given(call_seconds=st.floats(min_value=0.0, max_value=1000.0))
+@settings(max_examples=examples(pr=30, nightly=300), deadline=None)
+def test_a_withdrawal_timing_whose_mark_outlasts_the_longest_window_is_refused(
+    call_seconds: float,
+) -> None:
+    """Every build's marks hold at most 900 s, which a reader that cannot decode one relies on."""
+    window = 7 * call_seconds + 60
+    if window <= 900.0:
+        assert _timing(0.0).window_seconds <= 900.0
+        assert WithdrawalTiming(
+            clock=ManualClock(0.0), call_seconds=call_seconds
+        ).window_seconds == (pytest.approx(window))
+        return
+    with pytest.raises(LedgerError, match="transport_timeout_seconds"):
+        WithdrawalTiming(clock=ManualClock(0.0), call_seconds=call_seconds)

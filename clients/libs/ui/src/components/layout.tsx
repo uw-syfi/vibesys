@@ -1,5 +1,6 @@
-import type {CSSProperties, JSX, ReactNode} from 'react';
+import {type CSSProperties, type JSX, type ReactNode, useId, useState} from 'react';
 import type {SpaceToken} from '../tokens/index.js';
+import {Icon} from './icon.js';
 
 /** The page content's max width: `content` (1060), `wide` (1100) or `narrow` (900). */
 export type PageWidth = 'content' | 'wide' | 'narrow';
@@ -134,17 +135,46 @@ export function Split(props: {
   );
 }
 
-/** A page's persistent section navigation beside independently changing content. */
+/**
+ * A page's persistent section navigation beside independently changing content. With `summary`
+ * (a one-line account of where the reader is, such as "4 of 8 · Hardware") the navigation is a
+ * list of steps: beside the content while the layout is wide, and under that one line, which the
+ * reader presses to open the list, once the layout is narrower.
+ */
 export function SectionLayout(props: {
   readonly label: string;
   readonly sections: ReactNode;
+  readonly summary?: string;
   readonly children: ReactNode;
 }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const listId = useId();
+  const {summary} = props;
   return (
     <div className="vs-section-container">
-      <div className="vs-section-layout">
+      <div className="vs-section-layout" data-steps={summary === undefined ? undefined : ''}>
         <nav className="vs-section-nav" aria-label={props.label}>
-          {props.sections}
+          {summary === undefined ? (
+            props.sections
+          ) : (
+            <>
+              <button
+                type="button"
+                className="vs-section-toggle"
+                aria-expanded={open}
+                aria-controls={listId}
+                onClick={() => setOpen(!open)}
+              >
+                <span className="vs-section-toggle-text">{summary}</span>
+                <span className="vs-tree-chevron" data-open={open || undefined}>
+                  <Icon name="chevron-right" />
+                </span>
+              </button>
+              <div className="vs-section-steps" id={listId} data-open={open || undefined}>
+                {props.sections}
+              </div>
+            </>
+          )}
         </nav>
         <div className="vs-section-content">{props.children}</div>
       </div>

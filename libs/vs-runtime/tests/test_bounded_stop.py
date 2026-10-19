@@ -101,29 +101,26 @@ async def test_a_block_that_ends_within_the_grace_is_not_cancelled() -> None:
     assert await task == "drained"
 
 
+@pytest.mark.regression
 @pytest.mark.asyncio
-async def test_a_resume_within_the_grace_disarms_the_cancellation() -> None:
+async def test_a_resume_within_the_grace_does_not_disarm_the_cancellation() -> None:
+    """PR #3209 MED-3: a resume cleared the stop, so a hung turn held the closing run forever."""
     channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
     timer = FakeStopTimer(threads=SimThreads())
-    finish = asyncio.Event()
 
-    async def run() -> str:
+    async def run() -> None:
         async with bounded_stop(channel, grace_s=_GRACE_S, on_stop=_StopWork(), timer=timer):
-            await finish.wait()
-        return "resumed"
+            await asyncio.Event().wait()
 
     task = asyncio.create_task(run())
     await yield_now()
     channel.request_stop(StopMode.DRAIN)
     await _until_armed(timer)
-    channel.resume()
+    assert not channel.resume()
     timer.expire()
-    for _ in range(5):
-        await yield_now()
-    assert not task.done()
-    finish.set()
 
-    assert await task == "resumed"
+    with pytest.raises(RunStopped):
+        await task
 
 
 @pytest.mark.asyncio
@@ -207,11 +204,9 @@ def test_stop_listeners_see_each_request_until_unsubscribed() -> None:
 
     assert not channel.stop_requested()
     channel.request_stop(StopMode.DRAIN)
-    channel.resume()
-    assert not channel.stop_requested()
     unsubscribe()
     unsubscribe()
-    channel.request_stop(StopMode.DRAIN)
+    channel.request_stop(StopMode.CANCEL)
 
     assert seen == [True]
     assert channel.stop_requested()

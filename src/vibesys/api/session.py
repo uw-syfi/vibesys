@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
+from vs_runtime.api.infrastructure import StopMode
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -54,7 +56,10 @@ class RunControl(Protocol):
         ...
 
     def resume(self) -> None:
-        """Request the run acquire the write lease and continue from checkpoint."""
+        """Request the run acquire the write lease and continue from checkpoint.
+
+        A stop only escalates: while a stop is pending, a resume changes nothing.
+        """
         ...
 
     def resume_with_fallback(self) -> bool:
@@ -73,8 +78,8 @@ class RunControl(Protocol):
         """
         ...
 
-    def stop(self) -> None:
-        """Request the run terminate."""
+    def stop(self, mode: StopMode = StopMode.DRAIN) -> None:
+        """Request the run terminate, draining or cancelling work in flight as ``mode`` says."""
         ...
 
 

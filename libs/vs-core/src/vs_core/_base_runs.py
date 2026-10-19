@@ -41,15 +41,20 @@ from ._comparison import (
     evaluation_of,
     fresh,
     moment_of,
+    opened_answer,
     remeasures_base,
     remeasures_candidate,
+    restated_answers,
+    run_under_way,
     running_baseline,
     sample_of,
     samples_of,
+    scope_samples,
 )
 from ._proofs import (
     Proven,
 )
+from ._submission_receipts import receipt_ended
 from ._submissions import Origin, allocate, current, identity_of, submission_released
 from .types.common import (
     MAX_SUBMISSIONS_PER_MEASUREMENT,
@@ -79,7 +84,6 @@ if TYPE_CHECKING:
         MeasurementPlan,
     )
     from .types.kernel import EvaluationContext
-    from .types.records import Outbound
 
 __all__ = ["after_run", "base_of", "base_plan", "record_samples", "with_base"]
 
@@ -292,8 +296,9 @@ def _sample_ready(
 
     A run that gave a sample may be followed by another, and so may one that ended without a
     sample for a reason that says nothing of the next run: it was cancelled with its attempt,
-    failed in the machinery, was refused at submission, or succeeded and its records could not
-    be collected (those are bounded per side, `_side_open`). Two ends refuse another, since the
+    failed in the machinery, was refused at submission or ended by core before it named a job,
+    or succeeded and its records could not be collected (those are bounded per side,
+    `_side_open`). Two ends refuse another, since the
     next run would end the same way: a run that succeeded with records but without a reading
     (the benchmark reports no metric), and a workload failure (the revision fails the
     evaluation, which is durable, as it is for any submission).
@@ -312,18 +317,26 @@ def _sample_ready(
     latest = budget.receipts[-1]
     if (
         not isinstance(latest, PreparedSubmissionReceipt)
-        or latest.observation is None
-        or not latest.observation.terminal
+        or not receipt_ended(latest)
         or latest.failure is MeasurementFailure.WORKLOAD
     ):
         return False
     observation = latest.observation
     sampled = any(sample.run == latest.request_id for sample in state.samples)
     recorded = any(job.submission_id == latest.request_id and job.evidence for job in state.jobs)
-    if observation.status == ObservationStatus.SUCCEEDED and recorded and not sampled:
+    if (
+        observation is not None
+        and observation.status == ObservationStatus.SUCCEEDED
+        and recorded
+        and not sampled
+    ):
         return False
-    released = not observation.accepted or isinstance(
-        submission_released(state, context, latest), Proven
+    # A submission core ended before any observation named a job ran nothing core knows of,
+    # like one refused at submission.
+    released = (
+        observation is None
+        or not observation.accepted
+        or isinstance(submission_released(state, context, latest), Proven)
     )
     return (
         released
@@ -376,12 +389,8 @@ def _side_open(
         for receipt in budget.receipts
         if isinstance(receipt, PreparedSubmissionReceipt)
     }
-    collecting = {job.submission_id for job in state.jobs if job.collecting is not None}
     own = tuple(run.request_id for run in state.core_runs if run.request_id in side)
-    if any(
-        (seen := side[run].observation) is None or not seen.terminal or run in collecting
-        for run in own
-    ):
+    if any(run_under_way(state, side[run]) for run in own):
         return False
     sampled = {sample.run for sample in state.samples}
     unsampled = 0
@@ -423,16 +432,17 @@ def record_samples(
     job: OwnedJob | RegisteredOwnedJob,
     newly: tuple[EvidenceRef, ...],
     observed_at: Seconds,
-) -> tuple[EvaluationState, tuple[Outbound, ...]]:
+) -> AreaChange[EvaluationState]:
     """Record the sample a finished framework run gives, and what its end changes.
 
     One run is one sample, however many records it carries, and a sample cannot be built
-    without the commit and the measured input of its plan (`sample_of`). Every new or changed
-    comparison is logged. Once the run has ended, with a sample or without, the comparisons
+    without the commit and the measured input of its plan (`sample_of`). The official answer
+    of its input in its scope is restated to the mean it now makes (`restated_answers`), and
+    every new or changed comparison is logged. Once the run has ended, with a sample or without, the comparisons
     waiting on its input take the runs they still need (`after_run`).
     """
     if not isinstance(job, OwnedJob):
-        return state, ()
+        return AreaChange(state=state)
     sample = next(
         (
             made
@@ -443,14 +453,17 @@ def record_samples(
         None,
     )
     if sample is not None:
-        state = state.model_copy(
-            update={"samples": (*state.samples, _with_known_base(state, sample))}
+        sample = _with_known_base(state, sample)
+        state = restated_answers(
+            state.model_copy(update={"samples": (*state.samples, sample)}),
+            sample,
+            context.run.now_at,
         )
         state = state.model_copy(update={"comparisons": _logged(state, context)})
     if not job.terminal:
-        return state, ()
-    change = after_run(AreaChange(state=state), context, job.submission_id)
-    return change.state, change.requests
+        return AreaChange(state=state)
+    state = opened_answer(state, job, context.run.now_at)
+    return after_run(AreaChange(state=state), context, job.submission_id)
 
 
 def _logged(state: EvaluationState, context: EvaluationContext) -> tuple[Comparison, ...]:
@@ -624,7 +637,7 @@ def _advance(
     behalf = _Behalf(candidate.request_id, own)
     comparison = comparison_of(state, scope, mine, moment)
     if comparison is None:
-        sampled = any(s.scope == scope for s in samples_of(state, mine))
+        sampled = bool(scope_samples(state, scope, mine))
         if (sampled or base_in_flight(state, mine, scope)) and base_missing(
             state, Measured(evaluation, base.measured_input), moment
         ):

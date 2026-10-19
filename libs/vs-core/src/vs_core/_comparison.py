@@ -99,6 +99,7 @@ from dataclasses import dataclass
 from math import floor, inf, sqrt
 from typing import TYPE_CHECKING
 
+from ._submission_receipts import receipt_ended
 from ._values import digest
 from .types.common import (
     MAX_SUBMISSIONS_PER_MEASUREMENT,
@@ -117,6 +118,7 @@ from .types.evaluation import (
 from .types.measurement import (
     BaseRef,
     Comparison,
+    ComparisonSettled,
     ComparisonVerdict,
     Direction,
     EffectVerdict,
@@ -128,14 +130,15 @@ from .types.measurement import (
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from .types.common import RequestId, RunFacts, Scope, Seconds, TaskTerms
-    from .types.evaluation import EvaluationState
+    from .types.common import EvidenceKey, RequestId, RunFacts, Scope, Seconds, TaskTerms
+    from .types.evaluation import EvaluationState, SubmissionReceipt
     from .types.kernel import RunState
 
 __all__ = [
     "BASE_MAX_SAMPLES",
     "MAX_CORE_BASE_RUNS",
     "MIN_SAMPLES_WITHOUT_FLOOR",
+    "SETTLE_RUNS",
     "VERDICT_NOISES",
     "ComparisonPolicy",
     "Measured",
@@ -146,31 +149,43 @@ __all__ = [
     "base_run_stalled",
     "claimed_base",
     "close_call",
+    "closed_answers",
     "compare",
     "comparison_of",
     "comparison_of_result",
     "comparison_settling",
     "comparisons_of",
+    "comparisons_settled",
     "comparisons_to_publish",
     "effect_resolution",
     "effect_verdict",
     "evaluation_of",
+    "feeding_run_under_way",
     "fresh",
     "latest_comparisons",
     "moment_of",
     "official_needs_samples",
+    "opened_answer",
     "policy_of",
     "remeasures_base",
     "remeasures_candidate",
+    "restated_answers",
     "run_reading",
+    "run_under_way",
     "running_baseline",
     "sample_of",
     "samples_of",
+    "scope_samples",
     "stated_comparisons",
     "terms_policy",
     "verdict_unreachable",
 ]
 
+SETTLE_RUNS = 3
+"""How many measurement limits a comparison may keep settling for after an official run ends:
+one for each run a close call earns a side without a declared floor. A flow waits for the
+comparison that long at most, and the official record stops moving then
+(``OwnedJob.answer_until``)."""
 VERDICT_NOISES = 2.0
 """How many standard errors a difference must exceed for a verdict under a declared floor."""
 BASE_MAX_SAMPLES = 2
@@ -350,17 +365,22 @@ def sample_of(
     )
 
 
-def as_answer(state: EvaluationState, job: OwnedJob, evidence: EvidenceRef) -> EvidenceRef:
+def as_answer(
+    state: EvaluationState, job: OwnedJob, evidence: EvidenceRef, now_at: Seconds
+) -> EvidenceRef:
     """``evidence`` as the official measurement's answer: its reading is the samples' mean.
 
     The official measurement of an input is answered by every sample the scope holds of it, the
     run that answers included when it is a new one (`vs_core._measurement_reuse`). The
     benchmark record that carries the answer through the ledger, and so to every reader that
-    ranks candidates, states the mean of those samples: exactly the candidate value the
-    comparison with the base states (`comparison_of`) at the moment the answer is stored, never
-    one run's reading. A later sample of the same input in the same scope (another run of it
-    after the official check) moves the comparison but not the stored answer. The run's own
-    reading stays in its ``Sample``.
+    ranks candidates, states the mean of those samples (`scope_samples`): exactly the candidate
+    value the comparison with the base states (`comparison_of`), never one run's reading. A
+    later sample of the same input in the same scope (a close call's run after the official
+    check) restates the record (`restated_answers`), so the record and the settled comparison
+    are one figure. The run's own reading stays in its ``Sample``. Once an answer of the input in
+    the scope has closed (``OwnedJob.answer_until``), every official record of it states the
+    figure that answer closed on (`_closed_answer`), so a run that lands later does not part the
+    ledger from the verdict the strategy took.
 
     Only a measurement record states an answer (`_measures`): a failed or untrusted record
     keeps the reading its run reported, so a failed run never reads as the mean of runs that
@@ -381,7 +401,12 @@ def as_answer(state: EvaluationState, job: OwnedJob, evidence: EvidenceRef) -> E
     measured = Measured(
         evaluation_of(MeasurementIdentity.from_plan(plan, plan.candidate)), plan.measured_input
     )
-    held = tuple(s for s in samples_of(state, measured) if s.scope == job.scope)
+    closed = _closed_answer(state, job, measured, now_at)
+    if closed is not None and closed.metric == reading.metric:
+        return evidence.model_copy(
+            update={"reading": reading.model_copy(update={"value": closed.value})}
+        )
+    held = scope_samples(state, job.scope, measured)
     own = sample_of(job, evidence, 0.0)
     if own is not None and all(s.run != own.run for s in held):
         held = (*held, own)
@@ -389,6 +414,136 @@ def as_answer(state: EvaluationState, job: OwnedJob, evidence: EvidenceRef) -> E
         return evidence
     mean = _mean(tuple(s.reading.value for s in held))
     return evidence.model_copy(update={"reading": reading.model_copy(update={"value": mean})})
+
+
+def _closed_answer(
+    state: EvaluationState, job: OwnedJob, measured: Measured, now_at: Seconds
+) -> Reading | None:
+    """The headline reading the first closed official answer of ``measured`` in ``job``'s scope states.
+
+    None while no answer of it has closed: no official job of it whose ``answer_until`` has come.
+    """
+    for other in state.jobs:
+        plan = other.plan
+        if (
+            other.submission_id != job.submission_id
+            and other.answer_until is not None
+            and other.answer_until <= now_at
+            and other.scope == job.scope
+            and plan.purpose == "official"
+            and plan.measured_input == measured.measured_input
+            and isinstance(plan.candidate, RevisionRef)
+            and evaluation_of(MeasurementIdentity.from_plan(plan, plan.candidate))
+            == measured.evaluation
+        ):
+            for record in other.evidence:
+                if _measures(record):
+                    return record.reading
+    return None
+
+
+def restated_answers(state: EvaluationState, sample: Sample, now_at: Seconds) -> EvaluationState:
+    """``state`` with the open official answers of ``sample``'s input in its scope stating their mean.
+
+    The official measurement's ledger record states the mean of every sample its scope holds
+    of its input (`as_answer`), so a sample that lands after the answer was stored restates it:
+    in the ledger and in the job that carries it. The record keeps its identity; only its
+    headline reading moves. Only while the answer is open (``OwnedJob.answer_until``): once the
+    flow that waited for it took its verdict, the record states that verdict's figure for good.
+    """
+    restated: dict[EvidenceKey, EvidenceRef] = {}
+    for job in state.jobs:
+        plan = job.plan
+        if (
+            job.answer_until is not None
+            and now_at < job.answer_until
+            and job.scope == sample.scope
+            and plan.purpose == "official"
+            and plan.measured_input == sample.measured_input
+            and isinstance(plan.candidate, RevisionRef)
+            and evaluation_of(MeasurementIdentity.from_plan(plan, plan.candidate))
+            == sample.evaluation
+        ):
+            for record in job.evidence:
+                answer = as_answer(state, job, record, now_at)
+                if answer != record:
+                    restated[record.key] = answer
+    if not restated:
+        return state
+
+    def now(records: tuple[EvidenceRef, ...]) -> tuple[EvidenceRef, ...]:
+        return tuple(restated.get(record.key, record) for record in records)
+
+    return state.model_copy(
+        update={
+            "evidence": now(state.evidence),
+            "jobs": tuple(
+                job.model_copy(update={"evidence": now(job.evidence)})
+                if any(record.key in restated for record in job.evidence)
+                else job
+                for job in state.jobs
+            ),
+        }
+    )
+
+
+def opened_answer(state: EvaluationState, job: OwnedJob, now_at: Seconds) -> EvaluationState:
+    """``state`` with the answer of ``job``, an official run that just ended, open to restating.
+
+    It stays open for ``SETTLE_RUNS`` times the run's limit, the longest a flow waits for its
+    comparison to settle (`closed_answers` closes it sooner, when it settles).
+    """
+    if not job.terminal or job.plan.purpose != "official" or job.answer_until is not None:
+        return state
+    until = now_at + SETTLE_RUNS * job.plan.time_bound
+    return state.model_copy(
+        update={
+            "jobs": tuple(
+                j.model_copy(update={"answer_until": until})
+                if j.submission_id == job.submission_id
+                else j
+                for j in state.jobs
+            )
+        }
+    )
+
+
+def closed_answers(state: EvaluationState, moment: Moment) -> EvaluationState:
+    """``state`` with every open answer whose comparison no longer settles closed now.
+
+    A flow that waits for the comparison reads it once it is not settling (on core's report,
+    `comparisons_settled`), and takes its verdict on the record as it stands then; a sample
+    that lands later restates nothing (`restated_answers`), so the round's figure and the
+    ledger's stay one. An answer with no comparison is closed at once: its flow does not wait.
+    """
+    now_at = moment.now
+    open_jobs = [
+        job for job in state.jobs if job.answer_until is not None and now_at < job.answer_until
+    ]
+    if not open_jobs:
+        return state
+    settling = {
+        (stated.comparison.scope, stated.comparison.candidate_input)
+        for stated in stated_comparisons(state, moment)
+        if stated.settling
+    }
+    closing = {
+        job.submission_id
+        for job in open_jobs
+        if (job.scope, job.plan.measured_input) not in settling
+    }
+    if not closing:
+        return state
+    return state.model_copy(
+        update={
+            "jobs": tuple(
+                job.model_copy(update={"answer_until": now_at})
+                if job.submission_id in closing
+                else job
+                for job in state.jobs
+            )
+        }
+    )
 
 
 def run_reading(state: EvaluationState, job: OwnedJob, evidence: EvidenceRef) -> Reading | None:
@@ -411,6 +566,18 @@ def samples_of(state: EvaluationState, measured: Measured) -> tuple[Sample, ...]
         if sample.evaluation == measured.evaluation
         and sample.measured_input == measured.measured_input
     )
+
+
+def scope_samples(state: EvaluationState, scope: Scope, measured: Measured) -> tuple[Sample, ...]:
+    """The samples of one measurement that runs in ``scope`` gave, in the order they ended.
+
+    A candidate's side of a comparison is its own scope's samples only (`comparison_of`): each
+    attempt, and each generation of a reopened one, is compared on the runs it made, though
+    another holds samples of the same input. Everything that counts a candidate's samples
+    counts them here, so the comparison, the official answer (`as_answer`) and the sample cap
+    (`official_needs_samples`) never disagree on how many there are.
+    """
+    return tuple(s for s in samples_of(state, measured) if s.scope == scope)
 
 
 def fresh(samples: Iterable[Sample], moment: Moment) -> tuple[Sample, ...]:
@@ -590,7 +757,7 @@ def _anchored(
     state: EvaluationState, scope: Scope, measured: Measured
 ) -> tuple[tuple[Sample, ...], BaseRef | None]:
     """The scope's samples of the input and the base its latest anchored sample names."""
-    mine = tuple(s for s in samples_of(state, measured) if s.scope == scope)
+    mine = scope_samples(state, scope, measured)
     return mine, next((s.base for s in reversed(mine) if s.base is not None), None)
 
 
@@ -669,18 +836,96 @@ def comparison_settling(state: EvaluationState, comparison: Comparison) -> bool:
     )
     if evaluation is None:
         return False
-    base = Measured(evaluation, comparison.base_input)
-    candidate = Measured(evaluation, comparison.candidate_input)
-    return _base_under_way(state, comparison, base) or base_in_flight(
-        state, candidate, comparison.scope
+    base = BaseRef(commit=comparison.base, measured_input=comparison.base_input)
+    return feeding_run_under_way(
+        state, comparison.scope, Measured(evaluation, comparison.candidate_input), base
+    )
+
+
+def feeding_run_under_way(
+    state: EvaluationState, scope: Scope, candidate: Measured, base: BaseRef
+) -> bool:
+    """Whether a run that feeds the scope's comparison of ``candidate`` with ``base`` is under way.
+
+    A run of the base in any scope (core's, another candidate's, or the strategy's run core
+    claimed, `_base_under_way`), since a base's samples are shared by every candidate compared
+    with it, and a run of the candidate's input in its own scope (`base_in_flight`).
+    """
+    measured_base = Measured(candidate.evaluation, base.measured_input)
+    return _base_under_way(state, base, measured_base) or base_in_flight(state, candidate, scope)
+
+
+def comparisons_settled(
+    before: EvaluationState, after: EvaluationState, moment: Moment
+) -> tuple[ComparisonSettled, ...]:
+    """Every comparison that was settling in ``before`` and is settled in ``after``.
+
+    Read from the view's own statement of each comparison (`stated_comparisons`), so the report
+    and the ``settling`` a flow reads are one test: a flow that read a comparison settling is
+    told exactly once, in the step whose run's end leaves no run feeding it (after the runs that
+    end started), and never while one still does. A comparison stops settling only when a run
+    under way ends (`run_under_way`) or a sample lands, so any other step costs nothing here.
+    """
+    # Samples are only ever appended.
+    if _runs_under_way(before) <= _runs_under_way(after) and len(before.samples) == len(
+        after.samples
+    ):
+        return ()
+    settling = {
+        _subject(stated.comparison)
+        for stated in stated_comparisons(before, moment)
+        if stated.settling
+    }
+    if not settling:
+        return ()
+    return tuple(
+        ComparisonSettled(
+            scope=stated.comparison.scope,
+            candidate_input=stated.comparison.candidate_input,
+            base_input=stated.comparison.base_input,
+        )
+        for stated in stated_comparisons(after, moment)
+        if not stated.settling and _subject(stated.comparison) in settling
+    )
+
+
+def _subject(comparison: Comparison) -> tuple[Scope, str, str]:
+    return (comparison.scope, comparison.candidate_input, comparison.base_input)
+
+
+def _runs_under_way(state: EvaluationState) -> frozenset[RequestId]:
+    """The request of every run admitted and not ended (`run_under_way`)."""
+    return frozenset(
+        receipt.request_id
+        for budget in state.submission_budgets
+        for receipt in budget.receipts
+        if isinstance(receipt, PreparedSubmissionReceipt) and run_under_way(state, receipt)
     )
 
 
 def stated_comparisons(state: EvaluationState, moment: Moment) -> tuple[StatedComparison, ...]:
     """Every comparison the samples held make now, each with whether it is still settling."""
     return tuple(
-        StatedComparison(comparison=comparison, settling=comparison_settling(state, comparison))
+        StatedComparison(
+            comparison=comparison,
+            settling=comparison_settling(state, comparison),
+            answer_until=_answer_until(state, comparison),
+        )
         for comparison in comparisons_of(state, moment)
+    )
+
+
+def _answer_until(state: EvaluationState, comparison: Comparison) -> Seconds | None:
+    """When the scope's latest official answer of the candidate input stops moving, if any."""
+    return next(
+        (
+            job.answer_until
+            for job in reversed(state.jobs)
+            if job.answer_until is not None
+            and job.scope == comparison.scope
+            and job.plan.measured_input == comparison.candidate_input
+        ),
+        None,
     )
 
 
@@ -829,6 +1074,26 @@ def _base_max_samples(policy: ComparisonPolicy) -> int:
     return BASE_MAX_SAMPLES if policy.floor_declared else MIN_SAMPLES_WITHOUT_FLOOR
 
 
+def run_under_way(state: EvaluationState, receipt: SubmissionReceipt | None) -> bool:
+    """Whether the run ``receipt`` admitted has not ended: the one test of a run in flight.
+
+    Its submission has not ended (`receipt_ended`), or the job it named has not, or core is
+    still collecting that job's records: its sample, if any, lands only then. Every reader of
+    a comparison's runs reads it (`runs_in_flight`, `running_baseline`), and so does the
+    report that a comparison settled (`comparisons_settled`). A registered operation's job is
+    no run of a comparison's: it gives no sample (`vs_core._base_runs.record_samples`), so
+    nothing waits for it to end.
+    """
+    if not isinstance(receipt, PreparedSubmissionReceipt) or any(
+        job.request_id == receipt.request_id for job in state.registered_jobs
+    ):
+        return False
+    return not receipt_ended(receipt) or any(
+        job.submission_id == receipt.request_id and (not job.terminal or job.collecting is not None)
+        for job in state.jobs
+    )
+
+
 def runs_in_flight(state: EvaluationState, measured: Measured, scope: Scope | None = None) -> int:
     """How many runs of this measurement were admitted and have not ended (``scope``'s, or any)."""
     count = 0
@@ -840,10 +1105,7 @@ def runs_in_flight(state: EvaluationState, measured: Measured, scope: Scope | No
             or evaluation_of(identity) != measured.evaluation
         ):
             continue
-        latest = budget.receipts[-1] if budget.receipts else None
-        if isinstance(latest, PreparedSubmissionReceipt) and (
-            latest.observation is None or not latest.observation.terminal
-        ):
+        if run_under_way(state, budget.receipts[-1] if budget.receipts else None):
             count += 1
     return count
 
@@ -869,7 +1131,7 @@ def running_baseline(state: EvaluationState, base: BaseRef) -> RequestId | None:
             and identity.measured_input is None
             and identity.candidate == base.commit
             and isinstance(latest, PreparedSubmissionReceipt)
-            and (latest.observation is None or not latest.observation.terminal)
+            and run_under_way(state, latest)
         ):
             return latest.request_id
     return None
@@ -932,17 +1194,17 @@ def remeasures_base(
         close_call(comparison)
         and not verdict_unreachable(comparison, moment.policy)
         and len(held) < _base_max_samples(moment.policy)
-        and not _base_under_way(state, comparison, base)
+        and not _base_under_way(
+            state, BaseRef(commit=comparison.base, measured_input=comparison.base_input), base
+        )
         and not base_run_stalled(state, comparison, evaluation, moment)
     )
 
 
-def _base_under_way(state: EvaluationState, comparison: Comparison, base: Measured) -> bool:
+def _base_under_way(state: EvaluationState, ref: BaseRef, base: Measured) -> bool:
     """Whether a run of the base has not ended: core's own, or the strategy's run it claimed."""
     claimed = {claim.request_id for claim in state.base_claims}
-    running = running_baseline(
-        state, BaseRef(commit=comparison.base, measured_input=comparison.base_input)
-    )
+    running = running_baseline(state, ref)
     return base_in_flight(state, base) or (running is not None and running in claimed)
 
 
@@ -995,12 +1257,12 @@ def official_needs_samples(
         held is not None
         and close_call(held)
         and not verdict_unreachable(held, moment.policy)
-        and not _candidate_runs_spoken_for(state, scope, measured, moment)
+        and not _candidate_runs_spoken_for(state, scope, measured, moment.policy)
     )
 
 
 def _candidate_runs_spoken_for(
-    state: EvaluationState, scope: Scope, measured: Measured, moment: Moment
+    state: EvaluationState, scope: Scope, measured: Measured, policy: ComparisonPolicy
 ) -> bool:
     """Whether the candidate's samples and its runs under way already make the sample cap.
 
@@ -1008,9 +1270,10 @@ def _candidate_runs_spoken_for(
     (`remeasures_candidate`). A run of its input still under way, core's last re-run or another
     one, lands a sample of its own, so an official run added beside it would be one too many.
     The official measurement is then answered by the samples held, and the comparison settles
-    when the run under way lands.
+    when the run under way lands. Both counts are the scope's own, as the comparison's are
+    (`scope_samples`): another attempt's samples of the same input are not this candidate's.
     """
-    return not moment.policy.floor_declared and (
-        len(fresh(samples_of(state, measured), moment)) + runs_in_flight(state, measured, scope)
+    return not policy.floor_declared and (
+        len(scope_samples(state, scope, measured)) + runs_in_flight(state, measured, scope)
         >= MIN_SAMPLES_WITHOUT_FLOOR
     )

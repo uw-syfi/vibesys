@@ -154,6 +154,10 @@ def test_run_start_launches_with_the_typed_options_before_its_args() -> None:
     )
 
 
+_UNASKED_CHECKS = [check for check in CheckId if check is not CheckId.MEASUREMENT_TARGET]
+"""The checks every reply holds in order; ``measurement_target`` only comes with ``measure_on``."""
+
+
 def _project(root: Path) -> Path:
     task = root / ".vibesys" / "tasks" / "spsc"
     task.mkdir(parents=True)
@@ -190,7 +194,7 @@ def test_preflight_runs_the_run_check_with_the_arguments_run_start_would_launch(
     assert isinstance(reply, RunPreflightReply)
     # Without `with_project_clean` the reply is the one a client that predates that check expects.
     assert [check.id for check in reply.checks] == [
-        check_id for check_id in CheckId if check_id is not CheckId.PROJECT_CLEAN
+        check_id for check_id in _UNASKED_CHECKS if check_id is not CheckId.PROJECT_CLEAN
     ]
     assert preflight.calls == [
         (
@@ -394,7 +398,7 @@ def test_docker_fails_exactly_when_the_run_may_need_it_and_it_is_unreachable(
     (check,) = [check for check in checks if check.id is CheckId.DOCKER_REACHABLE]
     unreachable = isinstance(docker, DockerUnreachable)
     assert (check.state is CheckState.FAIL) == (uses_docker is not False and unreachable)
-    assert [each.id for each in checks] == list(CheckId)
+    assert [each.id for each in checks] == _UNASKED_CHECKS
 
 
 _UNAVAILABLE = BackendUnavailable(task="mpmc", backend=Backend.CUDA, declared=(Backend.CUDA,))
@@ -487,7 +491,7 @@ def test_the_clean_check_is_listed_in_check_order_only_when_asked_for(tmp_path: 
 
     assert isinstance(asked, RunPreflightReply)
     assert isinstance(unasked, RunPreflightReply)
-    assert [check.id for check in asked.checks] == list(CheckId)
+    assert [check.id for check in asked.checks] == _UNASKED_CHECKS
     assert CheckId.PROJECT_CLEAN not in [check.id for check in unasked.checks]
 
 

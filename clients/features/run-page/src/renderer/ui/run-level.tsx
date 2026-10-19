@@ -227,6 +227,7 @@ export function IdeasPane(props: {
       title={`${props.base.model.candidates.candidates.length}`}
       width="master"
       header={{}}
+      fixed
     >
       <IdeasFace {...props} outcomes={outcomes} effects={effects} modeControls />
     </FramedPane>
@@ -363,9 +364,9 @@ export function RunLevel(props: {
         kicker={KICKERS[mode]}
         title={mode === 'logs' ? 'run' : `${total}`}
         width="fill"
-        actions={<ModeSwitch mode={mode} options={MODES} zoom={base.zoom} />}
         header={face.header}
       >
+        <ModeSwitch mode={mode} options={MODES} zoom={base.zoom} />
         {face.body}
       </FramedPane>
       <NowPane base={base} />

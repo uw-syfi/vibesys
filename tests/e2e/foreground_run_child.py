@@ -67,7 +67,12 @@ class BlockedRuntime:
 
         asyncio.run(serve_forever())
 
-    def shutdown(self) -> None:
+    def interrupt(self) -> bool:
+        """No run control is installed: a Ctrl-C ends the server as SIGTERM does."""
+        return False
+
+    def shutdown(self, number: signal.Signals | None = None) -> None:
+        del number
         self.stopping.set()
 
 

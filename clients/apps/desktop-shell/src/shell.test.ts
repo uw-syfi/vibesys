@@ -141,6 +141,7 @@ test('regression: Run again opens New run with the options the run was started w
         start: {
           harness: null,
           options: {rounds: 3, time_limit_s: 600, results: 'publish_github', roles: []},
+          agents: {},
           args: ['--max-in-flight', '3'],
         },
       },

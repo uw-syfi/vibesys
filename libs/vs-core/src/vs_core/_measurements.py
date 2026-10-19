@@ -15,6 +15,7 @@ from ._base_runs import after_run, base_of, record_samples, with_base
 from ._comparison import (
     as_answer,
     moment_of,
+    run_reading,
 )
 from ._deadlines import resolve_until
 from ._evaluation_history import produce_history
@@ -40,6 +41,7 @@ from ._proofs import (
     operation_for,
     released_owner,
     request_matches,
+    stop_mode,
     submission_budget_for,
 )
 from ._registry import ContractError
@@ -47,6 +49,7 @@ from ._runaway import runaway_noted
 from ._submission_receipts import (
     canonical_failure,
     conclusive,
+    ended_unobserved,
     job_budget,
     submission_receipt,
 )
@@ -76,6 +79,7 @@ from .types.common import (
     RevisionRef,
     RunStatus,
     Scope,
+    StopMode,
 )
 from .types.evaluation import (
     MEASUREMENT_DIAGNOSTIC_LIMIT,
@@ -96,6 +100,7 @@ from .types.evaluation import (
     MeasurementIdentity,
     MeasurementRequested,
     MeasurementResult,
+    MeasurementSubmissionEnded,
     MeasurementSubmissionObserved,
     ObservationsDue,
     ObservedJobFacts,
@@ -133,7 +138,7 @@ if TYPE_CHECKING:
     from .types.kernel import EvaluationContext, RunState, Signal
     from .types.records import RecordsState, Request, RequestRecord
 
-__all__ = ["advance", "cancel_settled"]
+__all__ = ["advance", "cancel_settled", "submission_ended"]
 
 
 def _origin(context: EvaluationContext, event: MeasurementRequested) -> Verdict[Measure]:
@@ -574,6 +579,31 @@ def _submission_observed(
     # A waiting continuation derives and publishes the history itself when it authorizes.
     history = () if wake else _history_signals(change.state, context, scope)
     return change.model_copy(update={"signals": (*change.signals, *history, *wake)})
+
+
+def submission_ended(
+    state: EvaluationState, context: EvaluationContext, event: EvaluationEvent
+) -> AreaChange[EvaluationState]:
+    """Close the budget entry of a submission core ended before it named a job, and re-check.
+
+    No observation will reach the entry (its submission hung, or a restarted host could not
+    find it), so left open it would count its run under way for good: every comparison of its
+    input would stay settling and take no further run. A submission whose job is known ends
+    with that job. The comparisons waiting on its input take the runs they still need
+    (`after_run`).
+    """
+    if not isinstance(event, MeasurementSubmissionEnded):
+        raise ContractError(("event", event.kind), "not a submission's end")
+    if any(job.submission_id == event.request_id for job in state.jobs):
+        return AreaChange(state=state)
+    budgets = tuple(
+        ended_unobserved(budget, event.request_id, event.reason)
+        for budget in state.submission_budgets
+    )
+    if budgets == state.submission_budgets:
+        return AreaChange(state=state)
+    change = AreaChange(state=state.model_copy(update={"submission_budgets": budgets}))
+    return after_run(change, context, event.request_id)
 
 
 def _deferred_wake(
@@ -1029,6 +1059,7 @@ def _store_evidence(
     state: EvaluationState,
     job: OwnedJob | RegisteredOwnedJob,
     event: JobObserved | RegisteredJobObserved,
+    now_at: Seconds,
 ) -> _Stored:
     """Accept evidence keyed by (source request, evidence id).
 
@@ -1046,18 +1077,37 @@ def _store_evidence(
         if not isinstance(verdict, Proven) or not reused_record(state, job, evidence):
             continue
         reported = verdict.value
-        incoming = as_answer(state, job, reported) if isinstance(job, OwnedJob) else reported
+        incoming = (
+            as_answer(state, job, reported, now_at) if isinstance(job, OwnedJob) else reported
+        )
         previous = next((e for e in ledger if e.key == incoming.key), None)
         if previous is None:
             ledger.append(incoming)
             accepted.append(incoming)
             measured.append(reported)
-        elif previous != incoming:
+        elif previous != incoming and not _same_report(state, job, previous, reported):
             refused = True
         elif incoming not in accepted:
             accepted.append(incoming)
             measured.append(reported)
     return _Stored(tuple(accepted), tuple(ledger), refused, tuple(measured))
+
+
+def _same_report(
+    state: EvaluationState,
+    job: OwnedJob | RegisteredOwnedJob,
+    previous: EvidenceRef,
+    reported: EvidenceRef,
+) -> bool:
+    """Whether ``reported`` repeats the record the ledger holds as ``previous``, as its run read it.
+
+    An official answer whose restating closed (``OwnedJob.answer_until``) keeps the mean it
+    stated then, while `as_answer` would state the mean of every sample now; the run's own
+    reading (`run_reading`) is what a repeat of its report must match.
+    """
+    return isinstance(job, OwnedJob) and (
+        previous.model_copy(update={"reading": run_reading(state, job, previous)}) == reported
+    )
 
 
 def _job_observed(
@@ -1074,7 +1124,7 @@ def _job_observed(
     observation = event.observation
     if observation.resource_id is None:
         return AreaChange(state=state)
-    stored = _store_evidence(state, job, event)
+    stored = _store_evidence(state, job, event, context.run.now_at)
     accepted, ledger, refused, measured = (
         stored.accepted,
         stored.ledger,
@@ -1130,7 +1180,8 @@ def _job_observed(
         has_facts=event.evaluation_result is not None,
     )
     state = job_budget(state, context, updated, claim, reuse_incomplete=incomplete)
-    state, requests = record_samples(state, context, updated, measured, observation.observed_at)
+    ran = record_samples(state, context, updated, measured, observation.observed_at)
+    state, requests = ran.state, ran.requests
     wake = ContinuationJobsChanged(
         resource_id=observation.resource_id, observation=observation, previous=previous
     )
@@ -1186,7 +1237,8 @@ def _job_observed(
         # history in which this submission is not closed.
         signals=closing or (*_history_unless_awaited(state, context, job, event), wake),
         requests=requests if context.run.status != RunStatus.TERMINAL else (),
-        events=events,
+        # A comparison the run's end settled is told after the run's own result.
+        events=(*events, *ran.events),
     )
 
 
@@ -1669,7 +1721,8 @@ def _cancelling_scope(context: EvaluationContext) -> Scope | None:
     """
     match committed_stop(context.run):
         case Proven(value=stop) if context.run.status == RunStatus.CLOSING and (
-            stop.mode == "cancel" or context.run.now_at >= context.run.deadline_at
+            stop_mode(context.run) is StopMode.CANCEL
+            or context.run.now_at >= context.run.deadline_at
         ):
             return stop.scope
         case _:

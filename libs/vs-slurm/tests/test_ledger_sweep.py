@@ -33,6 +33,7 @@ from vs_slurm.api import (
     job_of_handle,
     ledger_operation_id,
     sweep_unleased,
+    sweep_withdrawer,
     transitioned,
 )
 
@@ -197,7 +198,7 @@ def test_the_sweep_never_withdraws_a_request_wanted_again_after_it_decided(
         outcomes = sweep_unleased(
             racing,
             world.cluster,
-            timing=_timing(NOW),
+            sweeper=sweep_withdrawer(_timing(NOW), grace_seconds=0.0),
             grace_seconds=0.0,
             orphans=OrphanChecks(900.0),
         )
@@ -280,7 +281,11 @@ def test_a_process_inspects_a_jobless_attempt_for_one_claim_window_then_never(
             before = cluster.inspections
             assert (
                 sweep_unleased(
-                    ledger, cluster, timing=_timing(now), grace_seconds=0.0, orphans=orphans
+                    ledger,
+                    cluster,
+                    sweeper=sweep_withdrawer(_timing(now), grace_seconds=0.0),
+                    grace_seconds=0.0,
+                    orphans=orphans,
                 )
                 == ()
             )
@@ -298,7 +303,13 @@ def test_an_orphan_that_starts_within_the_window_is_still_cancelled(appears_afte
         cluster = _CountingCluster()
         orphans = OrphanChecks(window_seconds=WINDOW)
         assert (
-            sweep_unleased(ledger, cluster, timing=_timing(NOW), grace_seconds=0.0, orphans=orphans)
+            sweep_unleased(
+                ledger,
+                cluster,
+                sweeper=sweep_withdrawer(_timing(NOW), grace_seconds=0.0),
+                grace_seconds=0.0,
+                orphans=orphans,
+            )
             == ()
         )
         cluster.script(operation, states=(SlurmJobStatus.RUNNING,))
@@ -306,7 +317,11 @@ def test_an_orphan_that_starts_within_the_window_is_still_cancelled(appears_afte
 
         later = NOW + appears_after
         outcomes = sweep_unleased(
-            ledger, cluster, timing=_timing(later), grace_seconds=0.0, orphans=orphans
+            ledger,
+            cluster,
+            sweeper=sweep_withdrawer(_timing(later), grace_seconds=0.0),
+            grace_seconds=0.0,
+            orphans=orphans,
         )
 
         (outcome,) = outcomes
@@ -317,10 +332,18 @@ def test_an_orphan_that_starts_within_the_window_is_still_cancelled(appears_afte
         assert observed.status.terminal
         # Once a sweep saw its job ended (or the window closed), it is never inspected again.
         sweep_unleased(
-            ledger, cluster, timing=_timing(later + 1.0), grace_seconds=0.0, orphans=orphans
+            ledger,
+            cluster,
+            sweeper=sweep_withdrawer(_timing(later + 1.0), grace_seconds=0.0),
+            grace_seconds=0.0,
+            orphans=orphans,
         )
         before = cluster.inspections
         sweep_unleased(
-            ledger, cluster, timing=_timing(later + 2.0), grace_seconds=0.0, orphans=orphans
+            ledger,
+            cluster,
+            sweeper=sweep_withdrawer(_timing(later + 2.0), grace_seconds=0.0),
+            grace_seconds=0.0,
+            orphans=orphans,
         )
         assert cluster.inspections == before

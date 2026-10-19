@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from headless import printable
 from headless import run as render_run
-from vibesys.api import RunStopped, StopMode, StopRequest
+from vibesys.api import RunStopped, StopMode
 from vs_sim.api import Signals
 
 if TYPE_CHECKING:
@@ -20,16 +20,16 @@ if TYPE_CHECKING:
     from vs_sim.api import SignalSource
 
 # Ctrl-C asks for a stop that cancels the work in flight (Slurm jobs) at once,
-# bounded like every stop; a repeated Ctrl-C changes nothing, since a terminal
-# delivers it here and the launcher forwards it too (the launcher sends a
-# repeated one on as SIGTERM). SIGTERM and SIGHUP end the run now: its task is
-# cancelled, so its teardown cancels external work before the process exits.
+# bounded like every stop, even after a draining stop: the run's control is the
+# one authority for its stop, and a stop there only escalates. The launcher
+# forwards each Ctrl-C once (this process leads its own process group, so the
+# terminal's copy never reaches it) and sends a repeated one on as SIGTERM.
+# SIGTERM and SIGHUP end the run now: its task is cancelled, so its teardown
+# cancels external work before the process exits.
 __all__ = ["failure_reason", "run_headless", "supervise"]
 
 _TERMINATION_SIGNALS = (Signals.SIGTERM, Signals.SIGHUP)
 _HANDLED_SIGNALS = (Signals.SIGINT, *_TERMINATION_SIGNALS)
-# The stop a Ctrl-C asks for: once per run, so a second Ctrl-C resends the same request.
-_INTERRUPT_STOP = StopRequest(control_id="signal-sigint", mode=StopMode.CANCEL)
 
 
 class _Supervisor:
@@ -38,21 +38,15 @@ class _Supervisor:
     def __init__(self, session: RunHandle, execution: asyncio.Task[RunResult]) -> None:
         self._session = session
         self._execution = execution
-        self._stopping = False
         self.terminating = False
         self.signalled: Signals | None = None
 
-    def stop(self) -> None:
-        """Request a cooperative stop once; the run drains in-flight work."""
-        if not self._stopping:
-            self._stopping = True
-            self._session.stop()
+    def stop(self, mode: StopMode = StopMode.DRAIN) -> None:
+        """Request a cooperative stop in ``mode``; the run's control keeps the strongest.
 
-    def interrupt(self) -> None:
-        """Request, once, a stop that cancels the work in flight instead of draining it."""
-        if not self._stopping and not self.terminating:
-            self._stopping = True
-            self._session.session.submit(_INTERRUPT_STOP)
+        A repeated request changes nothing, and a cancel after a drain escalates it.
+        """
+        self._session.stop(mode)
 
     def terminate(self) -> None:
         """Cancel the run once; cancellation unwinds through its teardown."""
@@ -64,7 +58,8 @@ class _Supervisor:
         """Stop, cancelling work in flight, on Ctrl-C; cancel the run on any other signal."""
         self.signalled = self.signalled or number
         if number is Signals.SIGINT:
-            self.interrupt()
+            if not self.terminating:
+                self.stop(StopMode.CANCEL)
         else:
             self.terminate()
 
@@ -89,7 +84,9 @@ async def supervise(
     before the cancellation propagates. With a *signals* source, SIGINT requests a
     stop in ``StopMode.CANCEL`` (the run cancels its evaluations and jobs at once,
     and the host bounds how long its agents' turns may take to end) and returns the
-    typed stopped result; a repeated SIGINT changes nothing. SIGTERM or SIGHUP,
+    typed stopped result. If cancelling this coroutine already asked for a draining
+    stop, a SIGINT escalates it to ``StopMode.CANCEL`` and the cancellation still
+    propagates once the run has ended. A repeated SIGINT changes nothing. SIGTERM or SIGHUP,
     first or after a SIGINT, cancel the run and end in ``SystemExit(128 + n)``,
     where n is the first signal received.
     The handlers run on the event loop, so no signal raises inside a teardown step.

@@ -322,6 +322,10 @@ class _Run:
         self.state = result.state
         self.sent.extend(result.requests)
 
+    def feed(self, event: core.CoreEvent) -> None:
+        """Step core with an event the shell received, keeping what core asks for."""
+        self._step(event)
+
     def tick(self, seconds: float) -> None:
         """Let time pass, but not past the queue allowance (10 s): an unconfirmed job that
         outlives it is cancelled by core itself, which is not the stop under test."""
@@ -636,3 +640,71 @@ def test_a_run_past_its_deadline_cancels_its_own_jobs_whatever_the_stop(
     run.settle_over((deadline - run.now, *(10.0,) * 4))
     assert run.state.run.status == core.RunStatus.TERMINAL
     assert all(run.cancels(resource) == 1 for resource in run.resources)
+
+
+def _operator_stop(index: int, mode: core.StopMode, now_at: float) -> core.RunControlEvent:
+    """An operator's stop as the run's control bridge records it: a control, with no result."""
+    control = core.ControlInput(
+        control_id=core.ControlId(root=f"op-stop-{index}"), action="stop", mode=mode
+    )
+    return core.RunControlEvent(control=control, now_at=now_at)
+
+
+def _strategy_finish(state: core.CoreState, mode: core.StopMode) -> core.DecisionSubmitted:
+    """The search's own end of the run, with the mode it read from the first stop it saw."""
+    finish = core.Finish(
+        decision_id=core.DecisionId(root="finish"),
+        scope=core.Scope(owner=state.run.run_id, generation=state.run.generation),
+        mode=mode.value,
+        result=core.RunResultProposal(outcome="cancelled", reason="operator stop"),
+    )
+    return core.DecisionSubmitted(decision=finish, expected_revision=state.revision)
+
+
+@pytest.mark.regression
+@settings(max_examples=examples(pr=6, nightly=300), deadline=None, database=None)
+@example(count=1, stops=[core.StopMode.DRAIN, core.StopMode.CANCEL], finish_at=1, restart=False)
+@example(count=1, stops=[core.StopMode.CANCEL, core.StopMode.DRAIN], finish_at=0, restart=False)
+@example(count=2, stops=[core.StopMode.DRAIN, core.StopMode.CANCEL], finish_at=2, restart=True)
+@given(
+    count=st.integers(1, 2),
+    stops=st.lists(st.sampled_from(core.StopMode), min_size=1, max_size=4),
+    finish_at=st.integers(0, 4),
+    restart=st.booleans(),
+)
+def test_a_stop_only_escalates_whatever_order_its_requests_come_in(
+    count: int, stops: list[core.StopMode], finish_at: int, *, restart: bool
+) -> None:
+    """periodic-1330 MED-2: a cancel after a drain was recorded, and changed nothing.
+
+    Operator stops arrive in any order, before or after the search commits its end of the
+    run (which carries the first stop's mode, or a drain when the run ended by itself).
+    The run's stop is the strongest asked for: one cancel anywhere cancels every job the
+    run owns, once, and closes the run; only drains let every job finish. ``restart``
+    reloads core after every step, so an escalation is durable.
+    """
+    run = _Run(count)
+    for index in range(count):
+        run.observe(index, core.ObservationStatus.PENDING, accepted=True)
+    finished = False
+    for index, mode in enumerate([*stops, None]):
+        if run.state.run.status == core.RunStatus.TERMINAL:
+            break
+        if not finished and (index >= finish_at or mode is None):
+            finished = True
+            run.feed(_strategy_finish(run.state, stops[0] if index else core.StopMode.DRAIN))
+        if mode is not None and run.state.run.status != core.RunStatus.TERMINAL:
+            run.feed(_operator_stop(index, mode, run.now))
+        if restart:
+            run.state = _reload(run.state)
+    run.mode = core.StopMode.CANCEL if core.StopMode.CANCEL in stops else core.StopMode.DRAIN
+    run.settle_out()
+    assert all(run.cancels(resource) <= 1 for resource in run.resources)
+    if run.mode is core.StopMode.CANCEL:
+        assert run.state.run.status == core.RunStatus.TERMINAL
+        assert all(run.cancels(resource) == 1 for resource in run.resources)
+    else:
+        assert all(run.cancels(resource) == 0 for resource in run.resources)
+        assert run.state.run.status == core.RunStatus.CLOSING
+        run.end_jobs()
+        assert run.state.run.status == core.RunStatus.TERMINAL

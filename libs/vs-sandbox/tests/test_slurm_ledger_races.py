@@ -199,11 +199,17 @@ class _SteppedCluster:
             return ClusterUnknown(operation_id=None, reason="ssh: connection reset")
         return observed
 
-    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
+    def cancel(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCancelOutcome:
         fault = self.steps.step()
         if fault == "fails":
             return ClusterUnknown(operation_id=None, reason="ssh: connection reset")
-        cancelled = self.inner.cancel(target, by_job_id=by_job_id)
+        cancelled = self.inner.cancel(target, by_job_id=by_job_id, observed=observed)
         if fault == "answer_lost":
             return ClusterUnknown(operation_id=None, reason="ssh: connection reset")
         return cancelled
@@ -509,11 +515,17 @@ class _FlakyCluster:
             return ClusterUnknown(operation_id=None, reason="ssh: connection reset")
         return observed
 
-    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
+    def cancel(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCancelOutcome:
         fate = self._fate("cancel")
         if fate == "fails":
             return ClusterUnknown(operation_id=None, reason="ssh: connection reset")
-        cancelled = self.inner.cancel(target, by_job_id=by_job_id)
+        cancelled = self.inner.cancel(target, by_job_id=by_job_id, observed=observed)
         if fate == "answer_lost":
             return ClusterUnknown(operation_id=None, reason="ssh: connection reset")
         return cancelled

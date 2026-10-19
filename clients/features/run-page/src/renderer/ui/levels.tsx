@@ -19,10 +19,10 @@ import {
   type RunPageAction,
   type RunPageState,
   roleLabel,
-  stepLabel,
+  stepKicker,
   stepTitle,
 } from '../../state/index.js';
-import {plain, statusWords} from '../../state/span-words.js';
+import {statusWords} from '../../state/span-words.js';
 import {FramedPane} from './framed-pane.js';
 import {agentFolds, IdeasList, IdeasPane, ModeSwitch, NowPane} from './run-level.js';
 import {
@@ -121,6 +121,7 @@ export function IdeasWorkspace(props: LevelProps & {readonly idea: Candidate | n
         <FramedPane
           kicker="idea"
           title={markdownToPlain(idea.title)}
+          mono
           width="fill"
           enterKey={`idea ${idea.id}`}
           actions={
@@ -171,6 +172,7 @@ function IdeaLevel(props: LevelProps & {readonly idea: Candidate}): JSX.Element 
       <FramedPane
         kicker="idea"
         title={markdownToPlain(idea.title)}
+        mono
         width="fill"
         enterKey={`idea ${idea.id}`}
         actions={<ModeSwitch mode={mode} options={logsOptions('Steps')} zoom={base.zoom} />}
@@ -247,9 +249,7 @@ function StepPane(
   const logs: LogsViewProps = {...base, state, scope: {kind: 'step', step}, dispatch};
   return (
     <FramedPane
-      kicker={
-        step.role === null ? plain(step.kind) : `${plain(step.kind)} · ${roleLabel(step.role)}`
-      }
+      kicker={stepKicker(step)}
       title={stepTitle(step)}
       width="fill"
       enterKey={`step ${step.span}`}
@@ -277,7 +277,7 @@ function StepLevel(
       {zoomed.idea === null ? (
         <AgentsPane {...props} selected={zoomed.agent?.id ?? null} />
       ) : (
-        <Pane kicker="steps" title={markdownToPlain(zoomed.idea.title)} width="master">
+        <Pane kicker="steps" title={markdownToPlain(zoomed.idea.title)} mono width="master">
           <StepList idea={zoomed.idea} selected={step.span} tokens={base.tokens} zoom={base.zoom} />
         </Pane>
       )}
@@ -307,7 +307,7 @@ function ItemLevel(
   return (
     <Panes>
       <FramedPane
-        kicker={step.role === null ? plain(step.kind) : stepLabel(step)}
+        kicker={stepKicker(step)}
         title={stepTitle(step)}
         width="master"
         header={stepHeader(view)}

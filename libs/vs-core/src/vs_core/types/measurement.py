@@ -13,7 +13,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
-from .common import Count, RequestId, RevisionRef, Scope, Seconds, Value
+from .common import Count, RequestId, RevisionRef, Scope, Seconds, Value, unset
 
 type Finite = Annotated[float, Field(allow_inf_nan=False)]
 type Direction = Literal["max", "min"]
@@ -175,3 +175,22 @@ class StatedComparison(Value):
 
     comparison: Comparison
     settling: bool
+    answer_until: Seconds | None = Field(default=None, exclude_if=unset)
+    """When the scope's latest official record of the candidate input stops moving
+    (``OwnedJob.answer_until``): a flow that waits for this comparison takes its verdict then
+    at the latest, on the record as it stands. None when no official run of it has ended."""
+
+
+class ComparisonSettled(Value):
+    """A run that fed a comparison ended, and no run that feeds it is under way any more.
+
+    Core reports it at the end of the run, so a flow that waits for the comparison to settle
+    (``ctx.evaluation.measure_compared``) wakes when the comparison it would read is final, and
+    not at a poll. It names the comparison only: the run's view states it
+    (``RunView.comparisons``), or no longer does when its base went stale meanwhile.
+    """
+
+    kind: Literal["comparison_settled"] = "comparison_settled"
+    scope: Scope
+    candidate_input: str = Field(min_length=1)
+    base_input: str = Field(min_length=1)

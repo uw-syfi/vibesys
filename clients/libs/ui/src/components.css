@@ -206,6 +206,7 @@ body > div:first-child {
 }
 .vs-flex[data-grow] {
   flex: 1 1 0;
+  min-height: 0;
 }
 .vs-flex[data-width="figure"] {
   flex: none;
@@ -300,6 +301,53 @@ body > div:first-child {
   }
   .vs-section-nav .vs-sidebar-item {
     flex: 1 1 auto;
+  }
+}
+/* Steps: a list beside the content while wide; under one line the reader opens when narrower. */
+.vs-section-toggle {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--control);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+  font-weight: var(--text-body-strong-weight);
+  text-align: left;
+  cursor: pointer;
+}
+.vs-section-toggle:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-section-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+@container (max-width: 56rem) {
+  .vs-section-layout[data-steps] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .vs-section-layout[data-steps] .vs-section-nav {
+    position: static;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    padding-block: 0;
+  }
+  .vs-section-layout[data-steps] .vs-section-toggle {
+    display: flex;
+  }
+  .vs-section-layout[data-steps] .vs-section-steps:not([data-open]) {
+    display: none;
   }
 }
 .vs-grid {
@@ -486,10 +534,15 @@ body > div:first-child {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-3);
+  /* As wide as its segments wherever it sits, so it is the same box in a wide pane and a narrow one. */
+  width: fit-content;
+  max-width: 100%;
 }
 .vs-segment {
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
+  justify-content: center;
   min-height: var(--control);
   margin: 0;
   padding: 0 var(--space-4);
@@ -503,6 +556,15 @@ body > div:first-child {
   font-weight: var(--text-body-weight);
   cursor: pointer;
   position: relative;
+}
+/* The chosen segment is bolder: its bold label is reserved unseen under every segment's, so a segment
+   is as wide chosen as not and the control is the same box whichever is chosen. */
+.vs-segment::after {
+  content: attr(data-label);
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  font-weight: var(--text-body-strong-weight);
 }
 /* The native radio covers its segment, unseen: it takes the presses, the focus and the arrow keys. */
 .vs-segment-input {
@@ -1665,8 +1727,11 @@ button.vs-stage-head {
   transform: none;
 }
 
-/* --- chart: drawn in the SVG's own units ------------------------------------------------------- */
+/* --- chart: drawn in pixels, as wide as its box ------------------------------------------------------- */
 
+.vs-chart-box {
+  min-width: 0;
+}
 .vs-chart {
   display: block;
   width: 100%;

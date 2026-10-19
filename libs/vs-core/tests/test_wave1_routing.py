@@ -108,6 +108,7 @@ EXPECTED_TARGET = {
                 "measurement_submission_observed",
             ),
         ),
+        ("vs_core._measurements.submission_ended", ("measurement_submission_ended",)),
         (
             "vs_core._continuations.advance",
             (

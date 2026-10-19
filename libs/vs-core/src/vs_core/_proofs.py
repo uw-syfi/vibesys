@@ -32,6 +32,8 @@ from .types.common import (
     RevisionRef,
     RunStatus,
     Scope,
+    StopMode,
+    escalate_stop,
 )
 from .types.evaluation import (
     MeasurementIdentity,
@@ -717,18 +719,44 @@ def continues_admitted_work(run: RunState) -> bool:
 
 
 def draining(run: RunState) -> bool:
-    """Whether the run is CLOSING under a proved drain Finish.
+    """Whether the run is CLOSING under a proved Finish and its stop is a drain.
 
     The one definition of the drain rule: a drain starts no new requests, but
     the already accepted queue still starts and runs to completion (legacy
-    FinishSearch). A cancel Finish starts nothing. Scheduling admits under this
+    FinishSearch). A cancel starts nothing. Scheduling admits under this
     rule and Attempts accepts those admissions under the same predicate.
     """
     match committed_stop(run):
-        case Proven(value=stop):
-            return run.status == RunStatus.CLOSING and stop.mode == "drain"
+        case Proven():
+            return run.status == RunStatus.CLOSING and stop_mode(run) is StopMode.DRAIN
         case _:
             return False
+
+
+def requested_stop_mode(run: RunState) -> StopMode | None:
+    """The strongest mode the run's recorded stop controls ask for; None before any stop."""
+    held: StopMode | None = None
+    for control in run.controls:
+        if control.action == "stop" and control.mode is not None:
+            held = escalate_stop(held, control.mode)
+    return held
+
+
+def stop_mode(run: RunState) -> StopMode | None:
+    """How the run's stop treats work in flight; None while nothing stops the run.
+
+    The one definition of the run's stop mode: the strongest of its committed Finish's
+    mode and every stop control it recorded (``escalate_stop``). A stop only escalates,
+    so a cancel recorded after a drain Finish committed turns the drain into a cancel,
+    and a later drain never weakens a cancel. The first committed Finish keeps the run's
+    result (``committed_stop``); only the mode escalates.
+    """
+    held = requested_stop_mode(run)
+    match committed_stop(run):
+        case Proven(value=stop):
+            return escalate_stop(held, StopMode(stop.mode))
+        case _:
+            return held
 
 
 def committed_stop(run: RunState) -> Verdict[Finish]:

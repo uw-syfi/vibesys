@@ -5,7 +5,7 @@ import '@vibesys/ui/tokens.css';
 import '@vibesys/ui/fonts.css';
 import '@vibesys/ui/components.css';
 import {bindSidebarShortcut, browserSidebarPreference} from '@vibesys/feature-app-shell/renderer';
-import {browserMoreOptionsMemory} from '@vibesys/feature-new-run/renderer';
+import {browserDraftMemory, browserMoreOptionsMemory} from '@vibesys/feature-new-run/renderer';
 import {pageAppearance} from '@vibesys/feature-settings/renderer';
 import {runOfWindow, type WelcomeBridge} from '@vibesys/ipc';
 import {Card, EmptyState, LinkOpener, Page} from '@vibesys/ui';
@@ -54,6 +54,8 @@ if (bridge === undefined) {
     {
       sidebar: browserSidebarPreference(() => window.localStorage),
       moreOptions: browserMoreOptionsMemory(() => window.localStorage),
+      // A window's own storage: another window starts its own New run.
+      draft: browserDraftMemory(() => window.sessionStorage),
     },
   );
   // A run window's page names its run in its query; the main window's has none.

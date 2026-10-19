@@ -111,8 +111,12 @@ state live in `vs_core._base_runs`:
   evaluation history, so the agent's resume never waits for it: the turn resumes when its own
   jobs end, and the comparison it reads next grows as core's runs land. The strategy's verdict
   does wait: `ctx.evaluation.measure_compared` hands back the comparison once no run that feeds
-  it is under way (`StatedComparison.settling` in the run's view), or as it stands when three
-  times the measurement's limit is spent.
+  it is under way (`StatedComparison.settling` in the run's view). Core reports the step that
+  takes a comparison from settling to settled (`ComparisonSettled`), read from that same
+  `settling` and so for every way a run ends, a submission core blocks before any observation
+  included (`MeasurementSubmissionEnded` closes its budget entry); the flow waits for that
+  report, not on a poll, and three times the measurement's limit only bounds the wait against a
+  report that never comes.
 
 The comparison reaches the agent twice: in the tool's reply for a finished evaluation
 (`SubmittedReply.comparison`, absent while the base has not ended) and in the resume prompt
@@ -123,9 +127,15 @@ events as `measurement_compared`, emitted by the commit observer from core's app
 The strategy's official measurement of an input the scope already measured is answered from the
 samples held (`vs_core._measurement_reuse`), and runs afresh only when the comparison is a close
 call that one more sample would narrow (not one that no run can settle). Its benchmark record enters the ledger stating the mean
-of the samples held then (`vs_core._comparison.as_answer`; a failed record keeps its own
-reading), and the reading a strategy decodes from a record takes its headline from the ledger's
-reading, so a candidate's headline in ranking is the value the comparison states; its other
+of the scope's samples of the input (`vs_core._comparison.as_answer`; a failed record keeps its
+own reading), and each later sample of the input in the scope restates it
+(`restated_answers`) while the answer is open (`OwnedJob.answer_until`): from the official
+run's end until the comparison settles, or at most `SETTLE_RUNS` times the run's limit. Core
+states that moment in the view (`StatedComparison.answer_until`), `measure_compared` stops
+waiting at it and hands back the records as the ledger states them then, and from then on the
+record, and every later official record of the input in the scope, states that figure. The
+reading a strategy decodes from a record takes its headline from
+the ledger's reading, so a candidate's headline in ranking is the value the comparison states; its other
 objectives are the answering run's own, and each run's own reading stays in its `Sample`.
 
 ## Reply: one continuation, never a poll

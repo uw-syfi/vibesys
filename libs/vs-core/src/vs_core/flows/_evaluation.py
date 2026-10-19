@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import TypeAdapter
 
+from vs_core._comparison import SETTLE_RUNS
 from vs_core._registry import ContractError
 from vs_core._strategy_operations import (
     CommandCapture,
@@ -20,7 +21,7 @@ from vs_core._strategy_operations import (
 )
 from vs_core.types.common import THIS_RUN, DecisionId, RevisionRef, Value
 from vs_core.types.evaluation import EvidenceRef, MeasurementPlan, MeasurementResult
-from vs_core.types.measurement import Comparison, StatedComparison
+from vs_core.types.measurement import Comparison, ComparisonSettled, StatedComparison
 from vs_core.types.search import MeasurementFinished, OperationFinished
 from vs_core.types.strategy import Measure, Operation
 from vs_core.types.until import Failed, Within
@@ -37,15 +38,6 @@ if TYPE_CHECKING:
 
 _REFS = TypeAdapter(tuple[EvidenceRef, ...])
 _STATED = TypeAdapter(StatedComparison | None)
-
-COMPARISON_POLL = 5.0
-"""Run-clock seconds between looks at a comparison that is still settling.
-
-Core's runs for a comparison take minutes, so a look every few seconds adds a negligible delay
-to a verdict and keeps the flow's journal short."""
-SETTLE_RUNS = 3
-"""How many measurement limits a comparison may keep settling for, after the measurement that
-asked for it: one for each run a close call earns a side without a declared floor."""
 
 
 class CaptureSpec(Value):
@@ -107,13 +99,20 @@ class Evaluation:
         A close call earns core more runs of either side (`vs_core._comparison`), and they land
         after this measurement ends, so the comparison is awaited until no run that feeds it is
         under way, at most ``SETTLE_RUNS`` times the measurement's limit: a verdict taken on it
-        rests on the runs a close call earns, never on the first one.
+        rests on the runs a close call earns, never on the first one. Those runs restate the
+        official record's headline (`vs_core._comparison.restated_answers`) until core closes
+        it, when the comparison settles or at the bound core states for it
+        (``StatedComparison.answer_until``), which is when this flow stops waiting. The
+        result's records are handed back as the ledger states them then, and the ledger keeps
+        that figure: the round's headline and the record cannot part.
         """
         found = await self._measure(plan, workspace, within, label, compared=True)
         if isinstance(found, Failed) or found.comparison is None:
             return found
         settled = await self._settled(found.comparison, _within(within).limit * SETTLE_RUNS)
-        return Compared(result=found.result, comparison=settled)
+        evidence = self._kit.read(partial(_as_ledger_states, held=found.result.evidence), _REFS)
+        result = found.result.model_copy(update={"evidence": evidence})
+        return Compared(result=result, comparison=settled)
 
     async def _measure(
         self,
@@ -141,20 +140,35 @@ class Evaluation:
         """``comparison`` as it stands once core's runs for it have ended, or when ``bound`` is spent.
 
         The run's view holds the comparison of each candidate input and whether runs that feed it
-        are still under way. Until they have ended it is looked at again after a poll; a
-        comparison that went from the view (its base samples went stale) is the last one seen.
+        are still under way. Until they have ended the flow waits for core to report that they
+        have (``ComparisonSettled``), and reads the view once more then. A report that never
+        comes is bounded by the moment core stops restating the official record
+        (``StatedComparison.answer_until``), so the flow reads the record once it no longer
+        moves; ``bound`` from now only when no official record of it is held. A comparison that
+        went from the view (its base samples went stale) is the last one seen. The wait journals
+        no step of its own while it lasts.
         """
-        until = self._kit.now() + bound
-        seen = comparison
-        while True:
-            stated = self._kit.read(partial(_stated, comparison=seen), _STATED)
-            if stated is None:
-                return seen
+        subject = (comparison.scope, comparison.candidate_input, comparison.base_input)
+        settled = self._kit.signal(
+            f"settling of {comparison.candidate_input}",
+            lambda event: (
+                isinstance(event, ComparisonSettled)
+                and (event.scope, event.candidate_input, event.base_input) == subject
+            ),
+        )
+        try:
+            stated = self._kit.read(partial(_stated, comparison=comparison), _STATED)
+            if stated is None or not stated.settling:
+                return comparison if stated is None else stated.comparison
             seen = stated.comparison
-            now = self._kit.now()
-            if not stated.settling or now >= until:
-                return seen
-            await First((self._kit.timer(min(now + COMPARISON_POLL, until)),))
+            until = stated.answer_until
+            await First(
+                (settled, self._kit.timer(self._kit.now() + bound if until is None else until))
+            )
+        finally:
+            self._kit.run.release(settled)
+        stated = self._kit.read(partial(_stated, comparison=seen), _STATED)
+        return seen if stated is None else stated.comparison
 
     async def readings(
         self,
@@ -271,6 +285,12 @@ def _taken(
         and item.scope.generation == attempt.generation
     )
     return tuple(sorted(held, key=lambda item: item.observation_sequence))
+
+
+def _as_ledger_states(view: RunView, held: tuple[EvidenceRef, ...]) -> tuple[EvidenceRef, ...]:
+    """``held`` as the ledger states each record now (a record not in it is kept as it is)."""
+    ledger = {item.key: item for item in view.measurements}
+    return tuple(ledger.get(item.key, item) for item in held)
 
 
 def _stated(view: RunView, comparison: Comparison) -> StatedComparison | None:

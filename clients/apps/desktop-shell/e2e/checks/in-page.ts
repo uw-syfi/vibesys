@@ -21,6 +21,8 @@ export type CheckId =
   | 'scroll-room'
   | 'control-row'
   | 'column-tops'
+  | 'truncation-room'
+  | 'focus-ring'
   | 'stability';
 
 export interface Violation {
@@ -537,21 +539,48 @@ export function repeatCheck(): Violation[] {
   return found;
 }
 
-/** The performance chart drawn too small to read: under 480 by 80 px, its labels are specks. */
+/** What is wrong with the labels of one chart: drawn under `minText` px on screen, or cut by its edge. */
+function chartLabelProblems(chart: Element, minText: number): string[] {
+  const frame = chart.getBoundingClientRect();
+  const view = (chart as SVGSVGElement).viewBox.baseVal;
+  const scale = view.width > 0 ? frame.width / view.width : 1;
+  const problems: string[] = [];
+  for (const label of chart.querySelectorAll('text')) {
+    const text = (label.textContent ?? '').trim();
+    if (text === '') continue;
+    const size = Number.parseFloat(getComputedStyle(label).fontSize) * scale;
+    const box = label.getBoundingClientRect();
+    if (size < minText) {
+      problems.push(
+        `the chart label "${text}" is drawn ${Math.round(size)} px high, under ${minText} px`,
+      );
+    }
+    if (box.left < frame.left - 1 || box.right > frame.right + 1) {
+      problems.push(`the chart label "${text}" is cut by the edge of the drawing`);
+    }
+  }
+  return problems;
+}
+
+/**
+ * A chart (the performance chart, the trade-off chart) that cannot be read: under 280 by 100 px,
+ * or with a label that is drawn under 10 px high on screen (a drawing scaled down to fit) or
+ * that the drawing's edge cuts.
+ */
 export function chartSizeCheck(): Violation[] {
   const found: Violation[] = [];
-  const [minWidth, minHeight] = [480, 80];
-  const charts = document.body.querySelectorAll(
-    'svg[aria-label*="of each measured idea over the run"]',
-  );
-  for (const chart of charts) {
+  const [minWidth, minHeight] = [280, 100];
+  for (const chart of document.body.querySelectorAll('svg.vs-chart, .vs-pareto > svg')) {
+    if (!isShown(chart)) continue;
     const {width, height} = chart.getBoundingClientRect();
-    if (isShown(chart) && (width < minWidth || height < minHeight)) {
-      found.push({
-        check: 'chart-size',
-        message: `the performance chart is ${Math.round(width)} by ${Math.round(height)} px, under the ${minWidth} by ${minHeight} px it needs to be read`,
-        where: describe(chart),
-      });
+    const problems = chartLabelProblems(chart, 10);
+    if (width < minWidth || height < minHeight) {
+      problems.unshift(
+        `the chart is ${Math.round(width)} by ${Math.round(height)} px, under the ${minWidth} by ${minHeight} px it needs to be read`,
+      );
+    }
+    for (const message of problems) {
+      found.push({check: 'chart-size', message, where: describe(chart)});
     }
   }
   return found;
@@ -674,6 +703,15 @@ function commonAncestor(a: Element, b: Element): Element | null {
   return null;
 }
 
+/** How many levels `element` sits below `ancestor`. */
+function depthBelow(ancestor: Element, element: Element): number {
+  let depth = 0;
+  for (let up: Element | null = element; up !== null && up !== ancestor; up = up.parentElement) {
+    depth += 1;
+  }
+  return depth;
+}
+
 /** Whether two boxes sit next to each other on one line of a flex row `style`. */
 function sideBySide(a: DOMRect, b: DOMRect, style: CSSStyleDeclaration): boolean {
   const apart = a.right <= b.left + 1 || b.right <= a.left + 1;
@@ -683,14 +721,18 @@ function sideBySide(a: DOMRect, b: DOMRect, style: CSSStyleDeclaration): boolean
 }
 
 /**
- * Form controls side by side in one flex row (a search box and a sort select in a toolbar) that
- * are not the same height or do not start at the same top edge, to within 1 px: they read as
- * misaligned, whatever centers them. Radios, checkboxes and sliders are not boxes of this kind.
+ * Controls side by side in one flex row, at most two levels down from it (a search box and a sort
+ * select in a toolbar; the position, state chip and action of the time bar) that are not the same height or do not start at the same
+ * top edge, to within 1 px: they read as misaligned, whatever centers them. Radios, checkboxes and
+ * sliders are not boxes of this kind.
  */
 export function controlRowCheck(): Violation[] {
   const found: Violation[] = [];
-  const kinds =
-    'input:not([type="radio"],[type="checkbox"],[type="range"],[type="hidden"],[type="file"]),select';
+  const kinds = [
+    'input:not([type="radio"],[type="checkbox"],[type="range"],[type="hidden"],[type="file"])',
+    'select',
+    '.vs-scrubber-head > *',
+  ].join(',');
   const boxes = [...document.body.querySelectorAll(kinds)]
     .filter(isShown)
     .map(control => ({control, frame: frameOf(control)}))
@@ -700,12 +742,99 @@ export function controlRowCheck(): Violation[] {
     for (const b of boxes.slice(at + 1)) {
       const row = commonAncestor(a.frame, b.frame);
       if (row === null || !sideBySide(a.box, b.box, getComputedStyle(row))) continue;
+      if (depthBelow(row, a.frame) > 2 || depthBelow(row, b.frame) > 2) continue;
       const [heights, tops] = [a.box.height - b.box.height, a.box.top - b.box.top];
       if (Math.abs(heights) <= 1 && Math.abs(tops) <= 1) continue;
       found.push({
         check: 'control-row',
         message: `controls in one row do not line up: ${describe(a.control)} is ${Math.round(a.box.height)} px high and ${describe(b.control)} ${Math.round(b.box.height)} px, their tops differ by ${Math.abs(Math.round(tops))} px`,
         where: describe(row),
+      });
+    }
+  }
+  return found;
+}
+
+/** Whether `other` sits to the right of `box` on its line: a column that takes room beside it. */
+function takesRoomRight(box: DOMRect, other: Element): boolean {
+  const style = getComputedStyle(other);
+  if (style.position === 'absolute' || style.position === 'fixed' || !isShown(other)) return false;
+  const rect = other.getBoundingClientRect();
+  const shared = Math.min(box.bottom, rect.bottom) - Math.max(box.top, rect.top);
+  return rect.width > 0 && shared > 0 && rect.left >= box.right - 1;
+}
+
+/**
+ * The width to the right of `element` on its own line that nothing uses, up to the inner edge of
+ * the pane, card or screen that holds it. A text with a column beside it (a sibling of it or of
+ * what holds it, to its right) is cut by the width that column leaves, a layout choice, so it has
+ * no room.
+ */
+function roomRight(element: Element): number {
+  const holder = element.closest('.vs-pane, .vs-card, .vs-screen, .vs-page, main') ?? document.body;
+  for (let up: Element | null = element; up !== null && up !== holder; up = up.parentElement) {
+    const box = up.getBoundingClientRect();
+    for (let next = up.nextElementSibling; next !== null; next = next.nextElementSibling) {
+      if (takesRoomRight(box, next)) return 0;
+    }
+  }
+  const style = getComputedStyle(holder);
+  const edge =
+    holder.getBoundingClientRect().left +
+    holder.clientLeft +
+    holder.clientWidth -
+    Number.parseFloat(style.paddingRight);
+  return edge - element.getBoundingClientRect().right;
+}
+
+/**
+ * Text cut short with an ellipsis while room is left beside it: a tooltip does not excuse a name
+ * cut at one edge of a pane when the other side of its line is empty. Room is at least 40 px that
+ * no column on the line uses (`roomRight`).
+ */
+export function truncationRoomCheck(): Violation[] {
+  const found: Violation[] = [];
+  const wanted = 40;
+  for (const element of document.body.querySelectorAll('*')) {
+    const style = getComputedStyle(element);
+    const clamped = style.webkitLineClamp !== 'none' && style.webkitLineClamp !== '';
+    if (!(clamped || style.textOverflow === 'ellipsis') || !isShown(element)) continue;
+    if (element.scrollWidth <= element.clientWidth + 1) continue;
+    const room = roomRight(element);
+    if (room >= wanted) {
+      found.push({
+        check: 'truncation-room',
+        message: `text is cut with an ellipsis while ${Math.round(room)} px beside it are empty: "${(element.textContent ?? '').trim().slice(0, 40)}"`,
+        where: describe(element),
+      });
+    }
+  }
+  return found;
+}
+
+/** Text that the focus ring of the focused control is drawn over (its outline and offset around it). */
+export function focusRingCheck(): Violation[] {
+  const active = document.activeElement;
+  if (active === null || active === document.body) return [];
+  const style = getComputedStyle(active);
+  const width = style.outlineStyle === 'none' ? 0 : Number.parseFloat(style.outlineWidth) || 0;
+  if (width === 0) return [];
+  const reach = width + (Number.parseFloat(style.outlineOffset) || 0);
+  const box = active.getBoundingClientRect();
+  const ring: Box = {
+    left: box.left - reach,
+    top: box.top - reach,
+    right: box.right + reach,
+    bottom: box.bottom + reach,
+  };
+  const found: Violation[] = [];
+  for (const {element, text, lines} of textBoxes()) {
+    if (active.contains(element) || active.closest('label')?.contains(element)) continue;
+    if (lines.some(line => cut(line, ring) !== null)) {
+      found.push({
+        check: 'focus-ring',
+        message: `the focus ring of ${describe(active)} is drawn over the text "${text.slice(0, 30)}"`,
+        where: describe(element),
       });
     }
   }
@@ -769,5 +898,9 @@ export const HELPERS: readonly ((...args: never[]) => unknown)[] = [
   nameHits,
   frameOf,
   commonAncestor,
+  depthBelow,
   sideBySide,
+  takesRoomRight,
+  roomRight,
+  chartLabelProblems,
 ];

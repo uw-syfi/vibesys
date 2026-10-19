@@ -1,182 +1,232 @@
 /**
- * New run: the essentials in the order a run is decided (the machine, the project and task, the
- * agent, the budget) and, below them, one closed disclosure for everything else. The wordmark and
- * title stay in view above the form, which scrolls on its own; "Ready to start" is pinned below it
- * as one line (ready, with a count, or what failed, open with its fix) and the Start button, so
- * Start is never out of the window.
+ * New run as a guided form: one question to a page, in the order a run is decided. The steps sit
+ * in a list beside the page (each shows its answer and takes you back to it) that, in a narrower
+ * pane, is one line ("4 of 8 · Hardware") which opens the list. Every answer is kept, so leaving
+ * New run and coming back finds the page where it was left.
  */
+import {Button, Page, Row, SectionLayout, SidebarItem, Stack, Text} from '@vibesys/ui';
+import type {JSX} from 'react';
+import {isDone, type NewRunEvent, type NewRunSnapshot, type StepId} from '../../state/index.js';
+import {AgentPage} from './agent-page.js';
 import {
-  ActionPanel,
-  Banner,
-  Button,
-  type CheckItem,
-  CheckList,
-  type CheckState,
-  Page,
-  Stack,
-  Text,
-  useSideActionLayout,
-} from '@vibesys/ui';
-import {type JSX, type ReactNode, useState} from 'react';
-import type {NewRunContext, NewRunEvent, NewRunSnapshot} from '../../state/index.js';
-import {AgentCard} from './agent-card.js';
-import {BudgetCard} from './budget-card.js';
-import {MachineCard} from './machine-card.js';
-import {MoreOptions} from './more-options.js';
-import {problemWords} from './problem-words.js';
-import {type FolderCompletion, ProjectCard} from './project-card.js';
-import {
-  type MachineOption,
-  machineLabel,
-  type ReadinessFix,
-  readiness,
-  readinessStatus,
-  startBlocked,
-  summary,
-} from './view.js';
+  DomainPage,
+  ExamplePage,
+  HardwarePage,
+  ModelPage,
+  StartPage,
+  StructurePage,
+  VariantPage,
+  WorkloadPage,
+} from './example-pages.js';
+import {GoalPage} from './goal-page.js';
+import {type FolderCompletion, ProjectPage, TaskPage} from './project-pages.js';
+import {Nav, Question} from './question.js';
+import {ProblemBanner, ReviewPage, StartButton} from './review-page.js';
+import {progressLine, type StepView, stepViews} from './steps.js';
+import {entriesIn, type MachineOption, machineLabel} from './view.js';
+import {WherePage} from './where-page.js';
 
 type Dispatch = (event: NewRunEvent) => void;
 
-function fixText(fix: ReadinessFix): string {
-  switch (fix.kind) {
-    case 'copy_out':
-      return 'Copy to its own repository';
-    case 'create_from_example':
-      return 'Create the project';
-    case 'choose_checkout':
-      return 'Choose it in Machines';
-    case 'recheck':
-      return 'Check again';
-  }
-}
+/** The question of each page, and the line under it. */
+const COPY: Readonly<Record<StepId, {readonly title: string; readonly lede?: string}>> = {
+  start: {
+    title: 'What do you want to optimize?',
+    lede: 'Start from one of our examples, or from your own code.',
+  },
+  domain: {title: 'Which domain?'},
+  model: {
+    title: 'Which model do you want to serve?',
+    lede: 'Each model lists the hardware it has an example for.',
+  },
+  hardware: {
+    title: 'Which hardware are you optimizing for?',
+    lede: 'The result is tuned for this hardware. Where it runs is a later step.',
+  },
+  structure: {title: 'Which structure?'},
+  workload: {
+    title: 'Which workload?',
+    lede: 'The benchmark drives the structure with this access pattern.',
+  },
+  example: {title: 'Which example?'},
+  variant: {title: 'Which task?', lede: 'This example has more than one task.'},
+  project: {
+    title: 'Which project?',
+    lede: 'A repository with tasks under .vibesys/tasks, on one of your machines.',
+  },
+  task: {title: 'Which task?'},
+  goal: {
+    title: 'This is what the agent will work toward',
+    lede: 'Check the goal before you choose where it runs and which agent does the work.',
+  },
+  where: {
+    title: 'Where does the agent work, and where are results measured?',
+    lede: 'Measure on the agent’s machine, or on a cluster or cloud once those are set up.',
+  },
+  agent: {
+    title: 'Which agent does the work?',
+    lede: 'Pick a model line and its model, then the harness that runs it.',
+  },
+  review: {title: 'Ready to start?'},
+};
 
-function fixPress(fix: ReadinessFix, dispatch: Dispatch, chooseCheckout: () => void): () => void {
-  switch (fix.kind) {
-    case 'copy_out':
-    case 'create_from_example':
-      return () => dispatch({type: 'fix', fix});
-    case 'choose_checkout':
-      return chooseCheckout;
-    case 'recheck':
-      return () => dispatch({type: 'refresh'});
-  }
-}
-
-const RANK: Readonly<Record<CheckState, number>> = {fail: 0, warn: 1, pending: 2, ok: 3};
-
-/**
- * "Ready to start": one line while all is well, the failed checks and their fixes open as soon as
- * one fails. Beside the form the checks are open to start with; under it (a narrow window) they
- * start closed, so the form and Start run stay in view. The user's own opening or closing holds
- * until the line's kind changes (ready, failing).
- */
-function ReadyPanel(props: {
-  readonly snapshot: NewRunSnapshot;
-  readonly dispatch: Dispatch;
-  readonly chooseCheckout: () => void;
-}): JSX.Element {
-  const {snapshot, dispatch, chooseCheckout} = props;
-  const checks = readiness(snapshot);
-  // What needs the reader comes first: a failed check and its fix are never below the fold.
-  const items: CheckItem[] = [...checks]
-    .sort((left, right) => RANK[left.state] - RANK[right.state])
-    .map(({fix, ...item}) => ({
-      ...item,
-      ...(fix === undefined
-        ? {}
-        : {fix: {text: fixText(fix), press: fixPress(fix, dispatch, chooseCheckout)}}),
-    }));
-  const status = readinessStatus(checks);
-  const [chosen, setChosen] = useState<{readonly for: boolean; readonly open: boolean} | null>(
-    null,
-  );
-  // A choice is for the kind of line it was made on: a check that starts failing opens it again.
-  // Unless the line fails, the checks open by themselves only where they have a column of their own.
-  const sideLayout = useSideActionLayout();
-  const open = chosen?.for === status.open ? chosen.open : status.open || sideLayout;
-  const blocked = startBlocked(snapshot);
-  const line = summary(snapshot.context);
-  return (
-    <ActionPanel
-      label="Ready to start"
-      status={{state: status.state, text: status.text}}
-      open={open}
-      toggle={next => setChosen({for: status.open, open: next})}
-      details={<CheckList items={items} />}
-      {...(line === null ? {} : {summary: line})}
-      action={
-        <Button
-          variant="primary"
-          text="Start run"
-          press={() => dispatch({type: 'start'})}
-          {...(blocked === undefined ? {} : {disabledReason: blocked})}
-        />
-      }
-    />
-  );
-}
-
-/** Why the last load, fix or start failed, in plain words, with a retry for a load or check. */
-function ProblemBanner(props: {
-  readonly context: NewRunContext;
-  readonly dispatch: Dispatch;
-}): JSX.Element | null {
-  const {context, dispatch} = props;
-  if (context.problem === null) return null;
-  const words = problemWords(context.problem, machineLabel(context.form.machine));
-  return (
-    <Banner
-      tone="err"
-      title={words.title}
-      body={words.body}
-      {...(words.retry
-        ? {actions: <Button text="Try again" press={() => dispatch({type: 'retry'})} />}
-        : {})}
-    />
-  );
-}
-
-/** The New run screen over its store's snapshot; `hero` is the app's wordmark. */
-export function NewRunScreen(props: {
+interface ScreenProps {
   readonly snapshot: NewRunSnapshot;
   readonly dispatch: Dispatch;
   readonly machines: readonly MachineOption[];
-  readonly hero: ReactNode;
   /** Open Machines, where the machine's VibeSys checkout is chosen. */
   readonly chooseCheckout: () => void;
   /** The folder field's path completion. */
   readonly completion: FolderCompletion;
-}): JSX.Element {
-  const {snapshot, dispatch, chooseCheckout} = props;
+}
+
+/** The page of the step shown. */
+function StepBody(props: ScreenProps & {readonly at: StepId}): JSX.Element {
+  const {snapshot, dispatch} = props;
+  const cardProps = {context: snapshot.context, dispatch};
+  switch (props.at) {
+    case 'start':
+      return <StartPage {...cardProps} />;
+    case 'domain':
+      return <DomainPage {...cardProps} />;
+    case 'model':
+      return <ModelPage {...cardProps} />;
+    case 'hardware':
+      return <HardwarePage {...cardProps} />;
+    case 'structure':
+      return <StructurePage {...cardProps} />;
+    case 'workload':
+      return <WorkloadPage {...cardProps} />;
+    case 'example':
+      return <ExamplePage {...cardProps} />;
+    case 'variant':
+      return <VariantPage {...cardProps} />;
+    case 'project':
+      return <ProjectPage {...cardProps} machines={props.machines} completion={props.completion} />;
+    case 'task':
+      return <TaskPage {...cardProps} />;
+    case 'goal':
+      return <GoalPage {...cardProps} />;
+    case 'where':
+      return (
+        <WherePage {...cardProps} machines={props.machines} chooseCheckout={props.chooseCheckout} />
+      );
+    case 'agent':
+      return <AgentPage {...cardProps} />;
+    case 'review':
+      return (
+        <ReviewPage snapshot={snapshot} dispatch={dispatch} chooseCheckout={props.chooseCheckout} />
+      );
+  }
+}
+
+/** Back, and the way on: Continue, Looks right on the goal, Start run on Review. */
+function StepNav(props: ScreenProps & {readonly at: StepId; readonly first: boolean}): JSX.Element {
+  const {snapshot, dispatch, at} = props;
   const {context} = snapshot;
-  const cardProps = {context, dispatch};
-  const offers = context.harnesses?.for === context.form.machine ? context.harnesses.list : null;
+  if (at === 'review') {
+    return (
+      <Row justify="between" wrap>
+        <Button text="Back" press={() => dispatch({type: 'back'})} />
+        <StartButton snapshot={snapshot} dispatch={dispatch} />
+      </Row>
+    );
+  }
+  const done = isDone(at, context.answers, entriesIn(context), {
+    agent: context.form.agent !== null,
+  });
   return (
-    <Page
-      width="wide"
-      sideAction
-      header={
-        <>
-          {/* The wordmark sizes to its container's width, so it is not in the centered stack. */}
-          {props.hero}
-          <Stack gap="space-1" align="center">
-            <Text as="h1" variant="title">
-              New run
-            </Text>
-            <Text tone="muted">Prefilled from your last run on this machine.</Text>
-          </Stack>
+    <Nav
+      {...(props.first ? {} : {back: () => dispatch({type: 'back'})})}
+      next={{
+        text: at === 'goal' ? 'Looks right' : 'Continue',
+        press: () =>
+          at === 'goal'
+            ? dispatch({type: 'answer', change: {kind: 'goal'}, advance: true})
+            : dispatch({type: 'next'}),
+        // The goal is answered by accepting it, which is what its button does.
+        blocked: done || at === 'goal' ? undefined : 'Answer the question above to continue.',
+      }}
+    />
+  );
+}
+
+/** The steps beside the page: each shows its answer and goes back to it; one line when narrow. */
+function Steps(props: {
+  readonly views: readonly StepView[];
+  readonly at: StepId | null;
+  readonly started: boolean;
+  readonly dispatch: Dispatch;
+}): JSX.Element {
+  const {dispatch} = props;
+  return (
+    <>
+      {props.views.map(view => (
+        <SidebarItem
+          key={view.id}
+          label={view.title}
+          {...(view.answer === null || view.id === props.at ? {} : {detail: view.answer})}
+          status={{
+            tone: view.answer === null ? 'neutral' : 'ok',
+            label: view.answer === null ? 'Not answered yet' : 'Answered',
+          }}
+          active={view.id === props.at}
+          // The step shown is not a way to anywhere.
+          disabled={!view.reached || view.id === props.at}
+          press={() => dispatch({type: 'go', step: view.id})}
+        />
+      ))}
+      {props.started ? (
+        <Button
+          variant="quiet"
+          size="sm"
+          text="Start over"
+          press={() => dispatch({type: 'reset'})}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/** The New run screen over its store's snapshot. */
+export function NewRunScreen(props: ScreenProps): JSX.Element {
+  const {snapshot, dispatch} = props;
+  const {context} = snapshot;
+  const views = stepViews(context);
+  // A kept form whose steps wait on the machine's examples shows no page until they are listed.
+  const at = views.find(view => view.id === context.at)?.id ?? null;
+  const index = views.findIndex(view => view.id === at);
+  const copy = at === null ? null : COPY[at];
+  return (
+    <Page width="wide">
+      <SectionLayout
+        label="New run steps"
+        summary={at === null ? 'Listing the examples' : progressLine(views, at)}
+        sections={
+          <Steps
+            views={views}
+            at={at}
+            started={context.answers.from !== null}
+            dispatch={dispatch}
+          />
+        }
+      >
+        <Stack gap="space-5">
           <ProblemBanner context={context} dispatch={dispatch} />
-        </>
-      }
-      footer={
-        <ReadyPanel snapshot={snapshot} dispatch={dispatch} chooseCheckout={chooseCheckout} />
-      }
-    >
-      <MachineCard {...cardProps} machines={props.machines} chooseCheckout={chooseCheckout} />
-      <ProjectCard key={context.form.machine} {...cardProps} completion={props.completion} />
-      <AgentCard {...cardProps} />
-      <BudgetCard {...cardProps} />
-      <MoreOptions {...cardProps} offers={offers ?? []} />
+          {at === null || copy === null ? (
+            <Text tone="muted">Listing the examples on {machineLabel(context.form.machine)}.</Text>
+          ) : (
+            <Question
+              kicker={`New run \u00b7 step ${index + 1} of ${views.length}`}
+              title={copy.title}
+              {...(copy.lede === undefined ? {} : {lede: copy.lede})}
+              nav={<StepNav {...props} at={at} first={index === 0} />}
+            >
+              <StepBody {...props} at={at} />
+            </Question>
+          )}
+        </Stack>
+      </SectionLayout>
     </Page>
   );
 }

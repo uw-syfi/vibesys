@@ -30,15 +30,18 @@ from .types.evaluation import (
 from .types.job_observations import MeasurementFailure
 
 if TYPE_CHECKING:
-    from .types.common import Observation
+    from .types.common import Observation, RequestId
     from .types.evaluation import EvaluationState, RegisteredOwnedJob
     from .types.kernel import EvaluationContext
     from .types.records import RequestRecord
+    from .types.until import FailureReason
 
 __all__ = [
     "canonical_failure",
     "conclusive",
+    "ended_unobserved",
     "job_budget",
+    "receipt_ended",
     "same_conclusion",
     "submission_receipt",
 ]
@@ -78,6 +81,36 @@ def conclusive(observation: Observation | None) -> bool:
         observation is not None
         and observation.terminal
         and observation.status not in (ObservationStatus.UNKNOWN, ObservationStatus.PENDING)
+    )
+
+
+def receipt_ended(receipt: PreparedSubmissionReceipt) -> bool:
+    """Whether the submission's run is over as far as its receipt says.
+
+    Its observation is terminal, or core ended the submission while no job of it was known
+    (``ended_unobserved``). The one definition: a job the run named is the job's to end, and
+    whether its run is under way also reads that job (`vs_core._comparison.run_under_way`).
+    """
+    return receipt.ended_unobserved is not None or (
+        receipt.observation is not None and receipt.observation.terminal
+    )
+
+
+def ended_unobserved(
+    budget: SubmissionBudget, request_id: RequestId, reason: FailureReason
+) -> SubmissionBudget:
+    """``budget`` with the receipt of ``request_id`` ended for ``reason``, unless it has ended."""
+    return budget.model_copy(
+        update={
+            "receipts": tuple(
+                receipt.model_copy(update={"ended_unobserved": reason})
+                if isinstance(receipt, PreparedSubmissionReceipt)
+                and receipt.request_id == request_id
+                and not receipt_ended(receipt)
+                else receipt
+                for receipt in budget.receipts
+            )
+        }
     )
 
 

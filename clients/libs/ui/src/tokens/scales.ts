@@ -81,7 +81,7 @@ export const SIZE: Readonly<Record<SizeToken, number>> = {
   'column-swatch': 160,
   'column-figure': 320,
   'column-metric': 360,
-  'column-chart': 520,
+  'column-chart': 288,
   'pane-list': 380,
   'pane-outline': 340,
   'pane-master': 480,

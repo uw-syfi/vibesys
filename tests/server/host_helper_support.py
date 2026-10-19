@@ -19,6 +19,12 @@ from tests.support.example_materializer import FakeExampleMaterializer
 from tests.support.task_project import write_task
 
 from entrypoints.examples import HelperExampleProjects
+from server.host_agent_logins import (
+    AgentLogin,
+    LoginStarted,
+    LoginUnavailable,
+    LoginUnavailableReason,
+)
 from server.host_api import (
     Checkout,
     DetachedLaunchFailure,
@@ -37,6 +43,7 @@ from server.host_api import (
 )
 from server.host_harness import HarnessDisplay
 from server.host_helper import serve_channel
+from server.host_helper_compute import MachineCompute
 from server.host_helper_logs import (
     HelperLogs,
     StoredBytes,
@@ -65,6 +72,7 @@ from vs_project.api.testing import FakeGitRepositories, run_execution_record
 from vs_sim.api.testing import HANG_GUARD_S, FakeProcessSignaller, ScriptedProbe
 
 if TYPE_CHECKING:
+    import builtins
     from collections.abc import Callable, Mapping
     from pathlib import Path
     from typing import Any
@@ -164,6 +172,64 @@ class FakeRunPreflight:
     def report(self, project: Path, arguments: tuple[str, ...]) -> PreflightReport:
         self.calls.append((project, arguments))
         return self.report_
+
+
+@dataclass
+class FakeAgentLogins:
+    """An ``AgentLogins`` over a fixed list, noting each login started."""
+
+    logins: tuple[AgentLogin, ...] = ()
+    started: builtins.list[str] = field(default_factory=list)
+    outcome: LoginStarted | LoginUnavailable = field(
+        default_factory=lambda: LoginUnavailable(reason=LoginUnavailableReason.NO_LOGIN_COMMAND)
+    )
+
+    def providers(self) -> tuple[str, ...]:
+        return tuple(login.provider for login in self.logins)
+
+    def list(self) -> tuple[AgentLogin, ...]:
+        return self.logins
+
+    def start(self, provider: str) -> LoginStarted | LoginUnavailable:
+        self.started.append(provider)
+        return self.outcome
+
+
+@dataclass
+class FakeConfigFiles:
+    """The machine's configuration files in memory, with the ``ConfigFiles`` contract."""
+
+    files: dict[str, str] = field(default_factory=dict)
+    unreadable: set[str] = field(default_factory=set)
+    """Paths whose read fails the way a permission error does."""
+    writes: list[str] = field(default_factory=list)
+    """Each path written, in order."""
+
+    def read(self, path: str) -> str | None:
+        if path in self.unreadable:
+            raise PermissionError(13, "Permission denied", path)
+        return self.files.get(path)
+
+    def write(self, path: str, text: str) -> None:
+        self.writes.append(path)
+        self.files[path] = text
+
+
+def no_cluster(_argv: tuple[str, ...]) -> ProbeResult | None:
+    """A probe script for a machine that cannot run any command."""
+    return None
+
+
+def fake_compute(
+    files: FakeConfigFiles | None = None,
+    script: Callable[[tuple[str, ...]], ProbeResult | None] = no_cluster,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> MachineCompute:
+    """A machine's compute settings over in-memory files and a scripted command probe."""
+    return MachineCompute(
+        files or FakeConfigFiles(), ScriptedProbe(script), home=HOME, environ=environ or {}
+    )
 
 
 @dataclass(frozen=True)
@@ -393,6 +459,8 @@ def fake_host(
         logs=None,
         harnesses=lambda: HARNESSES,
         machine=quiet_machine(),
+        logins=FakeAgentLogins(),
+        compute=fake_compute(),
         clock=threads,
         timezone=UTC,
     )

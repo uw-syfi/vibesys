@@ -13,13 +13,14 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.server.support import CONTROL_KEY, REQUEST_TIME, operator_dialer, sim_platform
 from tests.support.real_git import NO_GITHUB, REAL_GIT
 
 from entrypoints.production import production_runs
 from server.api.protocol import StopCommand, SubscribeRequest
+from server.events import RunInterruptedData
 from server.runtime import ServerRuntime
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.events import CoreEventType, EventStatus
@@ -27,7 +28,7 @@ from vibesys.run.event_journal import EventJournal as CoreEventJournal
 from vibesys.run.integration import LocalRunIntegration
 from vs_runtime.api.infrastructure import ChannelRunControl
 from vs_runtime.api.testing import idle_environment_system
-from vs_sim.api import OsThreads
+from vs_sim.api import OsThreads, Signals
 from vs_sim.api.testing import (
     HANG_GUARD_S,
     ManualClock,
@@ -460,5 +461,60 @@ def test_runtime_streams_configuration_failure_without_run_failure(
         assert event["data"]["message"] == "unknown token=[REDACTED] option --bad"
         assert event["data"]["usage"] == "usage: vibesys --token=[REDACTED]"
         assert not any(event["type"] == "run_failed" for event in received)
+
+    _on_sim(seed, body)
+
+
+_TERMINATING = (Signals.SIGTERM, Signals.SIGHUP)
+
+
+@pytest.mark.regression
+@example(signals=[Signals.SIGINT, Signals.SIGTERM], seed=0)
+@_SEEDS
+@given(
+    signals=st.lists(st.sampled_from([Signals.SIGINT, *_TERMINATING]), min_size=1, max_size=3),
+    seed=st.integers(0, 2**32),
+)
+def test_an_interrupted_run_is_journaled_by_the_signal_that_ended_it(
+    tmp_path_factory: pytest.TempPathFactory, signals: list[Signals], seed: int
+) -> None:
+    """PR #3209 LOW-3: a second Ctrl-C (the launcher's SIGTERM) was journaled as the first SIGINT.
+
+    A Ctrl-C asks the run to stop; a SIGTERM or SIGHUP ends it. The journal names the first
+    signal that ended the run, and a Ctrl-C only when nothing stronger arrived.
+    """
+    socket_path = tmp_path_factory.mktemp("run") / "control.sock"
+    ending = next((number for number in signals if number in _TERMINATING), signals[0])
+
+    def body(threads: SimThreads, network: SimNetwork) -> None:
+        runtime = _runtime(socket_path, threads, network)
+        received: list[dict[str, Any]] = []
+        subscriber = threads.spawn(
+            lambda: _collect_until(
+                runtime, network, socket_path, _has("run_interrupted"), received
+            ),
+            name="subscriber",
+            daemon=False,
+        )
+
+        def run() -> None:
+            for number in signals:
+                runtime.shutdown(number)
+            raise KeyboardInterrupt
+
+        with pytest.raises(KeyboardInterrupt):
+            runtime.run(run)
+
+        subscriber.join(HANG_GUARD_S)
+        assert not subscriber.is_alive()
+        interruptions = [
+            event.data
+            for event in runtime.journal.read()
+            if isinstance(event.data, RunInterruptedData)
+        ]
+        assert len(interruptions) == 1
+        assert interruptions[0].signal == ending.name
+        reason = "launcher_terminated" if ending in _TERMINATING else "interrupted"
+        assert interruptions[0].reason == reason
 
     _on_sim(seed, body)

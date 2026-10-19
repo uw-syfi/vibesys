@@ -142,6 +142,26 @@ function agentWords(
   );
 }
 
+function measurementWords(
+  cause: Extract<Cause, {kind: 'measurement_target_not_configured' | 'measurement_target_misfit'}>,
+  machine: string,
+): FailureWords {
+  if (cause.kind === 'measurement_target_misfit') {
+    return words(
+      `The task needs ${backendLabel(cause.backend)}, which the place chosen to measure does not offer. Choose another place to measure in Where it runs, or another task.`,
+      null,
+      false,
+    );
+  }
+  const place = cause.target.kind === 'slurm' ? `The cluster "${cause.target.cluster}"` : 'Modal';
+  const missing = cause.target.kind === 'slurm' ? 'is not set up' : 'has no token';
+  return words(
+    `${place} ${missing} on ${machine}. Set it up in that machine's Settings, or choose another place to measure in Where it runs, then check again.`,
+    null,
+    true,
+  );
+}
+
 /** The words for `check`'s typed cause; `null` for a check that has none. */
 export function failureWords(check: Check, machine: string): FailureWords | null {
   const cause = check.cause ?? null;
@@ -177,7 +197,7 @@ export function failureWords(check: Check, machine: string): FailureWords | null
       );
     case 'config_invalid':
       return words(
-        "The run's configuration (the project's agent configuration, and the settings chosen here) is not valid. Fix it in the project, then check again.",
+        "The run's configuration (the project's agent configuration, and the settings chosen here, such as a different agent for a role) is not valid. Change the setting the detail names, or fix it in the project, then check again.",
         cause.problem,
         true,
       );
@@ -210,6 +230,9 @@ export function failureWords(check: Check, machine: string): FailureWords | null
         cause.problem,
         true,
       );
+    case 'measurement_target_not_configured':
+    case 'measurement_target_misfit':
+      return measurementWords(cause, machine);
     default:
       // A cause from a helper newer than this app: say so plainly, and keep its facts out of view.
       return genericWords(check);

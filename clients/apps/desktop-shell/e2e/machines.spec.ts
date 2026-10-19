@@ -172,7 +172,7 @@ test('add a machine, change a checkout from labelled suggestions, and remove a m
 
   // New run here opens New run.
   await page.getByRole('button', {name: 'New run here'}).click();
-  await expect(page.getByRole('heading', {name: 'New run'})).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'What do you want to optimize?'})).toBeVisible();
 });
 
 test('the machines screen names its harnesses and hardware, never their ids', async ({page}) => {

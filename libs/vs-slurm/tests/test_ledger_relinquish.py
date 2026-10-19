@@ -144,7 +144,14 @@ def test_relinquish_cancels_the_job_iff_no_other_run_leased_it_within_the_grace(
 class _CancelUnreachable(FakeCluster):
     """The Fake cluster, whose every scancel is lost on the way: the caller hears nothing."""
 
-    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
+    def cancel(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCancelOutcome:
+        del observed  # lost on the way, whatever reading the caller holds
         named = target if isinstance(target, str) and not by_job_id else None
         return ClusterUnknown(operation_id=named, reason="ssh: connection reset")
 
@@ -258,8 +265,12 @@ def test_a_lease_written_just_after_the_withdrawal_mark_keeps_the_job() -> None:
 
 
 def test_a_withdrawal_window_covers_its_calls_at_the_transport_timeout_and_the_clock_skew() -> None:
-    """Derived from the transport timeout: six calls from the stamp to the cancel, one spare."""
-    for call_seconds in (1.0, 30.0, 110.0, 600.0):
+    """Derived from the transport timeout: six calls from the stamp to the cancel, one spare.
+
+    A timeout whose window outlasts ``MAX_WITHDRAWAL_WINDOW_SECONDS`` is refused
+    (``test_a_withdrawal_timing_whose_mark_outlasts_the_longest_window_is_refused``).
+    """
+    for call_seconds in (1.0, 30.0, 110.0, 120.0):
         timing = WithdrawalTiming(clock=ManualClock(NOW), call_seconds=call_seconds)
         assert timing.window_seconds == 7 * call_seconds + CLOCK_SKEW_SECONDS
 

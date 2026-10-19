@@ -16,6 +16,7 @@ from ._proofs import (
     admission_remaining,
     committed_stop,
     draining,
+    stop_mode,
 )
 from ._request_ledger import due_retries
 from ._request_recovery import overdue_reconciliations
@@ -29,6 +30,7 @@ from .types.common import (
     RejectionCode,
     RequestId,
     RunStatus,
+    StopMode,
     WorkspaceMode,
 )
 from .types.evaluation import ObservationsDue, RunJobsCancelRequested
@@ -514,8 +516,9 @@ def _cancel(state: SchedulingState, context: SchedulingContext) -> tuple[Signal,
     if context.run.status != RunStatus.CLOSING:
         return None
     decision = _first_stop(context)
-    # Reordered controls cannot change the first committed stop disposition.
-    if decision is None or decision.mode != "cancel":
+    # The first committed Finish keeps its authority; a later cancel control escalates only
+    # its mode (``stop_mode``), and a later drain never weakens a cancel.
+    if decision is None or stop_mode(context.run) is not StopMode.CANCEL:
         return None
     # A parked closure fences its old episode, not a queued reopening. Cancel
     # the carried new admission identity unless that exact episode is closing.

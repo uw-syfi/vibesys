@@ -117,12 +117,22 @@ def reading(value: float) -> core.Reading:
 
 def started_with(state: core.CoreState, request: core.SubmitMeasurement) -> core.CoreState:
     """Accept ``request``'s job: it is running, and core holds it in the order it started."""
+    return started_steps(state, request)[-1].state
+
+
+def started_steps(
+    state: core.CoreState, request: core.SubmitMeasurement
+) -> tuple[core.Transition, ...]:
+    """Every transition `started_with` takes, in order."""
     started = seen(request, 1)
     state = committed(state, started)
-    state = transition(state, core.MeasurementSubmissionObserved(observation=started)).state
+    observed = transition(state, core.MeasurementSubmissionObserved(observation=started))
     resource = started.resource_id
     assert resource is not None
-    return transition(state, core.JobObserved(resource_id=resource, observation=started)).state
+    return (
+        observed,
+        transition(observed.state, core.JobObserved(resource_id=resource, observation=started)),
+    )
 
 
 def ended_with(
@@ -171,6 +181,26 @@ def finished_transition(
     failed: bool = False,
 ) -> core.Transition:
     """End an already accepted job and return the final transition."""
+    return finished_steps(state, request, value, reused=reused, failed=failed)[-1]
+
+
+def ended_steps(
+    state: core.CoreState, request: core.SubmitMeasurement, value: float | None
+) -> tuple[core.Transition, ...]:
+    """Every transition `ended_transition` takes, in order."""
+    started = started_steps(state, request)
+    return (*started, *finished_steps(started[-1].state, request, value))
+
+
+def finished_steps(
+    state: core.CoreState,
+    request: core.SubmitMeasurement,
+    value: float | None,
+    *,
+    reused: core.RequestId | None = None,
+    failed: bool = False,
+) -> tuple[core.Transition, ...]:
+    """Every transition `finished_transition` takes, in order."""
     status = core.ObservationStatus.FAILED if failed else core.ObservationStatus.SUCCEEDED
     finished = seen(
         request,
@@ -210,17 +240,20 @@ def finished_transition(
     facts = _FAILED if failed else _PASSED
     failure = core.MeasurementFailure.WORKLOAD if failed else None
     state = committed(state, finished, facts)
-    state = transition(
+    observed = transition(
         state, core.MeasurementSubmissionObserved(observation=finished, failure=failure)
-    ).state
-    return transition(
-        state,
-        core.JobObserved(
-            resource_id=resource,
-            observation=finished,
-            evidence=records,
-            evaluation_result=facts,
-            failure=failure,
+    )
+    return (
+        observed,
+        transition(
+            observed.state,
+            core.JobObserved(
+                resource_id=resource,
+                observation=finished,
+                evidence=records,
+                evaluation_result=facts,
+                failure=failure,
+            ),
         ),
     )
 

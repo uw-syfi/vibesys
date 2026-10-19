@@ -89,3 +89,69 @@ def test_an_official_check_at_any_point_leaves_the_candidate_within_the_cap_and_
         s.run == check.request_id for s in lab.state.evaluation.samples
     )
     assert answered
+
+
+def scope_world(
+    other_input: str, steps: list[tuple[str, int, int]], spread: float, seed: int
+) -> tuple[bool, tuple[int, int, core.ComparisonVerdict] | None]:
+    """Attempt ``b`` measures ``INPUT`` while attempt ``a`` measures ``other_input``, both by ``steps``.
+
+    Each step is an agent's call, the end of a running run, or the official check, taken by
+    the attempt it names (an attempt calls only until its check). What ``b``'s check did
+    (whether the samples held answered it) and ``b``'s last comparison, by its sample counts and
+    verdict.
+    """
+    lab = Lab.of("a", "b", floor=0.0)
+    bench = Bench({INPUT: 100.4, other_input: 100.4, "base": 100.0}, spread, seeded(f"{seed}"))
+    inputs = {"a": other_input, "b": INPUT}
+    checks: dict[str, core.SubmitMeasurement] = {}
+    for kind, who, which in steps:
+        name = "ab"[who]
+        if name in checks:
+            continue
+        if kind == "call":
+            lab.call(name, f"c-{name}", inputs[name])
+        elif kind == "check":
+            checks[name] = final_check(lab, name, f"c-{name}", inputs[name])
+        elif live := running(lab):
+            run = live[which % len(live)]
+            assert run.plan.measured_input is not None
+            end(lab, run, "sample", bench.read(run.plan.measured_input))
+    if "b" not in checks:
+        checks["b"] = final_check(lab, "b", "c-b", INPUT)
+    settle(lab, bench)
+    last = [c for c in lab.comparisons() if c.scope == lab.scopes["b"]]
+    told = (last[-1].candidate_samples, last[-1].base_samples, last[-1].verdict) if last else None
+    return checks["b"].reuses is not None, told
+
+
+@pytest.mark.regression
+@settings(max_examples=examples(pr=30, nightly=300))
+@given(
+    steps=st.lists(
+        st.tuples(st.sampled_from(("call", "end", "check")), st.integers(0, 1), st.integers(0, 7)),
+        max_size=14,
+    ),
+    spread=st.sampled_from((0.0, 0.01, 0.05)),
+    seed=st.integers(0, 2**16),
+)
+@example(
+    steps=[("call", 0, 0), ("call", 1, 0), ("end", 0, 0), ("end", 0, 0), ("end", 0, 0)],
+    spread=0.0,
+    seed=0,
+)
+def test_an_official_check_counts_only_its_own_attempt_s_samples_of_the_input(
+    steps: list[tuple[str, int, int]], spread: float, seed: int
+) -> None:
+    """Another attempt measuring the same input changes nothing in this attempt's check.
+
+    Attempt ``a`` measures either the input ``b`` measures or another input that reads the
+    same, in the same order of calls and run ends. The base is shared either way, and each
+    attempt's comparison counts only its own samples, so ``b``'s official check and its
+    comparison must come out the same. Before, the check's sample cap counted every attempt's
+    samples of the input: with ``a``'s three samples held, ``b``'s check was answered by its one
+    sample instead of adding the run its comparison lacked.
+    """
+    alone = scope_world("input-2", steps, spread, seed)
+    shared = scope_world(INPUT, steps, spread, seed)
+    assert shared == alone

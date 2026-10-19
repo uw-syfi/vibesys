@@ -38,7 +38,9 @@ machine facts (``server.host_machine_facts``: ``Accelerator``, ``Gpu``, ``Hardwa
 ``CheckoutFound``, ``CheckoutNotFound``, ``CheckoutTooOld``, ``CheckoutInspection``), ``HelperMessage``
 and its members, ``HelperErrorCode``, the harness choice (``HarnessOption``,
 ``HarnessChoice``, ``RoleAgents``, and the run flags ``CLI_PROVIDER_FLAG``, ``MODEL_FLAG``,
-``ROLE_PROVIDER_FLAG``, ``UNVETTED_MODEL_FLAG``), and a relayed channel's end: ``ChannelEndOutcome``,
+``ROLE_PROVIDER_FLAG``, ``UNVETTED_MODEL_FLAG``, ``RUN_ENVIRONMENT_FLAG``, ``SLURM_CONFIG_FLAG``),
+where results are measured, compute settings and agent logins (``server.host_compute``,
+``server.host_agent_logins``), and a relayed channel's end: ``ChannelEndOutcome``,
 ``ChannelEnd``. An undeliverable successful start whose compensating stop cannot
 be proved terminal reports ``RunStartCompensationFailure`` on the helper's
 diagnostic stream.
@@ -75,7 +77,25 @@ from pydantic import (
     model_validator,
 )
 
+from server.host_agent_logins import (
+    AgentLoginsListReply,
+    AgentLoginsListRequest,
+    AgentLoginsStartReply,
+    AgentLoginsStartRequest,
+)
+from server.host_compute import (
+    ComputeAddClusterReply,
+    ComputeAddClusterRequest,
+    ComputeListReply,
+    ComputeListRequest,
+    ComputeRemoveClusterReply,
+    ComputeRemoveClusterRequest,
+    ComputeTestClusterReply,
+    ComputeTestClusterRequest,
+    MeasurementTarget,
+)
 from server.host_envelope import (
+    HelperFeature,
     HelperReplyBase,
     HelperRequestBase,
     RequestId,
@@ -754,69 +774,6 @@ reports per run.
 """
 
 
-class HelperFeature(StrEnum):
-    """Optional capabilities negotiated by ``hello``; a closed set per protocol version.
-
-    A client calls a gated method only after ``hello`` returned its feature, so
-    a strict peer never sees a method it does not know.
-    """
-
-    INSTANCES_WATCH = "instances_watch"
-    """``instances.watch`` and ``instances.unwatch``: registry changes pushed as they happen."""
-    PATHS_COMPLETE = "paths_complete"
-    """``paths.complete``: directory completion for a typed path on the host."""
-    INSTANCES_INSPECT = "instances_inspect"
-    """``instances.inspect``: retained metadata and an optional bounded log tail."""
-    LOGS = "logs"
-    """``logs.list`` and ``logs.read``: a run's recorded log streams, read in bounded chunks."""
-    LOGS_CANCEL = "logs_cancel"
-    """``logs.cancel``: withdraw a waiting ``logs.read`` so its worker returns at once."""
-    HARNESSES = "harnesses"
-    """``harnesses.list`` and ``run.start``'s ``harness``: start a run on a vetted provider and model."""
-    LOGS_BY_SPAN = "logs_by_span"
-    """``logs.list``'s ``span_id``: only the streams whose owner names that run-trace span."""
-    RUN_HISTORY = "run_history"
-    """``runs.read_events``: a run's recorded events, read from disk in bounded pages."""
-    RUN_SUMMARY = "run_summary"
-    """``runs.summary``: everything the run level shows, from a read model kept beside the journal."""
-    RUN_HISTORY_PAGES = "run_history_pages"
-    """``runs.read_events``'s pages of up to ``RUN_EVENTS_READ_MAX`` events, and its ``with_totals``."""
-    RUN_SPAN_EVENTS = "run_span_events"
-    """``runs.events_for_span``: the recorded events of one span and the spans beneath it."""
-    RUN_TAIL = "run_tail"
-    """``runs.read_tail``: the newest recorded events before a sequence, in bounded pages."""
-    MACHINE_DESCRIBE = "machine_describe"
-    """``machine.describe``: the host's checkout, hardware, Docker, harness CLIs and run counts."""
-    CHECKOUT_INSPECT = "checkout_inspect"
-    """``checkout.inspect``: whether a path holds a VibeSys checkout this app can use."""
-    PREFLIGHT = "preflight"
-    """``run.preflight``: the closed checks that say whether a run can start, each with its fix."""
-    RUN_OPTIONS = "run_options"
-    """``run.start``'s and ``run.preflight``'s ``options``: rounds, time limit, results, roles."""
-    EXAMPLES = "examples"
-    """``examples.list``, ``project.create_from_example`` and ``project.copy_out``."""
-    RUN_ROLES = "run_roles"
-    """``run.preflight``'s ``with_roles``: the role ids the run's orchestration declares."""
-    PROJECT_CLEAN = "project_clean"
-    """``run.preflight``'s ``with_project_clean``: the ``project_clean`` check, which fails with a
-    typed ``project_dirty`` cause naming the changed paths."""
-    RUN_BACKEND = "run_backend"
-    """``run.preflight``'s ``with_backend``: the compute backend the run resolved to (the task's),
-    and each failing check's typed ``cause``."""
-    RUN_CAUSES = "run_causes"
-    """``run.preflight``'s ``with_causes``: the typed ``cause`` of a failed ``settings_valid``
-    check beyond an unrunnable backend (the task, configuration, agent and argument failures)."""
-    EXAMPLE_CATALOGUE = "example_catalogue"
-    """``examples.list``'s ``with_catalogue``: each task's domain, served model, hardware,
-    workload, objectives and goal text, in ``task_details``."""
-    RUN_DIGEST = "run_digest"
-    """``runs.list``'s ``digest_runs``: each named run's ``digest``, read from its journal."""
-    HARNESS_GENERATIONS = "harness_generations"
-    """``harnesses.list``'s ``with_generations``: each pair's maker and the generation it belongs to."""
-    RUN_ROLE_AGENTS = "run_role_agents"
-    """``run.start``'s and ``run.preflight``'s ``agents``: a vetted provider and model per role."""
-
-
 CLI_PROVIDER_FLAG: Final = "--cli-provider"
 """The run option that names the agent CLI provider; ``run.start`` emits it for ``harness``."""
 MODEL_FLAG: Final = "--model"
@@ -837,6 +794,12 @@ PUBLISH_FLAG: Final = "--publish"
 """Publishes the project to GitHub under the generated name; emitted for ``publish_github``."""
 REPO_FLAG: Final = "--repo"
 """Publishes the project to a named GitHub repository; a typed ``results`` refuses it in ``args``."""
+RUN_ENVIRONMENT_FLAG: Final = "--run-environment"
+"""Selects where evaluation runs; ``run.start`` emits it for ``measure_on``'s Slurm and Modal."""
+SLURM_CONFIG_FLAG: Final = "--slurm-config"
+"""The operator file of a Slurm run; ``run.start`` emits it for ``measure_on``'s Slurm cluster."""
+ENVIRONMENT_FLAGS: Final = (RUN_ENVIRONMENT_FLAG, SLURM_CONFIG_FLAG, "--modal", "--skypilot")
+"""The flags that choose where a run measures; ``measure_on`` is their only source in ``args``."""
 LOCAL_FLAG: Final = "--local"
 """Keeps the run local; ``run.start`` emits it for ``results: keep``."""
 
@@ -984,6 +947,9 @@ class RunStartRequest(HelperRequestBase):
     agents: RoleAgents | None = None
     """The agent each named role runs; a role without an entry runs ``harness``. Sent only after
     ``hello`` returned ``run_role_agents``."""
+    measure_on: MeasurementTarget | None = None
+    """Where results are measured; ``args`` then carry no run-environment flag. Sent only after
+    ``hello`` returned ``measurement_target``."""
 
 
 class RunPreflightRequest(HelperRequestBase):
@@ -996,6 +962,8 @@ class RunPreflightRequest(HelperRequestBase):
     harness: HarnessChoice | None = None
     options: RunOptions | None = None
     agents: RoleAgents | None = None
+    measure_on: MeasurementTarget | None = None
+    """As ``run.start``'s; the reply then ends with the ``measurement_target`` check."""
     with_roles: bool | None = None
     """Ask for ``roles`` in the reply. Sent only after ``hello`` returned ``run_roles``."""
     with_project_clean: bool | None = None
@@ -1209,6 +1177,12 @@ HELPER_REQUEST_FEATURES: Final[Mapping[type[HelperRequestBase], HelperFeature]] 
     ExamplesListRequest: HelperFeature.EXAMPLES,
     ProjectCreateFromExampleRequest: HelperFeature.EXAMPLES,
     ProjectCopyOutRequest: HelperFeature.EXAMPLES,
+    ComputeListRequest: HelperFeature.MACHINE_COMPUTE,
+    ComputeTestClusterRequest: HelperFeature.MACHINE_COMPUTE,
+    ComputeAddClusterRequest: HelperFeature.MACHINE_COMPUTE,
+    ComputeRemoveClusterRequest: HelperFeature.MACHINE_COMPUTE,
+    AgentLoginsListRequest: HelperFeature.AGENT_LOGINS,
+    AgentLoginsStartRequest: HelperFeature.AGENT_LOGINS,
 }
 """The feature each gated request needs, exported with the generated wire contract."""
 
@@ -1217,11 +1191,13 @@ HELPER_FIELD_FEATURES: Final[Mapping[type[HelperRequestBase], Mapping[str, Helpe
         "harness": HelperFeature.HARNESSES,
         "options": HelperFeature.RUN_OPTIONS,
         "agents": HelperFeature.RUN_ROLE_AGENTS,
+        "measure_on": HelperFeature.MEASUREMENT_TARGET,
     },
     RunPreflightRequest: {
         "harness": HelperFeature.HARNESSES,
         "options": HelperFeature.RUN_OPTIONS,
         "agents": HelperFeature.RUN_ROLE_AGENTS,
+        "measure_on": HelperFeature.MEASUREMENT_TARGET,
         "with_roles": HelperFeature.RUN_ROLES,
         "with_backend": HelperFeature.RUN_BACKEND,
         "with_causes": HelperFeature.RUN_CAUSES,
@@ -1272,7 +1248,13 @@ HelperRequest = Annotated[
     | RunPreflightRequest
     | ExamplesListRequest
     | ProjectCreateFromExampleRequest
-    | ProjectCopyOutRequest,
+    | ProjectCopyOutRequest
+    | ComputeListRequest
+    | ComputeTestClusterRequest
+    | ComputeAddClusterRequest
+    | ComputeRemoveClusterRequest
+    | AgentLoginsListRequest
+    | AgentLoginsStartRequest,
     Field(discriminator="type"),
 ]
 """Every message a client sends on a helper channel."""
@@ -1771,6 +1753,22 @@ class HelperErrorCode(StrEnum):
     """``runs.read_events`` or ``runs.summary`` named a run the project does not have; the message names it."""
     UNVETTED_HARNESS = "unvetted_harness"
     """``run.start``'s ``harness`` is not one ``harnesses.list`` offers; only sent with ``harnesses``."""
+    UNKNOWN_CLUSTER = "unknown_cluster"
+    """``compute.remove_cluster`` or ``measure_on`` named a cluster not set up; the message names it."""
+    CLUSTER_EXISTS = "cluster_exists"
+    """``compute.add_cluster`` named a cluster already set up on this machine."""
+    CLUSTER_READ_ONLY = "cluster_read_only"
+    """``compute.remove_cluster`` named a cluster of a file this helper only reads."""
+    CLUSTER_TEST_FAILED = "cluster_test_failed"
+    """``compute.add_cluster``'s cluster did not pass its connection test; nothing was saved."""
+    CLUSTER_INVALID = "cluster_invalid"
+    """A cluster's settings are rejected by the Slurm configuration; the message names the keys."""
+    COMPUTE_CONFIG_UNREADABLE = "compute_config_unreadable"
+    """The compute settings file cannot be read or parsed; ``path`` names it."""
+    MODAL_NOT_CONFIGURED = "modal_not_configured"
+    """``run.start``'s ``measure_on`` is Modal and the machine holds no token."""
+    UNKNOWN_PROVIDER = "unknown_provider"
+    """``agent_logins.start`` named a provider with no harness here; the message names it."""
     INTERNAL = "internal"
     """The helper failed; ``message`` says how."""
 
@@ -1819,6 +1817,12 @@ HelperReply = (
     | ExamplesListReply
     | ProjectCreateFromExampleReply
     | ProjectCopyOutReply
+    | ComputeListReply
+    | ComputeTestClusterReply
+    | ComputeAddClusterReply
+    | ComputeRemoveClusterReply
+    | AgentLoginsListReply
+    | AgentLoginsStartReply
 )
 """A request's result; its ``type`` is the request's."""
 

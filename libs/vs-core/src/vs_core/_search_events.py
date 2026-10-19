@@ -22,6 +22,7 @@ from .types.common import Scope
 from .types.evaluation import MeasurementResult, ResumeAuthorized, ResumeRefused, TurnSuspended
 from .types.kernel import ControlChanged
 from .types.kinds import EventKind
+from .types.measurement import ComparisonSettled
 from .types.records import OperationResult
 from .types.scheduling import AttemptReady
 from .types.search import (
@@ -225,6 +226,11 @@ def _checkpoint(core: CoreState, event: CheckpointResolved) -> Event:
     return CheckpointKnown(invocation=event.invocation, checkpoint=event.checkpoint)
 
 
+def _comparison_settled(core: CoreState, event: ComparisonSettled) -> Event:
+    del core
+    return event
+
+
 def _measurement(core: CoreState, event: MeasurementResult) -> Event | Discarded:
     source = event.source_request
     comparison = comparison_of_result(
@@ -293,6 +299,7 @@ _TRANSLATE: dict[type, Callable[[CoreState, Any], Event | Discarded | None]] = {
     ResumeAuthorized: _resume,
     ResumeRefused: _resume_refused,
     CheckpointResolved: _checkpoint,
+    ComparisonSettled: _comparison_settled,
     MeasurementResult: _measurement,
     OperationResult: _operation,
     AdoptionResult: _adoption,

@@ -1,11 +1,13 @@
 """A round reports, ranks by and adopts the settled comparison's figure, never the first run's (#3027).
 
 Core answers the framework's official check with the mean of the samples it holds at that moment,
-and the runs a close call earns land after it. The strategy waits for the comparison to settle,
-so the candidate value that comparison states is the one figure an idea has: the one its round
-records (and `round_finished` carries), its gate and the adoption are labelled with, and the best
-is chosen by. These stories play the host of `multi`, whose evidence reading is the first run's
-(`throughputs`) and whose settled comparison says another, and read the figure at each place.
+and the runs a close call earns land after it and restate the ledger's record. The strategy waits
+for the comparison to settle and reads the record as the ledger states it then, so the candidate
+value that comparison states is the one figure an idea has: the one its round records (and
+`round_finished` carries), its gate and the adoption are labelled with, and the best is chosen by.
+These stories play the host of `multi`, whose record first states the first run's reading
+(`throughputs`) and is restated to the settled comparison's value, and read the figure at each
+place.
 """
 
 from __future__ import annotations

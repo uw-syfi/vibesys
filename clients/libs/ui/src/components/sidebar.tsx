@@ -32,6 +32,8 @@ export function SidebarItem(
     /** A control beside the entry (retry), outside its button. */
     readonly action?: {readonly label: string; readonly press: () => void};
     readonly active?: boolean;
+    /** An entry that cannot be followed yet: drawn muted and not pressable. */
+    readonly disabled?: boolean;
     readonly menu?: readonly MenuItem[];
   },
 ): JSX.Element {
@@ -70,13 +72,17 @@ export function SidebarItem(
     'aria-current': props.active === true ? ('page' as const) : undefined,
   };
   return (
-    <div className="vs-sidebar-item" data-active={props.active === true || undefined}>
+    <div
+      className="vs-sidebar-item"
+      data-active={props.active === true || undefined}
+      data-disabled={props.disabled === true || undefined}
+    >
       {props.href !== undefined ? (
         <a {...shared} href={props.href}>
           {content}
         </a>
       ) : (
-        <button {...shared} type="button" onClick={props.press}>
+        <button {...shared} type="button" disabled={props.disabled} onClick={props.press}>
           {content}
         </button>
       )}

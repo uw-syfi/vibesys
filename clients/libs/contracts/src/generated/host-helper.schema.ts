@@ -25,6 +25,293 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "AcceleratorVendor",
       "type": "string"
     },
+    "AccountLogin": {
+      "additionalProperties": false,
+      "description": "Signed in with a person's account (a subscription login).",
+      "properties": {
+        "kind": {
+          "const": "account",
+          "default": "account",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "AccountLogin",
+      "type": "object",
+      "required": [
+        "kind"
+      ]
+    },
+    "AgentLogin": {
+      "additionalProperties": false,
+      "description": "One harness's login on the machine.",
+      "properties": {
+        "provider": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        },
+        "provider_name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Provider Name",
+          "type": "string"
+        },
+        "installed": {
+          "title": "Installed",
+          "type": "boolean"
+        },
+        "state": {
+          "$ref": "#/$defs/LoginState"
+        },
+        "how": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "account": "#/$defs/AccountLogin",
+                  "api_key": "#/$defs/ApiKeyLogin"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/AccountLogin"
+                },
+                {
+                  "$ref": "#/$defs/ApiKeyLogin"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "How"
+        },
+        "api_key_variables": {
+          "default": [],
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Api Key Variables",
+          "type": "array"
+        },
+        "detail": {
+          "default": "",
+          "maxLength": 300,
+          "pattern": "^[^\\n\\r]*$",
+          "title": "Detail",
+          "type": "string"
+        },
+        "can_start_login": {
+          "title": "Can Start Login",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "provider",
+        "provider_name",
+        "installed",
+        "state",
+        "can_start_login"
+      ],
+      "title": "AgentLogin",
+      "type": "object"
+    },
+    "AgentLoginsListReply": {
+      "additionalProperties": false,
+      "description": "The logins, in the order ``harnesses.list`` offers the providers.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "agent_logins.list",
+          "default": "agent_logins.list",
+          "title": "Type",
+          "type": "string"
+        },
+        "logins": {
+          "items": {
+            "$ref": "#/$defs/AgentLogin"
+          },
+          "title": "Logins",
+          "type": "array"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "logins"
+      ],
+      "title": "AgentLoginsListReply",
+      "type": "object"
+    },
+    "AgentLoginsListRequest": {
+      "additionalProperties": false,
+      "description": "Each vetted harness's login on this machine.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "agent_logins.list",
+          "default": "agent_logins.list",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type"
+      ],
+      "title": "AgentLoginsListRequest",
+      "type": "object"
+    },
+    "AgentLoginsStartReply": {
+      "additionalProperties": false,
+      "description": "What starting the login did.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "agent_logins.start",
+          "default": "agent_logins.start",
+          "title": "Type",
+          "type": "string"
+        },
+        "result": {
+          "discriminator": {
+            "mapping": {
+              "started": "#/$defs/LoginStarted",
+              "unavailable": "#/$defs/LoginUnavailable"
+            },
+            "propertyName": "outcome"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LoginStarted"
+            },
+            {
+              "$ref": "#/$defs/LoginUnavailable"
+            }
+          ],
+          "title": "Result"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "result"
+      ],
+      "title": "AgentLoginsStartReply",
+      "type": "object"
+    },
+    "AgentLoginsStartRequest": {
+      "additionalProperties": false,
+      "description": "Start the harness's own login on this machine.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "agent_logins.start",
+          "default": "agent_logins.start",
+          "title": "Type",
+          "type": "string"
+        },
+        "provider": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "provider"
+      ],
+      "title": "AgentLoginsStartRequest",
+      "type": "object"
+    },
+    "ApiKeyLogin": {
+      "additionalProperties": false,
+      "description": "Signed in with an API key; where it is held is named, the key never.",
+      "properties": {
+        "kind": {
+          "const": "api_key",
+          "default": "api_key",
+          "title": "Kind",
+          "type": "string"
+        },
+        "variable": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Variable"
+        },
+        "file": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "File"
+        }
+      },
+      "title": "ApiKeyLogin",
+      "type": "object",
+      "required": [
+        "kind"
+      ]
+    },
     "ArgumentsRejected": {
       "additionalProperties": false,
       "description": "The run's argument parser refused the extra arguments; ``problem`` is its message (raw).",
@@ -216,6 +503,7 @@ const hostHelperSchema: Record<string, unknown> = {
               "discriminator": {
                 "mapping": {
                   "choose_checkout": "#/$defs/ChooseCheckout",
+                  "configure_compute": "#/$defs/ConfigureCompute",
                   "copy_out": "#/$defs/CopyOut",
                   "declare_build": "#/$defs/DeclareBuild",
                   "edit_setting": "#/$defs/EditSetting",
@@ -238,6 +526,9 @@ const hostHelperSchema: Record<string, unknown> = {
                 },
                 {
                   "$ref": "#/$defs/DeclareBuild"
+                },
+                {
+                  "$ref": "#/$defs/ConfigureCompute"
                 }
               ]
             },
@@ -258,6 +549,8 @@ const hostHelperSchema: Record<string, unknown> = {
                   "backend_unavailable": "#/$defs/BackendUnavailable",
                   "config_invalid": "#/$defs/ConfigInvalid",
                   "github_unavailable": "#/$defs/GitHubUnavailable",
+                  "measurement_target_misfit": "#/$defs/MeasurementTargetMisfit",
+                  "measurement_target_not_configured": "#/$defs/MeasurementTargetNotConfigured",
                   "model_not_vetted": "#/$defs/ModelNotVetted",
                   "option_not_accepted": "#/$defs/OptionNotAccepted",
                   "project_dirty": "#/$defs/ProjectDirty",
@@ -312,6 +605,12 @@ const hostHelperSchema: Record<string, unknown> = {
                 },
                 {
                   "$ref": "#/$defs/GitHubUnavailable"
+                },
+                {
+                  "$ref": "#/$defs/MeasurementTargetNotConfigured"
+                },
+                {
+                  "$ref": "#/$defs/MeasurementTargetMisfit"
                 }
               ]
             },
@@ -340,7 +639,8 @@ const hostHelperSchema: Record<string, unknown> = {
         "settings_valid",
         "docker_reachable",
         "agent_image",
-        "evaluator_available"
+        "evaluator_available",
+        "measurement_target"
       ],
       "title": "CheckId",
       "type": "string"
@@ -596,6 +896,414 @@ const hostHelperSchema: Record<string, unknown> = {
         "kind"
       ]
     },
+    "ClusterHardware": {
+      "additionalProperties": false,
+      "description": "What a cluster's nodes offer, as ``sinfo`` lists it or as its operator states it.",
+      "properties": {
+        "accelerator": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Accelerator"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "gpu_models": {
+          "default": [],
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[^\\n\\r]*$",
+            "type": "string"
+          },
+          "title": "Gpu Models",
+          "type": "array"
+        },
+        "gpus_per_node": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Gpus Per Node",
+          "type": "integer"
+        }
+      },
+      "title": "ClusterHardware",
+      "type": "object"
+    },
+    "ClusterSource": {
+      "description": "Which file of the machine a listed cluster lives in.",
+      "enum": [
+        "vibesys",
+        "slurm_toml"
+      ],
+      "title": "ClusterSource",
+      "type": "string"
+    },
+    "ClusterTestFailed": {
+      "additionalProperties": false,
+      "description": "The cluster did not pass; ``detail`` is one line saying how.",
+      "properties": {
+        "outcome": {
+          "const": "failed",
+          "default": "failed",
+          "title": "Outcome",
+          "type": "string"
+        },
+        "stage": {
+          "$ref": "#/$defs/ClusterTestStage"
+        },
+        "detail": {
+          "maxLength": 300,
+          "minLength": 1,
+          "pattern": "^[^\\n\\r]*$",
+          "title": "Detail",
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome",
+        "stage",
+        "detail"
+      ],
+      "title": "ClusterTestFailed",
+      "type": "object"
+    },
+    "ClusterTestPassed": {
+      "additionalProperties": false,
+      "description": "The cluster answered: what its scheduler lists, and the hardware read from it.",
+      "properties": {
+        "outcome": {
+          "const": "passed",
+          "default": "passed",
+          "title": "Outcome",
+          "type": "string"
+        },
+        "hardware": {
+          "$ref": "#/$defs/ClusterHardware"
+        },
+        "partitions": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[^\\n\\r]*$",
+            "type": "string"
+          },
+          "title": "Partitions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "outcome",
+        "hardware",
+        "partitions"
+      ],
+      "title": "ClusterTestPassed",
+      "type": "object"
+    },
+    "ClusterTestStage": {
+      "description": "Which step of a connection test failed.",
+      "enum": [
+        "reach",
+        "scheduler",
+        "workspace"
+      ],
+      "title": "ClusterTestStage",
+      "type": "string"
+    },
+    "ComputeAddClusterReply": {
+      "additionalProperties": false,
+      "description": "The settings after the cluster was saved.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "compute.add_cluster",
+          "default": "compute.add_cluster",
+          "title": "Type",
+          "type": "string"
+        },
+        "settings": {
+          "$ref": "#/$defs/ComputeSettings"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "settings"
+      ],
+      "title": "ComputeAddClusterReply",
+      "type": "object"
+    },
+    "ComputeAddClusterRequest": {
+      "additionalProperties": false,
+      "description": "Save ``cluster``, once it passes the test again; a name already set up is refused.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "compute.add_cluster",
+          "default": "compute.add_cluster",
+          "title": "Type",
+          "type": "string"
+        },
+        "cluster": {
+          "$ref": "#/$defs/SlurmClusterSettings"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "cluster"
+      ],
+      "title": "ComputeAddClusterRequest",
+      "type": "object"
+    },
+    "ComputeListReply": {
+      "additionalProperties": false,
+      "description": "The machine's compute settings.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "compute.list",
+          "default": "compute.list",
+          "title": "Type",
+          "type": "string"
+        },
+        "settings": {
+          "$ref": "#/$defs/ComputeSettings"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "settings"
+      ],
+      "title": "ComputeListReply",
+      "type": "object"
+    },
+    "ComputeListRequest": {
+      "additionalProperties": false,
+      "description": "The machine's compute settings.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "compute.list",
+          "default": "compute.list",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type"
+      ],
+      "title": "ComputeListRequest",
+      "type": "object"
+    },
+    "ComputeRemoveClusterReply": {
+      "additionalProperties": false,
+      "description": "The settings after the cluster was removed.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "compute.remove_cluster",
+          "default": "compute.remove_cluster",
+          "title": "Type",
+          "type": "string"
+        },
+        "settings": {
+          "$ref": "#/$defs/ComputeSettings"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "settings"
+      ],
+      "title": "ComputeRemoveClusterReply",
+      "type": "object"
+    },
+    "ComputeRemoveClusterRequest": {
+      "additionalProperties": false,
+      "description": "Remove the cluster ``name`` from the settings file this helper edits.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "compute.remove_cluster",
+          "default": "compute.remove_cluster",
+          "title": "Type",
+          "type": "string"
+        },
+        "name": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "name"
+      ],
+      "title": "ComputeRemoveClusterRequest",
+      "type": "object"
+    },
+    "ComputeSettings": {
+      "additionalProperties": false,
+      "description": "What the machine offers as places to measure: its clusters and its Modal token.",
+      "properties": {
+        "config_path": {
+          "title": "Config Path",
+          "type": "string"
+        },
+        "clusters": {
+          "items": {
+            "$ref": "#/$defs/ListedCluster"
+          },
+          "title": "Clusters",
+          "type": "array"
+        },
+        "modal": {
+          "$ref": "#/$defs/ModalStatus"
+        }
+      },
+      "required": [
+        "config_path",
+        "clusters",
+        "modal"
+      ],
+      "title": "ComputeSettings",
+      "type": "object"
+    },
+    "ComputeTestClusterReply": {
+      "additionalProperties": false,
+      "description": "What testing the cluster found.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "compute.test_cluster",
+          "default": "compute.test_cluster",
+          "title": "Type",
+          "type": "string"
+        },
+        "result": {
+          "discriminator": {
+            "mapping": {
+              "failed": "#/$defs/ClusterTestFailed",
+              "passed": "#/$defs/ClusterTestPassed"
+            },
+            "propertyName": "outcome"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ClusterTestPassed"
+            },
+            {
+              "$ref": "#/$defs/ClusterTestFailed"
+            }
+          ],
+          "title": "Result"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "result"
+      ],
+      "title": "ComputeTestClusterReply",
+      "type": "object"
+    },
+    "ComputeTestClusterRequest": {
+      "additionalProperties": false,
+      "description": "Test whether ``cluster`` can be reached from the machine, and read its hardware.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "compute.test_cluster",
+          "default": "compute.test_cluster",
+          "title": "Type",
+          "type": "string"
+        },
+        "cluster": {
+          "$ref": "#/$defs/SlurmClusterSettings"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "cluster"
+      ],
+      "title": "ComputeTestClusterRequest",
+      "type": "object"
+    },
     "ConfigInvalid": {
       "additionalProperties": false,
       "description": "The run's configuration (``agent.toml`` and what overrides it) is not valid.",
@@ -618,6 +1326,35 @@ const hostHelperSchema: Record<string, unknown> = {
         "problem"
       ],
       "title": "ConfigInvalid",
+      "type": "object"
+    },
+    "ConfigureCompute": {
+      "additionalProperties": false,
+      "description": "Set up the cluster or Modal on the machine, in that machine's compute settings.",
+      "properties": {
+        "kind": {
+          "const": "configure_compute",
+          "default": "configure_compute",
+          "title": "Kind",
+          "type": "string"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SlurmTarget"
+            },
+            {
+              "$ref": "#/$defs/ModalTarget"
+            }
+          ],
+          "title": "Target"
+        }
+      },
+      "required": [
+        "kind",
+        "target"
+      ],
+      "title": "ConfigureCompute",
       "type": "object"
     },
     "CopyOut": {
@@ -1734,6 +2471,14 @@ const hostHelperSchema: Record<string, unknown> = {
         "project_create_failed",
         "unknown_run",
         "unvetted_harness",
+        "unknown_cluster",
+        "cluster_exists",
+        "cluster_read_only",
+        "cluster_test_failed",
+        "cluster_invalid",
+        "compute_config_unreadable",
+        "modal_not_configured",
+        "unknown_provider",
         "internal"
       ],
       "title": "HelperErrorCode",
@@ -1766,7 +2511,10 @@ const hostHelperSchema: Record<string, unknown> = {
         "example_catalogue",
         "run_digest",
         "harness_generations",
-        "run_role_agents"
+        "run_role_agents",
+        "measurement_target",
+        "machine_compute",
+        "agent_logins"
       ],
       "title": "HelperFeature",
       "type": "string"
@@ -2362,6 +3110,24 @@ const hostHelperSchema: Record<string, unknown> = {
       "type": "object"
     },
     "JsonValue": {},
+    "ListedCluster": {
+      "additionalProperties": false,
+      "description": "A cluster set up on the machine, and the file it comes from.",
+      "properties": {
+        "cluster": {
+          "$ref": "#/$defs/SlurmClusterSettings"
+        },
+        "source": {
+          "$ref": "#/$defs/ClusterSource"
+        }
+      },
+      "required": [
+        "cluster",
+        "source"
+      ],
+      "title": "ListedCluster",
+      "type": "object"
+    },
     "LiveInstanceRecord": {
       "additionalProperties": false,
       "description": "What a detached server publishes about itself (version 5).\n\n``run_id`` is allocated by the launcher before the server starts, so the\nrecord names its run from the first time it is published. ``phase`` is the\nrun's lifecycle as the server folds it from its journal, and ``paused`` who\npaused it while it is paused. When the server exits it leaves its last\nrecord, with an ended phase, ``ended_at`` and ``end``, as a tombstone the\nregistry keeps for a day.",
@@ -2668,6 +3434,94 @@ const hostHelperSchema: Record<string, unknown> = {
       ],
       "title": "LogTail",
       "type": "object"
+    },
+    "LoginNodeReach": {
+      "additionalProperties": false,
+      "description": "The machine is a login node of the cluster: its own scheduler commands reach it.",
+      "properties": {
+        "kind": {
+          "const": "login_node",
+          "default": "login_node",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "LoginNodeReach",
+      "type": "object",
+      "required": [
+        "kind"
+      ]
+    },
+    "LoginStarted": {
+      "additionalProperties": false,
+      "description": "The harness's own login was started on the machine.",
+      "properties": {
+        "outcome": {
+          "const": "started",
+          "default": "started",
+          "title": "Outcome",
+          "type": "string"
+        },
+        "instruction": {
+          "anyOf": [
+            {
+              "maxLength": 300,
+              "pattern": "^[^\\n\\r]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Instruction"
+        }
+      },
+      "title": "LoginStarted",
+      "type": "object",
+      "required": [
+        "outcome"
+      ]
+    },
+    "LoginState": {
+      "description": "Whether a harness is signed in, as far as its own tooling can say.",
+      "enum": [
+        "signed_in",
+        "signed_out",
+        "unknown"
+      ],
+      "title": "LoginState",
+      "type": "string"
+    },
+    "LoginUnavailable": {
+      "additionalProperties": false,
+      "description": "The login was not started, and why.",
+      "properties": {
+        "outcome": {
+          "const": "unavailable",
+          "default": "unavailable",
+          "title": "Outcome",
+          "type": "string"
+        },
+        "reason": {
+          "$ref": "#/$defs/LoginUnavailableReason"
+        }
+      },
+      "required": [
+        "outcome",
+        "reason"
+      ],
+      "title": "LoginUnavailable",
+      "type": "object"
+    },
+    "LoginUnavailableReason": {
+      "description": "Why a login could not be started.",
+      "enum": [
+        "not_installed",
+        "no_login_command"
+      ],
+      "title": "LoginUnavailableReason",
+      "type": "string"
     },
     "LogsCancelReply": {
       "additionalProperties": false,
@@ -3086,6 +3940,83 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "Maker",
       "type": "string"
     },
+    "MeasurementTargetMisfit": {
+      "additionalProperties": false,
+      "description": "The target's hardware cannot run the compute backend the task targets.",
+      "properties": {
+        "kind": {
+          "const": "measurement_target_misfit",
+          "default": "measurement_target_misfit",
+          "title": "Kind",
+          "type": "string"
+        },
+        "target": {
+          "discriminator": {
+            "mapping": {
+              "modal": "#/$defs/ModalTarget",
+              "same_machine": "#/$defs/SameMachine",
+              "slurm": "#/$defs/SlurmTarget"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/SameMachine"
+            },
+            {
+              "$ref": "#/$defs/SlurmTarget"
+            },
+            {
+              "$ref": "#/$defs/ModalTarget"
+            }
+          ],
+          "title": "Target"
+        },
+        "backend": {
+          "$ref": "#/$defs/Backend"
+        },
+        "offered": {
+          "$ref": "#/$defs/Accelerator"
+        }
+      },
+      "required": [
+        "kind",
+        "target",
+        "backend",
+        "offered"
+      ],
+      "title": "MeasurementTargetMisfit",
+      "type": "object"
+    },
+    "MeasurementTargetNotConfigured": {
+      "additionalProperties": false,
+      "description": "The cluster is not set up on the machine, or Modal has no token there.",
+      "properties": {
+        "kind": {
+          "const": "measurement_target_not_configured",
+          "default": "measurement_target_not_configured",
+          "title": "Kind",
+          "type": "string"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SlurmTarget"
+            },
+            {
+              "$ref": "#/$defs/ModalTarget"
+            }
+          ],
+          "title": "Target"
+        }
+      },
+      "required": [
+        "kind",
+        "target"
+      ],
+      "title": "MeasurementTargetNotConfigured",
+      "type": "object"
+    },
     "MissingLogTail": {
       "additionalProperties": false,
       "description": "The instance has no retained ``server.log`` file.",
@@ -3102,6 +4033,58 @@ const hostHelperSchema: Record<string, unknown> = {
       "required": [
         "state"
       ]
+    },
+    "ModalStatus": {
+      "additionalProperties": false,
+      "description": "Whether Modal is set up on the machine; the token itself is never sent.",
+      "properties": {
+        "token_present": {
+          "title": "Token Present",
+          "type": "boolean"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModalTokenSource"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "token_present"
+      ],
+      "title": "ModalStatus",
+      "type": "object"
+    },
+    "ModalTarget": {
+      "additionalProperties": false,
+      "description": "Measure on Modal, with the token present on the machine.",
+      "properties": {
+        "kind": {
+          "const": "modal",
+          "default": "modal",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "ModalTarget",
+      "type": "object",
+      "required": [
+        "kind"
+      ]
+    },
+    "ModalTokenSource": {
+      "description": "Where the machine holds its Modal token.",
+      "enum": [
+        "environment",
+        "profile"
+      ],
+      "title": "ModalTokenSource",
+      "type": "string"
     },
     "ModelGeneration": {
       "additionalProperties": false,
@@ -4254,6 +5237,36 @@ const hostHelperSchema: Record<string, unknown> = {
           "default": null,
           "title": "Agents"
         },
+        "measure_on": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "modal": "#/$defs/ModalTarget",
+                  "same_machine": "#/$defs/SameMachine",
+                  "slurm": "#/$defs/SlurmTarget"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/SameMachine"
+                },
+                {
+                  "$ref": "#/$defs/SlurmTarget"
+                },
+                {
+                  "$ref": "#/$defs/ModalTarget"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Measure On"
+        },
         "with_roles": {
           "anyOf": [
             {
@@ -4490,6 +5503,36 @@ const hostHelperSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "Agents"
+        },
+        "measure_on": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "modal": "#/$defs/ModalTarget",
+                  "same_machine": "#/$defs/SameMachine",
+                  "slurm": "#/$defs/SlurmTarget"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/SameMachine"
+                },
+                {
+                  "$ref": "#/$defs/SlurmTarget"
+                },
+                {
+                  "$ref": "#/$defs/ModalTarget"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Measure On"
         }
       },
       "required": [
@@ -5316,6 +6359,152 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "RunsSummaryRequest",
       "type": "object"
     },
+    "SameMachine": {
+      "additionalProperties": false,
+      "description": "Measure on the machine the agent works on.",
+      "properties": {
+        "kind": {
+          "const": "same_machine",
+          "default": "same_machine",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "SameMachine",
+      "type": "object",
+      "required": [
+        "kind"
+      ]
+    },
+    "SlurmClusterSettings": {
+      "additionalProperties": false,
+      "description": "One Slurm cluster as its machine reaches and uses it.",
+      "properties": {
+        "name": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "reach": {
+          "discriminator": {
+            "mapping": {
+              "login_node": "#/$defs/LoginNodeReach",
+              "ssh": "#/$defs/SshReach"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/SshReach"
+            },
+            {
+              "$ref": "#/$defs/LoginNodeReach"
+            }
+          ],
+          "title": "Reach"
+        },
+        "workspace": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Workspace",
+          "type": "string"
+        },
+        "partition": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\n\\r]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Partition"
+        },
+        "nodes": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Nodes"
+        },
+        "time_limit": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9][0-9:-]{0,31}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Time Limit"
+        },
+        "sbatch_options": {
+          "default": [],
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[^\\n\\r]*$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Sbatch Options",
+          "type": "array"
+        },
+        "hardware": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClusterHardware"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "name",
+        "reach",
+        "workspace"
+      ],
+      "title": "SlurmClusterSettings",
+      "type": "object"
+    },
+    "SlurmTarget": {
+      "additionalProperties": false,
+      "description": "Measure on the Slurm cluster ``compute.list`` names ``cluster``.",
+      "properties": {
+        "kind": {
+          "const": "slurm",
+          "default": "slurm",
+          "title": "Kind",
+          "type": "string"
+        },
+        "cluster": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$",
+          "title": "Cluster",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "cluster"
+      ],
+      "title": "SlurmTarget",
+      "type": "object"
+    },
     "SpanTokens": {
       "additionalProperties": false,
       "description": "The tokens the turns of one agent-turn span spent, summed.",
@@ -5333,6 +6522,30 @@ const hostHelperSchema: Record<string, unknown> = {
         "tally"
       ],
       "title": "SpanTokens",
+      "type": "object"
+    },
+    "SshReach": {
+      "additionalProperties": false,
+      "description": "The cluster is reached from the machine over SSH, by a host alias in its ``~/.ssh/config``.",
+      "properties": {
+        "kind": {
+          "const": "ssh",
+          "default": "ssh",
+          "title": "Kind",
+          "type": "string"
+        },
+        "host": {
+          "maxLength": 255,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@-]*$",
+          "title": "Host",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "host"
+      ],
+      "title": "SshReach",
       "type": "object"
     },
     "StartDocker": {
@@ -6202,7 +7415,13 @@ const hostHelperSchema: Record<string, unknown> = {
     "request": {
       "discriminator": {
         "mapping": {
+          "agent_logins.list": "#/$defs/AgentLoginsListRequest",
+          "agent_logins.start": "#/$defs/AgentLoginsStartRequest",
           "checkout.inspect": "#/$defs/CheckoutInspectRequest",
+          "compute.add_cluster": "#/$defs/ComputeAddClusterRequest",
+          "compute.list": "#/$defs/ComputeListRequest",
+          "compute.remove_cluster": "#/$defs/ComputeRemoveClusterRequest",
+          "compute.test_cluster": "#/$defs/ComputeTestClusterRequest",
           "examples.list": "#/$defs/ExamplesListRequest",
           "harnesses.list": "#/$defs/HarnessesListRequest",
           "hello": "#/$defs/HelloRequest",
@@ -6309,6 +7528,24 @@ const hostHelperSchema: Record<string, unknown> = {
         },
         {
           "$ref": "#/$defs/ProjectCopyOutRequest"
+        },
+        {
+          "$ref": "#/$defs/ComputeListRequest"
+        },
+        {
+          "$ref": "#/$defs/ComputeTestClusterRequest"
+        },
+        {
+          "$ref": "#/$defs/ComputeAddClusterRequest"
+        },
+        {
+          "$ref": "#/$defs/ComputeRemoveClusterRequest"
+        },
+        {
+          "$ref": "#/$defs/AgentLoginsListRequest"
+        },
+        {
+          "$ref": "#/$defs/AgentLoginsStartRequest"
         }
       ],
       "title": "Request"
@@ -6316,7 +7553,13 @@ const hostHelperSchema: Record<string, unknown> = {
     "message": {
       "discriminator": {
         "mapping": {
+          "agent_logins.list": "#/$defs/AgentLoginsListReply",
+          "agent_logins.start": "#/$defs/AgentLoginsStartReply",
           "checkout.inspect": "#/$defs/CheckoutInspectReply",
+          "compute.add_cluster": "#/$defs/ComputeAddClusterReply",
+          "compute.list": "#/$defs/ComputeListReply",
+          "compute.remove_cluster": "#/$defs/ComputeRemoveClusterReply",
+          "compute.test_cluster": "#/$defs/ComputeTestClusterReply",
           "error": "#/$defs/HelperError",
           "examples.list": "#/$defs/ExamplesListReply",
           "harnesses.list": "#/$defs/HarnessesListReply",
@@ -6427,6 +7670,24 @@ const hostHelperSchema: Record<string, unknown> = {
           "$ref": "#/$defs/ProjectCopyOutReply"
         },
         {
+          "$ref": "#/$defs/ComputeListReply"
+        },
+        {
+          "$ref": "#/$defs/ComputeTestClusterReply"
+        },
+        {
+          "$ref": "#/$defs/ComputeAddClusterReply"
+        },
+        {
+          "$ref": "#/$defs/ComputeRemoveClusterReply"
+        },
+        {
+          "$ref": "#/$defs/AgentLoginsListReply"
+        },
+        {
+          "$ref": "#/$defs/AgentLoginsStartReply"
+        },
+        {
           "$ref": "#/$defs/InstancesChanged"
         },
         {
@@ -6468,18 +7729,26 @@ const hostHelperSchema: Record<string, unknown> = {
     "run.preflight": "preflight",
     "examples.list": "examples",
     "project.create_from_example": "examples",
-    "project.copy_out": "examples"
+    "project.copy_out": "examples",
+    "compute.list": "machine_compute",
+    "compute.test_cluster": "machine_compute",
+    "compute.add_cluster": "machine_compute",
+    "compute.remove_cluster": "machine_compute",
+    "agent_logins.list": "agent_logins",
+    "agent_logins.start": "agent_logins"
   },
   "x-vibesys-feature-by-field": {
     "run.start": {
       "harness": "harnesses",
       "options": "run_options",
-      "agents": "run_role_agents"
+      "agents": "run_role_agents",
+      "measure_on": "measurement_target"
     },
     "run.preflight": {
       "harness": "harnesses",
       "options": "run_options",
       "agents": "run_role_agents",
+      "measure_on": "measurement_target",
       "with_roles": "run_roles",
       "with_backend": "run_backend",
       "with_causes": "run_causes",

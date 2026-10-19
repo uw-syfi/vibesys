@@ -47,6 +47,16 @@
 .vs-sidebar-link > .vs-icon {
   margin-top: var(--space-1);
 }
+.vs-sidebar-item[data-disabled]:hover {
+  background: transparent;
+}
+.vs-sidebar-item[data-disabled] .vs-sidebar-link {
+  color: var(--muted);
+  cursor: default;
+}
+.vs-sidebar-item[data-disabled][data-active] .vs-sidebar-link {
+  color: var(--text);
+}
 .vs-sidebar-dot {
   display: flex;
   padding-top: var(--space-2);

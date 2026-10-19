@@ -76,7 +76,7 @@ test('a run opens in a window of its own, shown alone and live there', async ({p
   await runWindow.waitForLoadState();
 
   // The main window leaves the run for New run; the new one shows the run, with no sidebar.
-  await expect(page.getByRole('heading', {name: 'New run'})).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'What do you want to optimize?'})).toBeVisible();
   expect(new URL(runWindow.url()).search).toBe(`?host=ssh%3Ahost-b&run=${RUN_ID}`);
   await expect(runWindow.getByRole('radiogroup', {name: 'Show'})).toBeVisible();
   await expect(runWindow.getByText(`host-b · ${RUN_ID}`)).toBeVisible();
@@ -108,7 +108,7 @@ test('a run opens in a window of its own, shown alone and live there', async ({p
 
   // Closing it leaves the main window as it was.
   await runWindow.close();
-  await expect(page.getByRole('heading', {name: 'New run'})).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'What do you want to optimize?'})).toBeVisible();
 });
 
 test('the Settings menu item opens Settings in the main window while a run shows in its own window', async ({

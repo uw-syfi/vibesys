@@ -44,7 +44,7 @@ _READY_MOVES: dict[tuple[RunStatus, RunTrigger], RunStatus] = {
     (RunStatus.STOPPING, RunTrigger.READY): RunStatus.STOPPING,
     (RunStatus.STOPPING, RunTrigger.PAUSE_REQUESTED): RunStatus.STOPPING,
     (RunStatus.STOPPING, RunTrigger.INVOCATION_FINISHED): RunStatus.STOPPED,
-    (RunStatus.STOPPING, RunTrigger.RESUMED): RunStatus.RUNNING,
+    (RunStatus.STOPPING, RunTrigger.RESUMED): RunStatus.STOPPING,
     (RunStatus.STOPPING, RunTrigger.STOP_REQUESTED): RunStatus.STOPPING,
     (RunStatus.STOPPING, RunTrigger.COMPLETED): RunStatus.COMPLETED,
     (RunStatus.STOPPING, RunTrigger.FAILED): RunStatus.FAILED,
@@ -68,7 +68,7 @@ LEGAL: dict[tuple[RunState, RunTrigger], RunState] = {
     (_HOLDING_STOP, RunTrigger.INVOCATION_FINISHED): RunState(RunStatus.STOPPED),
     (_HOLDING_STOP, RunTrigger.PAUSE_REQUESTED): _HOLDING_STOP,
     (_HOLDING_STOP, RunTrigger.STOP_REQUESTED): _HOLDING_STOP,
-    (_HOLDING_STOP, RunTrigger.RESUMED): _STARTING_STATE,
+    (_HOLDING_STOP, RunTrigger.RESUMED): _HOLDING_STOP,
     (_HOLDING_STOP, RunTrigger.COMPLETED): RunState(RunStatus.COMPLETED),
     (_HOLDING_STOP, RunTrigger.FAILED): RunState(RunStatus.FAILED),
     **{
@@ -209,11 +209,11 @@ def test_stop_is_requestable_wherever_the_run_is_live(origin: RunStatus) -> None
     assert _status_after(status, RunTrigger.INVOCATION_FINISHED) is RunStatus.STOPPED
 
 
-def test_resume_before_the_boundary_cancels_the_pending_stop() -> None:
-    """A ``/resume`` that beats the stop boundary keeps the run going."""
+def test_a_resume_never_cancels_a_pending_stop() -> None:
+    """A stop only escalates: a ``/resume`` before the stop's boundary leaves it pending."""
     status = _status_after(RunStatus.RUNNING, RunTrigger.STOP_REQUESTED, RunTrigger.RESUMED)
-    assert status is RunStatus.RUNNING
-    assert _status_after(status, RunTrigger.INVOCATION_FINISHED) is RunStatus.RUNNING
+    assert status is RunStatus.STOPPING
+    assert _status_after(status, RunTrigger.INVOCATION_FINISHED) is RunStatus.STOPPED
 
 
 def test_a_pause_or_stop_requested_while_starting_lands_after_ready() -> None:
@@ -360,7 +360,9 @@ class _Fold:
         if self.state.status is not previous:
             self.phase = self.phase.advance(status=self.state.status)
         if item is RunTrigger.RESUMED:
-            self.request = None
+            # A resume cancels a pending pause, never a stop.
+            if self.request is not RunTrigger.STOP_REQUESTED:
+                self.request = None
         elif item is RunTrigger.STOP_REQUESTED or self.request is None:
             self.request = item
 

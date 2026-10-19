@@ -17,6 +17,7 @@ from vibesys.api import (
     RunSession,
     RunStatus,
     RunStopped,
+    StopMode,
 )
 from vibesys.api.testing import FakeRunHandle
 
@@ -36,8 +37,8 @@ class _Session:
     def close(self) -> None:
         pass
 
-    def stop(self) -> None:
-        pass
+    def stop(self, mode: StopMode = StopMode.DRAIN) -> None:
+        del mode
 
     async def await_result(self) -> RunResult | None:
         if isinstance(self._ending, BaseException):

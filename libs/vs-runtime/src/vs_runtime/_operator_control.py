@@ -448,12 +448,12 @@ class ChannelRunControl:
             accepted = self._channel.resume_with_fallback(request.control_id)
             status = ControlStatus.CONSUMED
         else:
-            self._channel.resume(request.control_id)
-            return ControlStatus.CONSUMED, None
+            accepted = self._channel.resume(request.control_id)
+            status = ControlStatus.CONSUMED
         if accepted:
             return status, None
-        # A stop stays pending until a resume, and the refused request resumed nothing, so a
-        # stop pending now was pending when the channel refused.
+        # A stop, once pending, stays pending (a stop only escalates), so a stop pending now
+        # was pending when the channel refused.
         if self._channel.stop_requested():
             return ControlStatus.REFUSED, RefusalReason.STOPPING
         return ControlStatus.REFUSED, RefusalReason.NOT_PAUSED_ON_CAPACITY
@@ -475,7 +475,7 @@ class ChannelRunControl:
         self._channel.request_pause()
 
     def resume(self) -> None:
-        """Release a paused run, cancelling a pending pause or stop."""
+        """Release a paused run or cancel a pending pause; a pending stop stays pending."""
         self._channel.resume()
 
     def resume_with_fallback(self) -> bool:

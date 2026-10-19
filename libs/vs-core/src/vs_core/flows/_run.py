@@ -12,6 +12,7 @@ from pydantic import TypeAdapter, ValidationError
 from vs_core._registry import ContractError
 from vs_core.types.common import THIS_RUN, AttemptRef, DecisionId, InvocationRef, RunFacts, Seconds
 from vs_core.types.kinds import EventKind
+from vs_core.types.measurement import ComparisonSettled
 from vs_core.types.records import OperationResult
 from vs_core.types.search import (
     AdoptionFinished,
@@ -686,7 +687,9 @@ class _Run:
             case CheckpointKnown(invocation=invocation, checkpoint=checkpoint):
                 self.checkpoints[invocation] = checkpoint
                 self._offer(item)
-            case TurnYielded() | YieldFailed() | ResumeReady() | ResumeFailed():
+            case (
+                TurnYielded() | YieldFailed() | ResumeReady() | ResumeFailed() | ComparisonSettled()
+            ):
                 self._offer(item)
             case _:
                 self._answer(item)

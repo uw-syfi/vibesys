@@ -87,7 +87,7 @@ layers_explicit_depends_on = true
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_preflight", "server.host_examples", "server.host_harness"]
+depends_on = ["server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_compute", "server.host_agent_logins", "server.host_preflight", "server.host_examples", "server.host_harness"]
 
 [[modules]]
 path = "headless"
@@ -138,7 +138,7 @@ depends_on = ["server", "server.trace", "server.execution", "server.chat", "serv
 # the standard library only; tests/architecture/test_light_entrypoints.py keeps
 # the light entrypoints' import closure free of the engine.
 path = "server.host_api"
-depends_on = ["vs_decode.api", "server.host_envelope", "server.host_examples", "server.host_harness", "server.host_machine_facts", "server.host_preflight", "server.host_run_events", "server.host_run_summary"]
+depends_on = ["vs_decode.api", "server.host_agent_logins", "server.host_compute", "server.host_envelope", "server.host_examples", "server.host_harness", "server.host_machine_facts", "server.host_preflight", "server.host_run_events", "server.host_run_summary"]
 
 [[modules]]
 # The fields every helper request and reply carries. Pydantic only.
@@ -221,7 +221,7 @@ depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_requests",
 [[modules]]
 # The host helper's request answering: one request through the host's interfaces.
 path = "server.host_helper_requests"
-depends_on = ["vs_decode.api", "server.host_api", "server.host_examples", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_events", "server.registry", "server.relay", "server.run_summary", "vs_project", "vs_sim.api"]
+depends_on = ["vs_decode.api", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_examples", "server.host_helper_compute", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_events", "server.registry", "server.relay", "server.run_summary", "vs_project", "vs_sim.api"]
 
 [[modules]]
 # The host helper's `logs` feature: chunking, tails and the long poll over the LogReader role.
@@ -241,12 +241,33 @@ depends_on = []
 [[modules]]
 # Light contracts for starting a run from the desktop app: typed options and preflight checks.
 path = "server.host_preflight"
-depends_on = []
+depends_on = ["server.host_compute", "server.host_machine_facts"]
 
 [[modules]]
 # The host helper's typed run options and preflight checks, as pure decisions.
 path = "server.host_helper_preflight"
-depends_on = ["server.host_api", "server.host_machine_facts", "server.host_preflight"]
+depends_on = ["server.host_api", "server.host_compute", "server.host_machine_facts", "server.host_preflight"]
+
+[[modules]]
+# A machine's compute settings: Slurm clusters in one file, the Modal token, connection tests.
+# Files and commands come through seams; Pydantic, the standard library and vs_slurm otherwise.
+path = "server.host_helper_compute"
+depends_on = ["server.host_api", "server.host_compute", "server.host_helper_slurm", "server.host_machine_facts", "vs_sim.api"]
+
+[[modules]]
+# What vs_slurm says about a cluster of the compute settings; loaded only by a compute request.
+path = "server.host_helper_slurm"
+depends_on = ["server.host_compute", "vs_slurm"]
+
+[[modules]]
+# Each agent harness's login on a machine, as helper messages. Pydantic only.
+path = "server.host_agent_logins"
+depends_on = ["server.host_envelope"]
+
+[[modules]]
+# Where results are measured and a machine's compute settings, as helper messages. Pydantic only.
+path = "server.host_compute"
+depends_on = ["server.host_envelope", "server.host_machine_facts"]
 
 [[modules]]
 # The host helper's MachineProbe on a real host: hardware, Docker, harness CLIs, checkouts.
@@ -1267,7 +1288,7 @@ depends_on = ["vibesys.api", "vibesys.orchestration.dynamic.scripted", "vibesys.
 
 [[modules]]
 path = "vibesys.api.runs"
-depends_on = ["vibesys.api.contracts", "vibesys.api.session"]
+depends_on = ["vibesys.api.contracts", "vibesys.api.session", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.api.catalog"
@@ -1287,7 +1308,7 @@ depends_on = ["vibesys", "vibesys.api._session", "vibesys.api.assembly", "vibesy
 [[modules]]
 path = "vs_runtime._runs"
 visibility = ["vs_runtime", "vs_runtime.api.wiring"]
-depends_on = []
+depends_on = ["vs_core"]
 
 [[modules]]
 path = "vs_runtime.api.wiring"
@@ -1378,7 +1399,7 @@ depends_on = ["vs_core.types", "vs_core.types.common", "vs_core._values"]
 
 [[interfaces]]
 from = ["vs_core._proofs"]
-expose = ["Mismatch", "Missing", "ProofField", "ProofReason", "Proven", "Verdict", "accepted_receipt_for", "blocked_unnamed", "admission_remaining", "committed_stop", "continues_admitted_work", "current_admission", "current_closure", "dependencies_for", "dependency_failed", "descriptor_matches", "draining", "fresh_observation", "invocation_for", "nonempty_required", "observation_for", "occupied_episode", "operation_for", "released_owner", "request_dependency_status", "request_matches", "resolved_observation", "submission_budget_for"]
+expose = ["Mismatch", "Missing", "ProofField", "ProofReason", "Proven", "Verdict", "accepted_receipt_for", "blocked_unnamed", "admission_remaining", "committed_stop", "continues_admitted_work", "current_admission", "current_closure", "dependencies_for", "dependency_failed", "descriptor_matches", "draining", "fresh_observation", "invocation_for", "nonempty_required", "observation_for", "occupied_episode", "operation_for", "released_owner", "request_dependency_status", "request_matches", "requested_stop_mode", "resolved_observation", "stop_mode", "submission_budget_for"]
 
 [[modules]]
 path = "vs_core.types"
@@ -1396,7 +1417,7 @@ depends_on = ["vs_core._values"]
 
 [[interfaces]]
 from = ["vs_core.types.common"]
-expose = ["[A-Z].*", "unset", "validate_setup_failure"]
+expose = ["[A-Z].*", "escalate_stop", "unset", "validate_setup_failure"]
 
 [[modules]]
 path = "vs_core._values"

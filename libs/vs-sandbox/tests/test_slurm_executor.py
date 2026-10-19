@@ -304,14 +304,20 @@ class _ScenarioCluster(FakeCluster):
             updates["result"] = replace(collected.result, job_id=handle.job.job_id)
         return collected.model_copy(update=updates)
 
-    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
+    def cancel(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCancelOutcome:
         translated, by_job_id = self._shadow_target(target, by_job_id=by_job_id)
-        observed = _ScenarioCluster.inspect(self, translated, by_job_id=by_job_id)
-        if isinstance(observed, ClusterObservation):
+        seen = _ScenarioCluster.inspect(self, translated, by_job_id=by_job_id)
+        if isinstance(seen, ClusterObservation):
             self.cancellations += 1
-            self.cancelled_job_ids.append(observed.job_id)
+            self.cancelled_job_ids.append(seen.job_id)
             self.job_status = SlurmJobStatus.CANCELLED
-        cancelled = super().cancel(translated, by_job_id=by_job_id)
+        cancelled = super().cancel(translated, by_job_id=by_job_id, observed=observed)
         if cancelled.operation_id in self._producer_handles:
             handle = self._producer_handles[cancelled.operation_id]
             cancelled = cancelled.model_copy(update={"job_id": handle.job.job_id})
@@ -377,8 +383,14 @@ class _BlockingCluster(_ScenarioCluster):
             return super().inspect(target, by_job_id=by_job_id)
         return observed
 
-    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
-        cancelled = super().cancel(target, by_job_id=by_job_id)
+    def cancel(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCancelOutcome:
+        cancelled = super().cancel(target, by_job_id=by_job_id, observed=observed)
         self._release_wait.set()
         return cancelled
 
@@ -427,17 +439,29 @@ class _GatedScancelCluster(_BlockingCluster):
         self.scancel_gate = threading.Event()
         self.scancel_done = threading.Event()
 
-    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
+    def cancel(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCancelOutcome:
         self.scancel_entered.set()
         self.scancel_gate.wait()
-        cancelled = super().cancel(target, by_job_id=by_job_id)
+        cancelled = super().cancel(target, by_job_id=by_job_id, observed=observed)
         self.scancel_done.set()
         return cancelled
 
 
 class _UnreachableSchedulerCluster(_BlockingCluster):
-    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
-        cancelled = super().cancel(target, by_job_id=by_job_id)
+    def cancel(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCancelOutcome:
+        cancelled = super().cancel(target, by_job_id=by_job_id, observed=observed)
         return ClusterUnknown(operation_id=cancelled.operation_id, reason="scancel unreachable")
 
 
@@ -496,7 +520,14 @@ class _TombstonedSubmissionCluster(FakeCluster):
         self._index = 0
         self._late_job_id: str | None = None
 
-    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
+    def cancel(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCancelOutcome:
+        del observed  # the schedule answers whatever reading the caller holds
         assert isinstance(target, str)
         assert not by_job_id
         reading = self._schedule[min(self._index, len(self._schedule) - 1)]
@@ -1263,19 +1294,23 @@ class _PendingCancellationCluster(_BlockingCluster):
 
     terminate: bool = False
 
-    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
+    def cancel(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCancelOutcome:
         if self.terminate:
-            return super().cancel(target, by_job_id=by_job_id)
-        observed = _ScenarioCluster.inspect(self, target, by_job_id=by_job_id)
+            return super().cancel(target, by_job_id=by_job_id, observed=observed)
+        seen = _ScenarioCluster.inspect(self, target, by_job_id=by_job_id)
         # Like _BlockingCluster.cancel, the acknowledgement frees the blocked inspection.
         self._release_wait.set()
-        if isinstance(observed, ClusterObservation):
+        if isinstance(seen, ClusterObservation):
             self.cancellations += 1
-            self.cancelled_job_ids.append(observed.job_id)
-            return ClusterCancelRequested(
-                operation_id=observed.operation_id, job_id=observed.job_id
-            )
-        return observed
+            self.cancelled_job_ids.append(seen.job_id)
+            return ClusterCancelRequested(operation_id=seen.operation_id, job_id=seen.job_id)
+        return seen
 
 
 @pytest.mark.asyncio
@@ -1329,11 +1364,16 @@ class _LostSubmissionAcknowledgementCluster(_ScenarioCluster):
         super()._accepted()
         self.accepted.set()
 
-    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
-        observed = super().inspect(target, by_job_id=by_job_id)
-        return ClusterUnknown(
-            operation_id=observed.operation_id, reason="scheduler identity unknown"
-        )
+    def cancel(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCancelOutcome:
+        del observed  # this cluster never knows the scheduler's identity
+        seen = super().inspect(target, by_job_id=by_job_id)
+        return ClusterUnknown(operation_id=seen.operation_id, reason="scheduler identity unknown")
 
 
 @pytest.mark.asyncio

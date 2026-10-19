@@ -12,7 +12,12 @@ import {
   type HostConnection,
   type LogsLease,
 } from '@vibesys/connection';
-import type {HelperMessage, PathsCompleteReply, UsageRecord} from '@vibesys/contracts/host-helper';
+import type {
+  HarnessesListReply,
+  HelperMessage,
+  PathsCompleteReply,
+  UsageRecord,
+} from '@vibesys/contracts/host-helper';
 import {
   digestEntries,
   type HostId,
@@ -32,6 +37,7 @@ import {
 } from '@vibesys/hosts';
 import type {
   HarnessListing,
+  HarnessOffer,
   PathCompletion,
   RunHistoryPage,
   RunLogsRequest,
@@ -153,6 +159,21 @@ export interface InspectionChangeId {
 interface InspectionLease {
   readonly sequence: number;
   readonly active: boolean;
+}
+
+/** How a pair reads, as the app's own type: only the fields the helper set. */
+function harnessDisplay(
+  display: NonNullable<HarnessesListReply['harnesses'][number]['display']>,
+): NonNullable<HarnessOffer['display']> {
+  return {
+    providerName: display.provider_name,
+    ...(display.model_name == null ? {} : {modelName: display.model_name}),
+    ...(display.family == null ? {} : {family: display.family}),
+    ...(display.tier == null ? {} : {tier: display.tier}),
+    ...(display.tier_name == null ? {} : {tierName: display.tier_name}),
+    ...(display.maker == null ? {} : {maker: display.maker}),
+    ...(display.generation == null ? {} : {generation: display.generation}),
+  };
 }
 
 export class Hosts {
@@ -526,24 +547,20 @@ export class Hosts {
   async harnesses(id: HostId): Promise<HarnessListing> {
     await using lease = await this.connection(id);
     try {
-      const reply = await lease.connection.request({type: 'harnesses.list'});
+      await lease.connection.ready();
+      // Makers and generations only from a helper that agreed to them in `hello`.
+      const generations = lease.connection.features?.includes('harness_generations') === true;
+      const reply = await lease.connection.request({
+        type: 'harnesses.list',
+        ...(generations ? {with_generations: true} : {}),
+      });
       return {
         kind: 'listed',
         harnesses: reply.harnesses.map(({provider, model, default: isDefault, display}) => ({
           provider,
           model,
           default: isDefault,
-          ...(display == null
-            ? {}
-            : {
-                display: {
-                  providerName: display.provider_name,
-                  ...(display.model_name == null ? {} : {modelName: display.model_name}),
-                  ...(display.family == null ? {} : {family: display.family}),
-                  ...(display.tier == null ? {} : {tier: display.tier}),
-                  ...(display.tier_name == null ? {} : {tierName: display.tier_name}),
-                },
-              }),
+          ...(display == null ? {} : {display: harnessDisplay(display)}),
         })),
       };
     } catch (error) {

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from vs_core.api import PauseOwner, RunPause
+from vs_core.api import PauseOwner, RunPause, escalate_stop
 from vs_runtime._operator_control import SteerMode, action_summary
 
 if TYPE_CHECKING:
@@ -204,8 +204,12 @@ class RunControlChannel(Protocol):
         """
         ...
 
-    def resume(self, control_id: str | None = None) -> None:
-        """Cancel a pause or stop request and release a parked run."""
+    def resume(self, control_id: str | None = None) -> bool:
+        """End a pause or cancel a pending one, releasing a parked run; whether it did.
+
+        A stop only escalates, and nothing undoes it: while a stop is pending the resume
+        changes nothing and answers False.
+        """
         ...
 
     def requested_by(self, flag: Literal["pause", "stop", "capacity"]) -> str | None:
@@ -585,9 +589,13 @@ class RuntimeRunControlChannel:
                 self._resume_at = at if self._resume_at is None else min(self._resume_at, at)
             self._lock.notify_all()
 
-    def resume(self, control_id: str | None = None) -> None:
-        """Cancel a pending pause or stop and release a parked run."""
-        self._release(fallback=False, control_id=control_id)
+    def resume(self, control_id: str | None = None) -> bool:
+        """End or cancel a pause and release a parked run, unless a stop is pending."""
+        with self._lock:
+            if self._stop_requested:
+                return False
+            self._release(fallback=False, control_id=control_id)
+        return True
 
     def requested_by(self, flag: Literal["pause", "stop", "capacity"]) -> str | None:
         """The id of the control that last set ``flag``, or None when it had none."""
@@ -605,9 +613,8 @@ class RuntimeRunControlChannel:
             self._emit(RunControlTransitionKind.PAUSED)
 
     def _release(self, *, fallback: bool, control_id: str | None) -> None:
+        """Resume the run for an operator; the caller holds the lock and no stop is pending."""
         with self._lock:
-            self._stop_requested = False
-            self._stop_mode = None
             self._unpause(PauseWake.RESUMED)
             self._fallback_requested = self._resumed_with_fallback = fallback
             self._requested_by = {"pause": control_id}
@@ -696,12 +703,21 @@ class RuntimeRunControlChannel:
         reaches a boundary concurrently never reports ``STOPPED`` ahead of the
         request: a consumer folding the events would otherwise see a stop land
         on a run that was never stopping.
+
+        A stop only escalates (``escalate_stop``): a cancel replaces a pending drain, and
+        a later drain never weakens a pending cancel. The request that set the mode in
+        force names the stop. Only a request that changes the stop in force is announced
+        (``STOP_REQUESTED`` and the stop listeners); a repeat changes nothing.
         """
         with self._lock:
+            held = self._stop_mode if self._stop_requested else None
+            in_force = escalate_stop(held, mode)
+            if in_force is held:
+                return
             self._emit(RunControlTransitionKind.STOP_REQUESTED)
-            self._stop_requested = True
-            self._stop_mode = mode
             self._requested_by["stop"] = control_id
+            self._stop_requested = True
+            self._stop_mode = in_force
             self._lock.notify_all()
             listeners = tuple(self._stop_listeners)
         for listener in listeners:

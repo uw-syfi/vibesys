@@ -811,6 +811,16 @@ class StopMode(StrEnum):
     CANCEL = "cancel"
 
 
+def escalate_stop(held: StopMode | None, asked: StopMode) -> StopMode:
+    """The stop in force once ``asked`` arrives while ``held`` is: a stop only escalates.
+
+    The one order of stop modes. A cancel replaces a drain and nothing replaces a cancel,
+    so the requests' order never weakens a stop: every holder of a run's stop (the run's
+    control channel, its bridge to core, core itself) folds requests through this.
+    """
+    return StopMode.CANCEL if StopMode.CANCEL in (held, asked) else StopMode.DRAIN
+
+
 class PauseOwner(StrEnum):
     """Who paused the run, which decides what may end the pause."""
 

@@ -62,7 +62,7 @@ from server.registry import (
     driving,
     instance_root,
 )
-from vibesys.api import CoreEvent, RunRequest, RunResult
+from vibesys.api import CoreEvent, RunRequest, RunResult, StopMode
 from vibesys.api.testing import FakeRuns
 from vibesys.orchestration.dynamic.launch import DynamicLaunch
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
@@ -99,8 +99,8 @@ class _FinishedSession:
     async def await_result(self) -> RunResult:
         return RunResult(run_id=self._run_id, loop="plain", succeeded=True)
 
-    def stop(self) -> None:
-        pass
+    def stop(self, mode: StopMode = StopMode.DRAIN) -> None:
+        del mode
 
     def close(self) -> None:
         pass

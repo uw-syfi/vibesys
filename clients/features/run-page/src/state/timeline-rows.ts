@@ -13,8 +13,7 @@ import type {
   CandidateOutcome,
   CandidateStep,
 } from '@vibesys/run-state/candidates';
-import {vsInputCell} from './idea-words.js';
-import {figureOf} from './ideas-view.js';
+import {figureOf, vsInputCell} from './idea-words.js';
 import {stepLabel, stepTitle} from './names.js';
 import {roleSeries} from './role-series.js';
 import type {Direction, RunModel} from './run-model.js';

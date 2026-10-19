@@ -12,6 +12,10 @@ import type {Violation} from './in-page.js';
 export interface Anchor {
   readonly name: string;
   readonly selector: string;
+  /** The element may be absent on some screens (a level that has no such control). */
+  readonly optional?: boolean;
+  /** The element may be a new one on each screen (each draws its own copy), as long as the copy is in the same box. */
+  readonly copies?: boolean;
 }
 
 /** The elements the Run screen keeps through every level and the scrubber. */
@@ -21,6 +25,12 @@ export const RUN_ANCHORS: readonly Anchor[] = [
     selector: '[role="group"][aria-label*="of each measured idea over the run"]',
   },
   {name: 'time bar', selector: '[role="slider"][aria-label="Run position"]'},
+  {
+    name: 'face switcher',
+    selector: '[role="radiogroup"][aria-label="Show"]:has(input[value="timeline"])',
+    optional: true,
+    copies: true,
+  },
 ];
 
 interface Placed {
@@ -73,7 +83,10 @@ export async function stabilityViolations(
   for (const [index, was] of before.entries()) {
     if (was === null) continue;
     const is = now[index];
-    const problem = is === null || is === undefined ? 'is gone' : movement(was, is);
+    const anchor = anchors[index];
+    const absent = is === null || is === undefined;
+    if (absent && anchor?.optional === true) continue;
+    const problem = absent ? 'is gone' : movement(was, is, anchor?.copies === true);
     if (problem !== null) {
       found.push({
         check: 'stability',
@@ -85,8 +98,8 @@ export async function stabilityViolations(
   return found;
 }
 
-function movement(was: Placed, is: Placed & {same: boolean}): string | null {
-  if (!is.same) return 'was replaced by a new element (a remount)';
+function movement(was: Placed, is: Placed & {same: boolean}, copies: boolean): string | null {
+  if (!is.same && !copies) return 'was replaced by a new element (a remount)';
   const keys = ['x', 'y', 'width', 'height'] as const;
   const moved = keys.filter(key => Math.abs(was[key] - is[key]) > 0.5);
   return moved.length === 0

@@ -319,6 +319,40 @@ describe('Select', () => {
     expect(large.textContent).toBe('Large (needs more memory)');
     expect(chosen).toEqual([]);
   });
+
+  test('options of one group sit under its heading and each still reports its own value', async () => {
+    const chosen: string[] = [];
+    const container = await mount(
+      <Field label="Model">
+        <Select
+          value="a"
+          change={value => chosen.push(value)}
+          options={[
+            {value: 'none', label: 'Same as the run'},
+            {value: 'a', label: 'A', group: 'Maker X'},
+            {value: 'b', label: 'B', group: 'Maker X'},
+            {value: 'c', label: 'C', group: 'Maker Y'},
+          ]}
+        />
+      </Field>,
+    );
+    const groups = [...container.querySelectorAll('optgroup')].map(group => [
+      group.label,
+      [...group.querySelectorAll('option')].map(option => option.value),
+    ]);
+    expect(groups).toEqual([
+      ['Maker X', ['a', 'b']],
+      ['Maker Y', ['c']],
+    ]);
+    expect(container.querySelectorAll('select > option')).toHaveLength(1);
+    const select = one(container, 'select') as HTMLSelectElement;
+    await act(async () => {
+      select.value = 'c';
+      // happy-dom's own Event class: the page's typings name another, which it does not accept.
+      select.dispatchEvent(new window.Event('change', {bubbles: true}) as unknown as Event);
+    });
+    expect(chosen).toEqual(['c']);
+  });
 });
 
 describe('Checkbox', () => {

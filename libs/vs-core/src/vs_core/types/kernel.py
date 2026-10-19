@@ -45,6 +45,7 @@ from .evaluation import (
     ResumeRefused,
     TurnSuspended,
 )
+from .measurement import ComparisonSettled
 from .records import (
     OperationResult,
     OperationView,
@@ -269,6 +270,7 @@ type StrategyEvent = Annotated[
     | InputDropped
     | AttemptExhausted
     | CheckpointResolved
+    | ComparisonSettled
     | InterruptCompleted
     | MeasurementResult
     | JobQueued

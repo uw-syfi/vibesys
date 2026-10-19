@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Protocol, cast
 
+from vs_core.api import StopMode
+
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
 
@@ -20,8 +22,8 @@ class RunExecution[Result](Protocol):
         """Execute work and return its terminal outcome."""
         ...
 
-    def stop(self) -> None:
-        """Request cooperative termination through the run's control."""
+    def stop(self, mode: StopMode = StopMode.DRAIN) -> None:
+        """Request cooperative termination in ``mode`` through the run's control."""
         ...
 
     def close(self) -> None:
@@ -142,11 +144,11 @@ class TaskRunHandle[Event, Result, Session: RunExecution[object]]:
             self._changed.clear()
             await self._changed.wait()
 
-    def stop(self) -> None:
-        """Request cooperative termination unless cancellation has begun."""
+    def stop(self, mode: StopMode = StopMode.DRAIN) -> None:
+        """Request cooperative termination in ``mode`` unless cancellation has begun."""
         if self._cancel_requested or (self._execution is not None and self._execution.cancelling()):
             return
-        self.session.stop()
+        self.session.stop(mode)
 
     def cancel(self) -> None:
         """Force cancellation once, leaving subsequent cleanup uninterrupted."""

@@ -90,12 +90,18 @@ def _report_stuck_main_thread(waited: float) -> None:
 def _termination_signal(
     runtime: ServerRuntime, relay: SignalRelay, wake: MainThreadWake, threads: Threads
 ) -> Iterator[None]:
-    """Forward launcher termination into the server's cleanup boundary.
+    """Forward the launcher's signals into the server's run and cleanup boundary.
 
-    The kernel may hand a process-directed SIGTERM to a transport thread, while
+    A Ctrl-C (SIGINT) stops the run through its control, cancelling its work in flight,
+    as headless does; with no run to stop, it ends the server like SIGTERM. SIGTERM and
+    SIGHUP end the server now, through its cleanup boundary. The relay owns SIGINT too,
+    so ``asyncio.run`` installs no handler that would cancel the run's driver on the
+    first SIGINT and raise inside its teardown on the next.
+
+    The kernel may hand a process-directed signal to a transport thread, while
     CPython runs Python handlers on the main thread only, so a handler installed
     for SIGTERM is not run while the main thread is blocked in the run. *relay*
-    observes SIGTERM on whichever thread took it, then *wake* interrupts the main
+    observes the signal on whichever thread took it, then *wake* interrupts the main
     thread, resent until the main thread has taken it (see ``MainThreadInterrupt``).
     """
 
@@ -107,12 +113,16 @@ def _termination_signal(
         send = scope.enter_context(wake.armed(on_wake))
         interrupt = MainThreadInterrupt(send, threads, _report_stuck_main_thread)
 
-        def terminate(signum: int) -> None:
-            del signum
-            runtime.shutdown()
+        def on_signal(signum: int) -> None:
+            number = Signals(signum)
+            if number is Signals.SIGINT and runtime.interrupt():
+                return
+            runtime.shutdown(number)
             interrupt.request()
 
-        scope.enter_context(relay.relay([Signals.SIGTERM], terminate))
+        scope.enter_context(
+            relay.relay([Signals.SIGINT, Signals.SIGTERM, Signals.SIGHUP], on_signal)
+        )
         yield
 
 
@@ -883,7 +893,7 @@ def main(
     has no structured channel to reach a frontend on, and stderr is inherited
     by the launcher and redirected onto the detached startup log.
     """
-    cli.start_boot_trace()
+    cli.start_process()
     try:
         _serve(sys.argv[1:] if argv is None else argv, observer, runs)
     except ConfigurationError as exc:

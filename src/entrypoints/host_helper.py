@@ -19,17 +19,29 @@ import shutil
 import sys
 from datetime import UTC, datetime, tzinfo
 from functools import cache
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from entrypoints.launcher import headless_command, source_checkout_root
+from server.host_agent_logins import (
+    AccountLogin,
+    AgentLogin,
+    ApiKeyLogin,
+    LoginStarted,
+    LoginState,
+    LoginUnavailable,
+    LoginUnavailableReason,
+)
 from server.host_api import HarnessOption
 from server.host_harness import HarnessDisplay, Maker
 from server.host_helper import serve_channel
+from server.host_helper_compute import MachineCompute
 from server.host_helper_logs import HelperLogs, run_location
 from server.host_helper_machine import HostMachineProbe
 from server.host_helper_os import (
     FileProjects,
     GitCheckoutProbe,
+    OsConfigFiles,
     OsDirectories,
     ProjectStopIntents,
     StoreLogReader,
@@ -62,11 +74,11 @@ from vs_sim.api import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-    from pathlib import Path
+    from collections.abc import Callable, Mapping
 
     from server.host_examples import CreatedProject, ExampleList
     from server.host_helper_requests import ExampleProjects
+    from vs_agent.api import ProviderLogin
     from vs_sim.api import Threads
 
 _STDIN_FD = 0
@@ -143,6 +155,79 @@ def launch_environment() -> Mapping[str, str]:
     return launch_shell_environment()
 
 
+def provider_login_here(provider: str) -> ProviderLogin:
+    """``provider``'s CLI probed in the environment a run finds it in, with this user's home."""
+    # lint-waiver: LW-271508 [PLC0415]; the helper answers hello without loading the agent library.
+    # > The same deferral as `vetted_harnesses`: `vs_agent.api` owns the provider facts and
+    # > importing it at module level would make every channel pay half a second before `hello`.
+    from vs_agent.api import provider_login  # noqa: PLC0415
+
+    return provider_login(provider, env=launch_environment(), home=Path.home())
+
+
+class AgentLibraryLogins:
+    """Each vetted harness's login, read through the agent library (agentshim's facts).
+
+    ``login_of`` probes one provider's CLI; the agent library is loaded when it first runs, not
+    for ``hello``.
+    """
+
+    def __init__(self, login_of: Callable[[str], ProviderLogin]) -> None:
+        """Bind how one provider's CLI is probed (``provider_login_here`` on a real host)."""
+        self._login_of = login_of
+
+    def providers(self) -> tuple[str, ...]:
+        """The providers the vetted harnesses come from, in offer order."""
+        return tuple(provider for provider, _binary in harness_binaries())
+
+    def list(self) -> tuple[AgentLogin, ...]:
+        """Each provider's CLI probed for whether it is installed and signed in, and how."""
+        return tuple(self._login(provider) for provider in self.providers())
+
+    def start(self, provider: str) -> LoginStarted | LoginUnavailable:
+        """Agentshim names no command that starts a harness's own login, so none is started.
+
+        A harness that is not installed is reported as that first.
+        """
+        reason = (
+            LoginUnavailableReason.NO_LOGIN_COMMAND
+            if self._login(provider).installed
+            else LoginUnavailableReason.NOT_INSTALLED
+        )
+        return LoginUnavailable(reason=reason)
+
+    def _login(self, provider: str) -> AgentLogin:
+        # lint-waiver: LW-271507 [PLC0415]; the helper answers hello without loading the agent library.
+        # > The same deferral as `vetted_harnesses`: `vs_agent.api` owns the provider facts and
+        # > importing it at module level would make every channel pay half a second before `hello`.
+        from vs_agent import api as agents  # noqa: PLC0415
+
+        found = self._login_of(provider)
+        credential = found.credential
+        how: AccountLogin | ApiKeyLogin | None = None
+        if credential is not None:
+            how = (
+                ApiKeyLogin(variable=credential.variable, file=credential.file)
+                if credential.kind is agents.LoginKind.API_KEY
+                else AccountLogin()
+            )
+        state = {
+            agents.LoginState.SIGNED_IN: LoginState.SIGNED_IN,
+            agents.LoginState.SIGNED_OUT: LoginState.SIGNED_OUT,
+            agents.LoginState.UNKNOWN: LoginState.UNKNOWN,
+        }[found.state]
+        return AgentLogin(
+            provider=provider,
+            provider_name=agents.provider_display_name(provider),
+            installed=found.installed,
+            state=state,
+            how=how,
+            api_key_variables=found.api_key_variables,
+            detail=found.detail,
+            can_start_login=False,
+        )
+
+
 @cache
 def checkout_example_projects() -> ExampleProjects:
     """This checkout's example catalog and project maker; loaded on first use."""
@@ -217,6 +302,10 @@ def real_host(environ: Mapping[str, str], uid: int, threads: Threads) -> HelperH
             which=lambda program, path: shutil.which(program, path=path),
             harness_binaries=harness_binaries,
             launch_environment=launch_environment,
+        ),
+        logins=AgentLibraryLogins(provider_login_here),
+        compute=MachineCompute(
+            OsConfigFiles(), SubprocessProbe(), home=str(Path.home()), environ=environ
         ),
         clock=epoch,
         timezone=local_timezone(epoch.now()),

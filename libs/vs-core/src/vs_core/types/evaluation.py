@@ -39,7 +39,7 @@ from .evaluation_history import (
 )
 from .job_observations import JobProgress, JobTimeout, MeasurementFailure, TimedOut
 from .measurement import BaseClaim, BaseRef, Comparison, CoreRun, Reading, Runaway, Sample
-from .until import Within
+from .until import FailureReason, Within
 from .waits import WaitOn
 
 
@@ -291,6 +291,11 @@ class OwnedJob(Value):
     The job ended without its records, so core asked for them (``CollectEvidence``); until
     that request ends, whether the run gave a sample is not known, and the comparisons it
     serves take no replacement run (`vs_core._base_runs.after_run`)."""
+    answer_until: Seconds | None = Field(default=None, exclude_if=unset)
+    """For an ended official run: until when a sample that lands may still restate its answer
+    (`vs_core._comparison.restated_answers`). Set when the run ends, to ``SETTLE_RUNS`` times its
+    limit later, and brought forward to the step its comparison settles; from then on its
+    ledger record states the figure the flow that waited for it took its verdict on."""
     queue_credit: Seconds = 0
     """Seconds of queue time this job's facts earned: its limit counts from its start.
 
@@ -576,6 +581,10 @@ class PreparedSubmissionReceipt(Value):
     ordinal: int = Field(ge=1)
     observation: Observation | None = None
     failure: MeasurementFailure | None = None
+    ended_unobserved: FailureReason | None = Field(default=None, exclude_if=unset)
+    """Why core ended the submission (blocked its record at a limit or a watch) while no job of
+    it was known: its run is over, though no observation said so (``MeasurementSubmissionEnded``).
+    A job a late observation names is under way until that job ends."""
 
 
 class HistoricalSubmissionReceipt(Value):
@@ -1243,6 +1252,19 @@ class MeasurementSubmissionObserved(Value):
     failure: MeasurementFailure | None = None
 
 
+class MeasurementSubmissionEnded(Value):
+    """Core ended a measurement submission whose result was still owed: its record is blocked.
+
+    ``reason`` is what ended it. The records area tells the evaluation area, which owns the submission's budget entry: a
+    submission that never named a job ends there, as a run that will not report. A submission
+    whose job is known ends with that job instead.
+    """
+
+    kind: Literal["measurement_submission_ended"] = "measurement_submission_ended"
+    request_id: RequestId
+    reason: FailureReason
+
+
 type EvaluationEvent = Annotated[
     RegisteredJobObserved
     | RegisteredJobRequested
@@ -1260,7 +1282,8 @@ type EvaluationEvent = Annotated[
     | ContinuationScopeReopened
     | JobsDrainRequested
     | RunJobsCancelRequested
-    | MeasurementSubmissionObserved,
+    | MeasurementSubmissionObserved
+    | MeasurementSubmissionEnded,
     Field(discriminator="kind"),
 ]
 type EvaluationRequest = Annotated[

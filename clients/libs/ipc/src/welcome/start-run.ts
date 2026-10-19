@@ -29,6 +29,10 @@ interface HarnessDisplay {
   readonly tier?: number;
   /** The tier as people call it ("Opus"); absent exactly when `tier` is. */
   readonly tierName?: string;
+  /** Who made the model; absent from a host that does not report makers. */
+  readonly maker?: 'anthropic' | 'openai' | 'google';
+  /** The generation of the maker's models it belongs to; absent when the host names none. */
+  readonly generation?: {readonly id: string; readonly name: string; readonly order: number};
 }
 
 /**

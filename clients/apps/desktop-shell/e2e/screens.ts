@@ -162,11 +162,9 @@ export async function walkScreens(
   await walk.at('agent');
   await page.getByRole('navigation', {name: 'Zoom'}).getByRole('button', {name: 'Run'}).click();
   await show.getByText('Ideas').click();
-  if (journey.live) {
-    await page.getByRole('slider', {name: 'Run position'}).focus();
-    await page.keyboard.press('Home');
-    await walk.at('scrubbed');
-    await page.getByRole('button', {name: 'Back to live'}).click();
-  }
+  await page.getByRole('slider', {name: 'Run position'}).focus();
+  await page.keyboard.press('Home');
+  await walk.at('scrubbed');
+  if (journey.live) await page.getByRole('button', {name: 'Back to live'}).click();
   return walk.moved;
 }

@@ -44,6 +44,7 @@ from .types.evaluation import (
     JobTerminationRequested,
     JobWaitLapsed,
     MeasurementRequested,
+    MeasurementSubmissionEnded,
     MeasurementSubmissionObserved,
     ObservationsDue,
     RegisteredJobObserved,
@@ -222,6 +223,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | JobsDrainRequested()
             | RunJobsCancelRequested()
             | MeasurementSubmissionObserved()
+            | MeasurementSubmissionEnded()
             | ContinuationJobsChanged()
             | ContinuationRetireRequested()
             | ContinuationReopenRequested()

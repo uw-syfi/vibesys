@@ -48,3 +48,5 @@ class EventKind(StrEnum):
     """Plumbing of the agent pipeline: core will never resume a suspended turn."""
     CHECKPOINT_KNOWN = "checkpoint_known"
     """Plumbing of the agent pipeline: core recorded or declined a turn's checkpoint."""
+    COMPARISON_SETTLED = "comparison_settled"
+    """No run that feeds a comparison is under way any more (``ComparisonSettled``)."""

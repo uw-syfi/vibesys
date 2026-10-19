@@ -139,7 +139,7 @@ class RunController:
             self._journal.record(EventType.CONTROL, "/stop", status=EventStatus.PENDING)
 
     def resume(self) -> None:
-        """Resume controlled invocations and clear a pending pause or stop."""
+        """Resume controlled invocations and clear a pending pause; a pending stop stays."""
         with self._condition:
             self._apply_locked(RunTrigger.RESUMED)
             self._journal.record(EventType.CONTROL, "/resume", status=EventStatus.CONSUMED)

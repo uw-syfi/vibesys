@@ -24,9 +24,16 @@ export const CLEAN_SCREEN = `
     <h1 style="font-size:20px">Run</h1>
     <div><span>best path</span> <span>Lock-free ring</span> <span>1.18×</span></div>
     <div>ops/s <span>48,000,000</span></div>
-    <div style="width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="A long idea title that is cut">
-      A long idea title that is cut
+    <div style="display:flex;gap:8px;width:200px">
+      <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="A long idea title that is cut">
+        A long idea title that is cut
+      </div>
+      <span>1.18×</span>
     </div>
+    <div class="vs-scrubber-head" style="display:flex;align-items:center;gap:8px"><span style="height:32px;display:inline-flex;align-items:center">Start</span><span class="vs-chip" style="height:32px;box-sizing:border-box">Replay</span><button class="vs-button" style="height:32px;box-sizing:border-box">Jump to end</button></div>
+    <input id="clean-range" type="range" aria-label="Run position" style="margin:8px 0 12px;outline:2px solid blue;outline-offset:2px"/>
+    <div style="height:14px">Call 1</div>
+    <script>document.getElementById('clean-range').focus();</script>
     <svg width="240" height="80" role="img" aria-label="measured ideas">
       <circle cx="40" cy="40" r="6" fill="rgb(200, 40, 40)"/>
       <circle cx="120" cy="30" r="6" fill="rgb(40, 90, 200)"/>
@@ -194,10 +201,22 @@ export const BAD_SCREENS: readonly BadScreen[] = [
     html: `<div style="${PAGE}"><div class="vs-pickrow"><span class="vs-pickrow-text"><span>Ring buffer</span><span>Passed</span></span><span class="vs-chip">Passed</span></div></div>`,
   },
   {
-    name: 'a performance chart a third of the readable width',
+    name: 'a chart too small to read',
     check: 'chart-size',
-    message: /the performance chart is 330 by 60 px/,
-    html: `<div style="${PAGE}"><svg role="group" aria-label="Metric of each measured idea over the run, with the best so far" width="330" height="60"><circle cx="40" cy="30" r="4" fill="red"/></svg></div>`,
+    message: /the chart is 240 by 60 px, under the 280 by 100 px/,
+    html: `<div style="${PAGE}"><svg class="vs-chart" role="group" aria-label="Metric of each measured idea over the run, with the best so far" width="240" height="60" viewBox="0 0 240 60"><circle cx="40" cy="30" r="4" fill="red"/></svg></div>`,
+  },
+  {
+    name: 'a chart drawn at a third of its size, its labels specks',
+    check: 'chart-size',
+    message: /the chart label "10m" is drawn 4 px high, under 10 px/,
+    html: `<div style="${PAGE}"><svg class="vs-chart" role="group" aria-label="Metric of each measured idea over the run, with the best so far" width="330" height="120" viewBox="0 0 1000 364"><text x="500" y="300" style="font-size:11px">10m</text></svg></div>`,
+  },
+  {
+    name: 'a chart label cut by the drawing’s edge',
+    check: 'chart-size',
+    message: /the chart label "333h 20m" is cut by the edge of the drawing/,
+    html: `<div style="${PAGE}"><svg class="vs-chart" role="group" aria-label="Metric of each measured idea over the run, with the best so far" width="320" height="120" viewBox="0 0 320 120" style="overflow:visible"><text x="300" y="100" style="font-size:12px">333h 20m</text></svg></div>`,
   },
   {
     name: 'an agent turn in a column a third of its pane, with dead space beside it',
@@ -216,6 +235,26 @@ export const BAD_SCREENS: readonly BadScreen[] = [
     check: 'control-row',
     message: /controls in one row do not line up: .* is 32 px high and .* 40 px/,
     html: `<div style="${PAGE}"><div style="display:flex;align-items:center;gap:8px"><span class="vs-searchbox" style="display:inline-flex;height:32px;box-sizing:border-box"><input type="search" aria-label="Search" style="height:30px;box-sizing:border-box"/></span><div style="display:flex;flex-direction:column"><label for="sort" style="height:20px">Sort</label><select id="sort" style="height:40px"><option>Newest</option></select></div></div></div>`,
+  },
+  {
+    name: 'the time bar: position, state chip and action of three heights and tops',
+    check: 'control-row',
+    message:
+      /controls in one row do not line up: .*vs-chip.* is 18 px high and .*vs-button.* 32 px/,
+    html: `<div style="${PAGE}"><div class="vs-scrubber-head" style="display:flex;align-items:center;gap:8px"><span>Start</span><span class="vs-chip" style="height:18px;box-sizing:border-box">Replay</span><button class="vs-button" style="height:32px;box-sizing:border-box">Jump to end</button></div></div>`,
+  },
+  {
+    name: 'a name cut with an ellipsis while the rest of its line is empty',
+    check: 'truncation-room',
+    message:
+      /cut with an ellipsis while \d+ px beside it are empty: "Lock-free ring with per-slot sequence nu"/,
+    html: `<div style="${PAGE}"><div class="vs-pane"><div style="display:flex;gap:8px"><span>Best so far:</span><div style="width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="Lock-free ring with per-slot sequence numbers">Lock-free ring with per-slot sequence numbers</div></div></div></div>`,
+  },
+  {
+    name: 'a focus ring drawn over the label under the focused range',
+    check: 'focus-ring',
+    message: /the focus ring of input .* is drawn over the text "Call 1"/,
+    html: `<div style="${PAGE}"><input id="range" type="range" aria-label="Run position" style="display:block;margin:0;outline:2px solid blue;outline-offset:2px"/><div>Call 1</div><script>document.getElementById('range').focus();</script></div>`,
   },
   {
     name: 'a side card that starts level with the page title while the form starts below it',

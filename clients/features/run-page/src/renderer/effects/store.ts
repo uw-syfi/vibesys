@@ -109,6 +109,18 @@ class Followers {
   }
 }
 
+/** Tells the screen the run did not take `request`: a refusal (a message), or the command failing to reach it. */
+function refusal(
+  request: {readonly kind: 'pause'} | {readonly kind: 'resume'; readonly when: string},
+  refused: unknown,
+  dispatch: Dispatch,
+): void {
+  if (refused === null) return;
+  const message = refused instanceof Error ? refused.message : String(refused);
+  const waited = request.kind === 'resume' && request.when === 'capacity_returns';
+  dispatch({type: waited ? 'wait-refused' : 'command-refused', message});
+}
+
 /** How often the clock ticks at the live end: a second, the finest the screen writes. */
 const TICK_MS = 1000;
 
@@ -300,11 +312,10 @@ export function createRunPageStore(
         return;
       case 'pause':
       case 'resume':
-        void sessions.command(request).then(refused => {
-          if (refused === null) return;
-          const waited = request.kind === 'resume' && request.when === 'capacity_returns';
-          dispatch({type: waited ? 'wait-refused' : 'command-refused', message: refused});
-        });
+        void sessions.command(request).then(
+          refused => refusal(request, refused, dispatch),
+          (error: unknown) => refusal(request, error, dispatch),
+        );
         return;
       default:
         performCommand(ports, request, dispatch);

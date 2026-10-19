@@ -1,0 +1,114 @@
+{
+  "id": "helper-compute-gated",
+  "protocol": "host-helper",
+  "title": "The machine compute messages need the machine_compute feature",
+  "description": "After a hello that negotiated no features, each compute.* request is answered feature_not_negotiated, so a client that did not ask never sees a machine's clusters or changes them.",
+  "role": "control",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": []
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "compute.list",
+        "request_id": "c0",
+        "deadline_ms": 30000
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "c0",
+        "code": "feature_not_negotiated"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "compute.test_cluster",
+        "request_id": "c1",
+        "deadline_ms": 30000,
+        "cluster": {
+          "name": "lab",
+          "reach": {
+            "kind": "login_node"
+          },
+          "workspace": "/work/vibesys"
+        }
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "c1",
+        "code": "feature_not_negotiated"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "compute.add_cluster",
+        "request_id": "c2",
+        "deadline_ms": 30000,
+        "cluster": {
+          "name": "lab",
+          "reach": {
+            "kind": "login_node"
+          },
+          "workspace": "/work/vibesys"
+        }
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "c2",
+        "code": "feature_not_negotiated"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "compute.remove_cluster",
+        "request_id": "c3",
+        "deadline_ms": 30000,
+        "name": "lab"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "c3",
+        "code": "feature_not_negotiated"
+      }
+    }
+  ]
+}

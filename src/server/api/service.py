@@ -61,7 +61,9 @@ from vibesys.api import (
     ResumeRequest,
     RunRecordReadError,
     SteerRequest,
+    StopMode,
     StopRequest,
+    escalate_stop,
 )
 from vibesys.api.hypothesis import agent_projection
 from vs_sim.api import utc_datetime
@@ -288,7 +290,8 @@ class RunControlSlot:
 
     Stop is the only command whose pre-session semantics are unambiguous: it
     means that the eventual session must stop. The slot retains that intent
-    until installation and delivers it once. Other mutating commands require
+    until installation and delivers it once; of several, it retains the
+    strongest (``escalate_stop``), since a stop only escalates. Other mutating commands require
     an active session, so rejecting them is safer than acknowledging and
     discarding them or guessing their ordering against startup.
     """
@@ -324,6 +327,18 @@ class RunControlSlot:
             self._control = None
             self._state = _RunControlState.ENDED
 
+    def stop(self, mode: StopMode) -> bool:
+        """Stop the installed run in ``mode``; False, changing nothing, when none is installed.
+
+        The run's control keeps the strongest stop asked for, so a repeat changes nothing
+        and a cancel after a drain escalates it.
+        """
+        with self._condition:
+            if self._control is None:
+                return False
+            self._control.stop(mode)
+            return True
+
     def execute(self, command: ControlProtocolCommand) -> CommandAck:
         """Apply one command or retain the sole command safe before startup."""
         request = control_request(command)
@@ -333,7 +348,12 @@ class RunControlSlot:
                 if self._state is _RunControlState.AWAITING_SESSION and isinstance(
                     request, StopRequest
                 ):
-                    self._stop_pending = request
+                    pending = self._stop_pending
+                    if (
+                        pending is None
+                        or escalate_stop(pending.mode, request.mode) is not pending.mode
+                    ):
+                        self._stop_pending = request
                     return CommandAck(action=request.action, status="pending")
                 raise RunControlUnavailableError(self._state)
             # Delivered while the slot prevents session release.

@@ -28,6 +28,10 @@ export function Pane(props: {
   readonly actions?: ReactNode;
   readonly enterKey?: string;
   readonly focusHeading?: boolean;
+  /** The body does not scroll: its view scrolls its own list, under what stays above it. */
+  readonly fixed?: boolean;
+  /** The title is a name (an idea's), drawn in the mono face names use everywhere. */
+  readonly mono?: boolean;
   readonly children: ReactNode;
 }): JSX.Element {
   const headingId = useId();
@@ -53,7 +57,13 @@ export function Pane(props: {
       <header className="vs-pane-header">
         <div className="vs-pane-titles">
           <Text variant="section">{props.kicker}</Text>
-          <h2 className="vs-pane-title" id={headingId} ref={focusOnOpen} tabIndex={-1}>
+          <h2
+            className="vs-pane-title"
+            data-mono={props.mono || undefined}
+            id={headingId}
+            ref={focusOnOpen}
+            tabIndex={-1}
+          >
             {props.title}
           </h2>
           {props.meta === undefined ? null : <div className="vs-pane-meta">{props.meta}</div>}
@@ -62,7 +72,9 @@ export function Pane(props: {
           <div className="vs-pane-actions">{props.actions}</div>
         )}
       </header>
-      <div className="vs-pane-body">{props.children}</div>
+      <div className="vs-pane-body" data-fixed={props.fixed || undefined}>
+        {props.children}
+      </div>
     </section>
   );
 }

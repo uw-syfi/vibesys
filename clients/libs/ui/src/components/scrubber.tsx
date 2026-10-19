@@ -1,7 +1,7 @@
 import {type JSX, useId} from 'react';
 import {Button} from './button.js';
 import type {StyleWithVars} from './css-vars.js';
-import {placeLabels, useInlineSize} from './label-fit.js';
+import {type PlacedLabel, placeLabels, useInlineSize} from './label-fit.js';
 import {Chip} from './status.js';
 import {Text} from './text.js';
 
@@ -9,6 +9,28 @@ import {Text} from './text.js';
 export interface ScrubberTick {
   readonly at: number;
   readonly label: string;
+}
+
+/**
+ * The labels of `ticks` that fit a track `width` px wide, with the word before each if all of them
+ * fit so, else without it; none placed (`fitted` null) while the track is unmeasured.
+ */
+function fitTicks(
+  ticks: readonly ScrubberTick[],
+  last: number,
+  word: string | undefined,
+  width: number | null,
+): {readonly fitted: readonly PlacedLabel[] | null; readonly words: string | undefined} {
+  if (width === null) return {fitted: null, words: undefined};
+  const along = (prefix: string | undefined) =>
+    ticks.map(tick => ({
+      share: last === 0 ? 0 : tick.at / last,
+      text: prefix === undefined ? tick.label : `${prefix} ${tick.label}`,
+    }));
+  const worded = word === undefined ? null : placeLabels(along(word), width);
+  return worded !== null && worded.length === ticks.length
+    ? {fitted: worded, words: word}
+    : {fitted: placeLabels(along(undefined), width), words: undefined};
 }
 
 /**
@@ -35,6 +57,11 @@ export function Scrubber(props: {
   /** The action that returns to the newest position; "Back to live" unless given. */
   readonly backLabel?: string;
   readonly ticks?: readonly ScrubberTick[];
+  /**
+   * What a tick's label counts (`Call`): each label reads `Call 3` while every one fits beside the
+   * others, and the bare number once they would not, so labels never skip.
+   */
+  readonly tickWord?: string;
   readonly change: (value: number) => void;
   readonly backToLive: () => void;
 }): JSX.Element {
@@ -44,13 +71,7 @@ export function Scrubber(props: {
   const [measure, width] = useInlineSize();
   const ticks = props.ticks ?? [];
   // Once the track is measured only the labels that can be read side by side are drawn.
-  const fitted =
-    width === null
-      ? null
-      : placeLabels(
-          ticks.map(tick => ({share: share(tick.at), text: tick.label})),
-          width,
-        );
+  const {fitted, words} = fitTicks(ticks, props.last, props.tickWord, width);
   return (
     <div className="vs-scrubber">
       <div className="vs-scrubber-head">
@@ -95,7 +116,7 @@ export function Scrubber(props: {
                 data-placed={left === null ? undefined : ''}
                 style={place}
               >
-                {tick.label}
+                {words === undefined ? tick.label : `${words} ${tick.label}`}
               </span>
             );
           })}

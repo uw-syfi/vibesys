@@ -22,7 +22,6 @@ from vibesys.api import (
     RunStatus,
     RunStopped,
     StopMode,
-    StopRequest,
 )
 from vibesys.api.testing import FakeRunHandle
 from vs_sim.api import Signals
@@ -35,8 +34,7 @@ class _InterruptibleSession:
     def __init__(self) -> None:
         self.started = asyncio.Event()
         self.stop_requested = asyncio.Event()
-        self.stop_calls = 0
-        self.controls: list[object] = []
+        self.stops: list[StopMode] = []
         self.closed = False
 
     def start(self) -> None:
@@ -50,13 +48,8 @@ class _InterruptibleSession:
         await self.stop_requested.wait()
         raise RunStopped
 
-    def stop(self) -> None:
-        self.stop_calls += 1
-        self.stop_requested.set()
-
-    def submit(self, request: object) -> None:
-        """The one control ingress: a stop request lands in the run as ``stop`` does."""
-        self.controls.append(request)
+    def stop(self, mode: StopMode = StopMode.DRAIN) -> None:
+        self.stops.append(mode)
         self.stop_requested.set()
 
 
@@ -73,7 +66,7 @@ async def test_one_interrupt_stops_and_drains_the_run_before_headless_exits() ->
 
     with pytest.raises(asyncio.CancelledError):
         await headless
-    assert session.stop_calls == 1
+    assert session.stops == [StopMode.DRAIN]
     assert session.stop_requested.is_set()
 
 
@@ -105,10 +98,7 @@ async def test_ctrl_c_stops_the_run_cancelling_its_work_and_returns_its_stopped_
     result = await supervise(handle, signals=signals)
 
     assert result.status is RunStatus.STOPPED
-    (stop,) = session.controls
-    assert isinstance(stop, StopRequest)
-    assert stop.mode is StopMode.CANCEL
-    assert session.stop_calls == 0
+    assert session.stops == [StopMode.CANCEL]
     assert not signals.handles(Signals.SIGINT)
 
 
@@ -133,7 +123,7 @@ async def test_render_failure_drains_the_owned_run_before_process_scope_exits() 
 
     assert session.started.is_set()
     assert session.closed
-    assert session.stop_calls == 1
+    assert session.stops == [StopMode.DRAIN]
     with pytest.raises(asyncio.CancelledError):
         await handle.result()
 
@@ -275,8 +265,46 @@ async def test_every_shutdown_signal_ends_the_run_cancelling_its_work_never_drai
             await supervise(handle, signals=signals)
         assert exited.value.code == 128 + delivered[0]
 
-    assert session.stop_calls == 0
-    stops = [control for control in session.controls if isinstance(control, StopRequest)]
-    assert all(stop.mode is StopMode.CANCEL for stop in stops)
-    assert stops or session.cancelled
+    assert all(mode is StopMode.CANCEL for mode in session.stops)
+    assert session.stops or session.cancelled
     assert not any(signals.handles(number) for number in _SHUTDOWN)
+
+
+class _EscalatingSession(_InterruptibleSession):
+    """A run that ends only once released, noting each stop's mode."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.release = asyncio.Event()
+
+    async def await_result(self) -> RunResult:
+        self.started.set()
+        await self.release.wait()
+        return RunResult(run_id="escalated", loop="test", succeeded=False, status=RunStatus.STOPPED)
+
+
+@pytest.mark.regression
+@pytest.mark.asyncio
+async def test_a_ctrl_c_after_a_draining_stop_escalates_it_to_cancel_the_work() -> None:
+    """periodic-1330 MED-2: a Ctrl-C while the run drained changed nothing.
+
+    Cancelling the supervision drains the run; a Ctrl-C then still asks the run to cancel
+    its work in flight, as Ctrl-C always does, instead of being dropped as a repeat.
+    """
+    signals = FakeSignalSource()
+    session = _EscalatingSession()
+    handle = FakeRunHandle("escalated")
+    handle.bind(cast("RunSession", session))
+    handle.start()
+    supervision = asyncio.create_task(supervise(handle, signals=signals))
+    await arrival(session.started.wait(), supervision)
+
+    supervision.cancel()
+    await arrival(session.stop_requested.wait(), supervision)
+    assert signals.deliver(Signals.SIGINT)
+    modes = list(session.stops)
+    session.release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await supervision
+    assert modes == [StopMode.DRAIN, StopMode.CANCEL]
