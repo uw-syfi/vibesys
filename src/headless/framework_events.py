@@ -239,9 +239,15 @@ def _format_comparisons_read(data: ComparisonsReadData) -> str:
 
 def _format_input_measurement_failed(data: InputMeasurementFailedData) -> str:
     where = f", stage {data.stage}" if data.stage else ""
+    twice = ", measured twice" if data.attempts > 1 else ""
+    judged = (
+        "its benchmark numbers stay the bar candidates must beat"
+        if data.compared
+        else "a candidate adopted now is adopted without an input comparison"
+    )
     line = (
-        f"[input] the input's trusted measurement failed ({data.failure.value}{where}); "
-        "the run goes on with no input baseline, and the planner is told why"
+        f"[input] the input's trusted measurement failed ({data.failure.value}{where}{twice}); "
+        f"the run goes on, {judged}, and the planner is told why"
     )
     return f"{line}:\n{data.summary}" if data.summary else line
 

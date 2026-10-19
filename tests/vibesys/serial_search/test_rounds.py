@@ -35,7 +35,7 @@ from vs_core.api import (
     Settlement,
     SettlementId,
 )
-from vs_core.api.search import INPUT, Kept
+from vs_core.api.search import INPUT, Kept, NoWinner
 from vs_sim.api.testing import examples
 
 INPUT_REVISION = RevisionRef.of_git_commit("input")
@@ -245,7 +245,7 @@ def test_a_failure_with_nothing_eligible_is_named_in_why_the_run_has_no_winner(
     run = run_of(2)
     run.finished(done(1, failure=failure), None)
     ending = run.ending()
-    assert ending is not None
+    assert isinstance(ending, NoWinner)
     assert failure in ending.reason
 
 

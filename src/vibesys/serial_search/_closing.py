@@ -14,9 +14,9 @@ from typing import TYPE_CHECKING
 
 from vibesys.candidates.api import (
     Baseline,
-    Measured,
     gates_of,
     improves_on,
+    input_metrics,
     measurement,
     settle_for,
     space_of,
@@ -64,13 +64,14 @@ def beats_input(
 ) -> bool:
     """Whether the candidate's benchmark beats the input's beyond noise.
 
-    An input with no trusted reading leaves nothing to beat.
+    The bar is `input_metrics` (a measured input's benchmark, or that of one that failed only
+    its accuracy check); an input with no bar leaves nothing to beat.
     """
     benchmark = reading_of(readings, EvidenceKind.BENCHMARK)
-    seen = baseline.reading if isinstance(baseline, Measured) else None
+    bar = input_metrics(baseline)
     return improves_on(
         measurement(None if benchmark is None else benchmark.headline()),
-        measurement(seen.metrics[0] if seen is not None and seen.metrics else None),
+        measurement(bar[0] if bar else None),
         space=space_of(terms),
         when_input_unmeasured=True,
     )

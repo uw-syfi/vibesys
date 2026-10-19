@@ -230,6 +230,12 @@ class _InputFailureProjection(Protocol):
     @property
     def output(self) -> str: ...
 
+    @property
+    def attempts(self) -> int: ...
+
+    @property
+    def compared(self) -> bool: ...
+
 
 class _RoundProjection(Protocol):
     """Product facts needed to translate one projected round into events."""
@@ -338,9 +344,6 @@ def _emit_core_commit_events(
         _emit_round_finished(events, after_rounds[number])
         _emit_workstream_finished(events, after_rounds[number])
     _emit_iterations_changed(events, before, after)
-    _emit_input_measurement_failed(
-        events, None if before is None else before.input_failure, after.input_failure
-    )
     if before is None or _experiments_view(before) == _experiments_view(after):
         return
     events.emit(
@@ -356,14 +359,8 @@ INPUT_FAILURE_TAIL_CHARS = 1000
 """How much of the failed stage's output the operator's event carries, after redaction."""
 
 
-def _emit_input_measurement_failed(
-    events: EventJournal,
-    before: _InputFailureProjection | None,
-    after: _InputFailureProjection | None,
-) -> None:
-    """Emit ``INPUT_MEASUREMENT_FAILED`` once, on the commit that first records the failure."""
-    if after is None or after == before:
-        return
+def _emit_input_measurement_failed(events: EventJournal, after: _InputFailureProjection) -> None:
+    """Emit ``INPUT_MEASUREMENT_FAILED`` for the failure ``after`` describes."""
     events.emit(
         CoreEventType.INPUT_MEASUREMENT_FAILED,
         status=EventStatus.FAILED,
@@ -371,6 +368,8 @@ def _emit_input_measurement_failed(
             failure=InputMeasurementFailureKind(after.kind),
             stage=after.stage,
             summary=redact_diagnostic_tail(after.output, max_chars=INPUT_FAILURE_TAIL_CHARS),
+            attempts=after.attempts,
+            compared=after.compared,
         ),
     )
 
@@ -563,6 +562,8 @@ class _CoreCommitObserver:
         """The last view that was built, which the next commit's events are diffed against."""
         self._seeded = False
         self._failing = False
+        self._input_announced: bool | None = None
+        """Whether the run's input failure was announced; None until this process first asks."""
 
     def committed(self, previous: BaseModel | None, current: BaseModel) -> None:
         """Publish the durable state hint before the events derived from it.
@@ -583,6 +584,7 @@ class _CoreCommitObserver:
             self._report_failed_projection(current, after.projection_failure)
         elif after is not None:
             _emit_core_commit_events(self._integration.events, self._shown, after)
+            self._announce_input_failure(after)
             self._shown, self._seeded, self._failing = after, True, False
         _emit_winner_selected(
             self._integration.events,
@@ -599,6 +601,26 @@ class _CoreCommitObserver:
                 new_runaways(previous if isinstance(previous, RuntimeRecord) else None, current),
             )
         _emit_span_changes(self._integration.events, _run_trace(previous), _run_trace(current))
+
+    def _announce_input_failure(self, after: _RunProjection) -> None:
+        """Announce the input's failed measurement once per run, judged by the run's journal.
+
+        The failure is a fact of the committed record, so it is announced on the first commit
+        that holds it. Whether it was announced is a fact of the run's durable event journal,
+        not of the record: a restarted process that loads a record holding the failure does
+        not announce it again, and one whose record an earlier version wrote, before the
+        announcement existed, announces it now.
+        """
+        failed = after.input_failure
+        if failed is None:
+            return
+        if self._input_announced is None:
+            self._input_announced = self._integration.events.has_recorded(
+                CoreEventType.INPUT_MEASUREMENT_FAILED
+            )
+        if not self._input_announced:
+            _emit_input_measurement_failed(self._integration.events, failed)
+            self._input_announced = True
 
     def _report_failed_projection(self, current: BaseModel, failure: str) -> None:
         if self._failing:

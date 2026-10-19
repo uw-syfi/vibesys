@@ -143,6 +143,11 @@ class DurableEventJournal[EventT]:
         with self._condition:
             return [event for event in self._events if self._codec.sequence(event) > after_sequence]
 
+    def history(self) -> list[EventT]:
+        """Return every event recorded so far: the durable ones, then any awaiting attachment."""
+        with self._condition:
+            return [*self._events, *self._pending]
+
     def wait(self, after_sequence: int, timeout: float | None = None) -> list[EventT]:
         """Wait until durable events exist after a cursor."""
         with self._condition:

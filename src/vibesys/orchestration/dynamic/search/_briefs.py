@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Protocol
 
-from vibesys.candidates.api import failure
+from vibesys.candidates.api import again_after, failure, input_metrics
 from vibesys.orchestration.dynamic.search._prompts import (
     EvidenceCitation,
     ImplementPrompt,
@@ -112,6 +112,7 @@ def implement_prompt(
     latest = blockers[-1] if blockers else None
     stuck = next((item for item in reversed(blockers) if item.kind not in _NOT_STUCK), None)
     prior_tail = "" if prior is None else tail(prior.failure_tail, FAILURE_CHARS)
+    why = None if baseline is None else failure(baseline)
     return ImplementPrompt(
         hypothesis_id=plan.work_id,
         hypothesis=plan.hypothesis,
@@ -128,7 +129,9 @@ def implement_prompt(
         ),
         prior_failure_tail=prior_tail,
         baseline_pending=baseline is None,
-        input_failure=None if baseline is None else failure(baseline),
+        input_failure=why,
+        input_at_fault=why is not None and not again_after(why),
+        input_compared=why is not None and bool(input_metrics(baseline)),
         prior_failure_fence=fence(prior_tail),
         last_blocker=None if stuck is None else _shown(stuck),
         turns_without_candidate=len(blockers),

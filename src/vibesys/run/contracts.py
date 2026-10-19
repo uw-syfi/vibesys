@@ -228,6 +228,12 @@ class InputFailureSummary(BaseModel):
     kind: str
     stage: str | None = None
     output: str = ""
+    attempts: int = Field(default=1, ge=1, le=2)
+    """How many times the input was measured: twice when the first failure showed no fault of
+    the input and it was measured again."""
+    compared: bool = False
+    """Whether candidates are still compared with the input: its benchmark passed although its
+    accuracy check failed, so its numbers stay the bar."""
 
 
 class RoundSummary(BaseModel):

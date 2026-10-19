@@ -94,7 +94,6 @@ def test_the_last_choice_is_the_one_adopted(begin: Begin) -> None:
     assert result.reason.startswith("adopted")
 
 
-@pytest.mark.xfail(strict=True, reason="PR #3235 round 2: fixed in the next commit")
 @pytest.mark.parametrize("chosen", [True, False], ids=["a-candidate", "nothing"])
 def test_an_uncompared_return_says_so_only_of_an_adopted_candidate(
     begin: Begin, *, chosen: bool

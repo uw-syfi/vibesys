@@ -266,6 +266,9 @@ function eventDataToTranscriptEntry(
   // The warning rides the envelope's `diagnostic`, which `applyDiagnosticEvent`
   // has already folded into `diagnostics`; it is not transcript prose.
   if (data?.kind === 'framework_warning') return null;
+  // Likewise the failed input measurement: the server attaches its diagnostic, and the run's state
+  // keeps it as `inputFailure`.
+  if (data?.kind === 'input_measurement_failed') return null;
   if (
     data?.kind === 'judge_result' ||
     data?.kind === 'benchmark_result' ||

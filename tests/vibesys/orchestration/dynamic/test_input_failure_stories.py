@@ -82,7 +82,6 @@ def _input_measurements(host: EvidenceHost) -> int:
     )
 
 
-@pytest.mark.xfail(strict=True, reason="PR #3235 round 2: fixed in the next commit")
 @MODES
 def test_input_benchmark_failure_is_told_to_every_later_planning_turn_and_ends_uncompared(
     *, restarting: bool
@@ -200,7 +199,6 @@ def _candidate_measurements(host: EvidenceHost) -> list[str]:
     ]
 
 
-@pytest.mark.xfail(strict=True, reason="PR #3235 round 2: fixed in the next commit")
 @pytest.mark.regression
 @MODES
 def test_an_input_that_fails_its_accuracy_check_is_announced_told_to_the_planner_and_fixable(
@@ -276,7 +274,6 @@ def test_an_input_that_fails_its_accuracy_check_is_announced_told_to_the_planner
     assert_flow_closed(host)
 
 
-@pytest.mark.xfail(strict=True, reason="PR #3235 round 2: fixed in the next commit")
 @pytest.mark.regression
 @MODES
 def test_an_input_measurement_lost_twice_is_announced_and_the_run_ends_uncompared(
@@ -322,7 +319,6 @@ def test_an_input_measurement_lost_twice_is_announced_and_the_run_ends_uncompare
     assert_flow_closed(host)
 
 
-@pytest.mark.xfail(strict=True, reason="PR #3235 round 2: fixed in the next commit")
 @MODES
 def test_an_input_measurement_lost_once_is_taken_again_and_the_run_compares_with_it(
     *, restarting: bool
@@ -367,7 +363,6 @@ _PRE_S173_ACCURACY_FAILED = {
 }
 
 
-@pytest.mark.xfail(strict=True, reason="PR #3235 round 2: fixed in the next commit")
 @pytest.mark.regression
 def test_a_run_checkpointed_before_s173_with_a_failed_accuracy_check_announces_it_on_resume() -> (
     None

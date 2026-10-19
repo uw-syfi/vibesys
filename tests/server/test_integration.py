@@ -326,7 +326,6 @@ def test_framework_events_bypass_execution_stamping_and_lift_warnings(tmp_path: 
     assert warning.diagnostic.source == "loop"
 
 
-@pytest.mark.xfail(strict=True, reason="PR #3235 round 2: fixed in the next commit")
 @pytest.mark.regression
 @pytest.mark.parametrize(("attempts", "compared"), [(1, False), (2, True)])
 def test_a_failed_input_measurement_projects_with_a_run_diagnostic(

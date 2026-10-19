@@ -95,6 +95,9 @@ _PAUSE_STATUSES = frozenset({RunStatus.PAUSING, RunStatus.PAUSED})
 
 _PLAIN_REASONS: dict[RunEndOutcome, str] = {
     RunEndOutcome.ADOPTED: "The chosen candidate was adopted.",
+    RunEndOutcome.ADOPTED_WITHOUT_INPUT_COMPARISON: (
+        "A candidate was adopted without an input comparison: the input failed its measurement."
+    ),
     RunEndOutcome.KEPT_INPUT: "Nothing beat the input; the input was kept.",
     RunEndOutcome.NO_WINNER: "The search ended with no winner.",
     RunEndOutcome.ADOPTION_FAILED: "The chosen winner could not be adopted.",

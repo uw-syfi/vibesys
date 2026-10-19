@@ -115,6 +115,7 @@ if TYPE_CHECKING:
         SearchDef,
         Seconds,
         SpanKind,
+        Uncompared,
         Within,
     )
     from vs_core.flows._define import Root
@@ -182,7 +183,7 @@ def code_changed[C](definition: SearchDef[C]) -> SearchDef[C]:
     """
     root = definition.root
 
-    async def changed(ctx: Flow, start: C) -> NoWinner | None:
+    async def changed(ctx: Flow, start: C) -> NoWinner | Uncompared | None:
         ctx.clock.now()
         return await root(ctx, start)
 

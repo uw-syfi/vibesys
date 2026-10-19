@@ -73,10 +73,26 @@ A hypothesis whose candidate is waiting or measured is still in flight: continue
 {% if input_failure %}
 
 Input not measurable: {{ input_failure_text(input_failure) }}
-The input itself fails its trusted measurement, so there is no input baseline to beat:
-any candidate that passes every trusted gate can be adopted. Plan the next work to fix
-what made the input fail (the stage and output above), or build on a revision the run
-has measured, and make the first candidate satisfy what that stage requires.
+{% if input_first_attempt %}
+The input was measured twice; the first measurement failed too: {{ input_failure_text(input_first_attempt) }}
+{% endif %}
+{% if baseline %}
+Its benchmark passed, so its numbers above stay the bar: a candidate must pass every
+trusted gate and beat them to be adopted.
+{% else %}
+There is no input value to compare a candidate with. One that passes every trusted gate
+can still be adopted, but the run then ends "adopted without an input comparison", not as
+a plain success: nothing shows it beats the input.
+{% endif %}
+{% if input_at_fault %}
+Plan the next work to fix what made the input fail (the stage and output above), or build
+on a revision the run has measured, and make the first candidate satisfy what that stage
+requires.
+{% else %}
+Nothing shows a fault in the input's code: its measurement ended without evidence against
+it (a time limit, the evaluation machinery, or no output). Do not plan work only to fix the
+input for this; plan as usual, building on a revision the run has measured where you can.
+{% endif %}
 {% endif %}
 {% if buildable %}
 

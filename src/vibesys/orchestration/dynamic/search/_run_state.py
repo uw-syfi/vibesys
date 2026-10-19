@@ -78,7 +78,17 @@ from vibesys.orchestration.dynamic.search._values import (
     WorkPlan,
 )
 from vibesys.search_spans.api import adoption_label
-from vs_core.api.search import INPUT, Input, Kept, Label, NoWinner, RevisionRef, TaskTerms, Value
+from vs_core.api.search import (
+    INPUT,
+    Input,
+    Kept,
+    Label,
+    NoWinner,
+    RevisionRef,
+    TaskTerms,
+    Uncompared,
+    Value,
+)
 
 _DROPPED_SHOWN = 8
 """The most recent dropped evaluations the orchestrator is shown."""
@@ -924,9 +934,16 @@ class RunRecord:
             return INPUT, adoption_label(INPUT, base, base)
         return found, adoption_label(found, winner.value, base)
 
-    def ending(self) -> NoWinner | None:
-        """None when the run ends with a winner or with the input standing; else why it has none."""
-        if self.eligible_rounds() or self.baseline is None:
+    def ending(self) -> NoWinner | Uncompared | None:
+        """None when the run ends with a winner or with the input standing; else why it has none.
+
+        A winner that was never compared with the input, because the input failed its
+        measurement and left no bar (`candidates.uncompared`), is ``Uncompared``: the run adopts
+        it, and its result says it was adopted without an input comparison.
+        """
+        if self.eligible_rounds():
+            return Uncompared() if candidates.uncompared(self.baseline) else None
+        if self.baseline is None:
             return None  # a stop before the input was measured leaves the input standing
         trusted = candidates.trusted(self.baseline)
         if self.gate.failed:

@@ -3,8 +3,6 @@
 from datetime import UTC, datetime
 from io import StringIO
 
-import pytest
-
 from headless.render import HeadlessRenderer, TodoDisplay
 from vibesys.api import (
     EventStatus,
@@ -221,7 +219,6 @@ class TestFrameworkEvents:
         assert candidate == f"[result] selected trusted winner {'c' * 12} (settlement s-1)\n"
         assert baseline.startswith("[result] selected the trusted input unchanged")
 
-    @pytest.mark.xfail(strict=True, reason="PR #3235 round 2: fixed in the next commit")
     def test_a_failed_input_measurement_names_how_the_stage_and_what_it_printed(self) -> None:
         out = _render_event(
             CoreEventType.INPUT_MEASUREMENT_FAILED,
@@ -246,7 +243,6 @@ class TestFrameworkEvents:
         assert bare.count("\n") == 1
         assert "a candidate adopted now is adopted without an input comparison" in bare
 
-    @pytest.mark.xfail(strict=True, reason="PR #3235 round 2: fixed in the next commit")
     def test_a_failed_input_measurement_says_how_often_it_was_taken_and_what_is_the_bar(
         self,
     ) -> None:

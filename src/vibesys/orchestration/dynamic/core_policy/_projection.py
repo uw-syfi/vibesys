@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
-from vibesys.candidates.api import failure, reading
+from vibesys.candidates.api import Unmeasurable, failure, input_metrics
 from vibesys.hypothesis import derive_hypothesis_title
 from vibesys.hypothesis.readmodel import (
     AgentRunProjection,
@@ -76,15 +76,23 @@ def project_run_snapshot(snapshot: RunSnapshot, *, experiment_revision: int) -> 
 
 def _input_failure(snapshot: RunSnapshot) -> InputFailureSummary | None:
     """Why the input failed its trusted measurement, once it has; None while pending or trusted."""
-    why = None if snapshot.baseline is None else failure(snapshot.baseline)
+    baseline = snapshot.baseline
+    why = None if baseline is None else failure(baseline)
     if why is None:
         return None
-    return InputFailureSummary(kind=why.kind.value, stage=why.stage, output=why.output)
+    again = isinstance(baseline, Unmeasurable) and baseline.first_attempt is not None
+    return InputFailureSummary(
+        kind=why.kind.value,
+        stage=why.stage,
+        output=why.output,
+        attempts=2 if again else 1,
+        compared=bool(input_metrics(baseline)),
+    )
 
 
 def _baseline_metrics(snapshot: RunSnapshot) -> tuple[MetricRow, ...]:
-    found = None if snapshot.baseline is None else reading(snapshot.baseline)
-    return () if found is None else found.metrics
+    """The bar candidates are compared with, as the comparison and the planner read it."""
+    return input_metrics(snapshot.baseline)
 
 
 def _workstream_iterations(snapshot: RunSnapshot) -> IterationTree:

@@ -885,6 +885,7 @@ const runEventSchema: Record<string, unknown> = {
       "description": "Why the framework ended the run as it did. Closed: the result's reason starts with it.",
       "enum": [
         "adopted",
+        "adopted-without-input-comparison",
         "kept-input",
         "no-winner",
         "adoption-failed",
@@ -1296,7 +1297,7 @@ const runEventSchema: Record<string, unknown> = {
     },
     "InputMeasurementFailedData": {
       "additionalProperties": false,
-      "description": "The run's input failed its trusted measurement, so the run has no input baseline.",
+      "description": "The run's input failed its trusted measurement, so the run has no trusted baseline.\n\nMirrors ``vibesys.events.InputMeasurementFailedData`` field for field.",
       "properties": {
         "kind": {
           "const": "input_measurement_failed",
@@ -1323,6 +1324,17 @@ const runEventSchema: Record<string, unknown> = {
           "default": "",
           "title": "Summary",
           "type": "string"
+        },
+        "attempts": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Attempts",
+          "type": "integer"
+        },
+        "compared": {
+          "default": false,
+          "title": "Compared",
+          "type": "boolean"
         }
       },
       "required": [

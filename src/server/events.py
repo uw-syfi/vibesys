@@ -821,12 +821,17 @@ class InputMeasurementFailureKind(StrEnum):
 
 
 class InputMeasurementFailedData(EventPayload):
-    """The run's input failed its trusted measurement, so the run has no input baseline."""
+    """The run's input failed its trusted measurement, so the run has no trusted baseline.
+
+    Mirrors ``vibesys.events.InputMeasurementFailedData`` field for field.
+    """
 
     kind: Literal["input_measurement_failed"] = "input_measurement_failed"
     failure: InputMeasurementFailureKind
     stage: str | None = None
     summary: str = ""
+    attempts: int = Field(default=1, ge=1)
+    compared: bool = False
 
 
 class MeasurementVerdict(StrEnum):

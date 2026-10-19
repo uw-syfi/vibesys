@@ -318,12 +318,14 @@ _StartedAt = Annotated[float, Field(ge=0, le=ECMASCRIPT_DATE_MAX_SECONDS, allow_
 class RunEndOutcome(StrEnum):
     """Why a run ended, on its tombstone: vs-core's ``EndReason`` members and two of the shell's.
 
-    The first seven are ``vs_core``'s ``EndReason`` values, copied because this module
+    The first eight are ``vs_core``'s ``EndReason`` values, copied because this module
     may not import the core (``tests/server/test_run_end_record.py`` keeps them equal).
     """
 
     ADOPTED = "adopted"
     """The chosen candidate was adopted."""
+    ADOPTED_WITHOUT_INPUT_COMPARISON = "adopted-without-input-comparison"
+    """A candidate was adopted, but the input had no reading to compare it with."""
     KEPT_INPUT = "kept-input"
     """Nothing beat the input, and the input was adopted as it stood."""
     NO_WINNER = "no-winner"

@@ -9,7 +9,15 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from vibesys.candidates.api import Baseline, failure, measurement, reading
+from vibesys.candidates.api import (
+    Baseline,
+    Unmeasurable,
+    again_after,
+    failure,
+    input_metrics,
+    measurement,
+    reading,
+)
 from vibesys.metrics import MetricComparison, MetricRow, MetricSpace, reading_of
 from vibesys.orchestration.dynamic.models import ProfileOffer
 from vibesys.orchestration.dynamic.search import _briefs as briefs
@@ -405,6 +413,7 @@ class PlanWorld:
         shown = history[-_HISTORY_ROWS:]
         shown_sequences = {row.sequence for row in shown}
         seen = None if self.baseline is None else reading(self.baseline)
+        why = None if self.baseline is None else failure(self.baseline)
         prompt = PlannerPrompt(
             capacity=self.capacity,
             in_flight=len(running),
@@ -419,8 +428,12 @@ class PlanWorld:
                 for row in implement_rows
                 if isinstance(row, HistoryRow) and row.sequence not in shown_sequences
             ),
-            baseline=() if seen is None else seen.metrics,
-            input_failure=None if self.baseline is None else failure(self.baseline),
+            baseline=input_metrics(self.baseline),
+            input_failure=why,
+            input_first_attempt=(
+                self.baseline.first_attempt if isinstance(self.baseline, Unmeasurable) else None
+            ),
+            input_at_fault=why is not None and not again_after(why),
             baseline_pending=self.baseline is None,
             profiling=self.offer is not None,
             profile_fields=() if self.offer is None else tuple(str(f) for f in self.offer.fields),

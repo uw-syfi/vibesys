@@ -42,9 +42,20 @@ lands, possibly after this turn ends.
 {% if input_failure %}
 
 The input's own trusted measurement failed: {{ input_failure_text(input_failure) }}
+{% if input_compared %}
+Its benchmark passed, so your candidate must still pass the trusted evaluation and beat the
+input's benchmark numbers to be adopted.
+{% else %}
 There is no input value for your candidate to beat. It is still measured, and it can be
-adopted once it passes the trusted evaluation and review, including when it fixes what made
-the input fail.
+adopted once it passes the trusted evaluation and review, but the run then ends "adopted
+without an input comparison", not as a plain success.
+{% endif %}
+{% if input_at_fault %}
+A candidate that fixes what made the input fail counts as well.
+{% else %}
+Nothing shows a fault in the input's code (a time limit, the evaluation machinery, or no
+output): do not spend this turn fixing the input for it.
+{% endif %}
 {% endif %}
 {% if rebase_onto %}
 

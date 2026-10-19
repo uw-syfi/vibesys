@@ -12,10 +12,10 @@ from dataclasses import dataclass, field
 from vibesys.candidates.api import STOPPED as STOPPED_TEXT
 from vibesys.candidates.api import (
     Baseline,
-    Measured,
     assessment,
     gates_of,
     improves_on,
+    input_metrics,
     measurement,
     settle_for,
     space_of,
@@ -435,13 +435,18 @@ def headline(closing: Closing) -> MetricRow | None:
 
 
 def input_headline(baseline: Baseline | None) -> MetricRow | None:
-    """The input's headline value, when it was measured."""
-    seen = baseline.reading if isinstance(baseline, Measured) else None
-    return seen.metrics[0] if seen is not None and seen.metrics else None
+    """The input's headline value: the first number of the bar a candidate must beat, if any."""
+    bar = input_metrics(baseline)
+    return bar[0] if bar else None
 
 
 def beats_input(closing: Closing, terms: TaskTerms, baseline: Baseline | None) -> bool:
-    """Whether the candidate's headline improves on the input's (an unmeasured input is beaten)."""
+    """Whether the candidate's headline improves on the input's bar (no bar is beaten).
+
+    The bar is `input_metrics`: a measured input's benchmark, or that of one that failed only
+    its accuracy check. With no bar the candidate is judged on the task's gates alone, and a
+    run that adopts it says so (`RunRecord.ending`).
+    """
     return improves_on(
         measurement(headline(closing)),
         measurement(input_headline(baseline)),

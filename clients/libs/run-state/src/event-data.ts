@@ -149,8 +149,7 @@ const EVENT_DATA_HANDLERS = {
   measurement_compared: runEventData(applyMeasurementComparedData),
   comparisons_read: runEventData(applyComparisonsReadData),
   winner_selected: runEventData(applyWinnerSelectedData),
-  // The planner is told why; frontends show it from the event log, not core state.
-  input_measurement_failed: ignoredEventData,
+  input_measurement_failed: runEventData(applyInputMeasurementFailedData),
   workstream_finished: runEventData(applyWorkstreamFinishedData),
   turn_usage_recorded: runEventData(applyTurnUsageData),
   // The run trace is its own fold (`@vibesys/run-state/trace`), not part of the run's core state.
@@ -263,6 +262,20 @@ function applyWinnerSelectedData(state: CoreState, event: RunEvent): CoreState {
       selection: data.selection,
       revision: data.revision,
       settlementId: data.settlement_id ?? null,
+    },
+  });
+}
+
+function applyInputMeasurementFailedData(state: CoreState, event: RunEvent): CoreState {
+  const data = event.data;
+  if (data?.kind !== 'input_measurement_failed') return state;
+  return cloneCoreStateWith(state, {
+    inputFailure: {
+      failure: data.failure,
+      stage: data.stage ?? null,
+      summary: data.summary ?? '',
+      attempts: data.attempts ?? 1,
+      compared: data.compared ?? false,
     },
   });
 }

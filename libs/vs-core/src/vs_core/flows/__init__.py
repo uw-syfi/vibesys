@@ -86,7 +86,7 @@ from ._state import (
     Waiting,
 )
 from ._trace import operation_span
-from ._winner import ADOPTED, INPUT, NOT_ADOPTED, EndReason, Input, Kept, NoWinner
+from ._winner import ADOPTED, INPUT, NOT_ADOPTED, EndReason, Input, Kept, NoWinner, Uncompared
 from ._workspaces import Assessment, NotOpened, NotReopened, Workspace, Workspaces
 
 __all__ = [
@@ -160,6 +160,7 @@ __all__ = [
     "TimeUp",
     "Timer",
     "Tries",
+    "Uncompared",
     "UnknownRoleError",
     "Waiting",
     "WaitingOn",

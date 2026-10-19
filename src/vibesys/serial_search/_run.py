@@ -32,6 +32,7 @@ from vs_core.api.search import (
     Settlement,
     SpanId,
     TaskTerms,
+    Uncompared,
     Value,
 )
 
@@ -333,10 +334,13 @@ class SerialRun:
                 return item.round_number, kept
         return None
 
-    def ending(self) -> NoWinner | None:
-        """None when the run ends with a winner or the trusted input standing; else why not."""
+    def ending(self) -> NoWinner | Uncompared | None:
+        """None when the run ends with a winner or the trusted input standing; else why not.
+
+        A winner never compared with the input (it failed with no bar) is ``Uncompared``.
+        """
         if self.eligible():
-            return None
+            return Uncompared() if candidates.uncompared(self.baseline) else None
         trusted = candidates.trusted(self.baseline)
         if trusted and self.failure is None:
             return None

@@ -11,9 +11,8 @@ projector and no concrete strategy ID.
 from __future__ import annotations
 
 import itertools
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
@@ -42,6 +41,9 @@ from vibesys.run.integration import LocalRunIntegration
 from vs_redaction.api import redact_diagnostic_tail
 from vs_runtime.api.testing import idle_environment_system
 from vs_sim.api.testing import ManualClock, SimThreads, examples
+
+if TYPE_CHECKING:
+    import pytest
 
 _FAILURE_TEXT_LIMIT = 4000
 
@@ -278,7 +280,6 @@ def _input_states(
     return states
 
 
-@pytest.mark.xfail(strict=True, reason="PR #3235 round 2: fixed in the next commit")
 @given(
     run=st.tuples(st.integers(0, 3), st.none() | _INPUT_FAILURES, st.integers(1, 4)),
     restart=st.integers(0, 7),

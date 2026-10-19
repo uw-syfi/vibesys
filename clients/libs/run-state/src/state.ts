@@ -128,6 +128,22 @@ export interface WinnerSelection {
 }
 
 /**
+ * Why the run's input failed its own trusted measurement, folded from the once-per-run
+ * `input_measurement_failed` (S173). `compared` says whether candidates are still compared with the
+ * input (its accuracy check failed but its benchmark passed); otherwise a candidate the run adopts
+ * is adopted without an input comparison. `attempts` is 2 when the input was measured again.
+ * `null` while the input is pending or measured.
+ */
+export interface InputMeasurementFailure {
+  readonly failure: string;
+  readonly stage: string | null;
+  /** The redacted tail of what the failed stage printed. */
+  readonly summary: string;
+  readonly attempts: number;
+  readonly compared: boolean;
+}
+
+/**
  * How a candidate's measurement compared with its base's, folded from `measurement_compared`:
  * `better`, `within_noise` or `worse` once the noise is allowed for, `inconclusive` before it can be. This is the framework's own
  * reading of whether an idea's effect held, whatever its ratio to the input says.
@@ -439,6 +455,7 @@ export interface CoreState {
   /** When the run's open capacity pause began (`quota_paused`), null while it has none. */
   readonly quotaPausedAt: string | null;
   readonly winner: WinnerSelection | null;
+  readonly inputFailure: InputMeasurementFailure | null;
   /**
    * The latest comparison with its base of each candidate commit, keyed by `candidate_commit`.
    * Folded from events, so a snapshot read does not carry it.
@@ -521,6 +538,7 @@ export function initialCoreState(): CoreState {
     quotaStops: [],
     quotaPausedAt: null,
     winner: null,
+    inputFailure: null,
     comparisons: {},
     baselines: [],
     benchmarks: [],

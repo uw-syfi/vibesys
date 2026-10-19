@@ -15,7 +15,6 @@ import dataclasses
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
-import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import TypeAdapter
@@ -27,8 +26,6 @@ from tests.vibesys.orchestration.dynamic._values import (
     settlement_of,
 )
 
-import vibesys.candidates.api as candidates_api
-import vs_core.api as core_api
 from vibesys.candidates.api import (
     Baseline,
     InputFailure,
@@ -38,6 +35,7 @@ from vibesys.candidates.api import (
     NotConfigured,
     Unmeasurable,
     trusted,
+    uncompared,
 )
 from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
 from vibesys.orchestration.dynamic.models import StrategyReason
@@ -63,7 +61,7 @@ from vibesys.orchestration.dynamic.search.api import (
     WorkstreamDone,
     WorkstreamStart,
 )
-from vs_core.api import INPUT, Kept, NoWinner, ObservationStatus
+from vs_core.api import INPUT, Kept, NoWinner, ObservationStatus, Uncompared
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
@@ -199,8 +197,8 @@ def _check(run: RunRecord, trace: Trace) -> None:
         assert leader.revision.revision_id.root in trace.eligible_candidates
     assert (leader is INPUT) == (not run.eligible_rounds())
     if run.eligible_rounds():
-        compared = run.baseline is None or not candidates_api.uncompared(run.baseline)
-        assert run.ending() == (None if compared else core_api.Uncompared())
+        compared = run.baseline is None or not uncompared(run.baseline)
+        assert run.ending() == (None if compared else Uncompared())
     snapshot = run.snapshot()
     assert RunSnapshot.model_validate_json(snapshot.model_dump_json()) == snapshot
     # resumed after a code change from what it checkpoints, the record is the same record
@@ -319,7 +317,6 @@ def play(
     return run, trace
 
 
-@pytest.mark.xfail(strict=True, reason="PR #3235 round 2: fixed in the next commit")
 @settings(max_examples=examples(pr=10, nightly=200), deadline=None, derandomize=True, database=None)
 @given(
     steps=STEPS,
@@ -340,9 +337,7 @@ INPUTS = {
     "measured": MEASURED,
     "not configured": NotConfigured(),
     "workload failed": Unmeasurable(
-        failure=InputFailure(
-            kind=InputFailureKind.BENCHMARK_FAILED, stage="benchmark", output="crashed"
-        ),
+        failure=InputFailure(kind=InputFailureKind.BENCHMARK_FAILED, output="crashed"),
         reading=InputReading(accuracy_passed=True, benchmark_passed=False),
     ),
     "no evidence": Unmeasurable(
@@ -363,7 +358,6 @@ INPUTS = {
 }
 
 
-@pytest.mark.xfail(strict=True, reason="PR #3235 round 2: fixed in the next commit")
 @settings(max_examples=examples(pr=8, nightly=100))
 @given(
     given_input=st.sampled_from(sorted(INPUTS)),
@@ -387,7 +381,7 @@ def test_a_search_ends_without_a_winner_only_when_no_candidate_stands_and_the_in
     ending = run.ending()
     if candidates:
         # a winner stands; one never compared with the input says so
-        assert ending == (core_api.Uncompared() if candidates_api.uncompared(baseline) else None)
+        assert ending == (Uncompared() if uncompared(baseline) else None)
     elif trusted(baseline) and not planner_gave_up:
         assert ending is None  # the trusted input stands
     else:

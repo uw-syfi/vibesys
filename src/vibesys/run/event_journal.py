@@ -49,3 +49,7 @@ class EventJournal(DurableEventJournal[CoreEvent]):
                 event_type, text, timestamp=utc_datetime(self._clock), data=data, **fields
             )
         )
+
+    def has_recorded(self, event_type: CoreEventType) -> bool:
+        """Whether an event of ``event_type`` was recorded, this process's or an earlier one's."""
+        return any(event.type is event_type for event in self.history())

@@ -22,6 +22,12 @@ type Outcome = NonNullable<HostRun['end']>['outcome'];
 
 const OUTCOMES: Readonly<Record<Outcome, EndLook>> = {
   adopted: {kind: 'finished', label: 'Finished', tone: 'ok'},
+  // A candidate passed the gates, but the input it should beat failed its own measurement.
+  'adopted-without-input-comparison': {
+    kind: 'finished',
+    label: 'Finished · adopted without an input comparison',
+    tone: 'warn',
+  },
   'kept-input': {kind: 'finished', label: 'Finished · kept the input', tone: 'ok'},
   'no-winner': {kind: 'finished', label: 'No winner', tone: 'neutral'},
   deadline: {kind: 'finished', label: 'Time limit reached', tone: 'warn'},

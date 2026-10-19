@@ -19,6 +19,7 @@ export interface FixtureObjective {
 /** How an ended run's record says it ended (the registry's end outcomes). */
 export const END_OUTCOMES = [
   'adopted',
+  'adopted-without-input-comparison',
   'kept-input',
   'no-winner',
   'deadline',

@@ -15,7 +15,15 @@ from vibesys.orchestration.multi.search._roles import ROLES
 from vibesys.orchestration.multi.search._round import MultiRound, play_round
 from vibesys.search_spans.api import SPANS, adoption_label
 from vibesys.serial_search.api import ROADMAP, RoundDone, open_run
-from vs_core.api.search import INPUT, Flow, NoWinner, StopRequested, TaskStopped, search
+from vs_core.api.search import (
+    INPUT,
+    Flow,
+    NoWinner,
+    StopRequested,
+    TaskStopped,
+    Uncompared,
+    search,
+)
 
 
 @search(
@@ -27,7 +35,7 @@ from vs_core.api.search import INPUT, Flow, NoWinner, StopRequested, TaskStopped
     owned=ROADMAP,
     spans=SPANS,
 )
-async def multi(ctx: Flow, given: MultiConfig | MultiResume) -> NoWinner | None:
+async def multi(ctx: Flow, given: MultiConfig | MultiResume) -> NoWinner | Uncompared | None:
     """Measure the input, play the rounds in order within budget, name the best reviewed candidate."""
     resumed = isinstance(given, MultiResume)
     config = given.config if resumed else given

@@ -48,6 +48,7 @@ export {
   type ExecutionTodos,
   hasRunEnded,
   initialCoreState,
+  type InputMeasurementFailure,
   type MeasurementComparison,
   type ProviderSwitch,
   type QuotaPause,

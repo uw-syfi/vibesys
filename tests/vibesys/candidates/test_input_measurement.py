@@ -9,7 +9,6 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import TypeAdapter, ValidationError
 
-import vibesys.candidates.api as candidates
 from vibesys.candidates.api import (
     Baseline,
     InputFailure,
@@ -18,11 +17,14 @@ from vibesys.candidates.api import (
     Measured,
     NotConfigured,
     Unmeasurable,
+    again_after,
     failure,
     input_from_readings,
+    input_metrics,
     input_value,
     reading,
     trusted,
+    uncompared,
 )
 from vibesys.metrics import EvidenceReading, MetricRow
 from vs_core.api import (
@@ -143,7 +145,6 @@ _PRE_S173_ACCURACY_FAILED = (
 )
 
 
-@pytest.mark.xfail(strict=True, reason="PR #3235 round 2: fixed in the next commit")
 def test_a_failed_benchmark_checkpointed_before_s173_still_loads() -> None:
     """A checkpoint with ``benchmark-failed`` and no stage resumes on this build (F1)."""
     found = TypeAdapter(Baseline).validate_json(_PRE_S173_BENCHMARK_FAILED)
@@ -155,7 +156,6 @@ def test_a_failed_benchmark_checkpointed_before_s173_still_loads() -> None:
     assert not trusted(found)
 
 
-@pytest.mark.xfail(strict=True, reason="PR #3235 round 2: fixed in the next commit")
 def test_a_failed_accuracy_check_checkpointed_before_s173_loads_as_the_failure_it_was() -> None:
     """The old ``measured`` shape reads as ``accuracy-failed`` everywhere, its bar kept (F4)."""
     found = TypeAdapter(Baseline).validate_json(_PRE_S173_ACCURACY_FAILED)
@@ -165,10 +165,9 @@ def test_a_failed_accuracy_check_checkpointed_before_s173_loads_as_the_failure_i
     assert found.failure.stage == "accuracy"
     assert not trusted(found)
     assert input_value(found) == 100.0  # its benchmark passed, so it stays the bar
-    assert not candidates.uncompared(found)
+    assert not uncompared(found)
 
 
-@pytest.mark.xfail(strict=True, reason="PR #3235 round 2: fixed in the next commit")
 @settings(max_examples=examples(pr=8, nightly=100))
 @given(accuracy_passed=st.none() | st.booleans(), benchmark_passed=st.none() | st.booleans())
 def test_every_measured_record_an_earlier_version_wrote_reads_as_one_shape(
@@ -187,7 +186,6 @@ def test_every_measured_record_an_earlier_version_wrote_reads_as_one_shape(
     assert again == found  # the migrated shape is stable
 
 
-@pytest.mark.xfail(strict=True, reason="PR #3235 round 2: fixed in the next commit")
 def test_a_measured_input_that_failed_its_accuracy_check_cannot_be_made() -> None:
     with pytest.raises(ValidationError):
         Measured(reading=InputReading(accuracy_passed=False))
@@ -196,7 +194,6 @@ def test_a_measured_input_that_failed_its_accuracy_check_cannot_be_made() -> Non
 _ROWS = (MetricRow(name="throughput", value=100.0, unit="tok/s", direction="max"),)
 
 
-@pytest.mark.xfail(strict=True, reason="PR #3235 round 2: fixed in the next commit")
 @settings(max_examples=examples(pr=10, nightly=100))
 @given(
     kind=st.sampled_from(list(InputFailureKind)),
@@ -224,13 +221,13 @@ def test_a_failed_input_keeps_a_bar_only_when_just_its_accuracy_check_failed(
     )
 
     kept = kind is InputFailureKind.ACCURACY_FAILED and benchmark_passed is True and has_metrics
-    assert candidates.input_metrics(found) == (_ROWS if kept else ())
-    assert candidates.uncompared(found) is not kept
-    assert candidates.input_metrics(
-        Measured(reading=seen.model_copy(update={"accuracy_passed": True}))
-    ) == (seen.metrics)
-    assert not candidates.uncompared(NotConfigured())
-    assert not candidates.uncompared(None)
+    assert input_metrics(found) == (_ROWS if kept else ())
+    assert uncompared(found) is not kept
+    assert input_metrics(Measured(reading=seen.model_copy(update={"accuracy_passed": True}))) == (
+        seen.metrics
+    )
+    assert not uncompared(NotConfigured())
+    assert not uncompared(None)
 
 
 _ANY_FAILURE = st.one_of(
@@ -262,7 +259,6 @@ _ANY_FAILURE = st.one_of(
 )
 
 
-@pytest.mark.xfail(strict=True, reason="PR #3235 round 2: fixed in the next commit")
 @settings(max_examples=examples(pr=20, nightly=200))
 @given(why=_ANY_FAILURE)
 def test_the_input_is_measured_again_only_when_its_failure_shows_no_fault_of_it(
@@ -279,7 +275,7 @@ def test_the_input_is_measured_again_only_when_its_failure_shows_no_fault_of_it(
         )
         or (stage_failed and (unblamed or not why.output.strip()))
     )
-    assert candidates.again_after(why) is expected
+    assert again_after(why) is expected
 
 
 @settings(max_examples=examples(pr=8, nightly=100))

@@ -39,7 +39,7 @@ from ._resource import kit_of
 from ._roles import Role, with_models
 from ._run import Wiring, _Run
 from ._state import FlowState, Step, Waiting, digest, key, recorded
-from ._winner import NoWinner, conclude
+from ._winner import NoWinner, Uncompared, conclude
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Mapping
@@ -55,7 +55,7 @@ if TYPE_CHECKING:
     from ._spans import RunTrace
     from ._state import LiveFlows
 
-type Root[C] = Callable[[Flow, C], Coroutine[Any, Any, NoWinner | None]]
+type Root[C] = Callable[[Flow, C], Coroutine[Any, Any, NoWinner | Uncompared | None]]
 
 _CAPABILITIES = frozenset({"park", "interrupt", "steer", "suspend", "profile-capture"})
 

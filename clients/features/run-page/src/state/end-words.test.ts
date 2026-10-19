@@ -13,6 +13,7 @@ type Outcome = NonNullable<RunEnd>['outcome'];
 
 const OUTCOMES: readonly Outcome[] = [
   'adopted',
+  'adopted-without-input-comparison',
   'kept-input',
   'no-winner',
   'adoption-failed',
@@ -25,6 +26,7 @@ const OUTCOMES: readonly Outcome[] = [
 /** Core's own account of an ending: its code and what it was about, in its terms. */
 const CORE_REASONS = [
   'adopted: settlement:000002/settle.1',
+  'adopted-without-input-comparison: settlement:000002/settle.1',
   'kept-input: the input',
   'stopped: kept-input: the input',
   'no-winner: every round failed',

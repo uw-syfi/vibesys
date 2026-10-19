@@ -119,6 +119,8 @@ export function endReason(
   switch (outcome) {
     case 'adopted':
       return adoptedWords(adopted, direction);
+    case 'adopted-without-input-comparison':
+      return 'A candidate was adopted without an input comparison: the input failed its own measurement, so nothing shows the candidate beats it.';
     case 'kept-input':
       return INPUT_STANDS;
     case 'no-winner':

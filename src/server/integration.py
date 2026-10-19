@@ -20,6 +20,7 @@ from server.events import (
     EventType,
     FrameworkSource,
     FrameworkWarningData,
+    InputMeasurementFailedData,
     InvocationFinishedData,
     PhaseData,
     RunEvent,
@@ -166,6 +167,31 @@ def _framework_warning_diagnostic(data: FrameworkWarningData) -> Diagnostic:
     )
 
 
+def _input_measurement_diagnostic(data: InputMeasurementFailedData) -> Diagnostic:
+    """Lift a failed input measurement into the run-scoped diagnostic surface (S173).
+
+    The run goes on, so this is an error, not a fatal one. The summary states the facts the
+    event carries: how it failed, where, how often it was measured, and what candidates are
+    judged against now; the detail is the redacted tail of what the failed stage printed.
+    """
+    where = f", stage {data.stage}" if data.stage else ""
+    twice = "; measured twice" if data.attempts > 1 else ""
+    judged = (
+        "candidates must still beat its benchmark"
+        if data.compared
+        else "a candidate adopted now is adopted without an input comparison"
+    )
+    return Diagnostic(
+        code="input_measurement_failed",
+        summary=f"The input's trusted measurement failed ({data.failure.value}{where}{twice}); "
+        f"{judged}",
+        detail=data.summary or None,
+        scope=DiagnosticScope.RUN,
+        severity=DiagnosticSeverity.ERROR,
+        source=FrameworkSource.LOOP.value,
+    )
+
+
 def _core_failure_diagnostic(
     event_type: EventType, text: str, data: EventData | None
 ) -> Diagnostic:
@@ -203,6 +229,8 @@ def _core_event_diagnostic(
     """Return the diagnostic a projected core event must carry, if any."""
     if isinstance(data, FrameworkWarningData):
         return _framework_warning_diagnostic(data)
+    if isinstance(data, InputMeasurementFailedData):
+        return _input_measurement_diagnostic(data)
     if event_type in _CORE_FAILURE_CONTEXTS and status is EventStatus.FAILED:
         return _core_failure_diagnostic(event_type, text, data)
     return None

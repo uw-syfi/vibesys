@@ -60,7 +60,15 @@ from vibesys.orchestration.dynamic.search._run_state import (
 from vibesys.orchestration.dynamic.search._spans import BuildsOn
 from vibesys.orchestration.dynamic.search._workstream import workstream
 from vibesys.search_spans.api import SPANS
-from vs_core.api.search import Flow, Group, NoWinner, StopRequested, TaskStopped, search
+from vs_core.api.search import (
+    Flow,
+    Group,
+    NoWinner,
+    StopRequested,
+    TaskStopped,
+    Uncompared,
+    search,
+)
 
 
 @search(
@@ -72,7 +80,7 @@ from vs_core.api.search import Flow, Group, NoWinner, StopRequested, TaskStopped
     owned=(HANDOFF,),
     spans=SPANS,
 )
-async def dynamic(ctx: Flow, given: DynamicConfig | DynamicResume) -> NoWinner | None:
+async def dynamic(ctx: Flow, given: DynamicConfig | DynamicResume) -> NoWinner | Uncompared | None:
     """Measure the input while planning, run workstreams in the free slots, name the best."""
     base, terms = ctx.facts.baseline, ctx.task.terms
     if isinstance(given, DynamicResume):

@@ -17,6 +17,7 @@ from vibesys.candidates._input import (
     Measured,
     NotConfigured,
     Unmeasurable,
+    again_after,
     decode_input,
     failure,
     input_from_readings,
@@ -26,6 +27,8 @@ from vibesys.candidates._input import (
     measure_input,
     reading,
     trusted,
+    uncompared,
+    with_first_attempt,
 )
 from vibesys.candidates._review import ReviewEvaluation, review_evaluations
 from vibesys.candidates._run import EligibleRound, Winner, choose_winner, ending_reason
@@ -74,6 +77,7 @@ __all__ = [
     "Unmeasurable",
     "Unranked",
     "Winner",
+    "again_after",
     "assessment",
     "best_by",
     "choose_winner",
@@ -99,5 +103,7 @@ __all__ = [
     "trusted",
     "turn_chain",
     "turned_down",
+    "uncompared",
+    "with_first_attempt",
     "workspace_mode_for",
 ]

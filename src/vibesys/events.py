@@ -839,18 +839,23 @@ class InputMeasurementFailureKind(StrEnum):
 
 
 class InputMeasurementFailedData(EventPayload):
-    """The run's input revision failed its trusted measurement, so it has no baseline.
+    """The run's input revision failed its trusted measurement, so it has no trusted baseline.
 
     ``failure`` says how, ``stage`` names the gate stage whose reading failed (None when no
-    stage reading did), and ``summary`` is the redacted tail of what that stage printed. Emitted
-    once, when core first commits the failure; the run goes on, and candidates are judged on
-    the task's gates alone, with no input value to beat.
+    stage reading did), and ``summary`` is the redacted tail of what that stage printed.
+    ``attempts`` is 2 when the first failure showed no fault of the input and it was measured
+    again. ``compared`` is whether candidates are still compared with the input: its accuracy
+    check failed but its benchmark passed, so its numbers stay the bar. Otherwise candidates are
+    judged on the task's gates alone, and a run that adopts one ends "adopted without an input
+    comparison". Emitted once per run, when core first commits the failure; the run goes on.
     """
 
     kind: Literal["input_measurement_failed"] = "input_measurement_failed"
     failure: InputMeasurementFailureKind
     stage: str | None = None
     summary: str = ""
+    attempts: int = Field(default=1, ge=1)
+    compared: bool = False
 
 
 class MeasurementComparedData(EventPayload):

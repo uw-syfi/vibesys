@@ -14,7 +14,15 @@ from vibesys.orchestration.single.search._roles import ROLES
 from vibesys.orchestration.single.search._round import SingleRound, play_round
 from vibesys.search_spans.api import SPANS, adoption_label
 from vibesys.serial_search.api import ROADMAP, RoundDone, open_run
-from vs_core.api.search import INPUT, Flow, NoWinner, StopRequested, TaskStopped, search
+from vs_core.api.search import (
+    INPUT,
+    Flow,
+    NoWinner,
+    StopRequested,
+    TaskStopped,
+    Uncompared,
+    search,
+)
 
 
 @search(
@@ -26,7 +34,7 @@ from vs_core.api.search import INPUT, Flow, NoWinner, StopRequested, TaskStopped
     owned=ROADMAP,
     spans=SPANS,
 )
-async def single(ctx: Flow, given: SingleConfig | SingleResume) -> NoWinner | None:
+async def single(ctx: Flow, given: SingleConfig | SingleResume) -> NoWinner | Uncompared | None:
     """Measure the input, play the rounds in order within budget, name the best candidate."""
     resumed = isinstance(given, SingleResume)
     config = given.config if resumed else given

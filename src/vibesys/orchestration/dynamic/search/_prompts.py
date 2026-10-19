@@ -242,7 +242,14 @@ class _Planning(RolePromptContext):
     history: tuple[WorkstreamHistoryRow, ...] = ()
     older_ids: tuple[str, ...] = ()
     baseline: tuple[MetricRow, ...] = ()
+    """The bar a candidate must beat (`input_metrics`); empty when there is none."""
     input_failure: InputFailure | None = None
+    input_first_attempt: InputFailure | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    """Why the input's first measurement failed, when it was measured again."""
+    input_at_fault: bool = Field(default=False, exclude_if=lambda value: not value)
+    """The input's failure shows a fault of its own code, so fixing it is worth planning."""
     baseline_pending: bool = False
     """The input is still being measured: what is scheduled now starts when its reading lands."""
     profiling: bool = False
@@ -299,6 +306,10 @@ class ImplementPrompt(RolePromptContext):
     """The input's own measurement had not landed when the turn was asked."""
     input_failure: InputFailure | None = None
     """Why the input's own measurement failed, when it had when the turn was asked."""
+    input_at_fault: bool = Field(default=False, exclude_if=lambda value: not value)
+    """The input's failure shows a fault of its own code (see the planner's field)."""
+    input_compared: bool = Field(default=False, exclude_if=lambda value: not value)
+    """The input failed yet still has a bar the candidate must beat (its benchmark passed)."""
     rebase_onto: RevisionRef | None = None
     """The run's main, when it advanced past this hypothesis's work: rebase onto it first."""
     reply_rejected: tuple[StrayUnapplied, ...] = ()

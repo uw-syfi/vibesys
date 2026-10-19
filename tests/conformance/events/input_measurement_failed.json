@@ -4,5 +4,22 @@
   "sequence": 47,
   "run_id": "run-conformance",
   "timestamp": "2026-01-01T00:00:00Z",
-  "text": "the input failed its trusted accuracy check"
+  "status": "failed",
+  "text": "the input failed its trusted accuracy check",
+  "diagnostic": {
+    "code": "input_measurement_failed",
+    "summary": "The input's trusted measurement failed (accuracy-failed, stage correctness; measured twice); a candidate adopted now is adopted without an input comparison",
+    "detail": "accuracy stage exceeded its 1200 s limit with no output",
+    "scope": "run",
+    "severity": "error",
+    "source": "loop"
+  },
+  "data": {
+    "kind": "input_measurement_failed",
+    "failure": "accuracy-failed",
+    "stage": "correctness",
+    "summary": "accuracy stage exceeded its 1200 s limit with no output",
+    "attempts": 2,
+    "compared": false
+  }
 }
