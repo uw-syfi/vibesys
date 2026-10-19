@@ -105,16 +105,59 @@ def _waited_on(state: core.CoreState, identity: core.RequestId) -> core.CoreStat
     return state.model_copy(update={"evaluation": evaluation.model_copy(update={"jobs": jobs})})
 
 
+def _with_records(state: core.CoreState, records: list[core.RequestRecord]) -> core.CoreState:
+    return state.model_copy(
+        update={"records": state.records.model_copy(update={"records": tuple(records)})}
+    )
+
+
+def _targeted(state: core.CoreState, identity: core.RequestId) -> core.CoreState:
+    """``state`` with its first non-poll request replaced by an inspection of ``identity``."""
+    records = list(state.records.records)
+    index = next(
+        i for i, r in enumerate(records) if not isinstance(r.request, core.ObserveOwnedJob)
+    )
+    request = records[index].request
+    inspection = core.InspectRequest(
+        request_id=request.request_id, scope=request.scope, target=identity
+    )
+    records[index] = records[index].model_copy(update={"request": inspection})
+    return _with_records(state, records)
+
+
+def _checked(state: core.CoreState, identity: core.RequestId) -> core.CoreState:
+    """``state`` with an unresolved recovery check whose target is ``identity``."""
+    recovery = state.records.recovery
+    check = core.RecoveryCheck(target=identity, resolution="safe-prepared", wait=None)
+    recovery = recovery.model_copy(update={"checks": (*recovery.checks, check)})
+    return state.model_copy(
+        update={"records": state.records.model_copy(update={"recovery": recovery})}
+    )
+
+
+def _addressed(state: core.CoreState, identity: core.RequestId) -> core.CoreState:
+    """``state`` with the poll ``identity`` addressed by its first non-poll request."""
+    records = list(state.records.records)
+    other = next(r.request_id for r in records if not isinstance(r.request, core.ObserveOwnedJob))
+    index = next(i for i, r in enumerate(records) if r.request_id == identity)
+    records[index] = records[index].model_copy(update={"addressed_by": (other,)})
+    return _with_records(state, records)
+
+
 _PINS: dict[str, Callable[[core.CoreState, core.RequestId], core.CoreState]] = {
+    "addressed_by": _addressed,
     "depends_on": _depended_on,
+    "recovery_check": _checked,
+    "target": _targeted,
     "wait": _waited_on,
 }
 
 
 @pytest.mark.parametrize("pin", sorted(_PINS))
 def test_a_spent_poll_that_the_state_still_names_is_kept(pin: str) -> None:
-    """No request today depends on a poll and no wait names a superseded one; if one ever
-    does, pruning the poll would leave it naming nothing, so compaction keeps such a poll."""
+    """No request today depends on, targets or addresses a superseded poll, no wait names
+    one, and no recovery check that still matters checks one; if one ever does, pruning the
+    poll would leave it naming nothing, so compaction keeps such a poll."""
     unpruned = _ledger_after(_POLLS, pruned=False).core
     kept = {record.request_id for record in core.compact_ledger(unpruned).records.records}
     spent = [r.request_id for r in unpruned.records.records if r.request_id not in kept]
