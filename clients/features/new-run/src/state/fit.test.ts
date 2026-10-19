@@ -61,7 +61,9 @@ describe('whether a machine has the hardware a task targets', () => {
   test('nothing is claimed when either side is not known', () => {
     expect(fitOf(null, machine('cuda', 2), 'host-a', SAME).kind).toBe('unknown');
     expect(fitOf(TWO_H100, null, 'host-a', SAME).kind).toBe('unknown');
-    expect(fitOf({...TWO_H100, backend: null}, machine('cuda', 2), 'host-a', SAME).kind).toBe('unknown');
+    expect(fitOf({...TWO_H100, backend: null}, machine('cuda', 2), 'host-a', SAME).kind).toBe(
+      'unknown',
+    );
   });
 });
 
