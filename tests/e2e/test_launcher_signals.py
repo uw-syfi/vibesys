@@ -30,7 +30,12 @@ import pytest
 from entrypoints.launcher import call_child
 from entrypoints.launcher import main as launcher_main
 from vibesys.api import boot_trace
-from vs_sim.api import InheritedStdioLauncher, LoopSignalSource
+from vs_sim.api import (
+    LAUNCHER_LIFELINE_ENV,
+    InheritedStdioLauncher,
+    LoopSignalSource,
+    follow_launcher,
+)
 from vs_sim.api.testing import HANG_GUARD_S, join_or_fail, run_in_child
 
 if TYPE_CHECKING:
@@ -406,7 +411,7 @@ class _EngineLines:
 
 
 def _following_launcher(
-    base: Path, *, terminal: int | None
+    base: Path, *, terminal: int | None, engine: str = _FOLLOWING_ENGINE
 ) -> tuple[subprocess.Popen[bytes], dict[str, str]]:
     """Start the real launcher, as a session of its own, over the following engine.
 
@@ -414,7 +419,7 @@ def _following_launcher(
     terminal and its standard streams, and so is the terminal's foreground process group.
     """
     environment = _write_engine(base)
-    (base / "fake" / "entrypoints" / "headless.py").write_text(_FOLLOWING_ENGINE, encoding="utf-8")
+    (base / "fake" / "entrypoints" / "headless.py").write_text(engine, encoding="utf-8")
     script = _launcher_script(base / "stub")
     if terminal is not None:
         script = "import fcntl, termios\nfcntl.ioctl(0, termios.TIOCSCTTY, 0)\n" + script
@@ -493,3 +498,130 @@ def test_an_engine_writes_its_terminal_under_stty_tostop(tmp_path: Path) -> None
         lines.close()
         _end(launcher, engine_pid)
         os.close(leader)
+
+
+# A command that turns off its terminal's echo, as ssh does to read a password or a 2FA
+# code from ``/dev/tty``; it reports whether it could reach a terminal at all.
+_ECHO_OFF = """
+import os, termios
+try:
+    tty = os.open("/dev/tty", os.O_RDWR)
+except OSError:
+    print("no-terminal")
+else:
+    attributes = termios.tcgetattr(tty)
+    attributes[3] &= ~termios.ECHO
+    termios.tcsetattr(tty, termios.TCSANOW, attributes)
+    print("echo-off")
+"""
+
+# A following engine that runs ``_ECHO_OFF`` as a run's own command (``OsProcesses``, as
+# the Slurm transport runs ssh) and reports how it ended.
+_PROMPTING_ENGINE = f"""
+import os, signal, sys
+handled = {{signal.SIGINT, signal.SIGTERM, signal.SIGHUP}}
+signal.pthread_sigmask(signal.SIG_BLOCK, handled)
+events = open(os.environ["ENGINE_EVENTS"], "w", buffering=1)
+from vs_sim.api import DISCARD, OsProcesses, ProcessOutcome, ProcessSpec, follow_launcher
+follow_launcher(os.environ)
+events.write(f"ready {{os.getpid()}}\\n")
+run = OsProcesses().run(
+    ProcessSpec(argv=(sys.executable, "-c", {_ECHO_OFF!r})), timeout={HANG_GUARD_S / 2}, output=DISCARD
+)
+ended = run.stdout.decode().strip() if isinstance(run, ProcessOutcome) else type(run).__name__
+events.write(f"command {{ended}}\\n")
+events.write(f"signal {{signal.sigwait(handled)}}\\n")
+sys.exit(7)
+"""
+
+
+@pytest.mark.regression
+@pytest.mark.xfail(strict=True, reason="PR #3209 follow-up: a run's command can turn echo off")
+def test_no_command_a_run_starts_can_turn_its_terminals_echo_off(tmp_path: Path) -> None:
+    """PR #3209 recheck LOW-2: an ssh prompt left the operator's terminal with echo off.
+
+    The run child ignored SIGTTOU (for ``stty tostop``) and its commands inherited that, so
+    a command that opened ``/dev/tty`` to prompt (ssh asking for a password or a 2FA code)
+    could turn echo off from the background, then stop at its read. No command a run
+    starts may reach the operator's terminal: it fails to open one, and echo stays on.
+    """
+    leader, follower = os.openpty()
+    launcher, environment = _following_launcher(
+        tmp_path, terminal=follower, engine=_PROMPTING_ENGINE
+    )
+    os.close(follower)
+    engine_pid: int | None = None
+    lines = _EngineLines(Path(environment["ENGINE_EVENTS"]))
+    try:
+        ready = lines.next_line()
+        assert ready.startswith("ready ")
+        engine_pid = int(ready.split()[1])
+        assert lines.next_line() == "command no-terminal"
+        assert termios.tcgetattr(leader)[3] & termios.ECHO
+        os.killpg(launcher.pid, signal.SIGINT)
+        assert lines.next_line() == f"signal {int(signal.SIGINT)}"
+        assert launcher.wait(timeout=HANG_GUARD_S) == _ENGINE_STATUS
+    finally:
+        lines.close()
+        _end(launcher, engine_pid)
+        os.close(leader)
+
+
+def _lifeline_reaches_a_grandchild() -> tuple[int, bool]:
+    """Follow a lifeline, then start a command that inherits every inheritable descriptor.
+
+    Call through ``run_in_child``: it blocks SIGHUP and hangs this process up. Returns the
+    command's status (0: it held the lifeline) and whether this process then hung up.
+    """
+    signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGHUP})
+    read, held = os.pipe()
+    # ``dup2`` leaves its copy inheritable, as ``pass_fds`` leaves it in a launched child.
+    given = os.dup2(read, read + 16)
+    os.close(read)
+    follow_launcher({LAUNCHER_LIFELINE_ENV: str(given)})
+    # lint-waiver: LW-191001 [S603]; the test runs a fixed probe of its own descriptors.
+    # > A Fake launcher cannot show what a real exec inherits, which is the property here.
+    probe = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", f"import os; os.fstat({given})"],
+        close_fds=False,
+        capture_output=True,
+        check=False,
+        timeout=HANG_GUARD_S,
+    )
+    os.close(held)
+    return probe.returncode, signal.sigtimedwait({signal.SIGHUP}, HANG_GUARD_S) is not None
+
+
+@pytest.mark.regression
+@pytest.mark.xfail(strict=True, reason="PR #3209 follow-up: the lifeline is inheritable")
+def test_no_command_the_run_starts_inherits_its_lifeline() -> None:
+    """PR #3209 recheck LOW-1: a command started with ``close_fds=False`` held the lifeline.
+
+    Only the launcher holds the write end, so a leaked read end never delays the hang-up,
+    but a long-lived command kept a descriptor that is not its own.
+    """
+    status, hung_up = run_in_child(_lifeline_reaches_a_grandchild, timeout_s=3 * HANG_GUARD_S)
+
+    assert status != 0
+    assert hung_up
+
+
+def _hang_up_with_a_closed_lifeline() -> bool:
+    """Follow a lifeline that was closed before its watcher could close it; whether it hung up."""
+    signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGHUP})
+    given, held = os.pipe()
+    os.close(given)
+    os.close(held)
+    follow_launcher({LAUNCHER_LIFELINE_ENV: str(given)})
+    return signal.sigtimedwait({signal.SIGHUP}, HANG_GUARD_S) is not None
+
+
+@pytest.mark.regression
+@pytest.mark.xfail(strict=True, reason="PR #3209 follow-up: a closed lifeline never hangs up")
+def test_a_lifeline_closed_before_its_end_still_hangs_up() -> None:
+    """PR #3209 recheck LOW-3: closing an already closed lifeline raised before the SIGHUP.
+
+    Whatever ends the watcher's read, end-of-file or a descriptor gone bad, the process
+    hangs up: it can no longer tell that its launcher lives.
+    """
+    assert run_in_child(_hang_up_with_a_closed_lifeline, timeout_s=3 * HANG_GUARD_S)
