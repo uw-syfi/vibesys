@@ -827,7 +827,8 @@ class FakeAgentClient:
                     self._raise_scripted(kind)
                 except AgentQuotaError as error:
                     gate = self._capacity_gate
-                    if gate is None:
+                    if gate is None or stops.cancelled:
+                        # As the real client: a cancelled turn is not waited for.
                         raise
                     stops.count += 1
                     request = AgentTurnRequest(
