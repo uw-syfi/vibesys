@@ -187,6 +187,15 @@ _COLLECTION_RETRY_SECONDS = 120.0
 # sweep after the run's lease lapsed); past this, it fails.
 _LEDGER_RESUBMITS = 3
 
+CLOSE_RELEASE_BOUND_S = 30.0
+"""How long a close keeps starting cluster calls to release its jobs, in seconds.
+
+A healthy controller cancels every job well within it. Past it, the close starts no
+further release and detaches what is left, as a run that keeps its jobs on a stop does:
+each job's record stays resumable, its ledger lease lapses, and the next run that opens
+the ledger reconciles it. A call already running then ends within its transport limit,
+so a close takes at most this plus one transport call."""
+
 
 class SlurmTargetLifecycle(StrEnum):
     """Whether a stage uses the batch's shared service."""
@@ -850,7 +859,8 @@ class SlurmEvaluationExecutor:
         With the evaluation ledger, a cancel withdraws a request no other run wants
         (``_release``). When the ledger keeps jobs on a stop, closing detaches
         instead: every job keeps running, its record keeps it resumable, and its
-        lease lapses.
+        lease lapses. A release still going after ``CLOSE_RELEASE_BOUND_S`` (a
+        controller that does not answer) is given up the same way.
         """
         self._closing = True
         if self._ledger is not None and self._ledger.ledger.policy.keep_jobs_on_stop:
@@ -860,15 +870,49 @@ class SlurmEvaluationExecutor:
         active = tuple(handle_id for handle_id, task in self._tasks.items() if not task.done())
         # A cancel whose job is still tearing down returns with the evaluation
         # CANCELING; the durable record keeps the job for a later reconcile.
-        results = await asyncio.gather(
-            *(self.cancel(handle_id) for handle_id in active), return_exceptions=True
-        )
+        errors = await self._release_within_bound(active)
         # A cancel of an evaluation that already ended durably returns without touching
         # its task, so a task still waiting for admission would outlive the executor.
         await self._drain()
-        for result in results:
-            if isinstance(result, BaseException):
-                raise result
+        for error in errors:
+            if error is not None:
+                raise error
+
+    async def _release_within_bound(
+        self, active: tuple[str, ...]
+    ) -> tuple[BaseException | None, ...]:
+        """Cancel every ``active`` evaluation; past the bound, detach instead (``close``).
+
+        Returns each cancel's error, or None; a release given up reports none.
+        """
+        releasing = asyncio.gather(
+            *(self.cancel(handle_id) for handle_id in active), return_exceptions=True
+        )
+        bound = asyncio.ensure_future(self._sleeper.sleep(CLOSE_RELEASE_BOUND_S))
+        try:
+            await asyncio.wait({releasing, bound}, return_when=asyncio.FIRST_COMPLETED)
+        except BaseException:
+            # The close itself was cancelled: so is its release, as an awaited one would be.
+            releasing.cancel()
+            await asyncio.gather(releasing, return_exceptions=True)
+            raise
+        finally:
+            bound.cancel()
+            await asyncio.gather(bound, return_exceptions=True)
+        if releasing.done():
+            return tuple(
+                result if isinstance(result, BaseException) else None
+                for result in releasing.result()
+            )
+        _LOG.warning(
+            "the cluster did not release this run's jobs within %.0f s; leaving them "
+            "for the next run to reconcile",
+            CLOSE_RELEASE_BOUND_S,
+        )
+        self._detaching = True
+        releasing.cancel()
+        await asyncio.gather(releasing, return_exceptions=True)
+        return ()
 
     async def _drain(self) -> None:
         """Cancel every background task and wait for the cluster calls they left running."""

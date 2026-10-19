@@ -34,6 +34,7 @@ from vs_evaluation.api import (
 )
 from vs_evaluation.api.testing import wait_until_executor_started
 from vs_sandbox.api.slurm import (
+    CLOSE_RELEASE_BOUND_S,
     AttachPending,
     SharedSlurmAdmission,
     SlurmEvaluationExecutor,
@@ -893,7 +894,6 @@ class _TimerSleeper(_ParkingSleeper):
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="periodic-1330 LOW-6: a close's release is unbounded")
 async def test_a_close_on_a_sick_controller_gives_up_releasing_and_detaches(
     tmp_path: Path,
 ) -> None:
@@ -916,8 +916,8 @@ async def test_a_close_on_a_sick_controller_gives_up_releasing_and_detaches(
     await asyncio.wait_for(run.executor.close(), timeout=_BOUND_S)
 
     # The scancel running when the bound passed ends; none starts after it.
-    assert world.scheduler.cancels <= 2
-    assert world.clock.now() - began <= 2 * CONFIG.transport_timeout_seconds
+    assert world.scheduler.cancels <= 1 + CLOSE_RELEASE_BOUND_S // CONFIG.transport_timeout_seconds
+    assert world.clock.now() - began <= CLOSE_RELEASE_BOUND_S + CONFIG.transport_timeout_seconds
     assert world.scheduler.status(operation) is SlurmJobStatus.PENDING
     world.scheduler.failing_cancels = 0
     restarted = world.run(tmp_path / "run-1", "run-1")
