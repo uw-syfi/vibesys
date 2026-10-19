@@ -1277,10 +1277,13 @@ class CoreRuntime[S: StrategyState]:
         now_at: float,
         max_concurrent: int,
         cap: int | None,
+        upkeep: Callable[[], None],
     ) -> ExecutorRefusal | None:
         """Start eligible requests while a slot is free; returns a refusal if one hit.
 
-        Cancellations start whether or not a slot is free.
+        Cancellations start whether or not a slot is free. Each start commits, so ``upkeep``
+        runs after each one, as between the steps of ``settle``; when it queues an input (a
+        renewal for core) this returns, for ``settle`` to commit the input before the next start.
         """
         if max_concurrent < 1:
             message = "max_concurrent must be at least 1"
@@ -1294,6 +1297,9 @@ class CoreRuntime[S: StrategyState]:
             if began is None:
                 return None
             self._flights.append(began)
+            upkeep()
+            if self._queue:
+                return None
 
     @staticmethod
     def _idle_result(
@@ -1393,7 +1399,7 @@ class CoreRuntime[S: StrategyState]:
         a cycle that keeps issuing requests raises ``DispatchCapExceededError`` naming the
         kinds seen, so a spinning run fails loudly instead of hanging.
 
-        ``upkeep`` runs after every step that committed. Each commit rewrites the whole record
+        ``upkeep`` runs after every step that committed, each start included. Each commit rewrites the whole record
         on the loop's thread, at a cost that grows with the run, and nothing here need suspend
         (a delivery may not), so a long queue committed back to back can hold the loop for
         longer than the lease while the heartbeat task cannot run: the caller renews it there
@@ -1408,7 +1414,9 @@ class CoreRuntime[S: StrategyState]:
                     continue
                 if refusal is None:
                     budget = None if max_dispatches is None else max_dispatches + entered
-                    refusal = self._start_available(now_at, max_concurrent, budget)
+                    refusal = self._start_available(now_at, max_concurrent, budget, upkeep)
+                    if self._queue:
+                        continue
                 if self._publication_failure is None:
                     published, self._publication_failure = await self._try_publish(delivery, now_at)
                     if published or self._publication_failure is not None:

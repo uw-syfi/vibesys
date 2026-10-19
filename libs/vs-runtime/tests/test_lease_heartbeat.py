@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -214,10 +213,6 @@ def _answer_each(request: object, core: object) -> Succeeded:
 _WIDTH = 8
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="the starts of one settle commit back to back with no lease upkeep between them",
-)
 @settings(max_examples=examples(pr=3, nightly=20), deadline=None, derandomize=True, database=None)
 @given(cost=st.floats(min_value=LEASE / 5, max_value=LEASE / 4))
 def test_a_burst_of_slow_dispatch_commits_does_not_starve_the_lease(cost: float) -> None:
