@@ -17,7 +17,7 @@ async function reviewTheStack(
 ): Promise<void> {
   const newRun = SEED.newRun;
   if (newRun === undefined) throw new Error('the seed has no New run helper');
-  await open(page, {
+  const seed = {
     ...SEED,
     newRun: {
       ...newRun,
@@ -31,7 +31,8 @@ async function reviewTheStack(
         'example_destination',
       ],
     },
-  });
+  };
+  await open(page, seed);
   await choose(page, 'Start from', 'An example');
   await proceed(page);
   await choose(page, 'Domain', 'Data structures');

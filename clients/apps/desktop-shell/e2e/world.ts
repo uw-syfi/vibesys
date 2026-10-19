@@ -9,6 +9,7 @@ import {
   type FakeBridgeSeed,
   type FakeNewRun,
   installFakeBridge,
+  installFakeExampleDestination,
   installFakeMachineSettings,
   installFakeMachines,
   installFakeNewRun,
@@ -127,6 +128,7 @@ export async function open(page: Page, seed: FakeBridgeSeed = SEED): Promise<voi
   await page.addInitScript(installFakeMachineSettings, seed);
   await page.addInitScript(installFakeNewRun, seed);
   await page.addInitScript(installFakeProjectRuns, seed);
+  await page.addInitScript(installFakeExampleDestination, seed);
   await page.goto('./shell.html');
   await expect(page.getByRole('navigation', {name: 'VibeSys'})).toBeVisible();
 }

@@ -16,8 +16,10 @@ import {
 } from '@vibesys/run-fixtures';
 import {
   type CoreMethods,
+  type ExampleDestinationMethods,
   type FakeBridgeSeed,
   installFakeBridge,
+  installFakeExampleDestination,
   installFakeMachineSettings,
   installFakeMachines,
   installFakeNewRun,
@@ -58,6 +60,7 @@ type ProvidedByWorld =
   | MachineSettingsMethods
   | NewRunMethods
   | UsageMethods
+  | ExampleDestinationMethods
   | WindowsMethods
   | RunMethods
   | FixtureServerMethods;
@@ -195,6 +198,7 @@ export function fixtureScripts(fixture: RunFixture, options: OpenOptions = {}): 
     script(installFakeProjectRuns, seed),
     script(installFakeNewRun, seed),
     script(installFakeUsage, seed),
+    script(installFakeExampleDestination, seed),
     script(installFakeWindows, undefined),
     script(installFakeRun, {streams: [], text: {}}),
     script(installFakeFixtureServer, {
