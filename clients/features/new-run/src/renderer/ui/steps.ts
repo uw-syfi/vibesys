@@ -74,9 +74,9 @@ function workloadWords(context: NewRunContext): string | null {
 }
 
 function hardwareWords(context: NewRunContext): string | null {
-  const {hardware} = context.answers;
+  const {hardware, model} = context.answers;
   return (
-    hardwareGroups(entriesIn(context))
+    hardwareGroups(entriesIn(context), model ?? '')
       .flatMap(group => group.options)
       .find(option => option.key === hardware)?.label ?? hardware
   );

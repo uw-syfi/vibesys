@@ -30,23 +30,12 @@ export interface CatalogueEntry {
 /** The domains in the order the first question lists them. */
 const DOMAINS: readonly Domain[] = ['llm-serving', 'data-structures', 'databases', 'microservices'];
 
-/** What each domain is, in the words of its card: its name and one line on what it optimizes. */
-export const DOMAIN_WORDS: Readonly<
-  Record<Domain, {readonly name: string; readonly note: string}>
-> = {
-  'llm-serving': {
-    name: 'LLM serving',
-    note: 'Serve a model as fast as possible while its answers stay correct.',
-  },
-  'data-structures': {
-    name: 'Data structures',
-    note: 'Concurrent queues, stacks and maps, checked for linearizability.',
-  },
-  databases: {name: 'Databases', note: 'Stores and engines that answer queries under load.'},
-  microservices: {
-    name: 'Microservices',
-    note: 'Service graphs that keep their behavior while they get faster.',
-  },
+/** The name each domain goes by. */
+export const DOMAIN_WORDS: Readonly<Record<Domain, {readonly name: string}>> = {
+  'llm-serving': {name: 'LLM serving'},
+  'data-structures': {name: 'Data structures'},
+  databases: {name: 'Databases'},
+  microservices: {name: 'Microservices'},
 };
 
 /** The makers in the order their groups are listed; a maker the catalogue does not use is not shown. */
@@ -145,8 +134,6 @@ export function domainOptions(entries: readonly CatalogueEntry[]): DomainOption[
 
 export interface ModelOption {
   readonly name: string;
-  /** The labels of the hardware the model has an example for, in the order of its entries. */
-  readonly hardware: readonly string[];
 }
 
 export interface MakerGroup {
@@ -154,30 +141,19 @@ export interface MakerGroup {
   readonly models: readonly ModelOption[];
 }
 
-/** The served models of the LLM-serving entries, grouped by maker. */
+/**
+ * The served models of the LLM-serving entries, grouped by maker, one option per distinct model:
+ * the hardware a model has examples for is the next question's (`hardwareGroups`).
+ */
 export function modelGroups(entries: readonly CatalogueEntry[]): MakerGroup[] {
   const serving = entries.flatMap(entry =>
     entry.details?.domain === 'llm-serving' && entry.details.model !== null
-      ? [{model: entry.details.model, hardware: entry.details.hardware}]
+      ? [entry.details.model]
       : [],
   );
   return MAKERS.flatMap(maker => {
-    const ofMaker = serving.filter(each => each.model.maker === maker);
-    const names = distinct(ofMaker.map(each => each.model.name));
-    if (names.length === 0) return [];
-    return [
-      {
-        maker,
-        models: names.map(name => ({
-          name,
-          hardware: distinct(
-            ofMaker
-              .filter(each => each.model.name === name)
-              .map(each => hardwareLabel(each.hardware)),
-          ),
-        })),
-      },
-    ];
+    const names = distinct(serving.filter(model => model.maker === maker).map(model => model.name));
+    return names.length === 0 ? [] : [{maker, models: names.map(name => ({name}))}];
   });
 }
 
@@ -192,10 +168,12 @@ export interface VendorGroup {
   readonly options: readonly HardwareOption[];
 }
 
-/** Every hardware an LLM-serving entry targets, grouped by vendor: the choices of the Hardware question. */
-export function hardwareGroups(entries: readonly CatalogueEntry[]): VendorGroup[] {
+/** The hardware `model` has an example for, grouped by vendor: the choices of the Hardware question. */
+export function hardwareGroups(entries: readonly CatalogueEntry[], model: string): VendorGroup[] {
   const targets = entries.flatMap(entry =>
-    entry.details?.domain === 'llm-serving' ? [entry.details.hardware] : [],
+    entry.details?.domain === 'llm-serving' && entry.details.model?.name === model
+      ? [entry.details.hardware]
+      : [],
   );
   return VENDORS.flatMap(vendor => {
     const ofVendor = targets.filter(hardware => hardware.vendor === vendor);

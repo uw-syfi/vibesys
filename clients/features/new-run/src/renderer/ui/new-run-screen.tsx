@@ -24,7 +24,7 @@ import {type FolderCompletion, ProjectPage, TaskPage} from './project-pages.js';
 import {Nav, Question} from './question.js';
 import {ProblemBanner, ReviewPage, StartButton} from './review-page.js';
 import {progressLine, type StepView, stepViews} from './steps.js';
-import {entriesIn, type MachineOption, machineLabel} from './view.js';
+import {entriesIn, type MachineOption} from './view.js';
 import {WherePage} from './where-page.js';
 
 type Dispatch = (event: NewRunEvent) => void;
@@ -218,7 +218,7 @@ export function NewRunScreen(props: ScreenProps): JSX.Element {
         <Stack gap="space-5">
           <ProblemBanner context={context} dispatch={dispatch} />
           {at === null || copy === null ? (
-            <Text tone="muted">Listing the examples on {machineLabel(context.form.machine)}.</Text>
+            <Text tone="muted">Listing</Text>
           ) : (
             <Question
               kicker={`New run \u00b7 step ${index + 1} of ${views.length}`}

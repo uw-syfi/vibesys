@@ -64,7 +64,9 @@ function Folder(props: ProjectProps): JSX.Element {
         <Button
           text="Use this folder"
           press={open}
-          {...(draft.trim() === '' ? {disabledReason: 'Type or choose a folder first.'} : {})}
+          {...(draft.trim() === ''
+            ? {disabledReason: 'Type or choose a folder first.', quietReason: true}
+            : {})}
         />
       </Row>
     </Stack>
@@ -79,9 +81,7 @@ export function ProjectPage(props: ProjectProps): JSX.Element {
     project?.source === 'recent' ? `${context.form.machine}${KEY}${project.path}` : null;
   return (
     <Stack gap="space-5">
-      {recents.length === 0 ? (
-        <Text tone="muted">No project has been opened yet. Open a folder below.</Text>
-      ) : (
+      {recents.length === 0 ? null : (
         <Stack gap="space-3">
           <Text variant="section">Recent</Text>
           <ChoiceTiles
@@ -114,8 +114,8 @@ export function TaskPage(props: CardProps): JSX.Element {
     answers.project !== null && context.tasks?.for === answers.project.path
       ? context.tasks.list
       : null;
-  if (tasks === null) return <Text tone="muted">Reading the project's tasks.</Text>;
-  if (tasks.length === 0) return <Text tone="warn">This project defines no tasks.</Text>;
+  if (tasks === null) return <Text tone="muted">Reading</Text>;
+  if (tasks.length === 0) return <Text tone="warn">No tasks</Text>;
   return (
     <ChoiceTiles
       label="Task"

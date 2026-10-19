@@ -31,7 +31,7 @@ import {
 } from '../../state/index.js';
 import type {CardProps} from './card-props.js';
 import {backendLabel} from './cause-words.js';
-import {entriesIn, machineLabel, modelMakerMark, recentChoices, vendorMark} from './view.js';
+import {entriesIn, modelMakerMark, recentChoices, vendorMark} from './view.js';
 
 function answer(props: CardProps, change: AnswerChange): void {
   props.dispatch({type: 'answer', change});
@@ -40,11 +40,10 @@ function answer(props: CardProps, change: AnswerChange): void {
 /** Said in place of options while the machine's examples are not known yet, or when it has none. */
 function Listing(props: CardProps): JSX.Element {
   const {context} = props;
-  const name = machineLabel(context.form.machine);
-  return context.examples?.for === context.form.machine ? (
-    <Text tone="muted">{name} has no examples.</Text>
-  ) : (
-    <Text tone="muted">Listing the examples on {name}.</Text>
+  return (
+    <Text tone="muted">
+      {context.examples?.for === context.form.machine ? 'No examples' : 'Listing'}
+    </Text>
   );
 }
 
@@ -77,13 +76,13 @@ export function StartPage(props: CardProps): JSX.Element {
       value: 'example',
       label: 'An example',
       ...(none
-        ? {unavailable: `No examples on ${machineLabel(context.form.machine)}.`}
-        : {meta: examples === 0 ? 'Listing the examples.' : `${examples} examples`}),
+        ? {unavailable: 'No examples'}
+        : {meta: examples === 0 ? 'Listing' : `${examples} examples`}),
     },
     {
       value: 'project',
       label: 'Your project',
-      meta: recents === 0 ? 'No recent projects yet.' : `${recents} recent`,
+      meta: `${recents} recent`,
     },
   ];
   return (
@@ -126,11 +125,7 @@ export function ModelPage(props: CardProps): JSX.Element {
           <ChoiceTiles
             label={MAKER_NAMES[group.maker]}
             layout="cards"
-            options={group.models.map(model => ({
-              value: model.name,
-              label: model.name,
-              meta: model.hardware.join(' · '),
-            }))}
+            options={group.models.map(model => ({value: model.name, label: model.name}))}
             value={
               group.models.some(m => m.name === props.context.answers.model)
                 ? props.context.answers.model
@@ -150,7 +145,7 @@ export function HardwarePage(props: CardProps): JSX.Element {
   const model = answers.model ?? '';
   return (
     <Stack gap="space-5">
-      {hardwareGroups(entries).map(group => (
+      {hardwareGroups(entries, model).map(group => (
         <Stack key={group.vendor} gap="space-3">
           <GroupLabel text={VENDOR_NAMES[group.vendor]} mark={vendorMark(group.vendor)} />
           <ChoiceTiles
@@ -162,9 +157,7 @@ export function HardwarePage(props: CardProps): JSX.Element {
                 value: option.key,
                 label: option.label,
                 ...(option.backend === null ? {} : {note: backendLabel(option.backend)}),
-                ...(example === undefined
-                  ? {unavailable: 'No example yet'}
-                  : {meta: exampleLabel(example)}),
+                ...(example === undefined ? {} : {meta: exampleLabel(example)}),
               };
             })}
             value={group.options.some(o => o.key === answers.hardware) ? answers.hardware : null}

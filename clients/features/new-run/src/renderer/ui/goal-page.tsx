@@ -45,10 +45,7 @@ function Objectives(props: {readonly objectives: readonly Objective[]}): JSX.Ele
   return (
     <Card section="Optimizes">
       {objectives.length === 0 ? (
-        <Text tone="muted">
-          The goal names the headline metric. This task declares no objectives, so no direction is
-          shown.
-        </Text>
+        <Text tone="muted">None</Text>
       ) : (
         <Stack gap="space-3">
           {objectives.map(objective => (
@@ -93,7 +90,7 @@ function GoalText(props: {readonly goal: Goal}): JSX.Element {
         <Markdown text={goal.goal} />
         {goal.goal_truncated ? (
           <Text variant="small" tone="muted">
-            Shortened here. The whole goal is in the file.
+            Shortened
           </Text>
         ) : null}
       </Stack>

@@ -1,7 +1,12 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
+import type {ExampleList} from '@vibesys/contracts/host-helper';
 import {REQUIRED_HELPER_FEATURES} from '@vibesys/hosts';
-import {exampleCatalogueWithoutDetails, queueRsCatalogue} from '@vibesys/run-fixtures';
+import {
+  exampleCatalogue,
+  exampleCatalogueWithoutDetails,
+  queueRsCatalogue,
+} from '@vibesys/run-fixtures';
 import {rawTextOf} from './checks/screen-check.js';
 import {
   installFakeBridge,
@@ -42,17 +47,17 @@ test('an example of LLM serving: its model, its hardware, its goal, then the run
   await expect(question(page, 'Which model do you want to serve?')).toBeVisible();
   await expect(main(page).getByRole('radiogroup', {name: 'Meta'})).toBeVisible();
   await expect(main(page).getByRole('radiogroup', {name: 'Qwen'})).toBeVisible();
+  // A model card names the model only: its hardware is the next question's.
+  await expect(main(page).getByRole('radio', {name: /Qwen3\.5 9B/})).not.toContainText('MI210');
+  await expect(main(page)).not.toContainText('H100');
   await choose(page, 'Qwen', /Qwen3\.5 9B/);
   await proceed(page);
 
-  // Hardware is grouped by vendor; one with no example for this model is dimmed and says so.
+  // Hardware is grouped by vendor and lists only what this model has an example for.
   await expect(question(page, 'Which hardware are you optimizing for?')).toBeVisible();
-  await expect(main(page).getByRole('radiogroup', {name: 'NVIDIA'})).toBeVisible();
-  const h100 = main(page).getByRole('radiogroup', {name: 'NVIDIA'}).getByRole('radio').first();
-  await expect(h100).toBeDisabled();
-  await expect(main(page).getByRole('radiogroup', {name: 'NVIDIA'})).toContainText(
-    'No example yet',
-  );
+  await expect(main(page).getByRole('radiogroup', {name: 'AMD'})).toBeVisible();
+  await expect(main(page).getByRole('radiogroup', {name: 'NVIDIA'})).toHaveCount(0);
+  await expect(main(page)).not.toContainText('No example yet');
   await choose(page, 'AMD', /MI210/);
   await proceed(page);
 
@@ -132,9 +137,6 @@ test('an example data structure: its structure, its workload, a goal with no dir
     main(page).getByText('Optimize a multi-producer, multi-consumer bounded stack.'),
   ).toBeVisible();
   // The task declares no objectives: no direction is shown for its metric.
-  await expect(main(page)).toContainText(
-    'This task declares no objectives, so no direction is shown.',
-  );
   await expect(main(page).getByText(/Higher is better|Lower is better/)).toHaveCount(0);
   await proceed(page, 'Looks right');
   await proceed(page);
@@ -191,7 +193,7 @@ test('your own project: a recent one, its task, the agent on its machine, and th
   await proceed(page, 'Looks right');
   // The project is on host-b, so that is where the agent works.
   await expect(main(page).getByRole('radio', {name: /This Mac/})).toBeDisabled();
-  await expect(main(page)).toContainText('Your project is on host-b.');
+  await expect(main(page)).toContainText('Project on host-b');
   await proceed(page);
   await proceed(page);
   await expect(main(page)).toContainText(/Ready · \d+ checks passed/);
@@ -268,6 +270,107 @@ for (const width of [1440, 1000, 660]) {
     });
   }
 }
+
+/** The example catalogue with `extra` models, and Qwen3.5 9B also served on an NVIDIA H100. */
+function longCatalogue(extra: number): ExampleList {
+  const base = exampleCatalogue.examples;
+  const qwen = base.find(each => each.name === 'model-serving/qwen3.5-9b-mi210');
+  if (qwen === undefined) throw new Error('the fixture has no Qwen example');
+  const served = (name: string, model: string, accelerator: string) => ({
+    ...qwen,
+    name,
+    task_details: (qwen.task_details ?? []).map(task => ({
+      ...task,
+      model: {name: model, maker: 'other' as const},
+      hardware: {accelerator, count: 1, vendor: 'nvidia' as const, backend: 'cuda' as const},
+    })),
+  });
+  const twin = {
+    ...served('model-serving/qwen3.5-9b-h100', 'Qwen3.5 9B', 'NVIDIA H100'),
+    task_details: (qwen.task_details ?? []).map(task => ({
+      ...task,
+      hardware: {
+        accelerator: 'NVIDIA H100',
+        count: 1,
+        vendor: 'nvidia' as const,
+        backend: 'cuda' as const,
+      },
+    })),
+  };
+  const many = Array.from({length: extra}, (_, index) =>
+    served(`model-serving/long-${index}`, `Model ${index}`, 'NVIDIA L4'),
+  );
+  return {...exampleCatalogue, examples: [...base, twin, ...many]};
+}
+
+const WINDOWS = [
+  {width: 1440, height: 1100},
+  {width: 1000, height: 700},
+] as const;
+
+for (const {width, height} of WINDOWS) {
+  test(`Back and Continue stay inside the ${width}x${height} window, in one place, whatever the content does`, async ({
+    page,
+  }) => {
+    const newRun = SEED.newRun;
+    if (newRun === undefined) throw new Error('the seed has no New run helper');
+    await page.setViewportSize({width, height});
+    const seed = {...SEED, newRun: {...newRun, examples: longCatalogue(40)}};
+    const boxOf = async (name: string) =>
+      main(page).getByRole('button', {name, exact: true}).boundingBox();
+    const inside = (box: {x: number; y: number; width: number; height: number} | null) => {
+      expect(box).not.toBeNull();
+      expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+      expect(box?.y ?? -1).toBeGreaterThanOrEqual(0);
+      expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(width);
+      expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(height);
+    };
+    const backs: unknown[] = [];
+    const nexts: unknown[] = [];
+    for (const name of ['domain', 'model', 'review']) {
+      await openAt(page, pageNamed(name), seed);
+      expect(page.viewportSize()).toEqual({width, height});
+      const forward = name === 'review' ? 'Start run' : 'Continue';
+      const before = {back: await boxOf('Back'), next: await boxOf(forward)};
+      inside(before.back);
+      inside(before.next);
+      const region = main(page).locator('.vs-page-scroll');
+      if (name === 'model') {
+        // The long list outgrows the window, so it scrolls in its own region.
+        expect(await region.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(
+          true,
+        );
+      }
+      await region.evaluate(element => element.scrollTo(0, element.scrollHeight));
+      const after = {back: await boxOf('Back'), next: await boxOf(forward)};
+      expect(after).toEqual(before);
+      backs.push(before.back);
+      // Review's Start run is as wide as its words; the edge it sits on is the same.
+      nexts.push({y: before.next?.y, height: before.next?.height});
+    }
+    for (const each of backs) expect(each).toEqual(backs[0]);
+    for (const each of nexts) expect(each).toEqual(nexts[0]);
+  });
+}
+
+test('a model is one card however many kinds of hardware it has examples for, and hardware follows', async ({
+  page,
+}) => {
+  const newRun = SEED.newRun;
+  if (newRun === undefined) throw new Error('the seed has no New run helper');
+  await openAt(page, pageNamed('model'), {
+    ...SEED,
+    newRun: {...newRun, examples: longCatalogue(0)},
+  });
+  const qwen = main(page).getByRole('radiogroup', {name: 'Qwen'}).getByRole('radio');
+  await expect(qwen).toHaveCount(1);
+  await expect(qwen).toHaveAccessibleName(/^Qwen3\.5 9B$/);
+  await choose(page, 'Qwen', /Qwen3\.5 9B/);
+  await proceed(page);
+  await expect(main(page).getByRole('radio')).toHaveCount(2);
+  await expect(main(page).getByRole('radiogroup', {name: 'AMD'})).toContainText('MI210');
+  await expect(main(page).getByRole('radiogroup', {name: 'NVIDIA'})).toContainText('H100');
+});
 
 test('a step draws no explanatory sentence under its question, and a blocked Continue no caption', async ({
   page,
@@ -455,7 +558,7 @@ test('a machine with no examples dims that start, and says so', async ({page}) =
   });
   const example = main(page).getByRole('radio', {name: /An example/});
   await expect(example).toBeDisabled();
-  await expect(main(page)).toContainText('No examples on host-b.');
+  await expect(main(page)).toContainText('No examples');
 });
 
 test('a machine whose VibeSys predates New run says so and is never asked to start', async ({

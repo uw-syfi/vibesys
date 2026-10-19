@@ -32,14 +32,7 @@ function change(props: CardProps, next: Partial<Budget>): void {
 export function IdeasField(props: CardProps): JSX.Element {
   const {rounds} = props.context.form.budget;
   return (
-    <Field
-      label="Ideas to try"
-      help={
-        rounds === null
-          ? 'The run stops after the number of ideas the task is configured with, or when you stop it.'
-          : `The run stops after ${rounds} ${rounds === 1 ? 'idea' : 'ideas'}, or when you stop it.`
-      }
-    >
+    <Field label="Ideas to try">
       <Select
         value={rounds === null ? 'configured' : String(rounds)}
         options={withCurrent(

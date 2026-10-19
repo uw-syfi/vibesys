@@ -69,7 +69,7 @@ function MachineNotices(props: CardProps & {readonly chooseCheckout: () => void}
       {noCheckout ? (
         <Banner
           tone="warn"
-          title={`No VibeSys checkout found on ${name}.`}
+          title={`No VibeSys checkout on ${name}`}
           actions={<Button text="Choose it in Machines" press={props.chooseCheckout} />}
         />
       ) : null}
@@ -104,9 +104,9 @@ export function WherePage(
     value: option.value,
     label: option.label,
     ...(option.value === machine
-      ? {note: described === null ? 'Asking what it offers.' : hardwareLine(described)}
+      ? {note: described === null ? 'Checking' : hardwareLine(described)}
       : {}),
-    ...(ownProject && option.value !== machine ? {unavailable: `Your project is on ${name}.`} : {}),
+    ...(ownProject && option.value !== machine ? {unavailable: `Project on ${name}`} : {}),
   }));
   const targets = measureOptions(context.compute);
   const where: TileOption<string>[] = targets.map(target => ({
