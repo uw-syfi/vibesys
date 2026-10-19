@@ -259,7 +259,9 @@ class PolicyCapacityGate:
     stop request ends the wait by raising ``RunStopped``; a cancellation of the turn
     ends that turn's wait with the quota error and nothing else: the pause, its timed
     resume (which the channel owns), the operator's request to wait for capacity and the
-    other turns waiting stay as they were.
+    other turns waiting stay as they were. Core does not count the time a quota pause holds
+    the run against the limit of a turn already dispatched, so a wait that outlasts the role's
+    turn time is not cut short by it.
 
     A provider outage (``QuotaCondition.UNAVAILABLE``) is waited out under the
     outage policy instead (:func:`outage_policy_for`: the whole budget under ``pause``

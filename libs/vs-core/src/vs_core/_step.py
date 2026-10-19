@@ -41,6 +41,7 @@ from ._proofs import (
     requested_stop_mode,
     stop_mode,
 )
+from ._quota_pause_clock import credit_quota_pause
 from ._registry import ContractError
 from ._routing import SIGNAL_ORDER, event_area
 from ._run_pause import control_refusal
@@ -1347,12 +1348,8 @@ def _soft_stop(state: CoreState, event: RunControlEvent) -> Transition:
     refusal = control_refusal(state, event.control)
     if refusal is not None:
         raise refusal
-    run = state.run.model_copy(
-        update={
-            "controls": (*state.run.controls, event.control),
-            "now_at": max(state.run.now_at, event.now_at),
-        }
-    )
+    state = _advance_run_time(state, event.now_at)
+    run = state.run.model_copy(update={"controls": (*state.run.controls, event.control)})
     return Transition(
         state=state.model_copy(update={"run": run}),
         events=(ControlChanged(control=event.control),),
@@ -1387,10 +1384,10 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
         "pause": RunStatus.PAUSED,
         "resume": state.run.status if waits else RunStatus.RUNNING,
     }
+    state = _advance_run_time(state, event.now_at)
     run = state.run.model_copy(
         update={
             "controls": (*state.run.controls, event.control),
-            "now_at": max(state.run.now_at, event.now_at),
             "status": statuses.get(event.control.action, state.run.status),
         }
     )
@@ -1708,9 +1705,15 @@ def _advance_event_time(state: CoreState, event: CoreEvent) -> CoreState:
     target = getattr(event, "target", None)
     if target is not None and hasattr(target, "observation"):
         supplied_times.append(target.observation.observed_at)
-    now_at = max(supplied_times)
+    return _advance_run_time(state, max(supplied_times))
+
+
+def _advance_run_time(state: CoreState, now_at: float) -> CoreState:
+    """``state`` at run time ``now_at``, which never moves back (see ``credit_quota_pause``)."""
+    now_at = max(now_at, state.run.now_at)
     if now_at == state.run.now_at:
         return state
+    state = credit_quota_pause(state, now_at)
     return state.model_copy(update={"run": state.run.model_copy(update={"now_at": now_at})})
 
 

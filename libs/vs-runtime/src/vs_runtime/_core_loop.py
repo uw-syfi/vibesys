@@ -42,7 +42,6 @@ from vs_core.api import (
     TimeReached,
     Transition,
     TurnObserved,
-    Until,
     advance,
     check_decisions,
     deferred,
@@ -303,11 +302,6 @@ class _Flight:
     record: RequestRecord
     now_at: float
     task: asyncio.Task[ExecutionOutcome]
-
-    @property
-    def until(self) -> Until:
-        """When core ends this request: the loop cancels the task once that has happened."""
-        return self.record.until
 
 
 @dataclass(frozen=True)
@@ -1341,8 +1335,11 @@ class CoreRuntime[S: StrategyState]:
         its owner hears ``Failed``). The executor may not know, so the loop stops it.
         """
         current = self.record.envelope.core.records.record(flight.record.request_id)
-        ended = current is None or current.phase in (RequestPhase.BLOCKED, RequestPhase.COMPLETED)
-        return ended or flight.until.at <= now_at
+        if current is None or current.phase in (RequestPhase.BLOCKED, RequestPhase.COMPLETED):
+            return True
+        # Core's record, not the limit the flight began with: core moves a turn's limit past
+        # the time the run spends held by a quota stop.
+        return current.until.at <= now_at
 
     async def cancel_ended(self, now_at: float) -> bool:
         """Cancel the running requests whose limit has passed or that core has ended.

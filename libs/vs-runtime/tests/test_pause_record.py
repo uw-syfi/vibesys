@@ -140,8 +140,8 @@ class _Run:
         )
 
 
-def _run() -> _Run:
-    threads = SimThreads()
+def _run(threads: SimThreads | None = None) -> _Run:
+    threads = threads or SimThreads()
     sink = FakeRunControlEventSink()
     channel = create_run_control_channel(sink, threads=threads)
     control = ChannelRunControl(channel, threads)
@@ -720,3 +720,41 @@ def test_cancelling_the_turn_that_waits_for_capacity_ends_the_pause_in_core_too(
     assert run.agrees()
     assert inbox.pending() == ()
     assert inbox.rejected() == ()
+
+
+@given(
+    resume_in=st.integers(min_value=1, max_value=20_000).map(float),
+    late=st.integers(min_value=0, max_value=5_000).map(float),
+)
+def test_a_quota_pause_whose_turn_left_resumes_when_its_timer_is_due(
+    resume_in: float, late: float
+) -> None:
+    """The run loop's poll fires the timed resume of a quota pause no turn waits on any more.
+
+    A turn waiting out a quota stop under the ``wait`` policy is cancelled before its reset.
+    It leaves the pause and its timer behind, and the loop's poll of the channel is all that
+    can still fire the timer. Before, that poll did not, so the run stayed paused for good,
+    and its core record of the pause never ended, after the quota had reset.
+    """
+    clock = VirtualClock(1_000_000.0, limit=1_200_000.0)
+    threads = SimThreads(clock)
+    run = _run(threads)
+    run.channel.enter_capacity(timed=True)
+    run.channel.pause_for_quota(resume_in)
+    run.poll()
+    assert run_pause(run.core.run) == RunPause(owner=PauseOwner.QUOTA)
+    run.channel.leave_capacity(timed=True)
+
+    def poll_around_the_reset() -> bool:
+        threads.sleep(resume_in - 0.5)
+        run.poll()
+        held_before_reset = run_pause(run.core.run) is not None
+        threads.sleep(0.5 + late)
+        run.poll()
+        return held_before_reset
+
+    held_before_reset = threads.run(poll_around_the_reset)
+
+    assert held_before_reset
+    assert run_pause(run.core.run) is None
+    assert run.channel.pause_state() is None

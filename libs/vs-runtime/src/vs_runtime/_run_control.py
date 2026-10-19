@@ -364,7 +364,9 @@ class RunControlChannel(Protocol):
         """Who holds the run paused and whether a capacity wait is armed; None unless paused.
 
         The facts core records for the pause: the operator owns a pause it holds, whether or
-        not a quota stop paused the run as well.
+        not a quota stop paused the run as well. This is the run loop's poll, so it resumes
+        the run first when the quota pause's timed resume is due, even when no turn waits
+        on it any more (a cancelled turn leaves the pause and its timer behind).
         """
         ...
 
@@ -816,6 +818,8 @@ class RuntimeRunControlChannel:
     def pause_state(self) -> RunPause | None:
         """The pause as core records it; None while the run is not paused."""
         with self._lock:
+            # The run's poll: with no turn left waiting, nothing else fires a due timed resume.
+            self._fire_due()
             if not self._paused:
                 return None
             owner = PauseOwner.OPERATOR if self._held else PauseOwner.QUOTA
