@@ -7,6 +7,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from . import _host_epochs, _request_ledger, _request_recovery
+from ._ledger_compaction import spent_answer
 from .types.kernel import AreaChange
 from .types.records import (
     BlockedRecordStalled,
@@ -41,7 +42,9 @@ def _observation(
     facts are not persisted in the request ledger. Recovery preserves ledger
     fields; the wrapper merges outputs before the kernel registers any request.
     """
-    if isinstance(event, RequestObserved) and _request_ledger.is_late(state, event):
+    if isinstance(event, RequestObserved) and (
+        _request_ledger.is_late(state, event) or spent_answer(state, event)
+    ):
         return AreaChange(state=state)
     ledger = _request_ledger.advance(state, context, event)
     if isinstance(event, RequestObserved):

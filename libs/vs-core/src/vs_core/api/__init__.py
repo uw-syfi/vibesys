@@ -52,6 +52,7 @@ from vs_core._ids import (
     decision_of_operation,
     item_id,
 )
+from vs_core._ledger_compaction import compact_ledger
 from vs_core._measurement_recipe import (
     MeasurementPurpose,
     MeasurementRecipe,
@@ -1457,6 +1458,7 @@ __all__ = [
     "capacity_wait_stands",
     "check_decisions",
     "close_call",
+    "compact_ledger",
     "compare",
     "comparison_of",
     "comparison_settling",

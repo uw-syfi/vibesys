@@ -27,6 +27,7 @@ from ._dispatch_episode import (
 )
 from ._host_epochs import downtime
 from ._inspection import validate_inspection_target, validate_registered_owner
+from ._ledger_compaction import compact_ledger
 from ._operator_actions import cancellations, notice, reopen_retirements
 from ._ownership import cleanup_pending
 from ._proofs import (
@@ -226,6 +227,11 @@ class CoreReducers:
     attempts: AttemptsReducer | None = None
     evaluation: EvaluationReducer | None = None
     session_inputs: sessions.Reducer | None = None
+    ledger: Callable[[CoreState], CoreState] | None = None
+    """What leaves the request ledger at the end of a step; ``compact_ledger`` when omitted.
+
+    A test passes one that keeps everything, to compare a run with and without compaction.
+    """
 
 
 _DEFAULT_REDUCERS = CoreReducers()
@@ -1720,8 +1726,16 @@ def _advance_run_time(state: CoreState, now_at: float) -> CoreState:
     return state.model_copy(update={"run": state.run.model_copy(update={"now_at": now_at})})
 
 
-def consume(state: CoreState, event: CoreEvent, dispatch: Dispatch) -> Transition:
+def consume(
+    state: CoreState,
+    event: CoreEvent,
+    dispatch: Dispatch,
+    compaction: Callable[[CoreState], CoreState] = compact_ledger,
+) -> Transition:
     """Consume one top-level event, advancing the sole revision exactly once.
+
+    The ledger is compacted (``compaction``) last, so what a step leaves durable holds no
+    spent poll; compaction never changes what the step produced, only what it keeps.
 
     Whatever the event leaves equal comes back as the very object it was given. Every area's
     reducer builds its part of the next state its own way, and a part rebuilt with the same
@@ -1755,7 +1769,7 @@ def consume(state: CoreState, event: CoreEvent, dispatch: Dispatch) -> Transitio
     unmet = unmet_waits(given, result.state)
     if unmet:
         raise ContractError(("wait",), f"a recorded wait breaks its contract: {unmet[0]}")
-    advanced = result.state.model_copy(update={"revision": state.revision + 1})
+    advanced = compaction(result.state).model_copy(update={"revision": state.revision + 1})
     return result.model_copy(update={"state": share_unchanged(given, advanced)})
 
 
@@ -1766,4 +1780,5 @@ def step(state: CoreState, event: CoreEvent, *, reducers: CoreReducers | None = 
     the same kernel authority, validation, propagation and durable record path.
     """
     dispatch = _dispatch if reducers is None else partial(_dispatch, reducers=reducers)
-    return consume(state, event, dispatch)
+    compaction = compact_ledger if reducers is None or reducers.ledger is None else reducers.ledger
+    return consume(state, event, dispatch, compaction)

@@ -505,17 +505,15 @@ class ToyHost:
         return Succeeded(output_json=replies[ending], resource_id=lease, suspension=suspension)
 
 
-def run_toy(
+def toy_harness(
     host: ToyHost,
-    config: Config | None = None,
     *,
     limits: core.Limits = LIMITS,
-    faults: Faults | None = None,
     definition: core.SearchDef[Config] = toy,
-) -> Trace:
-    """Drive the toy search on the real core against ``host`` until nothing more happens."""
-    chosen = config or Config()
-    harness = Harness(
+    reducers: core.CoreReducers | None = None,
+) -> Harness:
+    """The harness the toy search runs on the real core under, against ``host``."""
+    return Harness(
         registry=OPERATIONS.registry(),
         facts=FACTS,
         limits=limits,
@@ -526,7 +524,21 @@ def run_toy(
         schemas=definition.reply_schemas,
         envelope_type=core.RunEnvelope[core.FlowState],
         events=host.events,
+        reducers=reducers,
     )
+
+
+def run_toy(
+    host: ToyHost,
+    config: Config | None = None,
+    *,
+    limits: core.Limits = LIMITS,
+    faults: Faults | None = None,
+    definition: core.SearchDef[Config] = toy,
+) -> Trace:
+    """Drive the toy search on the real core against ``host`` until nothing more happens."""
+    chosen = config or Config()
+    harness = toy_harness(host, limits=limits, definition=definition)
     return drive(definition.driver(chosen, OPERATIONS.registry()), chosen, host, harness, faults)
 
 

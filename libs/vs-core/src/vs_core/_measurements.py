@@ -1396,12 +1396,40 @@ def _poll(job: OwnedJob | RegisteredOwnedJob, context: EvaluationContext) -> Out
     if base is None or not context.records.positions(base):
         return outbound
     lapsed = 1
-    while context.records.positions(RequestId(root=f"{base.root}:b{lapsed}")):
+    while context.records.positions(RequestId(root=f"{base.root}{_LAPSED}{lapsed}")):
         lapsed += 1
-    identity = RequestId(root=f"{base.root}:b{lapsed}")
+    identity = RequestId(root=f"{base.root}{_LAPSED}{lapsed}")
     return outbound.model_copy(
         update={"request": outbound.request.model_copy(update={"request_id": identity})}
     )
+
+
+_LAPSED = ":b"
+"""What a poll's name adds to its base, with a count, when an earlier poll took the base."""
+
+
+def poll_family(request_id: RequestId) -> tuple[str, int] | None:
+    """The job prefix and observation sequence a poll of an owned job is named by, else None.
+
+    `_poll` names a poll ``{prefix}:{sequence}``, ``prefix`` naming the job and ``sequence``
+    the observation the poll follows, with ``:b{count}`` added when earlier polls took that
+    name. A job's observation sequence only grows, so a poll of a lower sequence than the
+    job's newest poll is never named again. Any other request id (a continuation's poll,
+    whose id core allocates from its revision) gives None.
+    """
+    root = request_id.root
+    base, lapsed, count = root.rpartition(_LAPSED)
+    if lapsed and count.isdecimal() and count.isascii():
+        root = base
+    prefix, _, sequence = root.rpartition(":")
+    if not (
+        prefix.startswith("measurement:")
+        and prefix.endswith(":observe")
+        and sequence.isdecimal()
+        and sequence.isascii()
+    ):
+        return None
+    return prefix, int(sequence)
 
 
 def _poll_due(

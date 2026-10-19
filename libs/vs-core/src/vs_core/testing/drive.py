@@ -19,6 +19,7 @@ any script.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import ValidationError
@@ -35,6 +36,7 @@ from vs_core.api import (
     CollectEvidence,
     ContractError,
     CoreEvent,
+    CoreReducers,
     CoreState,
     CoreView,
     Decision,
@@ -286,7 +288,8 @@ class _Driver[S: StrategyState]:
     ) -> None:
         self.script = script
         self.registry = harness.registry
-        self.host = SearchHost(step=step, registry=harness.registry)
+        self.step = partial(step, reducers=harness.reducers)
+        self.host = SearchHost(step=self.step, registry=harness.registry)
         self.faults = faults
         self.search = search
         self.trace: Trace[S]
@@ -362,7 +365,7 @@ class _Driver[S: StrategyState]:
         discarded: list[Discarded] = []
         core = self.core
         for event in (ClockAdvanced(now_at=1.0), *events):
-            transition = step(core, event)
+            transition = self.step(core, event)
             core = transition.state
             published.extend(transition.events)
             translated = translate(core, transition.events)
@@ -840,7 +843,7 @@ class _Driver[S: StrategyState]:
         trace = self.trace
         if isinstance(event, RequestObserved):
             trace.log.append(event)
-        transition = step(trace.core, event)
+        transition = self.step(trace.core, event)
         translated = translate(transition.state, transition.events)
         incoming = (*translated.events, *extra)
         advanced = advance(
@@ -909,6 +912,8 @@ class Harness:
     deadline_at: float = 100000.0
     max_steps: int = 2000
     requirements: EvidenceRequirements = field(default_factory=EvidenceRequirements)
+    reducers: CoreReducers | None = None
+    """Sibling implementations core's step uses (see ``CoreReducers``); production when None."""
 
 
 def new_run[S: StrategyState](search: SearchDriver[S, Any], harness: Harness) -> CoreState:
