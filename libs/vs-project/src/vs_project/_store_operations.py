@@ -1,10 +1,27 @@
-"""Shared state-store transition semantics; implementations own I/O only."""
+"""Shared state-store transition semantics; implementations own I/O only.
+
+A store keeps two documents under one lock. ``store.json`` holds the CAS record, the whole
+run envelope, and is written only by a commit. ``lease.json`` holds the fence and the time
+watermark, a few hundred bytes, and is written by every lease operation and after every
+commit. Renewing a lease once rewrote the whole record, so its cost grew with the run
+(FINDINGS S171); now it writes the small document only.
+
+Version 1 of ``store.json`` held the lease too, and had no ``lease.json``. A store written by
+an older release is read as is: its lease is the one inside ``store.json`` until the first
+lease write, which writes ``lease.json`` first and then ``store.json`` as version 2, so a
+crash between the two leaves the lease in ``lease.json``, which is authoritative whenever
+it exists. A version 2 ``store.json`` without a ``lease.json`` is damage: a record is only
+committed under a lease, and inventing an empty one would let the next host reuse an epoch.
+"""
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterable
-from contextlib import AbstractContextManager
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import AbstractContextManager, contextmanager, suppress
+from dataclasses import dataclass
+from enum import StrEnum
+from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from vs_project.api.state_store import (
     CommitFault,
@@ -20,22 +37,77 @@ from vs_project.api.state_store import (
     StoreRecord,
     Unknown,
 )
+from vs_project.errors import StateDocumentDamagedError
 
-STORE_DOCUMENT_VERSION = 1
+LEGACY_STORE_DOCUMENT_VERSION = 1
+STORE_DOCUMENT_VERSION = 2
+LEASE_DOCUMENT_VERSION = 1
+
+
+class StoreFile(StrEnum):
+    """The two documents of one store, by file name."""
+
+    RECORD = "store.json"
+    LEASE = "lease.json"
+
+
+_CONFIG = ConfigDict(
+    extra="forbid", frozen=True, strict=True, ser_json_bytes="base64", val_json_bytes="base64"
+)
 
 
 class StoreDocument(BaseModel):
-    """One atomic document owns both CAS record and dispatch fencing."""
+    """``store.json``: the CAS record; version 1, from older releases, also held the lease."""
 
-    model_config = ConfigDict(
-        extra="forbid", frozen=True, strict=True, ser_json_bytes="base64", val_json_bytes="base64"
-    )
+    model_config = _CONFIG
+    # A document that declares no version is the oldest format, as older releases wrote it.
     version: int = Field(
-        default=STORE_DOCUMENT_VERSION, ge=STORE_DOCUMENT_VERSION, le=STORE_DOCUMENT_VERSION
+        default=LEGACY_STORE_DOCUMENT_VERSION,
+        ge=LEGACY_STORE_DOCUMENT_VERSION,
+        le=STORE_DOCUMENT_VERSION,
     )
     record: StoreRecord | None = None
     fence: StoreFence | None = None
     observed_at: float = Field(default=0, ge=0, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def _lease_only_in_the_legacy_format(self) -> Self:
+        if self.version != LEGACY_STORE_DOCUMENT_VERSION and (
+            self.fence is not None or self.observed_at != 0
+        ):
+            message = f"store.json version {self.version} holds no lease; it is in lease.json"
+            raise ValueError(message)
+        return self
+
+    @property
+    def legacy(self) -> bool:
+        """Whether an older release wrote this document, with the lease inside it."""
+        return self.version == LEGACY_STORE_DOCUMENT_VERSION
+
+    def encode(self) -> bytes:
+        """The document's bytes, leaving out the lease fields the current format never has."""
+        exclude = None if self.legacy else {"fence", "observed_at"}
+        return self.model_dump_json(exclude=exclude).encode()
+
+
+def record_document(record: StoreRecord | None) -> StoreDocument:
+    """The current-format ``store.json`` holding ``record``."""
+    return StoreDocument(version=STORE_DOCUMENT_VERSION, record=record)
+
+
+class LeaseDocument(BaseModel):
+    """``lease.json``: the dispatch fence and the time watermark of the last published write."""
+
+    model_config = _CONFIG
+    version: int = Field(
+        default=LEASE_DOCUMENT_VERSION, ge=LEASE_DOCUMENT_VERSION, le=LEASE_DOCUMENT_VERSION
+    )
+    fence: StoreFence | None = None
+    observed_at: float = Field(default=0, ge=0, allow_inf_nan=False)
+
+    def encode(self) -> bytes:
+        """The document's bytes."""
+        return self.model_dump_json().encode()
 
 
 class _Time(BaseModel):
@@ -51,14 +123,22 @@ class _Expected(BaseModel):
     revision: int | None = Field(ge=0)
 
 
-def _valid_fence(document: StoreDocument, fence: StoreFence, now: float) -> bool:
-    current = document.fence
+def _valid_fence(lease: LeaseDocument, fence: StoreFence, now: float) -> bool:
+    current = lease.fence
     return (
         current is not None
         and current.host_id == fence.host_id
         and current.epoch == fence.epoch
-        and document.observed_at <= now < current.expires_at
+        and lease.observed_at <= now < current.expires_at
     )
+
+
+@dataclass(frozen=True)
+class _Lease:
+    """The lease an operation read, and whether it still lives only in a legacy ``store.json``."""
+
+    document: LeaseDocument
+    legacy_record: StoreDocument | None = None
 
 
 class StoreOperations(ABC):
@@ -80,85 +160,123 @@ class StoreOperations(ABC):
                 for fault in observation_fault_plan
             )
         )
+        self._pending_observation: ObservationFault | None = None
 
     @abstractmethod
     def _transaction(self) -> AbstractContextManager[None]: ...
 
     @abstractmethod
-    def _read(self) -> StoreDocument: ...
+    def _read_record(self) -> StoreDocument | None:
+        """The decoded ``store.json``, or None when there is none; see ``_observation``."""
 
     @abstractmethod
-    def _write(self, document: StoreDocument) -> None: ...
+    def _read_lease(self) -> LeaseDocument | None:
+        """The decoded ``lease.json``, or None when there is none; see ``_observation``."""
+
+    @abstractmethod
+    def _write(self, file: StoreFile, document: StoreDocument | LeaseDocument) -> None: ...
+
+    @contextmanager
+    def _operation(self) -> Iterator[None]:
+        """One store operation: the lock, and this operation's place in the observation plan."""
+        with self._transaction():
+            self._pending_observation = next(self._observation_faults, None)
+            try:
+                yield
+            finally:
+                self._pending_observation = None
+
+    def _observation(self, *, exists: bool) -> ObservationFault | None:
+        """The observation fault a read applies: READ at the first read, SYNC at the first found file.
+
+        Each operation takes one entry of the observation plan, as when one document held
+        everything, and the read that would have failed then fails now.
+        """
+        fault = self._pending_observation
+        if fault == ObservationFault.READ or (fault is not None and exists):
+            self._pending_observation = None
+            return fault
+        return None
+
+    def _lease(self) -> _Lease:
+        lease = self._read_lease()
+        if lease is not None:
+            return _Lease(document=lease)
+        stored = self._read_record()
+        if stored is None:
+            return _Lease(document=LeaseDocument())
+        if not stored.legacy:
+            message = "store.json is in the current format but lease.json is missing"
+            raise StateDocumentDamagedError.invalid(StoreFile.LEASE, message)
+        return _Lease(
+            document=LeaseDocument(fence=stored.fence, observed_at=stored.observed_at),
+            legacy_record=stored,
+        )
 
     def load(self) -> StoreRecord | None:
         """Read the current entire record under the store lock."""
-        with self._transaction():
-            return self._read().record
+        with self._operation():
+            stored = self._read_record()
+            return None if stored is None else stored.record
 
     def acquire(self, host_id: str, now: float, duration: float) -> StoreFence | None:
         """Claim only absent or expired ownership, increasing the epoch."""
         timing = _Time(now=now, duration=duration)
         candidate = StoreFence(host_id=host_id, epoch=1, expires_at=timing.now + timing.duration)
-        with self._transaction():
-            document = self._read()
-            current = document.fence
-            if timing.now < document.observed_at or (
+        with self._operation():
+            lease = self._lease()
+            current = lease.document.fence
+            if timing.now < lease.document.observed_at or (
                 current is not None and timing.now < current.expires_at
             ):
                 return None
             fence = candidate.model_copy(
                 update={"epoch": 1 if current is None else current.epoch + 1}
             )
-            self._write_lease(
-                document.model_copy(update={"fence": fence, "observed_at": timing.now})
-            )
+            self._write_lease(lease, LeaseDocument(fence=fence, observed_at=timing.now))
             return fence
 
     def renew(self, fence: StoreFence, now: float, duration: float) -> StoreFence | None:
         """Extend matching ownership, preserving the authoritative lease."""
         timing = _Time(now=now, duration=duration)
-        with self._transaction():
-            document = self._read()
-            current = document.fence
-            if current is None or not _valid_fence(document, fence, timing.now):
+        with self._operation():
+            lease = self._lease()
+            current = lease.document.fence
+            if current is None or not _valid_fence(lease.document, fence, timing.now):
                 return None
             renewed = StoreFence(
                 host_id=current.host_id,
                 epoch=current.epoch,
                 expires_at=max(current.expires_at, timing.now + timing.duration),
             )
-            self._write_lease(
-                document.model_copy(update={"fence": renewed, "observed_at": timing.now})
-            )
+            self._write_lease(lease, LeaseDocument(fence=renewed, observed_at=timing.now))
             return renewed
 
     def release(self, fence: StoreFence, now: float) -> bool:
         """End matching ownership at ``now`` so the next host can acquire at once."""
         timing = _Time(now=now)
-        with self._transaction():
-            document = self._read()
-            current = document.fence
-            if current is None or not _valid_fence(document, fence, timing.now):
+        with self._operation():
+            lease = self._lease()
+            current = lease.document.fence
+            if current is None or not _valid_fence(lease.document, fence, timing.now):
                 return False
             released = StoreFence(
                 host_id=current.host_id, epoch=current.epoch, expires_at=timing.now
             )
-            self._write_lease(
-                document.model_copy(update={"fence": released, "observed_at": timing.now})
-            )
+            self._write_lease(lease, LeaseDocument(fence=released, observed_at=timing.now))
             return True
 
     def verify(self, fence: StoreFence, now: float) -> bool:
         """Check persisted owner, epoch, expiry and time watermark."""
         timing = _Time(now=now)
-        with self._transaction():
-            return _valid_fence(self._read(), fence, timing.now)
+        with self._operation():
+            return _valid_fence(self._lease().document, fence, timing.now)
 
     def mutate_if_fenced(self, fence: StoreFence, now: float, mutation: Callable[[], None]) -> bool:
         """Run a synchronous external mutation under the lease transaction."""
         timing = _Time(now=now)
-        with self._transaction():
-            if not _valid_fence(self._read(), fence, timing.now):
+        with self._operation():
+            if not _valid_fence(self._lease().document, fence, timing.now):
                 return False
             mutation()
             return True
@@ -188,40 +306,76 @@ class StoreOperations(ABC):
         if envelope.revision != next_revision:
             message = f"revision must be {next_revision}, got {envelope.revision}"
             raise ValueError(message)
-        with self._transaction():
-            document = self._read()
-            revision = None if document.record is None else document.record.revision
+        with self._operation():
+            lease = self._lease()
+            stored = lease.legacy_record or self._read_record()
+            current = None if stored is None else stored.record
+            revision = None if current is None else current.revision
             if revision != expected:
                 return Conflict(reason=ConflictReason.REVISION, revision=revision)
-            if not _valid_fence(document, fence, timing.now):
+            if not _valid_fence(lease.document, fence, timing.now):
                 return Conflict(reason=ConflictReason.FENCE, revision=revision)
-            return self._publish(document, envelope, timing.now)
+            if lease.legacy_record is not None:
+                # Move the lease out before the record stops holding it.
+                self._write_document(StoreFile.LEASE, lease.document, None)
+            return self._publish(lease.document, envelope, timing.now)
 
-    def _publish(self, document: StoreDocument, envelope: StoreRecord, now: float) -> CommitOutcome:
+    def _publish(self, lease: LeaseDocument, envelope: StoreRecord, now: float) -> CommitOutcome:
         fault = next(self._faults, None)
         if fault == CommitFault.FAILED:
             message = "state-store fault plan rejected publication before writing"
             raise StateStoreWriteError(message)
         try:
-            self._write_record(
-                document.model_copy(update={"record": envelope, "observed_at": now}), fault
-            )
+            self._write_document(StoreFile.RECORD, record_document(envelope), fault)
         except OSError:
+            self._advance_if_published(lease, envelope, now)
             return Unknown(revision=envelope.revision)
+        # The record is published; the watermark that follows it is its own small write.
+        self._write_document(StoreFile.LEASE, lease.model_copy(update={"observed_at": now}), None)
         return Committed(record=envelope)
 
-    def _write_lease(self, document: StoreDocument) -> None:
-        fault = next(self._lease_faults, None)
-        self._write_record(document, fault)
+    def _advance_if_published(
+        self, lease: LeaseDocument, envelope: StoreRecord, now: float
+    ) -> None:
+        """Move the watermark to ``now`` when the unacknowledged record write did happen.
 
-    def _write_record(self, document: StoreDocument, fault: CommitFault | None) -> None:
+        Only a published write advances the watermark. Whether this one was published is
+        what the record now holds; when that cannot be read either, the watermark stays,
+        which only leaves the time check as loose as it was before the commit.
+        """
+        try:
+            stored = self._read_record()
+            if stored is not None and stored.record == envelope:
+                self._write_document(
+                    StoreFile.LEASE, lease.model_copy(update={"observed_at": now}), None
+                )
+        except OSError:
+            return
+
+    def _write_lease(self, lease: _Lease, document: LeaseDocument) -> None:
+        fault = next(self._lease_faults, None)
+        self._write_document(StoreFile.LEASE, document, fault)
+        if lease.legacy_record is None:
+            return
+        # The lease now lives in lease.json, which is authoritative. Drop the stale copy so
+        # older releases, which would trust it, refuse the store instead. When this write
+        # fails the copy stays until the next commit replaces store.json, and this
+        # release ignores it either way.
+        with suppress(OSError):
+            self._write_document(
+                StoreFile.RECORD, record_document(lease.legacy_record.record), None
+            )
+
+    def _write_document(
+        self, file: StoreFile, document: StoreDocument | LeaseDocument, fault: CommitFault | None
+    ) -> None:
         if fault == CommitFault.FAILED:
             message = "state-store lease fault rejected publication before writing"
             raise StateStoreWriteError(message)
         if fault == CommitFault.UNKNOWN_BEFORE:
             message = "state-store acknowledgement lost before publication"
             raise OSError(message)
-        self._write(document)
+        self._write(file, document)
         if fault in (CommitFault.UNKNOWN_AFTER, CommitFault.UNKNOWN_SYNC):
             message = "state-store acknowledgement lost after publication"
             raise OSError(message)

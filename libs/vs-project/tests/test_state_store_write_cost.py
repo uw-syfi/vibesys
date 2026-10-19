@@ -11,7 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -33,7 +32,6 @@ class _PublishedBytes(LocalAtomicWriteEffects):
         super().replace(temporary, destination)
 
 
-@pytest.mark.xfail(strict=True, reason="FINDINGS S171: a renewal rewrites the whole record")
 @given(size=st.sampled_from([1, 1_000, 100_000, 1_000_000]), renewals=st.integers(1, 4))
 @settings(max_examples=examples(pr=4, nightly=12), deadline=None)
 def test_a_renewal_publishes_a_few_hundred_bytes_whatever_the_record_size(
@@ -52,3 +50,18 @@ def test_a_renewal_publishes_a_few_hundred_bytes_whatever_the_record_size(
             assert renewed is not None
             assert effects.published - before <= _LEASE_BYTES, (size, effects.published - before)
         assert store.load() == envelope
+
+
+@given(size=st.sampled_from([1, 1_000, 100_000, 1_000_000]))
+@settings(max_examples=examples(pr=4, nightly=8), deadline=None)
+def test_a_commit_publishes_its_record_and_one_lease_document(size: int) -> None:
+    with TemporaryDirectory() as directory:
+        effects = _PublishedBytes()
+        store = Project.open(Path(directory)).state_store("run-1", effects=effects)
+        fence = store.acquire("host-a", now=0, duration=60)
+        assert fence is not None
+        envelope = StoredEnvelope(revision=0, schema_version=1, payload=b"x" * size)
+        before = effects.published
+        assert store.commit(None, envelope, fence, now=1) == Committed(record=envelope)
+        # The payload is stored in base64, four bytes for every three.
+        assert effects.published - before <= 4 * size // 3 + 4 + 2 * _LEASE_BYTES

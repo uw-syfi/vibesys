@@ -31,6 +31,7 @@ class _CountingEffects(LocalAtomicWriteEffects):
 
     def __init__(self) -> None:
         self.syncs = 0
+        self.reloaded: list[str] = []
 
     def sync_file(self, stream: AtomicWriteStream) -> None:
         self.syncs += 1
@@ -38,6 +39,7 @@ class _CountingEffects(LocalAtomicWriteEffects):
 
     def sync_existing_file(self, path: Path) -> None:
         self.syncs += 1
+        self.reloaded.append(path.name)
         super().sync_existing_file(path)
 
     def sync_directory(self, directory: Path) -> None:
@@ -84,7 +86,7 @@ def test_reloading_bytes_another_store_published_synchronizes_them_once(tmp_path
     assert effects.syncs > first
 
 
-def test_an_unfinished_publication_is_synchronized_by_the_next_reload(tmp_path: Path) -> None:
+def test_an_unfinished_publication_is_synchronized_before_it_is_read(tmp_path: Path) -> None:
     effects = _CountingEffects()
     store = Project.open(tmp_path).state_store(
         "run-1", fault_plan=(CommitFault.UNKNOWN_SYNC,), effects=effects
@@ -92,11 +94,12 @@ def test_an_unfinished_publication_is_synchronized_by_the_next_reload(tmp_path: 
     fence = store.acquire("host-a", now=0, duration=10)
     assert fence is not None
     store.commit(None, _envelope(0), fence, now=1)
-    before = effects.syncs
 
     assert store.load() == _envelope(0)
 
-    assert effects.syncs > before
+    # The commit that lost its acknowledgement reloads the record to learn whether it was
+    # published, and that reload synchronizes it; a clean publication never reloads.
+    assert "store.json" in effects.reloaded
 
 
 def test_an_observation_sync_fault_still_fires_on_already_durable_bytes(tmp_path: Path) -> None:

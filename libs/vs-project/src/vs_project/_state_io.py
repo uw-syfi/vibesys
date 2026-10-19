@@ -292,7 +292,7 @@ def decode_state_document[ModelT: BaseModel](
     *,
     source: Path | str,
     context: dict[str, Any] | None = None,
-    versioned_by: tuple[str, int] | None = None,
+    versioned_by: tuple[str, int | range] | None = None,
 ) -> ModelT:
     """Strictly decode persisted bytes as ``model_type``: the one path every reader uses.
 
@@ -301,13 +301,15 @@ def decode_state_document[ModelT: BaseModel](
     ``StateDocumentDamagedError`` naming ``source`` and the failing fields,
     never echoing the document. ``versioned_by=(field, expected)`` makes a
     document whose integer ``field`` differs from ``expected`` report both
-    versions instead of a schema error.
+    versions instead of a schema error. ``expected`` may be a range of versions, for a model
+    that still reads what older releases wrote; the newest is the one reported.
     """
     if versioned_by is not None:
         field, expected = versioned_by
+        readable = range(expected, expected + 1) if isinstance(expected, int) else expected
         found = _declared_version(data, field)
-        if found is not None and found != expected:
-            raise StateDocumentDamagedError.unsupported_version(source, found, expected)
+        if found is not None and found not in readable:
+            raise StateDocumentDamagedError.unsupported_version(source, found, readable[-1])
     decoded = decode_json(
         data,
         model_type,

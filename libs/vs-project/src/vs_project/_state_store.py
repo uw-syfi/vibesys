@@ -15,7 +15,15 @@ from vs_project._state_io import (
     decode_state_document,
     sync_directory_chain,
 )
-from vs_project._store_operations import STORE_DOCUMENT_VERSION, StoreDocument, StoreOperations
+from vs_project._store_operations import (
+    LEASE_DOCUMENT_VERSION,
+    LEGACY_STORE_DOCUMENT_VERSION,
+    STORE_DOCUMENT_VERSION,
+    LeaseDocument,
+    StoreDocument,
+    StoreFile,
+    StoreOperations,
+)
 from vs_project.api.state_store import CommitFault, ObservationFault, StateStoreWriteError
 from vs_project.errors import ProjectStateError
 
@@ -27,15 +35,27 @@ if TYPE_CHECKING:
     from vs_project.project import Project
 
 
-def _decode_store_document(source: bytes, *, location: str) -> StoreDocument:
-    """Decode store bytes; damage, or a newer release's version, is a typed error."""
+def _decode_store_document(source: bytes) -> StoreDocument:
+    """Decode ``store.json`` in this or the older format; damage, or a newer one, is a typed error."""
     return decode_state_document(
-        StoreDocument, source, source=location, versioned_by=("version", STORE_DOCUMENT_VERSION)
+        StoreDocument,
+        source,
+        source=StoreFile.RECORD,
+        versioned_by=(
+            "version",
+            range(LEGACY_STORE_DOCUMENT_VERSION, STORE_DOCUMENT_VERSION + 1),
+        ),
     )
 
 
-def _decode_local_document(source: bytes) -> StoreDocument:
-    return _decode_store_document(source, location="store.json")
+def _decode_lease_document(source: bytes) -> LeaseDocument:
+    """Decode ``lease.json``; damage, or a newer release's version, is a typed error."""
+    return decode_state_document(
+        LeaseDocument,
+        source,
+        source=StoreFile.LEASE,
+        versioned_by=("version", LEASE_DOCUMENT_VERSION),
+    )
 
 
 class _FaultAtomicWriteEffects(LocalAtomicWriteEffects):
@@ -86,62 +106,64 @@ class FakeStateStore(StoreOperations):
     ) -> None:
         """Create a shared store with deterministic mutation and read faults."""
         super().__init__(fault_plan, lease_fault_plan, observation_fault_plan)
-        self._contents: bytes | None = None
-        self._decoded: tuple[bytes, StoreDocument] | None = None
+        self._contents: dict[StoreFile, bytes] = {}
+        # Every operation reads its documents, so decoding them each time would cost the size
+        # of the run's record on every call; each memo decodes only bytes it has not seen.
+        self._records = DecodeMemo(_decode_store_document)
+        self._leases = DecodeMemo(_decode_lease_document)
         self._lock = RLock()
 
     def __deepcopy__(self, memo: dict[int, object]) -> FakeStateStore:
-        """An independent store holding the same document and the same place in its fault plans.
+        """An independent store holding the same documents and the same place in its fault plans.
 
         The lock is the one attribute that is not data: the copy gets a new lock of its own kind.
-        The decoded document is only a memo of the bytes, so the copy decodes them afresh when read.
+        The memos hold only frozen documents keyed on immutable bytes, so sharing them is safe.
         """
         clone = type(self).__new__(type(self))
         memo[id(self)] = clone
         for name, value in vars(self).items():
             if name == "_lock":
                 copied: object = type(value)()
-            elif name == "_decoded":
-                copied = None
+            elif name in {"_records", "_leases"}:
+                copied = value
             else:
                 copied = copy.deepcopy(value, memo)
             setattr(clone, name, copied)
         return clone
 
-    def replace_document(self, contents: bytes) -> None:
-        """Replace the stored document bytes, including deliberately damaged ones."""
+    def replace_document(self, contents: bytes, *, file: StoreFile = StoreFile.RECORD) -> None:
+        """Replace one stored document's bytes, including deliberately damaged ones."""
         with self._lock:
-            self._contents = contents
+            self._contents[file] = contents
 
     @contextmanager
     def _transaction(self) -> Iterator[None]:
         with self._lock:
             yield
 
-    def _read(self) -> StoreDocument:
-        fault = next(self._observation_faults, None)
-        if fault == ObservationFault.READ or (
-            fault == ObservationFault.SYNC and self._contents is not None
-        ):
+    def _read_record(self) -> StoreDocument | None:
+        source = self._read_file(StoreFile.RECORD)
+        return None if source is None else self._records.decode(source)
+
+    def _read_lease(self) -> LeaseDocument | None:
+        source = self._read_file(StoreFile.LEASE)
+        return None if source is None else self._leases.decode(source)
+
+    def _read_file(self, file: StoreFile) -> bytes | None:
+        contents = self._contents.get(file)
+        fault = self._observation(exists=contents is not None)
+        if fault is not None:
             message = f"state-store observation {fault} failed"
             raise OSError(message)
-        if self._contents is None:
-            return StoreDocument()
-        # Every operation reads the whole document and a commit writes a new one, so decoding
-        # it each time costs the size of the run's record on every call. The bytes are
-        # immutable and the document frozen: the document last written, or decoded from these
-        # very bytes, is what decoding them again would give. Bytes replaced by hand
-        # (`replace_document`) are a different object, so they are decoded, and refused if
-        # damaged, exactly as before.
-        if self._decoded is not None and self._decoded[0] is self._contents:
-            return self._decoded[1]
-        document = _decode_store_document(self._contents, location="store.json")
-        self._decoded = (self._contents, document)
-        return document
+        return contents
 
-    def _write(self, document: StoreDocument) -> None:
-        self._contents = document.model_dump_json().encode()
-        self._decoded = (self._contents, document)
+    def _write(self, file: StoreFile, document: StoreDocument | LeaseDocument) -> None:
+        contents = document.encode()
+        self._contents[file] = contents
+        if isinstance(document, StoreDocument):
+            self._records.remember(contents, document)
+        else:
+            self._leases.remember(contents, document)
 
 
 class FakeStateStores:
@@ -169,7 +191,8 @@ class LocalStateStore(StoreOperations):
 
     The filesystem must support cooperating flock users and atomic rename.
     Lock and document share portable run storage, never machine-local storage.
-    Every mutation publishes record and lease in one document. Namespace writes
+    A commit publishes the record, then the lease's time watermark; lease operations
+    publish only the small lease document. Namespace writes
     fsync staging and namespace links through the existing project root for
     first-use durability. Ancestors outside the project need only traversal.
     """
@@ -194,12 +217,13 @@ class LocalStateStore(StoreOperations):
         # > caller of Project.state_store for no added safety.
         super().__init__(fault_plan, lease_fault_plan, observation_fault_plan)
         self._effects = effects if effects is not None else LocalAtomicWriteEffects()
-        # The document bytes this store knows are durable: the last it published
-        # (every sync succeeded) or the last it reloaded and synchronized. A reload
-        # of exactly these bytes has nothing left to synchronize; any other bytes,
-        # or any publication that did not finish, make the next reload sync again.
-        self._durable_source: bytes | None = None
-        self._decoded = DecodeMemo(_decode_local_document, on_decode)
+        # The bytes of each document this store knows are durable: the last it published
+        # (every sync succeeded) or the last it reloaded and synchronized. A reload of exactly
+        # these bytes has nothing left to synchronize; any other bytes, or any publication
+        # that did not finish, make the next reload sync again.
+        self._durable_source: dict[StoreFile, bytes] = {}
+        self._records = DecodeMemo(_decode_store_document, on_decode)
+        self._leases = DecodeMemo(_decode_lease_document, on_decode)
         self._namespace = project.state.state_store_namespace(run_id)
         self._durable_root = project.root
 
@@ -215,42 +239,58 @@ class LocalStateStore(StoreOperations):
         finally:
             os.close(descriptor)
 
-    def _read(self) -> StoreDocument:
-        fault = next(self._observation_faults, None)
+    def _read_record(self) -> StoreDocument | None:
+        source = self._read_file(StoreFile.RECORD)
+        return None if source is None else self._records.decode(source)
+
+    def _read_lease(self) -> LeaseDocument | None:
+        source = self._read_file(StoreFile.LEASE)
+        return None if source is None else self._leases.decode(source)
+
+    def _read_file(self, file: StoreFile) -> bytes | None:
+        directory = self._namespace.external_directory()
+        source = self._namespace.read_bytes(file)
+        fault = self._observation(exists=source is not None)
         if fault == ObservationFault.READ:
             message = "state-store observation read failed"
             raise OSError(message)
-        directory = self._namespace.external_directory()
-        source = self._namespace.read_bytes("store.json")
         if source is None:
-            return StoreDocument()
-        document = self._decoded.decode(source)
+            return None
         # Reload resolves a lost durability acknowledgement: synchronize the
         # whole observed document before any caller can dispatch from it. Bytes
         # this store already made durable need no second synchronization.
-        if fault != ObservationFault.SYNC and source == self._durable_source:
-            return document
-        self._effects.sync_existing_file(directory / "store.json")
+        if fault != ObservationFault.SYNC and source == self._durable_source.get(file):
+            return source
+        self._effects.sync_existing_file(directory / file)
         filesystem = _FaultObservationEffects() if fault == ObservationFault.SYNC else self._effects
         sync_directory_chain(directory, self._durable_root, effects=filesystem)
-        self._durable_source = source
-        return document
+        self._durable_source[file] = source
+        return source
 
-    def _write(self, document: StoreDocument) -> None:
-        self._publish_document(document)
+    def _write(self, file: StoreFile, document: StoreDocument | LeaseDocument) -> None:
+        self._publish_document(file, document)
 
-    def _write_record(self, document: StoreDocument, fault: CommitFault | None) -> None:
+    def _write_document(
+        self, file: StoreFile, document: StoreDocument | LeaseDocument, fault: CommitFault | None
+    ) -> None:
         effects = self._effects if fault is None else _FaultAtomicWriteEffects(fault)
-        self._publish_document(document, effects=effects)
+        self._publish_document(file, document, effects=effects)
 
     def _publish_document(
-        self, document: StoreDocument, *, effects: AtomicWriteEffects | None = None
+        self,
+        file: StoreFile,
+        document: StoreDocument | LeaseDocument,
+        *,
+        effects: AtomicWriteEffects | None = None,
     ) -> None:
-        contents = document.model_dump_json().encode()
+        contents = document.encode()
         try:
-            self._namespace.write_bytes("store.json", contents, effects=effects or self._effects)
-            self._durable_source = contents
-            self._decoded.remember(contents, document)
+            self._namespace.write_bytes(file, contents, effects=effects or self._effects)
+            self._durable_source[file] = contents
+            if isinstance(document, StoreDocument):
+                self._records.remember(contents, document)
+            else:
+                self._leases.remember(contents, document)
         except ProjectStateError as exc:
             if isinstance(exc.__cause__, StateStoreWriteError):
                 message = str(exc.__cause__)

@@ -392,7 +392,7 @@ def test_a_damaged_store_document_is_a_resume_diagnostic(tmp_path: Path, damage:
     """Mechanism: the store document itself was decoded outside every typed error path.
 
     A damaged envelope payload is a ``core_resume_invalid`` diagnostic; damage one layer
-    out, in the store document that holds the envelope and lease, raised pydantic's raw
+    out, in the store document that holds the envelope, raised pydantic's raw
     ``ValidationError`` (with excerpts of the file) through the resume instead.
     """
     project, run_id = project_run(tmp_path)
@@ -402,7 +402,7 @@ def test_a_damaged_store_document_is_a_resume_diagnostic(tmp_path: Path, damage:
     if damage == "truncated":
         source = source[: len(source) // 2]
     elif damage == "newer_store_version":
-        source = source.replace('"version":1', '"version":2', 1)
+        source = source.replace('"version":2', '"version":3', 1)
     else:
         source = source[:-1] + ',"written_by_a_newer_release":1}'
     document.write_text(source, encoding="utf-8")

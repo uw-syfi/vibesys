@@ -26,6 +26,7 @@ from vs_project.api import (
     StateStoreWriteError,
     StoredEnvelope,
     StoreFence,
+    StoreFile,
     Unknown,
 )
 from vs_sim.api import OsThreads
@@ -82,13 +83,15 @@ def make_store(request: pytest.FixtureRequest) -> StoreFactory:
     return request.param
 
 
-def _damage(store: StateStore, root: Path, contents: bytes) -> None:
-    """Replace the store's persisted document, as a crash or another release would."""
+def _damage(
+    store: StateStore, root: Path, contents: bytes, file: StoreFile = StoreFile.RECORD
+) -> None:
+    """Replace one of the store's persisted documents, as a crash or another release would."""
     if isinstance(store, FakeStateStore):
-        store.replace_document(contents)
+        store.replace_document(contents, file=file)
         return
     state = Project.open(root).state
-    document = state.state_store_namespace("run-1").external_directory() / "store.json"
+    document = state.state_store_namespace("run-1").external_directory() / file
     document.write_bytes(contents)
 
 
@@ -726,34 +729,50 @@ _DAMAGES = {
 }
 
 
+# Each operation reads only the documents it needs: a lease operation never reads the record.
+_READERS = [
+    (StoreFile.RECORD, "load"),
+    (StoreFile.RECORD, "commit"),
+    (StoreFile.LEASE, "acquire"),
+    (StoreFile.LEASE, "verify"),
+    (StoreFile.LEASE, "commit"),
+]
+
+
 @pytest.mark.parametrize("damage", sorted(_DAMAGES))
-@pytest.mark.parametrize("operation", ["load", "acquire", "commit"])
+@pytest.mark.parametrize(("file", "operation"), _READERS)
 def test_a_damaged_document_is_a_typed_error_that_does_not_echo_it(
-    make_store: StoreFactory, tmp_path: Path, damage: str, operation: str
+    make_store: StoreFactory, tmp_path: Path, damage: str, file: StoreFile, operation: str
 ) -> None:
     store = make_store(tmp_path, ())
     fence = store.acquire("host-a", now=0, duration=10)
     assert fence is not None
-    _damage(store, tmp_path, _DAMAGES[damage])
+    _damage(store, tmp_path, _DAMAGES[damage], file)
 
     attempt = {
         "load": store.load,
         "acquire": lambda: store.acquire("host-b", now=50, duration=10),
+        "verify": lambda: store.verify(fence, now=2),
         "commit": lambda: store.commit(None, _envelope(0), fence, now=2),
     }[operation]
 
     with pytest.raises(StateDocumentDamagedError) as failure:
         attempt()
     assert _LEAK_MARKER not in str(failure.value)
-    assert "store.json" in str(failure.value)
+    assert file in str(failure.value)
 
 
+@pytest.mark.parametrize(
+    ("file", "newer", "read"),
+    [(StoreFile.RECORD, 3, 2), (StoreFile.LEASE, 2, 1)],
+)
 def test_a_document_from_a_newer_release_names_both_versions(
-    make_store: StoreFactory, tmp_path: Path
+    make_store: StoreFactory, tmp_path: Path, file: StoreFile, newer: int, read: int
 ) -> None:
     store = make_store(tmp_path, ())
-    assert store.acquire("host-a", now=0, duration=10) is not None
-    _damage(store, tmp_path, b'{"version":2,"record":null}')
+    fence = store.acquire("host-a", now=0, duration=10)
+    assert fence is not None
+    _damage(store, tmp_path, b'{"version":%d}' % newer, file)
 
-    with pytest.raises(StateDocumentDamagedError, match=r"version 2.*reads version 1"):
-        store.load()
+    with pytest.raises(StateDocumentDamagedError, match=rf"version {newer}.*reads version {read}"):
+        store.commit(None, _envelope(0), fence, now=1)

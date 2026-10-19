@@ -113,6 +113,7 @@ from vs_project._state_io import (
 )
 from vs_project._state_models import FakeStateModels, validate_state_namespace
 from vs_project._state_store import FakeStateStore, FakeStateStores, LocalStateStore
+from vs_project._store_operations import StoreFile
 from vs_project._task_files import (
     OBJECTIVES_NAME,
     AcceleratorVendor,
@@ -282,6 +283,7 @@ __all__ = [
     "StateTransition",
     "StoreDurabilityEffects",
     "StoreFence",
+    "StoreFile",
     "StoreRecord",
     "StoredEnvelope",
     "TaskDirectory",
