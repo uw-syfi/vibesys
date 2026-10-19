@@ -26,6 +26,7 @@ from .test_measurements import observation
 from .toy_agent_search import Config, ToyHost, run_toy
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from types import CodeType, FrameType
 
     from vs_core.api.testing import Answer
@@ -275,22 +276,30 @@ def _behind(state: core.CoreState, finished: core.RequestRecord, rows: int) -> c
     return state.model_copy(update={"records": records})
 
 
-# A step whose work is linear in the ledger costs at most four times as much on four times the
-# rows (less, for its fixed part); one that is quadratic costs up to sixteen.
+# A step's cost on ``n``, ``4 * n`` and ``16 * n`` finished rows. Each fourfold step in rows adds
+# four times the cost of the step before it when the work is linear in the ledger, and sixteen
+# times when it is quadratic. Comparing the added costs, not the totals, leaves out the step's
+# fixed cost, which hid a quadratic part: with one linear-time fix undone, a restart's total
+# grew only 4.9x to 5.8x from ``n`` to ``4 * n``, while its added cost grew 7.8x to 9.8x.
 _LINEAR = 6
+_SIZES = (_ROWS, 4 * _ROWS, 16 * _ROWS)
+
+
+def _quadratic(cost: Callable[[int], int]) -> tuple[int, ...] | None:
+    """The costs ``cost(rows)`` on each of ``_SIZES`` when they grow faster than linearly, else None."""
+    short, long, longest = (cost(rows) for rows in _SIZES)
+    return None if longest - long <= _LINEAR * (long - short) else (short, long, longest)
 
 
 def _grows_linearly(
     state: core.CoreState, event: core.CoreEvent, finished: core.RequestRecord
-) -> tuple[int, int] | None:
-    """None when ``event`` costs linearly more behind more ``finished`` rows, else both costs."""
-    short = _iterations(_behind(state, finished, _ROWS), event)
-    long = _iterations(_behind(state, finished, 4 * _ROWS), event)
-    return None if long < _LINEAR * short else (short, long)
+) -> tuple[int, ...] | None:
+    """None when ``event`` costs linearly more behind more ``finished`` rows, else its costs."""
+    return _quadratic(lambda rows: _iterations(_behind(state, finished, rows), event))
 
 
 def test_a_restart_costs_in_proportion_to_the_ledger() -> None:
-    """Opening a new host epoch over ``n`` and ``4 * n`` finished requests.
+    """Opening a new host epoch over ``n``, ``4 * n`` and ``16 * n`` finished requests.
 
     A restart re-reads the answer every finished record holds. Each re-read copied the ledger
     state, and the copy rebuilt the ledger's index on its next lookup, so a restart cost the
@@ -301,6 +310,40 @@ def test_a_restart_costs_in_proportion_to_the_ledger() -> None:
     restart = core.RecoveryStarted(epoch=state.records.recovery.epoch + 1, now_at=state.run.now_at)
     finished = _finished(run_toy(ToyHost(waits=(True,), polls=(2,)), Config()).core)
     assert _grows_linearly(state, restart, finished) is None
+
+
+def _blocked_answer(
+    state: core.CoreState, finished: core.RequestRecord, rows: int
+) -> tuple[core.CoreState, core.CoreEvent]:
+    """A restart over ``rows`` finished requests, blocked on the running job, and its next answer.
+
+    The restart checks every record; the job's submission outlives its reconciliation deadline,
+    which blocks the recovery; then the submission reports that it still does not know. That
+    answer resolves nothing, and recovery names the wait of every one of its checks again.
+    """
+    behind = _behind(state, finished, rows)
+    target = behind.records.records[-1]
+    restarted = core.step(
+        behind,
+        core.RecoveryStarted(epoch=behind.records.recovery.epoch + 1, now_at=behind.run.now_at),
+    ).state
+    blocked = core.step(
+        restarted,
+        core.ReconciliationDeadline(request_id=target.request_id, now_at=target.until.at + 1.0),
+    ).state
+    assert blocked.records.recovery.phase == core.RecoveryPhase.BLOCKED
+    answer = core.Observation.model_validate(
+        {
+            "event_id": core.EventId(root="late-answer"),
+            "request_id": target.request_id,
+            "scope": target.request.scope,
+            "admission_id": target.request.admission_id,
+            "sequence": 9,
+            "observed_at": blocked.run.now_at,
+            "status": core.ObservationStatus.UNKNOWN,
+        }
+    )
+    return blocked, core.RequestObserved(observation=answer)
 
 
 @dataclass
@@ -319,10 +362,11 @@ class _Witness(ToyHost):
 
 
 def test_every_answer_costs_in_proportion_to_the_ledger() -> None:
-    """Every executor answer of a whole toy run, on ``n`` and ``4 * n`` more finished requests.
+    """Every executor answer of a whole toy run, on ``n``, ``4 * n`` and ``16 * n`` finished requests.
 
     The answers cover a run's life: operations, sessions, turns, measurements, an attempt's
-    closing and adoption. Closing an attempt asked, for every row, whether the ledger held
+    closing and adoption, and, since the toy run never restarts, an answer to a recovery that
+    a restart left blocked (recovery looks up the inspections of each of its checks). Closing an attempt asked, for every row, whether the ledger held
     that row, and answered by scanning the ledger: on the 10-hour run, closing one attempt
     after its judge's session closed held the run loop for 90 s, past its 60 s lease.
     """
@@ -346,4 +390,8 @@ def test_every_answer_costs_in_proportion_to_the_ledger() -> None:
         core.DispatchTurn,
         core.ObserveOwnedJob,
     }
+    running = started(running_polls=5, ending=core.ObservationStatus.SUCCEEDED).state
+    blocked = _quadratic(lambda rows: _iterations(*_blocked_answer(running, finished, rows)))
+    if blocked is not None:
+        quadratic["an answer to a blocked recovery"] = blocked
     assert not quadratic, quadratic
