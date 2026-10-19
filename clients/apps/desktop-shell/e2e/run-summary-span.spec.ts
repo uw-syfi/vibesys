@@ -46,6 +46,7 @@ const summary = {
     spanId: entry.span_id,
     tokens: tally(entry.tally),
   })),
+  records: [],
 };
 const fixture: RunFixture = {
   format: 1,

@@ -1113,7 +1113,7 @@ body > div:first-child {
 }
 /* Columns that need room give way first: the table scroller is its own container, so it is the
    width of the table, not of the window, that decides. */
-@container (max-width: 680px) {
+@container (max-width: 760px) {
   .vs-table [data-wide] {
     display: none;
   }
