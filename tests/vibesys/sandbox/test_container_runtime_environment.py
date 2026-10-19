@@ -64,6 +64,7 @@ class _RecordingBuildRunner:
     def __init__(self) -> None:
         self.argvs: list[tuple[str, ...]] = []
         self.selected_features: list[str] = []
+        self.built: set[str] = set()
 
     def run(
         self,
@@ -75,7 +76,11 @@ class _RecordingBuildRunner:
     ) -> subprocess.CompletedProcess[str]:
         del cwd, timeout, output
         self.argvs.append(tuple(argv))
+        if tuple(argv[1:3]) == ("image", "inspect") and argv[-1].startswith("vibesys-agent-build:"):
+            if argv[-1] not in self.built:
+                return subprocess.CompletedProcess(tuple(argv), 1, "", "No such image")
         if argv[1] == "build":
+            self.built.add(argv[list(argv).index("--tag") + 1])
             dockerfile = Path(argv[list(argv).index("--file") + 1]).read_text()
             self.selected_features = [
                 line.split()[1].rsplit("/", 1)[-1]

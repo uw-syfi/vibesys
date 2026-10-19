@@ -400,9 +400,11 @@ A Docker run starts from two images, built by `vs_agent.api.images`:
 
 The agent layer sits on top so that a CLI version bump rebuilds only that top
 layer, and a task image stays pure enough to serve the evaluator on its own.
-Docker's layer cache is what makes a repeat build of either image cheap;
-`vs_agent.api.images` builds an image once per launch and resolves its
-immutable manifest ID rather than keeping a manifest of its own.
+Each image's local tag is keyed on its build inputs, so a daemon that already
+has the tag builds nothing (a build, even a fully cached one, re-exports the
+image, which takes minutes for a large base); a changed input gets a new tag
+and Docker's layer cache redoes only what changed. `vs_agent.api.images`
+resolves the immutable manifest ID rather than keeping a manifest of its own.
 
 How a run's Dockerfile is generated from its Features, why no devcontainer CLI
 or Docker socket is involved at run time, and how Features are tested on each

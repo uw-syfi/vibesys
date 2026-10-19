@@ -72,6 +72,7 @@ class _FakeRunner:
         self.build_returncode = build_returncode
         self.calls: list[tuple[tuple[str, ...], Path, float]] = []
         self.workspaces: list[_Workspace] = []
+        self.images: set[str] = set()
 
     def run(
         self,
@@ -84,13 +85,18 @@ class _FakeRunner:
         del output
         normalized = tuple(argv)
         self.calls.append((normalized, cwd, timeout))
-        if normalized[1] == "build" and any(a.startswith("vibesys-agent-build:") for a in argv):
-            self._read_workspace(normalized)
-            return docker_build_result(("docker",), self.build_returncode, "", "build failed")
+        if normalized[1] == "build":
+            if self.build_returncode == 0:
+                self.images.add(normalized[normalized.index("--tag") + 1])
+            if any(a.startswith("vibesys-agent-build:") for a in argv):
+                self._read_workspace(normalized)
+                return docker_build_result(("docker",), self.build_returncode, "", "build failed")
         if normalized[1] in {"build", "image"} and normalized[2] != "inspect":
             return docker_build_result(("docker",), 0, "", "")
         if normalized[1] == "image":
             tag = normalized[-1]
+            if tag not in self.images:
+                return docker_build_result(("docker",), 1, "", f"No such image: {tag}")
             image_id = (
                 self.task_image_id if tag.startswith("vibesys-task-build:") else self.agent_image_id
             )
@@ -142,12 +148,49 @@ def test_agent_image_is_one_docker_build_of_the_generated_dockerfile() -> None:
     )
 
     assert image_id == _AGENT_IMAGE_ID
-    assert runner.verbs() == [("image", "inspect"), ("build",), ("image", "inspect")]
+    assert runner.verbs() == [
+        ("image", "inspect"),
+        ("image", "inspect"),
+        ("build",),
+        ("image", "inspect"),
+    ]
     assert {timeout for _argv, _cwd, timeout in runner.calls} == {42}
     (workspace,) = runner.workspaces
     assert workspace.base_image == "python:3.12-bookworm"
     assert workspace.feature_ids == ("vibesys-agent",)
     assert not workspace.root.exists()  # the build context does not outlive the build
+
+
+def test_a_second_launch_of_an_unchanged_selection_builds_and_exports_nothing(
+    tmp_path: Path,
+) -> None:
+    """Regression: every launch ran ``docker build``, and a build re-exports the whole image.
+
+    A build whose layers are all cached still writes the image out, and on a host
+    whose daemon lacks the base that export took minutes; the image tag names every
+    input, so a daemon that has the tag has the image.
+    """
+    task_root = tmp_path / "task"
+    task_root.mkdir()
+    (task_root / "Dockerfile").write_text("ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\n", encoding="utf-8")
+    runner = _FakeRunner()
+
+    def launch() -> str:
+        return agent_image(
+            "python:3.12-bookworm",
+            task_dockerfile=task_root / "Dockerfile",
+            command_runner=runner,
+            clock=ManualClock(),
+            output=DISCARD,
+        )
+
+    first = launch()
+    builds_after_first = sum(call[0][1] == "build" for call in runner.calls)
+    second = launch()
+
+    assert first == second == _AGENT_IMAGE_ID
+    assert builds_after_first == 2  # the task image, then the agent layer
+    assert sum(call[0][1] == "build" for call in runner.calls) == builds_after_first
 
 
 def test_the_image_runs_as_agent_in_workspace_and_never_mounts_the_docker_socket() -> None:
@@ -185,7 +228,7 @@ def test_agent_image_chains_task_image_as_base(tmp_path: Path) -> None:
     )
 
     assert image_id == _AGENT_IMAGE_ID
-    task_build_argv, task_cwd, _ = runner.calls[0]
+    task_build_argv, task_cwd, _ = runner.calls[1]
     task_tag = task_build_argv[4]
     assert task_tag.startswith("vibesys-task-build:")
     assert task_build_argv == (
@@ -201,7 +244,7 @@ def test_agent_image_chains_task_image_as_base(tmp_path: Path) -> None:
         str(task_root),
     )
     assert task_cwd == task_root
-    assert runner.calls[1][0] == (
+    assert runner.calls[2][0] == (
         "docker",
         "image",
         "inspect",
@@ -252,7 +295,7 @@ def test_a_failed_feature_image_build_is_a_task_image_build_error_and_cleans_up(
             "python:3.12-bookworm", command_runner=runner, clock=ManualClock(), output=DISCARD
         )
 
-    assert runner.verbs() == [("image", "inspect"), ("build",)]
+    assert runner.verbs() == [("image", "inspect"), ("image", "inspect"), ("build",)]
     assert not runner.workspaces[0].root.exists()
 
 

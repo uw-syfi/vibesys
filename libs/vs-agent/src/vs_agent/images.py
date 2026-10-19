@@ -10,7 +10,8 @@ layer.
 Docker owns layer caching for both images; VibeSys invokes each build once
 per launch and consumes the runnable manifest ID resolved from a local tag
 derived from the build's own inputs, so an unchanged task or agent selection
-retags rather than re-creates an image, and launches do not leave behind an
+finds its image already tagged and builds nothing (no context transfer, no
+export of the base's layers), and launches do not leave behind an
 ever-growing set of local tags. Default provenance attestations are disabled
 because their generated metadata otherwise changes the manifest ID when all
 filesystem layers match.
@@ -817,9 +818,10 @@ def build_task_image(  # noqa: PLR0913
     The task directory is the complete Docker build context. Candidate source,
     Git metadata, and other project inputs therefore cannot be copied into the
     image. The local tag Docker builds to is keyed to a digest of the build
-    context, the Dockerfile, and ``base_image``, so an unchanged task retags
-    the same image instead of adding another local tag, and Docker's own
-    layer cache answers the rebuild without redoing any step. The tag is a
+    context, the Dockerfile, and ``base_image``, so an unchanged task finds
+    its image already tagged and builds nothing (a build, even a fully cached
+    one, re-exports the image, which takes minutes for a large base), and a
+    changed one gets a new tag and Docker's layer cache redoes only what changed. The tag is a
     local reachability anchor: containerd's image store cannot run the stable
     config digest emitted by ``--iidfile`` when an otherwise untagged image
     has no retained manifest reference. Every call prunes this repository's
@@ -1259,7 +1261,16 @@ def _timeout_error(
 def _build_and_inspect(
     target: _BuildTarget, extra_build_args: Sequence[str], build: _BuildRun, *, image_tag: str
 ) -> _BuiltImage:
-    """Build one Dockerfile to *image_tag* and resolve its immutable ID."""
+    """Resolve *image_tag*'s immutable ID, building the Dockerfile to it only when it is absent.
+
+    The tag is keyed to every build input, so a tag the daemon already has names
+    an image built from exactly these inputs: building again would only send the
+    context, re-check every layer and export the image a second time (minutes
+    for a large base) to arrive at the same ID.
+    """
+    present = _inspect_tag(build, target, image_tag)
+    if present.returncode == 0:
+        return _BuiltImage(tag=image_tag, image_id=_valid_image_id(present, target))
     build_argv = (
         "docker",
         "build",
@@ -1283,15 +1294,7 @@ def _build_and_inspect(
         detail = build_result.failure_diagnostic("docker build failed")
         raise TaskImageBuildError.build_failed(target, build_result.returncode, detail)
 
-    inspect_argv = (
-        "docker",
-        "image",
-        "inspect",
-        "--format",
-        "{{.Id}}",
-        image_tag,
-    )
-    inspect_result = _run_docker(build, inspect_argv, action="inspecting", target=target)
+    inspect_result = _inspect_tag(build, target, image_tag)
     if inspect_result.returncode != 0:
         detail = inspect_result.failure_diagnostic("docker inspect failed")
         raise TaskImageBuildError.inspect_failed(
@@ -1300,22 +1303,22 @@ def _build_and_inspect(
             inspect_result.returncode,
             detail,
         )
-    if inspect_result.stdout_truncated:
-        displayed = inspect_result.stdout_diagnostic("<empty>")
-        raise TaskImageBuildError.invalid_runnable_id(
-            target.image_label,
-            target.source,
-            displayed,
-        )
-    image_id = inspect_result.stdout.strip()
-    if _IMAGE_ID.fullmatch(image_id) is None:
-        displayed = inspect_result.stdout_diagnostic("<empty>")
-        raise TaskImageBuildError.invalid_runnable_id(
-            target.image_label,
-            target.source,
-            displayed,
-        )
-    return _BuiltImage(tag=image_tag, image_id=image_id)
+    return _BuiltImage(tag=image_tag, image_id=_valid_image_id(inspect_result, target))
+
+
+def _inspect_tag(build: _BuildRun, target: _BuildTarget, image_tag: str) -> DockerCommandResult:
+    """Run ``docker image inspect`` for the ID of *image_tag*."""
+    argv = ("docker", "image", "inspect", "--format", "{{.Id}}", image_tag)
+    return _run_docker(build, argv, action="inspecting", target=target)
+
+
+def _valid_image_id(inspected: DockerCommandResult, target: _BuildTarget) -> str:
+    """Return the image ID a successful inspection printed, or raise if it is not one."""
+    image_id = inspected.stdout.strip()
+    if inspected.stdout_truncated or _IMAGE_ID.fullmatch(image_id) is None:
+        displayed = inspected.stdout_diagnostic("<empty>")
+        raise TaskImageBuildError.invalid_runnable_id(target.image_label, target.source, displayed)
+    return image_id
 
 
 def _run_docker(

@@ -107,10 +107,24 @@ def test_build_reuses_the_existing_tag_and_image_for_an_unchanged_task(tmp_path:
         dockerfile, command_runner=store, clock=ManualClock(), output=DISCARD
     )
 
-    assert store.builds[0] == store.builds[1]
+    assert len(store.builds) == 1
     assert first_id == second_id
     assert len(store.tags) == 1
     assert store.removed == []
+
+
+@given(first=st.sampled_from(["a", "b", "c"]), second=st.sampled_from(["a", "b", "c"]))
+def test_a_task_is_built_again_exactly_when_its_inputs_changed(first: str, second: str) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        task_root = Path(directory)
+        dockerfile = task_root / "Dockerfile"
+        dockerfile.write_text("FROM scratch\n", encoding="utf-8")
+        store = _FakeDockerImageStore()
+        for payload in (first, second):
+            (task_root / "payload.txt").write_text(payload, encoding="utf-8")
+            build_task_image(dockerfile, command_runner=store, clock=ManualClock(), output=DISCARD)
+
+    assert len(store.builds) == (1 if first == second else 2)
 
 
 def test_build_tags_a_changed_task_differently_and_prunes_the_old_tag(tmp_path: Path) -> None:
@@ -173,7 +187,7 @@ def test_build_tag_is_unchanged_when_the_context_is_rebuilt_unchanged(content: s
             task_root / "Dockerfile", command_runner=store, clock=ManualClock(), output=DISCARD
         )
 
-    assert store.builds[0] == store.builds[1]
+    assert len(store.builds) == 1
 
 
 @given(
@@ -213,7 +227,7 @@ def test_build_uses_task_context_and_returns_runnable_image_id(tmp_path: Path) -
         == _IMAGE_ID
     )
 
-    build_argv, cwd, timeout = runner.calls[0]
+    build_argv, cwd, timeout = runner.calls[1]
     tag = build_argv[4]
     assert tag.startswith("vibesys-task-build:")
     assert build_argv == (
@@ -228,7 +242,7 @@ def test_build_uses_task_context_and_returns_runnable_image_id(tmp_path: Path) -
     )
     assert cwd == task_root
     assert 0 < timeout <= 42
-    inspect_argv, inspect_cwd, inspect_timeout = runner.calls[1]
+    inspect_argv, inspect_cwd, inspect_timeout = runner.calls[2]
     assert (inspect_argv, inspect_cwd) == (
         (
             "docker",
@@ -254,7 +268,7 @@ def test_build_passes_base_image_as_build_arg(tmp_path: Path) -> None:
         output=DISCARD,
     )
 
-    build_argv, _cwd, _timeout = runner.calls[0]
+    build_argv, _cwd, _timeout = runner.calls[1]
     tag = build_argv[4]
     assert tag.startswith("vibesys-task-build:")
     assert build_argv == (
@@ -295,7 +309,7 @@ def test_build_translates_process_failures(
             output=DISCARD,
         )
 
-    assert len(runner.calls) == 1
+    assert len(runner.calls) == 2
 
 
 def test_build_reports_bounded_truncated_docker_failure(tmp_path: Path) -> None:
@@ -384,7 +398,7 @@ def test_build_rejects_malformed_runnable_image_id(
             output=DISCARD,
         )
 
-    assert len(runner.calls) == 2
+    assert len(runner.calls) == 3
 
 
 @pytest.mark.parametrize(
@@ -417,7 +431,7 @@ def test_build_translates_inspect_failures(
             output=DISCARD,
         )
 
-    assert len(runner.calls) == 2
+    assert len(runner.calls) == 3
 
 
 def test_build_validates_dockerfile_before_running_docker(tmp_path: Path) -> None:

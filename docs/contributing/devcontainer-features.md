@@ -139,6 +139,11 @@ often ahead of the agent layer) does not apply.
    argument, so the Dockerfile text does not depend on it.
 3. Resolves the tag to its immutable image ID, as the old Dockerfile build did.
 
+The tag is derived from the build inputs, so when the daemon already has it
+steps 2 and 3 reduce to the inspection: nothing is built or exported. A base
+named by a mutable registry tag is an input known by name only, so callers pin
+it.
+
 The image ID is content-addressed: rebuilding the same selection on the same
 base resolves to the same ID from the layer cache, even though the temporary
 build directory has a different path each time. `push_agent_image` keys its
