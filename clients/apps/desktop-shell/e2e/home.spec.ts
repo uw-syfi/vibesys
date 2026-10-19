@@ -68,3 +68,11 @@ test('with a run listed the app opens on the Runs dashboard', async ({page}) => 
   await expect(rail(page, 'Runs')).toBeVisible();
   await expect(page.getByRole('heading', {name: 'Runs', level: 1})).toBeVisible();
 });
+
+test('a configured machine with a live run lists it on a fresh profile with no recent run', async ({
+  page,
+}) => {
+  await open(page, {...SEED, recent: [], projectRuns: {}});
+  await expect(rail(page, 'Runs')).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'Runs', level: 1})).toBeVisible();
+});

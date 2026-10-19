@@ -75,6 +75,8 @@ export {
   catalogueFor,
   defaultDestination,
   type ExamplesFor,
+  type ExamplesStatus,
+  examplesStatus,
   type Flow,
   factsOf,
   flowAnswer,
@@ -123,6 +125,7 @@ export {
 } from './form.js';
 export {
   CHECK_DEBOUNCE_MS,
+  EXAMPLES_BOUND_MS,
   type FixDone,
   type NewRunContext,
   type NewRunEvent,

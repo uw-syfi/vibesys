@@ -131,6 +131,7 @@ function desktopWorld(cleanups: RetirementCleanups = {}, skipped: SkippedRecent[
   const logs: string[] = [];
   const checkouts: {readonly path: unknown; readonly change: unknown}[] = [];
   const launches: string[] = [];
+  let configuredReads = 0;
   const opened: string[] = [];
   let bound: ReturnType<DesktopDeps['runs']['attached']> = null;
   let releaseCleanup = (): void => {};
@@ -216,6 +217,9 @@ function desktopWorld(cleanups: RetirementCleanups = {}, skipped: SkippedRecent[
     },
     logs: async () => ({ok: true, instanceId: '000000000001', streams: []}),
     recent: async () => undefined,
+    configured: async () => {
+      configuredReads += 1;
+    },
     releaseLogs: () => undefined,
     retireOwner: async owner => {
       events.push(`retire-host:${owner}`);
@@ -281,6 +285,7 @@ function desktopWorld(cleanups: RetirementCleanups = {}, skipped: SkippedRecent[
     log: message => logs.push(message),
   });
   return {
+    configuredReads: () => configuredReads,
     opened,
     historySource,
     runWindowList,
@@ -304,6 +309,23 @@ describe('Desktop overview', () => {
       ok: true,
       value: {recent: [], skippedRecent: skipped},
     });
+  });
+});
+
+describe('Desktop configured machines', () => {
+  test('every overview asks for the machines of hosts.json to be watched', async () => {
+    const w = desktopWorld();
+    expect(w.configuredReads()).toBe(0);
+    await w.ipc.invoke('10:100', WELCOME_CHANNELS.overview);
+    expect(w.configuredReads()).toBe(1);
+    await w.ipc.invoke('10:100', WELCOME_CHANNELS.overview);
+    expect(w.configuredReads()).toBe(2);
+  });
+
+  test('a saved checkout asks for the machines to be watched again', async () => {
+    const w = desktopWorld();
+    await w.ipc.invoke('10:100', WELCOME_CHANNELS.setCheckout, 'local', '/old', 1);
+    expect(w.configuredReads()).toBe(1);
   });
 });
 

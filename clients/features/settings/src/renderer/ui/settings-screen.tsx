@@ -48,9 +48,10 @@ function themeLabel(theme: ThemeName): string {
   return `${theme.charAt(0).toUpperCase()}${theme.slice(1)}`;
 }
 
+/** The theme in use, with the system's mode when it picks one: `Light · Paper`. */
 function modeNote(appearance: Appearance, os: 'light' | 'dark'): string {
-  if (appearance.mode !== 'system') return `Always ${themeLabel(appearance[appearance.mode])}.`;
-  return `Follows your system, which is ${os} now: ${themeLabel(appearance[os])}.`;
+  const mode = appearance.mode === 'system' ? os : appearance.mode;
+  return `${mode === 'light' ? 'Light' : 'Dark'} · ${themeLabel(appearance[mode])}`;
 }
 
 function ThemeChoice(props: {
@@ -101,7 +102,6 @@ function MachineContent(props: {
       <Card>
         <EmptyState
           title="No machine yet"
-          body="Add a machine, then set up its clusters, clouds and agent logins here."
           action={
             <Button
               text="Add a machine"

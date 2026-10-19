@@ -134,10 +134,6 @@ export function LoginsSection(props: {
         <Text as="h1" variant="title">
           Agent logins
         </Text>
-        <Text tone="muted">
-          The agents a run on {machine} can use. Each harness keeps its own login there; VibeSys
-          reads whether it is signed in, never the secret.
-        </Text>
       </Stack>
       <Reading
         what="the agent logins"

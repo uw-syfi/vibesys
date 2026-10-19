@@ -35,7 +35,17 @@ export interface Flow {
 /** What a machine's helper answered to `examples.list`, for one machine. */
 export interface ExamplesFor {
   readonly for: HostKey;
-  readonly value: Offered<ExampleList>;
+  /** `failed`: the machine could not list them, or did not answer in time. */
+  readonly value: Offered<ExampleList> | {readonly kind: 'failed'};
+}
+
+/** What the screen knows of `machine`'s examples: not yet, none, failed, or listed. */
+export type ExamplesStatus = 'listing' | 'failed' | 'none' | 'listed';
+
+export function examplesStatus(examples: ExamplesFor | null, machine: HostKey): ExamplesStatus {
+  if (examples === null || examples.for !== machine) return 'listing';
+  if (examples.value.kind === 'failed') return 'failed';
+  return (catalogueFor(examples, machine) ?? []).length === 0 ? 'none' : 'listed';
 }
 
 /**

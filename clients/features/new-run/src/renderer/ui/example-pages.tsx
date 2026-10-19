@@ -6,6 +6,7 @@
 import {
   BrandMark,
   type BrandMarkName,
+  Button,
   ChoiceTiles,
   Row,
   Stack,
@@ -21,6 +22,7 @@ import {
   entriesFor,
   exampleLabel,
   examplesOf,
+  examplesStatus,
   hardwareGroups,
   hasDetails,
   MAKER_NAMES,
@@ -31,7 +33,7 @@ import {
 } from '../../state/index.js';
 import type {CardProps} from './card-props.js';
 import {backendLabel} from './cause-words.js';
-import {entriesIn, modelMakerMark, recentChoices, vendorMark} from './view.js';
+import {entriesIn, type MachineOption, modelMakerMark, recentChoices, vendorMark} from './view.js';
 
 function answer(props: CardProps, change: AnswerChange): void {
   props.dispatch({type: 'answer', change});
@@ -40,10 +42,33 @@ function answer(props: CardProps, change: AnswerChange): void {
 /** Said in place of options while the machine's examples are not known yet, or when it has none. */
 function Listing(props: CardProps): JSX.Element {
   const {context} = props;
+  const status = examplesStatus(context.examples, context.form.machine);
+  return <Text tone="muted">{status === 'listing' ? 'Listing' : 'No examples'}</Text>;
+}
+
+/**
+ * Said when the machine's examples could not be listed: the status, a way to ask again, and the
+ * other machines, so a broken one is never the end of the form.
+ */
+export function ExamplesFailed(
+  props: CardProps & {readonly machines: readonly MachineOption[]},
+): JSX.Element {
+  const {context, dispatch} = props;
+  const {machine} = context.form;
   return (
-    <Text tone="muted">
-      {context.examples?.for === context.form.machine ? 'No examples' : 'Listing'}
-    </Text>
+    <Stack gap="space-5">
+      <Row gap="space-3">
+        <Text tone="err">Failed</Text>
+        <Button text="Try again" press={() => dispatch({type: 'machine', machine})} />
+      </Row>
+      <ChoiceTiles
+        label="Machine"
+        layout="cards"
+        options={props.machines.map(option => ({value: option.value, label: option.label}))}
+        value={machine}
+        change={next => dispatch({type: 'machine', machine: next})}
+      />
+    </Stack>
   );
 }
 
@@ -68,16 +93,18 @@ function GroupLabel(props: {
 export function StartPage(props: CardProps): JSX.Element {
   const {context} = props;
   const entries = entriesIn(context);
-  const none = entries.length === 0 && context.examples?.for === context.form.machine;
+  const status = examplesStatus(context.examples, context.form.machine);
   const examples = allExamples(entries).length;
   const recents = recentChoices(context.recent).length;
   const options: TileOption<'example' | 'project'>[] = [
     {
       value: 'example',
       label: 'An example',
-      ...(none
-        ? {unavailable: 'No examples'}
-        : {meta: examples === 0 ? 'Listing' : `${examples} examples`}),
+      ...(status === 'failed'
+        ? {unavailable: 'Failed'}
+        : status === 'none'
+          ? {unavailable: 'No examples'}
+          : {meta: examples === 0 ? 'Listing' : `${examples} examples`}),
     },
     {
       value: 'project',

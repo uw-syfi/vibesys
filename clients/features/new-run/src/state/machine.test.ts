@@ -24,12 +24,13 @@ import {createActor, fromPromise, SimulatedClock, type SnapshotFrom} from 'xstat
 import {type AnswerChange, chosenEntry, NO_ANSWERS, stepIds} from './answers.js';
 import type {CatalogueEntry} from './catalogue.js';
 import type {Draft} from './draft.js';
-import {catalogueFor} from './flow.js';
+import {catalogueFor, examplesStatus} from './flow.js';
 import {
   CHECK_DEBOUNCE_MS,
   type Compute,
   checksPass,
   destinationKey,
+  EXAMPLES_BOUND_MS,
   type FixDone,
   formWithRoles,
   inputsKey,
@@ -926,5 +927,100 @@ describe('roles', () => {
     expect(formWithRoles(form, null)).toBe(form);
     expect(rolesAfter(['a'], [])).toEqual(['a']);
     expect(rolesAfter(['a'], ['b'])).toEqual(['b']);
+  });
+});
+
+describe('a machine whose examples cannot be listed', () => {
+  type Listing = Offered<ExampleList> | 'fails' | 'hangs';
+  const never = (): Promise<never> => new Promise(() => {});
+
+  /** An actor whose machines list as `listings` say (`local` and `ssh:gpu`), on a simulated clock. */
+  function actorWith(
+    listings: Readonly<Record<string, Listing>>,
+    features: 'answers' | 'fails' | 'hangs',
+    clock: SimulatedClock,
+  ) {
+    return createActor(
+      newRunMachine.provide({
+        actors: {
+          describe: fromPromise<Offered<MachineDescription>, {readonly host: HostKey}>(
+            async () => ({kind: 'unsupported'}),
+          ),
+          examples: fromPromise<Offered<ExampleList>, {readonly host: HostKey}>(async ({input}) => {
+            const listing = listings[input.host] ?? 'fails';
+            if (listing === 'fails') throw new Error('helper failed');
+            if (listing === 'hangs') return never();
+            return listing;
+          }),
+          harnesses: fromPromise<readonly HarnessOffer[], {readonly host: HostKey}>(
+            async () => OFFERS,
+          ),
+          features: fromPromise<readonly HelperFeature[], {readonly host: HostKey}>(
+            async ({input}) => {
+              if (features === 'fails' && input.host === 'local') throw new Error('no helper');
+              if (features === 'hangs' && input.host === 'local') return never();
+              return REQUIRED_HELPER_FEATURES;
+            },
+          ),
+        },
+      }),
+      {input: {machine: 'local', recent: RECENT, moreOpen: {}}, clock},
+    );
+  }
+
+  const status = (actor: ReturnType<typeof actorWith>, machine: HostKey) =>
+    examplesStatus(actor.getSnapshot().context.examples, machine);
+
+  /** Let every promise already resolved deliver its answer (no real time passes). */
+  const settle = async () => {
+    for (let turn = 0; turn < 50; turn += 1) await Promise.resolve();
+  };
+
+  test.each([
+    ['the listing fails', {local: 'fails'}, 'answers'],
+    ['the helper cannot be reached', {local: 'fails'}, 'fails'],
+  ] as const)('%s: failed is said at once, and another machine can be chosen', async (_name, listings, features) => {
+    const clock = new SimulatedClock();
+    const actor = actorWith(
+      {...listings, 'ssh:gpu': {kind: 'offered', value: exampleCatalogue}},
+      features,
+      clock,
+    );
+    actor.start();
+    await settle();
+    expect(status(actor, 'local')).toBe('failed');
+    actor.send({type: 'machine', machine: 'ssh:gpu'});
+    await settle();
+    expect(status(actor, 'ssh:gpu')).toBe('listed');
+    actor.stop();
+  });
+
+  test.each([
+    ['listing', {local: 'hangs'}, 'answers'],
+    ['helper', {local: 'hangs'}, 'hangs'],
+  ] as const)('a hanging %s is failed once the bound passes, not before', async (_name, listings, features) => {
+    const clock = new SimulatedClock();
+    const actor = actorWith(listings, features, clock);
+    actor.start();
+    await settle();
+    expect(status(actor, 'local')).toBe('listing');
+    clock.increment(EXAMPLES_BOUND_MS - 1);
+    expect(status(actor, 'local')).toBe('listing');
+    clock.increment(1);
+    expect(status(actor, 'local')).toBe('failed');
+    actor.stop();
+  });
+
+  test('choosing the same machine again lists it again', async () => {
+    const clock = new SimulatedClock();
+    const actor = actorWith({local: 'fails'}, 'answers', clock);
+    actor.start();
+    await settle();
+    expect(status(actor, 'local')).toBe('failed');
+    actor.send({type: 'machine', machine: 'local'});
+    expect(status(actor, 'local')).toBe('listing');
+    await settle();
+    expect(status(actor, 'local')).toBe('failed');
+    actor.stop();
   });
 });

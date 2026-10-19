@@ -41,7 +41,7 @@ import {
 type Dispatch = (action: MachinesAction) => void;
 
 const LOCAL: HostKey = 'local';
-const CHECKING = 'The app is starting VibeSys from this checkout to check it.';
+const CHECKING = 'Checking the checkout';
 
 /** A ref callback with one identity, so it runs as the form mounts and not on every render. */
 function focusFirstField(form: HTMLDivElement | null): void {
@@ -87,7 +87,7 @@ export function AddMachine(props: {
           <Grid min="field">
             <Field
               label="SSH host"
-              help="As you’d type after ssh; your SSH config and keys apply."
+              hint="As you’d type after ssh; your SSH config and keys apply."
               {...(adding.problem?.field === 'host' ? {error: adding.problem.text} : {})}
             >
               <TextInput
@@ -211,10 +211,7 @@ function NoMachine(props: {readonly state: MachinesState}): JSX.Element | null {
       {state.listing !== null ? (
         <EmptyState title="Reading the machines" />
       ) : (
-        <EmptyState
-          title="No machine yet"
-          body="Add the SSH host where your VibeSys checkout is."
-        />
+        <EmptyState title="No machine yet" />
       )}
     </Card>
   );

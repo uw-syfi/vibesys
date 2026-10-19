@@ -34,6 +34,8 @@ export function useFieldWiring(control: string): FieldWiring {
 export function Field(props: {
   readonly label: string;
   readonly help?: string;
+  /** What the field needs explained, shown as the label's tooltip instead of a line of help. */
+  readonly hint?: string;
   readonly error?: string;
   /** Names the control to assistive technology and no one else, for a control in a toolbar row. */
   readonly hideLabel?: boolean;
@@ -51,6 +53,7 @@ export function Field(props: {
         className="vs-field-label"
         id={labelId}
         htmlFor={id}
+        title={props.hint}
         data-hidden={props.hideLabel === true || undefined}
       >
         {props.label}

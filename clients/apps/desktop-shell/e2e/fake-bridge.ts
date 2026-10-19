@@ -150,6 +150,8 @@ export interface FakeBridgeSeed {
     readonly features?: readonly string[];
     /** The roles the helper reports for a run (feature `run_roles`); the multi roles when not given. */
     readonly roles?: readonly string[];
+    /** The machines whose helper fails to list the examples. */
+    readonly examplesFail?: readonly string[];
   };
 }
 
@@ -560,8 +562,10 @@ export function installFakeExampleDestination(seed: FakeBridgeSeed): void {
 export function installFakeNewRun(seed: FakeBridgeSeed): void {
   const ok = (value: unknown) => Promise.resolve({ok: true, value});
   const catalog = seed.newRun;
-  const offered = (value: unknown) =>
-    ok(catalog === undefined ? {kind: 'unsupported'} : {kind: 'offered', value});
+  const offered = (value: unknown, failed = false) =>
+    failed
+      ? refused('The helper failed.')
+      : ok(catalog === undefined ? {kind: 'unsupported'} : {kind: 'offered', value});
   const projects = new Map(Object.entries(catalog?.projects ?? {}));
   const newRun = {preflights: [] as unknown[], started: [] as unknown[]};
   const refused = (error: string) => Promise.resolve({ok: false, error, authNeeded: false});
@@ -569,20 +573,18 @@ export function installFakeNewRun(seed: FakeBridgeSeed): void {
     projects.set(project, tasks);
     return {project, tasks};
   };
-  const insideRepository = (project: string) => project.includes('/vibesys/');
-  const words = (text: string) => text.split(' ');
   // Serialized into the page: it cannot name an import. Includes `REQUIRED_HELPER_FEATURES`.
   const features =
     catalog?.features ??
-    words(
-      'run_options preflight examples run_history run_summary run_trace run_roles example_catalogue run_role_agents project_goal chat_ended_runs',
+    'run_options preflight examples run_history run_summary run_trace run_roles example_catalogue run_role_agents project_goal chat_ended_runs'.split(
+      ' ',
     );
   const roles =
-    catalog?.roles ?? words('multi-orchestrator multi-profiler multi-implementer multi-judge');
+    catalog?.roles ?? 'multi-orchestrator multi-profiler multi-implementer multi-judge'.split(' ');
   const check = (id: string, state: string, detail: string) => ({id, state, detail, fix: null});
   const preflight = (_host: string, inputs: {project: string}) => {
     newRun.preflights.push(inputs);
-    const own = insideRepository(inputs.project)
+    const own = inputs.project.includes('/vibesys/')
       ? {
           id: 'project_own_repository',
           state: 'fail',
@@ -616,7 +618,7 @@ export function installFakeNewRun(seed: FakeBridgeSeed): void {
     describeMachine: () => offered(catalog?.machine),
     helperFeatures: () => ok(catalog === undefined ? [] : features),
     harnesses: () => ok({kind: 'listed', harnesses: catalog?.harnesses ?? []}),
-    examples: () => offered(catalog?.examples),
+    examples: (host: string) => offered(catalog?.examples, catalog?.examplesFail?.includes(host)),
     tasks: (_host: string, project: string) => {
       const tasks = projects.get(project);
       return tasks === undefined ? refused(`${project} is not a VibeSys project.`) : ok(tasks);

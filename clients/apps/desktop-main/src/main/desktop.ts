@@ -40,6 +40,7 @@ export interface DesktopDeps {
     Hosts,
     | 'cancelCheckout'
     | 'cancelCheckoutOwner'
+    | 'configured'
     | 'complete'
     | 'harnesses'
     | 'readSummary'
@@ -224,10 +225,20 @@ export class Desktop {
     }
   }
 
+  /** Watch every machine of `hosts.json`, whether or not a recent run names it. */
+  async #watchConfigured(): Promise<void> {
+    try {
+      await this.#deps.hosts.configured();
+    } catch (error) {
+      this.#deps.log(`could not watch configured hosts: ${(error as Error).message}`);
+    }
+  }
+
   async #overview(): Promise<WelcomeOverview> {
     const generation = ++this.#recentGeneration;
     const {recent, skipped} = await this.#deps.settings.recentSnapshot();
     void this.#watchRecent(recent, generation);
+    void this.#watchConfigured();
     return this.#deps.welcome.snapshot({recent: welcomeRecent(recent), skippedRecent: skipped});
   }
 
@@ -237,11 +248,15 @@ export class Desktop {
     switch (request.kind) {
       case 'overview':
         return this.#overview();
-      case 'set-checkout':
-        return hosts.setCheckout(request.host, request.path, {
+      case 'set-checkout': {
+        const root = await hosts.setCheckout(request.host, request.path, {
           owner: rendererGeneration,
           sequence: request.change,
         });
+        // The machine the user just saved is configured now.
+        void this.#watchConfigured();
+        return root;
+      }
       case 'cancel-checkout':
         await hosts.cancelCheckout({owner: rendererGeneration, sequence: request.change});
         return null;

@@ -1073,3 +1073,24 @@ test('models by maker: the latest generation is shown and older ones wait behind
   await expect(main(page).getByText('GPT-5-SOL', {exact: true})).toBeVisible();
   await expect(main(page).getByRole('button', {name: /Older/})).toHaveCount(0);
 });
+
+test('a machine that cannot list its examples says Failed and lets another machine be chosen', async ({
+  page,
+}) => {
+  const newRun = SEED.newRun;
+  if (newRun === undefined) throw new Error('the seed has no New run helper');
+  await openAt(page, pageNamed('example'), {
+    ...SEED,
+    newRun: {...newRun, examplesFail: ['ssh:host-b']},
+  });
+  await expect(main(page).getByText('Failed', {exact: true})).toBeVisible();
+  await expect(main(page).getByText('Listing', {exact: true})).toHaveCount(0);
+  // The failed page is replaced by the new machine's listing as the choice lands.
+  await main(page)
+    .getByRole('radiogroup', {name: 'Machine', exact: true})
+    .getByRole('radio', {name: /This Mac/})
+    .click({force: true});
+  await expect(question(page, 'Which domain?')).toBeVisible();
+  await expect(main(page).getByRole('radiogroup', {name: 'Domain'})).toBeVisible();
+  await expect(main(page).getByText('Failed', {exact: true})).toHaveCount(0);
+});

@@ -3,7 +3,7 @@ import {join} from 'node:path';
 import {type ConnectionLease, ConnectionManager} from '@vibesys/connection';
 import {FAKE_MODEL_CATALOGUE, FakeLink, record} from '@vibesys/connection/testing';
 import type {RunSummary} from '@vibesys/contracts/host-helper';
-import type {HostId, HostListing} from '@vibesys/hosts';
+import {type HostId, type HostListing, hostKey} from '@vibesys/hosts';
 import {remember, SettingsStore, settingsFor, withHostSettings} from '@vibesys/settings';
 import {FakeSettingsFilesystem} from '@vibesys/settings/testing';
 import {FakeClock} from '@vibesys/transport/testing';
@@ -1933,6 +1933,65 @@ describe('Hosts desired set', () => {
         connection: {kind: 'offline', detail: 'host unreachable'},
       },
     ]);
+  });
+
+  describe('configured machines', () => {
+    async function fresh(configured: readonly HostId[]) {
+      const settings = new SettingsStore({
+        settingsPath: '/settings/hosts.json',
+        recentPath: '/settings/recent.json',
+        preferencesPath: '/settings/preferences.json',
+        filesystem: new FakeSettingsFilesystem(),
+        log: () => {},
+      });
+      await configuredSettings(settings, configured);
+      const manager = new ConnectionManager({
+        linkFor: () => new FakeLink(),
+        appVersion: 'test',
+        scheduleTimeout: new FakeClock().scheduleTimeout,
+        config: CONFIG,
+        log: () => {},
+      });
+      const hosts = new Hosts({
+        manager,
+        settings,
+        localCheckout: '/bundled',
+        sshConfigPath: '/missing',
+        log: () => {},
+        push: () => {},
+        retire: () => {},
+      });
+      return {manager, hosts};
+    }
+
+    test.each([
+      [[ALPHA]],
+      [[BETA]],
+      [[ALPHA, BETA]],
+    ] as const)('every configured machine is watched with no recent run: %j', async configured => {
+      const {manager, hosts} = await fresh(configured);
+      await using _manager = manager;
+      await hosts.configured();
+      for (const id of configured) expect(manager.existing(hostKey(id))).not.toBeNull();
+    });
+
+    test('nothing is watched when no machine is configured', async () => {
+      const {manager, hosts} = await fresh([]);
+      await using _manager = manager;
+      await hosts.configured();
+      expect(manager.existing(hostKey(ALPHA))).toBeNull();
+    });
+
+    test('a removed machine stops being watched and a re-read cannot bring it back', async () => {
+      const {manager, hosts} = await fresh([ALPHA, BETA]);
+      await using _manager = manager;
+      await hosts.configured();
+      await hosts.remove(ALPHA);
+      expect(manager.existing(hostKey(ALPHA))).toBeNull();
+      expect(manager.existing(hostKey(BETA))).not.toBeNull();
+      await hosts.configured();
+      expect(manager.existing(hostKey(ALPHA))).toBeNull();
+    });
   });
 
   test('recent and visible intent form one set, independently of update order', async () => {

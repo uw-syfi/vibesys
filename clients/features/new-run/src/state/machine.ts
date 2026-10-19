@@ -148,6 +148,8 @@ export type NewRunEvent =
   | {readonly type: 'recent'; readonly recent: readonly RecentRun[]}
   | {readonly type: 'more_options'; readonly machine: HostKey; readonly open: boolean}
   | {readonly type: 'recheck'}
+  /** The machine's helper could not be reached, so its examples are not coming. */
+  | {readonly type: 'helper_failed'}
   /** Check again: read the project's tasks and check the inputs once more. */
   | {readonly type: 'refresh'}
   /** Try again the load or check that failed (`problem`). */
@@ -173,6 +175,13 @@ export interface NewRunInput {
 
 /** How long the inputs must stay still before they are checked, in milliseconds. */
 export const CHECK_DEBOUNCE_MS = 400;
+
+/**
+ * How long a machine's examples may stay unlisted before the listing counts as failed. It only
+ * guards a helper that never answers: a failure the helper reports shows at once, and the
+ * connection gives up on its own sooner.
+ */
+export const EXAMPLES_BOUND_MS = 90_000;
 
 function withAgent(form: Form, change: (agent: AgentChoice) => AgentChoice): Form {
   return form.agent === null ? form : {...form, agent: change(form.agent)};
@@ -231,6 +240,15 @@ function flowOf(context: NewRunContext): Flow {
 /** The entries of the catalogue of the machine the form is for; empty while it is not known. */
 function entriesOf(context: NewRunContext): readonly CatalogueEntry[] {
   return catalogueFor(context.examples, context.form.machine) ?? [];
+}
+
+/** The parts of the context for what `machine`'s helper said of its examples. */
+function examplesParts(context: NewRunContext, value: ExamplesFor['value']) {
+  const examples: ExamplesFor = {for: context.form.machine, value};
+  return {
+    examples,
+    ...fromFlow(flowSettled(flowOf(context), catalogueFor(examples, examples.for))),
+  };
 }
 
 /** The parts of the context a flow sets. */
@@ -440,7 +458,7 @@ export const newRunMachine = setup({
     answersProject: ({event}) =>
       event.type === 'answer' && (event.change.kind === 'project' || event.change.kind === 'from'),
   },
-  delays: {debounce: CHECK_DEBOUNCE_MS},
+  delays: {debounce: CHECK_DEBOUNCE_MS, examplesBound: EXAMPLES_BOUND_MS},
   actions: {
     clearProblem: assign({problem: null}),
     fail: assign((_, params: {readonly step: Step; readonly error: unknown}) => ({
@@ -552,10 +570,13 @@ export const newRunMachine = setup({
                 },
                 onError: {
                   target: 'ready',
-                  actions: {
-                    type: 'fail',
-                    params: ({event}) => ({step: 'features', error: event.error}),
-                  },
+                  actions: [
+                    {
+                      type: 'fail',
+                      params: ({event}) => ({step: 'features', error: event.error}),
+                    },
+                    raise({type: 'helper_failed'}),
+                  ],
                 },
               },
             },
@@ -651,58 +672,58 @@ export const newRunMachine = setup({
             retry: {
               guard: {type: 'failedAt', params: {step: 'examples'}},
               target: '.pending',
-              actions: 'clearProblem',
+              actions: ['clearProblem', assign({examples: null})],
             },
           },
           states: {
-            // A helper without `examples` is never asked: it offers none.
+            // A helper without `examples` is never asked: it offers none. One that cannot be
+            // reached, or never answers, offers none either: the screen says so.
             pending: {
               always: [
                 {guard: 'offersExamples', target: 'loading'},
                 {
                   guard: 'helperKnown',
                   target: 'ready',
-                  actions: assign(({context}) => {
-                    const examples: ExamplesFor = {
-                      for: context.form.machine,
-                      value: {kind: 'unsupported'},
-                    };
-                    return {
-                      examples,
-                      ...fromFlow(
-                        flowSettled(flowOf(context), catalogueFor(examples, examples.for)),
-                      ),
-                    };
-                  }),
+                  actions: assign(({context}) => examplesParts(context, {kind: 'unsupported'})),
                 },
               ],
+              after: {
+                examplesBound: {
+                  target: 'ready',
+                  actions: assign(({context}) => examplesParts(context, {kind: 'failed'})),
+                },
+              },
+              on: {
+                helper_failed: {
+                  target: 'ready',
+                  actions: assign(({context}) => examplesParts(context, {kind: 'failed'})),
+                },
+              },
             },
             loading: {
+              after: {
+                examplesBound: {
+                  target: 'ready',
+                  actions: assign(({context}) => examplesParts(context, {kind: 'failed'})),
+                },
+              },
               invoke: {
                 id: 'examples',
                 src: 'examples',
                 input: ({context}) => ({host: context.form.machine}),
                 onDone: {
                   target: 'ready',
-                  actions: assign(({context, event}) => {
-                    const examples: ExamplesFor = {
-                      for: context.form.machine,
-                      value: event.output,
-                    };
-                    return {
-                      examples,
-                      ...fromFlow(
-                        flowSettled(flowOf(context), catalogueFor(examples, examples.for)),
-                      ),
-                    };
-                  }),
+                  actions: assign(({context, event}) => examplesParts(context, event.output)),
                 },
                 onError: {
                   target: 'ready',
-                  actions: {
-                    type: 'fail',
-                    params: ({event}) => ({step: 'examples', error: event.error}),
-                  },
+                  actions: [
+                    assign(({context}) => examplesParts(context, {kind: 'failed'})),
+                    {
+                      type: 'fail',
+                      params: ({event}) => ({step: 'examples', error: event.error}),
+                    },
+                  ],
                 },
               },
             },

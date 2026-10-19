@@ -210,6 +210,8 @@ export class Hosts {
   #visible: {readonly owner: string; readonly host: HostKey} | null = null;
   /** Hosts mentioned by the bounded recent-run file. */
   #recent = new Set<HostKey>();
+  /** Hosts the user configured (`hosts.json`): watched even when no recent run names them. */
+  #configured = new Set<HostKey>();
   /** The one replacement currently allowed to install for each host. */
   readonly #watchIntents = new Map<HostKey, WatchIntent>();
   /** Advances before desired-set changes, fencing reads against the desired-host union. */
@@ -281,6 +283,16 @@ export class Hosts {
   /** Reconcile the hosts named by the bounded recent-run file with the current visible host. */
   async recent(hosts: readonly HostId[]): Promise<void> {
     this.#recent = new Set(hosts.map(hostKey));
+    await this.#reconcile(this.#changed());
+  }
+
+  /**
+   * Reconcile the hosts of `hosts.json` with the current ones: every configured machine is watched,
+   * so its live and recent runs list on a profile with no recent file.
+   */
+  async configured(): Promise<void> {
+    const {settings} = await this.#deps.settings.hosts();
+    this.#configured = new Set(Object.keys(settings.hosts).map(key => hostKey(hostFromKey(key))));
     await this.#reconcile(this.#changed());
   }
 
@@ -388,6 +400,7 @@ export class Hosts {
       }
       this.#checkoutRevisions.set(key, {removed: true});
       this.#watchIntents.delete(key);
+      this.#changed();
       await this.#repairDesired(key);
       if (persistenceFailure !== null) throw persistenceFailure.error;
     } finally {
@@ -818,6 +831,10 @@ export class Hosts {
 
   #desired(): Set<HostKey> {
     const desired = new Set(this.#recent);
+    for (const key of this.#configured) {
+      // A removal revokes the host before any stale read of `hosts.json` could name it again.
+      if (!('removed' in (this.#checkoutRevisions.get(key) ?? {}))) desired.add(key);
+    }
     if (this.#visible !== null) desired.add(this.#visible.host);
     return desired;
   }

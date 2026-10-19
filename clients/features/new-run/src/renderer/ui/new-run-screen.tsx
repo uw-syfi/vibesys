@@ -8,11 +8,19 @@
 import type {HostKey} from '@vibesys/hosts';
 import {Button, Page, Row, SectionLayout, SidebarItem, Stack, Text, Wordmark} from '@vibesys/ui';
 import type {JSX} from 'react';
-import {isDone, type NewRunEvent, type NewRunSnapshot, type StepId} from '../../state/index.js';
+import {
+  examplesStatus,
+  isDone,
+  type NewRunContext,
+  type NewRunEvent,
+  type NewRunSnapshot,
+  type StepId,
+} from '../../state/index.js';
 import {AgentPage} from './agent-page.js';
 import {
   DomainPage,
   ExamplePage,
+  ExamplesFailed,
   HardwarePage,
   ModelPage,
   StartPage,
@@ -77,10 +85,32 @@ interface ScreenProps {
   readonly completion: FolderCompletion;
 }
 
+/** The steps that ask about the machine's examples. */
+const EXAMPLE_STEPS: ReadonlySet<StepId> = new Set([
+  'domain',
+  'model',
+  'hardware',
+  'structure',
+  'workload',
+  'example',
+  'variant',
+]);
+
+/** Whether the machine's examples failed to list, so an example step has nothing to show. */
+function examplesFailed(context: NewRunContext, at: StepId | null): boolean {
+  return (
+    examplesStatus(context.examples, context.form.machine) === 'failed' &&
+    (at === null || EXAMPLE_STEPS.has(at))
+  );
+}
+
 /** The page of the step shown. */
 function StepBody(props: ScreenProps & {readonly at: StepId}): JSX.Element {
   const {snapshot, dispatch} = props;
   const cardProps = {context: snapshot.context, dispatch};
+  if (examplesFailed(snapshot.context, props.at)) {
+    return <ExamplesFailed {...cardProps} machines={props.machines} />;
+  }
   switch (props.at) {
     case 'start':
       return <StartPage {...cardProps} />;
@@ -207,7 +237,13 @@ export function NewRunScreen(props: ScreenProps): JSX.Element {
     >
       <SectionLayout
         label="New run steps"
-        summary={at === null ? 'Listing the examples' : progressLine(views, at)}
+        summary={
+          at === null
+            ? examplesFailed(context, at)
+              ? 'Examples failed'
+              : 'Listing the examples'
+            : progressLine(views, at)
+        }
         sections={
           <Steps
             views={views}
@@ -221,7 +257,11 @@ export function NewRunScreen(props: ScreenProps): JSX.Element {
           {at === 'start' ? <Wordmark art={VIBESYS_WORDMARK} size="compact" /> : null}
           <ProblemBanner context={context} dispatch={dispatch} />
           {at === null || copy === null ? (
-            <Text tone="muted">Listing</Text>
+            examplesFailed(context, at) ? (
+              <ExamplesFailed context={context} dispatch={dispatch} machines={props.machines} />
+            ) : (
+              <Text tone="muted">Listing</Text>
+            )
           ) : (
             <Question
               kicker={`New run \u00b7 step ${index + 1} of ${views.length}`}

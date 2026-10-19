@@ -105,7 +105,7 @@ function IdentityFields(props: FormProps): JSX.Element {
         {fields.reach === 'ssh' ? (
           <Field
             label="SSH host alias"
-            help={`A Host entry in ${machine}'s ~/.ssh/config; its keys and options apply.`}
+            hint={`A Host entry in ${machine}'s ~/.ssh/config; its keys and options apply.`}
             {...problemOf(form, 'host')}
           >
             <TextInput mono value={fields.host} placeholder="e.g. lab-login" change={set('host')} />
@@ -140,7 +140,7 @@ function SlurmFields(props: FormProps): JSX.Element {
       </Grid>
       <Field
         label="Other sbatch options"
-        help="Separated by spaces, one option each, as sbatch takes them."
+        hint="Separated by spaces, one option each, as sbatch takes them."
         {...problemOf(form, 'sbatch')}
       >
         <TextInput
@@ -170,7 +170,7 @@ function HardwareFields(props: FormProps): JSX.Element {
             change={value => dispatch({type: 'field', host, key: 'accelerator', value})}
           />
         </Field>
-        <Field label="GPU models" help="Separated by commas.">
+        <Field label="GPU models" hint="Separated by commas.">
           <TextInput
             value={fields.gpuModels}
             placeholder="e.g. nvidia_h100"
@@ -197,6 +197,7 @@ function FormActions(props: FormProps): JSX.Element {
     <Row gap="space-2" align="start" wrap>
       <Button
         text={testing ? 'Testing…' : 'Test connection'}
+        hint="Must pass before the cluster is saved"
         {...(testing ? {disabledReason: 'Waiting for the cluster to answer.'} : {})}
         press={() => dispatch({type: 'test', host})}
       />
@@ -222,14 +223,10 @@ function problemOf(form: ClusterForm, field: FormField): {error: string} | Recor
 }
 
 function ClusterFormCard(props: FormProps): JSX.Element {
-  const {machine, form} = props;
+  const {form} = props;
   return (
     <Card section="Add a Slurm cluster">
       <Stack>
-        <Text tone="muted">
-          {machine} reaches the cluster over SSH, or is one of its login nodes. Test connection must
-          pass before the cluster is saved.
-        </Text>
         <IdentityFields {...props} />
         <SlurmFields {...props} />
         <HardwareFields {...props} />
@@ -370,7 +367,6 @@ function Clusters(props: {
       <Row gap="space-3" align="end" wrap>
         <Stack gap="space-1" grow>
           <Text variant="body-strong">Slurm clusters</Text>
-          <Text tone="muted">Where a run can measure its candidates as batch jobs.</Text>
         </Stack>
         {view.form === null ? (
           <Button text="Add a cluster" press={() => dispatch({type: 'open-form', host})} />
@@ -384,10 +380,7 @@ function Clusters(props: {
       )}
       {settings.clusters.length === 0 && view.form === null ? (
         <Card>
-          <EmptyState
-            title="No Slurm cluster yet"
-            body={`Add one that ${machine} can reach, and a run can be measured there.`}
-          />
+          <EmptyState title="No Slurm cluster yet" />
         </Card>
       ) : null}
       {settings.clusters.map(listed => (
@@ -418,7 +411,6 @@ export function ClustersSection(props: {
         <Text as="h1" variant="title">
           Clusters and clouds
         </Text>
-        <Text tone="muted">Where {machine} can have results measured, besides on itself.</Text>
       </Stack>
       <Reading
         what="the clusters and clouds"
@@ -459,9 +451,7 @@ export function ClustersSection(props: {
                   <Row gap="space-2" wrap>
                     <Chip label="Preview" />
                   </Row>
-                  <Text tone="muted">
-                    Any cloud or cluster profile. Not available yet: nothing to set up here.
-                  </Text>
+                  <Text tone="muted">Not available</Text>
                 </Stack>
               </Card>
             </Stack>
