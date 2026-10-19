@@ -42,7 +42,7 @@ import {
 } from './app-security.js';
 import {AppStartup} from './app-startup.js';
 import {Desktop} from './desktop.js';
-import type {LaunchPlan} from './launch-args.js';
+import {type LaunchPlan, userDataOverride} from './launch-args.js';
 import {planFromSecondInstance, prepareLaunchHandoff} from './launch-handoff.js';
 import {RunWindows} from './run-windows.js';
 import {WelcomeFeed} from './welcome-feed.js';
@@ -276,6 +276,9 @@ async function connectionManager(): Promise<ConnectionManager> {
 function main(): void {
   let ownLaunch: ReturnType<typeof prepareLaunchHandoff>;
   try {
+    // Before anything reads `userData`, including the single-instance lock keyed on it.
+    const userData = userDataOverride(process.env);
+    if (userData !== null) app.setPath('userData', userData);
     // Resolve here, in the process that owns this command line. A relative cwd handed to the
     // existing primary would otherwise be resolved against that other process's working directory.
     const cwd = resolve(process.env['INIT_CWD'] ?? '.');

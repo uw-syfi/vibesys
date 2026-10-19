@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import {LaunchError, parseLaunch} from './launch-args.js';
+import {LaunchError, parseLaunch, USER_DATA_ENV, userDataOverride} from './launch-args.js';
 
 const CWD = '/home/me';
 
@@ -64,5 +64,18 @@ describe('parseLaunch', () => {
       expect(() => parseLaunch(argv, CWD)).toThrow(message);
       expect(() => parseLaunch(argv, CWD)).toThrow(LaunchError);
     }
+  });
+});
+
+describe('userDataOverride', () => {
+  test('is the default directory unless the variable names one', () => {
+    expect(userDataOverride({})).toBeNull();
+    expect(userDataOverride({[USER_DATA_ENV]: ''})).toBeNull();
+    expect(userDataOverride({[USER_DATA_ENV]: '/work/profile'})).toBe('/work/profile');
+  });
+
+  test('refuses a relative directory, naming the variable', () => {
+    expect(() => userDataOverride({[USER_DATA_ENV]: 'profile'})).toThrow(LaunchError);
+    expect(() => userDataOverride({[USER_DATA_ENV]: 'profile'})).toThrow(USER_DATA_ENV);
   });
 });

@@ -189,7 +189,7 @@ func cli(args []string) error {
 	}
 	args = filtered
 	if len(args) == 0 {
-		return fmt.Errorf("usage: repoctl {plan|test|run-checks|run-native|verify-policy|explain|validate}")
+		return fmt.Errorf("usage: repoctl {plan|test|dev|run-checks|run-native|verify-policy|explain|validate}")
 	}
 	root, err := rootPath(configPath)
 	if err != nil {
@@ -200,6 +200,8 @@ func cli(args []string) error {
 		return err
 	}
 	switch args[0] {
+	case "dev":
+		return runDev(root, configPath, args[1:])
 	case "verify-policy":
 		return runVerifyPolicy(root, g, args[1:])
 	case "run-checks":

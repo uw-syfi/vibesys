@@ -22,6 +22,23 @@ const USAGE =
   'usage: vibesys-desktop [[--host NAME] --instance ID]\n' +
   '       vibesys-desktop --project PATH [-- RUN_ARGS...]';
 
+/** The environment variable that points the app at a user-data directory of its own. */
+export const USER_DATA_ENV = 'VIBESYS_USER_DATA_DIR';
+
+/**
+ * The user-data directory `env` asks for, or null for Electron's default. A development launcher
+ * sets it so a build under test keeps its settings apart from the installed app's. It must be an
+ * absolute path: a relative one would mean the directory of whichever process reads it.
+ */
+export function userDataOverride(env: Readonly<Record<string, string | undefined>>): string | null {
+  const value = env[USER_DATA_ENV];
+  if (value === undefined || value === '') return null;
+  if (!isAbsolute(value)) {
+    throw new LaunchError(`${USER_DATA_ENV} must be an absolute path, not ${value}`);
+  }
+  return value;
+}
+
 export class LaunchError extends Error {
   override name = 'LaunchError';
 }

@@ -31,6 +31,32 @@ Security Policy forbids connections. Its only way to the server is the preload b
 (`window.vibesysWelcome`, whose `connectRun` takes no host or path): the main process binds a window
 to one run.
 
+### Test a branch in the app
+
+```bash
+./support/repoctl/repoctl dev                          # build this checkout, open the app
+./support/repoctl/repoctl dev --machine host-a         # also ship HEAD to host-a first
+./support/repoctl/repoctl dev --machine host-a --dry-run
+```
+
+`dev` installs the client packages only when the lockfile or a package manifest changed since the
+last successful install (a stamp under `build/dev/`), builds the app and the packages it uses with
+the build `test:e2e` runs, syncs this checkout's Python environment, and opens the app on a profile
+of its own, `build/dev/desktop-profile` (`VIBESYS_USER_DATA_DIR`), so the installed app and other
+Electron apps keep their settings. It returns when the app closes. Commands and paths are in
+`.repoctl/dev.toml`.
+
+With `--machine`, the committed HEAD is pushed over ssh to a dev ref in the machine's checkout (no
+GitHub involved) and checked out detached; a checkout that is not a git working tree gets its
+tracked files by rsync. The machine's checkout is `--checkout`, else the one the profile saved for
+it, else the policy's default. `dev` refuses before changing anything if the local tree or the
+machine's checkout has uncommitted changes to tracked files. It then runs `uv sync` there and starts
+a fresh helper the way the app does, and fails unless that helper's `hello` reports the shipped
+commit within 60 seconds. Each step prints its duration. The helper keeps no state and every run is
+a detached server, so starting a helper never interrupts a live run; there is no `--force`.
+Shipping does replace the checkout's files under a live run, so ship when no run is in a phase that
+imports new code.
+
 ### Layout
 
 The Electron main process is composed from packages, as the renderer is; the package-graph
