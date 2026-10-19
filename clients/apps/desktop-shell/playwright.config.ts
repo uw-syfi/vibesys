@@ -1,5 +1,6 @@
 import {defineConfig} from '@playwright/test';
 import {E2E_HOST, runPort} from '../../tools/e2e/free-port.mjs';
+import {e2eShard} from '../../tools/e2e/shard.mjs';
 
 /**
  * The app shell's journey: the built page against a Fake of the welcome preload's bridge
@@ -13,6 +14,11 @@ export default defineConfig({
   retries: 0,
   forbidOnly: inCI,
   workers: 1,
+  // Specs share no state across tests, so a shard may take any test: files of 89 tests cannot skew the
+  // slices. One worker still runs them one at a time.
+  fullyParallel: true,
+  // CI runs one slice of the specs per job (VIBESYS_E2E_SHARD, "2/5"); unset runs them all.
+  shard: e2eShard('VIBESYS_E2E_SHARD') ?? null,
   timeout: 30_000,
   webServer: {
     command: `node e2e/serve-dist.mjs ${port}`,

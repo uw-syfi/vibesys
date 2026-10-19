@@ -271,11 +271,22 @@ jobs:
       - name: Build TypeScript packages
         run: ./support/repoctl/repoctl run-checks --group clients_build
 
+  # Every spec of the three Playwright apps, split across the runners in `matrix.shard`
+  # (`VIBESYS_E2E_SHARD`, see clients/tools/e2e/shard.mts) so no job nears the 10-minute
+  # check limit. The desktop shell's ~530 specs were 7 of the unsharded job's 9 minutes; its
+  # specs are spread by test, and the other two apps' files land on shard 1. Each leg pays
+  # ~50 s of setup, so the shard count trades summed runner time against wall time: five keep
+  # every leg near 3 minutes. The count is the length of the list (`strategy.job-total`);
+  # `fail-fast: false` lets a red shard finish its siblings so one run lists every failure.
   clients-e2e:
     needs: changes
     if: needs.changes.outputs.clients == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5]
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -283,12 +294,25 @@ jobs:
       - name: Set up the client workspace
         uses: ./.github/actions/setup-clients
 
+      - name: Resolve the Playwright version
+        id: playwright
+        working-directory: clients
+        run: echo "version=$(pnpm --filter @vibesys/app-desktop-main exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+
+      # The browser download only; the system libraries below come from apt and are not cached.
+      - name: Cache the Playwright browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
       - name: Install Chromium for the desktop smoke test
         working-directory: clients
         run: pnpm --filter @vibesys/app-desktop-main exec playwright install --with-deps chromium
 
-      - name: Test the desktop app
+      - name: Test the desktop app (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
         env:
+          VIBESYS_E2E_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
           # The downloaded Electron runtime's SUID helper cannot have Chromium's required root
           # ownership on a hosted runner. This opt-out is scoped to the E2E child process.
           VIBESYS_ELECTRON_E2E_DISABLE_CHROMIUM_SANDBOX: "1"
@@ -297,12 +321,13 @@ jobs:
         run: xvfb-run -a ./support/repoctl/repoctl run-checks --group clients_e2e
 
       # A gallery screenshot that differs from its baseline leaves the actual and the diff here, so
-      # a reviewer can see the change without rerunning it in the Linux image.
+      # a reviewer can see the change without rerunning it in the Linux image. The gallery's one spec
+      # file runs on shard 1, so only that leg has files; the others upload nothing.
       - name: Upload the gallery's screenshot differences
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ui-gallery-test-results
+          name: ui-gallery-test-results-${{ matrix.shard }}
           path: clients/apps/ui-gallery/test-results/
           if-no-files-found: ignore
           retention-days: 7

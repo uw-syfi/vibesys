@@ -347,6 +347,8 @@ as the client and Python environments, so making the normal local command
 acquire or require them would make it unexpectedly heavyweight. Run that group
 explicitly when desktop coverage is needed. Each Playwright run asks the OS for
 a free port for its own server, so parallel runs on one machine do not collide.
+CI splits the group across runners with `VIBESYS_E2E_SHARD=i/N` (for example `2/5`), which
+each app's Playwright config reads; leave it unset to run every spec.
 
 ```bash
 uv sync --dev

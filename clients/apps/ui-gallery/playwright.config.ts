@@ -1,5 +1,6 @@
 import {defineConfig} from '@playwright/test';
 import {E2E_HOST, runPort} from '../../tools/e2e/free-port.mjs';
+import {e2eShard} from '../../tools/e2e/shard.mjs';
 
 /**
  * The gallery's visual and accessibility suite (rules S11 and S12 of #2827).
@@ -38,6 +39,8 @@ export default defineConfig({
   retries: 0,
   forbidOnly: inCI,
   workers: 1,
+  // CI runs one slice of the specs per job (VIBESYS_E2E_SHARD, "2/5"); unset runs them all.
+  shard: e2eShard('VIBESYS_E2E_SHARD') ?? null,
   // A hang guard only: the suite takes well under a minute natively, three times that under the
   // x86-64 emulation that writes the baselines on an Arm Mac.
   timeout: 360_000,

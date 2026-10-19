@@ -393,7 +393,7 @@ any difference; `scripts/check_clients.sh` runs it (see "Client checks before a 
 [development.md](development.md)).
 
 When the job fails on a screenshot, it uploads the actual and the diff as the
-`ui-gallery-test-results` artifact.
+`ui-gallery-test-results-1` artifact.
 
 ## Where a Run screen change goes
 
