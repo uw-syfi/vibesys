@@ -141,7 +141,6 @@ def _recorded_by_an_older_build(state: core.CoreState, mode: core.StopMode) -> c
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="#3209 follow-up: a saved cancel after a drain Finish")
 @pytest.mark.parametrize("paused", [False, True])
 def test_a_cancel_saved_after_a_drain_finish_cancels_on_recovery(*, paused: bool) -> None:
     """A state saved before #3209 holds a drain Finish followed by a recorded cancel.
