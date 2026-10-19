@@ -29,6 +29,7 @@ from vs_project.api import (
     StoredEnvelope,
     StoreFence,
     StoreFile,
+    Unknown,
 )
 from vs_sim.api.testing import examples
 
@@ -232,52 +233,75 @@ class _World:
         assert len(valid) <= 1, valid
 
     def act(self, action: _Action, now: float) -> None:
-        """One host's step; a host of the older release that cannot read the store does nothing."""
-        kind, release, index, duration = action
+        """One host's step; a host of the older release that cannot read the store does nothing.
+
+        A host of this release dies or fails at the action's drawn durable step, if any: a
+        write that reports a failure grants nothing, and a host that died reports nothing.
+        """
+        kind, release, index, duration, fault = action
+        effects = None if fault is None else _FailingEffects(fault[1], fault[0])
         try:
             if kind == "acquire":
                 host = f"host-{len(self.granted)}"
                 if release == "this":
-                    self.grant(release, self.store().acquire(host, now, duration))
+                    self.grant(release, self.store(effects).acquire(host, now, duration))
                 else:
                     self.grant(release, self.older().acquire(host, now, duration))
                 return
             if not self.holders:
                 return
             holder = self.holders[index % len(self.holders)]
-            self._hold(holder, kind, now, duration)
-        except _RefusedError:
+            self._hold(holder, kind, now, duration, effects)
+        except (_RefusedError, _HostDiedError):
             return
+        except OSError:
+            # Only an injected failure raises, and only in a host of this release.
+            assert effects is not None
 
-    def _hold(self, holder: _Holder, kind: str, now: float, duration: float) -> None:
+    def _hold(
+        self,
+        holder: _Holder,
+        kind: str,
+        now: float,
+        duration: float,
+        effects: _FailingEffects | None,
+    ) -> None:
         older = None if holder.release == "this" else self.older()
         if kind == "renew":
             renewed = (
-                self.store().renew(holder.fence, now, duration)
+                self.store(effects).renew(holder.fence, now, duration)
                 if older is None
                 else older.renew(holder.fence, now, duration)
             )
             holder.fence = renewed or holder.fence
         elif kind == "release":
             _ = (
-                self.store().release(holder.fence, now)
+                self.store(effects).release(holder.fence, now)
                 if older is None
                 else older.release(holder.fence, now)
             )
         elif older is None:
-            store = self.store()
+            store = self.store(effects)
             current = store.load()
             revision = 0 if current is None else current.revision + 1
             envelope = StoredEnvelope(revision=revision, schema_version=3, payload=b"this")
             outcome = store.commit(
                 None if current is None else current.revision, envelope, holder.fence, now
             )
-            assert isinstance(outcome, Committed) or not store.verify(holder.fence, now)
+            # Without a fault, only a host that lost the lease fails to commit; a failing
+            # host may also learn nothing about its commit.
+            assert (
+                isinstance(outcome, Committed)
+                or (effects is not None and isinstance(outcome, Unknown))
+                or not store.verify(holder.fence, now)
+            )
         else:
             older.commit(holder.fence, now)
 
 
-type _Action = tuple[Literal["acquire", "renew", "release", "commit"], Release, int, float]
+# Where a host of this release dies or fails during one action: its kind and durable step.
+type _Fault = tuple[Failure, int] | None
+type _Action = tuple[Literal["acquire", "renew", "release", "commit"], Release, int, float, _Fault]
 
 # The first write of this release, by a host that may die at any of its durable steps.
 _FIRST_WRITES: dict[str, Callable[[StateStore], object]] = {
@@ -296,6 +320,7 @@ _ACTIONS = st.lists(
         st.sampled_from(("older", "this")),
         st.integers(0, 3),
         st.integers(1, 200),
+        st.none() | st.tuples(st.sampled_from(("dies", "fails")), st.integers(1, 8)),
     ),
     max_size=6,
 )
@@ -348,8 +373,23 @@ def _steps(root: Path, start: str, failure: Failure) -> int:
 # dies before store.json is rewritten; an older host then takes over from store.json, and a
 # host of this release later takes over from lease.json while the older host still holds it.
 @example(
-    actions=[("acquire", "older", 0, 160), ("commit", "older", 2, 1), ("acquire", "this", 0, 30)],
+    actions=[
+        ("acquire", "older", 0, 160, None),
+        ("commit", "older", 2, 1, None),
+        ("acquire", "this", 0, 30, None),
+    ],
     gaps=[0, 1, 40, 0, 0, 0],
+)
+# A second migration that dies after rewriting store.json: the first one died after copying
+# the lease, an older host then took a larger epoch from store.json, and the second attempt
+# must copy that lease again, or the next host of this release reuses the older host's epoch.
+@example(
+    actions=[
+        ("acquire", "older", 0, 30, None),
+        ("acquire", "this", 0, 30, ("dies", 2)),
+        ("acquire", "this", 0, 30, None),
+    ],
+    gaps=[0, 40, 0, 0, 0, 0],
 )
 def test_no_two_hosts_hold_the_lease_wherever_the_migrating_host_dies(
     tmp_path_factory: pytest.TempPathFactory,
