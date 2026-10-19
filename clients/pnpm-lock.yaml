@@ -472,6 +472,25 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  features/runs-dashboard:
+    dependencies:
+      '@vibesys/machine':
+        specifier: workspace:*
+        version: link:../../libs/machine
+      xstate:
+        specifier: 5.33.2
+        version: 5.33.2
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
   features/settings:
     dependencies:
       '@vibesys/ipc':
