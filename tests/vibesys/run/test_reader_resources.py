@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.support.docker_environment import fake_docker_environment
 from tests.support.host_environment import unconfined_host_spec
-from tests.support.real_git import NO_GITHUB, REAL_GIT
+from tests.support.real_git import NO_GIT, NO_GITHUB
 from tests.support.slurm_environment import slurm_environment
 from tests.support.task_project import write_task
 
@@ -86,7 +86,7 @@ def _saved_run(root: Path, kind: str) -> RunRequest:
 def _integration() -> LocalRunIntegration:
     return LocalRunIntegration(
         clock=ManualClock(),
-        git=REAL_GIT,
+        git=NO_GIT,
         github=NO_GITHUB,
         threads=SimThreads(),
         system=idle_environment_system(),

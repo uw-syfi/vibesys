@@ -93,8 +93,23 @@ test('a steer the agent proposed on an ended run cannot be sent', async ({page})
   await expect(panel(page).getByText('Read only').first()).toBeVisible();
 });
 
-test('the panel on an ended run reads its threads and offers nothing to ask', async ({page}) => {
-  await openFixture(page, fixtureNamed(FIXTURE));
+async function openEndedChat(page: Page, features?: readonly string[]): Promise<void> {
+  if (features !== undefined) {
+    // The world's scripts first, then a helper that offers only `features`.
+    for (const content of fixtureScripts(fixtureNamed(FIXTURE)))
+      await page.addInitScript({content});
+    await page.addInitScript({
+      content: `Object.assign(window.vibesysWelcome, {helperFeatures: () => Promise.resolve({ok: true, value: ${JSON.stringify(features)}})});`,
+    });
+    await page.goto('./shell.html');
+    await page
+      .getByRole('main')
+      .getByRole('button', {name: /^queue-rs · mpmc/})
+      .first()
+      .click();
+  } else {
+    await openFixture(page, fixtureNamed(FIXTURE));
+  }
   await page.getByRole('button', {name: 'Chat', exact: true}).click();
   await settled(page);
   await page.evaluate(
@@ -102,6 +117,12 @@ test('the panel on an ended run reads its threads and offers nothing to ask', as
     conversation(firstSequence()) as readonly unknown[],
   );
   await settled(page);
+}
+
+test('a helper whose reader does not answer shows the threads and offers nothing to ask', async ({
+  page,
+}) => {
+  await openEndedChat(page, ['chat_ended_runs']);
 
   await expect(panel(page).getByText('Why did it fail')).toBeVisible();
   await expect(panel(page).getByRole('textbox', {name: 'Message'})).toHaveCount(0);
@@ -109,6 +130,18 @@ test('the panel on an ended run reads its threads and offers nothing to ask', as
   await expect(panel(page).getByRole('button', {name: 'New chat'})).toHaveCount(0);
   await expect(panel(page).getByRole('button', {name: 'New steer'})).toHaveCount(0);
   await expect(panel(page).getByText('Read only', {exact: true}).first()).toBeVisible();
+});
+
+test('a helper whose reader answers offers the question box and New chat, but no New steer', async ({
+  page,
+}) => {
+  await openEndedChat(page);
+
+  await expect(panel(page).getByText('Why did it fail')).toBeVisible();
+  await expect(panel(page).getByRole('textbox', {name: 'Message'})).toHaveCount(1);
+  await expect(panel(page).getByRole('button', {name: 'Ask'})).toHaveCount(1);
+  await expect(panel(page).getByRole('button', {name: 'New chat'})).toHaveCount(1);
+  await expect(panel(page).getByRole('button', {name: 'New steer'})).toHaveCount(0);
 });
 
 test('an older helper shows Chat off for an ended run, and nothing is attached', async ({page}) => {

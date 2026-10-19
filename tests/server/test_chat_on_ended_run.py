@@ -15,10 +15,10 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.server.support import REQUEST_TIME, build_server_parts, run_record
+from tests.server.support import REQUEST_TIME, build_server_parts, run_record, sim_platform
 from tests.support.chat_run import project_with_run, seed_agent_state
 from tests.support.host_environment import unconfined_host_spec
-from tests.support.real_git import NO_GIT, REAL_PROCESSES
+from tests.support.real_git import NO_GIT
 from tests.support.task_project import write_task
 
 from launch import LaunchSettings, built_in_orchestrations, default_run_readers
@@ -367,7 +367,7 @@ def _reader_of(run: _EndedRun, threads: SimThreads, tools: _RunTools) -> RunRead
     client.set_text(None, tools.answer)
     settings = LaunchSettings(
         timing=RunTiming(ManualClock(), PRODUCTION_LEASE_SECONDS, threads),
-        processes=REAL_PROCESSES,
+        processes=sim_platform(threads).processes,
         piped_processes=FakePipedProcessLauncher(),
         blocking=SimBlockingRunner(threads),
         network=network,

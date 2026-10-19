@@ -253,16 +253,18 @@ def _read_only_log_from_argv(argv: list[str]) -> Path | None:
     return path.parent if path.name == RUN_EVENTS_FILE else path
 
 
-def _chat_reader_opener(arguments: list[str], run_readers: RunReaders) -> Callable[[], RunReader]:
+def _chat_reader_opener(
+    arguments: list[str], run_readers: RunReaders
+) -> Callable[[], RunReader] | None:
     """How the read-only server opens the run it serves for conversation.
 
     The request is the one resuming the run builds: its record restores the run's settings, so
-    nothing is passed but the run's id. The server runs in the run's project directory.
+    nothing is passed but the run's id. The server runs in the run's project directory. A server
+    reopened without the run's id (a journal read for its events) has no chat agent.
     """
     run_id = _first_option(arguments, ("--run-id",))
     if run_id is None:
-        message = "--reopen needs --run-id"
-        raise ValueError(message)
+        return None
 
     def open_reader() -> RunReader:
         request = cli.build_run_request(cli.parse_cli_invocation(["--resume", run_id]))
