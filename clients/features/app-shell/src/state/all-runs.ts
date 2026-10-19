@@ -9,7 +9,7 @@ import type {HostKey, HostListing, ListedRun} from '@vibesys/hosts';
 import type {RecentRun} from '@vibesys/runs';
 
 /** What is known of one project's runs on one machine. */
-export type ProjectRunsSlot =
+type ProjectRunsSlot =
   | {readonly kind: 'loading'; readonly token: number}
   | {readonly kind: 'listed'; readonly runs: readonly ListedRun[]}
   /** The machine did not list the project's runs (unreachable, or the project is gone). */
@@ -129,11 +129,4 @@ export function listedRunRefs(all: AllRunsState): ProjectRunRef[] {
     const [host, project] = JSON.parse(key) as [HostKey, string];
     return runs.map(run => ({host, project, run}));
   });
-}
-
-/** The slots of the projects listed, or being listed, on `host`. */
-export function hostSlots(all: AllRunsState, host: HostKey): ProjectRunsSlot[] {
-  return Object.entries(all.projects)
-    .filter(([key]) => (JSON.parse(key) as [HostKey, string])[0] === host)
-    .map(([, slot]) => slot);
 }

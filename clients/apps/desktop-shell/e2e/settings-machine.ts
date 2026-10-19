@@ -31,7 +31,6 @@ export async function openSettingsAt(
     width,
   );
   await sidebar(page).getByRole('button', {name: 'Settings'}).click();
-  if (width < 800) await page.getByRole('button', {name: 'Hide sidebar'}).click();
 }
 
 /** Opens the section list where the window is narrow enough to fold it under one line. */

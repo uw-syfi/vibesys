@@ -2,7 +2,12 @@ import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
 import {settled} from './checks/settle.js';
 import {type Anchor, anchorsOf, RUN_ANCHORS, stabilityViolations} from './checks/stability.js';
-import {type FakeBridgeSeed, installFakeBridge, installFakeMachines} from './fake-bridge.js';
+import {
+  type FakeBridgeSeed,
+  installFakeBridge,
+  installFakeMachines,
+  installFakeProjectRuns,
+} from './fake-bridge.js';
 import {lineageRun} from './fake-lineage.js';
 import {installFakeRun} from './fake-run.js';
 import {installFakeServer} from './fake-server.js';
@@ -52,6 +57,7 @@ const SEED: FakeBridgeSeed = {
 
 async function openRun(page: Page, count: number): Promise<void> {
   await page.addInitScript(installFakeBridge, SEED);
+  await page.addInitScript(installFakeProjectRuns, SEED);
   await page.addInitScript(installFakeMachines, SEED);
   await page.addInitScript(installFakeRun, {streams: [], text: {}});
   await page.addInitScript(
@@ -59,10 +65,7 @@ async function openRun(page: Page, count: number): Promise<void> {
     lineageRun(RUN, {count, chain: count > 100 ? 15 : 4, days: count > 100 ? 14 : 1}),
   );
   await page.goto('./shell.html');
-  await page
-    .getByRole('navigation', {name: 'VibeSys'})
-    .getByRole('button', {name: /^\S+ queue-rs · mpmc/})
-    .click();
+  await page.getByRole('main').getByRole('button', {name: /^mpmc/}).click();
 }
 
 test.use({colorScheme: 'dark', viewport: {width: 1440, height: 900}});

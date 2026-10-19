@@ -2,7 +2,12 @@ import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
 import {exampleCatalogueWithoutDetails} from '@vibesys/run-fixtures';
 import {rawTextOf} from './checks/screen-check.js';
-import {installFakeBridge, installFakeMachines, installFakeNewRun} from './fake-bridge.js';
+import {
+  installFakeBridge,
+  installFakeMachines,
+  installFakeNewRun,
+  installFakeProjectRuns,
+} from './fake-bridge.js';
 import {installFakeRun} from './fake-run.js';
 import {choose, main, NEW_RUN_PAGES, openAt, proceed, question, steps} from './new-run-flow.js';
 import {type FakeHostWindow, openNewRun as open, PROJECT, SEED} from './world.js';
@@ -426,14 +431,12 @@ test('Run again opens Review with the run as it was started', async ({page}) => 
   );
   const seed = {...SEED, recent};
   await page.addInitScript(installFakeBridge, seed);
+  await page.addInitScript(installFakeProjectRuns, seed);
   await page.addInitScript(installFakeMachines, seed);
   await page.addInitScript(installFakeNewRun, seed);
   await page.addInitScript(installFakeRun, {streams: [], text: {}});
   await page.goto('./shell.html');
-  await page
-    .getByRole('navigation', {name: 'VibeSys'})
-    .getByRole('button', {name: /^\S+ queue-rs · spsc/})
-    .click();
+  await page.getByRole('main').getByRole('button', {name: /^spsc/}).click();
   await page.getByRole('button', {name: 'Run again', exact: true}).click();
   await expect(question(page, 'Ready to start?')).toBeVisible();
   await expect(main(page)).toContainText('Sonnet 4.5 · Claude Code');
@@ -673,6 +676,10 @@ test('More options starts closed, says what it holds, and stays as left on each 
   await more.click();
   await expect(main(page).getByLabel('Extra arguments')).toBeVisible();
   await page.reload();
+  await page
+    .getByRole('navigation', {name: 'VibeSys'})
+    .getByRole('button', {name: 'New', exact: true})
+    .click();
   await expect(main(page).getByRole('button', {name: /More options/})).toHaveAttribute(
     'aria-expanded',
     'true',
@@ -728,6 +735,7 @@ test('a bridge call that throws is worded plainly, names what failed, and Try ag
   page,
 }) => {
   await page.addInitScript(installFakeBridge, SEED);
+  await page.addInitScript(installFakeProjectRuns, SEED);
   await page.addInitScript(installFakeMachines, SEED);
   await page.addInitScript(installFakeNewRun, SEED);
   // The agents' request is missing, as a bridge built before it would be.
@@ -744,7 +752,7 @@ test('a bridge call that throws is worded plainly, names what failed, and Try ag
   await page.goto('./shell.html');
   await page
     .getByRole('navigation', {name: 'VibeSys'})
-    .getByRole('button', {name: 'New run'})
+    .getByRole('button', {name: 'New', exact: true})
     .click();
 
   await expect(page.getByText(/Could not read the agents .* runs\./)).toBeVisible();

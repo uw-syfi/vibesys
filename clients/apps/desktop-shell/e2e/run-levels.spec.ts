@@ -5,6 +5,7 @@ import {
   type FakeWindows,
   installFakeBridge,
   installFakeMachines,
+  installFakeProjectRuns,
   installFakeWindows,
 } from './fake-bridge.js';
 import {installFakeLive, moreTurnEvents, turnReplyEvent} from './fake-live.js';
@@ -128,6 +129,7 @@ async function check(page: Page, name: string): Promise<void> {
 
 async function openRun(page: Page, live = false, server: FakeServerSeed = SERVER): Promise<void> {
   await page.addInitScript(installFakeBridge, SEED);
+  await page.addInitScript(installFakeProjectRuns, SEED);
   await page.addInitScript(installFakeMachines, SEED);
   await page.addInitScript(installFakeRun, LOGS);
   await page.addInitScript(installFakeServer, server);
@@ -136,10 +138,7 @@ async function openRun(page: Page, live = false, server: FakeServerSeed = SERVER
     await page.addInitScript(installFakeWindows);
   }
   await page.goto('./shell.html');
-  await page
-    .getByRole('navigation', {name: 'VibeSys'})
-    .getByRole('button', {name: /^\S+ queue-rs · mpmc/})
-    .click();
+  await page.getByRole('main').getByRole('button', {name: /^mpmc/}).click();
 }
 
 /** The Ideas pane is always a flat list. */

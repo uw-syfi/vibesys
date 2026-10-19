@@ -1,6 +1,11 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
-import {type FakeBridgeSeed, installFakeBridge, installFakeMachines} from './fake-bridge.js';
+import {
+  type FakeBridgeSeed,
+  installFakeBridge,
+  installFakeMachines,
+  installFakeProjectRuns,
+} from './fake-bridge.js';
 import {installFakeRun} from './fake-run.js';
 import {type FakeServerSeed, installFakeServer} from './fake-server.js';
 import {STARTED_AT} from './started-at.js';
@@ -99,14 +104,12 @@ test('a run paused by its usage limit waits for quota, stops waiting, and resume
   page,
 }) => {
   await page.addInitScript(installFakeBridge, SEED);
+  await page.addInitScript(installFakeProjectRuns, SEED);
   await page.addInitScript(installFakeMachines, SEED);
   await page.addInitScript(installFakeRun, {streams: [], text: {}});
   await page.addInitScript(installFakeServer, SERVER);
   await page.goto('./shell.html');
-  await page
-    .getByRole('navigation', {name: 'VibeSys'})
-    .getByRole('button', {name: /^\S+ queue-rs · mpmc/})
-    .click();
+  await page.getByRole('main').getByRole('button', {name: /^mpmc/}).click();
 
   const main = page.getByRole('main');
   await expect(main.getByText('Paused: Claude hit its usage limit')).toBeVisible();

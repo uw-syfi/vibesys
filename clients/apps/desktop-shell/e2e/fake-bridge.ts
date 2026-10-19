@@ -305,10 +305,30 @@ export function installFakeDigests(seed: FakeBridgeSeed): void {
  * project's runs on each machine (`seed.projectRuns`), or a failure for a project not named.
  */
 export function installFakeProjectRuns(seed: FakeBridgeSeed): void {
-  const listings = seed.projectRuns ?? {};
+  type Listed = {runId: string; task: string | null; createdAt: number};
+  type Server = {projectRoot: string; runId: string; startedAt: number};
+  const listings = seed.projectRuns;
+  // Without a seeded listing, a machine lists what its servers hold and what the user opened.
+  const derived = (host: string, project: string): Listed[] => {
+    const served = (seed.listings as {host: string; live?: Server[]; ended?: Server[]}[])
+      .filter(listing => listing.host === host)
+      .flatMap(listing => [...(listing.live ?? []), ...(listing.ended ?? [])])
+      .filter(run => run.projectRoot === project)
+      .map((run): [string, Listed] => [
+        run.runId,
+        {runId: run.runId, task: null, createdAt: run.startedAt * 1000},
+      ]);
+    const opened = (seed.recent as (Listed & {host: string; project: string; attachedAt: number})[])
+      .filter(each => each.host === host && each.project === project)
+      .map((each): [string, Listed] => [
+        each.runId,
+        {runId: each.runId, task: each.task, createdAt: each.attachedAt},
+      ]);
+    return [...new Map([...served, ...opened]).values()];
+  };
   Object.assign((window as unknown as {vibesysWelcome: object}).vibesysWelcome, {
     projectRuns: (host: string, project: string) => {
-      const runs = listings[`${host}|${project}`];
+      const runs = listings === undefined ? derived(host, project) : listings[`${host}|${project}`];
       return Promise.resolve(
         runs === undefined
           ? {ok: false, error: `Could not list the runs of ${project}`, authNeeded: false}

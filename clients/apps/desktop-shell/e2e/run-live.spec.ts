@@ -1,6 +1,11 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
-import {type FakeBridgeSeed, installFakeBridge, installFakeMachines} from './fake-bridge.js';
+import {
+  type FakeBridgeSeed,
+  installFakeBridge,
+  installFakeMachines,
+  installFakeProjectRuns,
+} from './fake-bridge.js';
 import {installFakeRun} from './fake-run.js';
 import {prototypeRun} from './fake-run-data.js';
 import {type FakeServerSeed, installFakeServer} from './fake-server.js';
@@ -88,14 +93,12 @@ test('a live run folds its trace into the ideas, the failed listed and hideable'
   page,
 }) => {
   await page.addInitScript(installFakeBridge, SEED);
+  await page.addInitScript(installFakeProjectRuns, SEED);
   await page.addInitScript(installFakeMachines, SEED);
   await page.addInitScript(installFakeRun, {streams: [], text: {}});
   await page.addInitScript(installFakeServer, prototypeRun(RUN_ID));
   await page.goto('./shell.html');
-  await page
-    .getByRole('navigation', {name: 'VibeSys'})
-    .getByRole('button', {name: /^\S+ queue-rs · mpmc/})
-    .click();
+  await page.getByRole('main').getByRole('button', {name: /^mpmc/}).click();
 
   const ideas = page.getByRole('listbox', {name: 'Ideas'});
   await expect(ideas.getByRole('option').first()).toBeVisible();
@@ -114,14 +117,12 @@ test('a live run folds its trace into the ideas, the failed listed and hideable'
 
 test('a run that has tried no idea yet says what will appear, not a guess', async ({page}) => {
   await page.addInitScript(installFakeBridge, SEED);
+  await page.addInitScript(installFakeProjectRuns, SEED);
   await page.addInitScript(installFakeMachines, SEED);
   await page.addInitScript(installFakeRun, {streams: [], text: {}});
   await page.addInitScript(installFakeServer, SERVER);
   await page.goto('./shell.html');
-  await page
-    .getByRole('navigation', {name: 'VibeSys'})
-    .getByRole('button', {name: /^\S+ queue-rs · mpmc/})
-    .click();
+  await page.getByRole('main').getByRole('button', {name: /^mpmc/}).click();
   await expect(page.getByText('No ideas yet')).toBeVisible();
   await expect(page.getByText('nothing measured yet')).toBeVisible();
 });
@@ -130,12 +131,13 @@ test('a live run pauses and resumes from the header over its session, and is let
   page,
 }) => {
   await page.addInitScript(installFakeBridge, SEED);
+  await page.addInitScript(installFakeProjectRuns, SEED);
   await page.addInitScript(installFakeMachines, SEED);
   await page.addInitScript(installFakeRun, {streams: [], text: {}});
   await page.addInitScript(installFakeServer, SERVER);
   await page.goto('./shell.html');
   const nav = page.getByRole('navigation', {name: 'VibeSys'});
-  await nav.getByRole('button', {name: /^\S+ queue-rs · mpmc/}).click();
+  await page.getByRole('main').getByRole('button', {name: /^mpmc/}).click();
 
   const pause = page.getByRole('button', {name: 'Pause'});
   await expect(pause).toBeEnabled();
