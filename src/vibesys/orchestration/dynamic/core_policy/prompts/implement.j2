@@ -25,7 +25,10 @@ the revision the part was built on to the part), in this order:
 - hypothesis `{{ pick.hypothesis_id }}` at `{{ pick.revision }}` is no longer buildable: leave it out.
 {% endfor %}
 {{ apply_conflicts(agent_git_writable) }} Combine the parts as the task says, without
-redesigning any of them. Check and be careful of: {{ watch_for }}
+redesigning any of them.
+{% if watch_for %}
+Where the parts interact, watch for: {{ watch_for }}
+{% endif %}
 Then run the project's fast tests, fix what the combination broke, and submit the composite.
 In {{ reply.unapplied }}, list every part, or piece of one, that you could not apply, and why.
 {% endif %}
