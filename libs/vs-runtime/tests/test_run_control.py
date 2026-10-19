@@ -756,7 +756,6 @@ _RESTART_OPS = st.lists(
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="#3209 follow-up: a restarted channel forgets core's stop")
 @example(ops=[("stop", StopMode.CANCEL), ("poll",), ("restart",), ("stop", StopMode.DRAIN)])
 @example(ops=[("stop", StopMode.DRAIN), ("poll",), ("restart",), ("stop", StopMode.CANCEL)])
 @given(ops=_RESTART_OPS)

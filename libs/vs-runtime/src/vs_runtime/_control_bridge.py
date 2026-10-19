@@ -128,7 +128,8 @@ class RunControlBridge:
     adopts its last choice and ends the run itself. The first poll also records the run's
     deadline on the channel, for work on other threads that must not wait past it, and seeds
     the channel with the pause core recorded (``RunControlChannel.seed``), so a run the
-    operator paused stays paused across a restart.
+    operator paused stays paused across a restart, and with the stop core recorded, so a
+    run the operator stopped stays stopping, as strongly.
 
     With an ``inbox``, each poll also applies the inbox's requests, in the order they were
     posted, each as one control ``op-<control id>``; see the module docstring for how each
@@ -228,6 +229,10 @@ class RunControlBridge:
             self._channel.seed(self._pause, capacity_wait_stands=self._stands)
             self._count = len(core.run.controls)
             self._stop = requested_stop_mode(core.run)
+            if self._stop is not None:
+                # A stop core recorded before a restart stays in force: the run's
+                # stop bound arms, a resume is refused, and only a cancel escalates it.
+                self._channel.request_stop(self._stop)
             self._serve_inbox()
         self._position = len(core.run.controls)
         if self._control is not None:
