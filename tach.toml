@@ -300,7 +300,7 @@ depends_on = ["server.host_examples", "server.host_agent_logins", "vs_decode.api
 # A run's summary: the fold of its journal that the run level shows, as a pure read model.
 # Light: the standard library and the helper contracts.
 path = "server.run_summary"
-depends_on = ["server.host_run_summary", "server.run_usage"]
+depends_on = ["server.host_run_summary", "server.run_usage", "vs_redaction.api"]
 
 [[modules]]
 # A run's usage records: the journal's turns joined to their executions, as a pure projection.
