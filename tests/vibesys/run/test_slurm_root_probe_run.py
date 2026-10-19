@@ -154,9 +154,13 @@ def _run(
         return ProcessScript(returncode=128, stderr=b"fatal: no origin")
 
     events: list[CoreEvent] = []
+
+    def record(event: CoreEvent) -> None:
+        events.append(event)
+
     session = create_session(
         request,
-        sink=events.append,
+        sink=record,
         registry=registry,
         settings=LaunchSettings(
             blocking=SimBlockingRunner(threads),

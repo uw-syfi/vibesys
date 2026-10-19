@@ -24,11 +24,15 @@ from vs_slurm.api import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vs_runtime.api.infrastructure import RunControlChannel
+    from vs_runtime.api.infrastructure import RunControlChannel, RunControlTransition
+
+
+def _ignore(transition: RunControlTransition) -> None:
+    del transition
 
 
 def _environment(threads: SimThreads) -> tuple[RunEnvironmentFailure, RunControlChannel]:
-    control = create_run_control_channel(lambda _transition: None, threads=threads)
+    control = create_run_control_channel(_ignore, threads=threads)
     return RunEnvironmentFailure(control), control
 
 
