@@ -21,13 +21,18 @@ if TYPE_CHECKING:
 
     from vs_agent.api.images import ImageBuildProgress
     from vs_sim.api import Clock, OutputSink
+    from vs_slurm.api import WorkspaceRootProbeReport
 
 
 class EnvironmentStartupStage(StrEnum):
     """Where an opening environment is, in the order it gets there."""
 
     PROBING_WORKSPACE = "probing_workspace"
-    """A scheduler job proves the workspace root is shared with the compute nodes."""
+    """No longer reported: the workspace-root probe runs beside the run, not in startup.
+
+    It reports through ``WorkspaceRootProbeSink`` instead. The value stays so that
+    clients and recorded event streams that name it keep parsing.
+    """
     BUILDING_IMAGE = "building_image"
     """The agent image (and the task image under it, if any) is being built."""
     BUILDING_TOOLS = "building_tools"
@@ -116,25 +121,6 @@ def startup_stage(
         )
 
 
-def report_wait(
-    sink: EnvironmentStartupSink | None,
-    stage: EnvironmentStartupStage,
-    condition: EnvironmentWaitCondition,
-    *,
-    elapsed_seconds: float,
-) -> None:
-    """Report that *stage* has waited *elapsed_seconds* on *condition*."""
-    if sink is not None:
-        sink(
-            EnvironmentStartup(
-                stage=stage,
-                state=EnvironmentStartupState.WAITING,
-                condition=condition,
-                elapsed_seconds=max(0.0, elapsed_seconds),
-            )
-        )
-
-
 type StartupOutputOpener = Callable[
     [EnvironmentStartupStage, str], AbstractContextManager[OutputSink]
 ]
@@ -161,4 +147,14 @@ entered sink while they run, and exits the context when the build has ended,
 on every path; after exit nothing more is written. A cache hit builds nothing
 and opens no stream. The stream carries output only: a failed build raises
 the environment's typed error.
+"""
+
+
+type WorkspaceRootProbeSink = Callable[[WorkspaceRootProbeReport], None]
+"""Where a local Slurm root's workspace-root probe reports while the run goes on.
+
+The probe runs beside the run (``vs_slurm.api.WorkspaceRootProof``). The sink hears
+that its job still waits in the scheduler's queue, with the job id and the
+scheduler's reason, at once and then on a bounded cadence or when the reason
+changes, and then once how the probe ended. It is called on the probe's own thread.
 """

@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from vs_evaluation.api import ProfileField
     from vs_sandbox.api.skypilot import ResolvedSkyPilotResources
     from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmOperatorSettings
+    from vs_slurm.api import WorkspaceRootProof
 
 
 @dataclass(frozen=True)
@@ -38,11 +39,14 @@ class ClusterEvaluationFacts:
 
     ``settings`` is the operator file as the run parsed it once, and ``plan`` the
     evaluation plan the run wrote. Consumers read the cluster's capacity and the
-    executor's inputs here instead of re-reading either file.
+    executor's inputs here instead of re-reading either file. ``root_proof`` is the
+    run's workspace-root probe on a local Slurm root, which every Slurm submission
+    waits for; ``None`` where the root needs no probe.
     """
 
     settings: SlurmOperatorSettings
     plan: SlurmEvaluationPlan
+    root_proof: WorkspaceRootProof | None = None
 
     @property
     def evaluation_capacity(self) -> int:

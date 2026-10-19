@@ -17,12 +17,6 @@ from vs_runtime._agent_gpu_commands import (
 from vs_runtime._brokered_session import BrokeredRunEnvironmentSession, HostBroker
 from vs_runtime._command_environment_session import command_environment_session
 from vs_runtime._container_runtime_policy import RefusesDockerInDocker, reject_docker_in_docker
-from vs_runtime._environment_startup import (
-    EnvironmentStartupStage,
-    EnvironmentWaitCondition,
-    report_wait,
-    startup_stage,
-)
 from vs_runtime._host_command_bridge import (
     agent_paths,
     bridge_editor_extras,
@@ -67,6 +61,7 @@ from vs_sandbox.api.slurm import (
     GpuCommandRunner,
     GpuCommands,
     HostCommandBroker,
+    RootGatedGpuLauncher,
     RunRoots,
     SlurmCapturePlan,
     SlurmEvaluationPlan,
@@ -83,9 +78,8 @@ from vs_sandbox.api.slurm import (
 from vs_slurm.api import (
     SlurmConfig,
     SlurmJobRunner,
-    SlurmJobStatus,
     SlurmLocalTransport,
-    probe_workspace_root,
+    WorkspaceRootProof,
     slurm_transport_broker_available,
     slurm_transport_broker_policy,
 )
@@ -95,13 +89,10 @@ if TYPE_CHECKING:
 
     from vs_agent.api.images import DockerBuildRunner
     from vs_project.api import RunResourceRequest
-    from vs_runtime._environment_startup import EnvironmentStartupSink
     from vs_runtime._environment_system import EnvironmentSystem
     from vs_runtime._run_environment import _OrphanReaper
     from vs_sandbox.api import DockerCli
     from vs_sandbox.api.slurm import GpuLauncher, JobConfinement
-    from vs_sim.api import Clock, Processes
-    from vs_slurm.api import SlurmJobHandle
 
 _REMOTE_PROFILER_IDS = frozenset({"auto", "none", "rocprof"})
 _NO_PROFILER_IDS = frozenset({"auto", "none"})
@@ -160,9 +151,12 @@ class _Mode(Protocol):
         ...
 
     def gpu_commands(
-        self, request: RunEnvironmentRequest, confinement: JobConfinement | None
+        self,
+        request: RunEnvironmentRequest,
+        confinement: JobConfinement | None,
+        root_proof: WorkspaceRootProof | None,
     ) -> GpuCommands | None:
-        """What the host command broker offers as GPU commands, if anything."""
+        """What the host command broker offers as GPU commands, held for *root_proof*."""
         ...
 
     def capture_recovery(
@@ -208,9 +202,12 @@ class _ClusterOnly:
         return assumed_tool(executable)
 
     def gpu_commands(
-        self, request: RunEnvironmentRequest, confinement: JobConfinement | None
+        self,
+        request: RunEnvironmentRequest,
+        confinement: JobConfinement | None,
+        root_proof: WorkspaceRootProof | None,
     ) -> None:
-        del request, confinement
+        del request, confinement, root_proof
 
     def capture_recovery(self, run_id: str, *, system: EnvironmentSystem) -> None:
         del run_id, system
@@ -273,16 +270,20 @@ class _AgentGpuMode:
         return ToolLocation.found(command)
 
     def gpu_commands(
-        self, request: RunEnvironmentRequest, confinement: JobConfinement | None
+        self,
+        request: RunEnvironmentRequest,
+        confinement: JobConfinement | None,
+        root_proof: WorkspaceRootProof | None,
     ) -> GpuCommands:
         # The launcher names each job, so it takes the run's configuration too: the
         # queue status tells this run's jobs apart by the run's job name prefix.
         config = self.config.for_run(request.run_id)
+        launcher = self._launcher(config, request.run_id, request.system)
         return agent_gpu_commands(
             config,
             workspace=request.workspace,
             project_path_policy=request.project_path_policy,
-            launcher=self._launcher(config, request.run_id, request.system),
+            launcher=launcher if root_proof is None else RootGatedGpuLauncher(launcher, root_proof),
             confinement=confinement,
         )
 
@@ -317,46 +318,6 @@ def _mode(settings: SlurmOperatorSettings) -> _Mode:
     return _ClusterOnly(remote_capture=slurm_transport_broker_available(settings.config))
 
 
-class _ProbeRunner(SlurmJobRunner):
-    """The startup probe's runner: each poll that finds the job still waiting is reported.
-
-    The wait is measured from the first poll, so the queue and the short run that follows it
-    read as one wait, queued then running.
-    """
-
-    def __init__(
-        self,
-        config: SlurmConfig,
-        *,
-        processes: Processes,
-        clock: Clock,
-        scratch_root: Path,
-        sink: EnvironmentStartupSink | None,
-    ) -> None:
-        super().__init__(config, processes=processes, clock=clock, scratch_root=scratch_root)
-        self._probe_clock = clock
-        self._sink = sink
-        self._waiting_since: float | None = None
-
-    def poll(self, handle: SlurmJobHandle) -> SlurmJobStatus:
-        """Read the job's scheduler state, and report it while the job has not ended."""
-        status = super().poll(handle)
-        if not status.terminal:
-            now = self._probe_clock.now()
-            if self._waiting_since is None:
-                self._waiting_since = now
-            report_wait(
-                self._sink,
-                EnvironmentStartupStage.PROBING_WORKSPACE,
-                EnvironmentWaitCondition.QUEUED
-                if status is SlurmJobStatus.PENDING
-                else EnvironmentWaitCondition.RUNNING,
-                elapsed_seconds=now - self._waiting_since,
-            )
-        return status
-
-
-@dataclass(frozen=True, slots=True)
 class _ClusterPlans:
     """The evaluation and capture plans the run wrote, and the paths they name."""
 
@@ -413,6 +374,9 @@ class SlurmEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
         self._docker = DockerEnvironment(docker or DockerEnvironmentConfig())
         self._job_confinement = job_confinement
         self._deprecation = deprecation
+        # Each run's workspace-root probe, by run id: started by the run's root session,
+        # owned (closed) by it, and waited for by every session's Slurm work.
+        self._root_proofs: dict[str, WorkspaceRootProof] = {}
 
     @property
     def backend_image(self) -> str | None:
@@ -531,26 +495,15 @@ class SlurmEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
         )
 
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
-        """Validate external policy before opening the editor container."""
+        """Validate external policy, and start a local root's probe, before opening the editor.
+
+        The probe runs beside the run: preparing never waits for it. Only the run's
+        Slurm submissions (trusted evaluations, the agent's GPU jobs) wait for it to
+        prove the root, and a failed probe refuses each of them with its error.
+        """
         reject_docker_in_docker(docker_in_docker=request.docker_in_docker, environment="slurm")
-        if request.session_role is RunEnvironmentSessionRole.ROOT and isinstance(
-            self._settings.config.transport, SlurmLocalTransport
-        ):
-            runner = _ProbeRunner(
-                self._settings.config,
-                processes=request.system.slurm_processes,
-                clock=request.clock,
-                scratch_root=request.log_dir / "slurm-workspace-root-probe",
-                sink=request.startup,
-            )
-            stage = EnvironmentStartupStage.PROBING_WORKSPACE
-            with startup_stage(request.startup, stage, clock=request.clock):
-                probe_workspace_root(
-                    runner,
-                    state_root=request.log_dir / "slurm-workspace-root-probe",
-                    run_id=request.run_id,
-                    pause=request.system.threads.sleep,
-                )
+        if request.session_role is RunEnvironmentSessionRole.ROOT:
+            self._start_root_proof(request)
         return _PreparedRunEnvironment(
             SlurmEnvironmentFacts(
                 service_command=_slurm_service_command(self._settings.policy),
@@ -560,10 +513,57 @@ class SlurmEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
             partial(self._open, request),
         )
 
+    def _start_root_proof(self, request: RunEnvironmentRequest) -> None:
+        """Start the run's workspace-root probe on a local Slurm root, once per run.
+
+        Only a local transport needs one: the submit host itself writes the root the
+        compute nodes read. Over SSH or a connector the files are staged to the cluster.
+        """
+        if not isinstance(self._settings.config.transport, SlurmLocalTransport):
+            return
+        if request.run_id in self._root_proofs:
+            return
+        state_root = request.log_dir / "slurm-workspace-root-probe"
+        proof = WorkspaceRootProof(
+            SlurmJobRunner(
+                self._settings.config,
+                processes=request.system.slurm_processes,
+                clock=request.clock,
+                scratch_root=state_root,
+            ),
+            state_root=state_root,
+            run_id=request.run_id,
+            threads=request.system.threads,
+            report=request.workspace_root_probe,
+        )
+        self._root_proofs[request.run_id] = proof
+        proof.start()
+
     def _open(
         self,
         request: RunEnvironmentRequest,
         presentation: RunEnvironmentPresentation,
+    ) -> RunEnvironmentSession:
+        # Every session's Slurm work waits on the run's probe; the root session owns it,
+        # and closes it last, after the editor and every broker whose jobs wait on it.
+        root_proof = self._root_proofs.get(request.run_id)
+        if root_proof is None or request.session_role is not RunEnvironmentSessionRole.ROOT:
+            return self._open_session(request, presentation, root_proof, owned=())
+        try:
+            return self._open_session(request, presentation, root_proof, owned=(root_proof,))
+        except BaseException:
+            root_proof.close()
+            # A stopped probe proves nothing: a later root session starts a new one.
+            self._root_proofs.pop(request.run_id, None)
+            raise
+
+    def _open_session(
+        self,
+        request: RunEnvironmentRequest,
+        presentation: RunEnvironmentPresentation,
+        root_proof: WorkspaceRootProof | None,
+        *,
+        owned: tuple[HostBroker, ...],
     ) -> RunEnvironmentSession:
         config, policy, mode = self._settings.config, self._settings.policy, self._mode
         remote_profiling = mode.remote_capture
@@ -585,8 +585,8 @@ class SlurmEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
         plans = self._write_plans(
             request, config, policy, profiler_tree, remote_profiling=remote_profiling
         )
-        gpu = mode.gpu_commands(request, self._job_confinement)
-        brokers: list[HostBroker] = []
+        gpu = mode.gpu_commands(request, self._job_confinement, root_proof)
+        brokers: list[HostBroker] = list(owned)
         try:
             transport_env, transport_resources = _start_transport_broker(
                 config, request, plans, brokers
@@ -615,7 +615,9 @@ class SlurmEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
                 framework_setup_timeout_seconds=config.job_timeout_seconds,
                 profiler_mcp_env=profiler_mcp[0],
                 profiler_mcp_resources=profiler_mcp[1],
-                cluster_evaluation=ClusterEvaluationFacts(self._settings, plans.plan),
+                cluster_evaluation=ClusterEvaluationFacts(
+                    self._settings, plans.plan, root_proof=root_proof
+                ),
             )
             with _starting_container(request, sandbox) as output:
                 session = command_environment_session(

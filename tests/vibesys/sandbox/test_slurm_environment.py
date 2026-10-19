@@ -70,13 +70,19 @@ from vs_sim.api.testing import (
     ProcessScript,
     SimThreads,
 )
-from vs_slurm.api import FakeConnector, SlurmWorkspaceRootProbeError
+from vs_slurm.api import (
+    FakeConnector,
+    WorkspaceRootProbeFailed,
+    WorkspaceRootProbeProven,
+    WorkspaceRootProbeQueued,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from vs_runtime.api.infrastructure import RunEnvironmentSession
     from vs_sim.api import Threads
+    from vs_slurm.api import WorkspaceRootProbeReport
 from vs_sim.api import DISCARD
 
 
@@ -470,6 +476,7 @@ def test_local_slurm_root_prepares_once_without_run_owned_roots_and_children_nev
 ) -> None:
     connector = FakeConnector(tmp_path / "cluster")
     threads = SimThreads()
+    reports: list[WorkspaceRootProbeReport] = []
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     request = RunEnvironmentRequest(
@@ -483,11 +490,9 @@ def test_local_slurm_root_prepares_once_without_run_owned_roots_and_children_nev
         framework_root=tmp_path,
         clock=ManualClock(),
         system=replace(idle_environment_system(), threads=threads, slurm_processes=connector),
+        workspace_root_probe=reports.append,
     )
     environment = _local_probe_environment(tmp_path, kind, monkeypatch)
-
-    environment.prepare(request)
-    environment.prepare(request)
 
     def outage_after_root_start(
         _request: dict[str, object],
@@ -495,17 +500,33 @@ def test_local_slurm_root_prepares_once_without_run_owned_roots_and_children_nev
     ) -> dict[str, object]:
         raise OSError
 
-    connector.intercept(outage_after_root_start)
-    for index in range(3):
-        environment.prepare(
-            replace(
-                request,
-                log_dir=tmp_path / f"child-{index}-logs",
-                session_role=RunEnvironmentSessionRole.CHILD,
+    def start_the_run() -> None:
+        environment.prepare(request)
+        environment.prepare(request)
+        _until_the_probe_settles(threads, reports)
+        connector.intercept(outage_after_root_start)
+        for index in range(3):
+            environment.prepare(
+                replace(
+                    request,
+                    log_dir=tmp_path / f"child-{index}-logs",
+                    session_role=RunEnvironmentSessionRole.CHILD,
+                )
             )
-        )
+
+    try:
+        threads.run(start_the_run)
+    finally:
+        threads.close()
 
     assert connector.submitted_job_ids() == ("5000",)
+    assert reports[-1] == WorkspaceRootProbeProven()
+
+
+def _until_the_probe_settles(threads: SimThreads, reports: list[WorkspaceRootProbeReport]) -> None:
+    """Wait, in virtual time, for the root's probe to report how it ended."""
+    while not reports or isinstance(reports[-1], WorkspaceRootProbeQueued):
+        threads.sleep(1.0)
 
 
 def test_local_slurm_root_probe_diagnostic_is_closed_and_bounded(tmp_path: Path) -> None:
@@ -520,6 +541,7 @@ def test_local_slurm_root_probe_diagnostic_is_closed_and_bounded(tmp_path: Path)
 
     connector.intercept(fail_with_untrusted_detail)
     threads = SimThreads()
+    reports: list[WorkspaceRootProbeReport] = []
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     config = tmp_path / "slurm.toml"
@@ -546,13 +568,23 @@ rsync_command = ["fake-connector", "rsync"]
         framework_root=tmp_path,
         clock=ManualClock(),
         system=replace(idle_environment_system(), threads=threads, slurm_processes=connector),
+        workspace_root_probe=reports.append,
     )
 
-    with pytest.raises(SlurmWorkspaceRootProbeError) as failure:
+    def start_the_run() -> None:
         SlurmEnvironment(load_slurm_operator_settings(config)).prepare(request)
+        _until_the_probe_settles(threads, reports)
 
-    assert marker not in str(failure.value)
-    assert len(str(failure.value)) < 200
+    try:
+        threads.run(start_the_run)
+    finally:
+        threads.close()
+
+    # The run started; the probe's failure reaches the operator, closed and bounded.
+    (failed,) = reports
+    assert isinstance(failed, WorkspaceRootProbeFailed)
+    assert marker not in failed.failure
+    assert len(failed.failure) < 200
 
 
 def test_connector_transport_offers_the_remote_profiler_capability(tmp_path: Path) -> None:

@@ -636,6 +636,7 @@ class _ProductHostFactory:
             processes=self.integration.system.slurm_processes,
             ledger_identity=ledger_identity,
             stage_output=stage_output,
+            root_proof=cluster.root_proof,
         )
 
     async def stop_new_work(self) -> None:

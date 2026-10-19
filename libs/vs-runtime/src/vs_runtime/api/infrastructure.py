@@ -61,6 +61,7 @@ from vs_runtime._environment_startup import (
     EnvironmentWaitCondition,
     StartupOutputOpener,
     ToolBuildOutputOpener,
+    WorkspaceRootProbeSink,
 )
 from vs_runtime._environment_system import EnvironmentSystem
 from vs_runtime._evaluator_packages import (
@@ -732,6 +733,7 @@ __all__ = [
     "WorkspaceResourceFactory",
     "WorkspaceResourceProvider",
     "WorkspaceRestoreFailed",
+    "WorkspaceRootProbeSink",
     "WorkspaceRuntime",
     "WorkspaceSourceValue",
     "bounded_stop",

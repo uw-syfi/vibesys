@@ -81,7 +81,7 @@ if TYPE_CHECKING:
         SlurmStageOutputOpener,
     )
     from vs_sim.api import Clock, OutputSink, Processes, Sleeper
-    from vs_slurm.api import Cluster, SlurmConfig
+    from vs_slurm.api import Cluster, SlurmConfig, WorkspaceRootProof
 
 _CLEANUP_FAILURE = "cleanup failed"
 SERVICE_LOG_SUMMARY_CHARS = 2_000
@@ -156,6 +156,7 @@ class SemanticSlurmEvaluationExecutor:
         ledger: SlurmLedgerAttachment | None = None,
         ledger_identity: tuple[str, str] | None = None,
         stage_output: StageOutputOpener | None = None,
+        root_proof: WorkspaceRootProof | None = None,
     ) -> None:
         """Bind external Slurm policy to semantic evaluation state.
 
@@ -168,7 +169,11 @@ class SemanticSlurmEvaluationExecutor:
 
         ``stage_output`` opens each stage's stream, which the stage's output on the cluster
         reaches at each poll while the job runs and in full when it settles.
+
+        ``root_proof`` is the run's workspace-root probe; no evaluation is submitted
+        before it proves the root, and none at all once it failed.
         """
+        self._root_proof = root_proof
         self._stage_failure_text = stage_failure_text
         self._clock = clock
         self._sleeper = sleeper
@@ -416,6 +421,7 @@ class SemanticSlurmEvaluationExecutor:
             ledger=self._ledger,
             ledger_candidate=candidate,
             stage_output=stage_output,
+            root_proof=self._root_proof,
         )
 
     def _supported_evidence_kinds(self) -> tuple[str, ...]:

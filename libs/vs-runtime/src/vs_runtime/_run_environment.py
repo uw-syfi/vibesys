@@ -76,6 +76,7 @@ from vs_runtime._environment_startup import (
     EnvironmentStartupStage,
     StartupOutputOpener,
     ToolBuildOutputOpener,
+    WorkspaceRootProbeSink,
     startup_stage,
 )
 from vs_runtime._image_features import image_features
@@ -392,6 +393,9 @@ class RunEnvironmentRequest:
     #: declared tools) writes its raw output to, closed when the build ends;
     #: ``None`` discards the output.
     tool_build_output: ToolBuildOutputOpener | None = None
+    #: Where a local Slurm root's probe, which runs beside the run, reports that its
+    #: job waits in the queue and how it ended; ``None`` reports nothing.
+    workspace_root_probe: WorkspaceRootProbeSink | None = None
 
 
 class _AgentPathSandbox(Protocol):
