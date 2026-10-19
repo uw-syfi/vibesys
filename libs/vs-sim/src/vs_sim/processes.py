@@ -1026,15 +1026,13 @@ def _hang_up_at_end(lifeline: int) -> None:
     A lifeline that cannot be read (or closed) hangs up too: the launcher can no longer
     be heard, and a run nobody can stop must not go on.
     """
-    try:
-        with suppress(OSError):
-            # The launcher never writes; the read returns only at end-of-file.
-            while os.read(lifeline, 1):
-                pass
-        with suppress(OSError):
-            os.close(lifeline)
-    finally:
-        os.kill(os.getpid(), signal.SIGHUP)
+    with suppress(OSError):
+        # The launcher never writes; the read returns only at end-of-file.
+        while os.read(lifeline, 1):
+            pass
+    with suppress(OSError):
+        os.close(lifeline)
+    os.kill(os.getpid(), signal.SIGHUP)
 
 
 async def run_foreground(
