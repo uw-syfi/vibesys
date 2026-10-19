@@ -80,11 +80,8 @@ for (const why of ['machine', 'unconfirmed'] as const) {
     const text = (await screen(settled)).textContent ?? '';
     expect(text).not.toContain('Finding the run');
     expect(text).not.toContain('Looking for the run');
-    expect(text).toContain(why === 'machine' ? 'No answer' : 'Not confirmed');
     expect(text).toContain(
-      why === 'machine'
-        ? 'This machine did not list its runs.'
-        : 'This machine could not say whether the run is live.',
+      why === 'machine' ? 'No answer · runs not listed' : 'Not confirmed · live state unknown',
     );
   });
 }

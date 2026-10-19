@@ -56,7 +56,13 @@ import {
   whoBySpan,
 } from '../../state/index.js';
 import {Hero} from './hero.js';
-import {HistoryLoading, InitialRunLoading, RunGone, RunLoadError} from './history-loading.js';
+import {
+  HistoryLoading,
+  InitialRunLoading,
+  RunGone,
+  RunLoadError,
+  RunUnplaced,
+} from './history-loading.js';
 import {DeepLevel, IdeasWorkspace, type LevelProps} from './levels.js';
 import {RunLevel} from './run-level.js';
 import {RunScrubber} from './run-scrubber.js';
@@ -409,7 +415,7 @@ function pendingRunScreen(
         {unplaced === null ? (
           <InitialRunLoading stage="locating" />
         ) : (
-          <RunGone words={unplaced.words} />
+          <RunUnplaced label={unplaced.label} words={unplaced.words} />
         )}
       </Screen>
     );

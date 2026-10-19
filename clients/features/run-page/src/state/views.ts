@@ -567,8 +567,8 @@ export function unplacedRun(
 ): {readonly label: string; readonly words: string} | null {
   if (state.record.kind !== 'unlisted' || state.locate.kind !== 'unresolved') return null;
   return state.record.why === 'machine'
-    ? {label: 'No answer', words: 'This machine did not list its runs.'}
-    : {label: 'Not confirmed', words: 'This machine could not say whether the run is live.'};
+    ? {label: 'No answer', words: 'runs not listed'}
+    : {label: 'Not confirmed', words: 'live state unknown'};
 }
 
 export interface EndedView {

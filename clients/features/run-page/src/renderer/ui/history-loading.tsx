@@ -55,6 +55,15 @@ export function RunGone(props: {readonly words: string}): JSX.Element {
   );
 }
 
+/** A run the page gave up placing: a status word and the reason in a few words. */
+export function RunUnplaced(props: {readonly label: string; readonly words: string}): JSX.Element {
+  return (
+    <Card>
+      <Text variant="heading">{`${props.label} · ${props.words}`}</Text>
+    </Card>
+  );
+}
+
 export function RunLoadError(props: {
   readonly message: string;
   readonly retry: () => void;
