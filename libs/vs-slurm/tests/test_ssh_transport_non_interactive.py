@@ -107,7 +107,6 @@ _SSH_COMMANDS = st.tuples(
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="PR #3222 MED-1: the SSH transport may prompt")
 @given(ssh_command=_SSH_COMMANDS)
 @example(ssh_command=("ssh",))
 def test_every_ssh_transport_call_runs_in_batch_mode(
@@ -133,7 +132,6 @@ def test_every_ssh_transport_call_runs_in_batch_mode(
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="PR #3222 MED-1: exit 255 is reported as a bare exit code")
 @pytest.mark.parametrize("failing", ["ssh", "rsync"])
 def test_an_ssh_connection_failure_names_its_cause_without_its_output(
     tmp_path: Path, failing: str

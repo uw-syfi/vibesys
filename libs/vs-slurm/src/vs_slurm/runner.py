@@ -90,6 +90,8 @@ SERVICE_NOT_READY_EXIT_CODE = 70
 # its TERM, and 137 when the stage outlived the TERM and ``--kill-after`` killed it.
 STAGE_TIMEOUT_EXIT_CODES = frozenset({124, 137})
 _MAX_PROCESS_EXIT_CODE = 255
+# OpenSSH's exit status when it could not connect or log in (or the remote command exited 255).
+_SSH_CONNECTION_FAILED = 255
 _BATCH_RESULT_ROOT = ".vibesys-slurm-results"
 _SERVICE_LOG_TAIL = "service-log-tail.txt"
 _SERVICE_LOG_TAIL_LINES = 400
@@ -1343,6 +1345,10 @@ class _ProcessTransport:
         """Return the argv to start for *argv*; a transport may wrap the program."""
         return argv
 
+    def _failed(self, operation: str, returncode: int, stderr: str) -> SlurmError:
+        """Describe a transport program that exited *returncode*; a transport may refine it."""
+        return SlurmError.transport_failed(operation, returncode, stderr)
+
     def _run(
         self,
         argv: Sequence[str],
@@ -1363,9 +1369,7 @@ class _ProcessTransport:
             case ProcessOutcome(returncode=0, stdout=stdout, stderr=stderr):
                 return _TransportResponse(stdout=stdout.decode(), stderr=stderr.decode())
             case ProcessOutcome(returncode=returncode, stderr=stderr):
-                raise SlurmError.transport_failed(
-                    operation, returncode, stderr.decode(errors="replace")
-                )
+                raise self._failed(operation, returncode, stderr.decode(errors="replace"))
             case ProcessTimedOut():
                 raise SlurmError.transport_timed_out(operation)
             case ProcessGroupUnreaped(detail=detail):
@@ -1443,7 +1447,7 @@ class _SshTransport(_RsyncTransport):
     ) -> None:
         super().__init__(
             config.rsync_command,
-            remote_shell=("-e", shlex.join(config.ssh_command)),
+            remote_shell=("-e", shlex.join(config.ssh_argv)),
             destination=f"{config.host}:",
             processes=processes,
             timeout=timeout,
@@ -1452,9 +1456,15 @@ class _SshTransport(_RsyncTransport):
 
     def exec(self, command: str) -> _TransportResponse:
         return self._run(
-            (*self._config.ssh_command, "--", self._config.host, command),
+            (*self._config.ssh_argv, "--", self._config.host, command),
             operation="exec",
         )
+
+    def _failed(self, operation: str, returncode: int, stderr: str) -> SlurmError:
+        # ssh, and rsync through it, exit 255 when the connection or login failed.
+        if returncode == _SSH_CONNECTION_FAILED:
+            return SlurmError.ssh_connection_failed(operation, stderr)
+        return super()._failed(operation, returncode, stderr)
 
 
 _LOGIN_ENVIRONMENT_NAMES = frozenset(

@@ -96,6 +96,18 @@ class SlurmError(RuntimeError):
         )
 
     @classmethod
+    def ssh_connection_failed(cls, operation: str, stderr: str = "") -> SlurmError:
+        """Describe an ssh exit 255: no connection or login, usually a prompt a run cannot answer."""
+        return SlurmTransportFailedError(
+            f"Slurm transport {operation} failed with exit code 255: ssh could not connect "
+            "or log in. A run cannot answer a password, passphrase, host-key or "
+            "second-factor prompt, so SSH access to the cluster must be non-interactive "
+            "(see docs/remote-slurm-execution.md)",
+            returncode=255,
+            stderr=stderr,
+        )
+
+    @classmethod
     def invalid_connector_response(cls, operation: str) -> SlurmError:
         """Describe a response that violates the connector protocol."""
         return cls(f"Slurm connector returned an invalid response during {operation}")

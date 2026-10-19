@@ -122,6 +122,9 @@ class SlurmService(BaseModel):
         return value
 
 
+_NON_INTERACTIVE_SSH_OPTIONS = ("-o", "BatchMode=yes")
+
+
 class SlurmSshTransport(BaseModel):
     """Built-in OpenSSH and rsync transport using the user's SSH configuration."""
 
@@ -131,6 +134,18 @@ class SlurmSshTransport(BaseModel):
     host: Annotated[str, Field(min_length=1, max_length=255)]
     ssh_command: tuple[str, ...] = ("ssh",)
     rsync_command: tuple[str, ...] = ("rsync",)
+
+    @property
+    def ssh_argv(self) -> tuple[str, ...]:
+        """``ssh_command`` with every prompt off: the program each SSH call runs.
+
+        A run has no terminal, so an ssh that would ask for a password,
+        passphrase, host-key confirmation or second factor would submit empty
+        answers to the server (risking a lockout) or open an askpass window.
+        ``BatchMode=yes`` makes it fail instead. ssh keeps the first value of an
+        option, so an operator's own ``-o BatchMode=...`` in ``ssh_command`` wins.
+        """
+        return (*self.ssh_command, *_NON_INTERACTIVE_SSH_OPTIONS)
 
     @field_validator("host")
     @classmethod

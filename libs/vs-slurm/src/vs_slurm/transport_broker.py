@@ -117,7 +117,7 @@ class _SshBrokerPolicy:
     timeout_seconds: float
 
     def run(self, spec: ProcessSpec, *, processes: Processes, timeout: float) -> ProcessRun:
-        ssh = self.transport.ssh_command
+        ssh = self.transport.ssh_argv
         rsync = self.transport.rsync_command
         if spec.argv[: len(ssh)] == ssh:
             suffix = spec.argv[len(ssh) :]
@@ -154,7 +154,7 @@ class _SshBrokerPolicy:
             raise SlurmTransportRequestError.malformed_rsync() from error
         options = argv[:separator]
         operands = argv[separator + 1 :]
-        expected_shell = shlex.join(self.transport.ssh_command)
+        expected_shell = shlex.join(self.transport.ssh_argv)
         if len(operands) != _RSYNC_OPERAND_COUNT or not options or options[0] != "-a":
             raise SlurmTransportRequestError.malformed_rsync()
         index = 1
