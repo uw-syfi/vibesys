@@ -46,8 +46,8 @@ from vs_sandbox.slurm_capture_plan import (
     read_slurm_capture_plan,
     write_slurm_capture_plan,
 )
+from vs_sandbox.slurm_close_bound import CLOSE_RELEASE_BOUND_S
 from vs_sandbox.slurm_executor import (
-    CLOSE_RELEASE_BOUND_S,
     SharedSlurmAdmission,
     SlurmCommandResult,
     SlurmEvaluationExecutor,
