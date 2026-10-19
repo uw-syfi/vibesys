@@ -31,8 +31,10 @@ export interface UserSteer {
 
 export interface PanelContext {
   readonly choice: ThreadChoice;
-  /** The harness a new thread starts with; null keeps the run's own. */
+  /** The pair the user picked for a new thread; null until they pick (see `effectiveHarness`). */
   readonly harness: HarnessChoice | null;
+  /** The pairs a new thread starts on when none is picked, best first: the last thread's, the run's. */
+  readonly preferred: readonly (HarnessChoice | null)[];
   readonly catalogue: Catalogue;
   readonly composer: string;
   readonly listOpen: boolean;
@@ -50,6 +52,7 @@ export type PanelEvent =
   | {readonly type: 'choose-thread'; readonly id: string}
   | {readonly type: 'new-chat'}
   | {readonly type: 'set-harness'; readonly harness: HarnessChoice | null}
+  | {readonly type: 'set-preferred'; readonly preferred: readonly (HarnessChoice | null)[]}
   | {readonly type: 'set-composer'; readonly text: string}
   /** Turns the draft in the composer into a steer card (an empty draft is an empty card). */
   | {readonly type: 'new-steer'}
@@ -61,6 +64,7 @@ export type PanelEvent =
 export const panelInitial: PanelContext = {
   choice: {kind: 'last'},
   harness: null,
+  preferred: [],
   catalogue: {kind: 'loading'},
   composer: '',
   listOpen: false,
@@ -77,6 +81,14 @@ function failed(context: PanelContext, message: string): Partial<PanelContext> {
 
 function outcomeMessage(output: ChatOutcome<unknown>): string {
   return output.ok ? '' : output.message;
+}
+
+/** The pair a new thread is made with: the user's pick, else the best preferred pair offered. */
+export function effectiveHarness(context: PanelContext): HarnessChoice | null {
+  if (context.harness !== null) return context.harness;
+  return context.catalogue.kind === 'listed'
+    ? defaultChoice(context.catalogue.offers, context.preferred)
+    : null;
 }
 
 export const panelMachine = setup({
@@ -112,6 +124,7 @@ export const panelMachine = setup({
     },
     'toggle-list': {actions: assign(({context}) => ({listOpen: !context.listOpen}))},
     'toggle-picker': {actions: assign(({context}) => ({pickerOpen: !context.pickerOpen}))},
+    'set-preferred': {actions: assign(({event}) => ({preferred: event.preferred}))},
     'set-harness': {actions: assign(({event}) => ({harness: event.harness, pickerOpen: false}))},
     'choose-thread': {
       actions: assign(({event}) => ({
@@ -146,15 +159,7 @@ export const panelMachine = setup({
             src: 'loadCatalogue',
             onDone: {
               target: 'ready',
-              actions: assign(({context, event}) => {
-                const catalogue = catalogueOf(event.output);
-                return {
-                  catalogue,
-                  harness:
-                    context.harness ??
-                    (catalogue.kind === 'listed' ? defaultChoice(catalogue.offers) : null),
-                };
-              }),
+              actions: assign(({event}) => ({catalogue: catalogueOf(event.output)})),
             },
             onError: {target: 'ready', actions: assign({catalogue: {kind: 'none'}})},
           },
@@ -198,7 +203,7 @@ export const panelMachine = setup({
           invoke: {
             id: 'createThread',
             src: 'createThread',
-            input: ({context}) => ({harness: context.harness}),
+            input: ({context}) => ({harness: effectiveHarness(context)}),
             onDone: [
               {
                 guard: ({event}) => event.output.ok,

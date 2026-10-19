@@ -14,6 +14,7 @@ import {
 import type {JSX} from 'react';
 import {
   type ChatPanelView,
+  effectiveHarness,
   modelOptions,
   type PanelItem,
   providerOptions,
@@ -24,7 +25,8 @@ import {SteerCardView} from './steer-card-view.js';
 /** The harness, then the model: the two choices of a new chat in one compact row. */
 function Picker(props: Pick<ChatPanelView, 'panel' | 'dispatch'>): JSX.Element | null {
   const {panel, dispatch} = props;
-  const {catalogue, harness} = panel;
+  const {catalogue} = panel;
+  const harness = effectiveHarness(panel);
   if (catalogue.kind === 'loading') {
     return (
       <Text variant="small" tone="muted">
@@ -147,7 +149,7 @@ function uiItem(item: PanelItem, roles: readonly string[]): UiThreadItem {
   }
 }
 
-/** One input and one send control; Steer turns what is typed into a steer card. */
+/** One input and one send control; New steer turns what is typed into a steer card. */
 function Composer(props: ChatPanelView): JSX.Element {
   const {panel, dispatch} = props;
   const submit = (): void => dispatch({type: 'submit', threadId: props.shown});
@@ -171,7 +173,8 @@ function Composer(props: ChatPanelView): JSX.Element {
         <Button
           variant="quiet"
           size="sm"
-          text="Steer"
+          icon="plus"
+          text="New steer"
           press={() => dispatch({type: 'new-steer'})}
         />
         <Button variant="primary" size="sm" icon="arrow-up" label="Ask" press={submit} />

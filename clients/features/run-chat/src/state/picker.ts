@@ -4,6 +4,7 @@
  * the catalogue's `display`; a pair the host did not name shows its raw ids.
  */
 import type {HarnessChoice, HarnessListing, HarnessOffer} from '@vibesys/ipc';
+import type {CoreState} from '@vibesys/run-state';
 
 export interface PickerOption {
   readonly value: string;
@@ -51,13 +52,45 @@ export function modelOptions(
     .map(offer => ({value: offer.model, label: modelLabel(offer)}));
 }
 
-/** The pair a new chat starts with: the first provider's default model. */
-export function defaultChoice(offers: readonly HarnessOffer[]): HarnessChoice | null {
+function offered(offers: readonly HarnessOffer[], choice: HarnessChoice): boolean {
+  return offers.some(offer => offer.provider === choice.provider && offer.model === choice.model);
+}
+
+/**
+ * The pair a new chat starts with: the first of `preferred` (the chat's last thread, then the
+ * run's own harness and model) the catalogue offers, else the first provider's default model.
+ */
+export function defaultChoice(
+  offers: readonly HarnessOffer[],
+  preferred: readonly (HarnessChoice | null)[] = [],
+): HarnessChoice | null {
   const first = offers[0];
   if (first === undefined) return null;
-  const preferred = offers.find(offer => offer.provider === first.provider && offer.default);
-  const offer = preferred ?? first;
+  for (const choice of preferred) {
+    if (choice !== null && offered(offers, choice)) {
+      return {provider: choice.provider, model: choice.model};
+    }
+  }
+  const fallback = offers.find(offer => offer.provider === first.provider && offer.default);
+  const offer = fallback ?? first;
   return {provider: offer.provider, model: offer.model};
+}
+
+/** The planner's role id: its harness and model stand for the run when roles differ. */
+const PLANNER_ROLE = 'planner';
+
+/**
+ * The harness and model the run's agents ran on, from the executions its journal started: the
+ * planner's when roles differ, else the first execution's. Null before any execution named both.
+ */
+export function runHarness(core: Pick<CoreState, 'executionStarts'>): HarnessChoice | null {
+  const named = Object.values(core.executionStarts).flatMap(start =>
+    start.harness !== null && start.model !== null
+      ? [{role: start.role, provider: start.harness, model: start.model}]
+      : [],
+  );
+  const chosen = named.find(start => start.role === PLANNER_ROLE) ?? named[0];
+  return chosen === undefined ? null : {provider: chosen.provider, model: chosen.model};
 }
 
 /** The pair after the user picks `provider`: its default model, or the one already chosen if it runs there. */

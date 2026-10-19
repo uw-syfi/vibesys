@@ -2,7 +2,7 @@ import {describe, expect, test} from 'bun:test';
 import type {HarnessListing} from '@vibesys/ipc';
 import {checkMachine} from '@vibesys/machine/testing';
 import {getInitialSnapshot, getNextSnapshot} from 'xstate';
-import {type PanelEvent, panelMachine} from './panel.js';
+import {effectiveHarness, type PanelEvent, panelMachine} from './panel.js';
 
 type Snapshot = ReturnType<typeof getInitialSnapshot<typeof panelMachine>>;
 
@@ -37,18 +37,24 @@ describe('panelMachine', () => {
     expect(snapshot.context.composer).toBe('why?');
   });
 
-  test('the catalogue loads on open and the first provider default is chosen', () => {
+  test('the catalogue loads on open; a new chat starts on the run own pair, a pick overrides it', () => {
     const loaded = step(opened(), done('loadCatalogue', LISTING));
     expect(loaded.context.catalogue.kind).toBe('listed');
-    expect(loaded.context.harness).toEqual({provider: 'claude', model: 'sonnet'});
-    const chosen = step(loaded, {
-      type: 'set-harness',
-      harness: {provider: 'codex', model: 'gpt'},
+    expect(effectiveHarness(loaded.context)).toEqual({provider: 'claude', model: 'sonnet'});
+    // The run's pair may arrive after the catalogue; nothing was picked, so it applies.
+    const withRun = step(loaded, {
+      type: 'set-preferred',
+      preferred: [null, {provider: 'codex', model: 'gpt'}],
     });
-    expect(chosen.context.harness).toEqual({provider: 'codex', model: 'gpt'});
-    // A catalogue that arrives later never overrides a pair the user already chose.
+    expect(effectiveHarness(withRun.context)).toEqual({provider: 'codex', model: 'gpt'});
+    const chosen = step(withRun, {
+      type: 'set-harness',
+      harness: {provider: 'claude', model: 'opus'},
+    });
+    expect(effectiveHarness(chosen.context)).toEqual({provider: 'claude', model: 'opus'});
+    // A pair the user already chose survives closing and reopening.
     const reopened = step(step(chosen, {type: 'close'}), {type: 'open'});
-    expect(reopened.context.harness).toEqual({provider: 'codex', model: 'gpt'});
+    expect(effectiveHarness(reopened.context)).toEqual({provider: 'claude', model: 'opus'});
   });
 
   test('an unreadable catalogue leaves nothing to pick, not a stuck panel', () => {

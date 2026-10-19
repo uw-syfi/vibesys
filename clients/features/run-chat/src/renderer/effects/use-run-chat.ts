@@ -4,6 +4,7 @@
  * The transcript, the threads and the proposals come from the run fold (`core`), the sends and
  * the catalogue from the injected ports.
  */
+import type {HarnessChoice} from '@vibesys/ipc';
 import {actorStore} from '@vibesys/machine';
 import {type CoreState, initialCoreState} from '@vibesys/run-state';
 import {useEffect, useRef, useState, useSyncExternalStore} from 'react';
@@ -18,6 +19,7 @@ import {
   type PanelContext,
   type PanelItem,
   panelMachine,
+  runHarness,
   runRoles,
   shownThread,
   threadEntries,
@@ -124,6 +126,16 @@ function panelItems(chat: Chat, core: CoreState, shown: string | null, panel: Pa
   return items;
 }
 
+/** The pairs a new chat starts on, best first: the last thread's own, then the run's. */
+function preferredHarnesses(core: CoreState): readonly (HarnessChoice | null)[] {
+  const last = core.chatThreads.find(thread => thread.id === core.lastChatThreadId);
+  const lastPair =
+    last?.provider != null && last.model != null
+      ? {provider: last.provider, model: last.model}
+      : null;
+  return [lastPair, runHarness(core)];
+}
+
 export function useRunChat(options: RunChatOptions): RunChatHost {
   const {identity, ports} = options;
   const core = options.core ?? NO_CORE;
@@ -149,6 +161,12 @@ export function useRunChat(options: RunChatOptions): RunChatHost {
     cards?.version ?? (() => 0),
     cards?.version ?? (() => 0),
   );
+  const preferred = preferredHarnesses(core);
+  const preferredKey = JSON.stringify(preferred);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `preferred` is rebuilt every render; its serialized form says when it changed.
+  useEffect(() => {
+    chat?.actor.send({type: 'set-preferred', preferred});
+  }, [chat, preferredKey]);
   const ideaOf = options.ideaOf;
   const deliveries = core.steerDeliveries;
   // biome-ignore lint/correctness/useExhaustiveDependencies: deliveries are re-read from the fold whenever it holds new steps; `core` itself changes with every event.

@@ -280,13 +280,13 @@ test('a standing steer in force offers Withdraw, which ends it', async ({page}) 
   await check(page, 'standing-withdrawn');
 });
 
-test('Steer turns what is typed into a card, with no text left in the composer', async ({page}) => {
+test('New steer turns what is typed into a card, with no text left in the composer', async ({page}) => {
   await open(page, 1440);
   await emit(page, conversation(firstSequence()));
   await openPanel(page);
   const composer = panel(page).getByRole('textbox', {name: 'Message'});
   await composer.fill('Spend the next idea on batching.');
-  await panel(page).getByRole('button', {name: 'Steer', exact: true}).click();
+  await panel(page).getByRole('button', {name: 'New steer', exact: true}).click();
   await expect(composer).toHaveValue('');
   await expect(panel(page).getByRole('textbox', {name: 'Steer text'})).toHaveCount(2);
   await check(page, 'steer-written');

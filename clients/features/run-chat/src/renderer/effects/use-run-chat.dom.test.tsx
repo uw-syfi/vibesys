@@ -185,7 +185,7 @@ test('a proposal that is dismissed is gone and sends nothing', async () => {
   await act(async () => root.unmount());
 });
 
-test('Steer turns the typed text into a card whose target is picked from the run roles', async () => {
+test('New steer turns the typed text into a card whose target is picked from the run roles', async () => {
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
@@ -215,7 +215,7 @@ test('Steer turns the typed text into a card whose target is picked from the run
   );
   expect(container.querySelector('button[aria-label="Ask"]')?.textContent).toBe('');
   await act(async () => type(container.querySelector('textarea') as Element, 'pad the counters'));
-  await act(async () => press(container, 'Steer'));
+  await act(async () => press(container, 'New steer'));
   const select = container.querySelector('select') as HTMLSelectElement;
   const options = [...select.querySelectorAll('option')].map(each => each.textContent);
   expect(options).toEqual(['Whole run', 'Planner', 'Implementer']);
@@ -233,6 +233,76 @@ test('Steer turns the typed text into a card whose target is picked from the run
       target: {kind: 'role', id: 'implementer'},
       mode: 'next_turn',
     },
+  ]);
+  await act(async () => root.unmount());
+});
+
+function started(sequence: number, id: string, role: string, provider: string, model: string): RunEvent {
+  return event(sequence, 'agent_execution_started', {
+    execution_id: id,
+    agent_kind: role,
+    round_label: 'round-1',
+    status: 'active',
+    data: {
+      kind: 'agent_execution_started',
+      stage: 'planning',
+      attempt: 1,
+      system_prompt: '',
+      user_prompt: 'go',
+      provider,
+      model,
+      activity: {
+        kind: 'agent_execution_activity_changed',
+        mode: 'thinking',
+        summary: '',
+        tool: null,
+      },
+    },
+  });
+}
+
+test('a new chat starts on the harness and model the run runs on, not the first provider', async () => {
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const ports: RunChatPorts = {
+    ...fakePorts([]),
+    harnesses: () =>
+      Promise.resolve({
+        kind: 'listed',
+        harnesses: [
+          {
+            provider: 'claude',
+            model: 'opus',
+            default: true,
+            display: {providerName: 'Claude Code', modelName: 'Opus'},
+          },
+          {
+            provider: 'codex',
+            model: 'gpt-6-luna',
+            default: false,
+            display: {providerName: 'Codex', modelName: 'GPT-6 Luna'},
+          },
+          {
+            provider: 'codex',
+            model: 'gpt-6-sol',
+            default: true,
+            display: {providerName: 'Codex', modelName: 'GPT-6 Sol'},
+          },
+        ],
+      }),
+  };
+  const core = fold([
+    started(10, 'e1', 'implementer', 'claude', 'opus'),
+    started(11, 'e2', 'planner', 'codex', 'gpt-6-luna'),
+  ]);
+  await act(async () => root.render(<Harness core={core} ports={ports} />));
+  await act(async () => press(container, 'Chat'));
+  await act(async () => undefined);
+  const selects = [...container.querySelectorAll('select')] as HTMLSelectElement[];
+  expect(selects.map(select => select.selectedOptions[0]?.textContent)).toEqual([
+    'Codex',
+    'GPT-6 Luna',
   ]);
   await act(async () => root.unmount());
 });

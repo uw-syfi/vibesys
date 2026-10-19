@@ -21,6 +21,7 @@ export {
 export {
   type AskInput,
   type ChatOutcome,
+  effectiveHarness,
   type PanelContext,
   type PanelEvent,
   panelInitial,
@@ -35,6 +36,7 @@ export {
   modelOptions,
   type PickerOption,
   providerOptions,
+  runHarness,
   withProvider,
 } from './picker.js';
 export {

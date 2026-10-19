@@ -1,7 +1,14 @@
 import {describe, expect, test} from 'bun:test';
 import type {HarnessOffer} from '@vibesys/ipc';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
-import {catalogueOf, defaultChoice, modelOptions, providerOptions, withProvider} from './picker.js';
+import {
+  catalogueOf,
+  defaultChoice,
+  modelOptions,
+  providerOptions,
+  runHarness,
+  withProvider,
+} from './picker.js';
 
 const OFFERS: readonly HarnessOffer[] = [
   {
@@ -49,5 +56,56 @@ describe('picker', () => {
         ).toBe(true);
       }
     }
+  });
+
+  test('the default is always an offered pair, and the run own pair when it is offered', () => {
+    const pairs = OFFERS.map(offer => ({provider: offer.provider, model: offer.model}));
+    const strangers = [
+      null,
+      {provider: 'claude', model: 'unlisted'},
+      {provider: 'other', model: 'sonnet'},
+    ];
+    for (const seed of SEEDS) {
+      const random = new Seeded(seed);
+      const run = random.pick([...pairs, ...strangers]);
+      const last = random.pick([...pairs, ...strangers]);
+      const choice = defaultChoice(OFFERS, [last, run]);
+      expect(
+        choice !== null &&
+          pairs.some(pair => pair.provider === choice.provider && pair.model === choice.model),
+      ).toBe(true);
+      // The last thread's pair wins when offered; else the run's; else the first provider's default.
+      const expected = [last, run].find(
+        pair =>
+          pair !== null &&
+          pairs.some(each => each.provider === pair.provider && each.model === pair.model),
+      );
+      expect(choice).toEqual(expected ?? {provider: 'claude', model: 'sonnet'});
+    }
+  });
+
+  test('the run own pair is its planner, else the first execution that named both', () => {
+    const start = (role: string | null, harness: string | null, model: string | null) => ({
+      role,
+      harness,
+      model,
+      reasoningEffort: null,
+      harnessVersion: null,
+      startedAt: null,
+    });
+    expect(runHarness({executionStarts: {}})).toBeNull();
+    expect(
+      runHarness({
+        executionStarts: {
+          a: start('implementer', 'codex', 'gpt-x'),
+          b: start('planner', 'claude', 'opus'),
+        },
+      }),
+    ).toEqual({provider: 'claude', model: 'opus'});
+    expect(
+      runHarness({
+        executionStarts: {a: start('judge', null, 'm'), b: start('implementer', 'codex', 'gpt-x')},
+      }),
+    ).toEqual({provider: 'codex', model: 'gpt-x'});
   });
 });
