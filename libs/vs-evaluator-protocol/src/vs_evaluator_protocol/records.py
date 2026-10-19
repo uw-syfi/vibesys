@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated, Literal, NoReturn
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, model_validator
 
 from vs_decode.api import Unreadable, UnreadableKind, decode_json
 from vs_evaluator_protocol.errors import ReasonCode, reject
@@ -24,6 +24,21 @@ class ProfileField(StrEnum):
     HIP_API_TIMING = "hip_api_timing"
     PREFILL_TIMING = "prefill_timing"
     DECODE_TIMING = "decode_timing"
+
+
+class ErrorKind(StrEnum):
+    """Why an evaluator produced no row: the one authoritative closed set of error kinds.
+
+    `TRANSIENT` is the protocol's backward-compatible default: an `error` record
+    that names no kind (every record written before kinds existed) says nothing
+    about whether measuring again could help, so a reader treats it as it always
+    did. `REQUIREMENT_NOT_MET` says the measured revision lacks a capability the
+    task requires, so the failure is deterministic and measuring it again cannot
+    help; the record names the requirement in `requirement`.
+    """
+
+    TRANSIENT = "transient"
+    REQUIREMENT_NOT_MET = "requirement_not_met"
 
 
 class _StrictRecord(BaseModel):
@@ -110,12 +125,24 @@ class ErrorRecord(_StrictRecord):
     """Terminating record reporting that the evaluator produced no row.
 
     `partial` is what the run measured before it failed, when it measured
-    anything; absent means nothing was measured.
+    anything; absent means nothing was measured. `error_kind` says whether
+    measuring again could help (see `ErrorKind`; absent means `TRANSIENT`), and
+    `requirement` names the capability a `REQUIREMENT_NOT_MET` failure lacks:
+    present exactly for that kind.
     """
 
     kind: Literal["error"] = "error"
     message: str = Field(min_length=1)
     partial: PartialMeasurement | None = None
+    error_kind: ErrorKind = ErrorKind.TRANSIENT
+    requirement: _Name | None = None
+
+    @model_validator(mode="after")
+    def _requirement_exactly_when_not_met(self) -> ErrorRecord:
+        if (self.error_kind is ErrorKind.REQUIREMENT_NOT_MET) != (self.requirement is not None):
+            message = "key 'requirement' is required by, and only allowed with, key 'error_kind' = 'requirement_not_met'"
+            raise ValueError(message)
+        return self
 
 
 Record = Hello | Result | ErrorRecord

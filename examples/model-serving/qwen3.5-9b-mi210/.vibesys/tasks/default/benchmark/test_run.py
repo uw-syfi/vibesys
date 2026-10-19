@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sys
 import tempfile
 import textwrap
@@ -343,6 +344,48 @@ class WarmupWatchTests(unittest.TestCase):
         headline, _, command_line = str(caught.exception).partition("\n")
         self.assertIn("warmup sub-run stopped at 178s", headline)
         self.assertEqual(command_line, f"command: {engine} --trace t.csv")
+
+
+class RequirementNotMetTests(unittest.TestCase):
+    """A server session_runner's preflight refuses fails as `requirement_not_met`, once."""
+
+    def _fail_with(self, error: run.HarnessError) -> dict[str, object]:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "out.jsonl"
+            run.ProtocolReport(path).fail(str(error), error.partial, error.requirement)
+            records = [json.loads(line) for line in path.read_text().splitlines()]
+        self.assertEqual([record["kind"] for record in records], ["hello", "error"])
+        return records[-1]
+
+    def test_a_preflight_refusal_is_reported_as_an_unmet_prefix_cache(self) -> None:
+        tail = "error: prefix-cache preflight failed: the second response reported cached_tokens=0"
+        self.assertTrue(run.is_preflight_failure(tail))
+        record = self._fail_with(run.warmup_failure("quick", tail))
+        self.assertEqual(record["error_kind"], "requirement_not_met")
+        self.assertEqual(record["requirement"], "prefix_cache")
+
+    def test_an_ordinary_failure_names_no_kind_so_it_stays_transient(self) -> None:
+        self.assertFalse(run.is_preflight_failure("connection reset by peer"))
+        record = self._fail_with(run.warmup_failure("quick", "connection reset by peer"))
+        self.assertNotIn("error_kind", record)
+        self.assertNotIn("requirement", record)
+
+    def test_a_fake_session_runner_that_refuses_at_the_preflight_is_recognised(self) -> None:
+        script = textwrap.dedent(
+            """\
+            #!{python}
+            import sys
+            print("prefix-cache preflight: second response reported cached_tokens=0", file=sys.stderr)
+            sys.exit(1)
+            """
+        ).format(python=sys.executable)
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = Path(tmp) / "fake_session_runner"
+            engine.write_text(script)
+            engine.chmod(0o755)
+            result = run.run_session_runner(engine, [], timeout_s=60.0, label="warmup sub-run")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(run.is_preflight_failure(result.stderr_tail))
 
 
 if __name__ == "__main__":

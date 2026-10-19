@@ -677,6 +677,8 @@ class BenchmarkEvaluation(BaseModel):
     # What a failed benchmark measured before it stopped, as its evaluator
     # reported it; absent when the evaluator reported nothing.
     partial_measurement: PartialMeasurement | None = None
+    # The capability the evaluator named as unmet on a failed benchmark, when it did.
+    unmet_requirement: str | None = None
 
     @model_validator(mode="after")
     def _failure_facts_only_when_failed(self) -> BenchmarkEvaluation:
@@ -685,6 +687,9 @@ class BenchmarkEvaluation(BaseModel):
             raise ValueError(message)
         if (self.feedback is None) != (self.failure_kind is None):
             message = "a benchmark carries a failure kind exactly when it failed"
+            raise ValueError(message)
+        if self.unmet_requirement is not None and self.feedback is None:
+            message = "only a failed benchmark names an unmet requirement"
             raise ValueError(message)
         if (self.feedback is None) != (self.operator_feedback is None):
             message = "a benchmark failure requires a separate operator-safe feedback"

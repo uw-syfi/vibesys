@@ -572,6 +572,7 @@ class _EvaluationAdapter:
                 operator_feedback=operator_feedback,
                 failure_kind=result.failure_kind,
                 partial_measurement=result.partial_measurement,
+                unmet_requirement=result.unmet_requirement,
             )
         if result.row is None:
             return BenchmarkEvaluation(executed=result.executed)

@@ -30,6 +30,7 @@ from vs_runtime.api import render_stage_failure
 from vs_runtime.api.infrastructure import (
     ScalarBenchmarkContract,
     SemanticSlurmEvaluationExecutor,
+    TrustedBenchmarkContract,
     TrustedEvaluationPlan,
 )
 from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaces
@@ -189,6 +190,7 @@ async def build_stack(  # noqa: PLR0913  # lint-waiver: LW-455560 [PLR0913]; eac
     sleeper: Sleeper | None = None,
     ledger: SlurmLedgerAttachment | None = None,
     policy: SlurmExecutionPolicy | None = None,
+    benchmark_contract: TrustedBenchmarkContract | None = None,
 ) -> Stack:
     """Build the semantic Slurm executor over ``cluster``, reusing durable state under root.
 
@@ -199,6 +201,7 @@ async def build_stack(  # noqa: PLR0913  # lint-waiver: LW-455560 [PLR0913]; eac
     ``sleeper`` paces the executor's polls of a running job; by default a pause
     passes at once. With ``ledger`` the run's evaluations go through that
     evaluation ledger attachment. ``policy`` is the operator's execution policy, default none.
+    ``benchmark_contract`` is how the benchmark's result is read, by default one scalar metric.
     """
     cluster = cluster or ScenarioCluster()
     workspaces = _Candidates(
@@ -219,9 +222,8 @@ async def build_stack(  # noqa: PLR0913  # lint-waiver: LW-455560 [PLR0913]; eac
         TrustedEvaluationPlan(
             accuracy_command="unused",
             benchmark_command="unused",
-            benchmark_contract=ScalarBenchmarkContract(
-                output_argument="--output", metric="throughput"
-            ),
+            benchmark_contract=benchmark_contract
+            or ScalarBenchmarkContract(output_argument="--output", metric="throughput"),
         ),
         workspaces,
         namespace,  # type: ignore[arg-type]  # the evaluation namespace is a StateNamespace

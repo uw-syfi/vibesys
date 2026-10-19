@@ -426,6 +426,7 @@ def _evidence(
                     for a in item.artifacts
                 ),
                 reading=_reading(item),
+                unmet_requirement=item.unmet_requirement,
             )
         )
     return tuple(refs), by_stage

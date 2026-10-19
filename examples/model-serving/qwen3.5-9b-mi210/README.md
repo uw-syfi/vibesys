@@ -159,6 +159,11 @@ No flag disables it for session traces. Consequences:
   (the reference engine) fail at the preflight with `session_runner`'s own
   message. This is the intended outcome, not a harness bug.
 
+`benchmark/run.py` reports such a refusal as an `error` record of kind
+`requirement_not_met` naming `prefix_cache`, so VibeSys measures that revision
+once and never again. Any other failure keeps the default kind and may be
+measured again.
+
 Every mode first checks that `/v1/models` lists the expected model, so a run
 against an unrelated process on the same port fails fast.
 

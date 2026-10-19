@@ -51,7 +51,7 @@ from vs_evaluation.api import (
 from vs_evaluation.api import EvidenceKind as StageKind
 from vs_project.api import Project
 from vs_prompts.api import TemplateRenderer
-from vs_runtime.api import ArtifactStore
+from vs_runtime.api import ArtifactStore, BenchmarkFailureKind
 from vs_runtime.api.core import (
     Applied,
     ExecutionContext,
@@ -70,6 +70,7 @@ from vs_runtime.api.core import (
     production_owners,
     revision_ref,
 )
+from vs_runtime.api.infrastructure import ProtocolBenchmarkContract
 from vs_runtime.api.operation_fixtures import execute_request
 from vs_runtime.api.slurm_evaluation_stack import (
     ADMISSION,
@@ -188,6 +189,7 @@ class _Reading(Value):
     metrics: tuple[_Metric, ...] = ()
     partial: _Partial | None = None
     feedback: str = ""
+    unmet_requirement: str | None = None
 
 
 class _Readings(Value):
@@ -370,6 +372,54 @@ async def test_the_crash_text_of_a_benchmark_killed_with_no_record_survives_into
         benchmark = next(r for r in readings if r["stage"] == "benchmark")  # type: ignore[index]
         assert benchmark["passed"] is False  # type: ignore[index]
         assert _CRASH_TAIL in benchmark["feedback"]  # type: ignore[index]
+
+
+# A benchmark whose evaluator states that the server lacks a capability the task requires.
+_UNMET = (
+    "__VIBESYS_FRAMEWORK_BENCHMARK_JSON__\n"
+    '{"kind":"error","message":"no prefix-cache hits","error_kind":"requirement_not_met",'
+    '"requirement":"prefix_cache"}\n'
+    "__VIBESYS_FRAMEWORK_BENCHMARK_JSON_END__"
+)
+
+
+async def test_an_unmet_requirement_the_evaluator_names_survives_into_its_reading() -> None:
+    """The input's failure names the requirement, so a frontend can say which one it lacks."""
+    cluster = ScenarioCluster()
+    cluster.benchmark_exit = 1
+    cluster.benchmark_output = _UNMET
+    with tempfile.TemporaryDirectory() as raw:
+        base = Path(raw)
+        stack = await build_stack(
+            base / "stack", cluster, benchmark_contract=ProtocolBenchmarkContract()
+        )
+        try:
+            requests = MeasurementRequests(stack.executor, _store(base))
+            sub = submission("sub", candidate=stack.snapshot)
+            first = await requests.execute(sub, _eval_context(sub))
+            resource = first.observation.observation.resource_id
+            assert resource is not None
+            while resource.root not in cluster.submissions:
+                await stack.executor.wait_for_change(resource.root, 30.0)
+            inspect = _inspect(resource)
+            terminal = await requests.execute(inspect, _eval_context(inspect))
+            target = terminal.observation.target
+            assert target is not None
+            refs = target.evidence
+            named = {ref.kind: ref.unmet_requirement for ref in refs}
+            assert named == {EvidenceKind.CORRECTNESS: None, EvidenceKind.BENCHMARK: "prefix_cache"}
+        finally:
+            await stack.executor.close()
+        owner = InterpretEvidenceOwner(ReceiptEvidenceLedger(_store(base)))
+        outcome = await owner.execute(_Interpret(evidence=refs), _context())
+        readings = outcome["readings"]
+        assert isinstance(readings, tuple)
+        benchmark = next(r for r in readings if r["stage"] == "benchmark")  # type: ignore[index]
+        assert benchmark["passed"] is False  # type: ignore[index]
+        assert benchmark["unmet_requirement"] == "prefix_cache"  # type: ignore[index]
+        stored = {e.stage_name: e for e in _stored(base, refs)}["benchmark"]
+        assert stored.unmet_requirement == "prefix_cache"
+        assert stored.failure_kind is BenchmarkFailureKind.WORKLOAD
 
 
 def _stored(base: Path, refs: tuple[EvidenceRef, ...]) -> list[TrustedEvidence]:

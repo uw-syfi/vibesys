@@ -117,6 +117,9 @@ class TrustedEvidence(BaseModel):
     # Set by the executor that ran the stage, only on failed evidence. Absent on
     # evidence recorded before failures were classified, which proves neither kind.
     failure_kind: EvidenceFailureKind | None = None
+    # The capability a failed stage lacks, when its evaluator stated that the requirement is
+    # not met (the `requirement_not_met` error kind): measuring again cannot help.
+    unmet_requirement: str | None = Field(default=None, min_length=1)
     artifacts: tuple[ArtifactDigest, ...] = ()
     accepted_round: int = Field(ge=0)
 
@@ -124,6 +127,9 @@ class TrustedEvidence(BaseModel):
     def _kind_only_when_failed(self) -> Self:
         if self.failure_kind is not None and self.outcome is not EvidenceOutcome.FAILED:
             message = "only failed evidence carries a failure kind"
+            raise ValueError(message)
+        if self.unmet_requirement is not None and self.outcome is not EvidenceOutcome.FAILED:
+            message = "only failed evidence names an unmet requirement"
             raise ValueError(message)
         return self
 

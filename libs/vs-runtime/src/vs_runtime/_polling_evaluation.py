@@ -279,6 +279,7 @@ class PollingEvaluationExecutor:
         handle_id: str,
         output: OutputSink,
     ) -> _SemanticStageObservation:
+        unmet: str | None = None
         if stage.kind is EvidenceKind.BUILD:
             built = await self._evaluation.build(workspace, output=output)
             completed = not is_unsettled(built.failure_kind)
@@ -311,6 +312,7 @@ class PollingEvaluationExecutor:
             summary = result.feedback
             operator_summary = result.operator_feedback
             partial = result.partial_measurement
+            unmet = result.unmet_requirement
             metrics = tuple(
                 EvidenceMetric(
                     name=name,
@@ -339,6 +341,7 @@ class PollingEvaluationExecutor:
                 summary=summary,
                 metrics=metrics,
                 partial=partial,
+                unmet_requirement=unmet,
             ),
         )
         evidence = TrustedEvidence(
@@ -353,6 +356,7 @@ class PollingEvaluationExecutor:
             metrics=metrics,
             partial_measurement=partial,
             failure_kind=None if outcome is EvidenceOutcome.PASSED else kind,
+            unmet_requirement=None if outcome is EvidenceOutcome.PASSED else unmet,
             accepted_round=0,
         )
         return _SemanticStageObservation(

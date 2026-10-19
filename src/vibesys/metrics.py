@@ -364,6 +364,8 @@ class EvidenceReading(Value):
     metrics: tuple[MetricRow, ...] = ()
     partial: PartialRow | None = None
     feedback: str = ""
+    unmet_requirement: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    """The capability a failed benchmark's evaluator named as unmet, when it named one."""
 
     def headline(self) -> MetricRow | None:
         """The first reported metric, the benchmark's headline reading."""

@@ -249,6 +249,8 @@ def _core_run(
     if not isinstance(identity, Proven) or not isinstance(current(context, scope), Proven):
         return change
     state = change.state
+    if requirement_unmet(state, identity.value):
+        return change
     if not _side_open(state, context, scope, baseline=plan.purpose == "baseline"):
         return change
     matches = tuple(
@@ -361,6 +363,31 @@ def _charged(state: EvaluationState, budget: SubmissionBudget, candidate_input: 
         and receipt.request_id in sampled
         and receipt.request_id not in others
     )
+
+
+def requirement_unmet(state: EvaluationState, identity: MeasurementIdentity) -> bool:
+    """Whether a run of ``identity``'s revision under its evaluation ended with an unmet requirement.
+
+    The evaluator's own statement, kept on the run's evidence (``EvidenceRef.unmet_requirement``),
+    that the revision lacks a capability the task requires. That is a fact of the revision and the
+    evaluation, not of a scope or of why the run was asked for, so every scope's runs are read,
+    the strategy's own measurement of the input among them: another run would end the same way.
+    A run names its revision and evaluation the way ``identity`` does, whatever it measured it
+    for (``purpose``) and whatever input its plan names (the strategy's measurement of the input
+    names none), so those are not compared.
+    """
+    evaluation = evaluation_of(identity)
+    for job in state.jobs:
+        if not any(ref.unmet_requirement is not None for ref in job.evidence):
+            continue
+        ran = identity_of(job.plan)
+        if (
+            isinstance(ran, Proven)
+            and ran.value.candidate == identity.candidate
+            and evaluation_of(ran.value) == evaluation
+        ):
+            return True
+    return False
 
 
 def _side_open(

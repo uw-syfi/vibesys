@@ -434,6 +434,8 @@ class TrustedBenchmarkResult(BaseModel):
     failure_kind: BenchmarkFailureKind | None = None
     # The validated evaluator error record's message, without transport framing.
     failure_reason: str | None = None
+    # The capability the evaluator named as unmet on a failed run, when it did.
+    unmet_requirement: str | None = None
     operator_failure_reason: str | None = None
     stdout: str = ""
     stderr: str = ""
@@ -455,6 +457,9 @@ class TrustedBenchmarkResult(BaseModel):
             raise ValueError(message)
         if (self.failure_reason is None) != (self.operator_failure_reason is None):
             message = "a benchmark reason requires a separate operator-safe reason"
+            raise ValueError(message)
+        if self.passed and self.unmet_requirement is not None:
+            message = "only a failed benchmark result names an unmet requirement"
             raise ValueError(message)
         return self
 
@@ -863,6 +868,7 @@ class RuntimeTrustedEvaluation:
                     else _command_failure_kind(record_state(framed), result, execution_failure)
                 ),
                 failure_reason=decoded.reason,
+                unmet_requirement=None if passed else decoded.requirement,
                 operator_failure_reason=(
                     None if decoded.reason is None else redact_diagnostic_text(decoded.reason)
                 ),
@@ -913,6 +919,7 @@ class _Decoded:
     partial: PartialMeasurement | None = None
     reason: str | None = None
     violation: str | None = None
+    requirement: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -934,6 +941,8 @@ class TrustedBenchmarkDecoding:
     # What the evaluator left in its result file; with the exit status it decides whose
     # fault a failed run is (`classify`).
     record: RecordState = RecordState.ABSENT
+    # The capability the evaluator's `error` record named as unmet, when it did.
+    requirement: str | None = None
 
 
 def record_state(framed: str) -> RecordState:
@@ -993,7 +1002,11 @@ def decode_trusted_benchmark_run(
         return TrustedBenchmarkDecoding(passed=False, violation=str(error), record=kind)
     if failure is not None:
         return TrustedBenchmarkDecoding(
-            passed=False, partial=failure.partial, reason=failure.failure, record=kind
+            passed=False,
+            partial=failure.partial,
+            reason=failure.failure,
+            record=kind,
+            requirement=failure.requirement,
         )
     if not exited_cleanly:
         return TrustedBenchmarkDecoding(passed=False, record=kind)
@@ -1026,6 +1039,7 @@ def _decode_framed(
         partial=decoded.partial,
         reason=decoded.reason,
         violation=decoded.violation,
+        requirement=decoded.requirement,
     )
 
 

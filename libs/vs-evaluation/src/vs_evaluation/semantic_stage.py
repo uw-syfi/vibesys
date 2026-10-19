@@ -53,6 +53,7 @@ class EvidenceResultIdentity:
     summary: str | None
     metrics: tuple[EvidenceMetric, ...]
     partial: PartialMeasurement | None
+    unmet_requirement: str | None = None
 
 
 def evidence_identity(stage: SemanticEvaluationStage, result: EvidenceResultIdentity) -> str:
@@ -72,6 +73,8 @@ def evidence_identity(stage: SemanticEvaluationStage, result: EvidenceResultIden
     }
     if result.partial is not None:
         identity["partial_measurement"] = result.partial.model_dump(mode="json")
+    if result.unmet_requirement is not None:
+        identity["unmet_requirement"] = result.unmet_requirement
     return hashlib.sha256(
         json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()

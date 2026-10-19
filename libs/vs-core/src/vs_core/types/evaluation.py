@@ -217,6 +217,15 @@ class EvidenceRef(Value):
     comparison states. A run's own reading is its ``Sample``'s.
     """
 
+    unmet_requirement: str | None = Field(default=None, exclude_if=unset)
+    """The capability the evaluator named as unmet on a failed benchmark record, if it named one.
+
+    Set by the runtime from the evaluator's `requirement_not_met` error. It says the revision
+    lacks something the task requires, so measuring that revision again cannot help: core takes
+    no further run of it (`vs_core._base_runs.requirement_unmet`). Kept on the ref, as
+    ``reading`` is, so that decision is pure state a resume replays.
+    """
+
     @property
     def key(self) -> EvidenceKey:
         """Run-wide identity: evidence IDs are unique only within a source request."""

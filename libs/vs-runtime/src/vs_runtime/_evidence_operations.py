@@ -129,6 +129,7 @@ def reading_mapping(ref: EvidenceRef, evidence: TrustedEvidence) -> Mapping[str,
             "progress_unit": None if progress is None else progress.unit,
         },
         "feedback": evidence.semantic_summary or "",
+        "unmet_requirement": evidence.unmet_requirement,
     }
 
 

@@ -46,7 +46,15 @@ from .test_measurements import committed, transition
 Death = Literal["cancelled", "infrastructure", "refused", "drained"]
 """How a run ends without a sample, for a reason that says nothing of the next run."""
 DEATHS: tuple[Death, ...] = ("cancelled", "infrastructure", "refused", "drained")
-Outcome = Literal["sample", "no-metric", "workload", "cancelled", "infrastructure", "refused"]
+Outcome = Literal[
+    "sample",
+    "no-metric",
+    "workload",
+    "requirement-not-met",
+    "cancelled",
+    "infrastructure",
+    "refused",
+]
 
 _PASSED = core.EvaluationTerminalFacts(
     stages=(
@@ -107,6 +115,7 @@ def died_steps(
         "infrastructure": (core.ObservationStatus.FAILED, core.MeasurementFailure.INFRASTRUCTURE),
         "no-metric": (core.ObservationStatus.SUCCEEDED, None),
         "workload": (core.ObservationStatus.FAILED, core.MeasurementFailure.WORKLOAD),
+        "requirement-not-met": (core.ObservationStatus.SUCCEEDED, None),
     }[how]
     finished = seen(
         request,
@@ -117,10 +126,11 @@ def died_steps(
         children_complete=True,
         observed_at=state.run.now_at,
     )
-    facts = _PASSED if how == "no-metric" else None
+    records_exist = how in ("no-metric", "requirement-not-met")
+    facts = _PASSED if records_exist else None
     records = (
         ()
-        if how != "no-metric"
+        if not records_exist
         else tuple(
             core.EvidenceRef(
                 evidence_id=core.EvidenceId(root=f"{request.request_id.root}-{stage}"),
@@ -134,7 +144,16 @@ def died_steps(
                 workload_digest=request.plan.workload_digest,
                 environment_digest=request.plan.environment_digest,
                 provenance="trusted",
-                status=status,
+                status=(
+                    core.ObservationStatus.FAILED
+                    if how == "requirement-not-met" and stage == "benchmark"
+                    else status
+                ),
+                unmet_requirement=(
+                    "prefix_cache"
+                    if how == "requirement-not-met" and stage == "benchmark"
+                    else None
+                ),
             )
             for stage, kind in (
                 ("accuracy", core.EvidenceKind.CORRECTNESS),

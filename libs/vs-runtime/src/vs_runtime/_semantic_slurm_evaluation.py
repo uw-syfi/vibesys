@@ -645,6 +645,7 @@ class SemanticSlurmEvaluationExecutor:
         summary: str | None = None
         operator_summary: str | None = None
         partial: PartialMeasurement | None = None
+        unmet: str | None = None
         # Whose fault a failure is follows from how the stage ended and what its evaluator
         # wrote (`classify`). Only a benchmark has a result record to read; every other
         # stage's exit status is its whole outcome.
@@ -662,6 +663,7 @@ class SemanticSlurmEvaluationExecutor:
                 raw.output, contract, frozenset(), exited_cleanly=passed
             )
             partial = decoded.partial
+            unmet = decoded.requirement
             # The evaluator's own stop reason leads, as on the local executor;
             # the raw output tail would end with its command line instead.
             summary = decoded.reason
@@ -731,6 +733,7 @@ class SemanticSlurmEvaluationExecutor:
                 summary=summary,
                 metrics=metrics,
                 partial=partial,
+                unmet_requirement=unmet,
             ),
         )
         return TrustedEvidence(
@@ -745,6 +748,7 @@ class SemanticSlurmEvaluationExecutor:
             metrics=metrics,
             partial_measurement=partial,
             failure_kind=None if passed else classify(signal, record),
+            unmet_requirement=None if passed else unmet,
             accepted_round=0,
         ), operator_summary
 
