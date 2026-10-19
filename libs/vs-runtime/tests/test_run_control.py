@@ -35,6 +35,10 @@ from vs_runtime.api.infrastructure import (
     RunControlTransition,
     RunControlTransitionKind,
     RunStopped,
+    SteerDelivery,
+    SteerDeliveryState,
+    SteerMode,
+    SteerTurn,
     StopRequest,
     create_run_control_channel,
 )
@@ -155,9 +159,13 @@ def test_consumed_steering_records_the_landing_invocation() -> None:
     control = create_run_control_channel(events, threads=SimThreads())
 
     control.notify_steer_consumed(
-        agent_kind="implementer",
-        round_label="round-1",
-        execution_id="execution-1",
+        SteerTurn(
+            role="implementer",
+            round_label="round-1",
+            execution_id="execution-1",
+            attempt_id="attempt-1",
+        ),
+        control_id="s1",
     )
 
     assert events.transitions == [
@@ -166,8 +174,71 @@ def test_consumed_steering_records_the_landing_invocation() -> None:
             agent_kind="implementer",
             round_label="round-1",
             execution_id="execution-1",
+            delivery=SteerDelivery(
+                state=SteerDeliveryState.REACHED,
+                control_id="s1",
+                role="implementer",
+                attempt_id="attempt-1",
+            ),
         )
     ]
+
+
+_FACTS = {
+    SteerDeliveryState.QUEUED: {"mode": SteerMode.NEXT_TURN},
+    SteerDeliveryState.WITHDRAW_QUEUED: {"withdraws": "keep"},
+    SteerDeliveryState.REACHED: {"role": "implementer"},
+    SteerDeliveryState.REACHED_MID_TURN: {"role": "implementer"},
+    SteerDeliveryState.IN_FORCE: {"role": "implementer"},
+    SteerDeliveryState.DROPPED: {"reason": "gone"},
+    SteerDeliveryState.ENDED: {"reason": "withdrawn"},
+    SteerDeliveryState.REFUSED: {"reason": "run ending"},
+}
+_EXTRA_FACT = {"mode": SteerMode.STANDING, "withdraws": "keep", "role": "judge", "reason": "why"}
+
+
+@given(state=st.sampled_from(SteerDeliveryState), fact=st.sampled_from(sorted(_EXTRA_FACT)))
+def test_a_steer_step_carries_the_facts_its_state_names_and_no_other(
+    state: SteerDeliveryState, fact: str
+) -> None:
+    facts = _FACTS[state]
+    assert SteerDelivery(state=state, **facts).state is state
+    if fact in facts:
+        with pytest.raises(ValidationError, match=f"{fact}: a {state.value} step needs {fact}"):
+            SteerDelivery(state=state, **{k: v for k, v in facts.items() if k != fact})
+    else:
+        with pytest.raises(ValidationError, match=f"{fact}: a {state.value} step has no {fact}"):
+            SteerDelivery(state=state, **{**facts, fact: _EXTRA_FACT[fact]})
+
+
+@given(kind=st.sampled_from(RunControlTransitionKind))
+def test_a_transition_carries_the_step_of_its_kind_or_none(
+    kind: RunControlTransitionKind,
+) -> None:
+    steps = {
+        RunControlTransitionKind.STEER_QUEUED: SteerDeliveryState.QUEUED,
+        RunControlTransitionKind.GUIDANCE_QUEUED: SteerDeliveryState.QUEUED,
+        RunControlTransitionKind.WITHDRAW_QUEUED: SteerDeliveryState.WITHDRAW_QUEUED,
+        RunControlTransitionKind.STEER_CONSUMED: SteerDeliveryState.REACHED,
+        RunControlTransitionKind.STEER_DELIVERED_MID_TURN: SteerDeliveryState.REACHED_MID_TURN,
+        RunControlTransitionKind.GUIDANCE_REACHED: SteerDeliveryState.IN_FORCE,
+        RunControlTransitionKind.STEER_DROPPED: SteerDeliveryState.DROPPED,
+        RunControlTransitionKind.GUIDANCE_ENDED: SteerDeliveryState.ENDED,
+        RunControlTransitionKind.CONTROL_REFUSED: SteerDeliveryState.REFUSED,
+    }
+    request = "r1" if kind is RunControlTransitionKind.REQUEST_REJECTED else None
+    for state in SteerDeliveryState:
+        step = SteerDelivery(state=state, **_FACTS[state])
+        if steps.get(kind) is state:
+            assert RunControlTransition(kind=kind, request_id=request, delivery=step).delivery
+        else:
+            with pytest.raises(ValidationError):
+                RunControlTransition(kind=kind, request_id=request, delivery=step)
+    if kind in steps and kind is not RunControlTransitionKind.CONTROL_REFUSED:
+        with pytest.raises(ValidationError):
+            RunControlTransition(kind=kind)
+    else:
+        assert RunControlTransition(kind=kind, request_id=request).delivery is None
 
 
 def test_transition_contract_rejects_unknown_fields_and_is_immutable() -> None:

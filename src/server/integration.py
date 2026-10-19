@@ -30,7 +30,13 @@ from server.events import (
 from server.read_model import RunInspector
 from server.run_attachment import AgentSelection, RunAttachment
 from server.run_lifecycle import RunTrigger
-from vibesys.api import STEER_PROPOSAL_KIND, CoreEventType, JsonResultPayload, SteerProposalReceipt
+from vibesys.api import (
+    STEER_PROPOSAL_KIND,
+    CoreEventType,
+    JsonResultPayload,
+    SteerDeliveryData,
+    SteerProposalReceipt,
+)
 from vs_sim.api import CloseOnce, ReleaseStack
 
 if TYPE_CHECKING:
@@ -105,6 +111,7 @@ _CONTROL_EVENT_TYPES = frozenset(
         CoreEventType.GUIDANCE_QUEUED,
         CoreEventType.WITHDRAW_QUEUED,
         CoreEventType.GUIDANCE_ENDED,
+        CoreEventType.GUIDANCE_REACHED,
         CoreEventType.PAUSE_REQUESTED,
         CoreEventType.RESUMED,
         CoreEventType.STOP_REQUESTED,
@@ -497,6 +504,14 @@ class RunIntegrationAdapter:
         }.get(event.type)
         if handle is not None:
             handle()
+        if isinstance(event.data, SteerDeliveryData):
+            self.journal.record(
+                EventType.STEER_DELIVERY,
+                data=event.data,
+                agent_kind=event.agent_kind,
+                round_label=event.round_label,
+                execution_id=event.execution_id,
+            )
 
     def _route_output_event(self, event: CoreEvent) -> None:
         """Publish one explicitly delivered presentation event."""

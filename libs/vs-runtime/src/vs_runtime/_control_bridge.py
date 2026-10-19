@@ -62,6 +62,9 @@ from vs_runtime._operator_control import (
     WithdrawRequest,
     action_summary,
 )
+from vs_runtime._operator_control import (
+    ControlAction as OperatorAction,
+)
 from vs_runtime._run_end import ending as run_ending
 from vs_runtime._steer_delivery import (
     SteerConsumption,
@@ -213,13 +216,7 @@ class RunControlBridge:
         turn (``_steer_delivery``), and a steer control whose input core never recorded
         gets that input too.
         """
-        self._consumption.newly_settled(
-            core,
-            self._report_consumed,
-            self._report_mid_turn,
-            self._channel.notify_steer_dropped,
-            self._channel.notify_guidance_ended,
-        )
+        self._consumption.newly_settled(core, self._channel)
         if not self._started:
             self._started = True
             self._channel.set_run_deadline(core.run.deadline_at)
@@ -389,7 +386,11 @@ class RunControlBridge:
             if isinstance(target, TargetRefusal):
                 # Its target ended between the ack and this poll.
                 name = steer.control_id or "steer"
-                self._channel.notify_steer_dropped(f"steer {name} reached no turn: {target.reason}")
+                self._channel.notify_steer_dropped(
+                    f"steer {name} reached no turn: {target.reason}",
+                    why=target.reason,
+                    control_id=steer.control_id,
+                )
                 continue
             control = self._event(
                 core,
@@ -439,7 +440,12 @@ class RunControlBridge:
         input_id = standing_input_id(withdraws)
         if not _standing_now(core, events, withdraws):
             reason = f"steer {withdraws} is not standing guidance in force"
-            self._channel.notify_steer_dropped(f"withdraw {control_id} ended nothing: {reason}")
+            self._channel.notify_steer_dropped(
+                f"withdraw {control_id} ended nothing: {reason}",
+                why=reason,
+                control_id=control_id,
+                withdraws=withdraws,
+            )
             return reason
         control = self._event(
             core, now_at, _Change("withdraw", control_id=control_id, withdraws=input_id)
@@ -535,7 +541,12 @@ class RunControlBridge:
             if name is None or name not in self._told:
                 if name is not None:
                     self._told[name] = reason
-                self._channel.notify_control_refused(f"{label}: {reason}")
+                self._channel.notify_control_refused(
+                    f"{label}: {reason}",
+                    why=reason,
+                    action=OperatorAction(change.action),
+                    control_id=change.control_id,
+                )
         else:
             # No operator to tell (a control sent without an id, or the channel's own quota
             # pause or timed resume): the run's log keeps the refusal.
@@ -590,14 +601,22 @@ class RunControlBridge:
             return
         if self._control is not None:
             self._control.end()
+        # Guidance that ended with the run, and steers the run's end dropped, are reported now:
+        # no poll follows the run's end.
+        self._consumption.newly_settled(core, self._channel)
         # Core refuses every control of an ended run, so this records nothing.
         self._record_channel(core, core.run.now_at, [])
         for steer in self._channel.take_pending_steer():
             name = steer.control_id or "steer"
-            self._channel.notify_steer_dropped(f"steer {name} reached no turn: {ending}")
+            self._channel.notify_steer_dropped(
+                f"steer {name} reached no turn: {ending}", why=ending, control_id=steer.control_id
+            )
         for withdrawal in self._channel.take_pending_withdrawals():
             self._channel.notify_steer_dropped(
-                f"withdraw {withdrawal.control_id} ended nothing: {ending}"
+                f"withdraw {withdrawal.control_id} ended nothing: {ending}",
+                why=ending,
+                control_id=withdrawal.control_id,
+                withdraws=withdrawal.withdraws,
             )
         for request in self._channel.take_pending_actions():
             change = _Change(
@@ -779,16 +798,6 @@ class RunControlBridge:
                 self._inbox.requests.settle(request_id)
         except ProjectStateError as error:
             _LOG.warning("the run's control inbox cannot be marked; its requests wait: %s", error)
-
-    def _report_consumed(self, role: str, round_label: str, execution_id: str, note: str) -> None:
-        self._channel.notify_steer_consumed(
-            agent_kind=role, round_label=round_label, execution_id=execution_id, note=note
-        )
-
-    def _report_mid_turn(self, role: str, round_label: str, execution_id: str) -> None:
-        self._channel.notify_steer_delivered_mid_turn(
-            agent_kind=role, round_label=round_label, execution_id=execution_id
-        )
 
     def _event(self, core: CoreState, now_at: float, change: _Change) -> RunControlEvent | None:
         """The event recording one control, or None when core already holds that control.

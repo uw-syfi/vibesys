@@ -53,6 +53,7 @@ from vibesys.api import (
     RunFailedData,
     RunOverview,
     SpanId,
+    SteerDeliveryData,
     SteerProposal,
     TodoItemData,
     ToolResultPayload,
@@ -104,6 +105,7 @@ class EventType(StrEnum):
     CHAT = "chat"
     CHAT_THREAD_CREATED = "chat_thread_created"
     STEER_PROPOSED = "steer_proposed"
+    STEER_DELIVERY = "steer_delivery"
     STATUS_QUERY = "status_query"
     CONTROL = "control"
     INVOCATION_STARTED = "invocation_started"
@@ -915,6 +917,7 @@ EventData = Annotated[
     | ToolCallData
     | ToolResultData
     | SteerProposedData
+    | SteerDeliveryData
     | TodoUpdateData
     | UsageUpdateData
     | RateLimitUpdateData

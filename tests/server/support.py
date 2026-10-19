@@ -24,11 +24,11 @@ from vibesys.orchestration.agent_options import (
     AgentOrchestrationOptions,
 )
 from vibesys.run.event_journal import EventJournal as CoreEventJournal
+from vibesys.run.integration import CoreRunControlEvents
 from vs_project.api import OperatorDialer, OperatorKey, OrchestrationDescriptor
 from vs_runtime.api.infrastructure import (
     ChannelRunControl,
     RunControlChannel,
-    RunControlTransition,
     create_run_control_channel,
 )
 from vs_sim.api import OsThreads, Platform
@@ -111,19 +111,6 @@ class RecordingObserver:
     def terminated(self) -> None:
         """Note ``"terminated"``."""
         self.facts.append("terminated")
-
-
-def _record_control_transition(
-    events: CoreEventJournal, transition: RunControlTransition
-) -> object:
-    """Adapt runtime transitions to the core journal in test composition."""
-    return events.emit(
-        CoreEventType(transition.kind.value),
-        transition.summary,
-        agent_kind=transition.agent_kind,
-        round_label=transition.round_label,
-        execution_id=transition.execution_id,
-    )
 
 
 def agent_descriptor(
@@ -275,9 +262,7 @@ def build_server_parts(
     chat.set_fallback_answer(RunInspector(integration).answer)
     core_events = CoreEventJournal(clock=clock, threads=OsThreads())
     core_events.subscribe(integration.project_event)
-    control = create_run_control_channel(
-        lambda transition: _record_control_transition(core_events, transition), threads=OsThreads()
-    )
+    control = create_run_control_channel(CoreRunControlEvents(core_events), threads=OsThreads())
     control_bridge = ChannelRunControl(control, threads)
     controls = RunControlSlot(condition)
     controls.install(control_bridge)

@@ -536,6 +536,11 @@ restart, the next turn may get a message the running turn already had. When the 
 the message and the run ends before any turn confirms it, the run reports the steer as one
 that may have reached the agent, not as one that reached no turn.
 
+A client that watches the run's event stream sees each step of a steer, standing guidance and
+withdrawal as a typed `steer_delivery` event that names the control id you sent it under:
+queued, reached a turn (its role and attempt), in force from its first turn (standing),
+dropped, ended, withdrawal queued, or refused, with the reason for the last three.
+
 ```bash
 vibesys control <run-id> steer "stop tuning the tile size; profile the copy first" --interrupt
 ```

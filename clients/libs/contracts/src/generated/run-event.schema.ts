@@ -792,6 +792,7 @@ const runEventSchema: Record<string, unknown> = {
         "chat",
         "chat_thread_created",
         "steer_proposed",
+        "steer_delivery",
         "status_query",
         "control",
         "invocation_started",
@@ -2926,6 +2927,147 @@ const runEventSchema: Record<string, unknown> = {
       "title": "StartupStage",
       "type": "string"
     },
+    "SteerDelivery": {
+      "additionalProperties": false,
+      "description": "One step in a steer's life: the facts a client needs to show it, by control id.\n\n``control_id`` is the id the operator sent the steer or withdrawal under, so a client\nmatches the step to its own send; None for a control sent without one. A step carries\nthe facts its state names and no other: ``mode`` when queued, ``withdraws`` for a queued\nwithdrawal, ``role`` when a turn took the steer, and ``reason`` when it ended unreached.",
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/SteerDeliveryState"
+        },
+        "control_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Control Id"
+        },
+        "action": {
+          "default": "steer",
+          "enum": [
+            "steer",
+            "withdraw"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SteerMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SteerTarget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "withdraws": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Withdraws"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        },
+        "attempt_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attempt Id"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "SteerDelivery",
+      "type": "object"
+    },
+    "SteerDeliveryData": {
+      "additionalProperties": false,
+      "description": "One step in an operator steer's life, by the control id the operator sent it under.\n\nCarried by the steer-lifecycle run-control events (queued, reached a turn, in force,\ndropped, ended, withdrawal queued, refused); ``SteerDelivery`` is its one definition.",
+      "properties": {
+        "kind": {
+          "const": "steer_delivery",
+          "default": "steer_delivery",
+          "title": "Kind",
+          "type": "string"
+        },
+        "delivery": {
+          "$ref": "#/$defs/SteerDelivery"
+        }
+      },
+      "required": [
+        "kind",
+        "delivery"
+      ],
+      "title": "SteerDeliveryData",
+      "type": "object"
+    },
+    "SteerDeliveryState": {
+      "description": "Where one operator steer or withdrawal stands, as a client shows it.",
+      "enum": [
+        "queued",
+        "withdraw_queued",
+        "reached",
+        "reached_mid_turn",
+        "in_force",
+        "dropped",
+        "ended",
+        "refused"
+      ],
+      "title": "SteerDeliveryState",
+      "type": "string"
+    },
     "SteerMode": {
       "description": "How a steer reaches the turns of its target.",
       "enum": [
@@ -3839,6 +3981,7 @@ const runEventSchema: Record<string, unknown> = {
               "span_ended": "#/$defs/SpanEndedData",
               "span_started": "#/$defs/SpanStartedData",
               "span_updated": "#/$defs/SpanUpdatedData",
+              "steer_delivery": "#/$defs/SteerDeliveryData",
               "steer_proposed": "#/$defs/SteerProposedData",
               "subprocess_output": "#/$defs/SubprocessOutputData",
               "todo_update": "#/$defs/TodoUpdateData",
@@ -3933,6 +4076,9 @@ const runEventSchema: Record<string, unknown> = {
             },
             {
               "$ref": "#/$defs/SteerProposedData"
+            },
+            {
+              "$ref": "#/$defs/SteerDeliveryData"
             },
             {
               "$ref": "#/$defs/TodoUpdateData"

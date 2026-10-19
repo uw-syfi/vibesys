@@ -47,12 +47,14 @@ from vs_runtime._operator_control import (
     SteerTargetKind,
     WithdrawRequest,
 )
+from vs_runtime._run_control import SteerTurn
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_core.api import ControlInput, InputTarget
     from vs_runtime._operator_control import ControlRequest, SteerTarget
+    from vs_runtime._run_control import RunControlChannel
 
 
 @dataclass(frozen=True)
@@ -269,38 +271,42 @@ def _sent_as(input_id: InputId) -> str:
     return control.removeprefix("op-")
 
 
+def _operator_id(input_id: InputId) -> str | None:
+    """The control id an operator sent a steer under, or None when it was sent without one."""
+    prefix = "steer-op-"
+    return input_id.root.removeprefix(prefix) if input_id.root.startswith(prefix) else None
+
+
 class SteerConsumption:
     """Reports each steer once: when a turn received it, or when it reaches no turn any more.
 
-    A next-turn steer ends when a turn receives it or core drops it. Standing guidance ends
-    when it is withdrawn, or its target or the run ends; guidance to an attempt also stops
-    reaching it when the attempt is reopened as a new generation, which core does not record
-    as an end, so that is reported here once too.
+    A next-turn steer ends when a turn receives it or core drops it. Standing guidance is
+    reported when its first turn receives it, and ends when it is withdrawn, or its target
+    or the run ends; guidance to an attempt also stops reaching it when the attempt is
+    reopened as a new generation, which core does not record as an end, so that is reported
+    here once too.
     """
 
     def __init__(self) -> None:
         """Start with nothing reported; the first poll seeds what already happened."""
         self._reported: set[InputId] | None = None
+        self._in_force: set[InputId] = set()
 
-    def newly_settled(
-        self,
-        core: CoreState,
-        delivered: Callable[[str, str, str, str], None],
-        delivered_mid_turn: Callable[[str, str, str], None],
-        dropped: Callable[[str], None],
-        ended: Callable[[str], None],
-    ) -> None:
-        """Report each steer settled since last time.
+    def newly_settled(self, core: CoreState, channel: RunControlChannel) -> None:
+        """Report to ``channel`` each steer step that happened since last time.
 
-        ``delivered(role, scope owner, invocation, note)`` for one a turn received in its
-        prompt, where ``note`` says why an interrupt-mode steer reached the next turn instead
-        of a running one (empty for any other steer),
-        ``delivered_mid_turn(role, scope owner, invocation)`` for one a turn took while it ran,
-        ``dropped(reason)`` for one core dropped because its target can no longer take input,
-        and ``ended(reason)`` for standing guidance that no longer reaches any turn.
-        Receipts recorded before the first call are not reported: a resumed run must not
+        A steer a turn received in its prompt (``notify_steer_consumed``, whose ``note`` says
+        why an interrupt-mode steer reached the next turn instead of a running one), one a
+        turn took while it ran (``notify_steer_delivered_mid_turn``), standing guidance's
+        first turn (``notify_guidance_reached``), one core dropped because its target can no
+        longer take input (``notify_steer_dropped``), and standing guidance that no longer
+        reaches any turn (``notify_guidance_ended``). Every report names the control id the
+        operator sent the steer under and, for a turn, the attempt it ran in. Receipts and
+        turns recorded before the first call are not reported: a resumed run must not
         announce again what its previous process already announced.
         """
+        first = self._reported is None
+        self._report_guidance_reached(core, channel, seed=first)
         settled = {
             row.input.input_id: row
             for row in core.sessions.inputs
@@ -310,49 +316,77 @@ class SteerConsumption:
         if self._reported is None:
             self._reported = set(settled)
             return
+        attempts = {row.attempt_id.root for row in core.attempts.attempts}
         for input_id, row in settled.items():
             if input_id in self._reported:
                 continue
             self._reported.add(input_id)
             receipt = row.receipt
+            control_id = _operator_id(input_id)
             if row.input.mode is InputMode.STANDING:
                 why = (
                     receipt.reason.value
                     if isinstance(receipt, InputDropped)
                     else "its attempt was reopened"
                 )
-                ended(f"standing guidance {_sent_as(input_id)} ended: {why}")
+                channel.notify_guidance_ended(
+                    f"standing guidance {_sent_as(input_id)} ended: {why}",
+                    why=why,
+                    control_id=control_id,
+                )
             elif isinstance(receipt, InputDropped):
-                dropped(_drop_report(_sent_as(input_id), receipt))
+                text, why = _drop_report(_sent_as(input_id), receipt)
+                channel.notify_steer_dropped(text, why=why, control_id=control_id)
             elif receipt is not None:
                 invocation = next(
                     row for row in core.sessions.invocations if row.invocation == receipt.invocation
                 )
-                where = (
-                    invocation.turn.session.role_id.root,
-                    invocation.scope.owner.root,
-                    receipt.invocation.invocation_id.root,
+                owner = invocation.scope.owner.root
+                turn = SteerTurn(
+                    role=invocation.turn.session.role_id.root,
+                    round_label=owner,
+                    execution_id=receipt.invocation.invocation_id.root,
+                    attempt_id=owner if owner in attempts else None,
                 )
                 if receipt.mid_turn:
-                    delivered_mid_turn(*where)
-                elif row.input.mode is InputMode.INTERRUPT:
-                    delivered(
-                        *where,
-                        f"interrupt steer {_sent_as(input_id)} reached the next turn: "
-                        "no running turn kept it",
-                    )
+                    channel.notify_steer_delivered_mid_turn(turn, control_id=control_id)
                 else:
-                    delivered(*where, "")
+                    note = (
+                        f"interrupt steer {_sent_as(input_id)} reached the next turn: "
+                        "no running turn kept it"
+                        if row.input.mode is InputMode.INTERRUPT
+                        else ""
+                    )
+                    channel.notify_steer_consumed(turn, control_id=control_id, note=note)
+
+    def _report_guidance_reached(
+        self, core: CoreState, channel: RunControlChannel, *, seed: bool
+    ) -> None:
+        """Report each standing steer's first turn; ``seed`` only records what already did."""
+        attempts = {row.attempt_id.root for row in core.attempts.attempts}
+        for invocation in core.sessions.invocations:
+            for input_id in invocation.guidance_ids:
+                if input_id in self._in_force or not input_id.root.startswith("steer-"):
+                    continue
+                self._in_force.add(input_id)
+                if seed:
+                    continue
+                owner = invocation.scope.owner.root
+                turn = SteerTurn(
+                    role=invocation.turn.session.role_id.root,
+                    round_label=owner,
+                    execution_id=invocation.invocation.invocation_id.root,
+                    attempt_id=owner if owner in attempts else None,
+                )
+                channel.notify_guidance_reached(turn, control_id=_operator_id(input_id))
 
 
-def _drop_report(name: str, receipt: InputDropped) -> str:
-    """What the operator reads about a steer core dropped, and why."""
+def _drop_report(name: str, receipt: InputDropped) -> tuple[str, str]:
+    """What the operator reads about a steer core dropped, and the bare reason why."""
     if receipt.reason is InputDropReason.DELIVERY_UNKNOWN:
-        return (
-            f"steer {name} may have reached the agent mid-turn: its turn's provider took it, "
-            "and no later turn can confirm it"
-        )
-    return f"steer {name} reached no turn: {receipt.reason.value}"
+        why = "its turn's provider took it, and no later turn can confirm it"
+        return f"steer {name} may have reached the agent mid-turn: {why}", why
+    return f"steer {name} reached no turn: {receipt.reason.value}", receipt.reason.value
 
 
 def _superseded(core: CoreState, item: SessionInput) -> bool:

@@ -129,6 +129,9 @@ const EVENT_DATA_HANDLERS = {
   // A steer proposal belongs to a chat thread, not the run's core state. The chat fold reads it
   // (the chat client is a later slice of #3224).
   steer_proposed: ignoredEventData,
+  // A steer's delivery steps are the chat card's, folded by the chat client (a later slice of
+  // #3224), not the run's core state.
+  steer_delivery: ignoredEventData,
   todo_update: runEventData(applyTodoData),
   usage_update: runEventData(applyUsageData),
   rate_limit_update: ignoredEventData,

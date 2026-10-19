@@ -24,6 +24,7 @@ from vibesys.events import (
     SpanEndedData,
     SpanStartedData,
     SpanUpdatedData,
+    SteerDeliveryData,
     WinnerSelectedData,
     WorkstreamFailureData,
     WorkstreamFailureKind,
@@ -112,7 +113,7 @@ class RunResources:
 
 
 @dataclass(frozen=True, slots=True)
-class _CoreRunControlEvents:
+class CoreRunControlEvents:
     """Persist runtime transitions in VibeSys's stable core-event format."""
 
     journal: EventJournal
@@ -125,6 +126,9 @@ class _CoreRunControlEvents:
             agent_kind=transition.agent_kind,
             round_label=transition.round_label,
             execution_id=transition.execution_id,
+            data=None
+            if transition.delivery is None
+            else SteerDeliveryData(delivery=transition.delivery),
         )
 
 
@@ -566,7 +570,7 @@ class LocalRunIntegration:
         self.threads = threads
         self.events = EventJournal(clock, threads)
         self.agent_events = CoreAgentEventSink(self.events.record, clock)
-        self.control = create_run_control_channel(_CoreRunControlEvents(self.events), threads)
+        self.control = create_run_control_channel(CoreRunControlEvents(self.events), threads)
         self.run_control = ChannelRunControl(self.control, threads)
         """The run's one control entry point: every ingress submits here, so ids are shared."""
         self._closed = False

@@ -16,9 +16,40 @@ from hypothesis import strategies as st
 from pydantic import TypeAdapter, ValidationError
 
 from server.events import ChatThreadId, EventData, EventType, RunEvent
-from vibesys.api import CoreEvent, CoreEventType, WireSpan
+from vibesys.api import (
+    CoreEvent,
+    CoreEventType,
+    SteerDelivery,
+    SteerDeliveryState,
+    SteerMode,
+    WireSpan,
+)
 from vibesys.events import CoreEventData, EventPayload, RunFailure, RunFailureKind
 from vs_sim.api.testing import examples
+
+
+def _deliveries() -> st.SearchStrategy[SteerDelivery]:
+    """Steer steps with exactly the facts each state names (a step with any other is invalid)."""
+    text = st.text(min_size=1, max_size=8)
+    facts: dict[SteerDeliveryState, dict[str, st.SearchStrategy[object]]] = {
+        SteerDeliveryState.QUEUED: {"mode": st.sampled_from(SteerMode)},
+        SteerDeliveryState.WITHDRAW_QUEUED: {"withdraws": text},
+        SteerDeliveryState.REACHED: {"role": text},
+        SteerDeliveryState.REACHED_MID_TURN: {"role": text},
+        SteerDeliveryState.IN_FORCE: {"role": text},
+        SteerDeliveryState.DROPPED: {"reason": text},
+        SteerDeliveryState.ENDED: {"reason": text},
+        SteerDeliveryState.REFUSED: {"reason": text},
+    }
+    return st.sampled_from(SteerDeliveryState).flatmap(
+        lambda state: st.builds(
+            SteerDelivery,
+            state=st.just(state),
+            control_id=st.none() | text,
+            **facts[state],
+        )
+    )
+
 
 _JSON_SCALARS = st.none() | st.booleans() | st.integers() | st.text(max_size=8)
 # Thread ids are drawn from the published schema of the id type itself, so they follow every
@@ -29,6 +60,7 @@ _FIELD_VALUES: dict[str, st.SearchStrategy[object]] = {
         lambda value: len(value) <= _THREAD_ID["maxLength"]
     ),
     "value": st.floats(allow_nan=False, allow_infinity=False),
+    "delivery": _deliveries(),
     # ``model_fields`` drops a field's bound, which ``st.from_type`` would need.
     "rounds_finished": st.integers(min_value=0, max_value=99),
     # A span's id has a pattern a type alias carries, which ``st.from_type`` cannot see.

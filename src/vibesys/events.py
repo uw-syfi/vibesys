@@ -31,7 +31,7 @@ from vs_agent.api import (
 )
 from vs_core.api import ComparisonVerdict, EndReason, SpanId, TaskObjective, WireSpan
 from vs_redaction.api import redact_diagnostic_text
-from vs_runtime.api.infrastructure import AgentReply, EnvironmentStartupStage
+from vs_runtime.api.infrastructure import AgentReply, EnvironmentStartupStage, SteerDelivery
 
 CommandResultPayload = _agent_api.CommandResultPayload
 JsonResultPayload = _agent_api.JsonResultPayload
@@ -97,14 +97,17 @@ class CoreEventType(StrEnum):
     # request-time events (`*_REQUESTED`, `STEER_QUEUED`, `GUIDANCE_QUEUED`, `WITHDRAW_QUEUED`,
     # `ACTION_QUEUED`, `RESUMED`) come from
     # `RunControl` callers; boundary-consume-time events (`PAUSED`, `STOPPED`,
-    # `STEER_CONSUMED`, `STEER_DELIVERED_MID_TURN`, `STEER_DROPPED`, `GUIDANCE_ENDED`, `CONTROL_REFUSED`,
-    # `REQUEST_REJECTED`, `ACTION_APPLIED`) come from the run boundary or an agent turn. A server
+    # `STEER_CONSUMED`, `STEER_DELIVERED_MID_TURN`, `GUIDANCE_REACHED`, `STEER_DROPPED`,
+    # `GUIDANCE_ENDED`, `CONTROL_REFUSED`, `REQUEST_REJECTED`, `ACTION_APPLIED`) come from the
+    # run boundary or an agent turn. A server
     # projects both onto its own status machine
-    # and CONTROL journal; there is no frontend-visible wire event for them.
+    # and CONTROL journal. Each steer-lifecycle one also carries a `SteerDeliveryData`, which the
+    # server publishes as the typed `steer_delivery` wire event.
     STEER_QUEUED = "steer_queued"
     GUIDANCE_QUEUED = "guidance_queued"
     WITHDRAW_QUEUED = "withdraw_queued"
     GUIDANCE_ENDED = "guidance_ended"
+    GUIDANCE_REACHED = "guidance_reached"
     PAUSE_REQUESTED = "pause_requested"
     RESUMED = "resumed"
     STOP_REQUESTED = "stop_requested"
@@ -174,6 +177,17 @@ class EventPayload(BaseModel):
         if cls.retired_keys and isinstance(data, dict):
             return {key: value for key, value in data.items() if key not in cls.retired_keys}
         return data
+
+
+class SteerDeliveryData(EventPayload):
+    """One step in an operator steer's life, by the control id the operator sent it under.
+
+    Carried by the steer-lifecycle run-control events (queued, reached a turn, in force,
+    dropped, ended, withdrawal queued, refused); ``SteerDelivery`` is its one definition.
+    """
+
+    kind: Literal["steer_delivery"] = "steer_delivery"
+    delivery: SteerDelivery
 
 
 class InvocationStartedData(EventPayload):
@@ -921,7 +935,8 @@ class SpanEndedData(_SpanData):
 
 
 CoreEventData = Annotated[
-    InvocationStartedData
+    SteerDeliveryData
+    | InvocationStartedData
     | InvocationFinishedData
     | AgentExecutionStartedData
     | AgentExecutionActivityData

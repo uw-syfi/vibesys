@@ -11,7 +11,11 @@ from tests.support.real_git import NO_GITHUB, REAL_GIT
 from vibesys.api import CoreEventType, RunStopped
 from vibesys.run.integration import LocalRunIntegration
 from vs_core.api import StopMode
-from vs_runtime.api.infrastructure import RunControlTransition, RunControlTransitionKind
+from vs_runtime.api.infrastructure import (
+    RunControlTransition,
+    RunControlTransitionKind,
+    SteerTurn,
+)
 from vs_runtime.api.testing import idle_environment_system
 from vs_sim.api.testing import ManualClock, SimThreads
 
@@ -44,11 +48,17 @@ def test_control_transitions_keep_the_existing_persisted_event_format(
             "focus on latency"
         ]
         integration.control.notify_steer_consumed(
-            agent_kind="implementer",
-            round_label="round-1",
-            execution_id="execution-1",
+            SteerTurn(
+                role="implementer",
+                round_label="round-1",
+                execution_id="execution-1",
+                attempt_id=None,
+            ),
+            control_id=None,
         )
-        integration.control.notify_steer_dropped("role 'judge' is not declared")
+        integration.control.notify_steer_dropped(
+            "role 'judge' is not declared", why="role 'judge' is not declared", control_id=None
+        )
         integration.control.request_pause()
         integration.control.wait_while_paused()
         integration.control.request_stop(StopMode.DRAIN)

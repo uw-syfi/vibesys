@@ -43,16 +43,20 @@ from vibesys.api import (
     CancelAttemptRequest,
     CancelItemRequest,
     ControlAck,
+    ControlAction,
     ControlRequest,
     ControlStatus,
     PauseRequest,
     RefusalReason,
     RunStopped,
     SetMaxParallelRequest,
+    SteerDeliveryData,
+    SteerDeliveryState,
     SteerMode,
     SteerRequest,
     SteerTarget,
     SteerTargetKind,
+    SteerTurn,
     StopRequest,
     WithdrawRequest,
 )
@@ -661,7 +665,9 @@ def test_every_refusal_reason_answers_with_a_protocol_error(reason: RefusalReaso
 def test_a_refused_steer_is_journaled_as_a_failed_control(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
 
-    parts.control.notify_steer_dropped("role 'judge' is not declared")
+    parts.control.notify_steer_dropped(
+        "role 'judge' is not declared", why="role 'judge' is not declared", control_id=None
+    )
 
     (refused,) = [
         event
@@ -674,7 +680,12 @@ def test_a_refused_steer_is_journaled_as_a_failed_control(tmp_path: Path) -> Non
 def test_a_control_the_run_refuses_is_journaled_as_a_failed_control(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
 
-    parts.control.notify_control_refused("pause p1: cleanup must finish before pause or resume")
+    parts.control.notify_control_refused(
+        "pause p1: cleanup must finish before pause or resume",
+        why="cleanup must finish before pause or resume",
+        action=ControlAction.PAUSE,
+        control_id="p1",
+    )
 
     (refused,) = [
         event
@@ -802,7 +813,9 @@ def test_standing_guidance_is_journaled_in_force_then_ended(tmp_path: Path) -> N
     parts.api.execute(ControlCommand(timestamp=REQUEST_TIME, control=steer))
     withdraw = WithdrawRequest(control_id="w1", withdraws="keep")
     parts.api.execute(ControlCommand(timestamp=REQUEST_TIME, control=withdraw))
-    parts.control.notify_guidance_ended("standing guidance keep ended: withdrawn")
+    parts.control.notify_guidance_ended(
+        "standing guidance keep ended: withdrawn", why="withdrawn", control_id="keep"
+    )
 
     controls = [
         (event.text, event.status)
@@ -832,3 +845,59 @@ def test_an_inbox_request_the_run_set_aside_is_journaled_as_failed(tmp_path: Pat
             EventStatus.FAILED,
         )
     ]
+
+
+def test_each_steer_step_reaches_the_wire_as_a_typed_event_with_the_control_id(
+    tmp_path: Path,
+) -> None:
+    parts = build_server_parts(tmp_path)
+    steer = SteerRequest(control_id="keep", text="keep bf16", mode=SteerMode.STANDING)
+    parts.api.execute(ControlCommand(timestamp=REQUEST_TIME, control=steer))
+    withdraw = WithdrawRequest(control_id="w1", withdraws="keep")
+    parts.api.execute(ControlCommand(timestamp=REQUEST_TIME, control=withdraw))
+    parts.control.notify_steer_consumed(
+        SteerTurn(
+            role="implementer",
+            round_label="attempt-3",
+            execution_id="exec-1",
+            attempt_id="attempt-3",
+        ),
+        control_id="s2",
+    )
+    parts.control.notify_guidance_ended(
+        "standing guidance keep ended: withdrawn", why="withdrawn", control_id="keep"
+    )
+    parts.control.notify_control_refused(
+        "steer s9: the run is ending",
+        why="the run is ending",
+        action=ControlAction.STEER,
+        control_id="s9",
+    )
+    parts.control.notify_control_refused(
+        "pause p1: cleanup must finish",
+        why="cleanup must finish",
+        action=ControlAction.PAUSE,
+        control_id="p1",
+    )
+
+    steps = [
+        (event.data.delivery.state, event.data.delivery.control_id)
+        for event in parts.journal.read()
+        if event.type is EventType.STEER_DELIVERY and isinstance(event.data, SteerDeliveryData)
+    ]
+    # The refused pause is no steer step; every other transition is one, in order.
+    assert steps == [
+        (SteerDeliveryState.QUEUED, "keep"),
+        (SteerDeliveryState.WITHDRAW_QUEUED, "w1"),
+        (SteerDeliveryState.REACHED, "s2"),
+        (SteerDeliveryState.ENDED, "keep"),
+        (SteerDeliveryState.REFUSED, "s9"),
+    ]
+    (reached,) = [
+        event
+        for event in parts.journal.read()
+        if isinstance(event.data, SteerDeliveryData)
+        and event.data.delivery.state is SteerDeliveryState.REACHED
+    ]
+    assert (reached.agent_kind, reached.execution_id) == ("implementer", "exec-1")
+    assert reached.data.delivery.attempt_id == "attempt-3"

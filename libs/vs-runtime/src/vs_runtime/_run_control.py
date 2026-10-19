@@ -9,13 +9,13 @@ from typing import TYPE_CHECKING, Literal, Protocol
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from vs_core.api import PauseOwner, RunPause, escalate_stop
-from vs_runtime._operator_control import SteerMode, action_summary
+from vs_runtime._operator_control import ControlAction, SteerMode, SteerTarget, action_summary
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_core.api import StopMode
-    from vs_runtime._operator_control import ActionRequest, SteerTarget
+    from vs_runtime._operator_control import ActionRequest
     from vs_sim.api import Threads
 
 
@@ -35,6 +35,8 @@ class RunControlTransitionKind(StrEnum):
     WITHDRAW_QUEUED = "withdraw_queued"
     GUIDANCE_ENDED = "guidance_ended"
     """Standing guidance reaches no turn any more: withdrawn, or its target or the run ended."""
+    GUIDANCE_REACHED = "guidance_reached"
+    """Standing guidance reached its first turn: it is in force from that turn on."""
     CONTROL_REFUSED = "control_refused"
     """The run refused an operator control it had acknowledged; ``text`` names it and why."""
     REQUEST_REJECTED = "request_rejected"
@@ -45,6 +47,91 @@ class RunControlTransitionKind(StrEnum):
     """An operator action (a cancel, a new parallel limit) was queued for the run to take."""
     ACTION_APPLIED = "action_applied"
     """Core recorded an operator action, so it applied; ``text`` names it."""
+
+
+class SteerDeliveryState(StrEnum):
+    """Where one operator steer or withdrawal stands, as a client shows it."""
+
+    QUEUED = "queued"
+    """The run acknowledged the steer; it waits for the run to take it, then for a turn of its
+    target (``mode`` says which turns)."""
+    WITHDRAW_QUEUED = "withdraw_queued"
+    """The run acknowledged a withdrawal of standing guidance (``withdraws`` names the steer)."""
+    REACHED = "reached"
+    """A turn received the steer in its prompt (``role``, ``attempt_id``)."""
+    REACHED_MID_TURN = "reached_mid_turn"
+    """An interrupt-mode steer joined a turn while it ran (``role``, ``attempt_id``)."""
+    IN_FORCE = "in_force"
+    """Standing guidance reached its first turn; it stays in force until it ends."""
+    DROPPED = "dropped"
+    """The steer, or the withdrawal, reached no one (``reason``)."""
+    ENDED = "ended"
+    """Standing guidance reaches no turn any more: withdrawn, or its target or the run ended
+    (``reason``)."""
+    REFUSED = "refused"
+    """The run refused a steer or withdrawal it had acknowledged (``reason``)."""
+
+
+_STATE_OF_KIND: dict[RunControlTransitionKind, SteerDeliveryState] = {
+    RunControlTransitionKind.STEER_QUEUED: SteerDeliveryState.QUEUED,
+    RunControlTransitionKind.GUIDANCE_QUEUED: SteerDeliveryState.QUEUED,
+    RunControlTransitionKind.WITHDRAW_QUEUED: SteerDeliveryState.WITHDRAW_QUEUED,
+    RunControlTransitionKind.STEER_CONSUMED: SteerDeliveryState.REACHED,
+    RunControlTransitionKind.STEER_DELIVERED_MID_TURN: SteerDeliveryState.REACHED_MID_TURN,
+    RunControlTransitionKind.GUIDANCE_REACHED: SteerDeliveryState.IN_FORCE,
+    RunControlTransitionKind.STEER_DROPPED: SteerDeliveryState.DROPPED,
+    RunControlTransitionKind.GUIDANCE_ENDED: SteerDeliveryState.ENDED,
+    RunControlTransitionKind.CONTROL_REFUSED: SteerDeliveryState.REFUSED,
+}
+"""The one table from a transition kind to the steer step it is; kinds not in it are no step."""
+
+_FACTS_OF_STATE: dict[SteerDeliveryState, tuple[str, ...]] = {
+    SteerDeliveryState.QUEUED: ("mode",),
+    SteerDeliveryState.WITHDRAW_QUEUED: ("withdraws",),
+    SteerDeliveryState.REACHED: ("role",),
+    SteerDeliveryState.REACHED_MID_TURN: ("role",),
+    SteerDeliveryState.IN_FORCE: ("role",),
+    SteerDeliveryState.DROPPED: ("reason",),
+    SteerDeliveryState.ENDED: ("reason",),
+    SteerDeliveryState.REFUSED: ("reason",),
+}
+
+
+class SteerDelivery(BaseModel):
+    """One step in a steer's life: the facts a client needs to show it, by control id.
+
+    ``control_id`` is the id the operator sent the steer or withdrawal under, so a client
+    matches the step to its own send; None for a control sent without one. A step carries
+    the facts its state names and no other: ``mode`` when queued, ``withdraws`` for a queued
+    withdrawal, ``role`` when a turn took the steer, and ``reason`` when it ended unreached.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    state: SteerDeliveryState
+    control_id: str | None = None
+    action: Literal[ControlAction.STEER, ControlAction.WITHDRAW] = ControlAction.STEER
+    """Whether the control is a steer or a withdrawal (either can be dropped or refused)."""
+    mode: SteerMode | None = None
+    target: SteerTarget | None = None
+    """Whom the steer is for, set with ``mode``; None is the whole run."""
+    withdraws: str | None = None
+    """The control id of the standing steer a withdrawal ends."""
+    role: str | None = None
+    """The session role of the turn the steer reached."""
+    attempt_id: str | None = None
+    """The attempt the reaching turn ran in; None for a turn of the run itself."""
+    reason: str | None = None
+
+    @model_validator(mode="after")
+    def _facts_match_state(self) -> SteerDelivery:
+        needed = _FACTS_OF_STATE[self.state]
+        for name in ("mode", "withdraws", "role", "reason"):
+            if (getattr(self, name) is not None) != (name in needed):
+                verb = "needs" if name in needed else "has no"
+                message = f"{name}: a {self.state.value} step {verb} {name}"
+                raise ValueError(message)
+        return self
 
 
 class RunControlTransition(BaseModel):
@@ -59,12 +146,28 @@ class RunControlTransition(BaseModel):
     execution_id: str | None = None
     request_id: str | None = None
     """The inbox request a ``REQUEST_REJECTED`` transition names; None for every other kind."""
+    delivery: SteerDelivery | None = None
+    """The steer step this transition is: set for every steer-lifecycle kind, and for a
+    ``CONTROL_REFUSED`` only when the refused control was a steer or withdrawal."""
 
     @model_validator(mode="after")
     def _request_named_only_when_rejected(self) -> RunControlTransition:
         rejected = self.kind is RunControlTransitionKind.REQUEST_REJECTED
         if rejected != (self.request_id is not None):
             message = "request_id: a request_rejected transition names its request; no other does"
+            raise ValueError(message)
+        return self
+
+    @model_validator(mode="after")
+    def _delivery_is_the_kind_step(self) -> RunControlTransition:
+        state = _STATE_OF_KIND.get(self.kind)
+        refused = self.kind is RunControlTransitionKind.CONTROL_REFUSED
+        if self.delivery is None:
+            if state is not None and not refused:
+                message = f"delivery: a {self.kind.value} transition is a steer step"
+                raise ValueError(message)
+        elif self.delivery.state is not state:
+            message = f"delivery: a {self.kind.value} transition carries no {self.delivery.state.value} step"
             raise ValueError(message)
         return self
 
@@ -132,6 +235,18 @@ class RunControlEventSink(Protocol):
     def __call__(self, transition: RunControlTransition) -> object:
         """Record or project one semantic transition."""
         ...
+
+
+@dataclass(frozen=True)
+class SteerTurn:
+    """The turn a steer reached: its session role, its scope's owner and the attempt it ran in."""
+
+    role: str
+    round_label: str
+    """The owner of the turn's scope: its attempt, or the run for a turn of the run itself."""
+    execution_id: str | None
+    attempt_id: str | None
+    """The attempt the turn ran in; None for a turn of the run itself."""
 
 
 @dataclass(frozen=True)
@@ -311,36 +426,39 @@ class RunControlChannel(Protocol):
         ...
 
     def notify_steer_consumed(
-        self,
-        *,
-        agent_kind: str,
-        round_label: str,
-        execution_id: str | None,
-        note: str = "",
+        self, turn: SteerTurn, *, control_id: str | None, note: str = ""
     ) -> None:
         """Record which invocation consumed queued steering.
 
-        ``note`` says why an interrupt-mode steer reached this next turn, not a running one.
+        ``control_id`` is the id the steer was sent under. ``note`` says why an interrupt-mode
+        steer reached this next turn, not a running one.
         """
         ...
 
-    def notify_steer_delivered_mid_turn(
-        self, *, agent_kind: str, round_label: str, execution_id: str
-    ) -> None:
+    def notify_steer_delivered_mid_turn(self, turn: SteerTurn, *, control_id: str | None) -> None:
         """Record the running invocation an interrupt-mode steer reached, which accepted it."""
         ...
 
-    def notify_steer_dropped(self, reason: str) -> None:
-        """Record that an accepted steer reached no turn; ``reason`` names the steer and why.
+    def notify_guidance_reached(self, turn: SteerTurn, *, control_id: str | None) -> None:
+        """Record the first turn standing guidance reached: it is in force from that turn."""
+        ...
 
-        Its target ended or became unknown before the run took it, or before a turn of it ran.
+    def notify_steer_dropped(
+        self, text: str, *, why: str, control_id: str | None, withdraws: str | None = None
+    ) -> None:
+        """Record that an accepted steer, or a withdrawal (``withdraws``), reached no one.
+
+        ``text`` names the control and ``why`` is the bare reason. A steer's target ended or
+        became unknown before the run took it, or before a turn of it ran; a withdrawal
+        found no standing guidance in force.
         """
         ...
 
-    def notify_guidance_ended(self, reason: str) -> None:
-        """Record that standing guidance reaches no turn any more; ``reason`` names it and why.
+    def notify_guidance_ended(self, text: str, *, why: str, control_id: str | None) -> None:
+        """Record that the standing steer ``control_id`` reaches no turn any more.
 
-        It was withdrawn, its target or the run ended, or its attempt was reopened.
+        ``text`` names it and ``why`` is the bare reason: it was withdrawn, its target or the
+        run ended, or its attempt was reopened.
         """
         ...
 
@@ -348,8 +466,14 @@ class RunControlChannel(Protocol):
         """Record that the run set aside the inbox request ``request_id``, and why."""
         ...
 
-    def notify_control_refused(self, reason: str) -> None:
-        """Record that the run refused an operator control; ``reason`` names it and core's reason."""
+    def notify_control_refused(
+        self, text: str, *, why: str, action: ControlAction, control_id: str | None
+    ) -> None:
+        """Record that the run refused an operator control of ``action``, and why.
+
+        ``text`` names the control and ``why`` is core's reason. A refused steer or withdrawal
+        also reports the step (``SteerDelivery``) with the control id.
+        """
         ...
 
     def undo_refused(self, part: RefusedPart, control_id: str | None) -> None:
@@ -550,18 +674,37 @@ class RuntimeRunControlChannel:
         """Queue free-text steering for the run loop to take at its next control poll."""
         with self._lock:
             self._pending_steer.append(QueuedSteer(text, control_id, target, mode))
-            self._emit(
-                RunControlTransitionKind.GUIDANCE_QUEUED
-                if mode is SteerMode.STANDING
-                else RunControlTransitionKind.STEER_QUEUED,
-                text=text,
+            self._events(
+                RunControlTransition(
+                    kind=RunControlTransitionKind.GUIDANCE_QUEUED
+                    if mode is SteerMode.STANDING
+                    else RunControlTransitionKind.STEER_QUEUED,
+                    text=text,
+                    delivery=SteerDelivery(
+                        state=SteerDeliveryState.QUEUED,
+                        control_id=control_id,
+                        mode=mode,
+                        target=target or SteerTarget(),
+                    ),
+                )
             )
 
     def queue_withdraw(self, withdraws: str, control_id: str) -> None:
         """Queue a withdrawal for the run loop to take at its next control poll."""
         with self._lock:
             self._pending_withdrawals.append(QueuedWithdraw(withdraws, control_id))
-            self._emit(RunControlTransitionKind.WITHDRAW_QUEUED, text=withdraws)
+            self._events(
+                RunControlTransition(
+                    kind=RunControlTransitionKind.WITHDRAW_QUEUED,
+                    text=withdraws,
+                    delivery=SteerDelivery(
+                        state=SteerDeliveryState.WITHDRAW_QUEUED,
+                        control_id=control_id,
+                        action=ControlAction.WITHDRAW,
+                        withdraws=withdraws,
+                    ),
+                )
+            )
 
     def request_pause(self, control_id: str | None = None) -> None:
         """Hold the run for the operator; only an operator resume lifts the hold.
@@ -794,57 +937,113 @@ class RuntimeRunControlChannel:
             self._emit(RunControlTransitionKind.ACTION_APPLIED, text=summary)
 
     def notify_steer_consumed(
-        self,
-        *,
-        agent_kind: str,
-        round_label: str,
-        execution_id: str | None,
-        note: str = "",
+        self, turn: SteerTurn, *, control_id: str | None, note: str = ""
     ) -> None:
         """Record the invocation identity that consumed queued steering, and any note."""
-        with self._lock:
-            self._events(
-                RunControlTransition(
-                    kind=RunControlTransitionKind.STEER_CONSUMED,
-                    text=note,
-                    agent_kind=agent_kind,
-                    round_label=round_label,
-                    execution_id=execution_id,
-                )
-            )
+        self._reached(
+            RunControlTransitionKind.STEER_CONSUMED,
+            SteerDeliveryState.REACHED,
+            turn,
+            control_id,
+            text=note,
+        )
 
-    def notify_steer_delivered_mid_turn(
-        self, *, agent_kind: str, round_label: str, execution_id: str
-    ) -> None:
+    def notify_steer_delivered_mid_turn(self, turn: SteerTurn, *, control_id: str | None) -> None:
         """Record the running invocation an interrupt-mode steer reached."""
+        self._reached(
+            RunControlTransitionKind.STEER_DELIVERED_MID_TURN,
+            SteerDeliveryState.REACHED_MID_TURN,
+            turn,
+            control_id,
+        )
+
+    def notify_guidance_reached(self, turn: SteerTurn, *, control_id: str | None) -> None:
+        """Record the first turn standing guidance reached."""
+        self._reached(
+            RunControlTransitionKind.GUIDANCE_REACHED,
+            SteerDeliveryState.IN_FORCE,
+            turn,
+            control_id,
+        )
+
+    def _reached(
+        self,
+        kind: RunControlTransitionKind,
+        state: SteerDeliveryState,
+        turn: SteerTurn,
+        control_id: str | None,
+        *,
+        text: str = "",
+    ) -> None:
+        """Publish a step that names the turn a steer reached."""
         with self._lock:
             self._events(
                 RunControlTransition(
-                    kind=RunControlTransitionKind.STEER_DELIVERED_MID_TURN,
-                    agent_kind=agent_kind,
-                    round_label=round_label,
-                    execution_id=execution_id,
+                    kind=kind,
+                    text=text,
+                    agent_kind=turn.role,
+                    round_label=turn.round_label,
+                    execution_id=turn.execution_id,
+                    delivery=SteerDelivery(
+                        state=state,
+                        control_id=control_id,
+                        role=turn.role,
+                        attempt_id=turn.attempt_id,
+                    ),
                 )
             )
 
-    def notify_steer_dropped(self, reason: str) -> None:
-        """Record why a queued steer reached no one."""
+    def notify_steer_dropped(
+        self, text: str, *, why: str, control_id: str | None, withdraws: str | None = None
+    ) -> None:
+        """Record why a queued steer, or a withdrawal, reached no one."""
         with self._lock:
             self._events(
-                RunControlTransition(kind=RunControlTransitionKind.STEER_DROPPED, text=reason)
+                RunControlTransition(
+                    kind=RunControlTransitionKind.STEER_DROPPED,
+                    text=text,
+                    delivery=SteerDelivery(
+                        state=SteerDeliveryState.DROPPED,
+                        control_id=control_id,
+                        action=ControlAction.STEER if withdraws is None else ControlAction.WITHDRAW,
+                        reason=why,
+                    ),
+                )
             )
 
-    def notify_guidance_ended(self, reason: str) -> None:
+    def notify_guidance_ended(self, text: str, *, why: str, control_id: str | None) -> None:
         """Record that standing guidance reaches no turn any more, and why."""
         with self._lock:
             self._events(
-                RunControlTransition(kind=RunControlTransitionKind.GUIDANCE_ENDED, text=reason)
+                RunControlTransition(
+                    kind=RunControlTransitionKind.GUIDANCE_ENDED,
+                    text=text,
+                    delivery=SteerDelivery(
+                        state=SteerDeliveryState.ENDED, control_id=control_id, reason=why
+                    ),
+                )
             )
 
-    def notify_control_refused(self, reason: str) -> None:
+    def notify_control_refused(
+        self, text: str, *, why: str, action: ControlAction, control_id: str | None
+    ) -> None:
         """Record that the run refused an operator control, and why."""
+        steer_step = action in (ControlAction.STEER, ControlAction.WITHDRAW)
         with self._lock:
-            self._emit(RunControlTransitionKind.CONTROL_REFUSED, text=reason)
+            self._events(
+                RunControlTransition(
+                    kind=RunControlTransitionKind.CONTROL_REFUSED,
+                    text=text,
+                    delivery=SteerDelivery(
+                        state=SteerDeliveryState.REFUSED,
+                        control_id=control_id,
+                        action=action,
+                        reason=why,
+                    )
+                    if steer_step
+                    else None,
+                )
+            )
 
     def undo_refused(self, part: RefusedPart, control_id: str | None) -> None:
         """Undo what the refused control asked of the channel; see the protocol."""
@@ -1053,4 +1252,7 @@ __all__ = [
     "RunControlTransitionKind",
     "RunStopped",
     "RuntimeRunControlChannel",
+    "SteerDelivery",
+    "SteerDeliveryState",
+    "SteerTurn",
 ]

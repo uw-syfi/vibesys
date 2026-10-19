@@ -213,6 +213,9 @@ from vs_runtime._run_control import (
     RunControlTransitionKind,
     RunStopped,
     RuntimeRunControlChannel,
+    SteerDelivery,
+    SteerDeliveryState,
+    SteerTurn,
 )
 from vs_runtime._run_end import recorded_ending
 from vs_runtime._run_environment import (
@@ -673,10 +676,13 @@ __all__ = [
     "StartupOutputOpener",
     "StateBuildStore",
     "StateValidationPasses",
+    "SteerDelivery",
+    "SteerDeliveryState",
     "SteerMode",
     "SteerRequest",
     "SteerTarget",
     "SteerTargetKind",
+    "SteerTurn",
     "StopGraceError",
     "StopMode",
     "StopRequest",
