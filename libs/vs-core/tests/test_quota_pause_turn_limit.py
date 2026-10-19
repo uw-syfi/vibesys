@@ -111,3 +111,37 @@ def test_a_quota_pause_does_not_carry_a_limit_past_the_run_deadline(limit: float
 
     state = _ticked(state, [_RUN_DEADLINE - 1.0])
     assert _record(state, request_id).until.at <= _RUN_DEADLINE
+
+
+@given(
+    limit=_LIMIT,
+    paused_at=st.integers(min_value=1, max_value=9).map(float),
+    wait=st.integers(min_value=1, max_value=5000).map(float),
+)
+def test_a_quota_wait_the_gate_reports_is_credited_once(
+    limit: float, paused_at: float, wait: float
+) -> None:
+    """A turn the capacity gate parks for the pause gets the pause once, not twice.
+
+    The gate reports the parked wait (``TurnHeld``) and credits it whole once the run resumes
+    (``_turn_holds``), so the run's quota pause must not move that turn's limit as well.
+    """
+    state, request_id = _dispatched(limit)
+    request = _record(state, request_id).request
+    assert isinstance(request, core.DispatchTurn)
+    invocation = request.turn.invocation_id
+
+    def held(hold: core.CapacityHold) -> core.CoreState:
+        return core.step(state, core.TurnHeld(invocation_id=invocation, hold=hold)).state
+
+    state = _ticked(state, [paused_at / 2])
+    state = held(core.CapacityHold(since=paused_at, parked=True, budget=wait))
+    state = _control(state, "quota", "pause", paused_at, core.PauseOwner.QUOTA)
+    resumed = paused_at + wait
+    state = _ticked(state, [resumed])
+    assert not _blocked(state, request_id), "the turn ended inside the quota wait"
+
+    state = held(core.CapacityHold(credit=wait, budget=wait))
+    state = _control(state, "capacity", "resume", resumed)
+    assert not _blocked(_ticked(state, [limit + wait - 1.0]), request_id)
+    assert _blocked(_ticked(state, [limit + wait]), request_id)

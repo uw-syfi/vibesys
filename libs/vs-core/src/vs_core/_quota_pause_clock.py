@@ -12,6 +12,10 @@ host downtime moves an open record's limit (``_request_recovery.open_host_epoch`
 limit moves only for a turn already dispatched, and only as far as the run deadline, which
 still ends a wait that never resumes. A turn running beside the one that waited gets the same
 extra time, which is bounded by the pause.
+
+A turn the run's capacity gate reports it holds (``capacity_hold``) is skipped: the gate parks
+it for the pause and ``_turn_holds`` credits that wait from the report, so moving its limit here
+as well would credit the pause twice.
 """
 
 from __future__ import annotations
@@ -49,6 +53,7 @@ def credit_quota_pause(state: CoreState, now_at: float) -> CoreState:
             is_open(record)
             and record.phase == RequestPhase.DISPATCHED
             and isinstance(record.request, DispatchTurn | ResumeSessionTurn)
+            and not (record.capacity_hold is not None and record.capacity_hold.holding)
         ):
             return record
         at = record.until.at + gap
