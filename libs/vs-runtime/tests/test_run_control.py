@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import pytest
 from hypothesis import example, given
@@ -40,6 +40,10 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.testing import FakeRunControlEventSink
 from vs_sim.api.testing import HANG_GUARD_S, SimThreads, wait_or_fail
+
+if TYPE_CHECKING:
+    from vs_core.api import CoreEvent
+    from vs_runtime.api.infrastructure import RunControlChannel
 
 
 def test_steering_is_ordered_and_drained_exactly_once() -> None:
@@ -722,3 +726,72 @@ def test_a_stop_request_is_announced_only_when_it_changes_the_stop(modes: list[S
     kinds = [transition.kind for transition in events.transitions]
     assert kinds == [RunControlTransitionKind.STOP_REQUESTED] * len(in_force)
     assert heard == in_force
+
+
+@dataclass
+class _Process:
+    """One process of a run: its channel, operators' controls, bridge, and queued events."""
+
+    channel: RunControlChannel
+    control: ChannelRunControl
+    bridge: RunControlBridge
+    queued: list[CoreEvent]
+
+
+def _process() -> _Process:
+    threads = SimThreads()
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=threads)
+    control = ChannelRunControl(channel, threads)
+    bridge = RunControlBridge(channel, _DiscardingSteerArtifacts(), control=control)
+    return _Process(channel, control, bridge, [])
+
+
+_RESTART_OPS = st.lists(
+    st.one_of(
+        st.sampled_from(StopMode).map(lambda mode: ("stop", mode)),
+        st.sampled_from([("poll",), ("poll-queued",), ("commit",), ("restart",), ("resume",)]),
+    ),
+    max_size=12,
+)
+
+
+@pytest.mark.regression
+@pytest.mark.xfail(strict=True, reason="#3209 follow-up: a restarted channel forgets core's stop")
+@example(ops=[("stop", StopMode.CANCEL), ("poll",), ("restart",), ("stop", StopMode.DRAIN)])
+@example(ops=[("stop", StopMode.DRAIN), ("poll",), ("restart",), ("stop", StopMode.CANCEL)])
+@given(ops=_RESTART_OPS)
+def test_a_stop_core_recorded_stays_in_force_across_a_runtime_restart(
+    ops: list[tuple[str, StopMode] | tuple[str]],
+) -> None:
+    """A restarted process holds the stop core recorded, and only escalates it.
+
+    ``restart`` starts a new process over core's committed state: what the old one had
+    not committed is lost with it. From the new process's first poll on, its channel
+    holds at least the stop core records, so a later drain never weakens a recorded
+    cancel, a resume is refused as ``STOPPING``, and a later cancel still reaches core.
+    """
+    process, core = _process(), initial_state()
+    polled = False
+    for number, op in enumerate([*ops, ("poll",)]):
+        match op:
+            case ("stop", StopMode() as mode):
+                process.control.submit(StopRequest(control_id=f"op-{number}", mode=mode))
+            case ("resume",):
+                ack = process.control.submit(ResumeRequest(control_id=f"op-{number}"))
+                if polled and stop_mode(core.run) is not None:
+                    assert ack.reason is RefusalReason.STOPPING
+            case ("restart",):
+                process, polled = _process(), False
+            case ("poll-queued",):
+                process.queued += process.bridge.poll(core, core.run.now_at)
+                polled = True
+            case _:
+                if op == ("poll",):
+                    process.queued += process.bridge.poll(core, core.run.now_at)
+                    polled = True
+                for event in process.queued:
+                    core = step(core, event).state
+                process.queued = []
+        if polled:
+            assert _never_weaker(stop_mode(core.run), process.channel.stop_mode())
+    assert stop_mode(core.run) == process.channel.stop_mode()
