@@ -171,8 +171,9 @@ def test_a_failed_accuracy_check_checkpointed_before_s173_loads_as_the_failure_i
 @settings(max_examples=examples(pr=8, nightly=100))
 @given(accuracy_passed=st.none() | st.booleans(), benchmark_passed=st.none() | st.booleans())
 def test_every_measured_record_an_earlier_version_wrote_reads_as_one_shape(
-    accuracy_passed: bool | None,  # noqa: FBT001
-    benchmark_passed: bool | None,  # noqa: FBT001
+    *,
+    accuracy_passed: bool | None,
+    benchmark_passed: bool | None,
 ) -> None:
     """Whatever a ``measured`` record said, the loaded input is measured only if it passed."""
     seen = {"accuracy_passed": accuracy_passed, "benchmark_passed": benchmark_passed}
@@ -202,8 +203,8 @@ _ROWS = (MetricRow(name="throughput", value=100.0, unit="tok/s", direction="max"
 )
 def test_a_failed_input_keeps_a_bar_only_when_just_its_accuracy_check_failed(
     kind: InputFailureKind,
-    benchmark_passed: bool | None,  # noqa: FBT001
     *,
+    benchmark_passed: bool | None,
     has_metrics: bool,
 ) -> None:
     """F3(b): candidates must still beat a benchmark the input passed; otherwise nothing."""
