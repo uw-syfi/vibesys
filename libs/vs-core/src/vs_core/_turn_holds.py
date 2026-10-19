@@ -32,18 +32,20 @@ from typing import TYPE_CHECKING
 
 from ._registry import ContractError
 from ._request_forward import turn_of
-from .types.common import ExecuteRegisteredOperation
+from .types.common import ExecuteRegisteredOperation, ObservationStatus
 from .types.kernel import AreaChange
 from .types.records import RequestPhase, TurnHeld
 from .types.sessions import DispatchTurn, ResumeSessionTurn
 
 if TYPE_CHECKING:
     from .types.kernel import RecordsContext
-    from .types.records import RecordsEvent, RecordsState, RequestRecord
+    from .types.records import CapacityHold, RecordsEvent, RecordsState, RequestRecord
     from .types.sessions import Invocation
 
 _HELD = (RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
 """The phases of a dispatch record whose turn the gate can be holding."""
+_ENDED = (RequestPhase.BLOCKED, RequestPhase.COMPLETED)
+_NOT_RETURNED = (ObservationStatus.PENDING, ObservationStatus.CANCELLED)
 
 
 def held(
@@ -68,14 +70,29 @@ def held(
 
 
 def held_when_lost(records: RecordsState, invocation: Invocation) -> bool:
-    """Whether core ended ``invocation``'s dispatch while the capacity gate held the turn."""
+    """Whether core ended ``invocation``'s dispatch while the capacity gate held the turn.
+
+    The record ended (core blocks it at its bound or by a watch, and the block completes it),
+    and an ended record takes no later report, so its hold is the gate's last word before the
+    end. That report says the gate was holding the turn, and the executor never reported the
+    call's end: the record's observation is none, the turn's acknowledgement, or the cancel
+    core made. A call that returned (say with the error of a turn the gate gave up) is not
+    held any more, whatever report of it is still on its way.
+    """
     return any(
-        record.failure is not None
+        record.phase in _ENDED
         and record.capacity_hold is not None
         and record.capacity_hold.holding
+        and _within_its_time(record, record.capacity_hold)
+        and (record.observation is None or record.observation.status in _NOT_RETURNED)
         and _dispatches(record, invocation)
         for record in records.records
     )
+
+
+def _within_its_time(record: RequestRecord, hold: CapacityHold) -> bool:
+    """Whether the hold began before the turn's own time ran out (else it is late, as a bound)."""
+    return hold.since is not None and hold.since <= record.until.at + hold.credit
 
 
 def _dispatches(record: RequestRecord, invocation: Invocation) -> bool:
