@@ -1,0 +1,129 @@
+/* Overview tiles: a subject at a glance, in groups on a grid. Imported by components.css. */
+
+.vs-overview-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.vs-overview-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.vs-overview-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--column-chart), 1fr));
+  gap: var(--space-4);
+}
+.vs-overview-tile {
+  position: relative;
+  box-sizing: border-box;
+  display: flex;
+  min-width: 0;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+.vs-overview-tile[data-attention] {
+  border-color: var(--chip-err-border);
+  background: var(--banner-err-bg);
+}
+.vs-overview-tile:hover {
+  border-color: var(--muted);
+}
+.vs-overview-tile-press {
+  box-sizing: border-box;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-4) var(--space-5);
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.vs-overview-tile-press:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-overview-tile-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.vs-overview-tile[data-menu] .vs-overview-tile-head {
+  padding-right: var(--control-sm);
+}
+.vs-overview-tile-head > :first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-overview-tile-line {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-overview-tile-chart {
+  display: block;
+}
+.vs-overview-tile-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.vs-overview-tile-menu {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+}
+.vs-result-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.vs-result-chart-base {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0.7;
+}
+.vs-result-chart-line {
+  fill: none;
+  stroke: var(--text);
+  stroke-width: 1.5;
+}
+.vs-result-chart-mark[data-mark="kept"] {
+  fill: var(--ok);
+  stroke: var(--ok);
+}
+.vs-result-chart-mark[data-mark="not-better"] {
+  fill: var(--panel);
+  stroke: var(--muted);
+  stroke-width: 1.5;
+}
+.vs-result-chart-mark[data-mark="failed"] {
+  fill: none;
+  stroke: var(--err);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+.vs-result-chart-mark[data-mark="pending"] {
+  fill: var(--accent);
+  stroke: var(--chip-accent-border);
+  stroke-width: 3;
+}

@@ -36,6 +36,7 @@ export type SizeToken =
   | 'control'
   | 'row'
   | 'sidebar'
+  | 'rail'
   | 'content'
   | 'content-wide'
   | 'content-narrow'
@@ -71,6 +72,7 @@ export const SIZE: Readonly<Record<SizeToken, number>> = {
   control: 40,
   row: 44,
   sidebar: 264,
+  rail: 64,
   content: 1060,
   'content-wide': 1100,
   'content-narrow': 900,

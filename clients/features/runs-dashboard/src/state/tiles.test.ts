@@ -1,0 +1,253 @@
+import {describe, expect, test} from 'bun:test';
+import {SEEDS, Seeded} from '@vibesys/store/testing';
+import {
+  type Attention,
+  BASE,
+  chartOf,
+  GROUP_BYS,
+  groupTiles,
+  type IdeaInput,
+  type Mark,
+  needsYou,
+  type RunInput,
+  type StatusKind,
+  tileOf,
+  tilesOf,
+  UNKNOWN_GROUP,
+  type Verdict,
+} from './index.js';
+
+const VERDICTS: readonly Verdict[] = ['kept', 'not_better', 'failed', 'running'];
+const STATUSES: readonly StatusKind[] = [
+  'running',
+  'paused',
+  'finished',
+  'failed',
+  'stopped',
+  'unknown',
+];
+const ATTENTIONS: readonly Attention[] = ['none', 'failed', 'repeated_failure', 'stalled'];
+
+function idea(random: Seeded): IdeaInput {
+  const verdict = random.pick(VERDICTS);
+  const measured = verdict === 'kept' || verdict === 'not_better';
+  const ratio = measured || random.bool() ? 0.4 + random.next() * 2.6 : null;
+  return {ratio: verdict === 'failed' && random.bool() ? null : ratio, verdict};
+}
+
+function ideas(random: Seeded): IdeaInput[] {
+  return Array.from({length: random.int(40)}, () => idea(random));
+}
+
+function run(id: string, over: Partial<RunInput> = {}): RunInput {
+  return {
+    id,
+    task: 'mpmc',
+    machine: 'host-a',
+    hardware: null,
+    agent: null,
+    status: {kind: 'running', word: 'running'},
+    now: null,
+    ideas: null,
+    costUsd: null,
+    seconds: null,
+    best: null,
+    createdAt: 1,
+    points: [],
+    pointsOmitted: 0,
+    attention: 'none',
+    ...over,
+  };
+}
+
+function randomRun(random: Seeded, index: number): RunInput {
+  return run(`run-${index}`, {
+    task: random.pick(['mpmc', 'spsc', 'mpsc']),
+    machine: random.pick(['host-a', 'host-b']),
+    agent: random.pick(['Codex', 'Claude', null]),
+    status: {kind: random.pick(STATUSES), word: 'word'},
+    createdAt: random.int(5),
+    points: random.bool() ? ideas(random) : null,
+    pointsOmitted: random.int(3),
+    attention: random.pick(ATTENTIONS),
+  });
+}
+
+describe('a tile chart', () => {
+  test('the best-so-far line never falls and never drops below the base', () => {
+    for (const seed of SEEDS) {
+      const chart = chartOf(ideas(new Seeded(seed)), 0);
+      expect(chart.line.every(value => value >= BASE)).toBe(true);
+      expect(chart.line.every((value, at) => at === 0 || value >= (chart.line[at - 1] ?? 0))).toBe(
+        true,
+      );
+    }
+  });
+
+  test('plots every idea once, in order, each with its own mark', () => {
+    for (const seed of SEEDS) {
+      const points = ideas(new Seeded(seed));
+      const chart = chartOf(points, 0);
+      expect(chart.points).toHaveLength(points.length);
+      expect(chart.line).toHaveLength(points.length);
+      const marks: Record<Verdict, Mark> = {
+        kept: 'kept',
+        not_better: 'not-better',
+        failed: 'failed',
+        running: 'pending',
+      };
+      expect(chart.points.map(point => point.mark)).toEqual(
+        points.map(point => marks[point.verdict]),
+      );
+    }
+  });
+
+  test('a kept idea raises the line to its result; an idea that is not better leaves it', () => {
+    const chart = chartOf(
+      [
+        {ratio: 1.2, verdict: 'kept'},
+        {ratio: 1.5, verdict: 'not_better'},
+        {ratio: 1.4, verdict: 'kept'},
+        {ratio: 1.1, verdict: 'kept'},
+      ],
+      0,
+    );
+    expect(chart.line).toEqual([1.2, 1.2, 1.4, 1.4]);
+  });
+
+  test('a failed idea sits on the base and one still running sits at the best so far', () => {
+    const chart = chartOf(
+      [
+        {ratio: 1.3, verdict: 'kept'},
+        {ratio: null, verdict: 'failed'},
+        {ratio: null, verdict: 'running'},
+      ],
+      0,
+    );
+    expect(chart.points.map(point => point.y)).toEqual([1.3, BASE, 1.3]);
+  });
+
+  test('a run with no ideas has an empty chart', () => {
+    expect(chartOf([], 0)).toMatchObject({points: [], line: []});
+  });
+
+  test('says how many ideas it stands for, left-out ones included', () => {
+    expect(chartOf([{ratio: 1.1, verdict: 'kept'}], 63).label).toContain('64 ideas');
+  });
+});
+
+describe('a tile', () => {
+  test('headlines the best result against the base, green above 1', () => {
+    expect(tileOf(run('a', {best: 1.424})).result).toEqual({text: '1.42×', tone: 'ok'});
+    expect(tileOf(run('a', {best: 0.9})).result).toEqual({text: '0.90×', tone: 'muted'});
+    expect(tileOf(run('a', {best: null, points: []})).result).toBeNull();
+  });
+
+  test('falls back to the chart when the digest has no best', () => {
+    const tile = tileOf(run('a', {points: [{ratio: 2, verdict: 'kept'}]}));
+    expect(tile.result).toEqual({text: '2.00×', tone: 'ok'});
+  });
+
+  test('says machine, hardware and agent, leaving out what is unknown', () => {
+    expect(tileOf(run('a')).facts).toBe('host-a');
+    expect(tileOf(run('a', {hardware: '8 cores', agent: 'Codex'})).facts).toBe(
+      'host-a · 8 cores · Codex',
+    );
+  });
+
+  test('says ideas, cost and time, counting ideas the chart left out', () => {
+    const tile = tileOf(
+      run('a', {
+        costUsd: 4.2,
+        seconds: 3900,
+        points: [{ratio: 1, verdict: 'kept'}],
+        pointsOmitted: 6,
+      }),
+    );
+    expect(tile.figures).toBe('7 ideas · $4.20 · 1h 05m');
+    expect(tileOf(run('a')).figures).toBe('0 ideas');
+  });
+
+  test('has no chart when the host offers no chart data', () => {
+    expect(tileOf(run('a', {points: null})).chart).toBeNull();
+  });
+});
+
+describe('the tiles of many runs', () => {
+  test('are newest first, a total order', () => {
+    for (const seed of SEEDS) {
+      const random = new Seeded(seed);
+      const runs = Array.from({length: random.int(12)}, (_, index) => randomRun(random, index));
+      const tiles = tilesOf(runs);
+      expect(tiles).toHaveLength(runs.length);
+      expect(
+        tiles.every((tile, at) => at === 0 || (tiles[at - 1]?.createdAt ?? 0) >= tile.createdAt),
+      ).toBe(true);
+    }
+  });
+
+  test('need you exactly when their attention is not none', () => {
+    for (const seed of SEEDS) {
+      const random = new Seeded(seed);
+      const runs = Array.from({length: random.int(12)}, (_, index) => randomRun(random, index));
+      const needing = needsYou(tilesOf(runs)).map(tile => tile.id);
+      expect(new Set(needing)).toEqual(
+        new Set(runs.filter(each => each.attention !== 'none').map(each => each.id)),
+      );
+    }
+  });
+
+  test('every tile is in exactly one group, whatever the grouping', () => {
+    for (const seed of SEEDS) {
+      const random = new Seeded(seed);
+      const tiles = tilesOf(
+        Array.from({length: random.int(14)}, (_, index) => randomRun(random, index)),
+      );
+      for (const by of GROUP_BYS) {
+        const grouped = groupTiles(tiles, by).flatMap(group => group.tiles.map(tile => tile.id));
+        expect(grouped.sort()).toEqual(tiles.map(tile => tile.id).sort());
+      }
+    }
+  });
+
+  test('a group keeps the tiles newest first', () => {
+    const tiles = tilesOf([
+      run('old', {createdAt: 1}),
+      run('new', {createdAt: 9}),
+      run('mid', {createdAt: 5}),
+    ]);
+    expect(groupTiles(tiles, 'machine')[0]?.tiles.map(tile => tile.id)).toEqual([
+      'new',
+      'mid',
+      'old',
+    ]);
+  });
+
+  test('status groups come in a fixed order with their dots, and only when they have runs', () => {
+    const tiles = tilesOf([
+      run('a', {status: {kind: 'finished', word: 'finished'}}),
+      run('b', {status: {kind: 'running', word: 'running'}}),
+      run('c', {status: {kind: 'failed', word: 'failed'}}),
+    ]);
+    expect(groupTiles(tiles, 'status').map(group => [group.title, group.tone])).toEqual([
+      ['Running', 'live'],
+      ['Failed', 'err'],
+      ['Finished', 'ok'],
+    ]);
+  });
+
+  test('other groups are named by what they group and have no dot; an unknown agent is Unknown', () => {
+    const tiles = tilesOf([
+      run('a', {agent: 'Codex'}),
+      run('b', {agent: null}),
+      run('c', {machine: 'host-b'}),
+    ]);
+    expect(groupTiles(tiles, 'agent').map(group => group.title)).toEqual(['Codex', UNKNOWN_GROUP]);
+    expect(
+      groupTiles(tiles, 'machine').map(group => [group.title, group.tone, group.tiles.length]),
+    ).toEqual([
+      ['host-a', null, 2],
+      ['host-b', null, 1],
+    ]);
+  });
+});

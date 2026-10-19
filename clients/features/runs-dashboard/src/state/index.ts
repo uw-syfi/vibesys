@@ -1,3 +1,30 @@
-/** This package's ./state entry (neutral). */
-export const runsDashboardState = 'runs-dashboard';
-export {runsDashboardMachine} from './machine.js';
+/**
+ * The Runs dashboard's pure state: the tile fold (`tilesOf`, `groupTiles`, `needsYou`) over what the
+ * app knows of each run, and the machine that holds how the runs are grouped.
+ */
+
+export {type GroupingContext, type GroupingEvent, groupingMachine} from './grouping.js';
+export {
+  type Attention,
+  BASE,
+  chartOf,
+  durationWord,
+  GROUP_BYS,
+  type GroupBy,
+  groupTiles,
+  type IdeaInput,
+  type Mark,
+  needsYou,
+  type RunInput,
+  ratioWord,
+  STATUS_TONES,
+  type StatusKind,
+  type Tile,
+  type TileChart,
+  type TileGroup,
+  type Tone,
+  tileOf,
+  tilesOf,
+  UNKNOWN_GROUP,
+  type Verdict,
+} from './tiles.js';
