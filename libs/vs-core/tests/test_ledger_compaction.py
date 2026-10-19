@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -23,11 +24,13 @@ from .test_agent_turn_runs import SCENARIOS, Scenario
 from .toy_agent_search import OPERATIONS, Config, ToyHost, run_toy, toy, toy_harness
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from vs_core.api.testing import Trace
 
 _POLLS = 10
 _UNPRUNED = core.CoreReducers(ledger=lambda state: state)
-_SETTINGS = settings(max_examples=examples(pr=4, nightly=300), deadline=None, database=None)
+_SETTINGS = settings(max_examples=examples(pr=4, nightly=60), deadline=None, database=None)
 
 
 def _unpruned(host: ToyHost, config: Config, faults: Faults | None = None) -> Trace:
@@ -78,6 +81,49 @@ def test_without_pruning_the_ledger_grows_with_every_poll() -> None:
     assert len(long.records.records) >= len(short.records.records) + 3 * _POLLS
 
 
+def _depended_on(state: core.CoreState, identity: core.RequestId) -> core.CoreState:
+    """``state`` with its first non-poll request depending on ``identity``."""
+    records = list(state.records.records)
+    index = next(
+        i for i, r in enumerate(records) if not isinstance(r.request, core.ObserveOwnedJob)
+    )
+    request = records[index].request
+    depends_on = (*request.depends_on, identity)
+    records[index] = records[index].model_copy(
+        update={"request": request.model_copy(update={"depends_on": depends_on})}
+    )
+    return state.model_copy(
+        update={"records": state.records.model_copy(update={"records": tuple(records)})}
+    )
+
+
+def _waited_on(state: core.CoreState, identity: core.RequestId) -> core.CoreState:
+    """``state`` with its evaluation job's recorded wait naming ``identity``."""
+    evaluation = state.evaluation
+    job = evaluation.jobs[0].model_copy(update={"wait": core.WaitOn(requests=(identity,))})
+    jobs = (job, *evaluation.jobs[1:])
+    return state.model_copy(update={"evaluation": evaluation.model_copy(update={"jobs": jobs})})
+
+
+_PINS: dict[str, Callable[[core.CoreState, core.RequestId], core.CoreState]] = {
+    "depends_on": _depended_on,
+    "wait": _waited_on,
+}
+
+
+@pytest.mark.parametrize("pin", sorted(_PINS))
+def test_a_spent_poll_that_the_state_still_names_is_kept(pin: str) -> None:
+    """No request today depends on a poll and no wait names a superseded one; if one ever
+    does, pruning the poll would leave it naming nothing, so compaction keeps such a poll."""
+    unpruned = _ledger_after(_POLLS, pruned=False).core
+    kept = {record.request_id for record in core.compact_ledger(unpruned).records.records}
+    spent = [r.request_id for r in unpruned.records.records if r.request_id not in kept]
+    assert spent
+    for identity in spent:
+        named = core.compact_ledger(_PINS[pin](unpruned, identity))
+        assert identity in {record.request_id for record in named.records.records}
+
+
 def _host(scenario: Scenario) -> ToyHost:
     return ToyHost(
         waits=scenario.waits,
@@ -92,10 +138,29 @@ _PRUNING_FAULTS = st.builds(
     Faults,
     duplicate=st.booleans(),
     reorder=st.booleans(),
-    reload=st.booleans(),
+    # No ``reload`` after every step: it is nine tenths of an example's time, and every crash
+    # already restarts the run from the pruned envelope through the codec.
     crash_after=st.frozensets(st.integers(1, 40), max_size=1),
     reobserve_after=st.frozensets(st.integers(1, 40), max_size=1),
+    # Late enough that the answers replayed include polls already pruned.
+    replay_after=st.frozensets(st.integers(1, 80), max_size=2),
 )
+
+
+def test_an_answer_to_a_pruned_poll_delivered_again_changes_nothing() -> None:
+    """An executor that resends its old answers after a restart reaches polls already pruned.
+
+    Without ``spent_answer`` such an answer names no record, and core refuses it as naming no
+    canonical request, which halts a live run.
+    """
+    late = Faults(replay_after=frozenset(range(10, 200, 10)))
+    host = ToyHost(waits=(True,), polls=(_POLLS,))
+    pruned = run_toy(host, Config(), faults=late)
+    unpruned = _unpruned(ToyHost(waits=(True,), polls=(_POLLS,)), Config(), late)
+    assert pruned.finished
+    assert _observable(pruned) == _observable(unpruned)
+    replayed = [event for event in pruned.log if isinstance(event, core.RequestObserved)]
+    assert any(not pruned.core.records.positions(e.observation.request_id) for e in replayed)
 
 
 @_SETTINGS

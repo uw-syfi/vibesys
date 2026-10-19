@@ -208,6 +208,12 @@ class Faults:
     executor answers again for every job that has ended: a poll that was in flight when the job
     ended reports the same end, at a newer sequence, event and time.
 
+    ``replay_after`` lists commit numbers (counted as for ``crash_after``) after which the
+    job executors deliver again, oldest first, every answer to a job poll they delivered
+    before, as an executor that resends its answers after a restart does. An answer delivered
+    long ago may name a poll the ledger no longer holds (a spent poll), which must change
+    nothing.
+
     ``crash_after`` lists commit numbers (counted from the first, over the whole drive:
     every authorization, every delivery of a request's observations and its owner events, every
     clock move, and the recovery's own) after which the host dies and a new one takes over. The
@@ -225,6 +231,7 @@ class Faults:
     crash_after: frozenset[int] = frozenset()
     unsealed: Callable[[Request], bool] = lambda _request: False
     reobserve_after: frozenset[int] = frozenset()
+    replay_after: frozenset[int] = frozenset()
 
 
 class _CrashError(Exception):
@@ -312,6 +319,7 @@ class _Driver[S: StrategyState]:
         self.ended: dict[ResourceId, JobObserved] = {}
         """The last observation delivered of each job that has ended, by job."""
         self.reobserve_owed = 0
+        self.replay_owed = 0
 
     # -- the shell loop ---------------------------------------------------
 
@@ -336,6 +344,8 @@ class _Driver[S: StrategyState]:
         self.trace.commits = self.commits
         if self.commits in self.faults.reobserve_after:
             self.reobserve_owed += 1
+        if self.commits in self.faults.replay_after:
+            self.replay_owed += 1
         if self.commits in self.faults.crash_after:
             raise _CrashError
 
@@ -451,6 +461,7 @@ class _Driver[S: StrategyState]:
                     executed.delivered = True
                 self.commit()
                 self.reobserve()
+                self.replay()
 
     # -- jobs observed again after their end ---------------------------------------------
 
@@ -486,6 +497,21 @@ class _Driver[S: StrategyState]:
             self.reobserve_owed -= 1
             for resource in tuple(self.ended):
                 self.again(resource)
+
+    def replay(self) -> None:
+        """Deliver again every poll answer delivered so far, once per ``replay_after`` point."""
+        while self.replay_owed and not self.trace.finished:
+            self.replay_owed -= 1
+            log = self.trace.log
+            polls = {self.key_of(item) for item in log if isinstance(item, ObserveOwnedJob)}
+            delivered = [
+                item
+                for item in log
+                if isinstance(item, RequestObserved) and item.observation.request_id.root in polls
+            ]
+            for event in delivered:
+                self.consume(event)
+            self.commit()
 
     def authorize_round(self) -> list[Request]:
         """Authorize every prepared request core lets go now, in ledger order."""
