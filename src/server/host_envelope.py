@@ -126,6 +126,9 @@ class HelperFeature(StrEnum):
     CHAT_ENDED_RUNS = "chat_ended_runs"
     """``run.reader``: the server Chat reads a run through, which for a run with no live server is
     one started read-only on demand and ended when no client holds it."""
+    CHAT_ENDED_RUN_QUESTIONS = "chat_ended_run_questions"
+    """The read-only server of a finished run answers chat questions and opens chat threads over the
+    saved run (``query.chat``, ``query.chat_thread_create``); every command stays refused."""
 
 
 class HelperRequestBase(BaseModel):

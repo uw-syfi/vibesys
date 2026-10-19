@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.api import AuxiliaryAgents, ManagedAgent
-    from vibesys.api.wiring import RunResources
+    from vibesys.api.wiring import AuxiliaryResources
     from vs_agent.api import AgentEventSink, AgentInvocationStore
     from vs_runtime.api.infrastructure import RunState, ScopedAgentEnvironment
     from vs_sandbox.api import HostResource
@@ -94,7 +94,7 @@ class FalseyFakeSessionAgents:
 
     def open_environment(
         self,
-        resources: RunResources,
+        resources: AuxiliaryResources,
         *,
         mounts: tuple[HostResource, ...] = (),
         agent_backend: str | None = None,
@@ -110,7 +110,7 @@ class FalseyFakeSessionAgents:
     def create_agent(
         self,
         launch: AuxiliaryAgentLaunch,
-        resources: RunResources,
+        resources: AuxiliaryResources,
         agent_events: AgentEventSink,
     ) -> ManagedAgent:
         self.calls += 1

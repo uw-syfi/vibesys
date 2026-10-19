@@ -121,7 +121,7 @@ class _AgentPathSandbox(Protocol):
 
 def open_agent_execution_environment(  # noqa: PLR0913  # lint-waiver: LW-954433 [PLR0913]; these are independent resolved lower-layer resources; bundling them would create the broad environment DTO this composition seam replaces.
     base_request: RunEnvironmentRequest,
-    shared_session: RunEnvironmentSession,
+    shared_session: RunEnvironmentSession | None,
     *,
     share_session: bool,
     skill_source_dirs: tuple[Path, ...],
@@ -144,6 +144,8 @@ def open_agent_execution_environment(  # noqa: PLR0913  # lint-waiver: LW-954433
             or (agent_backend is not None and agent_backend != base_request.agent_backend)
             or (cli_provider is not None and cli_provider != base_request.cli_provider)
         ):
+            raise SharedAgentEnvironmentConflictError
+        if shared_session is None:
             raise SharedAgentEnvironmentConflictError
         session = shared_session
         request = base_request

@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, NoReturn, Protocol
 
 from entrypoints import cli
 from entrypoints.main_thread_interrupt import MainThreadInterrupt
-from entrypoints.production import production_runs, production_web_discovery
+from entrypoints.production import production_run_readers, production_runs, production_web_discovery
 from entrypoints.web_assets import WebAssetBundle
 from server.host_api import (
     RUN_EVENTS_FILE,
@@ -92,7 +92,7 @@ if TYPE_CHECKING:
     from typing import BinaryIO
 
     from server.runtime import ServerLifecycleObserver, ServerRuntime
-    from vibesys.api import Runs
+    from vibesys.api import RunReader, RunReaders, Runs
     from vs_sim.api import MainThreadWake, SignalRelay, Threads
 
 
@@ -251,6 +251,24 @@ def _read_only_log_from_argv(argv: list[str]) -> Path | None:
         return None
     path = Path(value).expanduser().resolve()
     return path.parent if path.name == RUN_EVENTS_FILE else path
+
+
+def _chat_reader_opener(arguments: list[str], run_readers: RunReaders) -> Callable[[], RunReader]:
+    """How the read-only server opens the run it serves for conversation.
+
+    The request is the one resuming the run builds: its record restores the run's settings, so
+    nothing is passed but the run's id. The server runs in the run's project directory.
+    """
+    run_id = _first_option(arguments, ("--run-id",))
+    if run_id is None:
+        message = "--reopen needs --run-id"
+        raise ValueError(message)
+
+    def open_reader() -> RunReader:
+        request = cli.build_run_request(cli.parse_cli_invocation(["--resume", run_id]))
+        return run_readers(request)
+
+    return open_reader
 
 
 def _headless_argv(argv: list[str]) -> list[str]:
@@ -948,12 +966,14 @@ def main(
     *,
     observer: ServerLifecycleObserver | None = None,
     runs: Runs | None = None,
+    run_readers: RunReaders | None = None,
 ) -> None:
     """Run the frontend server and headless engine in one process.
 
     ``observer`` is a detached server's registry record
     (``entrypoints.detached_run``), told when the server reaches a milestone.
-    ``runs`` replaces the application-wired run service in tests.
+    ``runs`` and ``run_readers`` replace the application-wired run service and finished-run
+    opener in tests.
 
     Every configuration diagnostic raised below this frame is rendered to
     stderr and exits with the diagnostic's code, the way
@@ -965,7 +985,7 @@ def main(
     """
     cli.start_process()
     try:
-        _serve(sys.argv[1:] if argv is None else argv, observer, runs)
+        _serve(sys.argv[1:] if argv is None else argv, observer, runs, run_readers)
     except ConfigurationError as exc:
         if observer is not None:
             diagnostic = exc.diagnostic
@@ -985,6 +1005,7 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
     arguments: list[str],
     observer: ServerLifecycleObserver | None,
     runs: Runs | None,
+    run_readers: RunReaders | None,
 ) -> None:
     """Serve one invocation, leaving configuration diagnostics to `main`."""
     web = _web_requested(arguments)
@@ -1074,6 +1095,13 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
         run_id = None if request is None else request.resolved_run_id
         project_root = None if request is None else request.resolved_project_root
         server_runtime = import_module("server.runtime").ServerRuntime
+        open_reader = (
+            None
+            if read_only_log is None
+            else _chat_reader_opener(
+                arguments, production_run_readers() if run_readers is None else run_readers
+            )
+        )
         platform = Platform.real()
         control_key = create_operator_key(os.environ, os.getuid())
         if web:
@@ -1091,6 +1119,7 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
                 instance_path=instance_path,
                 detach=detach,
                 read_only_log=read_only_log,
+                open_reader=open_reader,
                 platform=platform,
             )
         else:
@@ -1102,6 +1131,7 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
                 project_root=project_root,
                 detach=detach,
                 read_only_log=read_only_log,
+                open_reader=open_reader,
                 reader_idle_seconds=READER_IDLE_SECONDS if read_only_log is not None else None,
                 observer=observer,
                 platform=platform,

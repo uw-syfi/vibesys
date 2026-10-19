@@ -40,7 +40,12 @@ export interface ChatPanelView {
   readonly items: readonly PanelItem[];
   /** The run's roles, in its order: what a steer's target select lists after the whole run. */
   readonly roles: readonly string[];
-  /** The run ended: its threads are read, and nothing new is asked, written or sent. */
+  /** The run ended: nothing is written or sent to it, so a steer card cannot send. */
   readonly readOnly: boolean;
+  /**
+   * A question can be asked and a chat opened: on a live run always, on an ended one only when the
+   * machine's reader answers over the saved run. Without it the panel only shows the threads.
+   */
+  readonly canAsk: boolean;
   readonly dispatch: (event: PanelEvent) => void;
 }

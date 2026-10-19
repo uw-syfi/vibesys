@@ -17,6 +17,7 @@ from server.diagnostics import (
     exception_to_diagnostic,
 )
 from server.events import (
+    READER_APPENDABLE_EVENTS,
     AgentExecutionActivityData,
     AgentExecutionFinishedData,
     AgentExecutionStartedData,
@@ -237,7 +238,13 @@ class WireJournal:
                         threads=self._threads,
                     )
                     if not read_only
-                    else EventStore(events_path, run_id="", read_only=True, threads=self._threads)
+                    else EventStore(
+                        events_path,
+                        run_id="",
+                        read_only=True,
+                        appendable=READER_APPENDABLE_EVENTS,
+                        threads=self._threads,
+                    )
                 )
                 if read_only:
                     durable.run_id = _read_only_run_id(durable.event_headers(), run_id)
@@ -295,8 +302,10 @@ class WireJournal:
         try:
             with self._condition:
                 if self._read_only:
-                    return event
-                event = self._with_turn_span(event)
+                    if event.type not in READER_APPENDABLE_EVENTS or self._store is None:
+                        return event
+                else:
+                    event = self._with_turn_span(event)
                 store = self._store
                 if store is None:
                     self._pending_events.append(event)
@@ -316,8 +325,10 @@ class WireJournal:
         try:
             with self._condition:
                 if self._read_only:
-                    return event
-                event = self._with_turn_span(event)
+                    if event.type not in READER_APPENDABLE_EVENTS or self._store is None:
+                        return event
+                else:
+                    event = self._with_turn_span(event)
                 store = self._store
                 if store is None:
                     self._pending_events.append(event)

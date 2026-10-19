@@ -65,7 +65,9 @@ if TYPE_CHECKING:
     from vs_runtime.api.infrastructure import (
         EnvironmentSystem,
         ProjectRunResources,
+        RunEnvironmentRequest,
         RunEnvironmentResources,
+        RunEnvironmentSession,
     )
     from vs_sandbox.api import HostResource
     from vs_sim.api import Clock, Threads
@@ -110,6 +112,56 @@ class RunResources:
     """The run's clock, in seconds since the epoch."""
     threads: Threads
     """Makes the run's threads and locks."""
+
+    def auxiliary(self) -> AuxiliaryResources:
+        """What an auxiliary conversation of this run needs of it: no lease and no live session."""
+        environment = self.environment_resources
+        return AuxiliaryResources(
+            project=self.project_resources.project,
+            run_id=self.project_resources.state.run_id,
+            environment_request=environment.request,
+            open_environment_session=environment.open_session,
+            agent_backend=self.agent_backend,
+            provider=self.provider,
+            model=self.model,
+            role_models=self.role_models,
+            config=self.config,
+            allow_unvetted_model=self.allow_unvetted_model,
+            backend=self.backend,
+            skill_source_dirs=self.skill_source_dirs,
+            host_resources=self.host_resources,
+            clock=self.clock,
+            threads=self.threads,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class AuxiliaryResources:
+    """What an auxiliary conversation (chat) reads of a run.
+
+    That is its project, the recipe of its environment, and the agent settings.
+
+    A live run derives it from its ``RunResources``. A reader of a finished run builds it
+    directly, because none of the rest of the run's resources (the write lease, the project's
+    git tracker, the root environment session, the repository) exist for it, and a conversation
+    opens its own environment session from ``open_environment_session``.
+    """
+
+    project: Project
+    run_id: str
+    environment_request: RunEnvironmentRequest
+    open_environment_session: Callable[[RunEnvironmentRequest], RunEnvironmentSession]
+    agent_backend: str
+    provider: str
+    model: str
+    role_models: tuple[str, ...]
+    config: Config
+    allow_unvetted_model: bool
+    backend: ComputeBackend
+    skill_source_dirs: tuple[Path, ...]
+    host_resources: tuple[HostResource, ...]
+    clock: Clock
+    threads: Threads
 
 
 @dataclass(frozen=True, slots=True)

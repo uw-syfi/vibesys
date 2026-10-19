@@ -2721,7 +2721,8 @@ const hostHelperSchema: Record<string, unknown> = {
         "usage_window",
         "run_trace",
         "run_ending",
-        "chat_ended_runs"
+        "chat_ended_runs",
+        "chat_ended_run_questions"
       ],
       "title": "HelperFeature",
       "type": "string"

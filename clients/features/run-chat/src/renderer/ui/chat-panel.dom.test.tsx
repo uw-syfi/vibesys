@@ -85,6 +85,7 @@ function viewOf(items: ChatPanelView['items']): ChatPanelView {
     items,
     roles: [],
     readOnly: false,
+    canAsk: true,
     dispatch: () => undefined,
   };
 }
@@ -105,8 +106,19 @@ const PORTS: RunChatPorts = {
   newControlId: () => 'control-1',
 };
 
-function Harness(props: {readonly core: CoreState}): JSX.Element {
-  const chat = useRunChat({identity: 'run', core: props.core, ports: PORTS});
+function Harness(props: {
+  readonly core: CoreState;
+  readonly ports?: RunChatPorts;
+  readonly readOnly?: boolean;
+  readonly askable?: boolean;
+}): JSX.Element {
+  const chat = useRunChat({
+    identity: 'run',
+    core: props.core,
+    ports: props.ports ?? PORTS,
+    readOnly: props.readOnly === true,
+    askable: props.askable === true,
+  });
   return (
     <div>
       <button type="button" onClick={chat.toggle}>
@@ -187,5 +199,81 @@ test('messages sit in the thread below the header, in a pane that keeps its own 
       thread !== null &&
       (heading.compareDocumentPosition(thread) & window.Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
   ).toBe(true);
+  await unmount();
+});
+
+const QUESTION_BOX = 'Ask about this run';
+
+function hasQuestionBox(container: HTMLElement): boolean {
+  return container.querySelector(`textarea[placeholder="${QUESTION_BOX}"]`) !== null;
+}
+
+function buttons(container: HTMLElement): string[] {
+  return [...container.querySelectorAll('button')].map(
+    button => button.textContent || button.getAttribute('aria-label') || '',
+  );
+}
+
+async function openChat(container: HTMLElement): Promise<void> {
+  await act(async () => container.querySelector('button')?.click());
+}
+
+test('an ended run whose reader answers questions shows the question box and New chat, not New steer', async () => {
+  const {container, unmount} = await mount(
+    <Harness core={fold([THREAD, ANSWERED])} readOnly askable />,
+  );
+  await openChat(container);
+  expect(hasQuestionBox(container)).toBe(true);
+  expect(buttons(container)).toContain('New chat');
+  expect(buttons(container)).not.toContain('New steer');
+  expect(container.textContent).not.toContain('Read only');
+  await unmount();
+});
+
+test('an ended run whose reader does not answer shows its threads and no question box', async () => {
+  const {container, unmount} = await mount(<Harness core={fold([THREAD, ANSWERED])} readOnly />);
+  await openChat(container);
+  expect(container.textContent).toContain(ANSWER);
+  expect(hasQuestionBox(container)).toBe(false);
+  expect(buttons(container)).not.toContain('New chat');
+  expect(container.textContent).toContain('Read only');
+  await unmount();
+});
+
+test('a live run keeps the question box, New chat and New steer', async () => {
+  const {container, unmount} = await mount(<Harness core={fold([THREAD, ANSWERED])} />);
+  await openChat(container);
+  expect(hasQuestionBox(container)).toBe(true);
+  expect(buttons(container)).toEqual(expect.arrayContaining(['New chat', 'New steer']));
+  await unmount();
+});
+
+test('a question typed on an ended run goes to the run through the ask port', async () => {
+  const asked: string[] = [];
+  const ports: RunChatPorts = {
+    ...PORTS,
+    ask: input => {
+      asked.push(input.text);
+      return Promise.resolve({ok: true});
+    },
+  };
+  const {container, unmount} = await mount(
+    <Harness core={fold([THREAD, ANSWERED])} ports={ports} readOnly askable />,
+  );
+  await openChat(container);
+  const box = container.querySelector(`textarea[placeholder="${QUESTION_BOX}"]`);
+  await act(async () => {
+    if (box === null) throw new Error('no question box');
+    Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set?.call(
+      box,
+      'Which idea won?',
+    );
+    box.dispatchEvent(new window.Event('input', {bubbles: true}));
+  });
+  const ask = [...container.querySelectorAll('button')].find(
+    button => button.getAttribute('aria-label') === 'Ask',
+  );
+  await act(async () => ask?.click());
+  expect(asked).toEqual(['Which idea won?']);
   await unmount();
 });

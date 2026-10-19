@@ -17,7 +17,7 @@ from vibesys.orchestration.agent_options import attribution_command_of, objectiv
 from vibesys.plugin_catalog import project_run
 from vibesys.run.core_run import RunEnd, drive_core_run, ensure_resumable
 from vibesys.run.host import open_product_core_host
-from vibesys.run.integration import LocalRunIntegration, RunResources
+from vibesys.run.integration import AuxiliaryResources, LocalRunIntegration, RunResources
 from vibesys.run.overview import overview_of
 from vibesys.run.profilers import (
     ProfilerPreflight,
@@ -215,7 +215,9 @@ class _LocalRunSession:
     def _handle_resources(self, resources: RunResources) -> None:
         self._resources = resources
         if self._ready_listener is not None:
-            self._ready_listener(_run_ready(resources, self._registry, self._implementations))
+            self._ready_listener(
+                run_ready(resources.auxiliary(), self._registry, self._implementations)
+            )
 
     def _run_id(self) -> str:
         """Use the provisioned ID once a custom runtime has created its run."""
@@ -236,7 +238,7 @@ class _LocalRunSession:
             message = "the run is not ready to create agents"
             raise RuntimeError(message)
         return self._implementations.agents.open_environment(
-            resources,
+            resources.auxiliary(),
             mounts=mounts,
             agent_backend=agent_backend,
             cli_provider=cli_provider,
@@ -274,7 +276,7 @@ class _LocalRunSession:
 
     def _new_auxiliary_scope(self, resources: RunResources) -> InProcessAuxiliaryAgents:
         return InProcessAuxiliaryAgents(
-            resources,
+            resources.auxiliary(),
             self._implementations.agents,
             self._integration.agent_events,
             self._threads,
@@ -437,7 +439,7 @@ class InProcessAuxiliaryAgents:
 
     def __init__(
         self,
-        resources: RunResources,
+        resources: AuxiliaryResources,
         agents: SessionAgents,
         events: AgentEventSink,
         threads: Threads,
@@ -468,25 +470,23 @@ class InProcessAuxiliaryAgents:
             self._close.run(self._conversations.close)
 
 
-def _run_ready(
-    resources: RunResources,
+def run_ready(
+    resources: AuxiliaryResources,
     registry: OrchestrationRegistry,
     implementations: SessionImplementations,
 ) -> RunReady:
     """Project private resource facts to the narrow frontend contract."""
-    project = resources.project_resources
-    environment = resources.environment_resources
     store = open_run_store(
-        project.project,
+        resources.project,
         registry=registry,
         git=implementations.git,
         threads=implementations.timing.threads,
     )
     return RunReady(
-        record=store.get_record(project.state.run_id),
-        log_directory=environment.request.log_dir,
-        frontend_state_directory=project.project.state.local_namespace(
-            project.state.run_id, "server"
+        record=store.get_record(resources.run_id),
+        log_directory=resources.environment_request.log_dir,
+        frontend_state_directory=resources.project.state.local_namespace(
+            resources.run_id, "server"
         ).external_directory(),
         agent_provider=resources.provider,
         agent_model=resources.model,

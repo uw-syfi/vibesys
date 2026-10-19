@@ -482,6 +482,7 @@ export class FakeHelper {
     'example_destination',
     'usage_window',
     'chat_ended_runs',
+    'chat_ended_run_questions',
   ]);
   /** The run log streams `logs.list` and `logs.read` serve; replace it to seed a store. */
   logStore = new FakeLogStore();

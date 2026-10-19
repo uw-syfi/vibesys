@@ -1248,6 +1248,13 @@ class _StoredRecord:
     event: RunEvent | None = None
 
 
+READER_APPENDABLE_EVENTS = frozenset({EventType.CHAT, EventType.CHAT_THREAD_CREATED})
+"""What a reader of a finished run may still add to its journal: the conversation about it.
+
+Nothing else is appended, so the run's own record (its steps, results and state) never changes.
+"""
+
+
 class EventStore:
     """Serialize event access so readers never observe partial JSONL writes.
 
@@ -1267,12 +1274,22 @@ class EventStore:
     """
 
     def __init__(
-        self, path: Path, run_id: str, *, read_only: bool = False, threads: Threads
+        self,
+        path: Path,
+        run_id: str,
+        *,
+        read_only: bool = False,
+        appendable: frozenset[EventType] = frozenset(),
+        threads: Threads,
     ) -> None:
-        """Open an indexed event file, optionally without cache writes."""
+        """Open an indexed event file, optionally without cache writes.
+
+        A read-only store refuses every append except those of the ``appendable`` types.
+        """
         self.path = path
         self.run_id = run_id
         self.read_only = read_only
+        self._appendable = appendable
         # Names this store's sequence space. Sequences are only comparable
         # within one store, and a run replaces its store mid-flight when the
         # durable log is attached, so a consumer holding folded state needs an
@@ -1295,7 +1312,7 @@ class EventStore:
         self._span_index = None if read_only else SpanIndexLog(path)
 
     def append(self, event: RunEvent) -> RunEvent:  # noqa: D102  # lint-waiver: LW-101045 [D102]; the append contract is documented by the surrounding event-store protocol
-        if self.read_only:
+        if self.read_only and event.type not in self._appendable:
             raise PermissionError("Event store is read-only")  # noqa: TRY003  # lint-waiver: LW-101032 [TRY003]; reject writes while serving a reopened read-only run
         with self._changed:
             if self._malformed_tail_offset is not None:

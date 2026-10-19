@@ -40,6 +40,8 @@ export interface RunChatOptions {
   readonly roles?: readonly string[];
   /** The run cannot take a steer (it ended): its cards keep their drafts and cannot send. */
   readonly readOnly?: boolean;
+  /** The ended run's reader answers questions (the run still takes no steer): the panel asks. */
+  readonly askable?: boolean;
 }
 
 /** What the run screen hosts: whether the panel is open, the button's press, and the panel. */
@@ -207,6 +209,7 @@ export function useRunChat(options: RunChatOptions): RunChatHost {
           items: panelItems(chat, core, shown, context, readOnly),
           roles: runRoles(core.expectedRoles, options.roles ?? []),
           readOnly,
+          canAsk: !readOnly || options.askable === true,
           dispatch: event => chat.actor.send(event),
         }
       : null,

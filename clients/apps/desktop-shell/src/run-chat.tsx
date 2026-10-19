@@ -28,14 +28,30 @@ function chatPorts(page: RunPageView['chat'], bridge: WelcomeBridge, run: RunRef
 /** The word on a Chat button that cannot open: the machine's VibeSys cannot serve an ended run. */
 const NEEDS_UPDATE = 'Needs an update';
 
-/** Whether the run's machine offers chat on an ended run, asked once the run has ended; null until it said. */
-function useChatsEnded(bridge: WelcomeBridge, run: RunRef, ended: boolean): boolean | null {
-  const [offered, setOffered] = useState<boolean | null>(null);
+/** What the run's machine offers for chat on an ended run; null until it said. */
+interface EndedChat {
+  /** The run can be read: its reader serves its threads. */
+  readonly reads: boolean;
+  /** The reader also answers questions and opens chats over the saved run. */
+  readonly asks: boolean;
+}
+
+/** What the run's machine offers for chat on an ended run, asked once the run has ended. */
+function useChatsEnded(bridge: WelcomeBridge, run: RunRef, ended: boolean): EndedChat | null {
+  const [offered, setOffered] = useState<EndedChat | null>(null);
   useEffect(() => {
     if (!ended) return;
     let current = true;
     void settled(bridge.helperFeatures(run.host)).then(result => {
-      if (current) setOffered(result.ok ? result.value.includes('chat_ended_runs') : null);
+      if (!current) return;
+      setOffered(
+        result.ok
+          ? {
+              reads: result.value.includes('chat_ended_runs'),
+              asks: result.value.includes('chat_ended_run_questions'),
+            }
+          : null,
+      );
     });
     return () => {
       current = false;
@@ -63,13 +79,14 @@ export function RunWithChat(props: {
     ideaOf,
     roles,
     readOnly: ended,
+    askable: ended && chatsEnded?.asks === true && page.state.reader.link.kind === 'attached',
   });
   const {dispatch} = page;
   useEffect(() => {
     dispatch({type: 'chat', open: chat.open});
   }, [dispatch, chat.open]);
   const unsupported =
-    ended && (chatsEnded === false || page.state.reader.link.kind === 'unsupported');
+    ended && (chatsEnded?.reads === false || page.state.reader.link.kind === 'unsupported');
   return (
     <RunScreen
       state={page.state}

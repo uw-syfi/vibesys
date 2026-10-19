@@ -93,14 +93,14 @@ function Header(props: ChatPanelView): JSX.Element {
               }))}
             />
           )}
-          {props.readOnly ? null : (
+          {props.canAsk ? (
             <Button
               variant="quiet"
               size="sm"
               text="New chat"
               press={() => dispatch({type: 'new-chat'})}
             />
-          )}
+          ) : null}
           <Button
             variant="quiet"
             size="sm"
@@ -110,7 +110,7 @@ function Header(props: ChatPanelView): JSX.Element {
           />
         </Row>
       </Row>
-      {shown === null && !props.readOnly ? (
+      {shown === null && props.canAsk ? (
         <Picker panel={props.panel} dispatch={dispatch} />
       ) : null}
     </Stack>
@@ -175,13 +175,17 @@ function Composer(props: ChatPanelView): JSX.Element {
         />
       </Field>
       <Row justify="between" gap="space-3">
-        <Button
-          variant="quiet"
-          size="sm"
-          icon="plus"
-          text="New steer"
-          press={() => dispatch({type: 'new-steer'})}
-        />
+        {props.readOnly ? (
+          <span />
+        ) : (
+          <Button
+            variant="quiet"
+            size="sm"
+            icon="plus"
+            text="New steer"
+            press={() => dispatch({type: 'new-steer'})}
+          />
+        )}
         <Button variant="primary" size="sm" icon="arrow-up" label="Ask" press={submit} />
       </Row>
     </Stack>
@@ -200,12 +204,12 @@ function Panel(props: ChatPanelView): JSX.Element {
       ) : (
         <Thread key={props.shown ?? 'new'} label="Chat" items={items} size="fill" plain />
       )}
-      {props.readOnly ? (
+      {props.canAsk ? (
+        <Composer {...props} />
+      ) : (
         <Text variant="small" tone="muted">
           Read only
         </Text>
-      ) : (
-        <Composer {...props} />
       )}
     </Stack>
   );

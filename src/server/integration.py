@@ -47,7 +47,7 @@ if TYPE_CHECKING:
     from server.controller import RunController
     from server.execution import ExecutionTracker
     from server.journal import WireJournal
-    from vibesys.api import AuxiliaryAgents, CoreEvent, RunReady, RunRecord, RunSession
+    from vibesys.api import AuxiliaryAgents, CoreEvent, RunReader, RunReady, RunRecord, RunSession
     from vs_sim.api import Clock, Threads
 
 _EVENT_DATA_ADAPTER = TypeAdapter(EventData)
@@ -309,6 +309,18 @@ class RunIntegrationAdapter:
         """
         self.attach(ready.log_directory, run_id=ready.record.run_id, record=ready.record)
         self.controller.ready()
+        self._open_chat(ready, session.open_auxiliary_agents())
+
+    def attach_reader(self, reader: RunReader) -> None:
+        """Attach experiment chat over a finished run's reader: the run's journal is already open.
+
+        Only chat is attached. The run is not announced ready and nothing of it executes.
+        """
+        self._owned.callback(reader.close)
+        self._open_chat(reader.ready(), reader.open_auxiliary_agents())
+
+    def _open_chat(self, ready: RunReady, auxiliary_agents: AuxiliaryAgents) -> None:
+        """Own ``auxiliary_agents`` and start experiment chat over them."""
         attachment = RunAttachment(
             chat_state_dir=ready.frontend_state_directory / "chat",
             agent_defaults=AgentSelection(
@@ -318,7 +330,6 @@ class RunIntegrationAdapter:
             ),
             agent_providers=ready.agent_providers,
         )
-        auxiliary_agents = session.open_auxiliary_agents()
         self._owned.callback(auxiliary_agents.close)
         self._attach_run(attachment, auxiliary_agents)
 

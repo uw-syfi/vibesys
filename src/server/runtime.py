@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 from contextlib import ExitStack, suppress
 from functools import partial
 from typing import TYPE_CHECKING, Protocol, TypeVar
@@ -93,11 +94,12 @@ if TYPE_CHECKING:
 
     from server.events import RunEvent
     from server.host_api import RunStatus
-    from vibesys.api import RunHandle, RunRequest, RunResult, Runs, RunSession
+    from vibesys.api import RunHandle, RunReader, RunRequest, RunResult, Runs, RunSession
     from vs_project.api import OperatorKey
     from vs_sim.api import Platform
 
 
+_LOG = logging.getLogger(__name__)
 _RunValueT = TypeVar("_RunValueT")
 DETACHED_DRAIN_TIMEOUT_SECONDS = 2.0
 """How long a detached server that is exiting waits for clients to read its last events."""
@@ -215,6 +217,7 @@ class ServerRuntime:
         instance_path: Path | None = None,
         detach: bool = False,
         read_only_log: Path | None = None,
+        open_reader: Callable[[], RunReader] | None = None,
         reader_idle_seconds: float | None = None,
         observer: ServerLifecycleObserver | None = None,
         platform: Platform,
@@ -233,6 +236,9 @@ class ServerRuntime:
         ``run_id`` names the run every journaled event belongs to, from the
         first; only a read-only reopen (``read_only_log``) takes it from the
         recorded events instead.
+
+        A read-only server opens the finished run for conversation through ``open_reader`` when
+        it is given one; without it, chat on the run answers from its recorded events only.
 
         A read-only server without the web gateway ends once no client has held a
         connection for ``reader_idle_seconds`` (one nobody connects to ends that long
@@ -253,6 +259,7 @@ class ServerRuntime:
         self.instance_path = instance_path
         self.detach = detach
         self.read_only_log = read_only_log
+        self._open_reader = open_reader
         self._reader_idle_seconds = reader_idle_seconds
         self.observer = observer
         self._shutdown = self.threads.event()
@@ -358,6 +365,8 @@ class ServerRuntime:
     def run(self, run: Callable[[], _RunValueT]) -> _RunValueT | None:
         """Serve requests while executing ``run`` in the calling thread."""
         self._attach_journal()
+        if self._open_reader is not None:
+            self._attach_chat_reader(self._open_reader)
         if self.read_only_log is None:
             self.journal.record(
                 EventType.SERVER_READY,
@@ -436,6 +445,15 @@ class ServerRuntime:
                             f"{message}\n",
                             source="experiment-chat",
                         )
+
+    def _attach_chat_reader(self, open_reader: Callable[[], RunReader]) -> None:
+        """Give the finished run's chat an agent; a run that cannot be opened keeps its summary answers."""
+        try:
+            reader = open_reader()
+        except Exception:  # noqa: BLE001  # lint-waiver: LW-101051 [BLE001]; a finished run that cannot be opened for conversation is still served for reading, so the failure is logged, not raised
+            _LOG.warning("chat cannot read the finished run", exc_info=True)
+            return
+        self.integration.attach_reader(reader)
 
     @property
     def _detachable_mode(self) -> bool:

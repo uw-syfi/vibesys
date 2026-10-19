@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from vibesys.api.auxiliary import AuxiliaryAgentLaunch, ManagedAgent
-    from vibesys.run.integration import RunResources
+    from vibesys.run.integration import AuxiliaryResources
     from vs_agent.api import (
         AgentClientProtocol,
         AgentEventSink,
@@ -45,7 +45,7 @@ class SessionAgents(Protocol):
 
     def open_environment(
         self,
-        resources: RunResources,
+        resources: AuxiliaryResources,
         *,
         mounts: tuple[HostResource, ...] = (),
         agent_backend: str | None = None,
@@ -57,7 +57,7 @@ class SessionAgents(Protocol):
     def create_agent(
         self,
         launch: AuxiliaryAgentLaunch,
-        resources: RunResources,
+        resources: AuxiliaryResources,
         agent_events: AgentEventSink,
     ) -> ManagedAgent:
         """Open one conversation and transfer its resource ownership."""

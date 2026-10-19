@@ -447,7 +447,7 @@ def test_auxiliary_selection_rejected_before_environment_acquisition(
     )
 
     with pytest.raises(ValueError, match=provider):
-        agents.create_agent(launch, resources, NULL_AGENT_EVENT_SINK)
+        agents.create_agent(launch, resources.auxiliary(), NULL_AGENT_EVENT_SINK)
 
     assert environment.requests == []
     assert environment.sessions == []

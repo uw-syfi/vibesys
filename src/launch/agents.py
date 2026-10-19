@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.api import AuxiliaryAgentLaunch, ManagedAgent, OrchestrationRegistry
-    from vibesys.api.wiring import RunResources
+    from vibesys.api.wiring import AuxiliaryResources
     from vs_agent.api import (
         AgentClientProtocol,
         AgentEventSink,
@@ -64,7 +64,7 @@ class BuiltInSessionAgents:
 
     def open_environment(
         self,
-        resources: RunResources,
+        resources: AuxiliaryResources,
         *,
         mounts: tuple[HostResource, ...] = (),
         agent_backend: str | None = None,
@@ -75,10 +75,9 @@ class BuiltInSessionAgents:
 
         ``skills`` names the skill set to install: the run's own, or the chat agent's.
         """
-        environment = resources.environment_resources
         return open_agent_execution_environment(
-            environment.request,
-            environment.session,
+            resources.environment_request,
+            None,
             share_session=False,
             skill_selection=platform_skill_selection(resources.backend),
             skill_source_dirs=(
@@ -88,17 +87,17 @@ class BuiltInSessionAgents:
             mounts=mounts,
             agent_backend=agent_backend,
             cli_provider=cli_provider,
-            open_session=environment.open_session,
+            open_session=resources.open_environment_session,
         )
 
     def create_agent(
         self,
         launch: AuxiliaryAgentLaunch,
-        resources: RunResources,
+        resources: AuxiliaryResources,
         agent_events: AgentEventSink,
     ) -> ManagedAgent:
         """Open a conversation, closing provisional resources on failure."""
-        environment = resources.environment_resources
+        environment = resources.environment_request
         missing = tuple(item.path for item in launch.readable_inputs if not item.path.exists())
         if missing:
             message = f"auxiliary agent readable path does not exist: {missing[0]}"
@@ -129,7 +128,7 @@ class BuiltInSessionAgents:
                 conversation_spec = ManagedConversationSpec(
                     role=launch.role,
                     member_id=launch.member_id,
-                    workspace=environment.request.workspace,
+                    workspace=environment.workspace,
                     system_prompt=launch.system_prompt,
                     continuation_prompt=launch.continuation_prompt,
                     tool_servers=(relay.server,),
@@ -145,8 +144,8 @@ class BuiltInSessionAgents:
                         conversation_spec,
                         agent_spec=spec,
                         environment=opened,
-                        log_directory=environment.request.log_dir,
-                        agent_homes_directory=environment.request.agent_homes_dir,
+                        log_directory=environment.log_dir,
+                        agent_homes_directory=environment.agent_homes_dir,
                         agent_events=agent_events,
                         additional_host_resources=readable_resources,
                         client_factory=self.client_factory,
@@ -158,7 +157,7 @@ class BuiltInSessionAgents:
             owned.pop_all()
             return agent
 
-    def _serve_run_tools(self, resources: RunResources) -> _RunTools:
+    def _serve_run_tools(self, resources: AuxiliaryResources) -> _RunTools:
         """Serve the run's read-model to one conversation, on the host, behind a private token.
 
         The tools read the run's state, which no agent container may see
@@ -167,9 +166,8 @@ class BuiltInSessionAgents:
         private directory, which every agent container mounts; the token is issued to this
         conversation's server alone, so another agent of the run cannot read through it.
         """
-        project = resources.project_resources
         store = open_run_store(
-            project.project,
+            resources.project,
             registry=self.registry,
             git=self.git,
             threads=resources.threads,
@@ -177,7 +175,7 @@ class BuiltInSessionAgents:
         socket_path = agent_tool_socket(resources, f"chat-{uuid.uuid4().hex[:8]}.sock")
         token = uuid.uuid4().hex
         service = ToolRelayService(
-            build_tools(store, project.state.run_id),
+            build_tools(store, resources.run_id),
             socket_path,
             token=token,
             network=self.network,

@@ -19,6 +19,7 @@ from vibesys.api.request import validate_run_request as _validate_run_request
 from vibesys.api.store import open_run_store as _open_run_store
 from vibesys.api.wiring import NativeProfilerPreflight, SessionImplementations
 from vibesys.api.wiring import create_session as _create_session
+from vibesys.api.wiring import open_run_reader as _open_run_reader
 from vs_agent.api import SHIPPED_PROVIDERS, AgentInvocationState, launch_shell_environment
 from vs_github.api import GitHubCLI
 from vs_project.api import Git, generate_run_id
@@ -34,6 +35,8 @@ if TYPE_CHECKING:
         CoreEvent,
         OrchestrationDescriptor,
         OrchestrationRegistry,
+        RunReader,
+        RunReaders,
         RunRequest,
         RunResult,
         Runs,
@@ -94,6 +97,36 @@ def create_session(
 ) -> RunSession:
     """Compose a session with built-ins or an explicitly supplied catalog."""
     selected_registry = _catalog(registry if registry is not None else settings.registry)
+
+    def publish(event: CoreEvent) -> None:
+        # Pre-attachment observations have no durable journal identity yet.
+        if not event.run_id and (request.run_id is not None or request.resume is not None):
+            event = event.model_copy(update={"run_id": request.resolved_run_id})
+        sink(event)
+
+    return _create_session(
+        request,
+        sink=publish,
+        registry=selected_registry,
+        implementations=_implementations(settings, selected_registry),
+    )
+
+
+def default_run_readers(settings: LaunchSettings) -> RunReaders:
+    """Assemble the opener of finished runs for conversation, over the built-in catalog."""
+    registry = _catalog(settings.registry)
+    implementations = _implementations(settings, registry)
+
+    def open_reader(request: RunRequest) -> RunReader:
+        return _open_run_reader(request, registry=registry, implementations=implementations)
+
+    return open_reader
+
+
+def _implementations(
+    settings: LaunchSettings, selected_registry: OrchestrationRegistry
+) -> SessionImplementations:
+    """The execution implementations ``settings`` selects, for a session or a reader."""
     timing = settings.timing
     client_factory = (
         default_agent_client_factory(threads=timing.threads)
@@ -124,57 +157,44 @@ def create_session(
         else settings.agents
     )
 
-    def publish(event: CoreEvent) -> None:
-        # Pre-attachment observations have no durable journal identity yet.
-        if not event.run_id and (request.run_id is not None or request.resume is not None):
-            event = event.model_copy(update={"run_id": request.resolved_run_id})
-        sink(event)
-
-    return _create_session(
-        request,
-        sink=publish,
-        registry=selected_registry,
-        implementations=SessionImplementations(
-            agent_client_factory=client_factory,
-            backend_factory=backend_factory,
-            profiler_preflight=(
-                NativeProfilerPreflight(settings.processes)
-                if settings.profiler_preflight is None
-                else settings.profiler_preflight
-            ),
-            agents=agents,
-            stop_timer=timing.clock.sleep if settings.stop_timer is None else settings.stop_timer,
-            timing=timing,
-            blocking=settings.blocking,
-            network=settings.network,
-            invocation_store_factory=(
-                _durable_invocation_store
-                if settings.invocation_store_factory is None
-                else settings.invocation_store_factory
-            ),
-            stateless_tool_servers=STATELESS_TOOL_SERVERS,
-            git=Git(settings.processes),
-            github=GitHubCLI(settings.processes),
-            git_repository=settings.git_repository,
-            system=EnvironmentSystem(
-                login_environment=(
-                    launch_shell_environment
-                    if settings.login_environment is None
-                    else settings.login_environment
-                ),
-                threads=timing.threads,
-                network=settings.network,
-                processes=settings.processes,
-                launcher=settings.piped_processes,
-                slurm_processes=(
-                    settings.processes
-                    if settings.slurm_processes is None
-                    else settings.slurm_processes
-                ),
-            ),
-            state_stores=settings.state_stores,
-            agent_providers=tuple(sorted(SHIPPED_PROVIDERS)),
+    return SessionImplementations(
+        agent_client_factory=client_factory,
+        backend_factory=backend_factory,
+        profiler_preflight=(
+            NativeProfilerPreflight(settings.processes)
+            if settings.profiler_preflight is None
+            else settings.profiler_preflight
         ),
+        agents=agents,
+        stop_timer=timing.clock.sleep if settings.stop_timer is None else settings.stop_timer,
+        timing=timing,
+        blocking=settings.blocking,
+        network=settings.network,
+        invocation_store_factory=(
+            _durable_invocation_store
+            if settings.invocation_store_factory is None
+            else settings.invocation_store_factory
+        ),
+        stateless_tool_servers=STATELESS_TOOL_SERVERS,
+        git=Git(settings.processes),
+        github=GitHubCLI(settings.processes),
+        git_repository=settings.git_repository,
+        system=EnvironmentSystem(
+            login_environment=(
+                launch_shell_environment
+                if settings.login_environment is None
+                else settings.login_environment
+            ),
+            threads=timing.threads,
+            network=settings.network,
+            processes=settings.processes,
+            launcher=settings.piped_processes,
+            slurm_processes=(
+                settings.processes if settings.slurm_processes is None else settings.slurm_processes
+            ),
+        ),
+        state_stores=settings.state_stores,
+        agent_providers=tuple(sorted(SHIPPED_PROVIDERS)),
     )
 
 
@@ -253,6 +273,7 @@ __all__ = [
     "LaunchSettings",
     "built_in_orchestrations",
     "create_session",
+    "default_run_readers",
     "default_runs",
     "open_run_store",
     "orchestration_roles",

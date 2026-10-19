@@ -9,16 +9,14 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
-from uuid import UUID
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.multi_search import SearchRecord
+from tests.support.chat_run import project_with_run, seed_agent_state
 from tests.support.real_git import NO_GIT, REAL_GIT
 
 from launch import built_in_orchestrations, open_run_store
@@ -37,13 +35,9 @@ from vibesys.api import (
     SteerTargetKind,
     SteerTargets,
 )
-from vibesys.api.hypothesis import RoundRecord
 from vibesys.api.testing import FakeRunRecord, FakeRunStore
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
-from vibesys.hypothesis import OrchestratorPlan
-from vibesys.hypothesis.state import Hypothesis, HypothesisReview, HypothesisState
-from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.run.integration import RunResources
 from vs_agent.api import (
     CONTAINER_PYTHON,
@@ -62,13 +56,6 @@ from vs_evaluation.api.tool_relay import (
     ToolRelayClient,
 )
 from vs_mcp.api import tool_server
-from vs_project.api import (
-    AgentRoleExecutionRecord,
-    OrchestrationDescriptor,
-    Project,
-    RunEnvironmentRecord,
-    RunExecutionRecord,
-)
 from vs_runtime.api.infrastructure import RunEnvironmentSessionRole
 from vs_sandbox.api import CommandResult, EnvironmentBindMount, ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner
@@ -80,96 +67,9 @@ if TYPE_CHECKING:
     from vibesys.api.store import RunStore
     from vs_agent.api import ToolResultPayload
     from vs_mcp.api import ToolServerDescriptor, ToolSpec
+    from vs_project.api import Project
 
 _ID = st.from_regex(r"[a-z][a-z0-9-]{0,10}", fullmatch=True)
-NOW = datetime(2026, 8, 11, 12, 34, 56, tzinfo=UTC)
-UNIQUE = UUID("12345678-1234-5678-1234-567812345678")
-
-
-def _configuration() -> AgentOrchestrationOptions:
-    return AgentOrchestrationOptions(
-        interface="inprocess",
-        max_rounds=10,
-        max_retries_per_round=3,
-        judge_every=3,
-        modality="text_generation",
-        operator_constraints=("Do not change the ABI",),
-    )
-
-
-def _project_with_run(tmp_path: Path) -> tuple[Project, str]:
-    (tmp_path / "OBJECTIVE.md").write_text("Make it fast.\n", encoding="utf-8")
-    project = Project.open(tmp_path)
-    project.state.create_project("Queue SPSC", now=NOW)
-    manifest = project.state.new_run_manifest(
-        "Queue SPSC",
-        branch="vibesys/queue",
-        vibesys_version="0.2.0",
-        run_environment=RunEnvironmentRecord(name="docker"),
-        execution=RunExecutionRecord(
-            model="gpt-5",
-            agent_backend="cli",
-            cli_provider="codex",
-            cli_timeout=1800,
-            compute_backend="cpu",
-            requested_profiler="linux-cpu",
-            resolved_profiler="linux-cpu",
-            default_reasoning_effort="high",
-            agent_roles={
-                "orchestrator": AgentRoleExecutionRecord(
-                    model="gpt-5.6-sol", reasoning_effort="xhigh"
-                ),
-                "implementer": AgentRoleExecutionRecord(
-                    model="gpt-5.6-luna", reasoning_effort="medium"
-                ),
-            },
-        ),
-        orchestration=OrchestrationDescriptor(
-            id="multi-agent",
-            config_version=1,
-            options=_configuration().model_dump(mode="json"),
-        ),
-        trusted_input_baseline="a" * 40,
-        now=NOW,
-        unique=UNIQUE,
-    )
-    project.state.create_run(manifest)
-    return project, manifest.run_id
-
-
-def _hypothesis() -> Hypothesis:
-    return Hypothesis(
-        hypothesis_id="H-01",
-        started_round=1,
-        plan=OrchestratorPlan(
-            hypothesis_id="H-01",
-            title="Batch decode requests",
-            hypothesis="Batching improves throughput.",
-            task="Add request batching.",
-            pass_criteria="",
-            reasoning="",
-        ),
-        rounds=[
-            RoundRecord(
-                round_number=1,
-                commit="c1",
-                perf_metric=100.0,
-                perf_unit="ops_s",
-                perf_provenance="implementer",
-                passed=True,
-                hypothesis_id="H-01",
-                judge_verdict="pass",
-                hypothesis_outcome="proven",
-            ),
-        ],
-        review=HypothesisReview.PASS,
-    )
-
-
-def _seed_agent_state(project: Project, run_id: str) -> None:
-    SearchRecord(project, run_id).save(
-        HypothesisState(hypotheses=[_hypothesis()], active_hypothesis_id="H-01")
-    )
 
 
 def _server(tools: tuple[ToolSpec, ...]) -> FastMCP:
@@ -193,8 +93,8 @@ async def _call(server: FastMCP, name: str, **kwargs: object) -> str:
 
 
 def _tools(tmp_path: Path) -> tuple[tuple[ToolSpec, ...], str]:
-    project, run_id = _project_with_run(tmp_path)
-    _seed_agent_state(project, run_id)
+    project, run_id = project_with_run(tmp_path)
+    seed_agent_state(project, run_id)
     store = open_run_store(project, git=REAL_GIT, threads=SimThreads())
     return build_tools(store, run_id), run_id
 
@@ -243,7 +143,7 @@ class TestToolRegistration:
         assert sending == []
 
     def test_an_unknown_run_fails_each_call_naming_it(self, tmp_path: Path) -> None:
-        project, _run_id = _project_with_run(tmp_path)
+        project, _run_id = project_with_run(tmp_path)
         store = open_run_store(project, git=REAL_GIT, threads=SimThreads())
         server = _server(build_tools(store, "no-such-run"))
 
@@ -254,7 +154,7 @@ class TestToolRegistration:
 
 class TestEndToEnd:
     def test_non_agent_projection_has_neutral_run_tools(self, tmp_path: Path) -> None:
-        _project, run_id = _project_with_run(tmp_path)
+        _project, run_id = project_with_run(tmp_path)
 
         class CustomStore:
             def get_run(self, requested: str) -> RunView:
@@ -658,8 +558,8 @@ class _ChatSession:
     def __init__(
         self, tmp_path: Path, threads: SimThreads, *, containerized: bool, runner: FakeCommandRunner
     ) -> None:
-        project, run_id = _project_with_run(tmp_path)
-        _seed_agent_state(project, run_id)
+        project, run_id = project_with_run(tmp_path)
+        seed_agent_state(project, run_id)
         self.network = SimNetwork(threads)
         self.client = FakeAgentClient(
             threads=threads, capabilities=AgentCapabilities(tool_servers=True, session_reuse=True)
@@ -678,7 +578,7 @@ class _ChatSession:
             _ContainerSession(runner, containerized=containerized),
             threads,
         )
-        self.agent = agents.create_agent(_CHAT, resources, self.events)
+        self.agent = agents.create_agent(_CHAT, resources.auxiliary(), self.events)
         self.threads = threads
 
     def server(self) -> ToolServerDescriptor:

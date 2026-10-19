@@ -572,8 +572,6 @@ class RunApi:
         )
 
     def _execute_chat_thread_create(self, request: ChatThreadCreateQuery) -> Response:
-        if self._controller.is_read_only():
-            raise RunReadOnlyError
         sequence = self._journal.latest_sequence
         spec = self._chat.create_thread(
             harness=request.harness,

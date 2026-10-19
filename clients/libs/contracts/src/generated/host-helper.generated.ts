@@ -359,7 +359,8 @@ export type HelperFeature =
   | "usage_window"
   | "run_trace"
   | "run_ending"
-  | "chat_ended_runs";
+  | "chat_ended_runs"
+  | "chat_ended_run_questions";
 export type Features1 = HelperFeature[];
 export type VibesysVersion = string;
 export type Root = string;

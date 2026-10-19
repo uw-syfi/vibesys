@@ -72,7 +72,7 @@ from vs_sim.api import OsThreads, SystemClock
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from vibesys.api import Runs
+    from vibesys.api import RunReaders, Runs
     from vs_sim.api import Clock, Threads
 
 SERVER_EXITED = FailureReason(
@@ -389,13 +389,18 @@ def narration_installed() -> Iterator[NarrationHandler]:
         root.setLevel(level)
 
 
-def main(argv: list[str] | None = None, *, runs: Runs | None = None) -> None:
+def main(
+    argv: list[str] | None = None,
+    *,
+    runs: Runs | None = None,
+    run_readers: RunReaders | None = None,
+) -> None:
     """Hold this server's registry id for its lifetime and serve its run."""
     with narration_installed():
-        _serve(argv, runs)
+        _serve(argv, runs, run_readers)
 
 
-def _serve(argv: list[str] | None, runs: Runs | None) -> None:
+def _serve(argv: list[str] | None, runs: Runs | None, run_readers: RunReaders | None) -> None:
     arguments = sys.argv[1:] if argv is None else argv
     identity = _identity(arguments)
     root = instance_root(os.environ, os.getuid())
@@ -412,7 +417,9 @@ def _serve(argv: list[str] | None, runs: Runs | None) -> None:
             threads=OsThreads(),
         )
         try:
-            import_module("entrypoints.server").main(arguments, observer=publisher, runs=runs)
+            import_module("entrypoints.server").main(
+                arguments, observer=publisher, runs=runs, run_readers=run_readers
+            )
         finally:
             publisher.end()
 

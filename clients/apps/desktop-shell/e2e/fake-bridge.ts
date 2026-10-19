@@ -576,7 +576,7 @@ export function installFakeNewRun(seed: FakeBridgeSeed): void {
   // Serialized into the page: it cannot name an import. Includes `REQUIRED_HELPER_FEATURES`.
   const features =
     catalog?.features ??
-    'run_options preflight examples run_history run_summary run_trace run_roles example_catalogue run_role_agents project_goal chat_ended_runs'.split(
+    'run_options preflight examples run_history run_summary run_trace run_roles example_catalogue run_role_agents project_goal chat_ended_runs chat_ended_run_questions'.split(
       ' ',
     );
   const roles =
