@@ -142,6 +142,9 @@ class _Scheduler(FakeCluster):
         self.lose_submit_replies = 0
         # How many cancels never reach the scheduler, as over a broken connection.
         self.failing_cancels = 0
+        # How long each cancel takes on the clock, as on a sick controller; and how many came.
+        self.cancel_s = 0.0
+        self.cancels = 0
 
     def submit(
         self, request: SlurmBatchRequest | SlurmJobRequest, *, operation_id: str
@@ -214,6 +217,8 @@ class _Scheduler(FakeCluster):
         by_job_id: bool = False,
         observed: ClusterObservation | None = None,
     ) -> ClusterCancelOutcome:
+        self.cancels += 1
+        self.clock.advance(self.cancel_s)
         if self.failing_cancels:
             self.failing_cancels -= 1
             return ClusterUnknown(operation_id=None, reason="ssh: connection reset by peer")
@@ -869,3 +874,54 @@ async def test_a_cancel_whose_withdrawal_ended_unknown_withdraws_it_when_tried_a
     assert world.scheduler.status(operation) is SlurmJobStatus.CANCELLED
     assert world.entry_state() is LedgerState.WITHDRAWN
     await run.executor.close()
+
+
+class _TimerSleeper(_ParkingSleeper):
+    """Poll pauses and the lease keeper park, as ``_ParkingSleeper``'s; every other wait is a
+    timer that ends once the shared clock reaches its end, which only the scheduler moves."""
+
+    def __init__(self, clock: ManualClock) -> None:
+        super().__init__()
+        self._clock = clock
+
+    async def sleep(self, seconds: float) -> None:
+        if _is_poll_pause(seconds) or seconds == LEASE_S / 3:
+            await super().sleep(seconds)
+        end = self._clock.now() + seconds
+        while self._clock.now() < end:
+            await yield_now()
+
+
+@pytest.mark.regression
+@pytest.mark.xfail(strict=True, reason="periodic-1330 LOW-6: a close's release is unbounded")
+async def test_a_close_on_a_sick_controller_gives_up_releasing_and_detaches(
+    tmp_path: Path,
+) -> None:
+    """periodic-1330 LOW-6: a SIGTERM's close relinquished every job, however long it took.
+
+    Each scancel takes 110 s (a transport call's limit) and is lost, so every relinquish
+    ends unknown and is tried again, with no end but the retries. Past its bound, a close
+    starts no further release: it detaches what is left, as a run that keeps its jobs on a
+    stop does, so the job's record stays resumable and its lease lapses.
+    """
+    world = _World()
+    world.scheduler.queue_s = math.inf
+    run = world.run(tmp_path / "run-1", "run-1", sleeper=_TimerSleeper(world.clock))
+    await _attached(run, "eval-1")
+    (operation,) = world.scheduler.jobs
+    world.scheduler.failing_cancels = 10**6
+    world.scheduler.cancel_s = CONFIG.transport_timeout_seconds
+    began = world.clock.now()
+
+    await asyncio.wait_for(run.executor.close(), timeout=_BOUND_S)
+
+    # The scancel running when the bound passed ends; none starts after it.
+    assert world.scheduler.cancels <= 2
+    assert world.clock.now() - began <= 2 * CONFIG.transport_timeout_seconds
+    assert world.scheduler.status(operation) is SlurmJobStatus.PENDING
+    world.scheduler.failing_cancels = 0
+    restarted = world.run(tmp_path / "run-1", "run-1")
+    assert await restarted.executor.inspect("eval-1") is not None
+    await restarted.executor.cancel("eval-1")
+    assert world.scheduler.status(operation) is SlurmJobStatus.CANCELLED
+    await restarted.executor.close()
