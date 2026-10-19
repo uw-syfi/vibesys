@@ -720,34 +720,57 @@ function sideBySide(a: DOMRect, b: DOMRect, style: CSSStyleDeclaration): boolean
   return apart && flexRow && shared >= Math.min(a.height, b.height) / 2;
 }
 
+interface Boxed {
+  readonly control: Element;
+  readonly frame: Element;
+  readonly box: DOMRect;
+}
+
+/** The flex row that holds `a` and `b` side by side, at most two levels down; else null. */
+function sharedRow(a: Boxed, b: Boxed): Element | null {
+  const row = commonAncestor(a.frame, b.frame);
+  if (row === null || !sideBySide(a.box, b.box, getComputedStyle(row))) return null;
+  return depthBelow(row, a.frame) > 2 || depthBelow(row, b.frame) > 2 ? null : row;
+}
+
+/** By how much two controls of one row are out of line (tops, in px), or null when they line up or are not compared. */
+function outOfLine(a: Boxed, b: Boxed): number | null {
+  const heights = Math.abs(a.box.height - b.box.height);
+  const tops = Math.abs(a.box.top - b.box.top);
+  if (heights <= 1 && tops <= 1) return null;
+  const button = 'button.vs-button';
+  return a.control.matches(button) && b.control.matches(button) && heights > 1 ? null : tops;
+}
+
 /**
  * Controls side by side in one flex row, at most two levels down from it (a search box and a sort
  * select in a toolbar; the position, state chip and action of the time bar) that are not the same height or do not start at the same
  * top edge, to within 1 px: they read as misaligned, whatever centers them. Radios, checkboxes and
- * sliders are not boxes of this kind.
+ * sliders are not boxes of this kind. Buttons of different heights (sizes) are not compared;
+ * buttons of one height in a row start at one top, so a reason under one of them hangs below
+ * the row (Back and Continue).
  */
 export function controlRowCheck(): Violation[] {
   const found: Violation[] = [];
   const kinds = [
     'input:not([type="radio"],[type="checkbox"],[type="range"],[type="hidden"],[type="file"])',
     'select',
+    'button.vs-button',
     '.vs-scrubber-head > *',
   ].join(',');
-  const boxes = [...document.body.querySelectorAll(kinds)]
+  const boxes: Boxed[] = [...document.body.querySelectorAll(kinds)]
     .filter(isShown)
     .map(control => ({control, frame: frameOf(control)}))
     .map(({control, frame}) => ({control, frame, box: frame.getBoundingClientRect()}))
     .filter(each => each.box.width > 0 && each.box.height > 0);
   for (const [at, a] of boxes.entries()) {
     for (const b of boxes.slice(at + 1)) {
-      const row = commonAncestor(a.frame, b.frame);
-      if (row === null || !sideBySide(a.box, b.box, getComputedStyle(row))) continue;
-      if (depthBelow(row, a.frame) > 2 || depthBelow(row, b.frame) > 2) continue;
-      const [heights, tops] = [a.box.height - b.box.height, a.box.top - b.box.top];
-      if (Math.abs(heights) <= 1 && Math.abs(tops) <= 1) continue;
+      const row = sharedRow(a, b);
+      const tops = row === null ? null : outOfLine(a, b);
+      if (row === null || tops === null) continue;
       found.push({
         check: 'control-row',
-        message: `controls in one row do not line up: ${describe(a.control)} is ${Math.round(a.box.height)} px high and ${describe(b.control)} ${Math.round(b.box.height)} px, their tops differ by ${Math.abs(Math.round(tops))} px`,
+        message: `controls in one row do not line up: ${describe(a.control)} is ${Math.round(a.box.height)} px high and ${describe(b.control)} ${Math.round(b.box.height)} px, their tops differ by ${Math.round(tops)} px`,
         where: describe(row),
       });
     }
@@ -870,6 +893,8 @@ export function columnTopsCheck(): Violation[] {
 /** What `screen-check.ts` sends to the page ahead of a check. */
 export const HELPERS: readonly ((...args: never[]) => unknown)[] = [
   inCode,
+  sharedRow,
+  outOfLine,
   describe,
   boxOf,
   cut,

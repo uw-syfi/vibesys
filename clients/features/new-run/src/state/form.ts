@@ -8,6 +8,7 @@ import type {
   Check,
   HelperFeature,
   MachineDescription,
+  TaskGoal,
 } from '@vibesys/contracts/host-helper';
 import type {HostKey} from '@vibesys/hosts';
 import type {HarnessOffer, Offered, RoleOption, RunInputs} from '@vibesys/ipc';
@@ -334,6 +335,18 @@ export function offers(
   feature: HelperFeature,
 ): boolean {
   return helper !== null && helper.for === machine && helper.features.includes(feature);
+}
+
+/** A task's goal as its machine's helper read it, for the project and task it was asked of. */
+export interface GoalFor {
+  /** `goalKey` of the machine, project and task asked. */
+  readonly for: string;
+  readonly value: Offered<TaskGoal>;
+}
+
+/** The key a goal is read for: the machine, the user's project on it, and the task. */
+export function goalKey(machine: HostKey, project: string, task: string): string {
+  return JSON.stringify([machine, project, task]);
 }
 
 /** The checks a run is held to, for one key. */

@@ -113,6 +113,7 @@ export type {
   SlurmClusterSettings,
   SlurmTarget,
   StopOutcome,
+  TaskGoal,
   TaskList,
   TurnReply,
   UnreadableRecord,

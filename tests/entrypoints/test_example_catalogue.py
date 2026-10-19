@@ -10,7 +10,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from tests.support.example_materializer import FakeExampleMaterializer
 
-from entrypoints.example_catalog import CatalogError, bounded_goal, list_examples
+from entrypoints.example_catalog import CatalogError, list_examples
 from entrypoints.examples import HelperExampleProjects
 from server.host_api import (
     ExamplesListReply,
@@ -18,7 +18,7 @@ from server.host_api import (
     HelperFeature,
     request_features,
 )
-from server.host_examples import GOAL_MAX_CHARS, ExampleList
+from server.host_examples import GOAL_MAX_CHARS, ExampleList, bounded_goal
 from server.host_preflight import Backend
 from vs_project.api import (
     AcceleratorVendor,

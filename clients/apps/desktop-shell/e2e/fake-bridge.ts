@@ -55,6 +55,7 @@ export type NewRunMethods =
   | 'harnesses'
   | 'examples'
   | 'tasks'
+  | 'taskGoal'
   | 'preflight'
   | 'createFromExample'
   | 'copyOut'
@@ -121,6 +122,8 @@ export interface FakeBridgeSeed {
     readonly examples: ExampleList;
     /** The tasks of each project the machine has. */
     readonly projects: Readonly<Record<string, readonly string[]>>;
+    /** The goal of each task of the user's own projects, by `PROJECT TASK` (a space between). */
+    readonly goals?: Readonly<Record<string, unknown>>;
     /** What the helper agreed to in `hello`; every feature New run uses (catalogue included) when not given. */
     readonly features?: readonly string[];
     /** The roles the helper reports for a run (feature `run_roles`); the multi roles when not given. */
@@ -467,11 +470,15 @@ export function installFakeNewRun(seed: FakeBridgeSeed): void {
     return ok({project, tasks});
   };
   const insideRepository = (project: string) => project.includes('/vibesys/');
+  const words = (text: string) => text.split(' ');
   const features =
     catalog?.features ??
-    'run_options preflight examples run_roles example_catalogue run_role_agents'.split(' ');
+    words(
+      'run_options preflight examples run_roles example_catalogue run_role_agents project_goal',
+    );
   const roles =
-    catalog?.roles ?? 'multi-orchestrator multi-profiler multi-implementer multi-judge'.split(' ');
+    catalog?.roles ?? words('multi-orchestrator multi-profiler multi-implementer multi-judge');
+  const check = (id: string, state: string, detail: string) => ({id, state, detail, fix: null});
   const preflight = (_host: string, inputs: {project: string}) => {
     newRun.preflights.push(inputs);
     const own = insideRepository(inputs.project)
@@ -486,28 +493,13 @@ export function installFakeNewRun(seed: FakeBridgeSeed): void {
       kind: 'offered',
       value: {
         checks: [
-          {id: 'checkout_found', state: 'ok', detail: 'VibeSys 0.9.0 at ~/vibesys.', fix: null},
+          check('checkout_found', 'ok', 'VibeSys 0.9.0 at ~/vibesys.'),
           own,
-          {
-            id: 'project_clean',
-            state: 'ok',
-            detail: 'The project has no uncommitted changes.',
-            fix: null,
-          },
-          {id: 'settings_valid', state: 'ok', detail: 'vibesys.yaml is valid.', fix: null},
-          {id: 'docker_reachable', state: 'ok', detail: 'Docker 27.3.1.', fix: null},
-          {
-            id: 'agent_image',
-            state: 'warn',
-            detail: 'No agent image was built here yet; the first run builds it.',
-            fix: null,
-          },
-          {
-            id: 'evaluator_available',
-            state: 'ok',
-            detail: 'The task evaluator is available.',
-            fix: null,
-          },
+          check('project_clean', 'ok', 'The project has no uncommitted changes.'),
+          check('settings_valid', 'ok', 'vibesys.yaml is valid.'),
+          check('docker_reachable', 'ok', 'Docker 27.3.1.'),
+          check('agent_image', 'warn', 'No agent image was built here yet.'),
+          check('evaluator_available', 'ok', 'The task evaluator is available.'),
         ],
         roles: features.includes('run_roles') ? roles : null,
         backend: 'cpu',
@@ -527,6 +519,11 @@ export function installFakeNewRun(seed: FakeBridgeSeed): void {
     tasks: (_host: string, project: string) => {
       const tasks = projects.get(project);
       return tasks === undefined ? refused(`${project} is not a VibeSys project.`) : ok(tasks);
+    },
+    taskGoal: (_host: string, project: string, task: string) => {
+      if (!features.includes('project_goal')) return ok({kind: 'unsupported'});
+      const goal = catalog?.goals?.[`${project} ${task}`];
+      return goal === undefined ? refused(`${project} has no task ${task}.`) : offered(goal);
     },
     preflight,
     createFromExample: (_host: string, example: string, destination: string) =>

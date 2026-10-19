@@ -13,6 +13,7 @@ import type {
   ExampleList,
   HelperFeature,
   MachineDescription,
+  TaskGoal,
 } from '@vibesys/contracts/host-helper';
 import type {HostKey} from '@vibesys/hosts';
 import type {HarnessOffer, Offered, PreflightResult, RunInputs, StartedRun} from '@vibesys/ipc';
@@ -45,6 +46,8 @@ import {
   defaultRole,
   type FactsFor,
   type Form,
+  type GoalFor,
+  goalKey,
   type HelperFor,
   inputsKey,
   lastRun,
@@ -84,6 +87,8 @@ export interface NewRunContext {
   readonly examples: ExamplesFor | null;
   readonly tasks: {readonly for: string; readonly list: readonly string[]} | null;
   readonly checks: ChecksFor | null;
+  /** The goal of the user's own task, once read (feature `project_goal`). */
+  readonly goal: GoalFor | null;
   /**
    * The role ids the run's orchestration declares, from the latest preflight that reported any:
    * null before one did, or from a helper that does not report them (`offers(..., 'run_roles')`).
@@ -214,6 +219,7 @@ function freshParts(machine: HostKey, recent: readonly RecentRun[]) {
     harnesses: null,
     examples: null,
     tasks: null,
+    goal: null,
     checks: null,
     roles: null,
     rerun: lastRun(machine, recent)?.start ?? null,
@@ -300,6 +306,17 @@ function flowWithTasks(context: NewRunContext, list: readonly string[]): Flow {
   return flow;
 }
 
+/** The project and task whose goal is asked: the user's own, once both are answered. */
+function goalAsked(
+  context: NewRunContext,
+): {readonly project: string; readonly task: string} | null {
+  const project = projectPath(context.form);
+  const {task} = context.answers;
+  return context.answers.from === 'project' && project !== null && task !== null
+    ? {project, task}
+    : null;
+}
+
 /** Whether the machine reads the tasks of the user's own project now. */
 function readsTasks(context: NewRunContext): boolean {
   return context.answers.from === 'project' && projectPath(context.form) !== null;
@@ -319,6 +336,10 @@ export const newRunMachine = setup({
     tasks: unprovided<readonly string[], {readonly host: HostKey; readonly project: string}>(
       'tasks',
     ),
+    goal: unprovided<
+      Offered<TaskGoal>,
+      {readonly host: HostKey; readonly project: string; readonly task: string}
+    >('goal'),
     preflight: unprovided<
       Offered<PreflightResult>,
       {readonly host: HostKey; readonly inputs: RunInputs}
@@ -328,6 +349,11 @@ export const newRunMachine = setup({
   },
   guards: {
     readsTasks: ({context}) => readsTasks(context),
+    readsGoal: ({context}) =>
+      goalAsked(context) !== null && offers(context.helper, context.form.machine, 'project_goal'),
+    // A new project, task or path to read from changes which goal is asked.
+    changesGoal: ({event}) =>
+      event.type === 'answer' && ['project', 'task', 'from'].includes(event.change.kind),
     hasInputs: ({context}) => inputsKey(context.form) !== null,
     mayStart: ({context}) =>
       checksPass(context.form, context.checks) &&
@@ -659,6 +685,54 @@ export const newRunMachine = setup({
                   actions: {
                     type: 'fail',
                     params: ({event}) => ({step: 'tasks', error: event.error}),
+                  },
+                },
+              },
+            },
+            ready: {},
+          },
+        },
+        goal: {
+          initial: 'choosing',
+          on: {
+            answer: {guard: 'changesGoal', target: '.choosing'},
+            retry: {
+              guard: {type: 'failedAt', params: {step: 'goal'}},
+              target: '.choosing',
+              actions: 'clearProblem',
+            },
+          },
+          states: {
+            choosing: {always: [{guard: 'readsGoal', target: 'loading'}, {target: 'waiting'}]},
+            // Until the helper says it can read a goal, there is nothing to ask.
+            waiting: {always: {guard: 'readsGoal', target: 'loading'}},
+            loading: {
+              invoke: {
+                id: 'goal',
+                src: 'goal',
+                input: ({context}) => ({
+                  host: context.form.machine,
+                  ...(goalAsked(context) as {project: string; task: string}),
+                }),
+                onDone: {
+                  target: 'ready',
+                  actions: assign(({context, event}) => {
+                    const asked = goalAsked(context);
+                    return asked === null
+                      ? {}
+                      : {
+                          goal: {
+                            for: goalKey(context.form.machine, asked.project, asked.task),
+                            value: event.output,
+                          } satisfies GoalFor,
+                        };
+                  }),
+                },
+                onError: {
+                  target: 'ready',
+                  actions: {
+                    type: 'fail',
+                    params: ({event}) => ({step: 'goal', error: event.error}),
                   },
                 },
               },

@@ -34,6 +34,7 @@ import {
   type PathEntry,
   parseHelperRequest,
   type RunSummary,
+  type TaskGoal,
   type UnreadableRecord,
 } from '@vibesys/contracts/host-helper';
 import {ConnectionError} from '../shell/helper-channel.js';
@@ -106,6 +107,8 @@ export interface FakeHost {
   readonly unverified: string[];
   /** Project directories and their tasks. */
   readonly projects: Map<string, readonly string[]>;
+  /** What `project.task_goal` answers per `PROJECT TASK` (a space between); a task not named is `task_invalid`. */
+  readonly goals: Map<string, TaskGoal>;
   /**
    * The pages `runs.summary` answers per `PROJECT RUN_ID` (a space between), each served for its
    * `offset`; a page not named here, or a run not named, is an unknown run.
@@ -355,6 +358,7 @@ export class FakeHelper {
     unreadable: [],
     unverified: [],
     projects: new Map(),
+    goals: new Map(),
     summaries: new Map(),
     directories: new Map(),
     runHistory: new Map(),
@@ -431,6 +435,7 @@ export class FakeHelper {
     'measurement_target',
     'machine_compute',
     'agent_logins',
+    'project_goal',
   ]);
   /** The run log streams `logs.list` and `logs.read` serve; replace it to seed a store. */
   logStore = new FakeLogStore();
@@ -728,6 +733,7 @@ class HelperSession {
         return;
       case 'tasks.list':
       case 'runs.list':
+      case 'project.task_goal':
         this.#project(request);
         return;
       case 'run.start':
@@ -1236,9 +1242,34 @@ class HelperSession {
     });
   }
 
+  #taskGoal(request: Extract<HelperRequest, {type: 'project.task_goal'}>): void {
+    const id = request.request_id;
+    const {host} = this.#helper;
+    if (!host.projects.has(request.project)) {
+      this.#send({...this.#error(id, 'project_missing', 'no such project'), path: request.project});
+      return;
+    }
+    const goal = host.goals.get(`${request.project} ${request.task}`);
+    if (goal === undefined) {
+      this.#send({
+        ...this.#error(id, 'task_invalid', `no task ${request.task} with a goal`),
+        path: request.project,
+      });
+      return;
+    }
+    this.#send({type: 'project.task_goal', request_id: id, goal});
+  }
+
   #project(
-    request: Extract<HelperRequest, {type: 'tasks.list' | 'runs.list' | 'run.start'}>,
+    request: Extract<
+      HelperRequest,
+      {type: 'tasks.list' | 'runs.list' | 'run.start' | 'project.task_goal'}
+    >,
   ): void {
+    if (request.type === 'project.task_goal') {
+      this.#taskGoal(request);
+      return;
+    }
     const id = request.request_id;
     const helper = this.#helper;
     const tasks = helper.host.projects.get(request.project);

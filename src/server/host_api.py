@@ -22,8 +22,8 @@ Public surface: ``PROTOCOL_VERSION``, ``RECORD_VERSION``,
 ``END_REASON_MAX_CHARACTERS``, ``PauseCause``,
 ``LiveInstanceRecord``, ``UnreadableRecord``, ``parse_record``,
 ``InstanceList``, ``StopOutcome``, ``StopRoute``, ``InstanceStopResult``,
-``DetachedLaunchErrorCode``, ``DetachedLaunchFailure``, ``TaskSummary``,
-``TaskList``, the inspection documents, and the host helper's messages:
+``DetachedLaunchErrorCode``, ``DetachedLaunchFailure``,
+the inspection documents, and the host helper's messages:
 the log streams' ``LogStream``, ``LogStreamOutcome``, ``LogChunk``, ``LogPipeSpan``,
 ``LogPipe``, ``LogOffset``, ``LogTail`` and limits
 (``LOGS_READ_MAX_BYTES``, ``LOGS_READ_MIN_BYTES``, ``LOGS_WAIT_MAX_MS``),
@@ -101,7 +101,14 @@ from server.host_envelope import (
     RunId,
     SpanId,
 )
-from server.host_examples import CreatedProject, ExampleList
+from server.host_examples import (
+    CreatedProject,
+    ExampleList,
+    ProjectTaskGoalReply,
+    ProjectTaskGoalRequest,
+    TasksListReply,
+    TasksListRequest,
+)
 from server.host_harness import HarnessChoice, HarnessOption, generation_conflict
 from server.host_machine_facts import MachineDescription
 from server.host_preflight import Backend, Check, RoleName, RunOptions
@@ -744,26 +751,6 @@ class DetachedLaunchFailure(BaseModel):
     """The server already driving the run, for ``run_already_live``: attach to it."""
 
 
-class TaskSummary(BaseModel):
-    """One task of a project."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    name: str
-    """The task's directory name, the value ``--task`` accepts."""
-
-
-class TaskList(BaseModel):
-    """``vibesys tasks --json``: the tasks of one project."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    version: Literal[1] = 1
-    project_root: str
-    """The resolved absolute project directory the tasks were read from."""
-    tasks: tuple[TaskSummary, ...]
-
-
 # --- the host helper ---------------------------------------------------------
 
 HELPER_PROTOCOL_VERSIONS = (1, 1)
@@ -851,14 +838,6 @@ class InstancesUnwatchRequest(HelperRequestBase):
 
     type: Literal["instances.unwatch"] = "instances.unwatch"
     watch_id: RequestId
-
-
-class TasksListRequest(HelperRequestBase):
-    """The tasks a project defines under ``.vibesys/tasks/``."""
-
-    type: Literal["tasks.list"] = "tasks.list"
-    project: str
-    """The project directory on the host; ``~`` expands to the helper's home."""
 
 
 RUN_DIGEST_MAX_RUNS: Final = 100
@@ -1176,6 +1155,7 @@ HELPER_REQUEST_FEATURES: Final[Mapping[type[HelperRequestBase], HelperFeature]] 
     MachineDescribeRequest: HelperFeature.MACHINE_DESCRIBE,
     CheckoutInspectRequest: HelperFeature.CHECKOUT_INSPECT,
     RunPreflightRequest: HelperFeature.PREFLIGHT,
+    ProjectTaskGoalRequest: HelperFeature.PROJECT_GOAL,
     ExamplesListRequest: HelperFeature.EXAMPLES,
     ProjectCreateFromExampleRequest: HelperFeature.EXAMPLES,
     ProjectCopyOutRequest: HelperFeature.EXAMPLES,
@@ -1259,7 +1239,8 @@ HelperRequest = Annotated[
     | ComputeAddClusterRequest
     | ComputeRemoveClusterRequest
     | AgentLoginsListRequest
-    | AgentLoginsStartRequest,
+    | AgentLoginsStartRequest
+    | ProjectTaskGoalRequest,
     Field(discriminator="type"),
 ]
 """Every message a client sends on a helper channel."""
@@ -1335,13 +1316,6 @@ class InstancesChanged(BaseModel):
     type: Literal["instances.changed"] = "instances.changed"
     watch_id: RequestId
     listing: InstanceList
-
-
-class TasksListReply(HelperReplyBase):
-    """The project's tasks."""
-
-    type: Literal["tasks.list"] = "tasks.list"
-    tasks: TaskList
 
 
 class RunDigest(BaseModel):
@@ -1823,6 +1797,7 @@ HelperReply = (
     | ComputeRemoveClusterReply
     | AgentLoginsListReply
     | AgentLoginsStartReply
+    | ProjectTaskGoalReply
 )
 """A request's result; its ``type`` is the request's."""
 

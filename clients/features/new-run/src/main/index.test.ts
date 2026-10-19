@@ -244,6 +244,26 @@ describe('NewRunMain', () => {
     expect(remembered).toEqual([]);
   });
 
+  test("reads a project task's goal from a helper that has project_goal, and says so when it cannot", async () => {
+    const {link, main} = subject();
+    link.helper.host.projects.set('/p', ['mpmc']);
+    const goal = {
+      task: 'mpmc',
+      objectives: [{metric: 'ops', direction: 'max' as const}],
+      goal: 'Go fast.',
+      goal_truncated: false,
+    };
+    link.helper.host.goals.set('/p mpmc', goal);
+    const read = () => main.answer({kind: 'task-goal', host: LOCAL, project: '/p', task: 'mpmc'});
+    expect(await read()).toEqual({kind: 'offered', value: goal});
+    link.helper.features.delete('project_goal');
+    expect(await read()).toEqual({kind: 'unsupported'});
+    link.helper.features.add('project_goal');
+    await expect(
+      main.answer({kind: 'task-goal', host: LOCAL, project: '/p', task: 'nope'}),
+    ).rejects.toThrow('Could not read the goal of nope');
+  });
+
   test("answers the features the machine's helper agreed to in hello", async () => {
     const {link, main} = subject();
     link.helper.features.delete('run_options');

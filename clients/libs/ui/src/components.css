@@ -290,6 +290,12 @@ body > div:first-child {
 .vs-section-content {
   min-width: 0;
 }
+/* A list of numbered steps carries an answer under each: room for the longest to stay on one line. */
+@container (min-width: 42rem) {
+  .vs-section-layout[data-steps] {
+    grid-template-columns: calc(var(--column-aside) * 0.8) minmax(0, 1fr);
+  }
+}
 @container (max-width: 42rem) {
   .vs-section-layout {
     grid-template-columns: minmax(0, 1fr);

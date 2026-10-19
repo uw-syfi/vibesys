@@ -23,6 +23,7 @@ function fakeBridge(
       ok({kind: 'listed' as const, harnesses: [{provider: 'claude', model: 'm', default: true}]}),
     examples: () => record('examples', {kind: 'unsupported' as const}),
     tasks: () => ok(['mpmc']),
+    taskGoal: () => ok({kind: 'unsupported' as const}),
     preflight: () =>
       record('preflight', {kind: 'offered' as const, value: {checks: [], roles, backend: null}}),
     createFromExample: (_host, _example, destination) => ok({project: destination, tasks: ['a']}),

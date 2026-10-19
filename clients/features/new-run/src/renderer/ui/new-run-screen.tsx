@@ -126,7 +126,7 @@ function StepNav(props: ScreenProps & {readonly at: StepId; readonly first: bool
   const {context} = snapshot;
   if (at === 'review') {
     return (
-      <Row justify="between" wrap>
+      <Row justify="between" align="start" wrap>
         <Button text="Back" press={() => dispatch({type: 'back'})} />
         <StartButton snapshot={snapshot} dispatch={dispatch} />
       </Row>
@@ -161,14 +161,15 @@ function Steps(props: {
   const {dispatch} = props;
   return (
     <>
-      {props.views.map(view => (
+      {props.views.map((view, index) => (
         <SidebarItem
           key={view.id}
           label={view.title}
           {...(view.answer === null || view.id === props.at ? {} : {detail: view.answer})}
-          status={{
-            tone: view.answer === null ? 'neutral' : 'ok',
-            label: view.answer === null ? 'Not answered yet' : 'Answered',
+          marker={{
+            text: String(index + 1),
+            state: view.id === props.at ? 'current' : view.answer === null ? 'muted' : 'neutral',
+            label: `Step ${index + 1}, ${view.answer === null ? 'not answered yet' : 'answered'}`,
           }}
           active={view.id === props.at}
           // The step shown is not a way to anywhere.

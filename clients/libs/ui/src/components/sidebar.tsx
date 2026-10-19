@@ -9,8 +9,47 @@ export type SidebarTarget =
   | {readonly href: string; readonly press?: never}
   | {readonly press: () => void; readonly href?: never};
 
+/** What leads an entry: its icon, status dot or step marker. */
+function Lead(props: {
+  readonly icon: IconName | undefined;
+  readonly status: {readonly tone: StatusTone; readonly label: string} | undefined;
+  readonly marker: MarkerProps | undefined;
+}): JSX.Element {
+  return (
+    <>
+      {props.icon === undefined ? null : <Icon name={props.icon} />}
+      {props.status === undefined ? null : (
+        <span className="vs-sidebar-dot">
+          <StatusDot tone={props.status.tone} label={props.status.label} />
+        </span>
+      )}
+      {props.marker === undefined ? null : <Marker {...props.marker} />}
+    </>
+  );
+}
+
+/** The numbered circle of a step in a list of steps. */
+interface MarkerProps {
+  readonly text: string;
+  readonly state: 'current' | 'neutral' | 'muted';
+  readonly label: string;
+}
+
+function Marker(props: MarkerProps): JSX.Element {
+  return (
+    <span
+      className="vs-sidebar-marker"
+      data-state={props.state}
+      role="img"
+      aria-label={props.label}
+    >
+      {props.text}
+    </span>
+  );
+}
+
 /**
- * A navigation entry: an icon or a status dot, the label, an optional count, and an optional detail
+ * A navigation entry: an icon, a status dot or a numbered marker, the label, an optional count, and an optional detail
  * line under the label. `active` marks the current page. `menu` adds a row menu beside it.
  */
 export function SidebarItem(
@@ -18,6 +57,8 @@ export function SidebarItem(
     readonly label: string;
     readonly icon?: IconName;
     readonly status?: {readonly tone: StatusTone; readonly label: string};
+    /** A number in a small circle in place of a status dot: `current` is filled, `muted` is faint. */
+    readonly marker?: MarkerProps;
     readonly count?: number;
     readonly detail?: string;
     /** For entries under a group's header: the label may wrap, and `trail` follows it, muted. */
@@ -39,12 +80,7 @@ export function SidebarItem(
 ): JSX.Element {
   const content = (
     <>
-      {props.icon === undefined ? null : <Icon name={props.icon} />}
-      {props.status === undefined ? null : (
-        <span className="vs-sidebar-dot">
-          <StatusDot tone={props.status.tone} label={props.status.label} />
-        </span>
-      )}
+      <Lead icon={props.icon} status={props.status} marker={props.marker} />
       <span className="vs-sidebar-text" data-compact={props.compact === true || undefined}>
         <Text
           variant={props.detail === undefined && props.compact !== true ? 'body' : 'body-strong'}

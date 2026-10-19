@@ -97,6 +97,8 @@ export {
   type Effort,
   type FactsFor,
   type Form,
+  type GoalFor,
+  goalKey,
   type HelperFor,
   harnessLabel,
   inputsKey,

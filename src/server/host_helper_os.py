@@ -9,6 +9,7 @@ is light (``tests/architecture/test_light_entrypoints.py``).
 Public surface: ``FileProjects``, ``ProjectStopIntents``, ``OsDirectories``,
 ``SubprocessRunLauncher``,
 ``SubprocessRunPreflight``,
+``read_task_goal``,
 ``GitCheckoutProbe``, ``OsConfigFiles``, and ``StoreLogReader`` with ``run_streams_directory``.
 """
 
@@ -41,9 +42,8 @@ from server.host_api import (
     LogTail,
     RunDigest,
     RunDigestUnreadable,
-    TaskList,
-    TaskSummary,
 )
+from server.host_examples import ExampleObjective, TaskGoal, TaskList, TaskSummary, bounded_goal
 from server.host_helper_logs import (
     LogStoreCorruptError,
     RunLocation,
@@ -75,7 +75,13 @@ from server.span_index import (
     span_page,
 )
 from vs_decode.api import Unreadable, decode_json
-from vs_project.api import GitRunHistory, NullGitTrackerEvents, Project, ProjectError
+from vs_project.api import (
+    GitRunHistory,
+    NullGitTrackerEvents,
+    Project,
+    ProjectError,
+    load_objectives,
+)
 from vs_sim.api import ProcessSpec
 
 if TYPE_CHECKING:
@@ -84,7 +90,7 @@ if TYPE_CHECKING:
     from server.run_summary import Summarized
     from server.run_summary_cache import SummaryReader
     from vs_logs.read import LogReader as StoreReader
-    from vs_project.api import GitRepositoryFactory
+    from vs_project.api import GitRepositoryFactory, TaskDirectory
     from vs_sim.api import CommandProbe, ProcessLauncher, Threads
 
 _PYPROJECT_LIMIT_BYTES = 1 << 20
@@ -152,6 +158,29 @@ def tally_journal(stream: BinaryIO, previous: JournalTally) -> JournalTally:
     return JournalTally(size, lines)
 
 
+def read_task_goal(task: TaskDirectory) -> TaskGoal:
+    """What ``task`` is for: its ``OBJECTIVE.md`` (cut to ``GOAL_MAX_CHARS``) and its axes.
+
+    Raises ``OSError`` for a file that cannot be read and ``ValueError`` (naming the file) for
+    ``objectives.toml`` that is invalid or a goal that is not UTF-8 text.
+    """
+    objectives = load_objectives(task.path).objective
+    try:
+        text = task.objective_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        message = f"{task.objective_path} is not UTF-8 text: {exc}"
+        raise ValueError(message) from exc
+    goal, truncated = bounded_goal(text)
+    return TaskGoal(
+        task=task.name.value,
+        objectives=tuple(
+            ExampleObjective(metric=axis.name, direction=axis.direction) for axis in objectives
+        ),
+        goal=goal,
+        goal_truncated=truncated,
+    )
+
+
 class FileProjects:
     """Projects read through ``vs_project``'s ``Project`` on this filesystem.
 
@@ -183,6 +212,16 @@ class FileProjects:
             project_root=str(opened.root),
             tasks=tuple(TaskSummary(name=task.name.value) for task in tasks),
         )
+
+    def task_goal(self, project: Path, task: str) -> TaskGoal:
+        """The goal and axes of the project's task ``task``."""
+        opened = self._initialized(project)
+        try:
+            return read_task_goal(opened.select_task(task))
+        except (ProjectError, OSError, ValueError) as exc:
+            raise ProjectLookupError(
+                HelperErrorCode.TASK_INVALID, str(opened.root), str(exc)
+            ) from exc
 
     def runs(self, project: Path) -> tuple[Path, tuple[ProjectRun, ...]]:
         """The project's root and its runs, oldest first; runs this VibeSys cannot read are left out.

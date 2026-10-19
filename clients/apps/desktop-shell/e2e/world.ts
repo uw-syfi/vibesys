@@ -97,6 +97,20 @@ export const SEED: FakeBridgeSeed = {
       [PROJECT]: ['mpmc', 'mpsc', 'spsc'],
       '/home/me/vibesys/examples/queue-rs': ['mpmc', 'mpsc', 'spsc'],
     },
+    goals: Object.fromEntries(
+      ['mpmc', 'mpsc', 'spsc'].map(task => [
+        `${PROJECT} ${task}`,
+        {
+          task,
+          objectives: [
+            {metric: 'ops_per_second', direction: 'max'},
+            {metric: 'p99_latency_us', direction: 'min'},
+          ],
+          goal: `# Make the ${task} queue faster\n\nRaise throughput on the \`${task}\` workload without breaking linearizability.\n\n- Keep the public API.\n- Report ops per second.`,
+          goal_truncated: false,
+        },
+      ]),
+    ),
   },
 };
 

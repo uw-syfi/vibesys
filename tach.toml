@@ -87,7 +87,7 @@ layers_explicit_depends_on = true
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_compute", "server.host_agent_logins", "server.host_preflight", "server.host_examples", "server.host_harness"]
+depends_on = ["server.host_examples", "server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_compute", "server.host_agent_logins", "server.host_preflight", "server.host_harness"]
 
 [[modules]]
 path = "headless"
@@ -231,7 +231,7 @@ depends_on = ["server.host_api", "vs_sim.api"]
 [[modules]]
 # Light contracts for the example catalog and the projects made from it or copied out.
 path = "server.host_examples"
-depends_on = ["server.host_preflight", "vs_project"]
+depends_on = ["server.host_envelope", "server.host_preflight", "vs_project"]
 
 [[modules]]
 # Light contracts for the harness a run starts with: the provider and model pair and how it reads.
@@ -288,7 +288,7 @@ depends_on = ["vs_decode.api", "server.host_api", "server.host_run_dashboard", "
 [[modules]]
 # The host helper's interfaces on a real host: projects, directories, launches, the checkout.
 path = "server.host_helper_os"
-depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_preflight", "server.host_preflight", "server.host_helper_requests", "server.run_digest", "server.span_index", "server.run_summary", "server.run_summary_cache", "vs_logs", "vs_project", "vs_sim.api"]
+depends_on = ["server.host_examples", "vs_decode.api", "server.host_api", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_preflight", "server.host_preflight", "server.host_helper_requests", "server.run_digest", "server.span_index", "server.run_summary", "server.run_summary_cache", "vs_logs", "vs_project", "vs_sim.api"]
 
 [[modules]]
 # A run's summary: the fold of its journal that the run level shows, as a pure read model.

@@ -105,6 +105,8 @@ class HelperFeature(StrEnum):
     ``compute.remove_cluster``: the machine's Slurm clusters and Modal token."""
     AGENT_LOGINS = "agent_logins"
     """``agent_logins.list`` and ``agent_logins.start``: each harness's login on the machine."""
+    PROJECT_GOAL = "project_goal"
+    """``project.task_goal``: a project's task goal text (``OBJECTIVE.md``) and its objectives."""
 
 
 class HelperRequestBase(BaseModel):

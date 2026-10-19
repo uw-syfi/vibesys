@@ -1776,6 +1776,22 @@ const hostHelperSchema: Record<string, unknown> = {
           "title": "Task",
           "type": "string"
         },
+        "objectives": {
+          "items": {
+            "$ref": "#/$defs/ExampleObjective"
+          },
+          "title": "Objectives",
+          "type": "array"
+        },
+        "goal": {
+          "maxLength": 32000,
+          "title": "Goal",
+          "type": "string"
+        },
+        "goal_truncated": {
+          "title": "Goal Truncated",
+          "type": "boolean"
+        },
         "domain": {
           "$ref": "#/$defs/ExampleDomain"
         },
@@ -1801,33 +1817,17 @@ const hostHelperSchema: Record<string, unknown> = {
               "type": "null"
             }
           ]
-        },
-        "objectives": {
-          "items": {
-            "$ref": "#/$defs/ExampleObjective"
-          },
-          "title": "Objectives",
-          "type": "array"
-        },
-        "goal": {
-          "maxLength": 32000,
-          "title": "Goal",
-          "type": "string"
-        },
-        "goal_truncated": {
-          "title": "Goal Truncated",
-          "type": "boolean"
         }
       },
       "required": [
         "task",
+        "objectives",
+        "goal",
+        "goal_truncated",
         "domain",
         "hardware",
         "model",
-        "workload",
-        "objectives",
-        "goal",
-        "goal_truncated"
+        "workload"
       ],
       "title": "ExampleTask",
       "type": "object"
@@ -2515,7 +2515,8 @@ const hostHelperSchema: Record<string, unknown> = {
         "run_role_agents",
         "measurement_target",
         "machine_compute",
-        "agent_logins"
+        "agent_logins",
+        "project_goal"
       ],
       "title": "HelperFeature",
       "type": "string"
@@ -4613,6 +4614,77 @@ const hostHelperSchema: Record<string, unknown> = {
         "paths"
       ],
       "title": "ProjectDirty",
+      "type": "object"
+    },
+    "ProjectTaskGoalReply": {
+      "additionalProperties": false,
+      "description": "The task's goal and objectives.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "project.task_goal",
+          "default": "project.task_goal",
+          "title": "Type",
+          "type": "string"
+        },
+        "goal": {
+          "$ref": "#/$defs/TaskGoal"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "goal"
+      ],
+      "title": "ProjectTaskGoalReply",
+      "type": "object"
+    },
+    "ProjectTaskGoalRequest": {
+      "additionalProperties": false,
+      "description": "The goal text and objectives of one task of a project.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "project.task_goal",
+          "default": "project.task_goal",
+          "title": "Type",
+          "type": "string"
+        },
+        "project": {
+          "title": "Project",
+          "type": "string"
+        },
+        "task": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Task",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "project",
+        "task"
+      ],
+      "title": "ProjectTaskGoalRequest",
       "type": "object"
     },
     "ReasoningEffort": {
@@ -6882,6 +6954,40 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "SysboxMissing",
       "type": "object"
     },
+    "TaskGoal": {
+      "additionalProperties": false,
+      "description": "What a task is for: its goal text and the axes it declares, read from its files.",
+      "properties": {
+        "task": {
+          "title": "Task",
+          "type": "string"
+        },
+        "objectives": {
+          "items": {
+            "$ref": "#/$defs/ExampleObjective"
+          },
+          "title": "Objectives",
+          "type": "array"
+        },
+        "goal": {
+          "maxLength": 32000,
+          "title": "Goal",
+          "type": "string"
+        },
+        "goal_truncated": {
+          "title": "Goal Truncated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "task",
+        "objectives",
+        "goal",
+        "goal_truncated"
+      ],
+      "title": "TaskGoal",
+      "type": "object"
+    },
     "TaskImageUnsupported": {
       "additionalProperties": false,
       "description": "The task's Dockerfile cannot be used the way this run would run; ``problem`` is raw text.",
@@ -7564,6 +7670,7 @@ const hostHelperSchema: Record<string, unknown> = {
           "ping": "#/$defs/PingRequest",
           "project.copy_out": "#/$defs/ProjectCopyOutRequest",
           "project.create_from_example": "#/$defs/ProjectCreateFromExampleRequest",
+          "project.task_goal": "#/$defs/ProjectTaskGoalRequest",
           "run.connect": "#/$defs/RunConnectRequest",
           "run.preflight": "#/$defs/RunPreflightRequest",
           "run.start": "#/$defs/RunStartRequest",
@@ -7673,6 +7780,9 @@ const hostHelperSchema: Record<string, unknown> = {
         },
         {
           "$ref": "#/$defs/AgentLoginsStartRequest"
+        },
+        {
+          "$ref": "#/$defs/ProjectTaskGoalRequest"
         }
       ],
       "title": "Request"
@@ -7704,6 +7814,7 @@ const hostHelperSchema: Record<string, unknown> = {
           "ping": "#/$defs/PingReply",
           "project.copy_out": "#/$defs/ProjectCopyOutReply",
           "project.create_from_example": "#/$defs/ProjectCreateFromExampleReply",
+          "project.task_goal": "#/$defs/ProjectTaskGoalReply",
           "run.connect": "#/$defs/RunConnectReply",
           "run.preflight": "#/$defs/RunPreflightReply",
           "run.start": "#/$defs/RunStartReply",
@@ -7815,6 +7926,9 @@ const hostHelperSchema: Record<string, unknown> = {
           "$ref": "#/$defs/AgentLoginsStartReply"
         },
         {
+          "$ref": "#/$defs/ProjectTaskGoalReply"
+        },
+        {
           "$ref": "#/$defs/InstancesChanged"
         },
         {
@@ -7854,6 +7968,7 @@ const hostHelperSchema: Record<string, unknown> = {
     "machine.describe": "machine_describe",
     "checkout.inspect": "checkout_inspect",
     "run.preflight": "preflight",
+    "project.task_goal": "project_goal",
     "examples.list": "examples",
     "project.create_from_example": "examples",
     "project.copy_out": "examples",

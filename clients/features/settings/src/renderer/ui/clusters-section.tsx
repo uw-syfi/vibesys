@@ -194,7 +194,7 @@ function FormActions(props: FormProps): JSX.Element {
   const saving = form.saving !== null;
   const blocked = saveBlockedReason(form);
   return (
-    <Row gap="space-2" wrap>
+    <Row gap="space-2" align="start" wrap>
       <Button
         text={testing ? 'Testing…' : 'Test connection'}
         {...(testing ? {disabledReason: 'Waiting for the cluster to answer.'} : {})}
@@ -335,7 +335,7 @@ function ClusterCard(props: {
           {source === 'slurm_toml' ? <Chip label="From the operator file" /> : null}
         </Row>
         <KeyValue items={clusterFacts(cluster, machine)} />
-        <Row gap="space-2" wrap>
+        <Row gap="space-2" align="start" wrap>
           <Button
             variant="quiet"
             text={removing ? 'Removing…' : 'Remove'}

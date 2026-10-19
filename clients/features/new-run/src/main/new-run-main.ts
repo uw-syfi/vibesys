@@ -13,6 +13,7 @@ import type {
   HelperRequest,
   LiveInstanceRecord,
   MachineDescription,
+  TaskGoal,
 } from '@vibesys/contracts/host-helper';
 import {type HostId, hostKey, hostLabel} from '@vibesys/hosts';
 import type {Offered, PreflightResult, RunInputs, StartedRun, WelcomeRequest} from '@vibesys/ipc';
@@ -29,7 +30,8 @@ export type NewRunMainRequest = Extract<
       | 'create-from-example'
       | 'copy-out'
       | 'start-run'
-      | 'helper-features';
+      | 'helper-features'
+      | 'task-goal';
   }
 >;
 
@@ -123,6 +125,13 @@ export class NewRunMain {
         return this.#start(request.host, request.inputs);
       case 'helper-features':
         return this.#features(request.host);
+      case 'task-goal':
+        return this.#offered(
+          request.host,
+          {type: 'project.task_goal', project: request.project, task: request.task},
+          `Could not read the goal of ${request.task}`,
+          reply => (reply as {goal: TaskGoal}).goal,
+        );
     }
   }
 

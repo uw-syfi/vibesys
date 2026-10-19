@@ -110,11 +110,15 @@ from server.host_api import (
     RunStopReply,
     RunStopRequest,
     RunSummary,
+)
+from server.host_compute import MeasurementTarget, ModalTarget, SameMachine, SlurmTarget
+from server.host_examples import (
+    ProjectTaskGoalReply,
+    ProjectTaskGoalRequest,
     TaskList,
     TasksListReply,
     TasksListRequest,
 )
-from server.host_compute import MeasurementTarget, ModalTarget, SameMachine, SlurmTarget
 from server.host_helper_compute import ComputeError, MachineCompute
 from server.host_helper_logs import HelperLogs, ReadWithdrawal, list_logs, read_log
 from server.host_helper_preflight import (
@@ -161,7 +165,7 @@ if TYPE_CHECKING:
 
     from server.host_agent_logins import AgentLogin, LoginStarted, LoginUnavailable
     from server.host_api import RunDigestUnreadable
-    from server.host_examples import CreatedProject, ExampleList
+    from server.host_examples import CreatedProject, ExampleList, TaskGoal
     from server.host_preflight import PreflightReport
     from server.registry import InstanceInspector, LiveRegistry, StopEffects
     from server.run_summary import Summarized
@@ -239,6 +243,14 @@ class Projects(Protocol):
 
     def tasks(self, project: Path) -> TaskList:
         """The project's tasks, ordered by name."""
+        ...
+
+    def task_goal(self, project: Path, task: str) -> TaskGoal:
+        """The goal text and objectives of the project's task ``task``.
+
+        Raises ``ProjectLookupError`` with ``task_invalid`` when the project has no such task or
+        its goal files cannot be read.
+        """
         ...
 
     def runs(self, project: Path) -> tuple[Path, tuple[ProjectRun, ...]]:
@@ -832,7 +844,7 @@ def _answer(
             )
         case InstancesListRequest() | InstancesInspectRequest():
             reply = _instances_reply(request, host)
-        case TasksListRequest() | RunsListRequest():
+        case TasksListRequest() | RunsListRequest() | ProjectTaskGoalRequest():
             reply = _project_reply(request, host)
         case (
             RunsReadEventsRequest()
@@ -886,11 +898,15 @@ def _answer(
 
 
 def _project_reply(
-    request: TasksListRequest | RunsListRequest, host: HelperHost
-) -> TasksListReply | RunsListReply:
-    """Answer one read of a project's tasks or runs."""
+    request: TasksListRequest | RunsListRequest | ProjectTaskGoalRequest, host: HelperHost
+) -> TasksListReply | RunsListReply | ProjectTaskGoalReply:
+    """Answer one read of a project's tasks, runs or a task's goal."""
     project = Path(_host_path(request.project, host.directories))
     match request:
+        case ProjectTaskGoalRequest(request_id=request_id, task=task):
+            return ProjectTaskGoalReply(
+                request_id=request_id, goal=host.projects.task_goal(project, task)
+            )
         case TasksListRequest(request_id=request_id):
             return TasksListReply(request_id=request_id, tasks=host.projects.tasks(project))
         case RunsListRequest(

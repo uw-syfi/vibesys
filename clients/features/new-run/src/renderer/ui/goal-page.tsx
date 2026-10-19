@@ -1,7 +1,8 @@
 /**
  * The Goal page: the task's `OBJECTIVE.md` as written, safely rendered, with what the task
- * optimizes and the facts of its benchmark beside it. A task with no objectives file shows its
- * goal with no direction: none is made up.
+ * optimizes beside it, and for an example the facts of its benchmark. The same page shows the
+ * goal of a task in the user's own project, read from the machine. A task with no objectives file
+ * shows its goal with no direction: none is made up.
  */
 import {Card, KeyValue, type KeyValueItem, Markdown, Split, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
@@ -9,8 +10,11 @@ import {
   type CatalogueEntry,
   chosenEntry,
   exampleLabel,
+  goalKey,
   hardwareLabel,
   MAKER_NAMES,
+  type NewRunContext,
+  projectPath,
 } from '../../state/index.js';
 import type {CardProps} from './card-props.js';
 import {backendLabel} from './cause-words.js';
@@ -20,8 +24,21 @@ function taskFile(task: string): string {
   return `.vibesys/tasks/${task}/OBJECTIVE.md`;
 }
 
-function Objectives(props: {readonly entry: CatalogueEntry}): JSX.Element {
-  const objectives = props.entry.details?.objectives ?? [];
+interface Objective {
+  readonly metric: string;
+  readonly direction: 'max' | 'min';
+}
+
+/** The task's goal as the page shows it: where it is written, its text, and its axes. */
+interface Goal {
+  readonly task: string;
+  readonly goal: string;
+  readonly goal_truncated: boolean;
+  readonly objectives: readonly Objective[];
+}
+
+function Objectives(props: {readonly objectives: readonly Objective[]}): JSX.Element {
+  const {objectives} = props;
   return (
     <Card section="Optimizes">
       {objectives.length === 0 ? (
@@ -62,43 +79,91 @@ function facts(entry: CatalogueEntry): KeyValueItem[] {
   ];
 }
 
-export function GoalPage(props: CardProps): JSX.Element {
-  const {context} = props;
-  const entry = chosenEntry(context.answers, entriesIn(context));
-  const details = entry?.details ?? null;
-  const task = context.form.task ?? entry?.task ?? 'default';
-  if (entry === null || details === null) {
-    return (
-      <Card>
-        <Stack gap="space-2">
-          <Text>VibeSys reads this task's goal when the run starts. It is not shown here yet.</Text>
-          <Text variant="code" tone="muted">
-            {taskFile(task)}
+function GoalText(props: {readonly goal: Goal}): JSX.Element {
+  const {goal} = props;
+  return (
+    <Card>
+      <Stack gap="space-3">
+        <Text variant="code" tone="muted">
+          {taskFile(goal.task)}
+        </Text>
+        <Markdown text={goal.goal} />
+        {goal.goal_truncated ? (
+          <Text variant="small" tone="muted">
+            Shortened here. The whole goal is in the file.
           </Text>
-        </Stack>
-      </Card>
-    );
+        ) : null}
+      </Stack>
+    </Card>
+  );
+}
+
+/** The goal read from the machine for the user's own task now, or null while there is none. */
+function ownGoal(context: NewRunContext): Goal | null {
+  const project = projectPath(context.form);
+  const {task} = context.answers;
+  if (context.answers.from !== 'project' || project === null || task === null) return null;
+  const read = context.goal;
+  if (read === null || read.for !== goalKey(context.form.machine, project, task)) return null;
+  return read.value.kind === 'offered' ? read.value.value : null;
+}
+
+function Unread(props: {readonly task: string; readonly reading: boolean}): JSX.Element {
+  return (
+    <Card>
+      <Stack gap="space-2">
+        <Text>{props.reading ? 'Reading the goal' : 'Goal not shown here'}</Text>
+        <Text variant="code" tone="muted">
+          {taskFile(props.task)}
+        </Text>
+      </Stack>
+    </Card>
+  );
+}
+
+function OwnGoalPage(props: CardProps): JSX.Element {
+  const {context} = props;
+  const goal = ownGoal(context);
+  const task = context.answers.task ?? 'default';
+  if (goal === null) {
+    // Reading while the helper can read it and has not answered or failed.
+    const reading =
+      context.helper?.features.includes('project_goal') === true && context.problem === null;
+    return <Unread task={task} reading={reading} />;
   }
   return (
     <Split
-      main={
-        <Card>
-          <Stack gap="space-3">
-            <Text variant="code" tone="muted">
-              {taskFile(entry.task)}
-            </Text>
-            <Markdown text={details.goal} />
-            {details.goal_truncated ? (
-              <Text variant="small" tone="muted">
-                Shortened here. The whole goal is in the file.
-              </Text>
-            ) : null}
-          </Stack>
-        </Card>
-      }
+      main={<GoalText goal={goal} />}
       aside={
         <>
-          <Objectives entry={entry} />
+          <Objectives objectives={goal.objectives} />
+          <Card section="Task">
+            <KeyValue
+              items={[
+                {key: 'Project', value: projectPath(context.form) ?? '', mono: true},
+                {key: 'Task', value: goal.task, mono: true},
+              ]}
+            />
+          </Card>
+        </>
+      }
+    />
+  );
+}
+
+export function GoalPage(props: CardProps): JSX.Element {
+  const {context} = props;
+  if (context.answers.from === 'project') return <OwnGoalPage {...props} />;
+  const entry = chosenEntry(context.answers, entriesIn(context));
+  const details = entry?.details ?? null;
+  const task = context.form.task ?? entry?.task ?? 'default';
+  if (entry === null || details === null) return <Unread task={task} reading={false} />;
+  return (
+    <Split
+      main={<GoalText goal={{...details, task: entry.task}} />}
+      aside={
+        <>
+          <Objectives objectives={details.objectives} />
           <Card section="Benchmark">
             <KeyValue items={facts(entry)} />
           </Card>
