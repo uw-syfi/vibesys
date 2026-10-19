@@ -696,6 +696,32 @@ test('Where: only what the machine has set up is offered, and the choice is the 
   expect(started).toMatchObject([{measure_on: {kind: 'slurm', cluster: 'lab-h100'}}]);
 });
 
+test('Where: a GPU task the agent machine lacks is a misfit only when results are measured there', async ({
+  page,
+}) => {
+  const where = pageNamed('where');
+  await openAt(page, {
+    ...where,
+    answers: {
+      ...where.answers,
+      model: 'Olmo Hybrid 7B',
+      hardware: 'nvidia|NVIDIA L4|1',
+      variant: 'from-scratch',
+    },
+    machine: 'local',
+  });
+  const measured = main(page).getByRole('radiogroup', {name: 'Measured on'});
+  const misfit = main(page).getByText('The hardware may not fit.');
+  await expect(misfit).toBeVisible();
+  for (const name of ['Slurm · lab-h100', 'Slurm · campus', 'Modal']) {
+    await measured.getByRole('radio', {name: new RegExp(name)}).check();
+    await expect(misfit).toHaveCount(0);
+    await expect(main(page).getByText(/^The hardware fits\.$/)).toHaveCount(0);
+  }
+  await measured.getByRole('radio', {name: /Same machine/}).check();
+  await expect(misfit).toBeVisible();
+});
+
 test('More options starts closed, says what it holds, and stays as left on each machine', async ({
   page,
 }) => {

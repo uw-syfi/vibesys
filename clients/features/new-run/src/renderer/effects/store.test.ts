@@ -1,8 +1,8 @@
 import {expect, test} from 'bun:test';
 import type {Check, HelperFeature} from '@vibesys/contracts/host-helper';
 import {REQUIRED_HELPER_FEATURES} from '@vibesys/hosts';
-import type {DestinationFound, Offered} from '@vibesys/ipc';
-import {exampleCatalogue} from '@vibesys/run-fixtures';
+import type {DestinationFound, MeasureTarget, Offered} from '@vibesys/ipc';
+import {computeSettings, exampleCatalogue} from '@vibesys/run-fixtures';
 import type {RecentRun, RunRef} from '@vibesys/runs';
 import type {Draft} from '../../state/index.js';
 import {
@@ -998,3 +998,72 @@ test('typing another destination asks again, and a free name offers Create', asy
   });
   expect(destinationTaken(store.getState().context)).toBe(false);
 });
+
+const MACHINES = {
+  cpu: {accelerator: 'cpu' as const, gpus: []},
+  rocm: {accelerator: 'rocm' as const, gpus: [{vendor: 'amd', model: 'MI210'}]},
+};
+
+/** A store on a machine with `hardware`, the MI210 example chosen and results measured on `target`. */
+async function measuredOn(hardware: keyof typeof MACHINES, target: MeasureTarget) {
+  const clock = manualSchedule();
+  const bridge: NewRunBridge = {
+    ...fakeBridge(),
+    examples: () => ok({kind: 'offered' as const, value: exampleCatalogue}),
+    describeMachine: () =>
+      ok({
+        kind: 'offered' as const,
+        value: {
+          checkout: null,
+          hardware: {cpu_cores: 64, ...MACHINES[hardware]},
+          docker: {reachable: true, version: '27'},
+          harness_clis: [],
+          runs: {live: 0, ended_today: 0},
+        },
+      }),
+  };
+  const {store} = createNewRunStore(bridge, {
+    recent: [],
+    schedule: clock.schedule,
+    started: () => undefined,
+  });
+  await settle();
+  store.dispatch({
+    type: 'compute',
+    machine: store.getState().context.form.machine,
+    compute: {kind: 'offered', value: computeSettings},
+  });
+  for (const change of [
+    {kind: 'from', from: 'example'},
+    {kind: 'domain', domain: 'llm-serving'},
+    {kind: 'model', model: 'Qwen3.5 9B'},
+    {kind: 'hardware', hardware: 'amd|AMD MI210|1'},
+  ] as const) {
+    store.dispatch({type: 'answer', change, advance: true});
+  }
+  store.dispatch({type: 'measure', target});
+  await settle();
+  return hardwareItem(store);
+}
+
+const hardwareItem = (store: ReturnType<typeof createNewRunStore>['store']) =>
+  readiness(store.getState()).find(item => item.id === 'hardware_fit');
+
+const MEASURED_ON: readonly (readonly [string, MeasureTarget])[] = [
+  ['a cluster', {kind: 'slurm', cluster: 'cluster-m'}],
+  ['a cluster that states no hardware', {kind: 'slurm', cluster: 'campus'}],
+  ['Modal', {kind: 'modal'}],
+];
+
+test('on the same machine, a GPU task on a machine without one is a warning on Review', async () => {
+  expect((await measuredOn('cpu', {kind: 'same_machine'}))?.state).toBe('warn');
+  expect((await measuredOn('rocm', {kind: 'same_machine'}))?.state).toBe('ok');
+});
+
+for (const [name, target] of MEASURED_ON) {
+  test(`measured on ${name}, the agent's machine is not judged against the task's GPU`, async () => {
+    for (const hardware of ['cpu', 'rocm'] as const) {
+      expect(await measuredOn(hardware, target)).toBeUndefined();
+    }
+  });
+}

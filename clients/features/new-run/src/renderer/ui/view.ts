@@ -393,7 +393,7 @@ function helperItem(context: NewRunContext): Readiness | null {
 function hardwareItem(context: NewRunContext, machine: MachineDescription): Readiness | null {
   const needs = chosenEntry(context.answers, entriesIn(context))?.details?.hardware ?? null;
   if (needs === null) return null;
-  const fit = fitOf(needs, machine, machineLabel(context.form.machine));
+  const fit = fitOf(needs, machine, machineLabel(context.form.machine), context.form.measure);
   if (fit.kind === 'unknown') return null;
   return {
     id: 'hardware_fit',

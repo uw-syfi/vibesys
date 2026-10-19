@@ -117,7 +117,7 @@ export function WherePage(
       : {}),
   }));
   const needs = chosenEntry(context.answers, entriesIn(context))?.details?.hardware ?? null;
-  const fit = needs === null ? null : fitOf(needs, described, name);
+  const fit = needs === null ? null : fitOf(needs, described, name, context.form.measure);
   return (
     <Stack gap="space-5">
       <Stack gap="space-3">
