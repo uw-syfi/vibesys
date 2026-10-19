@@ -300,10 +300,11 @@ def _sample_ready(
     sample for a reason that says nothing of the next run: it was cancelled with its attempt,
     failed in the machinery, was refused at submission or ended by core before it named a job,
     or succeeded and its records could not be collected (those are bounded per side,
-    `_side_open`). Two ends refuse another, since the
+    `_side_open`). Three ends refuse another, since the
     next run would end the same way: a run that succeeded with records but without a reading
-    (the benchmark reports no metric), and a workload failure (the revision fails the
-    evaluation, which is durable, as it is for any submission).
+    (the benchmark reports no metric), a workload failure (the revision fails the
+    evaluation, which is durable, as it is for any submission), and a run environment that
+    can run nothing (``RUN_ENVIRONMENT_UNAVAILABLE``: a local Slurm root failed its probe).
 
     Two limits hold. Every run of the identity in the scope, whoever asked for it and whatever
     it gave, counts toward the budget's own limit over the attempt's lifetime
@@ -320,7 +321,8 @@ def _sample_ready(
     if (
         not isinstance(latest, PreparedSubmissionReceipt)
         or not receipt_ended(latest)
-        or latest.failure is MeasurementFailure.WORKLOAD
+        or latest.failure
+        in (MeasurementFailure.WORKLOAD, MeasurementFailure.RUN_ENVIRONMENT_UNAVAILABLE)
     ):
         return False
     observation = latest.observation

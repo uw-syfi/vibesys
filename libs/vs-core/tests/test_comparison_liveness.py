@@ -341,14 +341,7 @@ def test_a_base_run_that_died_does_not_block_the_next_one_in_its_scope(death: De
     [
         "no-metric",
         "workload",
-        pytest.param(
-            "unavailable",
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason="a base run refused by an unavailable run environment is retried "
-                "(#3243 review N4)",
-            ),
-        ),
+        "unavailable",
     ],
 )
 def test_a_base_run_that_would_end_the_same_way_again_is_not_retried(ending: Outcome) -> None:
