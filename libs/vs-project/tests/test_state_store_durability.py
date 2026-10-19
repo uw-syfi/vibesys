@@ -102,6 +102,26 @@ def test_an_unfinished_publication_is_synchronized_before_it_is_read(tmp_path: P
     assert "store.json" in effects.reloaded
 
 
+def test_an_unfinished_lease_publication_is_synchronized_before_it_is_trusted(
+    tmp_path: Path,
+) -> None:
+    effects = _CountingEffects()
+    store = Project.open(tmp_path).state_store(
+        "run-1", lease_fault_plan=(None, CommitFault.UNKNOWN_SYNC), effects=effects
+    )
+    fence = store.acquire("host-a", now=0, duration=10)
+    assert fence is not None
+    # The renewal is published, but syncing its directory fails, so the host sees an error.
+    with pytest.raises(OSError, match="synchronization failed"):
+        store.renew(fence, now=1, duration=10)
+
+    assert store.verify(fence, now=2)
+
+    # The renewal's bytes may not be durable, so the next read of the lease synchronizes
+    # them before the host acts under the lease they name.
+    assert "lease.json" in effects.reloaded
+
+
 def test_an_observation_sync_fault_still_fires_on_already_durable_bytes(tmp_path: Path) -> None:
     store = Project.open(tmp_path).state_store(
         "run-1", observation_fault_plan=(None, None, None, ObservationFault.SYNC)
