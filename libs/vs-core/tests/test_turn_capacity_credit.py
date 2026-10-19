@@ -188,8 +188,16 @@ def test_a_turn_ends_at_its_limit_plus_the_hold_it_is_credited(shape: Shape) -> 
         assert ended.failure is core.TurnFailureKind.TRANSPORT_LOST
 
 
-def _asked_again(overruns: int, *, resumed: bool, corrected: int = 0) -> Trace:
-    implementer = IMPLEMENTER.model_copy(update={"lost_turns": 0, "corrections": corrected})
+def _asked_again(
+    overruns: int, *, resumed: bool, corrected: int = 0, turn_time: float | None = None
+) -> Trace:
+    implementer = IMPLEMENTER.model_copy(
+        update={
+            "lost_turns": 0,
+            "corrections": corrected,
+            "turn_time": turn_time or IMPLEMENTER.turn_time,
+        }
+    )
     host = HeldHost(
         overruns=overruns,
         junk_first=corrected,
@@ -202,8 +210,7 @@ def _asked_again(overruns: int, *, resumed: bool, corrected: int = 0) -> Trace:
     trace = run_toy(host, definition=toy_search(implementer=implementer))
     assert_ended_closed(trace)
     results = _results(trace, host)
-    lost = [r.failure for r in results if r.failure is not None]
-    assert lost == [core.TurnFailureKind.PROVIDER_UNAVAILABLE] * overruns
+    assert [r.failure for r in results] == [core.TurnFailureKind.PROVIDER_UNAVAILABLE] * overruns
     assert summary(trace).done[0].failed == ()
     return trace
 
@@ -235,5 +242,6 @@ def test_outage_losses_never_spend_the_reask_chain(corrected: int) -> None:
     7th. An outage is the provider's, bounded by the gate's budget and its pause.
     """
     overruns = core.MAX_REASK_CHAIN + 2
-    trace = _asked_again(overruns, resumed=False, corrected=corrected)
+    # Turns short enough that the run's deadline comes after every loss.
+    trace = _asked_again(overruns, resumed=False, corrected=corrected, turn_time=1000.0)
     assert len(implementer_turns(trace)) == corrected + overruns + 1
