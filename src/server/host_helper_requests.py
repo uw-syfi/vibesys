@@ -97,6 +97,7 @@ from server.host_api import (
     ResumeRun,
     RunConnectReply,
     RunConnectRequest,
+    RunDigest,
     RunList,
     RunPreflightReply,
     RunPreflightRequest,
@@ -151,6 +152,7 @@ from server.relay import (
     ChannelEndOutcome,
     dial,
 )
+from server.run_digest import run_attention
 from vs_decode.api import Unreadable, decode_json
 
 if TYPE_CHECKING:
@@ -158,7 +160,7 @@ if TYPE_CHECKING:
     from datetime import tzinfo
 
     from server.host_agent_logins import AgentLogin, LoginStarted, LoginUnavailable
-    from server.host_api import RunDigest, RunDigestUnreadable
+    from server.host_api import RunDigestUnreadable
     from server.host_examples import CreatedProject, ExampleList
     from server.host_preflight import PreflightReport
     from server.registry import InstanceInspector, LiveRegistry, StopEffects
@@ -557,11 +559,14 @@ def run_summaries(
     runs: Iterable[ProjectRun],
     listing: InstanceList,
     digests: Mapping[str, RunDigest | RunDigestUnreadable] | None = None,
+    *,
+    now: float | None = None,
 ) -> RunList:
     """Join a project's runs with this host's registry: each run's server and its phase.
 
     A live server outranks a tombstone; among tombstones the latest ended wins. A run's
-    ``digest`` is the one ``digests`` holds for it, if any.
+    ``digest`` is the one ``digests`` holds for it, if any. With ``now`` (epoch seconds), each
+    run whose digest carries a dashboard also gets its ``attention`` as of ``now``.
     """
     project_root = str(root)
     live = {
@@ -574,15 +579,19 @@ def run_summaries(
     summaries = []
     for run in runs:
         server = live.get(run.run_id) or ended.get(run.run_id)
+        digest = None if digests is None else digests.get(run.run_id)
+        phase = None if server is None else server.phase
+        judged = isinstance(digest, RunDigest) and digest.dashboard is not None and now is not None
         summaries.append(
             RunSummary(
                 run_id=run.run_id,
                 task=run.task,
                 display_name=run.display_name,
                 created_at=run.created_at,
-                phase=None if server is None else server.phase,
+                phase=phase,
                 instance_id=None if run.run_id not in live else live[run.run_id].id,
-                digest=None if digests is None else digests.get(run.run_id),
+                digest=digest,
+                attention=run_attention(digest, phase=phase, now=now) if judged else None,
             )
         )
     return RunList(project_root=project_root, runs=tuple(summaries))
@@ -884,7 +893,9 @@ def _project_reply(
     match request:
         case TasksListRequest(request_id=request_id):
             return TasksListReply(request_id=request_id, tasks=host.projects.tasks(project))
-        case RunsListRequest(request_id=request_id, digest_runs=digest_runs):
+        case RunsListRequest(
+            request_id=request_id, digest_runs=digest_runs, with_dashboard=with_dashboard
+        ):
             root, runs = host.projects.runs(project)
             known = {run.run_id for run in runs}
             digests = {
@@ -893,8 +904,27 @@ def _project_reply(
                 if run_id in known
                 and (digest := host.projects.run_digest(root, run_id)) is not None
             }
-            summaries = run_summaries(root, runs, host.registry.list(), digests)
+            now = host.clock.now()
+            summaries = run_summaries(
+                root, runs, host.registry.list(), digests, now=now if with_dashboard else None
+            )
+            if not with_dashboard:  # a client that did not ask never sees the dashboard
+                summaries = _without_dashboards(summaries)
             return RunsListReply(request_id=request_id, runs=summaries)
+
+
+def _without_dashboards(listing: RunList) -> RunList:
+    """``listing`` with every digest's ``dashboard`` removed: it is sent only to a client that asked."""
+    return listing.model_copy(
+        update={
+            "runs": tuple(
+                run.model_copy(update={"digest": run.digest.model_copy(update={"dashboard": None})})
+                if isinstance(run.digest, RunDigest)
+                else run
+                for run in listing.runs
+            )
+        }
+    )
 
 
 def _logins_reply(

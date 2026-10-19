@@ -22,7 +22,7 @@ A journal with finished rounds and no span event predates the run trace
 (``ideas`` is ``None``) instead of counting none. A round and its workstream span end together, so a
 journal with a finished round and no ended span has no spans at all.
 
-Public surface: ``digest_journal``.
+Public surface: ``digest_journal``, ``run_attention``.
 """
 
 from __future__ import annotations
@@ -33,7 +33,21 @@ from typing import TYPE_CHECKING, Final, NamedTuple
 
 from pydantic import JsonValue, TypeAdapter, ValidationError
 
-from server.host_api import RunClosing, RunDigest, RunEndingFact
+from server.host_api import (
+    DASHBOARD_MAX_POINTS,
+    REPEATED_FAILURE_AFTER,
+    STALLED_AFTER_S,
+    IdeaPoint,
+    IdeaVerdict,
+    RunAttention,
+    RunClosing,
+    RunDashboard,
+    RunDigest,
+    RunEndingFact,
+    RunEndOutcome,
+    RunPhase,
+    RunStatus,
+)
 from server.host_run_summary import TraceFormat, trace_format
 from vs_decode.api import Unreadable, decode_json
 
@@ -114,6 +128,22 @@ class _Measure(NamedTuple):
     at: float
 
 
+class _Attempt(NamedTuple):
+    """A non-probe workstream: its idea, its outcome (``passed``, ``failed`` or ``running``) and when it ended (or began)."""
+
+    idea: str
+    outcome: str
+    at: float
+
+
+class _Idea(NamedTuple):
+    """An idea as the run page's candidate: its outcome, its shown measurement and when it last moved."""
+
+    outcome: str
+    measure: _Measure | None
+    at: float
+
+
 def _outcome(label: dict[str, JsonValue], span: dict[str, JsonValue]) -> str:
     """The run page's outcome of one attempt: a verdict of passed passes, any other verdict or an ended span fails."""
     verdict = label.get("verdict")
@@ -140,8 +170,8 @@ class _Fold:
         """Each adoption span's verdict and attributes, by span id, in the order they started."""
         self.parents: dict[str, str | None] = {}
         """Each span's parent, by span id, in the order the spans first appeared (the run page's order)."""
-        self.attempts: dict[str, tuple[str, str]] = {}
-        """Each non-probe workstream's idea and outcome (``passed``, ``failed`` or ``running``), by span id."""
+        self.attempts: dict[str, _Attempt] = {}
+        """Each non-probe workstream, by span id."""
         self.gates: dict[str, _Gate] = {}
         """Each gate span, by span id, as its latest event left it."""
         self.spans = 0
@@ -190,7 +220,11 @@ class _Fold:
             if probe:
                 self.attempts.pop(span_id, None)
             else:
-                self.attempts[span_id] = (idea, _outcome(label, span))
+                self.attempts[span_id] = _Attempt(
+                    idea,
+                    _outcome(label, span),
+                    _number(span.get("ended_at")) or _number(span.get("started_at")) or 0.0,
+                )
         elif label.get("kind") == "gate":
             verdict = label.get("verdict")
             self.gates[span_id] = _Gate(
@@ -232,8 +266,8 @@ class _Fold:
             above = self.parents.get(above)
         return None
 
-    def _candidates(self) -> list[tuple[bool, _Measure | None]]:
-        """The run page's candidates: whether each idea passed, and its shown measurement, in the order they began.
+    def _candidates(self) -> list[_Idea]:
+        """The run page's candidates, in the order they began.
 
         An attempt's measurement is its last gate that has a value or a verdict; an idea shows the
         last such attempt's among its passed attempts (all of them when none passed), and is running
@@ -245,11 +279,11 @@ class _Fold:
             if owner is not None:
                 gates_of.setdefault(owner, []).append(gate)
         ideas: dict[str, list[str]] = {}
-        for span_id, (idea, _) in self.attempts.items():
-            ideas.setdefault(idea, []).append(span_id)
-        found: list[tuple[bool, _Measure | None]] = []
+        for span_id, attempt in self.attempts.items():
+            ideas.setdefault(attempt.idea, []).append(span_id)
+        found: list[_Idea] = []
         for attempt_ids in ideas.values():
-            outcomes = [self.attempts[each][1] for each in attempt_ids]
+            outcomes = [self.attempts[each].outcome for each in attempt_ids]
             outcome = (
                 "running"
                 if "running" in outcomes
@@ -260,47 +294,91 @@ class _Fold:
             shown = [
                 measure
                 for each in attempt_ids
-                if outcome != "passed" or self.attempts[each][1] == "passed"
+                if outcome != "passed" or self.attempts[each].outcome == "passed"
                 if (measure := _last_measure(gates_of.get(each, []))) is not None
             ]
-            found.append((outcome == "passed", shown[-1] if shown else None))
+            moved = max(self.attempts[each].at for each in attempt_ids)
+            found.append(_Idea(outcome, shown[-1] if shown else None, moved))
         return found
 
-    def _best_so_far_ratio(self) -> float | None:
-        """What the run page headlines while the run works: the best idea so far, as a ratio.
+    def _chart(self) -> list[tuple[IdeaVerdict, _Measure | None]]:
+        """The run page's chart (``performanceFold``): each idea's verdict and measurement, in plot order.
 
-        Before the run opens an adoption, the page's best is the latest idea that passed and beat the
-        input and every passed idea before it, in the order their measurements ended (the chart's
-        step line); the input's value is any measurement's value over its ratio to the input. Worded
-        as an improvement like ``_adopted_ratio``. Nothing once the run has opened an adoption:
-        from then the adoption's result is the headline, or none.
+        The ideas whose gate read a value are plotted in the order the readings ended (ties in the
+        order the ideas began); the others take the place of when they last moved. The input stands
+        as the best until a passed idea beats it (the input's value is any measurement's value over
+        its ratio to the input): that idea is ``kept`` and becomes the best. A passed idea that does
+        not beat the best is ``not_better``; the workstream's own verdict decides passed or failed,
+        never a number alone.
         """
-        if self.adoptions:
-            return None
-        candidates = self._candidates()
+        ideas = self._candidates()
         standing: float | None = None
-        for _, measure in candidates:
+        for idea in ideas:
+            measure = idea.measure
             if measure and measure.value is not None and measure.ratio:
                 standing = measure.value / measure.ratio
                 break
-        measured = sorted(
-            (
-                (passed, measure)
-                for passed, measure in candidates
-                if measure and measure.value is not None
-            ),
-            key=lambda each: each[1].at if each[1] else 0.0,
-        )
-        leader: _Measure | None = None
-        for passed, measure in measured:
-            value = measure.value if measure else None
-            if not passed or measure is None or value is None:
-                continue
-            if standing is None or (value < standing if self.minimize else value > standing):
-                leader, standing = measure, value
-        if leader is None or leader.ratio is None:
+
+        def plotted_at(idea: _Idea) -> float:
+            measure = idea.measure
+            return measure.at if measure and measure.value is not None else idea.at
+
+        chart: list[tuple[IdeaVerdict, _Measure | None]] = []
+        for _, idea in sorted(enumerate(ideas), key=lambda each: (plotted_at(each[1]), each[0])):
+            measure, value = idea.measure, idea.measure.value if idea.measure else None
+            if idea.outcome == "running":
+                verdict = IdeaVerdict.RUNNING
+            elif idea.outcome == "failed":
+                verdict = IdeaVerdict.FAILED
+            elif value is not None and (
+                standing is None or (value < standing if self.minimize else value > standing)
+            ):
+                verdict, standing = IdeaVerdict.KEPT, value
+            else:
+                verdict = IdeaVerdict.NOT_BETTER
+            chart.append((verdict, measure))
+        return chart
+
+    def _improvement(self, measure: _Measure | None) -> float | None:
+        """``measure``'s ratio to the input, worded as an improvement (the digest's wording)."""
+        if measure is None or measure.ratio is None:
             return None
-        return 1 / leader.ratio if self.minimize and leader.ratio != 0 else leader.ratio
+        return 1 / measure.ratio if self.minimize and measure.ratio != 0 else measure.ratio
+
+    def _best_so_far_ratio(self, chart: list[tuple[IdeaVerdict, _Measure | None]]) -> float | None:
+        """What the run page headlines while the run works: the best idea so far, as a ratio.
+
+        Before the run opens an adoption, the page's best is the last ``kept`` idea of the ``chart``.
+        Nothing once the run has opened an adoption: from then the adoption's result is the
+        headline, or none.
+        """
+        if self.adoptions:
+            return None
+        kept = [measure for verdict, measure in chart if verdict is IdeaVerdict.KEPT]
+        return self._improvement(kept[-1]) if kept else None
+
+    def _dashboard(self, chart: list[tuple[IdeaVerdict, _Measure | None]]) -> RunDashboard:
+        points = [
+            IdeaPoint(ratio=self._improvement(measure), verdict=verdict)
+            for verdict, measure in chart
+        ]
+        streak = 0
+        for point in reversed(points):
+            if point.verdict is IdeaVerdict.RUNNING:
+                continue
+            if point.verdict is not IdeaVerdict.FAILED:
+                break
+            streak += 1
+        # Over the cap, the oldest points that are not kept go first, then the oldest kept ones.
+        order = sorted(
+            range(len(points)), key=lambda at: (points[at].verdict is IdeaVerdict.KEPT, at)
+        )
+        gone = set(order[: max(0, len(points) - DASHBOARD_MAX_POINTS)])
+        shown = tuple(point for at, point in enumerate(points) if at not in gone)
+        last = None if self.last is None else datetime.fromtimestamp(self.last, UTC)
+        return RunDashboard(
+            points=shown, points_omitted=len(gone), failed_streak=streak, last_event_at=last
+        )
 
     def _ending(self, data: dict[str, JsonValue]) -> None:
         try:
@@ -318,15 +396,17 @@ class _Fold:
     def digest(self) -> RunDigest:
         duration = None if self.first is None or self.last is None else self.last - self.first
         recorded = trace_format(spans=self.spans, rounds=self.rounds) is TraceFormat.RECORDED
+        chart = self._chart()
         return RunDigest(
             ideas=len({made[0] for made in self.workstreams.values() if made})
             if recorded
             else None,
             adopted_ratio=self._adopted_ratio(),
-            best_so_far_ratio=self._best_so_far_ratio(),
+            best_so_far_ratio=self._best_so_far_ratio(chart),
             duration_s=duration,
             ending=self.ending,
             closing=self.closing,
+            dashboard=self._dashboard(chart),
         )
 
 
@@ -363,3 +443,36 @@ def digest_journal(lines: Iterable[bytes]) -> RunDigest:
             fold.stamp(last)
             break
     return fold.digest()
+
+
+def run_attention(digest: RunDigest, *, phase: RunPhase | None, now: float) -> RunAttention:
+    """Why the run behind ``digest`` needs its user, as of ``now`` (epoch seconds, given as data).
+
+    A pure function of the journal's facts (``digest``), the phase of the server that drives the run
+    (``None``: no server here) and the time: nothing here reads a clock, so a test names any time
+    it likes. In order: ``failed`` when the run ended in failure (its terminal event, its ending or
+    its server's phase says so); nothing once it ended any other way; ``stalled`` when its server
+    works (``running``) and the journal's last event is older than ``STALLED_AFTER_S``;
+    ``repeated_failure`` when it works and its last ``REPEATED_FAILURE_AFTER`` ideas failed. A
+    paused run is silent by design, so it is neither stalled nor failing.
+    """
+    ended = digest.closing is not None or digest.ending is not None
+    if (
+        digest.closing is RunClosing.FAILED
+        or (digest.ending is not None and digest.ending.outcome is RunEndOutcome.FAILED)
+        or (phase is not None and phase.status is RunStatus.FAILED)
+    ):
+        return RunAttention.FAILED
+    if ended or phase is None or phase.status is not RunStatus.RUNNING:
+        return RunAttention.NONE
+    dashboard = digest.dashboard
+    if dashboard is None:
+        return RunAttention.NONE
+    if (
+        dashboard.last_event_at is not None
+        and now - dashboard.last_event_at.timestamp() > STALLED_AFTER_S
+    ):
+        return RunAttention.STALLED
+    if dashboard.failed_streak >= REPEATED_FAILURE_AFTER:
+        return RunAttention.REPEATED_FAILURE
+    return RunAttention.NONE

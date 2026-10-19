@@ -67,6 +67,7 @@ export type DeadlineMs6 = number;
 export type Type6 = "runs.list";
 export type Project1 = string;
 export type DigestRuns = string[] | null;
+export type WithDashboard = boolean | null;
 export type RequestId7 = string;
 export type DeadlineMs7 = number;
 export type Type7 = "run.start";
@@ -313,6 +314,7 @@ export type HelperFeature =
   | "run_causes"
   | "example_catalogue"
   | "run_digest"
+  | "run_dashboard"
   | "harness_generations"
   | "run_role_agents"
   | "measurement_target"
@@ -459,8 +461,24 @@ export type RoundsFinished = number;
  * The journal's last word on a run: the terminal event it ends with, if it has one.
  */
 export type RunClosing = "finished" | "failed" | "interrupted";
+export type Ratio = number | null;
+/**
+ * What a run's idea came to, as the run page's chart marks it.
+ */
+export type IdeaVerdict = "kept" | "not_better" | "failed" | "running";
+/**
+ * @maxItems 64
+ */
+export type Points = IdeaPoint[];
+export type PointsOmitted = number;
+export type FailedStreak = number;
+export type LastEventAt = string | null;
 export type Kind6 = "unreadable";
 export type Message2 = string;
+/**
+ * Why a run needs its user, judged from its journal, its server and the time now.
+ */
+export type RunAttention = "none" | "failed" | "repeated_failure" | "stalled";
 export type Runs = RunSummary[];
 export type RequestId39 = string;
 export type Type39 = "run.start";
@@ -1027,6 +1045,7 @@ export interface RunsListRequest {
   type: Type6;
   project: Project1;
   digest_runs?: DigestRuns;
+  with_dashboard?: WithDashboard;
 }
 /**
  * Start a detached run (``vibesys --detach``) in ``project``.
@@ -1647,6 +1666,7 @@ export interface RunSummary {
   phase: RunPhase | null;
   instance_id: InstanceId5;
   digest?: Digest;
+  attention?: RunAttention | null;
 }
 /**
  * What a run's journal says at a glance, for a list row; never a replay of the run.
@@ -1673,6 +1693,7 @@ export interface RunDigest {
   duration_s: DurationS;
   ending: RunEndingFact | null;
   closing: RunClosing | null;
+  dashboard?: RunDashboard | null;
 }
 /**
  * How a run's durable record stood as it ended, as its server reports it to the record.
@@ -1685,6 +1706,36 @@ export interface RunEndingFact {
   summary?: Summary;
   resumable: Resumable1;
   rounds_finished: RoundsFinished;
+}
+/**
+ * What a run's tile draws, folded from the journal in the digest's pass.
+ *
+ * ``points`` are the run page's chart (``performanceFold``): the ideas in the order their results
+ * landed (the idea's measurement time, else when its last attempt ended or began; ties in the
+ * order the ideas began), each with its verdict. A run with more than ``DASHBOARD_MAX_POINTS``
+ * ideas keeps the newest points of the verdicts that matter to the line: the oldest ideas that
+ * are not ``kept`` go first, then the oldest ``kept`` ones, and ``points_omitted`` counts the
+ * ideas left out (the ideas count is ``len(points) + points_omitted``). ``failed_streak`` counts
+ * the ideas at the end of the order that failed, with none passing since (a running idea is
+ * skipped), over every idea and not only the ones kept. ``last_event_at`` is the journal's last
+ * event, the only time fact a stalled run is judged from (``RunAttention``).
+ */
+export interface RunDashboard {
+  points: Points;
+  points_omitted: PointsOmitted;
+  failed_streak: FailedStreak;
+  last_event_at: LastEventAt;
+}
+/**
+ * One idea of a run on the performance chart: its result against the input and its verdict.
+ *
+ * ``ratio`` is worded like ``RunDigest.adopted_ratio`` (an improvement over the input, for a
+ * ``min`` objective the input's value over the result's); ``None`` when the idea has no
+ * measurement against the input (it failed before one, or still works).
+ */
+export interface IdeaPoint {
+  ratio: Ratio;
+  verdict: IdeaVerdict;
 }
 /**
  * A run whose journal exists and could not be read; ``message`` says why, in one line.

@@ -90,6 +90,9 @@ class HelperFeature(StrEnum):
     workload, objectives and goal text, in ``task_details``."""
     RUN_DIGEST = "run_digest"
     """``runs.list``'s ``digest_runs``: each named run's ``digest``, read from its journal."""
+    RUN_DASHBOARD = "run_dashboard"
+    """``runs.list``'s ``with_dashboard``: each digested run's per-idea ``dashboard`` points and its
+    ``attention`` reason, for the runs dashboard's tiles."""
     HARNESS_GENERATIONS = "harness_generations"
     """``harnesses.list``'s ``with_generations``: each pair's maker and the generation it belongs to."""
     RUN_ROLE_AGENTS = "run_role_agents"

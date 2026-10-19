@@ -18,7 +18,8 @@ Public surface: ``PROTOCOL_VERSION``, ``RECORD_VERSION``,
 ``INSTANCE_ID_PATTERN``, ``InstanceId``, ``RunId``, ``RunStatus``,
 ``StartupStage``, ``StartupProgress``, ``StartupFact``, ``FailureReason``,
 ``RunPhase``, ``InstanceStatus``, ``RunEndOutcome``, ``EndRecord``, ``RunEndingFact``, ``RunClosing``,
-``RunDigest``, ``RunDigestUnreadable``, ``one_line``,
+``RunDigest``, ``RunDigestUnreadable``, ``RunDashboard``, ``IdeaPoint``, ``IdeaVerdict``,
+``RunAttention``, ``DASHBOARD_MAX_POINTS``, ``REPEATED_FAILURE_AFTER``, ``STALLED_AFTER_S``, ``one_line``,
 ``END_REASON_MAX_CHARACTERS``, ``PauseCause``,
 ``LiveInstanceRecord``, ``UnreadableRecord``, ``parse_record``,
 ``InstanceList``, ``StopOutcome``, ``StopRoute``, ``InstanceStopResult``,
@@ -62,6 +63,7 @@ if TYPE_CHECKING:
 
 from pydantic import (
     AfterValidator,
+    AwareDatetime,
     BaseModel,
     ConfigDict,
     Field,
@@ -873,6 +875,9 @@ class RunsListRequest(HelperRequestBase):
     digest_runs: Annotated[tuple[RunId, ...], Field(max_length=RUN_DIGEST_MAX_RUNS)] | None = None
     """The runs to read a ``digest`` of, which costs a pass over each one's journal, so a
     client names only the runs it shows. Sent only after ``hello`` returned ``run_digest``."""
+    with_dashboard: bool | None = None
+    """With ``digest_runs``: also each digest's ``dashboard`` and each run's ``attention``, read in
+    the same pass. Sent only after ``hello`` returned ``run_dashboard``."""
 
 
 class ResumeRun(BaseModel):
@@ -1206,7 +1211,10 @@ HELPER_FIELD_FEATURES: Final[Mapping[type[HelperRequestBase], Mapping[str, Helpe
     HarnessesListRequest: {"with_generations": HelperFeature.HARNESS_GENERATIONS},
     LogsListRequest: {"span_id": HelperFeature.LOGS_BY_SPAN},
     RunsReadEventsRequest: {"with_totals": HelperFeature.RUN_HISTORY_PAGES},
-    RunsListRequest: {"digest_runs": HelperFeature.RUN_DIGEST},
+    RunsListRequest: {
+        "digest_runs": HelperFeature.RUN_DIGEST,
+        "with_dashboard": HelperFeature.RUN_DASHBOARD,
+    },
     ExamplesListRequest: {"with_catalogue": HelperFeature.EXAMPLE_CATALOGUE},
 }
 """The feature each gated optional field needs when it is set (not ``None``), exported too."""
@@ -1347,6 +1355,80 @@ class RunClosing(StrEnum):
     INTERRUPTED = "interrupted"
 
 
+class IdeaVerdict(StrEnum):
+    """What a run's idea came to, as the run page's chart marks it."""
+
+    KEPT = "kept"
+    """It passed and beat every passed idea before it and the input: it sits on the step line."""
+    NOT_BETTER = "not_better"
+    """It passed and did not beat the best so far."""
+    FAILED = "failed"
+    """Every attempt of the idea failed."""
+    RUNNING = "running"
+    """An attempt of the idea is still going: its verdict is not decided."""
+
+
+class IdeaPoint(BaseModel):
+    """One idea of a run on the performance chart: its result against the input and its verdict.
+
+    ``ratio`` is worded like ``RunDigest.adopted_ratio`` (an improvement over the input, for a
+    ``min`` objective the input's value over the result's); ``None`` when the idea has no
+    measurement against the input (it failed before one, or still works).
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    ratio: float | None
+    verdict: IdeaVerdict
+
+
+DASHBOARD_MAX_POINTS: Final = 64
+"""The most ideas one ``RunDashboard`` carries, so a ``runs.list`` of ``RUN_DIGEST_MAX_RUNS`` runs
+stays far under ``HELPER_LINE_MAX_BYTES``."""
+
+
+class RunDashboard(BaseModel):
+    """What a run's tile draws, folded from the journal in the digest's pass.
+
+    ``points`` are the run page's chart (``performanceFold``): the ideas in the order their results
+    landed (the idea's measurement time, else when its last attempt ended or began; ties in the
+    order the ideas began), each with its verdict. A run with more than ``DASHBOARD_MAX_POINTS``
+    ideas keeps the newest points of the verdicts that matter to the line: the oldest ideas that
+    are not ``kept`` go first, then the oldest ``kept`` ones, and ``points_omitted`` counts the
+    ideas left out (the ideas count is ``len(points) + points_omitted``). ``failed_streak`` counts
+    the ideas at the end of the order that failed, with none passing since (a running idea is
+    skipped), over every idea and not only the ones kept. ``last_event_at`` is the journal's last
+    event, the only time fact a stalled run is judged from (``RunAttention``).
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    points: Annotated[tuple[IdeaPoint, ...], Field(max_length=DASHBOARD_MAX_POINTS)]
+    points_omitted: NonNegativeInt
+    failed_streak: NonNegativeInt
+    last_event_at: AwareDatetime | None
+
+
+class RunAttention(StrEnum):
+    """Why a run needs its user, judged from its journal, its server and the time now."""
+
+    NONE = "none"
+    FAILED = "failed"
+    """The run ended in failure: its terminal event, or its server's phase, says so."""
+    REPEATED_FAILURE = "repeated_failure"
+    """The run still works and its last ``REPEATED_FAILURE_AFTER`` ideas all failed."""
+    STALLED = "stalled"
+    """A server drives the run and its journal has not moved for ``STALLED_AFTER_S``."""
+
+
+REPEATED_FAILURE_AFTER: Final = 3
+"""The ideas in a row that fail before a working run needs its user."""
+
+STALLED_AFTER_S: Final = 30 * 60
+"""The seconds a run's live server may leave its journal silent before the run is stalled: a
+benchmark or a long agent turn keeps writing output, so half an hour of silence is not work."""
+
+
 class RunDigest(BaseModel):
     """What a run's journal says at a glance, for a list row; never a replay of the run.
 
@@ -1374,6 +1456,9 @@ class RunDigest(BaseModel):
     duration_s: NonNegativeFloat | None
     ending: RunEndingFact | None
     closing: RunClosing | None
+    dashboard: Annotated[RunDashboard | None, Field(exclude_if=lambda each: each is None)] = None
+    """The tile's data, present when ``runs.list`` asked ``with_dashboard`` (feature ``run_dashboard``);
+    absent otherwise, so a strict client that did not ask never sees it."""
 
 
 class RunDigestUnreadable(BaseModel):
@@ -1404,6 +1489,9 @@ class RunSummary(BaseModel):
     ] = None
     """What the run's journal says, for each run the request named in ``digest_runs`` (feature
     ``run_digest``); absent for the others, so a strict client that did not ask never sees it."""
+    attention: Annotated[RunAttention | None, Field(exclude_if=lambda each: each is None)] = None
+    """Why the run needs its user, for each digested run when the request asked ``with_dashboard``
+    (feature ``run_dashboard``); absent otherwise."""
 
 
 class RunList(BaseModel):

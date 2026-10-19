@@ -256,7 +256,7 @@ def test_host_helper_schema_exports_the_authoritative_field_feature_gates() -> N
         "harnesses.list": {"with_generations": "harness_generations"},
         "logs.list": {"span_id": "logs_by_span"},
         "runs.read_events": {"with_totals": "run_history_pages"},
-        "runs.list": {"digest_runs": "run_digest"},
+        "runs.list": {"digest_runs": "run_digest", "with_dashboard": "run_dashboard"},
         "examples.list": {"with_catalogue": "example_catalogue"},
     }
     request_refs = document["properties"]["request"]["discriminator"]["mapping"]
