@@ -886,7 +886,7 @@ def test_docker_environment_opens_one_started_sandbox_with_agent_paths(
     assert session.view.profile_execution == "local"
     assert session.view.paths.accuracy_command == "uv run python accuracy_checker/checker.py"
     assert session.view.paths.benchmark_command == "uv run python benchmark/benchmark.py"
-    assert backend.calls[0][1]["extra_env"]["UV_CACHE_DIR"] == "/workspace/.cache/uv"
+    assert backend.calls[0][1]["extra_env"]["UV_CACHE_DIR"] == "/home/agent/.cache/uv"
     assert backend.calls[0][1]["lifecycle_hooks"] == []
     # The container always starts from a resolved agent image, built from the
     # backend's own base image, even when the run needs no evaluator tools.
@@ -1955,6 +1955,41 @@ def test_modal_environment_wraps_custom_deployment_entrypoint(tmp_path: Path) ->
     assert session.view.paths.benchmark_command == f"{prefix} trusted-benchmark"
 
 
+_TOOL_CACHE_VARIABLES = ("UV_CACHE_DIR", "CARGO_HOME")
+
+
+@pytest.mark.parametrize("environment", ["docker", "modal"])
+@pytest.mark.parametrize("workspace_kind", ["candidate", "worktrees/m-attempt-1/workspace"])
+def test_a_tool_cache_never_lives_inside_the_candidate_workspace(
+    tmp_path: Path, environment: str, workspace_kind: str
+) -> None:
+    """Regression: uv and Cargo caches hold Git checkouts, so inside a workspace they poison it.
+
+    The workspace is one of the host paths a candidate or an attempt gets, mounted at
+    ``/workspace``; the cache is the container's, whichever path the workspace has.
+    """
+    backend = FakeBackend()
+    workspace = tmp_path / workspace_kind
+    workspace.mkdir(parents=True)
+    _open(
+        build_run_environment(RunEnvironmentSpec(environment)),
+        _request(
+            tmp_path,
+            backend,
+            workspace=workspace,
+            agent_backend="cli",
+            cli_provider="codex",
+        ),
+    )
+
+    extra_env = backend.calls[0][1]["extra_env"]
+    roots = [workspace, Path("/workspace")]
+    for name in _TOOL_CACHE_VARIABLES:
+        location = Path(extra_env[name])
+        assert location.is_absolute()
+        assert not any(location.is_relative_to(root) for root in roots), (name, location)
+
+
 def test_modal_environment_installs_nothing_at_container_start(tmp_path: Path) -> None:
     """The local Docker container starts from a prebuilt, pushed agent image
     and installs nothing at start, including the Modal Python SDK an earlier
@@ -1967,7 +2002,7 @@ def test_modal_environment_installs_nothing_at_container_start(tmp_path: Path) -
     _open(env, _request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
 
     assert "extra_init_commands" not in backend.calls[0][1]
-    assert backend.calls[0][1]["extra_env"]["UV_CACHE_DIR"] == "/workspace/.cache/uv"
+    assert backend.calls[0][1]["extra_env"]["UV_CACHE_DIR"] == "/home/agent/.cache/uv"
 
 
 def test_modal_environment_mounts_modal_auth_under_the_agent_home(
@@ -2194,15 +2229,18 @@ def test_modal_environment_runtime_notes_describe_profile_contract(tmp_path: Pat
     assert "from torch.autograd import DeviceType" not in notes
 
 
-def test_modal_environment_prompt_notes_reuse_workspace_uv_cache(tmp_path: Path) -> None:
+def test_modal_environment_prompt_notes_keep_the_uv_cache_out_of_the_workspace(
+    tmp_path: Path,
+) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
 
     _open(env, _request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
     notes = _modal_runtime_document(tmp_path)
 
-    assert "UV_CACHE_DIR=/workspace/.cache/uv" in notes
-    assert "persist outside Git checkpoints" in notes
+    assert "UV_CACHE_DIR" not in notes
+    assert "uv cache lives in the container home, never in the workspace" in notes
+    assert "persists outside Git checkpoints" in notes
     assert "do not delete or recreate `.venv`" in notes
     assert ".venv/bin/python -m ..." in notes
     assert "excluding `.venv` and `.cache`" in notes

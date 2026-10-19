@@ -48,6 +48,7 @@ from vs_agent.api import (
 # lint-waiver: LW-014514 [TC001]; Pydantic resolves this dataclass field annotation at runtime
 from vs_project.api import RunResourceRequest  # noqa: TC001
 from vs_runtime import _boot_trace as boot_trace
+from vs_runtime._agent_tool_caches import agent_tool_cache_env
 from vs_runtime._cli_container_env import cli_container_env, cli_provider_env_and_auth_files
 from vs_runtime._command_environment_session import command_environment_session
 from vs_runtime._container_mount_plan import (
@@ -1018,7 +1019,6 @@ class DockerEnvironment(NoCaptureRecovery):
                 output=output,
                 clock=request.clock,
             )
-        workspace_root = sandbox_workspace_root(request, same_path=extras.same_path_workspace)
         plan = container_mount_plan(request, same_path=extras.same_path_workspace)
         docker_symlinks = plan.symlinks
         resources = [*plan.resources, *extras.resources]
@@ -1040,16 +1040,13 @@ class DockerEnvironment(NoCaptureRecovery):
         if resolved_cli is not None:
             provider, cli_provider_env = resolved_cli
             auth_files = auth_copy_paths(provider)
-        cli_provider_env.setdefault("UV_CACHE_DIR", f"{workspace_root}/.cache/uv")
         # The agent image's baked toolchain root is read-only (the vibesys-rust
         # Feature chmods /opt/cargo a+rX, deliberately: an agent cannot apt/cargo
-        # install mid-round). A Cargo invocation that needs a crate the image
-        # did not prebuild -- an evaluator's own trusted-runner build, most
-        # commonly -- still has to create its registry cache somewhere, so
-        # CARGO_HOME is redirected onto the writable, bind-mounted workspace.
-        # This is unrelated to which crates a candidate build needs: one with
-        # no external dependencies never touches the registry at all.
-        cli_provider_env.setdefault("CARGO_HOME", f"{workspace_root}/.cache/cargo")
+        # install mid-round), so a Cargo invocation that needs a crate the image
+        # did not prebuild still has to create its registry cache somewhere
+        # writable. That and uv's cache are the agent home's, never the workspace's.
+        for name, value in agent_tool_cache_env().items():
+            cli_provider_env.setdefault(name, value)
         if request.git_history_root is not None:
             cli_provider_env.setdefault("VIBESYS_GIT_HISTORY", "/opt/vibesys-history")
         cli_provider_env.update(extras.env)
@@ -1313,7 +1310,8 @@ class SkyPilotEnvironment(RefusesDockerInDocker, DockerEnvironment):
             plan = container_mount_plan(request)
             resources, docker_symlinks = plan.resources, plan.symlinks
             cli_provider_env, auth_files = _cli_provider_env_and_auth_files(request)
-            cli_provider_env.setdefault("UV_CACHE_DIR", "/workspace/.cache/uv")
+            for name, value in agent_tool_cache_env().items():
+                cli_provider_env.setdefault(name, value)
             helper_source = evaluator_helpers.SKYPILOT_EVALUATOR_HELPER
             helper_path = "/opt/vibesys-skypilot-evaluator.py"
             socket_path = "/opt/vibesys-skypilot/bridge.sock"
@@ -1489,7 +1487,8 @@ class ModalEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
         plan = container_mount_plan(request)
         resources, docker_symlinks = plan.resources, plan.symlinks
         cli_provider_env, auth_files = _cli_provider_env_and_auth_files(request)
-        cli_provider_env.setdefault("UV_CACHE_DIR", "/workspace/.cache/uv")
+        for name, value in agent_tool_cache_env().items():
+            cli_provider_env.setdefault(name, value)
         if request.git_history_root is not None:
             cli_provider_env.setdefault("VIBESYS_GIT_HISTORY", "/opt/vibesys-history")
         cli_provider_env["VIBESYS_MODAL_APP_NAME"] = app_name
