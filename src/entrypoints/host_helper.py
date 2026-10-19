@@ -79,7 +79,7 @@ from vs_sim.api import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
-    from server.host_examples import CreatedProject, ExampleList
+    from server.host_examples import CreatedProject, ExampleDestination, ExampleList
     from server.host_helper_requests import ExampleProjects
     from vs_agent.api import LoginCommand, ModelDisplay, ProviderLogin
     from vs_sim.api import Threads
@@ -287,6 +287,10 @@ class ExampleProjectsOnUse:
     def create(self, example: str, destination: Path) -> CreatedProject:
         """Copy ``example`` into its own new Git repository at ``destination``."""
         return checkout_example_projects().create(example, destination)
+
+    def destination(self, example: str, destination: Path) -> tuple[ExampleDestination, str | None]:
+        """What :meth:`create` would find at ``destination``, and the project there if it is one."""
+        return checkout_example_projects().destination(example, destination)
 
     def copy_out(self, source: Path, destination: Path) -> CreatedProject:
         """Copy ``source``'s tracked files into their own new Git repository at ``destination``."""
