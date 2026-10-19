@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import pytest
+
 from vs_sandbox.api.slurm import SlurmLedgerAttachment
 from vs_sim.api.testing import ManualClock
 from vs_slurm.api import (
@@ -254,3 +256,49 @@ def test_a_heartbeat_during_a_sweep_starts_no_second_sweep_of_the_process() -> N
 
         assert hooks[0].fired
         assert hooks[0].violations == []
+
+
+class _ListingFailsOnce(FakeEvaluationLedger):
+    """The Fake ledger, where the first listing of the project's requests fails."""
+
+    failed: bool = False
+
+    def list_keys(self) -> tuple[str, ...]:
+        if not self.failed:
+            self.failed = True
+            raise LedgerError.transport(ConnectionResetError("ssh: connection reset"))
+        return super().list_keys()
+
+
+def test_a_sweep_that_raises_leaves_the_next_due_sweep_to_run() -> None:
+    """r3223 LOW-4: a sweep's turn is released on every exit, an exception's too.
+
+    Were the claim kept, every later sweep of the process would return at once,
+    and no unleased request of the project would ever be withdrawn by it.
+    """
+    with TemporaryDirectory() as directory:
+        clock = ManualClock(NOW)
+        cluster = FakeCluster(clock=clock)
+        ledger = _ListingFailsOnce(project=PROJECT, clock=clock)
+        key, operation = _submitted(cluster, ledger, Path(directory), "unleased", "run-gone")
+        sweeper = SlurmLedgerAttachment(
+            ledger=ledger,
+            config=CONFIG,
+            project=PROJECT,
+            holder="run-sweeper",
+            policy=POLICY,
+            clock=clock,
+        )
+
+        with pytest.raises(LedgerError):
+            sweeper.sweep_if_due(cluster)
+        clock.advance(POLICY.lease_seconds)
+        swept = sweeper.sweep_if_due(cluster)
+
+        assert [type(outcome) for outcome in swept] == [Withdrawn]
+        entry = ledger.read(key)
+        assert entry is not None
+        assert entry.record.state is LedgerState.WITHDRAWN
+        observed = cluster.inspect(operation)
+        assert isinstance(observed, ClusterObservation)
+        assert observed.status is SlurmJobStatus.CANCELLED

@@ -262,6 +262,7 @@ class FakeCluster:
         self._pending: dict[str, str] = {}
         self._rejections: dict[str, tuple[str, str]] = {}
         self._expired_names: set[str] = set()
+        self._collisions: set[str] = set()
         self._outputs: dict[tuple[str, int, OutputStream], FakeByteSource] = {}
 
     def reopen(self) -> FakeCluster:
@@ -276,6 +277,7 @@ class FakeCluster:
         reopened._pending = self._pending
         reopened._rejections = self._rejections
         reopened._expired_names = self._expired_names
+        reopened._collisions = self._collisions
         reopened._outputs = self._outputs
         return reopened
 
@@ -283,6 +285,21 @@ class FakeCluster:
         """Expire scheduler name lookup while retained acceptance stays recoverable."""
         validate_operation_id(operation_id)
         self._expired_names.add(operation_id)
+
+    def collide_name(self, operation_id: str) -> None:
+        """Give another scheduler job this operation's name, as a foreign submitter's would.
+
+        A lookup by name then finds two jobs, so it proves neither which job is the
+        operation's nor that none is: an inspect that needs it stays unknown.
+        """
+        validate_operation_id(operation_id)
+        self._collisions.add(operation_id)
+
+    def has_live_job(self, operation_id: str) -> bool:
+        """Whether the scheduler holds this operation's job queued or running, read without advancing it."""
+        with self._lock:
+            job = self._jobs.get(operation_id)
+            return job is not None and isinstance(self._peek(job), Queued | Running)
 
     def on_accept(self, operation_id: str, callback: Callable[[], None]) -> None:
         """Run a deterministic test barrier after external acceptance."""
@@ -495,6 +512,10 @@ class FakeCluster:
                 reason="operation not found",
                 job_absent=self._absent_by_name(target, by_job_id=by_job_id),
             )
+        if self._ambiguous(job, by_job_id=by_job_id):
+            return ClusterUnknown(
+                operation_id=job.operation_id, reason="scheduler operation identity is ambiguous"
+            )
         if job.operation_id in self._expired_names and not job.accepted_published and not by_job_id:
             # The name lookup forgot the job; a queued or running one is still found by it.
             return ClusterUnknown(
@@ -612,9 +633,13 @@ class FakeCluster:
 
     def _unresolved(self, job: _Job, *, by_job_id: bool) -> bool:
         """Whether a cancel by name cannot find the job: its acceptance was never published."""
-        return (
+        return self._ambiguous(job, by_job_id=by_job_id) or (
             job.operation_id in self._expired_names and not job.accepted_published and not by_job_id
         )
+
+    def _ambiguous(self, job: _Job, *, by_job_id: bool) -> bool:
+        """Whether the job is found only by a name another job also has (``collide_name``)."""
+        return job.operation_id in self._collisions and not job.accepted_published and not by_job_id
 
     def _stop(self, job: _Job | None) -> None:
         """The scancel's effect: a job still queued or running is cancelled."""
@@ -795,6 +820,7 @@ class FakeCluster:
             and not by_job_id
             and target not in self._rejections
             and target not in self._cancelled
+            and target not in self._collisions
         )
 
     def _find(self, target: ClusterTarget, *, by_job_id: bool) -> _Job | None:

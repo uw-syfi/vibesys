@@ -41,6 +41,7 @@ from vs_slurm.api import (
     SlurmBatchStageResult,
     SlurmConfig,
     SlurmConnectorTransport,
+    SlurmError,
     SlurmFileArtifact,
     SlurmJobHandle,
     SlurmJobRequest,
@@ -51,6 +52,7 @@ from vs_slurm.api import (
     SlurmTreeArtifact,
     advance_with_notice,
     observe,
+    split_framed_scheduler_query,
 )
 
 # test-isolation: public executable transport Fake configures production contract scenarios.
@@ -94,14 +96,57 @@ class _Case:
     commands: Callable[[], Sequence[str]]
     # Every transport call the implementation made, in order, as a caller budgets them.
     calls: Callable[[], Sequence[ClusterCall]]
+    # Another scheduler job takes the operation's name (a foreign submitter's).
+    collide_name: Callable[[str], None]
+    # Whether the scheduler model holds the operation's job queued or running.
+    has_live_job: Callable[[str], bool]
+    # From now on, every read by the named scheduler programs ("squeue", "sacct") fails;
+    # an empty set restores them.
+    fail_scheduler_reads: Callable[[frozenset[str]], None]
+
+
+class _SchedulerReadFaults:
+    """Fails every read by the named scheduler programs, for the Fake and production alike."""
+
+    def __init__(self) -> None:
+        self.failing: frozenset[str] = frozenset()
+
+    def fail(self, programs: frozenset[str]) -> None:
+        self.failing = programs
+
+    def hear(self, call: ClusterCall) -> None:
+        """The Fake's inspection is one scheduler read: any program failing fails it."""
+        if self.failing and call is ClusterCall.SCHEDULER_READ:
+            raise SlurmError.truncated_output()
+
+    def intercept(
+        self,
+        request: dict[str, object],
+        answer: Callable[[dict[str, object]], dict[str, object]],
+    ) -> dict[str, object]:
+        """The connector's answer, unless the read is failing: then its end line never arrives.
+
+        The runner reads it again, and that read fails too.
+        """
+        query, _ = split_framed_scheduler_query(str(request.get("command", "")))
+        program = shlex.split(query)[:1]
+        if request.get("operation") == "exec" and program and program[0] in self.failing:
+            return {"version": 1, "returncode": 0, "stdout": "", "stderr": ""}
+        return answer(request)
 
 
 def _make_case(implementation: str, tmp_path: Path) -> _Case:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    faults = _SchedulerReadFaults()
     if implementation == "fake":
         calls: list[ClusterCall] = []
-        cluster = FakeCluster(clock=ManualClock(), on_call=calls.append)
+
+        def on_call(call: ClusterCall) -> None:
+            calls.append(call)
+            faults.hear(call)
+
+        cluster = FakeCluster(clock=ManualClock(), on_call=on_call)
 
         def script(operation_id: str, **values: Unpack[_ScriptOptions]) -> None:
             def lost_claim() -> None:
@@ -135,8 +180,12 @@ def _make_case(implementation: str, tmp_path: Path) -> _Case:
             cluster.on_accept,
             lambda: (),
             lambda: tuple(calls),
+            cluster.collide_name,
+            cluster.has_live_job,
+            faults.fail,
         )
     connector = FakeConnector(tmp_path / "connector")
+    connector.intercept(faults.intercept)
     remote = tmp_path / "remote"
     remote.mkdir()
     runner = SlurmJobRunner(
@@ -184,6 +233,9 @@ def _make_case(implementation: str, tmp_path: Path) -> _Case:
         connector.on_accept,
         lambda: recorded_commands(connector.state),
         lambda: _recorded_calls(connector.state),
+        connector.collide_name,
+        connector.has_live_job,
+        faults.fail,
     )
 
 
@@ -216,6 +268,13 @@ def _job_id(handle: SlurmJobHandle | SlurmBatchHandle) -> str:
 
 def _request(case: _Case, command: tuple[str, ...] = ("true",)) -> SlurmJobRequest:
     return SlurmJobRequest(workspace=case.workspace, command=command)
+
+
+def _cancelled_before_submit(request: SlurmJobRequest) -> SlurmJobRequest:
+    """``request``, its cancel already set when it is submitted."""
+    cancel = Event()
+    cancel.set()
+    return replace(request, cancel_event=cancel)
 
 
 @pytest.mark.parametrize("batch", [False, True])
@@ -416,6 +475,232 @@ def test_unknown_identity_stays_unknown(case: _Case) -> None:
     observed = case.cluster.inspect("absent")
     assert isinstance(observed, ClusterUnknown)
     assert observed.operation_id == "absent"
+    assert observed.job_absent
+
+
+def _absence_is_true(case: _Case, outcome: object, operation_id: str) -> None:
+    """``job_absent`` holds only while the scheduler has no queued or running job of the name."""
+    if isinstance(outcome, ClusterUnknown) and outcome.job_absent:
+        assert not case.has_live_job(operation_id), f"absent, yet a job of {operation_id} is live"
+
+
+_LIVE = [SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING]
+_LOOKUP_FAULTS = ["squeue fails", "sacct fails", "two jobs share the name"]
+
+
+def _break_name_lookup(case: _Case, operation_id: str, fault: str) -> None:
+    match fault:
+        case "squeue fails":
+            case.fail_scheduler_reads(frozenset({"squeue"}))
+        case "sacct fails":
+            case.fail_scheduler_reads(frozenset({"sacct"}))
+        case "two jobs share the name":
+            case.collide_name(operation_id)
+        case _:
+            raise AssertionError(fault)
+
+
+@pytest.mark.parametrize("fresh", [False, True])
+@pytest.mark.parametrize("fault", _LOOKUP_FAULTS)
+@pytest.mark.parametrize("state", _LIVE)
+def test_an_inspect_whose_name_lookup_failed_never_proves_absence(
+    case: _Case, state: SlurmJobStatus, fault: str, *, fresh: bool
+) -> None:
+    """r3223 MED-1: a lost submit reply leaves only the job's name to find it by.
+
+    A read of ``squeue`` or ``sacct`` that fails twice, or a name two jobs carry,
+    proves neither the job nor its absence. Production treating either as "no job"
+    went unnoticed by every test: a takeover would then fail the attempt while
+    its job runs, and the next attempt start a second.
+    """
+    case.script("lookup", states=(state,), lost_submit_reply=True)
+    assert isinstance(case.cluster.submit(_request(case), operation_id="lookup"), ClusterUnknown)
+    _break_name_lookup(case, "lookup", fault)
+    cluster = case.fresh() if fresh else case.cluster
+
+    observed = cluster.inspect("lookup")
+
+    assert isinstance(observed, ClusterUnknown)
+    assert not observed.job_absent
+    assert case.has_live_job("lookup")
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="r3223 MED-1: FakeConnector hides a live job from squeue once names are forgotten, "
+    "so production calls it absent; FakeCluster leaves it unresolved",
+)
+@pytest.mark.parametrize("state", _LIVE)
+def test_a_live_job_is_found_by_name_after_its_name_history_expired(
+    case: _Case, state: SlurmJobStatus
+) -> None:
+    """r3223 MED-1: ``squeue`` lists every queued or running job by name; only ended ones expire."""
+    case.script("forgotten", states=(state,), lost_submit_reply=True)
+    assert isinstance(case.cluster.submit(_request(case), operation_id="forgotten"), ClusterUnknown)
+    case.forget_name_history("forgotten")
+
+    observed = case.cluster.inspect("forgotten")
+
+    _absence_is_true(case, observed, "forgotten")
+    assert isinstance(observed, ClusterObservation)
+    assert observed.status is state
+
+
+def _without_intent_marks(implementation: str) -> list[object]:
+    return [
+        pytest.param(
+            implementation,
+            fault,
+            marks=pytest.mark.xfail(
+                strict=True,
+                reason="r3223 LOW-1: no intent is taken for no job without asking the scheduler",
+            )
+            if implementation == "slurm"
+            else (),
+        )
+        for fault in _LOOKUP_FAULTS
+    ]
+
+
+@pytest.mark.parametrize(
+    ("implementation", "fault"), _without_intent_marks("fake") + _without_intent_marks("slurm")
+)
+def test_an_operation_without_an_intent_is_absent_only_if_its_name_lookup_says_so(
+    tmp_path: Path, implementation: str, fault: str
+) -> None:
+    """r3223 LOW-1: a missing intent file proves no job only once the scheduler agrees.
+
+    ``test -f`` is false on ESTALE, EACCES and EIO too, so the intent's absence alone is
+    no proof; a name lookup that fails, or finds a job, keeps the operation unknown.
+    """
+    case = _make_case(implementation, tmp_path)
+    _break_name_lookup(case, "never-submitted", fault)
+
+    observed = case.cluster.inspect("never-submitted")
+
+    assert isinstance(observed, ClusterUnknown)
+    assert not observed.job_absent
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="r3223 LOW-1: an unreadable intent is taken for no job without asking the scheduler",
+)
+@pytest.mark.parametrize("state", _LIVE)
+def test_an_unreadable_intent_of_a_live_job_never_proves_absence(
+    tmp_path: Path, state: SlurmJobStatus
+) -> None:
+    """r3223 LOW-1: another host's read of a live job's intent fails, as ``test -f`` false."""
+    connector = FakeConnector(tmp_path / "connector")
+    runner = SlurmJobRunner(
+        SlurmConfig(
+            name="unreadable-intent",
+            remote_workspace_root=str(tmp_path / "remote"),
+            transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
+        ),
+        processes=connector,
+        clock=ManualClock(),
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    connector.script("unreadable-intent", states=(state,))
+    submitted = SlurmCluster(runner, state_root=tmp_path / "submitter").submit(
+        SlurmJobRequest(workspace=workspace, command=("true",)), operation_id="unreadable-intent"
+    )
+    assert isinstance(submitted, ClusterSubmitted)
+    unreadable = json.dumps(
+        {"intent": None, "accepted": None, "rejected": None, "cancelled": False}
+    )
+
+    def stat_fails(
+        request: dict[str, object], answer: Callable[[dict[str, object]], dict[str, object]]
+    ) -> dict[str, object]:
+        command = str(request.get("command", ""))
+        if "intent.json" in command and "test -f" in command:
+            return {"version": 1, "returncode": 0, "stdout": unreadable, "stderr": ""}
+        return answer(request)
+
+    connector.intercept(stat_fails)
+    observed = SlurmCluster(runner, state_root=tmp_path / "other-host").inspect("unreadable-intent")
+
+    assert isinstance(observed, ClusterUnknown)
+    assert not observed.job_absent
+
+
+_JOBLESS_HISTORIES = ["rejected", "cancelled-before-submit", "cancel-then-submit", "cancel-only"]
+# At 29ba6b1a4 the Fake called none of these absent, and production only some (r3223
+# MED-1 rows 1-2, LOW-2).
+_JOBLESS_PRESENT_AT_BASE = {
+    ("slurm", "cancelled-before-submit", "same"),
+    ("slurm", "cancel-then-submit", "same"),
+    ("slurm", "cancel-then-submit", "fresh"),
+    ("slurm", "cancel-only", "same"),
+    ("slurm", "cancel-only", "fresh"),
+}
+
+
+def _jobless_params() -> list[object]:
+    params = []
+    for implementation in ("fake", "slurm"):
+        for history in _JOBLESS_HISTORIES:
+            for view in ("same", "fresh"):
+                failed = implementation == "fake" or (implementation, history, view) in (
+                    _JOBLESS_PRESENT_AT_BASE
+                )
+                params.append(
+                    pytest.param(
+                        implementation,
+                        history,
+                        view,
+                        marks=pytest.mark.xfail(
+                            strict=True,
+                            reason="r3223 MED-1/LOW-2: a name that never started a job is "
+                            "not called absent",
+                        )
+                        if failed
+                        else (),
+                    )
+                )
+    return params
+
+
+@pytest.mark.parametrize(("implementation", "history", "view"), _jobless_params())
+def test_an_operation_that_never_started_a_job_is_absent(
+    tmp_path: Path, implementation: str, history: str, view: str
+) -> None:
+    """r3223 MED-1, LOW-2: no job can ever run under these names, so both implementations say so.
+
+    A rejected sbatch, a submission cancelled before it started, and a cancel that
+    left a tombstone and no intent all start no job: a submitter that publishes its
+    intent after the tombstone sees it and rejects itself. Saying "may run" there
+    wedged the request's key, since no takeover or withdrawal could then end the
+    attempt (a run that crashed between ``_take_over_own``'s cancel and its swap).
+    """
+    case = _make_case(implementation, tmp_path)
+    operation = "never-started"
+    match history:
+        case "rejected":
+            case.script(operation, rejected_reason="invalid partition")
+            outcome = case.cluster.submit(_request(case), operation_id=operation)
+            assert isinstance(outcome, ClusterRejected)
+        case "cancelled-before-submit":
+            request = _cancelled_before_submit(_request(case))
+            outcome = case.cluster.submit(request, operation_id=operation)
+            assert isinstance(outcome, ClusterRejected)
+        case "cancel-then-submit":
+            assert isinstance(case.cluster.cancel(operation), ClusterCancelRequested)
+            case.script(operation)
+            outcome = case.cluster.submit(_request(case), operation_id=operation)
+            assert isinstance(outcome, ClusterRejected)
+        case "cancel-only":
+            assert isinstance(case.cluster.cancel(operation), ClusterCancelRequested)
+        case _:
+            raise AssertionError(history)
+    cluster = case.fresh() if view == "fresh" else case.cluster
+
+    observed = cluster.inspect(operation)
+
+    assert isinstance(observed, ClusterUnknown)
     assert observed.job_absent
 
 
@@ -944,9 +1229,7 @@ def test_durable_acceptance_recovers_identity_after_name_history_expires(case: _
 def test_pre_cancelled_request_replays_rejection_and_preserves_payload_identity(
     case: _Case, *, reopened: bool
 ) -> None:
-    cancel = Event()
-    cancel.set()
-    request = replace(_request(case), cancel_event=cancel)
+    request = _cancelled_before_submit(_request(case))
     assert isinstance(case.cluster.submit(request, operation_id="pre-cancelled"), ClusterRejected)
     cluster = case.reopen() if reopened else case.cluster
     assert isinstance(cluster.submit(request, operation_id="pre-cancelled"), ClusterRejected)
@@ -1380,6 +1663,7 @@ class ClusterContractMachine(RuleBasedStateMachine):
         assert observed[0] == observed[1]
         assert all(value[1] == "sequence" for value in observed)
         for index, outcome in enumerate(outcomes):
+            _absence_is_true(self.cases[index], outcome, "sequence")
             if (
                 isinstance(outcome, ClusterObservation)
                 and outcome.status is SlurmJobStatus.COMPLETED

@@ -27,6 +27,7 @@ from vs_sandbox.api.slurm import (
 from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
     ClusterCall,
+    ClusterCancelRequested,
     ClusterObservation,
     ClusterSubmitted,
     FakeCluster,
@@ -574,3 +575,33 @@ def test_a_failed_inspect_of_a_lapsed_claim_never_starts_a_second_live_job(
     assert len(live) <= 1, f"live jobs of attempts {live}"
     assert isinstance(asked, AttachPending)
     assert world.state(key) is LedgerState.SUBMITTING
+
+
+@pytest.mark.xfail(
+    strict=True, reason="r3223 LOW-2: a tombstone without an intent reads as a job that may run"
+)
+def test_a_claim_whose_owner_died_between_its_cancel_and_its_swap_is_taken_over(
+    tmp_path: Path,
+) -> None:
+    """r3223 LOW-2: run-a cancelled its own lapsed claim's name, then died before its swap.
+
+    Its lost submission never published an intent, so only the cancel's tombstone is
+    left, and no job can start under the name. Another run must take the claim over;
+    reading the tombstone as "a job may run" left the request pending forever.
+    """
+    world = _World(tmp_path)
+    key = world.attachment("run-a").key(world.request("run-a"))
+    first, second = ledger_operation_id(key, 0), ledger_operation_id(key, 1)
+    world.claim("run-a", key)
+    # ``_take_over_own``'s first step; the swap that should follow never runs.
+    assert isinstance(world.cluster.cancel(first), ClusterCancelRequested)
+    world.clock.advance(LedgerPolicy().claim_seconds + 1)
+    world.cluster.script(second, queue_wait_s=math.inf)
+
+    asked = world.attachment("run-b").attach(
+        world.cluster, world.request("run-b"), labels=LedgerLabels()
+    )
+
+    assert isinstance(asked, Attached)
+    assert asked.operation_id == second
+    assert _active(world, second)
