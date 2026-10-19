@@ -3,7 +3,7 @@
  * event, each folded with run identity, the stream cursor, and replay provenance kept consistent.
  */
 import type {RunEvent, RunSnapshot} from '@vibesys/contracts';
-import {applyChatEvent, retainRegisteredChatThreads, upsertChatThread} from './chat.js';
+import {applyChatEvent, registerSnapshotChat, retainRegisteredChatThreads} from './chat.js';
 import {applyDiagnosticEvent, upsertDiagnostic} from './diagnostics.js';
 import {
   applyExecutionEventData,
@@ -279,16 +279,7 @@ export function foldSnapshot(state: CoreState, snapshot: RunSnapshot): SnapshotF
   // Boot issues the snapshot query and the subscription concurrently, so the
   // batch usually lands first and the liveness guard below would otherwise drop
   // the registry entirely. Applying it to a stale snapshot is always safe.
-  const registered = (snapshot.chat_threads ?? []).reduce(
-    (current, thread) =>
-      upsertChatThread(current, {
-        id: thread.thread_id,
-        title: thread.title ?? '',
-        provider: thread.provider,
-        model: thread.model,
-      }),
-    state,
-  );
+  const registered = registerSnapshotChat(state, snapshot);
   if (snapshot.sequence < registered.sequence) {
     return {state: publishCoreState(registered), disposition: 'stale', rejection: null};
   }

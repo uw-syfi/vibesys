@@ -1,7 +1,7 @@
 /**
  * Experiment-chat threads in the run fold: registration, titles, and each thread's transcript.
  */
-import type {RunEvent} from '@vibesys/contracts';
+import type {RunEvent, RunSnapshot} from '@vibesys/contracts';
 import {acceptsRunMetadata, retainedReplayEvents} from './replay.js';
 import {
   type ChatProposal,
@@ -16,6 +16,24 @@ import {
   type TranscriptEntry,
 } from './transcript-fold.js';
 import type {TranscriptFolder} from './transcript-folder.js';
+
+/** The snapshot's thread registry and last thread, applied to `state`. */
+export function registerSnapshotChat(state: CoreState, snapshot: RunSnapshot): CoreState {
+  const registered = (snapshot.chat_threads ?? []).reduce(
+    (current, thread) =>
+      upsertChatThread(current, {
+        id: thread.thread_id,
+        title: thread.title ?? '',
+        provider: thread.provider,
+        model: thread.model,
+      }),
+    state,
+  );
+  const lastChatThreadId = snapshot.last_chat_thread_id ?? registered.lastChatThreadId;
+  return lastChatThreadId === registered.lastChatThreadId
+    ? registered
+    : cloneCoreStateWith(registered, {lastChatThreadId});
+}
 
 /** Adds snapshot-only thread registry facts without merging an event projection. */
 export function retainRegisteredChatThreads(

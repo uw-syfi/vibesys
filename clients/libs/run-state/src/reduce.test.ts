@@ -488,6 +488,26 @@ describe('core state projection', () => {
     ]);
   });
 
+  it('names the last chat thread from a snapshot, even a stale one, and keeps it when a later one names none', () => {
+    const current = reduceEvent(initialCoreState(), outputEvent(5, 'current'));
+    const named = reduceSnapshot(current, {
+      run_id: 'run',
+      status: 'running',
+      sequence: 4,
+      chat_threads: [{thread_id: 'thread-a', title: '', provider: 'codex', model: 'gpt-5'}],
+      last_chat_thread_id: 'thread-a',
+    } satisfies RunSnapshot);
+    expect(named.lastChatThreadId).toBe('thread-a');
+
+    const later = reduceSnapshot(named, {
+      run_id: 'run',
+      status: 'running',
+      sequence: 9,
+    } satisfies RunSnapshot);
+    expect(later.lastChatThreadId).toBe('thread-a');
+    expect(initialCoreState().lastChatThreadId).toBeNull();
+  });
+
   it('leaves a stale snapshot that projects no chat threads identity-preserving', () => {
     const current = reduceEvent(initialCoreState(), {...outputEvent(5, 'current'), run_id: 'run'});
     const stale = {run_id: 'run', status: 'running', sequence: 4} satisfies RunSnapshot;

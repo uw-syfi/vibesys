@@ -330,6 +330,8 @@ export interface CoreState {
   readonly chatTranscripts: Readonly<Record<string, readonly TranscriptEntry[]>>;
   /** The default thread first, then created threads in replay order. */
   readonly chatThreads: readonly ChatThread[];
+  /** The thread the server last wrote to, from the snapshot; null before one names it. */
+  readonly lastChatThreadId: string | null;
   /** Each thread's answered questions, in journal order, keyed by thread id. */
   readonly chatQuestions: Readonly<Record<string, readonly ChatQuestion[]>>;
   /** The steers each thread's agent proposed, in journal order, keyed by thread id. */
@@ -407,6 +409,7 @@ export function initialCoreState(): CoreState {
     // The default thread has no backend record, so it has no backend-owned
     // title either. Naming it is the consumer's job.
     chatThreads: [{id: DEFAULT_CHAT_THREAD_ID, title: '', provider: null, model: null}],
+    lastChatThreadId: null,
     chatQuestions: {},
     chatProposals: {},
     todos: [],
