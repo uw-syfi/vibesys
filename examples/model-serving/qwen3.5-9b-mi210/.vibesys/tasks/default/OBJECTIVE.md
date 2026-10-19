@@ -16,10 +16,11 @@ gfx942; treat them as hypotheses to re-verify on gfx90a, per
 ## Candidate rules
 
 - The candidate is a serving engine built from `reference/`. It lives in the
-  top-level package `engine/`; trusted evaluation launches
+  top-level package `engine/`, which starts as an unmodified copy of
+  `reference/`, so the input measures as the reference does. Trusted evaluation
+  launches
   `python -m engine.server --model Qwen/Qwen3.5-9B --host 127.0.0.1 --port <port>`
-  from the candidate root when `engine/server.py` exists, and the reference
-  server otherwise.
+  from the candidate root; the candidate must keep `engine/server.py`.
 - The engine may use the kernel and tensor libraries installed in the
   evaluation environment (for example torch, Triton, and the fla kernels), but
   it must not delegate serving to an existing serving framework (vLLM, SGLang,

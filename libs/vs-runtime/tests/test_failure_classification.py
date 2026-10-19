@@ -61,6 +61,9 @@ _GENERIC_CANDIDATE_LOGS = (
     "HIP error: out of memory",
     "OSError: [Errno 12] Cannot allocate memory",
     "error: unrecognized arguments: --max-batch 99",
+    "/cluster/work/venv/bin/python: Error while finding module specification for "
+    "'engine.server' (ModuleNotFoundError: No module named 'engine')",
+    "ModuleNotFoundError: No module named 'triton_kernels'",
 )
 # What one task's server prints: only that task's domain can say so.
 _TASK_LOGS = (
@@ -98,7 +101,8 @@ def _startup_kind(log: str, causes: tuple[str, ...]) -> set[BenchmarkFailureKind
 
 
 @given(log=st.sampled_from(_GENERIC_CANDIDATE_LOGS), noise=_NOISE, causes=_CAUSES)
-def test_a_server_that_ran_out_of_memory_is_the_candidates_whatever_the_task(
+@example(log=_GENERIC_CANDIDATE_LOGS[4], noise="", causes=())
+def test_a_server_that_died_of_a_fact_true_of_any_process_is_the_candidates_whatever_the_task(
     log: str, noise: str, causes: tuple[str, ...]
 ) -> None:
     assert _startup_kind(f"{noise}\n{log}", causes) == {BenchmarkFailureKind.WORKLOAD}
