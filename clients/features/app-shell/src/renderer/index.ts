@@ -7,4 +7,3 @@ export {
   type ShellBridge,
 } from './effects/store.js';
 export {AppShell, type RailBadges} from './ui/app-shell.js';
-export {PlaceholderScreen} from './ui/placeholders.js';

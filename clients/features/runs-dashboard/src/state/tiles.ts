@@ -250,6 +250,11 @@ export function needsYou(tiles: readonly Tile[]): Tile[] {
 export type GroupBy = 'status' | 'machine' | 'task' | 'agent';
 export const GROUP_BYS: readonly GroupBy[] = ['status', 'machine', 'task', 'agent'];
 
+/** The tiles of the runs on `machine` (as a tile names it), or all of them when it is null. */
+export function onMachine(tiles: readonly Tile[], machine: string | null): Tile[] {
+  return machine === null ? [...tiles] : tiles.filter(tile => tile.machine === machine);
+}
+
 /** The key of the group of runs that need their user. */
 export const NEEDS_YOU = 'needs-you';
 

@@ -132,6 +132,8 @@ export interface ShellActions {
 }
 
 export interface SidebarState {
+  /** Whether the overview (the first listings and Recent) has been heard. */
+  readonly overviewHeard: boolean;
   /** The latest listing of each host, one per host. */
   readonly listings: readonly HostListing[];
   readonly recent: readonly RecentRun[];
@@ -193,6 +195,7 @@ export type SidebarRequest =
 export type SidebarStep = Step<SidebarState, SidebarRequest>;
 
 export const SIDEBAR_EMPTY: SidebarState = {
+  overviewHeard: false,
   listings: [],
   recent: [],
   skippedRecent: [],
@@ -217,9 +220,7 @@ export function initialSidebar(): SidebarStep {
 /** The selection, remembering the screen Settings was opened from. */
 function selected(state: SidebarState, screen: Screen): SidebarStep {
   const beforeSettings =
-    (screen.kind === 'settings' || screen.kind === 'machines') &&
-    state.selection.kind !== 'settings' &&
-    state.selection.kind !== 'machines'
+    screen.kind === 'settings' && state.selection.kind !== 'settings'
       ? state.selection
       : state.beforeSettings;
   const entering = screen.kind === 'runs' && state.selection.kind !== 'runs';
@@ -481,6 +482,7 @@ function baseStep(state: SidebarState, action: SidebarAction): SidebarStep {
     case 'overview':
       return same({
         ...state,
+        overviewHeard: true,
         listings: action.listings.reduce<HostListing[]>(withListing, []),
         recent: action.recent,
         skippedRecent: action.skippedRecent,

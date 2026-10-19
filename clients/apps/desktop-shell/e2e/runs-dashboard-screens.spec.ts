@@ -17,7 +17,7 @@ import {openFixture, playLive} from './fixture-world.js';
 
 /**
  * The rail and the Runs dashboard, checked against their real layout (`checks/screen-check.ts`) at
- * 1440, 1000 and 660 px: empty, one run, many runs, the runs that need the user alone, a run with
+ * 1440, 1000 and 660 px: one run, many runs, the runs that need the user alone, a run with
  * more ideas than its chart keeps, and the rail on the Run screen and on Settings. `SCREENS_DIR`
  * also writes each screen's screenshot (the app window only) and a contact sheet of them.
  */
@@ -30,7 +30,6 @@ const sheet: SheetEntry[] = [];
 const NEEDS_YOU: readonly RunCase[] = MANY_RUNS.filter(run => run.attention !== undefined);
 
 const DASHBOARDS: readonly (readonly [string, readonly RunCase[]])[] = [
-  ['empty', []],
   ['one-run', ONE_RUN],
   ['many-runs', MANY_RUNS],
   ['needs-you', NEEDS_YOU],

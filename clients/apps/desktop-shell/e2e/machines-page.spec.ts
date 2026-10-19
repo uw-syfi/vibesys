@@ -1,20 +1,13 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
 import {rawTextOf} from './checks/screen-check.js';
-import {card, type MachinesWorld, openMachines, testOf, WORLDS} from './machines-page.js';
+import {card, type MachinesWorld, openMachines, rail, testOf, WORLDS} from './machines-page.js';
 
 function world(name: string): MachinesWorld {
   const found = WORLDS.find(each => each.name === name);
   if (found === undefined) throw new Error(`no world named ${name}`);
   return found;
 }
-
-const recorded = (page: Page) =>
-  page.evaluate(
-    () =>
-      (window as unknown as {machinesPreview: {shown: string[]; settings: string[]}})
-        .machinesPreview,
-  );
 
 test('each machine is a card with its clusters and clouds nested under it', async ({page}) => {
   await openMachines(page, 1440, world('several machines'));
@@ -132,13 +125,59 @@ test('an unreachable machine offers Reconnect, one to sign in offers Sign in, an
   await expect(waiting.getByText('None', {exact: true})).toHaveCount(0);
 });
 
-test('Show runs and Settings name their machine, and Add machine opens its form', async ({
+test('the run count narrows the dashboard to that machine, and its chip removes the filter', async ({
   page,
 }) => {
   await openMachines(page, 1440, world('several machines'));
-  await card(page, 'host-a').getByRole('button', {name: '1 run'}).click();
-  await card(page, 'This Mac').getByRole('button', {name: 'Settings'}).click();
-  expect(await recorded(page)).toEqual({shown: ['ssh:host-a'], settings: ['local']});
+  await card(page, 'host-c').getByRole('button', {name: '12 runs'}).click();
+  await expect(page.getByRole('heading', {level: 1, name: 'Runs'})).toBeVisible();
+  // Twelve runs on host-c, and none of the other machines' runs.
+  await expect(page.locator('.vs-overview-tile')).toHaveCount(12);
+  await page.getByRole('button', {name: 'Remove host-c'}).click();
+  await expect(page.getByRole('button', {name: 'Remove host-c'})).toHaveCount(0);
+  // 3 on This Mac, 1 on host-a and 12 on host-c.
+  await expect(page.locator('.vs-overview-tile')).toHaveCount(16);
+});
+
+test("a machine's Settings opens on its clusters, and Back returns to Machines", async ({page}) => {
+  await openMachines(page, 1440, world('several machines'));
+  await card(page, 'host-a').getByRole('button', {name: 'Settings'}).click();
+  await expect(
+    page.getByRole('navigation', {name: 'Settings sections'}).getByRole('button', {
+      name: 'Clusters and clouds',
+    }),
+  ).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('combobox', {name: 'Machine'})).toHaveValue('ssh:host-a');
+  await page.getByRole('button', {name: 'Back', exact: true}).click();
+  await expect(page.getByRole('heading', {level: 1, name: 'Machines'})).toBeVisible();
+});
+
+/** The rail's Machines button carries its warning in its name. */
+const warning = (page: Page) => rail(page).getByRole('button', {name: 'A machine is unreachable'});
+
+test('the rail warns of nothing while every machine and cluster is fine', async ({page}) => {
+  await openMachines(page, 1440, world('one machine'));
+  await expect(warning(page)).toHaveCount(0);
+});
+
+test('the rail warns while a machine is unreachable, and signing one in clears only its own', async ({
+  page,
+}) => {
+  await openMachines(page, 1440, world('an unreachable machine'));
+  await expect(warning(page)).toBeVisible();
+  await card(page, 'host-b').getByRole('button', {name: 'Sign in'}).click();
+  await expect(card(page, 'host-b').getByText('Online', {exact: true})).toBeVisible();
+  // host-a still does not answer.
+  await expect(warning(page)).toBeVisible();
+});
+
+test('the rail warns when a cluster test finds it unreachable', async ({page}) => {
+  await openMachines(page, 1440, world('an unreachable cluster'));
+  await expect(warning(page)).toBeVisible();
+});
+
+test('Add machine opens its form', async ({page}) => {
+  await openMachines(page, 1440, world('several machines'));
   await page.getByRole('button', {name: 'Add machine'}).click();
   await expect(page.getByRole('textbox', {name: 'SSH host'})).toBeFocused();
 });

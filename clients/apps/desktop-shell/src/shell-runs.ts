@@ -6,6 +6,7 @@
 import type {DashboardRow, RunRowStatus} from '@vibesys/feature-app-shell/state';
 import {digestKey, formatStarted} from '@vibesys/feature-app-shell/state';
 import type {RunInput, StatusKind} from '@vibesys/feature-runs-dashboard/state';
+import type {HostKey} from '@vibesys/hosts';
 
 const STATUS_KINDS: Readonly<Record<RunRowStatus, StatusKind>> = {
   live: 'running',
@@ -24,6 +25,13 @@ const STATUS_WORDS: Readonly<Record<RunRowStatus, string>> = {
   stopped: 'stopped',
   unknown: 'unknown',
 };
+
+/** How many runs the dashboard lists on each machine: what the Machines page says of each. */
+export function runCounts(rows: readonly {readonly host: HostKey}[]): ReadonlyMap<HostKey, number> {
+  const counts = new Map<HostKey, number>();
+  for (const {host} of rows) counts.set(host, (counts.get(host) ?? 0) + 1);
+  return counts;
+}
 
 function projectName(path: string): string {
   return path.split('/').filter(Boolean).at(-1) ?? path;

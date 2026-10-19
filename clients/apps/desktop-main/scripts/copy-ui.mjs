@@ -3,7 +3,7 @@
 // `shell-assets/`) into `dist/ui`, where the main process serves it from `app://vibesys`.
 // The main process consumes the renderer app only as these built files, never as an import.
 import {cpSync, existsSync} from 'node:fs';
-import {basename, join} from 'node:path';
+import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const source = fileURLToPath(new URL('../../desktop-shell/dist/', import.meta.url));
@@ -13,5 +13,4 @@ if (!existsSync(join(source, 'shell.html'))) {
   console.error(`copy-ui: ${source} has no shell.html; run pnpm --filter @vibesys/app-desktop-shell build`);
   process.exit(1);
 }
-// `usage.html` is the Usage page on its own, built for the screen checks and never shipped.
-cpSync(source, target, {recursive: true, filter: path => basename(path) !== 'usage.html'});
+cpSync(source, target, {recursive: true});

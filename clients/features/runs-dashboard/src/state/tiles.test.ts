@@ -12,6 +12,7 @@ import {
   type Mark,
   NEEDS_YOU,
   needsYou,
+  onMachine,
   type RunInput,
   type StatusKind,
   type Tile,
@@ -93,6 +94,20 @@ function expectNeedsYouFirst(tiles: readonly Tile[], by: GroupBy): void {
   expect(others.flatMap(group => group.tiles).some(tile => tile.attention)).toBe(false);
   expect(others.some(group => group.key === NEEDS_YOU)).toBe(false);
 }
+
+describe('narrowing to a machine', () => {
+  test('keeps exactly the runs on it, in order, and no machine keeps them all', () => {
+    for (const seed of SEEDS) {
+      const random = new Seeded(seed);
+      const tiles = tilesOf(Array.from({length: random.int(30)}, (_, at) => randomRun(random, at)));
+      expect(onMachine(tiles, null).map(tile => tile.id)).toEqual(tiles.map(tile => tile.id));
+      for (const machine of ['host-a', 'host-b']) {
+        expect(onMachine(tiles, machine)).toEqual(tiles.filter(tile => tile.machine === machine));
+      }
+      expect(onMachine(tiles, 'host-z')).toEqual([]);
+    }
+  });
+});
 
 describe('a tile chart', () => {
   test('the best-so-far line never falls and never drops below the base', () => {

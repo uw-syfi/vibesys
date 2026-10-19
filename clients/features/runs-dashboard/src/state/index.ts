@@ -18,6 +18,7 @@ export {
   type Mark,
   NEEDS_YOU,
   needsYou,
+  onMachine,
   type RunInput,
   ratioWord,
   STATUS_TONES,

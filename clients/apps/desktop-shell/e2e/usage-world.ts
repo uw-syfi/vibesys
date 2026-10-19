@@ -159,5 +159,3 @@ export function seedFor(usage: UsageCase): FakeBridgeSeed {
     newRun: {...FAKE_OFFER, projects: {[PROJECT]: ['mpmc']}},
   };
 }
-
-export const USAGE_PROJECT = {host: HOST, project: PROJECT};

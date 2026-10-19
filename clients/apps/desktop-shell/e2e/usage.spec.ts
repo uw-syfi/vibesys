@@ -9,14 +9,14 @@ import {
   installFakeProjectRuns,
   installFakeUsage,
 } from './fake-bridge.js';
-import {seedFor, USAGE_CASES, USAGE_PROJECT, type UsageCase} from './usage-world.js';
+import {seedFor, USAGE_CASES, type UsageCase} from './usage-world.js';
 
 /**
- * The Usage page over a Fake of the bridge, at the three widths the shell is used at: empty
- * window, one run, many runs, turns without a price, a helper that predates the question and one
- * that fails. Each screen passes the layout and wording checks, does not scroll as a page, and
- * says only labels, figures and status words. `USAGE_SCREENS_DIR=<dir>` writes each screen's
- * screenshot (the page only).
+ * The Usage page, reached by the rail over a Fake of the bridge, at the three widths the shell is
+ * used at: empty window, one run, many runs, turns without a price, a helper that predates the
+ * question and one that fails. One session per case is resized across the widths. Each screen
+ * passes the layout and wording checks, does not scroll as a page, and says only labels, figures
+ * and status words. `USAGE_SCREENS_DIR=<dir>` writes each screen's screenshot (the page only).
  */
 
 const WIDTHS = [1440, 1000, 660] as const;
@@ -25,7 +25,6 @@ const DAY = 24 * 3_600_000;
 
 interface UsageHost extends Window {
   fakeHost: {usageAsked: {since: number; until: number; runIds: string[]}[]};
-  openedRuns: {host: string; project: string; runId: string}[];
 }
 
 async function open(page: Page, usage: UsageCase, width: number): Promise<void> {
@@ -35,7 +34,11 @@ async function open(page: Page, usage: UsageCase, width: number): Promise<void> 
   await page.addInitScript(installFakeProjectRuns, seed);
   await page.addInitScript(installFakeNewRun, seed);
   await page.addInitScript(installFakeUsage, seed);
-  await page.goto('./usage.html');
+  await page.goto('./shell.html');
+  await page
+    .getByRole('navigation', {name: 'VibeSys'})
+    .getByRole('button', {name: 'Usage'})
+    .click();
   await expect(page.getByRole('heading', {name: 'Usage', level: 1})).toBeVisible();
   // The page has read its figures once it is no longer loading.
   await expect(page.getByText('Loading')).toHaveCount(0);
@@ -43,25 +46,28 @@ async function open(page: Page, usage: UsageCase, width: number): Promise<void> 
 }
 
 for (const usage of USAGE_CASES) {
-  for (const width of WIDTHS) {
-    const name = `${usage.name}/${width}`;
-    test(`the Usage page passes the screen checks: ${name}`, async ({page}) => {
-      await open(page, usage, width);
+  test(`the Usage page passes the screen checks at every width: ${usage.name}`, async ({page}) => {
+    await open(page, usage, WIDTHS[0]);
+    for (const width of WIDTHS) {
+      await page.setViewportSize({width, height: 900});
       expect(await page.evaluate(() => window.innerWidth)).toBe(width);
+      await settled(page);
+      const name = `${usage.name}/${width}`;
       const result = report(`usage/${name}`, await screenCheck(page), KNOWN_FAILURES);
       expect(
         result.unexplained.map(each => `[${each.check}] ${each.message} (${each.where})`),
+        name,
       ).toEqual([]);
       // The page never scrolls sideways: a table that is too wide scrolls in its own box.
       const overflow = await page.evaluate(
         () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
       );
-      expect(overflow).toBeLessThanOrEqual(0);
+      expect(overflow, name).toBeLessThanOrEqual(0);
       if (SHOTS !== undefined) {
-        await page.screenshot({path: `${SHOTS}/${usage.name}-${width}.png`});
+        await page.getByRole('main').screenshot({path: `${SHOTS}/${usage.name}-${width}.png`});
       }
-    });
-  }
+    }
+  });
 }
 
 /** The text a person reads on the page, one string per element that holds text directly. */
@@ -179,14 +185,21 @@ test('the window select asks over that window, and a run opens from its row', as
   await page.getByRole('button', {name: 'Refresh'}).click();
   await expect.poll(async () => (await asked()).length).toBe(before + 3);
   await expect(page.getByText('Loading')).toHaveCount(0);
+});
 
+/** The run the shell shows, from the window's address: its Usage face is `#mode=usage`. */
+const faceOf = (page: Page) => page.evaluate(() => window.location.hash);
+
+test('a run opens on its Usage face from its row', async ({page}) => {
+  const many = USAGE_CASES.find(each => each.name === 'many-runs');
+  if (many === undefined) throw new Error('the cases changed');
+  await open(page, many, 1440);
   const row = page.getByRole('table', {name: 'Cost by run'}).getByRole('row').nth(1);
   await row.click();
-  const opened = await page.evaluate(() => (window as unknown as UsageHost).openedRuns);
-  expect(opened).toHaveLength(1);
-  expect(opened[0]).toMatchObject({host: USAGE_PROJECT.host, project: USAGE_PROJECT.project});
-  // The top row is the first run listed: its id is the one opened.
-  expect(opened[0]?.runId).toMatch(/^2026101\d-\d{6}$/);
+  await expect(page.getByRole('heading', {name: 'Usage', level: 1})).toHaveCount(0);
+  expect(await faceOf(page)).toBe('#mode=usage');
+  // The run screen names the run opened: the first the world lists.
+  await expect(page.getByRole('main')).toContainText(/host-b · 2026101\d-\d{6}/);
 });
 
 test('the rows open with the keyboard too', async ({page}) => {
@@ -196,8 +209,33 @@ test('the rows open with the keyboard too', async ({page}) => {
   const row = page.getByRole('table', {name: 'Cost by run'}).getByRole('row').nth(1);
   await row.focus();
   await page.keyboard.press('Enter');
-  const opened = await page.evaluate(() => (window as unknown as UsageHost).openedRuns);
-  expect(opened).toHaveLength(1);
+  await expect(page.getByRole('heading', {name: 'Usage', level: 1})).toHaveCount(0);
+  expect(await faceOf(page)).toBe('#mode=usage');
+});
+
+test('Usage asks nothing until it is shown, and again each time it is shown', async ({page}) => {
+  const one = USAGE_CASES.find(each => each.name === 'one-run');
+  if (one === undefined) throw new Error('the cases changed');
+  const asked = () =>
+    page.evaluate(() => (window as unknown as UsageHost).fakeHost.usageAsked.length);
+  const seed = seedFor(one);
+  await page.addInitScript(installFakeBridge, seed);
+  await page.addInitScript(installFakeProjectRuns, seed);
+  await page.addInitScript(installFakeNewRun, seed);
+  await page.addInitScript(installFakeUsage, seed);
+  await page.goto('./shell.html');
+  const rail = page.getByRole('navigation', {name: 'VibeSys'});
+  await expect(page.getByRole('heading', {name: 'Runs', level: 1})).toBeVisible();
+  expect(await asked()).toBe(0);
+  await rail.getByRole('button', {name: 'Usage'}).click();
+  await expect(page.getByText('Loading')).toHaveCount(0);
+  const first = await asked();
+  expect(first).toBeGreaterThan(0);
+  await rail.getByRole('button', {name: 'Runs'}).click();
+  await expect(page.getByRole('heading', {name: 'Runs', level: 1})).toBeVisible();
+  await rail.getByRole('button', {name: 'Usage'}).click();
+  await expect(page.getByText('Loading')).toHaveCount(0);
+  expect(await asked()).toBeGreaterThan(first);
 });
 
 test('the Usage page has no accessibility violations', async ({page}) => {

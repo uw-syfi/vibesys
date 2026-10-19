@@ -19,13 +19,37 @@ describe('groupingMachine', () => {
     }
   });
 
-  test('model: whatever is chosen, the grouping is always one the screen offers', () => {
+  test('shows every machine until one is chosen, and removing it shows every machine again', () => {
+    const start = getInitialSnapshot(groupingMachine);
+    expect(start.context.machine).toBeNull();
+    const narrowed = getNextSnapshot(groupingMachine, start, {
+      type: 'filter-machine',
+      machine: 'host-a',
+    });
+    expect(narrowed.context.machine).toBe('host-a');
+    const cleared = getNextSnapshot(groupingMachine, narrowed, {type: 'clear-machine'});
+    expect(cleared.context.machine).toBeNull();
+  });
+
+  test('model: whatever is chosen, the grouping is one the screen offers and the filter one of the machines chosen', () => {
     checkMachine({
       machine: groupingMachine,
       input: undefined,
-      event: random => ({type: 'group', by: random.pick<GroupBy>(GROUP_BYS)}),
-      invariants: snapshot =>
-        GROUP_BYS.includes(snapshot.context.by) ? [] : ['an unknown grouping'],
+      event: random => {
+        const pick = random.int(3);
+        if (pick === 0) return {type: 'group', by: random.pick<GroupBy>(GROUP_BYS)};
+        if (pick === 1) return {type: 'clear-machine'};
+        return {type: 'filter-machine', machine: random.pick(['host-a', 'host-b'])};
+      },
+      invariants: snapshot => {
+        const {by, machine} = snapshot.context;
+        const problems: string[] = [];
+        if (!GROUP_BYS.includes(by)) problems.push('an unknown grouping');
+        if (machine !== null && machine !== 'host-a' && machine !== 'host-b') {
+          problems.push('a machine nobody chose');
+        }
+        return problems;
+      },
     });
   });
 });

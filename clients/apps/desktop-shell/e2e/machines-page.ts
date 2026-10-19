@@ -1,7 +1,8 @@
 /**
- * Driving the Machines page alone (`machines-preview.html`) over fixture worlds: This Mac with
- * clusters and a Modal token, a machine with nothing set up, one whose VibeSys predates compute
- * settings, and one that cannot be reached; the cluster tests answer by the cluster's ssh alias.
+ * Driving the Machines page, reached by the rail, over fixture worlds: This Mac with clusters and a
+ * Modal token, a machine with nothing set up, one whose VibeSys predates compute settings, and one
+ * that cannot be reached; the cluster tests answer by the cluster's ssh alias. Each machine's runs
+ * are the runs its listing names, as the dashboard counts them.
  */
 import {expect, type Page} from '@playwright/test';
 import {computeSettings, computeSettingsEmpty, sshCluster} from '@vibesys/run-fixtures';
@@ -10,8 +11,9 @@ import {
   installFakeBridge,
   installFakeMachineSettings,
   installFakeMachines,
+  installFakeProjectRuns,
 } from './fake-bridge.js';
-import {SEED} from './world.js';
+import {PROJECT, SEED, server} from './world.js';
 
 /** Facts of a machine with GPUs, two runs live. */
 const FACTS = {
@@ -38,17 +40,54 @@ const NO_LOGINS = null;
 export interface MachinesWorld {
   readonly name: string;
   readonly seed: FakeBridgeSeed;
-  readonly runs: string;
   /** What to press before the page is looked at, from the page. */
   readonly before?: (page: Page) => Promise<void>;
+}
+
+const runId = (at: number): string => `2026101${at % 10}-1000${String(at).padStart(2, '0')}`;
+
+/** The Fake's listings and project runs for `runs`: each machine lists that many ended runs. */
+function listing(
+  runs: Readonly<Record<string, number>>,
+): Pick<FakeBridgeSeed, 'listings' | 'projectRuns'> {
+  const hosts = Object.entries(runs).filter(([, count]) => count > 0);
+  return {
+    listings: hosts.map(([host, count]) => ({
+      kind: 'listed',
+      host,
+      live: [],
+      ended: Array.from({length: count}, (_, at) => server(`00000000000${at}`, runId(at), 'failed')),
+      unreadable: [],
+      unverified: [],
+    })),
+    projectRuns: Object.fromEntries(
+      hosts.map(([host, count]) => [
+        `${host}|${PROJECT}`,
+        Array.from({length: count}, (_, at) => ({
+          runId: runId(at),
+          task: 'mpmc',
+          createdAt: 1_760_000_000_000 - at * 60_000,
+        })),
+      ]),
+    ),
+  };
 }
 
 function seeded(
   machines: readonly (typeof LOCAL)[],
   settings: NonNullable<FakeBridgeSeed['machineSettings']>,
+  runs: Readonly<Record<string, number>>,
   reports: NonNullable<FakeBridgeSeed['reports']> = {},
 ): FakeBridgeSeed {
-  return {...SEED, facts: FACTS, machines, reports, machineSettings: settings};
+  return {
+    ...SEED,
+    recent: [],
+    ...listing(runs),
+    facts: FACTS,
+    machines,
+    reports,
+    machineSettings: settings,
+  };
 }
 
 const FULL = {compute: computeSettings, logins: NO_LOGINS};
@@ -88,33 +127,30 @@ export const card = (page: Page, machine: string) =>
   page.locator('div.vs-card', {has: page.getByRole('heading', {name: machine, exact: true})});
 
 export const WORLDS: readonly MachinesWorld[] = [
-  {name: 'one machine', seed: seeded([LOCAL], {local: FULL}), runs: 'local:3'},
+  {name: 'one machine', seed: seeded([LOCAL], {local: FULL}, {local: 3})},
   {
     name: 'several machines',
-    seed: seeded([LOCAL, HOST_A, HOST_B, HOST_C], {
-      local: FULL,
-      'ssh:host-a': HELD,
-      'ssh:host-b': EMPTY,
-      'ssh:host-c': OLD,
-    }),
-    runs: 'local:3,ssh:host-a:1,ssh:host-b:0,ssh:host-c:12',
+    seed: seeded(
+      [LOCAL, HOST_A, HOST_B, HOST_C],
+      {local: FULL, 'ssh:host-a': HELD, 'ssh:host-b': EMPTY, 'ssh:host-c': OLD},
+      {local: 3, 'ssh:host-a': 1, 'ssh:host-c': 12},
+    ),
   },
   {
     name: 'an unreachable machine',
     seed: seeded(
       [LOCAL, HOST_A, HOST_B],
       {local: FULL, 'ssh:host-a': HELD, 'ssh:host-b': EMPTY},
+      {local: 1, 'ssh:host-a': 2},
       {
         'ssh:host-a': {kind: 'unavailable', detail: 'the host did not answer in time'},
         'ssh:host-b': {kind: 'sign-in', detail: 'your SSH key needs its passphrase.'},
       },
     ),
-    runs: 'local:1,ssh:host-a:2',
   },
   {
     name: 'an unreachable cluster',
-    seed: seeded([LOCAL, HOST_A], {local: UNREACHABLE_CLUSTER, 'ssh:host-a': HELD}),
-    runs: 'local:1',
+    seed: seeded([LOCAL, HOST_A], {local: UNREACHABLE_CLUSTER, 'ssh:host-a': HELD}, {local: 1}),
     before: async page => {
       await testOf(page, 'This Mac', 'standby').click();
       await expect(page.getByText('Unreachable since')).toBeVisible();
@@ -122,13 +158,11 @@ export const WORLDS: readonly MachinesWorld[] = [
   },
   {
     name: 'a machine with none',
-    seed: seeded([LOCAL, HOST_B], {local: FULL, 'ssh:host-b': EMPTY}),
-    runs: '',
+    seed: seeded([LOCAL, HOST_B], {local: FULL, 'ssh:host-b': EMPTY}, {}),
   },
   {
     name: 'a test in progress',
-    seed: seeded([LOCAL], {local: FULL}),
-    runs: 'local:2',
+    seed: seeded([LOCAL], {local: FULL}, {local: 2}),
     before: async page => {
       await testOf(page, 'This Mac', 'lab-h100').click();
       await expect(testOf(page, 'This Mac', 'lab-h100')).toHaveText('Testing…');
@@ -156,18 +190,20 @@ export async function resizeTo(page: Page, width: number): Promise<void> {
     .toBe(width);
 }
 
-/** Opens the page at `width` (measured) over `world`; clusters tested by press stay under way. */
+/** The rail: the app's one navigation. */
+export const rail = (page: Page) => page.getByRole('navigation', {name: 'VibeSys'});
+
+/** Opens the app over `world` at `width` (measured) and goes to Machines by the rail. */
 export async function openMachines(page: Page, width: number, world: MachinesWorld): Promise<void> {
   const {seed} = world;
-  await page.setViewportSize({width, height: 900});
   await page.addInitScript(installFakeBridge, seed);
   await page.addInitScript(installFakeMachines, seed);
   await page.addInitScript(installFakeMachineSettings, seed);
+  await page.addInitScript(installFakeProjectRuns, seed);
   if (world.name === 'a test in progress') await page.addInitScript(holdTests);
-  await page.goto(`./machines-preview.html?runs=${world.runs}`);
-  expect(await page.evaluate(() => window.innerWidth), 'the window is as wide as asked').toBe(
-    width,
-  );
+  await page.goto('./shell.html');
+  await resizeTo(page, width);
+  await rail(page).getByRole('button', {name: 'Machines'}).click();
   await expect(page.getByRole('heading', {level: 1, name: 'Machines'})).toBeVisible();
   const first = seed.machines?.[0]?.label ?? '';
   await expect(card(page, first)).toBeVisible();

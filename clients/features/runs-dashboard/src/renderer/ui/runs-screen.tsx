@@ -3,6 +3,8 @@ import {
   Button,
   Card,
   type ChartKeyItem,
+  Chip,
+  EmptyState,
   Field,
   type MenuItem,
   OverviewGroup,
@@ -18,7 +20,7 @@ import {
   Wordmark,
 } from '@vibesys/ui';
 import type {JSX} from 'react';
-import {BASE, type GroupBy, groupTiles, type Tile} from '../../state/index.js';
+import {BASE, type GroupBy, groupTiles, onMachine, type Tile} from '../../state/index.js';
 import {WORDMARK} from './wordmark.js';
 
 /** An unfinished New run, as the dashboard offers it: what it is of so far, and where it stands. */
@@ -105,15 +107,20 @@ function Draft(props: {readonly draft: RunsDraft}): JSX.Element {
 export function RunsScreen(props: {
   readonly tiles: readonly Tile[];
   readonly by: GroupBy;
+  /** The machine the runs are narrowed to (as a tile names it), shown as a chip; null for all. */
+  readonly machine: string | null;
+  readonly clearMachine: () => void;
   readonly group: (by: GroupBy) => void;
   readonly open: (id: string) => void;
   readonly menu: (id: string) => readonly MenuItem[];
-  readonly newRun: () => void;
+  /** Offered by the empty screen; the app's home is New run while there is no run, so it leaves it out. */
+  readonly newRun?: () => void;
   readonly draft: RunsDraft | null;
   /** What to say when saved runs could not be read; none when all were. */
   readonly notice: {readonly title: string; readonly body: string} | null;
 }): JSX.Element {
-  const {tiles, by} = props;
+  const {by, machine} = props;
+  const tiles = onMachine(props.tiles, machine);
   const tile = (each: Tile): JSX.Element => (
     <TileOf key={each.id} tile={each} open={props.open} menu={props.menu} />
   );
@@ -125,11 +132,25 @@ export function RunsScreen(props: {
           <Text as="h1" variant="title">
             Runs
           </Text>
-          {tiles.length === 0 ? null : (
-            <Field label="Group by">
-              <Select value={by} options={GROUP_OPTIONS} change={props.group} size="sm" />
-            </Field>
-          )}
+          <Row gap="space-4" wrap>
+            {machine === null ? null : (
+              <Row gap="space-1">
+                <Chip label={machine} />
+                <Button
+                  variant="quiet"
+                  size="sm"
+                  icon="cross"
+                  label={`Remove ${machine}`}
+                  press={props.clearMachine}
+                />
+              </Row>
+            )}
+            {props.tiles.length === 0 ? null : (
+              <Field label="Group by">
+                <Select value={by} options={GROUP_OPTIONS} change={props.group} size="sm" />
+              </Field>
+            )}
+          </Row>
         </Row>
       }
     >
@@ -138,12 +159,16 @@ export function RunsScreen(props: {
           <Banner tone="warn" title={props.notice.title} body={props.notice.body} />
         )}
         {props.draft === null ? null : <Draft draft={props.draft} />}
-        {tiles.length === 0 ? (
+        {props.tiles.length > 0 && tiles.length === 0 ? (
+          <EmptyState title="No runs" />
+        ) : tiles.length === 0 ? (
           <Stack gap="space-6">
             <Wordmark art={WORDMARK} label="VibeSys" align="center" />
-            <Row justify="center">
-              <Button variant="primary" icon="plus" text="New run" press={props.newRun} />
-            </Row>
+            {props.newRun === undefined ? null : (
+              <Row justify="center">
+                <Button variant="primary" icon="plus" text="New run" press={props.newRun} />
+              </Row>
+            )}
           </Stack>
         ) : (
           <>

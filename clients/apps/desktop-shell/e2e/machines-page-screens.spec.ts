@@ -4,7 +4,7 @@ import {screenCheck} from './checks/screen-check.js';
 import {openMachines, resizeTo, WORLDS} from './machines-page.js';
 
 /**
- * The Machines page over each world, opened once and resized across the three window widths the
+ * The Machines page, reached by the rail, over each world, opened once and resized across the three window widths the
  * app is used at: one machine,
  * several, an unreachable machine, an unreachable cluster, a machine with nothing set up, and a
  * test under way. The layout checks hold on each; the width is the page's own `innerWidth`, read

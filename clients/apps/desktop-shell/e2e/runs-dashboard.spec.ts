@@ -136,17 +136,6 @@ test('Archive takes a run off the dashboard', async ({page}) => {
   await expect(page.getByRole('region', {name: 'Stopped', exact: true})).toHaveCount(0);
 });
 
-test('with no run it offers New run alone, and pressing it opens New run', async ({page}) => {
-  await open(page, dashboardWorld([]));
-
-  await expect(page.getByRole('combobox', {name: 'Group by'})).toHaveCount(0);
-  const main = page.getByRole('main');
-  await expect(main.getByRole('button')).toHaveCount(1);
-  await expect(main.getByRole('img', {name: 'VibeSys'})).toBeVisible();
-  await main.getByRole('button', {name: 'New run'}).click();
-  await expect(page.getByRole('heading', {name: 'Runs'})).toHaveCount(0);
-});
-
 test('a machine that cannot list its runs leaves the other machine’s tiles', async ({page}) => {
   const world = dashboardWorld(MANY_RUNS);
   const {[`ssh:host-b|${'/home/me/projects/queue-rs'}`]: _lost, ...rest} = world.projectRuns ?? {};

@@ -1,21 +1,30 @@
 /**
  * The app shell's composition: the runs, Settings, Machines, New run and dashboard grouping stores
  * over the welcome bridge, the theme following the Settings store, and the shell rendering the
- * rail and the selected screen: the Runs dashboard (home), New run, Settings, Machines, the Run
- * screen for a selected run, or a placeholder for a screen not built yet (Usage).
+ * rail and the selected screen: the Runs dashboard (home), New run, Settings, Machines, Usage, or
+ * the Run screen for a selected run.
  */
-import {AppShell, createSidebarStore, PlaceholderScreen} from '@vibesys/feature-app-shell/renderer';
+import {AppShell, createSidebarStore} from '@vibesys/feature-app-shell/renderer';
 import {
   type Clock,
   type DashboardRow,
   dashboardRows,
   digestKey,
   recentNotice,
+  runsKnown,
   type Screen,
   type SidebarState,
 } from '@vibesys/feature-app-shell/state';
-import {createMachinesStore, MachinesScreen} from '@vibesys/feature-machines/renderer';
-import {type MachinesState, machineCounts} from '@vibesys/feature-machines/state';
+import {
+  createMachinesStore,
+  MachinesPage,
+  MachinesScreen,
+} from '@vibesys/feature-machines/renderer';
+import {
+  type MachinesState,
+  machineCounts,
+  machinesNeedAttention,
+} from '@vibesys/feature-machines/state';
 import {
   createNewRunStore,
   type DraftMemory,
@@ -31,7 +40,7 @@ import {
   RunScreen,
   useRunPage,
 } from '@vibesys/feature-run-page/renderer';
-import {runRecord} from '@vibesys/feature-run-page/state';
+import {RUN_ROUTE, routeQuery, runRecord} from '@vibesys/feature-run-page/state';
 import {
   createGroupingStore,
   type GroupingStore,
@@ -46,14 +55,15 @@ import {
   type SystemAppearance,
 } from '@vibesys/feature-settings/renderer';
 import {shownTheme} from '@vibesys/feature-settings/state';
+import {createUsageStore, type SpendRunRef, UsageScreen} from '@vibesys/feature-usage/renderer';
 import {type HostKey, hostFromKey, hostLabel} from '@vibesys/hosts';
 import {settled, type WelcomeBridge} from '@vibesys/ipc';
 import type {RecentRun, RunRef} from '@vibesys/runs';
 import {sameRun} from '@vibesys/runs';
 import type {Store} from '@vibesys/store';
 import {applyTheme, Card, EmptyState, Page, type ThemeTarget, WindowFrame} from '@vibesys/ui';
-import {type JSX, useMemo, useSyncExternalStore} from 'react';
-import {runInput} from './shell-runs.js';
+import {type JSX, useEffect, useMemo, useState, useSyncExternalStore} from 'react';
+import {runCounts, runInput} from './shell-runs.js';
 
 /** The clock the shell's screens time their bounds on: the window's own timers, in `main.tsx`. */
 export type Schedule = (callback: () => void, delayMs: number) => () => void;
@@ -69,6 +79,8 @@ export interface ShellStores {
   readonly bridge: WelcomeBridge;
   readonly schedule: Schedule;
   readonly machines: ReturnType<typeof createMachinesStore>;
+  /** What the Usage page shows; it asks only while the page is on screen. */
+  readonly usage: ReturnType<typeof createUsageStore>;
   readonly newRun: ReturnType<typeof createNewRunStore>['store'];
   /** The page a run's live session runs in. */
   readonly page: RunPagePage;
@@ -178,6 +190,13 @@ export function createShellStores(
     settings,
     machineSettings,
     machines,
+    usage: createUsageStore(bridge, {
+      schedule,
+      clock: () => {
+        const now = page.now();
+        return {now, midnight: new Date(now).setHours(0, 0, 0, 0)};
+      },
+    }),
     newRun: newRun.store,
     newRunCompletion: newRun.completion,
     bridge,
@@ -335,7 +354,10 @@ function NewRunRoute(props: {
       dispatch={newRun.dispatch}
       machines={machineOptions(hostsOf(props.machines, props.sidebar))}
       completion={{state: completion, dispatch: newRunCompletion.dispatch}}
-      chooseCheckout={() => props.select({kind: 'machines'})}
+      chooseCheckout={() => {
+        props.stores.machineSettings.dispatch({type: 'section', section: 'machines'});
+        props.select({kind: 'settings'});
+      }}
       setUp={machine => props.select({kind: 'settings', machine, section: 'clusters'})}
     />
   );
@@ -384,13 +406,15 @@ function RunsRoute(props: {
   readonly select: (screen: Screen) => void;
 }): JSX.Element {
   const {rows, stores, select} = props;
-  const by = useStore(stores.grouping);
+  const {by, machine} = useStore(stores.grouping);
   const runOf = (id: string): RunRef | null =>
     rows.find(each => digestKey(each.row.run) === id)?.row.run ?? null;
   return (
     <RunsScreen
       tiles={props.tiles}
       by={by}
+      machine={machine}
+      clearMachine={() => stores.grouping.dispatch({type: 'clear-machine'})}
       group={next => stores.grouping.dispatch({type: 'group', by: next})}
       open={id => {
         const run = runOf(id);
@@ -405,11 +429,67 @@ function RunsRoute(props: {
           {id: 'archive', label: 'Archive', press: () => actions.archive(run)},
         ];
       }}
-      newRun={() => select({kind: 'new-run'})}
       draft={props.draft}
       notice={recentNotice(stores.sidebar.store.getState().skippedRecent)}
     />
   );
+}
+
+/** The Machines page over its store: a machine's runs are the dashboard narrowed to it, its Settings open on its clusters. */
+function MachinesRoute(props: {
+  readonly stores: ShellStores;
+  readonly machines: MachinesState;
+  readonly counts: ReadonlyMap<HostKey, number>;
+  readonly select: (screen: Screen) => void;
+}): JSX.Element {
+  const {stores, select} = props;
+  return (
+    <MachinesPage
+      state={props.machines}
+      dispatch={stores.machines.dispatch}
+      runCounts={props.counts}
+      showRuns={host => {
+        stores.grouping.dispatch({
+          type: 'filter-machine',
+          machine: hostLabel(hostFromKey(host)),
+        });
+        select({kind: 'runs'});
+      }}
+      openSettings={host => select({kind: 'settings', machine: host, section: 'clusters'})}
+    />
+  );
+}
+
+/** The Usage page over its store; a run's row opens that run on its Usage face. */
+function UsageRoute(props: {
+  readonly stores: ShellStores;
+  readonly select: (screen: Screen) => void;
+}): JSX.Element {
+  const {stores, select} = props;
+  const {store, actions} = stores.usage;
+  const state = useStore(store);
+  return (
+    <UsageScreen
+      state={state}
+      actions={actions}
+      openRun={(run: SpendRunRef) => {
+        // The Run screen reads its face from the window's address when it opens.
+        stores.page.address.push(routeQuery({...RUN_ROUTE, mode: 'usage'}));
+        select({kind: 'run', run: {host: run.host, runId: run.runId}});
+      }}
+    />
+  );
+}
+
+/** How long the app waits for its machines to say whether they hold runs, in milliseconds. */
+const HOME_WAIT_MS = 4000;
+
+/** Whether the wait for the machines' listings is over: they all answered, or `HOME_WAIT_MS` passed. */
+function useListingsWaited(schedule: Schedule): boolean {
+  const [waited, setWaited] = useState(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: one wait for the window's life; `schedule` is the window's own timers.
+  useEffect(() => schedule(() => setWaited(true), HOME_WAIT_MS), []);
+  return waited;
 }
 
 /** The window: the rail and the selected screen. */
@@ -423,9 +503,25 @@ export function Shell(props: {
   const newRunState = useStore(newRun);
   const rows = useMemo(() => dashboardRows(sidebarState, viewerClock()), [sidebarState]);
   const tiles = useMemo(() => tilesOf(rows.map(row => runInput(row, Date.now()))), [rows]);
+  const counts = useMemo(() => runCounts(rows), [rows]);
   const select = (screen: Screen): void => sidebar.store.dispatch({type: 'select', screen});
+  const waited = useListingsWaited(props.stores.schedule);
+  const machinesListed = machineCounts(machinesState).listed;
+  const known = runsKnown(
+    sidebarState,
+    machinesListed ? machinesState.machines.map(each => each.host) : null,
+  );
+  // With no run on any machine the home is New run, and Runs is not offered; until the machines
+  // have answered (bounded by `HOME_WAIT_MS`) the home screen waits blank instead of flashing.
+  const homeless = known === 'none' || (known === 'unknown' && waited);
+  const home: Screen = homeless ? {kind: 'new-run'} : {kind: 'runs'};
+  const atHome = sidebarState.selection.kind === 'runs';
+  useEffect(() => {
+    if (atHome && homeless) select({kind: 'new-run'});
+  });
   const draft = runsDraft(newRunState, select, newRun.dispatch);
   const screen = (selected: Screen): JSX.Element => {
+    if (selected.kind === 'runs' && known === 'unknown' && !waited) return <Page>{null}</Page>;
     switch (selected.kind) {
       case 'new-run':
         return (
@@ -440,11 +536,11 @@ export function Shell(props: {
         return <SettingsRoute stores={props.stores} machines={machinesState} select={select} />;
       case 'machines':
         return (
-          <MachinesScreen
-            state={machinesState}
-            dispatch={machines.dispatch}
-            newRun={host => select({kind: 'new-run', machine: host})}
-            back={() => select({kind: 'settings'})}
+          <MachinesRoute
+            stores={props.stores}
+            machines={machinesState}
+            counts={counts}
+            select={select}
           />
         );
       case 'runs':
@@ -458,7 +554,7 @@ export function Shell(props: {
           />
         );
       case 'usage':
-        return <PlaceholderScreen title="Usage" />;
+        return <UsageRoute stores={props.stores} select={select} />;
       case 'run':
         return (
           <RunRoute
@@ -478,8 +574,10 @@ export function Shell(props: {
       version={props.version}
       badges={{
         needsYou: needsYou(tiles).length,
-        machineUnreachable: machineCounts(machinesState).attention > 0,
+        machineUnreachable: machinesNeedAttention(machinesState),
       }}
+      showRuns={known === 'some'}
+      home={home}
       screen={screen}
     />
   );
