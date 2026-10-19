@@ -2,21 +2,12 @@
  * How the Machines screen words a machine: its status, the one line under its name, and its facts,
  * each a function of what its last report said.
  */
-import {acceleratorName, type MachineDescription} from '@vibesys/hosts';
+import {acceleratorName, type MachineDescription, problemWord} from '@vibesys/hosts';
 import {gpuLine} from './hardware.js';
 import {type Machine, type MachineStatus, machineStatus} from './machines.js';
 
 /** The tones the screen draws a status in (the design system's status tones). */
 export type StatusTone = 'neutral' | 'ok' | 'warn' | 'err';
-
-const WORDS: Readonly<Record<MachineStatus, string>> = {
-  ready: 'Ready',
-  'needs-update': 'Needs an update',
-  'checkout-not-found': 'Checkout not found',
-  'sign-in': 'Sign in',
-  unavailable: 'Can’t connect',
-  checking: 'Checking',
-};
 
 const TONES: Readonly<Record<MachineStatus, StatusTone>> = {
   ready: 'ok',
@@ -28,7 +19,14 @@ const TONES: Readonly<Record<MachineStatus, StatusTone>> = {
 };
 
 export function statusWord(status: MachineStatus): string {
-  return WORDS[status];
+  switch (status) {
+    case 'ready':
+      return 'Ready';
+    case 'checking':
+      return 'Checking';
+    default:
+      return problemWord(status);
+  }
 }
 
 export function statusTone(status: MachineStatus): StatusTone {

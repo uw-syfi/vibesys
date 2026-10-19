@@ -42,7 +42,7 @@ afterAll(async () => {
 const BLOCKS = [
   ['needs-update', 'VibeSys on host-b needs an update', 'Needs an update'],
   ['sign-in', 'Sign in to host-b', 'Sign in'],
-  ['offline', 'Can’t reach host-b', 'Can’t connect'],
+  ['offline', 'Can’t reach host-b', 'Unreachable'],
   ['closed', 'Disconnected from host-b', 'Disconnected'],
 ] as const;
 

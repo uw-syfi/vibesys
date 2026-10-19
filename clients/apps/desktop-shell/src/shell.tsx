@@ -23,7 +23,7 @@ import {
 import {
   type MachinesState,
   machineCounts,
-  machinesNeedAttention,
+  machinesAttention,
 } from '@vibesys/feature-machines/state';
 import {
   createNewRunStore,
@@ -56,7 +56,7 @@ import {
 } from '@vibesys/feature-settings/renderer';
 import {shownTheme} from '@vibesys/feature-settings/state';
 import {createUsageStore, type SpendRunRef, UsageScreen} from '@vibesys/feature-usage/renderer';
-import {type HostKey, hostFromKey, hostLabel} from '@vibesys/hosts';
+import {type HostKey, hostFromKey, hostLabel, problemWord} from '@vibesys/hosts';
 import {settled, type WelcomeBridge} from '@vibesys/ipc';
 import type {RecentRun, RunRef} from '@vibesys/runs';
 import {sameRun} from '@vibesys/runs';
@@ -567,6 +567,7 @@ export function Shell(props: {
         );
     }
   };
+  const attention = machinesAttention(machinesState);
   return (
     <AppShell
       state={sidebarState}
@@ -574,7 +575,7 @@ export function Shell(props: {
       version={props.version}
       badges={{
         needsYou: needsYou(tiles).length,
-        machineUnreachable: machinesNeedAttention(machinesState),
+        machineWarning: attention === null ? null : problemWord(attention),
       }}
       showRuns={known === 'some'}
       home={home}

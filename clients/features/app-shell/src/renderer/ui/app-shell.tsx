@@ -6,8 +6,8 @@ import type {Screen, SidebarAction, SidebarState} from '../../state/index.js';
 export interface RailBadges {
   /** How many runs need the user (failed or stalled); none shows no badge. */
   readonly needsYou: number;
-  /** Whether a machine, cluster or cloud cannot be reached. */
-  readonly machineUnreachable: boolean;
+  /** The status word of the machine problem to flag on Machines (`problemWord`), or null. */
+  readonly machineWarning: string | null;
 }
 
 /** Whether `selected` is `screen`, or a screen that belongs to it (a run belongs to Runs). */
@@ -70,7 +70,7 @@ export function AppShell(props: {
             icon="monitor"
             label="Machines"
             active={within(selected, 'machines')}
-            {...(badges.machineUnreachable ? {warning: 'A machine is unreachable'} : {})}
+            {...(badges.machineWarning === null ? {} : {warning: badges.machineWarning})}
             press={go({kind: 'machines'})}
           />
           <RailItem

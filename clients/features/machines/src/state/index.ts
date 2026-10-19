@@ -29,7 +29,7 @@ export {
   type Load,
   machineHardware,
   machineLoad,
-  machinesNeedAttention,
+  machinesAttention,
   type PlaceRow,
   placeRows,
   placesReading,

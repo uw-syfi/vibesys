@@ -5,6 +5,7 @@
  * are the Machines store's, not kept here.
  */
 import {
+  connectionProblem,
   digestLook,
   type EndKind,
   type EndLook,
@@ -15,6 +16,8 @@ import {
   hostFromKey,
   hostLabel,
   type ListedRun,
+  type MachineProblem,
+  problemWord,
   RUN_GONE_WORDS,
   type RunDigestEntry,
   type RunDigestsReply,
@@ -686,15 +689,22 @@ function trailWords(read: ReadDigest, kind: EndKind | undefined): string | null 
   return parts.length === 0 ? null : parts.join(' · ');
 }
 
+/** A row's problem when its machine has one: that status's word, lower case (`problemWord`). */
+function machineProblemRow(problem: MachineProblem): RowProblem {
+  return {text: problemWord(problem).toLowerCase(), retry: problem !== 'needs-update'};
+}
+
 /** Why a Recent run's state is not known: nothing is read yet (null), or it cannot be. */
 function recentProblem(
   slot: DigestSlot | undefined,
   listing: HostListing | undefined,
 ): RowProblem | null {
   if (slot === undefined || slot.kind === 'loading') return null;
-  if (slot.kind === 'unsupported') return {text: 'machine needs a newer VibeSys', retry: false};
+  if (slot.kind === 'unsupported') return machineProblemRow('needs-update');
   if (slot.kind === 'gone') return {text: RUN_GONE_WORDS, retry: false};
-  if (listing?.kind === 'unavailable') return {text: "can't reach the machine", retry: true};
+  if (listing?.kind === 'unavailable') {
+    return machineProblemRow(connectionProblem(listing.connection) ?? 'unavailable');
+  }
   return {text: "can't read run state", retry: true};
 }
 

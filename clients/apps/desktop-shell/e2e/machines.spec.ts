@@ -119,7 +119,7 @@ test('machines show their status from their facts, and each problem carries its 
     page.getByText('The app couldn’t connect: your SSH key needs its passphrase.'),
   ).toBeVisible();
   await shoot(page, 'ink-sign-in');
-  await page.getByRole('button', {name: 'Sign in'}).click();
+  await page.getByRole('button', {name: 'Sign in', exact: true}).click();
   await expect(row(page, 'host-a')).toContainText('Ready');
 
   const axe = await new AxeBuilder({page}).analyze();

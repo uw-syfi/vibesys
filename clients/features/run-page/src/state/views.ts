@@ -5,7 +5,7 @@
  */
 import type {LogOwner, RunEvent, RunOverview, Span} from '@vibesys/contracts';
 import type {LogStream, UsageRecord} from '@vibesys/contracts/host-helper';
-import {endedLook, type HostRun, RUN_GONE_WORDS, type RunEnd} from '@vibesys/hosts';
+import {endedLook, type HostRun, problemWord, RUN_GONE_WORDS, type RunEnd} from '@vibesys/hosts';
 import {decodeNarrationLine, type LogView, logViewRecords} from '@vibesys/logs';
 import type {CoreState} from '@vibesys/run-state';
 import {type RunTrace, traceSpans} from '@vibesys/run-state/trace';
@@ -59,9 +59,9 @@ function endedStatus(phase: HostRun['phase'], end: RunEnd): {label: string; tone
 }
 
 const BLOCK_STATUS: Readonly<Record<MachineBlock, string>> = {
-  'needs-update': 'Needs an update',
-  'sign-in': 'Sign in',
-  offline: 'Can’t connect',
+  'needs-update': problemWord('needs-update'),
+  'sign-in': problemWord('sign-in'),
+  offline: problemWord('unavailable'),
   closed: 'Disconnected',
 };
 

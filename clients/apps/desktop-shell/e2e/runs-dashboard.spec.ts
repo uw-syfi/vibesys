@@ -218,7 +218,7 @@ test('Machines carries a warning dot while a machine cannot be reached', async (
   await open(page, {...world, reports: {'ssh:host-b': {kind: 'unavailable', detail: 'down'}}});
   const rail = page.getByRole('navigation', {name: 'VibeSys'});
 
-  await expect(rail.getByRole('button', {name: /^Machines/})).toHaveAccessibleName(/unreachable/);
+  await expect(rail.getByRole('button', {name: /^Machines/})).toHaveAccessibleName(/Unreachable/);
 });
 
 test('a run that ends moves from Running to Finished', async ({page}) => {
@@ -257,5 +257,5 @@ test('on a machine whose VibeSys is too old for digests, a run still says its ow
   // A run only a digest could place is unknown, with the machine's trouble beside it.
   const unknown = tiles(page, 'Unknown').first();
   await expect(unknown).toContainText('unknown');
-  await expect(unknown).toContainText('machine needs a newer VibeSys');
+  await expect(unknown).toContainText('needs an update');
 });

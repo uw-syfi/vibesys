@@ -1,5 +1,11 @@
 import {describe, expect, test} from 'bun:test';
-import type {HostListing, HostRun, RunDigestEntry, RunDigestsReply} from '@vibesys/hosts';
+import type {
+  ConnectionStatus,
+  HostListing,
+  HostRun,
+  RunDigestEntry,
+  RunDigestsReply,
+} from '@vibesys/hosts';
 import type {RecentRun} from '@vibesys/runs';
 import {
   type Clock,
@@ -331,9 +337,27 @@ describe('Recent rows from run digests', () => {
       reply: {kind: 'unsupported'},
     }).state;
     expect(recentRows(answered, CLOCK).rows[0]?.problem).toEqual({
-      text: 'machine needs a newer VibeSys',
+      text: 'needs an update',
       retry: false,
     });
+  });
+
+  test('a failed ask on a machine that is not listing words that machine, an old one as needing an update', () => {
+    const cases: readonly (readonly [ConnectionStatus, string, boolean])[] = [
+      [{kind: 'offline', detail: 'down'}, 'unreachable', true],
+      [{kind: 'closed'}, 'unreachable', true],
+      [{kind: 'auth-needed', detail: 'who'}, 'sign in', true],
+      [{kind: 'incompatible', detail: 'old'}, 'needs an update', false],
+    ];
+    for (const [connection, text, retry] of cases) {
+      const {state} = open([recent('r1', '/p/queue-rs', 'mpmc', 1)]);
+      const down = sidebarStep(state, {
+        type: 'listing',
+        listing: {kind: 'unavailable', host: 'ssh:host-a', connection},
+      }).state;
+      const failed = sidebarStep(down, {type: 'digests-read', token: 1, reply: null}).state;
+      expect(recentRows(failed, CLOCK).rows[0]?.problem).toEqual({text, retry});
+    }
   });
 
   test('a failed ask is a problem that can be retried, and a late reply is dropped', () => {

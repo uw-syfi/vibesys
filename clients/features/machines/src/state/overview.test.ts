@@ -1,9 +1,10 @@
 import {describe, expect, test} from 'bun:test';
-import type {MachineDescription} from '@vibesys/hosts';
+import {type MachineDescription, type MachineProblem, problemWord} from '@vibesys/hosts';
 import type {
   ClusterTest,
   ComputeSettings,
   MachineEntry,
+  MachineReport,
   Offered,
   SlurmClusterSettings,
 } from '@vibesys/ipc';
@@ -21,9 +22,10 @@ import {
   machineHardware,
   machineLoad,
   machineStatus,
-  machinesNeedAttention,
+  machinesAttention,
   machinesStep,
   placeRows,
+  statusWord,
 } from './index.js';
 
 const POOL: readonly SlurmClusterSettings[] = ['alpha', 'beta', 'gamma', 'delta', 'epsilon'].map(
@@ -218,7 +220,7 @@ describe('the places under each machine', () => {
         state = tested(state, 'local', 'alpha', fails ? FAILED : PASSED, at);
         since = fails ? (since ?? at) : null;
         expect(checkedWord(state)).toBe(expectedWord(at, since));
-        expect(machinesNeedAttention(state)).toBe(since !== null);
+        expect(machinesAttention(state) === 'unavailable').toBe(since !== null);
       }
     }
   });
@@ -252,7 +254,7 @@ describe('the places under each machine', () => {
       result: {ok: true, value: FAILED},
     }).state;
     expect(rowNames(state, 'local')).toEqual([]);
-    expect(machinesNeedAttention(state)).toBe(false);
+    expect(machinesAttention(state)).toBeNull();
   });
 });
 
@@ -317,9 +319,44 @@ describe('reconnect and load', () => {
     }
   });
 
+  test('the rail names a machine by its own status: an old one needs an update, not unreachable', () => {
+    const cases: readonly (readonly [MachineReport, MachineProblem | null])[] = [
+      [{kind: 'ready', facts: FACTS(0, 0)}, null],
+      [{kind: 'needs-update', facts: FACTS(0, 0)}, 'needs-update'],
+      [{kind: 'unavailable', detail: 'timed out'}, 'unavailable'],
+      [{kind: 'sign-in', detail: 'waiting'}, 'sign-in'],
+      [{kind: 'checkout-not-found', detail: 'gone'}, 'checkout-not-found'],
+    ];
+    for (const [report, problem] of cases) {
+      const state = ready(['ssh:host-a']);
+      const machines = state.machines.map(each => ({...each, report, checking: null}));
+      expect(machinesAttention({...state, machines})).toBe(problem);
+    }
+    const checking = ready(['ssh:host-a']);
+    const machines = checking.machines.map(each => ({...each, report: null, checking: 7}));
+    expect(machinesAttention({...checking, machines})).toBeNull();
+  });
+
+  test('the card and the rail word each status alike', () => {
+    const reports: readonly MachineReport[] = [
+      {kind: 'needs-update', facts: FACTS(0, 0)},
+      {kind: 'unavailable', detail: 'timed out'},
+      {kind: 'sign-in', detail: 'waiting'},
+      {kind: 'checkout-not-found', detail: 'gone'},
+    ];
+    for (const report of reports) {
+      const state = ready(['ssh:host-a']);
+      const machine = {...(state.machines[0] as Machine), report, checking: null};
+      const problem = machinesAttention({...state, machines: [machine]});
+      expect(problem).not.toBeNull();
+      expect(cardStatus(machine).word).toBe(problemWord(problem as MachineProblem));
+      expect(statusWord(machineStatus(machine))).toBe(cardStatus(machine).word);
+    }
+  });
+
   test('a machine that cannot be reached needs attention', () => {
     const state = ready(['ssh:host-a']);
-    expect(machinesNeedAttention(state)).toBe(false);
+    expect(machinesAttention(state)).toBeNull();
     const action: MachinesAction = {type: 'reconnect', host: 'ssh:host-a'};
     const checking = machinesStep(state, action).state;
     const down = machinesStep(checking, {
@@ -328,6 +365,6 @@ describe('reconnect and load', () => {
       host: 'ssh:host-a',
       result: {ok: true, value: {kind: 'unavailable', detail: 'timed out'}},
     }).state;
-    expect(machinesNeedAttention(down)).toBe(true);
+    expect(machinesAttention(down)).toBe('unavailable');
   });
 });
