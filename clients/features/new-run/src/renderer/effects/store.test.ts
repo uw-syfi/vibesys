@@ -901,7 +901,9 @@ for (const {name, answer, fix} of DESTINATIONS) {
 }
 
 test('while the destination is being read, the project item waits and offers no fix', async () => {
-  const {store} = await chooseExample(FREE, {exampleDestination: () => new Promise(() => undefined)});
+  const {store} = await chooseExample(FREE, {
+    exampleDestination: () => new Promise(() => undefined),
+  });
   const item = projectItem(store);
   expect(item).toMatchObject({state: 'pending', detail: 'Checking the destination'});
   expect(item?.fix).toBeUndefined();

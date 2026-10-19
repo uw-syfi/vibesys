@@ -526,6 +526,36 @@ export function installFakeMachineSettings(seed: FakeBridgeSeed): void {
 }
 
 /**
+ * The example destination answers of the fake helper (feature `example_destination`): what a
+ * destination holds (absent unless seeded), and Create, which a real host refuses where it holds
+ * anything other than nothing or an empty directory.
+ */
+function destinationMethods(
+  catalog: FakeBridgeSeed['newRun'],
+  features: readonly string[],
+  created: (project: string, tasks: readonly string[]) => unknown,
+) {
+  const ok = (value: unknown) => Promise.resolve({ok: true, value});
+  const stateOf = (destination: string) => catalog?.destinations?.[destination]?.state ?? 'absent';
+  return {
+    exampleDestination: (_host: string, _example: string, destination: string) =>
+      ok(
+        features.includes('example_destination')
+          ? {
+              kind: 'offered',
+              value: catalog?.destinations?.[destination] ?? {state: 'absent', project: null},
+            }
+          : {kind: 'unsupported'},
+      ),
+    createFromExample: (_host: string, example: string, destination: string) => {
+      if (!['absent', 'empty'].includes(stateOf(destination))) return ok({kind: 'taken'});
+      const tasks = catalog?.examples.examples.find(each => each.name === example)?.tasks ?? [];
+      return ok({kind: 'created', created: created(destination, tasks)});
+    },
+  };
+}
+
+/**
  * The New run half of the Fake, as a second init script after `installFakeBridge`: it adds the
  * helper's New run answers to the bridge, and what they were asked to `fakeHost.newRun`.
  */
@@ -598,22 +628,7 @@ export function installFakeNewRun(seed: FakeBridgeSeed): void {
       return goal === undefined ? refused(`${project} has no task ${task}.`) : offered(goal);
     },
     preflight,
-    exampleDestination: (_host: string, _example: string, destination: string) =>
-      ok(
-        features.includes('example_destination')
-          ? {
-              kind: 'offered',
-              value: catalog?.destinations?.[destination] ?? {state: 'absent', project: null},
-            }
-          : {kind: 'unsupported'},
-      ),
-    // As a real host does, a destination that holds something is refused.
-    createFromExample: (_host: string, example: string, destination: string) => {
-      const state = catalog?.destinations?.[destination]?.state ?? 'absent';
-      if (state !== 'absent' && state !== 'empty') return ok({kind: 'taken'});
-      const tasks = catalog?.examples.examples.find(each => each.name === example)?.tasks ?? [];
-      return ok({kind: 'created', created: created(destination, tasks)});
-    },
+    ...destinationMethods(catalog, features, created),
     copyOut: (_host: string, source: string, destination: string) =>
       ok(created(destination, projects.get(source) ?? [])),
     // As a real host does, a started run is listed as live from then on.

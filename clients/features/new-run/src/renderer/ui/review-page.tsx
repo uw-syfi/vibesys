@@ -209,7 +209,12 @@ function Checks(props: {
       ...item,
       ...(fix === undefined
         ? {}
-        : {fix: {text: fixText(fix), press: fixPress(fix, dispatch, chooseCheckout, snapshot.context.form.machine)}}),
+        : {
+            fix: {
+              text: fixText(fix),
+              press: fixPress(fix, dispatch, chooseCheckout, snapshot.context.form.machine),
+            },
+          }),
     }));
   const status = readinessStatus(checks);
   return (

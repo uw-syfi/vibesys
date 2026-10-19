@@ -344,7 +344,10 @@ describe('NewRunMain', () => {
     const {main} = subject();
     const failure = await main
       .answer({kind: 'copy-out', host: LOCAL, source: '/missing', destination: '/own'})
-      .then(() => null, (error: Error) => error);
+      .then(
+        () => null,
+        (error: Error) => error,
+      );
     expect(failure?.message).toStartWith('Could not copy the project out');
     expect(failure?.message).not.toContain('/missing');
     expect(failure?.message).not.toContain('/own');
@@ -410,7 +413,10 @@ describe('NewRunMain', () => {
       const {main} = world();
       const failure = await main
         .answer({kind: 'create-from-example', host: LOCAL, example: 'no/such', destination: '~/x'})
-        .then(() => null, (error: Error) => error);
+        .then(
+          () => null,
+          (error: Error) => error,
+        );
       expect(failure?.message).toStartWith('Could not create the project');
       expect(failure?.message).not.toContain('~/x');
     });

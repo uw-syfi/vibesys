@@ -784,10 +784,8 @@ class HelperSession {
         this.#preflight(request);
         return;
       case 'examples.list':
-        this.#examples(request);
-        return;
       case 'examples.destination':
-        this.#exampleDestination(request);
+        this.#examples(request);
         return;
       case 'project.create_from_example':
       case 'project.copy_out':
@@ -977,7 +975,13 @@ class HelperSession {
     this.#send({type: 'compute.remove_cluster', request_id: id, settings: host.compute});
   }
 
-  #examples(request: Extract<HelperRequest, {type: 'examples.list'}>): void {
+  #examples(
+    request: Extract<HelperRequest, {type: 'examples.list' | 'examples.destination'}>,
+  ): void {
+    if (request.type === 'examples.destination') {
+      this.#exampleDestination(request);
+      return;
+    }
     const listing = this.#helper.host.examples;
     if (listing === null) {
       this.#send({

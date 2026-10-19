@@ -216,6 +216,7 @@ def test_host_helper_schema_exports_the_authoritative_request_feature_gates() ->
         "examples.list": "examples",
         "project.create_from_example": "examples",
         "project.copy_out": "examples",
+        "examples.destination": "example_destination",
         "compute.list": "machine_compute",
         "compute.test_cluster": "machine_compute",
         "compute.add_cluster": "machine_compute",
