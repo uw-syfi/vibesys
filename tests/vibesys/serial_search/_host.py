@@ -82,6 +82,7 @@ _AS_COMPARED = {
     EffectVerdict.SUPPORTED: ComparisonVerdict.BETTER,
     EffectVerdict.WITHIN_NOISE: ComparisonVerdict.WITHIN_NOISE,
     EffectVerdict.DISPROVEN: ComparisonVerdict.WORSE,
+    EffectVerdict.INCONCLUSIVE: ComparisonVerdict.INCONCLUSIVE,
 }
 """A bar of one asks for any improvement: its effect verdict is the comparison's own."""
 
@@ -347,7 +348,7 @@ class SerialHost:
                 "candidate_samples": 1,
                 "base_samples": 1,
                 "noise": 0.0,
-                "verdict": ComparisonVerdict.WITHIN_NOISE,
+                "verdict": ComparisonVerdict.INCONCLUSIVE,
             }
         )
         self.landing[settled.candidate_input] = settled
