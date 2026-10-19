@@ -50,9 +50,11 @@ export {
 export {
   digestEntries,
   digestLook,
+  type IdeaPoint,
   type ListedRun,
   listedRuns,
   RUN_GONE_WORDS,
+  type RunDashboardEntry,
   type RunDigestEntry,
   type RunDigestsReply,
 } from './run-digest.js';

@@ -1,7 +1,7 @@
 """A run tile's data: the digest's per-idea points and the attention reason.
 
 The points are the run page's chart (``performanceFold`` in ``clients/features/run-page``). The two
-folds are held to one rule by a scenario both sides read: ``IDEAS`` below says what each idea
+folds are held to one rule by scenarios both sides read (``fixtures/run-dashboard``): each says what each idea
 did (its outcome, its reading and when it landed), a journal is built from it, and the digest's
 points must equal the chart the scenario's plain statement gives. The page's own test
 (``run-dashboard-conformance.test.ts``) builds the same journals from the same shape of scenario
@@ -13,11 +13,13 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from pydantic import BaseModel
 from tests.server.host_helper_support import RUN_ID, fake_host, project_with_run
 
 from server.host_api import (
@@ -46,8 +48,6 @@ from vs_project.api import Project
 from vs_sim.api.testing import SimNetwork, SimThreads
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from pydantic import JsonValue
 
 _INPUT = 100.0
@@ -278,15 +278,47 @@ def test_a_long_run_keeps_at_most_the_cap_and_says_how_many_it_left_out(
     assert kept_after == min(kept_before, DASHBOARD_MAX_POINTS) or len(points) == len(whole)
 
 
-def test_ideas_that_land_out_of_order_are_plotted_in_the_order_they_landed() -> None:
-    ideas = [_Idea("passed", 150.0, 50.0), _Idea("passed", 120.0, 20.0)]
+class _Point(BaseModel):
+    ratio: float | None
+    verdict: IdeaVerdict
 
-    digest = digest_journal(journal_of(ideas))
+
+class _Scenario(BaseModel):
+    name: str
+    direction: str
+    ideas: list[_Idea]
+    points: list[_Point]
+
+
+class _Corpus(BaseModel):
+    scenarios: list[_Scenario]
+
+
+_SCENARIOS = _Corpus.model_validate_json(
+    (
+        Path(__file__).parents[1] / "conformance" / "fixtures" / "run-dashboard" / "scenarios.json"
+    ).read_text()
+).scenarios
+
+
+def _approx(ratio: float | None) -> object:
+    return None if ratio is None else pytest.approx(ratio)
+
+
+@pytest.mark.parametrize("scenario", _SCENARIOS, ids=[each.name for each in _SCENARIOS])
+def test_the_digest_draws_each_shared_scenario_as_the_corpus_says(scenario: _Scenario) -> None:
+    digest = digest_journal(journal_of(scenario.ideas, scenario.direction))
 
     assert digest.dashboard is not None
-    assert [(p.ratio, p.verdict) for p in digest.dashboard.points] == [
-        (pytest.approx(1.2), IdeaVerdict.KEPT),
-        (pytest.approx(1.5), IdeaVerdict.KEPT),
+    got = [(point.ratio, point.verdict) for point in digest.dashboard.points]
+    assert got == [(_approx(point.ratio), point.verdict) for point in scenario.points]
+
+
+@pytest.mark.parametrize("scenario", _SCENARIOS, ids=[each.name for each in _SCENARIOS])
+def test_the_statement_the_property_tests_use_agrees_with_the_corpus(scenario: _Scenario) -> None:
+    """The corpus pins ``chart_of``, so holding the digest to it holds the digest to the corpus."""
+    assert chart_of(scenario.ideas, scenario.direction) == [
+        (_approx(point.ratio), point.verdict) for point in scenario.points
     ]
 
 

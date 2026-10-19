@@ -715,7 +715,58 @@ describe('Hosts.runDigests', () => {
       outcome: null,
       closing: 'finished',
       over: true,
+      dashboard: null,
     });
+  });
+
+  test('asks for the tile data of a helper that offers it, and an older helper is never sent the field', async () => {
+    const dashboard = {
+      points: [
+        {ratio: 1.4, verdict: 'kept' as const},
+        {ratio: null, verdict: 'failed' as const},
+      ],
+      points_omitted: 2,
+      failed_streak: 1,
+      last_event_at: '2026-10-17T04:00:00Z',
+    };
+    const digest = {
+      kind: 'digest' as const,
+      ideas: 4,
+      adopted_ratio: null,
+      best_so_far_ratio: 1.4,
+      duration_s: 90,
+      ending: null,
+      closing: null,
+      dashboard,
+    };
+    const link = new FakeLink();
+    link.helper.host.projects.set('/srv/project', ['mpmc']);
+    link.helper.host.runHistory.set('/srv/project', [{...summary(digest), attention: 'stalled'}]);
+    const subject = completionSubject(link);
+    await using _manager = subject.manager;
+
+    const reply = await subject.hosts.runDigests(LOCAL, '/srv/project', ['run-1']);
+
+    expect(link.helper.requests.at(-1)).toMatchObject({type: 'runs.list', with_dashboard: true});
+    const entry = reply.kind === 'digests' ? reply.runs.get('run-1') : undefined;
+    expect(entry).toMatchObject({
+      kind: 'read',
+      dashboard: {
+        points: [
+          {ratio: 1.4, verdict: 'kept'},
+          {ratio: null, verdict: 'failed'},
+        ],
+        pointsOmitted: 2,
+        failedStreak: 1,
+        lastEventAt: Date.parse('2026-10-17T04:00:00Z'),
+        attention: 'stalled',
+      },
+    });
+
+    link.helper.features.delete('run_dashboard');
+    const older = await subject.hosts.runDigests(LOCAL, '/srv/project', ['run-1']);
+    expect(link.helper.requests.at(-1)).not.toHaveProperty('with_dashboard');
+    expect(older.kind === 'digests' && older.runs.get('run-1')).toMatchObject({dashboard: null});
   });
 
   test('asks for the named runs only, and a run not named carries no digest', async () => {

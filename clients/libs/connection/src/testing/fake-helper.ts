@@ -424,6 +424,7 @@ export class FakeHelper {
     'run_causes',
     'project_clean',
     'run_digest',
+    'run_dashboard',
     'example_catalogue',
     'harness_generations',
     'run_role_agents',
@@ -1260,8 +1261,14 @@ class HelperSession {
         runs: {
           project_root: request.project,
           runs: (helper.host.runHistory.get(request.project) ?? []).map(run => {
-            const {digest: _digest, ...plain} = run;
-            return request.digest_runs?.includes(run.run_id) === true ? run : plain;
+            const {digest: _digest, attention: _attention, ...plain} = run;
+            if (request.digest_runs?.includes(run.run_id) !== true) return plain;
+            if (request.with_dashboard === true) return run;
+            // A client that did not ask for the dashboard never sees it.
+            const {attention: _unasked, ...asked} = run;
+            if (asked.digest?.kind !== 'digest') return asked;
+            const {dashboard: _dashboard, ...digest} = asked.digest;
+            return {...asked, digest};
           }),
         },
       });

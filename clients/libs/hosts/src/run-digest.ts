@@ -3,7 +3,13 @@
  * (`runs.list`'s `digest`, feature `run_digest`) in the app's own terms, with when the run began.
  * It is how a run's ending is known once the registry's tombstone has expired (a day).
  */
-import type {RunClosing, RunDigest, RunSummary} from '@vibesys/contracts/host-helper';
+import type {
+  IdeaVerdict,
+  RunAttention,
+  RunClosing,
+  RunDigest,
+  RunSummary,
+} from '@vibesys/contracts/host-helper';
 import type {RunEnd} from './listing.js';
 import {type EndLook, endedLook} from './run-look.js';
 
@@ -12,6 +18,29 @@ import {type EndLook, endedLook} from './run-look.js';
  * refused it): the one wording, which offers no Retry because asking again cannot find it.
  */
 export const RUN_GONE_WORDS = 'this run is gone';
+
+/** One idea of a run on its tile's chart: its result against the input and how it came out. */
+export interface IdeaPoint {
+  /** An improvement over the input (the digest's wording), null before the idea has a reading. */
+  readonly ratio: number | null;
+  readonly verdict: IdeaVerdict;
+}
+
+/**
+ * What a run's tile draws (`runs.list`'s `dashboard`, feature `run_dashboard`): the run page's
+ * chart as points in the order results landed, and why the run needs its user, if it does.
+ */
+export interface RunDashboardEntry {
+  /** At most 64; the oldest ideas that are not kept are left out first. */
+  readonly points: readonly IdeaPoint[];
+  /** The ideas left out of `points`, so the ideas the run tried are `points.length + pointsOmitted`. */
+  readonly pointsOmitted: number;
+  /** The ideas at the end that failed, none passing since. */
+  readonly failedStreak: number;
+  /** The journal's last event, in milliseconds; null when it has none. */
+  readonly lastEventAt: number | null;
+  readonly attention: RunAttention;
+}
 
 /** One run's digest, or why it could not be read. */
 export type RunDigestEntry =
@@ -31,6 +60,8 @@ export type RunDigestEntry =
       readonly closing: RunClosing | null;
       /** Whether the journal says the run is over (an ending record or a terminal event). */
       readonly over: boolean;
+      /** The tile's data; null when the host's VibeSys does not offer `run_dashboard`. */
+      readonly dashboard?: RunDashboardEntry | null;
     }
   | {readonly kind: 'unreadable'; readonly createdAt: number; readonly message: string};
 
@@ -39,7 +70,19 @@ export type RunDigestsReply =
   | {readonly kind: 'digests'; readonly runs: ReadonlyMap<string, RunDigestEntry>}
   | {readonly kind: 'unsupported'};
 
-function read(digest: RunDigest, createdAt: number): RunDigestEntry {
+function dashboardOf(summary: RunSummary, digest: RunDigest): RunDashboardEntry | null {
+  const {dashboard} = digest;
+  if (dashboard === undefined || dashboard === null) return null;
+  return {
+    points: dashboard.points.map(({ratio, verdict}) => ({ratio, verdict})),
+    pointsOmitted: dashboard.points_omitted,
+    failedStreak: dashboard.failed_streak,
+    lastEventAt: dashboard.last_event_at === null ? null : Date.parse(dashboard.last_event_at),
+    attention: summary.attention ?? 'none',
+  };
+}
+
+function read(summary: RunSummary, digest: RunDigest, createdAt: number): RunDigestEntry {
   const {ending, closing} = digest;
   return {
     kind: 'read',
@@ -51,6 +94,7 @@ function read(digest: RunDigest, createdAt: number): RunDigestEntry {
     outcome: ending?.outcome ?? null,
     closing,
     over: ending !== null || closing !== null,
+    dashboard: dashboardOf(summary, digest),
   };
 }
 
@@ -64,7 +108,7 @@ export function digestEntries(summaries: readonly RunSummary[]): Map<string, Run
     entries.set(
       summary.run_id,
       digest.kind === 'digest'
-        ? read(digest, createdAt)
+        ? read(summary, digest, createdAt)
         : {kind: 'unreadable', createdAt, message: digest.message},
     );
   }
