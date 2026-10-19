@@ -783,6 +783,7 @@ describe('Hosts.runDigests', () => {
       outcome: null,
       closing: 'finished',
       over: true,
+      uncompared: false,
       endSummary: null,
       dashboard: null,
     });
