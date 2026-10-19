@@ -899,11 +899,20 @@ class SlurmJobRunner:
         *,
         pause: Callable[[float], None],
         timeout_seconds: float,
+        cancel_event: Event | None = None,
+        queued: Callable[[SchedulerReading, float], None] | None = None,
     ) -> SlurmJobWaitResult:
-        """Observe until the job runs or ends; ``timed_out``: still queued. Never cancels."""
+        """Observe until the job runs or ends; ``timed_out``: still queued. Never cancels.
+
+        A set ``cancel_event`` ends the wait with the cancellation error and leaves the
+        job to the caller. ``queued`` receives each reading that finds the job still
+        pending, with the seconds waited so far, so a caller can say why it waits.
+        """
         if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
             raise SlurmError.invalid_wait_timeout()
-        return self._observe(handle, timeout_seconds, None, pause, until_started=True)
+        return self._observe(
+            handle, timeout_seconds, cancel_event, pause, queued=queued or _ignore_reading
+        )
 
     def _observe(
         self,
@@ -912,15 +921,24 @@ class SlurmJobRunner:
         cancel_event: Event | None,
         pause: Callable[[float], None],
         *,
-        until_started: bool = False,
+        queued: Callable[[SchedulerReading, float], None] | None = None,
     ) -> SlurmJobWaitResult:
-        """Poll until terminal (or started) or *timeout*; a set *cancel_event* raises, uncancelled."""
+        """Poll until terminal or *timeout*; a set *cancel_event* raises, uncancelled.
+
+        With *queued*, the wait ends once the job leaves the queue, and each reading
+        that finds it still pending goes to *queued*.
+        """
+        until_started = queued is not None
         started = self._clock.now()
         deadline = started + timeout
         while True:
             if cancel_event is not None and cancel_event.is_set():
                 raise SlurmError.cancelled(handle.job_id)
-            status = self.poll(handle)
+            self._validate_handle(handle)
+            reading = self.inspect_job(handle.job_id)
+            status = reading.status
+            if queued is not None and status == SlurmJobStatus.PENDING:
+                queued(reading, self._clock.now() - started)
             done = status.terminal or (until_started and status != SlurmJobStatus.PENDING)
             remaining = deadline - self._clock.now()
             if done or remaining <= 0:
@@ -1317,6 +1335,11 @@ class SlurmJobRunner:
         if match is None:
             raise SlurmError.missing_job_id()
         return match.group(1)
+
+
+def _ignore_reading(reading: SchedulerReading, waited_seconds: float) -> None:
+    """Observe a pending reading by doing nothing: the caller only waits for the start."""
+    del reading, waited_seconds
 
 
 class _Transport(Protocol):

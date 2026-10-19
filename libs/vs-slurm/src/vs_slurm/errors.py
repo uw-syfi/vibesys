@@ -304,6 +304,15 @@ class SlurmWorkspaceRootProbeError(SlurmError):
         )
 
     @classmethod
+    def stopped(cls, job_id: str | None) -> SlurmWorkspaceRootProbeError:
+        """Describe a probe the run stopped before it proved the root."""
+        job = "before its job was submitted" if job_id is None else f"and cancelled job {job_id}"
+        return cls(
+            "Slurm `remote_workspace_root` startup probe failed: the run stopped "
+            f"{job}; a resumed run retries the probe"
+        )
+
+    @classmethod
     def rejected(cls, detail: str | None) -> SlurmWorkspaceRootProbeError:
         """Describe a probe the cluster refused before ``sbatch`` accepted it."""
         return cls(
