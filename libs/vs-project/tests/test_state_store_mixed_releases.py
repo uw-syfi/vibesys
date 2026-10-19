@@ -314,13 +314,21 @@ _FIRST_WRITES: dict[str, Callable[[StateStore], object]] = {
 }
 _STARTS = ("fresh", *sorted(_FIRST_WRITES))
 
+# A write of this release takes at most three renames (copy the lease, rewrite store.json,
+# write the lease), and fails at one of at most nine steps (each one's file sync, rename and
+# directory sync).
+_FAULTS = (
+    st.none()
+    | st.tuples(st.just("dies"), st.integers(1, 3))
+    | st.tuples(st.just("fails"), st.integers(1, 9))
+)
 _ACTIONS = st.lists(
     st.tuples(
         st.sampled_from(("acquire", "renew", "release", "commit")),
         st.sampled_from(("older", "this")),
         st.integers(0, 3),
         st.integers(1, 200),
-        st.none() | st.tuples(st.sampled_from(("dies", "fails")), st.integers(1, 8)),
+        _FAULTS,
     ),
     max_size=6,
 )
@@ -407,5 +415,8 @@ def test_no_two_hosts_hold_the_lease_wherever_the_migrating_host_dies(
             now += gap
             world.act(action, now)
             world.check(now)
-        # A host of this release can always go on: no crash leaves a store it calls damaged.
-        world.store().acquire("host-last", now=now + 1000, duration=1)
+        # A host of this release can always go on: no crash leaves a store it calls damaged,
+        # and every lease has expired by now, so it is granted a larger epoch than any before.
+        last = world.store().acquire("host-last", now=now + 1000, duration=1)
+        assert last is not None
+        world.grant("this", last)
