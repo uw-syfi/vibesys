@@ -69,7 +69,9 @@ export type InstanceObservation<Record, Unreadable = string> =
 
 const STAGES: Readonly<Record<NonNullable<RunPhase['stage']>, string>> = {
   resolving: 'Resolving',
+  probing_workspace: 'Probing workspace',
   building_image: 'Building image',
+  building_tools: 'Building tools',
   starting_container: 'Starting container',
 };
 

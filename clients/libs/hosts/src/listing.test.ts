@@ -21,6 +21,19 @@ describe('instancePhaseText', () => {
     expect(instancePhaseText({status: 'starting', stage: 'resolving'})).toBe('Resolving');
   });
 
+  test('every startup stage has its own words', () => {
+    const stages = [
+      'resolving',
+      'probing_workspace',
+      'building_image',
+      'building_tools',
+      'starting_container',
+    ] as const;
+    const words = stages.map(stage => instancePhaseText({status: 'starting', stage}));
+    expect(new Set(words).size).toBe(stages.length);
+    expect(words).not.toContain(undefined);
+  });
+
   test('any other phase reads as its status', () => {
     for (const status of ['running', 'stopping', 'stopped', 'failed', 'completed'] as const) {
       expect(instancePhaseText({status})).toBe(status);
