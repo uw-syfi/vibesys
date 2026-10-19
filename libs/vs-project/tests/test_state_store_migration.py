@@ -3,7 +3,8 @@
 Older releases kept the record and the lease in one ``store.json`` (version 1). This release
 keeps the lease in ``lease.json`` so a renewal does not rewrite the record (FINDINGS S171). A
 run started by an older release and resumed by this one must keep its record, its fence, its
-epoch and its time watermark, and the first lease write moves the lease out.
+epoch and its time watermark, and the first lease write moves the lease out. Crashes and older
+hosts during that move are covered by ``test_state_store_mixed_releases.py``.
 """
 
 from __future__ import annotations
@@ -116,17 +117,39 @@ def test_the_first_write_moves_the_lease_out_of_the_record(tmp_path: Path, write
     assert reopened.verify(_V1_FENCE, now=121) == (write != "release")
 
 
-def test_a_lease_file_beside_an_older_record_is_the_authority(files: _Files) -> None:
-    """A crash between moving the lease out and rewriting the record leaves both copies."""
-    newer = StoreFence(host_id="host-b", epoch=2, expires_at=200)
-    files.write(
-        StoreFile.LEASE,
-        b'{"version":1,"fence":' + newer.model_dump_json().encode() + b',"observed_at":150}',
+def _lease_file(fence: StoreFence, observed_at: float) -> bytes:
+    """A ``lease.json`` copied out of an older record whose migration has not finished."""
+    return (
+        b'{"version":1,"fence":'
+        + fence.model_dump_json().encode()
+        + f',"observed_at":{observed_at}}}'.encode()
     )
+
+
+def test_beside_an_older_record_a_later_lease_file_holds_the_lease(files: _Files) -> None:
+    newer = StoreFence(host_id="host-b", epoch=2, expires_at=200)
+    files.write(StoreFile.LEASE, _lease_file(newer, 150))
     store = files.store()
     assert not store.verify(_V1_FENCE, now=120)
     assert store.verify(newer, now=160)
     assert store.load() == _V1_RECORD
+
+
+def test_beside_a_stale_lease_file_an_older_host_s_takeover_holds_the_lease(
+    files: _Files,
+) -> None:
+    """A crash after copying the lease out leaves store.json readable by an older release.
+
+    An older host may then take the lease over in store.json; the copy in lease.json is stale,
+    and a host of this release must neither take the lease over nor reuse the older host's epoch.
+    """
+    stale = StoreFence(host_id="host-a", epoch=1, expires_at=110)
+    files.write(StoreFile.LEASE, _lease_file(stale, 100))
+    store = files.store()
+    assert store.verify(_V1_FENCE, now=120)
+    assert store.acquire("host-b", now=130, duration=10) is None
+    taken = store.acquire("host-b", now=140, duration=10)
+    assert taken == StoreFence(host_id="host-b", epoch=2, expires_at=150)
 
 
 def test_a_current_record_without_its_lease_is_damage(files: _Files) -> None:
