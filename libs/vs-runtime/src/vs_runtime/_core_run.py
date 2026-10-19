@@ -201,7 +201,12 @@ class CoreRunHost:
 
 
 def start_core(host: CoreRunHost, config: RunLoopConfig) -> None:
-    """Take the lease and commit the new-epoch recovery, at the clock's current time."""
+    """Take the lease and commit the new-epoch recovery, at the clock's time after decoding."""
+    host.shell.prepare_start(config.host_id)
+    _take_lease(host, config)
+
+
+def _take_lease(host: CoreRunHost, config: RunLoopConfig) -> None:
     host.shell.start(config.host_id, now_at=host.clock.now(), lease_duration=config.lease_duration)
 
 
@@ -228,15 +233,18 @@ async def start_core_awaiting_lease(host: CoreRunHost, config: RunLoopConfig) ->
     give_up_at = host.clock.now() + config.lease_duration
     while True:
         # Take in the stored run first, then let the loop run, then read the clock for the
-        # lease: decoding a long run takes seconds, and neither the lease term nor one
-        # unbroken hold on the loop should include it. A task whose timer fell due meanwhile
-        # resumes three loop passes later (the timer fires, its future then wakes the task),
-        # and each yield gives exactly one pass. Yielding waits on no clock.
+        # lease: decoding a long run takes seconds, and the lease term should not include it.
+        # No lease is held yet, so the yields serve the loop's other tasks (the control
+        # watcher, a server), not the heartbeat, and they keep the decode and the start out of
+        # one unbroken hold on the loop. A task whose timer fell due during the decode needs
+        # two passes (the timer fires, then its future wakes the task); three leave one to
+        # spare, a margin that rests on asyncio's scheduling, not on a contract. Yielding
+        # waits on no clock.
         host.shell.prepare_start(config.host_id)
         for _ in range(_PASSES_TO_WAKE_A_DUE_TIMER):
             await yield_now()
         try:
-            start_core(host, config)
+            _take_lease(host, config)
         except LeaseUnavailableError as error:
             remaining = give_up_at - host.clock.now()
             if remaining <= 0:
