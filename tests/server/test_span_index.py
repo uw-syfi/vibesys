@@ -225,6 +225,7 @@ class _Journal:
 
 def _write(path: Path, documents: list[_Document]) -> None:
     """The journal as a run's writer leaves it."""
+    path.touch()
     journal = _Journal.open(path)
     for document in documents:
         journal.append(document)
@@ -573,6 +574,7 @@ def test_a_helper_that_keeps_indexes_answers_from_the_journal_as_it_now_is(
     path = Project.log_directory_for(project.resolve(), _RUN_ID) / RUN_EVENTS_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     projects = FileProjects(FakeGitRepositories().repository, SimThreads())
+    path.touch()  # a run that journaled nothing yet has an empty journal, not none
     journal = _Journal.open(path)
     written: list[_Document] = []
 
@@ -629,8 +631,8 @@ def test_a_span_the_journal_never_names_has_no_events_and_an_unknown_run_is_refu
     assert refused.code is HelperErrorCode.UNKNOWN_RUN
 
 
-def test_a_run_with_no_journal_has_an_empty_tail(tmp_path: Path) -> None:
-    project = project_with_run(tmp_path / "proj", _RUN_ID)
+def test_a_run_with_an_empty_journal_has_an_empty_tail(tmp_path: Path) -> None:
+    project = _project_with_journal(tmp_path, [])
 
     tail = _ask(
         RunsReadTailRequest(

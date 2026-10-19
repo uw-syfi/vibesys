@@ -132,12 +132,28 @@ def test_an_ended_runs_journal_is_read_through_the_helper(tmp_path: Path) -> Non
 
 
 def _history_requests(project: Path, run_id: str) -> list[HelperRequest]:
-    common: dict[str, object] = {"request_id": "h", "deadline_ms": 5000, "project": str(project)}
     return [
-        RunsReadEventsRequest(**common, run_id=run_id, from_sequence=1, max=5),
-        RunsReadTailRequest(**common, run_id=run_id, tail=5),
-        RunsEventsForSpanRequest(**common, run_id=run_id, span_id="flow:a", from_sequence=1, max=5),
-        RunsSummaryRequest(**common, run_id=run_id),
+        RunsReadEventsRequest(
+            request_id="h",
+            deadline_ms=5000,
+            project=str(project),
+            run_id=run_id,
+            from_sequence=1,
+            max=5,
+        ),
+        RunsReadTailRequest(
+            request_id="h", deadline_ms=5000, project=str(project), run_id=run_id, tail=5
+        ),
+        RunsEventsForSpanRequest(
+            request_id="h",
+            deadline_ms=5000,
+            project=str(project),
+            run_id=run_id,
+            span_id="flow:a",
+            from_sequence=1,
+            max=5,
+        ),
+        RunsSummaryRequest(request_id="h", deadline_ms=5000, project=str(project), run_id=run_id),
     ]
 
 
