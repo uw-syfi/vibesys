@@ -527,6 +527,17 @@ def _resource_identified(
 
 
 def _resolution(record: RequestRecord, context: RecordsContext) -> Resolution:
+    if record.phase == RequestPhase.BLOCKED and record.lifecycle == LifecycleClass.QUERY:
+        # Core ended this query at its limit, before the host that asked it died. It started
+        # nothing and owns nothing, and nobody waits on it (its owner heard it blocked), so no
+        # executor answer can matter: an inspection that finds it begun and unsealed (the host
+        # died as the poll ran) must not hold the run in recovery, as it did a run whose old
+        # polls of jobs core had long released came back unknown.
+        return "terminal"
+    return _observed_resolution(record, context)
+
+
+def _observed_resolution(record: RequestRecord, context: RecordsContext) -> Resolution:
     observation = record.observation
     if record.phase == RequestPhase.PREPARED and observation is None:
         return "safe-prepared" if _prepared_episode(record, context) else "pending"
