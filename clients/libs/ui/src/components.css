@@ -3,6 +3,7 @@
 @import './navigation.css';
 @import './rail.css';
 @import './overview-tiles.css';
+@import './chat.css';
 /*
  * The styles of the design system's components (the `.` entry). Every value is a token variable
  * from `tokens.css`; no color or length is written here. Import after `tokens.css` and `fonts.css`.
@@ -1989,34 +1990,4 @@ button.vs-stage-head {
   .vs-dock:has(> .vs-dock-side) > .vs-dock-main {
     visibility: hidden;
   }
-}
-
-/* --- chat message ------------------------------------------------------------------------------ */
-
-.vs-chat-message {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  min-width: 0;
-}
-.vs-chat-message-text {
-  color: var(--text);
-  font-family: var(--text-body-family);
-  font-size: var(--text-body-size);
-  line-height: var(--text-body-line);
-}
-/* The end side: a compact bubble on a subtle surface at the end of the line. */
-.vs-chat-message[data-side="end"] {
-  align-items: flex-end;
-}
-.vs-chat-message[data-side="end"] > .vs-chat-message-text {
-  max-width: 85%;
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-lg);
-  background: var(--panel-2);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.vs-chat-message[data-side="start"] > .vs-chat-message-text {
-  overflow-wrap: anywhere;
 }

@@ -129,6 +129,10 @@ export async function openAt(
   );
   await openNewRun(page, seed);
   await expect(page.getByRole('navigation', {name: 'New run steps'})).toBeVisible();
+  // The bundled fonts swap in after first paint (`font-display: swap`), and a width measured
+  // before the swap differs by a pixel from one measured after it. The first layout has started
+  // every font load the page needs, so waiting for the loads to finish makes sizes final.
+  await page.evaluate(() => document.fonts.ready);
 }
 
 export const main = (page: Page) => page.getByRole('main');
