@@ -25,6 +25,7 @@ from .common import (
     ContractValidationError,
     Count,
     ExecuteRegisteredOperation,
+    InvocationId,
     LifecycleClass,
     Observation,
     ObservationStatus,
@@ -41,6 +42,7 @@ from .common import (
     Seconds,
     SetupFailureKind,
     Value,
+    unset,
     validate_setup_failure,
 )
 from .evaluation import (
@@ -158,6 +160,62 @@ class Scheduled(Value):
     """The seconds the work may take once dispatched, when ``until`` is only a placeholder."""
 
 
+class CapacityHold(Value):
+    """The time a turn spent held at the run's capacity gate, as the gate last reported it.
+
+    The gate holds a turn its provider stopped (an outage, a spent quota) inside the turn's own
+    call, so that time is the provider's, not the turn's work, and it is never charged to the
+    turn's limit (``_turn_holds``). A report is cumulative: the latest replaces every earlier
+    one. A hold runs from the turn's first capacity stop to the release after its last one, so
+    the sends between its waits count too; only a send that ends the hold is the turn's.
+
+    ``credit`` is the time of the turn's holds that ended. ``since`` is when the hold the turn
+    is in began (None when it is in none), and ``released_at`` when that hold's latest wait
+    ended (None while it waits). A ``parked`` hold waits for the operator or a timed resume
+    with the run paused, not for a backoff. ``budget`` is the most hold time the turn is
+    credited: the outage budget the gate applies.
+    """
+
+    credit: Seconds = 0.0
+    since: Seconds | None = None
+    released_at: Seconds | None = None
+    parked: bool = False
+    budget: Seconds
+
+    @model_validator(mode="after")
+    def consistent(self) -> Self:
+        """A release or a park belongs to a hold, and a parked hold is not released."""
+        if self.since is None and (self.released_at is not None or self.parked):
+            raise ContractValidationError("since", "a released or parked hold names its start")
+        if (
+            self.released_at is not None
+            and self.since is not None
+            and self.released_at < self.since
+        ):
+            raise ContractValidationError("released_at", "a hold is released after it began")
+        if self.parked and self.released_at is not None:
+            raise ContractValidationError("parked", "a parked hold waits; it is not released")
+        return self
+
+    @property
+    def holding(self) -> bool:
+        """Whether the gate holds the turn now: it waits, for a backoff or parked."""
+        return self.since is not None and self.released_at is None
+
+
+class TurnHeld(Value):
+    """The run's capacity gate reports how long it has held the turn ``invocation_id``.
+
+    The host's control bridge turns the gate's latest report into this event. Core keeps it on
+    the turn's open dispatch record, whose limit it extends (``_turn_holds``); a report for a
+    turn with no open dispatch record changes nothing.
+    """
+
+    kind: Literal["turn_held"] = "turn_held"
+    invocation_id: InvocationId
+    hold: CapacityHold
+
+
 class RequestPhase(StrEnum):
     """RequestRecord phase lifecycle contract."""
 
@@ -211,6 +269,9 @@ class RequestRecord(OutcomeValue):
     """
     dispatched_at: Seconds | None = None
     """When the shell first dispatched a request whose limit counts from then, else None."""
+    capacity_hold: CapacityHold | None = Field(default=None, exclude_if=unset)
+    """For a turn's dispatch: the latest hold the run's capacity gate reported for the turn,
+    which extends its limit (``_turn_holds``), else None."""
     dispatched_in: Count | None = None
     """The host epoch whose dispatch is the request's latest, else None (never dispatched).
 
@@ -853,7 +914,8 @@ type RecordsEvent = Annotated[
     | ReconciliationCommandLapsed
     | RecoveryCheckWaitLapsed
     | OperationRetireRequested
-    | HostRenewed,
+    | HostRenewed
+    | TurnHeld,
     Field(discriminator="kind"),
 ]
 

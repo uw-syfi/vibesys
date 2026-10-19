@@ -190,6 +190,28 @@ def wait_bounds(
     return tuple(job_bound(job, stated(job), run, records.hosts) for job in jobs)
 
 
+def turn_bound(record: RequestRecord, run: RunState) -> Bound:
+    """When ``record``'s own limit ends it: its stated limit plus the capacity hold it is credited.
+
+    The rules are ``_turn_holds``'s: a released hold credits its length, a hold the gate is
+    in may last up to its budget, a parked one until the run ends, and one that began after
+    the turn's own time ran out credits nothing. A record with no hold ends at its ``until``.
+    """
+    stated = record.until.at
+    hold = record.capacity_hold
+    if hold is None:
+        return Bound(at=stated, by=WaitEnd.LIMIT)
+    ceiling = Bound(at=max(run.deadline_at, stated), by=WaitEnd.RUN_END)
+    credit = min(hold.credit, hold.budget)
+    at = stated + credit
+    if hold.since is not None and hold.since <= at:
+        if hold.parked:
+            return ceiling
+        held = hold.budget if hold.released_at is None else credit + hold.released_at - hold.since
+        at = stated + min(held, hold.budget)
+    return Bound(at=at, by=WaitEnd.LIMIT) if at <= ceiling.at else ceiling
+
+
 def record_bound(
     record: RequestRecord,
     evaluation: EvaluationState,
@@ -198,14 +220,15 @@ def record_bound(
 ) -> Bound:
     """When ``record``'s limit ends it: at the earliest bound of an unfinished job it started.
 
-    A record that started no job (or whose jobs all ended) ends at its stated ``until``.
+    A record that started no job (or whose jobs all ended) ends at its own bound: its stated
+    ``until``, extended by the capacity hold of the turn it dispatches (``turn_bound``).
     """
     bounds = tuple(
         job_bound(job, record.until.at, run, hosts)
         for job in (*evaluation.jobs, *evaluation.registered_jobs)
         if source(job) == record.request_id and not job.terminal
     )
-    return _earliest(bounds, Bound(at=record.until.at, by=WaitEnd.LIMIT))
+    return _earliest(bounds, turn_bound(record, run))
 
 
 def notice_due(job: Job, before: float, limits: Limits) -> bool:

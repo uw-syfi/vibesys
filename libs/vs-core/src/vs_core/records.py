@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from . import _host_epochs, _request_ledger, _request_recovery
+from . import _host_epochs, _request_ledger, _request_recovery, _turn_holds
 from ._ledger_compaction import spent_answer
 from .types.kernel import AreaChange
 from .types.records import (
@@ -23,6 +23,7 @@ from .types.records import (
     RequestPrepared,
     RequestUndispatchable,
     RetryDue,
+    TurnHeld,
 )
 
 if TYPE_CHECKING:
@@ -75,6 +76,7 @@ EVENT_TO_SUBAREA: Mapping[type[RecordsEvent], Reducer] = MappingProxyType(
         BlockedRecordStalled: _request_ledger.advance,
         HostRenewed: _host_epochs.renewed,
         RecoveryCheckWaitLapsed: _request_recovery.advance,
+        TurnHeld: _turn_holds.held,
     }
 )
 

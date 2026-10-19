@@ -31,11 +31,6 @@ from vs_sim.api.testing import examples
 _ROLE_LOST_TURNS = 3
 
 
-def _unavailable() -> TurnFailureKind:
-    # Constructed from its value so this module imports before the kind exists.
-    return TurnFailureKind("provider_unavailable")
-
-
 def _lose_to_the_outage(role: str, losses: int, *, restarting: bool, outline: bool) -> None:
     cfg = plan_config(max_rounds=2) if outline else config(max_in_flight=1, max_rounds=2)
     host = begin(cfg, restarting=restarting)
@@ -43,7 +38,7 @@ def _lose_to_the_outage(role: str, losses: int, *, restarting: bool, outline: bo
     for _ in range(losses):
         turn = host.run.expect_turn(role=role)
         host.run.advance_to(host.run.view.now_at + 1800.0)  # the turn's limit passed
-        host.run.fail_turn(turn, _unavailable())
+        host.run.fail_turn(turn, TurnFailureKind.PROVIDER_UNAVAILABLE)
         assert host.run.finished is None, "an outage loss ended the run"
         if host.run.sleeping_until:
             host.run.advance_to(min(host.run.sleeping_until))
@@ -55,7 +50,6 @@ def _lose_to_the_outage(role: str, losses: int, *, restarting: bool, outline: bo
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="S179: outage losses count as lost turns")
 @pytest.mark.parametrize("restarting", [False, True])
 @given(losses=st.integers(min_value=1, max_value=4 * _ROLE_LOST_TURNS))
 @example(losses=_ROLE_LOST_TURNS)
@@ -67,7 +61,6 @@ def test_planner_turns_lost_to_an_outage_never_end_the_run(
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="S179: outage losses count as lost turns")
 @pytest.mark.parametrize("restarting", [False, True])
 @given(losses=st.integers(min_value=1, max_value=4 * _ROLE_LOST_TURNS))
 @example(losses=_ROLE_LOST_TURNS)

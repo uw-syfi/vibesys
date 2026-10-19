@@ -54,6 +54,10 @@ class TurnFailureKind(StrEnum):
     """Acceptance stayed unknown after inspection, so core released the turn unfinished."""
     CANCELLED = "cancelled"
     """Core cancelled the turn (stop, interruption or cleanup), so no reply exists."""
+    PROVIDER_UNAVAILABLE = "provider_unavailable"
+    """Core ended the turn while the run's capacity gate held it for its provider (an outage,
+    a spent quota): no reply exists, and the turn's own work never failed. A strategy asks it
+    again without counting it against the role's lost turns."""
 
 
 def unset(value: object) -> bool:

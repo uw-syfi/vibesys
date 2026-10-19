@@ -74,6 +74,7 @@ from .types.records import (
     RequestPrepared,
     RequestUndispatchable,
     RetryDue,
+    TurnHeld,
 )
 from .types.scheduling import (
     AdmissionControl,
@@ -258,6 +259,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | BlockedRecordStalled()
             | ReconciliationCommandLapsed()
             | HostRenewed()
+            | TurnHeld()
             | RecoveryCheckWaitLapsed()
             | OperationRetireRequested()
             | DecisionCompleted()

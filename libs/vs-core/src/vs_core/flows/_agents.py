@@ -102,6 +102,8 @@ class _Again:
 
 
 _AGAIN = _Again()
+_BACKOFF_STEPS = 16
+"""Outage losses past this many wait the backoff's cap; the doubling stops before it overflows."""
 
 
 class Agents:
@@ -244,8 +246,11 @@ class _Ask:
         self.continuation = None
         self.corrections = 0
         self.drops = 0
+        self.outages = 0
+        """Turns of this ask core ended while the capacity gate held them; never a limit."""
         self.resuming = False
-        """Whether the ask in flight continues a wait: a loss of it is never asked again."""
+        """Whether the ask in flight continues a wait: a loss of it is never asked again, unless
+        its provider lost it (``_unavailable``)."""
         self.invocation: InvocationRef | None = None
         self.decision = DecisionId(root=self.role.name)
 
@@ -447,6 +452,8 @@ class _Ask:
         role, turn = self.role, result.invocation
         if result.failure is TurnFailureKind.TRANSPORT_LOST:
             return await self._lost(turn)
+        if result.failure is TurnFailureKind.PROVIDER_UNAVAILABLE:
+            return await self._unavailable(turn)
         if result.reply_errors:
             # The executor's own schema check rejected the reply: the same typed failure as
             # a reply that breaks the model here, with the errors it reported by field.
@@ -517,6 +524,29 @@ class _Ask:
         self.continuation = None
         self.invocation = None
         self.drops += 1
+        return _AGAIN
+
+    async def _unavailable(self, lost: InvocationRef) -> _Again:
+        """The provider lost the turn while the run's capacity gate held it: ask again.
+
+        The turn's own work never failed; its provider was unavailable (an outage, a spent
+        quota) past the time core gave it. That is not the role's to spend, so it never counts
+        against ``lost_turns``, and a turn that continued a wait is asked again too: the new
+        turn follows the lost one in its conversation, with the same prompt, as a correction
+        (its continuation was used). The gate's own budget, and the pause it puts the run in
+        once that is spent, bound how long the provider is waited for.
+        """
+        role = self.role
+        await self.kit.timer(
+            self.kit.now() + role.lost_turn_backoff.delay(min(self.outages, _BACKOFF_STEPS))
+        )
+        self.charge = "correction"
+        self.predecessor = lost
+        self.resume = None
+        self.continuation = None
+        self.invocation = None
+        self.resuming = False
+        self.outages += 1
         return _AGAIN
 
     # -- waiting for what core decides ---------------------------------------------------------

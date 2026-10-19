@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from . import _session_checkpoints
+from . import _session_checkpoints, _turn_holds
 from ._acquisition_stall import stalled_acquisition
 from ._continuations import bounded_wait, wait_refused_at_turn_end
 from ._proofs import (
@@ -1119,6 +1119,7 @@ def _apply_turn_observation(
             observation,
             reply=event,
             lost=released_lost,
+            held=released_lost and _turn_holds.held_when_lost(context.records, invocation),
         ),
     )
     cleanup = _after_turn_cleanup(state, context, invocation, session)
