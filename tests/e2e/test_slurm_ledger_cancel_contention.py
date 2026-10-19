@@ -22,6 +22,7 @@ scancel once that run attached.
 
 from __future__ import annotations
 
+import os
 import shlex
 import threading
 import time
@@ -169,13 +170,16 @@ class _World:
         """Whether some thread waits for the operation store's ``flock`` (``/proc/locks``)."""
         if self.lock_file is None or not self.lock_file.exists():
             return False
-        inode = self.lock_file.stat().st_ino
+        status = self.lock_file.stat()
+        # /proc/locks names a file as MAJOR:MINOR:INODE, the device numbers in hex:
+        # match the device too, since another filesystem may hold the same inode.
+        lock = (os.major(status.st_dev), os.minor(status.st_dev), status.st_ino)
         for line in Path("/proc/locks").read_text(encoding="utf-8").splitlines():
             tokens = line.split()
             if "->" not in tokens:
                 continue
-            device = tokens[tokens.index("->") + 5]
-            if int(device.rsplit(":", 1)[1]) == inode:
+            major, minor, inode = tokens[tokens.index("->") + 5].split(":")
+            if (int(major, 16), int(minor, 16), int(inode)) == lock:
                 return True
         return False
 
@@ -317,7 +321,7 @@ def test_a_withdrawals_scancel_is_never_held_up_behind_another_thread_of_the_run
     tmp_path: Path, implementation: str
 ) -> None:
     clock = ManualClock(NOW)
-    ledger = _SlowAfterMark(project=PROJECT)
+    ledger = _SlowAfterMark(project=PROJECT, clock=ManualClock())
     ledger.clock = clock
     ledger.seconds = _READ_AFTER_MARK_S
     workspace = tmp_path / "workspace"
