@@ -284,3 +284,29 @@ describe('usageView', () => {
     }
   });
 });
+
+describe('the order of runs that cost the same', () => {
+  test('is total: equal costs fall in name order, then run order, whatever order they arrive in', () => {
+    for (const seed of SEEDS) {
+      const random = new Seeded(seed);
+      const base = entry(random, 0);
+      const byRun = Array.from({length: 2 + random.int(8)}, (_, at) => ({
+        runId: `run-${at}`,
+        task: random.pick(['spsc', 'mpmc', null]),
+        costUsd: random.pick([1, 2]),
+      }));
+      const view = (rows: typeof byRun) =>
+        usageView({
+          sources: [{host: 'local', project: '/p', usage: {...base, byRun: rows}}],
+          names: NAMES,
+          unreachable: 0,
+          unsupported: 0,
+          runsLeftOut: 0,
+        }).runs.map(row => row.key);
+
+      const shuffled = [...byRun].sort(() => random.next() - 0.5);
+
+      expect(view(shuffled)).toEqual(view(byRun));
+    }
+  });
+});
