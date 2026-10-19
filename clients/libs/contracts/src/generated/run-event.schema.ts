@@ -1424,7 +1424,8 @@ const runEventSchema: Record<string, unknown> = {
       "enum": [
         "better",
         "within_noise",
-        "worse"
+        "worse",
+        "inconclusive"
       ],
       "title": "MeasurementVerdict",
       "type": "string"

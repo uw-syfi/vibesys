@@ -605,7 +605,7 @@ async def test_an_agent_that_resumed_on_a_provisional_comparison_is_told_where_i
             for c in receipt.comparisons
             if c.candidate_input == first
         ]
-        assert told[0] == (ComparisonVerdict.WITHIN_NOISE, True), "first told as provisional"
+        assert told[0] == (ComparisonVerdict.INCONCLUSIVE, True), "first told as provisional"
         assert told[-1] == (ComparisonVerdict.BETTER, False), "later told where it ended"
         assert len(told) == len(set(told)), "each change is told once"
 

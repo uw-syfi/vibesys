@@ -14,7 +14,7 @@
 import type {CoreState} from '@vibesys/run-state';
 import type {CandidateTree} from '@vibesys/run-state/candidates';
 
-export type IdeaEffect = 'supported' | 'within noise' | 'disproven' | 'measuring';
+export type IdeaEffect = 'supported' | 'within noise' | 'disproven' | 'inconclusive' | 'measuring';
 
 /**
  * The verdict as a screen words it. It is against the idea's base, not the input, so it says so:
@@ -28,6 +28,8 @@ export function effectWords(effect: IdeaEffect): string {
       return 'within noise of its base';
     case 'disproven':
       return 'did not beat its base';
+    case 'inconclusive':
+      return 'too few runs to tell';
     case 'measuring':
       return 'measuring';
   }
@@ -39,6 +41,7 @@ const WORDS = {
   better: 'supported',
   within_noise: 'within noise',
   worse: 'disproven',
+  inconclusive: 'inconclusive',
 } as const satisfies Record<string, IdeaEffect>;
 
 function fold(core: CoreState, tree: CandidateTree): IdeaEffects {

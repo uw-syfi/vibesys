@@ -120,11 +120,16 @@ class Runaway(Value):
 
 
 class ComparisonVerdict(StrEnum):
-    """Which side of the noise a candidate's result falls on, against its base."""
+    """Which side of the noise a candidate's result falls on, against its base.
+
+    ``INCONCLUSIVE`` is no side: the samples held give no estimate of the noise (too few runs a
+    side, or runs that all read alike), so the ratio is neither a gain nor within the noise.
+    """
 
     BETTER = "better"
     WITHIN_NOISE = "within_noise"
     WORSE = "worse"
+    INCONCLUSIVE = "inconclusive"
 
 
 class EffectVerdict(StrEnum):
@@ -136,6 +141,7 @@ class EffectVerdict(StrEnum):
     SUPPORTED = "supported"
     WITHIN_NOISE = "within_noise"
     DISPROVEN = "disproven"
+    INCONCLUSIVE = "inconclusive"
 
 
 class Comparison(Value):

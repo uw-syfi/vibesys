@@ -88,6 +88,7 @@ _EFFECT_COMPARISON = {
     EffectVerdict.SUPPORTED: MetricComparison.BETTER,
     EffectVerdict.WITHIN_NOISE: MetricComparison.WITHIN_NOISE,
     EffectVerdict.DISPROVEN: MetricComparison.WORSE,
+    EffectVerdict.INCONCLUSIVE: MetricComparison.INCOMPARABLE,
 }
 """How the framework's verdict on the expected effect is recorded as the round's comparison."""
 

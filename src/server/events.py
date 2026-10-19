@@ -810,6 +810,7 @@ class MeasurementVerdict(StrEnum):
     BETTER = "better"
     WITHIN_NOISE = "within_noise"
     WORSE = "worse"
+    INCONCLUSIVE = "inconclusive"
 
 
 class MeasurementComparedData(EventPayload):

@@ -887,7 +887,7 @@ def test_a_task_that_declares_no_noise_gets_no_verdict_from_runs_that_show_none(
     (a quantized or cached benchmark), the spread was zero and the 0.3% gap between the two
     sides was ``better``: the official check then reused the agent's single run. Now each side
     takes three runs (the fewest that can give a verdict) and no more, the comparison stays
-    ``within_noise``, and since no run can change that (`verdict_unreachable`) the official
+    ``inconclusive``, and since no run can change that (`verdict_unreachable`) the official
     check is answered by the samples held instead of a run that would read the same.
     """
     lab = Lab.of("a", floor=0.0)
@@ -895,7 +895,7 @@ def test_a_task_that_declares_no_noise_gets_no_verdict_from_runs_that_show_none(
     lab.measure({"input-1": 100.3, "base": 100.0})
     last = lab.comparisons()[-1]
     assert (last.candidate_samples, last.base_samples) == (3, 3)
-    assert {c.verdict for c in lab.comparisons()} == {core.ComparisonVerdict.WITHIN_NOISE}
+    assert {c.verdict for c in lab.comparisons()} == {core.ComparisonVerdict.INCONCLUSIVE}
     assert core.verdict_unreachable(last, core.moment_of(lab.state.run).policy)
     assert len(lab.baselines()) == core.MIN_SAMPLES_WITHOUT_FLOOR, "at most two extra base runs"
     check = final_check(lab, "a", "c1", "input-1")

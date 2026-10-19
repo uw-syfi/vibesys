@@ -3815,7 +3815,8 @@
       "enum": [
         "better",
         "within_noise",
-        "worse"
+        "worse",
+        "inconclusive"
       ],
       "title": "MeasurementVerdict",
       "type": "string"

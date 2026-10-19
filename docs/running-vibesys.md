@@ -260,7 +260,7 @@ three runs each and those runs differ, and then the bar is the Student-t
 quantile at the floor of the Welch-Satterthwaite degrees of freedom (between
 4.30 noises at the fewest runs and 2.04 with many), which keeps false verdicts
 near 5% whatever the two spreads and counts. Until then the
-result is `within_noise` and a close call: the base takes up to two more runs,
+result is `inconclusive` (never `within_noise`, whatever the ratio) and a close call: the base takes up to two more runs,
 and the official check runs afresh. The agent's evaluation tool and the resumed turn
 report the comparison the base's fresh samples make, and the run's events carry
 each one logged as `measurement_compared`.
@@ -284,8 +284,8 @@ framework compares it with its base (the comparison above, over every sample of 
 input) and holds the gain against the bar with the comparison's own noise and the same rule a
 verdict follows: `supported` when it clears the bar by more than two noises under a declared
 `relative_noise` (without one, by more than the Student-t number for the fewest runs a side),
-`disproven` when it misses by more than that, and `within_noise` otherwise, which is also the
-answer for every bar while the runs give no estimate of the noise. The judge reviews correctness and evidence, not arithmetic, and
+`disproven` when it misses by more than that, and `within_noise` otherwise; while the runs give no estimate of the noise the
+answer for every bar is `inconclusive`. The judge reviews correctness and evidence, not arithmetic, and
 free-text performance thresholds no longer belong in a plan's pass criteria. A candidate with no
 comparison (the task has no benchmark stage, or its base could not be measured) is resolved as
 before, from its headline metric against its parent round.

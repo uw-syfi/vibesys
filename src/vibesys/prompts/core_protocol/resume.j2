@@ -42,12 +42,14 @@ changed since your last resume. These are its numbers, not claims; report them a
 {% else %}
 This task declares no per-run noise, so the noise is estimated from the runs themselves:
 there is no verdict until the candidate and its base each have at least
-{{ comparison_rule.min_runs }} runs, and their runs do not all read alike. Then `better` and `worse` mean
-the difference exceeds a critical number of noises (Welch's t test at 95%), larger the
-fewer runs there are; `within noise` means the runs held cannot tell the candidate from its
-base. While a result is within noise, the framework runs the candidate and its base again
-itself, up to {{ comparison_rule.min_runs }} runs each. If every run on both sides reads
-alike, no verdict is possible and no more runs are taken.
+{{ comparison_rule.min_runs }} runs, and their runs do not all read alike. Until then the result is
+`inconclusive`: the ratio is not a gain and it is not noise, it is a number from too few runs
+to say either. Then `better` and `worse` mean the difference exceeds a critical number of
+noises (Welch's t test at 95%), larger the fewer runs there are; `within noise` means the
+runs held show a spread the difference does not exceed. While a result is inconclusive or
+within noise, the framework runs the candidate and its base again itself, up to
+{{ comparison_rule.min_runs }} runs each. If every run on both sides reads alike, no verdict is
+possible and no more runs are taken.
 {% endif %}
 Evaluating unchanged candidate content again starts no new run (only one the machinery
 failed is run again) and adds no sample: it returns the evaluation already made with its

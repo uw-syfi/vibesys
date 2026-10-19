@@ -20,7 +20,8 @@ samples shrink it, a wider spread or a higher floor grow it, and a shared host s
 A verdict needs the difference to exceed a critical number of noises: ``better`` when the
 candidate improves on the base by more than that (a ratio above one for a ``max`` metric, below
 one for a ``min`` metric), ``worse`` when it is worse by more than that, and ``within_noise``
-otherwise.
+otherwise. A comparison with no estimate of the noise says none of these: it is
+``inconclusive``, so a large ratio over too few runs is never called noise.
 
 - A task that declares a floor (``relative_noise``) has stated its noise. The runs' spread is
   the pooled relative deviation, never taken below the floor (which is also all there is to go
@@ -47,7 +48,7 @@ otherwise.
   the two spreads and counts. The comparison gives a verdict only once each side holds
   ``MIN_SAMPLES_WITHOUT_FLOOR`` runs and the noise is above zero. Fewer runs, or identical
   runs, are no estimate of a noise: identical readings of a quantized or cached benchmark show
-  none, not that there is none. Until then the comparison is ``within_noise`` and a close call
+  none, not that there is none. Until then the comparison is ``inconclusive`` and a close call
   (`close_call`), which earns both sides more samples (below). Any fixed default floor would be a
   number nobody measured; requiring the key would refuse every task that has a benchmark and no
   ``[pareto]`` table.
@@ -59,7 +60,7 @@ The base is measured once per (measured input, evaluation): the first time a can
 compared with it and no run of it is held or running, and again when every run of it a
 candidate waited on ended without a sample (`vs_core._base_runs`). It is measured again only
 when its samples are stale (older than ``TaskTerms.base_staleness`` on the run clock) or when a
-candidate's result is a close call (``within_noise``, `close_call`), because one more base
+candidate's result is a close call (``within_noise`` or ``inconclusive``, `close_call`), because one more base
 sample narrows the noise. A close call never takes a base past `_base_max_samples` fresh
 samples: ``BASE_MAX_SAMPLES`` (2, so at most one extra base run) under a declared floor, and
 ``MIN_SAMPLES_WITHOUT_FLOOR`` (3, so at most two extra base runs) without one, the fewest that
@@ -638,7 +639,7 @@ def compare(
         critical = _t_critical(degrees)
     gain = ratio - 1 if direction == "max" else 1 - ratio
     verdict = (
-        ComparisonVerdict.WITHIN_NOISE
+        ComparisonVerdict.INCONCLUSIVE
         if not _noise_known(m, n, noise, policy)
         else ComparisonVerdict.BETTER
         if gain > critical * noise
@@ -982,6 +983,8 @@ def effect_verdict(
         disproven     if margin < -critical * noise
         within_noise  otherwise
 
+    A comparison with no estimate of its noise is ``inconclusive``, whatever the bar.
+
     ``policy`` is the one the comparison was made under (`compare`). Under a declared floor the
     critical number is ``VERDICT_NOISES``, and with a bar of one this is exactly the
     comparison's own verdict. Without one, a comparison with no estimate of its noise
@@ -989,11 +992,11 @@ def effect_verdict(
     quantile at the fewest degrees Welch's test can have, ``min(m, n) - 1`` (the stored
     comparison does not carry its exact degrees): at least the one the verdict used, so the
     effect is never called where the comparison would not be, and with a bar of one it is the
-    comparison's verdict or ``within_noise``.
+    comparison's verdict or ``inconclusive``.
     """
     resolution = effect_resolution(comparison, policy)
     if resolution is None:
-        return EffectVerdict.WITHIN_NOISE
+        return EffectVerdict.INCONCLUSIVE
     sign = 1.0 if comparison.direction == "max" else -1.0
     margin = sign * (comparison.ratio - minimum_ratio)
     if margin > resolution:
@@ -1038,16 +1041,16 @@ def comparison_of_result(
 
 
 def close_call(comparison: Comparison) -> bool:
-    """Whether the candidate's result is within the critical number of noises of its base.
+    """Whether the candidate's result is not yet called: within the noise, or with none estimated.
 
-    That is exactly a ``within_noise`` verdict: the verdict was taken at the critical number for
-    the comparison's own spreads (`compare`), which the stored comparison does not carry, so
-    the verdict is the only place that bar is known. A comparison with no estimate of its noise
-    (``_noise_known``) is ``within_noise`` whatever its gain: more samples are exactly what it
-    lacks. A verdict, even from a zero noise under a declared floor (a candidate that read 0),
-    is no close call.
+    That is a ``within_noise`` verdict (taken at the critical number for the comparison's own
+    spreads, `compare`, which the stored comparison does not carry, so the verdict is the only
+    place that bar is known) or an ``inconclusive`` one: a comparison with no estimate of its
+    noise (``_noise_known``) is called neither way whatever its gain, and more samples are
+    exactly what it lacks. A verdict, even from a zero noise under a declared floor (a candidate
+    that read 0), is no close call.
     """
-    return comparison.verdict is ComparisonVerdict.WITHIN_NOISE
+    return comparison.verdict in (ComparisonVerdict.WITHIN_NOISE, ComparisonVerdict.INCONCLUSIVE)
 
 
 def verdict_unreachable(comparison: Comparison, policy: ComparisonPolicy) -> bool:

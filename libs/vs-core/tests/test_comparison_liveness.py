@@ -485,7 +485,7 @@ def test_one_evaluation_without_a_floor_reaches_a_verdict_and_the_official_check
     """One commit, evaluated once, noisy runs: core takes the candidate to three runs itself.
 
     Before, the candidate held one run (a repeat call is answered with it), the comparison
-    stayed ``within_noise`` for good, and the official check always ran afresh.
+    stayed ``inconclusive`` for good, and the official check always ran afresh.
     """
     lab = Lab.of("a", floor=0.0)
     lab.call("a", "c1", "input-1")
@@ -511,7 +511,7 @@ def test_a_deterministic_benchmark_without_a_floor_stops_at_three_runs_a_side() 
     settle(lab, Bench({"input-1": 100.3, "base": 100.0}, 0.0, seeded("deterministic")))
     last = compared(lab, "a", "input-1")[-1]
     assert (last.candidate_samples, last.base_samples) == (3, 3)
-    assert last.verdict is core.ComparisonVerdict.WITHIN_NOISE
+    assert last.verdict is core.ComparisonVerdict.INCONCLUSIVE
     assert core.verdict_unreachable(last, core.moment_of(lab.state.run).policy)
     assert len(base_runs(lab)) == core.MIN_SAMPLES_WITHOUT_FLOOR
     assert final_check(lab, "a", "c1", "input-1").reuses is not None
@@ -710,7 +710,7 @@ def test_at_equal_means_one_evaluation_and_its_official_check_rarely_give_a_verd
         last = compared(lab, "a", "input-1")[-1]
         assert last.candidate_samples <= core.MIN_SAMPLES_WITHOUT_FLOOR + 1
         assert last.base_samples == core.MIN_SAMPLES_WITHOUT_FLOOR
-        if last.verdict is not core.ComparisonVerdict.WITHIN_NOISE:
+        if last.verdict in (core.ComparisonVerdict.BETTER, core.ComparisonVerdict.WORSE):
             verdicts += 1
     assert verdicts / SIMULATED <= 0.07, verdicts
 

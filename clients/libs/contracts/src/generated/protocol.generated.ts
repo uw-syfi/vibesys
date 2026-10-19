@@ -709,7 +709,7 @@ export type Noise = number;
 /**
  * Which side of the noise a candidate falls on. Mirrors ``vs_core.api.ComparisonVerdict``.
  */
-export type MeasurementVerdict = "better" | "within_noise" | "worse";
+export type MeasurementVerdict = "better" | "within_noise" | "worse" | "inconclusive";
 export type CandidateSamples = number;
 export type BaseSamples = number;
 /**

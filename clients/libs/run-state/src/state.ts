@@ -129,11 +129,11 @@ export interface WinnerSelection {
 
 /**
  * How a candidate's measurement compared with its base's, folded from `measurement_compared`:
- * `better`, `within_noise` or `worse` once the noise is allowed for. This is the framework's own
+ * `better`, `within_noise` or `worse` once the noise is allowed for, `inconclusive` before it can be. This is the framework's own
  * reading of whether an idea's effect held, whatever its ratio to the input says.
  */
 export interface MeasurementComparison {
-  readonly verdict: 'better' | 'within_noise' | 'worse';
+  readonly verdict: 'better' | 'within_noise' | 'worse' | 'inconclusive';
   /** The candidate's value over its base's. */
   readonly ratio: number;
 }

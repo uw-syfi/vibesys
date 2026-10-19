@@ -127,6 +127,7 @@ def test_which_way_is_better_flips_better_and_worse_and_nothing_else(
         core.ComparisonVerdict.BETTER: core.ComparisonVerdict.WORSE,
         core.ComparisonVerdict.WORSE: core.ComparisonVerdict.BETTER,
         core.ComparisonVerdict.WITHIN_NOISE: core.ComparisonVerdict.WITHIN_NOISE,
+        core.ComparisonVerdict.INCONCLUSIVE: core.ComparisonVerdict.INCONCLUSIVE,
     }
     assert (high.ratio, high.noise) == (low.ratio, low.noise)
     assert low.verdict is flipped[high.verdict]
@@ -202,11 +203,12 @@ def test_one_run_a_side_and_no_declared_floor_decide_nothing(
     and the official check the samples that measure the noise.
     """
     result = compared([mine], [theirs], direction=direction)
-    assert result.verdict is core.ComparisonVerdict.WITHIN_NOISE
+    assert result.verdict is core.ComparisonVerdict.INCONCLUSIVE
     assert core.close_call(result)
 
 
 MIN = core.MIN_SAMPLES_WITHOUT_FLOOR
+_CALLED = (core.ComparisonVerdict.BETTER, core.ComparisonVerdict.WORSE)
 
 
 @pytest.mark.regression
@@ -230,7 +232,7 @@ def test_without_a_declared_floor_a_verdict_needs_three_runs_a_side_with_a_sprea
     """
     result = compared([v * gain for v in mine], theirs)
     if min(len(mine), len(theirs)) < MIN:
-        assert result.verdict is core.ComparisonVerdict.WITHIN_NOISE
+        assert result.verdict is core.ComparisonVerdict.INCONCLUSIVE
         assert core.close_call(result)
 
 
@@ -255,7 +257,7 @@ def test_identical_runs_without_a_declared_floor_never_give_a_verdict(
     of the difference became the verdict.
     """
     result = compared([value] * m, [other] * n, direction=direction)
-    assert result.verdict is core.ComparisonVerdict.WITHIN_NOISE
+    assert result.verdict is core.ComparisonVerdict.INCONCLUSIVE
     assert core.close_call(result)
 
 
@@ -421,10 +423,83 @@ def test_at_equal_means_a_verdict_without_a_declared_floor_is_rare(
     for _ in range(SIMULATED):
         mine = [100.0 * (1 + draw.gauss(0.0, spread_mine)) for _ in range(m)]
         theirs = [100.0 * (1 + draw.gauss(0.0, spread_theirs)) for _ in range(n)]
-        if compared(mine, theirs).verdict is not core.ComparisonVerdict.WITHIN_NOISE:
+        if compared(mine, theirs).verdict in _CALLED:
             verdicts += 1
     rate = verdicts / SIMULATED
     if min(m, n) < MIN:
         assert rate == 0
     else:
         assert rate <= 0.07, rate
+
+
+SMALL_SPREAD = st.floats(min_value=0.0, max_value=0.005)
+EFFECTS = st.one_of(
+    st.floats(min_value=1.2, max_value=3.0), st.floats(min_value=0.3, max_value=0.8)
+)
+
+
+def _runs(centre: float, spreads: list[float]) -> list[float]:
+    """Runs reading ``centre`` times one plus a relative deviation of at most the spread."""
+    return [centre * (1 + s * (-1) ** i) for i, s in enumerate(spreads)]
+
+
+@pytest.mark.regression
+@given(
+    base=st.lists(SMALL_SPREAD, min_size=1, max_size=6),
+    mine=st.lists(SMALL_SPREAD, min_size=1, max_size=6),
+    effect=EFFECTS,
+    floor=st.sampled_from((0.0, 0.01)),
+    direction=st.sampled_from(("max", "min")),
+)
+@example(base=[0.005, 0.005], mine=[0.0], effect=1.2371, floor=0.0, direction="max")
+def test_a_large_effect_over_a_small_noise_is_never_within_noise(
+    base: list[float],
+    mine: list[float],
+    effect: float,
+    floor: float,
+    direction: Literal["max", "min"],
+) -> None:
+    """A live run read 352.37 over one run against a base of 287.03 and 282.66 as ``within_noise``.
+
+    Whatever the run counts, a ratio of at least 1.2 (or at most 0.8) against runs within 0.5%
+    of their side's centre is never called noise: with too few runs to estimate the noise the
+    verdict is ``inconclusive``, and otherwise it is ``better`` or ``worse`` by the direction.
+    """
+    result = compared(
+        _runs(100.0 * effect, mine), _runs(100.0, base), floor=floor, direction=direction
+    )
+    assert result.verdict is not core.ComparisonVerdict.WITHIN_NOISE
+    known = floor > 0 or (min(len(mine), len(base)) >= MIN and result.noise > 0)
+    if not known:
+        assert result.verdict is core.ComparisonVerdict.INCONCLUSIVE
+        assert core.close_call(result)
+    else:
+        improves = (effect > 1) == (direction == "max")
+        expected = core.ComparisonVerdict.BETTER if improves else core.ComparisonVerdict.WORSE
+        assert result.verdict is expected
+
+
+@given(
+    mine=st.lists(VALUES, min_size=1, max_size=6),
+    theirs=st.lists(VALUES, min_size=1, max_size=6),
+    floor=FLOORS,
+    direction=st.sampled_from(("max", "min")),
+)
+def test_within_noise_only_appears_when_the_effect_is_inside_the_noise_band(
+    mine: list[float], theirs: list[float], floor: float, direction: Literal["max", "min"]
+) -> None:
+    """``within_noise`` is a measured call: the noise is estimated and the gain is inside its band.
+
+    The band is at most 4.303 noises (the widest critical number a verdict can
+    use), and under a declared floor exactly ``VERDICT_NOISES``. Without an estimate of the
+    noise the verdict is ``inconclusive``, never ``within_noise``.
+    """
+    result = compared(mine, theirs, floor=floor, direction=direction)
+    gain = result.ratio - 1 if direction == "max" else 1 - result.ratio
+    if result.verdict is core.ComparisonVerdict.WITHIN_NOISE:
+        assert floor > 0 or (min(len(mine), len(theirs)) >= MIN and result.noise > 0)
+        widest = core.VERDICT_NOISES if floor > 0 else T_975_AT_2
+        assert abs(gain) <= widest * result.noise * (1 + 1e-9)
+    elif result.verdict is core.ComparisonVerdict.INCONCLUSIVE:
+        assert floor == 0
+        assert min(len(mine), len(theirs)) < MIN or result.noise == 0

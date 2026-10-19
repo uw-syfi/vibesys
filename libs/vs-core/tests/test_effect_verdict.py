@@ -4,8 +4,8 @@ A plan states a typed bar, a minimum ratio over the base in the metric's own dir
 measured comparison says of it is derived, never declared: `supported` when the candidate clears
 the bar by more than a critical number of noises (two under a declared floor), `disproven` when
 it misses by more than that, and `within_noise` otherwise. A comparison with no estimate of its
-noise (no declared floor and fewer than three runs a side, or runs that show none) says nothing
-of any bar. These properties hold for any comparison, any floor and any bar.
+noise (no declared floor and fewer than three runs a side, or runs that show none) is
+`inconclusive` of any bar. These properties hold for any comparison, any floor and any bar.
 """
 
 from __future__ import annotations
@@ -28,12 +28,14 @@ SAMPLES = st.lists(VALUES, min_size=1, max_size=5)
 _RANK = {
     core.EffectVerdict.SUPPORTED: 2,
     core.EffectVerdict.WITHIN_NOISE: 1,
+    core.EffectVerdict.INCONCLUSIVE: 1,
     core.EffectVerdict.DISPROVEN: 0,
 }
 _AS_COMPARED = {
     core.ComparisonVerdict.BETTER: core.EffectVerdict.SUPPORTED,
     core.ComparisonVerdict.WITHIN_NOISE: core.EffectVerdict.WITHIN_NOISE,
     core.ComparisonVerdict.WORSE: core.EffectVerdict.DISPROVEN,
+    core.ComparisonVerdict.INCONCLUSIVE: core.EffectVerdict.INCONCLUSIVE,
 }
 
 
@@ -56,7 +58,11 @@ def test_a_bar_of_one_is_the_comparisons_own_verdict_or_more_cautious(
     if floor > 0:
         assert effect is _AS_COMPARED[result.verdict]
     else:
-        assert effect in {_AS_COMPARED[result.verdict], core.EffectVerdict.WITHIN_NOISE}
+        assert effect in {
+            _AS_COMPARED[result.verdict],
+            core.EffectVerdict.WITHIN_NOISE,
+            core.EffectVerdict.INCONCLUSIVE,
+        }
 
 
 @given(
@@ -71,7 +77,7 @@ def test_without_a_declared_floor_too_few_runs_say_nothing_of_any_bar(
     """Fewer than three candidate runs are no estimate of its noise, so no bar is cleared or missed."""
     for one, other in ((mine, theirs), (theirs, mine)):
         result = compared(one, other, direction=direction)
-        assert core.effect_verdict(result, bar, policy(0.0)) is core.EffectVerdict.WITHIN_NOISE
+        assert core.effect_verdict(result, bar, policy(0.0)) is core.EffectVerdict.INCONCLUSIVE
 
 
 @given(value=VALUES, base=VALUES, direction=DIRECTIONS, bar=BARS)
@@ -81,7 +87,7 @@ def test_without_a_declared_floor_identical_runs_say_nothing_of_any_bar(
     """Three identical runs a side show no noise, which is no measurement that there is none."""
     runs = core.MIN_SAMPLES_WITHOUT_FLOOR
     result = compared([value] * runs, [base] * runs, direction=direction)
-    assert core.effect_verdict(result, bar, policy(0.0)) is core.EffectVerdict.WITHIN_NOISE
+    assert core.effect_verdict(result, bar, policy(0.0)) is core.EffectVerdict.INCONCLUSIVE
 
 
 @given(
@@ -126,8 +132,9 @@ def test_a_result_exactly_at_the_bar_is_within_noise(
     mine: list[float], theirs: list[float], floor: float, direction: Direction
 ) -> None:
     result = compared(mine, theirs, floor=floor, direction=direction)
-    assert (
-        core.effect_verdict(result, result.ratio, policy(floor)) is core.EffectVerdict.WITHIN_NOISE
+    called = core.effect_resolution(result, policy(floor)) is not None
+    assert core.effect_verdict(result, result.ratio, policy(floor)) is (
+        core.EffectVerdict.WITHIN_NOISE if called else core.EffectVerdict.INCONCLUSIVE
     )
 
 
@@ -150,7 +157,7 @@ def test_the_resolution_is_the_distance_from_a_bar_at_which_the_verdict_changes(
     resolution = core.effect_resolution(result, policy(floor))
     verdict = core.effect_verdict(result, bar, policy(floor))
     if resolution is None:
-        assert verdict is core.EffectVerdict.WITHIN_NOISE
+        assert verdict is core.EffectVerdict.INCONCLUSIVE
         return
     assert resolution >= 0
     margin = (1.0 if direction == "max" else -1.0) * (result.ratio - bar)

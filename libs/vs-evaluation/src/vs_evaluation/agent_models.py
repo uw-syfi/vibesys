@@ -161,7 +161,9 @@ class EvaluationComparison(BaseModel):
     better): two under a task's declared per-run noise; without one, Welch's t test at 95%,
     and no verdict until each side holds ``MIN_SAMPLES_WITHOUT_FLOOR`` (3) runs that do not
     all read alike (the rule is in ``vs_core._comparison``). Anything closer is
-    ``within_noise``. ``base_commit`` is the revision the base was measured at. More runs of
+    ``within_noise``. Until then the verdict is ``inconclusive``: the samples held give no
+    estimate of the noise, so the ratio says nothing yet (it is not noise), and the framework
+    takes more runs of both sides itself while a run can still change that. ``base_commit`` is the revision the base was measured at. More runs of
     the same candidate content add samples and narrow the noise. It describes the samples held
     when it is given: a candidate is ranked by the value stored at its official measurement,
     which later runs do not move. ``settling`` says it is provisional: a run of either side
@@ -176,7 +178,7 @@ class EvaluationComparison(BaseModel):
     base_value: FiniteFloat
     ratio: FiniteFloat
     noise: FiniteFloat = Field(ge=0)
-    verdict: Literal["better", "within_noise", "worse"]
+    verdict: Literal["better", "within_noise", "worse", "inconclusive"]
     base_commit: str = Field(min_length=1)
     candidate_samples: int = Field(ge=1)
     base_samples: int = Field(ge=1)

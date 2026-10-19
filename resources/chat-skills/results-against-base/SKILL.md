@@ -14,7 +14,7 @@ metric where lower is better, a ratio above 1 means the candidate is worse.
 - A step's value comes from the task's evaluation. Compare steps measured the same way: a
   value from a different workload or machine is not comparable.
 - A small gain inside the run's noise is not evidence. When a step reports a comparison, its
-  verdict is `better`, `within_noise` or `worse`; trust the verdict over the raw numbers.
+  verdict is `better`, `within_noise`, `worse` or `inconclusive` (too few runs to estimate the noise: not noise, wait for more runs); trust the verdict over the raw numbers.
 - Results flow from `get_idea` and `list_steps` (value, unit, commit). Do not average across
   units or invent a baseline the tools did not show.
 

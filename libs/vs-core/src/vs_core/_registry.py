@@ -33,7 +33,7 @@ from .types.records import OperationResult, RequestObserved
 from .types.sessions import TurnSpec
 from .types.strategy import Command, Operation, StrategyState, Wait
 
-ENVELOPE_SCHEMA_VERSION = 34
+ENVELOPE_SCHEMA_VERSION = 35
 
 if TYPE_CHECKING:
     from collections.abc import Callable

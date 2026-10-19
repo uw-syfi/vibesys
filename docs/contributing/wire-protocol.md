@@ -55,7 +55,7 @@ compatibility path.
 `measurement_compared` carries one comparison of a candidate with its base: `metric`, `unit`,
 `direction`, the candidate and base commits, their mean values over `candidate_samples` and
 `base_samples` runs, the `ratio` (candidate over base), the `noise` (one standard error of the
-ratio) and a `verdict` of `better`, `within_noise` or `worse`. Core logs a comparison whenever a
+ratio) and a `verdict` of `better`, `within_noise`, `worse` or `inconclusive` (no estimate of the noise yet). Core logs a comparison whenever a
 new sample changes it; the run's commit observer emits one event per logged comparison, in order.
 Folding is by order, and a later event for the same candidate supersedes an earlier one.
 
