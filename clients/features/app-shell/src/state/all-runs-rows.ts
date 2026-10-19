@@ -34,7 +34,10 @@ export function dashboardRows(state: SidebarState, clock: Clock): readonly Dashb
       host,
       hostLabel: machine,
       project,
-      task: run.task,
+      task:
+        run.task ??
+        state.recent.find(each => sameRun(each, {host, runId: run.runId}))?.task ??
+        null,
       runId: run.runId,
       instanceId: null,
       attachedAt: run.createdAt,
@@ -45,7 +48,7 @@ export function dashboardRows(state: SidebarState, clock: Clock): readonly Dashb
       host,
       machine,
       name: run.name ?? run.runId,
-      task: run.task,
+      task: ref.task,
       project,
       createdAt: run.createdAt,
     };

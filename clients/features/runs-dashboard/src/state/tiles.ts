@@ -28,7 +28,9 @@ export interface IdeaInput {
 export interface RunInput {
   /** The run's identity as the app names it; a tile's press hands it back. */
   readonly id: string;
-  /** The run's own name: what tells it from the others. */
+  /** The run's id on its machine (`20261019-071100`): never a title, kept as the tile's hint. */
+  readonly runId: string;
+  /** The run's own name; the run id itself when the run has none. */
   readonly name: string;
   /** The task it runs, or what it is of. */
   readonly task: string;
@@ -41,6 +43,8 @@ export interface RunInput {
   readonly status: {readonly kind: StatusKind; readonly word: string};
   /** Why the run's state cannot be read, in a word or two; null when it can. */
   readonly problem: string | null;
+  /** Why an ended run ended, in a line, when its record says; null when nothing does. */
+  readonly reason: string | null;
   /** The ideas the run tried, when its journal records them. */
   readonly ideas: number | null;
   /** What it has cost, in US dollars, when known. */
@@ -78,6 +82,8 @@ export interface TileChart {
 export interface Tile {
   readonly id: string;
   readonly title: string;
+  /** The run id, for the pointer: a title names a run, the id tells it apart. */
+  readonly hint: string;
   readonly result: {readonly text: string; readonly tone: 'ok' | 'muted'} | null;
   readonly facts: string;
   /** Null when the host offers no chart data (a chart-less tile). */
@@ -195,6 +201,34 @@ export function attentionWord(input: RunInput): string | null {
   }
 }
 
+/** The first line of `text`, trimmed; null when it has none. */
+function firstLine(text: string | null): string | null {
+  const line = text
+    ?.split('\n')
+    .find(each => each.trim() !== '')
+    ?.trim();
+  return line === undefined || line === '' ? null : line;
+}
+
+/**
+ * The words of a failed or stopped run's tile: why it ended, when its record says, else nothing
+ * (the status pill already says `failed`).
+ */
+function endNote(input: RunInput): string | null {
+  return input.status.kind === 'failed' || input.status.kind === 'stopped'
+    ? firstLine(input.reason)
+    : null;
+}
+
+/** A run's title: its own name, or, when it has none, its task and when it started. */
+function runTitle(input: RunInput): {title: string; sayingFacts: boolean} {
+  if (input.name !== input.runId) return {title: input.name, sayingFacts: false};
+  const parts = [input.task, input.started].filter((part): part is string => part !== null);
+  return parts.length === 0
+    ? {title: input.name, sayingFacts: false}
+    : {title: parts.join(' · '), sayingFacts: true};
+}
+
 /** `note` unless the status pill already says it: a status is said once. */
 function noteOf(note: string | null, status: string): string | null {
   return note !== null && note.toLowerCase() === status.toLowerCase() ? null : note;
@@ -211,16 +245,21 @@ export function tileOf(input: RunInput): Tile {
     ...(input.costUsd === null ? [] : [`$${input.costUsd.toFixed(2)}`]),
     ...(input.seconds === null ? [] : [durationWord(input.seconds)]),
   ].join(' · ');
+  const {title, sayingFacts} = runTitle(input);
   return {
     id: input.id,
-    title: input.name,
+    title,
+    hint: input.runId,
     result: resultOf(input, chart),
-    facts: [input.task, input.machine, input.started]
+    facts: (sayingFacts ? [input.machine] : [input.task, input.machine, input.started])
       .filter((part): part is string => part !== null)
       .join(' · '),
     chart,
     figures,
-    note: noteOf(attentionWord({...input, attention}) ?? input.problem, input.status.word),
+    note: noteOf(
+      endNote(input) ?? attentionWord({...input, attention}) ?? input.problem,
+      input.status.word,
+    ),
     status: {
       kind: input.status.kind,
       tone: attention === 'none' ? STATUS_TONES[input.status.kind] : ATTENTION_TONES[attention],

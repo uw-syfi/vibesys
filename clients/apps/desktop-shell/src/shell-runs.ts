@@ -46,6 +46,7 @@ export function runInput(entry: DashboardRow, now: number): RunInput {
     (row.startedAt === null ? null : Math.max(0, (now - row.startedAt) / 1000));
   return {
     id: digestKey(row.run),
+    runId: row.run.runId,
     name: entry.name,
     task: entry.task ?? projectName(entry.project),
     started: formatStarted(entry.createdAt, {now}),
@@ -58,6 +59,8 @@ export function runInput(entry: DashboardRow, now: number): RunInput {
     },
     // A machine's trouble is a note beside the run's own status, never its replacement.
     problem: row.problem?.text ?? null,
+    // A live run's `now` says what it does, not why it ended.
+    reason: row.status === 'live' ? null : row.now,
     ideas: digest?.ideas ?? null,
     costUsd: null,
     seconds,

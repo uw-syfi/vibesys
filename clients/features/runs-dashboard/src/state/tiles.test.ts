@@ -47,6 +47,7 @@ function ideas(random: Seeded): IdeaInput[] {
 function run(id: string, over: Partial<RunInput> = {}): RunInput {
   return {
     id,
+    runId: id,
     name: id,
     task: 'mpmc',
     started: null,
@@ -55,6 +56,7 @@ function run(id: string, over: Partial<RunInput> = {}): RunInput {
     agent: null,
     status: {kind: 'running', word: 'running'},
     problem: null,
+    reason: null,
     ideas: null,
     costUsd: null,
     seconds: null,
@@ -185,9 +187,11 @@ describe('a tile', () => {
   });
 
   test('says task, machine and start time, leaving out what is unknown', () => {
-    expect(tileOf(run('a')).facts).toBe('mpmc · host-a');
+    expect(tileOf(run('a', {name: 'final'})).facts).toBe('mpmc · host-a');
     expect(
-      tileOf(run('a', {hardware: '8 cores', agent: 'Codex', started: 'Oct 19 04:21'})).facts,
+      tileOf(
+        run('a', {name: 'final', hardware: '8 cores', agent: 'Codex', started: 'Oct 19 04:21'}),
+      ).facts,
     ).toBe('mpmc · host-a · Oct 19 04:21');
     expect(tileOf(run('a', {name: 'queue-rs-final2827'})).title).toBe('queue-rs-final2827');
   });
@@ -322,5 +326,51 @@ describe('the tiles of many runs', () => {
       ['host-a', null, 2],
       ['host-b', null, 1],
     ]);
+  });
+});
+
+describe('a tile of a run that crashed', () => {
+  const crashed = (over: Partial<RunInput> = {}) =>
+    run('20261019-071100', {
+      status: {kind: 'failed', word: 'failed'},
+      task: 'mpmc',
+      started: 'Oct 19, 07:11',
+      ...over,
+    });
+
+  test('says why the run failed, in the first line of what its record says', () => {
+    for (const seed of SEEDS) {
+      const random = new Seeded(seed);
+      const kind = random.pick(['failed', 'stopped'] as const);
+      const why = `reason ${random.int(1000)}`;
+      const tile = tileOf(
+        crashed({status: {kind, word: kind}, reason: `${why}\nsecond line ${random.int(9)}`}),
+      );
+      expect(tile.note).toBe(why);
+    }
+  });
+
+  test('says nothing more than its status when no record gives a reason', () => {
+    expect(tileOf(crashed()).note).toBeNull();
+    expect(tileOf(crashed({reason: '  '})).note).toBeNull();
+  });
+
+  test('does not read a running run reason as a failure', () => {
+    expect(
+      tileOf(crashed({status: {kind: 'running', word: 'running'}, reason: 'x'})).note,
+    ).toBeNull();
+  });
+
+  test('is titled by its task and start time, with the run id as the hint', () => {
+    const tile = tileOf(crashed());
+    expect(tile.title).toBe('mpmc · Oct 19, 07:11');
+    expect(tile.hint).toBe('20261019-071100');
+    expect(tile.title).not.toContain('20261019-071100');
+    expect(tile.facts).toBe('host-a');
+  });
+
+  test('keeps a name the run has, and the id when nothing else names it', () => {
+    expect(tileOf(crashed({name: 'tuned queue'})).title).toBe('tuned queue');
+    expect(tileOf(crashed({task: null as never, started: null})).title).toBe('20261019-071100');
   });
 });

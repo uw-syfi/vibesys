@@ -53,6 +53,7 @@ function TileOf(props: {
   return (
     <OverviewTile
       title={tile.title}
+      hint={tile.hint}
       result={tile.result}
       facts={tile.facts}
       chart={

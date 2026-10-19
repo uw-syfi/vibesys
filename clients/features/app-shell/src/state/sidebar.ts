@@ -650,7 +650,7 @@ export function recentRow(state: SidebarState, recent: RecentRun, clock: Clock):
   const began = beganAt(entry, ended, clock);
   const detail = began === null ? result : `${began} · ${result}`;
   const trail = read === undefined ? null : trailWords(read, kind);
-  const reason = ended === undefined ? null : endReason(ended);
+  const reason = (ended === undefined ? null : endReason(ended)) ?? read?.endSummary ?? null;
   const tooltip = [
     title,
     trail === null ? detail : `${detail} · ${trail}`,

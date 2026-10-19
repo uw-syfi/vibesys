@@ -117,6 +117,26 @@ test('a failed question reads Unavailable and Retry asks again', async ({page}) 
   await expect(page.getByText('Unavailable', {exact: true})).toBeVisible();
 });
 
+test('a figure stays on one line at 1440 however large it is', async ({page}) => {
+  const large = USAGE_CASES.find(each => each.name === 'large-figures');
+  if (large === undefined) throw new Error('the cases changed');
+  await open(page, large, 1440);
+  const lines = await page.evaluate(() =>
+    [...document.querySelectorAll('.vs-tile-figure')].map(figure => {
+      const walk = document.createTreeWalker(figure, NodeFilter.SHOW_TEXT);
+      const tops = new Set<number>();
+      for (let node = walk.nextNode(); node !== null; node = walk.nextNode()) {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        for (const rect of range.getClientRects()) tops.add(Math.round(rect.top));
+      }
+      return {text: figure.textContent, tops: tops.size};
+    }),
+  );
+  expect(lines.length).toBe(4);
+  expect(lines.filter(line => line.tops !== 1)).toEqual([]);
+});
+
 test('the figures are the four tiles, the runs and the agents the helper summed', async ({
   page,
 }) => {

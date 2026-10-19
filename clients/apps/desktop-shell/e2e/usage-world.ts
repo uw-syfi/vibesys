@@ -145,6 +145,24 @@ export const USAGE_CASES: readonly UsageCase[] = [
       },
     },
   },
+  {
+    name: 'large-figures',
+    runs: 2,
+    answer: {
+      ...spending(2, 2),
+      spentUsd: 12_345_678.9,
+      spendPerHourUsd: 98_765.43,
+      tokens: {
+        input: 987_600_000_000,
+        cache_read: null,
+        cache_write: null,
+        output: null,
+        reasoning: null,
+      },
+      newBests: 1,
+      costPerNewBestUsd: 12_345_678.9,
+    },
+  },
   {name: 'unsupported-helper', runs: 2, answer: 'unsupported'},
   {name: 'failed-question', runs: 2, answer: 'failed'},
 ];
