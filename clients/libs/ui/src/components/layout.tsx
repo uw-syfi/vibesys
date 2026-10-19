@@ -3,7 +3,7 @@ import type {SpaceToken} from '../tokens/index.js';
 import {Icon} from './icon.js';
 
 /** The page content's max width: `content` (1060), `wide` (1100) or `narrow` (900). */
-export type PageWidth = 'content' | 'wide' | 'narrow';
+export type PageWidth = 'content' | 'wide' | 'narrow' | 'fill';
 export type Align = 'start' | 'center' | 'end' | 'stretch' | 'baseline';
 export type Justify = 'start' | 'center' | 'end' | 'between';
 /**

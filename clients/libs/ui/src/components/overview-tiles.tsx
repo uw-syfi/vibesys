@@ -100,9 +100,10 @@ export function ResultChartKey(props: {
 }
 
 /**
- * One subject at a glance as a tile: its `title` and best `result` against the base, the `facts`
- * line, a `chart`, the `figures` line and a `note` (a word or two on why it needs its user) beside
- * its `status` pill, which is the one place its status is said. Pressing
+ * One subject at a glance as a tile, in four rows: its `title` and best `result` against the base,
+ * the `facts` line, a `chart` (none without chart data) and a foot with the `figures`, a `note` (a
+ * word or two on why it needs its user) and its `status` pill, which is the one place its status is
+ * said. Pressing
  * it opens the subject; `menu` adds a row menu in its corner. `attention` marks a tile that
  * needs its user.
  */
@@ -144,16 +145,18 @@ export function OverviewTile(props: {
             {props.facts}
           </Text>
         </span>
-        <span className="vs-overview-tile-chart">{props.chart}</span>
-        <span className="vs-overview-tile-line">
-          <Text variant="small" tone="muted">
-            {props.figures}
-          </Text>
-        </span>
+        {props.chart === null ? null : (
+          <span className="vs-overview-tile-chart">{props.chart}</span>
+        )}
         <span className="vs-overview-tile-foot">
-          <span className="vs-overview-tile-line">
+          <span className="vs-overview-tile-figures">
+            <Text variant="small" tone="muted">
+              {props.figures}
+            </Text>
+          </span>
+          <span className="vs-overview-tile-line" title={props.note ?? undefined}>
             <Text variant="small" tone={props.attention === true ? 'err' : 'muted'}>
-              {props.note ?? ' '}
+              {props.note ?? ''}
             </Text>
           </span>
           <Chip label={props.status.label} tone={props.status.tone} dot />

@@ -19,7 +19,8 @@ import {openFixture, playLive} from './fixture-world.js';
  * The rail and the Runs dashboard, checked against their real layout (`checks/screen-check.ts`) at
  * 1440, 1000 and 660 px: one run, many runs, the runs that need the user alone, a run with
  * more ideas than its chart keeps, and the rail on the Run screen and on Settings. `SCREENS_DIR`
- * also writes each screen's screenshot (the app window only) and a contact sheet of them.
+ * also writes each screen's screenshot (the app window only) and a contact sheet of them. Each
+ * state is rendered once and resized through the widths in one page session.
  */
 
 const WIDTHS = [1440, 1000, 660] as const;
@@ -54,23 +55,27 @@ async function check(page: Page, name: string, ignore: string[] = []): Promise<v
 }
 
 for (const [state, runs] of DASHBOARDS) {
-  for (const width of WIDTHS) {
-    test(`runs dashboard/${state}/${width}`, async ({page}) => {
+  test(`runs dashboard/${state}`, async ({page}) => {
+    await page.setViewportSize({width: WIDTHS[0], height: 900});
+    await open(page, dashboardWorld(runs));
+    for (const width of WIDTHS) {
       await page.setViewportSize({width, height: 900});
-      await open(page, dashboardWorld(runs));
       await check(page, `runs/${state}/${width}`);
-    });
-  }
+    }
+  });
 }
 
-for (const width of WIDTHS) {
-  test(`runs dashboard/grouped by machine/${width}`, async ({page}) => {
+test('runs dashboard/grouped by machine', async ({page}) => {
+  await page.setViewportSize({width: WIDTHS[0], height: 900});
+  await open(page, dashboardWorld(MANY_RUNS));
+  await page.getByRole('combobox', {name: 'Group by'}).selectOption('machine');
+  for (const width of WIDTHS) {
     await page.setViewportSize({width, height: 900});
-    await open(page, dashboardWorld(MANY_RUNS));
-    await page.getByRole('combobox', {name: 'Group by'}).selectOption('machine');
     await check(page, `runs/by-machine/${width}`);
-  });
+  }
+});
 
+for (const width of WIDTHS) {
   test(`the rail on the Run screen/${width}`, async ({page}) => {
     await page.setViewportSize({width, height: 900});
     const fixture = fixtureNamed('queue-rs-live');

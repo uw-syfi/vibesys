@@ -35,7 +35,7 @@ export interface RunInput {
   /** When it started, worded; null when unknown. */
   readonly started: string | null;
   readonly machine: string;
-  /** The hardware it runs on and the agent that drives it, when known. */
+  /** The hardware it runs on (not on a tile) and the agent that drives it, when known. */
   readonly hardware: string | null;
   readonly agent: string | null;
   readonly status: {readonly kind: StatusKind; readonly word: string};
@@ -215,7 +215,7 @@ export function tileOf(input: RunInput): Tile {
     id: input.id,
     title: input.name,
     result: resultOf(input, chart),
-    facts: [input.task, input.machine, input.hardware, input.agent, input.started]
+    facts: [input.task, input.machine, input.started]
       .filter((part): part is string => part !== null)
       .join(' · '),
     chart,

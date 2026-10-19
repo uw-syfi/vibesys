@@ -88,6 +88,10 @@ body > div:first-child {
 .vs-page-content[data-width="narrow"] {
   max-width: var(--content-narrow);
 }
+/* `fill`: the whole area, for a page whose content is a grid that wraps to the width. */
+.vs-page-content[data-width="fill"] {
+  max-width: none;
+}
 
 /*
  * A page with a header or a footer never scrolls itself: they are fixed and the body scrolls

@@ -184,11 +184,11 @@ describe('a tile', () => {
     expect(tile.result).toEqual({text: '2.00×', tone: 'ok'});
   });
 
-  test('says machine, hardware and agent, leaving out what is unknown', () => {
+  test('says task, machine and start time, leaving out what is unknown', () => {
     expect(tileOf(run('a')).facts).toBe('mpmc · host-a');
     expect(
       tileOf(run('a', {hardware: '8 cores', agent: 'Codex', started: 'Oct 19 04:21'})).facts,
-    ).toBe('mpmc · host-a · 8 cores · Codex · Oct 19 04:21');
+    ).toBe('mpmc · host-a · Oct 19 04:21');
     expect(tileOf(run('a', {name: 'queue-rs-final2827'})).title).toBe('queue-rs-final2827');
   });
 
