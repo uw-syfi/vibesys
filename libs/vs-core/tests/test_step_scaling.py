@@ -15,7 +15,6 @@ from dataclasses import dataclass, field
 from functools import cache
 from typing import TYPE_CHECKING
 
-import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import BaseModel
@@ -261,7 +260,11 @@ def _answered(row: core.RequestRecord, rows: int) -> tuple[core.RequestRecord, .
 
 
 def _finished(state: core.CoreState) -> core.RequestRecord:
-    return next(row for row in state.records.records if row.observation is not None)
+    return next(
+        row
+        for row in state.records.records
+        if row.phase == core.RequestPhase.COMPLETED and row.observation is not None
+    )
 
 
 def _behind(state: core.CoreState, finished: core.RequestRecord, rows: int) -> core.CoreState:
@@ -286,10 +289,6 @@ def _grows_linearly(
     return None if long < _LINEAR * short else (short, long)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="a restart re-reads every answer and each re-read rebuilds the ledger index",
-)
 def test_a_restart_costs_in_proportion_to_the_ledger() -> None:
     """Opening a new host epoch over ``n`` and ``4 * n`` finished requests.
 
@@ -300,7 +299,8 @@ def test_a_restart_costs_in_proportion_to_the_ledger() -> None:
     """
     state = started(running_polls=5, ending=core.ObservationStatus.SUCCEEDED).state
     restart = core.RecoveryStarted(epoch=state.records.recovery.epoch + 1, now_at=state.run.now_at)
-    assert _grows_linearly(state, restart, _finished(state)) is None
+    finished = _finished(run_toy(ToyHost(waits=(True,), polls=(2,)), Config()).core)
+    assert _grows_linearly(state, restart, finished) is None
 
 
 @dataclass
@@ -318,10 +318,6 @@ class _Witness(ToyHost):
         return super().__call__(request, state)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="closing an attempt looks each ledger row up by scanning the whole ledger",
-)
 def test_every_answer_costs_in_proportion_to_the_ledger() -> None:
     """Every executor answer of a whole toy run, on ``n`` and ``4 * n`` more finished requests.
 

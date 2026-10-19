@@ -377,6 +377,7 @@ def register_requests(
     """Allocate stable identities and persist every proposed request in the outbox."""
     records = list(state.records.records)
     appended: dict[RequestId, RequestRecord] = {}
+    appended_at: dict[RequestId, int] = {}
     allocated: list[Request] = []
     added: dict[DecisionId | None, list[RequestId]] = {}
     for index, scheduled in enumerate(requests):
@@ -405,7 +406,8 @@ def register_requests(
             )
         )
         appended[request_id] = records[-1]
-        _address(records, appended, request)
+        appended_at[request_id] = len(records) - 1
+        _address(records, appended, request, state.records.positions, appended_at)
         allocated.append(request)
         added.setdefault(request.decision_id, []).append(request_id)
     if not allocated:
@@ -436,26 +438,32 @@ def _address(
     records: list[RequestRecord],
     appended: dict[RequestId, RequestRecord],
     request: Request,
+    held: Callable[[RequestId], tuple[int, ...]],
+    appended_at: dict[RequestId, int],
 ) -> None:
     """Name a reconciliation command on the record it addresses, as the command is registered.
 
-    A command about a request core holds no record of has no waiter to name it.
+    A command about a request core holds no record of has no waiter to name it. *held* gives
+    the positions of a request the state already held (``records`` extends that ledger in
+    place), and *appended_at* the position of one this step appended, so a lookup reads an
+    index instead of scanning the ledger once per registered command.
     """
     if (
         not isinstance(request, InspectRequest | CancelOwnedResource | BlockRequest)
         or request.request_id is None
     ):
         return
-    for index, row in enumerate(records):
-        if row.request_id != request.target:
-            continue
-        if request.request_id not in row.addressed_by:
-            records[index] = row.model_copy(
-                update={"addressed_by": (*row.addressed_by, request.request_id)}
-            )
-            if row.request_id in appended:
-                appended[row.request_id] = records[index]
+    positions = held(request.target)
+    index = positions[0] if positions else appended_at.get(request.target)
+    if index is None:
         return
+    row = records[index]
+    if request.request_id not in row.addressed_by:
+        records[index] = row.model_copy(
+            update={"addressed_by": (*row.addressed_by, request.request_id)}
+        )
+        if row.request_id in appended:
+            appended[row.request_id] = records[index]
 
 
 def _with_requests(receipt: DecisionReceipt, request_ids: list[RequestId]) -> DecisionReceipt:

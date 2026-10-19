@@ -98,10 +98,9 @@ def _identity(owner: AttemptView, suffix: str) -> RequestId:
 
 
 def _record(context: AttemptsContext, identity: RequestId) -> RequestRecord | None:
-    # Compare the id strings: a `RequestId` differs from another only by its root, and the ledger
-    # holds every record of the run, so a model comparison per row dominated each step.
-    root = identity.root
-    rows = tuple(row for row in context.records.records if row.request_id.root == root)
+    # The ledger holds every record of the run, and closing an attempt looks up one identity per
+    # record, so a scan here made the step cost the square of the ledger; `find` reads the index.
+    rows = context.records.find(identity)
     return rows[0] if len(rows) == 1 and rows[0].request.request_id == identity else None
 
 
