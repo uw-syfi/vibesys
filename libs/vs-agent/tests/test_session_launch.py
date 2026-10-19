@@ -1408,16 +1408,45 @@ def test_a_resumed_turn_that_exhausts_its_retries_keeps_the_conversation(
     assert "s-1" in fake.requests[2].argv
 
 
+@pytest.mark.regression
+@pytest.mark.parametrize("provider", CLASSIFYING_PROVIDERS)
+def test_a_sustained_outage_reaches_the_caller_after_one_short_retry(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """The production schedule hides at most one 30 s retry of a send from the capacity gate.
+
+    Before (S179), five retries hid about fifteen minutes of every send, which the gate could
+    neither see nor keep off the turn's limit.
+    """
+    del sandbox_builds
+    session, fake = _session(
+        tmp_path,
+        provider,
+        lambda _request: scripted_failure(provider, _TRANSIENT),
+        transient_retry_delays=subject.TRANSIENT_RETRY_DELAYS_S,
+    )
+
+    with pytest.raises(AgentQuotaError) as excinfo:
+        session.run_turn(AgentTurnRequest(message="one"))
+
+    assert excinfo.value.condition is QuotaCondition.UNAVAILABLE
+    assert len(fake.requests) == 2
+    assert sum(subject.TRANSIENT_RETRY_DELAYS_S) <= 60.0
+
+
 @pytest.mark.parametrize("provider", CLASSIFYING_PROVIDERS)
 def test_cancel_stops_a_turn_waiting_out_a_transient_error(
     sandbox_builds: list[dict[str, Any]],
     tmp_path: Path,
     provider: str,
 ) -> None:
-    """A cancelled turn raises the provider error instead of retrying it.
+    """A cancelled turn ends instead of retrying, with the capacity type of its failure.
 
-    It is a plain failure, never a capacity stop: a caller's gate would otherwise wait out an
-    outage for a turn nobody wants any more.
+    Before (S179), a cancel made the failure a plain provider error, so a turn that core
+    cancelled while its provider was down was reported lost by its transport. The client
+    never sends a cancelled turn to its gate, so nothing waits for a turn nobody wants.
     """
     del sandbox_builds
     sessions: list[LaunchedSession] = []
@@ -1437,10 +1466,10 @@ def test_cancel_stops_a_turn_waiting_out_a_transient_error(
     )
     sessions.append(session)
 
-    with pytest.raises(agentshim.CliExitError) as excinfo:
+    with pytest.raises(AgentQuotaError) as excinfo:
         session.run_turn(AgentTurnRequest(message="one"))
 
-    assert not isinstance(excinfo.value, AgentQuotaError)
+    assert excinfo.value.condition is QuotaCondition.UNAVAILABLE
     assert len(fake.requests) == 1
 
 

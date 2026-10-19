@@ -83,16 +83,18 @@ of seconds to attach, and a false negative here ends the run (see
 the host one.
 """
 
-TRANSIENT_RETRY_DELAYS_S: tuple[float, ...] = (30.0, 60.0, 120.0, 240.0, 480.0)
+TRANSIENT_RETRY_DELAYS_S: tuple[float, ...] = (30.0,)
 """Waits in seconds before each retry of a turn that failed on a transient provider error.
 
 agentshim classifies the failure (``agentshim.FailureKind.TRANSIENT``: an
 overload, a rate limit, or a server error) and its ``Session`` waits these
 delays (``agentshim.RetryPolicy``). The provider CLI has already retried inside
-the turn before it exits, so by then the outage has lasted minutes; these waits
-add about fifteen more. A failure that outlasts them reaches the client as a
-capacity limit (``QuotaCondition.UNAVAILABLE`` or ``RATE_LIMITED``), which the
-run's capacity gate waits out across a longer outage.
+the turn before it exits, so one short retry rides out a blip. A failure that
+outlasts it reaches the client as a capacity limit (``QuotaCondition.UNAVAILABLE``
+or ``RATE_LIMITED``), and the run's capacity gate waits out a longer outage
+with its own backoff. Only the gate's waits are reported to core and kept off
+the turn's limit, so a longer chain here would hide minutes of each send from
+it (S179: five retries hid about fifteen minutes of every send).
 """
 
 LAUNCH_SHELL_ENVIRONMENT: Callable[[], Mapping[str, str]] = launch_shell_environment

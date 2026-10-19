@@ -21,7 +21,6 @@ from vs_agent.cli_common import build_schema_hint
 from vs_agent.contracts import (
     DEFAULT_TURN_TIMEOUT_S,
     AgentOutputSchemaError,
-    AgentQuotaError,
     AgentTurnResult,
     AgentTurnTimeoutError,
     SteerOutcome,
@@ -484,10 +483,10 @@ def _run(
         classified = shim_translation.failure_from(
             exc, provider=live.profile.name, exhausted=live.events.exhausted
         )
-        if classified is None or (
-            live.events.cancelled and isinstance(classified, AgentQuotaError)
-        ):
+        if classified is None:
             raise
+        # A cancelled turn keeps its capacity type (S179): the caller decides what a
+        # cancel means, and the client never sends a cancelled turn to its gate.
         raise classified from exc
 
 

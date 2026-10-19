@@ -972,7 +972,8 @@ class AgentClient:
                     result = session.run_turn(turn, observer)
                 except AgentQuotaError as error:
                     gate = self._capacity_gate
-                    if gate is None:
+                    if gate is None or stops.cancelled:
+                        # A cancelled turn is not waited for: it ends with its capacity type.
                         raise
                     stops.count += 1
                     gate.wait_for_capacity(error, turn, role=role, stops=stops)
