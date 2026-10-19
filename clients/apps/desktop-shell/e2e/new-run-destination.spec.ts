@@ -5,7 +5,7 @@
  */
 import {expect, type Page, test} from '@playwright/test';
 import {choose, main, proceed} from './new-run-flow.js';
-import {type FakeHostWindow, open, SEED} from './world.js';
+import {type FakeHostWindow, openNewRun as open, SEED} from './world.js';
 
 const start = (page: Page) => main(page).getByRole('button', {name: 'Start run'});
 const DESTINATION = '~/vibesys-projects/stack';
