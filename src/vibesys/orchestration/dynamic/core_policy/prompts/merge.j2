@@ -1,14 +1,15 @@
 {% from '_revision.j2' import rev %}
 {% from 'domain_section.j2' import domain_section %}
+{% from '_macros.j2' import apply_change, apply_conflicts %}
 Merge `{{ merge_id }}`: combine these candidates into the run's main revision.
 
 {% include 'run_context.j2' %}
 {{ domain_section(domain_sections, 'implementer') }}
 Your workspace is a checkout of main at `{{ rev(main_revision) }}`. Apply the candidates
-below in this order; each is an exact revision in this repository, so `git log`,
-`git diff {{ rev(main_revision) }} REVISION` and `git cherry-pick` or `git merge` reach it.
+below in this order; each is an exact revision in this repository, so `git log` and
+`git show` reach it. Apply each candidate's own change, from where it left main:
 {% for source in candidates %}
-{{ loop.index }}. hypothesis `{{ source.hypothesis_id }}` at `{{ rev(source.revision) }}`
+{{ loop.index }}. hypothesis `{{ source.hypothesis_id }}` at `{{ rev(source.revision) }}`: {{ apply_change('git diff $(git merge-base ' ~ rev(main_revision) ~ ' ' ~ rev(source.revision) ~ ') ' ~ rev(source.revision), agent_git_writable) }}
 {% else %}
 none: every candidate this merge named is no longer buildable, so refuse.
 {% endfor %}
@@ -19,7 +20,8 @@ How to combine them (the orchestrator's instructions):
 What to check or be careful of:
 {{ watch_for }}
 
-Resolve conflicts so each candidate's change survives as the instructions say. Then run
+{{ apply_conflicts(agent_git_writable) }} Resolve conflicts so each candidate's change survives
+as the instructions say. Then run
 the project's fast tests and fix what the merge broke, without redesigning any candidate. The
 framework measures your commit with the trusted evaluations; main moves to it only when it
 passes the trusted accuracy check and measures no worse than main.

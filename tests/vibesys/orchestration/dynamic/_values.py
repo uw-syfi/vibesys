@@ -17,6 +17,7 @@ from vibesys.candidates.api import InputReading, Measured
 from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
 from vibesys.metrics import AcceptedReading, MetricRow, PartialRow
 from vibesys.orchestration.dynamic.models import (
+    CombinePlan,
     MergePlan,
     PlannerHandoff,
     PlannerHypothesisUpdate,
@@ -238,6 +239,22 @@ def merge_entry(identifier: str, *candidates: str, **changes: object) -> MergePl
     return MergePlan.model_validate(fields)
 
 
+def combine_entry(identifier: str, *parts: tuple[str, str], **changes: object) -> CombinePlan:
+    """A planner entry that combines the exact (hypothesis, revision) ``parts`` into one candidate."""
+    fields: dict[str, object] = {
+        "kind": "combine",
+        "hypothesis_id": identifier,
+        "title": f"title {identifier}",
+        "hypothesis": "the parts work together",
+        "parents": [{"hypothesis_id": item, "revision": revision} for item, revision in parts],
+        "instructions": "Apply them in order.",
+        "watch_for": "Both touch the scheduler.",
+        "pass_criteria": "faster than the best part",
+        **changes,
+    }
+    return CombinePlan.model_validate(fields)
+
+
 def update_entry(
     identifier: str, disposition: Literal["parked", "abandoned"] = "parked"
 ) -> PlannerHypothesisUpdate:
@@ -251,7 +268,7 @@ def update_entry(
 
 
 def portfolio(
-    *entries: WorkstreamPlan | ProfileDecision | MergePlan,
+    *entries: WorkstreamPlan | ProfileDecision | MergePlan | CombinePlan,
     updates: tuple[PlannerHypothesisUpdate, ...] = (),
     expected: tuple[str, ...] = (),
     order: tuple[str, ...] = (),

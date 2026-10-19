@@ -18,6 +18,7 @@ from pydantic import ValidationError
 from tests.vibesys.orchestration.dynamic._host import TERMS
 from tests.vibesys.orchestration.dynamic._values import (
     BASE,
+    combine_entry,
     finished_merge,
     finished_profile,
     hypothesis_record,
@@ -267,6 +268,13 @@ def _scenarios() -> dict[ViolationCode, Scenario]:
             portfolio(merge_entry("m", "b")),
             Record(parents=[GOOD_PARENT], terms=unchecked),
             "workstreams.0.kind",
+        ),
+        ViolationCode.COMBINE_PARENT_REPEATED: (
+            portfolio(
+                combine_entry("k", ("b", "b-r1"), ("c", "c-r1"), ("b", "b-r2")),
+            ),
+            Record(parents=[GOOD_PARENT, snapshot("b", 2), snapshot("c", 1)]),
+            "workstreams.0.parents.2.hypothesis_id",
         ),
         ViolationCode.EXPECTATION_UNKNOWN: (
             portfolio(implement_entry("n"), expected=("n", "z")),
@@ -590,7 +598,6 @@ def _rejected_at(paths: list[tuple[str | int, ...]]) -> bool:
 
 @settings(max_examples=examples(pr=40, nightly=400), deadline=None, derandomize=True, database=None)
 @given(case=combine_cases())
-@pytest.mark.xfail(strict=True, reason="S182: the combine workstream kind does not exist yet")
 def test_a_combine_is_scheduled_exactly_when_its_parts_are_distinct_offered_exact_revisions(
     case: CombineCase,
 ) -> None:

@@ -89,7 +89,6 @@ _TEMPLATES = (
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="S182: merge.j2 and implement.j2 prescribe git writes")
 @pytest.mark.parametrize("name", sorted(_NAMED))
 def test_a_read_only_git_workspace_is_never_told_to_write_git(name: str) -> None:
     template, context = _NAMED[name]()
@@ -99,7 +98,6 @@ def test_a_read_only_git_workspace_is_never_told_to_write_git(name: str) -> None
     assert "git apply --reject" in text  # the read-only way to take a change, with what to fix
 
 
-@pytest.mark.xfail(strict=True, reason="S182: the combine brief does not exist yet")
 @pytest.mark.parametrize("name", sorted(_NAMED))
 def test_a_writable_git_workspace_is_told_the_three_way_apply(name: str) -> None:
     template, context = _NAMED[name]()
@@ -113,7 +111,6 @@ def test_a_writable_git_workspace_is_told_the_three_way_apply(name: str) -> None
 @given(data=st.data(), template=st.sampled_from(_TEMPLATES))
 @example(data=None, template=PromptTemplate.IMPLEMENT).via("rebase onto a moved main")
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="S182: implement.j2 tells a read-only workspace to rebase")
 def test_no_dynamic_prompt_tells_a_read_only_workspace_to_write_git(
     data: st.DataObject | None, template: PromptTemplate
 ) -> None:

@@ -63,6 +63,8 @@ the latest candidate of {{ quoted(item.subject) }} does not beat main's latest m
 the input's measurement has not landed, so main has no measurement the latest candidate of {{ quoted(item.subject) }} could be shown to beat; schedule no merge until it lands
 {%- elif item.code.value == 'merge-uncheckable' -%}
 this task has no trusted accuracy check, so a merged commit could never become main; schedule no merge
+{%- elif item.code.value == 'combine-parent-repeated' -%}
+{{ quoted(item.subject) }} is named twice in this combine; name each part's hypothesis once, at one exact offered revision
 {%- elif item.code.value == 'expectation-unknown' -%}
 {{ quoted(item.subject) }} is not a workstream of this reply; name only workstreams this reply schedules
 {%- elif item.code.value == 'ranking-unknown' -%}

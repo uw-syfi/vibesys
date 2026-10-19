@@ -121,6 +121,26 @@ METRIC = st.builds(
     unit=st.none() | tokens("u"),
 )
 METRICS = st.lists(METRIC, max_size=2).map(tuple)
+PARTS = st.lists(
+    st.builds(
+        dict,
+        hypothesis_id=tokens("part"),
+        revision=REVISIONS,
+        built_on=REVISIONS,
+        metric=st.none() | METRIC,
+    ),
+    min_size=2,
+    max_size=3,
+).map(tuple)
+"""The parts of a combine, each with the revision its own change starts from."""
+COMPOSITES = st.builds(
+    dict,
+    parts=PARTS,
+    verdict=st.sampled_from(("better", "within_noise", "worse", "unknown")),
+    unapplied=st.lists(
+        st.builds(dict, hypothesis_id=tokens("part"), part=tokens("hunk"), why=TEXT), max_size=2
+    ).map(tuple),
+)
 
 
 @st.composite
@@ -137,6 +157,7 @@ def _history(draw: st.DrawFn) -> list[dict[str, object]]:
             "candidate": draw(st.none() | REVISIONS),
             "metrics": draw(METRICS),
             "failure_tail": draw(st.just("") | TEXT),
+            "composite": draw(st.none() | COMPOSITES),
         }
         for index in range(draw(st.integers(0, 3)))
     ]
@@ -301,6 +322,11 @@ IMPLEMENT_PROMPTS = st.builds(
     baseline_pending=st.booleans(),
     input_failure=INPUT_FAILURES,
     rebase_onto=st.none() | REVISIONS,
+    combine=st.just(()) | PARTS,
+    combine_missing=st.lists(
+        st.builds(dict, hypothesis_id=tokens("gone"), revision=tokens("rev")), max_size=1
+    ).map(tuple),
+    watch_for=st.just("") | tokens("watch"),
 )
 MERGE_PROMPTS = st.builds(
     lambda **fields: MergePrompt.model_validate(fields, strict=False),

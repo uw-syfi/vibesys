@@ -53,9 +53,6 @@ if TYPE_CHECKING:
     from tests.vibesys.orchestration.dynamic._host import World
 
 MODES = across_restarts
-_XFAIL = pytest.mark.xfail(
-    strict=True, reason="S182: the combine workstream kind does not exist yet"
-)
 
 
 def _start(host: Host) -> None:
@@ -118,7 +115,6 @@ LOST = {"c1": INPUT_THROUGHPUT - 10, "c2": INPUT_THROUGHPUT - 5}
 
 
 @MODES
-@_XFAIL
 def test_a_combine_of_two_candidates_that_lost_alone_is_built_from_main_and_reported_by_part(
     *, restarting: bool
 ) -> None:
@@ -162,7 +158,6 @@ def test_a_combine_of_two_candidates_that_lost_alone_is_built_from_main_and_repo
 
 
 @MODES
-@_XFAIL
 def test_what_the_implementer_could_not_apply_reaches_the_planner(*, restarting: bool) -> None:
     host, offer = _two_parts_that_lost(restarting=restarting, throughputs=LOST)
     revisions = {row.hypothesis_id: row.revision.revision_id.root for row in offer.buildable}
@@ -195,7 +190,6 @@ UNAPPLIED = st.lists(
 
 @settings(max_examples=examples(pr=15, nightly=150), deadline=None)
 @given(unapplied=UNAPPLIED, stray=st.booleans())
-@_XFAIL
 def test_the_unapplied_reply_field_round_trips_and_rejects_unknown_keys(
     unapplied: list[dict[str, str]], *, stray: bool
 ) -> None:

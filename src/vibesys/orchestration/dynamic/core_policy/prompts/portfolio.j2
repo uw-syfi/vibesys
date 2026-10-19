@@ -151,6 +151,23 @@ Merges so far, oldest first:
 {% endif %}
 {% endfor %}
 {% endif %}
+{% if buildable | length >= 2 %}
+
+To build one new candidate out of several buildable candidates, choose a combine workstream:
+{{ reply.kind }} "combine", a new {{ reply.hypothesis_id }}, {{ reply.title }}, {{ reply.hypothesis }} (why the parts work
+better together than alone), {{ reply.parents }} (the parts in the order to apply them, each an
+exact offered pair of {{ reply.hypothesis_id }} and {{ reply.revision }} from the buildable list, each a different
+hypothesis), {{ reply.instructions }} (how to combine them, and which side wins a conflict),
+{{ reply.watch_for }} and {{ reply.pass_criteria }}. A new implementer applies each part's own change on a
+checkout of main, runs the tests and submits. The composite is a candidate of the new
+hypothesis, measured and judged like any other; it does not move main. Its history row shows
+its trusted result beside each part's, with a verdict against the best part, and a composite
+that beats main can then be merged.
+A part need not beat main or the input. Combine when parts were designed to work together and
+each lost or tied alone, when several candidates each measured within noise of the bar, or when
+a part's benefit depends on another (a design document naming parts that need each other).
+Each combine takes a slot: combine parts for such a reason, not every pair.
+{% endif %}
 {% if profiling %}
 For measurement-only work, choose a profile workstream: {{ reply.kind }} "profile", a new
 {{ reply.profile_id }}, {{ reply.target_hypothesis_id }} (a listed buildable candidate, or null for the base
@@ -164,7 +181,8 @@ capture supplies only {{ profile_fields | join(', ') }}: list nothing else.
 This run's capture supplies no named measurement field: leave {{ reply.required_fields }} empty.
 {% endif %}
 {% endif %}
-Choose workstreams that investigate distinct mechanisms or competing hypotheses. Do not
+Choose workstreams that investigate distinct mechanisms, competing hypotheses, or
+combinations of existing candidates. Do not
 split one implementation into parallel fragments and do not assign duplicate
 hypothesis IDs. New IDs must not occur in the history. A continued workstream must
 reuse its existing ID and set {{ reply.continue_hypothesis }}. Use {{ reply.hypothesis_updates }} to park
@@ -212,6 +230,12 @@ be adopted or offered as a parent.
 
 {% else %}
 - `{{ row.hypothesis_id }}` #{{ row.sequence }} "{{ row.title }}": {{ row.status }}, strategy {{ row.strategy }}{% if row.outcome %}, outcome {{ row.outcome }}{% endif %}{% if row.candidate %}, candidate `{{ rev(row.candidate) }}`{% endif %}{% if row.review_passed is not none %}, review passed: {{ row.review_passed }}{% endif %}{% if row.accuracy_passed is not none %}, accuracy passed: {{ row.accuracy_passed }}{% endif %}{% if row.benchmark_passed is not none %}, benchmark passed: {{ row.benchmark_passed }}{% endif %}{% for m in row.metrics %}; {{ metric(m) }}{% endfor %}{% if row.partial %}; partial {{ partial(row.partial) }}{% endif %}{% if row.summary %}: {{ row.summary }}{% endif %}
+{% if row.composite %}
+  This candidate was combined from {% for part in row.composite.parts %}`{{ part.hypothesis_id }}` at `{{ rev(part.revision) }}` ({% if part.metric %}{{ metric(part.metric) }}{% else %}no trusted headline{% endif %}){% if not loop.last %}, {% endif %}{% endfor %}; against the best part it is {% if row.composite.verdict.value == 'better' %}better beyond noise{% elif row.composite.verdict.value == 'worse' %}worse beyond noise{% elif row.composite.verdict.value == 'within_noise' %}within noise{% else %}not comparable yet: a trusted headline is missing{% endif %}.
+{% for item in row.composite.unapplied %}
+  Not applied from `{{ item.hypothesis_id }}`: {{ item.part }} ({{ item.why }})
+{% endfor %}
+{% endif %}
 {% if row.failure %}
   Why it ended: {{ failure_text(row.failure) }}
 {% endif %}
