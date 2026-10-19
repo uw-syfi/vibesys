@@ -506,16 +506,13 @@ class CoreRuntime[S: StrategyState]:
         if self._record is not None:
             self._start_checked = (self._record, host_id)
 
-    def start(self, host_id: str, *, now_at: float, lease_duration: float) -> None:
-        """Validate before lease acquisition, then commit new-epoch recovery.
+    def _provisional(
+        self, host_id: str, *, now_at: float
+    ) -> tuple[RunEnvelope[S], tuple[Decision, ...]]:
+        """The envelope a start by ``host_id`` would commit, validated, and a new run's decisions.
 
-        No backend setup or execution occurs here. Unfinished identities produce
-        inspection requests; core gates ordinary admission until reconciled.
+        ``now_at`` dates a new run; a resumed one keeps its own times.
         """
-        if self._fence is not None:
-            message = "runtime already started"
-            raise RuntimeError(message)
-        self._load()
         core = (
             _started_at(self._initial, now_at)
             if self._record is None
@@ -551,6 +548,35 @@ class CoreRuntime[S: StrategyState]:
         )
         if recheck:
             self._validate_provisional(provisional, host_id)
+        return provisional, decisions
+
+    def prepare_start(self, host_id: str) -> None:
+        """Decode and validate the stored record a `start` by ``host_id`` would resume.
+
+        The shell remembers both for that very store revision and host, so a `start` that
+        follows only steps and commits. Taking in a long run's record costs seconds on the
+        caller's thread; preparing first lets the caller yield between the two halves and read
+        the clock for the lease after them, so the lease term is not spent on them. A run with
+        nothing stored has nothing to prepare.
+        """
+        if self._fence is not None:
+            message = "runtime already started"
+            raise RuntimeError(message)
+        if self._load() is not None:
+            # A resumed run's start never reads its time before taking the lease.
+            self._provisional(host_id, now_at=self.record.envelope.core.run.now_at)
+
+    def start(self, host_id: str, *, now_at: float, lease_duration: float) -> None:
+        """Validate before lease acquisition, then commit new-epoch recovery.
+
+        No backend setup or execution occurs here. Unfinished identities produce
+        inspection requests; core gates ordinary admission until reconciled.
+        """
+        if self._fence is not None:
+            message = "runtime already started"
+            raise RuntimeError(message)
+        self._load()
+        provisional, decisions = self._provisional(host_id, now_at=now_at)
         fence = self._store.acquire(host_id, now=now_at, duration=lease_duration)
         if fence is None:
             message = "runtime lease unavailable"

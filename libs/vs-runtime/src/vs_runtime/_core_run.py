@@ -213,6 +213,9 @@ async def start_core_awaiting_lease(host: CoreRunHost, config: RunLoopConfig) ->
     in clock time: a simulated clock makes it instant. Raises ``LeaseUnavailableError``
     naming the bound when the lease is still held after it.
 
+    The stored run is decoded and validated before the clock is read for the lease, with the
+    loop free to run in between (see ``CoreRuntime.prepare_start``).
+
     Once started, the host's ``workspaces`` follow core's recovered state: worktrees a
     stopped host left that core no longer references are discarded now. If following or
     sweeping those workspaces fails or is cancelled, startup releases its newly acquired
@@ -220,6 +223,11 @@ async def start_core_awaiting_lease(host: CoreRunHost, config: RunLoopConfig) ->
     """
     give_up_at = host.clock.now() + config.lease_duration
     while True:
+        # Take in the stored run first, then let the loop run, then read the clock for the
+        # lease: decoding a long run takes seconds, and neither the lease term nor one
+        # unbroken hold on the loop should include it.
+        host.shell.prepare_start(config.host_id)
+        await host.clock.sleep(0)
         try:
             start_core(host, config)
         except LeaseUnavailableError as error:

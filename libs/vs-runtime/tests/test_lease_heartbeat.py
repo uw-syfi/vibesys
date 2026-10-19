@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -201,7 +200,6 @@ class _SlowDecodeStore(FakeStateStore):
         return record
 
 
-@pytest.mark.xfail(strict=True, reason="a restart stamps its lease with the time before decoding")
 @settings(max_examples=examples(pr=3, nightly=20), deadline=None, derandomize=True, database=None)
 @given(cost=st.floats(min_value=1.0, max_value=59.0))
 def test_a_restart_holds_its_lease_a_full_term_after_taking_it(cost: float) -> None:
