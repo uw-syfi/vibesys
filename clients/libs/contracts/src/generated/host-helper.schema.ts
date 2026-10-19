@@ -2672,7 +2672,8 @@ const hostHelperSchema: Record<string, unknown> = {
         "agent_logins",
         "project_goal",
         "example_destination",
-        "usage_window"
+        "usage_window",
+        "run_trace"
       ],
       "title": "HelperFeature",
       "type": "string"
@@ -8387,7 +8388,7 @@ const hostHelperSchema: Record<string, unknown> = {
     "runs.read_events": "run_history",
     "runs.events_for_span": "run_span_events",
     "runs.read_tail": "run_tail",
-    "runs.summary": "run_summary",
+    "runs.summary": "run_trace",
     "machine.describe": "machine_describe",
     "checkout.inspect": "checkout_inspect",
     "run.preflight": "preflight",
@@ -8429,6 +8430,9 @@ const hostHelperSchema: Record<string, unknown> = {
     },
     "runs.read_events": {
       "with_totals": "run_history_pages"
+    },
+    "runs.summary": {
+      "offset": "run_summary"
     },
     "runs.list": {
       "digest_runs": "run_digest",

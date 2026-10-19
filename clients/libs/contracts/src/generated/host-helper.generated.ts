@@ -348,7 +348,8 @@ export type HelperFeature =
   | "agent_logins"
   | "project_goal"
   | "example_destination"
-  | "usage_window";
+  | "usage_window"
+  | "run_trace";
 export type Features1 = HelperFeature[];
 export type VibesysVersion = string;
 export type Root = string;
