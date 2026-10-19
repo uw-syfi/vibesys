@@ -15,14 +15,14 @@ and the gate's report arrives while they run.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
-from vs_core.api.testing import Answer, Running, Trace
+from vs_core.api.testing import Answer, Running, Succeeded, Trace
 
 from .test_agent_turn_runs import assert_ended_closed
 from .test_role_limits_through_core import implementer_turns
@@ -71,14 +71,18 @@ class HeldHost(ToyHost):
     """The implementer's first ``overruns`` turns never answer; the gate reports ``shape``.
 
     ``resumed`` makes the overrunning turns the ones that continue an evaluation wait.
+    ``junk_first`` of the implementer's turns before them reply with JSON that does not parse,
+    so core corrects them first.
     """
 
     overruns: int = 1
+    junk_first: int = 0
     shape: Shape = field(default_factory=Shape)
     resumed: bool = False
     dispatched_at: dict[str, float] = field(default_factory=dict)
     _started: int = 0
     _overrunning: set[str] = field(default_factory=set)
+    _junk: set[str] = field(default_factory=set)
 
     def during_turn(
         self, request: core.Request, state: core.CoreState
@@ -92,7 +96,10 @@ class HeldHost(ToyHost):
         ):
             return events
         self._started += 1
-        if self._started > self.overruns:
+        if self._started <= self.junk_first:
+            self._junk.add(request.request_id.root)
+            return events
+        if self._started > self.junk_first + self.overruns:
             return events
         self._overrunning.add(request.request_id.root)
         now = state.run.now_at
@@ -105,7 +112,11 @@ class HeldHost(ToyHost):
     ) -> Answer:
         if request.request_id is not None and request.request_id.root in self._overrunning:
             return Running(resource_id=core.ResourceId(root="lease:overrun"))
-        return super()._turn(request, state)
+        answer = super()._turn(request, state)
+        if request.request_id is not None and request.request_id.root in self._junk:
+            assert isinstance(answer, Succeeded)
+            return replace(answer, output_json="not json")
+        return answer
 
 
 def _results(trace: Trace, host: HeldHost) -> list[core.TurnResult]:
@@ -177,10 +188,11 @@ def test_a_turn_ends_at_its_limit_plus_the_hold_it_is_credited(shape: Shape) -> 
         assert ended.failure is core.TurnFailureKind.TRANSPORT_LOST
 
 
-def _asked_again(overruns: int, *, resumed: bool) -> Trace:
-    implementer = IMPLEMENTER.model_copy(update={"lost_turns": 0})
+def _asked_again(overruns: int, *, resumed: bool, corrected: int = 0) -> Trace:
+    implementer = IMPLEMENTER.model_copy(update={"lost_turns": 0, "corrections": corrected})
     host = HeldHost(
         overruns=overruns,
+        junk_first=corrected,
         shape=Shape(since=1.0),
         resumed=resumed,
         # The first turn waits on an evaluation, and its resume is the one that overruns.
@@ -190,7 +202,8 @@ def _asked_again(overruns: int, *, resumed: bool) -> Trace:
     trace = run_toy(host, definition=toy_search(implementer=implementer))
     assert_ended_closed(trace)
     results = _results(trace, host)
-    assert [r.failure for r in results] == [core.TurnFailureKind.PROVIDER_UNAVAILABLE] * overruns
+    lost = [r.failure for r in results if r.failure is not None]
+    assert lost == [core.TurnFailureKind.PROVIDER_UNAVAILABLE] * overruns
     assert summary(trace).done[0].failed == ()
     return trace
 
@@ -208,3 +221,19 @@ def test_a_turn_lost_while_held_is_asked_again_whatever_the_roles_lost_turns(
 def test_a_resumed_turn_lost_while_held_is_asked_again() -> None:
     """Before, a turn that continued an evaluation wait was never asked again."""
     _asked_again(1, resumed=True)
+
+
+@pytest.mark.regression
+@pytest.mark.xfail(strict=True, reason="MED-2: outage re-asks share MAX_REASK_CHAIN")
+@pytest.mark.parametrize("corrected", [0, 4], ids=["no-corrections", "after-4-corrections"])
+def test_outage_losses_never_spend_the_reask_chain(corrected: int) -> None:
+    """More outage losses in one ask than ``MAX_REASK_CHAIN`` allows re-asks still recover.
+
+    Before (review of #3283, MED-2), each re-ask after a ``PROVIDER_UNAVAILABLE`` loss was a
+    link of the correction chain, so the 11th was rejected (``correction retry bound
+    exhausted``) and the ask failed as if the role were broken; after 4 real corrections, the
+    7th. An outage is the provider's, bounded by the gate's budget and its pause.
+    """
+    overruns = core.MAX_REASK_CHAIN + 2
+    trace = _asked_again(overruns, resumed=False, corrected=corrected)
+    assert len(implementer_turns(trace)) == corrected + overruns + 1

@@ -38,6 +38,7 @@ from vs_agent.api import (
     SessionScope,
 )
 from vs_agent.api.testing import FakeProvider, FakeTurnScript
+from vs_core.api import StopMode
 from vs_runtime.api.infrastructure import (
     PROVIDER_OUTAGE,
     CapacityHandling,
@@ -46,6 +47,7 @@ from vs_runtime.api.infrastructure import (
     RunControlChannel,
     RunControlTransition,
     RunControlTransitionKind,
+    RunStopped,
     create_run_control_channel,
     install_capacity_gate,
 )
@@ -115,11 +117,16 @@ class _Sink(NullAgentEventSink):
 
 @dataclass
 class _Turn:
-    """One turn under ``policy`` through an outage of ``outage`` seconds from its first send."""
+    """One turn under ``policy`` through an outage of ``outage`` seconds.
+
+    The turn's first send works ``lead`` seconds before the outage starts; each failing send
+    then takes ``send_s`` (agentshim's retry and the CLI's own) before it reaches the gate.
+    """
 
     policy: QuotaPolicy
     outage: float
     send_s: float
+    lead: float = 0.0
     clock: VirtualClock = field(
         default_factory=lambda: VirtualClock(START, limit=START + 4 * BUDGET)
     )
@@ -141,8 +148,8 @@ class _Turn:
 
         def send(request: AgentTurnRequest) -> None:
             del request
-            self.threads.sleep(self.send_s)
-            if self.clock.now() - START < self.outage:
+            self.threads.sleep(max(START + self.lead - self.clock.now(), 0.0) + self.send_s)
+            if self.clock.now() - START - self.lead < self.outage:
                 raise _outage()
 
         self.client = AgentClient(
@@ -198,7 +205,7 @@ class _Turn:
                         invocation_id=INVOCATION,
                     )
                 )
-            except (RuntimeError, TimeoutError) as error:
+            except (RuntimeError, TimeoutError, RunStopped) as error:
                 self.ended.append(f"failed: {type(error).__name__}")
 
         self.threads.run(main)
@@ -237,6 +244,89 @@ def test_an_outage_shorter_than_the_budget_never_fails_a_turn(
     assert final.since == pytest.approx(START + send_s)
     assert final.released_at is not None
     assert final.released_at >= START + outage - send_s
+
+
+@pytest.mark.regression
+@pytest.mark.xfail(strict=True, reason="MED-1: the resend after a hold is charged to the turn")
+@settings(max_examples=examples(pr=10, nightly=60), deadline=None)
+# A turn resumed near its limit (review of #3283, MED-1): 300 s and 200 s of own time left.
+@example(
+    turn_time=1800.0,
+    spare=60.0,
+    outage=3600.0,
+    send_s=240.0,
+    policy=QuotaPolicy(QuotaAction.WAIT, wait_seconds=7200.0, retry_seconds=300.0),
+)
+@example(turn_time=1800.0, spare=50.0, outage=3600.0, send_s=150.0, policy=QuotaPolicy())
+@given(
+    turn_time=st.sampled_from([1800.0, 7200.0]),
+    spare=st.floats(min_value=0.0, max_value=1800.0),
+    outage=st.floats(min_value=60.0, max_value=BUDGET - 3600.0),
+    send_s=st.floats(min_value=1.0, max_value=600.0),
+    policy=_POLICIES,
+)
+def test_an_outage_late_in_a_turn_never_fails_it(
+    turn_time: float, spare: float, outage: float, send_s: float, policy: QuotaPolicy
+) -> None:
+    """Wherever in the turn the outage starts, its own time left is never cut by a resend.
+
+    ``spare`` is the own time the turn has left once its first failing send reaches the gate
+    (so ``send_s + spare`` when the outage starts). Before, core credited a resend only once
+    the next refusal reopened the hold, so a turn with less own time left than one send was
+    cut during the resend as ``TRANSPORT_LOST``; a resumed turn is then never asked again.
+    """
+    left = min(send_s + spare, turn_time)
+    turn = _Turn(policy, outage, send_s, lead=turn_time - left)
+    turn.play(turn_time)
+
+    assert turn.cut_at == []
+    assert turn.ended == ["plan"]
+    assert turn.sink.abandoned == []
+
+
+@pytest.mark.regression
+@pytest.mark.xfail(strict=True, reason="MED-3: a spent outage budget under wait never resumes")
+@given(outage_past=st.floats(min_value=60.0, max_value=3 * 3600.0))
+def test_under_wait_a_spent_outage_budget_resumes_the_run_by_itself(outage_past: float) -> None:
+    """``wait`` is documented to resume the run by itself: with no operator, a spent outage
+    budget pauses the run on a timed resume, and the turn ends once the provider is back.
+
+    Before (review of #3283, MED-3), the run paused for the operator, as under ``pause``, and an
+    unattended run made no progress after the provider came back.
+    """
+    policy = QuotaPolicy(QuotaAction.WAIT, wait_seconds=7200.0, retry_seconds=300.0)
+    turn = _Turn(policy, outage=BUDGET + outage_past, send_s=60.0)
+    turn.play(1800.0)
+
+    assert turn.ended == ["plan"]
+    assert turn.cut_at == []
+    assert turn.sink.abandoned == []
+    kinds = [t.kind for t in turn.transitions]
+    assert RunControlTransitionKind.PAUSED in kinds
+    assert RunControlTransitionKind.RESUMED in kinds
+    # Back within one timed resume (and the sends around it) of the provider's return.
+    assert turn.clock.now() <= START + BUDGET + outage_past + 2 * policy.retry_seconds + 600.0
+
+
+def test_under_pause_a_spent_outage_budget_waits_for_the_operator() -> None:
+    """``pause`` keeps waiting for the operator once the outage budget is spent: no timed
+    resume, the turn stays held however long the provider has been back."""
+    turn = _Turn(QuotaPolicy(QuotaAction.PAUSE), outage=BUDGET + 3600.0, send_s=60.0)
+    stop_at = START + 3 * BUDGET
+
+    def operator_never_comes() -> None:
+        turn.threads.sleep(stop_at - START)
+        turn.control.request_stop(StopMode.DRAIN)
+
+    turn.threads.spawn(operator_never_comes, name="late-stop", daemon=True)
+    turn.play(1800.0)
+
+    assert turn.ended == ["failed: RunStopped"]
+    assert turn.cut_at == []
+    kinds = [t.kind for t in turn.transitions]
+    assert RunControlTransitionKind.PAUSED in kinds
+    assert RunControlTransitionKind.RESUMED not in kinds
+    assert turn.clock.now() == pytest.approx(stop_at)
 
 
 @pytest.mark.parametrize("operator_after", [0.0, 2 * 3600.0], ids=["at-once", "hours-later"])

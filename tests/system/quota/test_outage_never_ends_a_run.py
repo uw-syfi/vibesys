@@ -138,14 +138,23 @@ class Hit(enum.StrEnum):
     """The planner's second turn, which resumes its session."""
 
 
+_TURN_TIME = {"orchestrator": 1800.0, "implementer": 7200.0, "judge": 1800.0}
+"""Each role's ``turn_time`` in the dynamic search (planner and judge 30 min, implementer 2 h)."""
+
+
 @dataclass
 class Outage:
-    """When the provider is down, anchored at the hit turn's first send."""
+    """When the provider is down, anchored at the hit turn's first send.
+
+    With ``left`` the hit turn first works until it has ``left`` seconds of its own time left,
+    and the outage starts then; else it starts with the hit turn's first send.
+    """
 
     pattern: Pattern
     hit: Hit
     length: float
     gap: float = 600.0
+    left: float | None = None
     started_at: float | None = None
     planner_turns: int = 0
     sends: int = 0
@@ -163,7 +172,8 @@ class Outage:
             Hit.RESUMED_PLANNER: role == "orchestrator" and self.planner_turns == 2,
         }[self.hit]
         if wanted:
-            self.started_at = now
+            lead = 0.0 if self.left is None else max(_TURN_TIME[role] - self.left, 0.0)
+            self.started_at = now + lead
 
     def down(self, at: float) -> bool:
         """Whether a send that ends at ``at`` fails."""
@@ -227,7 +237,10 @@ class _Provider:
                 # A cancel ends a send at once, as the provider's process is stopped.
                 provider.hold_until_cancelled(_WORK_S)
                 return
-            provider.hold_until_cancelled(self.send_s)
+            # The hit turn's first send works until the outage starts, then fails as any does.
+            provider.hold_until_cancelled(
+                max(self.outage.started_at - self.clock.now(), 0.0) + self.send_s
+            )
             if self.outage.down(self.clock.now()):
                 raise AgentQuotaError(
                     PROVIDER, QuotaCondition.UNAVAILABLE, "API Error: 503 No available accounts"
@@ -443,6 +456,48 @@ def test_an_outage_shorter_than_the_budget_never_ends_the_run(
     assert played.core.run.result is not None
     assert played.core.run.result.outcome == "success", played.core.run.result
     # No turn was lost and asked again: one turn per role per round.
+    assert played.asked == Counter(orchestrator=rounds, implementer=rounds, judge=rounds)
+
+
+@pytest.mark.regression
+@pytest.mark.xfail(strict=True, reason="MED-1: the resend after a hold is charged to the turn")
+@_SETTINGS
+# The resumed planner turn near its limit (review of #3283, MED-1): 300 s and 200 s left.
+@example(
+    hit=Hit.RESUMED_PLANNER,
+    spare=60.0,
+    length=3600.0,
+    send_s=240.0,
+    policy=QuotaPolicy(QuotaAction.WAIT, wait_seconds=7200.0, retry_seconds=300.0),
+)
+@example(
+    hit=Hit.JUDGE, spare=50.0, length=3600.0, send_s=150.0, policy=QuotaPolicy(QuotaAction.PAUSE)
+)
+@given(
+    hit=st.sampled_from(Hit),
+    spare=st.floats(min_value=0.0, max_value=1800.0),
+    length=st.floats(min_value=60.0, max_value=BUDGET - 3600.0),
+    send_s=st.floats(min_value=5.0, max_value=600.0),
+    policy=_POLICIES,
+)
+def test_an_outage_late_in_a_turn_never_ends_the_run(
+    hit: Hit, spare: float, length: float, send_s: float, policy: QuotaPolicy
+) -> None:
+    """Wherever in the hit turn the outage starts, the run still ends with a winner.
+
+    The hit turn works until ``send_s + spare`` of its own time is left, then the outage
+    starts, so its first failing send reaches the gate with ``spare`` left. Before (review of
+    #3283, MED-1), the resend after the gate's first wait was charged to the turn, which core
+    cut as ``TRANSPORT_LOST``; a resumed turn is never asked again, and the run failed.
+    """
+    rounds = 2 if hit is Hit.RESUMED_PLANNER else 1
+    outage = Outage(Pattern.TOTAL, hit, length, left=send_s + spare)
+    played = play(outage, send_s=send_s, policy=policy, rounds=rounds)
+
+    assert played.outage_started, "the outage hit no turn"
+    assert played.abandoned == [], "the gate gave a turn up"
+    assert played.core.run.result is not None
+    assert played.core.run.result.outcome == "success", played.core.run.result
     assert played.asked == Counter(orchestrator=rounds, implementer=rounds, judge=rounds)
 
 
