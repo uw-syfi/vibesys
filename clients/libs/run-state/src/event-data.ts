@@ -256,16 +256,23 @@ function applyRunStartupProgressData(state: CoreState, event: RunEvent): CoreSta
   if (data?.kind !== 'run_startup_progress') return state;
   const progress = data.progress;
   const previous = state.startup;
+  const sameStage = previous !== null && previous.stage === data.stage;
+  const stepState = data.state ?? 'running';
   return cloneCoreStateWith(state, {
     startup: {
       stage: data.stage,
-      stageSince:
-        previous !== null && previous.stage === data.stage ? previous.stageSince : event.timestamp,
+      state: stepState,
+      condition: data.condition ?? null,
+      elapsedSeconds: data.elapsed_seconds ?? null,
+      stageSince: sameStage ? previous.stageSince : event.timestamp,
       lastActivityAt: event.timestamp,
+      // A wait or a finish carries no step of its own: the stage's last step stays the latest.
       progress:
-        progress == null
-          ? null
-          : {done: progress.done, total: progress.total ?? null, label: progress.label ?? ''},
+        progress != null
+          ? {done: progress.done, total: progress.total ?? null, label: progress.label ?? ''}
+          : stepState !== 'running' && sameStage
+            ? previous.progress
+            : null,
     },
   });
 }

@@ -26,6 +26,7 @@ from pydantic import (
     ConfigDict,
     Field,
     FiniteFloat,
+    NonNegativeFloat,
     ValidationError,
     WithJsonSchema,
     field_validator,
@@ -392,17 +393,61 @@ class RunInterruptedData(EventPayload):
     signal: str | None = None
 
 
+class StartupState(StrEnum):
+    """What a startup stage is doing at the moment of one observation."""
+
+    RUNNING = "running"
+    """The stage began, or moved to a new step of its own (its progress)."""
+    WAITING = "waiting"
+    """The stage is blocked on something outside the run host, named by the wait condition."""
+    FINISHED = "finished"
+    """The stage ended without failing."""
+
+
+class StartupWaitCondition(StrEnum):
+    """What a waiting startup stage waits on."""
+
+    QUEUED = "queued"
+    """A scheduler holds the job in its queue."""
+    RUNNING = "running"
+    """The scheduler runs the job; the stage waits for it to end."""
+
+
 class RunStartupProgressData(EventPayload):
-    """A starting run reached ``stage``, or progressed within it.
+    """A starting run's ``stage`` began, moved, waited, or finished.
 
     Journaled while the run acquires its resources, before it is ready. The
-    stage only moves forward; ``progress`` is present when the stage reports
-    it (an image build's steps done of total, and the step now running).
+    run's stage only moves forward. ``state`` is ``running`` when a stage begins
+    and at each step of its ``progress`` (an image build's steps done of total,
+    and the step now running), ``waiting`` while it is blocked on something
+    outside the run host (``condition``, and the ``elapsed_seconds`` waited so
+    far), and ``finished`` with the ``elapsed_seconds`` the stage took. A stage
+    that fails journals no ``finished``; the run's failure says why it ended.
     """
 
     kind: Literal["run_startup_progress"] = "run_startup_progress"
     stage: StartupStage
     progress: StartupProgress | None = None
+    state: StartupState = StartupState.RUNNING
+    condition: StartupWaitCondition | None = None
+    """What a ``waiting`` stage waits on; present exactly then."""
+    elapsed_seconds: NonNegativeFloat | None = None
+    """Seconds waited (``waiting``) or taken (``finished``); absent while ``running``."""
+
+    @model_validator(mode="after")
+    def _detail_matches_state(self) -> RunStartupProgressData:
+        waiting = self.state is StartupState.WAITING
+        running = self.state is StartupState.RUNNING
+        if (self.condition is not None) != waiting:
+            message = "condition is present exactly when state is waiting"
+            raise ValueError(message)
+        if (self.elapsed_seconds is None) != running:
+            message = "elapsed_seconds is present exactly when state is not running"
+            raise ValueError(message)
+        if self.progress is not None and not running:
+            message = "progress is present only while state is running"
+            raise ValueError(message)
+        return self
 
 
 class RunStatusChangedData(EventPayload):

@@ -69,6 +69,7 @@ class InstalledReleaseError(RuntimeError):
         """Build an error for a failed installed-artifact command."""
         return cls(f"Installed verification command failed: {command}")
 
+
 def verify_installed_release() -> None:
     """Exercise the installed framework, SDK, and resources."""
     _verify_isolated_interpreter()

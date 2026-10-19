@@ -32,7 +32,7 @@ import sys
 
 # lint-waiver: LW-007062 [TC003]; Pydantic resolves this dataclass field annotation at runtime
 from collections.abc import Mapping  # noqa: TC003
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from enum import StrEnum
 from functools import partial
@@ -76,6 +76,7 @@ from vs_runtime._environment_startup import (
     EnvironmentStartupStage,
     StartupOutputOpener,
     ToolBuildOutputOpener,
+    startup_stage,
 )
 from vs_runtime._image_features import image_features
 from vs_runtime._model_artifacts import read_model_metadata
@@ -151,7 +152,7 @@ from vs_sim.api import DISCARD, CloseOnce, ReleaseStack
 
 _RUNTIME_DOCUMENT_NAME = "runtime-environment.md"
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
     from contextlib import AbstractContextManager
 
     from vs_agent.api.images import BuildProgressSink, DockerBuildRunner, ImageBuildProgress
@@ -798,8 +799,7 @@ def _report_startup(
 
 
 def _image_build_progress(request: RunEnvironmentRequest) -> BuildProgressSink | None:
-    """Report that the image build begins, and where its progress goes."""
-    _report_startup(request, EnvironmentStartupStage.BUILDING_IMAGE)
+    """Where the image build's step observations go: the request's startup sink, when it has one."""
     if request.startup is None:
         return None
     return partial(_report_startup, request, EnvironmentStartupStage.BUILDING_IMAGE)
@@ -823,12 +823,59 @@ def _startup_output(
     return request.startup_output(stage, command)
 
 
-def _starting_container(request: RunEnvironmentRequest) -> AbstractContextManager[OutputSink]:
-    """Report that the container starts, and open the stream its ``docker run`` writes to."""
-    _report_startup(request, EnvironmentStartupStage.STARTING_CONTAINER)
-    return _startup_output(
-        request, EnvironmentStartupStage.STARTING_CONTAINER, _CONTAINER_START_COMMAND
+def _building_image(request: RunEnvironmentRequest) -> AbstractContextManager[None]:
+    """Report the image build as a stage: running for the block, finished after it."""
+    return startup_stage(
+        request.startup, EnvironmentStartupStage.BUILDING_IMAGE, clock=request.clock
     )
+
+
+class _Identified(Protocol):
+    @property
+    def id(self) -> str: ...
+
+
+@contextmanager
+def _starting_container(
+    request: RunEnvironmentRequest, sandbox: _Identified
+) -> Iterator[OutputSink]:
+    """Report the container start as a stage, and open the stream its ``docker run`` writes to.
+
+    Once the container is up, one narration line names it (the sandbox's id) and
+    the session's role, so two container starts of one run never read as one
+    event repeated: every container of a run starts exactly once and is told once.
+    """
+    stage = EnvironmentStartupStage.STARTING_CONTAINER
+    with (
+        startup_stage(request.startup, stage, clock=request.clock),
+        _startup_output(request, stage, _CONTAINER_START_COMMAND) as output,
+    ):
+        yield output
+    if request.log is not None:
+        request.log(f"[docker] container {sandbox.id} started ({request.session_role})")
+
+
+def _reporting_tool_builds(request: RunEnvironmentRequest) -> ToolBuildOutputOpener | None:
+    """The request's tool-build opener, each build it opens reported as a startup stage.
+
+    The opener is entered once per build that runs and never for a cache hit, so
+    the stage is reported exactly when a build ran.
+    """
+    if request.startup is None:
+        return request.tool_build_output
+    opener = request.tool_build_output
+
+    @contextmanager
+    def open_build(tools: tuple[str, ...]) -> Iterator[OutputSink]:
+        stage = EnvironmentStartupStage.BUILDING_TOOLS
+        with startup_stage(request.startup, stage, clock=request.clock):
+            if opener is None:
+                yield DISCARD
+            else:
+                with opener(tools) as output:
+                    yield output
+
+    return open_build
 
 
 class _OrphanReaper(Protocol):
@@ -955,7 +1002,7 @@ class DockerEnvironment(NoCaptureRecovery):
             env_kind="docker",
             workspace_git_writable=editor.agent_git_writable,
         )
-        with _starting_container(request) as output:
+        with _starting_container(request, sandbox) as output:
             return command_environment_session(
                 SandboxSession.start(sandbox=sandbox, view=view, output=output)
             )
@@ -1003,9 +1050,14 @@ class DockerEnvironment(NoCaptureRecovery):
         # agent layer is applied on top of it.
         base_image = _docker_backend_image(request)
         on_progress = _image_build_progress(request)
-        with _startup_output(
-            request, EnvironmentStartupStage.BUILDING_IMAGE, _agent_image_build_command(base_image)
-        ) as output:
+        with (
+            _building_image(request),
+            _startup_output(
+                request,
+                EnvironmentStartupStage.BUILDING_IMAGE,
+                _agent_image_build_command(base_image),
+            ) as output,
+        ):
             container_image = image_helpers.agent_image(
                 base_image,
                 features=image_features(toolchains),
@@ -1030,7 +1082,7 @@ class DockerEnvironment(NoCaptureRecovery):
                     backend=request.backend,
                     log_dir=request.log_dir,
                     image=container_image,
-                    output=request.tool_build_output,
+                    output=_reporting_tool_builds(request),
                 ),
             )
         )
@@ -1068,7 +1120,6 @@ class DockerEnvironment(NoCaptureRecovery):
             attach_accelerator=attach_accelerator,
             run_id=request.run_id,
         )
-        log(f"[docker] starting container with image {container_image}")
         return BuiltEditor(sandbox, agent_git_writable=plan.agent_git_writable)
 
     def reap_orphans(
@@ -1344,7 +1395,7 @@ class SkyPilotEnvironment(RefusesDockerInDocker, DockerEnvironment):
                 attach_accelerator=False,
                 run_id=request.run_id,
             )
-            with _starting_container(request) as output:
+            with _starting_container(request, sandbox) as output:
                 start_sandbox(sandbox, output=output)
         except Exception:
             bridge.close()
@@ -1581,7 +1632,7 @@ class ModalEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
                 ),
             ),
         )
-        with _starting_container(request) as output:
+        with _starting_container(request, sandbox) as output:
             return command_environment_session(
                 SandboxSession.start(
                     sandbox=sandbox,
@@ -1807,20 +1858,21 @@ def _build_and_push_agent_image(
     base_image = _docker_backend_image(request)
     on_progress = _image_build_progress(request)
     building = EnvironmentStartupStage.BUILDING_IMAGE
-    with _startup_output(request, building, _agent_image_build_command(base_image)) as output:
-        image_id = image_helpers.agent_image(
-            base_image,
-            features=features,
-            on_progress=on_progress,
-            output=output,
-            clock=request.clock,
-        )
-    with _startup_output(request, building, _AGENT_IMAGE_PUSH_COMMAND) as output:
-        return _ensure_pushed_for_remote_backend(
-            image_id,
-            ensure_pushed=partial(image_helpers.ensure_pushed, output=output),
-            backend_label=backend_label,
-        )
+    with _building_image(request):
+        with _startup_output(request, building, _agent_image_build_command(base_image)) as output:
+            image_id = image_helpers.agent_image(
+                base_image,
+                features=features,
+                on_progress=on_progress,
+                output=output,
+                clock=request.clock,
+            )
+        with _startup_output(request, building, _AGENT_IMAGE_PUSH_COMMAND) as output:
+            return _ensure_pushed_for_remote_backend(
+                image_id,
+                ensure_pushed=partial(image_helpers.ensure_pushed, output=output),
+                backend_label=backend_label,
+            )
 
 
 def _ensure_pushed_for_remote_backend(

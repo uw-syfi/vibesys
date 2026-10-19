@@ -193,8 +193,12 @@ class StartupStage(StrEnum):
 
     RESOLVING = "resolving"
     """The server validates the request, its configuration, and the project."""
+    PROBING_WORKSPACE = "probing_workspace"
+    """A scheduler job proves the workspace root is shared with the compute nodes."""
     BUILDING_IMAGE = "building_image"
     """The agent image is being built (the first build on a host takes minutes)."""
+    BUILDING_TOOLS = "building_tools"
+    """The image is built; the evaluator tools it lacks in cache are being built."""
     STARTING_CONTAINER = "starting_container"
     """The image is built; the agent's container is being started."""
 

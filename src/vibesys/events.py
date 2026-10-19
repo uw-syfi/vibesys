@@ -12,6 +12,7 @@ from pydantic import (
     ConfigDict,
     Field,
     FiniteFloat,
+    NonNegativeFloat,
     NonNegativeInt,
     field_validator,
     model_validator,
@@ -31,7 +32,13 @@ from vs_agent.api import (
 )
 from vs_core.api import ComparisonVerdict, EndReason, SpanId, TaskObjective, WireSpan
 from vs_redaction.api import redact_diagnostic_text
-from vs_runtime.api.infrastructure import AgentReply, EnvironmentStartupStage, SteerDelivery
+from vs_runtime.api.infrastructure import (
+    AgentReply,
+    EnvironmentStartupStage,
+    EnvironmentStartupState,
+    EnvironmentWaitCondition,
+    SteerDelivery,
+)
 
 CommandResultPayload = _agent_api.CommandResultPayload
 JsonResultPayload = _agent_api.JsonResultPayload
@@ -327,15 +334,39 @@ class StartupProgressData(EventPayload):
 
 
 class RunStartupProgressData(EventPayload):
-    """A starting run reached ``stage``, or progressed within it.
+    """A starting run's ``stage`` began, moved, waited, or finished.
 
-    Emitted while the run environment opens, before the run is ready;
-    ``progress`` is present when the stage reports it (an image build's steps).
+    Emitted while the run environment opens, before the run is ready. Each
+    stage reports ``running`` when it begins (and at each step of its
+    ``progress``, an image build's steps), ``waiting`` while it is blocked on
+    something outside this process (``condition``, ``elapsed_seconds`` waited
+    so far), and ``finished`` with the ``elapsed_seconds`` it took. A stage that
+    fails reports no ``finished``: the run's failure says why it ended.
     """
 
     kind: Literal["run_startup_progress"] = "run_startup_progress"
     stage: EnvironmentStartupStage
     progress: StartupProgressData | None = None
+    state: EnvironmentStartupState = EnvironmentStartupState.RUNNING
+    condition: EnvironmentWaitCondition | None = None
+    """What a ``waiting`` stage waits on; present exactly then."""
+    elapsed_seconds: NonNegativeFloat | None = None
+    """Seconds waited (``waiting``) or taken (``finished``); absent while ``running``."""
+
+    @model_validator(mode="after")
+    def _detail_matches_state(self) -> RunStartupProgressData:
+        waiting = self.state is EnvironmentStartupState.WAITING
+        running = self.state is EnvironmentStartupState.RUNNING
+        if (self.condition is not None) != waiting:
+            message = "condition is present exactly when state is waiting"
+            raise ValueError(message)
+        if (self.elapsed_seconds is None) != running:
+            message = "elapsed_seconds is present exactly when state is not running"
+            raise ValueError(message)
+        if self.progress is not None and not running:
+            message = "progress is present only while state is running"
+            raise ValueError(message)
+        return self
 
 
 class RunFailureKind(StrEnum):

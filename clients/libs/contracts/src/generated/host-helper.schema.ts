@@ -7029,7 +7029,9 @@ const hostHelperSchema: Record<string, unknown> = {
       "description": "Where a starting run is, in the order it gets there.\n\nDeclaration order is the order: a starting run only moves to a later stage.",
       "enum": [
         "resolving",
+        "probing_workspace",
         "building_image",
+        "building_tools",
         "starting_container"
       ],
       "title": "StartupStage",

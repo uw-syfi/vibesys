@@ -91,6 +91,11 @@ AGENT_IMAGE_REPOSITORY = "vibesys-agent-build"
 #: A BuildKit progress line that starts a Dockerfile step: ``#7 [ 2/14] RUN ...``,
 #: or ``#7 [stage 2/14] RUN ...`` in a named stage of a multi-stage build.
 _BUILD_STEP = re.compile(r"^#\d+ \[(?:\S+ )?\s*(\d+)/(\d+)\] (.+)$")
+#: BuildKit's last phase: it writes the layers out and unpacks them into the image store, which
+#: for a large base image takes minutes after the last Dockerfile step is done.
+_BUILD_EXPORT = re.compile(r"^#\d+ exporting to image")
+#: The label of the observation that says the Dockerfile steps are done and the export runs.
+_EXPORT_LABEL = "exporting to image"
 #: Longest step label reported; a ``RUN`` line can be a whole shell script.
 _STEP_LABEL_LIMIT = 200
 #: Characters of a stopped build's output kept in its timeout error.
@@ -264,6 +269,9 @@ class ImageBuildProgress:
     ``label`` is the step now running, as Docker names it (``RUN npm install
     ...``), cut to a bounded length. Observations of one build only move
     forward; a build of two images (task, then agent) reports each in turn.
+    When every step is done and Docker writes the image out (minutes, for a
+    large base), ``done`` equals ``total`` and ``label`` is ``exporting to
+    image``.
     """
 
     done: int
@@ -286,6 +294,8 @@ class _StepTracker:
     def __init__(self, sink: BuildProgressSink | None = None) -> None:
         self._sink = sink
         self._done = -1
+        self._total = 0
+        self._exporting = False
         self._running = ""
 
     @property
@@ -296,6 +306,16 @@ class _StepTracker:
     def line(self, stream: OutputStream, text: str) -> None:
         """Observe one line of the build's output."""
         if stream is not OutputStream.STDERR:
+            return
+        if self._total and not self._exporting and _BUILD_EXPORT.match(text):
+            # Every step is done: all of ``total``, now writing the image out.
+            self._exporting = True
+            self._done = self._total
+            self._running = _EXPORT_LABEL
+            if self._sink is not None:
+                self._sink(
+                    ImageBuildProgress(done=self._total, total=self._total, label=_EXPORT_LABEL)
+                )
             return
         match = _BUILD_STEP.match(text)
         if match is None:
@@ -308,6 +328,7 @@ class _StepTracker:
             # A step re-announced (``CACHED``, a parallel stage) is not progress.
             return
         self._done = done
+        self._total = total
         label = match.group(3)[:_STEP_LABEL_LIMIT]
         self._running = f"step {step}/{total}: {label}"
         if self._sink is not None:

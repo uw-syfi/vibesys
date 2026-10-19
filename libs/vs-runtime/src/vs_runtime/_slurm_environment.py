@@ -17,6 +17,12 @@ from vs_runtime._agent_gpu_commands import (
 from vs_runtime._brokered_session import BrokeredRunEnvironmentSession, HostBroker
 from vs_runtime._command_environment_session import command_environment_session
 from vs_runtime._container_runtime_policy import RefusesDockerInDocker, reject_docker_in_docker
+from vs_runtime._environment_startup import (
+    EnvironmentStartupStage,
+    EnvironmentWaitCondition,
+    report_wait,
+    startup_stage,
+)
 from vs_runtime._host_command_bridge import (
     agent_paths,
     bridge_editor_extras,
@@ -75,6 +81,7 @@ from vs_sandbox.api.slurm import (
 from vs_slurm.api import (
     SlurmConfig,
     SlurmJobRunner,
+    SlurmJobStatus,
     SlurmLocalTransport,
     probe_workspace_root,
     slurm_transport_broker_available,
@@ -86,10 +93,13 @@ if TYPE_CHECKING:
 
     from vs_agent.api.images import DockerBuildRunner
     from vs_project.api import RunResourceRequest
+    from vs_runtime._environment_startup import EnvironmentStartupSink
     from vs_runtime._environment_system import EnvironmentSystem
     from vs_runtime._run_environment import _OrphanReaper
     from vs_sandbox.api import DockerCli
     from vs_sandbox.api.slurm import GpuLauncher, JobConfinement
+    from vs_sim.api import Clock, Processes
+    from vs_slurm.api import SlurmJobHandle
 
 _REMOTE_PROFILER_IDS = frozenset({"auto", "none", "rocprof"})
 _NO_PROFILER_IDS = frozenset({"auto", "none"})
@@ -305,6 +315,45 @@ def _mode(settings: SlurmOperatorSettings) -> _Mode:
     return _ClusterOnly(remote_capture=slurm_transport_broker_available(settings.config))
 
 
+class _ProbeRunner(SlurmJobRunner):
+    """The startup probe's runner: each poll that finds the job still waiting is reported.
+
+    The wait is measured from the first poll, so the queue and the short run that follows it
+    read as one wait, queued then running.
+    """
+
+    def __init__(
+        self,
+        config: SlurmConfig,
+        *,
+        processes: Processes,
+        clock: Clock,
+        scratch_root: Path,
+        sink: EnvironmentStartupSink | None,
+    ) -> None:
+        super().__init__(config, processes=processes, clock=clock, scratch_root=scratch_root)
+        self._probe_clock = clock
+        self._sink = sink
+        self._waiting_since: float | None = None
+
+    def poll(self, handle: SlurmJobHandle) -> SlurmJobStatus:
+        """Read the job's scheduler state, and report it while the job has not ended."""
+        status = super().poll(handle)
+        if not status.terminal:
+            now = self._probe_clock.now()
+            if self._waiting_since is None:
+                self._waiting_since = now
+            report_wait(
+                self._sink,
+                EnvironmentStartupStage.PROBING_WORKSPACE,
+                EnvironmentWaitCondition.QUEUED
+                if status is SlurmJobStatus.PENDING
+                else EnvironmentWaitCondition.RUNNING,
+                elapsed_seconds=now - self._waiting_since,
+            )
+        return status
+
+
 @dataclass(frozen=True, slots=True)
 class _ClusterPlans:
     """The evaluation and capture plans the run wrote, and the paths they name."""
@@ -485,18 +534,21 @@ class SlurmEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
         if request.session_role is RunEnvironmentSessionRole.ROOT and isinstance(
             self._settings.config.transport, SlurmLocalTransport
         ):
-            runner = SlurmJobRunner(
+            runner = _ProbeRunner(
                 self._settings.config,
                 processes=request.system.slurm_processes,
                 clock=request.clock,
                 scratch_root=request.log_dir / "slurm-workspace-root-probe",
+                sink=request.startup,
             )
-            probe_workspace_root(
-                runner,
-                state_root=request.log_dir / "slurm-workspace-root-probe",
-                run_id=request.run_id,
-                pause=request.system.threads.sleep,
-            )
+            stage = EnvironmentStartupStage.PROBING_WORKSPACE
+            with startup_stage(request.startup, stage, clock=request.clock):
+                probe_workspace_root(
+                    runner,
+                    state_root=request.log_dir / "slurm-workspace-root-probe",
+                    run_id=request.run_id,
+                    pause=request.system.threads.sleep,
+                )
         return _PreparedRunEnvironment(
             SlurmEnvironmentFacts(
                 service_command=_slurm_service_command(self._settings.policy),
@@ -563,7 +615,7 @@ class SlurmEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
                 profiler_mcp_resources=profiler_mcp[1],
                 cluster_evaluation=ClusterEvaluationFacts(self._settings, plans.plan),
             )
-            with _starting_container(request) as output:
+            with _starting_container(request, sandbox) as output:
                 session = command_environment_session(
                     SandboxSession.start(sandbox, view, output=output)
                 )

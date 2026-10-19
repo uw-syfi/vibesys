@@ -463,10 +463,20 @@ export type Kind12 = "run_startup_progress";
  *
  * Declaration order is the order: a starting run only moves to a later stage.
  */
-export type StartupStage = "resolving" | "building_image" | "starting_container";
+export type StartupStage =
+  "resolving" | "probing_workspace" | "building_image" | "building_tools" | "starting_container";
 export type Done = number;
 export type Total = number | null;
 export type Label = string;
+/**
+ * What a startup stage is doing at the moment of one observation.
+ */
+export type StartupState = "running" | "waiting" | "finished";
+/**
+ * What a waiting startup stage waits on.
+ */
+export type StartupWaitCondition = "queued" | "running";
+export type ElapsedSeconds = number | null;
 export type Kind13 = "run_failed";
 /**
  * Why a run failed to meet its goal, whether or not it preserved a partial result.
@@ -509,7 +519,7 @@ export type Channel = "assistant" | "analysis" | "tool" | "diagnostic" | "prompt
 export type Content1 = string;
 export type Progress = string | null;
 export type AgentLabel = string | null;
-export type ElapsedSeconds = number;
+export type ElapsedSeconds1 = number;
 export type InputTokens = number;
 export type ContextWindow = number | null;
 export type Kind22 = "subprocess_output";
@@ -939,7 +949,7 @@ export type Kind55 = "startup_step";
 /**
  * Where an opening environment is, in the order it gets there.
  */
-export type EnvironmentStartupStage = "building_image" | "starting_container";
+export type EnvironmentStartupStage = "probing_workspace" | "building_image" | "building_tools" | "starting_container";
 export type Kind56 = "gate_stage";
 export type ExecutionId2 = string;
 export type Attempt4 = number;
@@ -1717,16 +1727,23 @@ export interface RunStartedData {
   overview?: RunOverview | null;
 }
 /**
- * A starting run reached ``stage``, or progressed within it.
+ * A starting run's ``stage`` began, moved, waited, or finished.
  *
  * Journaled while the run acquires its resources, before it is ready. The
- * stage only moves forward; ``progress`` is present when the stage reports
- * it (an image build's steps done of total, and the step now running).
+ * run's stage only moves forward. ``state`` is ``running`` when a stage begins
+ * and at each step of its ``progress`` (an image build's steps done of total,
+ * and the step now running), ``waiting`` while it is blocked on something
+ * outside the run host (``condition``, and the ``elapsed_seconds`` waited so
+ * far), and ``finished`` with the ``elapsed_seconds`` the stage took. A stage
+ * that fails journals no ``finished``; the run's failure says why it ended.
  */
 export interface RunStartupProgressData {
   kind: Kind12;
   stage: StartupStage;
   progress?: StartupProgress | null;
+  state?: StartupState;
+  condition?: StartupWaitCondition | null;
+  elapsed_seconds?: ElapsedSeconds;
 }
 /**
  * How far a startup stage has come: ``done`` of ``total`` steps, now on ``label``.
@@ -1854,7 +1871,7 @@ export interface AgentOutputChunkData {
 export interface AgentStatusData {
   progress?: Progress;
   agent_label?: AgentLabel;
-  elapsed_seconds?: ElapsedSeconds;
+  elapsed_seconds?: ElapsedSeconds1;
   input_tokens?: InputTokens;
   context_window?: ContextWindow;
 }

@@ -147,12 +147,20 @@ type RunStartupProgressData = Extract<
  * The latest startup stage and progress fact, while the run's environment opens.
  *
  * `null` before the first `run_startup_progress` event. The backend stops
- * reporting once the run is ready and emits no explicit "done" event, so this
- * is never cleared once set; a consumer shows it only while `status` is
+ * reporting once the run is ready, so this is never cleared once set; a consumer shows it only while `status` is
  * `starting`, the same discipline `QuotaState` documents for `pause`.
  */
 export interface RunStartupState {
   readonly stage: RunStartupProgressData['stage'];
+  /**
+   * What the stage is doing: `running` as it begins and at each step, `waiting` while blocked on
+   * something outside the run host (`condition`), `finished` once it has ended.
+   */
+  readonly state: NonNullable<RunStartupProgressData['state']>;
+  /** What a `waiting` stage waits on; `null` in any other state. */
+  readonly condition: NonNullable<RunStartupProgressData['condition']> | null;
+  /** Seconds waited so far (`waiting`) or the stage took (`finished`); `null` while `running`. */
+  readonly elapsedSeconds: number | null;
   /** `null` while the stage reports no progress of its own (resolving, say). */
   readonly progress: Readonly<{done: number; total: number | null; label: string}> | null;
   /**

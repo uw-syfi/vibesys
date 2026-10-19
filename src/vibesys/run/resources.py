@@ -752,6 +752,9 @@ class _StartupReporter:
                 else StartupProgressData(
                     done=progress.done, total=progress.total, label=progress.label
                 ),
+                state=startup.state,
+                condition=startup.condition,
+                elapsed_seconds=startup.elapsed_seconds,
             ),
         )
 

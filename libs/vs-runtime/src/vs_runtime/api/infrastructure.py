@@ -57,6 +57,8 @@ from vs_runtime._environment_startup import (
     EnvironmentStartup,
     EnvironmentStartupSink,
     EnvironmentStartupStage,
+    EnvironmentStartupState,
+    EnvironmentWaitCondition,
     StartupOutputOpener,
     ToolBuildOutputOpener,
 )
@@ -562,7 +564,9 @@ __all__ = [
     "EnvironmentStartup",
     "EnvironmentStartupSink",
     "EnvironmentStartupStage",
+    "EnvironmentStartupState",
     "EnvironmentSystem",
+    "EnvironmentWaitCondition",
     "EvaluatorGoModule",
     "EvaluatorGoModuleError",
     "EvaluatorGoModuleLifecycleHooks",

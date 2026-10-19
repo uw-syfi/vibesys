@@ -3369,8 +3369,16 @@ describe('run startup progress state', () => {
   const progressEvent = (
     sequence: number,
     data: {
-      stage: 'resolving' | 'building_image' | 'starting_container';
+      stage:
+        | 'resolving'
+        | 'probing_workspace'
+        | 'building_image'
+        | 'building_tools'
+        | 'starting_container';
       progress?: {done: number; total?: number | null; label?: string};
+      state?: 'running' | 'waiting' | 'finished';
+      condition?: 'queued' | 'running' | null;
+      elapsed_seconds?: number | null;
     },
   ): RunEvent =>
     fixtureEvent(sequence, 'run_startup_progress', {data: {kind: 'run_startup_progress', ...data}});
@@ -3384,6 +3392,9 @@ describe('run startup progress state', () => {
     expect(state.startup).toEqual({
       stage: 'resolving',
       progress: null,
+      state: 'running',
+      condition: null,
+      elapsedSeconds: null,
       stageSince: timestamp(1),
       lastActivityAt: timestamp(1),
     });
@@ -3400,6 +3411,9 @@ describe('run startup progress state', () => {
     expect(state.startup).toEqual({
       stage: 'building_image',
       progress: {done: 12, total: 30, label: 'RUN pip install'},
+      state: 'running',
+      condition: null,
+      elapsedSeconds: null,
       stageSince: timestamp(1),
       lastActivityAt: timestamp(1),
     });
@@ -3413,6 +3427,9 @@ describe('run startup progress state', () => {
     expect(state.startup).toEqual({
       stage: 'starting_container',
       progress: {done: 0, total: null, label: ''},
+      state: 'running',
+      condition: null,
+      elapsedSeconds: null,
       stageSince: timestamp(1),
       lastActivityAt: timestamp(1),
     });
@@ -3437,6 +3454,9 @@ describe('run startup progress state', () => {
     expect(state.startup).toEqual({
       stage: 'building_image',
       progress: {done: 2, total: 10, label: 'RUN build'},
+      state: 'running',
+      condition: null,
+      elapsedSeconds: null,
       stageSince: timestamp(2),
       lastActivityAt: timestamp(3),
     });
@@ -3455,6 +3475,52 @@ describe('run startup progress state', () => {
       [timestamp(2), timestamp(3)],
       [timestamp(4), timestamp(4)],
     ]);
+  });
+
+  it('folds a wait with its condition and elapsed time, keeping the stage clock and last step', () => {
+    let state = reduceEvent(
+      initialCoreState(),
+      progressEvent(1, {stage: 'probing_workspace', progress: {done: 1, total: 3, label: 'step'}}),
+    );
+    state = reduceEvent(
+      state,
+      progressEvent(2, {
+        stage: 'probing_workspace',
+        state: 'waiting',
+        condition: 'queued',
+        elapsed_seconds: 40,
+      }),
+    );
+    expect(state.startup).toEqual({
+      stage: 'probing_workspace',
+      state: 'waiting',
+      condition: 'queued',
+      elapsedSeconds: 40,
+      progress: {done: 1, total: 3, label: 'step'},
+      stageSince: timestamp(1),
+      lastActivityAt: timestamp(2),
+    });
+  });
+
+  it('folds a finished stage with how long it took, and the next stage starts running', () => {
+    let state = reduceEvent(initialCoreState(), progressEvent(1, {stage: 'building_image'}));
+    state = reduceEvent(
+      state,
+      progressEvent(2, {stage: 'building_image', state: 'finished', elapsed_seconds: 12.5}),
+    );
+    expect(state.startup).toMatchObject({
+      stage: 'building_image',
+      state: 'finished',
+      condition: null,
+      elapsedSeconds: 12.5,
+    });
+    state = reduceEvent(state, progressEvent(3, {stage: 'building_tools'}));
+    expect(state.startup).toMatchObject({
+      stage: 'building_tools',
+      state: 'running',
+      elapsedSeconds: null,
+      stageSince: timestamp(3),
+    });
   });
 
   it('resets again when an earlier stage recurs, and a replay yields the same fact', () => {

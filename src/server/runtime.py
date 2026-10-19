@@ -28,6 +28,7 @@ from server.events import (
     RunStartupProgressData,
     RunStatusChangedData,
     ServerReadyData,
+    StartupState,
 )
 from server.execution import ExecutionTracker
 from server.host_api import (
@@ -607,7 +608,10 @@ def _report_phase_facts(observer: ServerLifecycleObserver, event: RunEvent) -> N
     if isinstance(data, RunStatusChangedData):
         observer.observe(status=data.status)
     elif isinstance(data, RunStartupProgressData):
-        observer.observe(startup=StartupFact(stage=data.stage, progress=data.progress))
+        # Only a stage's start and its steps move the run through its stages; a wait or a
+        # finish says nothing new about where the run is.
+        if data.state is StartupState.RUNNING:
+            observer.observe(startup=StartupFact(stage=data.stage, progress=data.progress))
     elif isinstance(data, QuotaPausedData) and data.condition != "unavailable":
         # An outage holds only its own turn; the run is not pausing for it.
         observer.pausing_for(PauseCause.QUOTA)

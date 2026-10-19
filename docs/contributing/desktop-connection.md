@@ -425,7 +425,7 @@ One closed union, owned by `server.host_api` and folded by the existing pure lif
 
 | `RunPhase` | Meaning | Ends |
 | --- | --- | --- |
-| `starting {stage, progress}` | `stage` is `resolving`, `building_image`, or `starting_container`. `progress` is `{done, total \| null, label}` when the stage reports it. | no |
+| `starting {stage, progress}` | `stage` is `resolving`, `probing_workspace` (a Slurm run proving its workspace root), `building_image`, `building_tools` (evaluator tools the cache lacks), or `starting_container`. `progress` is `{done, total \| null, label}` when the stage reports it. | no |
 | `running` | Ready and executing (`RunStatus.RUNNING`; also `pausing`, `paused` as today). | no |
 | `stopping` | A stop was accepted; the run ends at its next boundary. | no |
 | `stopped` | Stopped by request; its result and measurements are kept, and it has ended for good: not resumable (Pause is how a run continues later). | yes |
@@ -438,13 +438,21 @@ emits `run_status_changed`, so the two cannot disagree.
 
 Facts enter once:
 
-- **Journal**: a new event `run_startup_progress {stage, progress}` and the existing
+- **Journal**: a new event `run_startup_progress {stage, progress, state, condition, elapsed_seconds}` and the existing
   `run_status_changed` (now carrying the reason on `failed`). The agent image build
   (`vs_agent.api.images.agent_image`) parses Docker's progress output into typed step
   observations (`ImageBuildProgress {done, total, label}`), not log lines; the run environment
   reports them, and the stage it is in, to the request's `startup` sink (`vs_runtime`), and the
   engine emits each as a `run_startup_progress` core event. The run's status stays `starting`
   until its session reports it ready (`RunTrigger.READY`); attaching the journal is not readiness.
+  Each stage journals `state` `running` when it begins (and at each `progress` step), `waiting` while
+  blocked on the scheduler (`condition` `queued` or `running`, `elapsed_seconds` waited so far, once per
+  poll), and `finished` with the `elapsed_seconds` it took; a stage that fails journals no `finished`.
+  An image build reports its last step, `exporting to image` (`done` equal to `total`), when Docker
+  writes the image out, which for a large base image takes minutes after the last Dockerfile step.
+  Only `running` events move the run's stage in the record. Every container the run starts, the first
+  and the candidates' after it, is named once by a narration line carrying the container's id and the
+  session's role, never by a repeated identical line.
   A pause or stop requested while starting is held (`RunState.requested`), not entered: the run
   keeps reporting `starting` with its stage and progress, a resume drops the held request, and
   `READY` lands the run in `pausing` or `stopping` if one is still held. A pause lands (`paused`)

@@ -2386,7 +2386,7 @@ const runEventSchema: Record<string, unknown> = {
     },
     "RunStartupProgressData": {
       "additionalProperties": false,
-      "description": "A starting run reached ``stage``, or progressed within it.\n\nJournaled while the run acquires its resources, before it is ready. The\nstage only moves forward; ``progress`` is present when the stage reports\nit (an image build's steps done of total, and the step now running).",
+      "description": "A starting run's ``stage`` began, moved, waited, or finished.\n\nJournaled while the run acquires its resources, before it is ready. The\nrun's stage only moves forward. ``state`` is ``running`` when a stage begins\nand at each step of its ``progress`` (an image build's steps done of total,\nand the step now running), ``waiting`` while it is blocked on something\noutside the run host (``condition``, and the ``elapsed_seconds`` waited so\nfar), and ``finished`` with the ``elapsed_seconds`` the stage took. A stage\nthat fails journals no ``finished``; the run's failure says why it ended.",
       "properties": {
         "kind": {
           "const": "run_startup_progress",
@@ -2407,6 +2407,34 @@ const runEventSchema: Record<string, unknown> = {
             }
           ],
           "default": null
+        },
+        "state": {
+          "$ref": "#/$defs/StartupState",
+          "default": "running"
+        },
+        "condition": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StartupWaitCondition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "elapsed_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Elapsed Seconds"
         }
       },
       "required": [
@@ -2921,10 +2949,31 @@ const runEventSchema: Record<string, unknown> = {
       "description": "Where a starting run is, in the order it gets there.\n\nDeclaration order is the order: a starting run only moves to a later stage.",
       "enum": [
         "resolving",
+        "probing_workspace",
         "building_image",
+        "building_tools",
         "starting_container"
       ],
       "title": "StartupStage",
+      "type": "string"
+    },
+    "StartupState": {
+      "description": "What a startup stage is doing at the moment of one observation.",
+      "enum": [
+        "running",
+        "waiting",
+        "finished"
+      ],
+      "title": "StartupState",
+      "type": "string"
+    },
+    "StartupWaitCondition": {
+      "description": "What a waiting startup stage waits on.",
+      "enum": [
+        "queued",
+        "running"
+      ],
+      "title": "StartupWaitCondition",
       "type": "string"
     },
     "SteerDelivery": {

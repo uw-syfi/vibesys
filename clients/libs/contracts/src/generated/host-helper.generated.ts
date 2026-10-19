@@ -383,7 +383,8 @@ export type RunStatus = "starting" | "running" | "pausing" | "paused" | "stoppin
  *
  * Declaration order is the order: a starting run only moves to a later stage.
  */
-export type StartupStage = "resolving" | "building_image" | "starting_container";
+export type StartupStage =
+  "resolving" | "probing_workspace" | "building_image" | "building_tools" | "starting_container";
 export type Done = number;
 export type Total = number | null;
 export type Label = string;
