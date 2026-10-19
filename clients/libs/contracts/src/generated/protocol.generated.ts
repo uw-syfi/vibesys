@@ -498,6 +498,7 @@ export type EndReason =
 export type Summary2 = string;
 export type Resumable = boolean;
 export type RoundsFinished = number;
+export type Uncompared = boolean;
 export type Kind15 = "run_interrupted";
 export type Reason3 = string;
 export type Signal = string | null;
@@ -1806,6 +1807,8 @@ export interface RunFailure {
  * without one (an error, or a stop that left work unsettled). ``resumable`` is whether a
  * resume continues it: its record is not terminal. ``rounds_finished`` counts its
  * workstreams (rounds) that reached their end. ``summary`` is core's account of the result.
+ * ``uncompared`` is whether the result adopted a candidate never compared with the input (it
+ * failed its own measurement), however the run ended.
  */
 export interface RunEndingData {
   kind: Kind14;
@@ -1813,6 +1816,7 @@ export interface RunEndingData {
   summary?: Summary2;
   resumable: Resumable;
   rounds_finished: RoundsFinished;
+  uncompared?: Uncompared;
 }
 /**
  * Reason and optional signal for an interrupted run.

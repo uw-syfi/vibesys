@@ -22,12 +22,6 @@ type Outcome = NonNullable<HostRun['end']>['outcome'];
 
 const OUTCOMES: Readonly<Record<Outcome, EndLook>> = {
   adopted: {kind: 'finished', label: 'Finished', tone: 'ok'},
-  // A candidate passed the gates, but the input it should beat failed its own measurement.
-  'adopted-without-input-comparison': {
-    kind: 'finished',
-    label: 'Finished · adopted without an input comparison',
-    tone: 'warn',
-  },
   'kept-input': {kind: 'finished', label: 'Finished · kept the input', tone: 'ok'},
   'no-winner': {kind: 'finished', label: 'No winner', tone: 'neutral'},
   deadline: {kind: 'finished', label: 'Time limit reached', tone: 'warn'},
@@ -38,12 +32,30 @@ const OUTCOMES: Readonly<Record<Outcome, EndLook>> = {
   force_stopped: {kind: 'stopped', label: 'Force stopped', tone: 'neutral'},
 };
 
+/** Words added to an ending that adopted a candidate the input could not be compared with. */
+const UNCOMPARED_WORDS = 'adopted without an input comparison';
+
+/**
+ * The look of an ending (adopted, the deadline, a stop) whose adopted candidate was never compared
+ * with the input, because the input failed its own measurement: never a plain success.
+ */
+function uncomparedLook(look: EndLook): EndLook {
+  return {
+    kind: look.kind,
+    label: `${look.label} · ${UNCOMPARED_WORDS}`,
+    tone: look.tone === 'err' ? 'err' : 'warn',
+  };
+}
+
 /**
  * An ended run's look: from its end record's outcome, or, on a tombstone that records no end, from
  * its last phase (null when that phase says nothing of an ending).
  */
 export function endedLook(run: Pick<HostRun, 'phase' | 'end'>): EndLook | null {
-  if (run.end !== null) return OUTCOMES[run.end.outcome];
+  if (run.end !== null) {
+    const look = OUTCOMES[run.end.outcome];
+    return run.end.uncompared === true ? uncomparedLook(look) : look;
+  }
   switch (run.phase) {
     case 'completed':
       return {kind: 'finished', label: 'Finished', tone: 'ok'};

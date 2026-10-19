@@ -129,9 +129,6 @@ def test_a_successful_run_returns_without_exiting(tmp_path: Path) -> None:
     cli.dispatch(["--outer-loop", "agent", "--input", str(project)], _Runs(ok))
 
 
-@pytest.mark.xfail(
-    strict=True, reason="PR #3235 H1: the uncompared mark is a structured field of the result"
-)
 def test_a_run_that_adopted_an_uncompared_candidate_says_so_when_it_completes(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

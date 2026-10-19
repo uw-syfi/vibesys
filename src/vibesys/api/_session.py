@@ -366,6 +366,7 @@ class _LocalRunSession:
                 loop=request.orchestration.id,
                 succeeded=succeeded,
                 failure=failure,
+                uncompared=outcome.uncompared,
             )
         finally:
             if self._unsubscribe is not None:

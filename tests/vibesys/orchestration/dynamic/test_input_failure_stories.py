@@ -140,10 +140,8 @@ def _assert_adopted(host: EvidenceHost, *, uncompared: bool) -> None:
     assert finish.result.outcome == "success"
     assert finish.result.selection is not None
     assert finish.result.selection.kind == "retained_candidate"
-    told = finish.result.reason.split(":", 1)[0]
-    assert told == (
-        EndReason.ADOPTED_WITHOUT_INPUT_COMPARISON if uncompared else EndReason.ADOPTED
-    ), finish.result.reason
+    assert finish.result.reason.split(":", 1)[0] == EndReason.ADOPTED, finish.result.reason
+    assert finish.result.uncompared is uncompared
 
 
 # What the live run's input printed when its accuracy stage hung and hit its time limit (S173).
@@ -352,9 +350,6 @@ def test_an_input_measurement_lost_once_is_taken_again_and_the_run_compares_with
     assert_flow_closed(host)
 
 
-@pytest.mark.xfail(
-    strict=True, reason="PR #3235 H1: the uncompared mark is a structured field of the result"
-)
 @MODES
 def test_an_uncompared_run_that_ends_on_its_deadline_still_says_it_was_never_compared(
     *, restarting: bool

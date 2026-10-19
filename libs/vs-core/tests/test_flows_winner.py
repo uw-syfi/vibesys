@@ -98,7 +98,7 @@ def test_the_last_choice_is_the_one_adopted(begin: Begin) -> None:
 def test_an_uncompared_return_says_so_only_of_an_adopted_candidate(
     begin: Begin, *, chosen: bool
 ) -> None:
-    """A root that had no input reading to compare with ends "adopted-without-input-comparison".
+    """A root that had no input reading to compare with says its adopted candidate is uncompared.
 
     Keeping the input needs no comparison, so a run that chose nothing still keeps the input.
     """
@@ -112,7 +112,8 @@ def test_an_uncompared_return_says_so_only_of_an_adopted_candidate(
     assert result.outcome == "success"
     if chosen:
         assert result.selection == selection_of(kept("a"))
-        assert result.reason == "adopted-without-input-comparison: a"
+        assert result.reason == "adopted: a"
+        assert result.uncompared
     else:
         assert result.selection == BASELINE
         assert result.reason.startswith("kept-input")
@@ -243,12 +244,6 @@ def test_the_deadline_control_cancels_the_run_with_its_own_reason(begin: Begin) 
     assert result.reason.startswith("deadline")
 
 
-_H1 = pytest.mark.xfail(
-    strict=True, reason="PR #3235 H1: the uncompared mark is a structured field of the result"
-)
-
-
-@_H1
 @pytest.mark.parametrize("ending", [None, "stop", "deadline"], ids=["returned", "stop", "deadline"])
 @pytest.mark.parametrize("chosen", [True, False], ids=["a-candidate", "nothing"])
 def test_an_uncompared_adoption_is_a_field_of_the_result_however_the_run_ends(

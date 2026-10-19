@@ -370,9 +370,6 @@ def test_a_failed_public_run_reports_its_verified_adopted_candidate(
     assert failed[0].data.failure.adopted_candidate == candidate_revisions[0]
 
 
-@pytest.mark.xfail(
-    strict=True, reason="PR #3235 H1: the uncompared mark is a structured field of the result"
-)
 def test_a_public_run_that_adopts_an_uncompared_candidate_says_so_in_its_result_and_ending(
     request_template: RunRequest, sim: Sim
 ) -> None:

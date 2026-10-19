@@ -129,6 +129,7 @@ def _ending_fact(data: RunEndingData) -> RunEndingFact:
         summary=data.summary,
         resumable=data.resumable,
         rounds_finished=data.rounds_finished,
+        uncompared=data.uncompared,
     )
 
 

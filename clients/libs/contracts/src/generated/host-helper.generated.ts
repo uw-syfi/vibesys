@@ -417,12 +417,11 @@ export type PauseCause = "user" | "quota";
 /**
  * Why a run ended, on its tombstone: vs-core's ``EndReason`` members and two of the shell's.
  *
- * The first eight are ``vs_core``'s ``EndReason`` values, copied because this module
+ * The first seven are ``vs_core``'s ``EndReason`` values, copied because this module
  * may not import the core (``tests/server/test_run_end_record.py`` keeps them equal).
  */
 export type RunEndOutcome =
   | "adopted"
-  | "adopted-without-input-comparison"
   | "kept-input"
   | "no-winner"
   | "adoption-failed"
@@ -434,6 +433,7 @@ export type RunEndOutcome =
 export type Reason = string;
 export type Resumable = boolean;
 export type ResumeFromRound = number | null;
+export type Uncompared = boolean;
 export type Hostname = string;
 export type ProtocolVersion1 = 1;
 export type VibesysVersion1 = string;
@@ -501,6 +501,7 @@ export type DurationS = number | null;
 export type Summary = string;
 export type Resumable1 = boolean;
 export type RoundsFinished = number;
+export type Uncompared1 = boolean;
 /**
  * The journal's last word on a run: the terminal event it ends with, if it has one.
  */
@@ -1704,6 +1705,7 @@ export interface EndRecord {
   reason: Reason;
   resumable: Resumable;
   resume_from_round?: ResumeFromRound;
+  uncompared?: Uncompared;
 }
 /**
  * A registry entry this reader cannot interpret; ``version`` is ``None`` if it has none.
@@ -1868,6 +1870,7 @@ export interface RunEndingFact {
   summary?: Summary;
   resumable: Resumable1;
   rounds_finished: RoundsFinished;
+  uncompared?: Uncompared1;
 }
 /**
  * What a run's tile draws, folded from the journal in the digest's pass.

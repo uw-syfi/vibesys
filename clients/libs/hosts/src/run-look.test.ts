@@ -7,7 +7,6 @@ type Outcome = NonNullable<RunEnd>['outcome'];
 /** Every outcome an end record can carry: a new one fails to compile here until it is listed. */
 const OUTCOMES: Readonly<Record<Outcome, true>> = {
   adopted: true,
-  'adopted-without-input-comparison': true,
   'kept-input': true,
   'no-winner': true,
   deadline: true,
@@ -39,15 +38,32 @@ describe('endedLook', () => {
     });
     expect(endedLook(ended('finish-refused'))?.tone).toBe('warn');
     expect(endedLook(ended('deadline'))?.tone).toBe('warn');
-    expect(endedLook(ended('adopted-without-input-comparison'))).toEqual({
-      kind: 'finished',
-      label: 'Finished · adopted without an input comparison',
-      tone: 'warn',
-    });
     expect(endedLook(ended('failed'))?.tone).toBe('err');
     expect(endedLook(ended('adoption-failed'))?.tone).toBe('err');
     expect(endedLook(ended('stopped'))?.tone).toBe('neutral');
     expect(endedLook(ended('force_stopped'))?.tone).toBe('neutral');
+  });
+
+  test('an ending that adopted an uncompared candidate says so and is never a plain success', () => {
+    const uncompared = (outcome: Outcome): Pick<HostRun, 'phase' | 'end'> => ({
+      phase: 'completed',
+      end: {outcome, reason: 'why', resumable: false, uncompared: true},
+    });
+    expect(endedLook(uncompared('adopted'))).toEqual({
+      kind: 'finished',
+      label: 'Finished · adopted without an input comparison',
+      tone: 'warn',
+    });
+    expect(endedLook(uncompared('deadline'))).toEqual({
+      kind: 'finished',
+      label: 'Time limit reached · adopted without an input comparison',
+      tone: 'warn',
+    });
+    expect(endedLook(uncompared('stopped'))).toEqual({
+      kind: 'stopped',
+      label: 'Stopped · adopted without an input comparison',
+      tone: 'warn',
+    });
   });
 
   test('every outcome has its own label', () => {

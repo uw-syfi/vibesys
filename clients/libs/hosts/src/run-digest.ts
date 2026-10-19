@@ -75,6 +75,8 @@ export type RunDigestEntry =
       readonly durationSeconds: number | null;
       /** The run's own ending record's outcome, when its journal has one that names it. */
       readonly outcome: NonNullable<RunEnd>['outcome'] | null;
+      /** Whether that ending adopted a candidate never compared with the input. */
+      readonly uncompared?: boolean;
       readonly closing: RunClosing | null;
       /** Whether the journal says the run is over (an ending record or a terminal event). */
       readonly over: boolean;
@@ -122,6 +124,7 @@ function read(summary: RunSummary, digest: RunDigest, createdAt: number): RunDig
     bestSoFarRatio: digest.best_so_far_ratio,
     durationSeconds: digest.duration_s,
     outcome: ending?.outcome ?? null,
+    uncompared: ending?.uncompared === true,
     closing,
     over: ending !== null || closing !== null,
     endSummary: nonEmpty(ending?.summary),
@@ -154,7 +157,12 @@ export function digestLook(entry: Extract<RunDigestEntry, {kind: 'read'}>): EndL
   if (entry.outcome !== null) {
     return endedLook({
       phase: 'completed',
-      end: {outcome: entry.outcome, reason: '', resumable: false},
+      end: {
+        outcome: entry.outcome,
+        reason: '',
+        resumable: false,
+        uncompared: entry.uncompared === true,
+      },
     });
   }
   switch (entry.closing) {

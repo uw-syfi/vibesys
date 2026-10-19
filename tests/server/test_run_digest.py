@@ -331,9 +331,6 @@ def test_a_digest_reads_when_and_how_the_run_ended() -> None:
     )
 
 
-@pytest.mark.xfail(
-    strict=True, reason="PR #3235 H1: the uncompared mark is a structured field of the result"
-)
 def test_a_digest_reads_that_an_adoption_the_deadline_ended_was_never_compared() -> None:
     """H1: a run whose tombstone is gone still says, from its journal, it adopted uncompared."""
     lines = [

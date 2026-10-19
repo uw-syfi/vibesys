@@ -13,7 +13,6 @@ type Outcome = NonNullable<RunEnd>['outcome'];
 
 const OUTCOMES: readonly Outcome[] = [
   'adopted',
-  'adopted-without-input-comparison',
   'kept-input',
   'no-winner',
   'adoption-failed',
@@ -26,7 +25,6 @@ const OUTCOMES: readonly Outcome[] = [
 /** Core's own account of an ending: its code and what it was about, in its terms. */
 const CORE_REASONS = [
   'adopted: settlement:000002/settle.1',
-  'adopted-without-input-comparison: settlement:000002/settle.1',
   'kept-input: the input',
   'stopped: kept-input: the input',
   'no-winner: every round failed',
@@ -216,6 +214,16 @@ describe('the ended banner', () => {
     }
     const read = {...ended('adopted', 'adopted: s', full), history: {kind: 'read'}} as const;
     expect(endedView(read)?.reason).toMatch(/^Adopted the candidate from round /);
+  });
+
+  test('says an adopted candidate was never compared with the input, however the run ended', () => {
+    for (const outcome of ['adopted', 'deadline', 'stopped'] as const) {
+      const words = endReason(outcome, `${outcome}: adopted: c1`, null, 'max', true);
+      expect(words).toContain('adopted without an input comparison');
+      expect(endReason(outcome, `${outcome}: adopted: c1`, null, 'max')).not.toContain(
+        'input comparison',
+      );
+    }
   });
 
   test('shows a failure’s own message', () => {

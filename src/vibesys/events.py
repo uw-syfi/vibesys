@@ -431,6 +431,8 @@ class RunEndingData(EventPayload):
     without one (an error, or a stop that left work unsettled). ``resumable`` is whether a
     resume continues it: its record is not terminal. ``rounds_finished`` counts its
     workstreams (rounds) that reached their end. ``summary`` is core's account of the result.
+    ``uncompared`` is whether the result adopted a candidate never compared with the input (it
+    failed its own measurement), however the run ended.
     """
 
     kind: Literal["run_ending"] = "run_ending"
@@ -438,6 +440,7 @@ class RunEndingData(EventPayload):
     summary: str = ""
     resumable: bool
     rounds_finished: NonNegativeInt
+    uncompared: bool = False
 
 
 ExperimentsChangeReason = Literal[

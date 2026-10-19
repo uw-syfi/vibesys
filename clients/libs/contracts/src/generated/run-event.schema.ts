@@ -885,7 +885,6 @@ const runEventSchema: Record<string, unknown> = {
       "description": "Why the framework ended the run as it did. Closed: the result's reason starts with it.",
       "enum": [
         "adopted",
-        "adopted-without-input-comparison",
         "kept-input",
         "no-winner",
         "adoption-failed",
@@ -2364,7 +2363,7 @@ const runEventSchema: Record<string, unknown> = {
     },
     "RunEndingData": {
       "additionalProperties": false,
-      "description": "How a core run's durable record stands as the run ends, emitted once just before its end.\n\n``reason`` is core's ``EndReason`` when the run recorded a result, ``None`` when it ended\nwithout one (an error, or a stop that left work unsettled). ``resumable`` is whether a\nresume continues it: its record is not terminal. ``rounds_finished`` counts its\nworkstreams (rounds) that reached their end. ``summary`` is core's account of the result.",
+      "description": "How a core run's durable record stands as the run ends, emitted once just before its end.\n\n``reason`` is core's ``EndReason`` when the run recorded a result, ``None`` when it ended\nwithout one (an error, or a stop that left work unsettled). ``resumable`` is whether a\nresume continues it: its record is not terminal. ``rounds_finished`` counts its\nworkstreams (rounds) that reached their end. ``summary`` is core's account of the result.\n``uncompared`` is whether the result adopted a candidate never compared with the input (it\nfailed its own measurement), however the run ended.",
       "properties": {
         "kind": {
           "const": "run_ending",
@@ -2395,6 +2394,11 @@ const runEventSchema: Record<string, unknown> = {
           "minimum": 0,
           "title": "Rounds Finished",
           "type": "integer"
+        },
+        "uncompared": {
+          "default": false,
+          "title": "Uncompared",
+          "type": "boolean"
         }
       },
       "required": [

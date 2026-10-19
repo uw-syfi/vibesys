@@ -318,14 +318,12 @@ _StartedAt = Annotated[float, Field(ge=0, le=ECMASCRIPT_DATE_MAX_SECONDS, allow_
 class RunEndOutcome(StrEnum):
     """Why a run ended, on its tombstone: vs-core's ``EndReason`` members and two of the shell's.
 
-    The first eight are ``vs_core``'s ``EndReason`` values, copied because this module
+    The first seven are ``vs_core``'s ``EndReason`` values, copied because this module
     may not import the core (``tests/server/test_run_end_record.py`` keeps them equal).
     """
 
     ADOPTED = "adopted"
     """The chosen candidate was adopted."""
-    ADOPTED_WITHOUT_INPUT_COMPARISON = "adopted-without-input-comparison"
-    """A candidate was adopted, but the input had no reading to compare it with."""
     KEPT_INPUT = "kept-input"
     """Nothing beat the input, and the input was adopted as it stood."""
     NO_WINNER = "no-winner"
@@ -375,6 +373,9 @@ class EndRecord(BaseModel):
     reason: OneLine
     resumable: bool
     resume_from_round: PositiveInt | None = None
+    uncompared: bool = False
+    """The run adopted a candidate never compared with the input (the input failed its own
+    measurement), whichever ``outcome`` ended it: adopted, the deadline or a stop."""
 
     @model_validator(mode="after")
     def _round_only_when_resumable(self) -> EndRecord:
@@ -397,6 +398,8 @@ class RunEndingFact(BaseModel):
     summary: str = ""
     resumable: bool
     rounds_finished: NonNegativeInt
+    uncompared: bool = False
+    """The run adopted a candidate never compared with the input, however it ended."""
 
 
 class PauseCause(StrEnum):

@@ -183,9 +183,6 @@ def test_the_record_observer_is_told_a_quota_pause_and_how_the_run_ended(tmp_pat
     ]
 
 
-@pytest.mark.xfail(
-    strict=True, reason="PR #3235 H1: the uncompared mark is a structured field of the result"
-)
 def test_the_record_observer_is_told_an_uncompared_adoption_the_deadline_ended(
     tmp_path: Path,
 ) -> None:

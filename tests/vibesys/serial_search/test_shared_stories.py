@@ -139,7 +139,7 @@ def adopted(host: SerialHost) -> RunResultProposal:
 
 def uncompared(result: RunResultProposal) -> bool:
     """Whether the run says its adopted candidate was never compared with the input."""
-    return result.reason.split(":", 1)[0] == EndReason.ADOPTED_WITHOUT_INPUT_COMPARISON
+    return result.uncompared
 
 
 # -- the input's measurement -----------------------------------------------------------------
@@ -181,9 +181,6 @@ def test_an_input_measurement_lost_once_is_taken_again_and_the_winner_is_compare
     assert_flow_closed(host)
 
 
-@pytest.mark.xfail(
-    strict=True, reason="PR #3235 H1: the uncompared mark is a structured field of the result"
-)
 @SEARCHES
 @MODES
 def test_an_uncompared_run_that_ends_on_its_deadline_still_says_it_was_never_compared(

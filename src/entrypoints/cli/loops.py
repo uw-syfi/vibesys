@@ -417,6 +417,8 @@ def _run_request(args: argparse.Namespace, runs: Runs | None = None) -> None:
     result = _execute_run_request(request, production_runs() if runs is None else runs)
     if result.succeeded:
         sys.stdout.write(f"\n{request.orchestration.id} run completed.\n")
+        if result.uncompared:
+            sys.stdout.write(f"{_UNCOMPARED}\n")
     else:
         sys.stdout.write(f"\n{request.orchestration.id} run stopped early.\n")
         sys.stdout.write(f"{describe_early_stop(result)}\n")
@@ -437,6 +439,12 @@ def describe_early_stop(result: RunResult) -> str:
         return f"Reason: {result.stop_reason}. The run has ended; start a new run to go on."
     return "Reason: the run was stopped on request."
 
+
+_UNCOMPARED = (
+    "The candidate was adopted without an input comparison: the input failed its own "
+    "measurement, so nothing shows the candidate beats it."
+)
+"""What a run that adopted an uncompared candidate adds to its completion line."""
 
 _FAILURE_HEADLINES = {
     RunFailureKind.BUDGET_EXHAUSTED: "the workstream budget ran out",

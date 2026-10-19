@@ -66,9 +66,10 @@ class Uncompared(Value):
     """What a root flow returns when its chosen candidate was never compared with the input.
 
     The input has no reading to compare with (its own measurement failed), so the candidate was
-    judged on the task's gates alone. The framework adopts the last choice as usual, and a run
-    that adopts a candidate ends ``ADOPTED_WITHOUT_INPUT_COMPARISON``, never as a plain
-    adoption; a run whose choice is still the input ends as it would have.
+    judged on the task's gates alone. The framework adopts the last choice as usual, and the
+    result of a run that adopts a candidate says it was never compared
+    (``RunResultProposal.uncompared``), however the run ended (its root returning, a stop or
+    the deadline); a run whose choice is still the input ends as it would have.
     """
 
 
@@ -98,9 +99,6 @@ class EndReason(StrEnum):
 
     ADOPTED = "adopted"
     """The chosen candidate was adopted."""
-    ADOPTED_WITHOUT_INPUT_COMPARISON = "adopted-without-input-comparison"
-    """The chosen candidate was adopted, but the input had no reading to compare it with: it
-    passed the task's gates, and nothing shows it beats the input (``Uncompared``)."""
     KEPT_INPUT = "kept-input"
     """Nothing beat the input, and the input was adopted as it stood."""
     NO_WINNER = "no-winner"
@@ -196,7 +194,7 @@ async def conclude(kit: Kit, returned: NoWinner | Uncompared | None) -> None:
     is closing included); a failed adoption or a ``NoWinner`` is a ``failure`` with a typed reason,
     unless the operator stopped the run: a stop is a pause the operator can lift, so its ending
     is ``cancelled`` whatever the adoption did, and a resume reopens the run.
-    An ``Uncompared`` return marks an adopted candidate's reason as never compared with the input.
+    An ``Uncompared`` return marks an adopted candidate's result as never compared with the input.
     """
     stopped = _stop_ending(kit)
     result = await _result(kit, returned, stopped)
@@ -247,15 +245,17 @@ async def _result(
             # The deadline closed the run to decisions: it ended and nothing failed.
             return RunResultProposal(outcome="cancelled", reason=reason_text(stopped, detail))
         return RunResultProposal(outcome="failure", reason=detail)
-    if isinstance(selection, TrustedBaseline):
-        kind = EndReason.KEPT_INPUT
-    elif isinstance(returned, Uncompared):
-        kind = EndReason.ADOPTED_WITHOUT_INPUT_COMPARISON
-    else:
-        kind = EndReason.ADOPTED
+    kind = EndReason.KEPT_INPUT if isinstance(selection, TrustedBaseline) else EndReason.ADOPTED
     detail = reason_text(kind, _selection_name(selection))
+    # Keeping the input needs no comparison; a candidate the root never compared says so.
+    uncompared = isinstance(returned, Uncompared) and isinstance(selection, RetainedCandidate)
     if stopped is not None:
         return RunResultProposal(
-            outcome="cancelled", reason=reason_text(stopped, detail), selection=selection
+            outcome="cancelled",
+            reason=reason_text(stopped, detail),
+            selection=selection,
+            uncompared=uncompared,
         )
-    return RunResultProposal(outcome="success", reason=detail, selection=selection)
+    return RunResultProposal(
+        outcome="success", reason=detail, selection=selection, uncompared=uncompared
+    )

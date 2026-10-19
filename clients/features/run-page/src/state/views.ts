@@ -673,6 +673,7 @@ export function endedView(state: RunPageState): EndedView | null {
             unclipped(end.reason, wholeReason(state, phase.run.reason)),
             adopted,
             direction,
+            end.uncompared === true,
           );
   const round = end?.resume_from_round ?? null;
   const resume =

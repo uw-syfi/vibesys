@@ -165,6 +165,9 @@ class RunResult(BaseModel):
     succeeded: bool
     status: Literal[RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.STOPPED] = RunStatus.FAILED
     failure: RunFailure | None = None
+    uncompared: bool = False
+    """The run adopted a candidate never compared with the input: the input failed its own
+    measurement, so the candidate was judged on the task's gates alone."""
     stop_reason: str | None = None
     """Why a stopped run stopped, as its record says; None when the stop left no reason."""
 

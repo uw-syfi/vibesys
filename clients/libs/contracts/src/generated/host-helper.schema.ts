@@ -1695,6 +1695,11 @@ const hostHelperSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "Resume From Round"
+        },
+        "uncompared": {
+          "default": false,
+          "title": "Uncompared",
+          "type": "boolean"
         }
       },
       "required": [
@@ -5386,10 +5391,9 @@ const hostHelperSchema: Record<string, unknown> = {
       "type": "object"
     },
     "RunEndOutcome": {
-      "description": "Why a run ended, on its tombstone: vs-core's ``EndReason`` members and two of the shell's.\n\nThe first eight are ``vs_core``'s ``EndReason`` values, copied because this module\nmay not import the core (``tests/server/test_run_end_record.py`` keeps them equal).",
+      "description": "Why a run ended, on its tombstone: vs-core's ``EndReason`` members and two of the shell's.\n\nThe first seven are ``vs_core``'s ``EndReason`` values, copied because this module\nmay not import the core (``tests/server/test_run_end_record.py`` keeps them equal).",
       "enum": [
         "adopted",
-        "adopted-without-input-comparison",
         "kept-input",
         "no-winner",
         "adoption-failed",
@@ -5429,6 +5433,11 @@ const hostHelperSchema: Record<string, unknown> = {
           "minimum": 0,
           "title": "Rounds Finished",
           "type": "integer"
+        },
+        "uncompared": {
+          "default": false,
+          "title": "Uncompared",
+          "type": "boolean"
         }
       },
       "required": [

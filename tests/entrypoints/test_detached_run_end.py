@@ -232,9 +232,6 @@ def test_a_run_that_recorded_a_result_ends_with_cores_reason(outcome: RunEndOutc
     )
 
 
-@pytest.mark.xfail(
-    strict=True, reason="PR #3235 H1: the uncompared mark is a structured field of the result"
-)
 @pytest.mark.parametrize(
     "outcome", [RunEndOutcome.ADOPTED, RunEndOutcome.DEADLINE, RunEndOutcome.STOPPED]
 )

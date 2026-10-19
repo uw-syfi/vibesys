@@ -57,10 +57,14 @@ _UNFINISHED_REASON = "the run ended without recording a result"
 
 @dataclass(frozen=True)
 class RunEnd:
-    """How a run ended: its status and, for a failure, the data that says why."""
+    """How a run ended: its status and, for a failure, the data that says why.
+
+    ``uncompared`` is whether it adopted a candidate never compared with the input.
+    """
 
     status: RunStatus
     failure: RunFailure | None = None
+    uncompared: bool = False
 
 
 class CoreRunRefusedError(RuntimeError):
@@ -220,7 +224,9 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
         raise CoreRunRefusedError(services.run_id, outcome.refusal)
     status = _status_of(outcome.result, shell)
     return RunEnd(
-        status, _failure_of(outcome.result, shell) if status is RunStatus.FAILED else None
+        status,
+        _failure_of(outcome.result, shell) if status is RunStatus.FAILED else None,
+        uncompared=outcome.result is not None and outcome.result.uncompared,
     )
 
 
@@ -238,6 +244,7 @@ def run_ending(shell: CoreRuntime) -> RunEndingData:
         rounds_finished=sum(
             1 for attempt in core.attempts.attempts if attempt.phase == AttemptPhase.TERMINAL
         ),
+        uncompared=result is not None and result.uncompared,
     )
 
 

@@ -106,11 +106,27 @@ export function unclipped(reason: string, full: string | null): string {
     : reason;
 }
 
+const UNCOMPARED =
+  'The candidate was adopted without an input comparison: the input failed its own measurement, so nothing shows it beats the input.';
+
 /**
  * The ended banner's line, for an end record's `outcome` and `reason`. `adopted` and `direction` come
- * from the run's trace and declared objective; null when the page has not read them.
+ * from the run's trace and declared objective; null when the page has not read them. `uncompared`
+ * is the record's mark that the adopted candidate was never compared with the input, which holds
+ * however the run ended (adopted, the deadline, a stop).
  */
 export function endReason(
+  outcome: Outcome,
+  reason: string,
+  adopted: AdoptedCandidate | 'input' | null,
+  direction: 'max' | 'min' | null | undefined,
+  uncompared = false,
+): string {
+  const words = outcomeWords(outcome, reason, adopted, direction);
+  return uncompared ? `${words} ${UNCOMPARED}` : words;
+}
+
+function outcomeWords(
   outcome: Outcome,
   reason: string,
   adopted: AdoptedCandidate | 'input' | null,
@@ -119,8 +135,6 @@ export function endReason(
   switch (outcome) {
     case 'adopted':
       return adoptedWords(adopted, direction);
-    case 'adopted-without-input-comparison':
-      return 'A candidate was adopted without an input comparison: the input failed its own measurement, so nothing shows the candidate beats it.';
     case 'kept-input':
       return INPUT_STANDS;
     case 'no-winner':

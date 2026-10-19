@@ -447,6 +447,7 @@ class _Fold:
                     "summary": data.get("summary", ""),
                     "resumable": data.get("resumable"),
                     "rounds_finished": data.get("rounds_finished"),
+                    "uncompared": data.get("uncompared", False),
                 }
             )
         except ValidationError:

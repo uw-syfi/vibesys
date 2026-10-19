@@ -477,8 +477,8 @@ Facts enter once:
   operator's. `instances.watch` therefore drives the sidebar's paused status and the "paused"
   notification without a run connection.
 - **Ended records**: when a server exits, its last record (terminal phase and reason) stays in the
-  registry as a tombstone for 24 hours, with `end {outcome, reason, resumable, resume_from_round}`
-  (record version 5). `outcome` is vs-core's `EndReason` (`adopted`, `kept-input`, `no-winner`,
+  registry as a tombstone for 24 hours, with
+  `end {outcome, reason, resumable, resume_from_round, uncompared}` (record version 5). `outcome` is vs-core's `EndReason` (`adopted`, `kept-input`, `no-winner`,
   `adoption-failed`, `stopped`, `deadline`, `finish-refused`) when the run recorded a result, else
   `force_stopped` when the server was terminated, `stopped` for a stop that left work unsettled,
   and `failed` otherwise. `reason` is one line (at most 200 characters): core's account of the
@@ -492,7 +492,11 @@ Facts enter once:
   (`vs_core.reopens_on_resume`: a `cancelled` result under a standing operator stop that is not
   the deadline's), and the search starts again from its checkpoints. Only an operator's resume
   lifts a stop, never a crash restart (#2902). `resume_from_round` is then its finished rounds
-  plus one. A force stop records the stop request in the run's state
+  plus one.
+  `uncompared` is core's result fact that the adopted candidate
+  was never compared with the input (the input failed its own measurement); it holds whichever
+  outcome ended the run (`adopted`, `deadline` or `stopped`), and the UI adds "adopted without an
+  input comparison" to that outcome. A force stop records the stop request in the run's state
   (`ProjectState.record_stop_request`) before the server is signalled, so a resume of a
   force-stopped run commits that stop first, starts no new work, and only finishes the drain and
   ends; `vibesys --resume` refuses a run whose record is terminal for a reason of its own
