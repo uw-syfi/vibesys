@@ -162,6 +162,7 @@ from vs_agent.sink import (
 from vs_agent.skills import NULL_SKILL_SELECTION, SkillSelection
 from vs_agent.spec import AgentBackend, AgentSpec
 from vs_agent.todos import todos_from_tool_call
+from vs_agent.tool_server_check import CHECK_TIMEOUT_S, ToolServerFailure, check_tool_servers
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
@@ -181,6 +182,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BASE_ENV_ALLOWLIST",
+    "CHECK_TIMEOUT_S",
     "CLI_VERSIONS",
     "CONTAINER_FRAMEWORK_ROOT",
     "CONTAINER_PYTHON",
@@ -284,6 +286,7 @@ __all__ = [
     "ThreadsClock",
     "TodoItemData",
     "ToolResultPayload",
+    "ToolServerFailure",
     "Unknown",
     "UnvettedHarnessError",
     "agent_supports_tool_servers",
@@ -294,6 +297,7 @@ __all__ = [
     "auth_paths",
     "build_agent_client",
     "check_harness",
+    "check_tool_servers",
     "cli_mcp_config_files",
     "cli_skill_dirs",
     "container_import_roots",

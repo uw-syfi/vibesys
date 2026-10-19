@@ -113,7 +113,16 @@ def create_session(
         if settings.backend_factory is None
         else settings.backend_factory
     )
-    agents = BuiltInSessionAgents(client_factory) if settings.agents is None else settings.agents
+    agents = (
+        BuiltInSessionAgents(
+            client_factory,
+            network=settings.network,
+            git=Git(settings.processes),
+            registry=selected_registry,
+        )
+        if settings.agents is None
+        else settings.agents
+    )
 
     def publish(event: CoreEvent) -> None:
         # Pre-attachment observations have no durable journal identity yet.

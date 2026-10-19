@@ -7,7 +7,7 @@ from contextlib import ExitStack
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from vs_agent.api import AgentSessionKey, SessionScope
+from vs_agent.api import AgentSessionKey, SessionScope, check_tool_servers
 from vs_project.api import RunLogger
 from vs_sim.api import CloseOnce, ReleaseStack
 
@@ -15,11 +15,23 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from vs_agent.api import AgentClientProtocol, AgentEventSink, AgentSpec
+    from vs_agent.api import AgentClientProtocol, AgentEventSink, AgentSpec, ToolServerFailure
     from vs_mcp.api import ToolServerDescriptor
     from vs_runtime._agent_execution import AgentExecutionEnvironment
     from vs_sandbox.api import HostResource
     from vs_sim.api import Clock, Released, Threads
+
+
+@dataclass(frozen=True, slots=True)
+class ToolServerStartupCheck:
+    """A check of a conversation's tool servers and where its failures are published.
+
+    ``check`` returns the servers that cannot start; each is published on ``events`` as an
+    error tool result naming the server and the cause, which a client shows in the conversation.
+    """
+
+    check: Callable[[], tuple[ToolServerFailure, ...]]
+    events: AgentEventSink
 
 
 class _Closeable(Protocol):
@@ -41,6 +53,13 @@ class ManagedConversationSpec:
     continuation_prompt: str | None = None
     tool_servers: tuple[ToolServerDescriptor, ...] = ()
     environment: tuple[tuple[str, str], ...] = ()
+    tool_server_checks: tuple[ToolServerDescriptor, ...] = ()
+    """Startup checks of ``tool_servers``: each exits 0 when its server could start.
+
+    In an agent container, each runs there before a turn until all pass, and a failure is
+    reported on the conversation's event stream with its cause. On the host nothing runs: the
+    server starts on the interpreter that runs VibeSys.
+    """
 
 
 class ManagedConversation(Protocol):
@@ -64,6 +83,7 @@ class _RuntimeManagedConversation:
         spec: ManagedConversationSpec,
         resources: tuple[_Closeable, ...],
         threads: Threads,
+        startup: ToolServerStartupCheck | None = None,
     ) -> None:
         for name, value in (("role", spec.role), ("member_id", spec.member_id)):
             if not value.strip():
@@ -80,6 +100,7 @@ class _RuntimeManagedConversation:
         )
         self._lock = threads.lock()
         self._close = CloseOnce()
+        self._startup = startup
 
     def turn(self, message: str, *, invocation_id: str | None = None) -> str:
         """Serialize a turn and reuse only this object's provider context."""
@@ -90,6 +111,7 @@ class _RuntimeManagedConversation:
             if self._close.started:
                 error = "managed conversation is closed"
                 raise RuntimeError(error)
+            self._report_tool_server_failures(invocation_id)
             previous = self._client.provider_session_id(self._session_key)
             prompt = (
                 self._spec.continuation_prompt
@@ -108,6 +130,28 @@ class _RuntimeManagedConversation:
                     invocation_id=invocation_id,
                 )
             return answer
+
+    def _report_tool_server_failures(self, invocation_id: str | None) -> None:
+        """Check the tool servers until every one passes; say why each failing one cannot start.
+
+        The turn still runs: the agent can answer without its tools, and the operator sees on
+        the stream which server it lacks and why.
+        """
+        if self._startup is None:
+            return
+        failures = self._startup.check()
+        if not failures:
+            self._startup = None
+            return
+        for failure in failures:
+            self._startup.events.tool_result(
+                failure.server,
+                f"tool server {failure.server} did not start: {failure.detail}",
+                is_error=True,
+                agent_kind=self._spec.role,
+                round_label=f"auxiliary {self._spec.role}",
+                invocation_id=invocation_id,
+            )
 
     def _invoke(
         self,
@@ -148,14 +192,37 @@ def create_managed_conversation(
     *,
     resources: tuple[_Closeable, ...],
     threads: Threads,
+    startup: ToolServerStartupCheck | None = None,
 ) -> ManagedConversation:
     """Transfer *resources* after validating and creating one conversation.
 
     If construction raises, ownership remains with the caller.  After a
     successful return, the conversation closes every resource in reverse order.
-    ``threads`` makes the lock that serializes its turns.
+    ``threads`` makes the lock that serializes its turns. ``startup``, when given, is checked
+    before each turn until it finds no failure.
     """
-    return _RuntimeManagedConversation(client, spec, resources, threads)
+    return _RuntimeManagedConversation(client, spec, resources, threads, startup)
+
+
+def _container_tool_check(
+    spec: ManagedConversationSpec,
+    environment: AgentExecutionEnvironment,
+    events: AgentEventSink,
+) -> ToolServerStartupCheck | None:
+    """The startup checks of *spec*'s tool servers, run in the agent container; ``None`` off one.
+
+    Absolute paths in a check are not translated: the container interpreter and the
+    framework mount are the same on both sides.
+    """
+    backends = environment.backends
+    if not spec.tool_server_checks or not environment.use_docker or not backends:
+        return None
+    (runner,) = backends.values()
+
+    def check() -> tuple[ToolServerFailure, ...]:
+        return check_tool_servers(runner, spec.tool_server_checks, agent_path=str)
+
+    return ToolServerStartupCheck(check, events)
 
 
 def open_managed_conversation(  # noqa: PLR0913  # lint-waiver: LW-994218 [PLR0913]; this lower composition seam binds independently resolved agent, environment, logging, event, and conversation inputs once.
@@ -206,6 +273,7 @@ def open_managed_conversation(  # noqa: PLR0913  # lint-waiver: LW-994218 [PLR09
             spec,
             resources=(environment, logger, client),
             threads=threads,
+            startup=_container_tool_check(spec, environment, agent_events),
         )
     except BaseException as construction_error:
         try:

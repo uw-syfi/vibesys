@@ -124,6 +124,16 @@ through `Project.state.agent_visible_namespace`. The host environment gives the 
 copy of the effective objective beside the run's logs, as a container gets it as a
 mount, because the committed document lives in `runs/`.
 
+A tool that must read run state therefore runs on the host, and the agent's container only
+forwards to it. The run Chat agent's `vibesys-run` tools are the example: `launch.agents` serves
+them with `vs_evaluation`'s `ToolRelayService` on a unix socket in the run's private socket
+directory (the one directory every agent container mounts, beside the evaluation and queue
+status sockets), and the agent's tool server (`vs_evaluation.tool_relay_mcp`) imports only the
+container interpreter's packages and relays each call. The relay's token is issued to that one
+conversation, so another agent of the run, which shares the directory, is refused. Before the
+chat's first turn in a container, `launch.agents` runs the server's `--check` there and
+reports a server that cannot start as an error tool result naming it and the cause.
+
 `ProjectSandboxPaths.hidden_paths` is the set the policy hides, so adding a hidden state
 directory is one entry there. The framework's own reads and writes of run state, the
 isolation check (`GitTracker`), state commits and resume run outside the confinement and

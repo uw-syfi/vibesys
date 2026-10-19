@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict
 
 from vs_decode.api import Unreadable, decode_json
 from vs_evaluation.queue_status import QUEUE_READING, QueueStatusUnavailable
+from vs_evaluation.socket_lines import read_line
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -49,28 +50,6 @@ class QueueStatusCall(BaseModel):
     action: Literal["read"] = "read"
 
 
-class _LineTooLongError(OSError):
-    """A peer sent more than the frame allows without ending its line."""
-
-
-def _read_line(connection: Connection, clock: Clock, deadline: float, limit: int) -> bytes | None:
-    """One line, or ``None`` if the peer closed first; ``TimeoutError`` at ``deadline``."""
-    data = b""
-    while b"\n" not in data:
-        remaining = deadline - clock.now()
-        if remaining <= 0:
-            message = "no complete line before the deadline"
-            raise TimeoutError(message)
-        chunk = connection.recv(65536, remaining)
-        if not chunk:
-            return None
-        data += chunk
-        if len(data) > limit:
-            message = f"line longer than {limit} bytes"
-            raise _LineTooLongError(message)
-    return data.partition(b"\n")[0]
-
-
 class SocketQueueStatusReader:
     """Reads the host's queue status over its unix socket; a failed call is unavailable."""
 
@@ -92,7 +71,7 @@ class SocketQueueStatusReader:
                 connection.send(
                     QueueStatusCall().model_dump_json().encode() + b"\n", self._timeout_s
                 )
-                line = _read_line(connection, self._clock, deadline, MAX_REPLY_BYTES)
+                line = read_line(connection, self._clock, deadline, MAX_REPLY_BYTES)
             finally:
                 connection.close()
         except OSError as error:
@@ -183,7 +162,7 @@ class QueueStatusService:
 
     def _answer(self, connection: Connection) -> None:
         try:
-            line = _read_line(
+            line = read_line(
                 connection, self._clock, self._clock.now() + REQUEST_READ_S, _MAX_REQUEST_BYTES
             )
             if line is None:

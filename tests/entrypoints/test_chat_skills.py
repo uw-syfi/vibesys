@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from entrypoints.chat_tools_server import PROPOSE_STEER_TOOL, READ_TOOLS
+from launch.chat_tools import PROPOSE_STEER_TOOL, READ_TOOLS
 from server.chat.prompts import experiment_chat_system_prompt
 from vibesys.api import AuxiliaryAgentLaunch, AuxiliarySkills
 from vibesys.api.request import default_skill_roots

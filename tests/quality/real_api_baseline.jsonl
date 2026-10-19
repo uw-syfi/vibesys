@@ -165,7 +165,6 @@
 {"path": "libs/vs-slurm/tests/test_fake_connector.py", "rule": "real_impl", "count": 2}
 {"path": "tests/architecture/test_prompt_resource_contract.py", "rule": "real_impl", "count": 2}
 {"path": "tests/conformance/test_server_transports.py", "rule": "real_impl", "count": 9}
-{"path": "tests/entrypoints/test_chat_tools_server.py", "rule": "real_impl", "count": 2}
 {"path": "tests/entrypoints/test_launch_frontends.py", "rule": "real_impl", "count": 16}
 {"path": "tests/entrypoints/test_launch_selection.py", "rule": "real_impl", "count": 12}
 {"path": "tests/entrypoints/test_legacy_resume.py", "rule": "real_impl", "count": 1}

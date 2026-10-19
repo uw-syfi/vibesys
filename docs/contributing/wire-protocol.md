@@ -276,9 +276,9 @@ core does.
 
 A run's chat agent can suggest a steer but cannot send one. Its only steering tool is
 `propose_steer` (`text`, `target`, `mode`: the fields of a `SteerRequest` without a
-`control_id`), served by `src/entrypoints/chat_tools_server.py` beside its read tools, and no tool
-it has sends, withdraws or controls anything: `test_the_chat_agent_has_no_tool_that_sends` holds
-the tool list to that. The tool validates its arguments with the control schema's own models and
+`control_id`), built in `src/launch/chat_tools.py` beside its read tools, and no tool it has
+sends, withdraws or controls anything: `test_the_chat_agent_has_no_tool_that_sends` holds the
+tool list to that. The tool validates its arguments with the control schema's own models and
 returns a `SteerProposalReceipt` (`vibesys.api`). When a chat turn's tool result carries one, the
 server records a `steer_proposed` event on that chat thread (`chat_thread_id` on the event)
 right after the `tool_result`. Its `data` is `{kind, proposal_id, proposal: {text, target, mode}}`;

@@ -525,7 +525,7 @@
  "tests/e2e/test_wakeup_fd_signal_relay.py": 0.11,
  "tests/e2e/test_web_matrix_gateway.py": 0.0,
  "tests/e2e/test_web_port_collisions.py": 0.68,
- "tests/entrypoints/test_chat_tools_server.py": 0.6,
+ "tests/entrypoints/test_chat_tools.py": 0.6,
  "tests/entrypoints/test_cli_modalities.py": 0.1,
  "tests/entrypoints/test_detached_instances.py": 1.9,
  "tests/entrypoints/test_detached_startup_progress.py": 0.01,

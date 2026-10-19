@@ -685,13 +685,36 @@ depends_on = ["vs_sim.api"]
 # Host service and agent-side client of the queue status socket.
 path = "vs_evaluation.queue_status_wire"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_decode.api", "vs_evaluation.queue_status", "vs_sim.api"]
+depends_on = ["vs_decode.api", "vs_evaluation.queue_status", "vs_evaluation.socket_lines", "vs_sim.api"]
 
 [[modules]]
 # The read-only queue status agent tool server, on the shared vs_mcp layer.
 path = "vs_evaluation.queue_status_mcp"
 layer = "prompts_and_lower_libs"
 depends_on = ["vs_evaluation.queue_status", "vs_evaluation.queue_status_wire", "vs_mcp", "vs_sim.api"]
+
+[[modules]]
+path = "vs_evaluation.api.tool_relay"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.tool_relay_mcp", "vs_evaluation.tool_relay_wire"]
+
+[[modules]]
+# Line framing shared by the host services an agent tool server dials over a unix socket.
+path = "vs_evaluation.socket_lines"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_sim.api"]
+
+[[modules]]
+# Host service and agent-side client that run a tool on the host for an agent in a container.
+path = "vs_evaluation.tool_relay_wire"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_decode.api", "vs_evaluation.socket_lines", "vs_mcp", "vs_sim.api"]
+
+[[modules]]
+# The agent-side tool server that forwards to the host's tool relay, and its startup check.
+path = "vs_evaluation.tool_relay_mcp"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.tool_relay_wire", "vs_mcp", "vs_sim.api"]
 
 [[modules]]
 # The queue status Fake and the contract suite every reader passes.
@@ -1295,7 +1318,7 @@ from = ["vs_evaluation.state_namespace"]
 [[modules]]
 path = "launch"
 visibility = ["entrypoints", "tests", "scripts"]
-depends_on = ["vibesys.api", "vibesys.orchestration.dynamic.scripted", "vibesys.api.catalog", "vibesys.api.wiring", "vibesys.api.store", "vibesys.api.contracts", "vs_agent", "vs_evaluation.api", "vs_evaluation.api.queue_status", "vs_evaluation.api.tools", "vs_github", "vs_project", "vs_runtime", "vs_runtime.api.wiring", "vs_sandbox", "vs_mcp", "vs_slurm", "vs_sim.api"]
+depends_on = ["vibesys.api", "vibesys.api.hypothesis", "vibesys.orchestration.dynamic.scripted", "vibesys.api.catalog", "vibesys.api.wiring", "vibesys.api.store", "vibesys.api.contracts", "vs_agent", "vs_evaluation.api", "vs_evaluation.api.queue_status", "vs_evaluation.api.tool_relay", "vs_evaluation.api.tools", "vs_github", "vs_project", "vs_runtime", "vs_runtime.api.wiring", "vs_sandbox", "vs_mcp", "vs_slurm", "vs_sim.api"]
 
 [[modules]]
 path = "vibesys.api.runs"
@@ -1314,7 +1337,7 @@ depends_on = ["vs_agent", "vibesys.orchestration.dynamic.search", "vibesys.orche
 [[modules]]
 path = "vibesys.api.wiring"
 visibility = ["launch", "entrypoints", "tests", "scripts"]
-depends_on = ["vibesys", "vibesys.api._session", "vibesys.api.assembly", "vibesys.run", "vibesys.run.skill_sources", "vibesys.orchestration.skill_selection"]
+depends_on = ["vibesys", "vibesys.api._session", "vibesys.api.assembly", "vibesys.run", "vibesys.run.evaluation_socket", "vibesys.run.skill_sources", "vibesys.orchestration.skill_selection"]
 
 [[modules]]
 path = "vs_runtime._runs"
@@ -1336,7 +1359,7 @@ expose = ["RunHandle", "Runs"]
 
 [[interfaces]]
 from = ["vibesys.api.wiring"]
-expose = ["AgentToolContext", "NativeProfilerPreflight", "ProfilerPreflight", "RunResources", "SessionAgents", "SessionImplementations", "chat_skill_dirs", "create_session", "platform_skill_selection"]
+expose = ["AgentToolContext", "NativeProfilerPreflight", "ProfilerPreflight", "RunResources", "SessionAgents", "SessionImplementations", "agent_tool_socket", "chat_skill_dirs", "create_session", "platform_skill_selection"]
 
 [[interfaces]]
 from = ["vibesys.api.catalog"]

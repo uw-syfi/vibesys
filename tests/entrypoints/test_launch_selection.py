@@ -13,6 +13,7 @@ from tests.support.real_git import REAL_GIT, REAL_PROCESSES
 from entrypoints.production import production_timing
 from launch import (
     LaunchSettings,
+    built_in_orchestrations,
     default_runs,
     open_run_store,
     validate_descriptor,
@@ -79,7 +80,12 @@ class FalseyFakeBackendFactory:
 
 class FalseyFakeSessionAgents:
     def __init__(self, client_factory: FalseyFakeAgentFactory) -> None:
-        self.implementation = BuiltInSessionAgents(client_factory=client_factory)
+        self.implementation = BuiltInSessionAgents(
+            client_factory=client_factory,
+            network=UnixNetwork(),
+            git=REAL_GIT,
+            registry=built_in_orchestrations(),
+        )
         self.calls = 0
 
     def __bool__(self) -> bool:

@@ -1,12 +1,12 @@
-"""Stdio MCP server exposing one run's read-model to experiment chat.
+"""The tools that expose one run's read-model to experiment chat.
 
 Instead of copying a run's portable state and raw logs into the chat agent's sandbox
-for `rg`/`tail`/`jq`, this subprocess opens the run's own read-model
-(`launch.open_run_store`) and serves it as a handful of read-only MCP tools, in the
-vocabulary the desktop app shows: an *idea* (what the code calls a hypothesis) is one
-thing the run tried, a *step* (a round) is one pass of work on it. A chat agent launches
-`python -m entrypoints.chat_tools_server --run-id <id> --project-root <path>` per
-`launch.agents._investigation_tools`.
+for `rg`/`tail`/`jq`, these tools read the run's own read-model (a `RunStore`) and offer it as
+a handful of read-only tools, in the vocabulary the desktop app shows: an *idea* (what the
+code calls a hypothesis) is one thing the run tried, a *step* (a round) is one pass of work on
+it. `launch.agents` serves them on the host through `vs_evaluation`'s tool relay, so the run's
+state stays on the host side of the trust boundary and the agent's container, whatever
+interpreter it has, speaks only MCP to the relay.
 
 Tool set:
 
@@ -21,7 +21,7 @@ Tool set:
   documents (`RunRecord.portable_documents`, read whichever branch is checked out), for
   detail the tools above do not carry. The raw per-attempt/event logs live in `log_dir`,
   a machine-local path outside the project root, which is the only thing this
-  subprocess's `--project-root` argument can resolve into.
+  relay can resolve into.
 - `propose_steer`: the agent's only steering tool. It checks a suggestion (its target must be
   one `list_targets` shows) and returns it as
   a `SteerProposalReceipt`, which the run server publishes as a `steer_proposed` event for
@@ -31,12 +31,10 @@ Tool set:
 
 from __future__ import annotations
 
-import argparse
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from launch import open_run_store
 from vibesys.api import (
     STEER_PROPOSAL_KIND,
     SteerMode,
@@ -45,9 +43,7 @@ from vibesys.api import (
     SteerTarget,
 )
 from vibesys.api.hypothesis import agent_projection
-from vs_mcp.api import ToolSpec, serve_stdio
-from vs_project.api import Git, Project
-from vs_sim.api import OsProcesses, OsThreads
+from vs_mcp.api import ToolSpec
 
 if TYPE_CHECKING:
     from vibesys.api import RunStore, SteerTargets
@@ -350,7 +346,7 @@ def _check_target(targets: SteerTargets | None, target: SteerTarget) -> None:
 
 
 def build_tools(store: RunStore, run_id: str) -> tuple[ToolSpec[Any], ...]:
-    """Build every tool this server exposes for one run: the read-only ones and `propose_steer`."""
+    """Build every tool the chat agent gets for one run: the read-only ones and `propose_steer`."""
     # Touch the run once up front so a missing run_id fails fast and
     # identically across every tool, instead of each "get_run" discovering it lazily.
     store.get_run(run_id)
@@ -364,32 +360,3 @@ def build_tools(store: RunStore, run_id: str) -> tuple[ToolSpec[Any], ...]:
         _read_state_file_tool(store, run_id),
         _propose_steer_tool(store, run_id),
     )
-
-
-def build_parser() -> argparse.ArgumentParser:
-    """Build the argument parser this subprocess's own CLI is invoked with."""
-    parser = argparse.ArgumentParser(
-        prog="vibesys-run-mcp",
-        description=(
-            "Stdio MCP server exposing one run's read-model as investigation tools for "
-            "experiment chat, and propose_steer, which suggests guidance without sending it."
-        ),
-    )
-    parser.add_argument("--run-id", required=True, help="Run to expose.")
-    parser.add_argument(
-        "--project-root", required=True, help="Root of the project containing the run."
-    )
-    return parser
-
-
-def main(argv: list[str] | None = None) -> None:
-    """Parse args, open this run's read-model, and serve its tools over stdio."""
-    args = build_parser().parse_args(argv)
-    project = Project.open(args.project_root)
-    store = open_run_store(project, git=Git(OsProcesses()), threads=OsThreads())
-    tools = build_tools(store, args.run_id)
-    serve_stdio(tools, server_name="vibesys-run")
-
-
-if __name__ == "__main__":
-    main()
