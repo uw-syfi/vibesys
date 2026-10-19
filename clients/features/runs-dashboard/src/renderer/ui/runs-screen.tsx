@@ -1,12 +1,15 @@
 import {
+  Banner,
   Button,
   Card,
+  type ChartKeyItem,
   Field,
   type MenuItem,
   OverviewGroup,
   OverviewTile,
   Page,
   ResultChart,
+  ResultChartKey,
   Row,
   Select,
   type SelectOption,
@@ -29,6 +32,14 @@ const GROUP_OPTIONS: readonly SelectOption<GroupBy>[] = [
   {value: 'machine', label: 'Machine'},
   {value: 'task', label: 'Task'},
   {value: 'agent', label: 'Agent'},
+];
+
+const CHART_KEY: readonly ChartKeyItem[] = [
+  {mark: 'kept', label: 'Kept'},
+  {mark: 'not-better', label: 'Not better'},
+  {mark: 'failed', label: 'Failed'},
+  {mark: 'pending', label: 'Running'},
+  {mark: 'line', label: 'Best so far'},
 ];
 
 function TileOf(props: {
@@ -97,6 +108,8 @@ export function RunsScreen(props: {
   readonly menu: (id: string) => readonly MenuItem[];
   readonly newRun: () => void;
   readonly draft: RunsDraft | null;
+  /** What to say when saved runs could not be read; none when all were. */
+  readonly notice: {readonly title: string; readonly body: string} | null;
 }): JSX.Element {
   const {tiles, by} = props;
   const attention = needsYou(tiles);
@@ -120,6 +133,9 @@ export function RunsScreen(props: {
       }
     >
       <Stack gap="space-6">
+        {props.notice === null ? null : (
+          <Banner tone="warn" title={props.notice.title} body={props.notice.body} />
+        )}
         {props.draft === null ? null : <Draft draft={props.draft} />}
         {tiles.length === 0 ? (
           <Row justify="center">
@@ -127,6 +143,7 @@ export function RunsScreen(props: {
           </Row>
         ) : (
           <>
+            <ResultChartKey label="Chart key" items={CHART_KEY} />
             {attention.length === 0 ? null : (
               <OverviewGroup title="Needs you" count={attention.length} tone="err">
                 {attention.map(tile)}

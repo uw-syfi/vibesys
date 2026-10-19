@@ -15,7 +15,6 @@ import {
   type SidebarState,
   sidebarStep,
 } from '../../state/index.js';
-import type {SidebarPreference} from './sidebar-visibility.js';
 
 /** The bridge calls and pushes the sidebar uses. */
 export type ShellBridge = Pick<
@@ -29,7 +28,6 @@ export type ShellBridge = Pick<
   | 'onListing'
   | 'onRecent'
   | 'onPreferences'
-  | 'onToggleSidebar'
 >;
 
 /** Run `callback` after `delayMs`; the returned function cancels it (the app injects the scheduler). */
@@ -69,26 +67,18 @@ function perform(
  */
 export function createSidebarStore(
   bridge: ShellBridge,
-  preference: SidebarPreference,
   schedule: ScheduleRefresh,
 ): {
   readonly store: Store<SidebarState, SidebarAction>;
   readonly actions: ShellActions;
 } {
-  const initial = initialSidebar(preference.read() ?? true);
+  const initial = initialSidebar();
   const store = createStore<SidebarState, SidebarAction, SidebarRequest>(
     sidebarStep,
     initial.state,
     (request, dispatch) => perform(bridge, request, dispatch),
   );
   for (const request of initial.requests) perform(bridge, request, store.dispatch);
-  let shown = initial.state.shown;
-  store.subscribe(() => {
-    const now = store.getState().shown;
-    if (now === shown) return;
-    shown = now;
-    preference.write(shown);
-  });
   // While any run is live its digest is due again after each interval; the next waits on this one.
   let refreshing = false;
   const keepLiveDigestsFresh = (): void => {
@@ -101,7 +91,6 @@ export function createSidebarStore(
   };
   store.subscribe(keepLiveDigestsFresh);
   keepLiveDigestsFresh();
-  bridge.onToggleSidebar(() => store.dispatch({type: 'toggle-sidebar'}));
   let cursor: number | null = null;
   const early: {sequence: number; action: SidebarAction}[] = [];
   const pushed = (sequence: number, action: SidebarAction): void => {
@@ -129,7 +118,7 @@ export function createSidebarStore(
       openWindow: run => {
         const shown = store.getState().selection;
         if (shown.kind === 'run' && sameRun(shown.run, run)) {
-          store.dispatch({type: 'select', screen: {kind: 'new-run'}});
+          store.dispatch({type: 'select', screen: {kind: 'runs'}});
         }
         void settled(bridge.openRunWindow(run));
       },

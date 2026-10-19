@@ -106,6 +106,9 @@ importers:
       '@vibesys/feature-run-page':
         specifier: workspace:*
         version: link:../../features/run-page
+      '@vibesys/feature-runs-dashboard':
+        specifier: workspace:*
+        version: link:../../features/runs-dashboard
       '@vibesys/feature-settings':
         specifier: workspace:*
         version: link:../../features/settings

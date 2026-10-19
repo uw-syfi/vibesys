@@ -3,10 +3,9 @@ import {frameProblems, STACKED_FRAME} from './checks/main-above-fold.js';
 import {open, sidebar} from './world.js';
 
 /**
- * The page is first on screen at every window width. Below 800 px the navigation column no longer
- * stacks above the page (which put the first screen under a full-height sidebar): the rail stays
- * beside the page and a shown column floats over its start. The check fails on the stacked frame
- * the app used to draw.
+ * The page is first on screen at every window width: the rail stays beside the page, at every
+ * width, and never stacks above it (which put the first screen under a full-height column). The
+ * check fails on the stacked frame the app used to draw.
  */
 
 const WIDTHS = [640, 800, 1000] as const;
@@ -24,24 +23,14 @@ test('the frame check fails on a navigation stacked above the page', async ({pag
 });
 
 for (const width of WIDTHS) {
-  test(`at ${width} px the page starts at the top with the sidebar shown`, async ({page}) => {
+  test(`at ${width} px the page starts at the top, beside the rail`, async ({page}) => {
     await shown(page, width);
     expect(await frameProblems(page)).toEqual([]);
-    await expect(
-      page.getByRole('heading', {name: 'What do you want to optimize?'}),
-    ).toBeInViewport();
-  });
-
-  test(`at ${width} px the page starts at the top with the sidebar hidden, beside the rail`, async ({
-    page,
-  }) => {
-    await shown(page, width);
-    await page.getByRole('button', {name: 'Hide sidebar'}).click();
-    await expect(sidebar(page)).toBeHidden();
-    expect(await frameProblems(page)).toEqual([]);
-    await expect(page.getByRole('navigation', {name: 'Quick navigation'})).toBeVisible();
-    await expect(
-      page.getByRole('heading', {name: 'What do you want to optimize?'}),
-    ).toBeInViewport();
+    await expect(sidebar(page)).toBeVisible();
+    await expect(page.getByRole('heading', {name: 'Runs'})).toBeInViewport();
+    const rail = await sidebar(page).boundingBox();
+    const content = await page.locator('.vs-app-content').boundingBox();
+    expect(rail?.width).toBe(64);
+    expect(content?.x).toBe(64);
   });
 }

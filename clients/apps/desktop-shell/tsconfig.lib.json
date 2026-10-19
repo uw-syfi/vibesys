@@ -49,6 +49,12 @@
       "path": "../../features/run-page/tsconfig.state.json"
     },
     {
+      "path": "../../features/runs-dashboard/tsconfig.renderer.json"
+    },
+    {
+      "path": "../../features/runs-dashboard/tsconfig.state.json"
+    },
+    {
       "path": "../../features/settings/tsconfig.renderer.json"
     },
     {
@@ -58,19 +64,19 @@
       "path": "../../libs/hosts/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/runs/tsconfig.lib.json"
+      "path": "../../libs/ipc/tsconfig.lib.json"
     },
     {
       "path": "../../libs/run-session/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/transport/tsconfig.websocket.json"
-    },
-    {
-      "path": "../../libs/ipc/tsconfig.lib.json"
+      "path": "../../libs/runs/tsconfig.lib.json"
     },
     {
       "path": "../../libs/store/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/transport/tsconfig.websocket.json"
     },
     {
       "path": "../../libs/ui/tsconfig.lib.json"

@@ -28,6 +28,7 @@ import {
   type ListProjectRuns,
   listedRunRefs,
   projectRunsListed,
+  refreshed,
 } from './all-runs.js';
 import {
   type Clock,
@@ -63,7 +64,9 @@ export type Screen =
       readonly machine?: HostKey;
       readonly section?: 'clusters' | 'logins';
     }
-  | {readonly kind: 'all-runs'}
+  /** The Runs dashboard, the app's home. */
+  | {readonly kind: 'runs'}
+  | {readonly kind: 'usage'}
   | {readonly kind: 'run'; readonly run: RunRef};
 
 /** Why a Recent row cannot say how its run came out, in words, and whether asking again may help. */
@@ -90,13 +93,12 @@ export interface RunRow {
   readonly look: RowLook;
   /** Set when a Recent row's state cannot be read; the row says so and may offer a retry. */
   readonly problem: RowProblem | null;
-}
-
-/** Runs from one machine, in recency order. */
-export interface MachineRunGroup {
-  readonly host: HostKey;
-  readonly title: string;
-  readonly rows: readonly RunRow[];
+  /** What the run is doing now, or why it ended, in one line; null when nothing says. */
+  readonly now: string | null;
+  /** When a live run's server started, in milliseconds; null for a run no server drives. */
+  readonly startedAt: number | null;
+  /** The run's digest as last read, with its chart data when the host offers it; null before one is. */
+  readonly digest: ReadDigest | null;
 }
 
 /** What is known of one Recent run's digest: asked for, read, or not to be had. */
@@ -147,8 +149,6 @@ export interface SidebarState {
   readonly selection: Screen;
   /** Screen to return to when Settings is opened, including its run or New run context. */
   readonly beforeSettings: Screen;
-  /** Whether the sidebar is shown; the viewer may hide it completely. */
-  readonly shown: boolean;
 }
 
 export type SidebarAction =
@@ -163,7 +163,6 @@ export type SidebarAction =
   | {readonly type: 'archived'; readonly archived: readonly RunRef[]}
   | {readonly type: 'select'; readonly screen: Screen}
   | {readonly type: 'back-from-settings'}
-  | {readonly type: 'toggle-sidebar'}
   /** What the host said of the digests asked under `token`; null when it could not be asked. */
   | {readonly type: 'digests-read'; readonly token: number; readonly reply: RunDigestsReply | null}
   /** The user asks again for a Recent run whose state could not be read. */
@@ -177,9 +176,7 @@ export type SidebarAction =
       readonly host: HostKey;
       readonly project: string;
       readonly runs: readonly ListedRun[] | null;
-    }
-  /** The user asks the All runs screen to list every machine's runs again. */
-  | {readonly type: 'reload-all-runs'};
+    };
 
 /** What the sidebar asks of the main process. */
 export type SidebarRequest =
@@ -204,18 +201,17 @@ export const SIDEBAR_EMPTY: SidebarState = {
   digests: {},
   live: {},
   lastDigestToken: 0,
-  selection: {kind: 'new-run'},
-  beforeSettings: {kind: 'new-run'},
-  shown: true,
+  selection: {kind: 'runs'},
+  beforeSettings: {kind: 'runs'},
 };
 
 function same(state: SidebarState): SidebarStep {
   return {state, requests: []};
 }
 
-/** The sidebar before anything is heard, shown or hidden as the viewer left it. */
-export function initialSidebar(shown = true): SidebarStep {
-  return same({...SIDEBAR_EMPTY, shown});
+/** The sidebar before anything is heard. */
+export function initialSidebar(): SidebarStep {
+  return same(SIDEBAR_EMPTY);
 }
 
 /** The selection, remembering the screen Settings was opened from. */
@@ -226,12 +222,12 @@ function selected(state: SidebarState, screen: Screen): SidebarStep {
     state.selection.kind !== 'machines'
       ? state.selection
       : state.beforeSettings;
-  const entering = screen.kind === 'all-runs' && state.selection.kind !== 'all-runs';
+  const entering = screen.kind === 'runs' && state.selection.kind !== 'runs';
   const next = {
     ...state,
     selection: screen,
     beforeSettings,
-    ...(entering ? {allRuns: ALL_RUNS_EMPTY} : {}),
+    ...(entering ? {allRuns: refreshed(state.allRuns)} : {}),
   };
   return same(next);
 }
@@ -276,10 +272,27 @@ interface WantedDigest {
   readonly runId: string;
 }
 
-/** The runs whose digest a screen shows now: Recent's rows, and every run the All runs screen lists. */
+/** The most runs the dashboard shows (the newest), so what it reads stays bounded. */
+export const DASHBOARD_RUNS = 60;
+
+/** The runs the dashboard shows: not archived, newest first, at most `DASHBOARD_RUNS`. */
+export function dashboardRefs(state: SidebarState): ReturnType<typeof listedRunRefs> {
+  return listedRunRefs(state.allRuns)
+    .filter(
+      ({host, run}) =>
+        !state.archived.some(archived => sameRun(archived, {host, runId: run.runId})),
+    )
+    .sort(
+      (left, right) =>
+        right.run.createdAt - left.run.createdAt || (left.run.runId < right.run.runId ? 1 : -1),
+    )
+    .slice(0, DASHBOARD_RUNS);
+}
+
+/** The runs whose digest a screen shows now: the runs the user opened, and every run the dashboard shows. */
 function shownRuns(state: SidebarState): WantedDigest[] {
   const recent = recentRuns(state).slice(0, RECENT_ROWS);
-  const all = state.selection.kind === 'all-runs' ? listedRunRefs(state.allRuns) : [];
+  const all = dashboardRefs(state);
   return [...recent, ...all.map(({host, project, run}) => ({host, project, runId: run.runId}))];
 }
 
@@ -382,9 +395,8 @@ function askLiveDigests(state: SidebarState, refresh: boolean): SidebarStep {
   return {state: {...state, live, lastDigestToken: token}, requests};
 }
 
-/** The project listings the All runs screen still needs, while it is shown. */
+/** The project listings the dashboard still needs: every known project's runs, on every screen. */
 function askAllRuns(state: SidebarState): SidebarStep {
-  if (state.selection.kind !== 'all-runs') return same(state);
   const asked = askProjectRuns(state.allRuns, state.listings, state.recent);
   return asked.requests.length === 0
     ? same(state)
@@ -466,8 +478,6 @@ function baseStep(state: SidebarState, action: SidebarAction): SidebarStep {
       return same(state);
     case 'project-runs-listed':
       return same({...state, allRuns: projectRunsListed(state.allRuns, action)});
-    case 'reload-all-runs':
-      return same({...state, allRuns: ALL_RUNS_EMPTY});
     case 'overview':
       return same({
         ...state,
@@ -486,8 +496,6 @@ function baseStep(state: SidebarState, action: SidebarAction): SidebarStep {
       return selected(state, action.screen);
     case 'back-from-settings':
       return selected(state, state.beforeSettings);
-    case 'toggle-sidebar':
-      return same({...state, shown: !state.shown});
   }
 }
 
@@ -540,6 +548,9 @@ export function liveRows(state: SidebarState): RunRow[] {
         status: liveStatus(server),
         look: liveLook(server),
         problem: null,
+        now: liveDetail(server),
+        startedAt: server.startedAt * 1000,
+        digest: state.live[digestKey(run)]?.entry ?? null,
       };
     });
   });
@@ -641,11 +652,23 @@ export function recentRow(state: SidebarState, recent: RecentRun, clock: Clock):
     ...(reason === null ? [] : [reason]),
     `${label(recent.host)} · run ${recent.runId}`,
   ].join('\n');
-  return {run, title, detail, trail, tooltip, status, look, problem};
+  return {
+    run,
+    title,
+    detail,
+    trail,
+    tooltip,
+    status,
+    look,
+    problem,
+    now: reason,
+    startedAt: null,
+    digest: read ?? null,
+  };
 }
 
 /** A digest that was read. */
-type ReadDigest = Extract<RunDigestEntry, {kind: 'read'}>;
+export type ReadDigest = Extract<RunDigestEntry, {kind: 'read'}>;
 
 /** A read digest's ideas as the trail says them; null: the journal predates the run trace. */
 function ideasTrail(ideas: number | null): string {
@@ -688,40 +711,6 @@ export function recentRows(
   };
 }
 
-/** Recent's rows grouped by machine; recency order holds within each machine. */
-export function recentGroups(
-  state: SidebarState,
-  clock: Clock,
-): {readonly groups: readonly MachineRunGroup[]; readonly more: number} {
-  const {rows, more} = recentRows(state, clock);
-  const groups: {host: HostKey; title: string; rows: RunRow[]}[] = [];
-  for (const row of rows) {
-    let machine = groups.find(group => group.host === row.run.host);
-    if (machine === undefined) {
-      machine = {host: row.run.host, title: label(row.run.host), rows: []};
-      groups.push(machine);
-    }
-    machine.rows.push(row);
-  }
-  return {groups, more};
-}
-
-/** Live rows grouped by their machine, preserving listing and run order. */
-export function liveMachineGroups(
-  state: SidebarState,
-): readonly {title: string; rows: readonly RunRow[]}[] {
-  const groups: {host: HostKey; title: string; rows: RunRow[]}[] = [];
-  for (const row of liveRows(state)) {
-    let group = groups.find(each => each.host === row.run.host);
-    if (group === undefined) {
-      group = {host: row.run.host, title: label(row.run.host), rows: []};
-      groups.push(group);
-    }
-    group.rows.push(row);
-  }
-  return groups;
-}
-
 function recentProblems(state: SidebarState, live: readonly RunRow[]): string[] {
   const problems: string[] = [];
   const {rows} = recentRows(state);
@@ -738,6 +727,23 @@ function recentProblems(state: SidebarState, live: readonly RunRow[]): string[] 
     }
     if (state.digests[digestKey(row.run)] === undefined) {
       problems.push(`recent ${row.run.runId} has no digest asked for`);
+    }
+  }
+  return problems;
+}
+
+function dashboardProblems(state: SidebarState, live: readonly RunRow[]): string[] {
+  const problems: string[] = [];
+  const refs = dashboardRefs(state);
+  if (refs.length > DASHBOARD_RUNS) problems.push('the dashboard shows more than its limit');
+  for (const {host, run} of refs) {
+    const ref: RunRef = {host, runId: run.runId};
+    if (state.archived.some(archived => sameRun(archived, ref))) {
+      problems.push(`archived ${run.runId} is on the dashboard`);
+    }
+    const isLive = live.some(each => sameRun(each.run, ref));
+    if (!isLive && state.digests[digestKey(ref)] === undefined) {
+      problems.push(`${run.runId} has no digest asked for`);
     }
   }
   return problems;
@@ -763,6 +769,7 @@ export function sidebarInvariants(state: SidebarState): string[] {
   return [
     ...(new Set(hosts).size === hosts.length ? [] : ['a host is listed twice']),
     ...recentProblems(state, live),
+    ...dashboardProblems(state, live),
     ...liveProblems(live),
   ];
 }

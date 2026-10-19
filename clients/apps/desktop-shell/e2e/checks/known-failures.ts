@@ -5,7 +5,7 @@
  * list is a debt: `screens.spec.ts` fails when an entry matches nothing, so fixing a defect means
  * deleting its entry in the same change.
  *
- * Screens are named `<fixture>/<screen>/sidebar-<shown|hidden>/<width>` (plus `/paper` in the
+ * Screens are named `<fixture>/<screen>/<width>` (plus `/paper` in the
  * light theme).
  */
 import type {CheckId, Violation} from './in-page.js';

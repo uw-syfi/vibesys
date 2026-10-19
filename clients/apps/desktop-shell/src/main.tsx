@@ -4,7 +4,6 @@
 import '@vibesys/ui/tokens.css';
 import '@vibesys/ui/fonts.css';
 import '@vibesys/ui/components.css';
-import {bindSidebarShortcut, browserSidebarPreference} from '@vibesys/feature-app-shell/renderer';
 import {browserDraftMemory, browserMoreOptionsMemory} from '@vibesys/feature-new-run/renderer';
 import {pageAppearance} from '@vibesys/feature-settings/renderer';
 import {runOfWindow, type WelcomeBridge} from '@vibesys/ipc';
@@ -52,7 +51,6 @@ if (bridge === undefined) {
       session: run => shellSessionOptions(run, {document, window, navigator}),
     },
     {
-      sidebar: browserSidebarPreference(() => window.localStorage),
       moreOptions: browserMoreOptionsMemory(() => window.localStorage),
       // A window's own storage: another window starts its own New run.
       draft: browserDraftMemory(() => window.sessionStorage),
@@ -61,7 +59,6 @@ if (bridge === undefined) {
   // A run window's page names its run in its query; the main window's has none.
   const run = runOfWindow(window.location.search);
   if (run === null) {
-    bindSidebarShortcut(window, bridge.platform === 'darwin', stores.sidebar.store.dispatch);
     bridge.onOpenSettings(() =>
       stores.sidebar.store.dispatch({type: 'select', screen: {kind: 'settings'}}),
     );
@@ -71,11 +68,7 @@ if (bridge === undefined) {
   createRoot(root).render(
     <StrictMode>
       <LinkOpener open={openExternal}>
-        {run === null ? (
-          <Shell stores={stores} version={String(import.meta.env['VITE_APP_VERSION'])} />
-        ) : (
-          <RunWindow stores={stores} run={run} />
-        )}
+        {run === null ? <Shell stores={stores} /> : <RunWindow stores={stores} run={run} />}
       </LinkOpener>
     </StrictMode>,
   );

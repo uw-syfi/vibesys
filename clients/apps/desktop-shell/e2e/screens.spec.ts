@@ -9,8 +9,8 @@ import {type Journey, walkScreens} from './screens.js';
 
 /**
  * Every screen of the Run screen, checked against its real layout: run, idea, step and item
- * levels, the Timeline, Agents and Usage faces and the scrubbed run, live and finished, with the sidebar
- * shown and hidden, at 1000, 1440 and 1920 px; and the stress fixtures (long titles, every failure
+ * levels, the Timeline, Agents and Usage faces and the scrubbed run, live and finished, at 1000,
+ * 1440 and 1920 px; and the stress fixtures (long titles, every failure
  * reason, retries, rounds, bases that are not the input, a reconnect, 600 ideas over 14 days) at
  * 1000 and 1440. Each screen must pass the layout and wording checks (`checks/screen-check.ts`)
  * except for the defects listed in `checks/known-failures.ts`, and the performance chart and time
@@ -30,7 +30,6 @@ interface Cell {
   readonly fixture: string;
   readonly journey: Journey;
   readonly width: number;
-  readonly sidebar: boolean;
   readonly theme: 'ink' | 'paper';
 }
 
@@ -51,15 +50,12 @@ const MAIN: readonly Cell[] = [
   'finished-ten-ideas',
   'finished-two-objectives',
 ].flatMap(fixture =>
-  [true, false].flatMap(sidebar =>
-    [1000, 1440, 1920].map(width => ({
-      fixture,
-      journey: FINISHED[fixture] ?? DEEP,
-      width,
-      sidebar,
-      theme: 'ink' as const,
-    })),
-  ),
+  [1000, 1440, 1920].map(width => ({
+    fixture,
+    journey: FINISHED[fixture] ?? DEEP,
+    width,
+    theme: 'ink' as const,
+  })),
 );
 const STRESS: readonly Cell[] = [
   'long-titles',
@@ -75,12 +71,11 @@ const STRESS: readonly Cell[] = [
     fixture,
     journey: SHALLOW,
     width,
-    sidebar: true,
     theme: 'ink' as const,
   })),
 );
 const LIGHT: readonly Cell[] = [
-  {fixture: 'queue-rs-live', journey: DEEP, width: 1440, sidebar: true, theme: 'paper'},
+  {fixture: 'queue-rs-live', journey: DEEP, width: 1440, theme: 'paper'},
 ];
 const CELLS: readonly Cell[] = [...MAIN, ...STRESS, ...LIGHT];
 
@@ -91,16 +86,15 @@ const shots = process.env['SCREENS_DIR'] || undefined;
 if (shots !== undefined) mkdirSync(shots, {recursive: true});
 
 function nameOf(cell: Cell, screen: string): string {
-  const sidebar = cell.sidebar ? 'shown' : 'hidden';
   const theme = cell.theme === 'paper' ? '/paper' : '';
-  return `${cell.fixture}/${screen}/sidebar-${sidebar}/${cell.width}${theme}`;
+  return `${cell.fixture}/${screen}/${cell.width}${theme}`;
 }
 
 for (const cell of CELLS) {
   test(`${nameOf(cell, '*')}`, async ({page}) => {
     await page.setViewportSize({width: cell.width, height: 900});
     const fixture = fixtureNamed(cell.fixture);
-    await openFixture(page, fixture, {sidebar: cell.sidebar, theme: cell.theme});
+    await openFixture(page, fixture, {theme: cell.theme});
     await playLive(page, fixture);
     const unexplained: string[] = [];
     const moved = await walkScreens(page, cell.journey, async (screen, current) => {

@@ -1,0 +1,213 @@
+import {expect, type Page, test} from '@playwright/test';
+import {
+  dashboardWorld,
+  listingOf,
+  MANY_RUNS,
+  NOW,
+  OMITTED_RUN,
+  ONE_RUN,
+  open,
+  type RunCase,
+} from './dashboard-world.js';
+import type {FakeHostWindow} from './world.js';
+
+/**
+ * The Runs dashboard's journeys against the Fake bridge: every run of every machine as a tile,
+ * grouped and regrouped, the runs that need the user in their own row and on the rail's badge, a
+ * tile opening its run, archiving it, and a machine that cannot be reached or listed.
+ */
+
+test.use({viewport: {width: 1440, height: 900}});
+
+const group = (page: Page, name: string) => page.getByRole('region', {name, exact: true});
+const tiles = (page: Page, name: string) => group(page, name).locator('.vs-overview-tile');
+
+async function groupTitles(page: Page): Promise<string[]> {
+  const titles = await page
+    .locator('.vs-overview-group-head')
+    .evaluateAll(heads =>
+      heads.map(head => [...head.children].map(child => child.textContent ?? '').join(' ')),
+    );
+  return titles.map(text => text.replace(/\s+/g, ' ').trim());
+}
+
+test('groups every run of every machine by status, the runs that need the user first', async ({
+  page,
+}) => {
+  await open(page, dashboardWorld(MANY_RUNS));
+
+  expect(await groupTitles(page)).toEqual([
+    'Needs you 2',
+    'Running 3',
+    'Paused 1',
+    'Failed 1',
+    'Finished 3',
+    'Stopped 1',
+  ]);
+  await expect(tiles(page, 'Needs you')).toHaveCount(2);
+  const stalled = tiles(page, 'Needs you').filter({hasText: 'mpsc'});
+  await expect(stalled).toContainText('host-b');
+});
+
+test('a tile says its result against the base, where it ran, its ideas and time, and charts every idea', async ({
+  page,
+}) => {
+  await open(page, dashboardWorld(ONE_RUN));
+
+  const tile = tiles(page, 'Running').first();
+  await expect(tile).toContainText('mpmc');
+  await expect(tile).toContainText('1.42×');
+  await expect(tile).toContainText('host-a');
+  await expect(tile).toContainText('7 ideas · 40m');
+  await expect(tile).toContainText('running');
+  const marks = tile.locator('.vs-result-chart-mark');
+  await expect(marks).toHaveCount(7);
+  await expect(tile.locator('[data-mark="kept"]')).toHaveCount(3);
+  await expect(tile.locator('[data-mark="not-better"]')).toHaveCount(2);
+  await expect(tile.locator('[data-mark="failed"]')).toHaveCount(1);
+  await expect(tile.locator('[data-mark="pending"]')).toHaveCount(1);
+  await expect(tile.locator('.vs-result-chart-base')).toHaveCount(1);
+});
+
+test('a run with more ideas than its chart keeps still counts them all', async ({page}) => {
+  await open(page, dashboardWorld(OMITTED_RUN));
+
+  const tile = tiles(page, 'Running').first();
+  await expect(tile).toContainText('100 ideas');
+  await expect(tile.locator('.vs-result-chart-mark')).toHaveCount(64);
+});
+
+test('Group by regroups the same tiles by machine, task and agent', async ({page}) => {
+  await open(page, dashboardWorld(MANY_RUNS));
+  const by = page.getByRole('combobox', {name: 'Group by'});
+  const names = async (): Promise<string[]> =>
+    (await groupTitles(page)).filter(title => !title.startsWith('Needs you'));
+
+  await by.selectOption('machine');
+  expect(await names()).toEqual(['host-a 5', 'host-b 4']);
+  await by.selectOption('task');
+  expect(await names()).toEqual(['mpmc 3', 'mpsc 3', 'spsc 3']);
+  await by.selectOption('agent');
+  expect(await names()).toEqual(['Unknown 9']);
+  await by.selectOption('status');
+  expect((await names())[0]).toBe('Running 3');
+  // The Needs you row stays whatever the grouping.
+  await expect(tiles(page, 'Needs you')).toHaveCount(2);
+});
+
+test('the rail counts the runs that need the user, and Runs and the mark both go home', async ({
+  page,
+}) => {
+  await open(page, dashboardWorld(MANY_RUNS));
+  const rail = page.getByRole('navigation', {name: 'VibeSys'});
+
+  await expect(rail.getByRole('button', {name: /^Runs/})).toHaveAccessibleName(/2 need you/);
+  await rail.getByRole('button', {name: 'New', exact: true}).click();
+  await expect(page.getByRole('heading', {name: 'Runs'})).toHaveCount(0);
+  await rail.getByRole('button', {name: 'VibeSys'}).click();
+  await expect(page.getByRole('heading', {name: 'Runs'})).toBeVisible();
+  await expect(rail.getByRole('button', {name: /^Runs/})).toHaveAttribute('aria-current', 'page');
+});
+
+test('a tile opens its run, and the rail keeps Runs as where it came from', async ({page}) => {
+  await open(page, dashboardWorld(ONE_RUN));
+
+  await tiles(page, 'Running').first().getByRole('button', {name: /^mpmc/}).click();
+
+  await expect(page.getByRole('heading', {name: 'Runs'})).toHaveCount(0);
+  const rail = page.getByRole('navigation', {name: 'VibeSys'});
+  await expect(rail.getByRole('button', {name: /^Runs/})).toHaveAttribute('aria-current', 'page');
+});
+
+test('Archive takes a run off the dashboard', async ({page}) => {
+  await open(page, dashboardWorld(MANY_RUNS));
+  await expect(tiles(page, 'Stopped')).toHaveCount(1);
+
+  await page.getByRole('button', {name: 'More for mpsc'}).last().click();
+  await page.getByRole('menuitem', {name: 'Archive'}).click();
+
+  await expect(page.getByRole('region', {name: 'Stopped', exact: true})).toHaveCount(0);
+});
+
+test('with no run it offers New run alone, and pressing it opens New run', async ({page}) => {
+  await open(page, dashboardWorld([]));
+
+  await expect(page.getByRole('combobox', {name: 'Group by'})).toHaveCount(0);
+  const main = page.getByRole('main');
+  await expect(main.getByRole('button')).toHaveCount(1);
+  await main.getByRole('button', {name: 'New run'}).click();
+  await expect(page.getByRole('heading', {name: 'Runs'})).toHaveCount(0);
+});
+
+test('a machine that cannot list its runs leaves the other machine’s tiles', async ({page}) => {
+  const world = dashboardWorld(MANY_RUNS);
+  const {[`ssh:host-b|${'/home/me/projects/queue-rs'}`]: _lost, ...rest} = world.projectRuns ?? {};
+  await open(page, {...world, projectRuns: rest});
+
+  await expect(page.locator('.vs-overview-tile', {hasText: 'host-b'})).toHaveCount(0);
+  await expect(page.locator('.vs-overview-tile', {hasText: 'host-a'})).toHaveCount(5 + 1);
+});
+
+test('a host that sends no chart data still shows each run as a tile without a chart', async ({
+  page,
+}) => {
+  const world = dashboardWorld(ONE_RUN);
+  const digests = Object.fromEntries(
+    Object.entries(world.digests ?? {}).map(([id, entry]) => {
+      const {dashboard: _chart, ...plain} = entry as Record<string, unknown>;
+      return [id, plain];
+    }),
+  );
+  await open(page, {...world, digests});
+
+  const tile = tiles(page, 'Running').first();
+  await expect(tile).toContainText('mpmc');
+  await expect(tile.locator('.vs-result-chart')).toHaveCount(0);
+});
+
+test('Machines carries a warning dot while a machine cannot be reached', async ({page}) => {
+  const world = dashboardWorld(ONE_RUN as readonly RunCase[]);
+  await open(page, {...world, reports: {'ssh:host-b': {kind: 'unavailable', detail: 'down'}}});
+  const rail = page.getByRole('navigation', {name: 'VibeSys'});
+
+  await expect(rail.getByRole('button', {name: /^Machines/})).toHaveAccessibleName(/unreachable/);
+});
+
+test('a run that ends moves from Running to Finished', async ({page}) => {
+  await open(page, dashboardWorld(ONE_RUN));
+  await expect(tiles(page, 'Running')).toHaveCount(1);
+
+  const ended = listingOf([{...ONE_RUN[0], phase: 'completed'} as RunCase], 'ssh:host-a');
+  await page.evaluate(
+    ([listing]) => (window as unknown as FakeHostWindow).fakeHost.listing(listing),
+    [ended],
+  );
+
+  await expect(group(page, 'Running')).toHaveCount(0);
+  await expect(tiles(page, 'Finished')).toHaveCount(1);
+  await expect(tiles(page, 'Finished').first()).toContainText('finished');
+});
+
+test('on a machine whose VibeSys is too old for digests, a run still says its own status', async ({
+  page,
+}) => {
+  const world = dashboardWorld(MANY_RUNS, ['ssh:host-b']);
+  const key = Object.keys(world.projectRuns ?? {}).find(each => each.startsWith('ssh:host-b'));
+  if (key === undefined) throw new Error('the world lists nothing on host-b');
+  // A run the registry no longer holds: only a digest could say how it went.
+  const old = {runId: 'r-old-99', task: 'mpmc', createdAt: NOW - 50 * 3_600_000};
+  await open(page, {
+    ...world,
+    projectRuns: {...world.projectRuns, [key]: [...(world.projectRuns?.[key] ?? []), old]},
+  });
+
+  // host-b's finished runs come from the registry's record of their end, not from a digest.
+  const finished = tiles(page, 'Finished').filter({hasText: 'host-b'});
+  await expect(finished).toHaveCount(2);
+  await expect(finished.first()).toContainText('finished');
+  await expect(finished.first()).not.toContainText('newer VibeSys');
+  // A run only a digest could place is unknown, with the machine's trouble beside it.
+  const unknown = tiles(page, 'Unknown').first();
+  await expect(unknown).toContainText('unknown');
+  await expect(unknown).toContainText('machine needs a newer VibeSys');
+});

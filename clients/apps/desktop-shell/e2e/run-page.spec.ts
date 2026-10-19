@@ -5,6 +5,7 @@ import {
   installFakeBridge,
   installFakeMachines,
   installFakeNewRun,
+  installFakeProjectRuns,
 } from './fake-bridge.js';
 import {type FakeRunSeed, installFakeRun} from './fake-run.js';
 import {type FakeServerSeed, installFakeServer} from './fake-server.js';
@@ -72,6 +73,7 @@ const SEED: FakeBridgeSeed = {
       attachedAt: 3,
     },
   ],
+  projectRuns: {[`ssh:host-b|${PROJECT}`]: [{runId: RUN_ID, task: 'mpmc', createdAt: 3}]},
 };
 
 /** The live run's server: a session that opens and answers, with no events to show yet. */
@@ -110,14 +112,12 @@ async function open(page: Page, seed: FakeBridgeSeed): Promise<void> {
   await page.addInitScript(installFakeBridge, seed);
   await page.addInitScript(installFakeMachines, seed);
   await page.addInitScript(installFakeNewRun, seed);
+  await page.addInitScript(installFakeProjectRuns, seed);
   await page.addInitScript(installFakeRun, RUN);
   await page.addInitScript(installFakeServer, SERVER);
   await page.goto('./shell.html');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'ink');
-  await page
-    .getByRole('navigation', {name: 'VibeSys'})
-    .getByRole('button', {name: /^\S+ queue-rs · mpmc/})
-    .click();
+  await page.getByRole('main').getByRole('button', {name: /^mpmc/}).click();
 }
 
 const shots = process.env['RUN_PAGE_SHOTS'];

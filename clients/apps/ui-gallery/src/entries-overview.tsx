@@ -4,6 +4,7 @@ import {
   RailFrame,
   RailItem,
   ResultChart,
+  ResultChartKey,
   type SparkPoint,
   Stack,
   Text,
@@ -69,7 +70,7 @@ function Tiles(props: {readonly title: string}): JSX.Element {
 
 export const OVERVIEW_ENTRIES: Pick<
   Record<ComponentName, GalleryEntry>,
-  'RailFrame' | 'RailItem' | 'ResultChart' | 'OverviewTile' | 'OverviewGroup'
+  'RailFrame' | 'RailItem' | 'ResultChart' | 'ResultChartKey' | 'OverviewTile' | 'OverviewGroup'
 > = {
   RailFrame: {
     render: () => (
@@ -111,6 +112,20 @@ export const OVERVIEW_ENTRIES: Pick<
         <Chart points={[]} line={[]} />
         <Chart points={[{y: 1, mark: 'pending'}]} line={[1]} />
       </Stack>
+    ),
+  },
+  ResultChartKey: {
+    render: () => (
+      <ResultChartKey
+        label="Chart key"
+        items={[
+          {mark: 'kept', label: 'Kept'},
+          {mark: 'not-better', label: 'Not better'},
+          {mark: 'failed', label: 'Failed'},
+          {mark: 'pending', label: 'Running'},
+          {mark: 'line', label: 'Best so far'},
+        ]}
+      />
     ),
   },
   OverviewTile: {render: () => <Tiles title="Tiles" />},

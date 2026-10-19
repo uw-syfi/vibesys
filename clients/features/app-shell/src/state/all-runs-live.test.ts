@@ -87,7 +87,7 @@ function settle(
   return {digestRequests, settled: pending.length === 0};
 }
 
-describe('the All runs screen with live runs', () => {
+describe('the dashboard with live runs', () => {
   test('regression: answered requests settle, and each run is asked for once', () => {
     for (const liveCount of [1, 2, 3]) {
       for (const endedCount of [0, 1, 4]) {
@@ -103,18 +103,14 @@ describe('the All runs screen with live runs', () => {
             unverified: [],
           };
           const first = sidebarStep(initialSidebar().state, {type: 'listing', listing});
-          const opened = sidebarStep(first.state, {
-            type: 'select',
-            screen: {kind: 'all-runs'},
-          });
           const {digestRequests, settled} = settle(
-            opened.state,
-            [...first.requests, ...opened.requests],
+            first.state,
+            first.requests,
             [...live, ...ended],
             reply,
           );
           expect(settled, `${liveCount} live, ${endedCount} ended`).toBe(true);
-          // Each live run once, for its row's figures; each ended run once, for the All runs row.
+          // Each live run once, for its row's figures; each ended run once, for the dashboard's tile.
           expect(digestRequests).toBeLessThanOrEqual(liveCount + endedCount);
         }
       }

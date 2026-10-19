@@ -10,15 +10,10 @@ import {openFixture, playLive} from './fixture-world.js';
  * shows. Each reads the fixtures the screen checks walk.
  */
 
-async function open(
-  page: Page,
-  name: string,
-  width: number,
-  options: {sidebar?: boolean} = {},
-): Promise<void> {
+async function open(page: Page, name: string, width: number): Promise<void> {
   await page.setViewportSize({width, height: 900});
   const fixture = fixtureNamed(name);
-  await openFixture(page, fixture, options);
+  await openFixture(page, fixture);
   await playLive(page, fixture);
   await expect(page.getByRole('slider', {name: 'Run position'})).toBeVisible();
   await settled(page);
@@ -31,14 +26,14 @@ const tickLabels = (page: Page): Promise<string[]> =>
 
 for (const width of [660, 1000, 1440]) {
   test(`at ${width} px a two-call run labels its calls "Call 1" and "Call 2"`, async ({page}) => {
-    await open(page, 'finished-run', width, {sidebar: false});
+    await open(page, 'finished-run', width);
     expect(await tickLabels(page)).toEqual(['Call 1', 'Call 2']);
   });
 
   test(`at ${width} px a fifteen-call run labels every call, by number, in order`, async ({
     page,
   }) => {
-    await open(page, 'weeks-600-ideas', width, {sidebar: false});
+    await open(page, 'weeks-600-ideas', width);
     expect(await tickLabels(page)).toEqual(
       Array.from({length: 15}, (_, index) => String(index + 1)),
     );
@@ -91,7 +86,7 @@ test('the agents header columns sit over their values, right edge to right edge'
 });
 
 test('the Ideas list takes the whole row when nothing sits beside it', async ({page}) => {
-  await open(page, 'finished-run', 1000, {sidebar: false});
+  await open(page, 'finished-run', 1000);
   const widths = await page.evaluate(() => ({
     pane: document.querySelector('.vs-panes > .vs-pane')?.getBoundingClientRect().width ?? 0,
     panes: document.querySelector('.vs-panes')?.getBoundingClientRect().width ?? 0,

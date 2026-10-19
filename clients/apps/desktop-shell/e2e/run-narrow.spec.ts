@@ -56,7 +56,7 @@ test('at 660 px an open idea takes the row from the list, and its close button b
 }) => {
   await page.setViewportSize({width: 660, height: 900});
   const fixture = fixtureNamed('bases-and-effects');
-  await openFixture(page, fixture, {sidebar: false});
+  await openFixture(page, fixture);
   await playLive(page, fixture);
   const ideas = page.getByRole('listbox', {name: 'Ideas'});
   await ideas.getByRole('option', {name: /Per-core free lists/}).click();

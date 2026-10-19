@@ -68,7 +68,6 @@ void complete;
 interface FixtureWindow extends Window {
   fakeHost: {
     listing(listing: unknown): void;
-    toggleSidebar(): void;
     emit(events: readonly unknown[]): void;
     drop(): void;
     releaseHistory(): void;
@@ -78,8 +77,6 @@ interface FixtureWindow extends Window {
 
 export interface OpenOptions {
   readonly theme?: 'ink' | 'paper';
-  /** Whether the sidebar is shown; shown by default. */
-  readonly sidebar?: boolean;
   /** A finished run's history served in small pages, held part-way: see `fake-history.ts`. */
   readonly historyServing?: Omit<FakeHistorySeed, 'events'>;
   readonly summaryServing?: Omit<FakeSummarySpanSeed, 'events'>;
@@ -126,7 +123,7 @@ function listingOf(fixture: RunFixture): Record<string, unknown> {
 /**
  * The runs `host` lists for `PROJECT`: those its servers and registry hold, and those the user
  * opened (Recent), as `runs.list` would answer. The one place the world says which runs a machine
- * has, so the sidebar, All runs and the machines agree.
+ * has, so the dashboard and the machines agree.
  */
 function projectRuns(
   listing: Record<string, unknown>,
@@ -236,14 +233,7 @@ export async function openFixture(
   // Only a test is bounded: the fixture dev app is open for as long as someone looks at it.
   await page.addInitScript({content: script(installRequestBound, REQUEST_LIMIT)});
   await page.goto('./shell.html');
-  await page
-    .getByRole('navigation', {name: 'VibeSys'})
-    .locator('button.vs-sidebar-link[title*="queue-rs · mpmc"]')
-    .click();
-  if (options.sidebar === false) {
-    await page.evaluate(() => (window as unknown as FixtureWindow).fakeHost.toggleSidebar());
-    await expect(page.getByRole('navigation', {name: 'VibeSys'})).toHaveCount(0);
-  }
+  await page.getByRole('main').getByRole('button', {name: /^mpmc/}).first().click();
   await expect(page.getByRole('main')).toBeVisible();
 }
 

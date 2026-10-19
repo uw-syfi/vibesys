@@ -109,7 +109,7 @@ function randomAction(random: () => number): SidebarAction {
         random() < 0.5 ? [] : [{index: 1, reason: 'recent.json: runs[1].task must be a task name'}],
     };
   }
-  const screen = pick(random, ['new-run', 'machines', 'settings', 'all-runs', 'run'] as const);
+  const screen = pick(random, ['new-run', 'machines', 'settings', 'runs', 'usage', 'run'] as const);
   return {
     type: 'select',
     screen:

@@ -18,11 +18,16 @@ export type ProjectRunsSlot =
 export interface AllRunsState {
   /** Each project's listing, by `projectKey`. */
   readonly projects: Readonly<Record<string, ProjectRunsSlot>>;
+  /**
+   * What each project listed before the screen asked again, by `projectKey`: the runs shown until
+   * the new listing answers (or when it cannot), so a refresh never empties the dashboard.
+   */
+  readonly stale: Readonly<Record<string, readonly ListedRun[]>>;
   /** The last token a listing used, so each is new. */
   readonly lastToken: number;
 }
 
-export const ALL_RUNS_EMPTY: AllRunsState = {projects: {}, lastToken: 0};
+export const ALL_RUNS_EMPTY: AllRunsState = {projects: {}, stale: {}, lastToken: 0};
 
 /** What the All runs screen asks of the main process: one project's runs on one machine. */
 export interface ListProjectRuns {
@@ -75,7 +80,7 @@ export function askProjectRuns(
     }
   }
   if (requests.length === 0) return {all, requests};
-  return {all: {projects, lastToken: token}, requests};
+  return {all: {...all, projects, lastToken: token}, requests};
 }
 
 /** What the machine said of `project`'s runs asked under `token`; null when it could not say. */
@@ -103,12 +108,26 @@ export interface ProjectRunRef {
   readonly run: ListedRun;
 }
 
-/** Every run the listings hold, with where it is. */
+/**
+ * Asking every project again: what each had listed is kept as the runs to show until its new
+ * listing answers, and the next `askProjectRuns` asks for them all.
+ */
+export function refreshed(all: AllRunsState): AllRunsState {
+  const stale: Record<string, readonly ListedRun[]> = {...all.stale};
+  for (const [key, slot] of Object.entries(all.projects)) {
+    if (slot.kind === 'listed') stale[key] = slot.runs;
+  }
+  return {...all, projects: {}, stale};
+}
+
+/** Every run the listings hold, with where it is: a project not listed again yet keeps its last listing. */
 export function listedRunRefs(all: AllRunsState): ProjectRunRef[] {
-  return Object.entries(all.projects).flatMap(([key, slot]) => {
-    if (slot.kind !== 'listed') return [];
+  const keys = new Set([...Object.keys(all.projects), ...Object.keys(all.stale)]);
+  return [...keys].flatMap(key => {
+    const slot = all.projects[key];
+    const runs = slot?.kind === 'listed' ? slot.runs : (all.stale[key] ?? []);
     const [host, project] = JSON.parse(key) as [HostKey, string];
-    return slot.runs.map(run => ({host, project, run}));
+    return runs.map(run => ({host, project, run}));
   });
 }
 

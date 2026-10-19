@@ -1,26 +1,21 @@
 /**
- * The app shell's composition: the sidebar, Settings, Machines and New run stores over the welcome
- * bridge, the theme following the Settings store, and the shell rendering the selected screen: New
- * run, Settings, Machines, All runs, the Run screen for a selected run, or a placeholder for a screen not
- * built yet.
+ * The app shell's composition: the runs, Settings, Machines, New run and dashboard grouping stores
+ * over the welcome bridge, the theme following the Settings store, and the shell rendering the
+ * rail and the selected screen: the Runs dashboard (home), New run, Settings, Machines, the Run
+ * screen for a selected run, or a placeholder for a screen not built yet (Usage).
  */
+import {AppShell, createSidebarStore, PlaceholderScreen} from '@vibesys/feature-app-shell/renderer';
 import {
-  AllRunsScreen,
-  AppShell,
-  createSidebarStore,
-  PlaceholderScreen,
-  type SidebarDraft,
-  type SidebarPreference,
-} from '@vibesys/feature-app-shell/renderer';
-import {
-  allRunsGroups,
   type Clock,
+  type DashboardRow,
+  dashboardRows,
+  digestKey,
+  recentNotice,
   type Screen,
   type SidebarState,
-  sidebarShortcutLabel,
 } from '@vibesys/feature-app-shell/state';
 import {createMachinesStore, MachinesScreen} from '@vibesys/feature-machines/renderer';
-import {machineCounts} from '@vibesys/feature-machines/state';
+import {type MachinesState, machineCounts} from '@vibesys/feature-machines/state';
 import {
   createNewRunStore,
   type DraftMemory,
@@ -38,6 +33,13 @@ import {
 } from '@vibesys/feature-run-page/renderer';
 import {runRecord} from '@vibesys/feature-run-page/state';
 import {
+  createGroupingStore,
+  type GroupingStore,
+  type RunsDraft,
+  RunsScreen,
+} from '@vibesys/feature-runs-dashboard/renderer';
+import {needsYou, type Tile, tilesOf} from '@vibesys/feature-runs-dashboard/state';
+import {
   createMachineSettingsStore,
   createSettingsStore,
   SettingsScreen,
@@ -51,6 +53,7 @@ import {sameRun} from '@vibesys/runs';
 import type {Store} from '@vibesys/store';
 import {applyTheme, Card, EmptyState, Page, type ThemeTarget, WindowFrame} from '@vibesys/ui';
 import {type JSX, useMemo, useSyncExternalStore} from 'react';
+import {runInput} from './shell-runs.js';
 
 /** The clock the shell's screens time their bounds on: the window's own timers, in `main.tsx`. */
 export type Schedule = (callback: () => void, delayMs: number) => () => void;
@@ -58,6 +61,8 @@ export type Schedule = (callback: () => void, delayMs: number) => () => void;
 /** The stores the shell renders, and what its screens reach the app through. */
 export interface ShellStores {
   readonly sidebar: ReturnType<typeof createSidebarStore>;
+  /** What the Runs dashboard groups its tiles by. */
+  readonly grouping: GroupingStore;
   readonly settings: ReturnType<typeof createSettingsStore>;
   /** What each machine has set up (clusters, clouds, agent logins), and the Settings section shown. */
   readonly machineSettings: ReturnType<typeof createMachineSettingsStore>;
@@ -105,7 +110,6 @@ function runWindowPlace(stores: ShellStores): RunPlace {
 
 /** What the shell keeps between runs of the app, each in the viewer's own storage. */
 export interface ShellPreferences {
-  readonly sidebar: SidebarPreference;
   /** What the user chose for New run's More options on each machine; none keeps it this run only. */
   readonly moreOptions?: MoreOptionsMemory;
   /** This window's unfinished New run, so leaving and coming back finds it; none keeps it this run only. */
@@ -131,7 +135,7 @@ export function createShellStores(
     if (state.kind === 'ready') applyTheme(shownTheme(state, DEFAULT_APPEARANCE), document);
   };
   settings.subscribe(follow);
-  const sidebar = createSidebarStore(bridge, preferences.sidebar, schedule);
+  const sidebar = createSidebarStore(bridge, schedule);
   const newRun = createNewRunStore(bridge, {
     recent: sidebar.store.getState().recent,
     schedule,
@@ -170,6 +174,7 @@ export function createShellStores(
   });
   return {
     sidebar,
+    grouping: createGroupingStore(),
     settings,
     machineSettings,
     machines,
@@ -291,27 +296,12 @@ function RunRoute(props: {
   );
 }
 
-/** The All runs screen over the sidebar's store and its state. */
-function AllRuns(props: {
-  readonly sidebar: ShellStores['sidebar'];
-  readonly state: SidebarState;
-}): JSX.Element {
-  return (
-    <AllRunsScreen
-      groups={allRunsGroups(props.state, viewerClock())}
-      state={props.state}
-      dispatch={props.sidebar.store.dispatch}
-      actions={props.sidebar.actions}
-    />
-  );
-}
-
-/** The unfinished New run the sidebar lists, or null when there is not one. */
-function sidebarDraft(
+/** The unfinished New run the dashboard offers, or null when there is not one. */
+function runsDraft(
   state: NewRunSnapshot,
   select: (screen: Screen) => void,
   dispatch: ShellStores['newRun']['dispatch'],
-): SidebarDraft | null {
+): RunsDraft | null {
   const words = draftWords(state.context);
   if (words === null) return null;
   return {
@@ -329,56 +319,122 @@ function hostsOf(
   return [...machines.machines.map(each => each.host), ...sidebar.listings.map(each => each.host)];
 }
 
-/** The window: the sidebar and the selected screen. */
-export function Shell(props: {
+/** New run over its store, offered the machines saved and the ones listing runs. */
+function NewRunRoute(props: {
   readonly stores: ShellStores;
-  readonly version: string;
+  readonly sidebar: SidebarState;
+  readonly machines: MachinesState;
+  readonly select: (screen: Screen) => void;
 }): JSX.Element {
-  const {sidebar, settings, machineSettings, machines, newRun, newRunCompletion} = props.stores;
-  const sidebarState = useStore(sidebar.store);
+  const {newRun, newRunCompletion} = props.stores;
+  const snapshot = useStore(newRun);
+  const completion = useStore(newRunCompletion);
+  return (
+    <NewRunScreen
+      snapshot={snapshot}
+      dispatch={newRun.dispatch}
+      machines={machineOptions(hostsOf(props.machines, props.sidebar))}
+      completion={{state: completion, dispatch: newRunCompletion.dispatch}}
+      chooseCheckout={() => props.select({kind: 'machines'})}
+      setUp={machine => props.select({kind: 'settings', machine, section: 'clusters'})}
+    />
+  );
+}
+
+/** Settings over its stores, with the Machines screen embedded in it. */
+function SettingsRoute(props: {
+  readonly stores: ShellStores;
+  readonly machines: MachinesState;
+  readonly select: (screen: Screen) => void;
+}): JSX.Element {
+  const {sidebar, settings, machineSettings, machines} = props.stores;
   const settingsState = useStore(settings);
-  const machinesState = useStore(machines);
   const machineSettingsState = useStore(machineSettings);
+  const machinesState = props.machines;
+  return (
+    <SettingsScreen
+      state={settingsState}
+      dispatch={settings.dispatch}
+      back={() => sidebar.store.dispatch({type: 'back-from-settings'})}
+      machinesContent={
+        <MachinesScreen
+          embedded
+          state={machinesState}
+          dispatch={machines.dispatch}
+          newRun={host => props.select({kind: 'new-run', machine: host})}
+          back={() => props.select({kind: 'settings'})}
+        />
+      }
+      machines={machineCounts(machinesState)}
+      machineSettings={{
+        state: machineSettingsState,
+        dispatch: machineSettings.dispatch,
+        machines: machinesState.machines.map(({host, label}) => ({host, label})),
+      }}
+    />
+  );
+}
+
+/** The Runs dashboard over the tiles of `rows`: a tile opens its run, and its menu archives it or opens it in a window. */
+function RunsRoute(props: {
+  readonly rows: readonly DashboardRow[];
+  readonly tiles: readonly Tile[];
+  readonly stores: ShellStores;
+  readonly draft: RunsDraft | null;
+  readonly select: (screen: Screen) => void;
+}): JSX.Element {
+  const {rows, stores, select} = props;
+  const by = useStore(stores.grouping);
+  const runOf = (id: string): RunRef | null =>
+    rows.find(each => digestKey(each.row.run) === id)?.row.run ?? null;
+  return (
+    <RunsScreen
+      tiles={props.tiles}
+      by={by}
+      group={next => stores.grouping.dispatch({type: 'group', by: next})}
+      open={id => {
+        const run = runOf(id);
+        if (run !== null) select({kind: 'run', run});
+      }}
+      menu={id => {
+        const run = runOf(id);
+        if (run === null) return [];
+        const {actions} = stores.sidebar;
+        return [
+          {id: 'window', label: 'Open in new window', press: () => actions.openWindow(run)},
+          {id: 'archive', label: 'Archive', press: () => actions.archive(run)},
+        ];
+      }}
+      newRun={() => select({kind: 'new-run'})}
+      draft={props.draft}
+      notice={recentNotice(stores.sidebar.store.getState().skippedRecent)}
+    />
+  );
+}
+
+/** The window: the rail and the selected screen. */
+export function Shell(props: {readonly stores: ShellStores}): JSX.Element {
+  const {sidebar, machines, newRun} = props.stores;
+  const sidebarState = useStore(sidebar.store);
+  const machinesState = useStore(machines);
   const newRunState = useStore(newRun);
-  const completionState = useStore(newRunCompletion);
+  const rows = useMemo(() => dashboardRows(sidebarState, viewerClock()), [sidebarState]);
+  const tiles = useMemo(() => tilesOf(rows.map(row => runInput(row, Date.now()))), [rows]);
   const select = (screen: Screen): void => sidebar.store.dispatch({type: 'select', screen});
-  const draft = sidebarDraft(newRunState, select, newRun.dispatch);
+  const draft = runsDraft(newRunState, select, newRun.dispatch);
   const screen = (selected: Screen): JSX.Element => {
     switch (selected.kind) {
       case 'new-run':
         return (
-          <NewRunScreen
-            snapshot={newRunState}
-            dispatch={newRun.dispatch}
-            machines={machineOptions(hostsOf(machinesState, sidebarState))}
-            completion={{state: completionState, dispatch: newRunCompletion.dispatch}}
-            chooseCheckout={() => select({kind: 'machines'})}
-            setUp={machine => select({kind: 'settings', machine, section: 'clusters'})}
+          <NewRunRoute
+            stores={props.stores}
+            sidebar={sidebarState}
+            machines={machinesState}
+            select={select}
           />
         );
       case 'settings':
-        return (
-          <SettingsScreen
-            state={settingsState}
-            dispatch={settings.dispatch}
-            back={() => sidebar.store.dispatch({type: 'back-from-settings'})}
-            machinesContent={
-              <MachinesScreen
-                embedded
-                state={machinesState}
-                dispatch={machines.dispatch}
-                newRun={host => select({kind: 'new-run', machine: host})}
-                back={() => select({kind: 'settings'})}
-              />
-            }
-            machines={machineCounts(machinesState)}
-            machineSettings={{
-              state: machineSettingsState,
-              dispatch: machineSettings.dispatch,
-              machines: machinesState.machines.map(({host, label}) => ({host, label})),
-            }}
-          />
-        );
+        return <SettingsRoute stores={props.stores} machines={machinesState} select={select} />;
       case 'machines':
         return (
           <MachinesScreen
@@ -388,8 +444,18 @@ export function Shell(props: {
             back={() => select({kind: 'settings'})}
           />
         );
-      case 'all-runs':
-        return <AllRuns sidebar={sidebar} state={sidebarState} />;
+      case 'runs':
+        return (
+          <RunsRoute
+            rows={rows}
+            tiles={tiles}
+            stores={props.stores}
+            draft={draft}
+            select={select}
+          />
+        );
+      case 'usage':
+        return <PlaceholderScreen title="Usage" />;
       case 'run':
         return (
           <RunRoute
@@ -400,19 +466,16 @@ export function Shell(props: {
             place={mainWindowPlace(props.stores)}
           />
         );
-      default:
-        return <PlaceholderScreen screen={selected} />;
     }
   };
   return (
     <AppShell
       state={sidebarState}
       dispatch={sidebar.store.dispatch}
-      actions={sidebar.actions}
-      version={props.version}
-      shortcut={sidebarShortcutLabel(props.stores.bridge.platform === 'darwin')}
-      clock={viewerClock}
-      draft={draft}
+      badges={{
+        needsYou: needsYou(tiles).length,
+        machineUnreachable: machineCounts(machinesState).attention > 0,
+      }}
       screen={screen}
     />
   );

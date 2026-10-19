@@ -84,9 +84,11 @@ export {
 } from './components/narrative.js';
 export {NewBelow} from './components/new-below.js';
 export {
+  type ChartKeyItem,
   OverviewGroup,
   OverviewTile,
   ResultChart,
+  ResultChartKey,
   type SparkMark,
   type SparkPoint,
 } from './components/overview-tiles.js';

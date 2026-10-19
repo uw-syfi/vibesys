@@ -16,7 +16,7 @@ const FIXTURE = 'finished-ten-ideas';
 async function open(page: Page, width: number): Promise<void> {
   await page.setViewportSize({width, height: 900});
   const fixture = fixtureNamed(FIXTURE);
-  await openFixture(page, fixture, {sidebar: false});
+  await openFixture(page, fixture);
   await playLive(page, fixture);
   await expect(page.getByRole('slider', {name: 'Run position'})).toBeVisible();
   await settled(page);

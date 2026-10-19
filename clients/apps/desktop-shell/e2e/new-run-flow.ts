@@ -15,7 +15,7 @@ import {
   storeDraft,
 } from '@vibesys/feature-new-run/state';
 import type {FakeBridgeSeed} from './fake-bridge.js';
-import {open, SEED} from './world.js';
+import {openNewRun, SEED} from './world.js';
 
 /** The pages of every path, each with the answers that make it the page shown. */
 export interface NewRunPage {
@@ -127,7 +127,7 @@ export async function openAt(
     ([key, value]) => window.sessionStorage.setItem(key as string, value as string),
     [DRAFT_KEY, text],
   );
-  await open(page, seed);
+  await openNewRun(page, seed);
   await expect(page.getByRole('navigation', {name: 'New run steps'})).toBeVisible();
 }
 

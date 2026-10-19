@@ -4,10 +4,8 @@ import type {RecentRun} from '@vibesys/runs';
 import {
   type Clock,
   initialSidebar,
-  recentGroups,
   recentRows,
   SIDEBAR_EMPTY,
-  type SidebarAction,
   type SidebarRequest,
   type SidebarState,
   sidebarInvariants,
@@ -194,7 +192,8 @@ function open(runs: readonly RecentRun[]): {
 } {
   const first = sidebarStep(SIDEBAR_EMPTY, {type: 'listing', listing: listed()});
   const step = sidebarStep(first.state, {type: 'recent', recent: runs});
-  return {state: step.state, requests: step.requests};
+  const digests = step.requests.filter(request => request.kind === 'read-digests');
+  return {state: step.state, requests: digests};
 }
 
 function answer(
@@ -371,84 +370,21 @@ describe('Recent rows from run digests', () => {
   });
 });
 
-describe('Recent groups', () => {
-  const TITLES: readonly (readonly [string, string])[] = [
-    ['/p/queue-rs', 'mpmc'],
-    ['/p/queue-rs', 'mpmc'],
-    ['/p/kv-store', 'get-put'],
-    ['/p/queue-rs', 'mpmc'],
-  ];
-
-  test('runs share one machine header and retain their project and task, in recency order', () => {
-    const runs = TITLES.map(([project, task], index) =>
-      recent(`r${index}`, project, task, 100 - index),
-    );
-    const {state} = open(runs);
-    const {groups} = recentGroups(state, CLOCK);
-    expect(groups[0]?.title).toBe('host-a');
-    expect(groups[0]?.rows.map(row => [row.title, row.run.runId])).toEqual([
-      ['queue-rs · mpmc', 'r0'],
-      ['queue-rs · mpmc', 'r1'],
-      ['kv-store · get-put', 'r2'],
-      ['queue-rs · mpmc', 'r3'],
-    ]);
-  });
-
-  test('over seeded sequences, groups hold every row once, in order, and neighbours differ', () => {
-    let seed = 20_261_017;
-    const random = (): number => {
-      seed = (seed * 1103515245 + 12345) % 2147483648;
-      return seed / 2147483648;
-    };
-    for (let sample = 0; sample < 100; sample += 1) {
-      const runs = Array.from({length: Math.floor(random() * 30)}, (_, index) =>
-        recent(
-          `r${index}`,
-          random() < 0.5 ? '/p/a' : '/p/b',
-          random() < 0.5 ? 'x' : 'y',
-          100 - index,
-        ),
-      );
-      const {state} = open(runs);
-      const {groups} = recentGroups(state, CLOCK);
-      const flat = groups.flatMap(machine => machine.rows.map(row => row.run.runId));
-      expect(flat).toEqual(recentRows(state, CLOCK).rows.map(row => row.run.runId));
-      for (const machine of groups) {
-        expect(machine.rows.every(row => row.run.host === machine.host)).toBe(true);
-      }
-    }
-  });
-
-  test('runs from different machines have distinct headers', () => {
-    const runs = [
-      recent('a1', '/p/queue-rs', 'mpmc', 4),
-      {...recent('b1', '/p/queue-rs', 'mpmc', 3), host: 'ssh:host-b', hostLabel: 'host-b'},
-      recent('a2', '/p/queue-rs', 'mpmc', 2),
-    ];
-    const {groups} = recentGroups(open(runs).state, CLOCK);
-    expect(groups.map(machine => [machine.title, machine.rows.map(row => row.run.runId)])).toEqual([
-      ['host-a', ['a1', 'a2']],
-      ['host-b', ['b1']],
-    ]);
-  });
-
+describe('the first start and Settings', () => {
   test("the first start asks for nothing: the saved machines are the Machines store's", () => {
-    const action: SidebarAction = {type: 'toggle-sidebar'};
     expect(initialSidebar().requests).toEqual([]);
-    expect(sidebarStep(SIDEBAR_EMPTY, action).requests).toEqual([]);
+    expect(initialSidebar().state.selection).toEqual({kind: 'runs'});
   });
 
-  test('Settings back restores the exact previous screen after repeated opens, even with the sidebar hidden', () => {
+  test('Settings back restores the exact previous screen after repeated opens', () => {
     const previous = {kind: 'run', run: {host: 'ssh:host-a', runId: 'r1'}} as const;
     let state = sidebarStep(SIDEBAR_EMPTY, {type: 'select', screen: previous}).state;
-    state = sidebarStep(state, {type: 'toggle-sidebar'}).state;
     state = sidebarStep(state, {type: 'select', screen: {kind: 'settings'}}).state;
     state = sidebarStep(state, {type: 'select', screen: {kind: 'settings'}}).state;
     state = sidebarStep(state, {type: 'select', screen: {kind: 'machines'}}).state;
     state = sidebarStep(state, {type: 'select', screen: {kind: 'settings'}}).state;
     state = sidebarStep(state, {type: 'back-from-settings'}).state;
     expect(state.selection).toEqual(previous);
-    expect(state.shown).toBe(false);
   });
 
   test('opening Machines directly also remembers its exact caller for the Settings exit', () => {

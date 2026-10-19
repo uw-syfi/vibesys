@@ -88,6 +88,31 @@ export function ResultChart(props: {
   );
 }
 
+/** One entry of a `ResultChartKey`: a mark of the chart, or its best-so-far line, and its word. */
+export interface ChartKeyItem {
+  readonly mark: SparkMark | 'line';
+  readonly label: string;
+}
+
+/** A one-line key to what a `ResultChart` draws: each mark, or the line, beside its word. */
+export function ResultChartKey(props: {
+  readonly label: string;
+  readonly items: readonly ChartKeyItem[];
+}): JSX.Element {
+  return (
+    <ul className="vs-dotlegend vs-result-key" aria-label={props.label}>
+      {props.items.map(item => (
+        <li key={item.label} className="vs-dotlegend-item">
+          <span className="vs-result-key-mark" data-mark={item.mark} aria-hidden="true" />
+          <Text variant="small" tone="muted">
+            {item.label}
+          </Text>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /**
  * One subject at a glance as a tile: its `title` and best `result` against the base, the `facts`
  * line, a `chart`, the `figures` line and what it is doing now with its `status` pill. Pressing

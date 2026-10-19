@@ -5,6 +5,7 @@ import {
   installFakeBridge,
   installFakeMachines,
   installFakeNewRun,
+  installFakeProjectRuns,
   installFakeWindows,
 } from './fake-bridge.js';
 import {installFakeRun} from './fake-run.js';
@@ -12,10 +13,10 @@ import {type FakeServerSeed, installFakeServer} from './fake-server.js';
 import {drawnUnderWindowControls, listed, SEED, server} from './world.js';
 
 /**
- * Open in new window: the Run screen's "⋯" and the sidebar row menu ask main to show the run in a
+ * Open in new window: the Run screen's "⋯" and the tile's menu ask main to show the run in a
  * window of its own (the Fake opens a browser window on the run's page, as main opens an
  * `AppWindow`). That window shows the Run screen alone, for the run its URL names, and is live
- * there; the main window leaves the run for New run. Asking again focuses the window.
+ * there; the main window leaves the run for Runs. Asking again focuses the window.
  */
 
 const RUN_ID = '20261015-163047';
@@ -42,6 +43,7 @@ async function install(context: BrowserContext): Promise<void> {
   await context.addInitScript(installFakeBridge, WINDOW_SEED);
   await context.addInitScript(installFakeMachines, WINDOW_SEED);
   await context.addInitScript(installFakeNewRun, WINDOW_SEED);
+  await context.addInitScript(installFakeProjectRuns, WINDOW_SEED);
   await context.addInitScript(installFakeWindows);
   await context.addInitScript(installFakeRun, {streams: [], text: {}});
   await context.addInitScript(installFakeServer, SERVER);
@@ -64,9 +66,7 @@ const sidebar = (page: Page) => page.getByRole('navigation', {name: 'VibeSys'});
 test('a run opens in a window of its own, shown alone and live there', async ({page, context}) => {
   await install(context);
   await page.goto('./shell.html');
-  await sidebar(page)
-    .getByRole('button', {name: /^\S+ queue-rs · mpmc/})
-    .click();
+  await page.getByRole('main').getByRole('button', {name: /^mpmc/}).click();
   await expect(page.getByRole('radiogroup', {name: 'Show'})).toBeVisible();
 
   const opening = context.waitForEvent('page');
@@ -75,8 +75,8 @@ test('a run opens in a window of its own, shown alone and live there', async ({p
   const runWindow = await opening;
   await runWindow.waitForLoadState();
 
-  // The main window leaves the run for New run; the new one shows the run, with no sidebar.
-  await expect(page.getByRole('heading', {name: 'What do you want to optimize?'})).toBeVisible();
+  // The main window leaves the run for Runs; the new one shows the run, with no rail.
+  await expect(page.getByRole('heading', {name: 'Runs'})).toBeVisible();
   expect(new URL(runWindow.url()).search).toBe(`?host=ssh%3Ahost-b&run=${RUN_ID}`);
   await expect(runWindow.getByRole('radiogroup', {name: 'Show'})).toBeVisible();
   await expect(runWindow.getByText(`host-b · ${RUN_ID}`)).toBeVisible();
@@ -98,8 +98,8 @@ test('a run opens in a window of its own, shown alone and live there', async ({p
   await expect(runWindow.getByRole('menuitem', {name: 'Open in new window'})).toHaveCount(0);
   await runWindow.keyboard.press('Escape');
 
-  // Asking again, from the sidebar row's menu, focuses that window rather than opening another.
-  await sidebar(page).getByRole('button', {name: 'More for queue-rs · mpmc'}).click();
+  // Asking again, from the tile's menu, focuses that window rather than opening another.
+  await page.getByRole('button', {name: 'More for mpmc'}).click();
   await page.getByRole('menuitem', {name: 'Open in new window'}).click();
   await expect
     .poll(async () => (await windows(page)).opened)
@@ -108,7 +108,7 @@ test('a run opens in a window of its own, shown alone and live there', async ({p
 
   // Closing it leaves the main window as it was.
   await runWindow.close();
-  await expect(page.getByRole('heading', {name: 'What do you want to optimize?'})).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'Runs'})).toBeVisible();
 });
 
 test('the Settings menu item opens Settings in the main window while a run shows in its own window', async ({
@@ -117,9 +117,7 @@ test('the Settings menu item opens Settings in the main window while a run shows
 }) => {
   await install(context);
   await page.goto('./shell.html');
-  await sidebar(page)
-    .getByRole('button', {name: /^\S+ queue-rs · mpmc/})
-    .click();
+  await page.getByRole('main').getByRole('button', {name: /^mpmc/}).click();
   const opening = context.waitForEvent('page');
   await page.getByRole('button', {name: 'More actions'}).click();
   await page.getByRole('menuitem', {name: 'Open in new window'}).click();

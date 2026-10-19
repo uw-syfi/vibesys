@@ -41,7 +41,7 @@ function pageScript(name: string, theme: Theme): string {
 /** In the page: opens the run Recent lists, then streams a live fixture's later batches. */
 function openRun(batches: readonly (readonly unknown[])[], drops: boolean): void {
   type Host = {emit(events: readonly unknown[]): void; drop(): void};
-  const link = 'button.vs-sidebar-link[title*="queue-rs · mpmc"]';
+  const link = 'main button.vs-overview-tile-press';
   const watch = new MutationObserver(() => {
     const button = document.querySelector<HTMLButtonElement>(link);
     if (button === null) return;

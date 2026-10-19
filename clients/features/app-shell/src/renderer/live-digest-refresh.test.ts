@@ -91,12 +91,10 @@ function world(listing: HostListing): {readonly bridge: ShellBridge; readonly as
     onListing: ignore,
     onRecent: ignore,
     onPreferences: ignore,
-    onToggleSidebar: ignore,
   };
   return {bridge, asked: () => asked};
 }
 
-const memory = {read: () => null, write: () => undefined};
 const settle = (): Promise<void> =>
   new Promise(resolve => queueMicrotask(resolve)).then(() => undefined);
 
@@ -108,7 +106,7 @@ describe('a live run on the sidebar', () => {
   test('its digest is read again each interval, and the row shows the latest', async () => {
     const clock = new ManualClock();
     const {bridge, asked} = world(LISTING(true));
-    const {store} = createSidebarStore(bridge, memory, clock.schedule);
+    const {store} = createSidebarStore(bridge, clock.schedule);
     await drain();
     expect(asked()).toBe(1);
     expect(liveRows(store.getState())[0]?.trail).toBe('1 idea · 1.50× best so far · 1m');
@@ -126,7 +124,7 @@ describe('a live run on the sidebar', () => {
   test('with no live run nothing is scheduled and nothing is asked', async () => {
     const clock = new ManualClock();
     const {bridge, asked} = world(LISTING(false));
-    createSidebarStore(bridge, memory, clock.schedule);
+    createSidebarStore(bridge, clock.schedule);
     await drain();
     expect(clock.pending).toBe(0);
     expect(asked()).toBe(0);

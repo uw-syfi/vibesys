@@ -1,214 +1,81 @@
-import {
-  AppFrame,
-  Banner,
-  Button,
-  Row,
-  SidebarGroup,
-  SidebarItem,
-  SidebarSection,
-  Text,
-} from '@vibesys/ui';
+import {RailFrame, RailItem} from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
-import {
-  type Clock,
-  liveMachineGroups,
-  type RunRow,
-  recentGroups,
-  recentNotice,
-  type Screen,
-  type ShellActions,
-  type SidebarAction,
-  type SidebarState,
-} from '../../state/index.js';
-import {RunItem} from './run-item.js';
+import type {Screen, SidebarAction, SidebarState} from '../../state/index.js';
 
-/**
- * The icon-only control that hides or shows the sidebar: named, and described with its shortcut,
- * for what pressing it does now.
- */
-function SidebarToggle(props: {
-  readonly shown: boolean;
-  readonly shortcut: string;
-  readonly press: () => void;
-}): JSX.Element {
-  const label = props.shown ? 'Hide sidebar' : 'Show sidebar';
-  return (
-    <Button
-      variant="quiet"
-      size="sm"
-      icon="sidebar"
-      label={label}
-      hint={`${label} (${props.shortcut})`}
-      press={props.press}
-    />
-  );
+/** What the rail says besides its destinations: the runs that need the user, and the machines' health. */
+export interface RailBadges {
+  /** How many runs need the user (failed or stalled); none shows no badge. */
+  readonly needsYou: number;
+  /** Whether a machine, cluster or cloud cannot be reached. */
+  readonly machineUnreachable: boolean;
 }
 
-/** An unfinished New run, as the sidebar lists it: what it is of so far, and where it stands. */
-export interface SidebarDraft {
-  readonly title: string;
-  readonly detail: string;
-  /** Open New run where it was left. */
-  readonly open: () => void;
-  readonly discard: () => void;
-}
-
-/** What the narrow rail keeps when the sidebar is hidden: New run and Settings. */
-function QuickRail(props: {readonly select: (screen: Screen) => () => void}): JSX.Element {
-  return (
-    <>
-      <Button
-        variant="primary"
-        icon="plus"
-        label="New run"
-        press={props.select({kind: 'new-run'})}
-      />
-      <Button
-        variant="quiet"
-        icon="gear"
-        label="Settings"
-        press={props.select({kind: 'settings'})}
-      />
-    </>
-  );
-}
-
-/** The unfinished New run, listed above the runs. */
-function DraftSection(props: {
-  readonly draft: SidebarDraft;
-  readonly active: boolean;
-}): JSX.Element {
-  const {draft} = props;
-  return (
-    <SidebarSection title="Draft">
-      <SidebarItem
-        label={draft.title}
-        detail={draft.detail}
-        icon="plus"
-        active={props.active}
-        press={draft.open}
-        menu={[{id: 'discard', label: 'Discard draft', press: draft.discard}]}
-      />
-    </SidebarSection>
-  );
+/** Whether `selected` is `screen`, or a screen that belongs to it (a run belongs to Runs). */
+function within(selected: Screen, screen: Screen['kind']): boolean {
+  return selected.kind === screen || (screen === 'runs' && selected.kind === 'run');
 }
 
 /**
- * The app's one window: the sidebar (New run, Live, Recent with "Show all", Machines and
- * Settings) beside the selected screen, which `screen` renders. The sidebar can be hidden, leaving
- * a narrow rail with New run and Settings; its toggle is in the window's title-bar row beside the
- * window controls, in the same place whether the sidebar is shown or hidden. `shortcut` is the toggle's keyboard shortcut, as a tooltip shows it.
+ * The app's one window: a narrow rail (the app's mark, New, Runs with a badge for the runs that need
+ * the user, Machines with a warning dot, Usage, and Settings at the bottom) beside the selected
+ * screen, which `screen` renders. The mark goes to Runs, the home screen.
  */
 export function AppShell(props: {
   readonly state: SidebarState;
   readonly dispatch: (action: SidebarAction) => void;
-  readonly actions: ShellActions;
-  readonly version: string;
-  readonly shortcut: string;
-  /** The moment and zone Recent's times are worded in; the app passes the viewer's own. */
-  readonly clock: () => Clock;
-  /** The unfinished New run of this window, listed above the runs; none when there is not one. */
-  readonly draft?: SidebarDraft | null;
+  readonly badges: RailBadges;
   readonly screen: (screen: Screen) => ReactNode;
 }): JSX.Element {
-  const {state, dispatch, actions} = props;
-  const live = liveMachineGroups(state);
-  const recent = recentGroups(state, props.clock());
-  const skipped = recentNotice(state.skippedRecent);
-  const recentCount = recent.groups.reduce((total, machine) => total + machine.rows.length, 0);
-  const toggle = (
-    <SidebarToggle
-      shown={state.shown}
-      shortcut={props.shortcut}
-      press={() => dispatch({type: 'toggle-sidebar'})}
-    />
-  );
-  const select = (screen: Screen) => () => dispatch({type: 'select', screen});
-  const item = (row: RunRow) => (
-    <RunItem
-      key={`${row.run.host} ${row.run.runId}`}
-      row={row}
-      state={state}
-      dispatch={dispatch}
-      actions={actions}
-    />
-  );
+  const {state, dispatch, badges} = props;
+  const selected = state.selection;
+  const go = (screen: Screen) => () => dispatch({type: 'select', screen});
   return (
-    <AppFrame
+    <RailFrame
       label="VibeSys"
-      navHidden={!state.shown}
-      control={toggle}
-      rail={{label: 'Quick navigation', content: <QuickRail select={select} />}}
-      onCollapse={() => dispatch({type: 'toggle-sidebar'})}
-      navPinned={
+      top={
         <>
-          <Row justify="between">
-            <Row gap="space-3">
-              <Text variant="section" tone="default">
-                VibeSys
-              </Text>
-              <Text variant="code" tone="muted">
-                {props.version}
-              </Text>
-            </Row>
-          </Row>
-          <Button
-            variant="primary"
-            full
+          <RailItem icon="mark" label="VibeSys" hideLabel press={go({kind: 'runs'})} />
+          <RailItem
             icon="plus"
-            text="New run"
-            press={select({kind: 'new-run'})}
+            label="New"
+            hint="New run"
+            active={within(selected, 'new-run')}
+            press={go({kind: 'new-run'})}
+          />
+          <RailItem
+            icon="grid"
+            label="Runs"
+            active={within(selected, 'runs')}
+            {...(badges.needsYou > 0
+              ? {badge: {count: badges.needsYou, label: `${badges.needsYou} need you`}}
+              : {})}
+            press={go({kind: 'runs'})}
+          />
+          <RailItem
+            icon="monitor"
+            label="Machines"
+            active={within(selected, 'machines')}
+            {...(badges.machineUnreachable ? {warning: 'A machine is unreachable'} : {})}
+            press={go({kind: 'machines'})}
+          />
+          <RailItem
+            icon="usage"
+            label="Usage"
+            active={within(selected, 'usage')}
+            press={go({kind: 'usage'})}
           />
         </>
       }
-      nav={
-        <>
-          {props.draft == null ? null : (
-            <DraftSection draft={props.draft} active={state.selection.kind === 'new-run'} />
-          )}
-          {live.length === 0 ? null : (
-            <SidebarSection title="Live">
-              {live.map(group => (
-                <SidebarGroup key={group.title} title={group.title}>
-                  {group.rows.map(row => item(row))}
-                </SidebarGroup>
-              ))}
-            </SidebarSection>
-          )}
-          <SidebarSection
-            title="Recent"
-            showAll={{
-              label: recent.more === 0 ? 'Show all' : `Show all (${recentCount + recent.more})`,
-              press: select({kind: 'all-runs'}),
-            }}
-          >
-            {skipped === null ? null : (
-              <Banner tone="warn" title={skipped.title} body={skipped.body} />
-            )}
-            {recent.groups.length === 0 && skipped === null ? (
-              <Text variant="small" tone="muted">
-                Runs you open show up here.
-              </Text>
-            ) : (
-              recent.groups.map(machine => (
-                <SidebarGroup key={machine.host} title={machine.title}>
-                  {machine.rows.map(row => item(row))}
-                </SidebarGroup>
-              ))
-            )}
-          </SidebarSection>
-        </>
-      }
-      footer={
-        <SidebarItem
-          label="Settings"
+      bottom={
+        <RailItem
           icon="gear"
-          active={state.selection.kind === 'settings' || state.selection.kind === 'machines'}
-          press={select({kind: 'settings'})}
+          label="Settings"
+          active={within(selected, 'settings')}
+          press={go({kind: 'settings'})}
         />
       }
     >
-      {props.screen(state.selection)}
-    </AppFrame>
+      {props.screen(selected)}
+    </RailFrame>
   );
 }

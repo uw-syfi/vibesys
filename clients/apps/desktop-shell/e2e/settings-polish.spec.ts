@@ -32,8 +32,6 @@ async function openSettings(
   await page.goto('./shell.html');
   expect(await page.evaluate(() => window.innerWidth)).toBe(width);
   await sidebar(page).getByRole('button', {name: 'Settings'}).click();
-  // A narrow window floats the sidebar over the page's start; the page is what is measured.
-  if (width < 800) await page.getByRole('button', {name: 'Hide sidebar'}).click();
 }
 
 const openMachines = async (page: Page): Promise<void> => {
@@ -140,17 +138,14 @@ for (const width of WIDTHS) {
 }
 
 for (const width of WIDTHS) {
-  test(`All runs lists, under its host, the live run the sidebar shows at ${width} px`, async ({
+  test(`the Runs dashboard lists the live run of a fixture, once, at ${width} px`, async ({
     page,
   }) => {
     await resize(page, width);
     await openFixture(page, fixtureNamed('weeks-600-ideas'));
     expect(await page.evaluate(() => window.innerWidth)).toBe(width);
-    await sidebar(page)
-      .getByRole('button', {name: /^Show all/})
-      .click();
-    await expect(page.getByRole('heading', {name: 'All runs'})).toBeVisible();
-    await expect(page.locator('main').getByText('No runs yet.')).toHaveCount(0);
-    await expect(page.locator('main .vs-sidebar-group .vs-sidebar-item')).toHaveCount(1);
+    await sidebar(page).getByRole('button', {name: /^Runs/}).click();
+    await expect(page.getByRole('heading', {name: 'Runs'})).toBeVisible();
+    await expect(page.locator('main .vs-overview-tile')).toHaveCount(1);
   });
 }

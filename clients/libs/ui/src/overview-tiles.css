@@ -127,3 +127,29 @@
   stroke: var(--chip-accent-border);
   stroke-width: 3;
 }
+.vs-result-key-mark {
+  flex: none;
+  box-sizing: border-box;
+  width: var(--dot);
+  height: var(--dot);
+  border-radius: var(--radius-full);
+}
+.vs-result-key-mark[data-mark="kept"] {
+  background: var(--ok);
+}
+.vs-result-key-mark[data-mark="not-better"] {
+  border: var(--hairline) solid var(--muted);
+  background: var(--panel);
+}
+.vs-result-key-mark[data-mark="failed"] {
+  background: var(--err);
+}
+.vs-result-key-mark[data-mark="pending"] {
+  background: var(--accent);
+}
+.vs-result-key-mark[data-mark="line"] {
+  width: var(--space-5);
+  height: var(--focus-ring);
+  border-radius: 0;
+  background: var(--text);
+}

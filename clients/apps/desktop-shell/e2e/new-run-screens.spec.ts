@@ -35,8 +35,6 @@ for (const theme of THEMES) {
         expect(await page.evaluate(() => window.innerWidth), 'the window is as wide as asked').toBe(
           width,
         );
-        // Where the sidebar would float over the page (660 px), it is put away, as a user does.
-        if (width === 660) await page.getByRole('button', {name: 'Hide sidebar'}).click();
         await expect(main(page).getByRole('heading', {level: 1})).toBeVisible();
         // The roles come with the first check of the run's inputs; the page is checked with them.
         if (each.agent !== undefined && each.step === 'agent') {

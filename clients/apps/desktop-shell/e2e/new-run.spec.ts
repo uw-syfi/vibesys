@@ -5,7 +5,7 @@ import {rawTextOf} from './checks/screen-check.js';
 import {installFakeBridge, installFakeMachines, installFakeNewRun} from './fake-bridge.js';
 import {installFakeRun} from './fake-run.js';
 import {choose, main, NEW_RUN_PAGES, openAt, proceed, question, steps} from './new-run-flow.js';
-import {type FakeHostWindow, open, PROJECT, SEED} from './world.js';
+import {type FakeHostWindow, openNewRun as open, PROJECT, SEED} from './world.js';
 
 const start = (page: Page) => main(page).getByRole('button', {name: 'Start run'});
 
@@ -313,30 +313,39 @@ test('changing the domain clears the questions of the old one, and Back returns 
   await expect(question(page, 'Which domain?')).toBeVisible();
 });
 
-test('an unfinished run is a draft: it is listed in the sidebar, kept across a reload, and discarded', async ({
+test('an unfinished run is a draft: it is offered on the Runs dashboard, kept across a reload, and discarded', async ({
   page,
 }) => {
   await open(page);
-  const sidebar = page.getByRole('navigation', {name: 'VibeSys'});
-  await expect(sidebar.getByText('Draft', {exact: true})).toHaveCount(0);
+  const rail = page.getByRole('navigation', {name: 'VibeSys'});
+  const home = async (): Promise<void> => {
+    await rail.getByRole('button', {name: /^Runs/}).click();
+    await expect(page.getByRole('heading', {name: 'Runs'})).toBeVisible();
+  };
+  await home();
+  await expect(main(page).getByText('Draft', {exact: true})).toHaveCount(0);
+  await rail.getByRole('button', {name: 'New', exact: true}).click();
   await choose(page, 'Start from', 'An example');
   await proceed(page);
   await choose(page, 'Domain', 'LLM serving');
   await proceed(page);
-  const draft = sidebar.getByRole('region', {name: 'Draft'});
-  await expect(draft).toContainText('3 of 8 · Model');
   // Leaving New run and coming back finds it where it was left.
-  await sidebar.getByRole('button', {name: 'Settings'}).click();
+  await home();
+  await expect(main(page)).toContainText('LLM serving');
+  await expect(main(page)).toContainText('3 of 8 · Model');
   await expect(question(page, 'Which model do you want to serve?')).toHaveCount(0);
-  await draft.getByRole('button', {name: 'LLM serving 3 of 8 \u00b7 Model'}).click();
+  await main(page).getByRole('button', {name: 'Open'}).click();
   await expect(question(page, 'Which model do you want to serve?')).toBeVisible();
   await page.reload();
+  await home();
+  await main(page).getByRole('button', {name: 'Open'}).click();
   await expect(question(page, 'Which model do you want to serve?')).toBeVisible();
   await expect(steps(page).getByRole('button', {name: /Domain/})).toContainText('LLM serving');
-  await draft.getByRole('button', {name: /More for/}).click();
-  await page.getByRole('menuitem', {name: 'Discard draft'}).click();
+  await home();
+  await main(page).getByRole('button', {name: 'Discard'}).click();
+  await expect(main(page).getByText('Draft', {exact: true})).toHaveCount(0);
+  await rail.getByRole('button', {name: 'New', exact: true}).click();
   await expect(question(page, 'What do you want to optimize?')).toBeVisible();
-  await expect(sidebar.getByRole('region', {name: 'Draft'})).toHaveCount(0);
 });
 
 test('Start over forgets the answers', async ({page}) => {

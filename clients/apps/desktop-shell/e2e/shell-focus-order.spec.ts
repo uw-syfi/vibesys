@@ -2,26 +2,22 @@ import {expect, type Page, test} from '@playwright/test';
 import {open, sidebar} from './world.js';
 
 /**
- * The keyboard reaches the sidebar before the page, as the eye does: from a fresh load, Tab walks
- * the title-bar control and the sidebar, and only then the screen beside it, on every screen and at
- * every window width.
+ * The keyboard reaches the rail before the page, as the eye does: from a fresh load, Tab walks
+ * the rail, and only then the screen beside it, on every screen and at every window width.
  */
 
 const WIDTHS = [660, 1000, 1440] as const;
-const SCREENS = ['New run', 'All runs', 'Settings'] as const;
+const SCREENS = ['New', 'Runs', 'Settings'] as const;
 
 async function reach(page: Page, screen: (typeof SCREENS)[number]): Promise<void> {
-  const nav = sidebar(page);
-  if (screen === 'New run') await nav.getByRole('button', {name: 'New run'}).click();
-  if (screen === 'All runs') await nav.getByRole('button', {name: 'Show all'}).click();
-  if (screen === 'Settings') await nav.getByRole('button', {name: 'Settings'}).click();
+  await sidebar(page).getByRole('button', {name: screen, exact: true}).click();
   // A fresh load's focus start: the click moved it, so the page's own start is restored.
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 }
 
 for (const width of WIDTHS) {
   for (const screen of SCREENS) {
-    test(`Tab reaches the sidebar before ${screen} at ${width}px`, async ({page}) => {
+    test(`Tab reaches the rail before ${screen} at ${width}px`, async ({page}) => {
       await page.setViewportSize({width, height: 900});
       await open(page);
       await reach(page, screen);
@@ -38,7 +34,7 @@ for (const width of WIDTHS) {
         const focused = await page.evaluate(() => {
           const active = document.activeElement;
           const region =
-            active?.closest('nav.vs-app-nav') != null ? 1 : active?.closest('main') != null ? 2 : 0;
+            active?.closest('nav.vs-rail') != null ? 1 : active?.closest('main') != null ? 2 : 0;
           const path =
             active === null
               ? ''
@@ -53,7 +49,7 @@ for (const width of WIDTHS) {
       const regions = lap.map(each => each.region);
       expect(regions).toContain(1);
       expect(regions).toContain(2);
-      // The title bar's control, then the sidebar, then the page.
+      // The rail, then the page.
       expect(regions).toEqual([...regions].sort());
     });
   }

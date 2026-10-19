@@ -15,7 +15,7 @@
   justify-content: space-between;
   width: var(--rail);
   max-height: 100%;
-  padding: calc(var(--titlebar-row) + var(--space-2)) var(--space-2) var(--space-4);
+  padding: calc(var(--titlebar-row) + var(--space-2)) var(--space-1) var(--space-4);
   /* The rail's background moves the window; its controls stay controls. */
   -webkit-app-region: drag;
   border-right: var(--hairline) solid var(--line);
@@ -35,7 +35,7 @@
   gap: var(--space-1);
   min-height: var(--control);
   margin: 0;
-  padding: var(--space-3) var(--space-1);
+  padding: var(--space-3) var(--space-0);
   border: var(--hairline) solid transparent;
   border-radius: var(--radius);
   background: transparent;
@@ -46,6 +46,7 @@
 }
 .vs-rail-item .vs-text {
   color: inherit;
+  white-space: nowrap;
 }
 .vs-rail-item:hover {
   background: var(--hover);

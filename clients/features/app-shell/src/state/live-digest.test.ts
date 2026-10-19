@@ -62,7 +62,7 @@ function play(...actions: SidebarAction[]): {
   for (const action of actions) {
     const step = sidebarStep(state, action);
     state = step.state;
-    requests.push(...step.requests);
+    requests.push(...step.requests.filter(request => request.kind === 'read-digests'));
   }
   return {state, requests};
 }

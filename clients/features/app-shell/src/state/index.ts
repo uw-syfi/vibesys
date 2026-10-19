@@ -1,24 +1,23 @@
 /**
- * The app shell's pure state: the sidebar's store and its rows, and which run notifications a
- * host's listing calls for.
+ * The app shell's pure state: the store of the runs the hosts list (listings, digests, the screen
+ * shown) and the dashboard's rows over it, and which run notifications a host's listing calls for.
  */
 
-export {type AllRunsGroup, allRunsGroups, type MachineRunsState} from './all-runs-rows.js';
+export {type DashboardRow, dashboardRows} from './all-runs-rows.js';
 export {type NoticeKind, type RunNotice, runNotices} from './notices.js';
 export {NOTICE_REASONS, type RecentNotice, recentNotice} from './recent-notice.js';
 export {type Clock, formatWhen} from './recent-words.js';
 export {type RunRowStatus, statusWord} from './run-status.js';
 export {
+  DASHBOARD_RUNS,
   type DigestSlot,
   digestKey,
   initialSidebar,
-  liveMachineGroups,
   liveRows,
-  type MachineRunGroup,
   RECENT_ROWS,
+  type ReadDigest,
   type RowProblem,
   type RunRow,
-  recentGroups,
   recentRows,
   type Screen,
   type ShellActions,
@@ -30,10 +29,3 @@ export {
   sidebarInvariants,
   sidebarStep,
 } from './sidebar.js';
-export {
-  isSidebarShortcut,
-  parseSidebarShown,
-  type ShortcutKey,
-  sidebarShortcutLabel,
-  storeSidebarShown,
-} from './sidebar-visibility.js';

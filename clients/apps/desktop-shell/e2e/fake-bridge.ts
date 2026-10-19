@@ -91,6 +91,8 @@ export interface FakeBridgeSeed {
    * answers as an older helper would: it does not offer digests.
    */
   readonly digests?: Readonly<Record<string, unknown>>;
+  /** Hosts whose VibeSys is too old to offer digests, whatever `digests` holds. */
+  readonly digestless?: readonly string[];
   /**
    * What each machine lists of a project's runs (`runs.list`, as `ListedRun`s), by
    * `<host>|<project>`; a project not named is one the machine cannot list.
@@ -289,8 +291,9 @@ export function installRequestBound(limit: number): void {
 export function installFakeDigests(seed: FakeBridgeSeed): void {
   const digests = seed.digests;
   Object.assign((window as unknown as {vibesysWelcome: object}).vibesysWelcome, {
-    runDigests: (_host: string, _project: string, runIds: readonly string[]) => {
-      if (digests === undefined) return Promise.resolve({ok: true, value: {kind: 'unsupported'}});
+    runDigests: (host: string, _project: string, runIds: readonly string[]) => {
+      if (digests === undefined || seed.digestless?.includes(host) === true)
+        return Promise.resolve({ok: true, value: {kind: 'unsupported'}});
       const runs = new Map(runIds.flatMap(id => (id in digests ? [[id, digests[id]]] : [])));
       return Promise.resolve({ok: true, value: {kind: 'digests', runs}});
     },
