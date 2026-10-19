@@ -232,6 +232,7 @@ def representative_context() -> dict[str, object]:
         "profile_focus",
         "profile_name",
         "profiler_entry",
+        "profiler_id",
         "profiler_kind",
         "profiler_mcp_name",
         "profiler_support_name",

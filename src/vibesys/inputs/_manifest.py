@@ -324,6 +324,9 @@ class AgentInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     domain: DomainName
+    interface: Literal["inprocess", "service"] | None = None
+    """How the evaluator reaches the candidate; the ``--interface`` flag overrides it, and
+    ``inprocess`` is the default when neither says."""
 
 
 class ProfileGuidedInput(BaseModel):
@@ -575,6 +578,8 @@ def render_input_manifest(manifest: InputManifest) -> str:
         "[agent]",
         f"domain = {_toml_string(manifest.agent.domain.value)}",
     ]
+    if manifest.agent.interface is not None:
+        lines.append(f"interface = {_toml_string(manifest.agent.interface)}")
     _append_profile_guided(lines, manifest)
     _append_build(lines, manifest)
     _append_accuracy(lines, manifest)

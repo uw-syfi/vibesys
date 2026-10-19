@@ -188,6 +188,7 @@ async def build_stack(  # noqa: PLR0913  # lint-waiver: LW-455560 [PLR0913]; eac
     stage_output: StageOutputOpener | None = None,
     sleeper: Sleeper | None = None,
     ledger: SlurmLedgerAttachment | None = None,
+    policy: SlurmExecutionPolicy | None = None,
 ) -> Stack:
     """Build the semantic Slurm executor over ``cluster``, reusing durable state under root.
 
@@ -197,7 +198,7 @@ async def build_stack(  # noqa: PLR0913  # lint-waiver: LW-455560 [PLR0913]; eac
     ``cluster.profile_output``. ``stage_output`` opens each stage's output stream.
     ``sleeper`` paces the executor's polls of a running job; by default a pause
     passes at once. With ``ledger`` the run's evaluations go through that
-    evaluation ledger attachment.
+    evaluation ledger attachment. ``policy`` is the operator's execution policy, default none.
     """
     cluster = cluster or ScenarioCluster()
     workspaces = _Candidates(
@@ -208,7 +209,7 @@ async def build_stack(  # noqa: PLR0913  # lint-waiver: LW-455560 [PLR0913]; eac
     namespace = StateNamespace(project_root=root, root=state, portable=False)
     executor = SemanticSlurmEvaluationExecutor(
         _config(),
-        SlurmExecutionPolicy(),
+        policy or SlurmExecutionPolicy(),
         SlurmEvaluationPlan(
             config_path=root / "slurm.toml",
             accuracy_command=("python", "accuracy.py"),

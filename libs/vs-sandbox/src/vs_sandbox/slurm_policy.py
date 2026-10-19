@@ -135,6 +135,21 @@ class SlurmExecutionPolicy(BaseModel):
             return (self.remote_python, *parts[1:])
         return parts
 
+    def private_paths(self) -> tuple[str, ...]:
+        """The absolute cluster paths the operator wrote: interpreter, setup script, service and arguments.
+
+        What a stage reports may echo them; they are the operator's, not the agent's to see.
+        """
+        service = () if self.service is None else self.service.command
+        words = (
+            self.remote_python,
+            self.setup_script or "",
+            *service,
+            *self.accuracy_arguments,
+            *self.benchmark_arguments,
+        )
+        return tuple(word for word in words if word.startswith("/"))
+
     def remote_service(self) -> SlurmService | None:
         """Return the configured service with its Python launcher translated."""
         if self.service is None:

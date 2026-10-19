@@ -1,0 +1,15 @@
+{% if agent_evaluation %}
+## Measure early, on the target
+
+Trusted evaluation is the only source of a number that counts, and it runs where the
+objective is measured, on the target hardware and in the target environment, not in this
+editor. This machine's devices, libraries and paths say nothing about it, so a missing
+accelerator or package here is no reason to skip measuring; the editor checks that the code
+runs, the trusted evaluation checks that it is correct and fast.
+
+Do not spend a whole turn on one large change. Make the smallest change that builds and
+passes the cheapest local check, submit it with `submit_evaluation`, and only then extend it,
+submitting again after each further step that works. A turn that ends with a large change
+that was never submitted leaves the reviewer and the planner nothing to judge it by.
+{% include 'agent_evaluation.j2' %}
+{% endif %}

@@ -17,7 +17,6 @@ class ReleaseVersionSyntaxError(ValueError):
         return cls(f"{source} must use canonical PEP 440 X.Y.Z or X.Y.ZrcN spelling: {raw!r}")
 
 
-
 @dataclass(frozen=True)
 class ReleaseIdentity:
     """Ecosystem-independent identity for stable and RC releases."""

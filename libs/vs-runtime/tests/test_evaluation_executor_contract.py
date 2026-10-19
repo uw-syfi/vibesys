@@ -45,6 +45,7 @@ from vs_runtime.api import (
 from vs_runtime.api.core import StageOutputOpener, StageRun
 from vs_runtime.api.slurm_evaluation_stack import BENCHMARK_OUTPUT, ScenarioCluster, build_stack
 from vs_runtime.api.testing import FakeEvaluation, FakeWorkspace, FakeWorkspaces
+from vs_sandbox.api.slurm import SlurmExecutionPolicy
 from vs_sim.api import Capture, OutputStream
 from vs_sim.api.testing import ManualClock, yield_until
 from vs_slurm.api import SlurmJobStatus
@@ -252,6 +253,42 @@ async def test_semantic_slurm_failure_keeps_raw_evidence_and_safe_operator_summa
     assert len(evidence.semantic_summary) <= MAX_EVIDENCE_SUMMARY_CHARS
     assert benchmark.operator_summary is not None
     assert "slurm-secret" not in benchmark.operator_summary
+    await stack.executor.close()
+
+
+_PRIVATE_PYTHON = "/cluster/work/u/venv/bin/python"
+_PRIVATE_SETUP = "/cluster/work/u/campaign/setup.sh"
+_PRIVATE_ERROR = (
+    f"{_PRIVATE_PYTHON}: Error while finding module specification for 'engine.server' "
+    "(ModuleNotFoundError: No module named 'engine')\n"
+    '  File "/cluster/work/u/venv/lib/python3.10/site-packages/x.py", line 1, in main\n'
+    f"sourced {_PRIVATE_SETUP}\n"
+)
+
+
+@pytest.mark.parametrize("never_ready", [False, True])
+async def test_a_failed_slurm_evaluation_names_none_of_the_operators_paths(
+    *, never_ready: bool, tmp_path: Path
+) -> None:
+    cluster = ScenarioCluster()
+    if never_ready:
+        cluster.job_exit_code = 70
+        cluster.benchmark_output = _PRIVATE_ERROR
+    else:
+        cluster.accuracy_exit = 1
+        cluster.accuracy_output = _PRIVATE_ERROR
+        cluster.service_log_tail = _PRIVATE_ERROR
+    policy = SlurmExecutionPolicy(remote_python=_PRIVATE_PYTHON, setup_script=_PRIVATE_SETUP)
+    stack = await build_stack(tmp_path, cluster, policy=policy)
+
+    await stack.executor.submit(_request(stack.snapshot), handle_id=_HANDLE)
+    observed = await _terminal(stack.executor)
+
+    reported = observed.model_dump_json()
+    assert observed.state is EvaluationState.FAILED
+    assert "No module named" in reported
+    for private in (_PRIVATE_PYTHON, _PRIVATE_SETUP, "/cluster/work/u"):
+        assert private not in reported
     await stack.executor.close()
 
 

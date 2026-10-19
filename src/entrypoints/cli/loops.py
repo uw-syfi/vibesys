@@ -253,7 +253,7 @@ def _agent_policy_descriptor(
             }
         )
     task = {
-        "interface": args.interface,
+        "interface": args.interface or bundle.manifest.agent.interface or "inprocess",
         "modality": args.modality
         or ("text_generation" if bundle.domain is DomainName.LLM_SERVING else None),
         "operator_constraints": [item.strip() for item in args.constraint if item.strip()],

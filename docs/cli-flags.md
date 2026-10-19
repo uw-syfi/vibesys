@@ -521,7 +521,7 @@ Validation does not execute the checker or benchmark. A project with a root
 
 ## Interface
 
-`--interface` applies to the agent loop.
+`--interface` applies to the agent loop. Without the flag, the input's `[agent].interface` applies (`inprocess` or `service`), and `inprocess` when it declares none.
 
 | Value | Process boundary | Contract ownership |
 | --- | --- | --- |

@@ -227,6 +227,7 @@ def domain_prompt_sections(
         accuracy_command=facts.accuracy_command,
         runtime_notes=facts.environment_notes,
         profile_execution=facts.profile_execution.value,
+        profiler_id=facts.profiler_id,
         workspace_sources=facts.workspace_sources,
     )
     return {role.value: text for role, text in sections.items()}
