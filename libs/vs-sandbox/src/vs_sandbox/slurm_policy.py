@@ -181,7 +181,7 @@ class SlurmOperatorSettings:
     The cluster (``[slurm]``), the VibeSys policy (``[vibesys]``), and, through
     the policy, the agent GPU limits. Construction rejects a combination the
     run could not honor (agent GPU commands without the local transport, or a
-    transport timeout whose withdrawal mark outlasts the ledger's windows), so
+    transport timeout whose withdrawal mark outlasts the longest one allowed), so
     holding a value means the file is usable and no later read can differ.
     """
 
@@ -212,24 +212,24 @@ class SlurmOperatorSettings:
 
 
 def _check_withdrawal_window(config: SlurmConfig, policy: SlurmExecutionPolicy) -> None:
-    """Refuse a transport timeout whose withdrawal mark outlasts a window that must cover it.
+    """Refuse a transport timeout whose withdrawal mark outlasts ``MAX_WITHDRAWAL_WINDOW_SECONDS``.
 
     A run's withdrawal mark holds ``withdrawal_window_seconds`` of the
-    transport timeout. A reader that cannot decode the mark undoes it after
-    ``MAX_WITHDRAWAL_WINDOW_SECONDS``, and an attempt's claim, which the mark
-    must outlast no longer than, holds ``claim_seconds``.
+    transport timeout, and a reader that cannot decode the mark undoes it after
+    ``MAX_WITHDRAWAL_WINDOW_SECONDS``; ``WithdrawalTiming`` refuses the same
+    timeout when a withdrawal starts, and this names the file's keys at load.
+    The claim window is not bound by the mark's: an unreadable mark holds at
+    least ``MAX_WITHDRAWAL_WINDOW_SECONDS`` whatever the claim window.
     """
     if policy.ledger is None:
         return
     window = withdrawal_window_seconds(config.transport_timeout_seconds)
-    bounds = {"the longest any withdrawal may hold": MAX_WITHDRAWAL_WINDOW_SECONDS}
-    bounds["vibesys.ledger.claim_seconds"] = policy.ledger.claim_seconds
-    exceeded = [f"{name} ({bound:g} s)" for name, bound in bounds.items() if window > bound]
-    if exceeded:
+    if window > MAX_WITHDRAWAL_WINDOW_SECONDS:
         message = (
             f"slurm.transport_timeout_seconds={config.transport_timeout_seconds:g} makes a "
-            f"withdrawal mark hold {window:g} s, more than {' and '.join(exceeded)}; "
-            "lower slurm.transport_timeout_seconds or raise vibesys.ledger.claim_seconds"
+            f"withdrawal mark hold {window:g} s, more than the longest any withdrawal may "
+            f"hold ({MAX_WITHDRAWAL_WINDOW_SECONDS:g} s), with [vibesys.ledger] set; "
+            "lower slurm.transport_timeout_seconds"
         )
         raise SlurmPolicyError(message)
 

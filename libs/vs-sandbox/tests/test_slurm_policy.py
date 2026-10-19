@@ -170,28 +170,26 @@ def _ledger_file(
     claim_seconds=st.one_of(st.none(), st.floats(min_value=1.0, max_value=5000.0)),
 )
 @settings(max_examples=examples(pr=40, nightly=400), deadline=None)
-def test_a_ledger_whose_withdrawal_window_exceeds_a_claim_window_is_rejected_naming_the_keys(
+def test_a_ledger_whose_withdrawal_window_exceeds_the_longest_mark_is_rejected_naming_the_key(
     transport_timeout_seconds: int, claim_seconds: float | None
 ) -> None:
     """A withdrawal's mark holds ``7 x transport_timeout_seconds + 60`` s.
 
     A reader that cannot decode a mark holds it for the longest window any
-    build may write (900 s); a run's own claims hold ``claim_seconds``. A window
-    longer than either would let a reader undo a mark whose writer is still
-    about to cancel the job.
+    build may write (900 s). A window longer than that would let a reader undo
+    a mark whose writer is still about to cancel the job; the claim window,
+    whatever it is, changes nothing.
     """
     window = 7 * transport_timeout_seconds + 60
     ledger = {} if claim_seconds is None else {"claim_seconds": claim_seconds}
     policy = LedgerPolicy() if claim_seconds is None else LedgerPolicy(claim_seconds=claim_seconds)
     with tempfile.TemporaryDirectory() as directory:
         path = _ledger_file(Path(directory), transport_timeout_seconds, ledger)
-        if window <= min(900.0, policy.claim_seconds):
+        if window <= 900.0:
             assert load_slurm_operator_settings(path).policy.ledger == policy
             return
-        with pytest.raises(SlurmPolicyError, match=r"slurm\.transport_timeout_seconds") as raised:
+        with pytest.raises(SlurmPolicyError, match=r"slurm\.transport_timeout_seconds"):
             load_slurm_operator_settings(path)
-    if window > policy.claim_seconds:
-        assert "vibesys.ledger.claim_seconds" in str(raised.value)
 
 
 def test_without_a_ledger_any_transport_timeout_loads(tmp_path: Path) -> None:
@@ -199,9 +197,6 @@ def test_without_a_ledger_any_transport_timeout_loads(tmp_path: Path) -> None:
     assert load_slurm_operator_settings(_ledger_file(tmp_path, 400, None)).policy.ledger is None
 
 
-@pytest.mark.xfail(
-    strict=True, reason="r3206 recheck LOW-2: claim_seconds was bound by the mark window"
-)
 @pytest.mark.parametrize("claim_seconds", [60.0, 300.0, 829.0])
 def test_a_claim_window_shorter_than_the_mark_window_loads(
     tmp_path: Path, claim_seconds: float
