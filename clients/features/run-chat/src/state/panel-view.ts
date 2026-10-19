@@ -40,5 +40,7 @@ export interface ChatPanelView {
   readonly items: readonly PanelItem[];
   /** The run's roles, in its order: what a steer's target select lists after the whole run. */
   readonly roles: readonly string[];
+  /** The run ended: its threads are read, and nothing new is asked, written or sent. */
+  readonly readOnly: boolean;
   readonly dispatch: (event: PanelEvent) => void;
 }

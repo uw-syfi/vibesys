@@ -90,7 +90,25 @@ test('a steer the agent proposed on an ended run cannot be sent', async ({page})
     'Fix the engine import before the next idea.',
   );
   await expect(panel(page).getByRole('button', {name: 'Send', exact: true})).toBeDisabled();
-  await expect(panel(page).getByText('Read only')).toBeVisible();
+  await expect(panel(page).getByText('Read only').first()).toBeVisible();
+});
+
+test('the panel on an ended run reads its threads and offers nothing to ask', async ({page}) => {
+  await openFixture(page, fixtureNamed(FIXTURE));
+  await page.getByRole('button', {name: 'Chat', exact: true}).click();
+  await settled(page);
+  await page.evaluate(
+    events => (window as unknown as FixtureWindow).fakeHost.emit(events),
+    conversation(firstSequence()) as readonly unknown[],
+  );
+  await settled(page);
+
+  await expect(panel(page).getByText('Why did it fail')).toBeVisible();
+  await expect(panel(page).getByRole('textbox', {name: 'Message'})).toHaveCount(0);
+  await expect(panel(page).getByRole('button', {name: 'Ask'})).toHaveCount(0);
+  await expect(panel(page).getByRole('button', {name: 'New chat'})).toHaveCount(0);
+  await expect(panel(page).getByRole('button', {name: 'New steer'})).toHaveCount(0);
+  await expect(panel(page).getByText('Read only', {exact: true}).first()).toBeVisible();
 });
 
 test('an older helper shows Chat off for an ended run, and nothing is attached', async ({page}) => {

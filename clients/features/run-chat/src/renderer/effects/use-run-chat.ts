@@ -206,6 +206,7 @@ export function useRunChat(options: RunChatOptions): RunChatHost {
           shown,
           items: panelItems(chat, core, shown, context, readOnly),
           roles: runRoles(core.expectedRoles, options.roles ?? []),
+          readOnly,
           dispatch: event => chat.actor.send(event),
         }
       : null,

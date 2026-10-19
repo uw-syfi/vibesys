@@ -93,12 +93,14 @@ function Header(props: ChatPanelView): JSX.Element {
               }))}
             />
           )}
-          <Button
-            variant="quiet"
-            size="sm"
-            text="New chat"
-            press={() => dispatch({type: 'new-chat'})}
-          />
+          {props.readOnly ? null : (
+            <Button
+              variant="quiet"
+              size="sm"
+              text="New chat"
+              press={() => dispatch({type: 'new-chat'})}
+            />
+          )}
           <Button
             variant="quiet"
             size="sm"
@@ -108,7 +110,9 @@ function Header(props: ChatPanelView): JSX.Element {
           />
         </Row>
       </Row>
-      {shown === null ? <Picker panel={props.panel} dispatch={dispatch} /> : null}
+      {shown === null && !props.readOnly ? (
+        <Picker panel={props.panel} dispatch={dispatch} />
+      ) : null}
     </Stack>
   );
 }
@@ -196,7 +200,13 @@ function Panel(props: ChatPanelView): JSX.Element {
       ) : (
         <Thread key={props.shown ?? 'new'} label="Chat" items={items} size="fill" plain />
       )}
-      <Composer {...props} />
+      {props.readOnly ? (
+        <Text variant="small" tone="muted">
+          Read only
+        </Text>
+      ) : (
+        <Composer {...props} />
+      )}
     </Stack>
   );
 }

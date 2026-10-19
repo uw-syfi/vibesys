@@ -84,6 +84,7 @@ function viewOf(items: ChatPanelView['items']): ChatPanelView {
     shown: 't',
     items,
     roles: [],
+    readOnly: false,
     dispatch: () => undefined,
   };
 }
