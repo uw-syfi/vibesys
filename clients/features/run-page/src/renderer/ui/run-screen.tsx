@@ -167,7 +167,8 @@ function Header(props: {
         {chat === undefined ? null : (
           <Button
             variant={chat.open ? 'primary' : 'secondary'}
-            text="Chat"
+            icon="chat"
+            label="Chat"
             expanded={chat.open}
             press={chat.toggle}
           />
