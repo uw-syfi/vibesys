@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -30,15 +31,31 @@ from vs_core.api import (
     Value,
     WorkspaceMode,
     WorkspacePlan,
+    initial_state,
 )
 from vs_core.api.testing import Harness, Succeeded, sample_limits, sample_retries
 from vs_core.flows import search
 from vs_project.api import FakeStateStore
-from vs_runtime.api.testing import LEASE, HostOptions, Launch, ScriptedExecutors, scripted_host
-from vs_sim.api.testing import VirtualClock, examples
+from vs_runtime.api.core import (
+    CoreRunHost,
+    CoreRuntime,
+    RunLoopConfig,
+    start_core,
+    start_core_awaiting_lease,
+)
+from vs_runtime.api.core_shell_fixtures import CounterConfig, counter
+from vs_runtime.api.testing import (
+    LEASE,
+    FakePublicationDelivery,
+    HostOptions,
+    Launch,
+    ScriptedExecutors,
+    scripted_host,
+)
+from vs_sim.api.testing import VirtualClock, examples, run_virtual
 
 if TYPE_CHECKING:
-    from vs_project.api import CommitOutcome, StoredEnvelope, StoreFence
+    from vs_project.api import CommitOutcome, StoredEnvelope, StoreFence, StoreRecord
     from vs_runtime.api.core import ExecutionContext, ExecutionResult
 
 BASELINE = RevisionRef.of_git_commit("abc123")
@@ -159,3 +176,64 @@ def test_slow_commits_in_one_settle_do_not_starve_the_lease(cost: float) -> None
 
     assert run.halted is None
     assert run.core.run.status == RunStatus.TERMINAL
+
+
+class _SlowDecodeStore(FakeStateStore):
+    """The memory store, where each newly written record takes ``cost`` seconds to take in.
+
+    A restart decodes and validates the whole stored record before it takes the lease, on the
+    loop's thread: tens of seconds after hours of run time. A shell decodes each store revision
+    once, so only the first load of a revision moves the clock, with no await.
+    """
+
+    def __init__(self, cost: float) -> None:
+        super().__init__()
+        self.cost = cost
+        self.clock: VirtualClock | None = None
+        self._seen: set[int] = set()
+
+    def load(self) -> StoreRecord | None:
+        record = super().load()
+        revision = getattr(record, "revision", None)
+        if self.clock is not None and revision is not None and revision not in self._seen:
+            self._seen.add(revision)
+            self.clock.at += self.cost
+        return record
+
+
+@pytest.mark.xfail(strict=True, reason="a restart stamps its lease with the time before decoding")
+@settings(max_examples=examples(pr=3, nightly=20), deadline=None, derandomize=True, database=None)
+@given(cost=st.floats(min_value=1.0, max_value=59.0))
+def test_a_restart_holds_its_lease_a_full_term_after_taking_it(cost: float) -> None:
+    """However long decoding the stored run takes, the new lease runs a full term from its taking.
+
+    A restart that read the clock before decoding stamped its lease with that earlier time, so
+    the decode ate into the term it had to renew within.
+    """
+    lease = 60.0
+    clock = VirtualClock(1.0)
+    store = _SlowDecodeStore(cost)
+    core = initial_state()
+    core = core.model_copy(
+        update={"run": core.run.model_copy(update={"declaration": counter.declaration})}
+    )
+
+    def shell() -> CoreRuntime:
+        return CoreRuntime(store, counter.driver(CounterConfig()), core, config=CounterConfig())
+
+    start_core(
+        CoreRunHost(shell(), FakePublicationDelivery(), clock),
+        RunLoopConfig(host_id="crashed", lease_duration=lease),
+    )
+    clock.at += lease
+    store.clock = clock
+    restarted = shell()
+    run_virtual(
+        clock,
+        start_core_awaiting_lease(
+            CoreRunHost(restarted, FakePublicationDelivery(), clock),
+            RunLoopConfig(host_id="restart", lease_duration=lease),
+        ),
+    )
+
+    assert restarted.holds_lease(now_at=clock.now() + lease - 1.0)
