@@ -11,7 +11,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
-import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
@@ -519,6 +518,7 @@ class CombineCase:
 
     entry: dict[str, object]
     record: Record
+    picks: tuple[tuple[str, str], ...]
     valid: bool
     """Whether the entry breaks no rule: 2 to 8 distinct offered exact parts, no unknown key, a
     new ID. Restated here independently of the search; how the parts measure never matters."""
@@ -576,7 +576,10 @@ def combine_cases(draw: st.DrawFn) -> CombineCase:
     )
     main_value = draw(st.none() | st.sampled_from([1.0, 5.0, 9.0]))
     return CombineCase(
-        entry, Record(hypotheses=hypotheses, parents=parents, main_value=main_value), valid
+        entry,
+        Record(hypotheses=hypotheses, parents=parents, main_value=main_value),
+        tuple(picks),
+        valid,
     )
 
 
@@ -594,9 +597,9 @@ def _rejected_at(paths: list[tuple[str | int, ...]]) -> bool:
     The list itself may also be reported short, since the one entry it held was rejected.
     """
     named = {"weight", "parents"}
-    return all(path[:2] == ("workstreams", 0) or path == ("workstreams",) for path in paths) and any(
-        named & {str(step) for step in path} for path in paths
-    )
+    return all(
+        path[:2] == ("workstreams", 0) or path == ("workstreams",) for path in paths
+    ) and any(named & {str(step) for step in path} for path in paths)
 
 
 @settings(max_examples=examples(pr=40, nightly=400), deadline=None, derandomize=True, database=None)
@@ -609,7 +612,7 @@ def test_a_combine_is_scheduled_exactly_when_its_parts_are_distinct_offered_exac
     Main's measurement and each part's value vary, and never decide: a combine has no
     beats-main bar, since parts that lost or tied alone are what it is for.
     """
-    reply = {
+    reply: dict[str, object] = {
         "reasoning": "combine",
         "workstreams": [case.entry],
         "handoff": {"expectations": [], "doubts": []},
@@ -627,8 +630,7 @@ def test_a_combine_is_scheduled_exactly_when_its_parts_are_distinct_offered_exac
         assert accepted.kind is WorkKind.IMPLEMENT  # a combine is an implement of a new hypothesis
         assert accepted.parent_hypothesis_id is None  # it starts from main
         parts = [(item.hypothesis_id, item.revision) for item in accepted.combine]
-        expected = [(str(p["hypothesis_id"]), str(p["revision"])) for p in case.entry["parents"]]
-        assert parts == expected
+        assert parts == list(case.picks)
         return
     assert result.accepted == ()
     for item in result.violations:
