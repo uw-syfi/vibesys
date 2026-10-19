@@ -254,7 +254,8 @@ def test_the_method_needs_its_feature_and_the_messages_are_strict() -> None:
     )
     line = request.model_dump_json().encode()
 
-    assert request_features(request) == (HelperFeature.RUN_SUMMARY,)
+    # The reply names ``trace``: a client from before it (``run_summary`` alone) is refused.
+    assert request_features(request) == (HelperFeature.RUN_TRACE, HelperFeature.RUN_SUMMARY)
     assert parse_helper_request(line) == request
     unknown = json.loads(line) | {"unexpected": 1}
     assert isinstance(parse_helper_request(json.dumps(unknown).encode()), Unreadable)
