@@ -50,6 +50,7 @@ from .errors import (
 )
 from .job_teardown import start_in_own_session, teardown_shell
 from .phase_files import NODE_NAME, SERVICE_LOG_TAIL, distinct_tail, read_node
+from .login_environment import login_environment
 from .queue_view import QueueSnapshot, parse_queue_snapshot, queue_snapshot_command
 from .remote_file import SlurmFileSource
 from .remote_operations import (
@@ -900,19 +901,15 @@ class SlurmJobRunner:
         pause: Callable[[float], None],
         timeout_seconds: float,
         cancel_event: Event | None = None,
-        queued: Callable[[SchedulerReading, float], None] | None = None,
+        queued: Callable[[SchedulerReading, float], None] = lambda _reading, _waited: None,
     ) -> SlurmJobWaitResult:
         """Observe until the job runs or ends; ``timed_out``: still queued. Never cancels.
 
-        A set ``cancel_event`` ends the wait with the cancellation error and leaves the
-        job to the caller. ``queued`` receives each reading that finds the job still
-        pending, with the seconds waited so far, so a caller can say why it waits.
+        A set ``cancel_event`` raises, leaving the job; ``queued`` hears each pending reading.
         """
         if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
             raise SlurmError.invalid_wait_timeout()
-        return self._observe(
-            handle, timeout_seconds, cancel_event, pause, queued=queued or _ignore_reading
-        )
+        return self._observe(handle, timeout_seconds, cancel_event, pause, queued=queued)
 
     def _observe(
         self,
@@ -923,23 +920,17 @@ class SlurmJobRunner:
         *,
         queued: Callable[[SchedulerReading, float], None] | None = None,
     ) -> SlurmJobWaitResult:
-        """Poll until terminal or *timeout*; a set *cancel_event* raises, uncancelled.
-
-        With *queued*, the wait ends once the job leaves the queue, and each reading
-        that finds it still pending goes to *queued*.
-        """
-        until_started = queued is not None
+        """Poll until terminal (or started, given *queued*) or *timeout*; *cancel_event* raises."""
         started = self._clock.now()
         deadline = started + timeout
         while True:
             if cancel_event is not None and cancel_event.is_set():
                 raise SlurmError.cancelled(handle.job_id)
             self._validate_handle(handle)
-            reading = self.inspect_job(handle.job_id)
-            status = reading.status
+            status = (reading := self.inspect_job(handle.job_id)).status
             if queued is not None and status == SlurmJobStatus.PENDING:
                 queued(reading, self._clock.now() - started)
-            done = status.terminal or (until_started and status != SlurmJobStatus.PENDING)
+            done = status.terminal or (queued is not None and status != SlurmJobStatus.PENDING)
             remaining = deadline - self._clock.now()
             if done or remaining <= 0:
                 waited = self._clock.now() - started
@@ -1337,11 +1328,6 @@ class SlurmJobRunner:
         return match.group(1)
 
 
-def _ignore_reading(reading: SchedulerReading, waited_seconds: float) -> None:
-    """Observe a pending reading by doing nothing: the caller only waits for the start."""
-    del reading, waited_seconds
-
-
 class _Transport(Protocol):
     def exec(self, command: str) -> _TransportResponse: ...
 
@@ -1483,34 +1469,6 @@ class _SshTransport(_RsyncTransport):
             (*self._config.ssh_argv, "--", self._config.host, command),
             operation="exec",
         )
-
-
-_LOGIN_ENVIRONMENT_NAMES = frozenset(
-    {"HOME", "USER", "LOGNAME", "SHELL", "PATH", "LANG", "TZ", "TMPDIR"}
-)
-_LOGIN_ENVIRONMENT_PREFIX = "LC_"
-
-
-def login_environment(host: Mapping[str, str]) -> dict[str, str]:
-    """Return the part of *host* that a login session would also have.
-
-    The local transport runs its programs in this environment and nothing else,
-    which is what the SSH transport gets from sshd: a fresh one. A host process
-    can hold credentials, and inside a Slurm allocation or batch job it holds
-    ``SLURM_*`` variables that would redirect the gate's own ``sbatch`` to the
-    wrong job. The names kept are the identity and locale ones a login sets
-    (``HOME USER LOGNAME SHELL PATH LANG LC_* TZ``) and ``TMPDIR``; every other
-    name, ``SLURM_*``, ``SBATCH_*``, ``SALLOC_*`` and ``SRUN_*`` included, is dropped.
-    """
-    return {
-        name: value
-        for name, value in host.items()
-        if name in _LOGIN_ENVIRONMENT_NAMES
-        or (
-            name.startswith(_LOGIN_ENVIRONMENT_PREFIX)
-            and len(name) > len(_LOGIN_ENVIRONMENT_PREFIX)
-        )
-    }
 
 
 class _LocalTransport(_RsyncTransport):

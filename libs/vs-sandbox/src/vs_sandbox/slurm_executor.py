@@ -424,9 +424,8 @@ class SlurmEvaluationExecutor:
         ``stage_output`` opens one stream per stage, which the stage's output reaches while
         the job runs, read at each scheduler poll (``StageOutputFollower``); without it the
         output reaches only the collected result.
-        ``root_proof`` is the run's workspace-root probe: an evaluation's first submission
-        waits, at the poll interval, until it proves the root, and a failed proof refuses
-        the submission with the probe's error, so no job is ever sent to an unproven root.
+        ``root_proof`` is the run's workspace-root probe: a first submission waits for it at
+        the poll interval, and a failed proof refuses the submission with the probe's error.
         """
         if cluster is None:
             if processes is None:
@@ -978,14 +977,10 @@ class SlurmEvaluationExecutor:
             return
 
     async def _await_root_proof(self, durable: _DurableSlurmEvaluation | None) -> None:
-        """Hold a first submission until the run's workspace root is proven; refuse it if not.
-
-        An evaluation whose dispatch already started may have a job on the cluster, so it
-        goes on to reconcile that job: refusing it would disown a live allocation.
-        """
+        """Hold a first submission until the root is proven; never one that may have a job."""
         proof = self._root_proof
         if proof is None or (durable is not None and durable.dispatch_started):
-            return
+            return  # a dispatched evaluation reconciles its job; refusing would disown it
         try:
             while not proof.check():
                 await self._sleeper.sleep(self._poll_interval)
