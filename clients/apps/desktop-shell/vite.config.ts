@@ -20,6 +20,12 @@ export default defineConfig({
     emptyOutDir: true,
     outDir: 'dist',
     assetsDir: 'shell-assets',
-    rollupOptions: {input: fileURLToPath(new URL('./shell.html', import.meta.url))},
+    rollupOptions: {
+      input: [
+        fileURLToPath(new URL('./shell.html', import.meta.url)),
+        // The Machines page alone, for the screens checks until the shell routes to it.
+        fileURLToPath(new URL('./machines-preview.html', import.meta.url)),
+      ],
+    },
   },
 });

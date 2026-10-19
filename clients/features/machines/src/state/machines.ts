@@ -24,6 +24,17 @@ import {
   pathForm,
   typed,
 } from './path-form.js';
+import {
+  keepPlaces,
+  type Places,
+  type PlacesAction,
+  type PlacesRequest,
+  type PlacesState,
+  type PlacesStep,
+  placesAwaited,
+  placesStep,
+  readPlaces,
+} from './places.js';
 
 /** A machine's status, from its facts: the three the screen names, one it cannot reach, or checking. */
 export type MachineStatus = MachineReport['kind'] | 'checking';
@@ -84,6 +95,8 @@ export interface MachinesState {
   } | null;
   /** Why the last removal or sign-in failed, until the next one. */
   readonly actionProblem: string | null;
+  /** What each ready machine has set up and how its clusters tested, by machine. */
+  readonly places: Readonly<Record<HostKey, Places>>;
   readonly lastToken: number;
 }
 
@@ -92,6 +105,9 @@ type Outcome<T> =
   | {readonly ok: false; readonly error: string};
 
 export type MachinesAction =
+  | PlacesAction
+  /** Check the machine again, signing in first when it is waiting for that. */
+  | {readonly type: 'reconnect'; readonly host: HostKey}
   | {
       readonly type: 'listed';
       readonly token: number;
@@ -138,6 +154,7 @@ export type MachinesAction =
     };
 
 export type MachinesRequest =
+  | PlacesRequest
   | {readonly kind: 'list'; readonly token: number}
   | {readonly kind: 'report'; readonly token: number; readonly host: HostKey}
   | (PathFormRequest & {readonly form: FormName})
@@ -159,6 +176,22 @@ export interface MachinesStep {
 
 const same = (state: MachinesState): MachinesStep => ({state, requests: []});
 
+const placesOf = (state: MachinesState): PlacesState => ({
+  places: state.places,
+  lastToken: state.lastToken,
+});
+
+function fromPlaces(state: MachinesState, step: PlacesStep): MachinesStep {
+  // A reply that changed nothing leaves the very state, so a late one is seen to have done nothing.
+  if (step.state.places === state.places && step.state.lastToken === state.lastToken) {
+    return {state, requests: step.requests};
+  }
+  return {
+    state: {...state, places: step.state.places, lastToken: step.state.lastToken},
+    requests: step.requests,
+  };
+}
+
 /** The store before anything is read: it asks for the machines. */
 export function initialMachines(): MachinesStep {
   const state: MachinesState = {
@@ -170,6 +203,7 @@ export function initialMachines(): MachinesStep {
     fixing: null,
     pending: null,
     actionProblem: null,
+    places: {},
     lastToken: 1,
   };
   return {state, requests: [{kind: 'list', token: 1}]};
@@ -245,6 +279,14 @@ function adoptList(
       machines,
       selected,
       fixing,
+      // A sign-in or removal for a machine the list no longer holds has nothing left to do.
+      pending: machines.some(machine => machine.host === state.pending?.host)
+        ? state.pending
+        : null,
+      places: keepPlaces(
+        {places: state.places, lastToken: last},
+        new Set(machines.map(machine => machine.host)),
+      ).places,
       lastToken: last,
     },
     requests: dropped === null ? requests : [...requests, {kind: 'cancel-save', token: dropped}],
@@ -406,7 +448,24 @@ function reported(
   const machines = state.machines.map(each =>
     each === machine ? {...each, report, checking: null} : each,
   );
-  return same({...state, machines});
+  const next = {...state, machines};
+  // A machine that answers can say what it has set up: read it again with each answer.
+  if (report.kind !== 'ready') return same(next);
+  return fromPlaces(next, readPlaces(placesOf(next), action.host));
+}
+
+/** Check `host` again, or sign it in first when it is waiting for that. */
+function reconnect(state: MachinesState, host: HostKey): MachinesStep {
+  const machine = state.machines.find(each => each.host === host);
+  if (machine === undefined || machine.checking !== null || state.pending !== null) {
+    return same(state);
+  }
+  if (machineStatus(machine) === 'sign-in') return startPending(state, 'sign-in', host);
+  const token = state.lastToken + 1;
+  const machines = state.machines.map(each =>
+    each === machine ? {...each, checking: token} : each,
+  );
+  return {state: {...state, machines, lastToken: token}, requests: [{kind: 'report', token, host}]};
 }
 
 function startPending(
@@ -445,8 +504,9 @@ function done(state: MachinesState, action: Extract<MachinesAction, {type: 'done
     const selected = kept.some(machine => machine.host === state.selected)
       ? state.selected
       : (kept[0]?.host ?? null);
+    const places = keepPlaces(placesOf(cleared), new Set(kept.map(machine => machine.host)));
     return {
-      state: {...cleared, fixing, machines: kept, selected},
+      state: {...cleared, fixing, machines: kept, selected, places: places.places},
       requests: dropped === null ? [] : [{kind: 'cancel-save', token: dropped}],
     };
   }
@@ -577,6 +637,12 @@ export function machinesStep(state: MachinesState, action: MachinesAction): Mach
       return startPending(state, action.type, action.host);
     case 'done':
       return done(state, action);
+    case 'reconnect':
+      return reconnect(state, action.host);
+    case 'computed':
+    case 'test-cluster':
+    case 'tested':
+      return fromPlaces(state, placesStep(placesOf(state), action));
   }
 }
 
@@ -589,6 +655,7 @@ export function machinesAwaited(state: MachinesState): Record<string, number | n
     'fix:save': state.fixing?.saving ?? null,
   };
   for (const machine of state.machines) awaited[`report:${machine.host}`] = machine.checking;
+  Object.assign(awaited, placesAwaited(placesOf(state)));
   if (state.adding !== null) Object.assign(awaited, formAwaited(state.adding.path, 'add'));
   if (state.fixing !== null) Object.assign(awaited, formAwaited(state.fixing.path, 'fix'));
   return awaited;
@@ -603,6 +670,8 @@ function namingProblems(state: MachinesState): string[] {
   if (unselected || (state.selected !== null && !hosts.includes(state.selected))) {
     problems.push(`the selection ${state.selected} is not a listed machine`);
   }
+  if (Object.keys(state.places).some(host => !hosts.includes(host)))
+    problems.push('places are kept for a machine not listed');
   if (state.fixing !== null && !hosts.includes(state.fixing.host))
     problems.push('the checkout form is for a machine not listed');
   if (state.pending !== null && !hosts.includes(state.pending.host))

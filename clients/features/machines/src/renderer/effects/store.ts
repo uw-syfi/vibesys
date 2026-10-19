@@ -7,6 +7,7 @@
 import {
   attempt,
   type HostsWelcomeBridge,
+  type MachineSettingsWelcomeBridge,
   type MachinesWelcomeBridge,
   type WelcomeResult,
 } from '@vibesys/ipc';
@@ -21,7 +22,11 @@ import {
 
 /** The bridge calls the Machines store uses. */
 export type MachinesBridge = MachinesWelcomeBridge &
-  Pick<HostsWelcomeBridge, 'setCheckout' | 'cancelCheckout' | 'signIn' | 'complete'>;
+  Pick<HostsWelcomeBridge, 'setCheckout' | 'cancelCheckout' | 'signIn' | 'complete'> &
+  Pick<MachineSettingsWelcomeBridge, 'compute' | 'testCluster'>;
+
+/** The time now in milliseconds, by the shell's clock; it stamps what a test found. */
+export type Clock = () => number;
 
 type Outcome<T> =
   | {readonly ok: true; readonly value: T}
@@ -36,6 +41,7 @@ function perform(
   bridge: MachinesBridge,
   request: MachinesRequest,
   dispatch: (action: MachinesAction) => void,
+  now: Clock,
 ): Promise<void> {
   const {token} = request;
   const then = <T>(
@@ -55,6 +61,23 @@ function perform(
           type: 'reported',
           token,
           host: request.host,
+          result,
+        }),
+      );
+    case 'compute':
+      return then(
+        () => bridge.compute(request.host),
+        result => ({type: 'computed', token, host: request.host, result}),
+      );
+    case 'test-cluster':
+      return then(
+        () => bridge.testCluster(request.host, request.cluster),
+        result => ({
+          type: 'tested',
+          token,
+          host: request.host,
+          name: request.cluster.name,
+          at: now(),
           result,
         }),
       );
@@ -104,12 +127,18 @@ function perform(
   }
 }
 
-/** The Machines store over `bridge`: it lists the machines at once and checks each one. */
-export function createMachinesStore(bridge: MachinesBridge): Store<MachinesState, MachinesAction> {
+/**
+ * The Machines store over `bridge`: it lists the machines at once and checks each one. `now` is
+ * the clock a cluster test's time is read from.
+ */
+export function createMachinesStore(
+  bridge: MachinesBridge,
+  now: Clock = () => Date.now(),
+): Store<MachinesState, MachinesAction> {
   const initial = initialMachines();
   const store = createStore(machinesStep, initial.state, (request, dispatch) => {
-    void perform(bridge, request, dispatch);
+    void perform(bridge, request, dispatch, now);
   });
-  for (const request of initial.requests) void perform(bridge, request, store.dispatch);
+  for (const request of initial.requests) void perform(bridge, request, store.dispatch, now);
   return store;
 }

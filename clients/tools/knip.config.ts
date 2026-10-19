@@ -46,6 +46,8 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
     // The app shell's page (`shell.html`, built by `vite.config.ts`) and its Playwright journey.
     entry: [
       'src/main.tsx',
+      // The Machines page alone (`machines-preview.html`), which the screens checks open.
+      'src/machines-preview.tsx',
       'src/**/*.test.ts',
       'src/**/*.test.tsx',
       'e2e/**/*.spec.ts',

@@ -1,6 +1,14 @@
 import {describe, expect, test} from 'bun:test';
 import type {CompletionResult, MachineDescription} from '@vibesys/hosts';
-import type {CheckoutInspection, MachineEntry, MachineReport} from '@vibesys/ipc';
+import type {
+  CheckoutInspection,
+  ClusterTest,
+  ComputeSettings,
+  MachineEntry,
+  MachineReport,
+  Offered,
+  SlurmClusterSettings,
+} from '@vibesys/ipc';
 import {checkModel, type Seeded} from '@vibesys/store/testing';
 import {
   type FormName,
@@ -59,6 +67,37 @@ const INSPECTIONS: readonly CheckoutInspection[] = [
   {state: 'unsupported'},
 ];
 
+const CLUSTERS: readonly SlurmClusterSettings[] = [
+  {
+    name: 'lab-h100',
+    reach: {kind: 'ssh', host: 'host-login'},
+    workspace: '/scratch/vibesys',
+    hardware: {accelerator: 'cuda', gpu_models: ['h100'], gpus_per_node: 8},
+  },
+  {name: 'campus', reach: {kind: 'login_node'}, workspace: '/work/vibesys', hardware: null},
+];
+
+function computeOf(random: Seeded): Offered<ComputeSettings> {
+  if (random.next() < 0.2) return {kind: 'unsupported'};
+  return {
+    kind: 'offered',
+    value: {
+      config_path: '/home/me/.config/vibesys/compute.toml',
+      clusters: CLUSTERS.filter(() => random.bool()).map(cluster => ({cluster, source: 'vibesys'})),
+      modal: {token_present: random.bool()},
+    },
+  };
+}
+
+const TESTS: readonly ClusterTest[] = [
+  {
+    outcome: 'passed',
+    hardware: {accelerator: 'cuda', gpu_models: ['h100'], gpus_per_node: 8},
+    partitions: [],
+  },
+  {outcome: 'failed', stage: 'reach', detail: 'cannot reach host-login'},
+];
+
 const LISTING: CompletionResult = {
   ok: true,
   value: {
@@ -100,6 +139,8 @@ function userAction(random: Seeded, state: MachinesState): MachinesAction {
     {type: 'open-fix', host: state.selected ?? host},
     {type: 'remove', host},
     {type: 'sign-in', host},
+    {type: 'reconnect', host},
+    {type: 'test-cluster', host, name: random.pick(CLUSTERS).name},
   ]);
 }
 
@@ -133,6 +174,20 @@ function replyAction(random: Seeded, token: number): MachinesAction {
       token,
       result: ok ? {ok, value: random.bool() ? null : someEntries(random)} : fail('denied'),
     },
+    {
+      type: 'computed',
+      token,
+      host: random.pick(HOSTS),
+      result: ok ? {ok, value: computeOf(random)} : fail('refused'),
+    },
+    {
+      type: 'tested',
+      token,
+      host: random.pick(HOSTS),
+      name: random.pick(CLUSTERS).name,
+      at: random.int(1000),
+      result: ok ? {ok, value: random.pick(TESTS)} : fail('refused'),
+    },
   ]);
 }
 
@@ -150,6 +205,10 @@ function replySlot(action: MachinesAction): {readonly slot: string; readonly tok
       return {slot: `${action.form}:save`, token: action.token};
     case 'done':
       return {slot: 'pending', token: action.token};
+    case 'computed':
+      return {slot: `compute:${action.host}`, token: action.token};
+    case 'tested':
+      return {slot: `test:${action.host}:${action.name}`, token: action.token};
     default:
       return null;
   }
@@ -285,6 +344,21 @@ describe('machinesStep', () => {
 
     const empty = machinesStep(reading, {type: 'listed', token: 1, result: {ok: true, value: []}});
     expect(machineCounts(empty.state)).toEqual({count: 0, attention: 0, listed: true});
+  });
+
+  test('regression: a sign-in awaited for a machine the next listing drops is forgotten', () => {
+    let {state} = initialMachines();
+    const run = (action: MachinesAction): void => {
+      state = machinesStep(state, action).state;
+    };
+    run({type: 'listed', token: 1, result: {ok: true, value: ENTRIES.slice(0, 2)}});
+    run({type: 'sign-in', host: 'ssh:host-a'});
+    expect(state.pending).toMatchObject({kind: 'sign-in', host: 'ssh:host-a'});
+    const token = state.lastToken + 1;
+    state = {...state, listing: {token, select: null}, lastToken: token};
+    run({type: 'listed', token, result: {ok: true, value: ENTRIES.slice(0, 1)}});
+    expect(state.pending).toBeNull();
+    expect(machinesInvariants(state)).toEqual([]);
   });
 
   test('checkout save and removal for one machine are mutually exclusive', () => {
