@@ -54,6 +54,7 @@ Outcome = Literal[
     "cancelled",
     "infrastructure",
     "refused",
+    "unavailable",
 ]
 
 _PASSED = core.EvaluationTerminalFacts(
@@ -81,7 +82,7 @@ def died_steps(
 ) -> tuple[core.Transition, ...]:
     """Every transition `died` takes, in order."""
     assert request.request_id is not None
-    if how == "refused":
+    if how in {"refused", "unavailable"}:
         refused = seen(
             request,
             1,
@@ -96,7 +97,11 @@ def died_steps(
             transition(
                 state,
                 core.MeasurementSubmissionObserved(
-                    observation=refused, failure=core.MeasurementFailure.INFRASTRUCTURE
+                    observation=refused,
+                    # The run environment refused it: its workspace root failed its probe.
+                    failure=core.MeasurementFailure.RUN_ENVIRONMENT_UNAVAILABLE
+                    if how == "unavailable"
+                    else core.MeasurementFailure.INFRASTRUCTURE,
                 ),
             ),
         )
@@ -331,9 +336,24 @@ def test_a_base_run_that_died_does_not_block_the_next_one_in_its_scope(death: De
     assert compared(lab, "a", "input-1")[-1].base_samples == 1
 
 
-@pytest.mark.parametrize("ending", ["no-metric", "workload"])
+@pytest.mark.parametrize(
+    "ending",
+    [
+        "no-metric",
+        "workload",
+        pytest.param(
+            "unavailable",
+            marks=pytest.mark.xfail(
+                strict=True,
+                reason="a base run refused by an unavailable run environment is retried "
+                "(#3243 review N4)",
+            ),
+        ),
+    ],
+)
 def test_a_base_run_that_would_end_the_same_way_again_is_not_retried(ending: Outcome) -> None:
-    """A benchmark that reads no metric, or a base the evaluation rejects, is one probe."""
+    """A benchmark that reads no metric, a base the evaluation rejects, or a run environment
+    that can run nothing (its workspace root failed its probe) is one probe."""
     lab = Lab.of("a")
     candidate, base = lab.call("a", "c1", "input-1")
     end(lab, base, ending)
