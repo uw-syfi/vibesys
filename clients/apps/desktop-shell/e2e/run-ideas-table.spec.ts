@@ -139,6 +139,8 @@ test('opening an idea preserves the Ideas list and controls at wide and narrow w
     });
   for (const width of [1440, 1000]) {
     await page.setViewportSize({width, height: 900});
+    // The layout is measured only once it has stopped moving after the resize.
+    await settled(page);
     await expect(controls.locator('.vs-dotlegend-item')).toHaveCount(3);
     await expect(page.getByRole('searchbox', {name: 'Search ideas'})).toBeVisible();
     await expect(page.getByRole('combobox', {name: 'Sort ideas'})).toBeVisible();

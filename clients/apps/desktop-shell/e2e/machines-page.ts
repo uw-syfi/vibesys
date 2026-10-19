@@ -56,7 +56,9 @@ function listing(
       kind: 'listed',
       host,
       live: [],
-      ended: Array.from({length: count}, (_, at) => server(`00000000000${at}`, runId(at), 'failed')),
+      ended: Array.from({length: count}, (_, at) =>
+        server(`00000000000${at}`, runId(at), 'failed'),
+      ),
       unreadable: [],
       unverified: [],
     })),
