@@ -8,6 +8,7 @@
 import type {BaseComparison, Candidate} from '@vibesys/run-state/candidates';
 import {baseWords} from './base-words.js';
 import {type Measure, resultLine, selectedWords, standingOf} from './idea-words.js';
+import {objectiveUnit} from './metric-words.js';
 import {resolveZoom} from './run-level.js';
 import type {RunModel} from './run-model.js';
 import {formatValue, ratio} from './span-reading.js';
@@ -44,8 +45,8 @@ function measureOf(model: RunModel, idea: Candidate): Measure | null {
   const vs = measurement?.vsBaseline ?? null;
   const against = measurement?.against ?? null;
   if (value === null || (vs === null && against === null)) return null;
-  const unit = model.overview?.objective.unit;
-  const words = `${formatValue(value)}${typeof unit === 'string' && unit !== '' ? ` ${unit}` : ''}`;
+  const unit = objectiveUnit(model.overview);
+  const words = `${formatValue(value)}${unit === '' ? '' : ` ${unit}`}`;
   if (vs !== null) return {ratio: ratio(vs), value: words, base: null};
   return {
     ratio: ratio((against as BaseComparison).ratio),

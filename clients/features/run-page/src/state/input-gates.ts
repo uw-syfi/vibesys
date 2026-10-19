@@ -4,8 +4,11 @@
  * workstream, shown with the idea), so without this reading a failed baseline shows nowhere: the
  * run has no idea failed and nothing measured, and says neither why.
  *
- * A gate that failed may be tried again: a later attempt of the same gate (and recipe) that passes
- * supersedes the failure, which stays as history and no longer reads as the gate's standing.
+ * A gate that failed may be tried again, even after the first idea began (the input's measurement
+ * can be retried while ideas run): a later attempt of the same gate (and recipe) that passes
+ * supersedes the failure, which stays as history and no longer reads as the gate's standing. A
+ * failure after the first idea began is that idea's own and joins nothing; a pass still counts, as
+ * it shows the gate works.
  */
 import type {RunEvent} from '@vibesys/contracts';
 
@@ -58,6 +61,10 @@ function gatePassOf(event: RunEvent): GatePass | null {
   return {gate: data.gate, recipe: data.recipe ?? null};
 }
 
+function sameGate(failure: GateFailure, other: GatePass): boolean {
+  return failure.gate === other.gate && failure.recipe === other.recipe;
+}
+
 /** `failures` with those a pass of the same gate at `sequence` supersedes (earlier ones only). */
 function supersededBy(
   failures: readonly GateFailure[],
@@ -65,10 +72,7 @@ function supersededBy(
   sequence: number,
 ): readonly GateFailure[] {
   const open = (failure: GateFailure): boolean =>
-    failure.supersededBy === null &&
-    failure.gate === pass.gate &&
-    failure.recipe === pass.recipe &&
-    failure.sequence < sequence;
+    failure.supersededBy === null && sameGate(failure, pass) && failure.sequence < sequence;
   return failures.some(open)
     ? failures.map(failure => (open(failure) ? {...failure, supersededBy: sequence} : failure))
     : failures;
@@ -79,8 +83,8 @@ function supersededBy(
  * settled; a pass of the same gate supersedes the failures before it.
  */
 export function foldInputGates(gates: InputGates, event: RunEvent): InputGates {
-  if (gates.settled) return gates;
   if (event.type === 'span_started') {
+    if (gates.settled) return gates;
     const data = event.data;
     const kind =
       data !== null && data !== undefined && 'span' in data ? data.span.label?.kind : null;
@@ -96,6 +100,8 @@ export function foldInputGates(gates: InputGates, event: RunEvent): InputGates {
   if (failure === null || gates.failures.some(known => known.sequence === failure.sequence)) {
     return gates;
   }
+  // Once an idea has begun, a failure is the idea's own: only passes still count.
+  if (gates.settled) return gates;
   return {...gates, failures: [...gates.failures, failure]};
 }
 
@@ -119,13 +125,12 @@ export interface GateFailureView {
   readonly reason: string | null;
   /** What each printed, headed by its gate when more than one failed; null when none printed. */
   readonly tail: string | null;
+  /** How many attempts failed: 2 when a gate was tried again and failed again. */
+  readonly attempts: number;
 }
 
 /** Gates that failed and then passed on a later attempt: their failed attempts as history. */
-export interface GateHistoryView extends GateFailureView {
-  /** How many attempts failed before their gates passed. */
-  readonly attempts: number;
-}
+export type GateHistoryView = GateFailureView;
 
 const ERROR_LINE = /\b([A-Z][A-Za-z0-9]*(?:Error|Exception)): ([^)\n]+)/g;
 
@@ -172,6 +177,7 @@ function viewOf(failures: readonly GateFailure[]): GateFailureView {
     label: names.join(' · '),
     reason: shared ? (reasons[0] ?? null) : (reasons.find(each => each !== null) ?? null),
     tail,
+    attempts: failures.length,
   };
 }
 
@@ -184,5 +190,5 @@ export function gateFailureView(failures: readonly GateFailure[]): GateFailureVi
 /** The failed attempts a later attempt of the same gate passed over, as one row; null when none. */
 export function gateHistoryView(failures: readonly GateFailure[]): GateHistoryView | null {
   const history = failures.filter(failure => failure.supersededBy !== null);
-  return history.length === 0 ? null : {...viewOf(history), attempts: history.length};
+  return history.length === 0 ? null : viewOf(history);
 }

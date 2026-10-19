@@ -262,7 +262,8 @@ class ClientFold:
     usage: dict[str, dict[str, int | None]]
     """The same sum for each turn span a usage event names, in the order the spans first spent."""
     input_gates: tuple[dict[str, Any], ...]
-    """The ``gate_finished`` events before the first workstream span (``foldInputGates``), at most 32."""
+    """The ``gate_finished`` events before the first workstream span, and after it the passes of a
+    gate that stood failed (``foldInputGates``), at most 32."""
     terminal: dict[str, Any] | None
     """The last ``run_finished``, ``run_failed`` or ``run_interrupted`` event: its sequence, kind, text."""
 
@@ -294,6 +295,12 @@ def _added(a: dict[str, int | None], b: dict[str, int | None]) -> dict[str, int 
     return {key: plus(a[key], b[key]) for key in a}
 
 
+def _stands_failed(gates: Sequence[dict[str, Any]], data: GateFinishedData) -> bool:
+    """Whether the last kept attempt of ``data``'s gate (and recipe) failed: a retry may supersede it."""
+    attempts = [g for g in gates if g["gate"] == data.gate.value and g["recipe"] == data.recipe]
+    return bool(attempts) and not attempts[-1]["passed"]
+
+
 def _ending_fold(
     run_events: Sequence[RunEvent],
 ) -> tuple[tuple[dict[str, Any], ...], dict[str, Any] | None]:
@@ -314,7 +321,14 @@ def _ending_fold(
                 "kind": _TERMINAL_KINDS[event.type],
                 "message": text or None,
             }
-        if isinstance(data, GateFinishedData) and not settled and len(gates) < 32:
+        if (
+            isinstance(data, GateFinishedData)
+            and len(gates) < 32
+            and (
+                not settled
+                or (event.status is not EventStatus.FAILED and _stands_failed(gates, data))
+            )
+        ):
             gates.append(
                 {
                     "sequence": event.sequence,

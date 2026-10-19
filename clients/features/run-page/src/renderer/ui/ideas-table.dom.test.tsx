@@ -60,11 +60,36 @@ test('the line under an idea carries its effect verdict, never its status again'
   );
 });
 
-async function shown() {
+async function shown(compared = false) {
   const container = document.createElement('div');
   document.body.append(container);
   const root: Root = createRoot(container);
-  const fixture = modelOfShape(SHAPE);
+  const shape = modelOfShape(SHAPE);
+  // A compared idea has a ratio against its base (the run has none against the input).
+  const fixture = compared
+    ? {
+        ...shape,
+        candidates: {
+          ...shape.candidates,
+          candidates: shape.candidates.candidates.map(item =>
+            item.id === 'n3' && item.measurement !== null
+              ? {
+                  ...item,
+                  measurement: {
+                    ...item.measurement,
+                    vsBaseline: null,
+                    against: {
+                      ratio: 1.1,
+                      baseCommit: item.attempts[0]?.revision ?? 'x',
+                      baseValue: 100,
+                    },
+                  },
+                }
+              : item,
+          ),
+        },
+      }
+    : shape;
   const model = {
     ...fixture,
     candidates: {...fixture.candidates, best: {candidate: 'n2', adopted: true}},
@@ -229,5 +254,18 @@ test('a search that matches nothing says so instead of leaving the list blank', 
   });
   expect(titles(screen.container)).toEqual([]);
   expect(screen.container.textContent).toContain('No ideas match “zzzz”');
+  await screen.done();
+});
+
+test('a ratio against a base reads short in the column and whole on hover', async () => {
+  const screen = await shown(true);
+  const figures = [...screen.container.querySelectorAll('[aria-label="Ideas"] .vs-pickrow-figure')];
+  const short = figures.find(each => (each.textContent ?? '').includes('1.10×'));
+  expect(short?.textContent).toMatch(/^1\.10× (r\d+|base)$/);
+  expect(short?.getAttribute('title')).toMatch(/^1\.10× vs /);
+  expect(short?.getAttribute('title')).not.toBe(short?.textContent);
+  // A plain ratio to the input is its own title.
+  const plain = figures.find(each => each.textContent === '1.01×');
+  expect(plain?.getAttribute('title')).toBe('1.01×');
   await screen.done();
 });

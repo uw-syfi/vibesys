@@ -11,6 +11,7 @@ import type {
   CandidateTree,
   FailedCheck,
 } from '@vibesys/run-state/candidates';
+import {againstWords} from './base-words.js';
 import {ratio, TURNED_DOWN, words} from './span-reading.js';
 
 /** `text` with its first letter capitalized. */
@@ -81,6 +82,39 @@ export function figureOf(
   }
   if (item.outcome === 'failed') return {figure: capitalized(outcomeWords(item)), tone: 'err'};
   return inputKnown ? {figure: '–', tone: 'muted'} : {figure: NO_INPUT, tone: 'muted'};
+}
+
+/** A figure as a cell shows it, in a short form that fits the column, and the whole on hover. */
+export interface FigureCell {
+  readonly figure: string;
+  readonly tone: IdeaTone;
+  /** The whole cell, when `figure` is its short form. */
+  readonly figureTitle?: string;
+}
+
+/**
+ * The figure of an idea's row in a column that cannot hold a whole base (`1.10× vs round 2`): the
+ * short form (`1.10× r2`), with the whole as `figureTitle` when they differ. `cell` is the column's
+ * own reading of a figure (`vsInputCell`); the Ideas rows and the Timeline word it once, here.
+ */
+export function figureCell(
+  item: Candidate,
+  inputKnown: boolean,
+  candidates: readonly Candidate[],
+  cell: (figure: {readonly figure: string; readonly tone: IdeaTone}) => {
+    readonly figure: string;
+    readonly tone: IdeaTone;
+  } = figure => figure,
+): FigureCell {
+  const whole = cell(
+    figureOf(item, inputKnown, against => againstWords(candidates, against, 'whole')),
+  );
+  const short = cell(
+    figureOf(item, inputKnown, against => againstWords(candidates, against, 'short')),
+  );
+  return short.figure === whole.figure
+    ? whole
+    : {figure: short.figure, tone: short.tone, figureTitle: whole.figure};
 }
 
 /** What an idea measured, against the input or, with none, its base; null when it measured nothing. */

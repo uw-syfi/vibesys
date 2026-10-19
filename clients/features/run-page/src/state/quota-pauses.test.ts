@@ -7,6 +7,7 @@ import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {attached, events, isoAt, RUN, spanEvent, step, T0} from './live-run-fixtures.js';
 import {
   pausedSeconds,
+  pauseWords,
   piecesAround,
   type QuotaPauseSpan,
   quotaPauses,
@@ -218,5 +219,122 @@ describe('the quota-pause run fixture, folded as the page folds a live run', () 
     const took = (second?.endedAt ?? 0) - (second?.startedAt ?? 0);
     expect(took).toBe(5000);
     expect(workedSeconds(model.pauses, second?.startedAt ?? 0, second?.endedAt ?? 0)).toBe(2780);
+  });
+});
+
+describe('a pause that outlasts its wait', () => {
+  const at = (clock: string): string => `2026-10-19T${clock}Z`;
+  const quotaEvent = (
+    sequence: number,
+    clock: string,
+    data: NonNullable<RunEvent['data']>,
+  ): RunEvent => ({
+    ...fixtureEvent(sequence, data?.kind as RunEvent['type'], {data}),
+    timestamp: at(clock),
+  });
+  const status = (
+    sequence: number,
+    clock: string,
+    to: 'pausing' | 'paused' | 'running',
+    previous: 'running' | 'pausing' | 'paused',
+  ): RunEvent => quotaEvent(sequence, clock, {kind: 'run_status_changed', status: to, previous});
+  const seconds = (clock: string): number => Date.parse(at(clock)) / 1000;
+
+  /** The journal of a live run: waited 14 minutes, then paused until an operator resumed it. */
+  const JOURNAL: RunEvent[] = [
+    quotaEvent(1, '13:55:34', {
+      kind: 'quota_paused',
+      provider: 'claude',
+      condition: 'quota_exhausted',
+      detail: 'usage limit',
+    }),
+    status(2, '13:55:34', 'paused', 'running'),
+    quotaEvent(3, '14:09:51', {
+      kind: 'quota_abandoned',
+      provider: 'claude',
+      condition: 'quota_exhausted',
+      detail: 'usage limit',
+      reason: 'budget',
+      waited_seconds: 857,
+    }),
+    status(4, '14:32:58', 'running', 'paused'),
+  ];
+
+  test('runs from the pause until the run resumed, not for the wait alone', () => {
+    const core = reduceEventBatch(initialCoreState(), JOURNAL);
+    const [pause] = quotaPauses(core.quotaStops, 0);
+    expect(pause?.from).toBe(seconds('13:55:34'));
+    expect(pause?.to).toBe(seconds('14:32:58'));
+    expect(pauseWords((pause?.to ?? 0) - (pause?.from ?? 0))).toBe('Quota pause · 37m');
+  });
+
+  test('is not closed by the stop that ended while the run was still paused', () => {
+    const core = reduceEventBatch(initialCoreState(), JOURNAL.slice(0, 3));
+    const [stop] = core.quotaStops;
+    expect(stop?.resumedAt).toBeNull();
+    // Until the run resumes the pause runs to the stop's end, the latest time it is known to last.
+    const [pause] = quotaPauses(core.quotaStops, 0);
+    expect(pause?.to).toBe(seconds('14:09:51'));
+  });
+
+  test('is, over random pauses, the time the run was paused: paused to running', () => {
+    for (const seed of SEEDS) {
+      const random = new Seeded(seed);
+      let clock = seconds('09:00:00');
+      let sequence = 0;
+      const next = (): number => {
+        sequence += 1;
+        return sequence;
+      };
+      const journal: RunEvent[] = [];
+      let expected = 0;
+      const stamp = (): string => new Date(clock * 1000).toISOString().slice(11, 19);
+      for (let each = 0; each <= random.int(4); each += 1) {
+        clock += 1 + random.int(600);
+        const pausedAt = clock;
+        journal.push(
+          quotaEvent(next(), stamp(), {
+            kind: 'quota_paused',
+            provider: 'claude',
+            condition: 'quota_exhausted',
+            detail: 'limit',
+          }),
+          status(next(), stamp(), 'paused', 'running'),
+        );
+        const waited = 1 + random.int(900);
+        clock += waited;
+        journal.push(
+          quotaEvent(
+            next(),
+            stamp(),
+            random.bool()
+              ? {
+                  kind: 'quota_resumed',
+                  provider: 'claude',
+                  condition: 'quota_exhausted',
+                  reason: 'wait_elapsed',
+                  waited_seconds: waited,
+                }
+              : {
+                  kind: 'quota_abandoned',
+                  provider: 'claude',
+                  condition: 'quota_exhausted',
+                  detail: 'limit',
+                  reason: 'budget',
+                  waited_seconds: waited,
+                },
+          ),
+        );
+        // The run resumes at once, or only when an operator does, long after the wait ended.
+        clock += random.bool() ? 0 : random.int(3000);
+        journal.push(status(next(), stamp(), 'running', 'paused'));
+        expected += clock - pausedAt;
+      }
+      const core = reduceEventBatch(initialCoreState(), journal);
+      const pauses = quotaPauses(core.quotaStops, 0);
+      const total = pauses.reduce((sum, pause) => sum + (pause.to - pause.from), 0);
+      expect(total, `seed ${seed}`).toBe(expected);
+      expect(pausedSeconds(pauses, 0, Number.MAX_SAFE_INTEGER), `seed ${seed}`).toBe(expected);
+    }
   });
 });

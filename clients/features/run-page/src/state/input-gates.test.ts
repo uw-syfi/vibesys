@@ -127,6 +127,7 @@ describe('the input gates', () => {
       label: 'Accuracy',
       reason: 'oops',
       tail: 'oops',
+      attempts: 1,
     });
     const two = [gate(7, 'failed', 'oops\n'), gate(8, 'failed', 'oops\n')].reduce(
       foldInputGates,
@@ -218,6 +219,56 @@ describe('a gate that failed and was tried again', () => {
           each => each.sequence === failure.sequence,
         );
         expect(held?.supersededBy, `seed ${seed}`).toBeNull();
+      }
+    }
+  });
+});
+
+describe('a gate tried again while ideas run', () => {
+  test('is superseded by a pass after the first idea began, the failure kept as history', () => {
+    const events = [
+      gate(1, 'failed', 'ValueError: preflight', 'benchmark'),
+      started(2, 'workstream'),
+      gate(3, 'completed', null, 'benchmark'),
+    ];
+    const gates = events.reduce(foldInputGates, NO_INPUT_GATES);
+    expect(gateFailureView(gates.failures)).toBeNull();
+    expect(gateHistoryView(gates.failures)).toMatchObject({label: 'Benchmark', attempts: 1});
+  });
+
+  test('stands failed when no attempt passed, a later failure being the idea’s own', () => {
+    const events = [
+      gate(1, 'failed', 'a', 'benchmark'),
+      started(2, 'workstream'),
+      gate(3, 'failed', 'b', 'benchmark'),
+      gate(4, 'completed', null, 'accuracy'),
+    ];
+    const gates = events.reduce(foldInputGates, NO_INPUT_GATES);
+    expect(gates.failures.map(failure => failure.supersededBy)).toEqual([null]);
+  });
+
+  test('names both attempts when the re-run failed again', () => {
+    const gates = [
+      gate(1, 'failed', 'oops', 'benchmark'),
+      gate(2, 'failed', 'oops', 'benchmark'),
+    ].reduce(foldInputGates, NO_INPUT_GATES);
+    expect(gateFailureView(gates.failures)).toMatchObject({label: 'Benchmark', attempts: 2});
+  });
+
+  test('is read the same wherever the journal is cut: only a pass of its own gate supersedes', () => {
+    for (const seed of SEEDS) {
+      const random = new Seeded(seed);
+      const events = journal(random);
+      const gates = events.reduce(foldInputGates, NO_INPUT_GATES);
+      for (const failure of gates.failures) {
+        const pass = events.find(
+          event =>
+            (event.sequence ?? 0) > failure.sequence &&
+            event.data?.kind === 'gate_finished' &&
+            event.status !== 'failed' &&
+            event.data.gate === failure.gate,
+        );
+        expect(failure.supersededBy, `seed ${seed}`).toBe(pass?.sequence ?? null);
       }
     }
   });

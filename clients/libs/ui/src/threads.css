@@ -169,8 +169,11 @@
   border-top: var(--hairline) solid var(--line);
 }
 .vs-thread[data-plain] > .vs-thread-pane {
-  padding: 0;
+  /* A hairline and a gap at the top edge: a message scrolled partly out of view is cut at a visible
+     edge below the header, not flush against the header's own text. */
+  padding: var(--space-2) 0 0;
   border: 0;
+  border-top: var(--hairline) solid var(--line);
   border-radius: 0;
   background: transparent;
 }

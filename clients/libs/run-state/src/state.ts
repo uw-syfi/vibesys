@@ -162,6 +162,17 @@ export interface QuotaStop {
   readonly waitedSeconds: number;
   /** The event's timestamp: when the stop ended. */
   readonly endedAt: string;
+  /**
+   * When the run paused on this limit (the `quota_paused` that began it), null when the stop held
+   * a turn without pausing the run.
+   */
+  readonly pausedAt: string | null;
+  /**
+   * When the run actually resumed after pausing (the status change back to running, or the end of
+   * the run); null while it is still paused, and for a stop that did not pause the run. A run can
+   * stay paused after the stop ended, until an operator resumes it.
+   */
+  readonly resumedAt: string | null;
 }
 
 type RunStartupProgressData = Extract<
@@ -405,6 +416,8 @@ export interface CoreState {
   readonly quota: QuotaState;
   /** Every stop on a capacity limit that held a turn for some time, in journal order. */
   readonly quotaStops: readonly QuotaStop[];
+  /** When the run's open capacity pause began (`quota_paused`), null while it has none. */
+  readonly quotaPausedAt: string | null;
   readonly winner: WinnerSelection | null;
   /**
    * The latest comparison with its base of each candidate commit, keyed by `candidate_commit`.
@@ -484,6 +497,7 @@ export function initialCoreState(): CoreState {
     usage: null,
     quota: {sequence: 0, pause: null, lastSwitch: null},
     quotaStops: [],
+    quotaPausedAt: null,
     winner: null,
     comparisons: {},
     benchmarks: [],

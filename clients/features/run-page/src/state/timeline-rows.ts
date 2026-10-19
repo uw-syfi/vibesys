@@ -13,8 +13,7 @@ import type {
   CandidateOutcome,
   CandidateStep,
 } from '@vibesys/run-state/candidates';
-import {againstWords} from './base-words.js';
-import {figureOf, vsInputCell} from './idea-words.js';
+import {figureCell, vsInputCell} from './idea-words.js';
 import {stepLabel, stepTitle} from './names.js';
 import {inputValueOf} from './performance.js';
 import {
@@ -111,6 +110,8 @@ export interface TimelineRows {
 interface TimelineLegend {
   readonly roles: readonly {readonly role: string; readonly series: number}[];
   readonly gates: boolean;
+  /** Whether a pause (a turn held on a provider's quota) is drawn. */
+  readonly pauses: boolean;
 }
 
 const OUTCOME: Readonly<Record<CandidateOutcome, BarOutcome>> = {
@@ -184,13 +185,8 @@ function figureCells(
   candidates: readonly Candidate[],
 ): Pick<TimelineRow, 'figure' | 'figureTitle'> {
   if (item.outcome === 'running') return {figure: ''};
-  const whole = vsInputCell(
-    figureOf(item, inputKnown, against => againstWords(candidates, against, 'whole')),
-  ).figure;
-  const short = vsInputCell(
-    figureOf(item, inputKnown, against => againstWords(candidates, against, 'short')),
-  ).figure;
-  return short === whole ? {figure: whole} : {figure: short, figureTitle: whole};
+  const {figure, figureTitle} = figureCell(item, inputKnown, candidates, vsInputCell);
+  return figureTitle === undefined ? {figure} : {figure, figureTitle};
 }
 
 function rowOf(
@@ -287,13 +283,16 @@ function ordered(candidates: readonly Candidate[]): Candidate[] {
 function legendOfSegments(segments: readonly StepSegment[]): TimelineLegend {
   const roles = new Set<string>();
   let gates = false;
+  let pauses = false;
   for (const segment of segments) {
     if (segment.role !== null) roles.add(segment.role);
     else if (segment.kind === 'hatched') gates = true;
+    else if (segment.kind === 'grey') pauses = true;
   }
   return {
     roles: [...roles].sort().map(role => ({role, series: roleSeries(role)})),
     gates,
+    pauses,
   };
 }
 
@@ -301,13 +300,17 @@ function legendOf(rows: readonly TimelineRow[]): TimelineLegend {
   return legendOfSegments(rows.filter(row => !row.lane).flatMap(row => row.segments));
 }
 
-/** A legend's entries for a `SwatchLegend`: each role by its color, a gate hatched. */
-export function legendItems(
-  legend: TimelineLegend,
-): readonly {readonly label: string; readonly series?: number; readonly hatched?: boolean}[] {
+/** A legend's entries for a `SwatchLegend`: each role by its color, a gate hatched, a pause grey. */
+export function legendItems(legend: TimelineLegend): readonly {
+  readonly label: string;
+  readonly series?: number;
+  readonly hatched?: boolean;
+  readonly muted?: boolean;
+}[] {
   return [
     ...legend.roles.map(({role, series}) => ({label: roleName(role), series})),
     ...(legend.gates ? [{label: 'Gate', hatched: true}] : []),
+    ...(legend.pauses ? [{label: 'Quota pause', muted: true}] : []),
   ];
 }
 

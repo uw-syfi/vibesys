@@ -37,6 +37,7 @@ import {
   type WhoBySpan,
   whoWords,
 } from '../../../../state/index.js';
+import {objectiveUnit} from '../../../../state/metric-words.js';
 import {
   pausedSeconds,
   pauseWords,
@@ -59,8 +60,7 @@ export interface IdeaViewProps extends ViewBase {
 }
 
 function unitOf(model: ViewBase['model']): string {
-  const unit = model.overview?.objective.unit;
-  return typeof unit === 'string' ? unit : '';
+  return objectiveUnit(model.overview);
 }
 
 const OUTCOME_TONE: Readonly<Record<Candidate['outcome'], 'live' | 'ok' | 'err'>> = {

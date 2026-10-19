@@ -192,3 +192,17 @@ test('a legend names each role on the bars, in the color of its segments, and th
   expect(drawn.filter(color => color !== '').sort()).toEqual(colors.slice(0, 2).sort());
   await unmount();
 });
+
+test('the legend names a quota pause when a bar shows one, and only then', async () => {
+  const legend = (container: HTMLElement) =>
+    [...container.querySelectorAll('[aria-label="Bar colors"] li')].map(item => item.textContent);
+  const quiet = await mount(<TimelineView {...base(IDEAS, 3600)} />);
+  expect(legend(quiet.container)).not.toContain('Quota pause');
+  await quiet.unmount();
+  // The idea `mid` ran 2000 to 2600: a pause inside it cuts its bar and joins the legend.
+  const pause = {from: 2100, to: 2300, provider: 'claude', condition: 'quota_exhausted' as const};
+  const paused = {...base(IDEAS, 3600), model: {...modelOf(IDEAS), pauses: [pause]}};
+  const shown = await mount(<TimelineView {...paused} />);
+  expect(legend(shown.container)).toContain('Quota pause');
+  await shown.unmount();
+});

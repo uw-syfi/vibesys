@@ -153,12 +153,13 @@ describe('an idea whose measurement the framework compared', () => {
   });
 
   test('says the ratio it made on the Ideas list and the Timeline, not that there is no input', () => {
-    expect(ideasView(model, IDEAS_FILTER_DEFAULT).rows.map(row => [row.title, row.figure])).toEqual(
-      [
-        ['Idea 3', '1.10× vs round 2'],
-        ['Idea 2', '1.22× vs its base'],
-      ],
-    );
+    // The Ideas column is narrow too: the base in a few characters, the whole cell on hover.
+    const ideas = ideasView(model, IDEAS_FILTER_DEFAULT).rows;
+    expect(ideas.map(row => [row.title, row.figure])).toEqual([
+      ['Idea 3', '1.10× r2'],
+      ['Idea 2', '1.22× base'],
+    ]);
+    expect(ideas.map(row => row.figureTitle)).toEqual(['1.10× vs round 2', '1.22× vs its base']);
     const clock = {start: T0, now: T0 + 4000};
     // The Timeline's column is narrow: the base in a few characters, the whole cell on hover.
     const rows = timelineRows(model, 'all', clock, false).rows;
@@ -169,6 +170,20 @@ describe('an idea whose measurement the framework compared', () => {
   test('says the ratio it made in the selected idea’s line, by its base', () => {
     const line = ideaFocusView(model, model.candidates.candidates[1]?.id ?? null);
     expect(line).toMatchObject({ratio: '1.10×', base: 'round 2', value: '385.4 tok/s'});
+  });
+
+  test('words the objective’s unit as the rest of the page does, never as its metric key', () => {
+    const keyed = {
+      ...model,
+      overview: model.overview && {
+        ...model.overview,
+        objective: {...model.overview.objective, unit: 'output_tokens_per_s'},
+      },
+    };
+    const line = ideaFocusView(keyed, model.candidates.candidates[1]?.id ?? null);
+    expect(line).toMatchObject({value: '385.4 output tokens/s'});
+    const ideas = ideasView(keyed, IDEAS_FILTER_DEFAULT);
+    expect(JSON.stringify(ideas)).not.toContain('output_tokens_per_s');
   });
 
   test('has the ratio to the input from the mean, once the input was measured', () => {

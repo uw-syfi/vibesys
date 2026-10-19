@@ -134,6 +134,11 @@ export function IdeasTable(props: {
               figure={
                 row.runningSince === null ? cell.figure : ageWords(row.runningSince, base.clock.now)
               }
+              {...(row.runningSince === null &&
+              cell.figure === row.figure &&
+              row.figureTitle !== undefined
+                ? {figureTitle: row.figureTitle}
+                : {})}
               figureTone={cell.tone}
               fresh={row.fresh}
               hover={on => props.dispatch({type: 'ideas-hover', idea: on ? row.id : null})}

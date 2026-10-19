@@ -21,6 +21,17 @@ export interface TreePlace {
   readonly hover: (on: boolean) => void;
 }
 
+/** A row's figure: its age while it runs, else its figure, with the whole on hover when it is short. */
+function rowFigure(
+  row: IdeaRow,
+  now: number | null,
+): {readonly figure: string; readonly figureTitle?: string} {
+  if (row.runningSince !== null) return {figure: ageWords(row.runningSince, now)};
+  return row.figureTitle === undefined
+    ? {figure: row.figure}
+    : {figure: row.figure, figureTitle: row.figureTitle};
+}
+
 export function IdeaPickRow(props: {
   readonly row: IdeaRow;
   readonly outcomes: ImplementerOutcomes;
@@ -42,7 +53,7 @@ export function IdeaPickRow(props: {
       state={row.state}
       badges={compact || reported === null ? row.badges : [...row.badges, reported]}
       {...(compact ? {} : {bar: row.bar})}
-      figure={row.runningSince === null ? row.figure : ageWords(row.runningSince, props.now)}
+      {...rowFigure(row, props.now)}
       figureTone={row.figureTone}
       {...(compact || place !== undefined
         ? {}

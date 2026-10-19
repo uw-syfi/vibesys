@@ -34,3 +34,14 @@ export function metricLabel(metric: string): string {
 export function unitLabel(unit: string): string {
   return unit.includes('_') ? metricLabel(unit).toLowerCase() : unit;
 }
+
+/**
+ * The unit a run measures its objective in, as a person reads it (`unitLabel`); empty when the run
+ * names none. The one place a screen takes the objective's unit from.
+ */
+export function objectiveUnit(
+  overview: {readonly objective: {readonly unit?: unknown}} | null,
+): string {
+  const unit = overview?.objective.unit;
+  return typeof unit === 'string' && unit !== '' ? unitLabel(unit) : '';
+}

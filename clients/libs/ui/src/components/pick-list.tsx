@@ -229,6 +229,7 @@ function Trail(props: {
   readonly badges?: readonly RowBadge[];
   readonly bar?: RowBar;
   readonly figure?: string;
+  readonly figureTitle?: string;
   readonly figureTone?: 'default' | 'ok' | 'err' | 'muted';
   readonly measure?: Measure | readonly Measure[];
   readonly measureBeforeFigure?: boolean;
@@ -242,7 +243,7 @@ function Trail(props: {
       <span
         className="vs-pickrow-figure"
         data-tone={props.figureTone ?? 'default'}
-        title={props.figure}
+        title={props.figureTitle ?? props.figure}
       >
         {props.figure}
       </span>
@@ -369,6 +370,8 @@ export function PickRow(props: {
   readonly title: string;
   readonly summary?: string;
   readonly figure?: string;
+  /** What the figure means in full, on hover, when `figure` is a short form of it. */
+  readonly figureTitle?: string;
   readonly figureTone?: 'default' | 'ok' | 'err' | 'muted';
   readonly lead?: string;
   /** What the lead means, on hover (`6 steps from input`). */

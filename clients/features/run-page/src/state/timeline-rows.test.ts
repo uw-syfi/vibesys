@@ -119,6 +119,10 @@ describe('the timeline legend', () => {
           row => !row.lane && row.segments.some(each => each.kind === 'hatched'),
         );
         expect(shown.legend.gates).toBe(hatched);
+        const paused = shown.rows.some(
+          row => !row.lane && row.segments.some(each => each.kind === 'grey'),
+        );
+        expect(shown.legend.pauses).toBe(paused);
       }
     }
   });
@@ -127,7 +131,7 @@ describe('the timeline legend', () => {
     const bare = idea('a', 'passed', 0, 100);
     const none = {...bare, attempts: [{...(bare.attempts[0] as CandidateAttempt), steps: []}]};
     const shown = timelineRows(modelOf([none]), 'all', {start: 0, now: 200}, false);
-    expect(shown.legend).toEqual({roles: [], gates: false});
+    expect(shown.legend).toEqual({roles: [], gates: false, pauses: false});
   });
 
   test('names the roles a run used: implementer and judge here, and a gate', () => {

@@ -8,9 +8,9 @@
  * nothing (a tree is the same object until a span changes).
  */
 import type {Candidate, CandidateOutcome, CandidateTree} from '@vibesys/run-state/candidates';
-import {againstWords} from './base-words.js';
 import {type IdeaBase, type IdeaBases, ideaBases} from './idea-bases.js';
-import {figureOf, type IdeaTone, outcomeWords} from './idea-words.js';
+import {figureCell, type IdeaTone, outcomeWords} from './idea-words.js';
+import {objectiveUnit} from './metric-words.js';
 import {inputValueOf} from './performance.js';
 import type {Direction, RunModel} from './run-model.js';
 import {duration, formatValue} from './span-reading.js';
@@ -76,6 +76,8 @@ export interface IdeaRow {
   readonly state: {readonly tone: 'live' | 'ok' | 'err'; readonly label: string};
   /** `vs input`: the ratio, the failed check's progress, or (running) the start time. */
   readonly figure: string;
+  /** The whole figure, when `figure` is a short form of it. */
+  readonly figureTitle?: string;
   readonly figureTone: IdeaTone;
   /** Running: when it started on the run clock, so the screen words its age. */
   readonly runningSince: number | null;
@@ -104,8 +106,7 @@ export interface IdeasView {
 
 /** The unit the run measures in, for the bar's label; empty when the run named none. */
 function unitOf(model: RunModel): string {
-  const unit = model.overview?.objective.unit;
-  return typeof unit === 'string' ? unit : '';
+  return objectiveUnit(model.overview);
 }
 
 function bestValue(tree: CandidateTree): number | null {
@@ -180,9 +181,7 @@ function summaryOf(item: Candidate): string | null {
 }
 
 function rowOf(item: Candidate, context: RowContext): IdeaRow {
-  const {figure, tone} = figureOf(item, context.inputKnown, against =>
-    againstWords(context.tree.candidates, against, 'whole'),
-  );
+  const {figure, tone, figureTitle} = figureCell(item, context.inputKnown, context.tree.candidates);
   const attempts = item.attempts.length;
   return {
     id: item.id,
@@ -191,6 +190,7 @@ function rowOf(item: Candidate, context: RowContext): IdeaRow {
     outcome: item.outcome,
     state: stateOf(item),
     figure,
+    ...(figureTitle === undefined ? {} : {figureTitle}),
     figureTone: tone,
     runningSince: item.outcome === 'running' ? item.startedAt : null,
     bar: barOf(item, context),

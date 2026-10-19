@@ -188,16 +188,44 @@ function applyUsageData(state: CoreState, event: RunEvent): CoreState {
 
 function applyQuotaData(state: CoreState, event: RunEvent, sequence: number): CoreState {
   const quota = quotaFromEvent(state.quota, event, sequence);
-  const stop = quotaStopFromEvent(event, sequence);
-  if (quota === state.quota && stop === null) return state;
+  const quotaPausedAt = quotaPausedAtFrom(state.quotaPausedAt, event);
+  // A stop that ends while the run is still parked stays open until the run resumes.
+  const stop = quotaStopFromEvent(event, sequence, state.quotaPausedAt, !isParked(state.status));
+  if (quota === state.quota && stop === null && quotaPausedAt === state.quotaPausedAt) return state;
   return cloneCoreStateWith(state, {
     quota,
+    quotaPausedAt,
     ...(stop === null ? {} : {quotaStops: [...state.quotaStops, stop]}),
   });
 }
 
+function isParked(status: CoreRunStatus): boolean {
+  return status === 'paused' || status === 'pausing';
+}
+
+/** When the run's open pause began after `event`: the first `quota_paused` opens it, a settled stop closes it. */
+function quotaPausedAtFrom(open: string | null, event: RunEvent): string | null {
+  const data = event.data;
+  switch (data?.kind) {
+    case 'quota_paused':
+      return data.condition === 'unavailable' ? open : (open ?? event.timestamp);
+    case 'quota_resumed':
+    case 'quota_abandoned':
+      return data.condition === 'unavailable' ? open : null;
+    case 'provider_switched':
+      return null;
+    default:
+      return open;
+  }
+}
+
 /** The stop a `quota_resumed` or `quota_abandoned` event ends, when it held a turn for some time. */
-function quotaStopFromEvent(event: RunEvent, sequence: number): QuotaStop | null {
+function quotaStopFromEvent(
+  event: RunEvent,
+  sequence: number,
+  pausedAt: string | null,
+  runIsMoving: boolean,
+): QuotaStop | null {
   const data = event.data;
   if (data?.kind !== 'quota_resumed' && data?.kind !== 'quota_abandoned') return null;
   const waitedSeconds = data.waited_seconds ?? 0;
@@ -209,6 +237,11 @@ function quotaStopFromEvent(event: RunEvent, sequence: number): QuotaStop | null
     outcome: data.kind === 'quota_resumed' ? 'resumed' : 'abandoned',
     waitedSeconds,
     endedAt: event.timestamp,
+    pausedAt: data.condition === 'unavailable' ? null : pausedAt,
+    resumedAt:
+      data.condition === 'unavailable' || pausedAt === null || !runIsMoving
+        ? null
+        : event.timestamp,
   };
 }
 
@@ -320,7 +353,17 @@ function applyRunStatusData(state: CoreState, event: RunEvent): CoreState {
   if (data?.kind !== 'run_status_changed') return state;
   // The backend owns the run's lifecycle and publishes every move through it,
   // so the projection folds the status it is told rather than inferring one.
-  return applyRunStatus(state, data.status);
+  return withResumedPauses(applyRunStatus(state, data.status), event.timestamp);
+}
+
+/** Closes the paused stretch of each stop still open once the run is no longer parked. */
+function withResumedPauses(state: CoreState, timestamp: string): CoreState {
+  if (isParked(state.status)) return state;
+  const open = (stop: QuotaStop): boolean => stop.pausedAt !== null && stop.resumedAt === null;
+  if (!state.quotaStops.some(open)) return state;
+  return cloneCoreStateWith(state, {
+    quotaStops: state.quotaStops.map(stop => (open(stop) ? {...stop, resumedAt: timestamp} : stop)),
+  });
 }
 
 /** The pause a `quota_paused` event on a named limit (`condition`) sets, waiting on nothing yet. */

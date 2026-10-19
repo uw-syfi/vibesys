@@ -383,17 +383,26 @@ class RunSummaryFold:
             self._gates_settled = True
 
     def _fold_gate(self, event: dict[str, JsonValue], data: dict[str, JsonValue]) -> None:
-        """Keep a gate that finished before the first idea began (``foldInputGates``)."""
+        """Keep a gate that finished before the first idea began (``foldInputGates``).
+
+        Once an idea has begun, a pass of a gate that still stands failed is kept too: the input's
+        gate tried again, which supersedes the failure.
+        """
         gate = data.get("gate")
-        if self._gates_settled or len(self._gates) >= INPUT_GATES_MAX or not isinstance(gate, str):
+        if len(self._gates) >= INPUT_GATES_MAX or not isinstance(gate, str):
             return
         recipe = data.get("recipe")
+        recipe = recipe if isinstance(recipe, str) else None
+        if self._gates_settled and (
+            event.get("status") == "failed" or not self._stands_failed(gate, recipe)
+        ):
+            return
         tail = data.get("output_tail")
         self._gates.append(
             InputGate(
                 sequence=cast("int", event["sequence"]),
                 gate=gate,
-                recipe=recipe if isinstance(recipe, str) else None,
+                recipe=recipe,
                 passed=event.get("status") != "failed",
                 output_tail=(
                     redact_diagnostic_tail(tail, max_chars=INPUT_GATE_TAIL_MAX_CHARS)
@@ -402,6 +411,11 @@ class RunSummaryFold:
                 ),
             )
         )
+
+    def _stands_failed(self, gate: str, recipe: str | None) -> bool:
+        """Whether the last kept attempt of this gate (and recipe) failed."""
+        attempts = [kept for kept in self._gates if kept.gate == gate and kept.recipe == recipe]
+        return bool(attempts) and not attempts[-1].passed
 
     def _fold_usage(self, record: UsageRecord) -> None:
         """Add one finished turn's spend to the run's, and to its span's when it names one."""

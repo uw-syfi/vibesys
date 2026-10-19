@@ -3342,6 +3342,72 @@ describe('quota stops', () => {
   });
 });
 
+describe('quota stops and the run paused around them', () => {
+  const at = (
+    sequence: number,
+    clock: string,
+    type: RunEvent['type'],
+    data: NonNullable<RunEvent['data']>,
+  ) =>
+    ({
+      ...fixtureEvent(sequence, type, {data}),
+      timestamp: `2026-10-19T${clock}Z`,
+    }) as RunEvent;
+  const paused = at(1, '13:55:34', 'quota_paused', {
+    kind: 'quota_paused',
+    provider: 'claude',
+    condition: 'quota_exhausted',
+    detail: 'limit',
+  });
+  const parked = at(2, '13:55:34', 'run_status_changed', {
+    kind: 'run_status_changed',
+    status: 'paused',
+    previous: 'running',
+  });
+  const abandoned = at(3, '14:09:51', 'quota_abandoned', {
+    kind: 'quota_abandoned',
+    provider: 'claude',
+    condition: 'quota_exhausted',
+    detail: 'limit',
+    reason: 'budget',
+    waited_seconds: 857,
+  });
+  const running = at(4, '14:32:58', 'run_status_changed', {
+    kind: 'run_status_changed',
+    status: 'running',
+    previous: 'paused',
+  });
+
+  it('keeps a stop open while the run stays paused, and closes it when the run resumes', () => {
+    const waiting = [paused, parked, abandoned].reduce(reduceEvent, initialCoreState());
+    expect(waiting.quotaStops.map(stop => [stop.pausedAt, stop.resumedAt])).toEqual([
+      ['2026-10-19T13:55:34Z', null],
+    ]);
+    const resumed = reduceEvent(waiting, running);
+    expect(resumed.quotaStops.map(stop => [stop.pausedAt, stop.resumedAt])).toEqual([
+      ['2026-10-19T13:55:34Z', '2026-10-19T14:32:58Z'],
+    ]);
+  });
+
+  it('closes a stop at once when the run was already moving as the stop ended', () => {
+    const moving = [paused, abandoned].reduce(reduceEvent, initialCoreState());
+    expect(moving.quotaStops.map(stop => stop.resumedAt)).toEqual(['2026-10-19T14:09:51Z']);
+  });
+
+  it('gives a stop that never paused the run no pause of its own', () => {
+    const outage = at(1, '14:00:00', 'quota_abandoned', {
+      kind: 'quota_abandoned',
+      provider: 'claude',
+      condition: 'unavailable',
+      detail: 'outage',
+      reason: 'budget',
+      waited_seconds: 60,
+    });
+    const state = reduceEvent(initialCoreState(), outage);
+    expect(state.quotaStops.map(stop => [stop.pausedAt, stop.resumedAt])).toEqual([[null, null]]);
+  });
+});
+
 describe('workstream telemetry state', () => {
   it('starts with no workstreams', () => {
     expect(initialCoreState().workstreams).toEqual({});

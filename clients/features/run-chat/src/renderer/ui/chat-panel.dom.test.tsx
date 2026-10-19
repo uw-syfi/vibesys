@@ -169,3 +169,23 @@ test('the header lets its buttons drop to a line of their own, so New chat never
   expect(header?.hasAttribute('data-wrap')).toBe(true);
   await unmount();
 });
+
+test('messages sit in the thread below the header, in a pane that keeps its own top edge', async () => {
+  const items: ChatPanelView['items'] = [
+    {kind: 'question', id: 'q', text: QUESTION},
+    {kind: 'answer', id: 'a', text: ANSWER, streaming: false},
+  ];
+  const {container, unmount} = await mount(<ChatPanel {...viewOf(items)} />);
+  const thread = container.querySelector('.vs-thread[data-plain]');
+  const pane = thread?.querySelector('.vs-thread-pane');
+  const heading = container.querySelector('h2');
+  // The first message is inside the scrolling pane, which follows the header in the document.
+  expect(pane?.textContent).toContain(QUESTION);
+  expect(heading?.closest('.vs-thread')).toBeNull();
+  expect(
+    heading !== null &&
+      thread !== null &&
+      (heading.compareDocumentPosition(thread) & window.Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+  ).toBe(true);
+  await unmount();
+});

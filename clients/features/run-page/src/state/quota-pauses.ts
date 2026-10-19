@@ -36,9 +36,15 @@ export function quotaPauses(
   for (const stop of stops) {
     const ended = Date.parse(stop.endedAt) / 1000;
     if (!Number.isFinite(ended)) continue;
-    const to = ended - offsetSeconds;
+    // A paused run is held from `quota_paused` until it resumed, which can be long after the
+    // stop ended (an operator resumes it); a stop that did not pause the run holds its wait only.
+    const paused = stop.pausedAt === null ? Number.NaN : Date.parse(stop.pausedAt) / 1000;
+    const resumed = stop.resumedAt === null ? Number.NaN : Date.parse(stop.resumedAt) / 1000;
+    const to = (Number.isFinite(resumed) ? Math.max(resumed, ended) : ended) - offsetSeconds;
     pauses.push({
-      from: to - stop.waitedSeconds,
+      from: Number.isFinite(paused)
+        ? Math.min(paused, ended) - offsetSeconds
+        : ended - offsetSeconds - stop.waitedSeconds,
       to,
       provider: stop.provider,
       condition: stop.condition,

@@ -14,7 +14,7 @@ import type {
   ObjectiveAxis,
 } from '@vibesys/run-state/candidates';
 import {baseWords} from './base-words.js';
-import {metricLabel, unitLabel} from './metric-words.js';
+import {metricLabel, objectiveUnit, unitLabel} from './metric-words.js';
 import {stepLabel, stepTitle} from './names.js';
 import {objectivesOf} from './pareto-view.js';
 import {
@@ -104,8 +104,7 @@ function verdictOf(better: number): {note: string; tone: MetricTileView['tone']}
 
 /** The unit as a suffix (` ops/s`); the metric's name in lower case when the run names no unit. */
 function unitWords(model: RunModel, name: string): string {
-  const unit = model.overview?.objective.unit;
-  return ` ${typeof unit === 'string' && unit !== '' ? unitLabel(unit) : name.toLowerCase()}`;
+  return ` ${objectiveUnit(model.overview) || name.toLowerCase()}`;
 }
 
 function trendOf(

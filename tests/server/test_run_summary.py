@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from hypothesis import given
@@ -14,7 +15,16 @@ from tests.server.run_summary_support import (
     journal_lines,
 )
 
+from server.events import (
+    EventStatus,
+    EventType,
+    GateFinishedData,
+    RunEvent,
+    SpanStartedData,
+)
 from server.run_summary import RunSummaryFold, schema_id
+from vibesys.api import GateKind
+from vs_core.api import Span, SpanLabel, SpanStatus, SpanType
 
 if TYPE_CHECKING:
     from server.host_run_summary import SpanTokens, TurnReply, UsageRecord
@@ -155,3 +165,55 @@ def test_a_page_past_the_end_is_empty_and_ends_the_summary() -> None:
 def test_a_reply_schema_is_identified_by_its_canonical_json() -> None:
     assert schema_id({"b": 1, "a": [1, 2]}) == schema_id({"a": [1, 2], "b": 1})
     assert schema_id({"a": 1}) != schema_id({"a": 2})
+
+
+def _gate(sequence: int, status: EventStatus, gate: GateKind = GateKind.BENCHMARK) -> RunEvent:
+    return RunEvent(
+        sequence=sequence,
+        run_id="run",
+        timestamp=datetime(2026, 10, 19, 12, tzinfo=UTC),
+        type=EventType.GATE_FINISHED,
+        data=GateFinishedData(
+            gate=gate, output_tail="boom" if status is EventStatus.FAILED else None
+        ),
+        status=status,
+    )
+
+
+def _idea(sequence: int) -> RunEvent:
+    return RunEvent(
+        sequence=sequence,
+        run_id="run",
+        timestamp=datetime(2026, 10, 19, 12, tzinfo=UTC),
+        type=EventType.SPAN_STARTED,
+        data=SpanStartedData(
+            span=Span(
+                id="flow:search/idea#1",
+                parent=None,
+                type=SpanType.FLOW,
+                name="idea",
+                status=SpanStatus.RUNNING,
+                started_at=1.0,
+                label=SpanLabel(kind="workstream"),
+            )
+        ),
+    )
+
+
+def test_a_retry_of_a_failed_input_gate_that_passes_after_the_first_idea_is_kept() -> None:
+    """The input benchmark failed, an idea began, and the gate's second attempt passed."""
+    fold = RunSummaryFold()
+    journal = [
+        _gate(1, EventStatus.FAILED),
+        _idea(2),
+        _gate(3, EventStatus.COMPLETED, GateKind.ACCURACY),  # an idea's own gate: not kept
+        _gate(4, EventStatus.COMPLETED),  # the retry of the failed gate
+        _gate(5, EventStatus.COMPLETED),  # the gate no longer stands failed: not kept
+        _gate(6, EventStatus.FAILED),  # an idea's failure: not kept
+    ]
+    for line in journal_lines(journal):
+        assert fold.consume(line)
+    assert [(gate.sequence, gate.passed) for gate in fold.state().input_gates] == [
+        (1, False),
+        (4, True),
+    ]

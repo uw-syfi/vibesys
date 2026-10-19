@@ -352,3 +352,36 @@ test('regression: a saved run’s Logs face ends in a notice, not in "Looking fo
   expect(read).toContain('logs are not available');
   expect(read).not.toContain('Looking for');
 });
+
+test('the selected idea’s line words the objective’s unit, not its metric key', async () => {
+  const model = measuredRun(null);
+  const [first] = model.candidates.candidates;
+  const withUnit = {
+    ...model,
+    overview: {objective: {metric: 'output_tokens_per_s', unit: 'output_tokens_per_s'}},
+    candidates: {
+      ...model.candidates,
+      candidates: model.candidates.candidates.map(item =>
+        item.id === first?.id && item.measurement !== null
+          ? {...item, measurement: {...item.measurement, vsBaseline: 1.5}}
+          : item,
+      ),
+    },
+  } as unknown as RunModel;
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const base = {
+    model: withUnit,
+    clock: {start: 0, now: null},
+    tokens: EMPTY_LEDGER,
+    who: new Map(),
+    zoom: () => undefined,
+  };
+  await act(async () => root.render(<Hero {...base} whole={withUnit} idea={first?.id ?? null} />));
+  const text = container.textContent ?? '';
+  await act(async () => root.unmount());
+  container.remove();
+  expect(text).toContain('output tokens/s');
+  expect(text).not.toContain('output_tokens_per_s');
+});
