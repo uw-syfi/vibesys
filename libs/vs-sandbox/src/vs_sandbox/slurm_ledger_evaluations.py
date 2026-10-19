@@ -95,7 +95,7 @@ class LedgerEvaluations:
     """When a close stops starting releases (``give_up_releasing_after``); None: never."""
 
     def give_up_releasing_after(self, seconds: float) -> None:
-        """Start no release ``seconds`` from now; what is left detaches (``release``)."""
+        """Start no relinquish ``seconds`` from now; a job left in the ledger detaches."""
         self.release_until = self.clock.now() + seconds
 
     def _gave_up(self) -> bool:
@@ -235,11 +235,15 @@ class LedgerEvaluations:
         leaves even that. ``known`` is the request of the job the evaluation
         attached to (``attached``), as its executor recorded it; a job attached
         to before the operator enabled the ledger has none, and is cancelled by
-        the executor as before.
+        the executor as before. A close that gave up releasing
+        (``give_up_releasing_after``) starts no further relinquish and detaches
+        the job, which its ledger entry leaves to a later run; it still cancels a
+        job that has no entry.
         """
-        if detaching or self._gave_up():
+        if detaching:
             return Released.DETACHED
         if attached and known is None:
+            # Even past a close's bound: with no ledger entry, no sweep would withdraw it.
             return Released.CANCEL_HERE
         ledger = self.ledger
         key = known if known is not None else ledger.request_of(handle_id)

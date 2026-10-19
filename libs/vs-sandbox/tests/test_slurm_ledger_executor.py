@@ -942,9 +942,6 @@ async def test_a_close_on_a_sick_controller_gives_up_releasing_and_detaches(
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(
-    strict=True, reason="PR #3222 LOW-1: a pre-ledger job is detached after the bound"
-)
 async def test_a_close_past_its_bound_still_cancels_a_job_from_before_the_ledger(
     tmp_path: Path,
 ) -> None:
