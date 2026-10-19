@@ -4,6 +4,7 @@
  * would fail, and says nothing about a home directory.
  */
 import {expect, type Page, test} from '@playwright/test';
+import {REQUIRED_HELPER_FEATURES} from '@vibesys/hosts';
 import {choose, main, proceed} from './new-run-flow.js';
 import {type FakeHostWindow, openNewRun as open, SEED} from './world.js';
 
@@ -23,9 +24,7 @@ async function reviewTheStack(
       ...newRun,
       destinations,
       features: [
-        'run_options',
-        'preflight',
-        'examples',
+        ...REQUIRED_HELPER_FEATURES,
         'run_roles',
         'example_catalogue',
         'example_destination',
