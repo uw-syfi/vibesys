@@ -74,7 +74,9 @@ _SCENARIOS = tuple(
 # modules: the standard library and Pydantic only.
 # vs_project._operator_key (the key every control-socket connection presents first) adds 1,
 # loading neither hmac nor secrets; main already loaded 355 before it.
-_MODULE_CEILING = 356
+# server.host_run_dashboard (the run tile's contracts, split from host_api to hold its file-length
+# ceiling) adds 1: Pydantic and the standard library only.
+_MODULE_CEILING = 357
 """The most modules a helper may load to answer ``hello``; lower it as the helper sheds imports."""
 _HELLO = {
     "type": "hello",

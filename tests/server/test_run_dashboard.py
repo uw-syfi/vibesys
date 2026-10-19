@@ -78,24 +78,26 @@ def _event(sequence: int, kind: str, at: float, data: dict[str, JsonValue]) -> b
     return json.dumps(document).encode() + b"\n"
 
 
-def _span(  # noqa: PLR0913 - the span's own fields
-    kind: str,
-    span_id: str,
-    parent: str | None,
-    *,
-    status: str,
-    started: float,
-    ended: float | None,
-    verdict: str | None,
-    attrs: dict[str, JsonValue],
+@dataclass(frozen=True)
+class _State:
+    """Where a span stands: its status, its times (run-clock seconds) and its label's verdict."""
+
+    status: str
+    started: float
+    ended: float | None
+    verdict: str | None
+
+
+def _span(
+    kind: str, span_id: str, parent: str | None, state: _State, attrs: dict[str, JsonValue]
 ) -> dict[str, JsonValue]:
     return {
         "id": span_id,
         "parent": parent,
-        "status": status,
-        "started_at": started,
-        "ended_at": ended,
-        "label": {"kind": kind, "verdict": verdict, "attrs_json": json.dumps(attrs)},
+        "status": state.status,
+        "started_at": state.started,
+        "ended_at": state.ended,
+        "label": {"kind": kind, "verdict": state.verdict, "attrs_json": json.dumps(attrs)},
     }
 
 
@@ -110,56 +112,20 @@ def journal_of(ideas: list[_Idea], direction: str = "max") -> list[bytes]:
         began = 10.0 * index
         ws = f"flow:{index}"
         attrs: dict[str, JsonValue] = {"hypothesis_id": f"h{index}", "probe": False}
-        ended = None if idea.outcome == "running" else idea.landed + 1
-        add(
-            "span_started",
-            began,
-            _span(
-                "workstream",
-                ws,
-                None,
-                status="running",
-                started=began,
-                ended=None,
-                verdict=None,
-                attrs=attrs,
-            ),
-        )
+        started = _State("running", began, None, None)
+        add("span_started", began, _span("workstream", ws, None, started, attrs))
         if idea.reading is not None:
-            ratio = idea.reading / _INPUT
             gate_attrs: dict[str, JsonValue] = {
                 "metric_value": idea.reading,
-                "vs_baseline": ratio,
+                "vs_baseline": idea.reading / _INPUT,
             }
-            add(
-                "span_ended",
-                idea.landed,
-                _span(
-                    "gate",
-                    f"op:{index}",
-                    ws,
-                    status="done",
-                    started=idea.landed - 0.5,
-                    ended=idea.landed,
-                    verdict="passed" if idea.outcome == "passed" else "failed_check",
-                    attrs=gate_attrs,
-                ),
-            )
+            verdict = "passed" if idea.outcome == "passed" else "failed_check"
+            gate = _State("done", idea.landed - 0.5, idea.landed, verdict)
+            add("span_ended", idea.landed, _span("gate", f"op:{index}", ws, gate, gate_attrs))
         if idea.outcome != "running":
-            add(
-                "span_ended",
-                idea.landed + 1,
-                _span(
-                    "workstream",
-                    ws,
-                    None,
-                    status="done" if idea.outcome == "passed" else "failed",
-                    started=began,
-                    ended=ended,
-                    verdict=idea.outcome,
-                    attrs=attrs,
-                ),
-            )
+            status = "done" if idea.outcome == "passed" else "failed"
+            done = _State(status, began, idea.landed + 1, idea.outcome)
+            add("span_ended", idea.landed + 1, _span("workstream", ws, None, done, attrs))
     return lines
 
 
