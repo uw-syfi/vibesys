@@ -99,6 +99,23 @@ describe('threadItems', () => {
     expect(threadItems(core, 't', null).filter(item => item.kind === 'question')).toHaveLength(1);
   });
 
+  test('no two items of a thread share an id, whether or not an answer streamed first', () => {
+    // Each turn is a streamed or a bare answer; every mix of three turns, with a proposal after.
+    for (let mix = 0; mix < 2 ** 3; mix++) {
+      const events: RunEvent[] = [created(1, 't')];
+      let sequence = 2;
+      for (let turn = 0; turn < 3; turn++) {
+        if ((mix >> turn) & 1) events.push(chunk(sequence++, 't', `turn-${turn}`, 'streamed'));
+        events.push(answered(sequence++, 't', `question ${turn}`, 'streamed', `turn-${turn}`));
+      }
+      events.push(proposed(sequence, 't', 'p-1'));
+      const ids = threadItems(fold(events), 't', 'next').map(item =>
+        item.kind === 'proposal' ? item.proposal.id : item.id,
+      );
+      expect(new Set(ids).size, `mix ${mix}: ${ids.join(', ')}`).toBe(ids.length);
+    }
+  });
+
   test('a proposal alone, with no answers, still shows', () => {
     const items = threadItems(fold([created(1, 't'), proposed(2, 't', 'p-1')]), 't', null);
     expect(items.map(item => item.kind)).toEqual(['proposal']);

@@ -7,6 +7,11 @@
  * both), so the question being answered now is the caller's `pending` text, shown first and
  * superseded once the fold has it. Questions and answers pair by order: the k-th question goes
  * before the k-th answer.
+ *
+ * Every item of a thread has an id no other item has: the thread draws rows keyed by it and keeps
+ * each row's measured height under it. The fold names a question and the answer that ends its turn
+ * by the one event that carried both (the answer keeps the question's sequence when nothing
+ * streamed before it), so a question's id carries a prefix of its own.
  */
 import type {ChatProposal, CoreState} from '@vibesys/run-state';
 
@@ -104,7 +109,7 @@ export function threadItems(
     flushProposals(sequenceOf(answer.id));
     const question = questions[index];
     if (question !== undefined) {
-      items.push({kind: 'question', id: question.id, text: question.text});
+      items.push({kind: 'question', id: `question ${question.id}`, text: question.text});
     } else if (index === questions.length && pending !== null) {
       items.push({kind: 'question', id: `pending ${index}`, text: pending});
     }

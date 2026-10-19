@@ -20,6 +20,7 @@ import {
   providerOptions,
   withProvider,
 } from '../../state/index.js';
+import {ChatBoundary} from './chat-boundary.js';
 import {SteerCardView} from './steer-card-view.js';
 
 /** The harness, then the model: the two choices of a new chat in one compact row. */
@@ -183,8 +184,7 @@ function Composer(props: ChatPanelView): JSX.Element {
   );
 }
 
-/** The chat panel: header, harness picker for a new chat, the thread, and the composer. */
-export function ChatPanel(props: ChatPanelView): JSX.Element {
+function Panel(props: ChatPanelView): JSX.Element {
   const items = props.items.map(item => uiItem(item, props.roles));
   return (
     <Stack gap="space-3" grow>
@@ -198,5 +198,17 @@ export function ChatPanel(props: ChatPanelView): JSX.Element {
       )}
       <Composer {...props} />
     </Stack>
+  );
+}
+
+/**
+ * The chat panel: header, harness picker for a new chat, the thread, and the composer. A failure
+ * to draw it stays in the panel.
+ */
+export function ChatPanel(props: ChatPanelView): JSX.Element {
+  return (
+    <ChatBoundary resetKey={props.shown} close={() => props.dispatch({type: 'close'})}>
+      <Panel {...props} />
+    </ChatBoundary>
   );
 }

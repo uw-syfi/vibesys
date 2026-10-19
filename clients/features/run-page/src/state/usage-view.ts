@@ -9,7 +9,7 @@
  * `reasoning` and the `reasoning`. A count nobody reported is `unknown`, never zero; a cost is the
  * provider's, summed over the turns that reported one.
  */
-import {roleName} from '@vibesys/contracts';
+import {isChatAgentKind, roleName} from '@vibesys/contracts';
 import type {UsageRecord} from '@vibesys/contracts/host-helper';
 import {totalTokens} from '@vibesys/run-state';
 import {
@@ -561,7 +561,8 @@ export function usageView(
 /**
  * The agents of the run by role, for the header: each role with the harness and model pairs its
  * turns ran on, in the order the roles first spent. A turn whose execution start the journal
- * lacks names nothing, so it adds no pair.
+ * lacks names nothing, so it adds no pair. A chat session is no role of the run: the records keep
+ * what it spent, and the header does not list it.
  */
 export function roleAgents(
   records: readonly UsageRecord[],
@@ -573,6 +574,7 @@ export function roleAgents(
   const by = new Map<string, Map<string, {harness: string | null; model: string | null}>>();
   for (const record of records) {
     if (record.role === null || (record.harness === null && record.model === null)) continue;
+    if (isChatAgentKind(record.role)) continue;
     const pairs = by.get(record.role) ?? new Map();
     pairs.set(`${record.harness}\n${record.model}`, {harness: record.harness, model: record.model});
     by.set(record.role, pairs);

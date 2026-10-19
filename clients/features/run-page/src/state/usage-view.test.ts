@@ -260,6 +260,21 @@ describe('the run’s records and the run’s spend', () => {
     });
   });
 
+  test('the header lists the run’s roles, never a chat session that spent on the same run', () => {
+    const state = opened();
+    const [first] = fixture.records;
+    if (state.summary.kind !== 'ready' || first === undefined) throw new Error('no records');
+    const chat: UsageRecord = {...first, role: 'chat', harness: 'claude', model: 'model-chat'};
+    const withChat = {
+      ...state,
+      summary: {...state.summary, records: [...state.summary.records, chat]},
+    } as typeof state;
+
+    expect(usageRecords(withChat).map(record => record.role)).toContain('chat');
+    expect(headerView(withChat).agents).toEqual(headerView(state).agents);
+    expect(headerView(withChat).agents.map(agent => agent.role)).not.toContain('Chat');
+  });
+
   test('a run folded from its events: the face totals say what the header says', () => {
     const state = opened();
     const core = reduceEventBatch(initialCoreState(), events);

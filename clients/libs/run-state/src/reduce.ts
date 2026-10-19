@@ -2,7 +2,7 @@
  * The run fold's reducers: a snapshot, an ordered batch, a rebootstrap, a replayed prefix, or one
  * event, each folded with run identity, the stream cursor, and replay provenance kept consistent.
  */
-import type {RunEvent, RunSnapshot} from '@vibesys/contracts';
+import {isChatAgentKind, type RunEvent, type RunSnapshot} from '@vibesys/contracts';
 import {applyChatEvent, registerSnapshotChat, retainRegisteredChatThreads} from './chat.js';
 import {applyDiagnosticEvent, upsertDiagnostic} from './diagnostics.js';
 import {
@@ -867,7 +867,7 @@ function foldAcceptedEvent(
   // that session's status block to every chat chunk it publishes, so folding
   // one would report the chat's token count as the run's. The same exclusion
   // covers chat `usage_update` events, which `applyRunFacts` never sees.
-  if (event.agent_kind === 'chat') return applyChatEvent(next, event, folder);
+  if (isChatAgentKind(event.agent_kind)) return applyChatEvent(next, event, folder);
   next = applyRunEventData(next, event, sequence, dataHandlers);
   if (event.agent_kind) (next as MutableCoreState).agentKind = event.agent_kind;
   if (event.round_label) (next as MutableCoreState).roundLabel = event.round_label;
