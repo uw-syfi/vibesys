@@ -101,9 +101,6 @@ def test_only_a_failed_probe_ends_the_run_and_it_names_the_probe(tmp_path: Path)
     assert control.stop_mode() is StopMode.CANCEL
 
 
-@pytest.mark.xfail(
-    strict=True, reason="the event is emitted before the run is ended (#3243 review N3)"
-)
 def test_a_failed_probe_ends_the_run_even_when_publishing_its_event_raises(
     tmp_path: Path,
 ) -> None:

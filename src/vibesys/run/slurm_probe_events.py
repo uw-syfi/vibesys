@@ -58,6 +58,8 @@ class CoreWorkspaceRootProbeEvents:
             case WorkspaceRootProbeFailed():
                 status = EventStatus.FAILED
                 data = WorkspaceRootProbeData(state="failed", failure=report.failure)
-        self._events.emit(CoreEventType.WORKSPACE_ROOT_PROBE, status=status, data=data)
         if isinstance(report, WorkspaceRootProbeFailed):
+            # The run ends first: publishing the event may raise (a broken subscriber), and
+            # the probe drops a report that raises, which must not leave the run going.
             self._environment.fail(report.failure)
+        self._events.emit(CoreEventType.WORKSPACE_ROOT_PROBE, status=status, data=data)
