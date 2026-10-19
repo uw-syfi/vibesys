@@ -20,6 +20,7 @@ from vs_sandbox.agent_gpu import (
     parse_partition_limits,
 )
 from vs_sandbox.agent_gpu_cap import CANCELLED_BEFORE_SUBMISSION, CappedGpuLauncher
+from vs_sandbox.agent_gpu_root_gate import RootGatedGpuLauncher
 from vs_sandbox.gpu_command_runner import (
     GpuCaptureRecovery,
     GpuCommandRunner,
@@ -155,6 +156,7 @@ __all__ = [
     "ProfileCaptureDescriptor",
     "ProfileStats",
     "ReadOnlyPathLinkError",
+    "RootGatedGpuLauncher",
     "RunRoots",
     "SharedSlurmAdmission",
     "SlurmCapturePlan",

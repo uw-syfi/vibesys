@@ -77,6 +77,7 @@ from vs_slurm.api import (
     SlurmJobStatus,
     SlurmSubmissionRejectedError,
     SlurmTreeArtifact,
+    SlurmWorkspaceRootProbeError,
     Unknown,
     advance_with_notice,
     recorded_job_ids,
@@ -96,6 +97,7 @@ if TYPE_CHECKING:
         ClusterInspectOutcome,
         SlurmConfig,
         SlurmService,
+        WorkspaceRootProof,
     )
 
 _UNRESOLVED_JOB_ID = "0"  # the placeholder id of a submission whose acceptance is unresolved
@@ -404,6 +406,7 @@ class SlurmEvaluationExecutor:
         ledger: SlurmLedgerAttachment | None = None,
         ledger_candidate: str | None = None,
         stage_output: SlurmStageOutputOpener | None = None,
+        root_proof: WorkspaceRootProof | None = None,
     ) -> None:
         """Bind scheduler policy, durable intent, and the cluster interface.
 
@@ -421,6 +424,9 @@ class SlurmEvaluationExecutor:
         ``stage_output`` opens one stream per stage, which the stage's output reaches while
         the job runs, read at each scheduler poll (``StageOutputFollower``); without it the
         output reaches only the collected result.
+        ``root_proof`` is the run's workspace-root probe: an evaluation's first submission
+        waits, at the poll interval, until it proves the root, and a failed proof refuses
+        the submission with the probe's error, so no job is ever sent to an unproven root.
         """
         if cluster is None:
             if processes is None:
@@ -431,6 +437,7 @@ class SlurmEvaluationExecutor:
             )
         self._cluster = cluster
         self._stage_output = stage_output
+        self._root_proof = root_proof
         self._sleeper = sleeper
         self._poll_interval = config.poll_interval_seconds
         # Confirmation is bounded by an inspection count so that it follows the
@@ -950,6 +957,7 @@ class SlurmEvaluationExecutor:
         reconcile: bool,
     ) -> None:
         """Submit or attach, then wait for and collect the job; again if the ledger took it."""
+        await self._await_root_proof(self._read_evaluation(handle_id))
         resubmits = 0
         while True:
             try:
@@ -968,6 +976,22 @@ class SlurmEvaluationExecutor:
                 self._write_evaluation(handle_id, None, request, dispatch_started=True)
                 continue
             return
+
+    async def _await_root_proof(self, durable: _DurableSlurmEvaluation | None) -> None:
+        """Hold a first submission until the run's workspace root is proven; refuse it if not.
+
+        An evaluation whose dispatch already started may have a job on the cluster, so it
+        goes on to reconcile that job: refusing it would disown a live allocation.
+        """
+        proof = self._root_proof
+        if proof is None or (durable is not None and durable.dispatch_started):
+            return
+        try:
+            while not proof.check():
+                await self._sleeper.sleep(self._poll_interval)
+        except SlurmWorkspaceRootProbeError as exc:
+            # Nothing was sent: a definite refusal, recorded and published as one.
+            raise SlurmSubmissionRejectedError(str(exc)) from exc
 
     async def _let_go_of_ended(self, handle_id: str, known: str | None) -> None:
         """Stop using the ledger request of an evaluation that ended, before saying it ended.
