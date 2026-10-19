@@ -6,6 +6,7 @@ export {
   addRecord,
   dimensionValue,
   foldUsage,
+  type IdeaOf,
   NO_USAGE,
   totalUsage,
   USAGE_DIMENSIONS,

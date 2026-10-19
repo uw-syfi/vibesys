@@ -27,6 +27,7 @@ import {
   SearchBox,
   Sparkline,
   Stack,
+  StackedArea,
   StackedBars,
   Swatch,
   SwatchLegend,
@@ -696,6 +697,22 @@ export const FRAME_ENTRIES = {
         The square before a name in a legend or a table row: a color of the palette, or hatched for
         what has none.
       </Text>
+    ),
+  },
+  StackedArea: {
+    render: () => (
+      <StackedArea
+        label="Tokens, running total"
+        unit="tokens"
+        from="Oct 15, 16:30"
+        to="Oct 15, 19:10"
+        titles={['16:30 to 17:00', '17:00 to 17:30', '17:30 to 18:00', '18:00 to 18:30']}
+        layers={[
+          {key: 'planner', series: 7, values: [4, 8, 10, 12]},
+          {key: 'implementer', series: 1, values: [6, 18, 38, 47]},
+          {key: 'judge', series: 3, values: [0, 3, 8, 13]},
+        ]}
+      />
     ),
   },
   StackedBars: {

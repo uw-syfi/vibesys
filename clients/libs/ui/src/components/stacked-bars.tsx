@@ -7,6 +7,8 @@ export interface BarSegment {
   readonly key: string;
   readonly series: number;
   readonly value: number;
+  /** Faded: another series is the one the reader follows. */
+  readonly dim?: boolean;
 }
 
 /** One bar: its segments stacked from the bottom, and what it stands for in words. */
@@ -40,7 +42,14 @@ export function StackedBars(props: {
                 '--seg-color': `var(--series-${segment.series})`,
                 height: `${tallest === 0 ? 0 : (segment.value / tallest) * 100}%`,
               };
-              return <span key={segment.key} className="vs-bars-segment" style={style} />;
+              return (
+                <span
+                  key={segment.key}
+                  className="vs-bars-segment"
+                  data-dim={segment.dim === true || undefined}
+                  style={style}
+                />
+              );
             })}
           </div>
         ))}

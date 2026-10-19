@@ -41,6 +41,7 @@ import {
   type RunPageState,
   roundsBeforeTrace,
   traceArrival,
+  usageContext,
   usageRecords,
   type ZoomEvent,
 } from '../../state/index.js';
@@ -324,6 +325,7 @@ function runFace(
         body: (
           <UsageView
             records={usageRecords(state)}
+            context={usageContext(base.model)}
             controls={state.usage}
             change={controls => dispatch({type: 'usage-controls', controls})}
           />
@@ -389,7 +391,7 @@ export function RunLevel(props: {
         <ModeSwitch mode={mode} options={MODES} zoom={base.zoom} />
         {face.body}
       </FramedPane>
-      <NowPane base={base} />
+      {mode === 'usage' ? null : <NowPane base={base} />}
     </Panes>
   );
 }

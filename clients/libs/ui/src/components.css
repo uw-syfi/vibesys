@@ -1015,6 +1015,7 @@ body > div:first-child {
 /* --- table ------------------------------------------------------------------------------------- */
 
 .vs-table-scroll {
+  container-type: inline-size;
   overflow-x: auto;
   min-width: 0;
   border: var(--hairline) solid var(--line);
@@ -1080,6 +1081,39 @@ body > div:first-child {
 }
 .vs-table tr[aria-current="true"] {
   background: var(--selection);
+}
+.vs-table tr[data-kind="sub"] td {
+  color: var(--muted);
+}
+.vs-table tr[data-kind="sub"] td:first-child {
+  padding-left: var(--space-7);
+}
+.vs-table tr[data-kind="total"] td {
+  font-weight: var(--text-body-strong-weight);
+}
+.vs-table-lead {
+  display: flex;
+  align-items: center;
+}
+.vs-table-fold {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-5);
+  margin: 0 var(--space-2) 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  vertical-align: middle;
+}
+/* Columns that need room give way first: the table scroller is its own container, so it is the
+   width of the table, not of the window, that decides. */
+@container (max-width: 680px) {
+  .vs-table [data-wide] {
+    display: none;
+  }
 }
 
 /* --- tabs -------------------------------------------------------------------------------------- */

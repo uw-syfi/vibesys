@@ -22,6 +22,7 @@ export const USAGE_DIMENSIONS = [
   'reasoning_effort',
   'round',
   'run',
+  'idea',
 ] as const;
 export type UsageDimension = (typeof USAGE_DIMENSIONS)[number];
 
@@ -47,8 +48,20 @@ export interface UsageFold {
   readonly total: UsageTotals;
 }
 
+/**
+ * The idea a record's turn served, or null (no idea: the turn is the run's own work). A record does
+ * not name its idea: the run's trace does, so the caller joins them and hands the join in.
+ */
+export type IdeaOf = (record: UsageRecord) => string | null;
+
+const NO_IDEA: IdeaOf = () => null;
+
 /** The value of `record` on `dimension`. */
-export function dimensionValue(record: UsageRecord, dimension: UsageDimension): string | null {
+export function dimensionValue(
+  record: UsageRecord,
+  dimension: UsageDimension,
+  ideaOf: IdeaOf = NO_IDEA,
+): string | null {
   switch (dimension) {
     case 'role':
       return record.role;
@@ -62,6 +75,8 @@ export function dimensionValue(record: UsageRecord, dimension: UsageDimension): 
       return record.round_label;
     case 'run':
       return record.run_id;
+    case 'idea':
+      return ideaOf(record);
   }
 }
 
@@ -95,18 +110,23 @@ export function totalUsage(records: readonly UsageRecord[]): UsageTotals {
   return records.reduce(addRecord, NO_USAGE);
 }
 
-function keyOf(record: UsageRecord, by: readonly UsageDimension[]): readonly (string | null)[] {
-  return by.map(dimension => dimensionValue(record, dimension));
+function keyOf(
+  record: UsageRecord,
+  by: readonly UsageDimension[],
+  ideaOf: IdeaOf,
+): readonly (string | null)[] {
+  return by.map(dimension => dimensionValue(record, dimension, ideaOf));
 }
 
 /** `records` grouped by `by` (any number of dimensions; none is one group of everything). */
 export function foldUsage(
   records: readonly UsageRecord[],
   by: readonly UsageDimension[],
+  ideaOf: IdeaOf = NO_IDEA,
 ): UsageFold {
   const groups = new Map<string, {key: readonly (string | null)[]; totals: UsageTotals}>();
   for (const record of records) {
-    const key = keyOf(record, by);
+    const key = keyOf(record, by, ideaOf);
     const id = JSON.stringify(key);
     const group = groups.get(id) ?? {key, totals: NO_USAGE};
     groups.set(id, {key, totals: addRecord(group.totals, record)});
@@ -139,6 +159,7 @@ export function usageOverTime(
   records: readonly UsageRecord[],
   by: UsageDimension,
   count: number,
+  ideaOf: IdeaOf = NO_IDEA,
 ): UsageOverTime {
   const dated: {record: UsageRecord; at: number}[] = [];
   let undated = NO_USAGE;
@@ -147,7 +168,7 @@ export function usageOverTime(
     if (Number.isFinite(at)) dated.push({record, at});
     else undated = addRecord(undated, record);
   }
-  const keys = [...new Set(records.map(record => dimensionValue(record, by)))];
+  const keys = [...new Set(records.map(record => dimensionValue(record, by, ideaOf)))];
   if (dated.length === 0) return {buckets: [], undated, keys};
   const first = Math.min(...dated.map(item => item.at));
   const last = Math.max(...dated.map(item => item.at));
@@ -157,7 +178,7 @@ export function usageOverTime(
     width === 0 ? 0 : Math.min(size - 1, Math.floor((at - first) / width));
   const buckets = Array.from({length: width === 0 ? 1 : size}, (_, index) => {
     const members = dated.filter(item => inBucket(item.at) === index).map(item => item.record);
-    const fold = foldUsage(members, [by]);
+    const fold = foldUsage(members, [by], ideaOf);
     return {
       from: first + index * width,
       to: width === 0 ? last : first + (index + 1) * width,

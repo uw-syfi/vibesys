@@ -141,6 +141,22 @@ describe('foldUsage', () => {
   });
 });
 
+describe('grouping by idea', () => {
+  const ideaOf = (record: UsageRecord): string | null =>
+    record.execution_id === null ? null : `idea-${record.execution_id.length % 3}`;
+
+  it('puts every turn in one idea, the turns of no idea together, and sums to the total', () => {
+    for (const seed of SEEDS) {
+      const list = records(seed);
+      const fold = foldUsage(list, ['idea'], ideaOf);
+      expect(fold.groups.reduce((sum, group) => sum + group.totals.turns, 0)).toBe(list.length);
+      expect(fold.total).toEqual(totalUsage(list));
+      const none = list.filter(record => ideaOf(record) === null).length;
+      expect(fold.groups.find(group => group.key[0] === null)?.totals.turns ?? 0).toBe(none);
+    }
+  });
+});
+
 describe('usageOverTime', () => {
   it('loses no record to bucketing: buckets and the undated sum to the total', () => {
     for (const seed of SEEDS) {

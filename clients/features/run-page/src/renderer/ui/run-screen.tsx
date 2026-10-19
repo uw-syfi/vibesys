@@ -131,6 +131,18 @@ function Header(props: {readonly state: RunPageState; readonly dispatch: Dispatc
             </Text>
           )}
         </Row>
+        {header.agents.length === 0 ? null : (
+          <Row gap="space-4" wrap>
+            {header.agents.map(agent => (
+              <Row key={agent.role} gap="space-2" align="baseline">
+                <Text variant="small" tone="muted">
+                  {agent.role}
+                </Text>
+                <Text variant="code">{agent.ran.join(', ')}</Text>
+              </Row>
+            ))}
+          </Row>
+        )}
       </Stack>
       <Row gap="space-3">
         {header.pause.shown ? (

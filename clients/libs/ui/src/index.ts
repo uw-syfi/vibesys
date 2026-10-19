@@ -123,6 +123,7 @@ export {
 } from './components/sidebar.js';
 export {Slider} from './components/slider.js';
 export {Sparkline, type SparkStep} from './components/sparkline.js';
+export {type AreaLayer, StackedArea} from './components/stacked-area.js';
 export {type BarSegment, type StackedBar, StackedBars} from './components/stacked-bars.js';
 export {Chip, StatusDot, type StatusTone} from './components/status.js';
 export {type ReplyField, StructuredReply} from './components/structured-reply.js';

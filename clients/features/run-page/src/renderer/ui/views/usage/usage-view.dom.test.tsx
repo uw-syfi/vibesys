@@ -10,6 +10,7 @@ import {act} from 'react';
 import {createRoot} from 'react-dom/client';
 import {
   USAGE_CONTROLS_DEFAULT,
+  type UsageContext,
   type UsageControls,
   type UsageRecord,
 } from '../../../../state/index.js';
@@ -42,11 +43,12 @@ function record(
   model: string,
   input: number,
   hour: number,
+  span: string | null = null,
 ): UsageRecord {
   return {
     run_id: 'run-1',
     execution_id: null,
-    span_id: null,
+    span_id: span,
     round_label: null,
     role,
     harness,
@@ -63,20 +65,27 @@ function record(
 
 const RECORDS = [
   record('planner', 'codex', 'gpt-6-luna', 4000, 1),
-  record('implementer', 'codex', 'gpt-6-luna', 2000, 2),
-  record('implementer', 'claude', 'sonnet-5', 1000, 3),
+  record('implementer', 'codex', 'gpt-6-luna', 2000, 2, 'turn-a'),
+  record('implementer', 'claude', 'sonnet-5', 1000, 3, 'turn-b'),
 ];
 
+const CONTEXT: UsageContext = {ideaOfSpan: new Map([['turn-a', 'idea-1']]), ideas: new Map()};
+
 async function mount(
-  records: readonly UsageRecord[],
   controls: UsageControls,
   sent: UsageControls[],
+  records: readonly UsageRecord[] = RECORDS,
 ): Promise<HTMLElement> {
   const container = document.createElement('div');
   document.body.append(container);
   await act(async () =>
     createRoot(container).render(
-      <UsageView records={records} controls={controls} change={next => void sent.push(next)} />,
+      <UsageView
+        records={records}
+        context={CONTEXT}
+        controls={controls}
+        change={next => void sent.push(next)}
+      />,
     ),
   );
   return container;
@@ -85,54 +94,91 @@ async function mount(
 const rows = (container: HTMLElement): string[] =>
   [...container.querySelectorAll('tbody tr')].map(row => row.textContent ?? '');
 
+async function press(element: Element | null): Promise<void> {
+  await act(async () => (element as HTMLElement).click());
+}
+
+const radio = (container: HTMLElement, group: string, value: string): Element | null =>
+  container.querySelector(`[role="radiogroup"][aria-label="${group}"] input[value="${value}"]`);
+
 describe('UsageView', () => {
-  test('totals the run, then lists a row per role, the most input first', async () => {
-    const view = await mount(RECORDS, USAGE_CONTROLS_DEFAULT, []);
-    expect(view.textContent).toContain('· 3 turns');
-    expect(view.textContent).toContain('· cost $7.00');
+  test('shows the four tiles, then a row per role by cost and the run total', async () => {
+    const view = await mount(USAGE_CONTROLS_DEFAULT, []);
+    for (const name of ['Cost', 'Tokens', 'Cached input', 'Per idea']) {
+      expect(view.textContent).toContain(name);
+    }
+    expect(view.textContent).toContain('$7.00');
     expect(rows(view)).toEqual([
-      expect.stringMatching(/^Planner4k/),
-      expect.stringMatching(/^Implementer3k/),
+      expect.stringMatching(/^Planner/),
+      expect.stringMatching(/^Implementer/),
+      expect.stringMatching(/^Run total.*100%/),
     ]);
   });
 
-  test('groups by the model when asked, and by a second dimension within it', async () => {
-    const view = await mount(RECORDS, {...USAGE_CONTROLS_DEFAULT, by: 'model', within: 'role'}, []);
-    expect(rows(view).map(row => row.slice(0, 26))).toEqual([
-      expect.stringContaining('gpt-6-luna·Planner'),
-      expect.stringContaining('gpt-6-luna·Implementer'),
-      expect.stringContaining('sonnet-5·Implementer'),
+  test('groups by the model, and by the idea with the turns before any idea as Run setup', async () => {
+    const byModel = await mount({...USAGE_CONTROLS_DEFAULT, by: 'model'}, []);
+    expect(rows(byModel).slice(0, 2)).toEqual([
+      expect.stringMatching(/^gpt-6-luna/),
+      expect.stringMatching(/^sonnet-5/),
     ]);
+    const byIdea = await mount({...USAGE_CONTROLS_DEFAULT, by: 'idea'}, []);
+    expect(rows(byIdea).map(row => row.slice(0, 5))).toEqual(['Run s', 'idea-', 'Run t']);
+  });
+
+  test('an unfolded group lists the second grouping beneath it', async () => {
+    const sent: UsageControls[] = [];
+    const open = await mount(
+      {...USAGE_CONTROLS_DEFAULT, within: 'model', open: ['"implementer"']},
+      sent,
+    );
+    expect(rows(open).map(row => row.slice(0, 12))).toEqual([
+      expect.stringMatching(/^Planner/),
+      expect.stringMatching(/^Implementer/),
+      expect.stringMatching(/^gpt-6-luna/),
+      expect.stringMatching(/^sonnet-5/),
+      expect.stringMatching(/^Run total/),
+    ]);
+    await press(open.querySelector('button[aria-label="Collapse Implementer"]'));
+    expect(sent).toEqual([{...USAGE_CONTROLS_DEFAULT, within: 'model', open: []}]);
   });
 
   test('each control sends the controls it changes', async () => {
     const sent: UsageControls[] = [];
-    const view = await mount(RECORDS, USAGE_CONTROLS_DEFAULT, sent);
-    const select = (label: string): HTMLSelectElement => {
-      const found = [...view.querySelectorAll('label')].find(each => each.textContent === label);
-      const id = found?.getAttribute('for') ?? '';
-      return view.querySelector<HTMLSelectElement>(`select[id="${id}"]`) as HTMLSelectElement;
-    };
+    const view = await mount(USAGE_CONTROLS_DEFAULT, sent);
+    await press(radio(view, 'Group by', 'harness'));
+    await press(radio(view, 'Count', 'tokens'));
+    await press(radio(view, 'Chart', 'running'));
+    await press([...view.querySelectorAll('tbody tr')][0] ?? null);
+    const select = view.querySelector('select') as HTMLSelectElement;
     await act(async () => {
-      const by = select('Group by');
-      by.value = 'harness';
-      by.dispatchEvent(new window.Event('change', {bubbles: true}) as unknown as Event);
+      select.value = 'model';
+      select.dispatchEvent(new window.Event('change', {bubbles: true}) as unknown as Event);
     });
-    await act(async () => {
-      const within = select('Then by');
-      within.value = 'model';
-      within.dispatchEvent(new window.Event('change', {bubbles: true}) as unknown as Event);
-    });
-    await act(async () => (view.querySelector('input[value="cost"]') as HTMLInputElement).click());
     expect(sent).toEqual([
       {...USAGE_CONTROLS_DEFAULT, by: 'harness'},
+      {...USAGE_CONTROLS_DEFAULT, metric: 'tokens'},
+      {...USAGE_CONTROLS_DEFAULT, chart: 'running'},
+      {...USAGE_CONTROLS_DEFAULT, highlight: '"planner"'},
       {...USAGE_CONTROLS_DEFAULT, within: 'model'},
-      {...USAGE_CONTROLS_DEFAULT, metric: 'cost'},
     ]);
   });
 
+  test('the token kinds show with the Tokens metric, and the last one cannot be switched off', async () => {
+    const sent: UsageControls[] = [];
+    const view = await mount(
+      {...USAGE_CONTROLS_DEFAULT, metric: 'tokens', kinds: ['cached']},
+      sent,
+    );
+    expect(view.textContent).toContain('Reasoning');
+    const boxes = [...view.querySelectorAll('input[type="checkbox"]')];
+    expect(boxes).toHaveLength(4);
+    await press(boxes[1] ?? null);
+    await press(boxes[2] ?? null);
+    expect(sent.map(next => next.kinds)).toEqual([['cached'], ['cached', 'output']]);
+  });
+
   test('says there is no usage when the run has no records', async () => {
-    const view = await mount([], USAGE_CONTROLS_DEFAULT, []);
+    const view = await mount(USAGE_CONTROLS_DEFAULT, [], []);
     expect(view.textContent).toContain('No usage yet');
     expect(view.querySelector('table')).toBeNull();
   });
