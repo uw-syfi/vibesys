@@ -203,7 +203,6 @@ class _NoChild(_DetachedGatewayEffects):
         raise AssertionError(message)
 
 
-@pytest.mark.xfail(strict=True, reason="PR #3225 G1: fixed in the next commit")
 @pytest.mark.regression
 def test_a_detached_resume_refuses_before_spawning_naming_the_outcome_and_reason(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]

@@ -110,7 +110,10 @@ class _StopSupervisor:
         if self.forced:
             remaining = self._task.uncancel()
             if isinstance(error, asyncio.CancelledError) and remaining == 0:
-                outcome = RunStopped()
+                outcome = RunStopped(
+                    f"the stop outlived its {self._grace_s:g} s grace, so the work still "
+                    "running was cancelled"
+                )
         for failure in self.failures:
             outcome.add_note(f"stop cleanup failed: {failure!r}")
         return outcome
@@ -232,7 +235,8 @@ class _StopGatedEvaluation:
         if not work.cancelled():
             return work.result()
         self._channel.raise_if_stopped()
-        raise RunStopped
+        message = "an evaluation was cancelled before it finished"
+        raise RunStopped(message)
 
 
 def stop_gated_evaluation(inner: Evaluation, channel: RunControlChannel) -> Evaluation:

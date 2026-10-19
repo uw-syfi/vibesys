@@ -101,6 +101,7 @@ __all__ = [
     "default_skill_roots",
     "derived_environment_name",
     "editor_image_plan",
+    "ensure_resumable",
     "experiment_origin_matches",
     "generate_experiment_name",
     "is_task_image_reference",

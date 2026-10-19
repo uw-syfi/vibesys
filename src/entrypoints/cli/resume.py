@@ -15,7 +15,7 @@ from entrypoints.cli.remote import _is_remote_project
 from launch import validate_descriptor
 from vibesys.api import ComputeBackend, ProfilerKind
 from vibesys.api.profilers import coerce_profiler_kind
-from vibesys.api.request import migrate_recorded_run_environment
+from vibesys.api.request import ensure_resumable, migrate_recorded_run_environment
 from vs_project.api import (
     Git,
     GitError,
@@ -372,6 +372,9 @@ def _resolve_resume_args(args: argparse.Namespace, *, loop_kind: str) -> None:
             stage="resume_resolution",
         )
     validate_descriptor(manifest.orchestration)
+    # Refuse a run that cannot go on where its reference is resolved, so every entrypoint (the
+    # detached launcher included, which spawns its server before any request is built) says why.
+    ensure_resumable(project_root, run_id)
     args.resume = run_id
     args.run_id = run_id
     args.exp_name = run_id

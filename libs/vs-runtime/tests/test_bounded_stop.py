@@ -81,7 +81,6 @@ async def test_a_stop_that_outlives_the_grace_cancels_the_block_as_a_landed_stop
     assert task.cancelling() == 0
 
 
-@pytest.mark.xfail(strict=True, reason="PR #3225 G2: fixed in the next commit")
 @pytest.mark.regression
 @pytest.mark.asyncio
 async def test_a_stop_that_outlives_the_grace_says_so() -> None:
@@ -286,7 +285,6 @@ class _CancelledBenchmark(FakeEvaluation):
         raise asyncio.CancelledError
 
 
-@pytest.mark.xfail(strict=True, reason="PR #3225 G2: fixed in the next commit")
 @pytest.mark.regression
 @pytest.mark.asyncio
 async def test_an_evaluation_cancelled_without_a_stop_lands_naming_why() -> None:
