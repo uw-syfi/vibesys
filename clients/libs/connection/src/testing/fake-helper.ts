@@ -465,6 +465,7 @@ export class FakeHelper {
     'machine_compute',
     'agent_logins',
     'project_goal',
+    'example_destination',
     'usage_window',
   ]);
   /** The run log streams `logs.list` and `logs.read` serve; replace it to seed a store. */
@@ -785,6 +786,9 @@ class HelperSession {
       case 'examples.list':
         this.#examples(request);
         return;
+      case 'examples.destination':
+        this.#exampleDestination(request);
+        return;
       case 'project.create_from_example':
       case 'project.copy_out':
         this.#createProject(request);
@@ -986,6 +990,47 @@ class HelperSession {
       type: 'examples.list',
       request_id: request.request_id,
       listing: request.with_catalogue === true ? listing : withoutTaskDetails(listing),
+    });
+  }
+
+  /**
+   * What `project.create_from_example` would find at the destination: nothing, an empty
+   * directory, a project with the example's tasks, or anything else.
+   */
+  #exampleDestination(request: Extract<HelperRequest, {type: 'examples.destination'}>): void {
+    const id = request.request_id;
+    const {host} = this.#helper;
+    const example = host.examples?.examples.find(entry => entry.name === request.example);
+    if (host.examples === null || example === undefined) {
+      const [code, path] =
+        host.examples === null
+          ? (['examples_unavailable', ''] as const)
+          : (['unknown_example', host.examples.checkout] as const);
+      this.#send({...this.#error(id, code, 'no such example'), path});
+      return;
+    }
+    const {destination} = request;
+    const tasks = host.projects.get(destination);
+    const entries = host.directories.get(destination);
+    const same =
+      tasks !== undefined &&
+      example.tasks.length > 0 &&
+      [...tasks].sort().join('\n') === [...example.tasks].sort().join('\n');
+    const state =
+      tasks !== undefined
+        ? same
+          ? 'example_project'
+          : 'occupied'
+        : entries === undefined
+          ? 'absent'
+          : entries.length === 0
+            ? 'empty'
+            : 'occupied';
+    this.#send({
+      type: 'examples.destination',
+      request_id: id,
+      state,
+      project: state === 'example_project' ? destination : null,
     });
   }
 
@@ -1215,7 +1260,9 @@ class HelperSession {
       this.#send({...this.#error(id, code, 'no such source'), path});
       return;
     }
-    if (host.directories.has(request.destination) || host.projects.has(request.destination)) {
+    // An empty directory is made into the project; a project, or a directory with entries, is not.
+    const occupied = (host.directories.get(request.destination)?.length ?? 0) > 0;
+    if (occupied || host.projects.has(request.destination)) {
       this.#send({
         ...this.#error(id, 'destination_exists', `${request.destination} exists`),
         path: request.destination,

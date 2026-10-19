@@ -397,7 +397,7 @@ export class Hosts {
       const reply = await lease.connection.request({type: 'tasks.list', project: path});
       return reply.tasks.tasks.map(task => task.name);
     } catch (error) {
-      throw plain(error, `Could not read the tasks of ${path}`);
+      throw plain(error, 'Could not read the tasks of the project');
     }
   }
 
@@ -536,7 +536,7 @@ export class Hosts {
       if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
         return {kind: 'unsupported'};
       }
-      throw plain(error, `Could not read the runs of ${project}`);
+      throw plain(error, 'Could not read the runs of the project');
     }
   }
 
@@ -569,7 +569,7 @@ export class Hosts {
       if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
         return {kind: 'unsupported'};
       }
-      throw plain(error, `Could not read what the runs of ${project} spent`);
+      throw plain(error, 'Could not read what the runs of the project spent');
     }
   }
 
@@ -580,7 +580,7 @@ export class Hosts {
       const reply = await lease.connection.request({type: 'runs.list', project});
       return listedRuns(reply.runs.runs);
     } catch (error) {
-      throw plain(error, `Could not list the runs of ${project}`);
+      throw plain(error, 'Could not list the runs of the project');
     }
   }
 
@@ -622,7 +622,7 @@ export class Hosts {
       if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
         return {kind: 'unsupported'};
       }
-      throw plain(error, `Could not list ${directory}`);
+      throw plain(error, 'Could not list the folder');
     }
     return {
       kind: 'listed',

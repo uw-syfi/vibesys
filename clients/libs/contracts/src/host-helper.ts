@@ -47,6 +47,7 @@ export type {
   ComputeTestClusterRequest,
   CreatedProject,
   DetachedLaunchFailure,
+  ExampleDestination,
   ExampleHardware,
   ExampleList,
   ExampleModel,

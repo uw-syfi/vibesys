@@ -60,6 +60,7 @@ const CHANNELS: Channels = {
   startRun: 'vibesys:welcome:start-run',
   helperFeatures: 'vibesys:welcome:helper-features',
   taskGoal: 'vibesys:welcome:task-goal',
+  exampleDestination: 'vibesys:welcome:example-destination',
   openRunWindow: 'vibesys:welcome:open-run-window',
   showMainWindow: 'vibesys:welcome:show-main-window',
   openSettings: 'vibesys:welcome:open-settings',
@@ -149,6 +150,8 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
     startRun: (host, inputs) => call(CHANNELS.startRun, host, inputs),
     helperFeatures: host => call(CHANNELS.helperFeatures, host),
     taskGoal: (host, project, task) => call(CHANNELS.taskGoal, host, project, task),
+    exampleDestination: (host, example, destination) =>
+      call(CHANNELS.exampleDestination, host, example, destination),
     openRunWindow: run => call(CHANNELS.openRunWindow, run),
     showMainWindow: () => call(CHANNELS.showMainWindow),
     openSettings: () => call(CHANNELS.openSettings),

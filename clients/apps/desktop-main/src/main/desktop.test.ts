@@ -470,6 +470,7 @@ describe('Desktop New run routing', () => {
       [WELCOME_CHANNELS.startRun, 'local', inputs],
       [WELCOME_CHANNELS.helperFeatures, 'local'],
       [WELCOME_CHANNELS.taskGoal, 'local', '/p', 'mpmc'],
+      [WELCOME_CHANNELS.exampleDestination, 'local', 'queue-rs', '/projects/queue-rs'],
     ];
     for (const [channel, ...args] of calls) {
       await expect(w.ipc.invoke('10:100', channel, ...args)).resolves.toEqual({
@@ -486,6 +487,7 @@ describe('Desktop New run routing', () => {
       'new-run:start-run',
       'new-run:helper-features',
       'new-run:task-goal',
+      'new-run:example-destination',
     ]);
   });
 });

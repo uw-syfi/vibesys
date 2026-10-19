@@ -340,10 +340,79 @@ describe('NewRunMain', () => {
     expect(asked.map(request => 'with_catalogue' in request)).toEqual([true, false]);
   });
 
-  test('a failed request says what it was doing', async () => {
+  test('a failed request says what it was doing, without naming a path', async () => {
     const {main} = subject();
-    await expect(
-      main.answer({kind: 'copy-out', host: LOCAL, source: '/missing', destination: '/own'}),
-    ).rejects.toThrow('Could not copy /missing out');
+    const failure = await main
+      .answer({kind: 'copy-out', host: LOCAL, source: '/missing', destination: '/own'})
+      .then(() => null, (error: Error) => error);
+    expect(failure?.message).toStartWith('Could not copy the project out');
+    expect(failure?.message).not.toContain('/missing');
+    expect(failure?.message).not.toContain('/own');
+  });
+
+  describe('what an example would find at its destination', () => {
+    const STACK = 'data-structures/stack';
+    const TASKS = ['mpmc', 'spsc'];
+    const ask = (main: ReturnType<typeof subject>['main'], destination: string) =>
+      main.answer({kind: 'example-destination', host: LOCAL, example: STACK, destination});
+    const create = (main: ReturnType<typeof subject>['main'], destination: string) =>
+      main.answer({kind: 'create-from-example', host: LOCAL, example: STACK, destination});
+
+    /** One destination of each kind on a helper whose catalogue has the stack example. */
+    function world() {
+      const made = subject();
+      const {host} = made.link.helper;
+      host.examples = exampleCatalogue;
+      host.directories.set('~/empty', []);
+      host.directories.set('~/junk', ['notes']);
+      host.projects.set('~/own', TASKS);
+      host.directories.set('~/own', []);
+      host.projects.set('~/other', ['default']);
+      host.directories.set('~/other', []);
+      return made;
+    }
+
+    const STATES = [
+      ['~/absent', {state: 'absent', project: null}],
+      ['~/empty', {state: 'empty', project: null}],
+      ['~/own', {state: 'example_project', project: '~/own'}],
+      ['~/other', {state: 'occupied', project: null}],
+      ['~/junk', {state: 'occupied', project: null}],
+    ] as const;
+
+    for (const [destination, found] of STATES) {
+      test(`says ${found.state} for ${destination}, and Create agrees`, async () => {
+        const {main} = world();
+        expect(await ask(main, destination)).toEqual({kind: 'offered', value: found});
+        const creatable = found.state === 'absent' || found.state === 'empty';
+        const made = await create(main, destination);
+        expect(made.kind).toBe(creatable ? 'created' : 'taken');
+        if (made.kind === 'created') {
+          expect(made.created.project).toBe(destination);
+          // What was made is the example's project from then on.
+          expect(await ask(main, destination)).toMatchObject({
+            value: {state: 'example_project'},
+          });
+        }
+      });
+    }
+
+    test('says it cannot, without asking, to a helper without example_destination', async () => {
+      const {link, main} = world();
+      link.helper.features.delete('example_destination');
+      expect(await ask(main, '~/absent')).toEqual({kind: 'unsupported'});
+      expect(link.helper.requests.some(request => request.type === 'examples.destination')).toBe(
+        false,
+      );
+    });
+
+    test('a failed creation names no destination', async () => {
+      const {main} = world();
+      const failure = await main
+        .answer({kind: 'create-from-example', host: LOCAL, example: 'no/such', destination: '~/x'})
+        .then(() => null, (error: Error) => error);
+      expect(failure?.message).toStartWith('Could not create the project');
+      expect(failure?.message).not.toContain('~/x');
+    });
   });
 });

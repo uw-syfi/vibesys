@@ -187,6 +187,10 @@ function cases(random: Seeded): Case[] {
       {kind: 'task-goal', host, project: path, task: name},
     ],
     [
+      bridge => bridge.exampleDestination(key, name, path),
+      {kind: 'example-destination', host, example: name, destination: path},
+    ],
+    [
       bridge => bridge.openRunWindow({host: key, runId: name}),
       {kind: 'open-run-window', run: {host: key, runId: name}},
     ],

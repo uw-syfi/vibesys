@@ -107,6 +107,7 @@ type ScreenRequest = Extract<
       | 'start-run'
       | 'helper-features'
       | 'task-goal'
+      | 'example-destination'
       | 'open-run-window'
       | 'show-main-window'
       | 'open-settings'

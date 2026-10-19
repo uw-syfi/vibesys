@@ -15,7 +15,7 @@ Public surface: ``answer``, ``connect``, ``negotiate``, ``Negotiated``,
 ``HelperHost``; the interfaces ``Projects``, ``Directories``, ``RunLauncher`` and
 ``CheckoutProbe`` with the values they exchange (``ProjectRun``,
 ``ProjectLookupError``, ``ScannedEntry``, ``Scan``, ``PathHints``);
-``complete_path``, ``select_completions``, ``split_prefix``, ``run_summaries``,
+``home_relative``, ``without_home``, ``complete_path``, ``select_completions``, ``split_prefix``, ``run_summaries``,
 ``event_page``, ``EventPage``, ``SpanEventPage``, ``TailPage``,
 ``launch_arguments``, ``refused_argument``, ``unvetted_harness``; and the limit
 ``SCAN_LIMIT``.
@@ -113,6 +113,9 @@ from server.host_api import (
 )
 from server.host_compute import MeasurementTarget, ModalTarget, SameMachine, SlurmTarget
 from server.host_examples import (
+    ExampleDestination,
+    ExamplesDestinationReply,
+    ExamplesDestinationRequest,
     ProjectTaskGoalReply,
     ProjectTaskGoalRequest,
     TaskList,
@@ -447,6 +450,13 @@ class ExampleProjects(Protocol):
 
     def copy_out(self, source: Path, destination: Path) -> CreatedProject:
         """Copy ``source``'s tracked files into their own new Git repository at ``destination``."""
+        ...
+
+    def destination(self, example: str, destination: Path) -> tuple[ExampleDestination, str | None]:
+        """What ``create`` would find at ``destination``, and the project's directory if it is one.
+
+        Raises ``ProjectLookupError`` with ``examples_unavailable`` or ``unknown_example``.
+        """
         ...
 
 
@@ -804,6 +814,26 @@ def launch_arguments(
     return ("--detach", *run_arguments(request, environment), *resume)
 
 
+def home_relative(text: str, home: str) -> str:
+    """``text`` with each path under ``home`` written ``~/...``, and ``home`` itself ``~``.
+
+    The one place an error message stops naming this account's home directory (and so its user
+    name): a client shows messages to a person who may not own the account.
+    """
+    prefix = home.rstrip("/")
+    if not prefix:
+        return text
+    return re.sub(rf"(?<![\w.~-]){re.escape(prefix)}(?!\w|-|\.\w)", "~", text)
+
+
+def without_home(reply: HelperReply | HelperError, host: HelperHost) -> HelperReply | HelperError:
+    """``reply``, an error with its message in ``~`` terms (:func:`home_relative`); else as it is."""
+    if not isinstance(reply, HelperError):
+        return reply
+    message = home_relative(reply.message, host.directories.home())
+    return reply.model_copy(update={"message": message})
+
+
 def _host_path(text: str, directories: Directories) -> str:
     expanded = directories.expand(text)
     return expanded if posixpath.isabs(expanded) else posixpath.join(directories.home(), expanded)
@@ -860,6 +890,7 @@ def _answer(
             MachineDescribeRequest()
             | CheckoutInspectRequest()
             | ExamplesListRequest()
+            | ExamplesDestinationRequest()
             | ProjectCreateFromExampleRequest()
             | ProjectCopyOutRequest()
             | ComputeListRequest()
@@ -980,11 +1011,26 @@ def _compute_reply(
 
 
 def _examples_reply(
-    request: ExamplesListRequest | ProjectCreateFromExampleRequest | ProjectCopyOutRequest,
+    request: ExamplesListRequest
+    | ExamplesDestinationRequest
+    | ProjectCreateFromExampleRequest
+    | ProjectCopyOutRequest,
     host: HelperHost,
-) -> ExamplesListReply | ProjectCreateFromExampleReply | ProjectCopyOutReply:
-    """Answer one read of the example catalog, or make one new project."""
+) -> (
+    ExamplesListReply
+    | ExamplesDestinationReply
+    | ProjectCreateFromExampleReply
+    | ProjectCopyOutReply
+):
+    """Answer one read of the example catalog or a destination, or make one new project."""
     match request:
+        case ExamplesDestinationRequest(
+            request_id=request_id, example=example, destination=destination
+        ):
+            state, project = host.examples.destination(
+                example, Path(_host_path(destination, host.directories))
+            )
+            return ExamplesDestinationReply(request_id=request_id, state=state, project=project)
         case ExamplesListRequest(request_id=request_id, with_catalogue=with_catalogue):
             listing = host.examples.list(with_catalogue=with_catalogue is True)
             return ExamplesListReply(request_id=request_id, listing=listing)
@@ -1005,6 +1051,7 @@ def _machine_reply(
     request: MachineDescribeRequest
     | CheckoutInspectRequest
     | ExamplesListRequest
+    | ExamplesDestinationRequest
     | ProjectCreateFromExampleRequest
     | ProjectCopyOutRequest
     | ComputeListRequest
@@ -1026,7 +1073,12 @@ def _machine_reply(
             | ComputeRemoveClusterRequest()
         ):
             return _compute_reply(request, host.compute)
-        case ExamplesListRequest() | ProjectCreateFromExampleRequest() | ProjectCopyOutRequest():
+        case (
+            ExamplesListRequest()
+            | ExamplesDestinationRequest()
+            | ProjectCreateFromExampleRequest()
+            | ProjectCopyOutRequest()
+        ):
             return _examples_reply(request, host)
         case MachineDescribeRequest(request_id=request_id):
             return MachineDescribeReply(request_id=request_id, machine=describe_machine(host))

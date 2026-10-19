@@ -111,7 +111,7 @@ export class MachinesMain {
     } catch (error) {
       if (notNegotiated(error)) return {state: 'unsupported'};
       throw error instanceof HelperRequestError
-        ? new Error(`Could not inspect ${path}: ${error.message}`)
+        ? new Error(`Could not inspect the folder: ${error.message}`)
         : error;
     }
   }

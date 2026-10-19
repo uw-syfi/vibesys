@@ -9,6 +9,7 @@ import type {
 import type {HostKey} from '@vibesys/hosts';
 import type {
   ComputeSettings,
+  DestinationFound,
   HarnessOffer,
   MeasureTarget,
   Offered,
@@ -28,6 +29,7 @@ import {
   CHECK_DEBOUNCE_MS,
   type Compute,
   checksPass,
+  destinationKey,
   type FixDone,
   formWithRoles,
   inputsKey,
@@ -124,6 +126,7 @@ function output(operation: string, random: Seeded): unknown {
       // A current helper, one before examples, one before typed options, one before both.
       return random.pick([
         ['run_options', 'preflight', 'examples', 'harnesses', 'run_roles', 'project_goal'],
+        ['run_options', 'preflight', 'examples', 'harnesses', 'example_destination'],
         ['run_options', 'preflight', 'examples', 'harnesses'],
         ['run_options', 'preflight', 'harnesses'],
         ['preflight', 'examples', 'harnesses'],
@@ -149,13 +152,26 @@ function output(operation: string, random: Seeded): unknown {
           value: {task: 'mpmc', objectives: [], goal: 'Go fast.', goal_truncated: false},
         },
       ]);
+    case 'destination':
+      return random.pick<Offered<DestinationFound>>([
+        {kind: 'unsupported'},
+        {kind: 'offered', value: {state: 'absent', project: null}},
+        {kind: 'offered', value: {state: 'empty', project: null}},
+        {kind: 'offered', value: {state: 'occupied', project: null}},
+        {kind: 'offered', value: {state: 'example_project', project: '/made/kv'}},
+      ]);
     case 'fix':
       return {
         fix: random.pick<ProjectFix>([
           {kind: 'copy_out', source: '/p/queue', destination: '/own/a'},
           {kind: 'create_from_example', example: 'database/kv-store', destination: '~/kv'},
         ]),
-        created: {project: random.pick(['/own/a', '/own/b']), tasks: ['mpmc']},
+        // A destination that turned out to be taken is a fix done without a project.
+        created: random.pick([
+          {project: random.pick(['/own/a', '/own/b']), tasks: ['mpmc']},
+          {project: '/own/a', tasks: ['mpmc']},
+          null,
+        ]),
       };
     default:
       return {runId: 'run-new', instanceId: '0123456789ab'};
@@ -231,6 +247,12 @@ function inputEvent(random: Seeded, snapshot: SnapshotFrom<typeof newRunMachine>
       type: 'fix',
       fix: {kind: 'create_from_example', example: 'database/kv-store', destination: '~/kv'},
     },
+    {
+      type: 'use_created',
+      example: random.pick(['database/kv-store', 'data-structures/stack']),
+      destination: '~/kv',
+      path: '/made/kv',
+    },
     {type: 'start'},
   ]);
 }
@@ -284,6 +306,10 @@ function expectAsksOnlyWhatHelperTakes(before: Snapshot, after: Snapshot): void 
     expect(offers(helper, form.machine, 'project_goal')).toBe(true);
     expect(after.context.answers.from).toBe('project');
     expect(after.context.answers.task).not.toBeNull();
+  }
+  if (entered({editing: {destination: 'loading'}})) {
+    expect(offers(helper, form.machine, 'example_destination')).toBe(true);
+    expect(form.project?.source).toBe('example');
   }
   if (entered({editing: {examples: 'loading'}})) {
     expect(offers(helper, form.machine, 'examples')).toBe(true);
@@ -403,6 +429,12 @@ describe('newRunMachine', () => {
           if (event.type === 'xstate.done.actor.goal' && after.context.goal !== null) {
             // A goal is kept under the machine, project and task it was asked of.
             expect(JSON.parse(after.context.goal.for)[0]).toBe(before.context.form.machine);
+          }
+          if (event.type === 'xstate.done.actor.destination') {
+            // What the destination held is kept for the machine, example and place that were asked.
+            expect(after.context.destination?.for).toBe(
+              destinationKey(before.context.form) ?? undefined,
+            );
           }
           if (event.type === 'xstate.done.actor.preflight') {
             // The checks are for the inputs that were asked; the roles the run reports may then

@@ -16,7 +16,15 @@ import type {
   TaskGoal,
 } from '@vibesys/contracts/host-helper';
 import {type HostId, hostKey, hostLabel} from '@vibesys/hosts';
-import type {Offered, PreflightResult, RunInputs, StartedRun, WelcomeRequest} from '@vibesys/ipc';
+import type {
+  DestinationFound,
+  ExampleCreation,
+  Offered,
+  PreflightResult,
+  RunInputs,
+  StartedRun,
+  WelcomeRequest,
+} from '@vibesys/ipc';
 import type {StoredRecentRun} from '@vibesys/settings';
 
 /** The New run requests a view sends, as `@vibesys/ipc` parsed them. */
@@ -28,6 +36,7 @@ export type NewRunMainRequest = Extract<
       | 'preflight'
       | 'examples'
       | 'create-from-example'
+      | 'example-destination'
       | 'copy-out'
       | 'start-run'
       | 'helper-features'
@@ -113,21 +122,23 @@ export class NewRunMain {
       case 'examples':
         return this.#examples(request.host);
       case 'create-from-example':
-        return this.#created(
+        return this.#createFromExample(request.host, request.example, request.destination);
+      case 'example-destination':
+        return this.#offered(
           request.host,
           {
-            type: 'project.create_from_example',
+            type: 'examples.destination',
             example: request.example,
             destination: request.destination,
           },
-          `Could not create ${request.destination}`,
+          'Could not check the destination',
+          (reply): DestinationFound => {
+            const {state, project} = reply as DestinationFound;
+            return {state, project};
+          },
         );
       case 'copy-out':
-        return this.#created(
-          request.host,
-          {type: 'project.copy_out', source: request.source, destination: request.destination},
-          `Could not copy ${request.source} out`,
-        );
+        return this.#copyOut(request.host, request.source, request.destination);
       case 'start-run':
         return this.#start(request.host, request.inputs);
       case 'helper-features':
@@ -236,11 +247,37 @@ export class NewRunMain {
     }
   }
 
-  async #created(host: HostId, request: HelperCall, doing: string): Promise<CreatedProject> {
+  /** The new project, or `taken` when the destination holds something (it is not for the user to read). */
+  async #createFromExample(
+    host: HostId,
+    example: string,
+    destination: string,
+  ): Promise<ExampleCreation> {
     try {
-      return ((await this.#request(host, request)) as {created: CreatedProject}).created;
+      const reply = (await this.#request(host, {
+        type: 'project.create_from_example',
+        example,
+        destination,
+      })) as {created: CreatedProject};
+      return {kind: 'created', created: reply.created};
     } catch (error) {
-      throw plain(error, doing);
+      if (error instanceof HelperRequestError && error.code === 'destination_exists') {
+        return {kind: 'taken'};
+      }
+      throw plain(error, 'Could not create the project');
+    }
+  }
+
+  async #copyOut(host: HostId, source: string, destination: string): Promise<CreatedProject> {
+    try {
+      const reply = (await this.#request(host, {
+        type: 'project.copy_out',
+        source,
+        destination,
+      })) as {created: CreatedProject};
+      return reply.created;
+    } catch (error) {
+      throw plain(error, 'Could not copy the project out');
     }
   }
 

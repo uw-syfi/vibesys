@@ -1,0 +1,57 @@
+{
+  "id": "helper-examples-destination-unavailable",
+  "protocol": "host-helper",
+  "title": "A destination on a helper with no catalog",
+  "description": "examples.destination on a helper with no example catalog is answered examples_unavailable.",
+  "role": "control",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [
+          "example_destination"
+        ],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": [
+          "example_destination"
+        ]
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "examples.destination",
+        "request_id": "d",
+        "deadline_ms": 10000,
+        "example": "data-structures/stack",
+        "destination": "~/vibesys-projects/stack"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "d",
+        "code": "examples_unavailable"
+      }
+    }
+  ]
+}

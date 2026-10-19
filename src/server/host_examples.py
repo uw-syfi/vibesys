@@ -8,11 +8,13 @@
 Public surface: ``ExampleSummary``, ``ExampleTask`` and what it holds, ``TaskGoal`` with
 ``bounded_goal``, ``ExampleList``, ``CreatedProject``, and a project's tasks: ``TaskSummary``,
 ``TaskList``, ``TasksListRequest``, ``TasksListReply``, ``ProjectTaskGoalRequest``,
-``ProjectTaskGoalReply``.
+``ProjectTaskGoalReply``, and what a destination holds: ``ExampleDestination``,
+``ExamplesDestinationRequest``, ``ExamplesDestinationReply``.
 """
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Annotated, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
@@ -190,9 +192,42 @@ class ProjectTaskGoalReply(HelperReplyBase):
     goal: TaskGoal
 
 
+class ExampleDestination(StrEnum):
+    """What is at the place an example would be copied to."""
+
+    ABSENT = "absent"
+    """Nothing: the copy creates it."""
+    EMPTY = "empty"
+    """An empty directory: the copy fills it, as for ``absent``."""
+    EXAMPLE_PROJECT = "example_project"
+    """A project with the example's tasks, which a run can use as it is."""
+    OCCUPIED = "occupied"
+    """Anything else: another project, files, or something that is not a directory."""
+
+
+class ExamplesDestinationRequest(HelperRequestBase):
+    """What ``project.create_from_example`` would find at ``destination`` for ``example``."""
+
+    type: Literal["examples.destination"] = "examples.destination"
+    example: Annotated[str, StringConstraints(min_length=1, max_length=256)]
+    """A name ``examples.list`` listed."""
+    destination: Annotated[str, StringConstraints(min_length=1, max_length=4096)]
+    """A path as typed, as for ``paths.complete``."""
+
+
+class ExamplesDestinationReply(HelperReplyBase):
+    """What the destination holds."""
+
+    type: Literal["examples.destination"] = "examples.destination"
+    state: ExampleDestination
+    project: str | None
+    """The resolved project directory for ``example_project``; ``None`` otherwise."""
+
+
 __all__ = [
     "GOAL_MAX_CHARS",
     "CreatedProject",
+    "ExampleDestination",
     "ExampleHardware",
     "ExampleList",
     "ExampleModel",
@@ -200,6 +235,8 @@ __all__ = [
     "ExampleSummary",
     "ExampleTask",
     "ExampleWorkload",
+    "ExamplesDestinationReply",
+    "ExamplesDestinationRequest",
     "ProjectTaskGoalReply",
     "ProjectTaskGoalRequest",
     "TaskGoal",

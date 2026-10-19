@@ -17,6 +17,7 @@ import type {
 } from '@vibesys/contracts/host-helper';
 import type {HostKey} from '@vibesys/hosts';
 import type {
+  DestinationFound,
   HarnessOffer,
   MeasureTarget,
   Offered,
@@ -51,6 +52,8 @@ import {
   type ChecksFor,
   checksPass,
   defaultRole,
+  type DestinationFor,
+  destinationKey,
   type FactsFor,
   type Form,
   type GoalFor,
@@ -75,10 +78,13 @@ export type ProjectFix =
   | {readonly kind: 'copy_out'; readonly source: string; readonly destination: string}
   | {readonly kind: 'create_from_example'; readonly example: string; readonly destination: string};
 
-/** A fix done: what was asked, and the project the helper made of it. */
+/**
+ * A fix done: what was asked, and the project the helper made of it, or null when the example's
+ * destination turned out to hold something (it is taken, which the screen says without an error).
+ */
 export interface FixDone {
   readonly fix: ProjectFix;
-  readonly created: CreatedProject;
+  readonly created: CreatedProject | null;
 }
 
 export interface NewRunContext {
@@ -94,6 +100,8 @@ export interface NewRunContext {
   readonly harnesses: {readonly for: HostKey; readonly list: readonly HarnessOffer[]} | null;
   readonly examples: ExamplesFor | null;
   readonly tasks: {readonly for: string; readonly list: readonly string[]} | null;
+  /** What the destination of the example chosen held, once read (feature `example_destination`). */
+  readonly destination: DestinationFor | null;
   readonly checks: ChecksFor | null;
   /** What the machine has set up to measure on, from its Settings data (`compute` events). */
   readonly compute: Compute;
@@ -145,6 +153,13 @@ export type NewRunEvent =
   /** Try again the load or check that failed (`problem`). */
   | {readonly type: 'retry'}
   | {readonly type: 'fix'; readonly fix: ProjectFix}
+  /** Use the project that already is the example's, at `path`, without copying it again. */
+  | {
+      readonly type: 'use_created';
+      readonly example: string;
+      readonly destination: string;
+      readonly path: string;
+    }
   | {readonly type: 'start'};
 
 export interface NewRunInput {
@@ -236,6 +251,7 @@ function freshParts(machine: HostKey, recent: readonly RecentRun[]) {
     examples: null,
     tasks: null,
     goal: null,
+    destination: null,
     compute: null,
     checks: null,
     roles: null,
@@ -278,6 +294,19 @@ function movedParts(context: NewRunContext, machine: HostKey) {
   return {...parts, answers, at: context.at};
 }
 
+/** The project made from `example` at `path`. */
+function createdProject(
+  example: {readonly example: string; readonly destination: string},
+  path: string,
+) {
+  return {
+    source: 'created',
+    example: example.example,
+    destination: example.destination,
+    path,
+  } as const;
+}
+
 /**
  * The parts of the context a fix done sets. It applies only to what it was asked of: an example
  * that is still the one chosen becomes a project of its own, a project of the user's that is still
@@ -289,14 +318,15 @@ function fixed(context: NewRunContext, done: FixDone): Partial<NewRunContext> {
   if (fix.kind === 'create_from_example') {
     const made = form.project;
     if (made?.source !== 'example' || made.example !== fix.example) return {};
-    const project = {
-      source: 'created',
-      example: made.example,
-      destination: made.destination,
-      path: created.project,
-    } as const;
-    return {form: {...form, project}};
+    if (created === null) {
+      // Something is there now (a run that raced this one, a junk directory): say so, as the check does.
+      const key = destinationKey(form);
+      const taken = {state: 'occupied', project: null} satisfies DestinationFound;
+      return key === null ? {} : {destination: {for: key, found: taken}};
+    }
+    return {form: {...form, project: createdProject(made, created.project)}};
   }
+  if (created === null) return {};
   if (answers.project?.path !== fix.source) return {};
   const copy = {source: 'folder', path: created.project} as const;
   return {answers: {...answers, project: copy}, form: {...form, project: copy}};
@@ -361,6 +391,10 @@ export const newRunMachine = setup({
       Offered<PreflightResult>,
       {readonly host: HostKey; readonly inputs: RunInputs}
     >('preflight'),
+    destination: unprovided<
+      Offered<DestinationFound>,
+      {readonly host: HostKey; readonly example: string; readonly destination: string}
+    >('destination'),
     fix: unprovided<FixDone, {readonly host: HostKey; readonly fix: ProjectFix}>('fix'),
     start: unprovided<StartedRun, {readonly host: HostKey; readonly inputs: RunInputs}>('start'),
   },
@@ -372,6 +406,15 @@ export const newRunMachine = setup({
     changesGoal: ({event}) =>
       event.type === 'answer' && ['project', 'task', 'from'].includes(event.change.kind),
     hasInputs: ({context}) => inputsKey(context.form) !== null,
+    // The destination of an example not made yet is asked of a helper that can say what it holds.
+    asksDestination: ({context}) =>
+      destinationKey(context.form) !== null &&
+      offers(context.helper, context.form.machine, 'example_destination'),
+    // The project to use is the example's the form has chosen and not made.
+    usesExample: ({context, event}) =>
+      event.type === 'use_created' &&
+      context.form.project?.source === 'example' &&
+      context.form.project.example === event.example,
     mayStart: ({context}) =>
       checksPass(context.form, context.checks) &&
       missingFeatures(context.helper, context.form.machine).length === 0,
@@ -763,6 +806,61 @@ export const newRunMachine = setup({
             ready: {},
           },
         },
+        destination: {
+          initial: 'choosing',
+          on: {
+            // Any answer may choose another example, so the destination is read again.
+            answer: '.choosing',
+            // A destination typed is asked once the typing pauses.
+            destination: '.typing',
+            refresh: '.choosing',
+          },
+          states: {
+            choosing: {
+              always: [{guard: 'asksDestination', target: 'loading'}, {target: 'waiting'}],
+            },
+            // Until the helper says it can read a destination, there is nothing to ask.
+            waiting: {always: {guard: 'asksDestination', target: 'loading'}},
+            typing: {after: {debounce: 'choosing'}},
+            loading: {
+              invoke: {
+                id: 'destination',
+                src: 'destination',
+                input: ({context}) => {
+                  const {project} = context.form;
+                  return {
+                    host: context.form.machine,
+                    example: project?.source === 'example' ? project.example : '',
+                    destination: project?.source === 'example' ? project.destination : '',
+                  };
+                },
+                onDone: {
+                  target: 'ready',
+                  actions: assign(({context, event}) => {
+                    const key = destinationKey(context.form);
+                    return key === null
+                      ? {}
+                      : {
+                          destination: {
+                            for: key,
+                            found: event.output.kind === 'offered' ? event.output.value : null,
+                          } satisfies DestinationFor,
+                        };
+                  }),
+                },
+                // A question that failed is not a reason to refuse: creating says what is there.
+                onError: {
+                  target: 'ready',
+                  actions: assign(({context}) => {
+                    const key = destinationKey(context.form);
+                    return key === null ? {} : {destination: {for: key, found: null}};
+                  }),
+                },
+              },
+            },
+            ready: {},
+          },
+        },
         checks: {
           initial: 'waiting',
           on: {
@@ -833,6 +931,21 @@ export const newRunMachine = setup({
             idle: {
               on: {
                 fix: {guard: 'fixApplies', target: 'fixing'},
+                use_created: {
+                  guard: 'usesExample',
+                  target: '#newRun.editing',
+                  reenter: true,
+                  actions: assign(({context, event}) => {
+                    const {form} = context;
+                    const made = form.project;
+                    if (made?.source !== 'example') return {};
+                    return {
+                      form: {...form, project: createdProject(made, event.path)},
+                      checks: null,
+                      problem: null,
+                    };
+                  }),
+                },
                 start: {guard: 'mayStart', target: 'starting'},
               },
             },
@@ -844,15 +957,26 @@ export const newRunMachine = setup({
                   host: context.form.machine,
                   fix: (event as Extract<NewRunEvent, {type: 'fix'}>).fix,
                 }),
-                onDone: {
-                  target: '#newRun.editing',
-                  reenter: true,
-                  actions: assign(({context, event}) => ({
-                    ...fixed(context, event.output),
-                    checks: null,
-                    problem: null,
-                  })),
-                },
+                onDone: [
+                  // A destination that holds something stays on this page, saying so.
+                  {
+                    guard: ({event}) => event.output.created === null,
+                    target: 'idle',
+                    actions: assign(({context, event}) => ({
+                      ...fixed(context, event.output),
+                      problem: null,
+                    })),
+                  },
+                  {
+                    target: '#newRun.editing',
+                    reenter: true,
+                    actions: assign(({context, event}) => ({
+                      ...fixed(context, event.output),
+                      checks: null,
+                      problem: null,
+                    })),
+                  },
+                ],
                 onError: {
                   target: 'idle',
                   actions: {type: 'fail', params: ({event}) => ({step: 'fix', error: event.error})},

@@ -2,6 +2,7 @@
  * The Review page: every answer with a way to change it, the checks of the run on its machine
  * (with the fixes they offer), the options most runs leave alone, and Start.
  */
+import type {HostKey} from '@vibesys/hosts';
 import {
   Banner,
   Button,
@@ -49,6 +50,10 @@ function fixText(fix: ReadinessFix): string {
       return 'Copy to its own repository';
     case 'create_from_example':
       return 'Create the project';
+    case 'use_created':
+      return 'Use it';
+    case 'rename_destination':
+      return 'Choose another name';
     case 'choose_checkout':
       return 'Choose it in Machines';
     case 'recheck':
@@ -56,11 +61,27 @@ function fixText(fix: ReadinessFix): string {
   }
 }
 
-function fixPress(fix: ReadinessFix, dispatch: Dispatch, chooseCheckout: () => void): () => void {
+function fixPress(
+  fix: ReadinessFix,
+  dispatch: Dispatch,
+  chooseCheckout: () => void,
+  machine: HostKey,
+): () => void {
   switch (fix.kind) {
     case 'copy_out':
     case 'create_from_example':
       return () => dispatch({type: 'fix', fix});
+    case 'use_created':
+      return () =>
+        dispatch({
+          type: 'use_created',
+          example: fix.example,
+          destination: fix.destination,
+          path: fix.path,
+        });
+    case 'rename_destination':
+      // The destination field is in More options.
+      return () => dispatch({type: 'more_options', machine, open: true});
     case 'choose_checkout':
       return chooseCheckout;
     case 'recheck':
@@ -188,7 +209,7 @@ function Checks(props: {
       ...item,
       ...(fix === undefined
         ? {}
-        : {fix: {text: fixText(fix), press: fixPress(fix, dispatch, chooseCheckout)}}),
+        : {fix: {text: fixText(fix), press: fixPress(fix, dispatch, chooseCheckout, snapshot.context.form.machine)}}),
     }));
   const status = readinessStatus(checks);
   return (

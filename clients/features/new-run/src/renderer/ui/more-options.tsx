@@ -28,7 +28,7 @@ import {
 } from '../../state/index.js';
 import {TimeLimitField} from './budget-fields.js';
 import type {CardProps} from './card-props.js';
-import {moreOptionsSummary, type RolesView, rolesView} from './view.js';
+import {destinationTaken, moreOptionsSummary, type RolesView, rolesView} from './view.js';
 
 const RESULTS: readonly {readonly value: Budget['results']; readonly label: string}[] = [
   {value: 'keep', label: 'Keep on the machine'},
@@ -126,7 +126,11 @@ function ExampleDestination(props: CardProps): JSX.Element | null {
   const project = context.form.project;
   if (project?.source !== 'example') return null;
   return (
-    <Field label="Create the example at" help="A new Git repository the run works in.">
+    <Field
+      label="Create the example at"
+      help="A new Git repository the run works in."
+      {...(destinationTaken(context) ? {error: 'Taken'} : {})}
+    >
       <TextInput
         mono
         value={project.destination}
@@ -142,7 +146,7 @@ export function MoreOptions(props: CardProps): JSX.Element {
   const {machine, advanced, budget} = context.form;
   const problem = advancedProblem(advanced);
   // The user's choice for this machine; until they make one, open only while something is wrong.
-  const open = context.moreOpen[machine] ?? problem !== null;
+  const open = context.moreOpen[machine] ?? (problem !== null || destinationTaken(context));
   return (
     <Collapsible
       label="More options"

@@ -1,8 +1,18 @@
 import {expect, test} from 'bun:test';
 import type {Check, HelperFeature} from '@vibesys/contracts/host-helper';
+import type {DestinationFound, Offered} from '@vibesys/ipc';
+import {exampleCatalogue} from '@vibesys/run-fixtures';
 import type {RecentRun, RunRef} from '@vibesys/runs';
 import type {Draft} from '../../state/index.js';
-import {backendOf, readiness, readinessStatus, rolesView, startBlocked} from '../ui/view.js';
+import {
+  backendOf,
+  destinationTaken,
+  type ReadinessFix,
+  readiness,
+  readinessStatus,
+  rolesView,
+  startBlocked,
+} from '../ui/view.js';
 import {createNewRunStore, type NewRunBridge, type NewRunStoreOptions} from './store.js';
 
 const ok = <T>(value: T) => Promise.resolve({ok: true as const, value});
@@ -26,7 +36,9 @@ function fakeBridge(
     taskGoal: () => ok({kind: 'unsupported' as const}),
     preflight: () =>
       record('preflight', {kind: 'offered' as const, value: {checks: [], roles, backend: null}}),
-    createFromExample: (_host, _example, destination) => ok({project: destination, tasks: ['a']}),
+    createFromExample: (_host, _example, destination) =>
+      ok({kind: 'created' as const, created: {project: destination, tasks: ['a']}}),
+    exampleDestination: () => ok({kind: 'unsupported' as const}),
     copyOut: (_host, _source, destination) => ok({project: destination, tasks: ['a']}),
     startRun: () => record('startRun', {runId: 'run-2', instanceId: '00000000000c'}),
     helperFeatures: () => ok(features as readonly HelperFeature[]),
@@ -792,4 +804,168 @@ test('starting over, and starting a run, forget the draft', async () => {
   store.dispatch({type: 'start'});
   await settle();
   expect(kept.kept.draft).toBeNull();
+});
+
+/** The destination of an example as a helper may answer for it, and the fix the Review page offers. */
+const DESTINATIONS: readonly {
+  readonly name: string;
+  readonly answer: Offered<DestinationFound> | 'fails' | 'not_offered';
+  readonly fix: ReadinessFix['kind'];
+}[] = [
+  {
+    name: 'nothing',
+    answer: {kind: 'offered', value: {state: 'absent', project: null}},
+    fix: 'create_from_example',
+  },
+  {
+    name: 'an empty directory',
+    answer: {kind: 'offered', value: {state: 'empty', project: null}},
+    fix: 'create_from_example',
+  },
+  {
+    name: 'the example project',
+    answer: {kind: 'offered', value: {state: 'example_project', project: '/made/stack'}},
+    fix: 'use_created',
+  },
+  {
+    name: 'something else',
+    answer: {kind: 'offered', value: {state: 'occupied', project: null}},
+    fix: 'rename_destination',
+  },
+  {name: 'a helper that cannot say', answer: {kind: 'unsupported'}, fix: 'create_from_example'},
+  {name: 'a question that fails', answer: 'fails', fix: 'create_from_example'},
+  {name: 'a helper without the feature', answer: 'not_offered', fix: 'create_from_example'},
+];
+
+const FREE = {kind: 'offered' as const, value: {state: 'absent' as const, project: null}};
+const TAKEN = {kind: 'offered' as const, value: {state: 'occupied' as const, project: null}};
+
+/** A store whose helper answers `answer` for the destination, with the stack example chosen. */
+async function chooseExample(
+  answer: (typeof DESTINATIONS)[number]['answer'],
+  overrides: Partial<NewRunBridge> = {},
+  asked: string[] = [],
+) {
+  const clock = manualSchedule();
+  const features =
+    answer === 'not_offered'
+      ? ['run_options', 'preflight', 'examples']
+      : ['run_options', 'preflight', 'examples', 'example_destination'];
+  const bridge: NewRunBridge = {
+    ...fakeBridge(features, asked),
+    examples: () => ok({kind: 'offered' as const, value: exampleCatalogue}),
+    exampleDestination: (_host, _example, destination) => {
+      asked.push(`destination ${destination}`);
+      if (answer === 'fails') return Promise.reject(new Error('refused'));
+      return ok(answer === 'not_offered' ? {kind: 'unsupported' as const} : answer);
+    },
+    ...overrides,
+  };
+  const created = createNewRunStore(bridge, {
+    recent: [],
+    schedule: clock.schedule,
+    started: () => undefined,
+  });
+  await settle();
+  for (const change of [
+    {kind: 'from', from: 'example'},
+    {kind: 'domain', domain: 'data-structures'},
+    {kind: 'structure', example: 'data-structures/stack'},
+    {kind: 'workload', task: 'spsc'},
+  ] as const) {
+    created.store.dispatch({type: 'answer', change, advance: true});
+  }
+  await settle();
+  return {...created, clock};
+}
+
+const projectItem = (store: ReturnType<typeof createNewRunStore>['store']) =>
+  readiness(store.getState()).find(item => item.id === 'project');
+
+for (const {name, answer, fix} of DESTINATIONS) {
+  test(`an example whose destination holds ${name} offers ${fix}`, async () => {
+    const {store} = await chooseExample(answer);
+    const item = projectItem(store);
+    expect(item?.fix?.kind).toBe(fix);
+    // Taken: the user chooses another name, and cannot create there.
+    expect(destinationTaken(store.getState().context)).toBe(fix === 'rename_destination');
+    if (fix === 'rename_destination') {
+      expect(item?.detail).toBe('~/vibesys-projects/stack is taken');
+    }
+    if (fix === 'use_created') expect(item?.fix).toMatchObject({path: '/made/stack'});
+    expect(store.getState().context.problem).toBeNull();
+    expect(startBlocked(store.getState())).toBe('Fix the items marked above to start.');
+    // What the screen says never has a home directory in it.
+    expect(JSON.stringify(readiness(store.getState()))).not.toMatch(/\/home\/|\/Users\//);
+  });
+}
+
+test('while the destination is being read, the project item waits and offers no fix', async () => {
+  const {store} = await chooseExample(FREE, {exampleDestination: () => new Promise(() => undefined)});
+  const item = projectItem(store);
+  expect(item).toMatchObject({state: 'pending', detail: 'Checking the destination'});
+  expect(item?.fix).toBeUndefined();
+});
+
+test('using the example project that is already there makes it the run project without copying', async () => {
+  const asked: string[] = [];
+  const copied: string[] = [];
+  const {store, clock} = await chooseExample(
+    {kind: 'offered', value: {state: 'example_project', project: '/made/stack'}},
+    {
+      createFromExample: (_host, _example, destination) => {
+        copied.push(destination);
+        return ok({kind: 'created' as const, created: {project: destination, tasks: ['spsc']}});
+      },
+    },
+    asked,
+  );
+  const fix = projectItem(store)?.fix;
+  if (fix?.kind !== 'use_created') throw new Error('expected the use fix');
+  store.dispatch({type: 'use_created', ...fix});
+  await settle();
+  clock.runDue();
+  await settle();
+  expect(store.getState().context.form.project).toEqual({
+    source: 'created',
+    example: 'data-structures/stack',
+    destination: '~/vibesys-projects/stack',
+    path: '/made/stack',
+  });
+  expect(copied).toEqual([]);
+  expect(asked).toContain('preflight');
+  expect(projectItem(store)).toBeUndefined();
+});
+
+test('a destination taken when Create runs lands in the same state, not an error', async () => {
+  const {store} = await chooseExample(FREE, {
+    createFromExample: () => ok({kind: 'taken' as const}),
+  });
+  const fix = projectItem(store)?.fix;
+  if (fix?.kind !== 'create_from_example') throw new Error('expected the create fix');
+  store.dispatch({type: 'fix', fix});
+  await settle();
+  expect(store.getState().context.problem).toBeNull();
+  expect(store.getState().context.form.project?.source).toBe('example');
+  expect(projectItem(store)?.fix?.kind).toBe('rename_destination');
+  expect(destinationTaken(store.getState().context)).toBe(true);
+});
+
+test('typing another destination asks again, and a free name offers Create', async () => {
+  const {store, clock} = await chooseExample(TAKEN, {
+    exampleDestination: (_host, _example, destination) =>
+      ok(destination === '~/mine' ? FREE : TAKEN),
+  });
+  expect(projectItem(store)?.fix?.kind).toBe('rename_destination');
+  store.dispatch({type: 'destination', destination: '~/mine'});
+  await settle();
+  // Until the typing pauses, the name last read is not the one shown as taken.
+  expect(projectItem(store)?.state).toBe('pending');
+  clock.runDue();
+  await settle();
+  expect(projectItem(store)?.fix).toMatchObject({
+    kind: 'create_from_example',
+    destination: '~/mine',
+  });
+  expect(destinationTaken(store.getState().context)).toBe(false);
 });

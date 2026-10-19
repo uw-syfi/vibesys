@@ -122,6 +122,7 @@ const WELCOME_ARGUMENT_COUNTS = {
   [WELCOME_CHANNELS.startRun]: 2,
   [WELCOME_CHANNELS.helperFeatures]: 1,
   [WELCOME_CHANNELS.taskGoal]: 3,
+  [WELCOME_CHANNELS.exampleDestination]: 3,
   [WELCOME_CHANNELS.openRunWindow]: 1,
   [WELCOME_CHANNELS.showMainWindow]: 0,
   [WELCOME_CHANNELS.openSettings]: 0,
@@ -204,6 +205,8 @@ export type {
   MachinesWelcomeBridge,
 } from './machines.js';
 export type {
+  DestinationFound,
+  ExampleCreation,
   HarnessPick,
   MeasureTarget,
   NewRunWelcomeBridge,

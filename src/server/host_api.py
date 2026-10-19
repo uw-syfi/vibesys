@@ -104,6 +104,8 @@ from server.host_envelope import (
 from server.host_examples import (
     CreatedProject,
     ExampleList,
+    ExamplesDestinationReply,
+    ExamplesDestinationRequest,
     ProjectTaskGoalReply,
     ProjectTaskGoalRequest,
     TasksListReply,
@@ -1161,6 +1163,7 @@ HELPER_REQUEST_FEATURES: Final[Mapping[type[HelperRequestBase], HelperFeature]] 
     CheckoutInspectRequest: HelperFeature.CHECKOUT_INSPECT,
     RunPreflightRequest: HelperFeature.PREFLIGHT,
     ProjectTaskGoalRequest: HelperFeature.PROJECT_GOAL,
+    ExamplesDestinationRequest: HelperFeature.EXAMPLE_DESTINATION,
     ExamplesListRequest: HelperFeature.EXAMPLES,
     ProjectCreateFromExampleRequest: HelperFeature.EXAMPLES,
     ProjectCopyOutRequest: HelperFeature.EXAMPLES,
@@ -1247,6 +1250,7 @@ HelperRequest = Annotated[
     | AgentLoginsListRequest
     | AgentLoginsStartRequest
     | ProjectTaskGoalRequest
+    | ExamplesDestinationRequest
     | UsageWindowRequest,
     Field(discriminator="type"),
 ]
@@ -1805,6 +1809,7 @@ HelperReply = (
     | AgentLoginsListReply
     | AgentLoginsStartReply
     | ProjectTaskGoalReply
+    | ExamplesDestinationReply
     | UsageWindowReply
 )
 """A request's result; its ``type`` is the request's."""

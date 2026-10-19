@@ -16,6 +16,7 @@ import {
   catalogueFor,
   checksPass,
   chosenEntry,
+  destinationView,
   fitOf,
   harnessLabel,
   inputsKey,
@@ -265,6 +266,15 @@ export interface Readiness {
 export type ReadinessFix =
   | {readonly kind: 'copy_out'; readonly source: string; readonly destination: string}
   | {readonly kind: 'create_from_example'; readonly example: string; readonly destination: string}
+  /** The destination already holds the example's project: use it as it is. */
+  | {
+      readonly kind: 'use_created';
+      readonly example: string;
+      readonly destination: string;
+      readonly path: string;
+    }
+  /** The destination is taken: the user picks another name in More options. */
+  | {readonly kind: 'rename_destination'}
   | {readonly kind: 'choose_checkout'}
   | {readonly kind: 'recheck'};
 
@@ -303,20 +313,54 @@ function checkItem(check: Check, project: string | null, machine: HostKey): Read
   };
 }
 
+/** The Project item for an example not made yet: made, used where it already is, or renamed. */
+function exampleItem(
+  context: NewRunContext,
+  chosen: {readonly example: string; readonly destination: string},
+): Readiness {
+  const {example, destination} = chosen;
+  const view = destinationView(context.helper, context.form, context.destination);
+  const base = {id: 'project', label: 'Project'} as const;
+  if (view?.kind === 'checking') {
+    return {...base, state: 'pending', detail: 'Checking the destination'};
+  }
+  if (view?.kind === 'found' && view.found.state === 'occupied') {
+    return {
+      ...base,
+      state: 'fail',
+      detail: `${destination} is taken`,
+      fix: {kind: 'rename_destination'},
+    };
+  }
+  if (view?.kind === 'found' && view.found.state === 'example_project' && view.found.project) {
+    return {
+      ...base,
+      state: 'fail',
+      detail: `${destination} is already ${example}`,
+      fix: {kind: 'use_created', example, destination, path: view.found.project},
+    };
+  }
+  return {
+    ...base,
+    state: 'fail',
+    detail: `Create ${example} as its own repository at ${destination} first.`,
+    fix: {kind: 'create_from_example', example, destination},
+  };
+}
+
+/** Whether the destination of the example chosen holds something that is not its project. */
+export function destinationTaken(context: NewRunContext): boolean {
+  const view = destinationView(context.helper, context.form, context.destination);
+  return view?.kind === 'found' && view.found.state === 'occupied';
+}
+
 function missing(context: NewRunContext): Readiness[] {
   const {form} = context;
   const items: Readiness[] = [];
   if (form.project === null) {
     items.push({id: 'project', state: 'pending', label: 'Project', detail: 'Choose a project.'});
   } else if (form.project.source === 'example') {
-    const {example, destination} = form.project;
-    items.push({
-      id: 'project',
-      state: 'fail',
-      label: 'Project',
-      detail: `Create ${example} as its own repository at ${destination} first.`,
-      fix: {kind: 'create_from_example', example, destination},
-    });
+    items.push(exampleItem(context, form.project));
   }
   if (projectPath(form) !== null && form.task === null) {
     items.push({id: 'task', state: 'pending', label: 'Task', detail: 'Choose a task.'});

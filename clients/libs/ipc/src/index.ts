@@ -30,6 +30,8 @@ export {
   type CheckoutInspection,
   type ClusterTest,
   type ComputeSettings,
+  type DestinationFound,
+  type ExampleCreation,
   FIRST_PAINT_CHANNEL,
   type FirstPaint,
   type HarnessChoice,

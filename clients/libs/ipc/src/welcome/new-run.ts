@@ -8,6 +8,7 @@ import type {
   Backend,
   Check,
   CreatedProject,
+  ExampleDestination,
   ExampleList,
   HelperFeature,
   MachineDescription,
@@ -33,6 +34,7 @@ export const NEW_RUN_CHANNELS = {
   copyOut: 'vibesys:welcome:copy-out',
   startRun: 'vibesys:welcome:start-run',
   taskGoal: 'vibesys:welcome:task-goal',
+  exampleDestination: 'vibesys:welcome:example-destination',
   helperFeatures: 'vibesys:welcome:helper-features',
 } as const;
 
@@ -64,6 +66,18 @@ export interface PreflightResult {
   readonly backend: Backend | null;
 }
 
+/** What an example's destination holds (`examples.destination`). */
+export interface DestinationFound {
+  readonly state: ExampleDestination;
+  /** The project's directory when `state` is `example_project`; null otherwise. */
+  readonly project: string | null;
+}
+
+/** What making a project from an example came to: the project, or a destination that holds something. */
+export type ExampleCreation =
+  | {readonly kind: 'created'; readonly created: CreatedProject}
+  | {readonly kind: 'taken'};
+
 /** A run that started: its id and the server that drives it. */
 export interface StartedRun {
   readonly runId: string;
@@ -79,7 +93,7 @@ export interface NewRunWelcomeBridge {
     host: HostKey,
     example: string,
     destination: string,
-  ): Promise<WelcomeResult<CreatedProject>>;
+  ): Promise<WelcomeResult<ExampleCreation>>;
   copyOut(
     host: HostKey,
     source: string,
@@ -88,6 +102,12 @@ export interface NewRunWelcomeBridge {
   startRun(host: HostKey, inputs: RunInputs): Promise<WelcomeResult<StartedRun>>;
   /** The goal text and objectives of `task` in the user's own `project` on `host`. */
   taskGoal(host: HostKey, project: string, task: string): Promise<WelcomeResult<Offered<TaskGoal>>>;
+  /** What creating `example` at `destination` on `host` would find there. */
+  exampleDestination(
+    host: HostKey,
+    example: string,
+    destination: string,
+  ): Promise<WelcomeResult<Offered<DestinationFound>>>;
   /** The features `host`'s helper agreed to: what New run may ask of it. */
   helperFeatures(host: HostKey): Promise<WelcomeResult<readonly HelperFeature[]>>;
 }
@@ -114,6 +134,12 @@ export type NewRunRequest =
       readonly host: HostId;
       readonly project: string;
       readonly task: string;
+    }
+  | {
+      readonly kind: 'example-destination';
+      readonly host: HostId;
+      readonly example: string;
+      readonly destination: string;
     }
   | {readonly kind: 'helper-features'; readonly host: HostId};
 
@@ -189,6 +215,13 @@ export function parseNewRunRequest(
         host,
         project: project(second),
         task: text(third, 'the task'),
+      };
+    case NEW_RUN_CHANNELS.exampleDestination:
+      return {
+        kind: 'example-destination',
+        host,
+        example: text(second, 'the example'),
+        destination: project(third),
       };
     case NEW_RUN_CHANNELS.helperFeatures:
       return {kind: 'helper-features', host};

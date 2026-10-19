@@ -92,6 +92,7 @@ const VALID_ARGUMENTS: Readonly<
   [WELCOME_CHANNELS.examples]: ['local'],
   [WELCOME_CHANNELS.helperFeatures]: ['ssh:host-b'],
   [WELCOME_CHANNELS.taskGoal]: ['ssh:host-b', '/home/me/projects/queue-rs', 'mpmc'],
+  [WELCOME_CHANNELS.exampleDestination]: ['local', 'queue-rs', '~/projects/queue-rs'],
   [WELCOME_CHANNELS.createFromExample]: ['local', 'queue-rs', '~/projects/queue-rs'],
   [WELCOME_CHANNELS.copyOut]: ['local', '/p/inner', '/p-own'],
   [WELCOME_CHANNELS.startRun]: [

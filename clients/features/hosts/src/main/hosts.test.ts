@@ -964,9 +964,12 @@ describe('Hosts.projectRuns', () => {
     const subject = completionSubject(new FakeLink());
     await using _manager = subject.manager;
 
-    await expect(subject.hosts.projectRuns(LOCAL, '/srv/missing')).rejects.toThrow(
-      'Could not list the runs of /srv/missing',
+    const failure = await subject.hosts.projectRuns(LOCAL, '/srv/missing').then(
+      () => null,
+      (error: Error) => error,
     );
+    expect(failure?.message).toStartWith('Could not list the runs of the project');
+    expect(failure?.message).not.toContain('/srv/missing');
   });
 });
 

@@ -80,6 +80,7 @@ from server.host_helper_requests import (
     answer,
     connect,
     negotiate,
+    without_home,
 )
 from server.relay import (
     ChannelEndOutcome,
@@ -914,7 +915,7 @@ class _Channel:
         # > instead would miss exactly the unexpected failures this exists to report.
         except Exception as error:  # noqa: BLE001
             reply = _error(request.request_id, HelperErrorCode.INTERNAL, _exception_detail(error))
-        self.post(Answered(request.request_id, reply))
+        self.post(Answered(request.request_id, without_home(reply, self._host)))
 
     def _watch(self, watch_id: str, stop: Event, observed: Event) -> None:
         try:

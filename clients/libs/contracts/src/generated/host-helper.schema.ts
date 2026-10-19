@@ -1660,6 +1660,17 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "EndRecord",
       "type": "object"
     },
+    "ExampleDestination": {
+      "description": "What is at the place an example would be copied to.",
+      "enum": [
+        "absent",
+        "empty",
+        "example_project",
+        "occupied"
+      ],
+      "title": "ExampleDestination",
+      "type": "string"
+    },
     "ExampleDomain": {
       "description": "What an example task optimizes; the first question New run asks.",
       "enum": [
@@ -1908,6 +1919,91 @@ const hostHelperSchema: Record<string, unknown> = {
         "description"
       ],
       "title": "ExampleWorkload",
+      "type": "object"
+    },
+    "ExamplesDestinationReply": {
+      "additionalProperties": false,
+      "description": "What the destination holds.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "examples.destination",
+          "default": "examples.destination",
+          "title": "Type",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/ExampleDestination"
+        },
+        "project": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Project"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "state",
+        "project"
+      ],
+      "title": "ExamplesDestinationReply",
+      "type": "object"
+    },
+    "ExamplesDestinationRequest": {
+      "additionalProperties": false,
+      "description": "What ``project.create_from_example`` would find at ``destination`` for ``example``.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "examples.destination",
+          "default": "examples.destination",
+          "title": "Type",
+          "type": "string"
+        },
+        "example": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Example",
+          "type": "string"
+        },
+        "destination": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Destination",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "example",
+        "destination"
+      ],
+      "title": "ExamplesDestinationRequest",
       "type": "object"
     },
     "ExamplesListReply": {
@@ -2575,6 +2671,7 @@ const hostHelperSchema: Record<string, unknown> = {
         "machine_compute",
         "agent_logins",
         "project_goal",
+        "example_destination",
         "usage_window"
       ],
       "title": "HelperFeature",
@@ -7965,6 +8062,7 @@ const hostHelperSchema: Record<string, unknown> = {
           "compute.list": "#/$defs/ComputeListRequest",
           "compute.remove_cluster": "#/$defs/ComputeRemoveClusterRequest",
           "compute.test_cluster": "#/$defs/ComputeTestClusterRequest",
+          "examples.destination": "#/$defs/ExamplesDestinationRequest",
           "examples.list": "#/$defs/ExamplesListRequest",
           "harnesses.list": "#/$defs/HarnessesListRequest",
           "hello": "#/$defs/HelloRequest",
@@ -8096,6 +8194,9 @@ const hostHelperSchema: Record<string, unknown> = {
           "$ref": "#/$defs/ProjectTaskGoalRequest"
         },
         {
+          "$ref": "#/$defs/ExamplesDestinationRequest"
+        },
+        {
           "$ref": "#/$defs/UsageWindowRequest"
         }
       ],
@@ -8112,6 +8213,7 @@ const hostHelperSchema: Record<string, unknown> = {
           "compute.remove_cluster": "#/$defs/ComputeRemoveClusterReply",
           "compute.test_cluster": "#/$defs/ComputeTestClusterReply",
           "error": "#/$defs/HelperError",
+          "examples.destination": "#/$defs/ExamplesDestinationReply",
           "examples.list": "#/$defs/ExamplesListReply",
           "harnesses.list": "#/$defs/HarnessesListReply",
           "hello": "#/$defs/HelloReply",
@@ -8244,6 +8346,9 @@ const hostHelperSchema: Record<string, unknown> = {
           "$ref": "#/$defs/ProjectTaskGoalReply"
         },
         {
+          "$ref": "#/$defs/ExamplesDestinationReply"
+        },
+        {
           "$ref": "#/$defs/UsageWindowReply"
         },
         {
@@ -8287,6 +8392,7 @@ const hostHelperSchema: Record<string, unknown> = {
     "checkout.inspect": "checkout_inspect",
     "run.preflight": "preflight",
     "project.task_goal": "project_goal",
+    "examples.destination": "example_destination",
     "examples.list": "examples",
     "project.create_from_example": "examples",
     "project.copy_out": "examples",

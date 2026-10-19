@@ -11,7 +11,14 @@ import type {
   TaskGoal,
 } from '@vibesys/contracts/host-helper';
 import type {HostKey} from '@vibesys/hosts';
-import type {HarnessOffer, MeasureTarget, Offered, RoleOption, RunInputs} from '@vibesys/ipc';
+import type {
+  DestinationFound,
+  HarnessOffer,
+  MeasureTarget,
+  Offered,
+  RoleOption,
+  RunInputs,
+} from '@vibesys/ipc';
 import type {RecentRun, RunStart} from '@vibesys/runs';
 import type {OwnProject} from './answers.js';
 
@@ -354,6 +361,43 @@ export interface GoalFor {
 /** The key a goal is read for: the machine, the user's project on it, and the task. */
 export function goalKey(machine: HostKey, project: string, task: string): string {
   return JSON.stringify([machine, project, task]);
+}
+
+/** What an example's destination held when its machine's helper was asked, for one key. */
+export interface DestinationFor {
+  /** `destinationKey` of the machine, example and destination asked. */
+  readonly for: string;
+  /** What it held; null when the helper could not say or was not asked. */
+  readonly found: DestinationFound | null;
+}
+
+/** The key a destination is read for: the machine, the example and where it would be copied. */
+export function destinationKey(form: Form): string | null {
+  const {project} = form;
+  return project?.source === 'example'
+    ? JSON.stringify([form.machine, project.example, project.destination])
+    : null;
+}
+
+/** What is known of the destination of the example the form has chosen, not yet made. */
+export type DestinationView =
+  | {readonly kind: 'checking'}
+  /** The helper cannot say (too old, or the question failed): creating is the way to find out. */
+  | {readonly kind: 'unknown'}
+  | {readonly kind: 'found'; readonly found: DestinationFound};
+
+/** The destination of the form's example as `helper` and `destination` say; null for any other project. */
+export function destinationView(
+  helper: HelperFor | null,
+  form: Form,
+  destination: DestinationFor | null,
+): DestinationView | null {
+  const key = destinationKey(form);
+  if (key === null) return null;
+  if (helper === null || helper.for !== form.machine) return {kind: 'checking'};
+  if (!helper.features.includes('example_destination')) return {kind: 'unknown'};
+  if (destination?.for !== key) return {kind: 'checking'};
+  return destination.found === null ? {kind: 'unknown'} : {kind: 'found', found: destination.found};
 }
 
 /** The checks a run is held to, for one key. */

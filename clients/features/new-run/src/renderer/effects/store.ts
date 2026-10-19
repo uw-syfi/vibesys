@@ -12,6 +12,7 @@ import {type Actor, createActor, fromPromise} from 'xstate';
 import {
   type Draft,
   draftOf,
+  type FixDone,
   type NewRunEvent,
   type NewRunSnapshot,
   newRunMachine,
@@ -30,6 +31,7 @@ export type NewRunBridge = Pick<
   | 'taskGoal'
   | 'preflight'
   | 'createFromExample'
+  | 'exampleDestination'
   | 'copyOut'
   | 'startRun'
   | 'helperFeatures'
@@ -62,14 +64,20 @@ export function newRunLogic(bridge: NewRunBridge) {
         value(() => bridge.taskGoal(input.host, input.project, input.task)),
       ),
       preflight: fromPromise(({input}) => value(() => bridge.preflight(input.host, input.inputs))),
-      fix: fromPromise(async ({input}) => ({
-        fix: input.fix,
-        created: await value(() =>
-          input.fix.kind === 'copy_out'
-            ? bridge.copyOut(input.host, input.fix.source, input.fix.destination)
-            : bridge.createFromExample(input.host, input.fix.example, input.fix.destination),
-        ),
-      })),
+      destination: fromPromise(({input}) =>
+        value(() => bridge.exampleDestination(input.host, input.example, input.destination)),
+      ),
+      fix: fromPromise(async ({input}): Promise<FixDone> => {
+        const {fix} = input;
+        if (fix.kind === 'copy_out') {
+          const copy = await value(() => bridge.copyOut(input.host, fix.source, fix.destination));
+          return {fix, created: copy};
+        }
+        const made = await value(() =>
+          bridge.createFromExample(input.host, fix.example, fix.destination),
+        );
+        return {fix, created: made.kind === 'created' ? made.created : null};
+      }),
       start: fromPromise(({input}) => value(() => bridge.startRun(input.host, input.inputs))),
     },
   });
