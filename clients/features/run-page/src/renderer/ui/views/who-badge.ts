@@ -2,7 +2,7 @@ import type {RowBadge} from '@vibesys/ui';
 import {type Who, whoShort, whoWords} from '../../../state/index.js';
 
 /**
- * The chip saying what ran a turn (`gpt-6-luna on codex`; only the model in a narrow list), or
+ * The chip saying what ran a turn (`<model> on <harness>`; only the model in a narrow list), or
  * none when the run's records do not say. `more` is how many other harness and model pairs ran
  * the same row's other turns.
  */

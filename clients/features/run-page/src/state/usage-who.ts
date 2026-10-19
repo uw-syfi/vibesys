@@ -29,7 +29,7 @@ export function whoBySpan(records: readonly UsageRecord[]): WhoBySpan {
   return by;
 }
 
-/** `gpt-6-luna on codex`, or the one part named; null when neither is. */
+/** `<model> on <harness>`, or the one part named; null when neither is. */
 export function whoWords(who: Who | undefined): string | null {
   if (who === undefined) return null;
   if (who.model !== null && who.harness !== null) return `${who.model} on ${who.harness}`;
