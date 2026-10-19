@@ -14,6 +14,7 @@ from vibesys.api.assembly import (
 from vibesys.composition import AgentToolContext
 from vibesys.orchestration.skill_selection import platform_skill_selection
 from vibesys.run.integration import RunResources
+from vibesys.run.skill_sources import chat_skill_dirs
 
 __all__ = [
     "AgentToolContext",
@@ -22,6 +23,7 @@ __all__ = [
     "RunResources",
     "SessionAgents",
     "SessionImplementations",
+    "chat_skill_dirs",
     "create_session",
     "platform_skill_selection",
 ]

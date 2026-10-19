@@ -11,6 +11,7 @@ substitute a profile.
 
 from __future__ import annotations
 
+import shlex
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -86,6 +87,20 @@ class ModelDisplay:
     """The model's rank in its family, 1 the smallest and cheapest; ``None`` off the ladder."""
     tier_name: str | None
     """The tier as people call it ("Opus"); ``None`` exactly when ``tier`` is."""
+    generation: ModelGenerationFacts | None
+    """The generation of its vendor's the model belongs to; ``None`` when agentshim names none."""
+
+
+@dataclass(frozen=True, slots=True)
+class ModelGenerationFacts:
+    """One generation of a vendor's models, as agentshim ranks it."""
+
+    id: str
+    """Names the generation within its vendor ("5.5"); models of one generation share it."""
+    name: str
+    """The generation as people call it ("Claude 5.5")."""
+    rank: int
+    """The generation's rank among its vendor's, 1 the newest."""
 
 
 def provider_display_name(provider: str) -> str:
@@ -108,6 +123,46 @@ def model_display(provider: str, model: str | None) -> ModelDisplay | None:
         family=spec.family,
         tier=spec.tier,
         tier_name=spec.tier_name,
+        generation=(
+            None
+            if spec.generation_id is None or spec.generation is None or spec.generation_rank is None
+            else ModelGenerationFacts(
+                id=spec.generation_id, name=spec.generation, rank=spec.generation_rank
+            )
+        ),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class LoginCommand:
+    """The command that starts *provider*'s own sign-in on this machine."""
+
+    argv: tuple[str, ...]
+    """The program and its arguments."""
+    needs_terminal: bool
+    """The command prompts the person, so a process without a terminal cannot finish it."""
+
+    @property
+    def line(self) -> str:
+        """The command as a person would type it."""
+        return shlex.join(self.argv)
+
+
+def provider_login_command(provider: str) -> LoginCommand | None:
+    """The command that signs *provider*'s CLI in, or ``None`` when its CLI has none.
+
+    agentshim owns the commands (``ProviderProfile.login``). The policy here is which one to
+    run: the device-code variant when the CLI has one, because it finishes on any machine,
+    including one with no browser to open; otherwise the CLI's usual sign-in.
+    """
+    profile = provider_profile(provider)
+    login = profile.login
+    if login is None:
+        return None
+    device = login.device_argv is not None
+    return LoginCommand(
+        argv=login.command(profile.binary, device=device),
+        needs_terminal=login.needs_terminal and not device,
     )
 
 

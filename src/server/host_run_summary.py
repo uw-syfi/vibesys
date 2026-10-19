@@ -5,31 +5,41 @@ from (megabytes of tool output for a few kilobytes of spans). ``runs.summary`` r
 kept beside the journal (``server.run_summary``), so the cost of opening a run is the size of its
 summary and not of its history.
 
+The same module holds the ``usage.window`` messages (see "The usage window" below): they read the
+usage records defined here and must load with the helper's other messages, because
+``server.host_api`` names them in its unions, while their computation (``server.usage_window``)
+loads on the first ``usage.window`` request.
+
 Light: Pydantic, the standard library and ``server.host_envelope``. ``server.host_api`` imports
 these messages into the helper's request and reply unions and gates them behind
-``HelperFeature.RUN_SUMMARY``.
+``HelperFeature.RUN_SUMMARY`` (and ``usage.window`` behind ``HelperFeature.USAGE_WINDOW``).
 
 Public surface: ``RunsSummaryRequest``, ``RunsSummaryReply``, ``TurnReply``, ``TokenTally``,
-``SpanTokens``, ``UsageRecord``, ``TraceFormat``, ``trace_format``, the documents they
+``SpanTokens``, ``UsageRecord``, ``NO_TOKENS``, ``add_tokens``, ``TraceFormat``, ``trace_format``, the documents they
 pass through (``RunSpanDocument``, ``RunOverviewDocument``, ``ReplySchemaDocument``) and the
 limits and names ``RUN_SUMMARY_FILE``, ``RUN_SUMMARY_PAGE_MAX_BYTES`` and
-``REPLY_SCHEMA_ID_PATTERN``.
+``REPLY_SCHEMA_ID_PATTERN``; and the usage window's ``UsageWindowRequest``, ``UsageWindowReply``,
+``RunSpend``, ``AgentSpend`` and the limits ``USAGE_WINDOW_MAX_RUNS``, ``USAGE_WINDOW_MAX_AGENTS``,
+``USAGE_WINDOW_MAX_HOURS`` and ``RATE_WINDOW_S``.
 """
 
 from __future__ import annotations
 
+from datetime import timedelta
 from enum import StrEnum
-from typing import Annotated, Final, Literal
+from typing import Annotated, Final, Literal, Self
 
 from pydantic import (
     AwareDatetime,
     BaseModel,
     ConfigDict,
+    Field,
     JsonValue,
     NonNegativeFloat,
     NonNegativeInt,
     PositiveInt,
     StringConstraints,
+    model_validator,
 )
 
 from server.host_envelope import HelperReplyBase, HelperRequestBase, RunId
@@ -132,6 +142,29 @@ class TokenTally(BaseModel):
     """Output tokens, reasoning included."""
     reasoning: NonNegativeInt | None
     """The part of ``output`` the provider reports as reasoning."""
+
+
+NO_TOKENS: Final = TokenTally(
+    input=None, cache_read=None, cache_write=None, output=None, reasoning=None
+)
+"""The tally of nothing spent: no count is reported yet."""
+
+
+def _sum(a: int | None, b: int | None) -> int | None:
+    if a is None:
+        return b
+    return a if b is None else a + b
+
+
+def add_tokens(a: TokenTally, b: TokenTally) -> TokenTally:
+    """``a`` and ``b`` summed count by count; a count neither reported stays unreported."""
+    return TokenTally(
+        input=_sum(a.input, b.input),
+        cache_read=_sum(a.cache_read, b.cache_read),
+        cache_write=_sum(a.cache_write, b.cache_write),
+        output=_sum(a.output, b.output),
+        reasoning=_sum(a.reasoning, b.reasoning),
+    )
 
 
 class SpanTokens(BaseModel):
@@ -246,3 +279,107 @@ class RunsSummaryReply(HelperReplyBase):
     """This page's usage records, from index ``max(0, offset`` minus every earlier item``)``."""
     next_offset: PositiveInt | None
     """The ``offset`` of the next page, or ``None`` when this page ends the summary."""
+
+
+# The usage window
+
+USAGE_WINDOW_MAX_RUNS: Final = 100
+"""The most runs one request names (the size of a ``runs.list`` digest page), so the work is bounded."""
+USAGE_WINDOW_MAX_AGENTS: Final = 64
+"""The most agents (a role, harness and model) one reply lists; the costliest come first."""
+USAGE_WINDOW_MAX_HOURS: Final = 336
+"""The longest window, in hours: two weeks."""
+RATE_WINDOW_S: Final = 3600
+"""The trailing seconds, ending at the window's end, that ``spend_per_hour_usd`` is read over."""
+
+
+class UsageWindowRequest(HelperRequestBase):
+    """What the named runs of a project spent in ``[since, until)``.
+
+    ``until`` is "now" for the reply: the helper reads no clock for it, so a client names the time it
+    is asking at (or the end of a past window) and the answer is a function of the journals and
+    these two instants. A turn is placed at the time it ended (``UsageRecord.ended_at``).
+    """
+
+    type: Literal["usage.window"] = "usage.window"
+    project: str
+    """The project directory on the host; ``~`` expands to the helper's home."""
+    run_ids: Annotated[tuple[RunId, ...], Field(max_length=USAGE_WINDOW_MAX_RUNS)]
+    """The runs to count, as ``runs.list`` names them; a run the project does not have is reported
+    in the reply's ``missing_runs``. A repeated id counts once."""
+    since: AwareDatetime
+    until: AwareDatetime
+
+    @model_validator(mode="after")
+    def _window_is_bounded(self) -> Self:
+        if not self.since < self.until:
+            message = "since must be before until"
+            raise ValueError(message)
+        if self.until - self.since > timedelta(hours=USAGE_WINDOW_MAX_HOURS):
+            message = f"the window may span at most {USAGE_WINDOW_MAX_HOURS} hours"
+            raise ValueError(message)
+        return self
+
+
+class RunSpend(BaseModel):
+    """What one run spent in the window; only runs that had a turn end in it are listed."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    run_id: RunId
+    task: str | None
+    """The task the run was started for, as ``runs.list`` names it; ``None`` when the run records none."""
+    cost_usd: NonNegativeFloat
+    """The reported cost of the run's turns that ended in the window."""
+
+
+class AgentSpend(BaseModel):
+    """What one kind of agent spent in the window: a role on a harness and model.
+
+    A part the journal did not record for a turn is ``None``, so the turns of an execution whose
+    start is missing form their own entry.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    role: str | None
+    harness: str | None
+    model: str | None
+    cost_usd: NonNegativeFloat
+    turns: NonNegativeInt
+    """The turns, priced or not, that ended in the window."""
+
+
+class UsageWindowReply(HelperReplyBase):
+    """What the Usage page shows for one window.
+
+    Costs are the sums of the turns' reported ``cost_usd`` (a turn that reported none counts in
+    ``unpriced_turns`` and adds nothing, so a total is a lower bound while it is not zero). A turn
+    with no recorded end time cannot be placed in a window: it counts in ``untimed_turns`` and
+    nowhere else. ``new_bests`` counts the ideas kept (``IdeaVerdict.KEPT``) whose result landed in
+    the window, and ``cost_per_new_best_usd`` is ``spent_usd`` over it, ``None`` when there is none.
+    A run's kept ideas beyond ``DASHBOARD_MAX_POINTS`` are not counted.
+    """
+
+    type: Literal["usage.window"] = "usage.window"
+    since: AwareDatetime
+    until: AwareDatetime
+    spent_usd: NonNegativeFloat
+    spend_per_hour_usd: NonNegativeFloat
+    """The cost of the turns that ended in the last ``min(RATE_WINDOW_S, window)`` seconds before
+    ``until``, per hour of that span."""
+    tokens: TokenTally
+    """The tokens of the turns in the window, summed as a run's are."""
+    turns: NonNegativeInt
+    unpriced_turns: NonNegativeInt
+    untimed_turns: NonNegativeInt
+    new_bests: NonNegativeInt
+    cost_per_new_best_usd: NonNegativeFloat | None
+    by_run: Annotated[tuple[RunSpend, ...], Field(max_length=USAGE_WINDOW_MAX_RUNS)]
+    """The costliest run first (ties by run id)."""
+    by_agent: Annotated[tuple[AgentSpend, ...], Field(max_length=USAGE_WINDOW_MAX_AGENTS)]
+    """The costliest agent first (ties by role, harness, model)."""
+    agents_omitted: NonNegativeInt
+    """The agents that spent in the window beyond ``USAGE_WINDOW_MAX_AGENTS``."""
+    missing_runs: Annotated[tuple[RunId, ...], Field(max_length=USAGE_WINDOW_MAX_RUNS)]
+    """The requested runs the project does not have, in the order asked."""

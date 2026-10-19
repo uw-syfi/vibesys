@@ -40,7 +40,8 @@ export function Nav(props: {
 }): JSX.Element {
   const {blocked} = props.next;
   return (
-    <Row justify="between" wrap>
+    // Top-aligned: the reason a blocked Continue gives hangs below the row, not inside its height.
+    <Row justify="between" align="start" wrap>
       {props.back === undefined ? <span /> : <Button text="Back" press={props.back} />}
       <Button
         variant="primary"

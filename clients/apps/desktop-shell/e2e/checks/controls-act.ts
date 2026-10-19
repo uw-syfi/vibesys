@@ -50,11 +50,12 @@ export async function controlsOf(scope: Locator): Promise<Control[]> {
     const state = match?.[3] ?? '';
     const chosen =
       ['radio', 'tab', 'option'].includes(role) && /\[(?:checked|selected)\]/.test(state);
-    if (state.includes('[disabled]') || chosen) continue;
     const text = JSON.parse(`"${name}"`) as string;
     const key = `${role} ${text}`;
+    // The index counts every control of that role and name, as the locator does, disabled or not.
     const nth = seen.get(key) ?? 0;
     seen.set(key, nth + 1);
+    if (state.includes('[disabled]') || chosen) continue;
     found.push({role, name: text, nth});
   }
   return found;

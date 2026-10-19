@@ -665,10 +665,34 @@ export const RICH_ENTRIES = {
   },
   SidebarItem: {
     render: () => (
-      <Text tone="muted">
-        Entries of the SidebarSection below: icons with counts, status dots with details, the active
-        one, and a row menu.
-      </Text>
+      <Stack gap="space-4">
+        <Text tone="muted">
+          Entries of the SidebarSection below: icons with counts, status dots with details, the
+          active one, and a row menu. Numbered markers are the steps of a form.
+        </Text>
+        <Grid min="tile">
+          <SidebarSection title="Steps">
+            <SidebarItem
+              label="Start from"
+              detail="An example"
+              marker={{text: '1', state: 'neutral', label: 'Step 1, answered'}}
+              press={noop}
+            />
+            <SidebarItem
+              label="Hardware"
+              active
+              marker={{text: '2', state: 'current', label: 'Step 2, not answered yet'}}
+              press={noop}
+            />
+            <SidebarItem
+              label="Review and start"
+              marker={{text: '3', state: 'muted', label: 'Step 3, not answered yet'}}
+              disabled
+              press={noop}
+            />
+          </SidebarSection>
+        </Grid>
+      </Stack>
     ),
   },
   SidebarGroup: {

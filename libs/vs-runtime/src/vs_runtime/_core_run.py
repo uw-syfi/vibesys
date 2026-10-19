@@ -51,6 +51,7 @@ from vs_core.api import (
 from vs_runtime._core_loop import LeaseUnavailableError
 from vs_runtime._mid_turn_steering import MidTurnSteering
 from vs_runtime._workspace_holds import core_workspace_holds
+from vs_sim.api import yield_now
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -200,8 +201,16 @@ class CoreRunHost:
 
 
 def start_core(host: CoreRunHost, config: RunLoopConfig) -> None:
-    """Take the lease and commit the new-epoch recovery, at the clock's current time."""
+    """Take the lease and commit the new-epoch recovery, at the clock's time after decoding."""
+    host.shell.prepare_start(config.host_id)
+    _take_lease(host, config)
+
+
+def _take_lease(host: CoreRunHost, config: RunLoopConfig) -> None:
     host.shell.start(config.host_id, now_at=host.clock.now(), lease_duration=config.lease_duration)
+
+
+_PASSES_TO_WAKE_A_DUE_TIMER = 3
 
 
 async def start_core_awaiting_lease(host: CoreRunHost, config: RunLoopConfig) -> None:
@@ -213,6 +222,9 @@ async def start_core_awaiting_lease(host: CoreRunHost, config: RunLoopConfig) ->
     in clock time: a simulated clock makes it instant. Raises ``LeaseUnavailableError``
     naming the bound when the lease is still held after it.
 
+    The stored run is decoded and validated before the clock is read for the lease, with the
+    loop free to run in between (see ``CoreRuntime.prepare_start``).
+
     Once started, the host's ``workspaces`` follow core's recovered state: worktrees a
     stopped host left that core no longer references are discarded now. If following or
     sweeping those workspaces fails or is cancelled, startup releases its newly acquired
@@ -220,8 +232,19 @@ async def start_core_awaiting_lease(host: CoreRunHost, config: RunLoopConfig) ->
     """
     give_up_at = host.clock.now() + config.lease_duration
     while True:
+        # Take in the stored run first, then let the loop run, then read the clock for the
+        # lease: decoding a long run takes seconds, and the lease term should not include it.
+        # No lease is held yet, so the yields serve the loop's other tasks (the control
+        # watcher, a server), not the heartbeat, and they keep the decode and the start out of
+        # one unbroken hold on the loop. A task whose timer fell due during the decode needs
+        # two passes (the timer fires, then its future wakes the task); three leave one to
+        # spare, a margin that rests on asyncio's scheduling, not on a contract. Yielding
+        # waits on no clock.
+        host.shell.prepare_start(config.host_id)
+        for _ in range(_PASSES_TO_WAKE_A_DUE_TIMER):
+            await yield_now()
         try:
-            start_core(host, config)
+            _take_lease(host, config)
         except LeaseUnavailableError as error:
             remaining = give_up_at - host.clock.now()
             if remaining <= 0:
@@ -306,7 +329,6 @@ class _Loop:
         self._next_wake = next_wake
         self._stall_notes = stall_notes
         self._time = self._core().run.now_at
-        self._renewed_at = self._read()
         self._deadline_stop = any(
             c.control_id.root == "deadline" for c in self._core().run.controls
         )
@@ -367,7 +389,9 @@ class _Loop:
                 refusal = await self._settle(now)
             if refusal is not None:
                 # Requests already running finish and commit before the refusal ends the run.
-                await self._shell.finish_in_flight(self._delivery, now_at=now, refusal=refusal)
+                await self._shell.finish_in_flight(
+                    self._delivery, now_at=now, refusal=refusal, upkeep=self._keep_lease
+                )
                 self._settle_controls()
                 return self._outcome(refusal)
             # Before the loop can exit: a control the commit that ended the run refused is
@@ -399,6 +423,7 @@ class _Loop:
                 now_at=now,
                 max_dispatches=remaining,
                 max_concurrent=self._slots(),
+                upkeep=self._keep_lease,
             )
         finally:
             self._raise_if_lease_lost()
@@ -435,8 +460,18 @@ class _Loop:
                 self._renew_now(self._read())
             self._shell.record_renewal()
 
+    def _keep_lease(self) -> None:
+        """Renew between two commits of one settle when due, and tell core, as the heartbeat does.
+
+        The heartbeat is a task on this loop, so it runs only when the loop is free; a settle
+        whose commits each take seconds (the whole record is rewritten on this thread) would
+        otherwise outlast the lease before the heartbeat could renew it.
+        """
+        self._renew(self._read())
+        self._shell.record_renewal()
+
     def _renewal_due(self) -> float:
-        return self._renewed_at + self._config.lease_duration / 3
+        return self._shell.lease_renewed_at + self._config.lease_duration / 3
 
     def _renew(self, now: float) -> None:
         if now >= self._renewal_due():
@@ -444,7 +479,6 @@ class _Loop:
 
     def _renew_now(self, now: float) -> None:
         self._shell.renew(now_at=now, lease_duration=self._config.lease_duration)
-        self._renewed_at = now
 
     def _due_controls(self, now: float) -> tuple[CoreEvent, ...]:
         core = self._core()

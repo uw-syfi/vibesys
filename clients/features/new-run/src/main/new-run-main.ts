@@ -13,6 +13,7 @@ import type {
   HelperRequest,
   LiveInstanceRecord,
   MachineDescription,
+  TaskGoal,
 } from '@vibesys/contracts/host-helper';
 import {type HostId, hostKey, hostLabel} from '@vibesys/hosts';
 import type {Offered, PreflightResult, RunInputs, StartedRun, WelcomeRequest} from '@vibesys/ipc';
@@ -29,7 +30,8 @@ export type NewRunMainRequest = Extract<
       | 'create-from-example'
       | 'copy-out'
       | 'start-run'
-      | 'helper-features';
+      | 'helper-features'
+      | 'task-goal';
   }
 >;
 
@@ -66,6 +68,12 @@ function runFields(inputs: RunInputs, features: readonly HelperFeature[]) {
       "This machine's VibeSys cannot run a different agent for a role. Update it, or use the run's agent for every role.",
     );
   }
+  const measured = inputs.measure_on.kind !== 'same_machine';
+  if (measured && !features.includes('measurement_target')) {
+    throw new Error(
+      "This machine's VibeSys cannot measure on a cluster or cloud. Update it, or measure on this machine.",
+    );
+  }
   return {
     project: inputs.project,
     task: inputs.task,
@@ -73,6 +81,7 @@ function runFields(inputs: RunInputs, features: readonly HelperFeature[]) {
     options: inputs.options,
     ...(inputs.harness === null ? {} : {harness: inputs.harness}),
     ...(roleAgents ? {agents: inputs.agents} : {}),
+    ...(measured ? {measure_on: inputs.measure_on} : {}),
   };
 }
 
@@ -123,6 +132,13 @@ export class NewRunMain {
         return this.#start(request.host, request.inputs);
       case 'helper-features':
         return this.#features(request.host);
+      case 'task-goal':
+        return this.#offered(
+          request.host,
+          {type: 'project.task_goal', project: request.project, task: request.task},
+          `Could not read the goal of ${request.task}`,
+          reply => (reply as {goal: TaskGoal}).goal,
+        );
     }
   }
 
@@ -255,6 +271,7 @@ export class NewRunMain {
         harness: inputs.harness,
         options: inputs.options,
         agents: inputs.agents,
+        measure_on: inputs.measure_on,
         args: inputs.args,
       },
     });

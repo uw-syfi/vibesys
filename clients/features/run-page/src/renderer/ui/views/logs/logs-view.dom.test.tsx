@@ -165,6 +165,7 @@ async function show(state: RunPageState, scope: LogScope, click?: string): Promi
         model={MODEL}
         clock={CLOCK}
         tokens={EMPTY_LEDGER}
+        who={new Map()}
         zoom={() => undefined}
         state={state}
         scope={scope}
@@ -255,6 +256,7 @@ test('a step’s Logs pane keeps the kicker of its step pane, so the role is sai
     model: MODEL,
     clock: CLOCK,
     tokens: EMPTY_LEDGER,
+    who: new Map(),
     zoom: () => undefined,
     state: pageState([]),
     scope: {kind: 'step', step: turn} as const,

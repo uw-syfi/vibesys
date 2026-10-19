@@ -50,10 +50,22 @@ export {
 export {
   digestEntries,
   digestLook,
+  type IdeaPoint,
   type ListedRun,
   listedRuns,
   RUN_GONE_WORDS,
+  type RunDashboardEntry,
   type RunDigestEntry,
   type RunDigestsReply,
 } from './run-digest.js';
 export {type EndKind, type EndLook, type EndTone, endedLook} from './run-look.js';
+export {
+  type AgentSpend,
+  type RunSpend,
+  USAGE_WINDOW_MAX_HOURS,
+  USAGE_WINDOW_MAX_RUNS,
+  type UsageWindowEntry,
+  type UsageWindowOutcome,
+  usageWindowEntry,
+  usageWindowRefusal,
+} from './usage-window.js';

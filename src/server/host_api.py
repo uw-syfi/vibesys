@@ -14,36 +14,35 @@ does not know, or one it cannot parse, is ``UnreadableRecord``, never dropped
 and never a failure of the whole listing: two checkouts on one host share one
 registry.
 
-Public surface: ``PROTOCOL_VERSION``, ``RECORD_VERSION``,
-``INSTANCE_ID_PATTERN``, ``InstanceId``, ``RunId``, ``RunStatus``,
-``StartupStage``, ``StartupProgress``, ``StartupFact``, ``FailureReason``,
+Public surface: ``PROTOCOL_VERSION``, ``RECORD_VERSION``, ``INSTANCE_ID_PATTERN``, ``InstanceId``,
+``RunId``, ``RunStatus``, ``StartupStage``, ``StartupProgress``, ``StartupFact``, ``FailureReason``,
 ``RunPhase``, ``InstanceStatus``, ``RunEndOutcome``, ``EndRecord``, ``RunEndingFact``, ``RunClosing``,
 ``RunDigest``, ``RunDigestUnreadable``, ``one_line``,
 ``END_REASON_MAX_CHARACTERS``, ``PauseCause``,
 ``LiveInstanceRecord``, ``UnreadableRecord``, ``parse_record``,
 ``InstanceList``, ``StopOutcome``, ``StopRoute``, ``InstanceStopResult``,
-``DetachedLaunchErrorCode``, ``DetachedLaunchFailure``, ``TaskSummary``,
-``TaskList``, the inspection documents, and the host helper's messages:
+``DetachedLaunchErrorCode``, ``DetachedLaunchFailure``,
+the inspection documents, and the host helper's messages:
 the log streams' ``LogStream``, ``LogStreamOutcome``, ``LogChunk``, ``LogPipeSpan``,
 ``LogPipe``, ``LogOffset``, ``LogTail`` and limits
 (``LOGS_READ_MAX_BYTES``, ``LOGS_READ_MIN_BYTES``, ``LOGS_WAIT_MAX_MS``),
-``HELPER_PROTOCOL_VERSIONS``, ``HELPER_REQUEST_FEATURES``,
-``HELPER_FIELD_FEATURES``, ``request_features``, ``HelperFeature``,
-``HelperRequest`` (``parse_helper_request``) and its members, the run history
-read's limit (``RUN_EVENTS_READ_MAX_BYTES``), ``RUN_EVENTS_FILE``, the run history's messages
-(``server.host_run_events``), the run summary's messages (``server.host_run_summary``), the
-machine facts (``server.host_machine_facts``: ``Accelerator``, ``Gpu``, ``Hardware``,
+``HELPER_PROTOCOL_VERSIONS``, ``HELPER_REQUEST_FEATURES``, ``HELPER_FIELD_FEATURES``,
+``request_features``, ``HelperFeature``, ``HelperRequest`` (``parse_helper_request``) and its
+members, the run history read's limit (``RUN_EVENTS_READ_MAX_BYTES``), ``RUN_EVENTS_FILE``, the run
+history's messages (``server.host_run_events``), the run summary's messages
+(``server.host_run_summary``, which also holds the usage window's), the run tile's dashboard
+(``server.host_run_dashboard``), the machine facts (``server.host_machine_facts``: ``Accelerator``,
+``Gpu``, ``Hardware``,
 ``DockerReachable``, ``DockerUnreachable``, ``MachineCheckout``, ``RunCounts``,
-``MachineDescription``) and checkout inspection (``MIN_CHECKOUT_VERSION``,
-``CheckoutFound``, ``CheckoutNotFound``, ``CheckoutTooOld``, ``CheckoutInspection``), ``HelperMessage``
-and its members, ``HelperErrorCode``, the harness choice (``HarnessOption``,
-``HarnessChoice``, ``RoleAgents``, and the run flags ``CLI_PROVIDER_FLAG``, ``MODEL_FLAG``,
-``ROLE_PROVIDER_FLAG``, ``UNVETTED_MODEL_FLAG``, ``RUN_ENVIRONMENT_FLAG``, ``SLURM_CONFIG_FLAG``),
-where results are measured, compute settings and agent logins (``server.host_compute``,
-``server.host_agent_logins``), and a relayed channel's end: ``ChannelEndOutcome``,
-``ChannelEnd``. An undeliverable successful start whose compensating stop cannot
-be proved terminal reports ``RunStartCompensationFailure`` on the helper's
-diagnostic stream.
+``MachineDescription``) and checkout inspection (``MIN_CHECKOUT_VERSION``, ``CheckoutFound``,
+``CheckoutNotFound``, ``CheckoutTooOld``, ``CheckoutInspection``), ``HelperMessage`` and its
+members, ``HelperErrorCode``, the harness choice (``HarnessOption``, ``HarnessChoice``,
+``RoleAgents``, and the run flags ``CLI_PROVIDER_FLAG``, ``MODEL_FLAG``, ``ROLE_PROVIDER_FLAG``,
+``UNVETTED_MODEL_FLAG``, ``RUN_ENVIRONMENT_FLAG``, ``SLURM_CONFIG_FLAG``), where results are
+measured, compute settings and agent logins (``server.host_compute``,
+``server.host_agent_logins``), and a relayed channel's end: ``ChannelEndOutcome``, ``ChannelEnd``.
+An undeliverable successful start whose compensating stop cannot be proved terminal reports
+``RunStartCompensationFailure`` on the helper's diagnostic stream.
 
 The helper's messages follow ``docs/contributing/desktop-connection.md``
 ("Handshake and versioning"): strict within a negotiated version, additive
@@ -102,10 +101,18 @@ from server.host_envelope import (
     RunId,
     SpanId,
 )
-from server.host_examples import CreatedProject, ExampleList
+from server.host_examples import (
+    CreatedProject,
+    ExampleList,
+    ProjectTaskGoalReply,
+    ProjectTaskGoalRequest,
+    TasksListReply,
+    TasksListRequest,
+)
 from server.host_harness import HarnessChoice, HarnessOption, generation_conflict
 from server.host_machine_facts import MachineDescription
 from server.host_preflight import Backend, Check, RoleName, RunOptions
+from server.host_run_dashboard import RunAttention, RunClosing, RunDashboard
 from server.host_run_events import (
     RunsEventsForSpanReply,
     RunsEventsForSpanRequest,
@@ -114,7 +121,12 @@ from server.host_run_events import (
     RunsReadTailReply,
     RunsReadTailRequest,
 )
-from server.host_run_summary import RunsSummaryReply, RunsSummaryRequest
+from server.host_run_summary import (
+    RunsSummaryReply,
+    RunsSummaryRequest,
+    UsageWindowReply,
+    UsageWindowRequest,
+)
 from vs_decode.api import Unreadable, decode_json
 
 PROTOCOL_VERSION = 1
@@ -744,26 +756,6 @@ class DetachedLaunchFailure(BaseModel):
     """The server already driving the run, for ``run_already_live``: attach to it."""
 
 
-class TaskSummary(BaseModel):
-    """One task of a project."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    name: str
-    """The task's directory name, the value ``--task`` accepts."""
-
-
-class TaskList(BaseModel):
-    """``vibesys tasks --json``: the tasks of one project."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    version: Literal[1] = 1
-    project_root: str
-    """The resolved absolute project directory the tasks were read from."""
-    tasks: tuple[TaskSummary, ...]
-
-
 # --- the host helper ---------------------------------------------------------
 
 HELPER_PROTOCOL_VERSIONS = (1, 1)
@@ -853,14 +845,6 @@ class InstancesUnwatchRequest(HelperRequestBase):
     watch_id: RequestId
 
 
-class TasksListRequest(HelperRequestBase):
-    """The tasks a project defines under ``.vibesys/tasks/``."""
-
-    type: Literal["tasks.list"] = "tasks.list"
-    project: str
-    """The project directory on the host; ``~`` expands to the helper's home."""
-
-
 RUN_DIGEST_MAX_RUNS: Final = 100
 """The most runs one ``runs.list`` may ask a digest of."""
 
@@ -871,8 +855,10 @@ class RunsListRequest(HelperRequestBase):
     type: Literal["runs.list"] = "runs.list"
     project: str
     digest_runs: Annotated[tuple[RunId, ...], Field(max_length=RUN_DIGEST_MAX_RUNS)] | None = None
-    """The runs to read a ``digest`` of, which costs a pass over each one's journal, so a
-    client names only the runs it shows. Sent only after ``hello`` returned ``run_digest``."""
+    """The runs to read a ``digest`` of (a pass over each journal), so a client names only the runs
+    it shows. Sent only after ``hello`` returned ``run_digest``."""
+    with_dashboard: bool | None = None
+    """Also each digest's ``dashboard`` and run's ``attention``; needs ``run_dashboard``."""
 
 
 class ResumeRun(BaseModel):
@@ -1174,6 +1160,7 @@ HELPER_REQUEST_FEATURES: Final[Mapping[type[HelperRequestBase], HelperFeature]] 
     MachineDescribeRequest: HelperFeature.MACHINE_DESCRIBE,
     CheckoutInspectRequest: HelperFeature.CHECKOUT_INSPECT,
     RunPreflightRequest: HelperFeature.PREFLIGHT,
+    ProjectTaskGoalRequest: HelperFeature.PROJECT_GOAL,
     ExamplesListRequest: HelperFeature.EXAMPLES,
     ProjectCreateFromExampleRequest: HelperFeature.EXAMPLES,
     ProjectCopyOutRequest: HelperFeature.EXAMPLES,
@@ -1183,6 +1170,7 @@ HELPER_REQUEST_FEATURES: Final[Mapping[type[HelperRequestBase], HelperFeature]] 
     ComputeRemoveClusterRequest: HelperFeature.MACHINE_COMPUTE,
     AgentLoginsListRequest: HelperFeature.AGENT_LOGINS,
     AgentLoginsStartRequest: HelperFeature.AGENT_LOGINS,
+    UsageWindowRequest: HelperFeature.USAGE_WINDOW,
 }
 """The feature each gated request needs, exported with the generated wire contract."""
 
@@ -1206,7 +1194,10 @@ HELPER_FIELD_FEATURES: Final[Mapping[type[HelperRequestBase], Mapping[str, Helpe
     HarnessesListRequest: {"with_generations": HelperFeature.HARNESS_GENERATIONS},
     LogsListRequest: {"span_id": HelperFeature.LOGS_BY_SPAN},
     RunsReadEventsRequest: {"with_totals": HelperFeature.RUN_HISTORY_PAGES},
-    RunsListRequest: {"digest_runs": HelperFeature.RUN_DIGEST},
+    RunsListRequest: {
+        "digest_runs": HelperFeature.RUN_DIGEST,
+        "with_dashboard": HelperFeature.RUN_DASHBOARD,
+    },
     ExamplesListRequest: {"with_catalogue": HelperFeature.EXAMPLE_CATALOGUE},
 }
 """The feature each gated optional field needs when it is set (not ``None``), exported too."""
@@ -1254,7 +1245,9 @@ HelperRequest = Annotated[
     | ComputeAddClusterRequest
     | ComputeRemoveClusterRequest
     | AgentLoginsListRequest
-    | AgentLoginsStartRequest,
+    | AgentLoginsStartRequest
+    | ProjectTaskGoalRequest
+    | UsageWindowRequest,
     Field(discriminator="type"),
 ]
 """Every message a client sends on a helper channel."""
@@ -1332,21 +1325,6 @@ class InstancesChanged(BaseModel):
     listing: InstanceList
 
 
-class TasksListReply(HelperReplyBase):
-    """The project's tasks."""
-
-    type: Literal["tasks.list"] = "tasks.list"
-    tasks: TaskList
-
-
-class RunClosing(StrEnum):
-    """The journal's last word on a run: the terminal event it ends with, if it has one."""
-
-    FINISHED = "finished"
-    FAILED = "failed"
-    INTERRUPTED = "interrupted"
-
-
 class RunDigest(BaseModel):
     """What a run's journal says at a glance, for a list row; never a replay of the run.
 
@@ -1356,13 +1334,12 @@ class RunDigest(BaseModel):
     ``None`` when the run adopted nothing. The best raw reading of a gate is not it: that may be
     an idea that later failed. ``best_so_far_ratio`` is what the page headlines before the run has
     opened an adoption (while it works): the best idea that passed and beat the input, worded as an
-    improvement the same way; ``None`` before one does and once an adoption exists. ``ideas`` is ``None`` for a journal
-    that predates the run trace (``TraceFormat.PREDATES_TRACE``): it records rounds, not ideas,
-    so no count is true. ``duration_s`` runs from the
-    journal's first event to the last step it recorded; ``None`` for a run with no events.
-    ``ending`` is the run's ending record and ``closing`` its terminal event: both ``None``
-    for a run still going or one whose server died without a word, which is how a run's
-    ending is known after its registry tombstone expired (a day).
+    improvement the same way; ``None`` before one does and once an adoption exists. ``ideas`` is
+    ``None`` for a journal that predates the run trace (``TraceFormat.PREDATES_TRACE``): it
+    records rounds, not ideas, so no count is true. ``duration_s`` runs from the journal's first
+    event to the last step it recorded; ``None`` for a run with no events. ``ending`` is the run's
+    ending record and ``closing`` its terminal event: both ``None`` for a run still going or one
+    whose server died without a word; they are how an ending is known once its tombstone expired.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -1374,6 +1351,8 @@ class RunDigest(BaseModel):
     duration_s: NonNegativeFloat | None
     ending: RunEndingFact | None
     closing: RunClosing | None
+    dashboard: Annotated[RunDashboard | None, Field(exclude_if=lambda each: each is None)] = None
+    """The tile's data when ``runs.list`` asked ``with_dashboard``; absent otherwise."""
 
 
 class RunDigestUnreadable(BaseModel):
@@ -1402,8 +1381,10 @@ class RunSummary(BaseModel):
         Annotated[RunDigest | RunDigestUnreadable, Field(discriminator="kind")] | None,
         Field(exclude_if=lambda digest: digest is None),
     ] = None
-    """What the run's journal says, for each run the request named in ``digest_runs`` (feature
-    ``run_digest``); absent for the others, so a strict client that did not ask never sees it."""
+    """What the journal says of each run named in ``digest_runs`` (feature ``run_digest``); absent for
+    the others, so a strict client that did not ask never sees it."""
+    attention: Annotated[RunAttention | None, Field(exclude_if=lambda each: each is None)] = None
+    """Why the run needs its user when ``runs.list`` asked ``with_dashboard``; absent otherwise."""
 
 
 class RunList(BaseModel):
@@ -1823,6 +1804,8 @@ HelperReply = (
     | ComputeRemoveClusterReply
     | AgentLoginsListReply
     | AgentLoginsStartReply
+    | ProjectTaskGoalReply
+    | UsageWindowReply
 )
 """A request's result; its ``type`` is the request's."""
 

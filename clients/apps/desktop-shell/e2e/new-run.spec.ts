@@ -99,6 +99,7 @@ test('an example of LLM serving: its model, its hardware, its goal, then the run
       harness: {provider: 'claude', model: 'claude-sonnet-4-5'},
       options: {rounds: 3, results: 'keep', roles: []},
       agents: {},
+      measure_on: {kind: 'same_machine'},
       args: [],
     },
   ]);
@@ -152,8 +153,12 @@ test('your own project: a recent one, its task, the agent on its machine, and th
   await expect(question(page, 'Which task?')).toBeVisible();
   await choose(page, 'Task', 'mpmc');
   await proceed(page);
-  // The goal is read when the run starts: there is no copy of it here yet.
-  await expect(main(page)).toContainText("VibeSys reads this task's goal when the run starts.");
+  // The goal is the task's own OBJECTIVE.md, read from the machine, with the axes it declares.
+  await expect(main(page)).toContainText('Make the mpmc queue faster');
+  await expect(main(page)).toContainText('.vibesys/tasks/mpmc/OBJECTIVE.md');
+  await expect(main(page)).toContainText('Higher is better');
+  await expect(main(page)).toContainText('ops_per_second');
+  await expect(main(page)).toContainText('Lower is better');
   await proceed(page, 'Looks right');
   // The project is on host-b, so that is where the agent works.
   await expect(main(page).getByRole('radio', {name: /This Mac/})).toBeDisabled();
@@ -173,10 +178,45 @@ test('your own project: a recent one, its task, the agent on its machine, and th
       harness: {provider: 'claude', model: 'claude-opus-4-5'},
       options: {results: 'keep', roles: []},
       agents: {},
+      measure_on: {kind: 'same_machine'},
       args: [],
     },
   ]);
 });
+
+test('a machine whose VibeSys cannot read a goal says it is read when the run starts', async ({
+  page,
+}) => {
+  const newRun = SEED.newRun;
+  if (newRun === undefined) throw new Error('the seed has no New run helper');
+  await openAt(page, pageNamed('goal project'), {
+    ...SEED,
+    newRun: {
+      ...newRun,
+      features: ['run_options', 'preflight', 'examples', 'run_roles', 'example_catalogue'],
+    },
+  });
+  await expect(main(page)).toContainText('Goal not shown here');
+  await expect(main(page)).not.toContainText('Higher is better');
+});
+
+for (const width of [1440, 1000, 660]) {
+  test(`Back and the way on start at one top edge at ${width}px, a reason hanging below`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({width, height: 900});
+    // A page whose Continue is blocked (it gives a reason under it) and Review's Start run.
+    for (const name of ['domain', 'review']) {
+      await openAt(page, pageNamed(name));
+      expect(await page.evaluate(() => window.innerWidth)).toBe(width);
+      const forward = name === 'domain' ? 'Continue' : 'Start run';
+      const top = async (label: string) =>
+        (await main(page).getByRole('button', {name: label, exact: true}).boundingBox())?.y;
+      expect(await top('Back')).toBeDefined();
+      expect(await top('Back')).toBe(await top(forward));
+    }
+  });
+}
 
 test('the steps show their answers and go back to them; a later question waits for the earlier', async ({
   page,
@@ -205,6 +245,58 @@ test('the steps show their answers and go back to them; a later question waits f
     'true',
   );
 });
+
+for (const width of [1440, 1000, 660]) {
+  test(`every step has its number in a neutral circle, the current one filled, no status colour, at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({width, height: 900});
+    await openAt(page, pageNamed('goal LLM'));
+    expect(await page.evaluate(() => window.innerWidth)).toBe(width);
+    const markers = await page.evaluate(() =>
+      [...document.querySelectorAll('.vs-sidebar-marker')].map(marker => ({
+        text: marker.textContent,
+        state: marker.getAttribute('data-state'),
+        font: getComputedStyle(marker).fontFamily,
+        radius: getComputedStyle(marker).borderRadius,
+        dots: marker.closest('.vs-sidebar-item')?.querySelectorAll('.vs-dot').length,
+      })),
+    );
+    expect(markers.map(each => each.text)).toEqual(['1', '2', '3', '4', '5', '6', '7', '8']);
+    expect(markers.map(each => each.state)).toEqual([
+      'neutral',
+      'neutral',
+      'neutral',
+      'neutral',
+      'current',
+      'neutral',
+      'neutral',
+      'muted',
+    ]);
+    // The collapsed control (shown when narrow) counts the same steps.
+    await expect(page.getByText('5 of 8 · Goal').first()).toBeAttached();
+    expect(markers.every(each => each.font.includes('JetBrains Mono'))).toBe(true);
+    expect(markers.every(each => each.dots === 0)).toBe(true);
+  });
+}
+
+for (const width of [1440]) {
+  test(`the longest step answer has room to spare on one line at ${width}px`, async ({page}) => {
+    await page.setViewportSize({width, height: 900});
+    await openAt(page, pageNamed('goal LLM'));
+    expect(await page.evaluate(() => window.innerWidth)).toBe(width);
+    const slack = await page.evaluate(() =>
+      [...document.querySelectorAll('.vs-sidebar-text > *')].map(line => {
+        const range = document.createRange();
+        range.selectNodeContents(line);
+        const box = line.getBoundingClientRect();
+        return {text: line.textContent, slack: box.width - range.getBoundingClientRect().width};
+      }),
+    );
+    const longest = slack.find(each => each.text === 'Opus 4.5 \u00b7 Claude Code');
+    expect(longest?.slack ?? 0).toBeGreaterThan(24);
+  });
+}
 
 test('changing the domain clears the questions of the old one, and Back returns a page', async ({
   page,
@@ -275,7 +367,7 @@ test('a helper without the catalogue lists examples and their tasks, with no dom
   await expect(question(page, 'Which task?')).toBeVisible();
   await choose(page, 'Task', 'vllm');
   await proceed(page);
-  await expect(main(page)).toContainText('It is not shown here yet.');
+  await expect(main(page)).toContainText('Goal not shown here');
 });
 
 test('a machine with no examples dims that start, and says so', async ({page}) => {
@@ -315,6 +407,7 @@ test('Run again opens Review with the run as it was started', async ({page}) => 
     harness: {provider: 'claude', model: 'claude-sonnet-4-5'},
     options: {rounds: 4, time_limit_s: null, results: 'keep', roles: []},
     agents: {},
+    measure_on: {kind: 'same_machine'},
     args: ['--max-in-flight', '3'],
   };
   const recent = (SEED.recent ?? []).map(each =>
@@ -456,14 +549,13 @@ test('an agent for a role: closed until opened, chosen from the run harness, lis
   await openAt(page, pageNamed('agent project'));
   const toggle = main(page).getByRole('button', {name: /Use a different agent for a role/});
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  await expect(toggle).toContainText("Every role uses the run's agent");
+  await expect(toggle).toContainText('Same as the run');
   await toggle.click();
   const judge = main(page).getByLabel('Judge model');
   await expect(judge).toHaveValue('');
   // Models sit under their maker and family; the run's own harness is the only one a role may use.
   await expect(judge.locator('optgroup')).toHaveAttribute('label', 'Anthropic \u00b7 Claude');
   await expect(main(page).getByLabel('Judge harness')).toHaveCount(0);
-  await expect(main(page)).toContainText("every role uses the run's harness");
   await judge.selectOption({label: 'Sonnet 4.5'});
   await expect(judge).not.toHaveValue('');
   // The run's own model is the same as no choice: the role follows the run again.
@@ -501,8 +593,65 @@ test('a machine whose VibeSys cannot run an agent per role says so on the Agent 
     ...SEED,
     newRun: {...newRun, features: ['run_options', 'preflight', 'examples', 'run_roles']},
   });
-  await expect(main(page).getByText(/cannot run a different agent for a role/)).toBeVisible();
+  await expect(main(page).getByText('Not supported on this machine')).toBeVisible();
   await expect(main(page).getByRole('button', {name: /different agent for a role/})).toHaveCount(0);
+});
+
+test('Where: a machine with nothing set up links to its Settings, and Back returns to the same step', async ({
+  page,
+}) => {
+  await openAt(page, pageNamed('where'));
+  const measured = main(page).getByRole('radiogroup', {name: 'Measured on'});
+  await expect(measured.getByRole('radio')).toHaveCount(1);
+  await expect(measured.getByRole('radio', {name: /Same machine/})).toBeVisible();
+  await main(page).getByRole('button', {name: 'Set up on host-b'}).click();
+  await expect(page.getByRole('combobox', {name: 'Machine'})).toHaveValue('ssh:host-b');
+  await expect(
+    main(page).getByRole('heading', {name: 'Clusters and clouds'}).first(),
+  ).toBeVisible();
+  await page.getByRole('button', {name: 'Back', exact: true}).click();
+  await expect(question(page, /Where does the agent work/)).toBeVisible();
+  await expect(steps(page).getByRole('button', {name: /Where it runs/})).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
+  await expect(
+    main(page)
+      .getByRole('radiogroup', {name: 'Agent works on'})
+      .getByRole('radio', {name: /host-b/}),
+  ).toBeChecked();
+});
+
+test('Where: only what the machine has set up is offered, and the choice is the measurement target', async ({
+  page,
+}) => {
+  await openAt(page, pageNamed('where'));
+  await main(page)
+    .getByRole('radiogroup', {name: 'Agent works on'})
+    .getByRole('radio', {name: /This Mac/})
+    .check();
+  const measured = main(page).getByRole('radiogroup', {name: 'Measured on'});
+  await expect(measured.getByRole('radio')).toHaveCount(5);
+  for (const name of [
+    'Same machine',
+    'Slurm · lab-h100',
+    'Slurm · campus',
+    'Slurm · amd-hpc',
+    'Modal',
+  ]) {
+    await expect(measured.getByRole('radio', {name: new RegExp(name)})).toBeVisible();
+  }
+  await expect(main(page).getByRole('button', {name: /^Set up on/})).toHaveCount(0);
+  await measured.getByRole('radio', {name: 'Slurm · lab-h100'}).check();
+  await proceed(page);
+  await proceed(page);
+  await expect(main(page)).toContainText('Slurm · lab-h100');
+  await main(page).getByRole('button', {name: 'Create the project'}).click();
+  await expect(start(page)).not.toHaveAttribute('aria-disabled', 'true');
+  await start(page).click();
+  await expect(page.getByRole('radiogroup', {name: 'Show'})).toBeVisible();
+  const {started} = await fakeNewRun(page);
+  expect(started).toMatchObject([{measure_on: {kind: 'slurm', cluster: 'lab-h100'}}]);
 });
 
 test('More options starts closed, says what it holds, and stays as left on each machine', async ({

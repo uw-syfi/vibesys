@@ -26,6 +26,7 @@ from server.host_api import (
 )
 from server.host_helper_os import FileProjects
 from server.host_helper_requests import answer
+from server.host_run_dashboard import RunDashboard
 from server.run_digest import digest_journal
 from vs_project.api import Project
 from vs_project.api.testing import FakeGitRepositories
@@ -133,6 +134,19 @@ def _idea_count(ideas: list[_Idea]) -> int:
     )
 
 
+def _untimed(digest: RunDigest) -> RunDigest:
+    """``digest`` without the figures that say when the journal's events were, which noise moves."""
+    dashboard = digest.dashboard
+    return digest.model_copy(
+        update={
+            "duration_s": None,
+            "dashboard": None
+            if dashboard is None
+            else dashboard.model_copy(update={"last_event_at": None}),
+        }
+    )
+
+
 @given(ideas=st.lists(_IDEAS, max_size=8), noise=_NOISE)
 @example(ideas=[], noise=[])
 def test_a_digest_counts_ideas_as_the_run_page_does(ideas: list[_Idea], noise: list[str]) -> None:
@@ -140,9 +154,7 @@ def test_a_digest_counts_ideas_as_the_run_page_does(ideas: list[_Idea], noise: l
 
     assert digest.ideas == _idea_count(ideas)
     quiet = digest_journal(_journal(ideas, []))
-    assert digest.model_copy(update={"duration_s": None}) == quiet.model_copy(
-        update={"duration_s": None}
-    )
+    assert _untimed(digest) == _untimed(quiet)
 
 
 @given(
@@ -305,7 +317,9 @@ def test_a_digest_reads_when_and_how_the_run_ended() -> None:
 
     digest = digest_journal(lines)
 
-    assert digest == RunDigest(
+    assert digest.dashboard is not None
+    assert digest.dashboard.points == ()
+    assert digest.model_copy(update={"dashboard": None}) == RunDigest(
         ideas=0,
         adopted_ratio=None,
         best_so_far_ratio=None,
@@ -333,6 +347,7 @@ def test_a_journal_with_no_events_has_no_duration() -> None:
         duration_s=None,
         ending=None,
         closing=None,
+        dashboard=RunDashboard(points=(), points_omitted=0, failed_streak=0, last_event_at=None),
     )
 
 

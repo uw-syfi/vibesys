@@ -11,10 +11,12 @@ import type {
   ExampleList,
   HelperFeature,
   MachineDescription,
+  TaskGoal,
 } from '@vibesys/contracts/host-helper';
 import {type HostId, type HostKey, hostFromKey} from '@vibesys/hosts';
 import {
   type HarnessPick,
+  type MeasureTarget,
   parseRunStart,
   type RoleOption,
   type RunOptions,
@@ -30,10 +32,11 @@ export const NEW_RUN_CHANNELS = {
   createFromExample: 'vibesys:welcome:create-from-example',
   copyOut: 'vibesys:welcome:copy-out',
   startRun: 'vibesys:welcome:start-run',
+  taskGoal: 'vibesys:welcome:task-goal',
   helperFeatures: 'vibesys:welcome:helper-features',
 } as const;
 
-export type {HarnessPick, RoleOption, RunOptions};
+export type {HarnessPick, MeasureTarget, RoleOption, RunOptions};
 
 /** What the inputs of a New run are: the checks are for exactly these, and a start uses them. */
 export interface RunInputs extends RunStart {
@@ -83,6 +86,8 @@ export interface NewRunWelcomeBridge {
     destination: string,
   ): Promise<WelcomeResult<CreatedProject>>;
   startRun(host: HostKey, inputs: RunInputs): Promise<WelcomeResult<StartedRun>>;
+  /** The goal text and objectives of `task` in the user's own `project` on `host`. */
+  taskGoal(host: HostKey, project: string, task: string): Promise<WelcomeResult<Offered<TaskGoal>>>;
   /** The features `host`'s helper agreed to: what New run may ask of it. */
   helperFeatures(host: HostKey): Promise<WelcomeResult<readonly HelperFeature[]>>;
 }
@@ -104,6 +109,12 @@ export type NewRunRequest =
       readonly destination: string;
     }
   | {readonly kind: 'start-run'; readonly host: HostId; readonly inputs: RunInputs}
+  | {
+      readonly kind: 'task-goal';
+      readonly host: HostId;
+      readonly project: string;
+      readonly task: string;
+    }
   | {readonly kind: 'helper-features'; readonly host: HostId};
 
 function record(value: unknown, what: string, keys: readonly string[]): Record<string, unknown> {
@@ -131,6 +142,7 @@ function parseRunInputs(value: unknown): RunInputs {
     'harness',
     'options',
     'agents',
+    'measure_on',
     'args',
   ]);
   return {
@@ -140,6 +152,7 @@ function parseRunInputs(value: unknown): RunInputs {
       harness: fields['harness'],
       options: fields['options'],
       agents: fields['agents'],
+      measure_on: fields['measure_on'],
       args: fields['args'],
     }),
   };
@@ -170,6 +183,13 @@ export function parseNewRunRequest(
       return {kind: 'copy-out', host, source: project(second), destination: project(third)};
     case NEW_RUN_CHANNELS.startRun:
       return {kind: 'start-run', host, inputs: parseRunInputs(second)};
+    case NEW_RUN_CHANNELS.taskGoal:
+      return {
+        kind: 'task-goal',
+        host,
+        project: project(second),
+        task: text(third, 'the task'),
+      };
     case NEW_RUN_CHANNELS.helperFeatures:
       return {kind: 'helper-features', host};
   }

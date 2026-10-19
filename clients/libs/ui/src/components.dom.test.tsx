@@ -26,8 +26,11 @@ import {
   Scrubber,
   SegmentedControl,
   Select,
+  StackedArea,
+  StackedBars,
   StatusDot,
   type StatusTone,
+  Table,
   Text,
   TextInput,
   type TextStyle,
@@ -775,5 +778,97 @@ describe('Text', () => {
         expect(css).toContain(`--text-${role}-${part}:`);
       }
     });
+  });
+});
+
+describe('StackedBars', () => {
+  const bar = (id: string, parts: readonly number[]) => ({
+    id,
+    title: `${id}: ${parts.join('+')}`,
+    total: parts.reduce((sum, part) => sum + part, 0),
+    segments: parts.map((value, index) => ({key: `${id}-${index}`, series: index, value})),
+  });
+
+  test('draws every bar to the tallest total, each segment its share of it', async () => {
+    const container = await mount(
+      <StackedBars
+        label="Usage over time"
+        unit="tokens"
+        bars={[bar('a', [30, 10]), bar('b', [20])]}
+        from="Oct 1"
+        to="Oct 2"
+      />,
+    );
+    const heights = [...container.querySelectorAll<HTMLElement>('.vs-bars-bar')].map(each =>
+      [...each.querySelectorAll<HTMLElement>('.vs-bars-segment')].map(
+        segment => segment.style.height,
+      ),
+    );
+    expect(heights).toEqual([['75%', '25%'], ['50%']]);
+    expect(container.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe(
+      'Usage over time, in tokens',
+    );
+    expect(container.textContent).toContain('Oct 1');
+    expect(container.textContent).toContain('Oct 2');
+  });
+
+  test('draws nothing tall when nothing was spent', async () => {
+    const container = await mount(
+      <StackedBars label="Usage" unit="tokens" bars={[bar('a', [0])]} />,
+    );
+    expect(container.querySelector<HTMLElement>('.vs-bars-segment')?.style.height).toBe('0%');
+  });
+});
+
+describe('StackedArea', () => {
+  test('stacks the layers over the slices and names each slice for the pointer', async () => {
+    const container = await mount(
+      <StackedArea
+        label="Running total"
+        unit="tokens"
+        titles={['first', 'second']}
+        layers={[
+          {key: 'a', series: 1, values: [10, 20]},
+          {key: 'b', series: 2, values: [5, 5], dim: true},
+        ]}
+      />,
+    );
+    expect(container.querySelectorAll('.vs-area-layer')).toHaveLength(2);
+    expect(container.querySelectorAll('.vs-area-layer[data-dim]')).toHaveLength(1);
+    expect(
+      [...container.querySelectorAll('.vs-area-slice title')].map(each => each.textContent),
+    ).toEqual(['first', 'second']);
+  });
+});
+
+describe('Table folds and kinds', () => {
+  test('a folding row has a named chevron, a sub row and the total cannot be selected', async () => {
+    const picked: string[] = [];
+    let folded = 0;
+    const rows = [
+      {id: 'a', kind: undefined},
+      {id: 'b', kind: 'sub' as const},
+      {id: 'c', kind: 'total' as const},
+    ];
+    const container = await mount(
+      <Table
+        label="Rows"
+        columns={[{key: 'id', header: 'id', cell: row => row.id}]}
+        rows={rows}
+        rowKey={row => row.id}
+        rowKind={row => row.kind}
+        select={key => picked.push(key)}
+        fold={row =>
+          row.id === 'a' ? {open: false, toggle: () => (folded += 1), label: 'Expand a'} : 'none'
+        }
+      />,
+    );
+    const trs = [...container.querySelectorAll<HTMLElement>('tbody tr')];
+    await act(async () =>
+      container.querySelector<HTMLElement>('button[aria-label="Expand a"]')?.click(),
+    );
+    for (const row of trs) await act(async () => row.click());
+    expect(folded).toBe(1);
+    expect(picked).toEqual(['a']);
   });
 });

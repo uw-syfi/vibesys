@@ -21,9 +21,9 @@ const INERT_BY_DESIGN: readonly {
     why: 'a path field that offers completions as it is typed in; "the folder field completes paths" drives it',
   },
   {
-    page: /^where$/,
+    page: /^where/,
     name: /^Same machine/,
-    why: 'the only place a result can be measured today; it is already the chosen one',
+    why: 'the place measured on until another is chosen; it is already the chosen one',
   },
 ];
 

@@ -11,6 +11,7 @@ export type Step =
   | 'harnesses'
   | 'examples'
   | 'tasks'
+  | 'goal'
   | 'preflight'
   | 'fix'
   | 'start';

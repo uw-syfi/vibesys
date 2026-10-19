@@ -1,35 +1,29 @@
 """Stdio MCP server exposing one run's read-model to experiment chat.
 
-Replaces the old file-materialization evidence path
-(`server.chat.evidence.TrajectoryEvidence`, deleted): instead of copying a
-run's portable state and raw logs into the chat agent's sandbox for `rg`/
-`tail`/`jq`, this subprocess opens the run's own read-model
-(`launch.open_run_store`) and serves it as a handful of read-only MCP
-tools. A chat agent launches `python -m entrypoints.chat_tools_server
---run-id <id> --project-root <path>` per `vibesys.api.session
-._OpenedAgentEnvironment.investigation_tools`; this module rebuilds its own
-tool list from those two primitives as a standalone agent tool server.
+Instead of copying a run's portable state and raw logs into the chat agent's sandbox
+for `rg`/`tail`/`jq`, this subprocess opens the run's own read-model
+(`launch.open_run_store`) and serves it as a handful of read-only MCP tools, in the
+vocabulary the desktop app shows: an *idea* (what the code calls a hypothesis) is one
+thing the run tried, a *step* (a round) is one pass of work on it. A chat agent launches
+`python -m entrypoints.chat_tools_server --run-id <id> --project-root <path>` per
+`launch.agents._investigation_tools`.
 
 Tool set:
 
-- `run_summary`: this run's top-level facts (loop, status, current round,
-  active hypothesis, experiment revision).
-- `list_hypotheses`: one line per hypothesis (id, title, round range,
-  resolved outcome) -- the structured replacement for grepping
-  `trajectory/state/agent/hypotheses.json`-shaped files by hand.
-- `get_hypothesis`: one hypothesis's full record, including its per-round
-  history.
-- `list_rounds`: every completed round, run-wide, in chronological order.
-- `list_state_files` / `read_state_file`: raw access to this run's portable
-  state documents (`RunRecord.portable_documents`, read whichever branch is
-  checked out), for
-  detail the DTOs above do not carry. This is the direct equivalent of what
-  `TrajectoryEvidence` used to copy into `trajectory/state/`; the raw
-  per-attempt/event logs it also copied from `log_dir` are not reproduced
-  here because `log_dir` lives outside the project root
-  (`vs_project.ProjectState.log_directory`, a machine-local path), which is
-  the only thing this subprocess's `--project-root` argument can resolve
-  into.
+- `run_summary`: this run's top-level facts (loop, status, current step, active idea,
+  experiment revision).
+- `list_ideas`: one line per idea (id, title, step range, resolved outcome).
+- `get_idea`: one idea's full record, including its per-step history.
+- `list_steps`: every completed step, run-wide, in chronological order.
+- `list_state_files` / `read_state_file`: raw access to this run's portable state
+  documents (`RunRecord.portable_documents`, read whichever branch is checked out), for
+  detail the tools above do not carry. The raw per-attempt/event logs live in `log_dir`,
+  a machine-local path outside the project root, which is the only thing this
+  subprocess's `--project-root` argument can resolve into.
+- `propose_steer`: the agent's only steering tool. It checks a suggestion and returns it as
+  a `SteerProposalReceipt`, which the run server publishes as a `steer_proposed` event for
+  the operator to edit, send or dismiss. It has no way to send: sending is the operator's
+  `command.control`, so the agent cannot send guidance because no tool here does.
 """
 
 from __future__ import annotations
@@ -40,6 +34,13 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from launch import open_run_store
+from vibesys.api import (
+    STEER_PROPOSAL_KIND,
+    SteerMode,
+    SteerProposal,
+    SteerProposalReceipt,
+    SteerTarget,
+)
 from vibesys.api.hypothesis import agent_projection
 from vs_mcp.api import ToolSpec, serve_stdio
 from vs_project.api import Git, Project
@@ -48,6 +49,19 @@ from vs_sim.api import OsProcesses, OsThreads
 if TYPE_CHECKING:
     from vibesys.api import RunStore
 
+PROPOSE_STEER_TOOL = "propose_steer"
+"""The one steering tool; the tool-list test holds the chat agent to it."""
+
+READ_TOOLS = (
+    "run_summary",
+    "list_ideas",
+    "get_idea",
+    "list_steps",
+    "list_state_files",
+    "read_state_file",
+)
+"""The read-only tools, in the order they are offered."""
+
 
 class _NoArgs(BaseModel):
     """Argument schema for tools that take no input."""
@@ -55,12 +69,12 @@ class _NoArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class _HypothesisArgs(BaseModel):
-    """Argument schema for `get_hypothesis`."""
+class _IdeaArgs(BaseModel):
+    """Argument schema for `get_idea`."""
 
     model_config = ConfigDict(extra="forbid")
 
-    hypothesis_id: str = Field(description="Hypothesis id, as returned by list_hypotheses.")
+    idea_id: str = Field(description="Idea id, as returned by list_ideas.")
 
 
 class _StateFileArgs(BaseModel):
@@ -73,6 +87,32 @@ class _StateFileArgs(BaseModel):
     )
 
 
+class _ProposeSteerArgs(BaseModel):
+    """Argument schema for `propose_steer`: the fields of a steer the operator may send."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(
+        min_length=1,
+        description="The guidance, written to the agents that will read it.",
+    )
+    target: SteerTarget = Field(
+        default_factory=SteerTarget,
+        description=(
+            "Whom it is for: {kind: run} for the whole run (the default), or {kind: role, id}, "
+            "{kind: attempt, id} or {kind: item, id}."
+        ),
+    )
+    mode: SteerMode = Field(
+        default=SteerMode.NEXT_TURN,
+        description=(
+            "next_turn: the target's next turn takes it, once. standing: every turn of the "
+            "target from now on, until the operator withdraws it. interrupt: a turn running "
+            "now, else the next one."
+        ),
+    )
+
+
 def _run_summary_tool(store: RunStore, run_id: str) -> ToolSpec[_NoArgs]:
     def handler(_args: _NoArgs) -> str:
         view = store.get_run(run_id)
@@ -82,114 +122,110 @@ def _run_summary_tool(store: RunStore, run_id: str) -> ToolSpec[_NoArgs]:
             return summary
         return (
             f"{summary}\n"
-            f"current_round: {projection.current_round}\n"
-            f"active_hypothesis_id: {projection.active_hypothesis_id or '(none)'}\n"
+            f"current_step: {projection.current_round}\n"
+            f"active_idea_id: {projection.active_hypothesis_id or '(none)'}\n"
             f"experiment_revision: {projection.experiment_revision}\n"
-            f"hypothesis_count: {len(projection.hypotheses)}\n"
-            f"round_count: {len(projection.rounds)}"
+            f"idea_count: {len(projection.hypotheses)}\n"
+            f"step_count: {len(projection.rounds)}"
         )
 
     return ToolSpec(
         name="run_summary",
         description=(
-            "Return this run's top-level status: outer loop, current round, active "
-            "hypothesis, and experiment revision."
+            "Return this run's top-level status: outer loop, current step, active idea, "
+            "and experiment revision."
         ),
         input_schema=_NoArgs,
         handler=handler,
     )
 
 
-def _list_hypotheses_tool(store: RunStore, run_id: str) -> ToolSpec[_NoArgs]:
+def _list_ideas_tool(store: RunStore, run_id: str) -> ToolSpec[_NoArgs]:
     def handler(_args: _NoArgs) -> str:
         projection = agent_projection(store.get_run(run_id))
         if projection is None or not projection.hypotheses:
-            return "(no hypotheses)"
+            return "(no ideas)"
         lines = []
-        for hypothesis in projection.hypotheses:
-            marker = (
-                " [active]" if hypothesis.hypothesis_id == projection.active_hypothesis_id else ""
-            )
+        for idea in projection.hypotheses:
+            marker = " [active]" if idea.hypothesis_id == projection.active_hypothesis_id else ""
             lines.append(
-                f"{hypothesis.hypothesis_id}{marker}: {hypothesis.title or '(untitled)'} "
-                f"(rounds {hypothesis.first_round}-{hypothesis.last_round}, "
-                f"outcome={hypothesis.resolved_outcome or 'pending'})"
+                f"{idea.hypothesis_id}{marker}: {idea.title or '(untitled)'} "
+                f"(steps {idea.first_round}-{idea.last_round}, "
+                f"outcome={idea.resolved_outcome or 'pending'})"
             )
         return "\n".join(lines)
 
     return ToolSpec(
-        name="list_hypotheses",
-        description="List every hypothesis tried in this run, with its round range and outcome.",
+        name="list_ideas",
+        description="List every idea tried in this run, with its step range and outcome.",
         input_schema=_NoArgs,
         handler=handler,
     )
 
 
-def _get_hypothesis_tool(store: RunStore, run_id: str) -> ToolSpec[_HypothesisArgs]:
-    def handler(args: _HypothesisArgs) -> str:
+def _get_idea_tool(store: RunStore, run_id: str) -> ToolSpec[_IdeaArgs]:
+    def handler(args: _IdeaArgs) -> str:
         projection = agent_projection(store.get_run(run_id))
-        if projection is None:
-            return f"(no hypothesis {args.hypothesis_id!r}; see list_hypotheses)"
-        hypothesis = next(
-            (h for h in projection.hypotheses if h.hypothesis_id == args.hypothesis_id), None
+        idea = (
+            None
+            if projection is None
+            else next((h for h in projection.hypotheses if h.hypothesis_id == args.idea_id), None)
         )
-        if hypothesis is None:
-            return f"(no hypothesis {args.hypothesis_id!r}; see list_hypotheses)"
+        if idea is None:
+            return f"(no idea {args.idea_id!r}; see list_ideas)"
         lines = [
-            f"id: {hypothesis.hypothesis_id}",
-            f"title: {hypothesis.title or '(none)'}",
-            f"claim: {hypothesis.claim or '(none)'}",
-            f"action: {hypothesis.action or '(none)'}",
-            f"rounds: {hypothesis.first_round}-{hypothesis.last_round}",
-            f"resolved_outcome: {hypothesis.resolved_outcome or '(pending)'}",
-            f"judge_verdict: {hypothesis.judge_verdict or '(none)'}",
-            f"strategy_disposition: {hypothesis.strategy_disposition}",
-            f"active: {hypothesis.active}",
-            f"best: {hypothesis.best}",
+            f"id: {idea.hypothesis_id}",
+            f"title: {idea.title or '(none)'}",
+            f"claim: {idea.claim or '(none)'}",
+            f"action: {idea.action or '(none)'}",
+            f"steps: {idea.first_round}-{idea.last_round}",
+            f"resolved_outcome: {idea.resolved_outcome or '(pending)'}",
+            f"judge_verdict: {idea.judge_verdict or '(none)'}",
+            f"strategy_disposition: {idea.strategy_disposition}",
+            f"active: {idea.active}",
+            f"best: {idea.best}",
         ]
-        if hypothesis.perf_metric is not None:
+        if idea.perf_metric is not None:
             lines.append(
-                f"perf_metric: {hypothesis.perf_metric} {hypothesis.perf_unit or ''} "
-                f"(round {hypothesis.perf_metric_round}, delta {hypothesis.perf_delta_pct})"
+                f"perf_metric: {idea.perf_metric} {idea.perf_unit or ''} "
+                f"(step {idea.perf_metric_round}, delta {idea.perf_delta_pct})"
             )
-        lines.append("rounds:")
+        lines.append("steps:")
         lines.extend(
-            f"  round {round_view.round_number}: passed={round_view.passed} "
-            f"reviewed={round_view.reviewed} outcome={round_view.hypothesis_outcome or '-'} "
-            f"judge={round_view.judge_verdict or '-'} commit={round_view.commit or '-'} "
-            f"perf={round_view.perf_metric} {round_view.perf_unit or ''}"
-            for round_view in hypothesis.rounds
+            f"  step {step.round_number}: passed={step.passed} "
+            f"reviewed={step.reviewed} outcome={step.hypothesis_outcome or '-'} "
+            f"judge={step.judge_verdict or '-'} commit={step.commit or '-'} "
+            f"perf={step.perf_metric} {step.perf_unit or ''}"
+            for step in idea.rounds
         )
         return "\n".join(lines)
 
     return ToolSpec(
-        name="get_hypothesis",
+        name="get_idea",
         description=(
-            "Return one hypothesis's full record: claim, action, disposition, and "
-            "per-round history."
+            "Return one idea's full record: claim, action, disposition, and per-step history."
         ),
-        input_schema=_HypothesisArgs,
+        input_schema=_IdeaArgs,
         handler=handler,
     )
 
 
-def _list_rounds_tool(store: RunStore, run_id: str) -> ToolSpec[_NoArgs]:
+def _list_steps_tool(store: RunStore, run_id: str) -> ToolSpec[_NoArgs]:
     def handler(_args: _NoArgs) -> str:
         projection = agent_projection(store.get_run(run_id))
         if projection is None or not projection.rounds:
-            return "(no rounds)"
-        lines = [
-            f"round {round_view.round_number}: passed={round_view.passed} "
-            f"commit={round_view.commit or '-'} perf={round_view.perf_metric} "
-            f"{round_view.perf_unit or ''} official={round_view.official_evaluation} "
-            f"profile_skipped={round_view.profile_skipped}"
-            for round_view in projection.rounds
-        ]
-        return "\n".join(lines)
+            return "(no steps)"
+        return "\n".join(
+            f"step {step.round_number}: passed={step.passed} "
+            f"commit={step.commit or '-'} perf={step.perf_metric} "
+            f"{step.perf_unit or ''} official={step.official_evaluation} "
+            f"profile_skipped={step.profile_skipped}"
+            for step in projection.rounds
+        )
 
     return ToolSpec(
-        name="list_rounds",
-        description="List every completed round in this run, run-wide and in order.",
+        name="list_steps",
+        description="List every completed step in this run, run-wide and in order.",
         input_schema=_NoArgs,
         handler=handler,
     )
@@ -205,7 +241,7 @@ def _list_state_files_tool(store: RunStore, run_id: str) -> ToolSpec[_NoArgs]:
     return ToolSpec(
         name="list_state_files",
         description=(
-            "List this run's raw portable state file paths (round records, run manifest, "
+            "List this run's raw portable state file paths (step records, run manifest, "
             "and similar), for use with read_state_file."
         ),
         input_schema=_NoArgs,
@@ -232,19 +268,53 @@ def _read_state_file_tool(store: RunStore, run_id: str) -> ToolSpec[_StateFileAr
     )
 
 
+def _propose_steer_tool() -> ToolSpec[_ProposeSteerArgs]:
+    """Build `propose_steer`.
+
+    The arguments are validated by the same models the operator's `SteerRequest` uses (target
+    kind and id agree, ids have the control schema's shape, mode is one of the three). Whether the
+    run holds the role, attempt or item is the run's to say: only the run process knows its
+    declared roles and live attempts, so the operator's send resolves the target and the run
+    refuses one it cannot (`control_refused`, with the reason).
+    """
+
+    def handler(args: _ProposeSteerArgs) -> str:
+        receipt = SteerProposalReceipt(
+            kind=STEER_PROPOSAL_KIND,
+            proposal=SteerProposal(text=args.text, target=args.target, mode=args.mode),
+            note=(
+                "Proposed to the operator, who can edit it, send it or dismiss it. It has not "
+                "been sent and you cannot send it: say what you proposed and why, and that "
+                "the operator decides."
+            ),
+        )
+        return receipt.model_dump_json()
+
+    return ToolSpec(
+        name=PROPOSE_STEER_TOOL,
+        description=(
+            "Suggest guidance for the run's agents. The operator sees it as a card they can "
+            "edit, send or dismiss; nothing reaches the run unless they send it, and you "
+            "cannot send it. Read the steering skill first."
+        ),
+        input_schema=_ProposeSteerArgs,
+        handler=handler,
+    )
+
+
 def build_tools(store: RunStore, run_id: str) -> tuple[ToolSpec[Any], ...]:
-    """Build every read-only tool this server exposes for one run."""
+    """Build every tool this server exposes for one run: the read-only ones and `propose_steer`."""
     # Touch the run once up front so a missing run_id fails fast and
-    # identically across every tool, instead of six different "get_run" calls
-    # discovering it lazily.
+    # identically across every tool, instead of each "get_run" discovering it lazily.
     store.get_run(run_id)
     return (
         _run_summary_tool(store, run_id),
-        _list_hypotheses_tool(store, run_id),
-        _get_hypothesis_tool(store, run_id),
-        _list_rounds_tool(store, run_id),
+        _list_ideas_tool(store, run_id),
+        _get_idea_tool(store, run_id),
+        _list_steps_tool(store, run_id),
         _list_state_files_tool(store, run_id),
         _read_state_file_tool(store, run_id),
+        _propose_steer_tool(),
     )
 
 
@@ -253,8 +323,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="vibesys-run-mcp",
         description=(
-            "Stdio MCP server exposing one run's read-model as read-only "
-            "investigation tools for experiment chat."
+            "Stdio MCP server exposing one run's read-model as investigation tools for "
+            "experiment chat, and propose_steer, which suggests guidance without sending it."
         ),
     )
     parser.add_argument("--run-id", required=True, help="Run to expose.")

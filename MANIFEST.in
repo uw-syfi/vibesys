@@ -30,6 +30,7 @@ prune libs/*/src/*.egg-info
 graft resources/evaluators
 graft resources/profilers
 graft resources/skills
+graft resources/chat-skills
 prune resources/evaluators/*/native_runner/target
 prune resources/skills/serving-systems/repos
 

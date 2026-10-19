@@ -110,6 +110,7 @@ function base(model: RunModel, sent: ZoomEvent[]): ViewBase {
     model,
     clock: {start: 0, now: 500},
     tokens: EMPTY_LEDGER,
+    who: new Map(),
     zoom: event => void sent.push(event),
   };
 }
@@ -479,5 +480,39 @@ describe('token usage', () => {
       ]),
     );
     expect(option(container, 'Implementer').textContent).toContain('2.5k');
+  });
+});
+
+describe('who ran the agents', () => {
+  const who = new Map([
+    ['turn:boss:1', {harness: 'codex', model: 'gpt-6-luna'}],
+    ['turn:impl:2', {harness: 'claude', model: 'sonnet-5'}],
+  ]);
+
+  test('each row says the harness and model that ran its turns, from the records', async () => {
+    const view = await mount(
+      <AgentsView
+        {...base(modelOf(FAN_IN), [])}
+        who={who}
+        {...folds()}
+        selected={null}
+        compact={false}
+      />,
+    );
+    expect(option(view, 'Planner').textContent).toContain('gpt-6-luna on codex');
+    expect(option(view, 'Implementer').textContent).toContain('sonnet-5 on claude');
+    // The judge's turn has no record: its row names nothing it does not know.
+    expect(option(view, 'Judge').textContent).not.toContain(' on ');
+  });
+
+  test('the agent pane names the harness and the model', async () => {
+    const model = modelOf(FAN_IN);
+    const agent = model.agents.agents.find(each => each.id === 'impl');
+    if (agent === undefined) throw new Error('no implementer');
+    const pane = await mount(
+      <AgentPane {...base(model, [])} who={who} core={initialCoreState()} agent={agent} />,
+    );
+    expect(pane.textContent).toContain('Modelsonnet-5');
+    expect(pane.textContent).toContain('Harnessclaude');
   });
 });

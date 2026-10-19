@@ -38,12 +38,13 @@ import {
 } from '@vibesys/feature-run-page/renderer';
 import {runRecord} from '@vibesys/feature-run-page/state';
 import {
+  createMachineSettingsStore,
   createSettingsStore,
   SettingsScreen,
   type SystemAppearance,
 } from '@vibesys/feature-settings/renderer';
 import {shownTheme} from '@vibesys/feature-settings/state';
-import {hostFromKey, hostLabel} from '@vibesys/hosts';
+import {type HostKey, hostFromKey, hostLabel} from '@vibesys/hosts';
 import {settled, type WelcomeBridge} from '@vibesys/ipc';
 import type {RecentRun, RunRef} from '@vibesys/runs';
 import {sameRun} from '@vibesys/runs';
@@ -58,6 +59,8 @@ export type Schedule = (callback: () => void, delayMs: number) => () => void;
 export interface ShellStores {
   readonly sidebar: ReturnType<typeof createSidebarStore>;
   readonly settings: ReturnType<typeof createSettingsStore>;
+  /** What each machine has set up (clusters, clouds, agent logins), and the Settings section shown. */
+  readonly machineSettings: ReturnType<typeof createMachineSettingsStore>;
   readonly bridge: WelcomeBridge;
   readonly schedule: Schedule;
   readonly machines: ReturnType<typeof createMachinesStore>;
@@ -136,6 +139,16 @@ export function createShellStores(
     ...(preferences.draft === undefined ? {} : {draft: preferences.draft}),
     started: run => sidebar.store.dispatch({type: 'select', screen: {kind: 'run', run}}),
   });
+  const machineSettings = createMachineSettingsStore(bridge);
+  const machines = createMachinesStore(bridge);
+  let listed = '';
+  machines.subscribe(() => {
+    const hosts = machines.getState().machines.map(machine => machine.host);
+    if (hosts.join('\n') === listed) return;
+    listed = hosts.join('\n');
+    machineSettings.dispatch({type: 'hosts', hosts});
+  });
+  followCompute(newRun.store, machineSettings);
   let {recent, selection} = sidebar.store.getState();
   sidebar.store.subscribe(() => {
     const next = sidebar.store.getState();
@@ -146,18 +159,52 @@ export function createShellStores(
     if (next.selection !== selection) {
       selection = next.selection;
       followSelection(newRun.store, selection, next.recent);
+      if (selection.kind === 'settings' && selection.machine !== undefined) {
+        machineSettings.dispatch({
+          type: 'focus',
+          host: selection.machine,
+          section: selection.section ?? 'clusters',
+        });
+      }
     }
   });
   return {
     sidebar,
     settings,
-    machines: createMachinesStore(bridge),
+    machineSettings,
+    machines,
     newRun: newRun.store,
     newRunCompletion: newRun.completion,
     bridge,
     schedule,
     page,
   };
+}
+
+/**
+ * What the machine New run is for has set up to measure on is what its Settings data says: that
+ * data is read once for the machine, and each change of it (a cluster added in Settings) reaches
+ * New run as an event, so the two never disagree.
+ */
+function followCompute(
+  newRun: ShellStores['newRun'],
+  machineSettings: ShellStores['machineSettings'],
+): void {
+  const follow = (): void => {
+    const machine = newRun.getState().context.form.machine;
+    const view = machineSettings.getState().views[machine]?.compute;
+    if (view === undefined) {
+      machineSettings.dispatch({type: 'refresh', host: machine, what: 'compute'});
+      return;
+    }
+    const compute = view.kind === 'ready' ? view.offered : null;
+    if (newRun.getState().context.compute !== compute) {
+      newRun.dispatch({type: 'compute', machine, compute});
+    }
+  };
+  newRun.subscribe(follow);
+  machineSettings.subscribe(follow);
+  follow();
 }
 
 /**
@@ -274,15 +321,24 @@ function sidebarDraft(
   };
 }
 
+/** The machines the app knows: the saved ones, then those with runs listed. */
+function hostsOf(
+  machines: {readonly machines: readonly {readonly host: HostKey}[]},
+  sidebar: {readonly listings: readonly {readonly host: HostKey}[]},
+): HostKey[] {
+  return [...machines.machines.map(each => each.host), ...sidebar.listings.map(each => each.host)];
+}
+
 /** The window: the sidebar and the selected screen. */
 export function Shell(props: {
   readonly stores: ShellStores;
   readonly version: string;
 }): JSX.Element {
-  const {sidebar, settings, machines, newRun, newRunCompletion} = props.stores;
+  const {sidebar, settings, machineSettings, machines, newRun, newRunCompletion} = props.stores;
   const sidebarState = useStore(sidebar.store);
   const settingsState = useStore(settings);
   const machinesState = useStore(machines);
+  const machineSettingsState = useStore(machineSettings);
   const newRunState = useStore(newRun);
   const completionState = useStore(newRunCompletion);
   const select = (screen: Screen): void => sidebar.store.dispatch({type: 'select', screen});
@@ -294,12 +350,10 @@ export function Shell(props: {
           <NewRunScreen
             snapshot={newRunState}
             dispatch={newRun.dispatch}
-            machines={machineOptions([
-              ...machinesState.machines.map(machine => machine.host),
-              ...sidebarState.listings.map(listing => listing.host),
-            ])}
+            machines={machineOptions(hostsOf(machinesState, sidebarState))}
             completion={{state: completionState, dispatch: newRunCompletion.dispatch}}
             chooseCheckout={() => select({kind: 'machines'})}
+            setUp={machine => select({kind: 'settings', machine, section: 'clusters'})}
           />
         );
       case 'settings':
@@ -318,6 +372,11 @@ export function Shell(props: {
               />
             }
             machines={machineCounts(machinesState)}
+            machineSettings={{
+              state: machineSettingsState,
+              dispatch: machineSettings.dispatch,
+              machines: machinesState.machines.map(({host, label}) => ({host, label})),
+            }}
           />
         );
       case 'machines':

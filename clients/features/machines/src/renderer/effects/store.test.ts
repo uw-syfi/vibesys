@@ -19,6 +19,8 @@ function bridgeListing(machines: MachinesBridge['machines']): MachinesBridge {
     setCheckout: answer as unknown as MachinesBridge['setCheckout'],
     cancelCheckout: answer as unknown as MachinesBridge['cancelCheckout'],
     signIn: answer as unknown as MachinesBridge['signIn'],
+    compute: () => Promise.resolve({ok: true as const, value: {kind: 'unsupported' as const}}),
+    testCluster: answer as unknown as MachinesBridge['testCluster'],
     complete: () => Promise.resolve({ok: true as const, value: {kind: 'unsupported' as const}}),
   };
 }

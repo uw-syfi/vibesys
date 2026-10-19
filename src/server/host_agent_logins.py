@@ -114,6 +114,10 @@ class LoginUnavailableReason(StrEnum):
     NOT_INSTALLED = "not_installed"
     NO_LOGIN_COMMAND = "no_login_command"
     """agentshim names no command that starts this harness's login."""
+    NEEDS_TERMINAL = "needs_terminal"
+    """The login prompts the person, so only a terminal can finish it: ``command`` is what to run."""
+    START_FAILED = "start_failed"
+    """The login's command could not run, or ended without asking the person anything."""
 
 
 class LoginUnavailable(BaseModel):
@@ -123,6 +127,10 @@ class LoginUnavailable(BaseModel):
 
     outcome: Literal["unavailable"] = "unavailable"
     reason: LoginUnavailableReason
+    command: _Line | None = None
+    """The command that signs the harness in, to run in a terminal; sent when the harness has one."""
+    detail: _Line = ""
+    """What the command said when it could not start, one line."""
 
 
 LoginStartResult = Annotated[LoginStarted | LoginUnavailable, Field(discriminator="outcome")]

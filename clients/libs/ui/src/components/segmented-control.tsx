@@ -16,7 +16,8 @@ export function SegmentedControl<T extends string>(props: {
   readonly options: readonly ChoiceOption<T>[];
   readonly value: T;
   readonly change: (value: T) => void;
-  readonly size?: 'sm' | 'md';
+  /** `xs` is `sm` with tighter gaps and padding, for a switch in a narrow pane. */
+  readonly size?: 'xs' | 'sm' | 'md';
 }): JSX.Element {
   const name = useId();
   return (

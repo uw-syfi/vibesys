@@ -53,6 +53,7 @@ from vibesys.api import (
     RunFailedData,
     RunOverview,
     SpanId,
+    SteerProposal,
     TodoItemData,
     ToolResultPayload,
     WireSpan,
@@ -102,6 +103,7 @@ class EventType(StrEnum):
     RUN_STATUS_CHANGED = "run_status_changed"
     CHAT = "chat"
     CHAT_THREAD_CREATED = "chat_thread_created"
+    STEER_PROPOSED = "steer_proposed"
     STATUS_QUERY = "status_query"
     CONTROL = "control"
     INVOCATION_STARTED = "invocation_started"
@@ -276,6 +278,20 @@ class ChatThreadCreatedData(EventPayload):
     provider: str
     model: str
     created_at: datetime
+
+
+class SteerProposedData(EventPayload):
+    """A steer the chat agent suggests; the operator edits, sends or dismisses it.
+
+    Recorded on the chat thread (the event header's ``chat_thread_id``) whose turn called
+    ``propose_steer``. It is a proposal only: nothing reaches the run until the operator sends
+    a ``command.control`` steer, which the proposal's fields prefill. ``proposal_id`` names it
+    for the client's card, and is unique within the run.
+    """
+
+    kind: Literal["steer_proposed"] = "steer_proposed"
+    proposal_id: str = Field(min_length=1)
+    proposal: SteerProposal
 
 
 class InvocationStartedData(EventPayload):
@@ -898,6 +914,7 @@ EventData = Annotated[
     | RoundFinishedData
     | ToolCallData
     | ToolResultData
+    | SteerProposedData
     | TodoUpdateData
     | UsageUpdateData
     | RateLimitUpdateData

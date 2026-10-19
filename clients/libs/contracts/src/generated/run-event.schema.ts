@@ -791,6 +791,7 @@ const runEventSchema: Record<string, unknown> = {
         "run_status_changed",
         "chat",
         "chat_thread_created",
+        "steer_proposed",
         "status_query",
         "control",
         "invocation_started",
@@ -2925,6 +2926,110 @@ const runEventSchema: Record<string, unknown> = {
       "title": "StartupStage",
       "type": "string"
     },
+    "SteerMode": {
+      "description": "How a steer reaches the turns of its target.",
+      "enum": [
+        "next_turn",
+        "standing",
+        "interrupt"
+      ],
+      "title": "SteerMode",
+      "type": "string"
+    },
+    "SteerProposal": {
+      "additionalProperties": false,
+      "description": "Guidance a chat agent suggests, in the fields of a ``SteerRequest``.\n\nIt carries no ``control_id`` and nothing in it reaches the run: only an operator's\n``command.control`` with a ``SteerRequest`` does. The tool that returns it is the\nagent's only steering tool, so the agent cannot send guidance.",
+      "properties": {
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/SteerTarget",
+          "default": {
+            "kind": "run",
+            "id": null
+          }
+        },
+        "mode": {
+          "$ref": "#/$defs/SteerMode",
+          "default": "next_turn"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "SteerProposal",
+      "type": "object"
+    },
+    "SteerProposedData": {
+      "additionalProperties": false,
+      "description": "A steer the chat agent suggests; the operator edits, sends or dismisses it.\n\nRecorded on the chat thread (the event header's ``chat_thread_id``) whose turn called\n``propose_steer``. It is a proposal only: nothing reaches the run until the operator sends\na ``command.control`` steer, which the proposal's fields prefill. ``proposal_id`` names it\nfor the client's card, and is unique within the run.",
+      "properties": {
+        "kind": {
+          "const": "steer_proposed",
+          "default": "steer_proposed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "proposal_id": {
+          "minLength": 1,
+          "title": "Proposal Id",
+          "type": "string"
+        },
+        "proposal": {
+          "$ref": "#/$defs/SteerProposal"
+        }
+      },
+      "required": [
+        "kind",
+        "proposal_id",
+        "proposal"
+      ],
+      "title": "SteerProposedData",
+      "type": "object"
+    },
+    "SteerTarget": {
+      "additionalProperties": false,
+      "description": "Whom a steer is for: the whole run, or one role, attempt or item, by id.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/SteerTargetKind",
+          "default": "run"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SubjectId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "SteerTarget",
+      "type": "object"
+    },
+    "SteerTargetKind": {
+      "description": "What a steer is addressed to.",
+      "enum": [
+        "run",
+        "role",
+        "attempt",
+        "item"
+      ],
+      "title": "SteerTargetKind",
+      "type": "string"
+    },
+    "SubjectId": {
+      "maxLength": 256,
+      "minLength": 1,
+      "pattern": "^\\S+$",
+      "type": "string"
+    },
     "SubprocessOutputData": {
       "additionalProperties": false,
       "description": "Captured output from a managed subprocess.",
@@ -3734,6 +3839,7 @@ const runEventSchema: Record<string, unknown> = {
               "span_ended": "#/$defs/SpanEndedData",
               "span_started": "#/$defs/SpanStartedData",
               "span_updated": "#/$defs/SpanUpdatedData",
+              "steer_proposed": "#/$defs/SteerProposedData",
               "subprocess_output": "#/$defs/SubprocessOutputData",
               "todo_update": "#/$defs/TodoUpdateData",
               "tool_call": "#/$defs/ToolCallData",
@@ -3824,6 +3930,9 @@ const runEventSchema: Record<string, unknown> = {
             },
             {
               "$ref": "#/$defs/ToolResultData"
+            },
+            {
+              "$ref": "#/$defs/SteerProposedData"
             },
             {
               "$ref": "#/$defs/TodoUpdateData"

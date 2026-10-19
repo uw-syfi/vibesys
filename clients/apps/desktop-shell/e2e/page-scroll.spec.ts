@@ -1,6 +1,7 @@
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {expect, type Page, test} from '@playwright/test';
 import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
+import {revealNav} from './settings-machine.js';
 import {open, SEED, sidebar} from './world.js';
 
 /**
@@ -92,6 +93,7 @@ async function goTo(page: Page, where: Where): Promise<void> {
     await sidebar(page).getByRole('button', {name: where}).click();
   } else {
     await sidebar(page).getByRole('button', {name: 'Settings'}).click();
+    await revealNav(page);
     await page
       .getByRole('navigation', {name: 'Settings sections'})
       .getByRole('button', {name: /Machines/})

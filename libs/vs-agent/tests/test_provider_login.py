@@ -13,7 +13,14 @@ from agentshim.testing import probe_executor
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vs_agent.api import LoginKind, LoginState, ProviderLogin, harnesses, provider_login
+from vs_agent.api import (
+    LoginKind,
+    LoginState,
+    ProviderLogin,
+    harnesses,
+    provider_login,
+    provider_login_command,
+)
 
 PROVIDERS = sorted({harness.provider for harness in harnesses()})
 STATUS_PROVIDERS = ("claude", "codex")
@@ -92,3 +99,26 @@ def test_the_variables_that_sign_a_cli_in_are_its_declared_api_key_sources(
 def test_an_unknown_provider_is_refused() -> None:
     with pytest.raises(ValueError, match="not-a-provider"):
         provider_login("not-a-provider", env={}, home=HOME)
+
+
+@pytest.mark.parametrize("provider", PROVIDERS)
+def test_a_login_command_is_the_clis_own_and_a_device_login_never_needs_a_terminal(
+    provider: str,
+) -> None:
+    command = provider_login_command(provider)
+    profile = agentshim.get_provider(provider).profile
+
+    if profile.login is None:
+        assert command is None
+        return
+    assert command is not None
+    assert command.argv[0] == profile.binary
+    device = profile.login.device_argv is not None
+    assert command.argv == profile.login.command(profile.binary, device=device)
+    assert command.needs_terminal == (profile.login.needs_terminal and not device)
+    assert command.line.split()[0] == profile.binary
+
+
+def test_a_provider_agentshim_does_not_register_has_no_login_command() -> None:
+    with pytest.raises(ValueError, match="unknown"):
+        provider_login_command("no-such-provider")

@@ -10,7 +10,7 @@ from hypothesis import strategies as st
 
 from entrypoints import launcher
 from entrypoints.tasks import run
-from server.host_api import TaskList, TaskSummary
+from server.host_examples import TaskList, TaskSummary
 from vs_sim.api.testing import FakeForegroundLauncher, ForegroundScript, examples
 
 if TYPE_CHECKING:

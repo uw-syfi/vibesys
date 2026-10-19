@@ -35,12 +35,14 @@ from typing import TYPE_CHECKING, Final, cast
 from pydantic import JsonValue, TypeAdapter
 
 from server.host_run_summary import (
+    NO_TOKENS,
     RUN_SUMMARY_PAGE_MAX_BYTES,
     SpanTokens,
     TokenTally,
     TraceFormat,
     TurnReply,
     UsageRecord,
+    add_tokens,
     trace_format,
 )
 from server.run_usage import USAGE_EVENTS, ExecutionStart, UsageFold
@@ -63,9 +65,6 @@ _FOLDED_EVENTS: Final = frozenset(
         "agent_execution_finished",
         *USAGE_EVENTS,
     }
-)
-_NO_TOKENS: Final = TokenTally(
-    input=None, cache_read=None, cache_write=None, output=None, reasoning=None
 )
 
 _PREFIX_BYTES: Final = 512
@@ -139,7 +138,7 @@ class RunSummaryFold:
     _overview: RunOverviewDocument | None = None
     _replies: dict[str, TurnReply] = field(default_factory=dict)
     _schemas: dict[str, ReplySchemaDocument] = field(default_factory=dict)
-    _tokens: TokenTally = _NO_TOKENS
+    _tokens: TokenTally = NO_TOKENS
     _usage: dict[str, TokenTally] = field(default_factory=dict)
     _turns: UsageFold = field(default_factory=UsageFold)
 
@@ -279,6 +278,11 @@ class RunSummaryFold:
         return len(self._usage)
 
     @property
+    def records(self) -> tuple[UsageRecord, ...]:
+        """The usage records folded so far, in journal order."""
+        return self._turns.records
+
+    @property
     def record_count(self) -> int:
         """Usage records folded so far."""
         return len(self._turns.records)
@@ -325,10 +329,10 @@ class RunSummaryFold:
 
     def _fold_usage(self, record: UsageRecord) -> None:
         """Add one finished turn's spend to the run's, and to its span's when it names one."""
-        self._tokens = _plus(self._tokens, record.tokens)
+        self._tokens = add_tokens(self._tokens, record.tokens)
         if record.span_id is not None:
-            self._usage[record.span_id] = _plus(
-                self._usage.get(record.span_id, _NO_TOKENS), record.tokens
+            self._usage[record.span_id] = add_tokens(
+                self._usage.get(record.span_id, NO_TOKENS), record.tokens
             )
 
     def _fold_reply(self, span_id: JsonValue, reply: JsonValue) -> None:
@@ -346,23 +350,6 @@ class RunSummaryFold:
         self._replies[span_id] = TurnReply(
             span_id=span_id, kind=reply_kind, schema_id=key, value=value
         )
-
-
-def _sum(a: int | None, b: int | None) -> int | None:
-    if a is None:
-        return b
-    return a if b is None else a + b
-
-
-def _plus(a: TokenTally, b: TokenTally) -> TokenTally:
-    """``a`` and ``b`` summed count by count; a count neither reported stays unreported."""
-    return TokenTally(
-        input=_sum(a.input, b.input),
-        cache_read=_sum(a.cache_read, b.cache_read),
-        cache_write=_sum(a.cache_write, b.cache_write),
-        output=_sum(a.output, b.output),
-        reasoning=_sum(a.reasoning, b.reasoning),
-    )
 
 
 def _decode_event(line: bytes) -> dict[str, JsonValue] | None:

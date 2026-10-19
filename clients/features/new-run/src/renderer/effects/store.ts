@@ -27,6 +27,7 @@ export type NewRunBridge = Pick<
   | 'harnesses'
   | 'examples'
   | 'tasks'
+  | 'taskGoal'
   | 'preflight'
   | 'createFromExample'
   | 'copyOut'
@@ -57,6 +58,9 @@ export function newRunLogic(bridge: NewRunBridge) {
       }),
       examples: fromPromise(({input}) => value(() => bridge.examples(input.host))),
       tasks: fromPromise(({input}) => value(() => bridge.tasks(input.host, input.project))),
+      goal: fromPromise(({input}) =>
+        value(() => bridge.taskGoal(input.host, input.project, input.task)),
+      ),
       preflight: fromPromise(({input}) => value(() => bridge.preflight(input.host, input.inputs))),
       fix: fromPromise(async ({input}) => ({
         fix: input.fix,

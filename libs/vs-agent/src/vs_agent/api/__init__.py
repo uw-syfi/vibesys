@@ -95,16 +95,19 @@ from vs_agent.provider_policy import (
     vetted_models,
 )
 from vs_agent.provider_profiles import (
+    LoginCommand,
     LoginCredential,
     LoginKind,
     LoginState,
     ModelDisplay,
+    ModelGenerationFacts,
     ProviderLogin,
     launch_shell_environment,
     model_display,
     provider_binary,
     provider_display_name,
     provider_login,
+    provider_login_command,
 )
 from vs_agent.provider_routing import ProviderRoutedExecutor
 from vs_agent.reply_limits import (
@@ -240,11 +243,13 @@ __all__ = [
     "InvocationConflictError",
     "InvocationOutcome",
     "JsonResultPayload",
+    "LoginCommand",
     "LoginCredential",
     "LoginKind",
     "LoginState",
     "MCPServerSpec",
     "ModelDisplay",
+    "ModelGenerationFacts",
     "NullAgentEventSink",
     "NullSessionStore",
     "OrphanReapError",
@@ -308,6 +313,7 @@ __all__ = [
     "provider_binary",
     "provider_display_name",
     "provider_login",
+    "provider_login_command",
     "reap_orphaned_agents",
     "reply_breach",
     "session_env_allowlist",

@@ -23,6 +23,7 @@ const read = (over: Partial<Read>): Read => ({
   outcome: null,
   closing: null,
   over: false,
+  dashboard: null,
   ...over,
 });
 

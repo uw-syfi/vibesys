@@ -8,8 +8,8 @@ from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from launch.scripted_agents import ScriptedDynamicAgents
-from vibesys.api import agent_spec_from_config
-from vibesys.api.wiring import platform_skill_selection
+from vibesys.api import AuxiliarySkills, agent_spec_from_config
+from vibesys.api.wiring import chat_skill_dirs, platform_skill_selection
 from vibesys.orchestration.dynamic.scripted.api import CHAT_REPLY
 from vs_agent.api import AgentBackend, ScriptedAgentClient, ScriptedClientSetup, build_agent_client
 from vs_mcp.api import ToolServerDescriptor, expose_as_tools
@@ -49,15 +49,21 @@ class BuiltInSessionAgents:
         mounts: tuple[HostResource, ...] = (),
         agent_backend: str | None = None,
         cli_provider: str | None = None,
+        skills: AuxiliarySkills = AuxiliarySkills.RUN,
     ) -> ScopedAgentEnvironment:
-        """Bind product skill policy to the runtime environment lifecycle."""
+        """Bind product skill policy to the runtime environment lifecycle.
+
+        ``skills`` names the skill set to install: the run's own, or the chat agent's.
+        """
         environment = resources.environment_resources
         return open_agent_execution_environment(
             environment.request,
             environment.session,
             share_session=False,
             skill_selection=platform_skill_selection(resources.backend),
-            skill_source_dirs=resources.skill_source_dirs,
+            skill_source_dirs=(
+                chat_skill_dirs() if skills is AuxiliarySkills.CHAT else resources.skill_source_dirs
+            ),
             host_resources=resources.host_resources,
             mounts=mounts,
             agent_backend=agent_backend,
@@ -94,6 +100,7 @@ class BuiltInSessionAgents:
                 mounts=readable_resources,
                 agent_backend=resources.agent_backend,
                 cli_provider=launch.provider,
+                skills=launch.skills,
             )
             pending_environment.callback(opened.close)
             conversation_spec = ManagedConversationSpec(

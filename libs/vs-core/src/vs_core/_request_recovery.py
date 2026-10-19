@@ -791,11 +791,7 @@ def _check_wait(
         expected += [
             _child_inspection(record, child.resource_id, epoch).request_id for child in children
         ]
-    expected += [
-        row.request_id
-        for row in state.records
-        if isinstance(row.request, InspectRequest) and row.request.target == check.target
-    ]
+    expected += [row.request_id for row in state.inspections_of(check.target)]
     requests = tuple(
         dict.fromkeys(
             request

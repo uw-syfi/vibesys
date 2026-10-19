@@ -26,6 +26,9 @@
       "path": "./tsconfig.agents.json"
     },
     {
+      "path": "./tsconfig.usage.json"
+    },
+    {
       "path": "./tsconfig.test.json"
     }
   ]

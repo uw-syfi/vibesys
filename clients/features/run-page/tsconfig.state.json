@@ -53,6 +53,9 @@
     },
     {
       "path": "../../libs/run-state/tsconfig.agents.json"
+    },
+    {
+      "path": "../../libs/run-state/tsconfig.usage.json"
     }
   ]
 }

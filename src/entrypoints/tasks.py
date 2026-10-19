@@ -22,7 +22,7 @@ from vs_project.api import Git, git_repositories
 from vs_sim.api import OsProcesses, OsThreads
 
 if TYPE_CHECKING:
-    from server.host_api import TaskList
+    from server.host_examples import TaskList
 
 
 def _parser() -> argparse.ArgumentParser:

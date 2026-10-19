@@ -60,6 +60,7 @@ function base(candidates: readonly Candidate[], now: number, events: ZoomEvent[]
     model: modelOf(candidates),
     clock: {start: 0, now},
     tokens: EMPTY_LEDGER,
+    who: new Map(),
     zoom: (event: ZoomEvent) => events.push(event),
     idea: null,
   };

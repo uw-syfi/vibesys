@@ -97,6 +97,8 @@ export {
   type Effort,
   type FactsFor,
   type Form,
+  type GoalFor,
+  goalKey,
   type HelperFor,
   harnessLabel,
   inputsKey,
@@ -112,6 +114,7 @@ export {
   type RoleChoice,
   recordedAgent,
   runInputs,
+  SAME_MACHINE,
   splitWords,
   vettedModels,
 } from './form.js';
@@ -125,6 +128,14 @@ export {
   newRunMachine,
   type ProjectFix,
 } from './machine.js';
+export {
+  type Compute,
+  formWithMeasure,
+  measureOptions,
+  nothingSetUp,
+  sameTarget,
+  targetFacts,
+} from './measure.js';
 export {type Problem, problemOf, type Step, StepFailure} from './problem.js';
 export {
   agentWithRoles,

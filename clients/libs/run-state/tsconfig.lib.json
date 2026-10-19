@@ -20,7 +20,8 @@
     "src/trace/**",
     "src/overview/**",
     "src/candidates/**",
-    "src/agents/**"
+    "src/agents/**",
+    "src/usage/**"
   ],
   "references": [
     {

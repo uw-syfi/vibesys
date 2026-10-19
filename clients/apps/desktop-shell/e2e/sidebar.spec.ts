@@ -4,6 +4,7 @@ import {type FakeBridgeSeed, installFakeBridge, installFakeMachines} from './fak
 import {installFakeRun} from './fake-run.js';
 import {type FakeServerSeed, installFakeServer} from './fake-server.js';
 import {judgeEvents, RUN_ID, traceEvents, turnEvents} from './fake-trace.js';
+import {revealNav} from './settings-machine.js';
 import {STARTED_AT} from './started-at.js';
 import {drawnUnderWindowControls, type FakeHostWindow, open, SEED, sidebar} from './world.js';
 
@@ -212,6 +213,7 @@ test('Settings section navigation remains reachable at narrow width', async ({pa
   await sidebar(page).getByRole('button', {name: 'Settings'}).click();
   const sections = page.getByRole('navigation', {name: 'Settings sections'});
   await expect(sections).toBeInViewport();
+  await revealNav(page);
   await sections.getByRole('button', {name: 'Notifications'}).click();
   await expect(page.getByRole('heading', {name: 'Notifications', exact: true})).toBeVisible();
   const overflow = await page.evaluate(

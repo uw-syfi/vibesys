@@ -12,7 +12,14 @@ from pathlib import Path
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from scripts.check_stale_revert import rewritten_append_only, stale_files
+from scripts.check_stale_revert import (
+    GIT_COMMAND_TIMEOUT_SECONDS,
+    GIT_LOW_SPEED_LIMIT,
+    GIT_LOW_SPEED_SECONDS,
+    bounded_git_argv,
+    rewritten_append_only,
+    stale_files,
+)
 from tests.support import run_test_command
 from tests.support.real_git import REAL_GIT
 
@@ -332,3 +339,23 @@ def test_bumping_a_submodule_pin_is_not_a_line_edit() -> None:
         _commit_staged_pin(root, "change: bump the pin")
 
         assert stale_files(root, "main") == []
+
+
+@given(args=st.lists(st.text(min_size=1, max_size=12), max_size=6))
+def test_every_git_command_carries_git_low_speed_abort_before_its_subcommand(
+    args: list[str],
+) -> None:
+    argv = bounded_git_argv(*args)
+
+    assert argv[0] == "git"
+    assert argv[1:5] == [
+        "-c",
+        f"http.lowSpeedLimit={GIT_LOW_SPEED_LIMIT}",
+        "-c",
+        f"http.lowSpeedTime={GIT_LOW_SPEED_SECONDS}",
+    ]
+    assert argv[5:] == args
+
+
+def test_the_per_command_bound_fits_inside_the_five_minute_job_limit() -> None:
+    assert GIT_COMMAND_TIMEOUT_SECONDS < 5 * 60

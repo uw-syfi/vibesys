@@ -54,6 +54,8 @@ export interface TurnUsage {
   readonly cache_creation_input_tokens?: number;
   readonly output_tokens?: number;
   readonly reasoning_output_tokens?: number;
+  readonly total_cost_usd?: number;
+  readonly duration_ms?: number;
 }
 
 export interface IdeaSpec {
@@ -91,6 +93,25 @@ export interface IdeaSpec {
   readonly keeps?: number;
   /** What the implementer's turn spent, reported when the turn ends; none when omitted. */
   readonly usage?: TurnUsage;
+}
+
+/**
+ * Records that idea `n`'s implementer started, on a harness and model: every third idea runs on a second harness and model, so a run's
+ * usage groups into more than one.
+ */
+function startedExecution(trace: Trace, n: number, turn: string, at: number): void {
+  const second = n % 3 === 0;
+  trace.event(
+    'agent_execution_started',
+    {
+      stage: 'implementer',
+      activity: {kind: 'agent_execution_activity_changed', mode: 'thinking', summary: ''},
+      provider: second ? 'claude' : 'codex',
+      model: second ? MODEL_B : MODEL_A,
+    },
+    at,
+    {execution_id: `exec-w${n}`, agent_kind: 'implementer', span_id: turn},
+  );
 }
 
 export class Trace {
@@ -350,12 +371,14 @@ export function addIdea(trace: Trace, spec: IdeaSpec): void {
     }),
   });
   trace.span('span_started', turn('running', false), turnStart);
+  if (spec.usage !== undefined) startedExecution(trace, spec.n, turnId, turnStart);
   if (tries.length > 0)
     trace.span('span_updated', turn('running', false), turnStart + 30 * tries.length);
   if (running) return;
   const spent = (): void => {
     if (spec.usage === undefined) return;
     trace.event('turn_usage_recorded', {span_id: turnId, ...spec.usage}, turnEnd, {
+      execution_id: `exec-w${spec.n}`,
       invocation_id: `inv-w${spec.n}`,
       agent_kind: 'implementer',
       span_id: turnId,

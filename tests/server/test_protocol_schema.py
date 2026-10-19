@@ -222,6 +222,8 @@ def test_host_helper_schema_exports_the_authoritative_request_feature_gates() ->
         "compute.remove_cluster": "machine_compute",
         "agent_logins.list": "agent_logins",
         "agent_logins.start": "agent_logins",
+        "project.task_goal": "project_goal",
+        "usage.window": "usage_window",
     }
     request_tags = document["properties"]["request"]["discriminator"]["mapping"]
     assert gates.keys() <= request_tags.keys()
@@ -256,7 +258,7 @@ def test_host_helper_schema_exports_the_authoritative_field_feature_gates() -> N
         "harnesses.list": {"with_generations": "harness_generations"},
         "logs.list": {"span_id": "logs_by_span"},
         "runs.read_events": {"with_totals": "run_history_pages"},
-        "runs.list": {"digest_runs": "run_digest"},
+        "runs.list": {"digest_runs": "run_digest", "with_dashboard": "run_dashboard"},
         "examples.list": {"with_catalogue": "example_catalogue"},
     }
     request_refs = document["properties"]["request"]["discriminator"]["mapping"]
@@ -745,16 +747,24 @@ def test_gate_kind_has_one_definition_on_both_wire_contracts() -> None:
     assert ServerGateKind is GateKind
 
 
-def test_thread_creation_request_no_longer_accepts_a_driver() -> None:
-    """The wire request names provider and model only; ``driver`` is an unknown key."""
+def test_thread_creation_request_names_a_harness_and_no_driver() -> None:
+    """The wire request names a harness choice; ``driver`` and loose provider keys are unknown."""
     request = TypeAdapter(ProtocolRequest)
     request.validate_python(
         {
             "type": "query.chat_thread_create",
             "timestamp": "2026-01-01T00:00:00Z",
-            "provider": "codex",
+            "harness": {"provider": "codex", "model": "gpt-test"},
         }
     )
+    with pytest.raises(ValidationError, match="provider"):
+        request.validate_python(
+            {
+                "type": "query.chat_thread_create",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "provider": "codex",
+            }
+        )
     with pytest.raises(ValidationError, match="driver"):
         request.validate_python(
             {

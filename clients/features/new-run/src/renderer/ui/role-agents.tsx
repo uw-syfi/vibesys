@@ -92,7 +92,7 @@ function RoleRow(
 export function RoleAgents(
   props: CardProps & {readonly offers: readonly HarnessOffer[]; readonly agent: AgentChoice},
 ): JSX.Element {
-  const {context, offers, agent} = props;
+  const {context} = props;
   const changed = roleAgentsChanged(context).length;
   const [open, setOpen] = useState(changed > 0);
   const view = rolesView(context);
@@ -101,9 +101,7 @@ export function RoleAgents(
   if (!helperOffers(context.helper, machine, 'run_role_agents')) {
     return (
       <Text variant="small" tone="muted">
-        {context.helper?.for === machine
-          ? "This machine's VibeSys cannot run a different agent for a role. Update it to set one."
-          : 'Asking the machine whether a role may have its own agent.'}
+        {context.helper?.for === machine ? 'Not supported on this machine' : 'Checking the machine'}
       </Text>
     );
   }
@@ -111,12 +109,11 @@ export function RoleAgents(
     return (
       <Text variant="small" tone="muted">
         {view.kind === 'unsupported'
-          ? "This machine's VibeSys does not report its agent roles, so every role runs the run's agent."
-          : 'The roles appear once the project is on the machine and its first check has run.'}
+          ? 'Roles not reported by this machine'
+          : 'Waiting for the first check'}
       </Text>
     );
   }
-  const shared = roleProviders(offers, agent.provider, AGENT_ENVIRONMENT).length < 2;
   return (
     <Collapsible
       label={heading}
@@ -127,17 +124,11 @@ export function RoleAgents(
         : {
             summary:
               changed === 0
-                ? "Every role uses the run's agent"
-                : `${changed} ${changed === 1 ? 'role uses' : 'roles use'} another agent`,
+                ? 'Same as the run'
+                : `${changed} ${changed === 1 ? 'role' : 'roles'} changed`,
           })}
     >
       <Stack gap="space-4">
-        {shared ? (
-          <Text variant="small" tone="muted">
-            Agents run in containers that carry one harness's login, so every role uses the run's
-            harness; its model can differ.
-          </Text>
-        ) : null}
         {view.roles.map(role => (
           <RoleRow key={role} {...props} role={role} />
         ))}

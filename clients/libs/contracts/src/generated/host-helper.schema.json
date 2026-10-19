@@ -265,6 +265,64 @@
       "title": "AgentLoginsStartRequest",
       "type": "object"
     },
+    "AgentSpend": {
+      "additionalProperties": false,
+      "description": "What one kind of agent spent in the window: a role on a harness and model.\n\nA part the journal did not record for a turn is ``None``, so the turns of an execution whose\nstart is missing form their own entry.",
+      "properties": {
+        "role": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Role"
+        },
+        "harness": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Harness"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Model"
+        },
+        "cost_usd": {
+          "minimum": 0,
+          "title": "Cost Usd",
+          "type": "number"
+        },
+        "turns": {
+          "minimum": 0,
+          "title": "Turns",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "role",
+        "harness",
+        "model",
+        "cost_usd",
+        "turns"
+      ],
+      "title": "AgentSpend",
+      "type": "object"
+    },
     "ApiKeyLogin": {
       "additionalProperties": false,
       "description": "Signed in with an API key; where it is held is named, the key never.",
@@ -1774,6 +1832,22 @@
           "title": "Task",
           "type": "string"
         },
+        "objectives": {
+          "items": {
+            "$ref": "#/$defs/ExampleObjective"
+          },
+          "title": "Objectives",
+          "type": "array"
+        },
+        "goal": {
+          "maxLength": 32000,
+          "title": "Goal",
+          "type": "string"
+        },
+        "goal_truncated": {
+          "title": "Goal Truncated",
+          "type": "boolean"
+        },
         "domain": {
           "$ref": "#/$defs/ExampleDomain"
         },
@@ -1799,33 +1873,17 @@
               "type": "null"
             }
           ]
-        },
-        "objectives": {
-          "items": {
-            "$ref": "#/$defs/ExampleObjective"
-          },
-          "title": "Objectives",
-          "type": "array"
-        },
-        "goal": {
-          "maxLength": 32000,
-          "title": "Goal",
-          "type": "string"
-        },
-        "goal_truncated": {
-          "title": "Goal Truncated",
-          "type": "boolean"
         }
       },
       "required": [
         "task",
+        "objectives",
+        "goal",
+        "goal_truncated",
         "domain",
         "hardware",
         "model",
-        "workload",
-        "objectives",
-        "goal",
-        "goal_truncated"
+        "workload"
       ],
       "title": "ExampleTask",
       "type": "object"
@@ -2508,13 +2566,66 @@
         "run_causes",
         "example_catalogue",
         "run_digest",
+        "run_dashboard",
         "harness_generations",
         "run_role_agents",
         "measurement_target",
         "machine_compute",
-        "agent_logins"
+        "agent_logins",
+        "project_goal",
+        "usage_window"
       ],
       "title": "HelperFeature",
+      "type": "string"
+    },
+    "IdeaPoint": {
+      "additionalProperties": false,
+      "description": "One idea of a run on the performance chart: its result against the input and its verdict.\n\n``ratio`` is worded like ``RunDigest.adopted_ratio`` (an improvement over the input, for a\n``min`` objective the input's value over the result's); ``None`` when the idea has no\nmeasurement against the input (it failed before one, or still works).\n\n``at`` is when the idea's result landed, by the journal's event clock: the time of the gate event\nthat last wrote the reading the idea is plotted by, else of the idea's last event; ``None`` when\nthe journal's event has no readable time. It is the one definition of when a ``kept`` idea became\nthe best (``usage.window`` counts new bests by it); the span clock orders the chart but is not a\ntime of day.",
+      "properties": {
+        "ratio": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Ratio"
+        },
+        "verdict": {
+          "$ref": "#/$defs/IdeaVerdict"
+        },
+        "at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "At"
+        }
+      },
+      "required": [
+        "ratio",
+        "verdict"
+      ],
+      "title": "IdeaPoint",
+      "type": "object"
+    },
+    "IdeaVerdict": {
+      "description": "What a run's idea came to, as the run page's chart marks it.",
+      "enum": [
+        "kept",
+        "not_better",
+        "failed",
+        "running"
+      ],
+      "title": "IdeaVerdict",
       "type": "string"
     },
     "InspectionState": {
@@ -3503,6 +3614,27 @@
         },
         "reason": {
           "$ref": "#/$defs/LoginUnavailableReason"
+        },
+        "command": {
+          "anyOf": [
+            {
+              "maxLength": 300,
+              "pattern": "^[^\\n\\r]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Command"
+        },
+        "detail": {
+          "default": "",
+          "maxLength": 300,
+          "pattern": "^[^\\n\\r]*$",
+          "title": "Detail",
+          "type": "string"
         }
       },
       "required": [
@@ -3516,7 +3648,9 @@
       "description": "Why a login could not be started.",
       "enum": [
         "not_installed",
-        "no_login_command"
+        "no_login_command",
+        "needs_terminal",
+        "start_failed"
       ],
       "title": "LoginUnavailableReason",
       "type": "string"
@@ -4575,6 +4709,77 @@
       "title": "ProjectDirty",
       "type": "object"
     },
+    "ProjectTaskGoalReply": {
+      "additionalProperties": false,
+      "description": "The task's goal and objectives.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "project.task_goal",
+          "default": "project.task_goal",
+          "title": "Type",
+          "type": "string"
+        },
+        "goal": {
+          "$ref": "#/$defs/TaskGoal"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "goal"
+      ],
+      "title": "ProjectTaskGoalReply",
+      "type": "object"
+    },
+    "ProjectTaskGoalRequest": {
+      "additionalProperties": false,
+      "description": "The goal text and objectives of one task of a project.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "project.task_goal",
+          "default": "project.task_goal",
+          "title": "Type",
+          "type": "string"
+        },
+        "project": {
+          "title": "Project",
+          "type": "string"
+        },
+        "task": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Task",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "project",
+        "task"
+      ],
+      "title": "ProjectTaskGoalRequest",
+      "type": "object"
+    },
     "ReasoningEffort": {
       "description": "A role's reasoning effort; ``default`` keeps the configured one.",
       "enum": [
@@ -4679,6 +4884,17 @@
       ],
       "title": "RolesNotDeclared",
       "type": "object"
+    },
+    "RunAttention": {
+      "description": "Why a run needs its user, judged from its journal, its server and the time now.",
+      "enum": [
+        "none",
+        "failed",
+        "repeated_failure",
+        "stalled"
+      ],
+      "title": "RunAttention",
+      "type": "string"
     },
     "RunClosing": {
       "description": "The journal's last word on a run: the terminal event it ends with, if it has one.",
@@ -4789,9 +5005,53 @@
       "title": "RunCounts",
       "type": "object"
     },
+    "RunDashboard": {
+      "additionalProperties": false,
+      "description": "What a run's tile draws, folded from the journal in the digest's pass.\n\n``points`` are the run page's chart (``performanceFold``): the ideas in the order their results\nlanded (the idea's measurement time, else when its last attempt ended or began; ties in the\norder the ideas began), each with its verdict. A run with more than ``DASHBOARD_MAX_POINTS``\nideas keeps the newest points of the verdicts that matter to the line: the oldest ideas that\nare not ``kept`` go first, then the oldest ``kept`` ones, and ``points_omitted`` counts the\nideas left out (the ideas count is ``len(points) + points_omitted``). ``failed_streak`` counts\nthe ideas at the end of the order that failed, with none passing since (a running idea is\nskipped), over every idea and not only the ones kept. ``last_event_at`` is the journal's last\nevent, the only time fact a stalled run is judged from (``RunAttention``).",
+      "properties": {
+        "points": {
+          "items": {
+            "$ref": "#/$defs/IdeaPoint"
+          },
+          "maxItems": 64,
+          "title": "Points",
+          "type": "array"
+        },
+        "points_omitted": {
+          "minimum": 0,
+          "title": "Points Omitted",
+          "type": "integer"
+        },
+        "failed_streak": {
+          "minimum": 0,
+          "title": "Failed Streak",
+          "type": "integer"
+        },
+        "last_event_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Event At"
+        }
+      },
+      "required": [
+        "points",
+        "points_omitted",
+        "failed_streak",
+        "last_event_at"
+      ],
+      "title": "RunDashboard",
+      "type": "object"
+    },
     "RunDigest": {
       "additionalProperties": false,
-      "description": "What a run's journal says at a glance, for a list row; never a replay of the run.\n\n``ideas`` counts the ideas the run page counts (one per hypothesis, probes excluded) and\n``adopted_ratio`` is the result the run's adoption span names, as the run page headlines it:\nan improvement over the input (for a ``min`` objective, the input's value over the result's);\n``None`` when the run adopted nothing. The best raw reading of a gate is not it: that may be\nan idea that later failed. ``best_so_far_ratio`` is what the page headlines before the run has\nopened an adoption (while it works): the best idea that passed and beat the input, worded as an\nimprovement the same way; ``None`` before one does and once an adoption exists. ``ideas`` is ``None`` for a journal\nthat predates the run trace (``TraceFormat.PREDATES_TRACE``): it records rounds, not ideas,\nso no count is true. ``duration_s`` runs from the\njournal's first event to the last step it recorded; ``None`` for a run with no events.\n``ending`` is the run's ending record and ``closing`` its terminal event: both ``None``\nfor a run still going or one whose server died without a word, which is how a run's\nending is known after its registry tombstone expired (a day).",
+      "description": "What a run's journal says at a glance, for a list row; never a replay of the run.\n\n``ideas`` counts the ideas the run page counts (one per hypothesis, probes excluded) and\n``adopted_ratio`` is the result the run's adoption span names, as the run page headlines it:\nan improvement over the input (for a ``min`` objective, the input's value over the result's);\n``None`` when the run adopted nothing. The best raw reading of a gate is not it: that may be\nan idea that later failed. ``best_so_far_ratio`` is what the page headlines before the run has\nopened an adoption (while it works): the best idea that passed and beat the input, worded as an\nimprovement the same way; ``None`` before one does and once an adoption exists. ``ideas`` is\n``None`` for a journal that predates the run trace (``TraceFormat.PREDATES_TRACE``): it\nrecords rounds, not ideas, so no count is true. ``duration_s`` runs from the journal's first\nevent to the last step it recorded; ``None`` for a run with no events. ``ending`` is the run's\nending record and ``closing`` its terminal event: both ``None`` for a run still going or one\nwhose server died without a word; they are how an ending is known once its tombstone expired.",
       "properties": {
         "kind": {
           "const": "digest",
@@ -4864,6 +5124,17 @@
               "type": "null"
             }
           ]
+        },
+        "dashboard": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunDashboard"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -5342,6 +5613,40 @@
       "title": "RunRole",
       "type": "string"
     },
+    "RunSpend": {
+      "additionalProperties": false,
+      "description": "What one run spent in the window; only runs that had a turn end in it are listed.",
+      "properties": {
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "task": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Task"
+        },
+        "cost_usd": {
+          "minimum": 0,
+          "title": "Cost Usd",
+          "type": "number"
+        }
+      },
+      "required": [
+        "run_id",
+        "task",
+        "cost_usd"
+      ],
+      "title": "RunSpend",
+      "type": "object"
+    },
     "RunStartCompensationEvidence": {
       "discriminator": {
         "mapping": {
@@ -5703,6 +6008,17 @@
           ],
           "default": null,
           "title": "Digest"
+        },
+        "attention": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunAttention"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -5899,6 +6215,18 @@
           ],
           "default": null,
           "title": "Digest Runs"
+        },
+        "with_dashboard": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "With Dashboard"
         }
       },
       "required": [
@@ -6753,6 +7081,40 @@
       "title": "SysboxMissing",
       "type": "object"
     },
+    "TaskGoal": {
+      "additionalProperties": false,
+      "description": "What a task is for: its goal text and the axes it declares, read from its files.",
+      "properties": {
+        "task": {
+          "title": "Task",
+          "type": "string"
+        },
+        "objectives": {
+          "items": {
+            "$ref": "#/$defs/ExampleObjective"
+          },
+          "title": "Objectives",
+          "type": "array"
+        },
+        "goal": {
+          "maxLength": 32000,
+          "title": "Goal",
+          "type": "string"
+        },
+        "goal_truncated": {
+          "title": "Goal Truncated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "task",
+        "objectives",
+        "goal",
+        "goal_truncated"
+      ],
+      "title": "TaskGoal",
+      "type": "object"
+    },
     "TaskImageUnsupported": {
       "additionalProperties": false,
       "description": "The task's Dockerfile cannot be used the way this run would run; ``problem`` is raw text.",
@@ -7358,6 +7720,187 @@
       "title": "UsageRecord",
       "type": "object"
     },
+    "UsageWindowReply": {
+      "additionalProperties": false,
+      "description": "What the Usage page shows for one window.\n\nCosts are the sums of the turns' reported ``cost_usd`` (a turn that reported none counts in\n``unpriced_turns`` and adds nothing, so a total is a lower bound while it is not zero). A turn\nwith no recorded end time cannot be placed in a window: it counts in ``untimed_turns`` and\nnowhere else. ``new_bests`` counts the ideas kept (``IdeaVerdict.KEPT``) whose result landed in\nthe window, and ``cost_per_new_best_usd`` is ``spent_usd`` over it, ``None`` when there is none.\nA run's kept ideas beyond ``DASHBOARD_MAX_POINTS`` are not counted.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "usage.window",
+          "default": "usage.window",
+          "title": "Type",
+          "type": "string"
+        },
+        "since": {
+          "format": "date-time",
+          "title": "Since",
+          "type": "string"
+        },
+        "until": {
+          "format": "date-time",
+          "title": "Until",
+          "type": "string"
+        },
+        "spent_usd": {
+          "minimum": 0,
+          "title": "Spent Usd",
+          "type": "number"
+        },
+        "spend_per_hour_usd": {
+          "minimum": 0,
+          "title": "Spend Per Hour Usd",
+          "type": "number"
+        },
+        "tokens": {
+          "$ref": "#/$defs/TokenTally"
+        },
+        "turns": {
+          "minimum": 0,
+          "title": "Turns",
+          "type": "integer"
+        },
+        "unpriced_turns": {
+          "minimum": 0,
+          "title": "Unpriced Turns",
+          "type": "integer"
+        },
+        "untimed_turns": {
+          "minimum": 0,
+          "title": "Untimed Turns",
+          "type": "integer"
+        },
+        "new_bests": {
+          "minimum": 0,
+          "title": "New Bests",
+          "type": "integer"
+        },
+        "cost_per_new_best_usd": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cost Per New Best Usd"
+        },
+        "by_run": {
+          "items": {
+            "$ref": "#/$defs/RunSpend"
+          },
+          "maxItems": 100,
+          "title": "By Run",
+          "type": "array"
+        },
+        "by_agent": {
+          "items": {
+            "$ref": "#/$defs/AgentSpend"
+          },
+          "maxItems": 64,
+          "title": "By Agent",
+          "type": "array"
+        },
+        "agents_omitted": {
+          "minimum": 0,
+          "title": "Agents Omitted",
+          "type": "integer"
+        },
+        "missing_runs": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 100,
+          "title": "Missing Runs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "since",
+        "until",
+        "spent_usd",
+        "spend_per_hour_usd",
+        "tokens",
+        "turns",
+        "unpriced_turns",
+        "untimed_turns",
+        "new_bests",
+        "cost_per_new_best_usd",
+        "by_run",
+        "by_agent",
+        "agents_omitted",
+        "missing_runs"
+      ],
+      "title": "UsageWindowReply",
+      "type": "object"
+    },
+    "UsageWindowRequest": {
+      "additionalProperties": false,
+      "description": "What the named runs of a project spent in ``[since, until)``.\n\n``until`` is \"now\" for the reply: the helper reads no clock for it, so a client names the time it\nis asking at (or the end of a past window) and the answer is a function of the journals and\nthese two instants. A turn is placed at the time it ended (``UsageRecord.ended_at``).",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "usage.window",
+          "default": "usage.window",
+          "title": "Type",
+          "type": "string"
+        },
+        "project": {
+          "title": "Project",
+          "type": "string"
+        },
+        "run_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 100,
+          "title": "Run Ids",
+          "type": "array"
+        },
+        "since": {
+          "format": "date-time",
+          "title": "Since",
+          "type": "string"
+        },
+        "until": {
+          "format": "date-time",
+          "title": "Until",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "project",
+        "run_ids",
+        "since",
+        "until"
+      ],
+      "title": "UsageWindowRequest",
+      "type": "object"
+    },
     "WorkerStartRefusedCompensationFailure": {
       "additionalProperties": false,
       "description": "The helper could not start the worker that owns the compensating stop.",
@@ -7435,6 +7978,7 @@
           "ping": "#/$defs/PingRequest",
           "project.copy_out": "#/$defs/ProjectCopyOutRequest",
           "project.create_from_example": "#/$defs/ProjectCreateFromExampleRequest",
+          "project.task_goal": "#/$defs/ProjectTaskGoalRequest",
           "run.connect": "#/$defs/RunConnectRequest",
           "run.preflight": "#/$defs/RunPreflightRequest",
           "run.start": "#/$defs/RunStartRequest",
@@ -7444,7 +7988,8 @@
           "runs.read_events": "#/$defs/RunsReadEventsRequest",
           "runs.read_tail": "#/$defs/RunsReadTailRequest",
           "runs.summary": "#/$defs/RunsSummaryRequest",
-          "tasks.list": "#/$defs/TasksListRequest"
+          "tasks.list": "#/$defs/TasksListRequest",
+          "usage.window": "#/$defs/UsageWindowRequest"
         },
         "propertyName": "type"
       },
@@ -7544,6 +8089,12 @@
         },
         {
           "$ref": "#/$defs/AgentLoginsStartRequest"
+        },
+        {
+          "$ref": "#/$defs/ProjectTaskGoalRequest"
+        },
+        {
+          "$ref": "#/$defs/UsageWindowRequest"
         }
       ],
       "title": "Request"
@@ -7575,6 +8126,7 @@
           "ping": "#/$defs/PingReply",
           "project.copy_out": "#/$defs/ProjectCopyOutReply",
           "project.create_from_example": "#/$defs/ProjectCreateFromExampleReply",
+          "project.task_goal": "#/$defs/ProjectTaskGoalReply",
           "run.connect": "#/$defs/RunConnectReply",
           "run.preflight": "#/$defs/RunPreflightReply",
           "run.start": "#/$defs/RunStartReply",
@@ -7584,7 +8136,8 @@
           "runs.read_events": "#/$defs/RunsReadEventsReply",
           "runs.read_tail": "#/$defs/RunsReadTailReply",
           "runs.summary": "#/$defs/RunsSummaryReply",
-          "tasks.list": "#/$defs/TasksListReply"
+          "tasks.list": "#/$defs/TasksListReply",
+          "usage.window": "#/$defs/UsageWindowReply"
         },
         "propertyName": "type"
       },
@@ -7686,6 +8239,12 @@
           "$ref": "#/$defs/AgentLoginsStartReply"
         },
         {
+          "$ref": "#/$defs/ProjectTaskGoalReply"
+        },
+        {
+          "$ref": "#/$defs/UsageWindowReply"
+        },
+        {
           "$ref": "#/$defs/InstancesChanged"
         },
         {
@@ -7725,6 +8284,7 @@
     "machine.describe": "machine_describe",
     "checkout.inspect": "checkout_inspect",
     "run.preflight": "preflight",
+    "project.task_goal": "project_goal",
     "examples.list": "examples",
     "project.create_from_example": "examples",
     "project.copy_out": "examples",
@@ -7733,7 +8293,8 @@
     "compute.add_cluster": "machine_compute",
     "compute.remove_cluster": "machine_compute",
     "agent_logins.list": "agent_logins",
-    "agent_logins.start": "agent_logins"
+    "agent_logins.start": "agent_logins",
+    "usage.window": "usage_window"
   },
   "x-vibesys-feature-by-field": {
     "run.start": {
@@ -7762,7 +8323,8 @@
       "with_totals": "run_history_pages"
     },
     "runs.list": {
-      "digest_runs": "run_digest"
+      "digest_runs": "run_digest",
+      "with_dashboard": "run_dashboard"
     },
     "examples.list": {
       "with_catalogue": "example_catalogue"

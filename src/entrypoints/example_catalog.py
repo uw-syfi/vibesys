@@ -21,22 +21,20 @@ from typing import Literal, Self
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from server.host_examples import (
-    GOAL_MAX_CHARS,
     ExampleHardware,
     ExampleList,
     ExampleModel,
-    ExampleObjective,
     ExampleSummary,
     ExampleTask,
     ExampleWorkload,
 )
+from server.host_helper_os import read_task_goal
 from server.host_preflight import Backend
 from vs_project.api import (
     CatalogueInput,
     Project,
     ProjectError,
     TaskDirectory,
-    load_objectives,
 )
 
 REGISTRY_RELATIVE = PurePosixPath("examples/registry.toml")
@@ -186,11 +184,6 @@ def example_tasks(root: Path) -> tuple[str, ...]:
     return tuple(task.name.value for task in _task_directories(root))
 
 
-def bounded_goal(text: str) -> tuple[str, bool]:
-    """``text`` cut to ``GOAL_MAX_CHARS``, and whether anything was cut."""
-    return text[:GOAL_MAX_CHARS], len(text) > GOAL_MAX_CHARS
-
-
 def read_task_detail(task: TaskDirectory) -> ExampleTask | None:
     """What ``task`` is about; ``None`` when its input file declares no ``[catalogue]``.
 
@@ -210,18 +203,19 @@ def read_task_detail(task: TaskDirectory) -> ExampleTask | None:
         catalogue = CatalogueInput.model_validate(table)
         backends = document.get("backends") or ()
         backend = Backend(backends[0]) if backends else None
-        objectives = load_objectives(task.path).objective
     except (ValidationError, ValueError) as exc:
         message = f"invalid {task.manifest_path}: {exc}"
         raise CatalogError(message) from exc
     try:
-        text = task.objective_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        message = f"cannot read {task.objective_path}: {exc}"
+        goal = read_task_goal(task)
+    except (OSError, ValueError) as exc:
+        message = f"cannot read the goal of {task.manifest_path}: {exc}"
         raise CatalogError(message) from exc
-    goal, truncated = bounded_goal(text)
     return ExampleTask(
-        task=task.name.value,
+        task=goal.task,
+        objectives=goal.objectives,
+        goal=goal.goal,
+        goal_truncated=goal.goal_truncated,
         domain=catalogue.domain,
         hardware=ExampleHardware(backend=backend, **catalogue.hardware.model_dump()),
         model=None if catalogue.model is None else ExampleModel(**catalogue.model.model_dump()),
@@ -230,11 +224,6 @@ def read_task_detail(task: TaskDirectory) -> ExampleTask | None:
             if catalogue.workload is None
             else ExampleWorkload(**catalogue.workload.model_dump())
         ),
-        objectives=tuple(
-            ExampleObjective(metric=axis.name, direction=axis.direction) for axis in objectives
-        ),
-        goal=goal,
-        goal_truncated=truncated,
     )
 
 

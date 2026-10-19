@@ -103,7 +103,7 @@ depends_on = ["vibesys.api.display_catalog", "vs_decode.api", "vs_logs", "vibesy
 
 [[modules]]
 path = "server.chat"
-depends_on = ["vibesys.api", "vs_prompts", "server", "server.controller", "server.run_lifecycle", "server.journal", "server.events", "server.execution", "vs_sim.api"]
+depends_on = ["vibesys.api", "vs_prompts", "server", "server.controller", "server.host_api", "server.run_lifecycle", "server.journal", "server.events", "server.execution", "vs_sim.api"]
 
 [[modules]]
 path = "server.transport"
@@ -138,7 +138,7 @@ depends_on = ["server", "server.trace", "server.execution", "server.chat", "serv
 # the standard library only; tests/architecture/test_light_entrypoints.py keeps
 # the light entrypoints' import closure free of the engine.
 path = "server.host_api"
-depends_on = ["vs_decode.api", "server.host_agent_logins", "server.host_compute", "server.host_envelope", "server.host_examples", "server.host_harness", "server.host_machine_facts", "server.host_preflight", "server.host_run_events", "server.host_run_summary"]
+depends_on = ["vs_decode.api", "server.host_agent_logins", "server.host_compute", "server.host_envelope", "server.host_examples", "server.host_harness", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_summary"]
 
 [[modules]]
 # The fields every helper request and reply carries. Pydantic only.
@@ -221,7 +221,7 @@ depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_requests",
 [[modules]]
 # The host helper's request answering: one request through the host's interfaces.
 path = "server.host_helper_requests"
-depends_on = ["vs_decode.api", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_examples", "server.host_helper_compute", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_events", "server.registry", "server.relay", "server.run_summary", "vs_project", "vs_sim.api"]
+depends_on = ["vs_decode.api", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_examples", "server.host_helper_compute", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_summary", "server.registry", "server.relay", "server.run_digest", "server.run_summary", "server.usage_window", "vs_project", "vs_sim.api"]
 
 [[modules]]
 # The host helper's `logs` feature: chunking, tails and the long poll over the LogReader role.
@@ -231,7 +231,7 @@ depends_on = ["server.host_api", "vs_sim.api"]
 [[modules]]
 # Light contracts for the example catalog and the projects made from it or copied out.
 path = "server.host_examples"
-depends_on = ["server.host_preflight", "vs_project"]
+depends_on = ["server.host_envelope", "server.host_preflight", "vs_project"]
 
 [[modules]]
 # Light contracts for the harness a run starts with: the provider and model pair and how it reads.
@@ -275,15 +275,26 @@ path = "server.host_helper_machine"
 depends_on = ["server.host_api", "server.host_machine_facts", "vs_sim.api"]
 
 [[modules]]
+# What a run's tile draws (per-idea points, attention reason): contracts only. Pydantic only.
+path = "server.host_run_dashboard"
+depends_on = []
+
+[[modules]]
+# What runs spent in a window, summed from their usage records: a pure function. Light, and
+# loaded by the host helper on the first usage.window request, not for hello.
+path = "server.usage_window"
+depends_on = ["server.host_envelope", "server.host_run_summary"]
+
+[[modules]]
 # A run's digest (ideas, best ratio, duration, ending) folded from its journal in one pass.
 # Light: the record contracts and the decoder only.
 path = "server.run_digest"
-depends_on = ["vs_decode.api", "server.host_api", "server.host_run_summary"]
+depends_on = ["vs_decode.api", "server.host_api", "server.host_run_dashboard", "server.host_run_summary"]
 
 [[modules]]
 # The host helper's interfaces on a real host: projects, directories, launches, the checkout.
 path = "server.host_helper_os"
-depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_preflight", "server.host_preflight", "server.host_helper_requests", "server.run_digest", "server.span_index", "server.run_summary", "server.run_summary_cache", "vs_logs", "vs_project", "vs_sim.api"]
+depends_on = ["server.host_examples", "server.host_agent_logins", "vs_decode.api", "server.host_api", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_preflight", "server.host_preflight", "server.host_helper_requests", "server.run_digest", "server.span_index", "server.run_summary", "server.run_summary_cache", "vs_logs", "vs_project", "vs_sim.api"]
 
 [[modules]]
 # A run's summary: the fold of its journal that the run level shows, as a pure read model.
@@ -352,7 +363,7 @@ depends_on = ["vibesys", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibe
 
 [[modules]]
 path = "vibesys.api.auxiliary"
-depends_on = ["vibesys.api.store"]
+depends_on = ["vibesys.api.store", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.api.store"
@@ -1222,7 +1233,7 @@ expose = ["NativeProfilerPreflight", "ProfilerPreflight", "ProfilerToolOffer", "
 from = ["vibesys.run.profilers"]
 
 [[interfaces]]
-expose = ["resolve_skill_source_dirs", "validate_skill_tree"]
+expose = ["chat_skill_dirs", "resolve_skill_source_dirs", "validate_skill_tree"]
 from = ["vibesys.run.skill_sources"]
 
 [[interfaces]]
@@ -1303,7 +1314,7 @@ depends_on = ["vs_agent", "vibesys.orchestration.dynamic.search", "vibesys.orche
 [[modules]]
 path = "vibesys.api.wiring"
 visibility = ["launch", "entrypoints", "tests", "scripts"]
-depends_on = ["vibesys", "vibesys.api._session", "vibesys.api.assembly", "vibesys.run", "vibesys.orchestration.skill_selection"]
+depends_on = ["vibesys", "vibesys.api._session", "vibesys.api.assembly", "vibesys.run", "vibesys.run.skill_sources", "vibesys.orchestration.skill_selection"]
 
 [[modules]]
 path = "vs_runtime._runs"
@@ -1325,7 +1336,7 @@ expose = ["RunHandle", "Runs"]
 
 [[interfaces]]
 from = ["vibesys.api.wiring"]
-expose = ["AgentToolContext", "NativeProfilerPreflight", "ProfilerPreflight", "RunResources", "SessionAgents", "SessionImplementations", "create_session", "platform_skill_selection"]
+expose = ["AgentToolContext", "NativeProfilerPreflight", "ProfilerPreflight", "RunResources", "SessionAgents", "SessionImplementations", "chat_skill_dirs", "create_session", "platform_skill_selection"]
 
 [[interfaces]]
 from = ["vibesys.api.catalog"]

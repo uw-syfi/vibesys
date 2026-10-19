@@ -155,6 +155,7 @@ function fixture(
       model,
       clock: {start: 0, now: 101},
       tokens: EMPTY_LEDGER,
+      who: new Map(),
       zoom: each => zooms.push(each),
     },
     core: state.run.core,

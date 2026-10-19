@@ -28,6 +28,7 @@ jobs:
   build:
     name: Build and verify universal wheel
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -118,6 +119,7 @@ jobs:
     if: github.event_name == 'release'
     needs: build
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     environment: pypi
     permissions:
       actions: read

@@ -1,0 +1,55 @@
+{
+  "id": "helper-usage-window-gated",
+  "protocol": "host-helper",
+  "title": "The usage.window message needs the usage_window feature",
+  "description": "After a hello that negotiated no features, usage.window is answered feature_not_negotiated, so a client that did not ask never reads what a project spent.",
+  "role": "control",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": []
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "usage.window",
+        "request_id": "u0",
+        "deadline_ms": 30000,
+        "project": "/p",
+        "run_ids": [],
+        "since": "2026-10-10T00:00:00Z",
+        "until": "2026-10-11T00:00:00Z"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "u0",
+        "code": "feature_not_negotiated"
+      }
+    }
+  ]
+}

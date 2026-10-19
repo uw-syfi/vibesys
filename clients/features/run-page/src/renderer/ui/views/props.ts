@@ -14,7 +14,7 @@
  */
 import type {CoreState, TokenLedger} from '@vibesys/run-state';
 import type {ReactNode} from 'react';
-import type {RunModel, ZoomEvent} from '../../../state/index.js';
+import type {RunModel, WhoBySpan, ZoomEvent} from '../../../state/index.js';
 
 /** Moves the screen: the route machine's events. */
 export type Zoom = (event: ZoomEvent) => void;
@@ -31,6 +31,8 @@ export interface ViewBase {
   readonly clock: RunClock;
   /** The tokens the run's turns spent, by turn span (empty before any turn finished). */
   readonly tokens: TokenLedger;
+  /** The harness and model that ran each turn, by turn span, from the run's usage records. */
+  readonly who: WhoBySpan;
   readonly zoom: Zoom;
 }
 

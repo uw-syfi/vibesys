@@ -15,7 +15,8 @@
       "helper-harnesses",
       "helper-run-summary-gated",
       "helper-compute-gated",
-      "helper-agent-logins-gated"
+      "helper-agent-logins-gated",
+      "helper-usage-window-gated"
     ],
     "registry": [
       "helper-instances-empty",

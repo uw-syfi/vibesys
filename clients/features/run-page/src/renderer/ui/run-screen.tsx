@@ -51,6 +51,8 @@ import {
   timelineView,
   traceArrival,
   transcriptLoading,
+  usageRecords,
+  whoBySpan,
 } from '../../state/index.js';
 import {Hero} from './hero.js';
 import {HistoryLoading, InitialRunLoading, RunGone, RunLoadError} from './history-loading.js';
@@ -129,6 +131,18 @@ function Header(props: {readonly state: RunPageState; readonly dispatch: Dispatc
             </Text>
           )}
         </Row>
+        {header.agents.length === 0 ? null : (
+          <Row gap="space-4" wrap>
+            {header.agents.map(agent => (
+              <Row key={agent.role} gap="space-2" align="baseline">
+                <Text variant="small" tone="muted">
+                  {agent.role}
+                </Text>
+                <Text variant="code">{agent.ran.join(', ')}</Text>
+              </Row>
+            ))}
+          </Row>
+        )}
       </Stack>
       <Row gap="space-3">
         {header.pause.shown ? (
@@ -456,6 +470,7 @@ export function RunScreen(props: {
     model,
     clock: {start: clockStart(model), now: clockAt(model, runNow(state))},
     tokens: props.core?.tokens ?? EMPTY_LEDGER,
+    who: whoBySpan(usageRecords(state)),
     zoom,
   };
   const pending = pendingRunScreen(state, dispatch, zoom, route);

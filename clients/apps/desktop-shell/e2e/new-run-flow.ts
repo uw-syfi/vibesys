@@ -24,6 +24,8 @@ export interface NewRunPage {
   readonly answers: Answers;
   /** The run's agent, when the page is shown with one chosen (else the machine's first). */
   readonly agent?: AgentChoice;
+  /** The machine the form is for, when not the world's own. */
+  readonly machine?: string;
 }
 
 const EXAMPLE = {...NO_ANSWERS, from: 'example' as const};
@@ -78,6 +80,7 @@ export const NEW_RUN_PAGES: readonly NewRunPage[] = [
   {name: 'goal data structure', step: 'goal', answers: STRUCTURE},
   {name: 'goal database', step: 'goal', answers: DATABASE},
   {name: 'where', step: 'where', answers: {...LLM, goalSeen: true}},
+  {name: 'where clusters', step: 'where', answers: {...LLM, goalSeen: true}, machine: 'local'},
   {name: 'agent', step: 'agent', answers: {...LLM, goalSeen: true}},
   {name: 'agent project', step: 'agent', answers: {...OWN, goalSeen: true}},
   {
@@ -102,11 +105,12 @@ export const NEW_RUN_PAGES: readonly NewRunPage[] = [
 /** The draft that has `answers` made and `step` shown, on the machine the world's runs are on. */
 function draftAt(page: NewRunPage, machine = 'ssh:host-b'): Draft {
   return {
-    machine,
+    machine: page.machine ?? machine,
     answers: page.answers,
     at: page.step,
     agent: page.agent ?? null,
     budget: {rounds: null, timeLimitS: null, results: 'keep'},
+    measure: {kind: 'same_machine'},
     advanced: '',
     destination: null,
   };

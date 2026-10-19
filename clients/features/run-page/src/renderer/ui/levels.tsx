@@ -278,7 +278,13 @@ function StepLevel(
         <AgentsPane {...props} selected={zoomed.agent?.id ?? null} />
       ) : (
         <Pane kicker="steps" title={markdownToPlain(zoomed.idea.title)} mono width="master">
-          <StepList idea={zoomed.idea} selected={step.span} tokens={base.tokens} zoom={base.zoom} />
+          <StepList
+            idea={zoomed.idea}
+            selected={step.span}
+            tokens={base.tokens}
+            who={base.who}
+            zoom={base.zoom}
+          />
         </Pane>
       )}
       <StepPane {...props} />

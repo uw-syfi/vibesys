@@ -290,6 +290,12 @@ body > div:first-child {
 .vs-section-content {
   min-width: 0;
 }
+/* A list of numbered steps carries an answer under each: room for the longest to stay on one line. */
+@container (min-width: 42rem) {
+  .vs-section-layout[data-steps] {
+    grid-template-columns: calc(var(--column-aside) * 0.8) minmax(0, 1fr);
+  }
+}
 @container (max-width: 42rem) {
   .vs-section-layout {
     grid-template-columns: minmax(0, 1fr);
@@ -577,11 +583,18 @@ body > div:first-child {
 .vs-segment:hover {
   color: var(--text);
 }
-.vs-segmented[data-size="sm"] .vs-segment {
+.vs-segmented[data-size="sm"] .vs-segment,
+.vs-segmented[data-size="xs"] .vs-segment {
   min-height: var(--control-sm);
   padding: 0 var(--space-4);
   font-size: var(--text-small-size);
   line-height: var(--text-small-line);
+}
+.vs-segmented[data-size="xs"] {
+  gap: var(--space-2);
+}
+.vs-segmented[data-size="xs"] .vs-segment {
+  padding: 0 var(--space-3);
 }
 .vs-segment:has(:checked) {
   border-color: var(--text);
@@ -798,6 +811,9 @@ body > div:first-child {
   font-weight: var(--text-caption-weight);
   white-space: nowrap;
 }
+.vs-chip[data-mono-id] {
+  font-family: var(--text-code-family);
+}
 .vs-chip[data-tone="live"] {
   color: var(--accent);
   border-color: var(--chip-accent-border);
@@ -1005,6 +1021,7 @@ body > div:first-child {
 /* --- table ------------------------------------------------------------------------------------- */
 
 .vs-table-scroll {
+  container-type: inline-size;
   overflow-x: auto;
   min-width: 0;
   border: var(--hairline) solid var(--line);
@@ -1070,6 +1087,42 @@ body > div:first-child {
 }
 .vs-table tr[aria-current="true"] {
   background: var(--selection);
+}
+.vs-table tr[data-kind="sub"] td {
+  color: var(--muted);
+}
+.vs-table tr[data-kind="sub"] td:first-child {
+  padding-left: var(--space-7);
+}
+.vs-table tr[data-kind="total"] td {
+  font-weight: var(--text-body-strong-weight);
+}
+.vs-table td[data-lead] {
+  min-width: calc(var(--space-8) * 3);
+}
+.vs-table-lead {
+  display: flex;
+  align-items: center;
+}
+.vs-table-fold {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-5);
+  margin: 0 var(--space-2) 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  vertical-align: middle;
+}
+/* Columns that need room give way first: the table scroller is its own container, so it is the
+   width of the table, not of the window, that decides. */
+@container (max-width: 760px) {
+  .vs-table [data-wide] {
+    display: none;
+  }
 }
 
 /* --- tabs -------------------------------------------------------------------------------------- */

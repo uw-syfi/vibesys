@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Literal, assert_never
+from typing import TYPE_CHECKING, Annotated, Literal, Self, assert_never
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 from pydantic import BaseModel, Field, SerializeAsAny, ValidationInfo, model_validator
 
@@ -421,14 +424,23 @@ class HostEpoch(Value):
         return self
 
 
+_LEDGER_INDEXES = ("_by_resource", "_inspections", "_positions")
+"""The slots of `RecordsState` that hold its ledger indexes.
+
+Named here, once, so that `RecordsState.model_copy` reads this tuple instead of the class's
+``__slots__``, a dunder the purity ratchet keeps core from reading.
+"""
+
+
 class RecordsState(Value):
     """Records state lifecycle contract."""
 
-    # The indexes from request identity, and from the resource a request names, to positions
-    # in ``records``, each built on its first lookup. A state never changes, so neither do its
-    # indexes; a copy is a new state and builds its own. Like `Value`'s slots they stay out of
-    # equality, copies and serialization.
-    __slots__ = ("_by_resource", "_positions")
+    # The indexes from request identity, from the resource a request names, and from the request
+    # an inspection inspects, to positions in ``records``, each built on its first lookup. A
+    # state never changes, so neither do its indexes. Like `Value`'s slots they stay out of
+    # equality and serialization; a copy that keeps the same ``records`` tuple keeps them too
+    # (see `model_copy`).
+    __slots__ = _LEDGER_INDEXES
 
     records: tuple[RequestRecord, ...] = ()
     children: tuple[ChildLease, ...] = ()
@@ -445,6 +457,23 @@ class RecordsState(Value):
         if epochs and epochs[-1] != self.recovery.epoch:
             raise ContractValidationError("hosts", "the newest host epoch is the recovery epoch")
         return self
+
+    def model_copy(self, *, update: Mapping[str, object] | None = None, deep: bool = False) -> Self:
+        """A copy that keeps the ledger indexes when it keeps the very same ``records`` tuple.
+
+        The indexes are positions in ``records`` and nothing else, so they hold for any copy
+        whose ``records`` is the same object. Without this, each copy that changed only
+        ``children`` or ``recovery`` rebuilt the index on its next lookup: recovery copies the
+        state once per finished record, so a restart cost the square of the ledger.
+        """
+        copy = super().model_copy(update=update, deep=deep)
+        if copy.records is self.records:
+            for slot in _LEDGER_INDEXES:
+                try:
+                    object.__setattr__(copy, slot, object.__getattribute__(self, slot))
+                except AttributeError:
+                    continue
+        return copy
 
     def positions(self, request_id: RequestId | None) -> tuple[int, ...]:
         """Where the records of ``request_id`` sit in ``records``: one place, or none.
@@ -476,6 +505,22 @@ class RecordsState(Value):
                     index[named] = (*index.get(named, ()), position)
             object.__setattr__(self, "_by_resource", index)
         return tuple(self.records[position] for position in index.get(resource_id, ()))
+
+    def inspections_of(self, target: RequestId) -> tuple[RequestRecord, ...]:
+        """The records of the inspections of ``target``, in ledger order.
+
+        A lookup costs a dictionary read instead of a scan of every record.
+        """
+        try:
+            index: dict[RequestId, tuple[int, ...]] = object.__getattribute__(self, "_inspections")
+        except AttributeError:
+            index = {}
+            for position, record in enumerate(self.records):
+                if isinstance(record.request, InspectRequest):
+                    named = record.request.target
+                    index[named] = (*index.get(named, ()), position)
+            object.__setattr__(self, "_inspections", index)
+        return tuple(self.records[position] for position in index.get(target, ()))
 
     def find(self, request_id: RequestId | None) -> tuple[RequestRecord, ...]:
         """The records of ``request_id``, in ledger order (see `positions`)."""

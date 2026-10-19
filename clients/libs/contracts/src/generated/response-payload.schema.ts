@@ -174,73 +174,6 @@ const responsePayloadSchema: Record<string, unknown> = {
       "title": "CandidateDisposition",
       "type": "string"
     },
-    "ChatModelOption": {
-      "additionalProperties": false,
-      "description": "One offered chat model and the source of its suggestion.",
-      "properties": {
-        "model": {
-          "title": "Model",
-          "type": "string"
-        },
-        "source": {
-          "enum": [
-            "run",
-            "role",
-            "suggested"
-          ],
-          "title": "Source",
-          "type": "string"
-        },
-        "default": {
-          "type": "boolean",
-          "default": false,
-          "title": "Default"
-        }
-      },
-      "required": [
-        "model",
-        "source"
-      ],
-      "title": "ChatModelOption",
-      "type": "object"
-    },
-    "ChatOptions": {
-      "additionalProperties": false,
-      "description": "All offered chat selections grouped by provider.",
-      "properties": {
-        "providers": {
-          "items": {
-            "$ref": "#/$defs/ChatProviderOptions"
-          },
-          "title": "Providers",
-          "type": "array"
-        }
-      },
-      "title": "ChatOptions",
-      "type": "object"
-    },
-    "ChatProviderOptions": {
-      "additionalProperties": false,
-      "description": "One supported chat provider and its suggested models.",
-      "properties": {
-        "provider": {
-          "title": "Provider",
-          "type": "string"
-        },
-        "models": {
-          "items": {
-            "$ref": "#/$defs/ChatModelOption"
-          },
-          "title": "Models",
-          "type": "array"
-        }
-      },
-      "required": [
-        "provider"
-      ],
-      "title": "ChatProviderOptions",
-      "type": "object"
-    },
     "ChatResult": {
       "additionalProperties": false,
       "description": "Answer and thread identity returned by experiment chat.",
@@ -1558,6 +1491,17 @@ const responsePayloadSchema: Record<string, unknown> = {
           "title": "Chat Threads",
           "type": "array"
         },
+        "last_chat_thread_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChatThreadId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "spans": {
           "items": {
             "$ref": "#/$defs/WireSpan"
@@ -2021,17 +1965,6 @@ const responsePayloadSchema: Record<string, unknown> = {
       "anyOf": [
         {
           "$ref": "#/$defs/ChatThreadInfo"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null
-    },
-    "chat_options": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/ChatOptions"
         },
         {
           "type": "null"

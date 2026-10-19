@@ -71,6 +71,7 @@ test('over every fixture run an idea has the same `vs input` figure on the Ideas
       model,
       clock: {start: 0, now: null},
       tokens: EMPTY_LEDGER,
+      who: new Map(),
       zoom: () => undefined,
     };
     const ideas = await figuresOf(

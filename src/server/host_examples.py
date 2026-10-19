@@ -1,20 +1,23 @@
-"""Light contracts for the example catalog and the projects made from it or copied out.
+"""Light contracts for the example catalog, the projects made from it or copied out, and a project's tasks.
 
 ``ExampleList`` is what ``vibesys example list --json`` prints and the helper's
 ``examples.list`` answers; ``CreatedProject`` is what ``project.create_from_example`` and
 ``project.copy_out`` answer. Pydantic and the standard library only, like
 ``server.host_api``, which embeds them in the helper's messages.
 
-Public surface: ``ExampleSummary``, ``ExampleTask`` and what it holds, ``ExampleList``,
-``CreatedProject``.
+Public surface: ``ExampleSummary``, ``ExampleTask`` and what it holds, ``TaskGoal`` with
+``bounded_goal``, ``ExampleList``, ``CreatedProject``, and a project's tasks: ``TaskSummary``,
+``TaskList``, ``TasksListRequest``, ``TasksListReply``, ``ProjectTaskGoalRequest``,
+``ProjectTaskGoalReply``.
 """
 
 from __future__ import annotations
 
 from typing import Annotated, Final, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
+from server.host_envelope import HelperReplyBase, HelperRequestBase
 from server.host_preflight import Backend
 from vs_project.api import AcceleratorVendor, ExampleDomain, ModelMaker
 
@@ -63,23 +66,33 @@ class ExampleObjective(BaseModel):
     direction: Literal["max", "min"]
 
 
-class ExampleTask(BaseModel):
-    """What one task of an example is about, read from its ``vibesys.input.toml`` and goal file."""
+class TaskGoal(BaseModel):
+    """What a task is for: its goal text and the axes it declares, read from its files."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     task: str
+    objectives: tuple[ExampleObjective, ...]
+    """Empty when the task has no ``objectives.toml``."""
+    goal: Annotated[str, Field(max_length=GOAL_MAX_CHARS)]
+    """The task's ``OBJECTIVE.md``, cut to ``GOAL_MAX_CHARS``."""
+    goal_truncated: bool
+
+
+def bounded_goal(text: str) -> tuple[str, bool]:
+    """``text`` cut to ``GOAL_MAX_CHARS``, and whether anything was cut."""
+    return text[:GOAL_MAX_CHARS], len(text) > GOAL_MAX_CHARS
+
+
+class ExampleTask(TaskGoal):
+    """What one task of an example is about, read from its ``vibesys.input.toml`` and goal file."""
+
     domain: ExampleDomain
     hardware: ExampleHardware
     model: ExampleModel | None
     """Present for ``llm-serving`` tasks."""
     workload: ExampleWorkload | None
     """Present for ``data-structures`` tasks."""
-    objectives: tuple[ExampleObjective, ...]
-    """Empty when the task has no ``objectives.toml``."""
-    goal: Annotated[str, Field(max_length=GOAL_MAX_CHARS)]
-    """The task's ``OBJECTIVE.md``, cut to ``GOAL_MAX_CHARS``."""
-    goal_truncated: bool
 
 
 class ExampleSummary(BaseModel):
@@ -125,6 +138,58 @@ class CreatedProject(BaseModel):
     """Its task names, sorted."""
 
 
+class TaskSummary(BaseModel):
+    """One task of a project."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str
+    """The task's directory name, the value ``--task`` accepts."""
+
+
+class TaskList(BaseModel):
+    """``vibesys tasks --json``: the tasks of one project."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    version: Literal[1] = 1
+    project_root: str
+    """The resolved absolute project directory the tasks were read from."""
+    tasks: tuple[TaskSummary, ...]
+
+
+class TasksListRequest(HelperRequestBase):
+    """The tasks a project defines under ``.vibesys/tasks/``."""
+
+    type: Literal["tasks.list"] = "tasks.list"
+    project: str
+    """The project directory on the host; ``~`` expands to the helper's home."""
+
+
+class TasksListReply(HelperReplyBase):
+    """The project's tasks."""
+
+    type: Literal["tasks.list"] = "tasks.list"
+    tasks: TaskList
+
+
+class ProjectTaskGoalRequest(HelperRequestBase):
+    """The goal text and objectives of one task of a project."""
+
+    type: Literal["project.task_goal"] = "project.task_goal"
+    project: str
+    """The project directory on the host; ``~`` expands to the helper's home."""
+    task: Annotated[str, StringConstraints(min_length=1, max_length=256)]
+    """A name ``tasks.list`` listed."""
+
+
+class ProjectTaskGoalReply(HelperReplyBase):
+    """The task's goal and objectives."""
+
+    type: Literal["project.task_goal"] = "project.task_goal"
+    goal: TaskGoal
+
+
 __all__ = [
     "GOAL_MAX_CHARS",
     "CreatedProject",
@@ -135,4 +200,12 @@ __all__ = [
     "ExampleSummary",
     "ExampleTask",
     "ExampleWorkload",
+    "ProjectTaskGoalReply",
+    "ProjectTaskGoalRequest",
+    "TaskGoal",
+    "TaskList",
+    "TaskSummary",
+    "TasksListReply",
+    "TasksListRequest",
+    "bounded_goal",
 ]

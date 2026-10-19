@@ -16,9 +16,9 @@ from server.events import (
     EventType,
     RunEvent,
 )
+from server.host_api import HarnessChoice
 
 if TYPE_CHECKING:
-    from server.chat.options import ChatRunSettings
     from server.journal import WireJournal
     from server.run_lifecycle import RunStatus
     from vs_sim.api import Condition, Lock, Threads
@@ -62,7 +62,7 @@ class ChatThreadHandle:
     close: Callable[[], None] = _noop_thread_close
 
 
-ChatThreadFactory = Callable[[ChatThreadId, str | None, str | None], ChatThreadHandle]
+ChatThreadFactory = Callable[[ChatThreadId, HarnessChoice | None], ChatThreadHandle]
 
 
 @dataclass(frozen=True)
@@ -160,7 +160,7 @@ class ChatManager:
         self._thread_handlers: dict[ChatThreadId, _ThreadRoute] = {}
         self._thread_restorations: dict[ChatThreadId, _ThreadRestoration] = {}
         self._thread_specs: dict[ChatThreadId, ChatThreadCreatedData] = {}
-        self._run_settings: ChatRunSettings | None = None
+        self._last_thread_id: ChatThreadId | None = None
         self._active_default_calls = 0
         self._active_thread_calls = 0
         self._retain_terminal = False
@@ -184,7 +184,10 @@ class ChatManager:
             event.data, ChatThreadCreatedData
         ):
             self._thread_specs.setdefault(event.data.thread_id, event.data)
+            self._last_thread_id = event.data.thread_id
             return
+        if event.type is EventType.CHAT:
+            self._last_thread_id = event.chat_thread_id
         if (
             event.type is EventType.CHAT
             and event.chat_thread_id is not None
@@ -259,11 +262,13 @@ class ChatManager:
     def create_thread(
         self,
         *,
-        provider: str | None = None,
-        model: str | None = None,
+        harness: HarnessChoice | None = None,
         title: str | None = None,
     ) -> ChatThreadCreatedData:
-        """Create, register, and record a chat thread with resolved settings."""
+        """Create, register, and record a chat thread with resolved settings.
+
+        ``harness`` is the provider and model the thread runs; omitted, the run's own.
+        """
         with self._condition:
             factory = self._thread_factory
             if factory is not None:
@@ -274,7 +279,7 @@ class ChatManager:
                 message
             )
         try:
-            handle = factory(uuid.uuid4().hex, provider, model)
+            handle = factory(uuid.uuid4().hex, harness)
             spec = handle.spec
             if title is not None and title.strip():
                 spec = spec.model_copy(update={"title": title.strip()})
@@ -313,16 +318,15 @@ class ChatManager:
         with self._condition:
             self._thread_factory = factory
 
-    def set_run_settings(self, settings: ChatRunSettings | None) -> None:
-        """Set the chat agent choices advertised for the attached run."""
-        with self._condition:
-            self._run_settings = settings
+    def last_thread_id_locked(self) -> ChatThreadId | None:
+        """The thread a chat opens on while the caller holds the condition.
 
-    @property
-    def run_settings(self) -> ChatRunSettings | None:
-        """Return the chat settings for the attached run, if available."""
-        with self._condition:
-            return self._run_settings
+        The thread asked in, or created, most recently; None is the default thread, which also
+        stands when no thread exists. A restart restores it from the journaled thread events
+        only: the default thread's own questions are not replayed, so a run whose last question
+        went to the default thread reopens on its newest thread.
+        """
+        return self._last_thread_id
 
     def install_default_handler(self, handler: Callable[[str], ChatAnswer] | None) -> None:
         """Install or remove the handler for the default chat route."""
@@ -493,7 +497,7 @@ class ChatManager:
                 message = "experiment chat restoration ownership changed"
                 raise RuntimeError(message)
         try:
-            handle = factory(thread_id, spec.provider, spec.model)
+            handle = factory(thread_id, HarnessChoice(provider=spec.provider, model=spec.model))
         except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-010249 [BLE001]; cancellation must also wake waiters before it is propagated.
             self._finish_thread_restoration(thread_id, restoration, error=exc)
             return

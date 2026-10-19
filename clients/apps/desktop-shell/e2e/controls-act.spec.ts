@@ -29,6 +29,10 @@ const STARTS: Readonly<Record<string, (page: Page) => Promise<void>>> = {
     await page.getByRole('radiogroup', {name: 'Show'}).getByText('Agents').click();
     await expect(page.getByRole('listbox', {name: 'Agents'})).toBeVisible();
   },
+  'the Usage face': async page => {
+    await page.getByRole('radiogroup', {name: 'Show'}).getByText('Usage').click();
+    await expect(page.getByRole('table', {name: 'Usage by group'})).toBeVisible();
+  },
 };
 
 async function reachScreen(page: Page, fixtureName: string, start: string): Promise<void> {
@@ -67,11 +71,15 @@ const CELLS: readonly string[] = [
   'an opened idea',
   'the Timeline face',
   'the Agents face',
+  'the Usage face',
 ];
 
-const fixtureName = 'finished-run';
+/** The Usage face needs a run whose turns report usage. */
+const fixtureFor = (start: string): string =>
+  start === 'the Usage face' ? 'finished-ten-ideas' : 'finished-run';
 
 for (const start of CELLS) {
+  const fixtureName = fixtureFor(start);
   test(`every control of ${start} acts on ${fixtureName}`, async ({context}) => {
     const first = await context.newPage();
     await reachScreen(first, fixtureName, start);

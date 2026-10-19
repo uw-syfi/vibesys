@@ -62,6 +62,7 @@ export type {
   HelperError,
   HelperErrorCode,
   HelperFeature,
+  IdeaVerdict,
   InstanceInspection,
   InstanceInspectionMetadata,
   InstanceList,
@@ -89,6 +90,7 @@ export type {
   PathEntry,
   PathsCompleteReply,
   Request as HelperRequest,
+  RunAttention,
   RunClosing,
   RunConnectReply,
   RunDigest,
@@ -111,10 +113,14 @@ export type {
   SlurmClusterSettings,
   SlurmTarget,
   StopOutcome,
+  TaskGoal,
   TaskList,
+  TokenTally,
   TurnReply,
   UnreadableRecord,
   UsageRecord,
+  UsageWindowReply,
+  UsageWindowRequest,
 } from './generated/host-helper.generated.js';
 
 const STRICT: SchemaWalk = {documents: [hostHelperSchema], strict: true};

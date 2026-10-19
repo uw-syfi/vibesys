@@ -14,11 +14,15 @@ private home modules.
 from __future__ import annotations
 
 from vibesys.api.auxiliary import (
+    STEER_PROPOSAL_KIND,
     AuxiliaryAgentLaunch,
     AuxiliaryAgents,
     AuxiliaryReadableInput,
+    AuxiliarySkills,
     ManagedAgent,
     RunReady,
+    SteerProposal,
+    SteerProposalReceipt,
 )
 from vibesys.api.contracts import (
     ArgumentsRejected,
@@ -160,6 +164,7 @@ __all__ = [
     "CONTROL_REQUEST",
     "KNOWN_COMPUTE_BACKENDS",
     "REFUSAL_TEXT",
+    "STEER_PROPOSAL_KIND",
     "ActionRequest",
     "AgentBackend",
     "AgentExecutionStartedData",
@@ -173,6 +178,7 @@ __all__ = [
     "AuxiliaryAgentLaunch",
     "AuxiliaryAgents",
     "AuxiliaryReadableInput",
+    "AuxiliarySkills",
     "CancelAttemptRequest",
     "CancelItemRequest",
     "CommandResultPayload",
@@ -259,6 +265,8 @@ __all__ = [
     "SpanUpdatedData",
     "StartupStep",
     "SteerMode",
+    "SteerProposal",
+    "SteerProposalReceipt",
     "SteerRequest",
     "SteerTarget",
     "SteerTargetKind",

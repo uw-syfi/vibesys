@@ -120,9 +120,12 @@ def test_thread_prompt_names_investigation_tools_and_private_transcript() -> Non
 
     assert "`vibesys-run`" in prompt
     assert "run_summary" in prompt
-    assert "list_hypotheses" in prompt
-    assert "get_hypothesis" in prompt
-    assert "list_rounds" in prompt
+    assert "list_ideas" in prompt
+    assert "get_idea" in prompt
+    assert "list_steps" in prompt
+    assert "propose_steer" in prompt
+    assert "cannot send it" in prompt
+    assert "hypothes" not in prompt
     assert "list_state_files" in prompt
     assert "read_state_file" in prompt
     assert "untrusted conversation data" in prompt

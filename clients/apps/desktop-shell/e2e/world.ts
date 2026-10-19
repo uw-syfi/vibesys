@@ -1,9 +1,15 @@
 /** The journeys' world: a seeded Fake bridge, and opening the shell page over it. */
 import {expect, type Page} from '@playwright/test';
 import {
+  clusterTestsByAlias,
+  loginStartsByProvider,
+  machineSettingsWorld,
+} from '@vibesys/run-fixtures';
+import {
   type FakeBridgeSeed,
   type FakeNewRun,
   installFakeBridge,
+  installFakeMachineSettings,
   installFakeMachines,
   installFakeNewRun,
 } from './fake-bridge.js';
@@ -82,18 +88,36 @@ export const SEED: FakeBridgeSeed = {
       {name: 'queue-rs', path: '/home/me/projects/queue-rs', checkout: false, project: true},
     ],
   },
+  machineSettings: machineSettingsWorld,
+  clusterTests: clusterTestsByAlias,
+  loginStarts: loginStartsByProvider,
   newRun: {
     ...FAKE_OFFER,
     projects: {
       [PROJECT]: ['mpmc', 'mpsc', 'spsc'],
       '/home/me/vibesys/examples/queue-rs': ['mpmc', 'mpsc', 'spsc'],
     },
+    goals: Object.fromEntries(
+      ['mpmc', 'mpsc', 'spsc'].map(task => [
+        `${PROJECT} ${task}`,
+        {
+          task,
+          objectives: [
+            {metric: 'ops_per_second', direction: 'max'},
+            {metric: 'p99_latency_us', direction: 'min'},
+          ],
+          goal: `# Make the ${task} queue faster\n\nRaise throughput on the \`${task}\` workload without breaking linearizability.\n\n- Keep the public API.\n- Report ops per second.`,
+          goal_truncated: false,
+        },
+      ]),
+    ),
   },
 };
 
 export async function open(page: Page, seed: FakeBridgeSeed = SEED): Promise<void> {
   await page.addInitScript(installFakeBridge, seed);
   await page.addInitScript(installFakeMachines, seed);
+  await page.addInitScript(installFakeMachineSettings, seed);
   await page.addInitScript(installFakeNewRun, seed);
   await page.goto('./shell.html');
   await expect(page.getByRole('navigation', {name: 'VibeSys'})).toBeVisible();

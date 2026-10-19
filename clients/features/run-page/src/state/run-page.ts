@@ -43,6 +43,7 @@ import {
   traceStep,
 } from './live.js';
 import type {RunSummaryState, SummaryReply} from './run-summary.js';
+import {USAGE_CONTROLS_DEFAULT, type UsageControls} from './usage-view.js';
 
 /** When a Resume takes effect: now, or once the provider's capacity returns. */
 export type ResumeWhen = 'now' | 'capacity_returns';
@@ -205,6 +206,8 @@ export interface RunPageState {
   readonly selected: string | null;
   /** Which ideas the Ideas face shows. */
   readonly ideas: IdeasFilter;
+  /** The Usage face's controls. */
+  readonly usage: UsageControls;
   /** The Ideas face's layout; null until the reader picks one (the face then picks by the run). */
   readonly ideasLayout: IdeasLayout | null;
   /** What the reader opened in the ideas tree (`ideaTree`'s keys). */
@@ -246,6 +249,7 @@ export type RunPageAction =
   | {readonly type: 'record'; readonly record: RunRecord}
   | {readonly type: 'select-stream'; readonly streamId: string}
   | {readonly type: 'ideas-filter'; readonly filter: IdeasFilter}
+  | {readonly type: 'usage-controls'; readonly controls: UsageControls}
   | {readonly type: 'ideas-layout'; readonly layout: IdeasLayout}
   | {readonly type: 'ideas-open'; readonly key: string; readonly open: boolean}
   | {readonly type: 'ideas-pin'; readonly idea: string | null}
@@ -348,6 +352,7 @@ export function runPageInitial(seed: RunPageSeed): RunPageState {
     views: {},
     selected: null,
     ideas: IDEAS_FILTER_DEFAULT,
+    usage: USAGE_CONTROLS_DEFAULT,
     ideasLayout: null,
     ideasOpen: new Set(),
     ideasPinned: null,
@@ -668,6 +673,7 @@ function withSummary(
       journalBytes: reply.journalBytes,
       trace: reply.trace,
       roundsFinished: reply.roundsFinished,
+      records: reply.records,
     },
     run: {
       core: reduceEventBatch(initialCoreState(), reply.seed),
@@ -995,6 +1001,8 @@ export function runPageStep(state: RunPageState, action: RunPageAction): RunPage
       return {state: {...state, followingLogs: true, selected: action.streamId}, requests: []};
     case 'ideas-filter':
       return {state: {...state, ideas: action.filter}, requests: []};
+    case 'usage-controls':
+      return {state: {...state, usage: action.controls}, requests: []};
     case 'ideas-layout':
       return {state: {...state, ideasLayout: action.layout}, requests: []};
     case 'ideas-open':

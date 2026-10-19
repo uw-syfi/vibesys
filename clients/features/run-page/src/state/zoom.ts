@@ -9,16 +9,16 @@
  * which the page provides to push the route into the window's history, so the address always names
  * the route shown. Only the window itself sends `restore` (its address on open, Back, Forward),
  * which sets the route the address already holds without pushing (`ZoomMachineEvent`).
- * The mode (`ideas`, `timeline`, `agents`, `logs`) switches what the panes show and keeps the
- * level, except that Timeline and Agents list the whole run, so choosing one closes an open idea
+ * The mode (`ideas`, `timeline`, `agents`, `usage`, `logs`) switches what the panes show and keeps the
+ * level, except that Timeline, Agents and Usage list the whole run, so choosing one closes an open idea
  * or agent (an idea is only ever open in the Ideas or Logs mode). `up` goes one level up: from an item to its step, a step to its idea or agent, an idea or
  * agent to the run, and at the run back to the Ideas.
  */
 import {assign, setup} from 'xstate';
 
 /** What the run level's left pane shows, and at deeper levels whether the detail shows its logs. */
-export type RunMode = 'ideas' | 'timeline' | 'agents' | 'logs';
-export const RUN_MODES: readonly RunMode[] = ['ideas', 'timeline', 'agents', 'logs'];
+export type RunMode = 'ideas' | 'timeline' | 'agents' | 'usage' | 'logs';
+export const RUN_MODES: readonly RunMode[] = ['ideas', 'timeline', 'agents', 'usage', 'logs'];
 
 /** The zoom as the address holds it. Ids that are not in the run resolve a level up. */
 export interface Route {
@@ -150,7 +150,7 @@ export const zoomMachine = setup({
     },
     mode: [
       {
-        // The Timeline and Agents faces list the whole run, so they replace an open idea or agent.
+        // The Timeline, Agents and Usage faces list the whole run, so they replace an open idea or agent.
         guard: ({context, event}) => listsRun(event.mode) && isOpen(context.route),
         target: '.run',
         actions: [assign(({event}) => ({route: {...RUN_ROUTE, mode: event.mode}})), 'remember'],
@@ -233,9 +233,9 @@ export const zoomMachine = setup({
   },
 });
 
-/** Whether the face lists the run's ideas or agents, which an open idea or agent would hide. */
+/** Whether the face covers the whole run, which an open idea or agent would hide. */
 function listsRun(mode: RunMode): boolean {
-  return mode === 'timeline' || mode === 'agents';
+  return mode === 'timeline' || mode === 'agents' || mode === 'usage';
 }
 
 function isOpen(route: Route): boolean {

@@ -17,6 +17,12 @@ import {
   parseHostsRequest,
 } from './hosts.js';
 import {
+  MACHINE_SETTINGS_CHANNELS,
+  type MachineSettingsRequest,
+  type MachineSettingsWelcomeBridge,
+  parseMachineSettingsRequest,
+} from './machine-settings.js';
+import {
   MACHINES_CHANNELS,
   type MachinesRequest,
   type MachinesWelcomeBridge,
@@ -66,6 +72,7 @@ export const WELCOME_CHANNELS = {
   ...RUN_CONTROL_CHANNELS,
   ...SETTINGS_CHANNELS,
   ...MACHINES_CHANNELS,
+  ...MACHINE_SETTINGS_CHANNELS,
   ...NEW_RUN_CHANNELS,
   ...WINDOWS_CHANNELS,
 } as const;
@@ -100,6 +107,12 @@ const WELCOME_ARGUMENT_COUNTS = {
   [WELCOME_CHANNELS.machine]: 1,
   [WELCOME_CHANNELS.inspectCheckout]: 2,
   [WELCOME_CHANNELS.removeMachine]: 1,
+  [WELCOME_CHANNELS.compute]: 1,
+  [WELCOME_CHANNELS.testCluster]: 2,
+  [WELCOME_CHANNELS.addCluster]: 2,
+  [WELCOME_CHANNELS.removeCluster]: 2,
+  [WELCOME_CHANNELS.agentLogins]: 1,
+  [WELCOME_CHANNELS.startLogin]: 2,
   [WELCOME_CHANNELS.describeMachine]: 1,
   [WELCOME_CHANNELS.preflight]: 2,
   [WELCOME_CHANNELS.examples]: 1,
@@ -107,6 +120,7 @@ const WELCOME_ARGUMENT_COUNTS = {
   [WELCOME_CHANNELS.copyOut]: 3,
   [WELCOME_CHANNELS.startRun]: 2,
   [WELCOME_CHANNELS.helperFeatures]: 1,
+  [WELCOME_CHANNELS.taskGoal]: 3,
   [WELCOME_CHANNELS.openRunWindow]: 1,
   [WELCOME_CHANNELS.showMainWindow]: 0,
   [WELCOME_CHANNELS.openSettings]: 0,
@@ -123,6 +137,7 @@ export interface WelcomeBridge
     RunControlWelcomeBridge,
     SettingsWelcomeBridge,
     MachinesWelcomeBridge,
+    MachineSettingsWelcomeBridge,
     NewRunWelcomeBridge,
     WindowsWelcomeBridge {
   readonly platform: string;
@@ -140,6 +155,7 @@ export type WelcomeRequest =
   | RunControlRequest
   | SettingsRequest
   | MachinesRequest
+  | MachineSettingsRequest
   | NewRunRequest
   | WindowsRequest;
 
@@ -162,6 +178,9 @@ export function parseWelcomeRequest(channel: string, args: readonly unknown[]): 
   if (isChannelOf(RUN_CONTROL_CHANNELS, channel)) return parseRunControlRequest(channel, args);
   if (isChannelOf(SETTINGS_CHANNELS, channel)) return parseSettingsRequest(channel, args);
   if (isChannelOf(MACHINES_CHANNELS, channel)) return parseMachinesRequest(channel, args);
+  if (isChannelOf(MACHINE_SETTINGS_CHANNELS, channel)) {
+    return parseMachineSettingsRequest(channel, args);
+  }
   if (isChannelOf(NEW_RUN_CHANNELS, channel)) return parseNewRunRequest(channel, args);
   if (isChannelOf(WINDOWS_CHANNELS, channel)) return parseWindowsRequest(channel, args);
   // `WELCOME_ARGUMENT_COUNTS` is exhaustive over the same composed channel object.
@@ -170,6 +189,14 @@ export function parseWelcomeRequest(channel: string, args: readonly unknown[]): 
 
 export type {HostsWelcomeBridge} from './hosts.js';
 export type {
+  AgentLogin,
+  ClusterTest,
+  ComputeSettings,
+  LoginStart,
+  MachineSettingsWelcomeBridge,
+  SlurmClusterSettings,
+} from './machine-settings.js';
+export type {
   CheckoutInspection,
   MachineEntry,
   MachineReport,
@@ -177,6 +204,7 @@ export type {
 } from './machines.js';
 export type {
   HarnessPick,
+  MeasureTarget,
   NewRunWelcomeBridge,
   Offered,
   PreflightResult,

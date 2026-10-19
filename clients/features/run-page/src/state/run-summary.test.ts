@@ -76,6 +76,7 @@ function wire(summary: Fixture['summary']): WireSummary {
     })),
     tokens: tokens(summary.tokens),
     usage: summary.usage.map(entry => ({spanId: entry.span_id, tokens: tokens(entry.tally)})),
+    records: [],
   };
 }
 

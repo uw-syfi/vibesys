@@ -8,7 +8,17 @@
  */
 import {ConnectionError, type ConnectionLease, HelperRequestError} from '@vibesys/connection';
 import {type HostId, hostFromKey, hostKey, hostLabel} from '@vibesys/hosts';
-import type {CheckoutInspection, MachineEntry, MachineReport} from '@vibesys/ipc';
+import type {
+  AgentLogin,
+  CheckoutInspection,
+  ClusterTest,
+  ComputeSettings,
+  LoginStart,
+  MachineEntry,
+  MachineReport,
+  Offered,
+  SlurmClusterSettings,
+} from '@vibesys/ipc';
 import type {SettingsStore} from '@vibesys/settings';
 
 export interface MachinesMainDeps {
@@ -37,6 +47,12 @@ function unreachable(error: unknown): MachineReport {
 
 function notNegotiated(error: unknown): boolean {
   return error instanceof HelperRequestError && error.code === 'feature_not_negotiated';
+}
+
+/** A failure the user reads: what was being done on which machine, then the helper's own words. */
+function explained(error: unknown, doing: string, id: HostId): Error {
+  const detail = error instanceof Error ? error.message : String(error);
+  return new Error(`Could not ${doing} on ${hostLabel(id)}: ${detail}`);
 }
 
 export class MachinesMain {
@@ -97,6 +113,86 @@ export class MachinesMain {
       throw error instanceof HelperRequestError
         ? new Error(`Could not inspect ${path}: ${error.message}`)
         : error;
+    }
+  }
+
+  /**
+   * What `id` has set up as places to measure (its Slurm clusters and Modal token), or that its
+   * helper predates machine compute settings.
+   */
+  async compute(id: HostId): Promise<Offered<ComputeSettings>> {
+    return this.#offered(id, 'read the clusters and clouds', async connection => {
+      const reply = await connection.request({type: 'compute.list'});
+      return reply.settings;
+    });
+  }
+
+  /** Try `cluster` from `id`: reach it, ask its scheduler, check its workspace. Saves nothing. */
+  async testCluster(id: HostId, cluster: SlurmClusterSettings): Promise<ClusterTest> {
+    return this.#changed(id, 'test the cluster', async connection => {
+      const reply = await connection.request({type: 'compute.test_cluster', cluster});
+      return reply.result;
+    });
+  }
+
+  /** Save `cluster` on `id`; its helper tests it again first. Answers the settings after. */
+  async addCluster(id: HostId, cluster: SlurmClusterSettings): Promise<ComputeSettings> {
+    return this.#changed(id, 'save the cluster', async connection => {
+      const reply = await connection.request({type: 'compute.add_cluster', cluster});
+      return reply.settings;
+    });
+  }
+
+  /** Remove the cluster `name` from `id`'s own file. Answers the settings after. */
+  async removeCluster(id: HostId, name: string): Promise<ComputeSettings> {
+    return this.#changed(id, 'remove the cluster', async connection => {
+      const reply = await connection.request({type: 'compute.remove_cluster', name});
+      return reply.settings;
+    });
+  }
+
+  /** Each vetted harness's login on `id`, or that its helper predates login state. */
+  async agentLogins(id: HostId): Promise<Offered<readonly AgentLogin[]>> {
+    return this.#offered(id, 'read the agent logins', async connection => {
+      const reply = await connection.request({type: 'agent_logins.list'});
+      return reply.logins;
+    });
+  }
+
+  /** Start `provider`'s own login on `id`. */
+  async startLogin(id: HostId, provider: string): Promise<LoginStart> {
+    return this.#changed(id, 'start the login', async connection => {
+      const reply = await connection.request({type: 'agent_logins.start', provider});
+      return reply.result;
+    });
+  }
+
+  /** `read` over `id`'s connection, or `unsupported` from a helper that did not negotiate it. */
+  async #offered<T>(
+    id: HostId,
+    doing: string,
+    read: (connection: ConnectionLease['connection']) => Promise<T>,
+  ): Promise<Offered<T>> {
+    try {
+      await using lease = await this.#deps.connection(id);
+      return {kind: 'offered', value: await read(lease.connection)};
+    } catch (error) {
+      if (notNegotiated(error)) return {kind: 'unsupported'};
+      throw explained(error, doing, id);
+    }
+  }
+
+  /** `change` over `id`'s connection; a failure is worded for the user, a missing feature too. */
+  async #changed<T>(
+    id: HostId,
+    doing: string,
+    change: (connection: ConnectionLease['connection']) => Promise<T>,
+  ): Promise<T> {
+    try {
+      await using lease = await this.#deps.connection(id);
+      return await change(lease.connection);
+    } catch (error) {
+      throw explained(error, doing, id);
     }
   }
 

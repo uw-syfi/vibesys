@@ -25,6 +25,8 @@ export interface SwatchItem {
   readonly label: string;
   readonly series?: number;
   readonly hatched?: boolean;
+  /** The label is an identifier a person may copy (a model id), set in the code face. */
+  readonly mono?: boolean;
 }
 
 /** A one-line key to colored bars: each swatch and its name, named as a list by `label`. */
@@ -40,7 +42,7 @@ export function SwatchLegend(props: {
             {...(item.series === undefined ? {} : {series: item.series})}
             {...(item.hatched === true ? {hatched: true} : {})}
           />
-          <Text variant="small" tone="muted">
+          <Text variant={item.mono === true ? 'code' : 'small'} tone="muted">
             {item.label}
           </Text>
         </li>

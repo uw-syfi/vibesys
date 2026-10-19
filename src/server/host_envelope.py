@@ -90,6 +90,9 @@ class HelperFeature(StrEnum):
     workload, objectives and goal text, in ``task_details``."""
     RUN_DIGEST = "run_digest"
     """``runs.list``'s ``digest_runs``: each named run's ``digest``, read from its journal."""
+    RUN_DASHBOARD = "run_dashboard"
+    """``runs.list``'s ``with_dashboard``: each digested run's per-idea ``dashboard`` points and its
+    ``attention`` reason, for the runs dashboard's tiles."""
     HARNESS_GENERATIONS = "harness_generations"
     """``harnesses.list``'s ``with_generations``: each pair's maker and the generation it belongs to."""
     RUN_ROLE_AGENTS = "run_role_agents"
@@ -102,6 +105,10 @@ class HelperFeature(StrEnum):
     ``compute.remove_cluster``: the machine's Slurm clusters and Modal token."""
     AGENT_LOGINS = "agent_logins"
     """``agent_logins.list`` and ``agent_logins.start``: each harness's login on the machine."""
+    PROJECT_GOAL = "project_goal"
+    """``project.task_goal``: a project's task goal text (``OBJECTIVE.md``) and its objectives."""
+    USAGE_WINDOW = "usage_window"
+    """``usage.window``: what a project's runs spent in a window of time, for the Usage page."""
 
 
 class HelperRequestBase(BaseModel):

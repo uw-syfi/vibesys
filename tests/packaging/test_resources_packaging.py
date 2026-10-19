@@ -37,6 +37,9 @@ def _make_fake_repo(root: Path) -> Path:
     (evaluator / "vibesys.evaluator.toml").write_text("schema_version = 1\n")
     (evaluator / "native_runner" / "target" / "debug").mkdir(parents=True)
     (evaluator / "native_runner" / "target" / "debug" / "runner").write_text("build output")
+    chat = root / "resources" / "chat-skills" / "steering-a-run"
+    chat.mkdir(parents=True)
+    (chat / "SKILL.md").write_text("---\nname: steering-a-run\ndescription: d\n---\n")
     skill = root / "resources" / "skills" / "serving-systems"
     skill.mkdir(parents=True)
     (skill / "SKILL.md").write_text("---\nname: serving-systems\ndescription: d\n---\n")
@@ -53,6 +56,7 @@ def test_stage_resources_copies_trees_and_drops_vendored_checkouts(tmp_path: Pat
     assert stage_resources(repo, dest)
     assert (dest / "profilers" / "nsys" / "server.py").is_file()
     assert (dest / "profilers" / "_common" / "capture_runtime.py").is_file()
+    assert (dest / "chat-skills" / "steering-a-run" / "SKILL.md").is_file()
     assert (dest / "skills" / "serving-systems" / "SKILL.md").is_file()
     assert (dest / "skills" / "serving-systems" / ".vibesys.toml").is_file()
     assert (dest / "evaluators" / "queue" / "vibesys.evaluator.toml").is_file()

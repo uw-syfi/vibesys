@@ -42,6 +42,10 @@ for (const theme of THEMES) {
         if (each.agent !== undefined && each.step === 'agent') {
           await expect(main(page).getByLabel('Judge model')).toBeVisible();
         }
+        // The goal of the user's own task is read from the machine; the page is checked with it.
+        if (each.step === 'goal' && each.answers.from === 'project') {
+          await expect(main(page)).toContainText('Higher is better');
+        }
         expect(await screenCheck(page)).toEqual([]);
         if (shots !== undefined) {
           const file = `new-run__${each.name.replaceAll(' ', '-')}__${width}__${theme}.png`;

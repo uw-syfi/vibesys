@@ -435,8 +435,8 @@ Components, under `renderer/ui/`:
   route. `renderer/ui/hero.tsx` is drawn at every level, so navigating moves
   nothing in it.
 - `renderer/ui/views/timeline/`, `renderer/ui/views/agents/`, `renderer/ui/views/logs/`,
-  `renderer/ui/views/step/` and `renderer/ui/views/idea/`: one folder per view, each owned on its
-  own. A view gets its props from `renderer/ui/views/props.ts` and reads the run only through
+  `renderer/ui/views/usage/`, `renderer/ui/views/step/` and `renderer/ui/views/idea/`: one folder
+  per view, each owned on its own. A view gets its props from `renderer/ui/views/props.ts` and reads the run only through
   them and the selectors in `state/`. Its pane header goes through
   `renderer/ui/views/headers.ts`.
 - Layout that must hold is checked by the desktop screen checks

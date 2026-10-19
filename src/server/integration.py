@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import TYPE_CHECKING
 
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from server.chat.factory import (
     ChatAgentBuilder,
@@ -22,12 +23,14 @@ from server.events import (
     InvocationFinishedData,
     PhaseData,
     RunEvent,
+    SteerProposedData,
+    ToolResultData,
     TurnUsageData,
 )
 from server.read_model import RunInspector
 from server.run_attachment import AgentSelection, RunAttachment
 from server.run_lifecycle import RunTrigger
-from vibesys.api import CoreEventType
+from vibesys.api import STEER_PROPOSAL_KIND, CoreEventType, JsonResultPayload, SteerProposalReceipt
 from vs_sim.api import CloseOnce, ReleaseStack
 
 if TYPE_CHECKING:
@@ -196,6 +199,31 @@ def _core_event_diagnostic(
     if event_type in _CORE_FAILURE_CONTEXTS and status is EventStatus.FAILED:
         return _core_failure_diagnostic(event_type, text, data)
     return None
+
+
+def _steer_proposal(data: ToolResultData, execution_id: str | None) -> SteerProposedData | None:
+    """The proposal a chat turn's tool result carries, or None when it carries none.
+
+    ``propose_steer`` returns a ``SteerProposalReceipt`` as JSON. The receipt is recognized by its
+    ``kind`` and parsed strictly, so a result that merely mentions a steer, or an error, proposes
+    nothing. The proposal is named by the turn and the tool call when the provider gives the call
+    an id (stable across replays), and by a fresh id otherwise.
+    """
+    payload = data.payload
+    if data.is_error or not isinstance(payload, JsonResultPayload):
+        return None
+    value = payload.value
+    if not isinstance(value, dict) or value.get("kind") != STEER_PROPOSAL_KIND:
+        return None
+    try:
+        receipt = SteerProposalReceipt.model_validate(value)
+    except ValidationError:
+        return None
+    stable = execution_id is not None and data.call_id is not None
+    return SteerProposedData(
+        proposal_id=f"{execution_id}.{data.call_id}" if stable else uuid.uuid4().hex,
+        proposal=receipt.proposal,
+    )
 
 
 class RunIntegrationAdapter:
@@ -485,3 +513,13 @@ class RunIntegrationAdapter:
             round_label=event.round_label,
             invocation_id=event.execution_id,
         )
+        if event.agent_kind == "chat" and isinstance(data, ToolResultData):
+            proposed = _steer_proposal(data, event.execution_id)
+            if proposed is not None:
+                self.executions.publish_presentation(
+                    EventType.STEER_PROPOSED,
+                    proposed,
+                    agent_kind=event.agent_kind,
+                    round_label=event.round_label,
+                    invocation_id=event.execution_id,
+                )

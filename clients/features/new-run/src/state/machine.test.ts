@@ -4,9 +4,17 @@ import type {
   ExampleList,
   HelperFeature,
   MachineDescription,
+  TaskGoal,
 } from '@vibesys/contracts/host-helper';
 import type {HostKey} from '@vibesys/hosts';
-import type {HarnessOffer, Offered, PreflightResult, RunInputs} from '@vibesys/ipc';
+import type {
+  ComputeSettings,
+  HarnessOffer,
+  MeasureTarget,
+  Offered,
+  PreflightResult,
+  RunInputs,
+} from '@vibesys/ipc';
 import {checkMachine} from '@vibesys/machine/testing';
 import {exampleCatalogue} from '@vibesys/run-fixtures';
 import type {RecentRun} from '@vibesys/runs';
@@ -18,10 +26,12 @@ import type {Draft} from './draft.js';
 import {catalogueFor} from './flow.js';
 import {
   CHECK_DEBOUNCE_MS,
+  type Compute,
   checksPass,
   type FixDone,
   formWithRoles,
   inputsKey,
+  measureOptions,
   missingFeatures,
   type NewRunEvent,
   newRunMachine,
@@ -32,6 +42,7 @@ import {
   roleSummary,
   rolesAfter,
   runInputs,
+  sameTarget,
   splitWords,
   vettedModels,
 } from './index.js';
@@ -77,6 +88,7 @@ const RECENT: readonly RecentRun[] = [
         roles: [{role: 'judge', model: null, reasoning_effort: 'high'}],
       },
       agents: {judge: {provider: 'claude', model: 'claude-a'}},
+      measure_on: {kind: 'same_machine'},
       args: ['--max-in-flight', '3', '--note', 'two words'],
     },
   },
@@ -111,7 +123,7 @@ function output(operation: string, random: Seeded): unknown {
     case 'features':
       // A current helper, one before examples, one before typed options, one before both.
       return random.pick([
-        ['run_options', 'preflight', 'examples', 'harnesses', 'run_roles'],
+        ['run_options', 'preflight', 'examples', 'harnesses', 'run_roles', 'project_goal'],
         ['run_options', 'preflight', 'examples', 'harnesses'],
         ['run_options', 'preflight', 'harnesses'],
         ['preflight', 'examples', 'harnesses'],
@@ -129,6 +141,14 @@ function output(operation: string, random: Seeded): unknown {
           backend: random.pick([null, 'cpu', 'cuda']),
         },
       };
+    case 'goal':
+      return random.pick([
+        {kind: 'unsupported'},
+        {
+          kind: 'offered',
+          value: {task: 'mpmc', objectives: [], goal: 'Go fast.', goal_truncated: false},
+        },
+      ]);
     case 'fix':
       return {
         fix: random.pick<ProjectFix>([
@@ -184,6 +204,24 @@ function inputEvent(random: Seeded, snapshot: SnapshotFrom<typeof newRunMachine>
       role: {role: random.pick(ROLE_IDS), agent: null, effort: random.pick(['default', 'high'])},
     },
     {type: 'budget', budget: {rounds: random.pick([1, 2, 5]), timeLimitS: null, results: 'keep'}},
+    {
+      type: 'measure',
+      target: random.pick<MeasureTarget>([
+        {kind: 'same_machine'},
+        {kind: 'modal'},
+        {kind: 'slurm', cluster: random.pick(['lab-h100', 'amd-hpc'])},
+      ]),
+    },
+    {
+      type: 'compute',
+      machine: random.pick(['local', 'ssh:gpu']),
+      compute: random.pick<Compute>([
+        null,
+        {kind: 'unsupported'},
+        {kind: 'offered', value: SETTINGS_WITH_MODAL},
+        {kind: 'offered', value: SETTINGS_WITH_LAB},
+      ]),
+    },
     {type: 'advanced', advanced: random.pick(['', '--max-in-flight 3', '--max-rounds 4', '"open'])},
     {type: 'destination', destination: random.pick(['~/a', '~/b'])},
     {type: 'again', run: random.pick(RECENT)},
@@ -207,7 +245,21 @@ function expectStartOnlyWhenChecksPass(before: Snapshot, after: Snapshot): void 
   }
 }
 
-const INPUTS = ['answer', 'agent', 'role', 'budget', 'advanced', 'destination'];
+function settings(clusters: readonly string[], modal: boolean): ComputeSettings {
+  return {
+    config_path: '/home/me/.config/vibesys/config.toml',
+    clusters: clusters.map(name => ({
+      cluster: {name, reach: {kind: 'login_node'}, workspace: '/scratch/me'},
+      source: 'user',
+    })),
+    modal: {token_present: modal},
+  } as unknown as ComputeSettings;
+}
+
+const SETTINGS_WITH_MODAL = settings([], true);
+const SETTINGS_WITH_LAB = settings(['lab-h100'], false);
+
+const INPUTS = ['answer', 'agent', 'role', 'budget', 'measure', 'advanced', 'destination'];
 
 /** An input other than the machine never restarts what the machine offers. */
 function expectInputKeepsFacts(before: Snapshot, event: NewRunEvent, after: Snapshot): void {
@@ -228,6 +280,11 @@ function expectAsksOnlyWhatHelperTakes(before: Snapshot, after: Snapshot): void 
     expect(offers(helper, form.machine, 'preflight')).toBe(true);
     expect(offers(helper, form.machine, 'run_options')).toBe(true);
   }
+  if (entered({editing: {goal: 'loading'}})) {
+    expect(offers(helper, form.machine, 'project_goal')).toBe(true);
+    expect(after.context.answers.from).toBe('project');
+    expect(after.context.answers.task).not.toBeNull();
+  }
   if (entered({editing: {examples: 'loading'}})) {
     expect(offers(helper, form.machine, 'examples')).toBe(true);
   }
@@ -246,6 +303,14 @@ function expectInputApplied(before: Snapshot, event: NewRunEvent, after: Snapsho
   if (event.type === 'agent') {
     expect(form.agent).toMatchObject({provider: event.provider, model: event.model});
   }
+}
+
+/** The run is never measured on a target the machine's Settings data says it does not offer. */
+function unofferedMeasure(snapshot: Snapshot): string[] {
+  const {compute, form} = snapshot.context;
+  const offered =
+    compute === null || measureOptions(compute).some(option => sameTarget(option, form.measure));
+  return offered ? [] : ['the run is measured on a target its machine does not offer'];
 }
 
 /** The form never sets a role the run does not have, once the run has reported its roles. */
@@ -323,6 +388,7 @@ describe('newRunMachine', () => {
             }
           }
           problems.push(...unreportedRoles(snapshot));
+          problems.push(...unofferedMeasure(snapshot));
           if (form.project?.source === 'example' && runInputs(form) !== null) {
             problems.push('an example not yet created has run inputs');
           }
@@ -334,6 +400,10 @@ describe('newRunMachine', () => {
           expectInputKeepsFacts(before, event as NewRunEvent, after);
           expectInputApplied(before, event as NewRunEvent, after);
           expectAsksOnlyWhatHelperTakes(before, after);
+          if (event.type === 'xstate.done.actor.goal' && after.context.goal !== null) {
+            // A goal is kept under the machine, project and task it was asked of.
+            expect(JSON.parse(after.context.goal.for)[0]).toBe(before.context.form.machine);
+          }
           if (event.type === 'xstate.done.actor.preflight') {
             // The checks are for the inputs that were asked; the roles the run reports may then
             // change the form, and the checks are no longer for it (Start waits for new ones).
@@ -408,6 +478,7 @@ describe('newRunMachine', () => {
         harness: {provider: 'claude', model: 'claude-gone'},
         options: {},
         agents: {},
+        measure_on: {kind: 'same_machine'},
         args: [],
       },
     };
@@ -446,6 +517,57 @@ describe('newRunMachine', () => {
     expect(form.task).toBe('only');
     expect(answers.goalSeen).toBe(false);
     expect(at).toBe('task');
+    actor.stop();
+  });
+
+  test("the goal of the user's own task is read once the helper can, and again for another task", async () => {
+    const asked: string[] = [];
+    const actor = liveActor({
+      tasks: ['one', 'two'],
+      features: ['run_options', 'preflight', 'examples', 'project_goal'],
+      goalsAsked: asked,
+    });
+    actor.start();
+    await until(actor, snapshot => snapshot.matches({editing: {helper: 'ready'}}));
+    const send = (change: AnswerChange) => actor.send({type: 'answer', change, advance: true});
+    send({kind: 'from', from: 'project'});
+    send({kind: 'project', project: {source: 'folder', path: '/p/queue'}});
+    // No task yet: nothing to read.
+    await until(actor, snapshot => snapshot.matches({editing: {tasks: 'ready'}}));
+    expect(asked).toEqual([]);
+    send({kind: 'task', task: 'one'});
+    await until(actor, snapshot => snapshot.context.goal !== null);
+    expect(asked).toEqual(['/p/queue one']);
+    expect(actor.getSnapshot().context.goal).toEqual({
+      for: JSON.stringify(['local', '/p/queue', 'one']),
+      value: {
+        kind: 'offered',
+        value: {task: 'one', objectives: [], goal: 'one', goal_truncated: false},
+      },
+    });
+    // Answering the goal as read asks nothing again; another task asks for its own.
+    send({kind: 'goal'});
+    send({kind: 'task', task: 'two'});
+    await until(actor, snapshot => snapshot.context.goal?.for.includes('two') === true);
+    expect(asked).toEqual(['/p/queue one', '/p/queue two']);
+    actor.stop();
+  });
+
+  test('a helper without project_goal is never asked for a goal', async () => {
+    const asked: string[] = [];
+    const actor = liveActor({tasks: ['only'], goalsAsked: asked});
+    actor.start();
+    await until(actor, snapshot => snapshot.matches({editing: {helper: 'ready'}}));
+    actor.send({type: 'answer', change: {kind: 'from', from: 'project'}, advance: true});
+    actor.send({
+      type: 'answer',
+      change: {kind: 'project', project: {source: 'folder', path: '/p/solo'}},
+      advance: true,
+    });
+    await until(actor, snapshot => snapshot.context.answers.task === 'only');
+    await until(actor, snapshot => snapshot.matches({editing: {tasks: 'ready'}}));
+    expect(asked).toEqual([]);
+    expect(actor.getSnapshot().context.goal).toBeNull();
     actor.stop();
   });
 
@@ -549,6 +671,7 @@ describe('newRunMachine', () => {
       at: 'where',
       agent: null,
       budget: {rounds: 3, timeLimitS: null, results: 'keep'},
+      measure: {kind: 'same_machine'},
       advanced: '',
       destination: null,
     } as const;
@@ -578,6 +701,10 @@ function liveActor(options: {
   readonly examples?: Offered<ExampleList>;
   readonly tasks?: readonly string[];
   readonly draft?: Draft;
+  /** What the helper agreed to; run options, checks and examples when not given. */
+  readonly features?: readonly HelperFeature[];
+  /** Every goal read, as `project task`; the helper answers each with the task's name as its goal. */
+  readonly goalsAsked?: string[];
 }) {
   return createActor(
     newRunMachine.provide({
@@ -591,14 +718,22 @@ function liveActor(options: {
         harnesses: fromPromise<readonly HarnessOffer[], {readonly host: HostKey}>(
           async () => OFFERS,
         ),
-        features: fromPromise<readonly HelperFeature[], {readonly host: HostKey}>(async () => [
-          'run_options',
-          'preflight',
-          'examples',
-        ]),
+        features: fromPromise<readonly HelperFeature[], {readonly host: HostKey}>(
+          async () => options.features ?? ['run_options', 'preflight', 'examples'],
+        ),
         tasks: fromPromise<readonly string[], {readonly host: HostKey; readonly project: string}>(
           async () => options.tasks ?? ['mpmc', 'spsc'],
         ),
+        goal: fromPromise<
+          Offered<TaskGoal>,
+          {readonly host: HostKey; readonly project: string; readonly task: string}
+        >(async ({input}) => {
+          options.goalsAsked?.push(`${input.project} ${input.task}`);
+          return {
+            kind: 'offered',
+            value: {task: input.task, objectives: [], goal: input.task, goal_truncated: false},
+          };
+        }),
         fix: fromPromise<FixDone, {readonly host: HostKey; readonly fix: ProjectFix}>(
           async ({input}) => ({
             fix: input.fix,

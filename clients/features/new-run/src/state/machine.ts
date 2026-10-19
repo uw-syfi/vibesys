@@ -13,9 +13,17 @@ import type {
   ExampleList,
   HelperFeature,
   MachineDescription,
+  TaskGoal,
 } from '@vibesys/contracts/host-helper';
 import type {HostKey} from '@vibesys/hosts';
-import type {HarnessOffer, Offered, PreflightResult, RunInputs, StartedRun} from '@vibesys/ipc';
+import type {
+  HarnessOffer,
+  MeasureTarget,
+  Offered,
+  PreflightResult,
+  RunInputs,
+  StartedRun,
+} from '@vibesys/ipc';
 import {unprovided} from '@vibesys/machine';
 import type {RecentRun, RunStart} from '@vibesys/runs';
 import {and, assign, raise, type SnapshotFrom, setup} from 'xstate';
@@ -45,6 +53,8 @@ import {
   defaultRole,
   type FactsFor,
   type Form,
+  type GoalFor,
+  goalKey,
   type HelperFor,
   inputsKey,
   lastRun,
@@ -56,6 +66,7 @@ import {
   recordedAgent,
   runInputs,
 } from './form.js';
+import {type Compute, formWithMeasure} from './measure.js';
 import {type Problem, problemOf, type Step} from './problem.js';
 import {formWithRoles, rolesAfter, rolesWithin} from './roles.js';
 
@@ -84,6 +95,10 @@ export interface NewRunContext {
   readonly examples: ExamplesFor | null;
   readonly tasks: {readonly for: string; readonly list: readonly string[]} | null;
   readonly checks: ChecksFor | null;
+  /** What the machine has set up to measure on, from its Settings data (`compute` events). */
+  readonly compute: Compute;
+  /** The goal of the user's own task, once read (feature `project_goal`). */
+  readonly goal: GoalFor | null;
   /**
    * The role ids the run's orchestration declares, from the latest preflight that reported any:
    * null before one did, or from a helper that does not report them (`offers(..., 'run_roles')`).
@@ -115,6 +130,10 @@ export type NewRunEvent =
   | {readonly type: 'agent'; readonly provider: string; readonly model: string}
   | {readonly type: 'role'; readonly role: RoleChoice}
   | {readonly type: 'budget'; readonly budget: Budget}
+  /** Where results are measured. */
+  | {readonly type: 'measure'; readonly target: MeasureTarget}
+  /** What `machine` has set up, as its Settings data says (null: not known); ignored for another machine. */
+  | {readonly type: 'compute'; readonly machine: HostKey; readonly compute: Compute}
   | {readonly type: 'advanced'; readonly advanced: string}
   /** Where an example is copied to, before it is. */
   | {readonly type: 'destination'; readonly destination: string}
@@ -147,7 +166,7 @@ function withAgent(form: Form, change: (agent: AgentChoice) => AgentChoice): For
 /** The events that change one input of the run that the answers do not name. */
 type InputEvent = Extract<
   NewRunEvent,
-  {readonly type: 'agent' | 'role' | 'budget' | 'advanced' | 'destination'}
+  {readonly type: 'agent' | 'role' | 'budget' | 'measure' | 'advanced' | 'destination'}
 >;
 
 /** The form after `event` changed one of its inputs. */
@@ -178,6 +197,8 @@ function withInput(context: NewRunContext, event: InputEvent): Form {
       }));
     case 'budget':
       return {...form, budget: event.budget};
+    case 'measure':
+      return formWithMeasure({...form, measure: event.target}, context.compute);
     case 'advanced':
       return {...form, advanced: event.advanced};
     case 'destination':
@@ -214,6 +235,8 @@ function freshParts(machine: HostKey, recent: readonly RecentRun[]) {
     harnesses: null,
     examples: null,
     tasks: null,
+    goal: null,
+    compute: null,
     checks: null,
     roles: null,
     rerun: lastRun(machine, recent)?.start ?? null,
@@ -300,6 +323,17 @@ function flowWithTasks(context: NewRunContext, list: readonly string[]): Flow {
   return flow;
 }
 
+/** The project and task whose goal is asked: the user's own, once both are answered. */
+function goalAsked(
+  context: NewRunContext,
+): {readonly project: string; readonly task: string} | null {
+  const project = projectPath(context.form);
+  const {task} = context.answers;
+  return context.answers.from === 'project' && project !== null && task !== null
+    ? {project, task}
+    : null;
+}
+
 /** Whether the machine reads the tasks of the user's own project now. */
 function readsTasks(context: NewRunContext): boolean {
   return context.answers.from === 'project' && projectPath(context.form) !== null;
@@ -319,6 +353,10 @@ export const newRunMachine = setup({
     tasks: unprovided<readonly string[], {readonly host: HostKey; readonly project: string}>(
       'tasks',
     ),
+    goal: unprovided<
+      Offered<TaskGoal>,
+      {readonly host: HostKey; readonly project: string; readonly task: string}
+    >('goal'),
     preflight: unprovided<
       Offered<PreflightResult>,
       {readonly host: HostKey; readonly inputs: RunInputs}
@@ -328,6 +366,11 @@ export const newRunMachine = setup({
   },
   guards: {
     readsTasks: ({context}) => readsTasks(context),
+    readsGoal: ({context}) =>
+      goalAsked(context) !== null && offers(context.helper, context.form.machine, 'project_goal'),
+    // A new project, task or path to read from changes which goal is asked.
+    changesGoal: ({event}) =>
+      event.type === 'answer' && ['project', 'task', 'from'].includes(event.change.kind),
     hasInputs: ({context}) => inputsKey(context.form) !== null,
     mayStart: ({context}) =>
       checksPass(context.form, context.checks) &&
@@ -366,6 +409,12 @@ export const newRunMachine = setup({
       form: withInput(context, event as InputEvent),
       problem: null,
     })),
+    // What the machine has set up changed: a target it no longer offers is dropped.
+    compute: assign(({context, event}) => {
+      const {machine, compute} = event as Extract<NewRunEvent, {type: 'compute'}>;
+      if (machine !== context.form.machine) return {};
+      return {compute, form: formWithMeasure(context.form, compute)};
+    }),
     answer: assign(({context, event}) => {
       const {change, advance} = event as Extract<NewRunEvent, {type: 'answer'}>;
       return {
@@ -666,6 +715,54 @@ export const newRunMachine = setup({
             ready: {},
           },
         },
+        goal: {
+          initial: 'choosing',
+          on: {
+            answer: {guard: 'changesGoal', target: '.choosing'},
+            retry: {
+              guard: {type: 'failedAt', params: {step: 'goal'}},
+              target: '.choosing',
+              actions: 'clearProblem',
+            },
+          },
+          states: {
+            choosing: {always: [{guard: 'readsGoal', target: 'loading'}, {target: 'waiting'}]},
+            // Until the helper says it can read a goal, there is nothing to ask.
+            waiting: {always: {guard: 'readsGoal', target: 'loading'}},
+            loading: {
+              invoke: {
+                id: 'goal',
+                src: 'goal',
+                input: ({context}) => ({
+                  host: context.form.machine,
+                  ...(goalAsked(context) as {project: string; task: string}),
+                }),
+                onDone: {
+                  target: 'ready',
+                  actions: assign(({context, event}) => {
+                    const asked = goalAsked(context);
+                    return asked === null
+                      ? {}
+                      : {
+                          goal: {
+                            for: goalKey(context.form.machine, asked.project, asked.task),
+                            value: event.output,
+                          } satisfies GoalFor,
+                        };
+                  }),
+                },
+                onError: {
+                  target: 'ready',
+                  actions: {
+                    type: 'fail',
+                    params: ({event}) => ({step: 'goal', error: event.error}),
+                  },
+                },
+              },
+            },
+            ready: {},
+          },
+        },
         checks: {
           initial: 'waiting',
           on: {
@@ -673,6 +770,8 @@ export const newRunMachine = setup({
             agent: {target: '.waiting', actions: 'input'},
             role: {target: '.waiting', actions: 'input'},
             budget: {target: '.waiting', actions: 'input'},
+            measure: {target: '.waiting', actions: 'input'},
+            compute: {target: '.waiting', actions: 'compute'},
             advanced: {target: '.waiting', actions: 'input'},
             destination: {target: '.waiting', actions: 'input'},
             recheck: '.waiting',

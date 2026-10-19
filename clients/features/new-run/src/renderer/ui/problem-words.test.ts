@@ -10,6 +10,7 @@ const STEPS: Readonly<Record<Step, true>> = {
   harnesses: true,
   examples: true,
   tasks: true,
+  goal: true,
   preflight: true,
   fix: true,
   start: true,
@@ -55,7 +56,15 @@ test('every title names what failed, and the machine where the step is about it'
 
 test('a load or check can be tried again from the banner; a fix or start is pressed again', () => {
   const retry = (step: Step) => problemWords({step, detail: null}, 'host-a').retry;
-  const retried: Step[] = ['describe', 'examples', 'features', 'harnesses', 'preflight', 'tasks'];
+  const retried: Step[] = [
+    'describe',
+    'examples',
+    'features',
+    'goal',
+    'harnesses',
+    'preflight',
+    'tasks',
+  ];
   expect(ALL_STEPS.filter(retry).sort()).toEqual(retried);
 });
 

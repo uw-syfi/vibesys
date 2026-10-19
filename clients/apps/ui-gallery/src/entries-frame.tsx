@@ -27,6 +27,9 @@ import {
   SearchBox,
   Sparkline,
   Stack,
+  StackedArea,
+  StackedBars,
+  Swatch,
   SwatchLegend,
   Text,
   Thought,
@@ -44,6 +47,21 @@ const SPARK = [
 ];
 
 const noop = (): void => undefined;
+
+const USAGE_BARS = [
+  [4, 6, 0],
+  [8, 12, 3],
+  [2, 20, 5],
+  [0, 9, 2],
+  [6, 0, 0],
+].map((parts, index) => ({
+  id: `bar-${index}`,
+  title: `Bar ${index + 1}: ${parts.reduce((sum, part) => sum + part, 0)}k tokens`,
+  total: parts.reduce((sum, part) => sum + part, 0),
+  segments: parts.flatMap((value, at) =>
+    value === 0 ? [] : [{key: `${index}-${at}`, series: [7, 1, 3][at] ?? 0, value}],
+  ),
+}));
 
 interface Candidate {
   readonly id: string;
@@ -673,6 +691,55 @@ export const FRAME_ENTRIES = {
   },
   DotLegend: {render: () => <FilterDemo />},
   SwatchLegend: {render: () => <SeriesBarsDemo />},
+  Swatch: {
+    render: () => (
+      <Text tone="muted">
+        The square before a name in a legend or a table row: a color of the palette, or hatched for
+        what has none.
+      </Text>
+    ),
+  },
+  StackedArea: {
+    render: () => (
+      <StackedArea
+        label="Tokens, running total"
+        unit="tokens"
+        from="Oct 15, 16:30"
+        to="Oct 15, 19:10"
+        titles={['16:30 to 17:00', '17:00 to 17:30', '17:30 to 18:00', '18:00 to 18:30']}
+        layers={[
+          {key: 'planner', series: 7, values: [4, 8, 10, 12]},
+          {key: 'implementer', series: 1, values: [6, 18, 38, 47]},
+          {key: 'judge', series: 3, values: [0, 3, 8, 13]},
+        ]}
+      />
+    ),
+  },
+  StackedBars: {
+    render: () => (
+      <Stack>
+        <StackedBars
+          label="Tokens over time"
+          unit="tokens"
+          from="Oct 15, 16:30"
+          to="Oct 15, 19:10"
+          bars={USAGE_BARS}
+        />
+        <SwatchLegend
+          label="Roles"
+          items={[
+            {label: 'planner', series: 7},
+            {label: 'implementer', series: 1},
+            {label: 'judge', series: 3},
+          ]}
+        />
+        <Row gap="space-2" align="center">
+          <Swatch series={1} />
+          <Text variant="small">implementer</Text>
+        </Row>
+      </Stack>
+    ),
+  },
   SearchBox: {
     render: () => <Text tone="muted">The search field beside the legend filter chips above.</Text>,
   },

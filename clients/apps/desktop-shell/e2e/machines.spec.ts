@@ -149,7 +149,7 @@ test('add a machine, change a checkout from labelled suggestions, and remove a m
   await page.getByRole('button', {name: 'Change checkout'}).click();
   const field = page.getByRole('combobox', {name: 'VibeSys checkout on This Mac'});
   await field.fill('/home/me/');
-  const options = page.getByRole('option');
+  const options = page.getByRole('listbox').getByRole('option');
   await expect(options).toHaveText([
     '/home/me/notes/',
     '/home/me/vibesys/0.1.1 · e66d941',
@@ -216,10 +216,10 @@ test('Escape in the checkout field first hides its suggestions, and closes the f
   await page.getByRole('textbox', {name: 'SSH host'}).fill('host-a');
   const checkout = page.getByRole('combobox', {name: 'VibeSys checkout'});
   await checkout.fill('/home/me/');
-  await expect(page.getByRole('option').first()).toBeVisible();
+  await expect(page.getByRole('listbox').getByRole('option').first()).toBeVisible();
 
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('option')).toHaveCount(0);
+  await expect(page.getByRole('listbox').getByRole('option')).toHaveCount(0);
   await expect(checkout).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(checkout).toHaveCount(0);

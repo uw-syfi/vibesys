@@ -69,7 +69,13 @@ async function shown() {
     ...fixture,
     candidates: {...fixture.candidates, best: {candidate: 'n2', adopted: true}},
   };
-  const base = {model, clock: {start: 0, now: null}, tokens: EMPTY_LEDGER, zoom: () => undefined};
+  const base = {
+    model,
+    clock: {start: 0, now: null},
+    tokens: EMPTY_LEDGER,
+    who: new Map(),
+    zoom: () => undefined,
+  };
   const initial = runPageInitial({
     identity: {host: 'ssh:host-b', runId: 'run-1'},
     title: {project: 'queue-rs', task: null},

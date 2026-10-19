@@ -61,6 +61,29 @@
   display: flex;
   padding-top: var(--space-2);
 }
+.vs-sidebar-marker {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: var(--space-6);
+  height: var(--space-6);
+  border: var(--hairline) solid var(--line);
+  border-radius: 50%;
+  color: var(--text);
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  line-height: 1;
+}
+.vs-sidebar-marker[data-state="current"] {
+  border-color: var(--text);
+  background: var(--text);
+  color: var(--bg);
+}
+.vs-sidebar-marker[data-state="muted"] {
+  color: var(--muted);
+}
 .vs-sidebar-text {
   display: flex;
   flex: 1;

@@ -5,6 +5,7 @@
  * hero, chart, ideas and Now, the logs, and the scrubber (`scrubberView`) over the trace log.
  */
 
+export type {UsageRecord} from '@vibesys/contracts/host-helper';
 export {type HistoryLoadingView, historyLoadingView} from './history-words.js';
 export {type IdeaBase, type IdeaBases, ideaBases} from './idea-bases.js';
 export {effectWords, type IdeaEffect, type IdeaEffects, ideaEffects} from './idea-effects.js';
@@ -92,6 +93,40 @@ export {
   tokensTitle,
 } from './token-words.js';
 export {
+  followed,
+  groupedBy,
+  groupedWithin,
+  roleAgents,
+  TOKEN_KINDS,
+  type TokenKind,
+  USAGE_CHARTS,
+  USAGE_CONTROLS_DEFAULT,
+  USAGE_GROUPS,
+  USAGE_METRICS,
+  type UsageChart,
+  type UsageContext,
+  type UsageControls,
+  type UsageGroupBy,
+  type UsageLabel,
+  type UsageMetric,
+  type UsageRowView,
+  type UsageSlice,
+  type UsageTile,
+  type UsageView,
+  unfolded,
+  usageContext,
+  usageView,
+  withKind,
+} from './usage-view.js';
+export {
+  agentWho,
+  type Who,
+  type WhoBySpan,
+  whoBySpan,
+  whoShort,
+  whoWords,
+} from './usage-who.js';
+export {
   endedView,
   followedStreams,
   headerView,
@@ -106,6 +141,7 @@ export {
   timelineView,
   traceArrival,
   transcriptLoading,
+  usageRecords,
   viewedRun,
 } from './views.js';
 export {

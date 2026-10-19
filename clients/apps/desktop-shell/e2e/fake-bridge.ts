@@ -55,10 +55,20 @@ export type NewRunMethods =
   | 'harnesses'
   | 'examples'
   | 'tasks'
+  | 'taskGoal'
   | 'preflight'
   | 'createFromExample'
   | 'copyOut'
   | 'startRun';
+
+/** What `installFakeMachineSettings` provides: each machine's clusters, clouds and agent logins. */
+export type MachineSettingsMethods =
+  | 'compute'
+  | 'testCluster'
+  | 'addCluster'
+  | 'removeCluster'
+  | 'agentLogins'
+  | 'startLogin';
 
 /** What `installFakeWindows` provides. */
 export type WindowsMethods = 'openRunWindow' | 'showMainWindow' | 'openSettings' | 'openExternal';
@@ -93,6 +103,17 @@ export interface FakeBridgeSeed {
   readonly checkouts?: Readonly<Record<string, unknown>>;
   /** What `paths.complete` lists for each directory (on a machine with a checkout saved). */
   readonly directories?: Readonly<Record<string, readonly unknown[]>>;
+  /**
+   * What each machine's helper answers machine Settings with, by host: its compute settings and its
+   * agents' logins, each null for a helper that predates it. A machine not named is such a helper.
+   */
+  readonly machineSettings?: Readonly<
+    Record<string, {readonly compute: unknown; readonly logins: readonly unknown[] | null}>
+  >;
+  /** What a connection test finds by the cluster's ssh host alias (`''` for a login node). */
+  readonly clusterTests?: Readonly<Record<string, unknown>>;
+  /** What starting a harness's login answers, by provider. */
+  readonly loginStarts?: Readonly<Record<string, unknown>>;
   /** What New run's helper calls answer; without it they answer as an older helper would. */
   readonly newRun?: {
     readonly machine: unknown;
@@ -101,6 +122,8 @@ export interface FakeBridgeSeed {
     readonly examples: ExampleList;
     /** The tasks of each project the machine has. */
     readonly projects: Readonly<Record<string, readonly string[]>>;
+    /** The goal of each task of the user's own projects, by `PROJECT TASK` (a space between). */
+    readonly goals?: Readonly<Record<string, unknown>>;
     /** What the helper agreed to in `hello`; every feature New run uses (catalogue included) when not given. */
     readonly features?: readonly string[];
     /** The roles the helper reports for a run (feature `run_roles`); the multi roles when not given. */
@@ -336,6 +359,100 @@ export function installFakeMachines(seed: FakeBridgeSeed): void {
   } satisfies FakeProvides<MachinesMethods>);
 }
 
+/** What the fake helper did for machine Settings, for the journey to read. */
+export interface FakeMachineSettings {
+  /** Each cluster tested, as `host cluster-name`. */
+  readonly tested: string[];
+  /** Each cluster saved, as `host cluster-name`. */
+  readonly added: string[];
+  /** Each cluster removed, as `host cluster-name`. */
+  readonly removed: string[];
+  /** Each login started, as `host provider`. */
+  readonly logins: string[];
+}
+
+/**
+ * The machine Settings half of the Fake, as a further init script: each machine's helper answers
+ * what it has set up and how its harnesses are signed in, tests a cluster by its ssh alias, saves
+ * one only if it passes the test again, and starts a login as the seed says. What was done is in
+ * `fakeHost.machineSettings`.
+ */
+export function installFakeMachineSettings(seed: FakeBridgeSeed): void {
+  const ok = (value: unknown) => Promise.resolve({ok: true, value});
+  const refused = (error: string) => Promise.resolve({ok: false, error, authNeeded: false});
+  type Cluster = {name: string; reach: {kind: string; host?: string}};
+  type Settings = {
+    config_path: string;
+    clusters: {cluster: Cluster; source: string}[];
+    modal: unknown;
+  };
+  const world = seed.machineSettings ?? {};
+  const settings = new Map<string, Settings | null>(
+    Object.entries(world).map(([host, each]) => [
+      host,
+      each.compute === null ? null : (structuredClone(each.compute) as Settings),
+    ]),
+  );
+  const done: FakeMachineSettings = {tested: [], added: [], removed: [], logins: []};
+  const label = (host: string) => (host === 'local' ? 'This Mac' : host.replace(/^ssh:/, ''));
+  const tests = seed.clusterTests ?? {};
+  const test = (cluster: Cluster) =>
+    tests[cluster.reach.kind === 'ssh' ? (cluster.reach.host ?? '') : ''] ?? {
+      outcome: 'failed',
+      stage: 'reach',
+      detail: `cannot reach ${cluster.reach.host ?? 'the scheduler'}`,
+    };
+  const tooOld = (host: string) => refused(`${label(host)} predates machine compute settings.`);
+  Object.assign((window as unknown as {vibesysWelcome: object}).vibesysWelcome, {
+    compute: (host: string) => {
+      const current = settings.get(host);
+      return ok(
+        current === undefined || current === null
+          ? {kind: 'unsupported'}
+          : {kind: 'offered', value: current},
+      );
+    },
+    testCluster: (host: string, cluster: Cluster) => {
+      done.tested.push(`${host} ${cluster.name}`);
+      return settings.get(host) == null ? tooOld(host) : ok(test(cluster));
+    },
+    addCluster: (host: string, cluster: Cluster) => {
+      const current = settings.get(host);
+      if (current === undefined || current === null) return tooOld(host);
+      if (current.clusters.some(listed => listed.cluster.name === cluster.name)) {
+        return refused(`a cluster named '${cluster.name}' is already set up`);
+      }
+      const result = test(cluster) as {outcome: string; stage?: string; detail?: string};
+      if (result.outcome === 'failed') return refused(`${result.stage}: ${result.detail}`);
+      current.clusters = [...current.clusters, {cluster, source: 'vibesys'}];
+      done.added.push(`${host} ${cluster.name}`);
+      return ok(current);
+    },
+    removeCluster: (host: string, name: string) => {
+      const current = settings.get(host);
+      if (current === undefined || current === null) return tooOld(host);
+      const listed = current.clusters.find(each => each.cluster.name === name);
+      if (listed === undefined) return refused(`no cluster named '${name}' is set up`);
+      if (listed.source !== 'vibesys')
+        return refused(`cluster '${name}' comes from the operator file`);
+      current.clusters = current.clusters.filter(each => each !== listed);
+      done.removed.push(`${host} ${name}`);
+      return ok(current);
+    },
+    agentLogins: (host: string) => {
+      const logins = world[host]?.logins ?? null;
+      return ok(logins === null ? {kind: 'unsupported'} : {kind: 'offered', value: logins});
+    },
+    startLogin: (host: string, provider: string) => {
+      done.logins.push(`${host} ${provider}`);
+      return ok(
+        seed.loginStarts?.[provider] ?? {outcome: 'unavailable', reason: 'no_login_command'},
+      );
+    },
+  } satisfies FakeProvides<MachineSettingsMethods>);
+  Object.assign((window as unknown as {fakeHost: object}).fakeHost, {machineSettings: done});
+}
+
 /**
  * The New run half of the Fake, as a second init script after `installFakeBridge`: it adds the
  * helper's New run answers to the bridge, and what they were asked to `fakeHost.newRun`.
@@ -353,11 +470,15 @@ export function installFakeNewRun(seed: FakeBridgeSeed): void {
     return ok({project, tasks});
   };
   const insideRepository = (project: string) => project.includes('/vibesys/');
+  const words = (text: string) => text.split(' ');
   const features =
     catalog?.features ??
-    'run_options preflight examples run_roles example_catalogue run_role_agents'.split(' ');
+    words(
+      'run_options preflight examples run_roles example_catalogue run_role_agents project_goal',
+    );
   const roles =
-    catalog?.roles ?? 'multi-orchestrator multi-profiler multi-implementer multi-judge'.split(' ');
+    catalog?.roles ?? words('multi-orchestrator multi-profiler multi-implementer multi-judge');
+  const check = (id: string, state: string, detail: string) => ({id, state, detail, fix: null});
   const preflight = (_host: string, inputs: {project: string}) => {
     newRun.preflights.push(inputs);
     const own = insideRepository(inputs.project)
@@ -372,28 +493,13 @@ export function installFakeNewRun(seed: FakeBridgeSeed): void {
       kind: 'offered',
       value: {
         checks: [
-          {id: 'checkout_found', state: 'ok', detail: 'VibeSys 0.9.0 at ~/vibesys.', fix: null},
+          check('checkout_found', 'ok', 'VibeSys 0.9.0 at ~/vibesys.'),
           own,
-          {
-            id: 'project_clean',
-            state: 'ok',
-            detail: 'The project has no uncommitted changes.',
-            fix: null,
-          },
-          {id: 'settings_valid', state: 'ok', detail: 'vibesys.yaml is valid.', fix: null},
-          {id: 'docker_reachable', state: 'ok', detail: 'Docker 27.3.1.', fix: null},
-          {
-            id: 'agent_image',
-            state: 'warn',
-            detail: 'No agent image was built here yet; the first run builds it.',
-            fix: null,
-          },
-          {
-            id: 'evaluator_available',
-            state: 'ok',
-            detail: 'The task evaluator is available.',
-            fix: null,
-          },
+          check('project_clean', 'ok', 'The project has no uncommitted changes.'),
+          check('settings_valid', 'ok', 'vibesys.yaml is valid.'),
+          check('docker_reachable', 'ok', 'Docker 27.3.1.'),
+          check('agent_image', 'warn', 'No agent image was built here yet.'),
+          check('evaluator_available', 'ok', 'The task evaluator is available.'),
         ],
         roles: features.includes('run_roles') ? roles : null,
         backend: 'cpu',
@@ -413,6 +519,11 @@ export function installFakeNewRun(seed: FakeBridgeSeed): void {
     tasks: (_host: string, project: string) => {
       const tasks = projects.get(project);
       return tasks === undefined ? refused(`${project} is not a VibeSys project.`) : ok(tasks);
+    },
+    taskGoal: (_host: string, project: string, task: string) => {
+      if (!features.includes('project_goal')) return ok({kind: 'unsupported'});
+      const goal = catalog?.goals?.[`${project} ${task}`];
+      return goal === undefined ? refused(`${project} has no task ${task}.`) : offered(goal);
     },
     preflight,
     createFromExample: (_host: string, example: string, destination: string) =>

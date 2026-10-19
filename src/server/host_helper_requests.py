@@ -97,6 +97,7 @@ from server.host_api import (
     ResumeRun,
     RunConnectReply,
     RunConnectRequest,
+    RunDigest,
     RunList,
     RunPreflightReply,
     RunPreflightRequest,
@@ -109,11 +110,15 @@ from server.host_api import (
     RunStopReply,
     RunStopRequest,
     RunSummary,
+)
+from server.host_compute import MeasurementTarget, ModalTarget, SameMachine, SlurmTarget
+from server.host_examples import (
+    ProjectTaskGoalReply,
+    ProjectTaskGoalRequest,
     TaskList,
     TasksListReply,
     TasksListRequest,
 )
-from server.host_compute import MeasurementTarget, ModalTarget, SameMachine, SlurmTarget
 from server.host_helper_compute import ComputeError, MachineCompute
 from server.host_helper_logs import HelperLogs, ReadWithdrawal, list_logs, read_log
 from server.host_helper_preflight import (
@@ -137,6 +142,7 @@ from server.host_machine_facts import (
     RunCounts,
 )
 from server.host_preflight import BackendUnavailable, CheckId
+from server.host_run_dashboard import IdeaVerdict
 from server.host_run_events import (
     RunEventDocument,
     RunsEventsForSpanReply,
@@ -146,11 +152,13 @@ from server.host_run_events import (
     RunsReadTailReply,
     RunsReadTailRequest,
 )
+from server.host_run_summary import UsageWindowReply, UsageWindowRequest
 from server.relay import (
     BridgeResult,
     ChannelEndOutcome,
     dial,
 )
+from server.run_digest import run_attention
 from vs_decode.api import Unreadable, decode_json
 
 if TYPE_CHECKING:
@@ -158,11 +166,12 @@ if TYPE_CHECKING:
     from datetime import tzinfo
 
     from server.host_agent_logins import AgentLogin, LoginStarted, LoginUnavailable
-    from server.host_api import RunDigest, RunDigestUnreadable
-    from server.host_examples import CreatedProject, ExampleList
+    from server.host_api import RunDigestUnreadable
+    from server.host_examples import CreatedProject, ExampleList, TaskGoal
     from server.host_preflight import PreflightReport
     from server.registry import InstanceInspector, LiveRegistry, StopEffects
     from server.run_summary import Summarized
+    from server.usage_window import RunUsage
     from vs_project.api import OperatorDialer
     from vs_sim.api import Clock, Connection
 
@@ -237,6 +246,14 @@ class Projects(Protocol):
 
     def tasks(self, project: Path) -> TaskList:
         """The project's tasks, ordered by name."""
+        ...
+
+    def task_goal(self, project: Path, task: str) -> TaskGoal:
+        """The goal text and objectives of the project's task ``task``.
+
+        Raises ``ProjectLookupError`` with ``task_invalid`` when the project has no such task or
+        its goal files cannot be read.
+        """
         ...
 
     def runs(self, project: Path) -> tuple[Path, tuple[ProjectRun, ...]]:
@@ -557,11 +574,14 @@ def run_summaries(
     runs: Iterable[ProjectRun],
     listing: InstanceList,
     digests: Mapping[str, RunDigest | RunDigestUnreadable] | None = None,
+    *,
+    now: float | None = None,
 ) -> RunList:
     """Join a project's runs with this host's registry: each run's server and its phase.
 
     A live server outranks a tombstone; among tombstones the latest ended wins. A run's
-    ``digest`` is the one ``digests`` holds for it, if any.
+    ``digest`` is the one ``digests`` holds for it, if any. With ``now`` (epoch seconds), each
+    run whose digest carries a dashboard also gets its ``attention`` as of ``now``.
     """
     project_root = str(root)
     live = {
@@ -574,15 +594,19 @@ def run_summaries(
     summaries = []
     for run in runs:
         server = live.get(run.run_id) or ended.get(run.run_id)
+        digest = None if digests is None else digests.get(run.run_id)
+        phase = None if server is None else server.phase
+        judged = isinstance(digest, RunDigest) and digest.dashboard is not None and now is not None
         summaries.append(
             RunSummary(
                 run_id=run.run_id,
                 task=run.task,
                 display_name=run.display_name,
                 created_at=run.created_at,
-                phase=None if server is None else server.phase,
+                phase=phase,
                 instance_id=None if run.run_id not in live else live[run.run_id].id,
-                digest=None if digests is None else digests.get(run.run_id),
+                digest=digest,
+                attention=run_attention(digest, phase=phase, now=now) if judged else None,
             )
         )
     return RunList(project_root=project_root, runs=tuple(summaries))
@@ -823,13 +847,14 @@ def _answer(
             )
         case InstancesListRequest() | InstancesInspectRequest():
             reply = _instances_reply(request, host)
-        case TasksListRequest() | RunsListRequest():
+        case TasksListRequest() | RunsListRequest() | ProjectTaskGoalRequest():
             reply = _project_reply(request, host)
         case (
             RunsReadEventsRequest()
             | RunsEventsForSpanRequest()
             | RunsReadTailRequest()
             | RunsSummaryRequest()
+            | UsageWindowRequest()
         ):
             reply = _run_history_reply(request, host)
         case (
@@ -877,14 +902,20 @@ def _answer(
 
 
 def _project_reply(
-    request: TasksListRequest | RunsListRequest, host: HelperHost
-) -> TasksListReply | RunsListReply:
-    """Answer one read of a project's tasks or runs."""
+    request: TasksListRequest | RunsListRequest | ProjectTaskGoalRequest, host: HelperHost
+) -> TasksListReply | RunsListReply | ProjectTaskGoalReply:
+    """Answer one read of a project's tasks, runs or a task's goal."""
     project = Path(_host_path(request.project, host.directories))
     match request:
+        case ProjectTaskGoalRequest(request_id=request_id, task=task):
+            return ProjectTaskGoalReply(
+                request_id=request_id, goal=host.projects.task_goal(project, task)
+            )
         case TasksListRequest(request_id=request_id):
             return TasksListReply(request_id=request_id, tasks=host.projects.tasks(project))
-        case RunsListRequest(request_id=request_id, digest_runs=digest_runs):
+        case RunsListRequest(
+            request_id=request_id, digest_runs=digest_runs, with_dashboard=with_dashboard
+        ):
             root, runs = host.projects.runs(project)
             known = {run.run_id for run in runs}
             digests = {
@@ -893,8 +924,27 @@ def _project_reply(
                 if run_id in known
                 and (digest := host.projects.run_digest(root, run_id)) is not None
             }
-            summaries = run_summaries(root, runs, host.registry.list(), digests)
+            now = host.clock.now()
+            summaries = run_summaries(
+                root, runs, host.registry.list(), digests, now=now if with_dashboard else None
+            )
+            if not with_dashboard:  # a client that did not ask never sees the dashboard
+                summaries = _without_dashboards(summaries)
             return RunsListReply(request_id=request_id, runs=summaries)
+
+
+def _without_dashboards(listing: RunList) -> RunList:
+    """``listing`` with every digest's ``dashboard`` removed: it is sent only to a client that asked."""
+    return listing.model_copy(
+        update={
+            "runs": tuple(
+                run.model_copy(update={"digest": run.digest.model_copy(update={"dashboard": None})})
+                if isinstance(run.digest, RunDigest)
+                else run
+                for run in listing.runs
+            )
+        }
+    )
 
 
 def _logins_reply(
@@ -1051,15 +1101,25 @@ def _run_history_reply(
     request: RunsReadEventsRequest
     | RunsEventsForSpanRequest
     | RunsReadTailRequest
-    | RunsSummaryRequest,
+    | RunsSummaryRequest
+    | UsageWindowRequest,
     host: HelperHost,
-) -> RunsReadEventsReply | RunsEventsForSpanReply | RunsReadTailReply | RunsSummaryReply:
+) -> (
+    RunsReadEventsReply
+    | RunsEventsForSpanReply
+    | RunsReadTailReply
+    | RunsSummaryReply
+    | UsageWindowReply
+):
     """Answer one read of a run's recorded history.
 
-    Its events (from a sequence, of a span, or the newest) or its summary.
+    Its events (from a sequence, of a span, or the newest), its summary, or what its turns spent
+    in a window.
     """
     if isinstance(request, RunsSummaryRequest):
         return _run_summary_reply(request, host)
+    if isinstance(request, UsageWindowRequest):
+        return _usage_window_reply(request, host)
     project = Path(_host_path(request.project, host.directories))
     if isinstance(request, RunsEventsForSpanRequest):
         span_page = host.projects.run_span_events(
@@ -1083,6 +1143,42 @@ def _run_history_reply(
             last_sequence=tail.last_sequence,
         )
     return _run_events_reply(request, host)
+
+
+def _usage_window_reply(request: UsageWindowRequest, host: HelperHost) -> UsageWindowReply:
+    """Answer what the named runs spent in the window, from each run's usage records.
+
+    A run's records are its summary's (``Projects.run_summary``, the cache beside the journal) and
+    its bests are the kept points of its digest, so each run costs a cache read and what its journal
+    gained since. A run the project does not have, or whose journal this machine does not hold, is
+    ``missing``.
+    """
+    # lint-waiver: LW-271612 [PLC0415]; the helper answers hello without loading the aggregation.
+    # > `server.usage_window` is a module the helper's start-up budget
+    # > (`tests/e2e/test_host_helper.py`) has no room for, and only a `usage.window` request needs
+    # > it; the request and reply messages stay with the other messages so `host_api` can name them.
+    from server.usage_window import RunUsage, usage_window  # noqa: PLC0415
+
+    project = Path(_host_path(request.project, host.directories))
+    root, known = host.projects.runs(project)
+    tasks = {run.run_id: run.task for run in known}
+    found: list[RunUsage] = []
+    missing: list[str] = []
+    for run_id in dict.fromkeys(request.run_ids):
+        try:
+            records = host.projects.run_summary(project, run_id).fold.records
+        except ProjectLookupError as error:
+            if error.code is not HelperErrorCode.UNKNOWN_RUN:
+                raise
+            missing.append(run_id)
+            continue
+        digest = host.projects.run_digest(root, run_id)
+        points = (
+            digest.dashboard.points if isinstance(digest, RunDigest) and digest.dashboard else ()
+        )
+        bests = [point.at for point in points if point.verdict is IdeaVerdict.KEPT and point.at]
+        found.append(RunUsage(run_id, tasks.get(run_id), records, bests))
+    return usage_window(request, found, missing)
 
 
 def _run_summary_reply(request: RunsSummaryRequest, host: HelperHost) -> RunsSummaryReply:

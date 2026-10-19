@@ -4,7 +4,7 @@
  * maps these onto `@vibesys/ui` components and decides nothing itself.
  */
 import type {LogOwner, RunEvent, RunOverview, Span} from '@vibesys/contracts';
-import type {LogStream} from '@vibesys/contracts/host-helper';
+import type {LogStream, UsageRecord} from '@vibesys/contracts/host-helper';
 import {endedLook, type HostRun, RUN_GONE_WORDS, type RunEnd} from '@vibesys/hosts';
 import {decodeNarrationLine, type LogView, logViewRecords} from '@vibesys/logs';
 import type {CoreState} from '@vibesys/run-state';
@@ -21,6 +21,8 @@ import {
   type Unavailable,
 } from './run-page.js';
 import {type TokensReading, tokensReading} from './token-words.js';
+import {roleAgents} from './usage-view.js';
+import {whoWords} from './usage-who.js';
 
 export type Tone = 'neutral' | 'live' | 'ok' | 'warn' | 'err';
 
@@ -36,6 +38,8 @@ export interface HeaderView {
   readonly status: {readonly label: string; readonly tone: Tone};
   /** What the run's turns have spent so far, whole; null until a turn reports any. */
   readonly spent: TokensReading | null;
+  /** What ran each role of the run, from its usage records: `Planner` with `model on harness`. */
+  readonly agents: readonly {readonly role: string; readonly ran: readonly string[]}[];
   readonly pause: Offer;
   readonly resume: Offer;
   readonly stop: Offer;
@@ -103,6 +107,10 @@ export function headerView(state: RunPageState): HeaderView {
     status: status(state),
     // Tokens counted over a prefix of the history are not what the run spent.
     spent: historyLoading(state) === null ? tokensReading(state.run.core?.tokens.total) : null,
+    agents: roleAgents(usageRecords(state)).map(each => ({
+      role: each.role,
+      ran: each.ran.flatMap(who => whoWords(who) ?? []),
+    })),
     pause: offer(phase.kind === 'running' && !phase.pausing, commandReason(state)),
     // A run paused by a usage limit is resumed from its banner, which also offers to wait.
     resume: offer(phase.kind === 'paused' && phase.by === 'user', commandReason(state)),
@@ -608,4 +616,17 @@ export function viewedRun(state: RunPageState): ViewedRun {
     spanEvents: state.run.trace.events.toArray(),
     at,
   };
+}
+
+const NO_RECORDS: readonly UsageRecord[] = [];
+
+/**
+ * The run's usage records, one per finished turn: the summary's while the run is opened from it
+ * (the core it seeds holds spend, not who spent it), else the ones the run fold keeps from the
+ * events, which a live session and a history read have. The header's spend is the sum of the same
+ * turns.
+ */
+export function usageRecords(state: RunPageState): readonly UsageRecord[] {
+  if (state.summary.kind === 'ready' && state.history.kind !== 'read') return state.summary.records;
+  return state.run.core?.usageRecords ?? NO_RECORDS;
 }

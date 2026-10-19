@@ -69,7 +69,8 @@ function OpenForm(props: {
   );
 }
 
-function AddMachine(props: {
+/** The Add a machine form, open in a card; nothing while it is closed. */
+export function AddMachine(props: {
   readonly state: MachinesState;
   readonly dispatch: Dispatch;
 }): JSX.Element | null {

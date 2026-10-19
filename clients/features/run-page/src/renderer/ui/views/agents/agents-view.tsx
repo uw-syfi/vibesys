@@ -18,6 +18,7 @@ import {type JSX, useMemo} from 'react';
 import {type AgentRow, agentTree, type FoldRow} from '../../../../state/agent-tree.js';
 import {type AgentTurn, agentModel, agentTurns} from '../../../../state/agent-turns.js';
 import {
+  agentWho,
   roleLabel,
   spendOf,
   type TokensCells,
@@ -32,6 +33,7 @@ import {roleSeries} from '../../../../state/role-series.js';
 import {duration} from '../../../../state/span-reading.js';
 import {statusWords} from '../../../../state/span-words.js';
 import type {ViewBase, WithCore} from '../props.js';
+import {whoBadge} from '../who-badge.js';
 
 export interface AgentsViewProps extends ViewBase {
   /** The opened agent's id, highlighted in the list; null at the run level. */
@@ -83,7 +85,12 @@ function AgentLine(props: {
   const summary = [agent.activity.within?.title, row.headline]
     .filter((part): part is string => part !== undefined && part !== null)
     .join(' · ');
-  const also = row.alsoUnder.length === 0 ? [] : [alsoBadge(row.alsoUnder, view.compact)];
+  const [first, ...rest] = agentWho(agent, view.model.trace.spans, view.who);
+  const ran = whoBadge(first, rest.length);
+  const also = [
+    ...(ran === null ? [] : [ran]),
+    ...(row.alsoUnder.length === 0 ? [] : [alsoBadge(row.alsoUnder, view.compact)]),
+  ];
   const time = took(agent, view.clock.now);
   const {measure} = props;
   return (
@@ -197,7 +204,10 @@ export function AgentPane(props: AgentPaneProps): JSX.Element {
   const {agent, model, zoom} = props;
   const spans = model.trace.spans;
   const turns = useMemo(() => agentTurns(spans, agent.id), [spans, agent.id]);
-  const modelName = agentModel(agent, props.core);
+  const ran = agentWho(agent, spans, props.who);
+  const models = [...new Set(ran.flatMap(each => each.model ?? []))];
+  const harnesses = [...new Set(ran.flatMap(each => each.harness ?? []))];
+  const modelName = models.length > 0 ? models.join(', ') : agentModel(agent, props.core);
   const spent = tokensByAgent(spans, props.tokens).get(agent.id);
   const spentLine = spent === undefined ? null : tokensLine(spent);
   const parents = agent.startedBy
@@ -209,6 +219,9 @@ export function AgentPane(props: AgentPaneProps): JSX.Element {
         items={[
           {key: 'Role', value: roleLabel(agent.role)},
           {key: 'Model', value: modelName ?? 'The run’s default', mono: modelName !== null},
+          ...(harnesses.length === 0
+            ? []
+            : [{key: 'Harness', value: harnesses.join(', '), mono: true}]),
           {
             key: 'Started by',
             value:

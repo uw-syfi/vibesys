@@ -8,9 +8,10 @@ import type {
   Check,
   HelperFeature,
   MachineDescription,
+  TaskGoal,
 } from '@vibesys/contracts/host-helper';
 import type {HostKey} from '@vibesys/hosts';
-import type {HarnessOffer, Offered, RoleOption, RunInputs} from '@vibesys/ipc';
+import type {HarnessOffer, MeasureTarget, Offered, RoleOption, RunInputs} from '@vibesys/ipc';
 import type {RecentRun, RunStart} from '@vibesys/runs';
 import type {OwnProject} from './answers.js';
 
@@ -76,8 +77,12 @@ export interface Form {
   readonly task: string | null;
   readonly agent: AgentChoice | null;
   readonly budget: Budget;
+  /** Where results are measured: this machine, a cluster set up on it, or Modal. */
+  readonly measure: MeasureTarget;
   readonly advanced: string;
 }
+
+export const SAME_MACHINE: MeasureTarget = {kind: 'same_machine'};
 
 export const DEFAULT_BUDGET: Budget = {rounds: null, timeLimitS: null, results: 'keep'};
 
@@ -146,6 +151,7 @@ export function prefill(machine: HostKey, recent: readonly RecentRun[]): Form {
       task: null,
       agent: null,
       budget: DEFAULT_BUDGET,
+      measure: SAME_MACHINE,
       advanced: '',
     };
   }
@@ -180,6 +186,7 @@ export function againForm(run: RecentRun): Form {
       timeLimitS: options?.time_limit_s ?? null,
       results: options?.results ?? 'keep',
     },
+    measure: start?.measure_on ?? SAME_MACHINE,
     advanced: start === null ? '' : joinWords(start.args),
   };
 }
@@ -296,6 +303,7 @@ export function runInputs(form: Form): RunInputs | null {
         .filter(role => role.effort !== 'default')
         .map(role => ({role: role.role, model: null, reasoning_effort: role.effort})),
     },
+    measure_on: form.measure,
     agents: Object.fromEntries(
       agent.roles.flatMap(role => (role.agent === null ? [] : [[role.role, role.agent] as const])),
     ),
@@ -334,6 +342,18 @@ export function offers(
   feature: HelperFeature,
 ): boolean {
   return helper !== null && helper.for === machine && helper.features.includes(feature);
+}
+
+/** A task's goal as its machine's helper read it, for the project and task it was asked of. */
+export interface GoalFor {
+  /** `goalKey` of the machine, project and task asked. */
+  readonly for: string;
+  readonly value: Offered<TaskGoal>;
+}
+
+/** The key a goal is read for: the machine, the user's project on it, and the task. */
+export function goalKey(machine: HostKey, project: string, task: string): string {
+  return JSON.stringify([machine, project, task]);
 }
 
 /** The checks a run is held to, for one key. */
