@@ -142,7 +142,7 @@ export function applyChatProposal(state: CoreState, event: RunEvent, sequence: n
 }
 
 /** Registers a replayed thread, or refreshes the record it already has. */
-export function upsertChatThread(
+function upsertChatThread(
   state: CoreState,
   thread: ChatThread,
   creationSequence?: number,

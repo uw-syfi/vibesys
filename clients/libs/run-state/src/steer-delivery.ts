@@ -39,7 +39,7 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 }
 
 /** The fact a `steer_delivery` event carries, or null for any other event or an unreadable one. */
-export function steerDeliveryOf(event: RunEvent, sequence: number): SteerDeliveryFact | null {
+function steerDeliveryOf(event: RunEvent, sequence: number): SteerDeliveryFact | null {
   const data: unknown = event.data;
   if (!isRecord(data) || data['kind'] !== 'steer_delivery') return null;
   const delivery = data['delivery'];

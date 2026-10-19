@@ -26,6 +26,7 @@
     "@vibesys/feature-machines": "workspace:*",
     "@vibesys/feature-new-run": "workspace:*",
     "@vibesys/feature-usage": "workspace:*",
+    "@vibesys/feature-run-chat": "workspace:*",
     "@vibesys/feature-run-page": "workspace:*",
     "@vibesys/feature-runs-dashboard": "workspace:*",
     "@vibesys/feature-settings": "workspace:*",

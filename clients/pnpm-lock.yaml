@@ -103,6 +103,9 @@ importers:
       '@vibesys/feature-new-run':
         specifier: workspace:*
         version: link:../../features/new-run
+      '@vibesys/feature-run-chat':
+        specifier: workspace:*
+        version: link:../../features/run-chat
       '@vibesys/feature-run-page':
         specifier: workspace:*
         version: link:../../features/run-page

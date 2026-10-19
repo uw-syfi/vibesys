@@ -80,6 +80,12 @@
     },
     {
       "path": "../../libs/ui/tsconfig.lib.json"
+    },
+    {
+      "path": "../../features/run-chat/tsconfig.renderer.json"
+    },
+    {
+      "path": "../../features/run-chat/tsconfig.state.json"
     }
   ]
 }

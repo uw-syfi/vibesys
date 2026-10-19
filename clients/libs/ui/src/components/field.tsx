@@ -72,7 +72,7 @@ export function Field(props: {
 
 /**
  * A text input; `mono` for paths and identifiers, `readOnly` for a value shown as set. With
- * `rows` above one it is a multi-line box of that height. `submit` runs on Enter; in a multi-line
+ * `rows` above one it is a multi-line box of that height. `submit` is called on Enter; in a multi-line
  * box Shift+Enter still starts a new line.
  */
 export function TextInput(props: {

@@ -28,6 +28,7 @@ export {
   panelMachine,
   type UserSteer,
 } from './panel.js';
+export type {CardActions, CardItem, ChatPanelView, PanelItem} from './panel-view.js';
 export {
   type Catalogue,
   catalogueOf,
