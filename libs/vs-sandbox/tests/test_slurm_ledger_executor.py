@@ -878,47 +878,50 @@ async def test_a_cancel_whose_withdrawal_ended_unknown_withdraws_it_when_tried_a
     await run.executor.close()
 
 
-class _TimerSleeper(_ParkingSleeper):
-    """Poll pauses and the lease keeper park, as ``_ParkingSleeper``'s; every other wait is a
-    timer that ends once the shared clock reaches its end, which only the scheduler moves."""
+def _tries_within_bound(cancel_s: float, lost: int) -> tuple[int, bool]:
+    """How many relinquish tries a close makes, and whether one cancelled the job.
 
-    def __init__(self, clock: ManualClock) -> None:
-        super().__init__()
-        self._clock = clock
-
-    async def sleep(self, seconds: float) -> None:
-        if _is_poll_pause(seconds) or seconds == LEASE_S / 3:
-            await super().sleep(seconds)
-        end = self._clock.now() + seconds
-        while self._clock.now() < end:
-            await yield_now()
+    Each case here ends within the relinquish's own retries; only the bound stops it.
+    """
+    tries = 0
+    while tries * cancel_s < CLOSE_RELEASE_BOUND_S:
+        tries += 1
+        if tries > lost:
+            return tries, True
+    return tries, False
 
 
 @pytest.mark.regression
+@pytest.mark.parametrize(
+    ("cancel_s", "lost"),
+    [(CONFIG.transport_timeout_seconds, 10**6), (20.0, 10**6), (5.0, 1), (5.0, 0)],
+)
 async def test_a_close_on_a_sick_controller_gives_up_releasing_and_detaches(
-    tmp_path: Path,
+    tmp_path: Path, cancel_s: float, lost: int
 ) -> None:
     """periodic-1330 LOW-6: a SIGTERM's close relinquished every job, however long it took.
 
-    Each scancel takes 110 s (a transport call's limit) and is lost, so every relinquish
-    ends unknown and is tried again, with no end but the retries. Past its bound, a close
-    starts no further release: it detaches what is left, as a run that keeps its jobs on a
-    stop does, so the job's record stays resumable and its lease lapses.
+    Each scancel takes ``cancel_s`` and the first ``lost`` are lost, so a relinquish ends
+    unknown and is tried again. A close starts no try once ``CLOSE_RELEASE_BOUND_S`` has
+    passed: it detaches what is left, as a run that keeps its jobs on a stop does, so the
+    job's record stays resumable and a later run cancels it. A try that is answered within
+    the bound cancels the job.
     """
     world = _World()
     world.scheduler.queue_s = math.inf
-    run = world.run(tmp_path / "run-1", "run-1", sleeper=_TimerSleeper(world.clock))
+    run = world.run(tmp_path / "run-1", "run-1")
     await _attached(run, "eval-1")
     (operation,) = world.scheduler.jobs
-    world.scheduler.failing_cancels = 10**6
-    world.scheduler.cancel_s = CONFIG.transport_timeout_seconds
-    began = world.clock.now()
+    world.scheduler.failing_cancels = lost
+    world.scheduler.cancel_s = cancel_s
+    tries, cancelled = _tries_within_bound(cancel_s, lost)
 
     await asyncio.wait_for(run.executor.close(), timeout=_BOUND_S)
 
-    # The scancel running when the bound passed ends; none starts after it.
-    assert world.scheduler.cancels <= 1 + CLOSE_RELEASE_BOUND_S // CONFIG.transport_timeout_seconds
-    assert world.clock.now() - began <= CLOSE_RELEASE_BOUND_S + CONFIG.transport_timeout_seconds
+    if cancelled:
+        assert world.scheduler.status(operation) is SlurmJobStatus.CANCELLED
+        return
+    assert world.scheduler.cancels == tries
     assert world.scheduler.status(operation) is SlurmJobStatus.PENDING
     world.scheduler.failing_cancels = 0
     restarted = world.run(tmp_path / "run-1", "run-1")

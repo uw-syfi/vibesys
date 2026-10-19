@@ -38,7 +38,6 @@ from vs_evaluation.api import (
     is_finished,
 )
 from vs_project.api import atomic_write_bytes
-from vs_sandbox.slurm_close_bound import CLOSE_RELEASE_BOUND_S, ended_within
 from vs_sandbox.slurm_deadlines import (
     DeadlineLimits,
     DeadlinePhase,
@@ -46,7 +45,11 @@ from vs_sandbox.slurm_deadlines import (
     first_deadlines,
 )
 from vs_sandbox.slurm_deadlines import observe as observe_deadlines
-from vs_sandbox.slurm_ledger_evaluations import LedgerEvaluations, Released
+from vs_sandbox.slurm_ledger_evaluations import (
+    CLOSE_RELEASE_BOUND_S,
+    LedgerEvaluations,
+    Released,
+)
 from vs_sandbox.slurm_stage_output import CollectedStage, StageOutputFollower
 from vs_sandbox.slurm_wiring import make_cluster
 from vs_slurm.api import (
@@ -851,7 +854,7 @@ class SlurmEvaluationExecutor:
         With the evaluation ledger, a cancel withdraws a request no other run wants
         (``_release``). When the ledger keeps jobs on a stop, closing detaches
         instead: every job keeps running, its record keeps it resumable, and its
-        lease lapses. A release still going after ``CLOSE_RELEASE_BOUND_S`` (a
+        lease lapses. A release not done within ``CLOSE_RELEASE_BOUND_S`` (a
         controller that does not answer) is given up the same way.
         """
         self._closing = True
@@ -862,15 +865,11 @@ class SlurmEvaluationExecutor:
         active = tuple(handle_id for handle_id, task in self._tasks.items() if not task.done())
         # A cancel whose job is still tearing down returns with the evaluation
         # CANCELING; the durable record keeps the job for a later reconcile.
-        releasing = asyncio.gather(*(self.cancel(h) for h in active), return_exceptions=True)
-        results = []
-        if await ended_within(releasing, self._sleeper, CLOSE_RELEASE_BOUND_S):
-            results = releasing.result()
-        else:
-            _LOG.warning("the cluster did not release this run's jobs in time; detaching them")
-            self._detaching = True
-            releasing.cancel()
-            await asyncio.gather(releasing, return_exceptions=True)
+        if self._ledger is not None:
+            self._ledger.give_up_releasing_after(CLOSE_RELEASE_BOUND_S)
+        results = await asyncio.gather(
+            *(self.cancel(handle_id) for handle_id in active), return_exceptions=True
+        )
         # A cancel of an evaluation that already ended durably returns without touching
         # its task, so a task still waiting for admission would outlive the executor.
         await self._drain()
