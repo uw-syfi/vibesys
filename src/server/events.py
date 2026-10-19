@@ -59,6 +59,7 @@ from vibesys.api import (
     TodoItemData,
     ToolResultPayload,
     WireSpan,
+    WorkspaceRootProbeData,
 )
 from vibesys.api import (
     CommandResultPayload as _CommandResultPayload,
@@ -99,6 +100,7 @@ class EventType(StrEnum):
     CONFIGURATION_FAILED = "configuration_failed"
     RUN_STARTED = "run_started"
     RUN_STARTUP_PROGRESS = "run_startup_progress"
+    WORKSPACE_ROOT_PROBE = "workspace_root_probe"
     EXPERIMENTS_CHANGED = "experiments_changed"
     ITERATIONS_CHANGED = "iterations_changed"
     RUN_INTERRUPTED = "run_interrupted"
@@ -1045,6 +1047,7 @@ EventData = Annotated[
     | QuotaAbandonedData
     | QuotaWaitingData
     | QuotaWaitCancelledData
+    | WorkspaceRootProbeData
     | ProviderSwitchedData
     | GateStartedData
     | GateFinishedData

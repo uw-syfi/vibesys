@@ -74,6 +74,7 @@ from vibesys.run.project_policy import (
     build_project_path_policy,
     trusted_project_input_paths,
 )
+from vibesys.run.slurm_probe_events import CoreWorkspaceRootProbeEvents
 from vibesys.run.workspace_policy import (
     AGENT_CONFIG_FILES,
     build_workspace_materialization_plan,
@@ -653,6 +654,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 state_namespace=project_state.local_namespace(run_id, "skypilot"),
                 docker_in_docker=bundle.docker_in_docker,
                 startup=startup.report,
+                workspace_root_probe=CoreWorkspaceRootProbeEvents(integration.events).report,
             )
         environment_resources = open_run_environment_resources(
             run_environment_request,

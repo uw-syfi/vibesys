@@ -113,6 +113,8 @@ const EVENT_DATA_HANDLERS = {
   server_ready: ignoredEventData,
   run_started: ignoredEventData,
   run_startup_progress: runEventData(applyRunStartupProgressData),
+  // The Slurm workspace-root probe is a notice to read, not run state to fold.
+  workspace_root_probe: ignoredEventData,
   run_failed: runEventData(applyTerminalExecutionStatus),
   run_interrupted: runEventData(applyTerminalExecutionStatus),
   run_status_changed: runEventData(

@@ -122,6 +122,7 @@ from vibesys.events import (
     ToolResultPayload,
     WinnerSelectedData,
     WireSpan,
+    WorkspaceRootProbeData,
     WorkspaceSnapshotData,
 )
 from vibesys.log_owners import (
@@ -312,6 +313,7 @@ __all__ = [
     "WithdrawRequest",
     "WorkspaceChange",
     "WorkspaceChangeKind",
+    "WorkspaceRootProbeData",
     "WorkspaceSnapshotData",
     "agent_spec_from_config",
     "boot_trace",

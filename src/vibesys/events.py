@@ -49,6 +49,7 @@ class CoreEventType(StrEnum):
 
     RUN_STARTED = "run_started"
     RUN_STARTUP_PROGRESS = "run_startup_progress"
+    WORKSPACE_ROOT_PROBE = "workspace_root_probe"
     EXPERIMENTS_CHANGED = "experiments_changed"
     ITERATIONS_CHANGED = "iterations_changed"
     RUN_FINISHED = "run_finished"
@@ -367,6 +368,38 @@ class RunStartupProgressData(EventPayload):
             raise ValueError(message)
         if self.progress is not None and not running:
             message = "progress is present only while state is running"
+            raise ValueError(message)
+        return self
+
+
+class WorkspaceRootProbeData(EventPayload):
+    """The run's probe of its local Slurm workspace root, which runs beside the run.
+
+    The probe is a small Slurm job that proves the compute nodes share the root the run
+    stages into. The run starts without it; each Slurm submission (a trusted evaluation,
+    an agent's GPU job) waits for it. ``queued``: the probe job ``job_id`` still waits in
+    the scheduler's queue, for the scheduler's ``pending_reason`` (None when it gave
+    none), after ``waited_seconds`` of at most ``queue_timeout_seconds``; it is reported
+    at once, then on a bounded cadence or when the reason changes. ``proven``: Slurm work
+    goes ahead. ``failed``: every Slurm submission of the run is refused with ``failure``.
+    """
+
+    kind: Literal["workspace_root_probe"] = "workspace_root_probe"
+    state: Literal["queued", "proven", "failed"]
+    job_id: str | None = None
+    pending_reason: str | None = None
+    waited_seconds: FiniteFloat | None = Field(default=None, ge=0)
+    queue_timeout_seconds: FiniteFloat | None = Field(default=None, ge=1)
+    failure: str | None = None
+
+    @model_validator(mode="after")
+    def _fields_follow_the_state(self) -> WorkspaceRootProbeData:
+        queued = self.state == "queued"
+        if queued != (self.job_id is not None and self.waited_seconds is not None):
+            message = "job_id and waited_seconds are set exactly when the probe is queued"
+            raise ValueError(message)
+        if (self.state == "failed") != (self.failure is not None):
+            message = "failure is set exactly when the probe failed"
             raise ValueError(message)
         return self
 
@@ -1077,6 +1110,7 @@ CoreEventData = Annotated[
     | QuotaAbandonedData
     | QuotaWaitingData
     | QuotaWaitCancelledData
+    | WorkspaceRootProbeData
     | ProviderSwitchedData
     | GateStartedData
     | GateFinishedData

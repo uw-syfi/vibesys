@@ -21,6 +21,7 @@ from vibesys.api import (
     RateLimitUpdateData,
     RunConfiguredData,
     WinnerSelectedData,
+    WorkspaceRootProbeData,
     WorkspaceSnapshotData,
     describe_seconds,
 )
@@ -52,6 +53,8 @@ def format_framework_event(event: CoreEvent) -> str | None:
             text = _format_measurement_compared(data)
         case ComparisonsReadData():
             text = _format_comparisons_read(data)
+        case WorkspaceRootProbeData():
+            text = _format_workspace_root_probe(data)
     return text
 
 
@@ -207,6 +210,26 @@ def _format_run_configured(data: RunConfiguredData) -> str:
     if data.benchmark_contract:
         lines.append("[log] benchmark result contract declared; it owns candidate fitness")
     return "\n".join(lines)
+
+
+def _format_workspace_root_probe(data: WorkspaceRootProbeData) -> str:
+    match data.state:
+        case "queued":
+            waited = describe_seconds(data.waited_seconds or 0.0)
+            reason = f" (scheduler reason: {data.pending_reason})" if data.pending_reason else ""
+            limit = (
+                f" of up to {describe_seconds(data.queue_timeout_seconds)}"
+                if data.queue_timeout_seconds is not None
+                else ""
+            )
+            return (
+                f"[slurm] workspace-root probe job {data.job_id} has waited {waited}{limit} "
+                f"in the queue{reason}; Slurm work waits for it, agents carry on"
+            )
+        case "proven":
+            return "[slurm] workspace root proven shared with the compute nodes"
+        case "failed":
+            return f"[slurm] workspace-root probe failed; Slurm work is refused: {data.failure}"
 
 
 def _format_framework_warning(data: FrameworkWarningData) -> str:
