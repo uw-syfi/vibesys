@@ -118,7 +118,7 @@ async function emit(page: Page, events: readonly RunEvent[]): Promise<void> {
 async function open(page: Page, width: number): Promise<void> {
   await page.setViewportSize({width, height: 900});
   const fixture = fixtureNamed(FIXTURE);
-  await openFixture(page, fixture, {sidebar: false});
+  await openFixture(page, fixture);
   await playLive(page, fixture);
   await settled(page);
   expect(await page.evaluate(() => window.innerWidth)).toBe(width);
