@@ -4,6 +4,7 @@
  */
 import type {RunEvent} from '@vibesys/contracts';
 import {benchmarkRecordFromEvent} from './benchmark.js';
+import {applyChatProposal} from './chat.js';
 import {
   applyAgentExecutionActivityData,
   applyAgentExecutionFinishedData,
@@ -128,9 +129,8 @@ const EVENT_DATA_HANDLERS = {
   tool_result: runEventData(applyTypedToolData),
   // A steer proposal belongs to a chat thread, not the run's core state. The chat fold reads it
   // (the chat client is a later slice of #3224).
-  steer_proposed: ignoredEventData,
-  // A steer's delivery steps are the chat card's, folded by the chat client (a later slice of
-  // #3224), not the run's core state.
+  steer_proposed: executionEventData(applyChatProposal),
+  // A steer's delivery steps are folded by the chat client, not the run's core state.
   steer_delivery: ignoredEventData,
   todo_update: runEventData(applyTodoData),
   usage_update: runEventData(applyUsageData),

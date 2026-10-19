@@ -4,6 +4,7 @@
 import type {RunEvent} from '@vibesys/contracts';
 import {acceptsRunMetadata, retainedReplayEvents} from './replay.js';
 import {
+  type ChatProposal,
   type ChatThread,
   type CoreState,
   cloneCoreStateWith,
@@ -78,9 +79,48 @@ export function applyChatEvent(
   if (data?.kind === 'chat' && data.thread_title) {
     next = setChatThreadTitle(next, threadId, data.thread_title);
   }
+  if (data?.kind === 'chat') next = recordChatQuestion(next, threadId, event);
   const entry = eventToTranscriptEntry(event);
   if (entry === null || (entry.kind !== 'assistant' && entry.kind !== 'result')) return next;
   return appendChatTranscript(next, threadId, entry, folder, data?.kind === 'chat');
+}
+
+/** Keeps the question the terminal `chat` event carries, once per event. */
+function recordChatQuestion(state: CoreState, threadId: string, event: RunEvent): CoreState {
+  const text = event.text ?? '';
+  const sequence = event.sequence ?? 0;
+  if (text === '' || sequence <= 0) return state;
+  const id = String(sequence);
+  const known = state.chatQuestions[threadId] ?? [];
+  if (known.some(question => question.id === id)) return state;
+  return cloneCoreStateWith(state, {
+    chatQuestions: {...state.chatQuestions, [threadId]: [...known, {id, text}]},
+  });
+}
+
+/**
+ * Keeps a steer the thread's agent proposed, once per `proposal_id`. A proposal records nothing
+ * about delivery: the operator's `command.control` is the only thing that reaches the run.
+ */
+export function applyChatProposal(state: CoreState, event: RunEvent, sequence: number): CoreState {
+  const data = event.data;
+  if (data?.kind !== 'steer_proposed') return state;
+  const threadId = event.chat_thread_id ?? DEFAULT_CHAT_THREAD_ID;
+  const known = state.chatProposals[threadId] ?? [];
+  if (known.some(proposal => proposal.id === data.proposal_id)) return state;
+  const proposal: ChatProposal = {
+    id: data.proposal_id,
+    sequence,
+    text: data.proposal.text,
+    target: {
+      kind: data.proposal.target?.kind ?? 'run',
+      id: data.proposal.target?.id ?? null,
+    },
+    mode: data.proposal.mode ?? 'next_turn',
+  };
+  return cloneCoreStateWith(state, {
+    chatProposals: {...state.chatProposals, [threadId]: [...known, proposal]},
+  });
 }
 
 /** Registers a replayed thread, or refreshes the record it already has. */
