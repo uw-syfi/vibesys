@@ -1831,7 +1831,18 @@ def _job_script(request: _JobScriptRequest) -> str:
     setup_script = request.setup_script
     service = request.service
     phase_timing_root = request.phase_timing_root
-    lines = ["#!/usr/bin/env bash", "set -uo pipefail", f"cd {shlex.quote(workspace.as_posix())}"]
+    lines = [
+        "#!/usr/bin/env bash",
+        "set -uo pipefail",
+        f"cd {shlex.quote(workspace.as_posix())}",
+        # The job inherits the environment of the ssh session that submitted it. A ``bash -c``
+        # started with these two set reads the operator's login rc files (the shell cannot tell
+        # it is not under sshd), which re-export the login values over what the setup script
+        # exported: the service, started without a shell, keeps the setup's environment while
+        # every ``bash -c`` stage loses it. Unset before the setup so that every process the
+        # job starts, the setup's own included, sees the one environment the setup builds.
+        "unset SSH_CLIENT SSH2_CLIENT",
+    ]
     if phase_timing_root is not None:
         lines.append(f"mkdir -p {shlex.quote((workspace / phase_timing_root).as_posix())}")
     if setup_script:
